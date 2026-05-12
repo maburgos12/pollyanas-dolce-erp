@@ -20,9 +20,16 @@
     .badge { display: inline-flex; padding: 5px 9px; border-radius: 999px; background: #2a2a38; color: #e8e0d5; font-size: .78rem; font-weight: 900; }
     .badge.warn { background: #3d3218; color: #f6d77e; }
     .badge.bad { background: #3a1829; color: #f8dce9; }
-    .data-table { width: 100%; border-collapse: collapse; }
-    .data-table th, .data-table td { padding: 9px 6px; border-bottom: 1px solid #2a2a38; text-align: left; vertical-align: top; }
-    .data-table th { color: #C9A84C; font-size: .74rem; text-transform: uppercase; }
+    .data-table { width: 100%; border-collapse: separate; border-spacing: 0; overflow: hidden; border: 1px solid #2a2a38; border-radius: 12px; background: #101018; }
+    .data-table th, .data-table td { padding: 11px 10px; border-bottom: 1px solid #2a2a38; text-align: left; vertical-align: top; }
+    .data-table th { background: #8B2252; color: #fff4df; font-size: .72rem; font-weight: 900; text-transform: uppercase; }
+    .data-table td { background: #181822; color: #f0e7dc; font-weight: 800; }
+    .data-table tbody tr:nth-child(even) td { background: #20202c; }
+    .data-table tbody tr:last-child td { border-bottom: 0; }
+    .data-table td:nth-child(2), .data-table td:nth-child(3) { color: #f6d77e; white-space: nowrap; }
+    .status-pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 8px; background: #3d3218; color: #f6d77e; font-size: .76rem; font-weight: 900; white-space: nowrap; }
+    .status-pill.ok { background: #183829; color: #d8f6e6; }
+    .status-pill.bad { background: #3a1829; color: #f8dce9; }
     .field { display: grid; gap: 6px; margin-bottom: 12px; }
     .field label { color: #d7c8b8; font-size: .86rem; font-weight: 900; }
     .field input, .field select, .field textarea { width: 100%; min-height: 48px; border: 1px solid #2a2a38; border-radius: 10px; padding: 10px 12px; font: inherit; background: #0f0f14; color: #e8e0d5; }
@@ -83,7 +90,7 @@
                     <td>{{ producto.nombre_producto }}</td>
                     <td>{{ producto.cantidad_enviada|floatformat:3 }}</td>
                     <td>{% if producto.cantidad_recibida != None %}{{ producto.cantidad_recibida|floatformat:3 }}{% else %}-{% endif %}</td>
-                    <td>{% if producto.conforme == True %}Validado{% elif producto.conforme == False %}Diferencia{% else %}Pendiente{% endif %}</td>
+                    <td>{% if producto.conforme == True %}<span class="status-pill ok">Validado</span>{% elif producto.conforme == False %}<span class="status-pill bad">Diferencia</span>{% else %}<span class="status-pill">Pendiente</span>{% endif %}</td>
                 </tr>
             {% endfor %}
             </tbody>
