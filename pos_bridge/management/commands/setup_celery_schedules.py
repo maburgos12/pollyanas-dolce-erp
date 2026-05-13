@@ -66,6 +66,25 @@ class Command(BaseCommand):
             },
         )
 
+        intraday_profitability_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="10",
+            hour="8-22",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="rentabilidad: recalculo intradia periodo actual",
+            defaults={
+                "task": "rentabilidad.tasks_rentabilidad.recalcular_rentabilidad_periodo_actual",
+                "crontab": intraday_profitability_cron,
+                "interval": None,
+                "kwargs": json.dumps({}),
+                "enabled": True,
+            },
+        )
+
         monthly_closure_cron, _ = CrontabSchedule.objects.get_or_create(
             minute="30",
             hour="5",

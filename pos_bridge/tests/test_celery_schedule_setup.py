@@ -27,6 +27,8 @@ class SetupCelerySchedulesCommandTests(TestCase):
             task_names,
             {
                 "pos_bridge: ventas cerradas diario",
+                "pos_bridge: ventas intradia actual",
+                "rentabilidad: recalculo intradia periodo actual",
                 "pos_bridge: cierre producto mensual",
                 "pos_bridge: inventario completo diario",
                 "pos_bridge: inventario cierre diario",
@@ -55,7 +57,19 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "orquestacion: guardia ajustes inventario",
             },
         )
-        self.assertEqual(PeriodicTask.objects.count(), 27)
+        self.assertEqual(PeriodicTask.objects.count(), 29)
+        intraday_sales = PeriodicTask.objects.get(name="pos_bridge: ventas intradia actual")
+        self.assertEqual(intraday_sales.task, "pos_bridge.daily_sales_sync")
+        self.assertEqual(intraday_sales.crontab.hour, "8-22")
+        self.assertEqual(intraday_sales.crontab.minute, "0")
+        self.assertEqual(intraday_sales.kwargs, '{"days": 1, "lag_days": 0}')
+        intraday_profitability = PeriodicTask.objects.get(name="rentabilidad: recalculo intradia periodo actual")
+        self.assertEqual(
+            intraday_profitability.task,
+            "rentabilidad.tasks_rentabilidad.recalcular_rentabilidad_periodo_actual",
+        )
+        self.assertEqual(intraday_profitability.crontab.hour, "8-22")
+        self.assertEqual(intraday_profitability.crontab.minute, "10")
         realtime = PeriodicTask.objects.get(name="pos_bridge: inventario realtime")
         self.assertEqual(realtime.interval.every, 5)
         inventory_close = PeriodicTask.objects.get(name="pos_bridge: inventario cierre diario")
