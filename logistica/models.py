@@ -353,6 +353,32 @@ class BitacoraSalidaLlegada(models.Model):
         return super().save(*args, **kwargs)
 
 
+class CargaCombustibleUnidad(models.Model):
+    bitacora = models.ForeignKey(
+        BitacoraSalidaLlegada,
+        on_delete=models.PROTECT,
+        related_name="cargas_combustible",
+    )
+    unidad = models.ForeignKey(Unidad, on_delete=models.PROTECT, related_name="cargas_combustible")
+    repartidor = models.ForeignKey(Repartidor, on_delete=models.PROTECT, related_name="cargas_combustible")
+    litros = models.DecimalField(max_digits=7, decimal_places=2)
+    importe_total = models.DecimalField(max_digits=10, decimal_places=2)
+    nivel_gas_despues = models.CharField(max_length=10, choices=BitacoraSalidaLlegada.NIVEL_GAS, blank=True)
+    foto_ticket = models.ImageField(upload_to="bitacora/combustible/")
+    fecha_registro = models.DateTimeField(auto_now_add=True)
+    ip_registro = models.GenericIPAddressField(null=True)
+    latitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+
+    class Meta:
+        ordering = ["-fecha_registro"]
+        verbose_name = "Carga de combustible"
+        verbose_name_plural = "Cargas de combustible"
+
+    def __str__(self) -> str:
+        return f"{self.unidad.codigo} · {self.litros} L · ${self.importe_total}"
+
+
 class InspeccionVehiculo(models.Model):
     repartidor = models.ForeignKey(Repartidor, on_delete=models.PROTECT)
     unidad = models.ForeignKey(Unidad, on_delete=models.PROTECT)

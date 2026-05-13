@@ -96,9 +96,22 @@
                     <span class="log-muted">Sin ticket</span>
                   {% endif %}
                 </div>
-              {% else %}
-                <span class="log-muted">Sin carga</span>
               {% endif %}
+              {% for carga in bitacora.cargas_combustible.all %}
+                <div class="log-fuel">
+                  <strong>{{ carga.litros|default:"0" }} L · ${{ carga.importe_total|default:"0"|floatformat:2|intcomma }}</strong>
+                  <span class="log-muted">{{ carga.fecha_registro|date:"d/m/Y H:i" }}</span>
+                  {% if carga.foto_ticket %}
+                    <a href="{{ carga.foto_ticket.url }}" target="_blank" rel="noopener">Ver ticket</a>
+                  {% else %}
+                    <span class="log-muted">Sin ticket</span>
+                  {% endif %}
+                </div>
+              {% empty %}
+                {% if not bitacora.litros_cargados and not bitacora.costo_combustible and not bitacora.foto_ticket_combustible %}
+                <span class="log-muted">Sin carga</span>
+                {% endif %}
+              {% endfor %}
             </td>
             <td>{% if bitacora.cerrada %}<span class="log-badge ok">Cerrada</span>{% else %}<span class="log-badge danger">ABIERTO</span>{% if bitacora.horas_abierta > 8 %}<br><span class="log-badge warn">{{ bitacora.horas_abierta }} h</span>{% endif %}{% endif %}</td>
             <td>

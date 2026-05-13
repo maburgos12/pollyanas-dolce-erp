@@ -7,6 +7,7 @@ from rest_framework import serializers
 from logistica.models import (
     BitacoraRepartidor,
     BitacoraSalidaLlegada,
+    CargaCombustibleUnidad,
     EntregaRuta,
     InspeccionDiaria,
     InspeccionVehiculo,
@@ -336,6 +337,7 @@ class LogisticaBitacoraSalidaLlegadaSerializer(serializers.ModelSerializer):
     repartidor_nombre = serializers.SerializerMethodField()
     unidad_codigo = serializers.CharField(source="unidad.codigo", read_only=True)
     unidad_descripcion = serializers.CharField(source="unidad.descripcion", read_only=True)
+    cargas_combustible = serializers.SerializerMethodField()
 
     class Meta:
         model = BitacoraSalidaLlegada
@@ -359,6 +361,7 @@ class LogisticaBitacoraSalidaLlegadaSerializer(serializers.ModelSerializer):
             "litros_cargados",
             "costo_combustible",
             "foto_ticket_combustible",
+            "cargas_combustible",
             "cerrada",
             "ip_registro",
             "latitud_salida",
@@ -381,6 +384,94 @@ class LogisticaBitacoraSalidaLlegadaSerializer(serializers.ModelSerializer):
 
     def get_repartidor_nombre(self, obj):
         return obj.repartidor.user.get_full_name() or obj.repartidor.user.username
+
+    def get_cargas_combustible(self, obj):
+        return LogisticaCargaCombustibleSerializer(
+            obj.cargas_combustible.all(),
+            many=True,
+            context=self.context,
+        ).data
+
+
+class LogisticaCargaCombustibleSerializer(serializers.ModelSerializer):
+    unidad_codigo = serializers.CharField(source="unidad.codigo", read_only=True)
+    repartidor_nombre = serializers.SerializerMethodField()
+    bitacora_folio = serializers.CharField(source="bitacora.folio", read_only=True)
+
+    class Meta:
+        model = CargaCombustibleUnidad
+        fields = [
+            "id",
+            "bitacora",
+            "bitacora_folio",
+            "unidad",
+            "unidad_codigo",
+            "repartidor",
+            "repartidor_nombre",
+            "litros",
+            "importe_total",
+            "nivel_gas_despues",
+            "foto_ticket",
+            "fecha_registro",
+            "latitud",
+            "longitud",
+        ]
+        read_only_fields = [
+            "id",
+            "bitacora",
+            "bitacora_folio",
+            "unidad",
+            "unidad_codigo",
+            "repartidor",
+            "repartidor_nombre",
+            "fecha_registro",
+        ]
+
+    def get_repartidor_nombre(self, obj):
+        return obj.repartidor.user.get_full_name() or obj.repartidor.user.username
+
+
+class LogisticaCargaCombustibleCreateSerializer(serializers.ModelSerializer):
+    nivel_gas_despues = serializers.CharField(required=False, allow_blank=True)
+
+    class Meta:
+        model = CargaCombustibleUnidad
+        fields = ["litros", "importe_total", "nivel_gas_despues", "foto_ticket", "latitud", "longitud"]
+
+    def validate_nivel_gas_despues(self, value):
+        if not value:
+            return ""
+        normalized = str(value or "").strip().lower()
+        aliases = {
+            "vacio": "vacio",
+            "vacío": "vacio",
+            "1/4": "1/4",
+            "¼": "1/4",
+            "1⁄4": "1/4",
+            "1/2": "1/2",
+            "½": "1/2",
+            "1⁄2": "1/2",
+            "3/4": "3/4",
+            "¾": "3/4",
+            "3⁄4": "3/4",
+            "lleno": "lleno",
+        }
+        if normalized not in aliases:
+            raise serializers.ValidationError("Selecciona un nivel de gas válido.")
+        return aliases[normalized]
+
+    def validate(self, attrs):
+        if attrs.get("litros") is None:
+            raise serializers.ValidationError("Captura los litros cargados.")
+        if attrs.get("importe_total") is None:
+            raise serializers.ValidationError("Captura el importe total.")
+        if not attrs.get("foto_ticket"):
+            raise serializers.ValidationError("La foto del ticket es obligatoria.")
+        if attrs["litros"] <= 0:
+            raise serializers.ValidationError("Los litros deben ser mayores a cero.")
+        if attrs["importe_total"] <= 0:
+            raise serializers.ValidationError("El importe total debe ser mayor a cero.")
+        return attrs
 
 
 class LogisticaBitacoraSalidaCreateSerializer(serializers.ModelSerializer):

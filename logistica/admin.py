@@ -3,6 +3,7 @@ from django.contrib import admin
 from .models import (
     BitacoraRepartidor,
     BitacoraSalidaLlegada,
+    CargaCombustibleUnidad,
     ConfigAlertaFlota,
     DocumentoUnidad,
     EntregaRuta,
@@ -159,6 +160,15 @@ class BitacoraSalidaLlegadaAdmin(admin.ModelAdmin):
     search_fields = ("folio", "repartidor__user__username", "unidad__codigo", "ip_registro")
     readonly_fields = ("fecha", "folio", "hora_salida", "hora_llegada", "ip_registro")
     autocomplete_fields = ("repartidor", "unidad")
+
+
+@admin.register(CargaCombustibleUnidad)
+class CargaCombustibleUnidadAdmin(admin.ModelAdmin):
+    list_display = ("fecha_registro", "unidad", "repartidor", "bitacora", "litros", "importe_total", "nivel_gas_despues")
+    list_filter = ("fecha_registro", "unidad", "repartidor")
+    search_fields = ("bitacora__folio", "unidad__codigo", "repartidor__user__username", "repartidor__user__first_name")
+    readonly_fields = ("fecha_registro", "ip_registro")
+    autocomplete_fields = ("bitacora", "unidad", "repartidor")
 
 
 @admin.register(InspeccionVehiculo)
