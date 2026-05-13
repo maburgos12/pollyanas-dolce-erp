@@ -392,7 +392,7 @@
                 <ul class="sidebar-nav sidebar-nav-group sidebar-collapsible sidebar-collapsed" id="group-comercial">
                     {% if ui_access.can_view_ventas %}
                     <li>
-                        <a href="{% url 'ventas:eventos' %}"
+                        <a href="{% url 'ventas:pronostico' %}"
                            class="{% if '/ventas/' in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -400,20 +400,7 @@
                                     <circle cx="9" cy="21" r="1"/><circle cx="19" cy="21" r="1"/>
                                 </svg>
                             </span>
-                            <span>Ventas · Eventos</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="{% url 'ventas:tendencias' %}"
-                           class="{% if request.resolver_match.url_name == 'tendencias' %}active{% endif %}">
-                            <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M4 19V5"/>
-                                    <path d="M4 19h16"/>
-                                    <path d="m7 15 4-4 3 3 5-7"/>
-                                </svg>
-                            </span>
-                            <span>Tendencias de mix</span>
+                            <span>Pronóstico de ventas</span>
                         </a>
                     </li>
                     {% endif %}

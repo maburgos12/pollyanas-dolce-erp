@@ -1,10 +1,21 @@
 from django.urls import path
+from django.views.generic import RedirectView
 from . import views
 
 app_name = "ventas"
 
 urlpatterns = [
     path("", views.PronosticoVentasView, name="home"),
+    path(
+        "eventos/",
+        RedirectView.as_view(pattern_name="ventas:pronostico", permanent=False),
+        name="eventos",
+    ),
+    path(
+        "tendencias/",
+        RedirectView.as_view(pattern_name="ventas:pronostico", permanent=False),
+        name="tendencias",
+    ),
     path("pronostico/", views.PronosticoVentasView, name="pronostico"),
     path("pronostico/esperando/<str:task_id>/", views.PronosticoEsperandoView, name="pronostico_esperando"),
     path("pronostico/status/<str:task_id>/", views.PronosticoStatusView, name="pronostico_status"),
