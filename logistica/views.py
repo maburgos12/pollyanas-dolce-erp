@@ -20,6 +20,7 @@ from crm.models import PedidoCliente
 
 from .models import (
     BitacoraSalidaLlegada,
+    CargaCombustibleUnidad,
     DocumentoUnidad,
     EntregaRuta,
     InspeccionVehiculo,
@@ -882,7 +883,11 @@ def capturas_pwa(request):
     query = (request.GET.get("q") or "").strip()
     tipo = (request.GET.get("tipo") or "todas").strip().lower()
 
-    bitacoras_qs = BitacoraSalidaLlegada.objects.select_related("repartidor__user", "unidad").order_by("-hora_salida", "-id")
+    bitacoras_qs = (
+        BitacoraSalidaLlegada.objects.select_related("repartidor__user", "unidad")
+        .prefetch_related("cargas_combustible")
+        .order_by("-hora_salida", "-id")
+    )
     inspecciones_qs = InspeccionVehiculo.objects.select_related("repartidor__user", "unidad").order_by("-fecha", "-id")
     reportes_qs = ReporteUnidad.objects.select_related("repartidor__user", "unidad", "asignado_a").order_by("-fecha_reporte", "-id")
 
@@ -934,7 +939,10 @@ def capturas_pwa(request):
         "turnos_abiertos": BitacoraSalidaLlegada.objects.filter(cerrada=False).count(),
         "inspecciones_hoy": InspeccionVehiculo.objects.filter(fecha__date=today).count(),
         "reportes_abiertos": ReporteUnidad.objects.exclude(estatus=ReporteUnidad.ESTATUS_CERRADO).count(),
-        "costo_combustible_total": BitacoraSalidaLlegada.objects.aggregate(total=Sum("costo_combustible")).get("total") or Decimal("0"),
+        "costo_combustible_total": (
+            (BitacoraSalidaLlegada.objects.aggregate(total=Sum("costo_combustible")).get("total") or Decimal("0"))
+            + (CargaCombustibleUnidad.objects.aggregate(total=Sum("importe_total")).get("total") or Decimal("0"))
+        ),
         "reportes_por_estatus": ReporteUnidad.objects.values("estatus").annotate(total=Count("id")).order_by("estatus"),
     }
     return render(request, "logistica/capturas_pwa.html", context)
@@ -1693,6 +1701,7 @@ def unidad_detalle(request, pk):
     bitacoras = [
         _decorate_bitacora(bitacora)
         for bitacora in BitacoraSalidaLlegada.objects.select_related("repartidor__user", "unidad")
+        .prefetch_related("cargas_combustible")
         .filter(unidad=unidad)
         .order_by("-hora_salida")[:30]
     ]
@@ -1874,7 +1883,11 @@ def bitacoras_lista(request):
     if not can_view_submodule(request.user, "logistica", "bitacoras"):
         raise PermissionDenied("No tienes permisos para ver bitácoras de Logística")
 
-    qs = BitacoraSalidaLlegada.objects.select_related("unidad", "repartidor__user").order_by("-hora_salida")
+    qs = (
+        BitacoraSalidaLlegada.objects.select_related("unidad", "repartidor__user")
+        .prefetch_related("cargas_combustible")
+        .order_by("-hora_salida")
+    )
     unidad_id = (request.GET.get("unidad") or "").strip()
     repartidor_id = (request.GET.get("repartidor") or "").strip()
     cerrada = (request.GET.get("cerrada") or "").strip()
@@ -1893,10 +1906,14 @@ def bitacoras_lista(request):
     if fecha_hasta:
         qs = qs.filter(fecha__lte=fecha_hasta)
 
-    combustible_total = qs.aggregate(total=Sum("costo_combustible")).get("total") or Decimal("0")
-    cargas_combustible = qs.filter(
+    combustible_total_bitacora = qs.aggregate(total=Sum("costo_combustible")).get("total") or Decimal("0")
+    combustible_total_cargas = CargaCombustibleUnidad.objects.filter(bitacora_id__in=qs.values("id")).aggregate(total=Sum("importe_total")).get("total") or Decimal("0")
+    combustible_total = combustible_total_bitacora + combustible_total_cargas
+    cargas_combustible_bitacora = qs.filter(
         Q(litros_cargados__isnull=False) | Q(costo_combustible__isnull=False) | Q(foto_ticket_combustible__isnull=False)
     ).count()
+    cargas_combustible_ruta = CargaCombustibleUnidad.objects.filter(bitacora_id__in=qs.values("id")).count()
+    cargas_combustible = cargas_combustible_bitacora + cargas_combustible_ruta
     page = Paginator(qs, 20).get_page(request.GET.get("page"))
     bitacoras = [_decorate_bitacora(bitacora) for bitacora in page]
     return render(

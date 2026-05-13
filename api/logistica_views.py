@@ -19,13 +19,27 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from core.access import can_manage_logistica, can_view_logistica
 from core.audit import log_event
 from crm.models import PedidoCliente
-from logistica.models import BitacoraRepartidor, BitacoraSalidaLlegada, EntregaRuta, InspeccionDiaria, InspeccionVehiculo, Repartidor, ReporteUnidad, ReporteUnidadReafirmacion, RutaEntrega, Unidad
+from logistica.models import (
+    BitacoraRepartidor,
+    BitacoraSalidaLlegada,
+    CargaCombustibleUnidad,
+    EntregaRuta,
+    InspeccionDiaria,
+    InspeccionVehiculo,
+    Repartidor,
+    ReporteUnidad,
+    ReporteUnidadReafirmacion,
+    RutaEntrega,
+    Unidad,
+)
 
 from .logistica_serializers import (
     LogisticaBitacoraSerializer,
     LogisticaBitacoraLlegadaSerializer,
     LogisticaBitacoraSalidaCreateSerializer,
     LogisticaBitacoraSalidaLlegadaSerializer,
+    LogisticaCargaCombustibleCreateSerializer,
+    LogisticaCargaCombustibleSerializer,
     LogisticaEntregaCreateSerializer,
     LogisticaEntregaSerializer,
     LogisticaInspeccionVehiculoCreateSerializer,
@@ -222,6 +236,7 @@ class LogisticaCombustibleAlertaView(_LogisticaBaseView):
         pendientes = []
         bitacoras = (
             BitacoraSalidaLlegada.objects.select_related("unidad")
+            .prefetch_related("cargas_combustible")
             .filter(repartidor=repartidor, cerrada=True)
             .exclude(nivel_gas_llegada="")
             .order_by("-hora_llegada", "-id")
@@ -236,6 +251,7 @@ class LogisticaCombustibleAlertaView(_LogisticaBaseView):
                     bitacora.litros_cargados is not None,
                     bitacora.costo_combustible is not None,
                     bool(bitacora.foto_ticket_combustible),
+                    bitacora.cargas_combustible.exists(),
                 ]
             )
             if tiene_combustible:
@@ -495,6 +511,46 @@ class LogisticaBitacoraSalidaView(_LogisticaBaseView):
         return Response(LogisticaBitacoraSalidaLlegadaSerializer(bitacora).data, status=status.HTTP_201_CREATED)
 
 
+class LogisticaCargaCombustibleView(_LogisticaBaseView):
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def post(self, request):
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor or not _is_repartidor(request.user):
+            return Response({"detail": "Solo repartidores registrados pueden capturar combustible."}, status=status.HTTP_403_FORBIDDEN)
+
+        bitacora = (
+            BitacoraSalidaLlegada.objects.select_related("unidad")
+            .filter(repartidor=repartidor, cerrada=False)
+            .first()
+        )
+        if not bitacora:
+            return Response({"detail": "Necesitas un turno abierto para registrar gasolina."}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = LogisticaCargaCombustibleCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        carga = CargaCombustibleUnidad.objects.create(
+            bitacora=bitacora,
+            unidad=bitacora.unidad,
+            repartidor=repartidor,
+            ip_registro=request.META.get("REMOTE_ADDR"),
+            **serializer.validated_data,
+        )
+        log_event(
+            request.user,
+            "CREATE",
+            "logistica.CargaCombustibleUnidad",
+            str(carga.id),
+            {
+                "bitacora": bitacora.folio,
+                "unidad": bitacora.unidad.codigo,
+                "litros": str(carga.litros),
+                "importe_total": str(carga.importe_total),
+            },
+        )
+        return Response(LogisticaCargaCombustibleSerializer(carga).data, status=status.HTTP_201_CREATED)
+
+
 class LogisticaBitacoraSalidaDetailView(_LogisticaBaseView):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
@@ -517,7 +573,12 @@ class LogisticaBitacoraSalidaActivaView(_LogisticaBaseView):
         repartidor = _get_repartidor_for_user(request.user)
         if not repartidor:
             return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
-        bitacora = BitacoraSalidaLlegada.objects.filter(repartidor=repartidor, cerrada=False).select_related("unidad", "repartidor__user").first()
+        bitacora = (
+            BitacoraSalidaLlegada.objects.filter(repartidor=repartidor, cerrada=False)
+            .select_related("unidad", "repartidor__user")
+            .prefetch_related("cargas_combustible")
+            .first()
+        )
         if not bitacora:
             return Response({"detail": "No hay turno abierto."}, status=status.HTTP_404_NOT_FOUND)
         return Response(LogisticaBitacoraSalidaLlegadaSerializer(bitacora).data, status=status.HTTP_200_OK)
