@@ -62,8 +62,6 @@ from pos_bridge.models import (
     PointBranch,
     PointDailyBranchIndicator,
     PointExtractionLog,
-    PointSalesDailyCategoryFact,
-    PointDailySale,
     PointSyncJob,
 )
 from pos_bridge.config import load_point_bridge_settings
@@ -84,6 +82,7 @@ from ventas.services.sales_canonical_source import (
     point_sales_month_total as canonical_point_sales_month_total,
     recent_sales_stage_max_date as get_recent_sales_stage_max_date,
     sales_history_queryset as canonical_sales_history_queryset,
+    sales_history_summary as canonical_sales_history_summary,
     sales_previous_dates as canonical_sales_previous_dates,
     sales_rows_for_date as canonical_sales_rows_for_date,
     sales_rows_for_month as canonical_sales_rows_for_month,
@@ -91,7 +90,6 @@ from ventas.services.sales_canonical_source import (
     v2_product_sales_max_date as canonical_v2_product_sales_max_date,
 )
 from ventas.services.sales_read_service import get_daily_sales_bulk, get_sales_range
-from ventas.models import VentaAutoritativaPoint
 from recetas.utils.derived_product_presentations import get_total_cost_map
 
 from .bi_utils import compute_bi_snapshot
@@ -900,53 +898,13 @@ def _sales_refresh_status(*, visible_cut_date: date | None = None) -> dict[str, 
 
 
 def _canonical_sales_history_summary(source: dict[str, object]) -> dict[str, object] | None:
-    canonical_latest = source.get("canonical_latest_date")
-    if not canonical_latest:
+    summary = canonical_sales_history_summary(source)
+    if summary is None:
         return None
-
-    authoritative_first = VentaAutoritativaPoint.objects.order_by("sale_date").values_list("sale_date", flat=True).first()
-    v2_category_first = PointSalesDailyCategoryFact.objects.order_by("sale_date").values_list("sale_date", flat=True).first()
-    v2_product_first = PointDailySale.objects.order_by("sale_date").values_list("sale_date", flat=True).first()
-    start_candidates = [value for value in [authoritative_first, v2_category_first, v2_product_first] if value]
-    if not start_candidates:
-        return None
-
-    start_date = min(start_candidates)
-    selected = get_sales_range(
-        start_date=start_date,
-        end_date=canonical_latest,
-        coverage_policy="prefer_complete",
-    )
-    if selected["source"] == "none":
-        return None
-
-    if selected["source"] == "authoritative":
-        rows_qs = VentaAutoritativaPoint.objects.all()
-        total_rows = rows_qs.count()
-        first_date = rows_qs.order_by("sale_date").values_list("sale_date", flat=True).first()
-        last_date = rows_qs.order_by("-sale_date").values_list("sale_date", flat=True).first()
-        recipe_count = rows_qs.exclude(product_id__isnull=True).values_list("product_id", flat=True).distinct().count()
-        top_branches = list(rows_qs.values("branch__codigo", "branch__nombre").annotate(total=Sum("quantity")).order_by("-total", "branch__codigo")[:4])
-        top_recipes = list(rows_qs.values("product__nombre", "point_name").annotate(total=Sum("quantity")).order_by("-total", "product__nombre", "point_name")[:5])
-    else:
-        category_qs = PointSalesDailyCategoryFact.objects.all()
-        product_qs = PointDailySale.objects.all()
-        total_rows = category_qs.count()
-        first_date = category_qs.order_by("sale_date").values_list("sale_date", flat=True).first()
-        last_date = category_qs.order_by("-sale_date").values_list("sale_date", flat=True).first()
-        recipe_count = product_qs.exclude(receta_id__isnull=True).values_list("receta_id", flat=True).distinct().count() if product_qs.exists() else 0
-        top_branches = list(category_qs.values("branch__erp_branch__codigo", "branch__erp_branch__nombre").annotate(total=Sum("total_cantidad")).order_by("-total", "branch__erp_branch__codigo")[:4])
-        top_recipes = list(product_qs.values("receta__nombre", "product__name").annotate(total=Sum("quantity")).order_by("-total", "receta__nombre", "product__name")[:5]) if product_qs.exists() else []
-
-    active_days = int(selected.get("coverage_days") or 0)
-    branch_count = int(selected.get("coverage_branches") or 0)
-    expected_days = ((last_date - first_date).days + 1) if first_date and last_date else 0
-    missing_days = max(expected_days - active_days, 0)
-    return {
-        "available": True,
-        "status": "Cobertura cerrada" if missing_days == 0 else "Cobertura parcial",
-        "tone": "success" if missing_days == 0 else "warning",
-        "official_ready": missing_days == 0,
+    missing_days = int(summary.get("missing_days") or 0)
+    first_date = summary.get("first_date")
+    last_date = summary.get("last_date")
+    summary.update({
         "detail": (
             "Fuente canónica Point disponible para lectura ejecutiva."
             if missing_days == 0
@@ -954,17 +912,8 @@ def _canonical_sales_history_summary(source: dict[str, object]) -> dict[str, obj
         ),
         "source_label": "Point directo",
         "date_label": f"{first_date.strftime('%d/%m/%Y')} → {last_date.strftime('%d/%m/%Y')}" if first_date and last_date else "Sin cobertura",
-        "active_days": active_days,
-        "expected_days": expected_days,
-        "missing_days": missing_days,
-        "branch_count": branch_count,
-        "recipe_count": recipe_count,
-        "total_rows": total_rows,
-        "total_units": Decimal(str(selected.get("cantidad") or 0)),
-        "total_amount": Decimal(str(selected.get("monto") or 0)),
-        "top_branches": top_branches,
-        "top_recipes": top_recipes,
-    }
+    })
+    return summary
 
 
 def _ventas_historicas_bi_summary() -> dict[str, object]:

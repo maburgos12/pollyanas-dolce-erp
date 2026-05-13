@@ -23,10 +23,11 @@ from openpyxl.utils import get_column_letter
 
 from control.models import MermaMensualSucursal
 from core.access import can_view_reportes
-from pos_bridge.models import PointDailySale, PointProductionLine, PointSalesDailyProductFact
+from pos_bridge.models import PointProductionLine, PointSalesDailyProductFact
 from recetas.models import ProductoMonthClosure, ProductoMonthClosureLine, Receta, RecetaEquivalencia
 from recetas.utils.derived_product_presentations import get_total_cost_map
 from reportes.models import FactProduccionDiaria
+from reportes.services_production_sales import build_sales_map
 
 
 ZERO = Decimal("0")
@@ -716,109 +717,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         return missing
 
     def _sales_map(self, period: PeriodSelection, sucursal_id: int | None) -> tuple[dict[int, Decimal], str]:
-        sales = PointDailySale.objects.filter(
-            sale_date__gte=period.month_start,
-            sale_date__lte=period.month_end,
-            receta_id__isnull=False,
-        )
-        if sucursal_id:
-            sales = sales.filter(branch__erp_branch_id=sucursal_id)
-        if sales.exists():
-            sales_map = _aggregate_by_recipe(sales, "quantity")
-            source = "PointDailySale"
-            if not sucursal_id:
-                fallback_sources = [
-                    (
-                        FactProduccionDiaria.objects.filter(
-                            fecha__gte=period.month_start,
-                            fecha__lte=period.month_end,
-                            receta_id__isnull=False,
-                            vendido__gt=0,
-                        ),
-                        "vendido",
-                        "FactProduccionDiaria",
-                    ),
-                    (
-                        PointSalesDailyProductFact.objects.filter(
-                            sale_date__gte=period.month_start,
-                            sale_date__lte=period.month_end,
-                            receta_id__isnull=False,
-                        ),
-                        "total_cantidad",
-                        "PointSalesDailyProductFact",
-                    ),
-                ]
-                source_parts = [source]
-                for fallback_qs, field_name, source_name in fallback_sources:
-                    fallback_map = _aggregate_by_recipe(fallback_qs, field_name)
-                    filled = 0
-                    for receta_id, value in fallback_map.items():
-                        if receta_id not in sales_map or sales_map[receta_id] == ZERO:
-                            sales_map[receta_id] = value
-                            filled += 1
-                    if filled:
-                        source_parts.append(f"{source_name}({filled})")
-                if len(source_parts) > 1:
-                    source = "+".join(source_parts)
-            return sales_map, source
-
-        facts = PointSalesDailyProductFact.objects.filter(
-            sale_date__gte=period.month_start,
-            sale_date__lte=period.month_end,
-            receta_id__isnull=False,
-        )
-        if sucursal_id:
-            facts = facts.filter(branch__erp_branch_id=sucursal_id)
-        if facts.exists():
-            sales_map = _aggregate_by_recipe(facts, "total_cantidad")
-            source = "PointSalesDailyProductFact"
-            if not sucursal_id:
-                fallback_sources = [
-                    (
-                        FactProduccionDiaria.objects.filter(
-                            fecha__gte=period.month_start,
-                            fecha__lte=period.month_end,
-                            receta_id__isnull=False,
-                            vendido__gt=0,
-                        ),
-                        "vendido",
-                        "FactProduccionDiaria",
-                    ),
-                    (
-                        PointDailySale.objects.filter(
-                            sale_date__gte=period.month_start,
-                            sale_date__lte=period.month_end,
-                            receta_id__isnull=False,
-                        ),
-                        "quantity",
-                        "PointDailySale",
-                    ),
-                ]
-                source_parts = [source]
-                for fallback_qs, field_name, source_name in fallback_sources:
-                    fallback_map = _aggregate_by_recipe(fallback_qs, field_name)
-                    filled = 0
-                    for receta_id, value in fallback_map.items():
-                        if receta_id not in sales_map or sales_map[receta_id] == ZERO:
-                            sales_map[receta_id] = value
-                            filled += 1
-                    if filled:
-                        source_parts.append(f"{source_name}({filled})")
-                if len(source_parts) > 1:
-                    source = "+".join(source_parts)
-            return sales_map, source
-
-        fpd = FactProduccionDiaria.objects.filter(
-            fecha__gte=period.month_start,
-            fecha__lte=period.month_end,
-            receta_id__isnull=False,
-            vendido__gt=0,
-        )
-        if sucursal_id:
-            fpd = fpd.filter(sucursal_id=sucursal_id)
-        if fpd.exists():
-            return _aggregate_by_recipe(fpd, "vendido"), "FactProduccionDiaria"
-        return {}, "sin_datos"
+        return build_sales_map(period, sucursal_id)
 
     def _production_map(self, period: PeriodSelection, sucursal_id: int | None) -> tuple[dict[int, Decimal], str]:
         facts = FactProduccionDiaria.objects.filter(

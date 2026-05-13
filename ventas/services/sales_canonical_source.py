@@ -273,3 +273,97 @@ def sales_history_queryset(source: dict[str, object]):
     if source["mode"] == "historical_fallback":
         return VentaHistorica.objects.all()
     return VentaHistorica.objects.none()
+
+
+def sales_history_summary(source: dict[str, object]) -> dict[str, object] | None:
+    canonical_latest = source.get("canonical_latest_date")
+    if not canonical_latest:
+        return None
+
+    authoritative_first = VentaAutoritativaPoint.objects.order_by("sale_date").values_list("sale_date", flat=True).first()
+    v2_category_first = PointSalesDailyCategoryFact.objects.order_by("sale_date").values_list("sale_date", flat=True).first()
+    v2_product_first = PointDailySale.objects.order_by("sale_date").values_list("sale_date", flat=True).first()
+    start_candidates = [value for value in [authoritative_first, v2_category_first, v2_product_first] if value]
+    if not start_candidates:
+        return None
+
+    start_date = min(start_candidates)
+    selected = get_sales_range(
+        start_date=start_date,
+        end_date=canonical_latest,
+        coverage_policy="prefer_complete",
+    )
+    if selected["source"] == "none":
+        return None
+
+    if selected["source"] == "authoritative":
+        rows_qs = VentaAutoritativaPoint.objects.all()
+        total_rows = rows_qs.count()
+        first_date = rows_qs.order_by("sale_date").values_list("sale_date", flat=True).first()
+        last_date = rows_qs.order_by("-sale_date").values_list("sale_date", flat=True).first()
+        recipe_count = rows_qs.exclude(product_id__isnull=True).values_list("product_id", flat=True).distinct().count()
+        top_branches = list(
+            rows_qs.values("branch__codigo", "branch__nombre")
+            .annotate(total=Sum("quantity"))
+            .order_by("-total", "branch__codigo")[:4]
+        )
+        top_recipes = list(
+            rows_qs.values("product__nombre", "point_name")
+            .annotate(total=Sum("quantity"))
+            .order_by("-total", "product__nombre", "point_name")[:5]
+        )
+    else:
+        category_qs = PointSalesDailyCategoryFact.objects.all()
+        product_qs = PointDailySale.objects.all()
+        total_rows = category_qs.count()
+        first_date = category_qs.order_by("sale_date").values_list("sale_date", flat=True).first()
+        last_date = category_qs.order_by("-sale_date").values_list("sale_date", flat=True).first()
+        recipe_count = (
+            product_qs.exclude(receta_id__isnull=True).values_list("receta_id", flat=True).distinct().count()
+            if product_qs.exists()
+            else 0
+        )
+        top_branches = list(
+            category_qs.values("branch__erp_branch__codigo", "branch__erp_branch__nombre")
+            .annotate(total=Sum("total_cantidad"))
+            .order_by("-total", "branch__erp_branch__codigo")[:4]
+        )
+        top_recipes = (
+            list(
+                product_qs.values("receta__nombre", "product__name")
+                .annotate(total=Sum("quantity"))
+                .order_by("-total", "receta__nombre", "product__name")[:5]
+            )
+            if product_qs.exists()
+            else []
+        )
+
+    active_days = int(selected.get("coverage_days") or 0)
+    branch_count = int(selected.get("coverage_branches") or 0)
+    expected_days = ((last_date - first_date).days + 1) if first_date and last_date else 0
+    missing_days = max(expected_days - active_days, 0)
+    return {
+        "available": True,
+        "status": "Cobertura cerrada" if missing_days == 0 else "Cobertura parcial",
+        "tone": "success" if missing_days == 0 else "warning",
+        "official_ready": missing_days == 0,
+        "detail": (
+            f"{active_days} dias con venta oficial"
+            + (f" de {expected_days}" if expected_days else "")
+            + f" · {branch_count} sucursales"
+        ),
+        "source": selected.get("source"),
+        "source_detail": selected.get("source_detail"),
+        "first_date": first_date,
+        "last_date": last_date,
+        "total_rows": total_rows,
+        "total_units": Decimal(str(selected.get("cantidad") or 0)),
+        "total_amount": Decimal(str(selected.get("monto") or 0)),
+        "recipe_count": recipe_count,
+        "branch_count": branch_count,
+        "active_days": active_days,
+        "expected_days": expected_days,
+        "missing_days": missing_days,
+        "top_branches": top_branches,
+        "top_recipes": top_recipes,
+    }
