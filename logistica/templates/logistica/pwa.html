@@ -1563,7 +1563,7 @@
               <button class="fuel-close" type="button" onclick="dismissCombustibleAlerta()" aria-label="Cerrar aviso">×</button>
               <div class="fuel-icon">⛽</div>
               <div class="fuel-label">${pendiente ? "Registro pendiente" : "Recordatorio"}</div>
-              <h2 id="fuel-alert-title">${pendiente ? "No registraste carga de combustible" : "Recuerda registrar la gasolina"}</h2>
+              <h2 id="fuel-alert-title">${pendiente ? "No registraste carga de combustible" : "Ya puedes registrar gasolina durante el turno"}</h2>
               ${pendiente ? `
                 <p>Detectamos turno${Number(alerta.pendientes_count || 0) === 1 ? "" : "s"} cerrado${Number(alerta.pendientes_count || 0) === 1 ? "" : "s"} donde la unidad salió con poca gasolina y terminó con más gasolina, pero no capturaste litros, importe ni ticket.</p>
                 <div class="fuel-notice">
@@ -1575,7 +1575,7 @@
                   ` : ""}
                 </div>
               ` : `
-                <p>Si cargas combustible durante tu turno, registra litros, importe total y foto del ticket desde la pantalla de bitácora activa.</p>
+                <p>Ahora puedes registrar la carga de gasolina en el momento, sin esperar al cierre: abre tu turno activo en Bitácora y toca “Registrar gasolina”.</p>
                 <div class="fuel-notice">El registro correcto evita aclaraciones y mantiene actualizado el control de combustible.</div>
               `}
               <button class="primary-btn" type="button" onclick="dismissCombustibleAlerta()">Entendido</button>
