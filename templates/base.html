@@ -490,7 +490,7 @@
                     {% endif %}
                     {% if ui_access.can_view_rrhh %}
                     <li>
-                        <a href="{% url 'rrhh:empleados' %}"
+                        <a href="{% url 'rrhh:rrhh_dashboard' %}"
                            class="{% if '/rrhh/' in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -500,7 +500,7 @@
                                     <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
                                 </svg>
                             </span>
-                            <span>RRHH</span>
+                            <span>Capital Humano</span>
                         </a>
                     </li>
                     {% endif %}
