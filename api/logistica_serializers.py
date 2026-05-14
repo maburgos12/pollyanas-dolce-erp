@@ -11,6 +11,7 @@ from logistica.models import (
     EntregaRuta,
     InspeccionDiaria,
     InspeccionVehiculo,
+    LavadoUnidad,
     Repartidor,
     ReporteUnidad,
     ReporteUnidadReafirmacion,
@@ -475,6 +476,64 @@ class LogisticaCargaCombustibleCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "El importe parece precio por litro. Captura el importe total del ticket."
             )
+        return attrs
+
+
+class LogisticaLavadoUnidadSerializer(serializers.ModelSerializer):
+    unidad_codigo = serializers.CharField(source="unidad.codigo", read_only=True)
+    unidad_descripcion = serializers.CharField(source="unidad.descripcion", read_only=True)
+    repartidor_nombre = serializers.SerializerMethodField()
+    tipo_lavado_display = serializers.CharField(source="get_tipo_lavado_display", read_only=True)
+
+    class Meta:
+        model = LavadoUnidad
+        fields = [
+            "id",
+            "unidad",
+            "unidad_codigo",
+            "unidad_descripcion",
+            "fecha",
+            "tipo_lavado",
+            "tipo_lavado_display",
+            "costo",
+            "foto_evidencia",
+            "registrado_por",
+            "repartidor_nombre",
+            "fecha_registro",
+            "latitud",
+            "longitud",
+            "notas",
+        ]
+        read_only_fields = [
+            "id",
+            "unidad_codigo",
+            "unidad_descripcion",
+            "fecha",
+            "registrado_por",
+            "repartidor_nombre",
+            "fecha_registro",
+        ]
+
+    def get_repartidor_nombre(self, obj):
+        if not obj.registrado_por:
+            return ""
+        return obj.registrado_por.get_full_name() or obj.registrado_por.username
+
+
+class LogisticaLavadoUnidadCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LavadoUnidad
+        fields = ["unidad", "tipo_lavado", "costo", "foto_evidencia", "latitud", "longitud", "notas"]
+
+    def validate(self, attrs):
+        unidad = attrs.get("unidad")
+        if not unidad or not unidad.activa:
+            raise serializers.ValidationError("Selecciona una unidad activa.")
+        if not attrs.get("foto_evidencia"):
+            raise serializers.ValidationError("La foto del lavado es obligatoria.")
+        costo = attrs.get("costo")
+        if costo is not None and costo < 0:
+            raise serializers.ValidationError("El importe del lavado no puede ser negativo.")
         return attrs
 
 
