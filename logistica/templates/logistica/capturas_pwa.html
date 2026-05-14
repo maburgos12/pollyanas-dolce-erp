@@ -73,7 +73,7 @@
         <h2>Bitácoras salida/llegada</h2>
         <p class="capture-muted">Incluye folio, unidad, kilometraje, combustible y fotos de tablero/ticket.</p>
       </div>
-      <span class="capture-badge info">Combustible: ${{ costo_combustible_total|floatformat:2|intcomma }}</span>
+      <span class="capture-badge info">Combustible total: ${{ costo_combustible_total|floatformat:2|intcomma }}</span>
     </div>
     <div class="table-responsive">
       <table class="table table-striped capture-table">
@@ -84,7 +84,7 @@
             <th>Unidad</th>
             <th>Salida</th>
             <th>Llegada</th>
-            <th>Combustible</th>
+            <th>Combustible (importe total)</th>
             <th>Evidencia</th>
           </tr>
         </thead>
@@ -96,12 +96,20 @@
             <td>{{ row.unidad.codigo }}<br><span class="capture-muted">{{ row.unidad.placa|default:row.unidad.descripcion }}</span></td>
             <td>{{ row.hora_salida|date:"d/m/Y H:i" }}<br>KM {{ row.km_salida|intcomma }} · Gas {{ row.nivel_gas_salida }}</td>
             <td>{% if row.hora_llegada %}{{ row.hora_llegada|date:"d/m/Y H:i" }}<br>KM {{ row.km_llegada|intcomma }} · Gas {{ row.nivel_gas_llegada }}{% else %}<span class="capture-muted">Pendiente de cierre</span>{% endif %}</td>
-            <td>{% if row.litros_cargados or row.costo_combustible %}{{ row.litros_cargados|default:"0" }} L<br>${{ row.costo_combustible|default:"0"|floatformat:2 }}{% else %}<span class="capture-muted">Sin carga</span>{% endif %}</td>
+            <td>
+              {% if row.litros_cargados or row.costo_combustible %}{{ row.litros_cargados|default:"0" }} L<br>Total ${{ row.costo_combustible|default:"0"|floatformat:2 }}{% endif %}
+              {% for carga in row.cargas_combustible.all %}
+                <div>{{ carga.litros|default:"0" }} L<br><span class="capture-muted">Total ${{ carga.importe_total|default:"0"|floatformat:2 }}</span></div>
+              {% empty %}
+                {% if not row.litros_cargados and not row.costo_combustible %}<span class="capture-muted">Sin carga</span>{% endif %}
+              {% endfor %}
+            </td>
             <td>
               <div class="capture-evidence">
                 {% if row.foto_tablero_salida %}<a href="{{ row.foto_tablero_salida.url }}" target="_blank" rel="noopener">Tablero salida</a>{% endif %}
                 {% if row.foto_tablero_llegada %}<a href="{{ row.foto_tablero_llegada.url }}" target="_blank" rel="noopener">Tablero llegada</a>{% endif %}
                 {% if row.foto_ticket_combustible %}<a href="{{ row.foto_ticket_combustible.url }}" target="_blank" rel="noopener">Ticket combustible</a>{% endif %}
+                {% for carga in row.cargas_combustible.all %}{% if carga.foto_ticket %}<a href="{{ carga.foto_ticket.url }}" target="_blank" rel="noopener">Ticket ruta</a>{% endif %}{% endfor %}
               </div>
             </td>
           </tr>

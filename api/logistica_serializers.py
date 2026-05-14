@@ -471,6 +471,10 @@ class LogisticaCargaCombustibleCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Los litros deben ser mayores a cero.")
         if attrs["importe_total"] <= 0:
             raise serializers.ValidationError("El importe total debe ser mayor a cero.")
+        if attrs["litros"] >= 5 and attrs["importe_total"] / attrs["litros"] < 10:
+            raise serializers.ValidationError(
+                "El importe parece precio por litro. Captura el importe total del ticket."
+            )
         return attrs
 
 
@@ -543,9 +547,15 @@ class LogisticaBitacoraLlegadaSerializer(serializers.ModelSerializer):
             if attrs.get("litros_cargados") in (None, ""):
                 raise serializers.ValidationError("Captura los litros cargados.")
             if attrs.get("costo_combustible") in (None, ""):
-                raise serializers.ValidationError("Captura el costo de combustible.")
+                raise serializers.ValidationError("Captura el importe total del ticket de combustible.")
             if not attrs.get("foto_ticket_combustible") and self.instance and not self.instance.foto_ticket_combustible:
                 raise serializers.ValidationError("La foto del ticket de combustible es obligatoria.")
+            litros = attrs.get("litros_cargados") or self.instance.litros_cargados
+            importe = attrs.get("costo_combustible") or self.instance.costo_combustible
+            if litros and importe and litros >= 5 and importe / litros < 10:
+                raise serializers.ValidationError(
+                    "El importe parece precio por litro. Captura el importe total del ticket."
+                )
         return attrs
 
 
