@@ -41,6 +41,7 @@ class HoraExtraSerializer(serializers.ModelSerializer):
             "creado_en",
         ]
         read_only_fields = ["monto_calculado", "estado", "creado_en"]
+        extra_kwargs = {"empleado": {"required": False}}
 
 
 class PermisoSalidaSerializer(serializers.ModelSerializer):

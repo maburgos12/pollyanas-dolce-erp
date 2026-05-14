@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from core.access import can_manage_rrhh, can_view_rrhh
+from recetas.utils.normalizacion import normalizar_nombre
 from .models import AsistenciaEmpleado, Empleado, HoraExtra, PermisoSalida
 from .serializers import AsistenciaSerializer, HoraExtraSerializer, PermisoSalidaSerializer
 from .services import calcular_monto_hora_extra
@@ -26,6 +27,14 @@ def empleado_de_usuario(user) -> Empleado | None:
         if empleado:
             return empleado
     empleado = candidates.filter(Q(codigo__iexact=user.username) | Q(nombre__iexact=user.get_full_name())).first()
+    if empleado:
+        return empleado
+
+    user_tokens = set(normalizar_nombre(user.get_full_name() or "").split())
+    if user_tokens:
+        for empleado in candidates.only("id", "nombre", "nombre_normalizado", "activo"):
+            if set((empleado.nombre_normalizado or normalizar_nombre(empleado.nombre)).split()) == user_tokens:
+                return empleado
     return empleado
 
 
@@ -79,6 +88,14 @@ class HoraExtraViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
         if estado:
             qs = qs.filter(estado=estado)
         return qs
+
+    def perform_create(self, serializer):
+        empleado = serializer.validated_data.get("empleado") or empleado_de_usuario(self.request.user)
+        if not empleado:
+            raise ValidationError({"empleado": "No se pudo vincular tu usuario con un empleado activo."})
+        if not can_view_rrhh(self.request.user) and empleado != empleado_de_usuario(self.request.user):
+            raise PermissionDenied("No puedes registrar horas extra para otro empleado.")
+        serializer.save(empleado=empleado, estado=HoraExtra.ESTADO_PENDIENTE)
 
     @action(detail=True, methods=["post"])
     def autorizar(self, request, pk=None):
