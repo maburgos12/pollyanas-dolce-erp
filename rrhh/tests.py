@@ -123,6 +123,33 @@ class CapitalHumanoAPITests(TestCase):
         self.assertEqual(resp.data["estado"], "pendiente")
         self.assertEqual(resp.data["notas"], "Cierre de sucursal")
 
+    def test_usuario_sin_empleado_no_se_vincula_a_otro_empleado(self):
+        Empleado.objects.create(nombre="XANTECO MENA MARISOL", salario_diario="500.00")
+        user = User.objects.create_user(
+            username="yesenia.soto",
+            first_name="Yesenia",
+            last_name="Soto",
+            email="admon.yesenia@pollyanasdolce.com",
+            password="pass123",
+        )
+        self.client.force_authenticate(user=user)
+
+        me_resp = self.client.get(reverse("rrhh:capital_humano_me"))
+        self.assertEqual(me_resp.status_code, 200)
+        self.assertIsNone(me_resp.data["empleado"])
+
+        resp = self.client.post(
+            reverse("rrhh:hora-extra-list"),
+            {
+                "fecha": "2026-05-14",
+                "horas": "1.00",
+                "notas": "No debe crear",
+            },
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, 400)
+
     def test_rutas_capital_humano_cargan(self):
         rrhh_group, _ = Group.objects.get_or_create(name="RRHH")
         self.user.groups.add(rrhh_group)
