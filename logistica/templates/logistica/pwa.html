@@ -1030,6 +1030,7 @@
         bitacoraSalida: null,
         unidades: [],
         inspeccionDraft: null,
+        lavadoDraft: null,
         reporteDraft: {
           step: 1,
           tipo: "",
@@ -1069,6 +1070,13 @@
         { icon: "⛽", label: "1/2", value: "1/2" },
         { icon: "⛽", label: "3/4", value: "3/4" },
         { icon: "🔋", label: "Lleno", value: "lleno" }
+      ];
+
+      const tiposLavado = [
+        { icon: "🚐", label: "Exterior", value: "exterior" },
+        { icon: "🪑", label: "Interior", value: "interior" },
+        { icon: "❄️", label: "Caja refrigerada", value: "caja_refrigerada" },
+        { icon: "✅", label: "Completo", value: "completo" }
       ];
 
       const inspeccionDiariaSecciones = [
@@ -1442,6 +1450,7 @@
         if (nombre === "bitacora") return renderBitacora();
         if (nombre === "bitacora_salida") return renderBitacoraSalida();
         if (nombre === "inspeccion_vehiculo") return renderInspeccionVehiculo();
+        if (nombre === "lavado") return renderLavadoUnidad();
         if (nombre === "ayuda") return renderAyuda();
       }
 
@@ -1627,6 +1636,7 @@
             <button class="dash-btn" onclick="startNuevoReporte()">🚨<br>Nuevo Reporte</button>
             <button class="dash-btn" onclick="showScreen('mis_reportes')">📂<br>Mis Reportes ${abiertos ? `<span class="badge">${abiertos}</span>` : ""}</button>
             <button class="dash-btn" onclick="showScreen('inspeccion_vehiculo')">📋<br>Inspección</button>
+            <button class="dash-btn" onclick="showScreen('lavado')">🚿<br>Lavado</button>
             <button class="dash-btn" onclick="showScreen('bitacora_salida')">🚗<br>Bitácora<br>${turnoBadge}</button>
           </div>
         `));
@@ -2046,6 +2056,176 @@
         if (!response.ok) return renderBitacora("No se pudo guardar. Revisa el kilometraje.");
         state.editandoBitacora = false;
         await renderBitacora("Bitácora guardada.");
+      }
+
+      function ensureLavadoDraft() {
+        if (!state.lavadoDraft) {
+          state.lavadoDraft = {
+            unidad: "",
+            tipo_lavado: "completo",
+            costo: "",
+            notas: "",
+            foto_evidencia: null,
+            fotoLavadoPreview: "",
+            fotoLavadoError: "",
+            latitud: "",
+            longitud: "",
+            geoStatus: "idle",
+            geoLabel: "",
+            estado: null,
+            estadoLoading: false,
+            confirmandoDuplicado: false,
+            guardando: false
+          };
+        }
+        return state.lavadoDraft;
+      }
+
+      function capturarUbicacionLavado() {
+        requestLocation(ensureLavadoDraft(), renderLavadoUnidad, "latitud", "longitud");
+      }
+
+      function setFotoLavado(input) {
+        setLivePhoto(input, ensureLavadoDraft(), "foto_evidencia", "fotoLavadoPreview", renderLavadoUnidad, "fotoLavadoError");
+      }
+
+      function selectTipoLavado(value) {
+        ensureLavadoDraft().tipo_lavado = value;
+        renderLavadoUnidad();
+      }
+
+      async function seleccionarUnidadLavado(value) {
+        const draft = ensureLavadoDraft();
+        draft.unidad = value;
+        draft.estado = null;
+        draft.confirmandoDuplicado = false;
+        if (!value) return renderLavadoUnidad();
+        draft.estadoLoading = true;
+        renderLavadoUnidad();
+        const response = await apiFetch(`/lavados/estado/?unidad_id=${encodeURIComponent(value)}`);
+        draft.estadoLoading = false;
+        draft.estado = response.ok ? await response.json() : null;
+        renderLavadoUnidad();
+      }
+
+      function puedeGuardarLavado() {
+        const draft = ensureLavadoDraft();
+        return Boolean(draft.unidad && draft.tipo_lavado && draft.foto_evidencia && isGeoReady(draft) && !draft.guardando);
+      }
+
+      function renderEstadoLavado(draft) {
+        if (draft.estadoLoading) return `<p class="unit-line">Consultando último lavado...</p>`;
+        const estado = draft.estado;
+        if (!estado) return "";
+        const ultimo = estado.ultimo_lavado;
+        const dias = estado.dias_sin_lavar;
+        const tone = estado.lavado_hoy ? "ok" : Number(dias) > 15 ? "warning" : "ok";
+        const texto = ultimo
+          ? `Último lavado: ${escapeHtml(ultimo.fecha || "-")} · ${dias} día${Number(dias) === 1 ? "" : "s"}`
+          : "Sin lavados registrados para esta unidad.";
+        return `
+          <div class="daily-banner ${tone === "warning" ? "warning" : ""}">
+            <span style="font-size:22px;">${estado.lavado_hoy ? "✅" : "🚿"}</span>
+            <div>
+              <strong>${escapeHtml(estado.unidad_codigo || "")}</strong><br>
+              ${texto}
+              ${estado.lavado_hoy ? "<br>Esta unidad ya tiene lavado registrado hoy. Si fue otro tipo de lavado, puedes registrarlo de nuevo." : ""}
+            </div>
+          </div>
+        `;
+      }
+
+      async function renderLavadoUnidad(message = "") {
+        const draft = ensureLavadoDraft();
+        if (!state.unidades.length) await loadUnidades();
+        const ubicacionLista = isGeoReady(draft);
+        const isError = message && !message.startsWith("✅");
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
+          <h1 class="screen-title" style="margin-top:16px;">Lavado de unidad</h1>
+          <p class="unit-line">Registra exterior, interior, caja refrigerada o lavado completo.</p>
+          ${message ? `<p class="${isError ? "error" : "success"}">${escapeHtml(message)}</p>` : ""}
+          <div class="${ubicacionLista ? "" : "gps-locked"}">
+            <section class="card report-card">
+              <div class="field">
+                <label for="unidad_lavado">Unidad</label>
+                <select id="unidad_lavado" required onchange="seleccionarUnidadLavado(this.value)">
+                  <option value="">Selecciona unidad</option>
+                  ${state.unidades.map((unidad) => `<option value="${unidad.id}" ${String(draft.unidad) === String(unidad.id) ? "selected" : ""}>${escapeHtml(unidad.codigo)} · ${escapeHtml(unidad.descripcion || "")}</option>`).join("")}
+                </select>
+              </div>
+              ${renderEstadoLavado(draft)}
+              <div class="field">
+                <label>Tipo de lavado</label>
+                <div class="card-grid">
+                  ${tiposLavado.map((tipo) => `
+                    <button type="button" class="option-card ${draft.tipo_lavado === tipo.value ? "selected" : ""}" onclick="selectTipoLavado('${tipo.value}')">
+                      <span>${tipo.icon}</span><br>${tipo.label}
+                    </button>
+                  `).join("")}
+                </div>
+              </div>
+              <div class="field">
+                <label for="costo_lavado">Importe del lavado</label>
+                <input id="costo_lavado" type="number" min="0" step="0.01" placeholder="Ej. 150.00" value="${escapeHtml(draft.costo)}" oninput="state.lavadoDraft.costo = this.value">
+              </div>
+              <div class="field">
+                <label for="foto_lavado">Foto de evidencia</label>
+                ${fotoInput("foto_lavado", Boolean(draft.foto_evidencia), "setFotoLavado(this)")}
+                ${draft.fotoLavadoPreview ? `
+                  <img class="thumb" src="${draft.fotoLavadoPreview}" alt="Vista previa lavado">
+                  <div class="photo-actions">
+                    <label class="retake" for="foto_lavado">↻ Volver a tomar</label>
+                    <button class="keep" type="button" onclick="renderLavadoUnidad()">Usar esta foto</button>
+                  </div>
+                ` : ""}
+                ${draft.fotoLavadoError ? `<p class="error">${escapeHtml(draft.fotoLavadoError)}</p>` : ""}
+              </div>
+              <div class="field">
+                <label for="notas_lavado">Notas</label>
+                <textarea id="notas_lavado" rows="3" placeholder="Opcional" oninput="state.lavadoDraft.notas = this.value">${escapeHtml(draft.notas)}</textarea>
+              </div>
+              <p class="gps-registered">📍 Ubicación registrada</p>
+              ${draft.estado?.lavado_hoy && !draft.confirmandoDuplicado ? `
+                <button class="secondary-btn" type="button" onclick="state.lavadoDraft.confirmandoDuplicado = true; renderLavadoUnidad()">Registrar otro lavado de hoy</button>
+              ` : `
+                <button class="primary-btn" type="button" onclick="guardarLavadoUnidad()" ${puedeGuardarLavado() ? "" : "disabled"}>${draft.guardando ? "Guardando..." : "Guardar lavado"}</button>
+              `}
+            </section>
+          </div>
+          ${geoOverlay(draft, "capturarUbicacionLavado")}
+        `));
+      }
+
+      async function guardarLavadoUnidad() {
+        const draft = ensureLavadoDraft();
+        if (!puedeGuardarLavado()) return renderLavadoUnidad("Completa unidad, tipo, foto y ubicación.");
+        draft.guardando = true;
+        renderLavadoUnidad();
+        const payload = new FormData();
+        payload.append("unidad", draft.unidad);
+        payload.append("tipo_lavado", draft.tipo_lavado);
+        if (draft.costo) payload.append("costo", draft.costo);
+        payload.append("foto_evidencia", draft.foto_evidencia);
+        payload.append("latitud", draft.latitud);
+        payload.append("longitud", draft.longitud);
+        payload.append("notas", draft.notas || "");
+        const response = await apiFetch("/lavados/", { method: "POST", body: payload });
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          draft.guardando = false;
+          return renderLavadoUnidad(apiErrorMessage(error, "No se pudo registrar el lavado."));
+        }
+        const lavado = await response.json();
+        state.lavadoDraft = null;
+        render(shell(`
+          <section class="confirm">
+            <div class="check">✅</div>
+            <h1 class="screen-title">Lavado registrado</h1>
+            <p class="unit-line">${escapeHtml(lavado.unidad_codigo || "")} · ${escapeHtml(lavado.tipo_lavado_display || lavado.tipo_lavado || "")}</p>
+            <button class="primary-btn" onclick="showScreen('dashboard')">Volver al inicio</button>
+          </section>
+        `));
       }
 
       function gasSelector(current, onSelect) {

@@ -26,6 +26,7 @@ from logistica.models import (
     EntregaRuta,
     InspeccionDiaria,
     InspeccionVehiculo,
+    LavadoUnidad,
     Repartidor,
     ReporteUnidad,
     ReporteUnidadReafirmacion,
@@ -45,6 +46,8 @@ from .logistica_serializers import (
     LogisticaInspeccionVehiculoCreateSerializer,
     LogisticaInspeccionVehiculoSerializer,
     LogisticaInspeccionDiariaSerializer,
+    LogisticaLavadoUnidadCreateSerializer,
+    LogisticaLavadoUnidadSerializer,
     LogisticaRepartidorSerializer,
     LogisticaReporteCreateSerializer,
     LogisticaReportePatchSerializer,
@@ -549,6 +552,70 @@ class LogisticaCargaCombustibleView(_LogisticaBaseView):
             },
         )
         return Response(LogisticaCargaCombustibleSerializer(carga).data, status=status.HTTP_201_CREATED)
+
+
+class LogisticaLavadoEstadoView(_LogisticaBaseView):
+    def get(self, request):
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor:
+            return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
+
+        unidad_id = request.query_params.get("unidad_id")
+        if not unidad_id:
+            return Response({"detail": "unidad_id es obligatorio."}, status=status.HTTP_400_BAD_REQUEST)
+
+        unidad = get_object_or_404(Unidad.objects.filter(activa=True), pk=unidad_id)
+        hoy = timezone.localdate()
+        ultimo_lavado = (
+            LavadoUnidad.objects.select_related("unidad", "registrado_por")
+            .filter(unidad=unidad)
+            .order_by("-fecha", "-fecha_registro", "-id")
+            .first()
+        )
+        lavado_hoy = LavadoUnidad.objects.filter(unidad=unidad, fecha=hoy).exists()
+        dias_sin_lavar = (hoy - ultimo_lavado.fecha).days if ultimo_lavado else None
+
+        return Response(
+            {
+                "unidad": unidad.id,
+                "unidad_codigo": unidad.codigo,
+                "unidad_descripcion": unidad.descripcion,
+                "ultimo_lavado": LogisticaLavadoUnidadSerializer(ultimo_lavado).data if ultimo_lavado else None,
+                "lavado_hoy": lavado_hoy,
+                "dias_sin_lavar": dias_sin_lavar,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class LogisticaLavadoUnidadView(_LogisticaBaseView):
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def post(self, request):
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor or not _is_repartidor(request.user):
+            return Response({"detail": "Solo repartidores registrados pueden capturar lavados."}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = LogisticaLavadoUnidadCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        lavado = LavadoUnidad.objects.create(
+            registrado_por=request.user,
+            fecha=timezone.localdate(),
+            ip_registro=request.META.get("REMOTE_ADDR"),
+            **serializer.validated_data,
+        )
+        log_event(
+            request.user,
+            "CREATE",
+            "logistica.LavadoUnidad",
+            str(lavado.id),
+            {
+                "unidad": lavado.unidad.codigo,
+                "tipo_lavado": lavado.tipo_lavado,
+                "costo": str(lavado.costo) if lavado.costo is not None else "",
+            },
+        )
+        return Response(LogisticaLavadoUnidadSerializer(lavado).data, status=status.HTTP_201_CREATED)
 
 
 class LogisticaBitacoraSalidaDetailView(_LogisticaBaseView):

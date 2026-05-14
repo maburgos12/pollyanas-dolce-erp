@@ -572,11 +572,27 @@ class ServicioRealizadoUnidad(models.Model):
 
 
 class LavadoUnidad(models.Model):
+    TIPO_EXTERIOR = "exterior"
+    TIPO_INTERIOR = "interior"
+    TIPO_CAJA_REFRIGERADA = "caja_refrigerada"
+    TIPO_COMPLETO = "completo"
+    TIPO_LAVADO_CHOICES = [
+        (TIPO_EXTERIOR, "Exterior"),
+        (TIPO_INTERIOR, "Interior"),
+        (TIPO_CAJA_REFRIGERADA, "Caja refrigerada"),
+        (TIPO_COMPLETO, "Completo"),
+    ]
+
     unidad = models.ForeignKey(Unidad, on_delete=models.PROTECT, related_name="lavados")
     fecha = models.DateField()
+    tipo_lavado = models.CharField(max_length=30, choices=TIPO_LAVADO_CHOICES, default=TIPO_COMPLETO)
     costo = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    foto_evidencia = models.ImageField(upload_to="lavados_unidad/", null=True, blank=True)
     registrado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True)
     fecha_registro = models.DateTimeField(auto_now_add=True)
+    ip_registro = models.GenericIPAddressField(null=True, blank=True)
+    latitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     notas = models.CharField(max_length=200, blank=True)
 
     class Meta:

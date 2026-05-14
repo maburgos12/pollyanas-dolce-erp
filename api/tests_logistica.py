@@ -1,11 +1,12 @@
 from django.contrib.auth.models import Group, User
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from core.models import Sucursal
-from logistica.models import Repartidor, ReporteUnidad, Unidad
+from logistica.models import LavadoUnidad, Repartidor, ReporteUnidad, Unidad
 
 
 @override_settings(CELERY_TASK_ALWAYS_EAGER=True, EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
@@ -127,3 +128,47 @@ class LogisticaReportesApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_repartidor_consulta_estado_lavado_unidad(self):
+        LavadoUnidad.objects.create(
+            unidad=self.unidad,
+            fecha="2026-05-10",
+            costo="120.00",
+            registrado_por=self.user_repartidor,
+            notas="Lavado completo previo.",
+        )
+
+        self._auth(self._jwt_for("repartidor.api"))
+        response = self.client.get(reverse("api_logistica_lavados_estado"), {"unidad_id": self.unidad.id})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["unidad_codigo"], self.unidad.codigo)
+        self.assertEqual(response.data["ultimo_lavado"]["costo"], "120.00")
+        self.assertIn("lavado_hoy", response.data)
+        self.assertIn("dias_sin_lavar", response.data)
+
+    def test_repartidor_registra_lavado_con_tipo_caja_refrigerada_importe_y_foto(self):
+        self._auth(self._jwt_for("repartidor.api"))
+        foto = SimpleUploadedFile("lavado.jpg", b"fake-image", content_type="image/jpeg")
+
+        response = self.client.post(
+            reverse("api_logistica_lavados"),
+            {
+                "unidad": self.unidad.id,
+                "tipo_lavado": "caja_refrigerada",
+                "costo": "180.50",
+                "foto_evidencia": foto,
+                "notas": "Lavado de caja refrigerada.",
+                "latitud": "25.567890",
+                "longitud": "-108.456789",
+            },
+            format="multipart",
+            REMOTE_ADDR="10.10.10.10",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        lavado = LavadoUnidad.objects.get(unidad=self.unidad)
+        self.assertEqual(lavado.tipo_lavado, "caja_refrigerada")
+        self.assertEqual(str(lavado.costo), "180.50")
+        self.assertEqual(lavado.ip_registro, "10.10.10.10")
+        self.assertTrue(lavado.foto_evidencia.name)
