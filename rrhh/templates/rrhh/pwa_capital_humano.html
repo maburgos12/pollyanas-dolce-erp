@@ -200,6 +200,34 @@
         render();
       }
 
+      async function submitHoraExtra(event) {
+        event.preventDefault();
+        state.message = "";
+        state.error = "";
+        const formElement = event.currentTarget;
+        const form = new FormData(formElement);
+        const data = {
+          fecha: form.get("fecha"),
+          horas: form.get("horas"),
+          notas: form.get("notas") || ""
+        };
+        const res = await apiFetch(`${API}/horas-extra/`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(data)
+        });
+        if (!res.ok) {
+          state.error = "No se pudieron registrar las horas extra.";
+          render();
+          return;
+        }
+        const result = await res.json();
+        formElement.reset();
+        state.horas = [result, ...state.horas.filter(item => item.id !== result.id)];
+        state.message = "Horas extra registradas para autorización.";
+        render();
+      }
+
       function shell(content) {
         const nombre = state.me?.nombre || "Capital Humano";
         return `
@@ -280,7 +308,20 @@
             ${h.notas ? `<div>${h.notas}</div>` : ""}
           </article>
         `).join("") || `<div class="muted">Sin horas extra registradas.</div>`;
-        app.innerHTML = shell(`<h1 class="brand">Mis horas extra</h1><div class="list">${items}</div>`);
+        app.innerHTML = shell(`
+          <h1 class="brand">Mis horas extra</h1>
+          <section class="panel">
+            <form onsubmit="submitHoraExtra(event)">
+              <div class="field"><label>Fecha<input type="date" name="fecha" required></label></div>
+              <div class="field"><label>Horas<input type="number" name="horas" min="0.25" max="24" step="0.25" required></label></div>
+              <div class="field"><label>Notas<textarea name="notas" placeholder="Motivo o actividad realizada"></textarea></label></div>
+              <button class="primary" type="submit">Registrar horas extra</button>
+              ${state.message ? `<div class="message">${state.message}</div>` : ""}
+              ${state.error ? `<div class="error">${state.error}</div>` : ""}
+            </form>
+          </section>
+          <div class="list">${items}</div>
+        `);
       }
 
       function setSection(section) {

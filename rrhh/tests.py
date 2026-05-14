@@ -90,6 +90,39 @@ class CapitalHumanoAPITests(TestCase):
         self.assertTrue(resp.data["folio"].startswith("PS-"))
         self.assertEqual(resp.data["estado"], "solicitado")
 
+    def test_hora_extra_api_crea_para_empleado_actual_por_nombre_reordenado(self):
+        user = User.objects.create_user(
+            username="paula.lugo",
+            first_name="Paula Elizabeth",
+            last_name="Lugo Espinoza",
+            email="capitalhumano@pollyanasdolce.com",
+            password="pass123",
+        )
+        empleado = Empleado.objects.create(
+            nombre="LUGO ESPINOZA PAULA ELIZABETH",
+            salario_diario="500.00",
+        )
+        self.client.force_authenticate(user=user)
+
+        me_resp = self.client.get(reverse("rrhh:capital_humano_me"))
+        self.assertEqual(me_resp.status_code, 200)
+        self.assertEqual(me_resp.data["empleado"], empleado.id)
+
+        resp = self.client.post(
+            reverse("rrhh:hora-extra-list"),
+            {
+                "fecha": "2026-05-14",
+                "horas": "2.50",
+                "notas": "Cierre de sucursal",
+            },
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["empleado"], empleado.id)
+        self.assertEqual(resp.data["estado"], "pendiente")
+        self.assertEqual(resp.data["notas"], "Cierre de sucursal")
+
     def test_rutas_capital_humano_cargan(self):
         rrhh_group, _ = Group.objects.get_or_create(name="RRHH")
         self.user.groups.add(rrhh_group)
@@ -98,6 +131,7 @@ class CapitalHumanoAPITests(TestCase):
         for url_name in ["rrhh_dashboard", "rrhh_pwa"]:
             resp = self.client.get(reverse(f"rrhh:{url_name}"))
             self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Registrar horas extra")
 
 
 class RRHHViewsTests(TestCase):
