@@ -108,6 +108,7 @@ INSTALLED_APPS = [
     "ventas",
     "rrhh",
     "bonos_produccion",
+    "bonos_ventas",
     "logistica",
     "fallas",
     "mermas",
