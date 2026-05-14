@@ -2316,6 +2316,12 @@
         );
       }
 
+      function importeCombustibleParecePrecioPorLitro(litros, importeTotal) {
+        const litrosNum = Number(litros || 0);
+        const importeNum = Number(importeTotal || 0);
+        return litrosNum >= 5 && importeNum > 0 && importeNum / litrosNum < 10;
+      }
+
       function resetCargaCombustibleForm() {
         const draft = ensureBitacoraSalidaDraft();
         draft.registrando_combustible = false;
@@ -2341,7 +2347,7 @@
             ${cargas.map((carga) => `
               <div class="route-fuel-item">
                 <div>
-                  ${escapeHtml(carga.litros || "0")} L · $${escapeHtml(carga.importe_total || "0")}
+                  ${escapeHtml(carga.litros || "0")} L · Total $${escapeHtml(carga.importe_total || "0")}
                   <br><span>${formatDate(carga.fecha_registro)}</span>
                 </div>
                 ${carga.foto_ticket ? `<a href="${escapeHtml(carga.foto_ticket)}" target="_blank" rel="noopener">Ticket</a>` : `<span>Sin ticket</span>`}
@@ -2383,8 +2389,8 @@
                 <input id="carga_litros" type="number" min="0" step="0.01" required value="${escapeHtml(draft.carga_litros)}" oninput="state.bitacoraSalidaDraft.carga_litros = this.value; document.getElementById('guardar_carga_combustible_btn')?.toggleAttribute('disabled', !puedeGuardarCargaCombustible());">
               </div>
               <div class="field">
-                <label for="carga_importe_total">Importe total</label>
-                <input id="carga_importe_total" type="number" min="0" step="0.01" required value="${escapeHtml(draft.carga_importe_total)}" oninput="state.bitacoraSalidaDraft.carga_importe_total = this.value; document.getElementById('guardar_carga_combustible_btn')?.toggleAttribute('disabled', !puedeGuardarCargaCombustible());">
+                <label for="carga_importe_total">Importe total del ticket</label>
+                <input id="carga_importe_total" type="number" min="0" step="0.01" required placeholder="Ej. 800.00, no 27.90 por litro" value="${escapeHtml(draft.carga_importe_total)}" oninput="state.bitacoraSalidaDraft.carga_importe_total = this.value; document.getElementById('guardar_carga_combustible_btn')?.toggleAttribute('disabled', !puedeGuardarCargaCombustible());">
               </div>
               <div class="field">
                 <label>Nivel de gas después de cargar</label>
@@ -2416,6 +2422,9 @@
         const draft = ensureBitacoraSalidaDraft();
         if (!puedeGuardarCargaCombustible()) {
           return renderBitacoraSalida("Captura litros, importe total, ticket y ubicación para guardar la carga.");
+        }
+        if (importeCombustibleParecePrecioPorLitro(draft.carga_litros, draft.carga_importe_total)) {
+          return renderBitacoraSalida("El importe parece precio por litro. Captura el importe total del ticket.");
         }
         draft.carga_guardando = true;
         renderBitacoraSalida();

@@ -68,12 +68,12 @@
       <div class="log-summary">
         <span class="muted">{{ bitacoras_page.paginator.count|intcomma }} bitácoras</span>
         <span class="log-badge warn">{{ cargas_combustible|intcomma }} cargas</span>
-        <span class="log-badge ok">Combustible ${{ combustible_total|floatformat:2|intcomma }}</span>
+        <span class="log-badge ok">Combustible total ${{ combustible_total|floatformat:2|intcomma }}</span>
       </div>
     </div>
     <div class="logi-table-wrap">
       <table class="table table-striped">
-        <thead><tr><th>Folio</th><th>Unidad</th><th>Repartidor</th><th>Hora salida</th><th>Hora llegada</th><th>KM salida</th><th>KM llegada</th><th>KM recorridos</th><th>Nivel gas</th><th>Combustible</th><th>Estatus</th><th>Fotos</th></tr></thead>
+        <thead><tr><th>Folio</th><th>Unidad</th><th>Repartidor</th><th>Hora salida</th><th>Hora llegada</th><th>KM salida</th><th>KM llegada</th><th>KM recorridos</th><th>Nivel gas</th><th>Combustible (importe total)</th><th>Estatus</th><th>Fotos</th></tr></thead>
         <tbody>
           {% for bitacora in bitacoras %}
           <tr class="{% if not bitacora.cerrada and bitacora.horas_abierta > 8 %}log-overdue{% endif %}">
@@ -89,7 +89,7 @@
             <td>
               {% if bitacora.litros_cargados or bitacora.costo_combustible or bitacora.foto_ticket_combustible %}
                 <div class="log-fuel">
-                  <strong>{{ bitacora.litros_cargados|default:"0" }} L · ${{ bitacora.costo_combustible|default:"0"|floatformat:2|intcomma }}</strong>
+                  <strong>{{ bitacora.litros_cargados|default:"0" }} L · Total ${{ bitacora.costo_combustible|default:"0"|floatformat:2|intcomma }}</strong>
                   {% if bitacora.foto_ticket_combustible %}
                     <a href="{{ bitacora.foto_ticket_combustible.url }}" target="_blank" rel="noopener">Ver ticket</a>
                   {% else %}
@@ -99,7 +99,7 @@
               {% endif %}
               {% for carga in bitacora.cargas_combustible.all %}
                 <div class="log-fuel">
-                  <strong>{{ carga.litros|default:"0" }} L · ${{ carga.importe_total|default:"0"|floatformat:2|intcomma }}</strong>
+                  <strong>{{ carga.litros|default:"0" }} L · Total ${{ carga.importe_total|default:"0"|floatformat:2|intcomma }}</strong>
                   <span class="log-muted">{{ carga.fecha_registro|date:"d/m/Y H:i" }}</span>
                   {% if carga.foto_ticket %}
                     <a href="{{ carga.foto_ticket.url }}" target="_blank" rel="noopener">Ver ticket</a>
