@@ -141,6 +141,11 @@ ACCESS_SUBMODULES = {
         ("reportes", "Reportes"),
     ],
     "rrhh": [
+        ("dashboard", "Capital Humano"),
+        ("asistencias", "Asistencias"),
+        ("horas_extra", "Horas extra"),
+        ("permisos", "Permisos"),
+        ("importar_checador", "Importar checador"),
         ("empleados", "Empleados"),
         ("nomina", "Nómina"),
     ],
