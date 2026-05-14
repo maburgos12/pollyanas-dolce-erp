@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from . import api_views, views
+from . import api_views, views, views_prestamos
 
 app_name = "rrhh"
 
@@ -26,4 +26,12 @@ urlpatterns = [
     path("importar-checador/", views.importar_checador, name="rrhh_importar"),
     path("horas-extra/", views.horas_extra_list, name="rrhh_he_list"),
     path("permisos/", views.permisos_list, name="rrhh_permisos_list"),
+    path("prestamos/", views_prestamos.prestamos_lista, name="rrhh_prestamos_lista"),
+    path("prestamos/nuevo/", views_prestamos.prestamo_nuevo, name="rrhh_prestamo_nuevo"),
+    path("prestamos/<int:pk>/", views_prestamos.prestamo_detalle, name="rrhh_prestamo_detalle"),
+    path("prestamos/<int:pk>/auth-jefe/", views_prestamos.prestamo_autorizar_jefe, name="rrhh_prestamo_auth_jefe"),
+    path("prestamos/<int:pk>/auth-dg/", views_prestamos.prestamo_autorizar_dg, name="rrhh_prestamo_auth_dg"),
+    path("prestamos/cuota/<int:cuota_pk>/cobro/", views_prestamos.prestamo_cobro_manual, name="rrhh_prestamo_cobro"),
+    path("prestamos/importar-contpaq/", views_prestamos.importar_contpaq, name="rrhh_importar_contpaq"),
+    path("prestamos/quincena/", views_prestamos.quincena_cobros, name="rrhh_quincena_cobros"),
 ]

@@ -361,6 +361,11 @@ class PermisoSalida(models.Model):
     fecha_fin = models.DateTimeField(null=True, blank=True)
     motivo = models.TextField()
     estado = models.CharField(max_length=12, choices=ESTADO_CHOICES, default=ESTADO_SOLICITADO)
+    goce_sueldo = models.BooleanField(
+        default=True,
+        verbose_name="Con goce de sueldo",
+        help_text="Desmarca si el permiso es sin goce de sueldo",
+    )
     autorizado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -421,3 +426,178 @@ class ImportacionChecador(models.Model):
 
     def __str__(self) -> str:
         return f"{self.get_metodo_display()} · {self.fecha_inicio} a {self.fecha_fin}"
+
+
+class Prestamo(models.Model):
+    METODO_TRANSFERENCIA = "transferencia"
+    METODO_CHEQUE = "cheque"
+    METODO_EFECTIVO = "efectivo"
+    METODO_CHOICES = [
+        (METODO_TRANSFERENCIA, "Transferencia electrónica"),
+        (METODO_CHEQUE, "Cheque"),
+        (METODO_EFECTIVO, "Efectivo"),
+    ]
+
+    ESTADO_SOLICITADO = "solicitado"
+    ESTADO_AUTORIZADO = "autorizado"
+    ESTADO_APROBADO = "aprobado"
+    ESTADO_RECHAZADO = "rechazado"
+    ESTADO_ACTIVO = "activo"
+    ESTADO_LIQUIDADO = "liquidado"
+    ESTADO_CANCELADO = "cancelado"
+    ESTADO_CHOICES = [
+        (ESTADO_SOLICITADO, "Solicitado"),
+        (ESTADO_AUTORIZADO, "Autorizado por jefe"),
+        (ESTADO_APROBADO, "Aprobado por dirección"),
+        (ESTADO_RECHAZADO, "Rechazado"),
+        (ESTADO_ACTIVO, "Activo - en descuento"),
+        (ESTADO_LIQUIDADO, "Liquidado"),
+        (ESTADO_CANCELADO, "Cancelado"),
+    ]
+
+    empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.PROTECT, related_name="prestamos")
+    folio = models.CharField(max_length=20, unique=True, editable=False)
+    concepto = models.TextField(verbose_name="Concepto del préstamo")
+    metodo_pago = models.CharField(max_length=15, choices=METODO_CHOICES, default=METODO_TRANSFERENCIA)
+    fecha_solicitud = models.DateField()
+    fecha_deposito = models.DateField(null=True, blank=True, verbose_name="Fecha pactada para depósito")
+    importe = models.DecimalField(max_digits=10, decimal_places=2)
+    num_quincenas = models.PositiveSmallIntegerField(verbose_name="Número de quincenas")
+    descuento_quincenal = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Descuento por quincena")
+    saldo_actual = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        verbose_name="Saldo pendiente",
+    )
+    estado = models.CharField(max_length=12, choices=ESTADO_CHOICES, default=ESTADO_SOLICITADO)
+    firma_jefe = models.BooleanField(default=False)
+    autorizado_jefe = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="prestamos_autorizados_jefe",
+    )
+    fecha_auth_jefe = models.DateTimeField(null=True, blank=True)
+    firma_direccion = models.BooleanField(default=False)
+    autorizado_dg = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="prestamos_autorizados_dg",
+    )
+    fecha_auth_dg = models.DateTimeField(null=True, blank=True)
+    nota_separacion = models.TextField(
+        blank=True,
+        help_text="En caso de baja, registrar cómo se liquidó el saldo",
+    )
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="prestamos_creados",
+    )
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-fecha_solicitud"]
+        verbose_name = "Préstamo"
+        verbose_name_plural = "Préstamos"
+
+    def save(self, *args, **kwargs):
+        if not self.folio:
+            import random
+            import string
+            from datetime import date
+
+            while True:
+                sufijo = "".join(random.choices(string.digits, k=4))
+                folio = f"PR-{date.today().strftime('%y%m')}-{sufijo}"
+                if not Prestamo.objects.filter(folio=folio).exists():
+                    self.folio = folio
+                    break
+        if not self.pk and self.saldo_actual == Decimal("0.00") and self.estado != self.ESTADO_LIQUIDADO:
+            self.saldo_actual = self.importe
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"{self.folio} - {self.empleado} - ${self.importe}"
+
+    def recalcular_saldo(self):
+        cobrado = (
+            self.cuotas.filter(estado=PrestamoCuota.ESTADO_COBRADO).aggregate(Sum("monto_cobrado"))[
+                "monto_cobrado__sum"
+            ]
+            or Decimal("0.00")
+        )
+        self.saldo_actual = max(self.importe - cobrado, Decimal("0.00"))
+        self.save(update_fields=["saldo_actual"])
+        if self.saldo_actual == Decimal("0.00") and self.estado == self.ESTADO_ACTIVO:
+            self.estado = self.ESTADO_LIQUIDADO
+            self.save(update_fields=["estado"])
+
+
+class PrestamoCuota(models.Model):
+    ESTADO_PENDIENTE = "pendiente"
+    ESTADO_COBRADO = "cobrado"
+    ESTADO_PARCIAL = "parcial"
+    ESTADO_OMITIDO = "omitido"
+    ESTADO_CHOICES = [
+        (ESTADO_PENDIENTE, "Pendiente"),
+        (ESTADO_COBRADO, "Cobrado"),
+        (ESTADO_PARCIAL, "Cobro parcial"),
+        (ESTADO_OMITIDO, "Omitido / saltado"),
+    ]
+    FUENTE_MANUAL = "manual"
+    FUENTE_CONTPAQ = "contpaq"
+    FUENTE_CHOICES = [
+        (FUENTE_MANUAL, "Registro manual"),
+        (FUENTE_CONTPAQ, "Importación CONTPAQ XLS"),
+    ]
+
+    prestamo = models.ForeignKey(Prestamo, on_delete=models.CASCADE, related_name="cuotas")
+    numero_quincena = models.PositiveSmallIntegerField(verbose_name="Quincena #")
+    fecha_quincena = models.DateField(verbose_name="Fecha de la quincena")
+    monto_esperado = models.DecimalField(max_digits=10, decimal_places=2)
+    monto_cobrado = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    estado = models.CharField(max_length=10, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE)
+    fuente = models.CharField(max_length=10, choices=FUENTE_CHOICES, default=FUENTE_MANUAL)
+    fecha_cobro = models.DateField(null=True, blank=True)
+    nota = models.CharField(max_length=200, blank=True)
+    registrado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["numero_quincena"]
+        unique_together = [("prestamo", "numero_quincena")]
+        verbose_name = "Cuota de préstamo"
+        verbose_name_plural = "Cuotas de préstamo"
+
+    def __str__(self) -> str:
+        return f"{self.prestamo.folio} · Q{self.numero_quincena} · {self.estado}"
+
+
+class ImportacionNominaContpaq(models.Model):
+    archivo = models.FileField(upload_to="contpaq_imports/")
+    periodo_inicio = models.DateField()
+    periodo_fin = models.DateField()
+    quincena_num = models.PositiveSmallIntegerField(verbose_name="Número de quincena del año")
+    empleados_leidos = models.PositiveIntegerField(default=0)
+    prestamos_aplicados = models.PositiveIntegerField(default=0)
+    prestamos_sin_match = models.PositiveIntegerField(default=0)
+    diferencias_detectadas = models.PositiveIntegerField(default=0)
+    log = models.TextField(blank=True)
+    creado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-creado_en"]
+        verbose_name = "Importación nómina CONTPAQ"
+        verbose_name_plural = "Importaciones nómina CONTPAQ"
+
+    def __str__(self) -> str:
+        return f"CONTPAQ {self.periodo_inicio} - {self.periodo_fin}"

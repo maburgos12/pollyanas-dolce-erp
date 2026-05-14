@@ -92,6 +92,7 @@ NAV_GROUPS = [
             ("rrhh", "asistencias", "Asistencias", "/rrhh/asistencias/", ["/rrhh/asistencias/"]),
             ("rrhh", "horas_extra", "Horas extra", "/rrhh/horas-extra/", ["/rrhh/horas-extra/"]),
             ("rrhh", "permisos", "Permisos", "/rrhh/permisos/", ["/rrhh/permisos/"]),
+            ("rrhh", "prestamos", "Préstamos", "/rrhh/prestamos/", ["/rrhh/prestamos/"]),
             ("rrhh", "importar_checador", "Importar checador", "/rrhh/importar-checador/", ["/rrhh/importar-checador/"]),
             ("rrhh", "empleados", "Empleados", "/rrhh/empleados/", ["/rrhh/empleados/"]),
             ("rrhh", "nomina", "Nómina", "/rrhh/nomina/", ["/rrhh/nomina/"]),

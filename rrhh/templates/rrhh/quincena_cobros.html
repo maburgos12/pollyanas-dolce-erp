@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Cobros quincena{% endblock %}
+{% block page_title %}Cobros de préstamo · {{ desde }} a {{ hasta }}{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="card">
+  <table class="table">
+    <thead><tr><th>Empleado</th><th>Folio</th><th>Q</th><th>Fecha</th><th>Esperado</th><th>Cobro</th></tr></thead>
+    <tbody>
+      {% for cuota in cuotas %}
+        <tr>
+          <td>{{ cuota.prestamo.empleado.nombre }}</td>
+          <td><a href="{% url 'rrhh:rrhh_prestamo_detalle' cuota.prestamo.pk %}">{{ cuota.prestamo.folio }}</a></td>
+          <td>{{ cuota.numero_quincena }}</td>
+          <td>{{ cuota.fecha_quincena }}</td>
+          <td>${{ cuota.monto_esperado }}</td>
+          <td>
+            <form method="post" action="{% url 'rrhh:rrhh_prestamo_cobro' cuota.pk %}" style="display:flex;gap:6px;">
+              {% csrf_token %}
+              <input type="number" name="monto_cobrado" step="0.01" min="0" value="{{ cuota.monto_esperado }}">
+              <input type="text" name="nota" placeholder="Nota">
+              <button class="btn btn-primary btn-sm" type="submit">Registrar</button>
+            </form>
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6">Sin cuotas pendientes en esta quincena.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

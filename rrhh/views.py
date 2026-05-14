@@ -41,6 +41,7 @@ def _module_tabs(active: str) -> list[dict]:
         {"label": "Asistencias", "url_name": "rrhh:rrhh_asistencias", "active": active == "asistencias"},
         {"label": "Horas extra", "url_name": "rrhh:rrhh_he_list", "active": active == "horas_extra"},
         {"label": "Permisos", "url_name": "rrhh:rrhh_permisos_list", "active": active == "permisos"},
+        {"label": "Préstamos", "url_name": "rrhh:rrhh_prestamos_lista", "active": active == "prestamos"},
         {"label": "Empleados", "url_name": "rrhh:empleados", "active": active == "empleados"},
         {"label": "Nómina", "url_name": "rrhh:nomina", "active": active == "nomina"},
     ]

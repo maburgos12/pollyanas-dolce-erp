@@ -58,6 +58,7 @@ class PermisoSalidaSerializer(serializers.ModelSerializer):
             "fecha_fin",
             "motivo",
             "estado",
+            "goce_sueldo",
             "folio",
             "foto_evidencia",
             "creado_en",
