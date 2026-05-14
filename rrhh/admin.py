@@ -1,6 +1,17 @@
 from django.contrib import admin
 
-from .models import Empleado, NominaConceptoLinea, NominaImportacion, NominaLinea, NominaPeriodo
+from .models import (
+    AsistenciaEmpleado,
+    Empleado,
+    HoraExtra,
+    ImportacionChecador,
+    NominaConceptoLinea,
+    NominaImportacion,
+    NominaLinea,
+    NominaPeriodo,
+    PermisoSalida,
+    Turno,
+)
 
 
 @admin.register(Empleado)
@@ -66,3 +77,51 @@ class NominaImportacionAdmin(admin.ModelAdmin):
     )
     list_filter = ("estatus", "created_at")
     search_fields = ("archivo_nombre", "archivo_hash", "periodo__folio")
+
+
+@admin.register(AsistenciaEmpleado)
+class AsistenciaAdmin(admin.ModelAdmin):
+    list_display = ("empleado", "fecha", "entrada", "salida", "minutos_trabajados", "fuente")
+    list_filter = ("fuente", "sucursal", "fecha")
+    search_fields = ("empleado__nombre", "empleado__codigo")
+
+
+@admin.register(HoraExtra)
+class HoraExtraAdmin(admin.ModelAdmin):
+    list_display = ("empleado", "fecha", "horas", "monto_calculado", "estado", "autorizado_por")
+    list_filter = ("estado", "fecha")
+    search_fields = ("empleado__nombre", "empleado__codigo")
+    actions = ["autorizar_seleccionadas"]
+
+    def autorizar_seleccionadas(self, request, queryset):
+        from .services import calcular_monto_hora_extra
+
+        for he in queryset.filter(estado=HoraExtra.ESTADO_PENDIENTE):
+            he.estado = HoraExtra.ESTADO_AUTORIZADO
+            he.autorizado_por = request.user
+            calcular_monto_hora_extra(he)
+            he.save(update_fields=["estado", "autorizado_por"])
+        self.message_user(request, "Horas extra autorizadas.")
+
+    autorizar_seleccionadas.short_description = "Autorizar horas extra seleccionadas"
+
+
+@admin.register(PermisoSalida)
+class PermisoAdmin(admin.ModelAdmin):
+    list_display = ("folio", "empleado", "tipo", "fecha_inicio", "estado", "autorizado_por")
+    list_filter = ("tipo", "estado", "fecha_inicio")
+    search_fields = ("folio", "empleado__nombre", "empleado__codigo", "motivo")
+    readonly_fields = ("folio",)
+
+
+@admin.register(Turno)
+class TurnoAdmin(admin.ModelAdmin):
+    list_display = ("nombre", "hora_entrada", "hora_salida", "tolerancia_minutos", "activo")
+    list_filter = ("activo",)
+
+
+@admin.register(ImportacionChecador)
+class ImportacionAdmin(admin.ModelAdmin):
+    list_display = ("creado_en", "metodo", "registros_procesados", "errores", "creado_por")
+    list_filter = ("metodo", "creado_en")
+    readonly_fields = ("log",)

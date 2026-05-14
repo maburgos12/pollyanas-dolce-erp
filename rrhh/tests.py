@@ -2,7 +2,10 @@ from django.contrib.auth.models import Group, User
 from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
+from decimal import Decimal
 from pathlib import Path
+from rest_framework.test import APIClient
 from unittest import SkipTest
 
 from rrhh.models import Empleado, NominaConceptoLinea, NominaImportacion, NominaPeriodo
@@ -10,6 +13,91 @@ from rrhh.services.lista_raya import parse_lista_raya_xls
 
 
 LISTA_RAYA_SAMPLE = Path("/Users/mauricioburgos/Downloads/Lista de raya del 16 al 31 de abril 2026.xls")
+
+
+class CapitalHumanoServiceTests(TestCase):
+    def test_generar_horas_extra_desde_asistencia(self):
+        from datetime import date, datetime, time
+        from zoneinfo import ZoneInfo
+
+        from rrhh.models import AsistenciaEmpleado, HoraExtra, Turno
+        from rrhh.services import calcular_horas_extra, generar_horas_extra_automatico
+
+        empleado = Empleado.objects.create(nombre="Empleado HE", salario_diario="400.00")
+        turno = Turno.objects.create(
+            nombre="Matutino",
+            hora_entrada=time(8, 0),
+            hora_salida=time(16, 0),
+            tolerancia_minutos=10,
+        )
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado=empleado,
+            fecha=date(2026, 5, 13),
+            entrada=datetime(2026, 5, 13, 8, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            salida=datetime(2026, 5, 13, 17, 15, tzinfo=ZoneInfo("America/Mazatlan")),
+            minutos_trabajados=555,
+            turno=turno,
+            fuente="manual",
+        )
+
+        self.assertEqual(calcular_horas_extra(asistencia), Decimal("1.25"))
+        he = generar_horas_extra_automatico(asistencia)
+        self.assertIsNotNone(he)
+        self.assertEqual(HoraExtra.objects.count(), 1)
+        self.assertEqual(he.horas, Decimal("1.25"))
+
+        he.estado = "autorizado"
+        he.horas = Decimal("1.00")
+        he.save(update_fields=["estado", "horas"])
+        asistencia.minutos_trabajados = 600
+        asistencia.save(update_fields=["minutos_trabajados"])
+
+        actualizado = generar_horas_extra_automatico(asistencia)
+        actualizado.refresh_from_db()
+        self.assertEqual(actualizado.estado, "autorizado")
+        self.assertEqual(actualizado.horas, Decimal("1.00"))
+
+
+class CapitalHumanoAPITests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="empleado.app",
+            email="empleado.app@example.com",
+            password="pass123",
+        )
+        self.empleado = Empleado.objects.create(
+            nombre="Empleado App",
+            email="empleado.app@example.com",
+            salario_diario="350.00",
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    def test_permiso_api_crea_folio_para_empleado_actual(self):
+        resp = self.client.post(
+            reverse("rrhh:permiso-list"),
+            {
+                "tipo": "cita_medica",
+                "fecha_inicio": timezone.datetime(2026, 5, 14, 10, 0, tzinfo=timezone.get_current_timezone()).isoformat(),
+                "fecha_fin": timezone.datetime(2026, 5, 14, 12, 0, tzinfo=timezone.get_current_timezone()).isoformat(),
+                "motivo": "Consulta programada",
+            },
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["empleado"], self.empleado.id)
+        self.assertTrue(resp.data["folio"].startswith("PS-"))
+        self.assertEqual(resp.data["estado"], "solicitado")
+
+    def test_rutas_capital_humano_cargan(self):
+        rrhh_group, _ = Group.objects.get_or_create(name="RRHH")
+        self.user.groups.add(rrhh_group)
+        self.client.force_login(self.user)
+
+        for url_name in ["rrhh_dashboard", "rrhh_pwa"]:
+            resp = self.client.get(reverse(f"rrhh:{url_name}"))
+            self.assertEqual(resp.status_code, 200)
 
 
 class RRHHViewsTests(TestCase):

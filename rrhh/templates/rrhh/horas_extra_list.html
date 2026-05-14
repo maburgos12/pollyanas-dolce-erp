@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}RRHH · Horas extra{% endblock %}
+{% block page_title %}RRHH · Horas extra{% endblock %}
+
+{% block extra_css %}
+<style>
+  .ch-kanban { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; align-items: start; }
+  .ch-column { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; min-height: 220px; padding: 12px; }
+  .ch-column h2 { color: var(--vino); font-size: 16px; margin: 0 0 12px; }
+  .ch-item { border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+  .ch-main { color: var(--texto); font-weight: 800; }
+  .ch-meta { color: var(--texto-light); font-size: 13px; margin-top: 4px; }
+  .ch-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  @media (max-width: 1100px) { .ch-kanban { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 700px) { .ch-kanban { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="ch-kanban">
+  {% for key, label, items in columnas %}
+  <article class="ch-column">
+    <h2>{{ label }}</h2>
+    {% for he in items %}
+    <div class="ch-item">
+      <div class="ch-main">{{ he.empleado.nombre }}</div>
+      <div class="ch-meta">{{ he.fecha|date:"Y-m-d" }} · {{ he.horas }} h · {{ he.monto_calculado|default:"Sin monto" }}</div>
+      {% if he.notas %}<div class="ch-meta">{{ he.notas }}</div>{% endif %}
+      {% if can_manage_rrhh and key == "pendiente" %}
+      <form method="post" class="ch-actions">
+        {% csrf_token %}
+        <input type="hidden" name="hora_extra_id" value="{{ he.id }}">
+        <button class="btn btn-primary" type="submit" name="action" value="autorizar">Autorizar</button>
+        <button class="btn btn-secondary" type="submit" name="action" value="rechazar">Rechazar</button>
+      </form>
+      {% endif %}
+    </div>
+    {% empty %}
+    <div class="ch-meta">Sin registros.</div>
+    {% endfor %}
+  </article>
+  {% endfor %}
+</section>
+{% endblock %}

@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}RRHH · Importar checador{% endblock %}
+{% block page_title %}Importar checador{% endblock %}
+
+{% block extra_css %}
+<style>
+  .ch-layout { display: grid; grid-template-columns: minmax(320px, .8fr) minmax(0, 1.2fr); gap: 18px; align-items: start; }
+  .ch-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 18px; }
+  .ch-fields { display: grid; gap: 12px; }
+  .ch-table { width: 100%; border-collapse: collapse; }
+  .ch-table th, .ch-table td { border-bottom: 1px solid var(--rosa); padding: 9px; text-align: left; }
+  .ch-table th { color: var(--vino); font-size: 12px; text-transform: uppercase; }
+  .ch-format { margin-top: 14px; }
+  @media (max-width: 900px) { .ch-layout { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="ch-layout">
+  <article class="ch-card">
+    <form method="post" enctype="multipart/form-data" class="ch-fields">
+      {% csrf_token %}
+      <label>Fecha inicio
+        <input type="date" name="fecha_inicio" required>
+      </label>
+      <label>Fecha fin
+        <input type="date" name="fecha_fin" required>
+      </label>
+      <label>Archivo Excel
+        <input type="file" name="archivo" accept=".xlsx,.xls" required>
+      </label>
+      <button class="btn btn-primary" type="submit">Importar asistencias</button>
+    </form>
+  </article>
+
+  <article class="ch-card">
+    <h2>Formato esperado</h2>
+    <table class="ch-table ch-format">
+      <thead>
+        <tr>
+          <th>id_empleado</th>
+          <th>nombre</th>
+          <th>fecha</th>
+          <th>hora_entrada</th>
+          <th>hora_salida</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>EMP001</td>
+          <td>Juan Pérez</td>
+          <td>2025-06-01</td>
+          <td>2025-06-01 08:02</td>
+          <td>2025-06-01 16:45</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>Columnas mínimas requeridas: <strong>id_empleado</strong>, <strong>fecha</strong>, <strong>hora_entrada</strong>, <strong>hora_salida</strong>.</p>
+  </article>
+</section>
+
+<section class="ch-card" style="margin-top:18px;">
+  <h2>Historial</h2>
+  <table class="ch-table">
+    <thead>
+      <tr>
+        <th>Fecha</th>
+        <th>Método</th>
+        <th>Procesados</th>
+        <th>Errores</th>
+        <th>Usuario</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in historial %}
+      <tr>
+        <td>{{ item.creado_en|date:"Y-m-d H:i" }}</td>
+        <td>{{ item.get_metodo_display }}</td>
+        <td>{{ item.registros_procesados }}</td>
+        <td>{{ item.errores }}</td>
+        <td>{{ item.creado_por|default:"-" }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5">Sin importaciones registradas.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

@@ -232,3 +232,192 @@ class NominaImportacion(models.Model):
 
     def __str__(self) -> str:
         return f"{self.archivo_nombre} · {self.estatus}"
+
+
+class Turno(models.Model):
+    nombre = models.CharField(max_length=60)
+    hora_entrada = models.TimeField()
+    hora_salida = models.TimeField()
+    tolerancia_minutos = models.PositiveSmallIntegerField(default=10)
+    activo = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "Turno"
+        verbose_name_plural = "Turnos"
+
+    def __str__(self) -> str:
+        return f"{self.nombre} ({self.hora_entrada}-{self.hora_salida})"
+
+
+class AsistenciaEmpleado(models.Model):
+    FUENTE_HIKCONNECT_API = "hikconnect_api"
+    FUENTE_HIKCONNECT_EXCEL = "hikconnect_excel"
+    FUENTE_POINT = "point"
+    FUENTE_MANUAL = "manual"
+    FUENTE_CHOICES = [
+        (FUENTE_HIKCONNECT_API, "Hik-Connect API"),
+        (FUENTE_HIKCONNECT_EXCEL, "Hik-Connect Excel"),
+        (FUENTE_POINT, "PointMeUp"),
+        (FUENTE_MANUAL, "Manual"),
+    ]
+
+    empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.CASCADE, related_name="asistencias")
+    sucursal = models.ForeignKey("core.Sucursal", on_delete=models.SET_NULL, null=True, blank=True)
+    fecha = models.DateField()
+    entrada = models.DateTimeField(null=True, blank=True)
+    salida = models.DateTimeField(null=True, blank=True)
+    minutos_trabajados = models.PositiveIntegerField(default=0)
+    turno = models.ForeignKey(Turno, null=True, blank=True, on_delete=models.SET_NULL)
+    fuente = models.CharField(max_length=20, choices=FUENTE_CHOICES, default=FUENTE_MANUAL)
+    observacion = models.TextField(blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("empleado", "fecha")]
+        ordering = ["-fecha"]
+        verbose_name = "Asistencia"
+        verbose_name_plural = "Asistencias"
+
+    def __str__(self) -> str:
+        return f"{self.empleado} · {self.fecha}"
+
+
+class HoraExtra(models.Model):
+    ESTADO_PENDIENTE = "pendiente"
+    ESTADO_AUTORIZADO = "autorizado"
+    ESTADO_RECHAZADO = "rechazado"
+    ESTADO_PAGADO = "pagado"
+    ESTADO_CHOICES = [
+        (ESTADO_PENDIENTE, "Pendiente autorización"),
+        (ESTADO_AUTORIZADO, "Autorizado"),
+        (ESTADO_RECHAZADO, "Rechazado"),
+        (ESTADO_PAGADO, "Pagado en nómina"),
+    ]
+
+    empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.CASCADE, related_name="horas_extra")
+    asistencia = models.OneToOneField(
+        AsistenciaEmpleado,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="hora_extra",
+    )
+    fecha = models.DateField()
+    horas = models.DecimalField(max_digits=4, decimal_places=2)
+    tasa_extra = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("2.00"),
+        help_text="Multiplicador sobre salario/hora",
+    )
+    monto_calculado = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    estado = models.CharField(max_length=12, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE)
+    autorizado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="horas_extra_autorizadas",
+    )
+    notas = models.TextField(blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-fecha"]
+        verbose_name = "Hora extra"
+        verbose_name_plural = "Horas extra"
+
+    def __str__(self) -> str:
+        return f"{self.empleado} · {self.fecha} · {self.horas}h"
+
+
+class PermisoSalida(models.Model):
+    TIPO_PERMISO_HORA = "permiso_hora"
+    TIPO_PERMISO_DIA = "permiso_dia"
+    TIPO_SALIDA_PERSONAL = "salida_personal"
+    TIPO_CITA_MEDICA = "cita_medica"
+    TIPO_OTRO = "otro"
+    TIPO_CHOICES = [
+        (TIPO_PERMISO_HORA, "Permiso por horas"),
+        (TIPO_PERMISO_DIA, "Permiso día completo"),
+        (TIPO_SALIDA_PERSONAL, "Salida personal"),
+        (TIPO_CITA_MEDICA, "Cita médica"),
+        (TIPO_OTRO, "Otro"),
+    ]
+    ESTADO_SOLICITADO = "solicitado"
+    ESTADO_APROBADO = "aprobado"
+    ESTADO_RECHAZADO = "rechazado"
+    ESTADO_CANCELADO = "cancelado"
+    ESTADO_CHOICES = [
+        (ESTADO_SOLICITADO, "Solicitado"),
+        (ESTADO_APROBADO, "Aprobado"),
+        (ESTADO_RECHAZADO, "Rechazado"),
+        (ESTADO_CANCELADO, "Cancelado"),
+    ]
+
+    empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.CASCADE, related_name="permisos")
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES)
+    fecha_inicio = models.DateTimeField()
+    fecha_fin = models.DateTimeField(null=True, blank=True)
+    motivo = models.TextField()
+    estado = models.CharField(max_length=12, choices=ESTADO_CHOICES, default=ESTADO_SOLICITADO)
+    autorizado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="permisos_autorizados",
+    )
+    foto_evidencia = models.ImageField(upload_to="permisos/", null=True, blank=True)
+    folio = models.CharField(max_length=20, unique=True, editable=False)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-creado_en"]
+        verbose_name = "Permiso / Salida"
+        verbose_name_plural = "Permisos y Salidas"
+
+    def __str__(self) -> str:
+        return f"{self.folio} · {self.empleado}"
+
+    def save(self, *args, **kwargs):
+        if not self.folio:
+            import random
+            import string
+            from datetime import date
+
+            while True:
+                sufijo = "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
+                folio = f"PS-{date.today().strftime('%y%m')}-{sufijo}"
+                if not PermisoSalida.objects.filter(folio=folio).exists():
+                    self.folio = folio
+                    break
+        super().save(*args, **kwargs)
+
+
+class ImportacionChecador(models.Model):
+    METODO_API = "api"
+    METODO_EXCEL = "excel"
+    METODO_CHOICES = [
+        (METODO_API, "API directa"),
+        (METODO_EXCEL, "Carga Excel"),
+    ]
+
+    metodo = models.CharField(max_length=6, choices=METODO_CHOICES)
+    archivo = models.FileField(upload_to="checador_imports/", null=True, blank=True)
+    fecha_inicio = models.DateField()
+    fecha_fin = models.DateField()
+    registros_procesados = models.PositiveIntegerField(default=0)
+    errores = models.PositiveIntegerField(default=0)
+    log = models.TextField(blank=True)
+    creado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-creado_en"]
+        verbose_name = "Importación checador"
+        verbose_name_plural = "Importaciones checador"
+
+    def __str__(self) -> str:
+        return f"{self.get_metodo_display()} · {self.fecha_inicio} a {self.fecha_fin}"

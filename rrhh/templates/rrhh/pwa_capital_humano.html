@@ -1,0 +1,307 @@
+{% load static %}
+<!doctype html>
+<html lang="es-MX">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#8B2252">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Capital Humano</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+    <style>
+      :root {
+        --bg: #0f0f14;
+        --surface: #1a1a24;
+        --border: #2a2a38;
+        --wine: #8B2252;
+        --gold: #C9A84C;
+        --text: #e8e0d5;
+        --muted: #9b9490;
+        --danger: #e64f64;
+        --success: #51b56f;
+      }
+      * { box-sizing: border-box; }
+      html, body { min-height: 100%; margin: 0; background: var(--bg); color: var(--text); font-family: "Nunito", sans-serif; }
+      body { display: flex; justify-content: center; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+      button, input, textarea, select { font: inherit; }
+      button { min-height: 46px; border: 0; cursor: pointer; }
+      #app { width: 100%; max-width: 430px; min-height: 100vh; padding: 18px 16px 82px; }
+      .brand { font-family: "Playfair Display", serif; font-size: 33px; line-height: 1; margin: 0; }
+      .gold { color: var(--gold); font-weight: 800; }
+      .muted { color: var(--muted); }
+      .panel, .card { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+      .panel { margin-top: 24px; padding: 18px; }
+      .field { display: grid; gap: 7px; margin-bottom: 13px; }
+      label { color: var(--muted); font-size: 13px; font-weight: 800; }
+      input, textarea, select { width: 100%; min-height: 48px; border: 1px solid var(--border); border-radius: 10px; background: #111118; color: var(--text); outline: none; padding: 12px 13px; }
+      textarea { min-height: 96px; resize: vertical; }
+      input:focus, textarea:focus, select:focus { border-color: var(--gold); }
+      .primary { width: 100%; border-radius: 10px; background: var(--wine); color: #fff; font-weight: 800; padding: 13px; }
+      .secondary { border: 1px solid var(--border); border-radius: 10px; background: transparent; color: var(--text); font-weight: 800; padding: 11px 13px; }
+      .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+      .mini { font-family: "Playfair Display", serif; font-size: 22px; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .quick { min-height: 92px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font-weight: 900; padding: 14px; text-align: left; }
+      .quick span { display: block; color: var(--gold); font-size: 13px; margin-top: 8px; }
+      .list { display: grid; gap: 10px; margin-top: 14px; }
+      .card { padding: 14px; }
+      .row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+      .badge { border-radius: 999px; background: #261521; color: var(--gold); font-size: 12px; font-weight: 900; padding: 4px 9px; white-space: nowrap; }
+      .footer { position: fixed; right: 0; bottom: 0; left: 0; display: flex; justify-content: center; background: rgba(15, 15, 20, .94); border-top: 1px solid var(--border); padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
+      .nav { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: 100%; max-width: 430px; }
+      .nav button { min-height: 44px; border-radius: 10px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 900; }
+      .nav button.active { background: #261521; color: var(--gold); }
+      .message { color: var(--success); font-weight: 800; margin-top: 10px; }
+      .error { color: var(--danger); font-weight: 800; margin-top: 10px; }
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <main id="app"></main>
+    <footer class="footer hidden" id="footer">
+      <nav class="nav">
+        <button data-section="inicio" class="active">Inicio</button>
+        <button data-section="permisos">Permisos</button>
+        <button data-section="horas">Horas extra</button>
+      </nav>
+    </footer>
+
+    <script>
+      const API = "/rrhh/api";
+      const AUTH_API = "/api/logistica";
+      const initialSection = "{{ initial_section|default:'inicio'|escapejs }}";
+      const state = {
+        section: initialSection,
+        token: localStorage.getItem("pd_logistica_access") || "",
+        refreshToken: localStorage.getItem("pd_logistica_refresh") || "",
+        me: null,
+        permisos: [],
+        horas: [],
+        message: "",
+        error: ""
+      };
+
+      const app = document.getElementById("app");
+      const footer = document.getElementById("footer");
+
+      function headers(extra = {}) {
+        const base = {...extra};
+        if (state.token) base.Authorization = `Bearer ${state.token}`;
+        return base;
+      }
+
+      async function apiFetch(url, options = {}) {
+        const res = await fetch(url, {...options, headers: headers(options.headers || {})});
+        if (res.status === 401 && state.refreshToken && !options._retry) {
+          const refreshed = await fetch(`${AUTH_API}/auth/token/refresh/`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({refresh: state.refreshToken})
+          });
+          if (refreshed.ok) {
+            const data = await refreshed.json();
+            state.token = data.access;
+            localStorage.setItem("pd_logistica_access", data.access);
+            return apiFetch(url, {...options, _retry: true});
+          }
+        }
+        return res;
+      }
+
+      async function enviarPermiso(datos) {
+        const token = localStorage.getItem("pd_logistica_access");
+        const res = await fetch("/rrhh/api/permisos/", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(datos)
+        });
+        return res.json();
+      }
+
+      async function login(event) {
+        event.preventDefault();
+        state.error = "";
+        const form = new FormData(event.currentTarget);
+        const res = await fetch(`${AUTH_API}/auth/token/`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({username: form.get("username"), password: form.get("password")})
+        });
+        if (!res.ok) {
+          state.error = "Usuario o contraseña inválidos.";
+          render();
+          return;
+        }
+        const data = await res.json();
+        state.token = data.access;
+        state.refreshToken = data.refresh;
+        localStorage.setItem("pd_logistica_access", data.access);
+        localStorage.setItem("pd_logistica_refresh", data.refresh);
+        await loadData();
+      }
+
+      function logout() {
+        state.token = "";
+        state.refreshToken = "";
+        localStorage.removeItem("pd_logistica_access");
+        localStorage.removeItem("pd_logistica_refresh");
+        render();
+      }
+
+      async function loadData() {
+        if (!state.token) {
+          render();
+          return;
+        }
+        const [meRes, permisosRes, horasRes] = await Promise.all([
+          apiFetch(`${API}/me/`),
+          apiFetch(`${API}/permisos/`),
+          apiFetch(`${API}/horas-extra/`)
+        ]);
+        state.me = meRes.ok ? await meRes.json() : null;
+        state.permisos = permisosRes.ok ? await permisosRes.json() : [];
+        state.horas = horasRes.ok ? await horasRes.json() : [];
+        render();
+      }
+
+      async function submitPermiso(event) {
+        event.preventDefault();
+        state.message = "";
+        state.error = "";
+        const formElement = event.currentTarget;
+        const form = new FormData(formElement);
+        const data = {
+          tipo: form.get("tipo"),
+          fecha_inicio: form.get("fecha_inicio"),
+          fecha_fin: form.get("fecha_fin") || null,
+          motivo: form.get("motivo")
+        };
+        try {
+          const result = await enviarPermiso(data);
+          if (result && (result.id || result.folio || result.estado === "solicitado")) {
+            formElement.reset();
+            state.permisos = [result, ...state.permisos.filter(item => item.id !== result.id)];
+            state.message = `Solicitud enviada · ${result.folio || "sin folio"}`;
+            render();
+            return;
+          }
+        } catch (err) {
+          state.error = "No se pudo enviar la solicitud.";
+          render();
+          return;
+        }
+        state.error = "No se pudo enviar la solicitud.";
+        render();
+      }
+
+      function shell(content) {
+        const nombre = state.me?.nombre || "Capital Humano";
+        return `
+          <div class="topbar">
+            <div>
+              <div class="mini">Pollyana's Dolce</div>
+              <div class="muted">Hola, ${nombre}</div>
+            </div>
+            <button class="secondary" onclick="logout()">Salir</button>
+          </div>
+          ${content}
+        `;
+      }
+
+      function renderLogin() {
+        footer.classList.add("hidden");
+        app.innerHTML = `
+          <section class="panel">
+            <h1 class="brand">Capital Humano</h1>
+            <p class="gold">Pollyana's Dolce</p>
+            <form onsubmit="login(event)">
+              <div class="field"><label>Usuario<input name="username" autocomplete="username" required></label></div>
+              <div class="field"><label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label></div>
+              <button class="primary" type="submit">Entrar</button>
+              ${state.error ? `<div class="error">${state.error}</div>` : ""}
+            </form>
+          </section>
+        `;
+      }
+
+      function renderInicio() {
+        app.innerHTML = shell(`
+          <h1 class="brand">Capital Humano</h1>
+          <p class="gold">${state.me?.sucursal || "Mi expediente"}</p>
+          <div class="grid">
+            <button class="quick" onclick="setSection('permisos')">Nuevo permiso<span>${state.permisos.length} solicitudes</span></button>
+            <button class="quick" onclick="setSection('horas')">Horas extra<span>${state.horas.length} registros</span></button>
+          </div>
+        `);
+      }
+
+      function renderPermisos() {
+        const items = state.permisos.map(p => `
+          <article class="card">
+            <div class="row"><strong>${p.folio}</strong><span class="badge">${p.estado}</span></div>
+            <div class="muted">${p.tipo} · ${new Date(p.fecha_inicio).toLocaleString("es-MX")}</div>
+            <div>${p.motivo}</div>
+          </article>
+        `).join("") || `<div class="muted">Sin permisos registrados.</div>`;
+        app.innerHTML = shell(`
+          <h1 class="brand">Mis permisos</h1>
+          <section class="panel">
+            <form onsubmit="submitPermiso(event)">
+              <div class="field"><label>Tipo<select name="tipo" required>
+                <option value="permiso_hora">Permiso por horas</option>
+                <option value="permiso_dia">Permiso día completo</option>
+                <option value="salida_personal">Salida personal</option>
+                <option value="cita_medica">Cita médica</option>
+                <option value="otro">Otro</option>
+              </select></label></div>
+              <div class="field"><label>Inicio<input type="datetime-local" name="fecha_inicio" required></label></div>
+              <div class="field"><label>Fin<input type="datetime-local" name="fecha_fin"></label></div>
+              <div class="field"><label>Motivo<textarea name="motivo" required></textarea></label></div>
+              <button class="primary" type="submit">Enviar solicitud</button>
+              ${state.message ? `<div class="message">${state.message}</div>` : ""}
+              ${state.error ? `<div class="error">${state.error}</div>` : ""}
+            </form>
+          </section>
+          <div class="list">${items}</div>
+        `);
+      }
+
+      function renderHoras() {
+        const items = state.horas.map(h => `
+          <article class="card">
+            <div class="row"><strong>${h.horas} h</strong><span class="badge">${h.estado}</span></div>
+            <div class="muted">${h.fecha} · ${h.monto_calculado || "Sin monto"}</div>
+            ${h.notas ? `<div>${h.notas}</div>` : ""}
+          </article>
+        `).join("") || `<div class="muted">Sin horas extra registradas.</div>`;
+        app.innerHTML = shell(`<h1 class="brand">Mis horas extra</h1><div class="list">${items}</div>`);
+      }
+
+      function setSection(section) {
+        state.section = section;
+        document.querySelectorAll(".nav button").forEach(btn => btn.classList.toggle("active", btn.dataset.section === section));
+        render();
+      }
+
+      function render() {
+        if (!state.token) {
+          renderLogin();
+          return;
+        }
+        footer.classList.remove("hidden");
+        if (state.section === "permisos") renderPermisos();
+        else if (state.section === "horas") renderHoras();
+        else renderInicio();
+      }
+
+      document.querySelectorAll(".nav button").forEach(btn => btn.addEventListener("click", () => setSection(btn.dataset.section)));
+      loadData();
+    </script>
+  </body>
+</html>

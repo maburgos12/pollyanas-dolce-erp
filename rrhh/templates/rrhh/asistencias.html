@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}RRHH · Asistencias{% endblock %}
+{% block page_title %}RRHH · Asistencias{% endblock %}
+
+{% block extra_css %}
+<style>
+  .ch-panel { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 18px; }
+  .ch-filters { display: grid; grid-template-columns: 170px minmax(220px, 1fr) auto auto; gap: 10px; align-items: end; }
+  .ch-table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  .ch-table th, .ch-table td { border-bottom: 1px solid var(--rosa); padding: 10px; text-align: left; }
+  .ch-table th { color: var(--vino); font-size: 12px; text-transform: uppercase; }
+  @media (max-width: 760px) { .ch-filters { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="ch-panel">
+  <form method="get" class="ch-filters">
+    <label>Mes
+      <input type="month" name="mes" value="{{ mes }}">
+    </label>
+    <label>Empleado
+      <select name="empleado">
+        <option value="">Todos</option>
+        {% for empleado in empleados %}
+          <option value="{{ empleado.id }}" {% if empleado_id == empleado.id|stringformat:"s" %}selected{% endif %}>{{ empleado.nombre }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button class="btn btn-primary" type="submit">Filtrar</button>
+    <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_importar' %}">Importar</a>
+  </form>
+
+  <table class="ch-table">
+    <thead>
+      <tr>
+        <th>Fecha</th>
+        <th>Empleado</th>
+        <th>Entrada</th>
+        <th>Salida</th>
+        <th>Minutos</th>
+        <th>Fuente</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for asistencia in asistencias %}
+      <tr>
+        <td>{{ asistencia.fecha|date:"Y-m-d" }}</td>
+        <td>{{ asistencia.empleado.nombre }}</td>
+        <td>{{ asistencia.entrada|date:"H:i"|default:"-" }}</td>
+        <td>{{ asistencia.salida|date:"H:i"|default:"-" }}</td>
+        <td>{{ asistencia.minutos_trabajados }}</td>
+        <td>{{ asistencia.get_fuente_display }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6">Sin asistencias para el filtro seleccionado.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
