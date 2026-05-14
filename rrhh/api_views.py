@@ -35,7 +35,7 @@ def empleado_de_usuario(user) -> Empleado | None:
         for empleado in candidates.only("id", "nombre", "nombre_normalizado", "activo"):
             if set((empleado.nombre_normalizado or normalizar_nombre(empleado.nombre)).split()) == user_tokens:
                 return empleado
-    return empleado
+    return None
 
 
 class _CapitalHumanoAccessMixin:
