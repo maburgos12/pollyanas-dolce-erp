@@ -54,6 +54,19 @@ class _CapitalHumanoAccessMixin:
         if not can_manage_rrhh(self.request.user):
             raise PermissionDenied("No tienes permisos para autorizar Capital Humano.")
 
+    def _apply_mis_and_limit(self, qs):
+        if self.request.query_params.get("mis") == "true":
+            empleado = empleado_de_usuario(self.request.user)
+            qs = qs.filter(empleado=empleado) if empleado else qs.none()
+        limit = self.request.query_params.get("limit")
+        if limit:
+            try:
+                limit_value = max(int(limit), 0)
+            except (TypeError, ValueError):
+                raise ValidationError({"limit": "Debe ser un entero valido."})
+            qs = qs[:limit_value]
+        return qs
+
 
 class AsistenciaViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
     serializer_class = AsistenciaSerializer
@@ -71,7 +84,7 @@ class AsistenciaViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
             qs = qs.filter(empleado_id=emp)
         if mes:
             qs = qs.filter(fecha__startswith=mes)
-        return qs
+        return self._apply_mis_and_limit(qs)
 
 
 class HoraExtraViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
@@ -87,7 +100,7 @@ class HoraExtraViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
         estado = self.request.query_params.get("estado")
         if estado:
             qs = qs.filter(estado=estado)
-        return qs
+        return self._apply_mis_and_limit(qs)
 
     def perform_create(self, serializer):
         empleado = serializer.validated_data.get("empleado") or empleado_de_usuario(self.request.user)
@@ -130,7 +143,7 @@ class PermisoSalidaViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
         estado = self.request.query_params.get("estado")
         if estado:
             qs = qs.filter(estado=estado)
-        return qs
+        return self._apply_mis_and_limit(qs)
 
     def perform_create(self, serializer):
         empleado = serializer.validated_data.get("empleado") or empleado_de_usuario(self.request.user)
@@ -173,5 +186,31 @@ def capital_humano_me(request):
             "codigo": empleado.codigo,
             "sucursal": empleado.sucursal,
             "puede_gestionar": can_manage_rrhh(request.user),
+        }
+    )
+
+
+@api_view(["GET"])
+@authentication_classes(AUTH_CLASSES)
+@permission_classes([permissions.IsAuthenticated])
+def mi_perfil(request):
+    empleado = empleado_de_usuario(request.user)
+    if not empleado:
+        return Response(
+            {
+                "nombre": request.user.get_full_name() or request.user.username,
+                "puesto": "",
+                "area": "",
+                "codigo": "",
+                "sucursal": "",
+            }
+        )
+    return Response(
+        {
+            "nombre": empleado.nombre,
+            "puesto": empleado.puesto or "",
+            "area": empleado.area or "",
+            "codigo": empleado.codigo or "",
+            "sucursal": str(empleado.sucursal) if empleado.sucursal else "",
         }
     )

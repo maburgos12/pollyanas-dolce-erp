@@ -13,49 +13,264 @@
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
     <style>
       :root {
-        --bg: #0f0f14;
-        --surface: #1a1a24;
-        --border: #2a2a38;
+        --bg: #1a1a2e;
+        --surface: #222237;
+        --surface-strong: #171726;
+        --border: rgba(201, 168, 76, .22);
         --wine: #8B2252;
         --gold: #C9A84C;
-        --text: #e8e0d5;
-        --muted: #9b9490;
-        --danger: #e64f64;
-        --success: #51b56f;
+        --text: #f2ecdf;
+        --muted: rgba(242, 236, 223, .62);
+        --danger: #ef6372;
+        --success: #6fd18a;
       }
       * { box-sizing: border-box; }
-      html, body { min-height: 100%; margin: 0; background: var(--bg); color: var(--text); font-family: "Nunito", sans-serif; }
-      body { display: flex; justify-content: center; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+      html, body {
+        min-height: 100%;
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Nunito", sans-serif;
+      }
+      body {
+        display: flex;
+        justify-content: center;
+        padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+      }
       button, input, textarea, select { font: inherit; }
       button { min-height: 46px; border: 0; cursor: pointer; }
-      #app { width: 100%; max-width: 430px; min-height: 100vh; padding: 18px 16px 82px; }
-      .brand { font-family: "Playfair Display", serif; font-size: 33px; line-height: 1; margin: 0; }
+      #app { width: 100%; max-width: 430px; min-height: 100vh; padding: 18px 16px 88px; }
+      .brand { font-family: "Playfair Display", serif; font-size: 32px; line-height: 1; margin: 0; }
       .gold { color: var(--gold); font-weight: 800; }
       .muted { color: var(--muted); }
-      .panel, .card { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
-      .panel { margin-top: 24px; padding: 18px; }
-      .field { display: grid; gap: 7px; margin-bottom: 13px; }
-      label { color: var(--muted); font-size: 13px; font-weight: 800; }
-      input, textarea, select { width: 100%; min-height: 48px; border: 1px solid var(--border); border-radius: 10px; background: #111118; color: var(--text); outline: none; padding: 12px 13px; }
-      textarea { min-height: 96px; resize: vertical; }
-      input:focus, textarea:focus, select:focus { border-color: var(--gold); }
-      .primary { width: 100%; border-radius: 10px; background: var(--wine); color: #fff; font-weight: 800; padding: 13px; }
-      .secondary { border: 1px solid var(--border); border-radius: 10px; background: transparent; color: var(--text); font-weight: 800; padding: 11px 13px; }
+      .panel, .card {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: rgba(23, 23, 38, .82);
+      }
+      .panel { margin-top: 18px; padding: 17px; }
       .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
       .mini { font-family: "Playfair Display", serif; font-size: 22px; }
-      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-      .quick { min-height: 92px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font-weight: 900; padding: 14px; text-align: left; }
-      .quick span { display: block; color: var(--gold); font-size: 13px; margin-top: 8px; }
-      .list { display: grid; gap: 10px; margin-top: 14px; }
-      .card { padding: 14px; }
-      .row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-      .badge { border-radius: 999px; background: #261521; color: var(--gold); font-size: 12px; font-weight: 900; padding: 4px 9px; white-space: nowrap; }
-      .footer { position: fixed; right: 0; bottom: 0; left: 0; display: flex; justify-content: center; background: rgba(15, 15, 20, .94); border-top: 1px solid var(--border); padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
-      .nav { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: 100%; max-width: 430px; }
-      .nav button { min-height: 44px; border-radius: 10px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 900; }
-      .nav button.active { background: #261521; color: var(--gold); }
+      .secondary {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: transparent;
+        color: var(--text);
+        font-weight: 800;
+        padding: 10px 13px;
+      }
+      .login-field { display: grid; gap: 7px; margin-bottom: 13px; }
+      .login-field label { color: var(--muted); font-size: 13px; font-weight: 800; }
+      .login-field input {
+        width: 100%;
+        min-height: 48px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, .06);
+        color: var(--text);
+        outline: none;
+        padding: 12px 13px;
+      }
+      .primary {
+        width: 100%;
+        border-radius: 10px;
+        background: var(--wine);
+        color: #fff;
+        font-weight: 800;
+        padding: 13px;
+      }
+      .welcome-name {
+        font-family: "Playfair Display", serif;
+        font-size: 30px;
+        line-height: 1.05;
+        margin-top: 8px;
+      }
+      .welcome-sub { color: var(--gold); font-size: 13px; font-weight: 800; margin: 7px 0 18px; }
+      .quick-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .quick-btn {
+        min-height: 98px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--surface);
+        color: var(--text);
+        font-weight: 900;
+        padding: 14px;
+        text-align: left;
+      }
+      .quick-icon {
+        display: grid;
+        width: 32px;
+        height: 32px;
+        place-items: center;
+        border: 1px solid rgba(201, 168, 76, .35);
+        border-radius: 999px;
+        color: var(--gold);
+        margin-bottom: 10px;
+      }
+      .section-label {
+        margin: 24px 0 10px;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: 1.2px;
+      }
+      .historial-list { display: grid; gap: 10px; }
+      .historial-item, .card {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: rgba(34, 34, 55, .82);
+        padding: 12px;
+      }
+      .historial-top, .row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+      .historial-tipo { color: var(--gold); font-size: 12px; font-weight: 900; }
+      .historial-desc { font-weight: 800; margin-top: 3px; }
+      .historial-folio { color: var(--muted); font-size: 12px; margin-top: 2px; }
+      .badge, .badge-estado {
+        border-radius: 999px;
+        background: rgba(139, 34, 82, .28);
+        color: var(--gold);
+        font-size: 11px;
+        font-weight: 900;
+        padding: 4px 9px;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+      .badge-aprobado, .badge-autorizado { color: var(--success); }
+      .badge-rechazado, .badge-cancelado { color: var(--danger); }
+      .empty-msg { color: var(--muted); margin: 0; }
+      .talon-header {
+        font-family: "Playfair Display", serif;
+        color: var(--gold, #C9A84C);
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 1.5px;
+        text-align: center;
+        padding: 12px 0 8px;
+        border-bottom: 1px solid rgba(201,168,76,0.3);
+        margin-bottom: 16px;
+      }
+      .field-row {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin-bottom: 14px;
+      }
+      .field-row label {
+        font-size: 10px;
+        letter-spacing: 1px;
+        color: rgba(255,255,255,0.5);
+        font-weight: 600;
+      }
+      .field-row input,
+      .field-row textarea,
+      .field-row select {
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(201,168,76,0.25);
+        border-radius: 6px;
+        color: #fff;
+        padding: 10px 12px;
+        font-size: 14px;
+        font-family: "Nunito", sans-serif;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .field-row input:focus,
+      .field-row textarea:focus {
+        outline: none;
+        border-color: #C9A84C;
+        background: rgba(255,255,255,0.09);
+      }
+      .readonly-field { opacity: 0.7; cursor: not-allowed; }
+      .field-row-double {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+      .field-row-double label {
+        font-size: 10px;
+        letter-spacing: 1px;
+        color: rgba(255,255,255,0.5);
+        font-weight: 600;
+        display: block;
+        margin-bottom: 4px;
+      }
+      .field-row-double input {
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(201,168,76,0.25);
+        border-radius: 6px;
+        color: #fff;
+        padding: 10px 12px;
+        font-size: 13px;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .radio-group {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 4px;
+      }
+      .radio-option {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        cursor: pointer;
+      }
+      .radio-option input[type="radio"] {
+        width: 18px;
+        height: 18px;
+        accent-color: #C9A84C;
+        cursor: pointer;
+      }
+      .radio-option span {
+        font-size: 13px;
+        color: rgba(255,255,255,0.85);
+        letter-spacing: 0.5px;
+      }
+      .folio-badge {
+        background: rgba(139,34,82,0.3);
+        border: 1px solid #8B2252;
+        border-radius: 8px;
+        color: #C9A84C;
+        font-size: 13px;
+        font-weight: 600;
+        padding: 12px;
+        text-align: center;
+        margin-top: 8px;
+      }
+      .btn-submit {
+        background: linear-gradient(135deg, #8B2252, #6d1a3f);
+        border: none;
+        border-radius: 8px;
+        color: #C9A84C;
+        font-family: "Playfair Display", serif;
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        padding: 14px;
+        width: 100%;
+        cursor: pointer;
+        margin-top: 8px;
+      }
+      .btn-submit:active { opacity: 0.85; transform: scale(0.98); }
       .message { color: var(--success); font-weight: 800; margin-top: 10px; }
       .error { color: var(--danger); font-weight: 800; margin-top: 10px; }
+      .list { display: grid; gap: 10px; margin-top: 14px; }
+      .footer {
+        position: fixed;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        display: flex;
+        justify-content: center;
+        background: rgba(26, 26, 46, .96);
+        border-top: 1px solid var(--border);
+        padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+      }
+      .nav { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: 100%; max-width: 430px; }
+      .nav button { min-height: 44px; border-radius: 10px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 900; }
+      .nav button.active { background: rgba(139, 34, 82, .28); color: var(--gold); }
       .hidden { display: none; }
     </style>
   </head>
@@ -65,7 +280,7 @@
       <nav class="nav">
         <button data-section="inicio" class="active">Inicio</button>
         <button data-section="permisos">Permisos</button>
-        <button data-section="horas">Horas extra</button>
+        <button data-section="horas">Horas Extra</button>
       </nav>
     </footer>
 
@@ -74,10 +289,10 @@
       const AUTH_API = "/api/logistica";
       const initialSection = "{{ initial_section|default:'inicio'|escapejs }}";
       const state = {
-        section: initialSection,
+        section: normalizeSection(initialSection),
         token: localStorage.getItem("pd_logistica_access") || "",
         refreshToken: localStorage.getItem("pd_logistica_refresh") || "",
-        me: null,
+        perfil: null,
         permisos: [],
         horas: [],
         message: "",
@@ -86,6 +301,20 @@
 
       const app = document.getElementById("app");
       const footer = document.getElementById("footer");
+
+      function normalizeSection(section) {
+        return section === "horas-extra" ? "horas" : (section || "inicio");
+      }
+
+      function esc(value) {
+        return String(value ?? "").replace(/[&<>"']/g, char => ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#039;"
+        }[char]));
+      }
 
       function headers(extra = {}) {
         const base = {...extra};
@@ -109,19 +338,6 @@
           }
         }
         return res;
-      }
-
-      async function enviarPermiso(datos) {
-        const token = localStorage.getItem("pd_logistica_access");
-        const res = await fetch("/rrhh/api/permisos/", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${token}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(datos)
-        });
-        return res.json();
       }
 
       async function login(event) {
@@ -149,9 +365,24 @@
       function logout() {
         state.token = "";
         state.refreshToken = "";
+        state.perfil = null;
         localStorage.removeItem("pd_logistica_access");
         localStorage.removeItem("pd_logistica_refresh");
         render();
+      }
+
+      async function cargarPerfilEmpleado() {
+        const res = await apiFetch(`${API}/mi-perfil/`);
+        state.perfil = res.ok ? await res.json() : {};
+      }
+
+      async function cargarHistorialReciente() {
+        const [permisosRes, horasRes] = await Promise.all([
+          apiFetch(`${API}/permisos/?mis=true&limit=3`),
+          apiFetch(`${API}/horas-extra/?mis=true&limit=3`)
+        ]);
+        state.permisos = permisosRes.ok ? await permisosRes.json() : [];
+        state.horas = horasRes.ok ? await horasRes.json() : [];
       }
 
       async function loadData() {
@@ -159,83 +390,104 @@
           render();
           return;
         }
-        const [meRes, permisosRes, horasRes] = await Promise.all([
-          apiFetch(`${API}/me/`),
-          apiFetch(`${API}/permisos/`),
-          apiFetch(`${API}/horas-extra/`)
-        ]);
-        state.me = meRes.ok ? await meRes.json() : null;
-        state.permisos = permisosRes.ok ? await permisosRes.json() : [];
-        state.horas = horasRes.ok ? await horasRes.json() : [];
+        await Promise.all([cargarPerfilEmpleado(), cargarHistorialReciente()]);
         render();
       }
 
-      async function submitPermiso(event) {
-        event.preventDefault();
-        state.message = "";
+      function perfilValue(field) {
+        return esc(state.perfil?.[field] || "");
+      }
+
+      function today() {
+        return new Date().toISOString().slice(0, 10);
+      }
+
+      function mostrarExito(message) {
+        state.message = message;
         state.error = "";
-        const formElement = event.currentTarget;
-        const form = new FormData(formElement);
-        const data = {
-          tipo: form.get("tipo"),
-          fecha_inicio: form.get("fecha_inicio"),
-          fecha_fin: form.get("fecha_fin") || null,
-          motivo: form.get("motivo"),
-          goce_sueldo: form.get("goce_sueldo") === "on"
+        render();
+      }
+
+      function mostrarError(message) {
+        state.error = message;
+        state.message = "";
+        render();
+      }
+
+      function limpiarFormPermiso() {
+        const form = document.getElementById("form_permiso");
+        if (form) form.reset();
+      }
+
+      function limpiarFormHE() {
+        const form = document.getElementById("form_horas_extra");
+        if (form) form.reset();
+      }
+
+      async function enviarPermiso(event) {
+        event.preventDefault();
+        const tipo = document.querySelector('input[name="tipo_permiso"]:checked')?.value;
+        const goce = document.querySelector('input[name="goce_sueldo"]:checked')?.value === "true";
+        const payload = {
+          tipo: tipo,
+          fecha_inicio: document.getElementById("p_desde").value,
+          fecha_fin: document.getElementById("p_hasta").value || null,
+          motivo: document.getElementById("p_motivo").value,
+          goce_sueldo: goce
         };
-        try {
-          const result = await enviarPermiso(data);
-          if (result && (result.id || result.folio || result.estado === "solicitado")) {
-            formElement.reset();
-            state.permisos = [result, ...state.permisos.filter(item => item.id !== result.id)];
-            state.message = `Solicitud enviada · ${result.folio || "sin folio"}`;
-            render();
-            return;
-          }
-        } catch (err) {
-          state.error = "No se pudo enviar la solicitud.";
+        const res = await apiFetch(`${API}/permisos/`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok) {
+          await cargarHistorialReciente();
+          limpiarFormPermiso();
+          state.message = `Solicitud enviada - Folio: ${data.folio || "sin folio"}`;
+          state.error = "";
           render();
-          return;
+        } else {
+          mostrarError(`Error al enviar permiso: ${JSON.stringify(data)}`);
         }
-        state.error = "No se pudo enviar la solicitud.";
-        render();
       }
 
-      async function submitHoraExtra(event) {
+      async function enviarHorasExtra(event) {
         event.preventDefault();
-        state.message = "";
-        state.error = "";
-        const formElement = event.currentTarget;
-        const form = new FormData(formElement);
-        const data = {
-          fecha: form.get("fecha"),
-          horas: form.get("horas"),
-          notas: form.get("notas") || ""
+        const fecha = document.getElementById("he_fecha").value;
+        const desde = document.getElementById("he_desde").value;
+        const hasta = document.getElementById("he_hasta").value;
+        const payload = {
+          fecha: fecha,
+          horas: parseFloat(document.getElementById("he_horas").value),
+          notas: document.getElementById("he_descripcion").value,
+          entrada_extra: desde ? `${fecha}T${desde}` : null,
+          salida_extra: hasta ? `${fecha}T${hasta}` : null
         };
         const res = await apiFetch(`${API}/horas-extra/`, {
           method: "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify(data)
+          body: JSON.stringify(payload)
         });
-        if (!res.ok) {
-          state.error = "No se pudieron registrar las horas extra.";
+        const data = await res.json();
+        if (res.ok) {
+          await cargarHistorialReciente();
+          limpiarFormHE();
+          state.message = `Horas extra registradas (${payload.horas}h) - pendiente de autorización`;
+          state.error = "";
           render();
-          return;
+        } else {
+          mostrarError(`Error: ${JSON.stringify(data)}`);
         }
-        const result = await res.json();
-        formElement.reset();
-        state.horas = [result, ...state.horas.filter(item => item.id !== result.id)];
-        state.message = "Horas extra registradas para autorización.";
-        render();
       }
 
       function shell(content) {
-        const nombre = state.me?.nombre || "Capital Humano";
+        const nombre = state.perfil?.nombre || "Capital Humano";
         return `
           <div class="topbar">
             <div>
               <div class="mini">Pollyana's Dolce</div>
-              <div class="muted">Hola, ${nombre}</div>
+              <div class="muted">Hola, ${esc(nombre)}</div>
             </div>
             <button class="secondary" onclick="logout()">Salir</button>
           </div>
@@ -250,53 +502,137 @@
             <h1 class="brand">Capital Humano</h1>
             <p class="gold">Pollyana's Dolce</p>
             <form onsubmit="login(event)">
-              <div class="field"><label>Usuario<input name="username" autocomplete="username" required></label></div>
-              <div class="field"><label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label></div>
+              <div class="login-field"><label>Usuario</label><input name="username" autocomplete="username" required></div>
+              <div class="login-field"><label>Contraseña</label><input name="password" type="password" autocomplete="current-password" required></div>
               <button class="primary" type="submit">Entrar</button>
-              ${state.error ? `<div class="error">${state.error}</div>` : ""}
+              ${state.error ? `<div class="error">${esc(state.error)}</div>` : ""}
             </form>
           </section>
         `;
       }
 
       function renderInicio() {
+        const nombre = state.perfil?.nombre || "Bienvenido";
+        const items = [
+          ...state.permisos.map(p => ({
+            tipo: "Permiso",
+            desc: p.tipo,
+            estado: p.estado,
+            folio: p.folio,
+            fecha: p.fecha_inicio
+          })),
+          ...state.horas.map(h => ({
+            tipo: "Horas extra",
+            desc: `${h.horas}h`,
+            estado: h.estado,
+            folio: `HE-${h.id}`,
+            fecha: h.fecha
+          }))
+        ].sort((a, b) => new Date(b.fecha) - new Date(a.fecha)).slice(0, 4);
+        const historial = items.length
+          ? items.map(i => `
+              <div class="historial-item">
+                <div class="historial-top">
+                  <div>
+                    <div class="historial-tipo">${esc(i.tipo)}</div>
+                    <div class="historial-desc">${esc(i.desc)}</div>
+                    <div class="historial-folio">${esc(i.folio)}</div>
+                  </div>
+                  <span class="badge-estado badge-${esc(i.estado)}">${esc(i.estado)}</span>
+                </div>
+              </div>
+            `).join("")
+          : '<p class="empty-msg">Sin solicitudes recientes</p>';
         app.innerHTML = shell(`
-          <h1 class="brand">Capital Humano</h1>
-          <p class="gold">${state.me?.sucursal || "Mi expediente"}</p>
-          <div class="grid">
-            <button class="quick" onclick="setSection('permisos')">Nuevo permiso<span>${state.permisos.length} solicitudes</span></button>
-            <button class="quick" onclick="setSection('horas')">Horas extra<span>${state.horas.length} registros</span></button>
+          <div class="welcome-name">${esc(nombre)}</div>
+          <div class="welcome-sub">Capital Humano · Pollyana's Dolce</div>
+          <div class="quick-actions">
+            <button class="quick-btn" onclick="setSection('permisos')">
+              <span class="quick-icon">P</span>
+              <span>Solicitar permiso</span>
+            </button>
+            <button class="quick-btn" onclick="setSection('horas')">
+              <span class="quick-icon">HE</span>
+              <span>Registrar horas extra</span>
+            </button>
           </div>
+          <div class="section-label">MIS SOLICITUDES RECIENTES</div>
+          <div id="historial_reciente" class="historial-list">${historial}</div>
         `);
       }
 
       function renderPermisos() {
         const items = state.permisos.map(p => `
           <article class="card">
-            <div class="row"><strong>${p.folio}</strong><span class="badge">${p.estado}</span></div>
-            <div class="muted">${p.tipo} · ${new Date(p.fecha_inicio).toLocaleString("es-MX")}</div>
+            <div class="row"><strong>${esc(p.folio)}</strong><span class="badge">${esc(p.estado)}</span></div>
+            <div class="muted">${esc(p.tipo)} · ${new Date(p.fecha_inicio).toLocaleString("es-MX")}</div>
             <div class="muted">${p.goce_sueldo ? "Con goce de sueldo" : "Sin goce de sueldo"}</div>
-            <div>${p.motivo}</div>
+            <div>${esc(p.motivo)}</div>
           </article>
         `).join("") || `<div class="muted">Sin permisos registrados.</div>`;
         app.innerHTML = shell(`
-          <h1 class="brand">Mis permisos</h1>
           <section class="panel">
-            <form onsubmit="submitPermiso(event)">
-              <div class="field"><label>Tipo<select name="tipo" required>
-                <option value="permiso_hora">Permiso por horas</option>
-                <option value="permiso_dia">Permiso día completo</option>
-                <option value="salida_personal">Salida personal</option>
-                <option value="cita_medica">Cita médica</option>
-                <option value="otro">Otro</option>
-              </select></label></div>
-              <div class="field"><label>Inicio<input type="datetime-local" name="fecha_inicio" required></label></div>
-              <div class="field"><label>Fin<input type="datetime-local" name="fecha_fin"></label></div>
-              <div class="field"><label><input type="checkbox" name="goce_sueldo" checked> Con goce de sueldo</label></div>
-              <div class="field"><label>Motivo<textarea name="motivo" required></textarea></label></div>
-              <button class="primary" type="submit">Enviar solicitud</button>
-              ${state.message ? `<div class="message">${state.message}</div>` : ""}
-              ${state.error ? `<div class="error">${state.error}</div>` : ""}
+            <form id="form_permiso" onsubmit="enviarPermiso(event)">
+              <div class="talon-header">TALÓN DE PERMISOS</div>
+              <div class="field-row">
+                <label>FECHA</label>
+                <input type="date" id="p_fecha" value="${today()}" required>
+              </div>
+              <div class="field-row">
+                <label>NOMBRE DE EMPLEADO</label>
+                <input type="text" id="p_nombre" value="${perfilValue("nombre")}" readonly class="readonly-field">
+              </div>
+              <div class="field-row">
+                <label>PUESTO</label>
+                <input type="text" id="p_puesto" value="${perfilValue("puesto")}" readonly class="readonly-field">
+              </div>
+              <div class="field-row">
+                <label>ÁREA</label>
+                <input type="text" id="p_area" value="${perfilValue("area")}" readonly class="readonly-field">
+              </div>
+              <div class="field-row">
+                <label>TIPO DE PERMISO</label>
+                <div class="radio-group">
+                  <label class="radio-option">
+                    <input type="radio" name="tipo_permiso" value="permiso_hora" required>
+                    <span>TIEMPO PARCIAL</span>
+                  </label>
+                  <label class="radio-option">
+                    <input type="radio" name="tipo_permiso" value="permiso_dia">
+                    <span>DÍA COMPLETO</span>
+                  </label>
+                </div>
+              </div>
+              <div class="field-row-double">
+                <div>
+                  <label>DESDE</label>
+                  <input type="datetime-local" id="p_desde" required>
+                </div>
+                <div>
+                  <label>HASTA</label>
+                  <input type="datetime-local" id="p_hasta">
+                </div>
+              </div>
+              <div class="field-row">
+                <label>AUTORIZADO</label>
+                <div class="radio-group">
+                  <label class="radio-option">
+                    <input type="radio" name="goce_sueldo" value="false" required>
+                    <span>SIN GOCE DE SUELDO</span>
+                  </label>
+                  <label class="radio-option">
+                    <input type="radio" name="goce_sueldo" value="true" checked>
+                    <span>CON GOCE DE SUELDO</span>
+                  </label>
+                </div>
+              </div>
+              <div class="field-row">
+                <label>MOTIVO DE PERMISO</label>
+                <textarea id="p_motivo" rows="3" required placeholder="Describe el motivo..."></textarea>
+              </div>
+              <button class="btn-submit" type="submit">ENVIAR SOLICITUD</button>
+              ${state.message ? `<div id="p_folio_result" class="folio-badge">${esc(state.message)}</div>` : ""}
+              ${state.error ? `<div class="error">${esc(state.error)}</div>` : ""}
             </form>
           </section>
           <div class="list">${items}</div>
@@ -306,21 +642,52 @@
       function renderHoras() {
         const items = state.horas.map(h => `
           <article class="card">
-            <div class="row"><strong>${h.horas} h</strong><span class="badge">${h.estado}</span></div>
-            <div class="muted">${h.fecha} · ${h.monto_calculado || "Sin monto"}</div>
-            ${h.notas ? `<div>${h.notas}</div>` : ""}
+            <div class="row"><strong>${esc(h.horas)} h</strong><span class="badge">${esc(h.estado)}</span></div>
+            <div class="muted">${esc(h.fecha)} · ${esc(h.monto_calculado || "Sin monto")}</div>
+            ${h.notas ? `<div>${esc(h.notas)}</div>` : ""}
           </article>
         `).join("") || `<div class="muted">Sin horas extra registradas.</div>`;
         app.innerHTML = shell(`
-          <h1 class="brand">Mis horas extra</h1>
           <section class="panel">
-            <form onsubmit="submitHoraExtra(event)">
-              <div class="field"><label>Fecha<input type="date" name="fecha" required></label></div>
-              <div class="field"><label>Horas<input type="number" name="horas" min="0.25" max="24" step="0.25" required></label></div>
-              <div class="field"><label>Notas<textarea name="notas" placeholder="Motivo o actividad realizada"></textarea></label></div>
-              <button class="primary" type="submit">Registrar horas extra</button>
-              ${state.message ? `<div class="message">${state.message}</div>` : ""}
-              ${state.error ? `<div class="error">${state.error}</div>` : ""}
+            <form id="form_horas_extra" onsubmit="enviarHorasExtra(event)">
+              <div class="talon-header">AUTORIZACIÓN DE HORAS EXTRAS</div>
+              <div class="field-row">
+                <label>FECHA</label>
+                <input type="date" id="he_fecha" value="${today()}" required>
+              </div>
+              <div class="field-row">
+                <label>NOMBRE DE EMPLEADO</label>
+                <input type="text" id="he_nombre" value="${perfilValue("nombre")}" readonly class="readonly-field">
+              </div>
+              <div class="field-row">
+                <label>PUESTO</label>
+                <input type="text" id="he_puesto" value="${perfilValue("puesto")}" readonly class="readonly-field">
+              </div>
+              <div class="field-row">
+                <label>ÁREA</label>
+                <input type="text" id="he_area" value="${perfilValue("area")}" readonly class="readonly-field">
+              </div>
+              <div class="field-row">
+                <label>CANTIDAD DE HORAS AUTORIZADAS</label>
+                <input type="number" id="he_horas" min="0.25" max="12" step="0.25" required placeholder="Ej: 1.5">
+              </div>
+              <div class="field-row-double">
+                <div>
+                  <label>DESDE</label>
+                  <input type="time" id="he_desde" required>
+                </div>
+                <div>
+                  <label>HASTA</label>
+                  <input type="time" id="he_hasta" required>
+                </div>
+              </div>
+              <div class="field-row">
+                <label>DESCRIPCIÓN DETALLADA SOBRE LA RAZÓN DE<br>SOLICITUD DE HORAS EXTRAS</label>
+                <textarea id="he_descripcion" rows="4" required placeholder="Describe detalladamente la razón..."></textarea>
+              </div>
+              <button class="btn-submit" type="submit">REGISTRAR HORAS EXTRA</button>
+              ${state.message ? `<div class="folio-badge">${esc(state.message)}</div>` : ""}
+              ${state.error ? `<div class="error">${esc(state.error)}</div>` : ""}
             </form>
           </section>
           <div class="list">${items}</div>
@@ -328,8 +695,12 @@
       }
 
       function setSection(section) {
-        state.section = section;
-        document.querySelectorAll(".nav button").forEach(btn => btn.classList.toggle("active", btn.dataset.section === section));
+        state.section = normalizeSection(section);
+        state.message = "";
+        state.error = "";
+        document.querySelectorAll(".nav button").forEach(btn => {
+          btn.classList.toggle("active", btn.dataset.section === state.section);
+        });
         render();
       }
 
@@ -339,12 +710,17 @@
           return;
         }
         footer.classList.remove("hidden");
+        document.querySelectorAll(".nav button").forEach(btn => {
+          btn.classList.toggle("active", btn.dataset.section === state.section);
+        });
         if (state.section === "permisos") renderPermisos();
         else if (state.section === "horas") renderHoras();
         else renderInicio();
       }
 
-      document.querySelectorAll(".nav button").forEach(btn => btn.addEventListener("click", () => setSection(btn.dataset.section)));
+      document.querySelectorAll(".nav button").forEach(btn => {
+        btn.addEventListener("click", () => setSection(btn.dataset.section));
+      });
       loadData();
     </script>
   </body>
