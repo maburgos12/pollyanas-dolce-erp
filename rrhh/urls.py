@@ -13,6 +13,7 @@ router.register(r"api/permisos", api_views.PermisoSalidaViewSet, basename="permi
 urlpatterns = [
     path("", include(router.urls)),
     path("api/me/", api_views.capital_humano_me, name="capital_humano_me"),
+    path("api/mi-perfil/", api_views.mi_perfil, name="rrhh_mi_perfil"),
     path("", views.empleados, name="home"),
     path("empleados/", views.empleados, name="empleados"),
     path("nomina/", views.nomina, name="nomina"),
