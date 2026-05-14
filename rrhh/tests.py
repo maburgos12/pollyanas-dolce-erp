@@ -57,6 +57,36 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertEqual(actualizado.estado, "autorizado")
         self.assertEqual(actualizado.horas, Decimal("1.00"))
 
+    def test_prestamo_genera_cuotas_y_recalcula_saldo(self):
+        from datetime import date
+
+        from rrhh.models import Prestamo, PrestamoCuota
+        from rrhh.services_prestamos import aplicar_cobro_manual, generar_cuotas
+
+        user = User.objects.create_user(username="paula", password="pass123")
+        empleado = Empleado.objects.create(nombre="Empleado Préstamo", salario_diario="400.00")
+        prestamo = Prestamo.objects.create(
+            empleado=empleado,
+            concepto="Apoyo personal",
+            fecha_solicitud=date(2026, 5, 10),
+            fecha_deposito=date(2026, 5, 14),
+            importe=Decimal("1000.00"),
+            num_quincenas=2,
+            descuento_quincenal=Decimal("500.00"),
+            creado_por=user,
+        )
+
+        cuotas = generar_cuotas(prestamo)
+        self.assertEqual(len(cuotas), 2)
+        self.assertEqual(PrestamoCuota.objects.filter(prestamo=prestamo).count(), 2)
+
+        cuota = prestamo.cuotas.first()
+        aplicar_cobro_manual(cuota, Decimal("500.00"), user, "Primer cobro")
+        prestamo.refresh_from_db()
+        cuota.refresh_from_db()
+        self.assertEqual(cuota.estado, PrestamoCuota.ESTADO_COBRADO)
+        self.assertEqual(prestamo.saldo_actual, Decimal("500.00"))
+
 
 class CapitalHumanoAPITests(TestCase):
     def setUp(self):
@@ -155,9 +185,11 @@ class CapitalHumanoAPITests(TestCase):
         self.user.groups.add(rrhh_group)
         self.client.force_login(self.user)
 
-        for url_name in ["rrhh_dashboard", "rrhh_pwa"]:
+        for url_name in ["rrhh_dashboard", "rrhh_prestamos_lista"]:
             resp = self.client.get(reverse(f"rrhh:{url_name}"))
             self.assertEqual(resp.status_code, 200)
+        resp = self.client.get(reverse("rrhh:rrhh_pwa"))
+        self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Registrar horas extra")
 
 

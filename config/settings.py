@@ -308,6 +308,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "logistica.tasks.alertar_lavados_pendientes",
         "schedule": crontab(hour=8, minute=10),
     },
+    "rrhh-alertar-cuotas-quincena": {
+        "task": "rrhh.tasks.alertar_cuotas_quincena",
+        "schedule": crontab(day_of_month="14,29", hour=8, minute=0),
+    },
     "logistica-escalar-tickets-sin-respuesta-cada-60-min": {
         "task": "logistica.tasks.escalar_tickets_sin_respuesta",
         "schedule": 60 * 60,

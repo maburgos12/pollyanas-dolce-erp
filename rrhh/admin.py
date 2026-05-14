@@ -1,15 +1,19 @@
 from django.contrib import admin
+from django.utils import timezone
 
 from .models import (
     AsistenciaEmpleado,
     Empleado,
     HoraExtra,
     ImportacionChecador,
+    ImportacionNominaContpaq,
     NominaConceptoLinea,
     NominaImportacion,
     NominaLinea,
     NominaPeriodo,
     PermisoSalida,
+    Prestamo,
+    PrestamoCuota,
     Turno,
 )
 
@@ -108,8 +112,8 @@ class HoraExtraAdmin(admin.ModelAdmin):
 
 @admin.register(PermisoSalida)
 class PermisoAdmin(admin.ModelAdmin):
-    list_display = ("folio", "empleado", "tipo", "fecha_inicio", "estado", "autorizado_por")
-    list_filter = ("tipo", "estado", "fecha_inicio")
+    list_display = ("folio", "empleado", "tipo", "fecha_inicio", "estado", "goce_sueldo", "autorizado_por")
+    list_filter = ("tipo", "estado", "goce_sueldo", "fecha_inicio")
     search_fields = ("folio", "empleado__nombre", "empleado__codigo", "motivo")
     readonly_fields = ("folio",)
 
@@ -124,4 +128,53 @@ class TurnoAdmin(admin.ModelAdmin):
 class ImportacionAdmin(admin.ModelAdmin):
     list_display = ("creado_en", "metodo", "registros_procesados", "errores", "creado_por")
     list_filter = ("metodo", "creado_en")
+    readonly_fields = ("log",)
+
+
+class PrestamoCuotaInline(admin.TabularInline):
+    model = PrestamoCuota
+    extra = 0
+    readonly_fields = ("fuente", "fecha_cobro", "registrado_por")
+    fields = ("numero_quincena", "fecha_quincena", "monto_esperado", "monto_cobrado", "estado", "fuente", "nota")
+
+
+@admin.register(Prestamo)
+class PrestamoAdmin(admin.ModelAdmin):
+    list_display = ("folio", "empleado", "importe", "saldo_actual", "num_quincenas", "estado", "fecha_solicitud")
+    list_filter = ("estado", "metodo_pago", "fecha_solicitud")
+    search_fields = ("empleado__nombre", "empleado__codigo", "folio")
+    readonly_fields = ("folio", "saldo_actual", "creado_en", "actualizado_en")
+    inlines = [PrestamoCuotaInline]
+    actions = ["autorizar_jefe_bulk"]
+
+    def autorizar_jefe_bulk(self, request, queryset):
+        for prestamo in queryset.filter(estado=Prestamo.ESTADO_SOLICITADO):
+            prestamo.firma_jefe = True
+            prestamo.autorizado_jefe = request.user
+            prestamo.fecha_auth_jefe = timezone.now()
+            prestamo.estado = Prestamo.ESTADO_AUTORIZADO
+            prestamo.save(update_fields=["firma_jefe", "autorizado_jefe", "fecha_auth_jefe", "estado", "actualizado_en"])
+        self.message_user(request, "Préstamos autorizados por jefe.")
+
+    autorizar_jefe_bulk.short_description = "Autorizar como jefe inmediato"
+
+
+@admin.register(PrestamoCuota)
+class PrestamoCuotaAdmin(admin.ModelAdmin):
+    list_display = ("prestamo", "numero_quincena", "fecha_quincena", "monto_esperado", "monto_cobrado", "estado", "fuente")
+    list_filter = ("estado", "fuente", "fecha_quincena")
+    search_fields = ("prestamo__folio", "prestamo__empleado__nombre", "prestamo__empleado__codigo")
+
+
+@admin.register(ImportacionNominaContpaq)
+class ImportContpaqAdmin(admin.ModelAdmin):
+    list_display = (
+        "creado_en",
+        "periodo_inicio",
+        "periodo_fin",
+        "empleados_leidos",
+        "prestamos_aplicados",
+        "diferencias_detectadas",
+        "creado_por",
+    )
     readonly_fields = ("log",)

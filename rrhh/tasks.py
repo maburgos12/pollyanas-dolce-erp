@@ -35,3 +35,39 @@ def alertar_he_pendientes():
         recipient_list=["mauricio@pollyanasdolce.com"],
     )
     return {"ok": True, "pendientes": count}
+
+
+@shared_task
+def alertar_cuotas_quincena():
+    """
+    Notifica cuotas de préstamo pendientes de cobrar en la quincena actual.
+    Programar en beat los días 14 y 29.
+    """
+    from datetime import date
+
+    from django.core.mail import send_mail
+
+    from .models import PrestamoCuota
+
+    hoy = date.today()
+    cuotas = PrestamoCuota.objects.filter(
+        estado=PrestamoCuota.ESTADO_PENDIENTE,
+        fecha_quincena__month=hoy.month,
+        fecha_quincena__year=hoy.year,
+    ).select_related("prestamo__empleado")
+
+    count = cuotas.count()
+    if count <= 0:
+        return {"ok": True, "pendientes": 0}
+
+    lineas = "\n".join(
+        f"- {c.prestamo.empleado} | Folio {c.prestamo.folio} | ${c.monto_esperado} | Q{c.numero_quincena}"
+        for c in cuotas
+    )
+    send_mail(
+        subject=f"[ERP] {count} cuotas de préstamo pendientes esta quincena",
+        message=f"Cuotas pendientes:\n\n{lineas}",
+        from_email="no-reply@pollyanasdolce.com",
+        recipient_list=["mauricio@pollyanasdolce.com"],
+    )
+    return {"ok": True, "pendientes": count}

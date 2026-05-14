@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}Nuevo préstamo{% endblock %}
+{% block page_title %}Nuevo préstamo{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="card">
+  <form method="post">
+    {% csrf_token %}
+    <div class="form-grid">
+      <label>Empleado
+        <select name="empleado" required>
+          <option value="">Seleccionar empleado</option>
+          {% for empleado in empleados %}
+            <option value="{{ empleado.id }}">{{ empleado.codigo }} · {{ empleado.nombre }} · {{ empleado.area }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Método de pago
+        <select name="metodo_pago">
+          {% for value, label in metodos %}
+            <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Fecha solicitud
+        <input type="date" name="fecha_solicitud">
+      </label>
+      <label>Fecha depósito
+        <input type="date" name="fecha_deposito">
+      </label>
+      <label>Importe
+        <input id="id_importe" type="number" name="importe" min="0.01" step="0.01" required>
+      </label>
+      <label>Número de quincenas
+        <input id="id_num_quincenas" type="number" name="num_quincenas" min="1" step="1" required>
+      </label>
+    </div>
+    <p id="descuento_preview" class="muted">$0.00 por quincena</p>
+    <label>Concepto
+      <textarea name="concepto" rows="4" required></textarea>
+    </label>
+    <div style="margin-top:14px;">
+      <button class="btn btn-primary" type="submit">Crear préstamo</button>
+      <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_prestamos_lista' %}">Cancelar</a>
+    </div>
+  </form>
+</section>
+
+<script>
+document.getElementById('id_importe').addEventListener('input', calcular);
+document.getElementById('id_num_quincenas').addEventListener('input', calcular);
+function calcular() {
+    const imp = parseFloat(document.getElementById('id_importe').value) || 0;
+    const q = parseInt(document.getElementById('id_num_quincenas').value) || 1;
+    document.getElementById('descuento_preview').textContent = '$' + (imp / q).toFixed(2) + ' por quincena';
+}
+</script>
+{% endblock %}

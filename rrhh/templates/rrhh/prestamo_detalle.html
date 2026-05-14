@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}{{ prestamo.folio }}{% endblock %}
+{% block page_title %}{{ prestamo.folio }} · {{ prestamo.empleado.nombre }}{% endblock %}
+
+{% block extra_css %}
+<style>
+  .loan-head { display: grid; grid-template-columns: 1.3fr .7fr; gap: 14px; }
+  .loan-progress { height: 12px; background: #f3e9ee; border-radius: 999px; overflow: hidden; }
+  .loan-progress span { display: block; height: 100%; background: var(--vino); }
+  .badge { border-radius: 999px; background: #f7edf2; color: var(--vino); font-weight: 800; padding: 5px 10px; }
+  .quota-table { width: 100%; border-collapse: collapse; }
+  .quota-table th, .quota-table td { border-bottom: 1px solid var(--rosa); padding: 9px; text-align: left; }
+  @media (max-width: 900px) { .loan-head { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<div class="loan-head">
+  <section class="card">
+    <h2>{{ prestamo.get_estado_display }}</h2>
+    <p>{{ prestamo.concepto }}</p>
+    <p><strong>Importe:</strong> ${{ prestamo.importe }} · <strong>Saldo:</strong> ${{ prestamo.saldo_actual }}</p>
+    <div class="loan-progress"><span style="width: {{ progreso }}%;"></span></div>
+  </section>
+  <section class="card">
+    <p><span class="badge">Jefe: {% if prestamo.firma_jefe %}Firmado{% else %}Pendiente{% endif %}</span></p>
+    <p><span class="badge">Dirección: {% if prestamo.firma_direccion %}Firmado{% else %}Pendiente{% endif %}</span></p>
+    {% if prestamo.estado == "solicitado" %}
+      <form method="post" action="{% url 'rrhh:rrhh_prestamo_auth_jefe' prestamo.pk %}">{% csrf_token %}<button class="btn btn-primary" type="submit">Autorizar jefe</button></form>
+    {% endif %}
+    {% if prestamo.estado == "autorizado" %}
+      <form method="post" action="{% url 'rrhh:rrhh_prestamo_auth_dg' prestamo.pk %}">{% csrf_token %}<button class="btn btn-primary" type="submit">Aprobar dirección</button></form>
+    {% endif %}
+  </section>
+</div>
+
+<section class="card" style="margin-top:16px;">
+  <h2>Cuotas</h2>
+  <table class="quota-table">
+    <thead><tr><th>Q</th><th>Fecha</th><th>Esperado</th><th>Cobrado</th><th>Estado</th><th>Cobro rápido</th></tr></thead>
+    <tbody>
+      {% for cuota in cuotas %}
+        <tr>
+          <td>{{ cuota.numero_quincena }}</td>
+          <td>{{ cuota.fecha_quincena }}</td>
+          <td>${{ cuota.monto_esperado }}</td>
+          <td>{% if cuota.monto_cobrado %}${{ cuota.monto_cobrado }}{% else %}-{% endif %}</td>
+          <td>{{ cuota.get_estado_display }}</td>
+          <td>
+            <form method="post" action="{% url 'rrhh:rrhh_prestamo_cobro' cuota.pk %}" style="display:flex;gap:6px;align-items:center;">
+              {% csrf_token %}
+              <input type="number" name="monto_cobrado" step="0.01" min="0" value="{{ cuota.monto_esperado }}" style="max-width:120px;">
+              <input type="text" name="nota" placeholder="Nota" style="max-width:160px;">
+              <button class="btn btn-secondary btn-sm" type="submit">Aplicar</button>
+            </form>
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6">Sin cuotas generadas.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

@@ -180,7 +180,8 @@
           tipo: form.get("tipo"),
           fecha_inicio: form.get("fecha_inicio"),
           fecha_fin: form.get("fecha_fin") || null,
-          motivo: form.get("motivo")
+          motivo: form.get("motivo"),
+          goce_sueldo: form.get("goce_sueldo") === "on"
         };
         try {
           const result = await enviarPermiso(data);
@@ -274,6 +275,7 @@
           <article class="card">
             <div class="row"><strong>${p.folio}</strong><span class="badge">${p.estado}</span></div>
             <div class="muted">${p.tipo} · ${new Date(p.fecha_inicio).toLocaleString("es-MX")}</div>
+            <div class="muted">${p.goce_sueldo ? "Con goce de sueldo" : "Sin goce de sueldo"}</div>
             <div>${p.motivo}</div>
           </article>
         `).join("") || `<div class="muted">Sin permisos registrados.</div>`;
@@ -290,6 +292,7 @@
               </select></label></div>
               <div class="field"><label>Inicio<input type="datetime-local" name="fecha_inicio" required></label></div>
               <div class="field"><label>Fin<input type="datetime-local" name="fecha_fin"></label></div>
+              <div class="field"><label><input type="checkbox" name="goce_sueldo" checked> Con goce de sueldo</label></div>
               <div class="field"><label>Motivo<textarea name="motivo" required></textarea></label></div>
               <button class="primary" type="submit">Enviar solicitud</button>
               ${state.message ? `<div class="message">${state.message}</div>` : ""}

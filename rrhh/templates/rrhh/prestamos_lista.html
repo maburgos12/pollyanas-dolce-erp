@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}Préstamos{% endblock %}
+{% block page_title %}Préstamos de personal{% endblock %}
+
+{% block extra_css %}
+<style>
+  .loan-page { display: grid; gap: 16px; }
+  .loan-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .loan-board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .loan-col { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 14px; }
+  .loan-col h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
+  .loan-list { display: grid; gap: 10px; }
+  .loan-card { border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; text-decoration: none; color: inherit; }
+  .loan-card strong { color: var(--vino); }
+  .muted { color: var(--texto-light); font-size: 13px; }
+  @media (max-width: 900px) { .loan-board { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="loan-page">
+  <div class="loan-actions">
+    <a class="btn btn-primary" href="{% url 'rrhh:rrhh_prestamo_nuevo' %}">Nuevo préstamo</a>
+    <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_quincena_cobros' %}">Cobros quincena</a>
+    <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_importar_contpaq' %}">Importar CONTPAQ</a>
+  </div>
+
+  <div class="loan-board">
+    <section class="loan-col">
+      <h2>Pendientes autorización</h2>
+      <div class="loan-list">
+        {% for prestamo in pendientes %}
+          <a class="loan-card" href="{% url 'rrhh:rrhh_prestamo_detalle' prestamo.pk %}">
+            <strong>{{ prestamo.folio }}</strong>
+            <div>{{ prestamo.empleado.nombre }}</div>
+            <div class="muted">${{ prestamo.importe }} · {{ prestamo.get_estado_display }}</div>
+          </a>
+        {% empty %}
+          <div class="muted">Sin préstamos pendientes.</div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="loan-col">
+      <h2>Activos</h2>
+      <div class="loan-list">
+        {% for prestamo in activos %}
+          <a class="loan-card" href="{% url 'rrhh:rrhh_prestamo_detalle' prestamo.pk %}">
+            <strong>{{ prestamo.folio }}</strong>
+            <div>{{ prestamo.empleado.nombre }}</div>
+            <div class="muted">Saldo ${{ prestamo.saldo_actual }} · Q{{ prestamo.num_quincenas }}</div>
+          </a>
+        {% empty %}
+          <div class="muted">Sin préstamos activos.</div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="loan-col">
+      <h2>Liquidados</h2>
+      <div class="loan-list">
+        {% for prestamo in liquidados %}
+          <a class="loan-card" href="{% url 'rrhh:rrhh_prestamo_detalle' prestamo.pk %}">
+            <strong>{{ prestamo.folio }}</strong>
+            <div>{{ prestamo.empleado.nombre }}</div>
+            <div class="muted">${{ prestamo.importe }} liquidado</div>
+          </a>
+        {% empty %}
+          <div class="muted">Sin préstamos liquidados.</div>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Importar CONTPAQ{% endblock %}
+{% block page_title %}Importar Lista de Raya CONTPAQ{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="card">
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <div class="form-grid">
+      <label>Archivo XLS
+        <input type="file" name="archivo" accept=".xls,.xlsx" required>
+      </label>
+      <label>Periodo inicio
+        <input type="date" name="periodo_inicio" required>
+      </label>
+      <label>Periodo fin
+        <input type="date" name="periodo_fin" required>
+      </label>
+      <label>Quincena del año
+        <input type="number" name="quincena_num" min="1" max="24" required>
+      </label>
+    </div>
+    <button class="btn btn-primary" type="submit">Importar cobros</button>
+  </form>
+</section>
+
+<section class="card" style="margin-top:16px;">
+  <h2>Historial</h2>
+  {% for item in historial %}
+    <details>
+      <summary>{{ item.creado_en }} · {{ item.periodo_inicio }} a {{ item.periodo_fin }} · {{ item.prestamos_aplicados }} aplicados</summary>
+      <pre>{{ item.log }}</pre>
+    </details>
+  {% empty %}
+    <p>Sin importaciones registradas.</p>
+  {% endfor %}
+</section>
+{% endblock %}
