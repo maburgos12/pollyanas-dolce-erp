@@ -7,7 +7,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Avg, Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -15,7 +15,7 @@ from django.utils import timezone
 from core.access import can_manage_rrhh, can_view_rrhh
 from core.audit import log_event
 
-from .models import Empleado, NominaLinea, NominaPeriodo
+from .models import AsistenciaEmpleado, Empleado, HoraExtra, ImportacionChecador, NominaLinea, NominaPeriodo, PermisoSalida
 
 
 def _parse_decimal(raw: str | None) -> Decimal:
@@ -37,6 +37,10 @@ def _parse_date(raw: str | None):
 
 def _module_tabs(active: str) -> list[dict]:
     return [
+        {"label": "Capital Humano", "url_name": "rrhh:rrhh_dashboard", "active": active == "dashboard"},
+        {"label": "Asistencias", "url_name": "rrhh:rrhh_asistencias", "active": active == "asistencias"},
+        {"label": "Horas extra", "url_name": "rrhh:rrhh_he_list", "active": active == "horas_extra"},
+        {"label": "Permisos", "url_name": "rrhh:rrhh_permisos_list", "active": active == "permisos"},
         {"label": "Empleados", "url_name": "rrhh:empleados", "active": active == "empleados"},
         {"label": "Nómina", "url_name": "rrhh:nomina", "active": active == "nomina"},
     ]
@@ -1114,3 +1118,164 @@ def nomina_status(request, pk: int, estatus: str):
     )
     messages.success(request, f"Nómina {periodo.folio} actualizada a {estatus}.")
     return redirect("rrhh:nomina_detail", pk=periodo.id)
+
+
+@login_required
+def dashboard_ch(request):
+    if not can_view_rrhh(request.user):
+        raise PermissionDenied("No tienes permisos para ver Capital Humano")
+
+    hoy = timezone.localdate()
+    stats = {
+        "he_pendientes": HoraExtra.objects.filter(estado=HoraExtra.ESTADO_PENDIENTE).count(),
+        "permisos_pendientes": PermisoSalida.objects.filter(estado=PermisoSalida.ESTADO_SOLICITADO).count(),
+        "asistencias_hoy": AsistenciaEmpleado.objects.filter(fecha=hoy).count(),
+        "promedio_minutos_mes": AsistenciaEmpleado.objects.filter(
+            fecha__year=hoy.year,
+            fecha__month=hoy.month,
+        ).aggregate(Avg("minutos_trabajados"))["minutos_trabajados__avg"]
+        or 0,
+        "empleados_activos": Empleado.objects.filter(activo=True).count(),
+    }
+    return render(
+        request,
+        "rrhh/dashboard_ch.html",
+        {"module_tabs": _module_tabs("dashboard"), "stats": stats, "can_manage_rrhh": can_manage_rrhh(request.user)},
+    )
+
+
+@login_required
+def asistencias_view(request):
+    if not can_view_rrhh(request.user):
+        raise PermissionDenied("No tienes permisos para ver asistencias")
+
+    mes = (request.GET.get("mes") or timezone.localdate().strftime("%Y-%m")).strip()
+    empleado_id = (request.GET.get("empleado") or "").strip()
+    qs = AsistenciaEmpleado.objects.select_related("empleado", "turno", "sucursal").order_by("-fecha", "empleado__nombre")
+    if mes:
+        qs = qs.filter(fecha__startswith=mes)
+    if empleado_id.isdigit():
+        qs = qs.filter(empleado_id=int(empleado_id))
+    context = {
+        "module_tabs": _module_tabs("asistencias"),
+        "asistencias": qs[:500],
+        "empleados": Empleado.objects.filter(activo=True).order_by("nombre")[:1000],
+        "mes": mes,
+        "empleado_id": empleado_id,
+    }
+    return render(request, "rrhh/asistencias.html", context)
+
+
+@login_required
+def importar_checador(request):
+    if not can_manage_rrhh(request.user):
+        raise PermissionDenied("No tienes permisos para importar checador")
+
+    if request.method == "POST":
+        archivo = request.FILES.get("archivo")
+        fecha_inicio = _parse_date(request.POST.get("fecha_inicio"))
+        fecha_fin = _parse_date(request.POST.get("fecha_fin"))
+        if not archivo:
+            messages.error(request, "Selecciona un archivo Excel.")
+        elif not fecha_inicio or not fecha_fin:
+            messages.error(request, "Captura fecha inicio y fecha fin.")
+        else:
+            from .importers import importar_excel_hikconnect
+
+            resultado = importar_excel_hikconnect(archivo, request.user, fecha_inicio, fecha_fin)
+            messages.success(
+                request,
+                f"Importación completa: {resultado['procesados']} registros, {resultado['errores']} errores.",
+            )
+        return redirect("rrhh:rrhh_importar")
+
+    historial = ImportacionChecador.objects.order_by("-creado_en")[:10]
+    return render(
+        request,
+        "rrhh/importar_checador.html",
+        {"module_tabs": _module_tabs("asistencias"), "historial": historial},
+    )
+
+
+@login_required
+def horas_extra_list(request):
+    if not can_view_rrhh(request.user):
+        raise PermissionDenied("No tienes permisos para ver horas extra")
+
+    if request.method == "POST":
+        if not can_manage_rrhh(request.user):
+            raise PermissionDenied("No tienes permisos para autorizar horas extra")
+        he = get_object_or_404(HoraExtra, pk=request.POST.get("hora_extra_id"))
+        action = (request.POST.get("action") or "").strip()
+        if action == "autorizar":
+            he.estado = HoraExtra.ESTADO_AUTORIZADO
+            he.autorizado_por = request.user
+            from .services import calcular_monto_hora_extra
+
+            calcular_monto_hora_extra(he)
+            he.save(update_fields=["estado", "autorizado_por"])
+            messages.success(request, f"Hora extra autorizada para {he.empleado.nombre}.")
+        elif action == "rechazar":
+            he.estado = HoraExtra.ESTADO_RECHAZADO
+            he.autorizado_por = request.user
+            he.save(update_fields=["estado", "autorizado_por"])
+            messages.success(request, f"Hora extra rechazada para {he.empleado.nombre}.")
+        return redirect("rrhh:rrhh_he_list")
+
+    horas_extra = HoraExtra.objects.select_related("empleado", "autorizado_por").order_by("-fecha", "empleado__nombre")
+    columnas = [
+        ("pendiente", "Pendiente", horas_extra.filter(estado=HoraExtra.ESTADO_PENDIENTE)),
+        ("autorizado", "Autorizado", horas_extra.filter(estado=HoraExtra.ESTADO_AUTORIZADO)),
+        ("rechazado", "Rechazado", horas_extra.filter(estado=HoraExtra.ESTADO_RECHAZADO)),
+        ("pagado", "Pagado", horas_extra.filter(estado=HoraExtra.ESTADO_PAGADO)),
+    ]
+    return render(
+        request,
+        "rrhh/horas_extra_list.html",
+        {"module_tabs": _module_tabs("horas_extra"), "columnas": columnas, "can_manage_rrhh": can_manage_rrhh(request.user)},
+    )
+
+
+@login_required
+def permisos_list(request):
+    if not can_view_rrhh(request.user):
+        raise PermissionDenied("No tienes permisos para ver permisos")
+
+    if request.method == "POST":
+        if not can_manage_rrhh(request.user):
+            raise PermissionDenied("No tienes permisos para autorizar permisos")
+        permiso = get_object_or_404(PermisoSalida, pk=request.POST.get("permiso_id"))
+        action = (request.POST.get("action") or "").strip()
+        if action == "aprobar":
+            permiso.estado = PermisoSalida.ESTADO_APROBADO
+            permiso.autorizado_por = request.user
+            permiso.save(update_fields=["estado", "autorizado_por", "actualizado_en"])
+            messages.success(request, f"Permiso {permiso.folio} aprobado.")
+        elif action == "rechazar":
+            permiso.estado = PermisoSalida.ESTADO_RECHAZADO
+            permiso.autorizado_por = request.user
+            permiso.save(update_fields=["estado", "autorizado_por", "actualizado_en"])
+            messages.success(request, f"Permiso {permiso.folio} rechazado.")
+        return redirect("rrhh:rrhh_permisos_list")
+
+    permisos = PermisoSalida.objects.select_related("empleado", "autorizado_por").order_by("-creado_en")[:500]
+    return render(
+        request,
+        "rrhh/permisos_list.html",
+        {"module_tabs": _module_tabs("permisos"), "permisos": permisos, "can_manage_rrhh": can_manage_rrhh(request.user)},
+    )
+
+
+@login_required
+def pwa_capital_humano(request):
+    return render(request, "rrhh/pwa_capital_humano.html")
+
+
+@login_required
+def pwa_permisos(request):
+    return render(request, "rrhh/pwa_capital_humano.html", {"initial_section": "permisos"})
+
+
+@login_required
+def pwa_horas_extra(request):
+    return render(request, "rrhh/pwa_capital_humano.html", {"initial_section": "horas"})

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}RRHH · Permisos{% endblock %}
+{% block page_title %}RRHH · Permisos{% endblock %}
+
+{% block extra_css %}
+<style>
+  .ch-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 18px; }
+  .ch-table { width: 100%; border-collapse: collapse; }
+  .ch-table th, .ch-table td { border-bottom: 1px solid var(--rosa); padding: 10px; text-align: left; vertical-align: top; }
+  .ch-table th { color: var(--vino); font-size: 12px; text-transform: uppercase; }
+  .ch-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .ch-status { border-radius: 999px; background: var(--rosa); color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 800; padding: 4px 9px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="ch-card">
+  <table class="ch-table">
+    <thead>
+      <tr>
+        <th>Folio</th>
+        <th>Empleado</th>
+        <th>Tipo</th>
+        <th>Periodo</th>
+        <th>Motivo</th>
+        <th>Estado</th>
+        <th>Acción</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for permiso in permisos %}
+      <tr>
+        <td>{{ permiso.folio }}</td>
+        <td>{{ permiso.empleado.nombre }}</td>
+        <td>{{ permiso.get_tipo_display }}</td>
+        <td>{{ permiso.fecha_inicio|date:"Y-m-d H:i" }}{% if permiso.fecha_fin %}<br>{{ permiso.fecha_fin|date:"Y-m-d H:i" }}{% endif %}</td>
+        <td>{{ permiso.motivo }}</td>
+        <td><span class="ch-status">{{ permiso.get_estado_display }}</span></td>
+        <td>
+          {% if can_manage_rrhh and permiso.estado == "solicitado" %}
+          <form method="post" class="ch-actions">
+            {% csrf_token %}
+            <input type="hidden" name="permiso_id" value="{{ permiso.id }}">
+            <button class="btn btn-primary" type="submit" name="action" value="aprobar">Aprobar</button>
+            <button class="btn btn-secondary" type="submit" name="action" value="rechazar">Rechazar</button>
+          </form>
+          {% else %}
+            {{ permiso.autorizado_por|default:"-" }}
+          {% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="7">Sin permisos registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
