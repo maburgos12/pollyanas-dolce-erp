@@ -480,6 +480,7 @@ class LogisticaCargaCombustibleCreateSerializer(serializers.ModelSerializer):
 
 class LogisticaBitacoraSalidaCreateSerializer(serializers.ModelSerializer):
     nivel_gas_salida = serializers.CharField()
+    MAX_KM_SALTO_SALIDA = 1000
 
     class Meta:
         model = BitacoraSalidaLlegada
@@ -505,6 +506,31 @@ class LogisticaBitacoraSalidaCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Selecciona un nivel de gas válido.")
         return aliases[normalized]
 
+    def validate(self, attrs):
+        unidad = attrs.get("unidad")
+        km_salida = attrs.get("km_salida")
+        if unidad and km_salida is not None:
+            ultimo_turno = (
+                BitacoraSalidaLlegada.objects.filter(
+                    unidad=unidad,
+                    cerrada=True,
+                    km_llegada__isnull=False,
+                )
+                .order_by("-hora_llegada", "-id")
+                .first()
+            )
+            if ultimo_turno and ultimo_turno.km_llegada is not None:
+                ultimo_km = ultimo_turno.km_llegada
+                if km_salida < ultimo_km:
+                    raise serializers.ValidationError(
+                        f"El KM salida no puede ser menor al último cierre de la unidad ({ultimo_km})."
+                    )
+                if km_salida - ultimo_km > self.MAX_KM_SALTO_SALIDA:
+                    raise serializers.ValidationError(
+                        f"El KM salida parece demasiado alto. Último cierre: {ultimo_km}. Revisa el odómetro antes de iniciar turno."
+                    )
+        return attrs
+
     def create(self, validated_data):
         repartidor = self.context["repartidor"]
         unidad = validated_data.pop("unidad", None)
@@ -518,6 +544,8 @@ class LogisticaBitacoraSalidaCreateSerializer(serializers.ModelSerializer):
 
 
 class LogisticaBitacoraLlegadaSerializer(serializers.ModelSerializer):
+    MAX_KM_RECORRIDO_TURNO = 1000
+
     class Meta:
         model = BitacoraSalidaLlegada
         fields = [
@@ -537,6 +565,10 @@ class LogisticaBitacoraLlegadaSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("El nivel de gas de llegada es obligatorio.")
         if km_llegada is not None and self.instance and km_llegada < self.instance.km_salida:
             raise serializers.ValidationError("El kilometraje de llegada no puede ser menor al de salida.")
+        if km_llegada is not None and self.instance and km_llegada - self.instance.km_salida > self.MAX_KM_RECORRIDO_TURNO:
+            raise serializers.ValidationError(
+                f"El KM llegada parece demasiado alto. KM salida: {self.instance.km_salida}. Revisa el odómetro antes de cerrar turno."
+            )
         if not attrs.get("foto_tablero_llegada") and self.instance and not self.instance.foto_tablero_llegada:
             raise serializers.ValidationError("La foto del tablero de llegada es obligatoria.")
         carga_combustible = any(
