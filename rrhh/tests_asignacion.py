@@ -93,3 +93,5 @@ class RRHHAsignacionSucursalTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Asignación de personal")
+        self.assertContains(response, "Buscar empleado")
+        self.assertContains(response, "data-employee-search")
