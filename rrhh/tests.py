@@ -1,6 +1,6 @@
 from django.contrib.auth.models import Group, User
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from decimal import Decimal
@@ -8,7 +8,7 @@ from pathlib import Path
 from rest_framework.test import APIClient
 from unittest import SkipTest
 
-from rrhh.models import Empleado, NominaConceptoLinea, NominaImportacion, NominaPeriodo
+from rrhh.models import AsistenciaEmpleado, Empleado, NominaConceptoLinea, NominaImportacion, NominaPeriodo, Turno
 from rrhh.services.lista_raya import parse_lista_raya_xls
 
 
@@ -185,12 +185,66 @@ class CapitalHumanoAPITests(TestCase):
         self.user.groups.add(rrhh_group)
         self.client.force_login(self.user)
 
-        for url_name in ["rrhh_dashboard", "rrhh_prestamos_lista"]:
+        for url_name in ["rrhh_dashboard", "rrhh_prestamos_lista", "rrhh_monitor_sync"]:
             resp = self.client.get(reverse(f"rrhh:{url_name}"))
             self.assertEqual(resp.status_code, 200)
         resp = self.client.get(reverse("rrhh:rrhh_pwa"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Registrar horas extra")
+
+    @override_settings(ERP_PUBLIC_API_KEY="hik-test-key")
+    def test_receptor_hik_crea_y_actualiza_asistencia(self):
+        from datetime import time
+
+        empleado = Empleado.objects.create(nombre="Empleado Hik", codigo="2", salario_diario="400.00")
+        Turno.objects.create(nombre="Matutino", hora_entrada=time(8, 0), hora_salida=time(16, 0), tolerancia_minutos=10)
+
+        entrada = self.client.post(
+            reverse("rrhh:rrhh_receptor_hik"),
+            {
+                "eventos": [
+                    {
+                        "employee_no": "2",
+                        "name": "Empleado Hik",
+                        "attendance_status": "checkIn",
+                        "time": "2026-05-14T08:05:00-07:00",
+                        "serial_no": 9991,
+                    }
+                ]
+            },
+            format="json",
+            HTTP_X_API_KEY="hik-test-key",
+        )
+        self.assertEqual(entrada.status_code, 200)
+        self.assertEqual(entrada.json()["procesados"], 1)
+
+        salida = self.client.post(
+            reverse("rrhh:rrhh_receptor_hik"),
+            {
+                "eventos": [
+                    {
+                        "employee_no": "2",
+                        "name": "Empleado Hik",
+                        "attendance_status": "checkOut",
+                        "time": "2026-05-14T17:15:00-07:00",
+                        "serial_no": 9992,
+                    }
+                ]
+            },
+            format="json",
+            HTTP_X_API_KEY="hik-test-key",
+        )
+        self.assertEqual(salida.status_code, 200)
+        self.assertEqual(salida.json()["procesados"], 1)
+
+        asistencia = AsistenciaEmpleado.objects.get(empleado=empleado, fecha="2026-05-14")
+        self.assertEqual(asistencia.fuente, AsistenciaEmpleado.FUENTE_HIKCONNECT_API)
+        self.assertEqual(asistencia.minutos_trabajados, 550)
+        self.assertIsNotNone(asistencia.turno)
+
+    def test_receptor_hik_rechaza_sin_api_key(self):
+        resp = self.client.post(reverse("rrhh:rrhh_receptor_hik"), {"eventos": []}, format="json")
+        self.assertEqual(resp.status_code, 401)
 
 
 class RRHHViewsTests(TestCase):
@@ -449,9 +503,9 @@ class RRHHViewsTests(TestCase):
 class ListaRayaImportTests(TestCase):
     @classmethod
     def setUpClass(cls):
-        super().setUpClass()
         if not LISTA_RAYA_SAMPLE.exists():
             raise SkipTest("No está disponible el archivo real de lista de raya.")
+        super().setUpClass()
 
     def test_parser_cuadra_con_totales_generales(self):
         result = parse_lista_raya_xls(LISTA_RAYA_SAMPLE)

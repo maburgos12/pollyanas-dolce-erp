@@ -26,6 +26,7 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_erp
       SECRET_KEY: ci-secret-key-temporal
       DEBUG: "True"
+      APP_ENV: local
       ALLOWED_HOSTS: localhost,127.0.0.1
       TIME_ZONE: America/Mazatlan
     steps:
