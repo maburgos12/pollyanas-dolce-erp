@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bonos de ventas</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <style>
+    :root { --wine:#8b2252; --gold:#c9a84c; --ink:#29212a; --muted:#706676; --line:#e7dfe5; --bg:#fbf8fa; --ok:#13795b; --bad:#b42318; }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); background:var(--bg); font-family:Nunito,system-ui,sans-serif; }
+    header { position:sticky; top:0; z-index:10; display:flex; justify-content:space-between; gap:16px; align-items:center; padding:18px 24px; background:#fff; border-bottom:1px solid var(--line); }
+    h1 { margin:0; color:var(--wine); font-family:"Playfair Display",serif; font-size:clamp(24px,3vw,36px); letter-spacing:0; }
+    main { padding:18px 24px 32px; }
+    .row,.tabs,.chips { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    button { border:0; border-radius:8px; padding:10px 14px; background:var(--wine); color:#fff; font:inherit; font-weight:800; cursor:pointer; }
+    button.ghost { background:#fff; color:var(--ink); border:1px solid var(--line); }
+    button.active { background:var(--gold); color:#211a10; }
+    input,select,textarea { border:1px solid var(--line); border-radius:8px; padding:9px 10px; background:#fff; color:var(--ink); font:inherit; }
+    .panel { margin-top:14px; padding:16px; background:#fff; border:1px solid var(--line); border-radius:8px; }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    th,td { padding:10px 8px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+    .badge { display:inline-flex; border-radius:999px; padding:3px 8px; font-size:12px; font-weight:800; }
+    .ok { color:var(--ok); background:#e7f5ef; } .bad { color:var(--bad); background:#fdecea; }
+    .days { display:grid; grid-template-columns:repeat(auto-fit,minmax(135px,1fr)); gap:10px; }
+    .day { display:grid; gap:7px; padding:10px; border:1px solid var(--line); border-radius:8px; }
+    label { display:grid; gap:5px; color:var(--muted); font-weight:800; font-size:13px; }
+    .check { grid-template-columns:auto 1fr; align-items:center; color:var(--ink); }
+    .status { color:var(--muted); font-weight:800; }
+    @media (max-width:720px) { header { align-items:flex-start; flex-direction:column; } main { padding:14px; } .table { overflow-x:auto; } th,td { white-space:nowrap; } }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    const e = React.createElement;
+    const CATS = ["GRANDE","MEDIANO","CHICO","MINI","VELAS_ACCESORIOS","VASOS"];
+    const TODAY = new Date();
+    function api(path, options={}) {
+      const token = localStorage.getItem("pd_logistica_access");
+      const headers = Object.assign({"Content-Type":"application/json"}, options.headers || {});
+      if (token) headers.Authorization = `Bearer ${token}`;
+      return fetch(path, Object.assign({}, options, {headers})).then(async (response) => {
+        const text = await response.text();
+        const data = text ? JSON.parse(text) : null;
+        if (!response.ok) throw new Error(data?.detail || data?.error || "Error de API");
+        return data;
+      });
+    }
+    function money(v) { return Number(v || 0).toLocaleString("es-MX", {style:"currency", currency:"MXN"}); }
+    function badge(v) { return e("span", {className:`badge ${v ? "ok" : "bad"}`}, v ? "Pasa" : "No pasa"); }
+
+    function App() {
+      const [tab,setTab] = React.useState("config");
+      const [mes,setMes] = React.useState(TODAY.getMonth()+1);
+      const [anio,setAnio] = React.useState(TODAY.getFullYear());
+      const [periodo,setPeriodo] = React.useState(null);
+      const [bonos,setBonos] = React.useState([]);
+      const [ventas,setVentas] = React.useState([]);
+      const [sucursal,setSucursal] = React.useState("");
+      const [selected,setSelected] = React.useState(null);
+      const [registros,setRegistros] = React.useState([]);
+      const [status,setStatus] = React.useState("");
+
+      React.useEffect(() => { cargar(); }, [mes,anio]);
+      React.useEffect(() => { if (selected) cargarRegistros(selected.id); }, [selected?.id]);
+      const sucursales = Array.from(new Map(bonos.map(b => [b.sucursal, b.sucursal_nombre])).entries());
+
+      function cargar() {
+        setStatus("Cargando");
+        Promise.all([
+          api(`/api/bonos-ventas/periodos/?mes=${mes}&anio=${anio}`),
+          api(`/api/bonos-ventas/bonos/resumen/?mes=${mes}&anio=${anio}`).catch(() => ({bonos:[]})),
+          api(`/api/bonos-ventas/ventas-categoria/?periodo_mes=${mes}&periodo_anio=${anio}`).catch(() => []),
+        ]).then(([periodos,resumen,ventasResp]) => {
+          setPeriodo(periodos.results ? periodos.results[0] : periodos[0]);
+          setBonos(resumen.bonos || []);
+          setVentas(ventasResp.results || ventasResp);
+          setStatus("");
+        }).catch(err => setStatus(err.message));
+      }
+      function crearPeriodo() {
+        api("/api/bonos-ventas/periodos/", {method:"POST", body:JSON.stringify({mes:Number(mes), anio:Number(anio), dias_laborables:23})}).then(cargar).catch(err => setStatus(err.message));
+      }
+      function inicializar() {
+        if (!periodo) return;
+        api(`/api/bonos-ventas/periodos/${periodo.id}/inicializar-bonos/`, {method:"POST", body:"{}"}).then(cargar).catch(err => setStatus(err.message));
+      }
+      function syncPos() {
+        if (!periodo) return;
+        api("/api/bonos-ventas/ventas-categoria/sync-pos-bridge/", {method:"POST", body:JSON.stringify({periodo:periodo.id, sucursal:sucursal || undefined})}).then(cargar).catch(err => setStatus(err.message));
+      }
+      function cargarRegistros(id) {
+        api(`/api/bonos-ventas/registros-diarios/?bono=${id}`).then(rows => setRegistros(rows.results || rows)).catch(err => setStatus(err.message));
+      }
+      function guardarDia(dia, patch) {
+        const actual = registros.find(r => Number(r.dia) === dia);
+        const payload = Object.assign({bono:selected.id, dia, tiene_uniforme:true, tiene_puntualidad:true, tiene_asistencia:true, puntos_de_vista:""}, actual || {}, patch);
+        api(`/api/bonos-ventas/registros-diarios/${actual ? `${actual.id}/` : ""}`, {method:actual ? "PUT" : "POST", body:JSON.stringify(payload)}).then(() => { cargarRegistros(selected.id); cargar(); }).catch(err => setStatus(err.message));
+      }
+      function patchBono(id, patch) {
+        api(`/api/bonos-ventas/bonos/${id}/`, {method:"PATCH", body:JSON.stringify(patch)}).then(cargar).catch(err => setStatus(err.message));
+      }
+
+      const bonosSucursal = sucursal ? bonos.filter(b => String(b.sucursal) === String(sucursal)) : bonos;
+      return e("div", null,
+        e("header", null, e("div", null, e("h1", null, "Bonos de ventas"), e("div", {className:"status"}, status)), e("div", {className:"row"}, e("input", {type:"number", min:1, max:12, value:mes, onChange:ev=>setMes(ev.target.value)}), e("input", {type:"number", value:anio, onChange:ev=>setAnio(ev.target.value)}), e("button", {onClick:cargar}, "Actualizar"))),
+        e("main", null,
+          e("nav", {className:"tabs"}, [["config","Configuración"],["captura","Captura diaria"],["ventas","Ventas por categoría"],["resumen","Resumen mensual"],["ajustes","Ajustes"]].map(([id,label]) => e("button", {key:id, className:tab===id ? "active" : "ghost", onClick:()=>setTab(id)}, label))),
+          e("section", {className:"panel row"}, e("select", {value:sucursal, onChange:ev=>setSucursal(ev.target.value)}, e("option", {value:""}, "Todas las sucursales"), sucursales.map(([id,nombre]) => e("option", {key:id, value:id}, nombre))), periodo ? e("span", {className:"status"}, `Período ID ${periodo.id}`) : e("button", {onClick:crearPeriodo}, "Crear período"), periodo && e("button", {onClick:inicializar}, "Inicializar bonos")),
+          tab === "config" && e(ConfigPanel, {bonos:bonosSucursal}),
+          tab === "captura" && e(CapturaPanel, {bonos:bonosSucursal, selected, setSelected, registros, guardarDia}),
+          tab === "ventas" && e(VentasPanel, {ventas, syncPos}),
+          tab === "resumen" && e(ResumenPanel, {bonos:bonosSucursal}),
+          tab === "ajustes" && e(AjustesPanel, {bonos:bonosSucursal, patchBono})
+        )
+      );
+    }
+    function ConfigPanel({bonos}) { return table(["Empleado","Sucursal","Días","Asistencias","Total"], bonos.map(b => [b.empleado_nombre,b.sucursal_nombre,b.dias_trabajados,b.dias_asistencia,money(b.total_a_pagar)])); }
+    function CapturaPanel({bonos,selected,setSelected,registros,guardarDia}) { return e("section", {className:"panel"}, e("div", {className:"chips"}, bonos.map(b => e("button", {key:b.id, className:selected?.id===b.id ? "active" : "ghost", onClick:()=>setSelected(b)}, b.empleado_nombre))), selected && e("div", {className:"days"}, Array.from({length:31}, (_,i) => { const dia=i+1; const r=registros.find(x=>Number(x.dia)===dia)||{}; return e("div", {className:"day", key:dia}, e("strong", null, `Día ${dia}`), ["uniforme","puntualidad","asistencia"].map(k => e("label", {className:"check", key:k}, e("input", {type:"checkbox", checked:r[`tiene_${k}`]!==false, onChange:ev=>guardarDia(dia,{[`tiene_${k}`]:ev.target.checked})}), k)), e("textarea", {placeholder:"Puntos de vista", defaultValue:r.puntos_de_vista || "", onBlur:ev=>guardarDia(dia,{puntos_de_vista:ev.target.value})})); }))); }
+    function VentasPanel({ventas,syncPos}) { return e("section", {className:"panel"}, e("button", {onClick:syncPos}, "Sincronizar desde POS"), table(["Sucursal","Categoría","Anterior","Actual","%","Bono"], ventas.map(v => [v.sucursal_nombre,v.categoria,v.cantidad_anterior,v.cantidad_actual,`${v.pct_crecimiento}%`,money(v.monto_bono_categoria)]))); }
+    function ResumenPanel({bonos}) { return table(["Empleado","Sucursal","Asistencia","Uniforme","Puntualidad","Sub1","Bono ventas","Total"], bonos.map(b => [b.empleado_nombre,b.sucursal_nombre,badge(b.pasa_asistencia),badge(b.pasa_uniforme),badge(b.pasa_puntualidad),money(b.sub1),money(b.bono_ventas),money(b.total_a_pagar)])); }
+    function AjustesPanel({bonos,patchBono}) { return table(["Empleado","Ajuste +","Ajuste -","Bono extra","Total"], bonos.map(b => [b.empleado_nombre,e("input",{type:"number",defaultValue:b.ajuste_positivo,onBlur:ev=>patchBono(b.id,{ajuste_positivo:ev.target.value})}),e("input",{type:"number",defaultValue:b.ajuste_negativo,onBlur:ev=>patchBono(b.id,{ajuste_negativo:ev.target.value})}),e("input",{type:"number",defaultValue:b.bono_extra,onBlur:ev=>patchBono(b.id,{bono_extra:ev.target.value})}),money(b.total_a_pagar)])); }
+    function table(headers, rows) { return e("section", {className:"panel table"}, e("table", null, e("thead", null, e("tr", null, headers.map(h => e("th", {key:h}, h)))), e("tbody", null, rows.map((row,i) => e("tr", {key:i}, row.map((cell,j) => e("td", {key:j}, cell)))))); }
+    ReactDOM.createRoot(document.getElementById("root")).render(e(App));
+  </script>
+</body>
+</html>
