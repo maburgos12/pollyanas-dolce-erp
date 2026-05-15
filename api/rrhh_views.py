@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 
 from core.access import can_manage_rrhh, can_view_rrhh
 from core.audit import log_event
+from core.models import Sucursal
 from rrhh.models import Empleado, NominaLinea, NominaPeriodo
 
 from .rrhh_serializers import (
@@ -41,10 +42,19 @@ class RRHHEmpleadosView(_RRHHBaseView):
 
         q = (request.query_params.get("q") or "").strip()
         activo_raw = (request.query_params.get("activo") or "").strip().lower()
+        area = (request.query_params.get("area") or "").strip()
+        sucursal = (request.query_params.get("sucursal") or "").strip()
+        sin_sucursal = (request.query_params.get("sin_sucursal") or "").strip()
         limit = self._bounded_int(request.query_params.get("limit"), default=50, min_value=1, max_value=500)
         offset = self._bounded_int(request.query_params.get("offset"), default=0, min_value=0, max_value=100000)
 
         qs = Empleado.objects.all()
+        if area:
+            qs = qs.filter(area__iexact=area)
+        if sucursal:
+            qs = qs.filter(sucursal__iexact=sucursal)
+        if sin_sucursal == "1":
+            qs = qs.filter(Q(sucursal="") | Q(sucursal__isnull=True))
         if q:
             qs = qs.filter(
                 Q(nombre__icontains=q)
@@ -90,6 +100,75 @@ class RRHHEmpleadosView(_RRHHBaseView):
             },
         )
         return Response(RRHHEmpleadoSerializer(empleado).data, status=status.HTTP_201_CREATED)
+
+
+class RRHHEmpleadosSinAsignarView(_RRHHBaseView):
+    def get(self, request):
+        if not can_view_rrhh(request.user):
+            return Response({"detail": "No tienes permisos para consultar RRHH."}, status=status.HTTP_403_FORBIDDEN)
+
+        area = (request.query_params.get("area") or "").strip()
+        qs = Empleado.objects.filter(Q(sucursal="") | Q(sucursal__isnull=True))
+        if area:
+            qs = qs.filter(area__iexact=area)
+        else:
+            qs = qs.filter(area__in=["VENTAS", "PRODUCCION"])
+        rows = list(qs.order_by("area", "nombre", "id"))
+        return Response(
+            {
+                "count": len(rows),
+                "results": RRHHEmpleadoSerializer(rows, many=True).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class RRHHEmpleadoAsignarSucursalView(_RRHHBaseView):
+    AREAS_PRODUCCION = {"PRODUCCION", "HORNOS", "EMBETUNADO", "ARMADO", "CRUCERO"}
+
+    def patch(self, request, empleado_id: int):
+        if not can_manage_rrhh(request.user):
+            return Response({"detail": "No tienes permisos para editar RRHH."}, status=status.HTTP_403_FORBIDDEN)
+
+        empleado = get_object_or_404(Empleado, pk=empleado_id)
+        sucursal_nombre = (request.data.get("sucursal") or "").strip()
+        area_detalle = (request.data.get("area_detalle") or "").strip().upper()
+        update_fields = ["updated_at"]
+
+        if "sucursal" in request.data:
+            if sucursal_nombre:
+                sucursal = Sucursal.objects.filter(nombre__iexact=sucursal_nombre, activa=True).first()
+                if not sucursal:
+                    return Response(
+                        {"error": f"Sucursal '{sucursal_nombre}' no encontrada o inactiva"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                empleado.sucursal = sucursal.nombre
+            else:
+                empleado.sucursal = ""
+            update_fields.append("sucursal")
+
+        if area_detalle:
+            if area_detalle not in self.AREAS_PRODUCCION:
+                return Response(
+                    {"error": f"Área de producción '{area_detalle}' inválida"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            empleado.area = area_detalle
+            update_fields.append("area")
+
+        if update_fields == ["updated_at"]:
+            return Response({"error": "Se requiere sucursal o area_detalle."}, status=status.HTTP_400_BAD_REQUEST)
+
+        empleado.save(update_fields=update_fields)
+        log_event(
+            request.user,
+            "UPDATE",
+            "rrhh.Empleado",
+            str(empleado.id),
+            {"nombre": empleado.nombre, "sucursal": empleado.sucursal, "area": empleado.area},
+        )
+        return Response(RRHHEmpleadoSerializer(empleado).data, status=status.HTTP_200_OK)
 
 
 class RRHHNominasView(_RRHHBaseView):

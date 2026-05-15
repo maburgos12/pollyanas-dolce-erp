@@ -93,8 +93,10 @@ from .crm_views import (
     CRMPedidosView,
 )
 from .rrhh_views import (
+    RRHHEmpleadoAsignarSucursalView,
     RRHHDashboardView,
     RRHHEmpleadosView,
+    RRHHEmpleadosSinAsignarView,
     RRHHNominaLineasView,
     RRHHNominasView,
 )
@@ -305,6 +307,12 @@ urlpatterns = [
     path("crm/pedidos/", CRMPedidosView.as_view(), name="api_crm_pedidos"),
     path("crm/pedidos/<int:pedido_id>/seguimiento/", CRMPedidoSeguimientoView.as_view(), name="api_crm_pedido_seguimiento"),
     path("rrhh/dashboard/", RRHHDashboardView.as_view(), name="api_rrhh_dashboard"),
+    path("rrhh/empleados/sin-asignar/", RRHHEmpleadosSinAsignarView.as_view(), name="api_rrhh_empleados_sin_asignar"),
+    path(
+        "rrhh/empleados/<int:empleado_id>/asignar-sucursal/",
+        RRHHEmpleadoAsignarSucursalView.as_view(),
+        name="api_rrhh_empleado_asignar_sucursal",
+    ),
     path("rrhh/empleados/", RRHHEmpleadosView.as_view(), name="api_rrhh_empleados"),
     path("rrhh/nominas/", RRHHNominasView.as_view(), name="api_rrhh_nominas"),
     path("rrhh/nominas/<int:nomina_id>/lineas/", RRHHNominaLineasView.as_view(), name="api_rrhh_nomina_lineas"),
