@@ -2,6 +2,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from bonos_ventas.models import ConfigBonoVentasPeriodo, VentaCategoriaSucursal
 from bonos_ventas.services import sync_ventas_categorias
+from rrhh.models import Empleado
 
 
 class Command(BaseCommand):
@@ -28,3 +29,14 @@ class Command(BaseCommand):
                 f"{row.sucursal.nombre} / {row.categoria} / actual={row.cantidad_actual} / "
                 f"anterior={row.cantidad_anterior} / pct={row.pct_crecimiento} / activo={row.activo_bono}"
             )
+
+        sin_sucursal = Empleado.objects.filter(area="VENTAS", sucursal="")
+        if sin_sucursal.exists():
+            self.stdout.write(
+                self.style.WARNING(
+                    f"\nADVERTENCIA: {sin_sucursal.count()} empleado(s) de VENTAS sin sucursal asignada - "
+                    "no tendrán bono inicializado hasta que se cargue Empleado.sucursal"
+                )
+            )
+            for empleado in sin_sucursal.order_by("nombre"):
+                self.stdout.write(f"   - {empleado.nombre}")

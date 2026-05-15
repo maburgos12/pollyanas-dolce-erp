@@ -11,7 +11,6 @@ from core.models import Sucursal
 from rrhh.models import Empleado, NominaPeriodo
 
 from .models import (
-    SUCURSALES_EXCLUIDAS_VENTAS,
     BonoVentasEmpleado,
     ConfigBonoVentasPeriodo,
     RegistroDiarioVentas,
@@ -25,10 +24,6 @@ from .serializers import (
     VentaCategoriaSucursalSerializer,
 )
 from .services import sync_ventas_categorias
-
-
-def _sucursales_ventas():
-    return Sucursal.objects.filter(activa=True).exclude(nombre__in=SUCURSALES_EXCLUIDAS_VENTAS)
 
 
 def _recalcular_desde_registros(bono: BonoVentasEmpleado) -> None:
@@ -62,22 +57,34 @@ class ConfigBonoVentasPeriodoViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="inicializar-bonos")
     def inicializar_bonos(self, request, pk=None):
         periodo = self.get_object()
-        sucursales = list(_sucursales_ventas())
-        sucursal_by_name = {s.nombre.lower(): s for s in sucursales}
-        empleados = Empleado.objects.filter(activo=True, sucursal__in=[s.nombre for s in sucursales])
+        empleados = Empleado.objects.filter(activo=True, area="VENTAS")
         creados = 0
+        sin_sucursal = []
         for empleado in empleados:
-            sucursal = sucursal_by_name.get((empleado.sucursal or "").lower())
-            if not sucursal:
+            sucursal_nombre = (empleado.sucursal or "").strip()
+            if not sucursal_nombre:
+                sin_sucursal.append(empleado.nombre)
+                continue
+            try:
+                sucursal_obj = Sucursal.objects.get(nombre__iexact=sucursal_nombre, activa=True)
+            except Sucursal.DoesNotExist:
+                sin_sucursal.append(f"{empleado.nombre} (sucursal desconocida: {sucursal_nombre!r})")
                 continue
             _, created = BonoVentasEmpleado.objects.get_or_create(
                 periodo=periodo,
                 empleado=empleado,
-                defaults={"sucursal": sucursal},
+                defaults={"sucursal": sucursal_obj},
             )
             if created:
                 creados += 1
-        return Response({"creados": creados, "total": empleados.count()}, status=status.HTTP_200_OK)
+        return Response(
+            {
+                "creados": creados,
+                "total_ventas": empleados.count(),
+                "sin_sucursal": sin_sucursal,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=["post"], url_path="aplicar-a-nomina")
     def aplicar_a_nomina(self, request, pk=None):
