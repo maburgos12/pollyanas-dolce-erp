@@ -12,6 +12,7 @@ from rrhh.models import Empleado, NominaPeriodo
 
 from .models import (
     AREA_EMBETUNADO,
+    AREA_HORNOS,
     AREAS_PRODUCCION,
     BonoProduccionEmpleado,
     ConfigBonoPeriodo,
@@ -60,13 +61,16 @@ class ConfigBonoPeriodoViewSet(viewsets.ModelViewSet):
     def inicializar_bonos(self, request, pk=None):
         periodo = self.get_object()
         areas_validas = {code for code, _ in AREAS_PRODUCCION}
-        empleados = Empleado.objects.filter(activo=True, sucursal__iexact="Matriz")
+        empleados = Empleado.objects.filter(
+            activo=True,
+            area__in=[*areas_validas, "PRODUCCION"],
+        )
         creados = 0
         considerados = 0
         for empleado in empleados:
             area = normalizar_area_produccion(empleado.area)
             if area not in areas_validas:
-                continue
+                area = AREA_HORNOS
             considerados += 1
             _, created = BonoProduccionEmpleado.objects.get_or_create(
                 periodo=periodo,
