@@ -586,6 +586,9 @@ class LavadoUnidad(models.Model):
     unidad = models.ForeignKey(Unidad, on_delete=models.PROTECT, related_name="lavados")
     fecha = models.DateField()
     tipo_lavado = models.CharField(max_length=30, choices=TIPO_LAVADO_CHOICES, default=TIPO_COMPLETO)
+    lavado_exterior = models.BooleanField(default=False)
+    lavado_interior = models.BooleanField(default=False)
+    lavado_caja_refrigerada = models.BooleanField(default=False)
     costo = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     foto_evidencia = models.ImageField(upload_to="lavados_unidad/", null=True, blank=True)
     registrado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True)
@@ -602,6 +605,29 @@ class LavadoUnidad(models.Model):
 
     def __str__(self) -> str:
         return f"{self.unidad.codigo} · {self.fecha:%Y-%m-%d}"
+
+    @property
+    def partes_lavadas(self) -> list[str]:
+        partes = []
+        if self.lavado_exterior:
+            partes.append("Exterior")
+        if self.lavado_interior:
+            partes.append("Interior")
+        if self.lavado_caja_refrigerada:
+            partes.append("Caja refrigerada")
+        if partes:
+            return partes
+        legacy = {
+            self.TIPO_EXTERIOR: ["Exterior"],
+            self.TIPO_INTERIOR: ["Interior"],
+            self.TIPO_CAJA_REFRIGERADA: ["Caja refrigerada"],
+            self.TIPO_COMPLETO: ["Exterior", "Interior", "Caja refrigerada"],
+        }
+        return legacy.get(self.tipo_lavado, [])
+
+    @property
+    def partes_lavadas_display(self) -> str:
+        return ", ".join(self.partes_lavadas) or "-"
 
 
 class ReparacionUnidad(models.Model):

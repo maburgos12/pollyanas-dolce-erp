@@ -1072,11 +1072,10 @@
         { icon: "🔋", label: "Lleno", value: "lleno" }
       ];
 
-      const tiposLavado = [
-        { icon: "🚐", label: "Exterior", value: "exterior" },
-        { icon: "🪑", label: "Interior", value: "interior" },
-        { icon: "❄️", label: "Caja refrigerada", value: "caja_refrigerada" },
-        { icon: "✅", label: "Completo", value: "completo" }
+      const partesLavado = [
+        { icon: "🚐", label: "Exterior", field: "lavado_exterior" },
+        { icon: "🪑", label: "Interior", field: "lavado_interior" },
+        { icon: "❄️", label: "Caja refrigerada", field: "lavado_caja_refrigerada" }
       ];
 
       const inspeccionDiariaSecciones = [
@@ -2062,7 +2061,9 @@
         if (!state.lavadoDraft) {
           state.lavadoDraft = {
             unidad: "",
-            tipo_lavado: "completo",
+            lavado_exterior: false,
+            lavado_interior: false,
+            lavado_caja_refrigerada: false,
             costo: "",
             notas: "",
             foto_evidencia: null,
@@ -2089,8 +2090,9 @@
         setLivePhoto(input, ensureLavadoDraft(), "foto_evidencia", "fotoLavadoPreview", renderLavadoUnidad, "fotoLavadoError");
       }
 
-      function selectTipoLavado(value) {
-        ensureLavadoDraft().tipo_lavado = value;
+      function toggleParteLavado(field) {
+        const draft = ensureLavadoDraft();
+        draft[field] = !draft[field];
         renderLavadoUnidad();
       }
 
@@ -2110,7 +2112,12 @@
 
       function puedeGuardarLavado() {
         const draft = ensureLavadoDraft();
-        return Boolean(draft.unidad && draft.tipo_lavado && draft.foto_evidencia && isGeoReady(draft) && !draft.guardando);
+        const tieneParte = draft.lavado_exterior || draft.lavado_interior || draft.lavado_caja_refrigerada;
+        return Boolean(draft.unidad && tieneParte && draft.foto_evidencia && isGeoReady(draft) && !draft.guardando);
+      }
+
+      function partesLavadoSeleccionadas(draft) {
+        return partesLavado.filter((parte) => draft[parte.field]).map((parte) => parte.label);
       }
 
       function renderEstadoLavado(draft) {
@@ -2143,7 +2150,7 @@
         render(shell(`
           <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
           <h1 class="screen-title" style="margin-top:16px;">Lavado de unidad</h1>
-          <p class="unit-line">Registra exterior, interior, caja refrigerada o lavado completo.</p>
+          <p class="unit-line">Selecciona las partes que se lavaron. Puedes marcar más de una.</p>
           ${message ? `<p class="${isError ? "error" : "success"}">${escapeHtml(message)}</p>` : ""}
           <div class="${ubicacionLista ? "" : "gps-locked"}">
             <section class="card report-card">
@@ -2156,14 +2163,15 @@
               </div>
               ${renderEstadoLavado(draft)}
               <div class="field">
-                <label>Tipo de lavado</label>
+                <label>Partes lavadas</label>
                 <div class="card-grid">
-                  ${tiposLavado.map((tipo) => `
-                    <button type="button" class="option-card ${draft.tipo_lavado === tipo.value ? "selected" : ""}" onclick="selectTipoLavado('${tipo.value}')">
-                      <span>${tipo.icon}</span><br>${tipo.label}
+                  ${partesLavado.map((parte) => `
+                    <button type="button" class="option-card ${draft[parte.field] ? "selected" : ""}" onclick="toggleParteLavado('${parte.field}')">
+                      <span>${parte.icon}</span><br>${parte.label}
                     </button>
                   `).join("")}
                 </div>
+                <p class="muted">${partesLavadoSeleccionadas(draft).length ? `Seleccionado: ${escapeHtml(partesLavadoSeleccionadas(draft).join(", "))}` : "Marca al menos una parte."}</p>
               </div>
               <div class="field">
                 <label for="costo_lavado">Importe del lavado</label>
@@ -2204,7 +2212,9 @@
         renderLavadoUnidad();
         const payload = new FormData();
         payload.append("unidad", draft.unidad);
-        payload.append("tipo_lavado", draft.tipo_lavado);
+        payload.append("lavado_exterior", draft.lavado_exterior ? "true" : "false");
+        payload.append("lavado_interior", draft.lavado_interior ? "true" : "false");
+        payload.append("lavado_caja_refrigerada", draft.lavado_caja_refrigerada ? "true" : "false");
         if (draft.costo) payload.append("costo", draft.costo);
         payload.append("foto_evidencia", draft.foto_evidencia);
         payload.append("latitud", draft.latitud);
@@ -2222,7 +2232,7 @@
           <section class="confirm">
             <div class="check">✅</div>
             <h1 class="screen-title">Lavado registrado</h1>
-            <p class="unit-line">${escapeHtml(lavado.unidad_codigo || "")} · ${escapeHtml(lavado.tipo_lavado_display || lavado.tipo_lavado || "")}</p>
+            <p class="unit-line">${escapeHtml(lavado.unidad_codigo || "")} · ${escapeHtml(lavado.partes_lavadas_display || "")}</p>
             <button class="primary-btn" onclick="showScreen('dashboard')">Volver al inicio</button>
           </section>
         `));

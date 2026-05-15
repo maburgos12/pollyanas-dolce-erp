@@ -147,7 +147,7 @@ class LogisticaReportesApiTests(TestCase):
         self.assertIn("lavado_hoy", response.data)
         self.assertIn("dias_sin_lavar", response.data)
 
-    def test_repartidor_registra_lavado_con_tipo_caja_refrigerada_importe_y_foto(self):
+    def test_repartidor_registra_lavado_con_varias_partes_importe_y_foto(self):
         self._auth(self._jwt_for("repartidor.api"))
         foto = SimpleUploadedFile("lavado.jpg", b"fake-image", content_type="image/jpeg")
 
@@ -155,10 +155,11 @@ class LogisticaReportesApiTests(TestCase):
             reverse("api_logistica_lavados"),
             {
                 "unidad": self.unidad.id,
-                "tipo_lavado": "caja_refrigerada",
+                "lavado_exterior": "true",
+                "lavado_caja_refrigerada": "true",
                 "costo": "180.50",
                 "foto_evidencia": foto,
-                "notas": "Lavado de caja refrigerada.",
+                "notas": "Lavado exterior y caja refrigerada.",
                 "latitud": "25.567890",
                 "longitud": "-108.456789",
             },
@@ -168,7 +169,27 @@ class LogisticaReportesApiTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         lavado = LavadoUnidad.objects.get(unidad=self.unidad)
-        self.assertEqual(lavado.tipo_lavado, "caja_refrigerada")
+        self.assertTrue(lavado.lavado_exterior)
+        self.assertFalse(lavado.lavado_interior)
+        self.assertTrue(lavado.lavado_caja_refrigerada)
+        self.assertEqual(response.data["partes_lavadas"], ["Exterior", "Caja refrigerada"])
         self.assertEqual(str(lavado.costo), "180.50")
         self.assertEqual(lavado.ip_registro, "10.10.10.10")
         self.assertTrue(lavado.foto_evidencia.name)
+
+    def test_repartidor_no_registra_lavado_sin_partes(self):
+        self._auth(self._jwt_for("repartidor.api"))
+        foto = SimpleUploadedFile("lavado.jpg", b"fake-image", content_type="image/jpeg")
+
+        response = self.client.post(
+            reverse("api_logistica_lavados"),
+            {
+                "unidad": self.unidad.id,
+                "costo": "180.50",
+                "foto_evidencia": foto,
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(LavadoUnidad.objects.filter(unidad=self.unidad).exists())

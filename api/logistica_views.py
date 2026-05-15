@@ -611,7 +611,7 @@ class LogisticaLavadoUnidadView(_LogisticaBaseView):
             str(lavado.id),
             {
                 "unidad": lavado.unidad.codigo,
-                "tipo_lavado": lavado.tipo_lavado,
+                "partes_lavadas": lavado.partes_lavadas,
                 "costo": str(lavado.costo) if lavado.costo is not None else "",
             },
         )

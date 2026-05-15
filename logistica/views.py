@@ -1802,7 +1802,9 @@ def unidad_lavado_nuevo(request, pk):
         LavadoUnidad.objects.create(
             unidad=unidad,
             fecha=_parse_date(request.POST.get("fecha")) or timezone.localdate(),
-            tipo_lavado=request.POST.get("tipo_lavado") or LavadoUnidad.TIPO_COMPLETO,
+            lavado_exterior=bool(request.POST.get("lavado_exterior")),
+            lavado_interior=bool(request.POST.get("lavado_interior")),
+            lavado_caja_refrigerada=bool(request.POST.get("lavado_caja_refrigerada")),
             costo=_parse_decimal(request.POST.get("costo")) if request.POST.get("costo") else None,
             foto_evidencia=request.FILES.get("foto_evidencia"),
             notas=(request.POST.get("notas") or "").strip(),
