@@ -2,7 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import Client, TestCase
 
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointDailySale, PointProduct
@@ -13,6 +13,47 @@ from .services import sync_ventas_categorias
 
 
 class BonosVentasTests(TestCase):
+    def test_pwa_usa_sesion_django_y_expone_csrf(self):
+        user = get_user_model().objects.create_user(username="pwa-ventas")
+        self.client.force_login(user)
+
+        response = self.client.get("/bonos-ventas/app/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("csrftoken", response.cookies)
+        content = response.content.decode()
+        self.assertIn("credentials:'same-origin'", content)
+        self.assertIn("/bonos-ventas/manifest.json", content)
+        self.assertIn("/bonos-ventas/sw.js", content)
+        self.assertNotIn("pd_logistica_access", content)
+
+    def test_manifest_y_service_worker_de_ventas_sirven_con_content_type_correcto(self):
+        manifest = self.client.get("/bonos-ventas/manifest.json")
+        sw = self.client.get("/bonos-ventas/sw.js")
+
+        self.assertEqual(manifest.status_code, 200)
+        self.assertEqual(manifest["Content-Type"], "application/manifest+json")
+        self.assertEqual(manifest.json()["start_url"], "/bonos-ventas/app/")
+        self.assertEqual(sw.status_code, 200)
+        self.assertIn("application/javascript", sw["Content-Type"])
+        self.assertIn("pollyanas-bonos-ventas-pwa", sw.content.decode())
+
+    def test_api_ventas_acepta_post_con_sesion_y_csrf(self):
+        client = Client(enforce_csrf_checks=True)
+        user = get_user_model().objects.create_user(username="csrf-ventas")
+        client.force_login(user)
+        client.get("/bonos-ventas/app/")
+        csrf_token = client.cookies["csrftoken"].value
+
+        response = client.post(
+            "/api/bonos-ventas/periodos/",
+            {"mes": 2, "anio": 2098, "dias_laborables": 23},
+            content_type="application/json",
+            HTTP_X_CSRFTOKEN=csrf_token,
+        )
+
+        self.assertEqual(response.status_code, 201)
+
     def test_recalcular_presentacion_usa_dias_trabajados_como_base(self):
         sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
         empleado = Empleado.objects.create(nombre="Empleado Ventas", area="VENTAS")

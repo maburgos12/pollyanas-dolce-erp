@@ -1,144 +1,684 @@
 <!doctype html>
 <html lang="es">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Bonos de ventas</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <style>
-    :root { --wine:#8b2252; --gold:#c9a84c; --ink:#29212a; --muted:#706676; --line:#e7dfe5; --bg:#fbf8fa; --ok:#13795b; --bad:#b42318; }
-    * { box-sizing:border-box; }
-    body { margin:0; color:var(--ink); background:var(--bg); font-family:Nunito,system-ui,sans-serif; }
-    header { position:sticky; top:0; z-index:10; display:flex; justify-content:space-between; gap:16px; align-items:center; padding:18px 24px; background:#fff; border-bottom:1px solid var(--line); }
-    h1 { margin:0; color:var(--wine); font-family:"Playfair Display",serif; font-size:clamp(24px,3vw,36px); letter-spacing:0; }
-    main { padding:18px 24px 32px; }
-    .row,.tabs,.chips { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    button { border:0; border-radius:8px; padding:10px 14px; background:var(--wine); color:#fff; font:inherit; font-weight:800; cursor:pointer; }
-    button.ghost { background:#fff; color:var(--ink); border:1px solid var(--line); }
-    button.active { background:var(--gold); color:#211a10; }
-    input,select,textarea { border:1px solid var(--line); border-radius:8px; padding:9px 10px; background:#fff; color:var(--ink); font:inherit; }
-    .panel { margin-top:14px; padding:16px; background:#fff; border:1px solid var(--line); border-radius:8px; }
-    table { width:100%; border-collapse:collapse; font-size:14px; }
-    th,td { padding:10px 8px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
-    th { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
-    .badge { display:inline-flex; border-radius:999px; padding:3px 8px; font-size:12px; font-weight:800; }
-    .ok { color:var(--ok); background:#e7f5ef; } .bad { color:var(--bad); background:#fdecea; }
-    .days { display:grid; grid-template-columns:repeat(auto-fit,minmax(135px,1fr)); gap:10px; }
-    .day { display:grid; gap:7px; padding:10px; border:1px solid var(--line); border-radius:8px; }
-    label { display:grid; gap:5px; color:var(--muted); font-weight:800; font-size:13px; }
-    .check { grid-template-columns:auto 1fr; align-items:center; color:var(--ink); }
-    .status { color:var(--muted); font-weight:800; }
-    @media (max-width:720px) { header { align-items:flex-start; flex-direction:column; } main { padding:14px; } .table { overflow-x:auto; } th,td { white-space:nowrap; } }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bonos de Ventas — Pollyana's Dolce</title>
+<link rel="manifest" href="/bonos-ventas/manifest.json">
+<meta name="theme-color" content="#8B2252">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bonos Ventas">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:ital,wght@0,700;1,400&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<style>
+:root{
+  --wine:#8B2252;--wine-light:rgba(139,34,82,.08);--wine-mid:rgba(139,34,82,.15);
+  --gold:#C9A84C;--gold-light:rgba(201,168,76,.12);
+  --ink:#1C1520;--sub:#6B5F70;--faint:#B8ADBE;
+  --line:#EDE6F0;--bg:#F9F5F8;--card:#FFFFFF;
+  --ok:#166534;--ok-bg:#DCFCE7;--bad:#991B1B;--bad-bg:#FEE2E2;
+  --warn:#92400E;--warn-bg:#FEF3C7;
+  --r:10px;--r-sm:6px;--sh:0 1px 3px rgba(0,0,0,.07),0 1px 2px rgba(0,0,0,.04);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:Nunito,sans-serif;font-size:14px;line-height:1.5}
+/* HEADER */
+.hdr{position:sticky;top:0;z-index:20;background:var(--card);border-bottom:1px solid var(--line);padding:12px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.hdr-brand{display:flex;align-items:center;gap:10px;flex:1;min-width:200px}
+.hdr-icon{width:36px;height:36px;border-radius:50%;background:var(--wine);display:flex;align-items:center;justify-content:center;flex:none}
+.hdr-icon svg{width:18px;height:18px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.hdr-title{font-family:"Playfair Display",serif;font-size:20px;color:var(--wine);line-height:1.1}
+.hdr-sub{font-size:11px;color:var(--sub);margin-top:1px}
+.hdr-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.hdr-controls input[type=number]{width:60px;padding:6px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font:inherit;font-size:13px;color:var(--ink);background:var(--bg);text-align:center}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:var(--r-sm);font:inherit;font-size:13px;font-weight:700;cursor:pointer;border:none;transition:opacity .15s,background .15s}
+.btn-wine{background:var(--wine);color:#fff}.btn-wine:hover{opacity:.88}
+.btn-ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}.btn-ghost:hover{background:var(--line)}
+.btn-gold{background:var(--gold);color:#1C1520}.btn-gold:hover{opacity:.88}
+.btn-sm{padding:5px 10px;font-size:12px}
+/* STATUS BAR */
+.status-bar{background:var(--wine);color:#fff;font-size:12px;font-weight:700;padding:6px 20px;display:flex;align-items:center;gap:8px}
+.status-bar.ok{background:#166534}.status-bar.err{background:#991B1B}
+/* TABS */
+.tabs-wrap{background:var(--card);border-bottom:1px solid var(--line);padding:0 20px;display:flex;gap:0;overflow-x:auto}
+.tab-btn{padding:12px 16px;font:inherit;font-size:13px;font-weight:700;color:var(--sub);background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap;transition:all .15s}
+.tab-btn:hover{color:var(--wine)}
+.tab-btn.on{color:var(--wine);border-bottom-color:var(--wine)}
+/* MAIN */
+main{padding:20px;max-width:1100px;margin:0 auto}
+/* PERIODO BAR */
+.periodo-bar{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px;box-shadow:var(--sh)}
+.periodo-label{font-size:12px;color:var(--sub);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.periodo-id{font-size:13px;font-weight:800;color:var(--wine);background:var(--wine-light);padding:3px 10px;border-radius:999px}
+/* CARDS MÉTRICAS */
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px}
+.metric-card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;box-shadow:var(--sh)}
+.metric-card .lbl{font-size:11px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+.metric-card .val{font-size:22px;font-weight:800;color:var(--ink);line-height:1}
+.metric-card .val.wine{color:var(--wine)}
+.metric-card .val.gold{color:var(--gold)}
+/* CHIPS */
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.chip{padding:6px 14px;border-radius:999px;border:1px solid var(--line);font:inherit;font-size:13px;font-weight:700;cursor:pointer;background:var(--card);color:var(--sub);transition:all .15s}
+.chip:hover{border-color:var(--wine);color:var(--wine)}
+.chip.on{background:var(--wine);color:#fff;border-color:var(--wine)}
+/* CARD */
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh);overflow:hidden;margin-bottom:16px}
+.card-hdr{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px}
+.card-hdr-title{font-size:13px;font-weight:800;color:var(--ink);text-transform:uppercase;letter-spacing:.05em}
+.card-body{padding:16px 18px}
+/* TABLA */
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{padding:8px 12px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--sub);border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--bg)}
+/* BADGES */
+.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:800}
+.badge.ok{background:var(--ok-bg);color:var(--ok)}
+.badge.bad{background:var(--bad-bg);color:var(--bad)}
+.badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.suc{background:var(--wine-light);color:var(--wine)}
+/* AVATAR */
+.av{width:32px;height:32px;border-radius:50%;background:var(--wine);color:#fff;font-size:11px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;flex:none}
+/* PERSONA ROW */
+.persona-row{display:flex;align-items:center;gap:10px}
+.persona-name{font-weight:700;font-size:13px}
+.persona-sub{font-size:11px;color:var(--sub)}
+/* GRID DÍAS */
+.days-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:16px}
+.day-cell{aspect-ratio:1;border-radius:6px;border:1px solid var(--line);background:var(--bg);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--faint);transition:all .12s;position:relative}
+.day-cell:hover{border-color:var(--wine);color:var(--wine)}
+.day-cell.worked{background:var(--wine);border-color:var(--wine);color:#fff}
+.day-cell.dom{opacity:.35;cursor:default;pointer-events:none}
+.day-cell .dn{font-size:13px;font-weight:800}
+.day-cell .ds{font-size:9px;margin-top:1px}
+/* CONCEPTOS */
+.concepto-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+.concepto-row:last-child{border-bottom:none}
+.toggle-btn{width:26px;height:26px;border-radius:6px;border:1px solid var(--line);background:var(--bg);cursor:pointer;display:flex;align-items:center;justify-content:center;flex:none;transition:all .12s}
+.toggle-btn.on{background:var(--wine);border-color:var(--wine)}
+.toggle-btn svg{width:13px;height:13px;stroke:#fff;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;fill:none}
+.concepto-lbl{flex:1;font-size:13px;font-weight:600;color:var(--ink)}
+/* VENTAS CAT */
+.cat-row{display:grid;grid-template-columns:1fr 90px 90px 80px 80px;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.cat-row:last-child{border-bottom:none}
+.cat-row input[type=number]{width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font:inherit;font-size:13px;text-align:right}
+.cat-row input.activo{border-color:var(--ok)}
+/* AJUSTE INPUT */
+.aj-input{width:90px;padding:5px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font:inherit;font-size:13px;text-align:right}
+/* NOTAS */
+.nota-input{width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font:inherit;font-size:12px;resize:none}
+/* SECTION TITLE */
+.sec-title{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--sub);margin-bottom:10px}
+/* DIVIDER */
+.div{height:1px;background:var(--line);margin:14px 0}
+/* EMPTY */
+.empty{text-align:center;padding:40px 20px;color:var(--faint);font-size:13px;font-weight:700}
+/* TOTAL ROW */
+.total-row td{font-weight:800;background:var(--bg);border-top:2px solid var(--line)}
+/* RESUMEN CARD */
+.res-sucursal{font-weight:800;color:var(--wine);font-size:12px;text-transform:uppercase;letter-spacing:.04em;padding:12px 18px 4px;border-top:2px solid var(--wine-light)}
+.res-sucursal:first-child{border-top:none}
+/* SELECTOR PERSONA */
+.persona-selector{display:flex;align-items:center;gap:8px;padding:10px;border:1px solid var(--line);border-radius:var(--r-sm);cursor:pointer;transition:all .12s;margin-bottom:6px}
+.persona-selector:hover{border-color:var(--wine);background:var(--wine-light)}
+.persona-selector.on{border-color:var(--wine);background:var(--wine-light)}
+/* RESPONSIVE */
+@media(max-width:700px){
+  .hdr{padding:10px 14px}
+  main{padding:14px}
+  .metrics{grid-template-columns:1fr 1fr}
+  .cat-row{grid-template-columns:1fr 70px 70px 60px 60px;font-size:12px}
+}
+</style>
 </head>
 <body>
-  <div id="root"></div>
-  <script>
-    const e = React.createElement;
-    const CATS = ["GRANDE","MEDIANO","CHICO","MINI","VELAS_ACCESORIOS","VASOS"];
-    const TODAY = new Date();
-    function api(path, options={}) {
-      const token = localStorage.getItem("pd_logistica_access");
-      const headers = Object.assign({"Content-Type":"application/json"}, options.headers || {});
-      if (token) headers.Authorization = `Bearer ${token}`;
-      return fetch(path, Object.assign({}, options, {headers})).then(async (response) => {
-        const text = await response.text();
-        const data = text ? JSON.parse(text) : null;
-        if (!response.ok) throw new Error(data?.detail || data?.error || "Error de API");
-        return data;
-      });
+<div id="root"></div>
+<script>
+const h = React.createElement;
+const TODAY = new Date();
+const MESES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const CATS_LABELS = {GRANDE:'Grande',MEDIANO:'Mediano',CHICO:'Chico',MINI:'Mini',VELAS_ACCESORIOS:'Velas/Accesorios',VASOS:'Vasos'};
+const CATS = Object.keys(CATS_LABELS);
+
+function api(path, opts={}) {
+  const csrfMatch = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+  const headers = {'Content-Type':'application/json', 'X-CSRFToken': csrfMatch ? decodeURIComponent(csrfMatch[1]) : '', ...(opts.headers||{})};
+  return fetch(path, {...opts, headers, credentials:'same-origin'}).then(async r => {
+    if (r.status === 403 || r.status === 401) {
+      window.location.href = '/login/?next=' + encodeURIComponent(window.location.pathname);
+      return null;
     }
-    function money(v) { return Number(v || 0).toLocaleString("es-MX", {style:"currency", currency:"MXN"}); }
-    function badge(v) { return e("span", {className:`badge ${v ? "ok" : "bad"}`}, v ? "Pasa" : "No pasa"); }
+    const t = await r.text();
+    const d = t ? JSON.parse(t) : null;
+    if (!r.ok) throw new Error(d?.detail || d?.error || `Error ${r.status}`);
+    return d;
+  });
+}
+function money(v){ return Number(v||0).toLocaleString('es-MX',{style:'currency',currency:'MXN'}); }
+function initials(n){ return (n||'').split(' ').filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase(); }
+function esDom(d,m,a){ return new Date(a,m-1,d).getDay()===0; }
+function diasEnMes(m,a){ return new Date(a,m,0).getDate(); }
 
-    function App() {
-      const [tab,setTab] = React.useState("config");
-      const [mes,setMes] = React.useState(TODAY.getMonth()+1);
-      const [anio,setAnio] = React.useState(TODAY.getFullYear());
-      const [periodo,setPeriodo] = React.useState(null);
-      const [bonos,setBonos] = React.useState([]);
-      const [ventas,setVentas] = React.useState([]);
-      const [sucursal,setSucursal] = React.useState("");
-      const [selected,setSelected] = React.useState(null);
-      const [registros,setRegistros] = React.useState([]);
-      const [status,setStatus] = React.useState("");
+// SVG icons inline
+const IconCheck = () => h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2.5,strokeLinecap:'round',strokeLinejoin:'round',style:{width:13,height:13}},h('polyline',{points:'20 6 9 17 4 12'}));
+const IconStore = () => h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'#fff',strokeWidth:2,strokeLinecap:'round',strokeLinejoin:'round',style:{width:18,height:18}},h('path',{d:'M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z'}),h('polyline',{points:'9 22 9 12 15 12 15 22'}));
 
-      React.useEffect(() => { cargar(); }, [mes,anio]);
-      React.useEffect(() => { if (selected) cargarRegistros(selected.id); }, [selected?.id]);
-      const sucursales = Array.from(new Map(bonos.map(b => [b.sucursal, b.sucursal_nombre])).entries());
+function Badge({ok, label}){
+  if(label) return h('span',{className:`badge ${ok?'ok':'bad'}`}, ok?'✓ Pasa':'✗ No pasa');
+  return h('span',{className:`badge ${ok?'ok':'bad'}`}, ok?'Pasa':'No pasa');
+}
 
-      function cargar() {
-        setStatus("Cargando");
-        Promise.all([
-          api(`/api/bonos-ventas/periodos/?mes=${mes}&anio=${anio}`),
-          api(`/api/bonos-ventas/bonos/resumen/?mes=${mes}&anio=${anio}`).catch(() => ({bonos:[]})),
-          api(`/api/bonos-ventas/ventas-categoria/?periodo_mes=${mes}&periodo_anio=${anio}`).catch(() => []),
-        ]).then(([periodos,resumen,ventasResp]) => {
-          setPeriodo(periodos.results ? periodos.results[0] : periodos[0]);
-          setBonos(resumen.bonos || []);
-          setVentas(ventasResp.results || ventasResp);
-          setStatus("");
-        }).catch(err => setStatus(err.message));
-      }
-      function crearPeriodo() {
-        api("/api/bonos-ventas/periodos/", {method:"POST", body:JSON.stringify({mes:Number(mes), anio:Number(anio), dias_laborables:23})}).then(cargar).catch(err => setStatus(err.message));
-      }
-      function inicializar() {
-        if (!periodo) return;
-        api(`/api/bonos-ventas/periodos/${periodo.id}/inicializar-bonos/`, {method:"POST", body:"{}"}).then(cargar).catch(err => setStatus(err.message));
-      }
-      function syncPos() {
-        if (!periodo) return;
-        api("/api/bonos-ventas/ventas-categoria/sync-pos-bridge/", {method:"POST", body:JSON.stringify({periodo:periodo.id, sucursal:sucursal || undefined})}).then(cargar).catch(err => setStatus(err.message));
-      }
-      function cargarRegistros(id) {
-        api(`/api/bonos-ventas/registros-diarios/?bono=${id}`).then(rows => setRegistros(rows.results || rows)).catch(err => setStatus(err.message));
-      }
-      function guardarDia(dia, patch) {
-        const actual = registros.find(r => Number(r.dia) === dia);
-        const payload = Object.assign({bono:selected.id, dia, tiene_uniforme:true, tiene_puntualidad:true, tiene_asistencia:true, puntos_de_vista:""}, actual || {}, patch);
-        api(`/api/bonos-ventas/registros-diarios/${actual ? `${actual.id}/` : ""}`, {method:actual ? "PUT" : "POST", body:JSON.stringify(payload)}).then(() => { cargarRegistros(selected.id); cargar(); }).catch(err => setStatus(err.message));
-      }
-      function patchBono(id, patch) {
-        api(`/api/bonos-ventas/bonos/${id}/`, {method:"PATCH", body:JSON.stringify(patch)}).then(cargar).catch(err => setStatus(err.message));
-      }
+function App(){
+  const [tab, setTab] = React.useState('config');
+  const [mes, setMes] = React.useState(TODAY.getMonth()+1);
+  const [anio, setAnio] = React.useState(TODAY.getFullYear());
+  const [periodo, setPeriodo] = React.useState(null);
+  const [bonos, setBonos] = React.useState([]);
+  const [ventas, setVentas] = React.useState([]);
+  const [filtroSuc, setFiltroSuc] = React.useState('');
+  const [status, setStatus] = React.useState('');
+  const [statusType, setStatusType] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
 
-      const bonosSucursal = sucursal ? bonos.filter(b => String(b.sucursal) === String(sucursal)) : bonos;
-      return e("div", null,
-        e("header", null, e("div", null, e("h1", null, "Bonos de ventas"), e("div", {className:"status"}, status)), e("div", {className:"row"}, e("input", {type:"number", min:1, max:12, value:mes, onChange:ev=>setMes(ev.target.value)}), e("input", {type:"number", value:anio, onChange:ev=>setAnio(ev.target.value)}), e("button", {onClick:cargar}, "Actualizar"))),
-        e("main", null,
-          e("nav", {className:"tabs"}, [["config","Configuración"],["captura","Captura diaria"],["ventas","Ventas por categoría"],["resumen","Resumen mensual"],["ajustes","Ajustes"]].map(([id,label]) => e("button", {key:id, className:tab===id ? "active" : "ghost", onClick:()=>setTab(id)}, label))),
-          e("section", {className:"panel row"}, e("select", {value:sucursal, onChange:ev=>setSucursal(ev.target.value)}, e("option", {value:""}, "Todas las sucursales"), sucursales.map(([id,nombre]) => e("option", {key:id, value:id}, nombre))), periodo ? e("span", {className:"status"}, `Período ID ${periodo.id}`) : e("button", {onClick:crearPeriodo}, "Crear período"), periodo && e("button", {onClick:inicializar}, "Inicializar bonos")),
-          tab === "config" && e(ConfigPanel, {bonos:bonosSucursal}),
-          tab === "captura" && e(CapturaPanel, {bonos:bonosSucursal, selected, setSelected, registros, guardarDia}),
-          tab === "ventas" && e(VentasPanel, {ventas, syncPos}),
-          tab === "resumen" && e(ResumenPanel, {bonos:bonosSucursal}),
-          tab === "ajustes" && e(AjustesPanel, {bonos:bonosSucursal, patchBono})
+  React.useEffect(()=>{ cargar(); },[mes,anio]);
+
+  const sucursales = React.useMemo(()=>{
+    const m = new Map();
+    bonos.forEach(b=>{ if(b.sucursal && b.sucursal_nombre) m.set(String(b.sucursal), b.sucursal_nombre); });
+    return Array.from(m.entries()).sort((a,b)=>a[1].localeCompare(b[1]));
+  },[bonos]);
+
+  function cargar(){
+    setLoading(true);
+    Promise.all([
+      api(`/api/bonos-ventas/periodos/?mes=${mes}&anio=${anio}`),
+      api(`/api/bonos-ventas/bonos/resumen/?mes=${mes}&anio=${anio}`).catch(()=>({bonos:[]})),
+      api(`/api/bonos-ventas/ventas-categoria/?periodo_mes=${mes}&periodo_anio=${anio}`).catch(()=>({results:[]})),
+    ]).then(([periodos,resumen,ventasR])=>{
+      const p = periodos.results ? periodos.results[0] : (Array.isArray(periodos)?periodos[0]:null);
+      setPeriodo(p||null);
+      setBonos(resumen.bonos||[]);
+      setVentas(ventasR.results||ventasR||[]);
+      setLoading(false);
+      setStatus('');
+    }).catch(err=>{ setStatus(err.message); setStatusType('err'); setLoading(false); });
+  }
+
+  function crearPeriodo(){
+    api('/api/bonos-ventas/periodos/',{method:'POST',body:JSON.stringify({mes:+mes,anio:+anio,dias_laborables:23})})
+      .then(()=>{ showStatus('Período creado','ok'); cargar(); })
+      .catch(err=>showStatus(err.message,'err'));
+  }
+  function inicializar(){
+    if(!periodo) return;
+    api(`/api/bonos-ventas/periodos/${periodo.id}/inicializar-bonos/`,{method:'POST',body:'{}'})
+      .then(r=>{ showStatus(`${r.creados} empleados inicializados`+(r.sin_sucursal?.length?` · ${r.sin_sucursal.length} sin sucursal asignada`:''),'ok'); cargar(); })
+      .catch(err=>showStatus(err.message,'err'));
+  }
+  function syncPos(){
+    if(!periodo) return;
+    api('/api/bonos-ventas/ventas-categoria/sync-pos-bridge/',{method:'POST',body:JSON.stringify({periodo:periodo.id})})
+      .then(()=>{ showStatus('Sincronización completada','ok'); cargar(); })
+      .catch(err=>showStatus(err.message,'err'));
+  }
+  function showStatus(msg,type='ok'){ setStatus(msg); setStatusType(type); setTimeout(()=>setStatus(''),4000); }
+
+  const bonosFiltrados = filtroSuc ? bonos.filter(b=>String(b.sucursal)===filtroSuc) : bonos;
+  const totalPagar = bonosFiltrados.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
+
+  return h('div',null,
+    // HEADER
+    h('header',{className:'hdr'},
+      h('div',{className:'hdr-brand'},
+        h('div',{className:'hdr-icon'}, h(IconStore)),
+        h('div',null,
+          h('div',{className:'hdr-title'},"Bonos de Ventas"),
+          h('div',{className:'hdr-sub'},"Pollyana's Dolce · "+MESES[mes]+' '+anio)
         )
-      );
+      ),
+      h('div',{className:'hdr-controls'},
+        h('input',{type:'number',min:1,max:12,value:mes,onChange:e=>setMes(+e.target.value),title:'Mes'}),
+        h('input',{type:'number',value:anio,onChange:e=>setAnio(+e.target.value),style:{width:70},title:'Año'}),
+        h('button',{className:'btn btn-wine',onClick:cargar}, loading?'Cargando…':'Actualizar')
+      )
+    ),
+
+    // STATUS
+    status && h('div',{className:`status-bar ${statusType}`}, status),
+
+    // TABS
+    h('div',{className:'tabs-wrap'},
+      [['config','Configuración'],['captura','Captura diaria'],['ventas','Ventas por categoría'],['resumen','Resumen mensual'],['ajustes','Ajustes']].map(([id,lbl])=>
+        h('button',{key:id,className:`tab-btn ${tab===id?'on':''}`,onClick:()=>setTab(id)},lbl)
+      )
+    ),
+
+    h('main',null,
+      // PERIODO BAR
+      h('div',{className:'periodo-bar'},
+        h('span',{className:'periodo-label'},'Período:'),
+        periodo
+          ? h('span',{className:'periodo-id'},`ID ${periodo.id} · ${periodo.dias_laborables} días lab.`)
+          : h('span',{style:{color:'var(--faint)',fontSize:13}},'Sin período para este mes'),
+        !periodo && h('button',{className:'btn btn-wine btn-sm',onClick:crearPeriodo},'Crear período'),
+        periodo && h('button',{className:'btn btn-ghost btn-sm',onClick:inicializar},'Inicializar empleados'),
+        periodo && h('div',{style:{marginLeft:'auto',display:'flex',gap:8,alignItems:'center'}},
+          h('span',{style:{fontSize:12,color:'var(--sub)',fontWeight:700}},'Sucursal:'),
+          h('select',{value:filtroSuc,onChange:e=>setFiltroSuc(e.target.value),style:{padding:'5px 10px',border:'1px solid var(--line)',borderRadius:6,font:'inherit',fontSize:13}},
+            h('option',{value:''},'Todas'),
+            sucursales.map(([id,nom])=>h('option',{key:id,value:id},nom))
+          )
+        )
+      ),
+
+      // MÉTRICAS GLOBALES
+      tab!=='ventas' && h('div',{className:'metrics'},
+        h('div',{className:'metric-card'},h('div',{className:'lbl'},'Total a pagar'),h('div',{className:'val gold'},money(totalPagar))),
+        h('div',{className:'metric-card'},h('div',{className:'lbl'},'Empleadas'),h('div',{className:'val'},bonosFiltrados.length)),
+        h('div',{className:'metric-card'},h('div',{className:'lbl'},'Pasan asistencia'),h('div',{className:'val wine'},bonosFiltrados.filter(b=>b.pasa_asistencia).length)),
+        h('div',{className:'metric-card'},h('div',{className:'lbl'},'Con bono ventas'),h('div',{className:'val gold'},bonosFiltrados.filter(b=>b.pasa_bono_ventas).length))
+      ),
+
+      tab==='config' && h(ConfigTab,{bonos:bonosFiltrados,sucursales,filtroSuc,setFiltroSuc}),
+      tab==='captura' && h(CapturaTab,{bonos:bonosFiltrados,mes,anio,showStatus}),
+      tab==='ventas' && h(VentasTab,{ventas,periodo,syncPos,cargar,showStatus}),
+      tab==='resumen' && h(ResumenTab,{bonos:bonosFiltrados,sucursales}),
+      tab==='ajustes' && h(AjustesTab,{bonos:bonosFiltrados,cargar,showStatus})
+    )
+  );
+}
+
+// ── CONFIG TAB ────────────────────────────────────────────────────────────────
+function ConfigTab({bonos,sucursales,filtroSuc,setFiltroSuc}){
+  if(!bonos.length) return h('div',{className:'empty'},'Sin empleados inicializados para este período.');
+  return h('div',null,
+    h('div',{className:'chips'},
+      h('button',{className:`chip ${!filtroSuc?'on':''}`,onClick:()=>setFiltroSuc('')},'Todas'),
+      sucursales.map(([id,nom])=>h('button',{key:id,className:`chip ${filtroSuc===id?'on':''}`,onClick:()=>setFiltroSuc(id)},nom))
+    ),
+    h('div',{className:'card'},
+      h('div',{className:'tbl-wrap'},
+        h('table',null,
+          h('thead',null,h('tr',null,
+            h('th',null,'Empleada'),h('th',null,'Sucursal'),
+            h('th',null,'Días trab.'),h('th',null,'Uniforme'),
+            h('th',null,'Asistencia'),h('th',null,'Puntualidad'),
+            h('th',null,'Sub 1'),h('th',null,'Bono Ventas'),h('th',null,'Total')
+          )),
+          h('tbody',null,
+            bonos.map(b=>h('tr',{key:b.id},
+              h('td',null,h('div',{className:'persona-row'},
+                h('div',{className:'av'},initials(b.empleado_nombre)),
+                h('div',null,h('div',{className:'persona-name'},b.empleado_nombre))
+              )),
+              h('td',null,h('span',{className:'badge suc'},b.sucursal_nombre||'—')),
+              h('td',null,b.dias_trabajados||0),
+              h('td',null,h(Badge,{ok:b.pasa_uniforme})),
+              h('td',null,h(Badge,{ok:b.pasa_asistencia})),
+              h('td',null,h(Badge,{ok:b.pasa_puntualidad})),
+              h('td',null,money(b.sub1)),
+              h('td',{style:{color:'var(--ok)',fontWeight:700}},money(b.bono_ventas)),
+              h('td',{style:{fontWeight:800,color:'var(--wine)'}},money(b.total_a_pagar))
+            ))
+          )
+        )
+      )
+    )
+  );
+}
+
+// ── CAPTURA TAB ───────────────────────────────────────────────────────────────
+function CapturaTab({bonos,mes,anio,showStatus}){
+  const [selSuc, setSelSuc] = React.useState('');
+  const [selBono, setSelBono] = React.useState(null);
+  const [registros, setRegistros] = React.useState([]);
+  const [selDia, setSelDia] = React.useState(null);
+  const [loadingReg, setLoadingReg] = React.useState(false);
+
+  const sucursales = React.useMemo(()=>{
+    const m = new Map();
+    bonos.forEach(b=>{ if(b.sucursal&&b.sucursal_nombre) m.set(String(b.sucursal),b.sucursal_nombre); });
+    return Array.from(m.entries()).sort((a,b)=>a[1].localeCompare(b[1]));
+  },[bonos]);
+
+  React.useEffect(()=>{
+    if(!selSuc && sucursales.length) setSelSuc(sucursales[0][0]);
+  },[sucursales]);
+
+  const bonosSuc = selSuc ? bonos.filter(b=>String(b.sucursal)===selSuc) : [];
+
+  React.useEffect(()=>{
+    if(selBono) cargarReg(selBono.id);
+    else { setRegistros([]); setSelDia(null); }
+  },[selBono?.id]);
+
+  function cargarReg(id){
+    setLoadingReg(true);
+    api(`/api/bonos-ventas/registros-diarios/?bono=${id}`)
+      .then(r=>{ setRegistros(r.results||r); setLoadingReg(false); })
+      .catch(()=>setLoadingReg(false));
+  }
+
+  function togDia(dia){
+    if(!selBono) return;
+    const r = registros.find(x=>+x.dia===dia);
+    if(r){
+      // Quitar asistencia = eliminar registro o marcar sin asistencia
+      api(`/api/bonos-ventas/registros-diarios/${r.id}/`,{method:'PATCH',body:JSON.stringify({tiene_asistencia:false})})
+        .then(()=>cargarReg(selBono.id)).catch(err=>showStatus(err.message,'err'));
+    } else {
+      api('/api/bonos-ventas/registros-diarios/',{method:'POST',body:JSON.stringify({
+        bono:selBono.id,dia,tiene_uniforme:true,tiene_puntualidad:true,tiene_asistencia:true,puntos_de_vista:''
+      })}).then(()=>{ cargarReg(selBono.id); setSelDia(dia); }).catch(err=>showStatus(err.message,'err'));
     }
-    function ConfigPanel({bonos}) { return table(["Empleado","Sucursal","Días","Asistencias","Total"], bonos.map(b => [b.empleado_nombre,b.sucursal_nombre,b.dias_trabajados,b.dias_asistencia,money(b.total_a_pagar)])); }
-    function CapturaPanel({bonos,selected,setSelected,registros,guardarDia}) { return e("section", {className:"panel"}, e("div", {className:"chips"}, bonos.map(b => e("button", {key:b.id, className:selected?.id===b.id ? "active" : "ghost", onClick:()=>setSelected(b)}, b.empleado_nombre))), selected && e("div", {className:"days"}, Array.from({length:31}, (_,i) => { const dia=i+1; const r=registros.find(x=>Number(x.dia)===dia)||{}; return e("div", {className:"day", key:dia}, e("strong", null, `Día ${dia}`), ["uniforme","puntualidad","asistencia"].map(k => e("label", {className:"check", key:k}, e("input", {type:"checkbox", checked:r[`tiene_${k}`]!==false, onChange:ev=>guardarDia(dia,{[`tiene_${k}`]:ev.target.checked})}), k)), e("textarea", {placeholder:"Puntos de vista", defaultValue:r.puntos_de_vista || "", onBlur:ev=>guardarDia(dia,{puntos_de_vista:ev.target.value})})); }))); }
-    function VentasPanel({ventas,syncPos}) { return e("section", {className:"panel"}, e("button", {onClick:syncPos}, "Sincronizar desde POS"), table(["Sucursal","Categoría","Anterior","Actual","%","Bono"], ventas.map(v => [v.sucursal_nombre,v.categoria,v.cantidad_anterior,v.cantidad_actual,`${v.pct_crecimiento}%`,money(v.monto_bono_categoria)]))); }
-    function ResumenPanel({bonos}) { return table(["Empleado","Sucursal","Asistencia","Uniforme","Puntualidad","Sub1","Bono ventas","Total"], bonos.map(b => [b.empleado_nombre,b.sucursal_nombre,badge(b.pasa_asistencia),badge(b.pasa_uniforme),badge(b.pasa_puntualidad),money(b.sub1),money(b.bono_ventas),money(b.total_a_pagar)])); }
-    function AjustesPanel({bonos,patchBono}) { return table(["Empleado","Ajuste +","Ajuste -","Bono extra","Total"], bonos.map(b => [b.empleado_nombre,e("input",{type:"number",defaultValue:b.ajuste_positivo,onBlur:ev=>patchBono(b.id,{ajuste_positivo:ev.target.value})}),e("input",{type:"number",defaultValue:b.ajuste_negativo,onBlur:ev=>patchBono(b.id,{ajuste_negativo:ev.target.value})}),e("input",{type:"number",defaultValue:b.bono_extra,onBlur:ev=>patchBono(b.id,{bono_extra:ev.target.value})}),money(b.total_a_pagar)])); }
-    function table(headers, rows) {
-      return e("section", {className:"panel table"},
-        e("table", null,
-          e("thead", null,
-            e("tr", null, headers.map(h => e("th", {key:h}, h)))
+  }
+
+  function togConcepto(dia,campo){
+    const r = registros.find(x=>+x.dia===dia);
+    if(!r) return;
+    api(`/api/bonos-ventas/registros-diarios/${r.id}/`,{method:'PATCH',body:JSON.stringify({[campo]:!r[campo]})})
+      .then(()=>cargarReg(selBono.id)).catch(err=>showStatus(err.message,'err'));
+  }
+
+  function guardarNota(dia,val){
+    const r = registros.find(x=>+x.dia===dia);
+    if(!r) return;
+    api(`/api/bonos-ventas/registros-diarios/${r.id}/`,{method:'PATCH',body:JSON.stringify({puntos_de_vista:val})}).catch(()=>{});
+  }
+
+  const total = diasEnMes(mes,anio);
+  const regActivos = registros.filter(r=>r.tiene_asistencia);
+  const diaActual = selDia && registros.find(x=>+x.dia===selDia);
+
+  return h('div',null,
+    // Sucursales
+    h('div',{className:'chips'},
+      sucursales.map(([id,nom])=>h('button',{key:id,className:`chip ${selSuc===id?'on':''}`,onClick:()=>{setSelSuc(id);setSelBono(null);}},nom))
+    ),
+
+    // Empleadas de la sucursal
+    h('div',{className:'card'},
+      h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},sucursales.find(([id])=>id===selSuc)?.[1]||'Sucursal')),
+      h('div',{className:'card-body'},
+        bonosSuc.length===0
+          ? h('div',{className:'empty'},'Sin empleadas en esta sucursal')
+          : h('div',{className:'chips'},
+              bonosSuc.map(b=>h('button',{key:b.id,className:`chip ${selBono?.id===b.id?'on':''}`,onClick:()=>setSelBono(b)},
+                b.empleado_nombre.split(' ')[0]
+              ))
+            )
+      )
+    ),
+
+    // Captura de la empleada seleccionada
+    selBono && h('div',{className:'card'},
+      h('div',{className:'card-hdr'},
+        h('div',{style:{display:'flex',alignItems:'center',gap:10}},
+          h('div',{className:'av'},initials(selBono.empleado_nombre)),
+          h('div',null,
+            h('div',{className:'persona-name'},selBono.empleado_nombre),
+            h('div',{className:'persona-sub'},`${regActivos.length} días trabajados este mes`)
+          )
+        ),
+        h('div',{style:{display:'flex',gap:6}},
+          h(Badge,{ok:selBono.pasa_asistencia}),
+          h(Badge,{ok:selBono.pasa_uniforme}),
+          h(Badge,{ok:selBono.pasa_puntualidad})
+        )
+      ),
+      h('div',{className:'card-body'},
+        h('div',{className:'sec-title'},'Clic en el día para registrar asistencia'),
+        h('div',{className:'days-grid'},
+          Array.from({length:total},(_,i)=>i+1).map(d=>{
+            const dom = esDom(d,mes,anio);
+            const r = registros.find(x=>+x.dia===d);
+            const worked = r?.tiene_asistencia;
+            return h('div',{key:d,
+              className:`day-cell ${dom?'dom':''} ${worked?'worked':''}`,
+              onClick:()=>{ if(!dom){togDia(d); setSelDia(d);} }
+            },
+              h('span',{className:'dn'},d),
+              h('span',{className:'ds'},worked?'✓':dom?'D':'')
+            );
+          })
+        ),
+
+        // Conceptos del día seleccionado
+        regActivos.length>0 && h('div',null,
+          h('div',{className:'div'}),
+          h('div',{className:'sec-title'},'Detalle por día'),
+          h('div',{className:'chips'},
+            regActivos.map(r=>h('button',{key:r.dia,
+              className:`chip ${selDia===+r.dia?'on':''}`,
+              style:{padding:'4px 10px',fontSize:12},
+              onClick:()=>setSelDia(+r.dia)
+            },r.dia))
           ),
-          e("tbody", null,
-            rows.map((row, i) => e("tr", {key:i}, row.map((cell, j) => e("td", {key:j}, cell))))
+          diaActual && h('div',null,
+            ['tiene_uniforme','tiene_puntualidad'].map(campo=>{
+              const labels={tiene_uniforme:'Uniforme',tiene_puntualidad:'Puntualidad'};
+              return h('div',{key:campo,className:'concepto-row'},
+                h('div',{className:`toggle-btn ${diaActual[campo]?'on':''}`,onClick:()=>togConcepto(selDia,campo)},
+                  diaActual[campo] && h(IconCheck)
+                ),
+                h('span',{className:'concepto-lbl'},labels[campo]),
+                h(Badge,{ok:diaActual[campo]})
+              );
+            }),
+            h('div',{className:'concepto-row'},
+              h('span',{className:'concepto-lbl'},'Puntos de vista / observaciones'),
+              h('textarea',{className:'nota-input',rows:2,defaultValue:diaActual.puntos_de_vista||'',
+                onBlur:e=>guardarNota(selDia,e.target.value),placeholder:'Opcional…'})
+            )
+          )
+        )
+      )
+    )
+  );
+}
+
+// ── VENTAS POR CATEGORÍA TAB ──────────────────────────────────────────────────
+function VentasTab({ventas,periodo,syncPos,cargar,showStatus}){
+  const [selSuc, setSelSuc] = React.useState('');
+
+  const sucursales = React.useMemo(()=>{
+    const m = new Map();
+    ventas.forEach(v=>{ if(v.sucursal&&v.sucursal_nombre) m.set(String(v.sucursal),v.sucursal_nombre); });
+    return Array.from(m.entries()).sort((a,b)=>a[1].localeCompare(b[1]));
+  },[ventas]);
+
+  React.useEffect(()=>{
+    if(!selSuc && sucursales.length) setSelSuc(sucursales[0][0]);
+  },[sucursales]);
+
+  const ventasSuc = selSuc ? ventas.filter(v=>String(v.sucursal)===selSuc) : ventas;
+  const bonoCat = ventasSuc.reduce((s,v)=>s+Number(v.monto_bono_categoria||0),0);
+
+  function actualizarVenta(id,campo,val){
+    api(`/api/bonos-ventas/ventas-categoria/${id}/`,{method:'PATCH',body:JSON.stringify({[campo]:val})})
+      .then(()=>cargar()).catch(err=>showStatus(err.message,'err'));
+  }
+
+  return h('div',null,
+    h('div',{style:{display:'flex',gap:10,alignItems:'center',marginBottom:14,flexWrap:'wrap'}},
+      h('div',{className:'chips',style:{flex:1,marginBottom:0}},
+        sucursales.map(([id,nom])=>h('button',{key:id,className:`chip ${selSuc===id?'on':''}`,onClick:()=>setSelSuc(id)},nom))
+      ),
+      periodo && h('button',{className:'btn btn-wine btn-sm',onClick:syncPos},'↻ Sincronizar desde POS')
+    ),
+
+    selSuc && h('div',{className:'card'},
+      h('div',{className:'card-hdr'},
+        h('div',{className:'card-hdr-title'},sucursales.find(([id])=>id===selSuc)?.[1]||'Sucursal'),
+        h('div',{style:{fontSize:13,fontWeight:800,color:'var(--gold)'}},`Bono total: ${money(bonoCat)}`)
+      ),
+      h('div',{className:'card-body'},
+        !ventasSuc.length
+          ? h('div',{className:'empty'},'Sin datos. Usa "Sincronizar desde POS" o carga manualmente.')
+          : h('div',null,
+              // Headers
+              h('div',{className:'cat-row',style:{fontWeight:800,fontSize:11,textTransform:'uppercase',letterSpacing:'.05em',color:'var(--sub)'}},
+                h('span',null,'Categoría'),h('span',null,'Año ant.'),h('span',null,'Este mes'),h('span',null,'%'),h('span',null,'Bono')
+              ),
+              CATS.map(cat=>{
+                const v = ventasSuc.find(x=>x.categoria===cat);
+                if(!v) return h('div',{key:cat,className:'cat-row'},
+                  h('span',null,CATS_LABELS[cat]),
+                  h('span',{style:{color:'var(--faint)'}},'—'),h('span',{style:{color:'var(--faint)'}},'—'),
+                  h('span',{style:{color:'var(--faint)'}},'—'),h('span',{style:{color:'var(--faint)'}},'—')
+                );
+                const pct = Number(v.pct_crecimiento||0).toFixed(1);
+                const activo = v.activo_bono;
+                return h('div',{key:cat,className:'cat-row'},
+                  h('span',{style:{fontWeight:700}},CATS_LABELS[cat]),
+                  h('input',{type:'number',defaultValue:v.cantidad_anterior,min:0,
+                    onBlur:e=>actualizarVenta(v.id,'cantidad_anterior',e.target.value)}),
+                  h('input',{type:'number',defaultValue:v.cantidad_actual,min:0,
+                    className:activo?'activo':'',
+                    onBlur:e=>actualizarVenta(v.id,'cantidad_actual',e.target.value)}),
+                  h('span',null,h('span',{className:`badge ${activo?'ok':'bad'}`},`${pct}%`)),
+                  h('span',{style:{fontWeight:800,color:activo?'var(--ok)':'var(--faint)'}},money(v.monto_bono_categoria))
+                );
+              })
+            )
+      )
+    )
+  );
+}
+
+// ── RESUMEN TAB ───────────────────────────────────────────────────────────────
+function ResumenTab({bonos,sucursales}){
+  if(!bonos.length) return h('div',{className:'empty'},'Sin datos para este período.');
+  const totalGlobal = bonos.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
+
+  // Agrupar por sucursal
+  const grupos = new Map();
+  bonos.forEach(b=>{
+    const k = String(b.sucursal);
+    if(!grupos.has(k)) grupos.set(k,{nombre:b.sucursal_nombre,bonos:[]});
+    grupos.get(k).bonos.push(b);
+  });
+
+  return h('div',null,
+    // Total global
+    h('div',{className:'metrics',style:{marginBottom:20}},
+      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Total global'),h('div',{className:'val gold'},money(totalGlobal))),
+      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Sucursales'),h('div',{className:'val'},grupos.size)),
+      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Empleadas'),h('div',{className:'val'},bonos.length)),
+      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Pasan todo'),h('div',{className:'val wine'},bonos.filter(b=>b.pasa_asistencia&&b.pasa_uniforme&&b.pasa_puntualidad).length))
+    ),
+
+    Array.from(grupos.entries()).map(([sucId,{nombre,bonos:bs}])=>{
+      const totalSuc = bs.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
+      return h('div',{key:sucId,className:'card',style:{marginBottom:14}},
+        h('div',{className:'card-hdr'},
+          h('div',{className:'card-hdr-title'},nombre||`Sucursal ${sucId}`),
+          h('div',{style:{fontWeight:800,color:'var(--gold)',fontSize:14}},money(totalSuc))
+        ),
+        h('div',{className:'tbl-wrap'},
+          h('table',null,
+            h('thead',null,h('tr',null,
+              h('th',null,'Empleada'),
+              h('th',null,'Días'),
+              h('th',null,'Uniforme'),
+              h('th',null,'Asistencia'),
+              h('th',null,'Puntualidad'),
+              h('th',null,'Sub 1'),
+              h('th',null,'Bono ventas'),
+              h('th',null,'Ajustes'),
+              h('th',null,'Total')
+            )),
+            h('tbody',null,
+              bs.map(b=>{
+                const aj = Number(b.ajuste_positivo||0)+Number(b.bono_extra||0)-Number(b.ajuste_negativo||0);
+                return h('tr',{key:b.id},
+                  h('td',null,h('div',{className:'persona-row'},h('div',{className:'av'},initials(b.empleado_nombre)),h('div',{className:'persona-name'},b.empleado_nombre))),
+                  h('td',null,b.dias_trabajados||0),
+                  h('td',null,h(Badge,{ok:b.pasa_uniforme})),
+                  h('td',null,h(Badge,{ok:b.pasa_asistencia})),
+                  h('td',null,h(Badge,{ok:b.pasa_puntualidad})),
+                  h('td',null,money(b.sub1)),
+                  h('td',{style:{color:'var(--ok)',fontWeight:700}},money(b.bono_ventas)),
+                  h('td',{style:{color:aj>=0?'var(--ok)':'var(--bad)',fontWeight:700}},money(aj)),
+                  h('td',{style:{fontWeight:800,color:'var(--wine)'}},money(b.total_a_pagar))
+                );
+              })
+            )
           )
         )
       );
-    }
-    ReactDOM.createRoot(document.getElementById("root")).render(e(App));
-  </script>
+    })
+  );
+}
+
+// ── AJUSTES TAB ───────────────────────────────────────────────────────────────
+function AjustesTab({bonos,cargar,showStatus}){
+  const [selSuc, setSelSuc] = React.useState('');
+  const sucursales = React.useMemo(()=>{
+    const m = new Map();
+    bonos.forEach(b=>{ if(b.sucursal&&b.sucursal_nombre) m.set(String(b.sucursal),b.sucursal_nombre); });
+    return Array.from(m.entries()).sort((a,b)=>a[1].localeCompare(b[1]));
+  },[bonos]);
+  React.useEffect(()=>{ if(!selSuc&&sucursales.length) setSelSuc(sucursales[0][0]); },[sucursales]);
+  const bonosSuc = selSuc ? bonos.filter(b=>String(b.sucursal)===selSuc) : bonos;
+
+  function patch(id,campo,val){
+    api(`/api/bonos-ventas/bonos/${id}/`,{method:'PATCH',body:JSON.stringify({[campo]:val})})
+      .then(()=>{ showStatus('Guardado','ok'); cargar(); }).catch(err=>showStatus(err.message,'err'));
+  }
+
+  return h('div',null,
+    h('div',{className:'chips'},
+      sucursales.map(([id,nom])=>h('button',{key:id,className:`chip ${selSuc===id?'on':''}`,onClick:()=>setSelSuc(id)},nom))
+    ),
+    bonosSuc.map(b=>h('div',{key:b.id,className:'card',style:{marginBottom:10}},
+      h('div',{className:'card-hdr'},
+        h('div',{style:{display:'flex',alignItems:'center',gap:10}},
+          h('div',{className:'av'},initials(b.empleado_nombre)),
+          h('div',null,h('div',{className:'persona-name'},b.empleado_nombre),h('div',{className:'persona-sub'},b.sucursal_nombre))
+        ),
+        h('div',{style:{fontWeight:800,color:'var(--wine)',fontSize:15}},money(b.total_a_pagar))
+      ),
+      h('div',{className:'card-body'},
+        h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12}},
+          h('label',{style:{display:'grid',gap:4,fontSize:12,fontWeight:700,color:'var(--sub)'}},
+            'Ajuste positivo (+)',
+            h('input',{className:'aj-input',type:'number',defaultValue:b.ajuste_positivo||0,min:0,
+              onBlur:e=>patch(b.id,'ajuste_positivo',e.target.value)})
+          ),
+          h('label',{style:{display:'grid',gap:4,fontSize:12,fontWeight:700,color:'var(--sub)'}},
+            'Ajuste negativo (−)',
+            h('input',{className:'aj-input',type:'number',defaultValue:b.ajuste_negativo||0,min:0,
+              onBlur:e=>patch(b.id,'ajuste_negativo',e.target.value)})
+          ),
+          h('label',{style:{display:'grid',gap:4,fontSize:12,fontWeight:700,color:'var(--sub)'}},
+            'Bono extra',
+            h('input',{className:'aj-input',type:'number',defaultValue:b.bono_extra||0,min:0,
+              onBlur:e=>patch(b.id,'bono_extra',e.target.value)})
+          )
+        )
+      )
+    ))
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(h(App));
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/bonos-ventas/sw.js', {scope: '/bonos-ventas/'})
+      .catch((err) => console.warn('No se pudo registrar el service worker de bonos ventas', err));
+  });
+}
+</script>
 </body>
 </html>

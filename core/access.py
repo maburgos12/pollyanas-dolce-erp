@@ -66,6 +66,7 @@ ACCESS_SUBMODULES = {
         ("eventos", "Eventos"),
         ("tendencias", "Tendencias"),
         ("pronostico", "Pronóstico"),
+        ("bonos", "Bonos ventas"),
     ],
     "crm": [
         ("dashboard", "Dashboard"),
@@ -77,6 +78,7 @@ ACCESS_SUBMODULES = {
         ("reabasto_cedis", "Reabasto CEDIS"),
         ("consolidado_cedis", "Consolidado CEDIS"),
         ("cedis_semanal", "Producción CEDIS semanal"),
+        ("bonos", "Bonos producción"),
     ],
     "logistica": [
         ("dashboard", "Dashboard"),
@@ -149,6 +151,7 @@ ACCESS_SUBMODULES = {
         ("importar_checador", "Importar checador"),
         ("empleados", "Empleados"),
         ("nomina", "Nómina"),
+        ("asignacion_sucursal", "Asignación sucursal"),
     ],
     "control": [
         ("discrepancias", "Discrepancias"),
