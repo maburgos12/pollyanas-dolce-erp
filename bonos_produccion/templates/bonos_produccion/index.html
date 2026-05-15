@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bonos de producción</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <style>
+    :root {
+      --wine: #8b2252;
+      --gold: #c9a84c;
+      --ink: #29212a;
+      --muted: #726977;
+      --line: #e7dfe5;
+      --bg: #fbf8fa;
+      --ok: #13795b;
+      --bad: #b42318;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font-family: Nunito, system-ui, sans-serif;
+    }
+    .shell { min-height: 100vh; }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 24px;
+      background: #fff;
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    h1 {
+      margin: 0;
+      font-family: "Playfair Display", serif;
+      color: var(--wine);
+      font-size: clamp(24px, 3vw, 36px);
+      letter-spacing: 0;
+    }
+    .period-controls, .tabs, .actions, .chips {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    input, select, textarea {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px 10px;
+      font: inherit;
+      background: #fff;
+      color: var(--ink);
+    }
+    button {
+      border: 0;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font: inherit;
+      font-weight: 800;
+      color: #fff;
+      background: var(--wine);
+      cursor: pointer;
+    }
+    button.secondary { color: var(--wine); background: #f3e8ee; }
+    button.ghost { color: var(--ink); background: #fff; border: 1px solid var(--line); }
+    button.active { background: var(--gold); color: #211a10; }
+    main { padding: 18px 24px 32px; }
+    .panel {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 14px;
+    }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+    label { display: grid; gap: 5px; font-weight: 800; color: var(--muted); font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { padding: 10px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+    .badge { display: inline-flex; border-radius: 999px; padding: 3px 8px; font-weight: 800; font-size: 12px; }
+    .badge.ok { color: var(--ok); background: #e7f5ef; }
+    .badge.bad { color: var(--bad); background: #fdecea; }
+    .day-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+    .day {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+      background: #fff;
+    }
+    .checks { display: grid; gap: 6px; }
+    .checks label { grid-template-columns: auto 1fr; align-items: center; color: var(--ink); font-weight: 700; }
+    .checks input { width: 16px; height: 16px; }
+    .status { color: var(--muted); font-weight: 800; }
+    @media (max-width: 720px) {
+      .topbar { align-items: flex-start; flex-direction: column; }
+      main { padding: 14px; }
+      th, td { white-space: nowrap; }
+      .table-wrap { overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    const e = React.createElement;
+    const AREAS = ["HORNOS", "EMBETUNADO", "ARMADO", "CRUCERO"];
+    const TODAY = new Date();
+
+    function api(path, options = {}) {
+      const token = localStorage.getItem("pd_logistica_access");
+      const headers = Object.assign({"Content-Type": "application/json"}, options.headers || {});
+      if (token) headers.Authorization = `Bearer ${token}`;
+      return fetch(path, Object.assign({}, options, {headers})).then(async (response) => {
+        const text = await response.text();
+        const data = text ? JSON.parse(text) : null;
+        if (!response.ok) throw new Error(data?.detail || data?.error || "Error de API");
+        return data;
+      });
+    }
+
+    function money(value) {
+      return Number(value || 0).toLocaleString("es-MX", {style: "currency", currency: "MXN"});
+    }
+
+    function App() {
+      const [tab, setTab] = React.useState("config");
+      const [mes, setMes] = React.useState(TODAY.getMonth() + 1);
+      const [anio, setAnio] = React.useState(TODAY.getFullYear());
+      const [periodo, setPeriodo] = React.useState(null);
+      const [bonos, setBonos] = React.useState([]);
+      const [empleados, setEmpleados] = React.useState([]);
+      const [area, setArea] = React.useState("HORNOS");
+      const [selectedBono, setSelectedBono] = React.useState(null);
+      const [registros, setRegistros] = React.useState([]);
+      const [status, setStatus] = React.useState("");
+
+      React.useEffect(() => { cargarTodo(); }, [mes, anio]);
+      React.useEffect(() => { if (selectedBono) cargarRegistros(selectedBono.id); }, [selectedBono?.id]);
+
+      function cargarTodo() {
+        setStatus("Cargando");
+        Promise.all([
+          api(`/api/bonos-produccion/periodos/?mes=${mes}&anio=${anio}`),
+          api("/api/rrhh/empleados/?activo=true&limit=500"),
+          api(`/api/bonos-produccion/bonos/resumen/?mes=${mes}&anio=${anio}`).catch(() => ({bonos: []})),
+        ]).then(([periodos, empleadosResp, resumen]) => {
+          setPeriodo(periodos.results ? periodos.results[0] : periodos[0]);
+          const rows = empleadosResp.results || empleadosResp;
+          setEmpleados(rows.filter((emp) => (emp.sucursal || "").toLowerCase() === "matriz"));
+          setBonos(resumen.bonos || []);
+          setStatus("");
+        }).catch((err) => setStatus(err.message));
+      }
+
+      function crearPeriodo() {
+        api("/api/bonos-produccion/periodos/", {
+          method: "POST",
+          body: JSON.stringify({mes: Number(mes), anio: Number(anio), dias_laborables: 23}),
+        }).then(() => cargarTodo()).catch((err) => setStatus(err.message));
+      }
+
+      function inicializar() {
+        if (!periodo) return;
+        api(`/api/bonos-produccion/periodos/${periodo.id}/inicializar-bonos/`, {method: "POST", body: "{}"})
+          .then(() => cargarTodo())
+          .catch((err) => setStatus(err.message));
+      }
+
+      function cargarRegistros(bonoId) {
+        api(`/api/bonos-produccion/registros-diarios/?bono=${bonoId}`)
+          .then((rows) => setRegistros(rows.results || rows))
+          .catch((err) => setStatus(err.message));
+      }
+
+      function guardarDia(dia, patch) {
+        const existente = registros.find((r) => Number(r.dia) === dia);
+        const payload = Object.assign({
+          bono: selectedBono.id,
+          dia,
+          tiene_uniforme: true,
+          tiene_puntualidad: true,
+          tiene_asistencia: true,
+          tiene_produccion: true,
+          cantidad_embetunados: 0,
+          observacion: "",
+        }, existente || {}, patch);
+        api(`/api/bonos-produccion/registros-diarios/${existente ? `${existente.id}/` : ""}`, {
+          method: existente ? "PUT" : "POST",
+          body: JSON.stringify(payload),
+        }).then(() => {
+          cargarRegistros(selectedBono.id);
+          cargarTodo();
+        }).catch((err) => setStatus(err.message));
+      }
+
+      function actualizarBono(id, patch) {
+        const bono = bonos.find((item) => item.id === id);
+        api(`/api/bonos-produccion/bonos/${id}/`, {
+          method: "PATCH",
+          body: JSON.stringify(Object.assign({}, patch)),
+        }).then(() => cargarTodo()).catch((err) => setStatus(err.message));
+      }
+
+      const bonosArea = bonos.filter((b) => b.area === area);
+      const empleadoArea = empleados.filter((emp) => (emp.area || "").toUpperCase() === area);
+
+      return e("div", {className: "shell"},
+        e("header", {className: "topbar"},
+          e("div", null, e("h1", null, "Bonos de producción"), e("div", {className: "status"}, status)),
+          e("div", {className: "period-controls"},
+            e("input", {type: "number", min: 1, max: 12, value: mes, onChange: (ev) => setMes(ev.target.value)}),
+            e("input", {type: "number", min: 2024, value: anio, onChange: (ev) => setAnio(ev.target.value)}),
+            e("button", {className: "secondary", onClick: cargarTodo}, "Actualizar")
+          )
+        ),
+        e("main", null,
+          e("nav", {className: "tabs"}, [
+            ["config", "Configuración"], ["captura", "Captura diaria"], ["resumen", "Resumen mensual"], ["ajustes", "Ajustes"], ["revision", "Revisión por área"]
+          ].map(([id, label]) => e("button", {key: id, className: tab === id ? "active" : "ghost", onClick: () => setTab(id)}, label))),
+          tab === "config" && e(ConfigPanel, {periodo, empleados: empleadoArea, area, setArea, crearPeriodo, inicializar}),
+          tab === "captura" && e(CapturaPanel, {area, setArea, bonosArea, selectedBono, setSelectedBono, registros, guardarDia}),
+          tab === "resumen" && e(ResumenPanel, {bonos}),
+          tab === "ajustes" && e(AjustesPanel, {bonos, actualizarBono}),
+          tab === "revision" && e(RevisionPanel, {area, setArea, bonosArea, selectedBono, setSelectedBono, registros, guardarDia})
+        )
+      );
+    }
+
+    function AreaChips({area, setArea}) {
+      return e("div", {className: "chips"}, AREAS.map((item) =>
+        e("button", {key: item, className: area === item ? "active" : "ghost", onClick: () => setArea(item)}, item)
+      ));
+    }
+
+    function ConfigPanel({periodo, empleados, area, setArea, crearPeriodo, inicializar}) {
+      return e("section", {className: "panel"},
+        e("div", {className: "actions"},
+          periodo ? e("span", {className: "status"}, `Período activo ID ${periodo.id}`) : e("button", {onClick: crearPeriodo}, "Crear período"),
+          periodo && e("button", {onClick: inicializar}, "Inicializar bonos")
+        ),
+        e("div", {className: "panel"}, e(AreaChips, {area, setArea})),
+        e("div", {className: "table-wrap"}, e("table", null,
+          e("thead", null, e("tr", null, ["Código", "Empleado", "Área", "Puesto", "Sucursal"].map((h) => e("th", {key: h}, h)))),
+          e("tbody", null, empleados.map((emp) => e("tr", {key: emp.id},
+            e("td", null, emp.codigo),
+            e("td", null, emp.nombre),
+            e("td", null, emp.area),
+            e("td", null, emp.puesto),
+            e("td", null, emp.sucursal)
+          )))
+        ))
+      );
+    }
+
+    function CapturaPanel({area, setArea, bonosArea, selectedBono, setSelectedBono, registros, guardarDia}) {
+      return e("section", {className: "panel"},
+        e(AreaChips, {area, setArea}),
+        e("div", {className: "chips"}, bonosArea.map((bono) =>
+          e("button", {key: bono.id, className: selectedBono?.id === bono.id ? "active" : "ghost", onClick: () => setSelectedBono(bono)}, bono.empleado_nombre)
+        )),
+        selectedBono && e("div", {className: "day-grid"}, Array.from({length: 31}, (_, idx) => {
+          const dia = idx + 1;
+          const reg = registros.find((item) => Number(item.dia) === dia) || {};
+          return e("div", {className: "day", key: dia},
+            e("strong", null, `Día ${dia}`),
+            e("div", {className: "checks"}, ["uniforme", "puntualidad", "asistencia", "produccion"].map((key) =>
+              e("label", {key}, e("input", {
+                type: "checkbox",
+                checked: reg[`tiene_${key}`] !== false,
+                onChange: (ev) => guardarDia(dia, {[`tiene_${key}`]: ev.target.checked})
+              }), key)
+            )),
+            selectedBono.area === "EMBETUNADO" && e("input", {
+              type: "number",
+              min: 0,
+              value: reg.cantidad_embetunados || 0,
+              onChange: (ev) => guardarDia(dia, {cantidad_embetunados: Number(ev.target.value)})
+            })
+          );
+        }))
+      );
+    }
+
+    function ResumenPanel({bonos}) {
+      return e("section", {className: "panel table-wrap"}, e("table", null,
+        e("thead", null, e("tr", null, ["Empleado", "Área", "Asistencia", "Puntualidad", "Uniforme", "Producción", "Total"].map((h) => e("th", {key: h}, h)))),
+        e("tbody", null, bonos.map((b) => e("tr", {key: b.id},
+          e("td", null, b.empleado_nombre),
+          e("td", null, b.area),
+          e("td", null, badge(b.pasa_asistencia)),
+          e("td", null, badge(b.pasa_puntualidad)),
+          e("td", null, badge(b.pasa_uniforme)),
+          e("td", null, badge(b.pasa_produccion)),
+          e("td", null, money(b.total_a_pagar))
+        )))
+      ));
+    }
+
+    function AjustesPanel({bonos, actualizarBono}) {
+      return e("section", {className: "panel table-wrap"}, e("table", null,
+        e("thead", null, e("tr", null, ["Empleado", "Ajuste +", "Ajuste -", "Bono extra", "Total"].map((h) => e("th", {key: h}, h)))),
+        e("tbody", null, bonos.map((b) => e("tr", {key: b.id},
+          e("td", null, b.empleado_nombre),
+          e("td", null, e("input", {type: "number", defaultValue: b.ajuste_positivo, onBlur: (ev) => actualizarBono(b.id, {ajuste_positivo: ev.target.value})})),
+          e("td", null, e("input", {type: "number", defaultValue: b.ajuste_negativo, onBlur: (ev) => actualizarBono(b.id, {ajuste_negativo: ev.target.value})})),
+          e("td", null, e("input", {type: "number", defaultValue: b.bono_extra, onBlur: (ev) => actualizarBono(b.id, {bono_extra: ev.target.value})})),
+          e("td", null, money(b.total_a_pagar))
+        )))
+      ));
+    }
+
+    function RevisionPanel({area, setArea, bonosArea, selectedBono, setSelectedBono, registros, guardarDia}) {
+      return e("section", {className: "panel"},
+        e(AreaChips, {area, setArea}),
+        e("div", {className: "chips"}, bonosArea.map((bono) =>
+          e("button", {key: bono.id, className: selectedBono?.id === bono.id ? "active" : "ghost", onClick: () => setSelectedBono(bono)}, bono.empleado_nombre)
+        )),
+        selectedBono && e("div", {className: "grid"}, registros.map((reg) =>
+          e("label", {key: reg.id}, `Día ${reg.dia}`, e("textarea", {
+            defaultValue: reg.observacion,
+            rows: 3,
+            onBlur: (ev) => guardarDia(Number(reg.dia), {observacion: ev.target.value})
+          }))
+        ))
+      );
+    }
+
+    function badge(value) {
+      return e("span", {className: `badge ${value ? "ok" : "bad"}`}, value ? "Pasa" : "No pasa");
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(e(App));
+  </script>
+</body>
+</html>
