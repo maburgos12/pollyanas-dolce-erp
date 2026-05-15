@@ -20,6 +20,7 @@ NAV_GROUPS = [
         "label": "Comercial",
         "items": [
             ("ventas", "pronostico", "Pronóstico", "/ventas/pronostico/", ["/ventas/pronostico/", "/ventas/"]),
+            ("ventas", "bonos", "Bonos ventas", "/bonos-ventas/app/", ["/bonos-ventas/"]),
             ("crm", "dashboard", "CRM", "/crm/dashboard/", ["/crm/dashboard/"]),
             ("crm", "clientes", "Clientes", "/crm/clientes/", ["/crm/clientes/"]),
             ("crm", "pedidos", "Pedidos", "/crm/pedidos/", ["/crm/pedidos/"]),
@@ -33,6 +34,7 @@ NAV_GROUPS = [
         "label": "Producción",
         "items": [
             ("produccion", "plan", "Plan de producción", "/recetas/plan-produccion/", ["/recetas/plan-produccion/"]),
+            ("produccion", "bonos", "Bonos producción", "/bonos-produccion/app/", ["/bonos-produccion/"]),
             ("produccion", "reabasto_cedis", "Reabasto CEDIS", "/recetas/reabasto-cedis/", ["/recetas/reabasto-cedis/"]),
             ("produccion", "consolidado_cedis", "Consolidado CEDIS", "/recetas/consolidado-cedis/", ["/recetas/consolidado-cedis/"]),
             ("produccion", "cedis_semanal", "Producción CEDIS semanal", "/recetas/produccion-cedis/semanal/", ["/recetas/produccion-cedis/semanal/"]),
@@ -96,6 +98,7 @@ NAV_GROUPS = [
             ("rrhh", "importar_checador", "Importar checador", "/rrhh/importar-checador/", ["/rrhh/importar-checador/"]),
             ("rrhh", "empleados", "Empleados", "/rrhh/empleados/", ["/rrhh/empleados/"]),
             ("rrhh", "nomina", "Nómina", "/rrhh/nomina/", ["/rrhh/nomina/"]),
+            ("rrhh", "asignacion_sucursal", "Asignación sucursal", "/rrhh/asignacion-sucursal/", ["/rrhh/asignacion-sucursal/"]),
             ("control", "discrepancias", "Control", "/control/discrepancias/", ["/control/discrepancias/"]),
             ("control", "captura_movil", "Captura móvil", "/control/captura-movil/", ["/control/captura-movil/"]),
             ("auditoria", "bitacora", "Bitácora", "/auditoria/", ["/auditoria/"]),

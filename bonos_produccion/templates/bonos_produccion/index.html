@@ -1,347 +1,385 @@
 <!doctype html>
 <html lang="es">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Bonos de producción</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <style>
-    :root {
-      --wine: #8b2252;
-      --gold: #c9a84c;
-      --ink: #29212a;
-      --muted: #726977;
-      --line: #e7dfe5;
-      --bg: #fbf8fa;
-      --ok: #13795b;
-      --bad: #b42318;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      color: var(--ink);
-      background: var(--bg);
-      font-family: Nunito, system-ui, sans-serif;
-    }
-    .shell { min-height: 100vh; }
-    .topbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      padding: 18px 24px;
-      background: #fff;
-      border-bottom: 1px solid var(--line);
-      position: sticky;
-      top: 0;
-      z-index: 10;
-    }
-    h1 {
-      margin: 0;
-      font-family: "Playfair Display", serif;
-      color: var(--wine);
-      font-size: clamp(24px, 3vw, 36px);
-      letter-spacing: 0;
-    }
-    .period-controls, .tabs, .actions, .chips {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    input, select, textarea {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 9px 10px;
-      font: inherit;
-      background: #fff;
-      color: var(--ink);
-    }
-    button {
-      border: 0;
-      border-radius: 8px;
-      padding: 10px 14px;
-      font: inherit;
-      font-weight: 800;
-      color: #fff;
-      background: var(--wine);
-      cursor: pointer;
-    }
-    button.secondary { color: var(--wine); background: #f3e8ee; }
-    button.ghost { color: var(--ink); background: #fff; border: 1px solid var(--line); }
-    button.active { background: var(--gold); color: #211a10; }
-    main { padding: 18px 24px 32px; }
-    .panel {
-      background: #fff;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 16px;
-      margin-top: 14px;
-    }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
-    label { display: grid; gap: 5px; font-weight: 800; color: var(--muted); font-size: 13px; }
-    table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    th, td { padding: 10px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
-    th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
-    .badge { display: inline-flex; border-radius: 999px; padding: 3px 8px; font-weight: 800; font-size: 12px; }
-    .badge.ok { color: var(--ok); background: #e7f5ef; }
-    .badge.bad { color: var(--bad); background: #fdecea; }
-    .day-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
-    .day {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 10px;
-      display: grid;
-      gap: 8px;
-      background: #fff;
-    }
-    .checks { display: grid; gap: 6px; }
-    .checks label { grid-template-columns: auto 1fr; align-items: center; color: var(--ink); font-weight: 700; }
-    .checks input { width: 16px; height: 16px; }
-    .status { color: var(--muted); font-weight: 800; }
-    @media (max-width: 720px) {
-      .topbar { align-items: flex-start; flex-direction: column; }
-      main { padding: 14px; }
-      th, td { white-space: nowrap; }
-      .table-wrap { overflow-x: auto; }
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bonos de Produccion — Pollyana's Dolce</title>
+<link rel="manifest" href="/bonos-produccion/manifest.json">
+<meta name="theme-color" content="#8B2252">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bonos Produccion">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:ital,wght@0,700;1,400&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<style>
+:root{
+  --wine:#8B2252;--wine-light:rgba(139,34,82,.08);--wine-mid:rgba(139,34,82,.18);
+  --gold:#C9A84C;--gold-light:rgba(201,168,76,.12);
+  --ink:#1C1520;--sub:#6B5F70;--faint:#B8ADBE;
+  --line:#EDE6F0;--bg:#F9F5F8;--card:#FFFFFF;
+  --ok:#166534;--ok-bg:#DCFCE7;--bad:#991B1B;--bad-bg:#FEE2E2;
+  --r:10px;--r-sm:6px;--sh:0 1px 3px rgba(0,0,0,.07),0 1px 2px rgba(0,0,0,.04);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:Nunito,sans-serif;font-size:14px;line-height:1.5}
+.hdr{position:sticky;top:0;z-index:20;background:var(--card);border-bottom:1px solid var(--line);padding:12px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.hdr-brand{display:flex;align-items:center;gap:10px;flex:1;min-width:200px}
+.hdr-icon{width:36px;height:36px;border-radius:50%;background:var(--wine);display:flex;align-items:center;justify-content:center;flex:none}
+.hdr-icon svg{width:18px;height:18px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.hdr-title{font-family:"Playfair Display",serif;font-size:20px;color:var(--wine);line-height:1.1}
+.hdr-sub{font-size:11px;color:var(--sub);margin-top:1px}
+.hdr-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.hdr-controls input[type=number]{width:60px;padding:6px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font:inherit;font-size:13px;color:var(--ink);background:var(--bg);text-align:center}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:var(--r-sm);font:inherit;font-size:13px;font-weight:700;cursor:pointer;border:none;transition:opacity .15s,background .15s}
+.btn-wine{background:var(--wine);color:#fff}.btn-wine:hover{opacity:.88}
+.btn-ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}.btn-ghost:hover{background:var(--line)}
+.btn-sm{padding:5px 10px;font-size:12px}
+.status-bar{background:var(--wine);color:#fff;font-size:12px;font-weight:700;padding:6px 20px;display:flex;align-items:center;gap:8px}
+.status-bar.ok{background:#166534}.status-bar.err{background:#991B1B}
+.tabs-wrap{background:var(--card);border-bottom:1px solid var(--line);padding:0 20px;display:flex;overflow-x:auto}
+.tab-btn{padding:12px 16px;font:inherit;font-size:13px;font-weight:700;color:var(--sub);background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap;transition:all .15s}
+.tab-btn:hover{color:var(--wine)}.tab-btn.on{color:var(--wine);border-bottom-color:var(--wine)}
+main{padding:20px;max-width:1100px;margin:0 auto}
+.periodo-bar{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px;box-shadow:var(--sh)}
+.periodo-label{font-size:12px;color:var(--sub);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.periodo-id{font-size:13px;font-weight:800;color:var(--wine);background:var(--wine-light);padding:3px 10px;border-radius:999px}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px}
+.metric-card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;box-shadow:var(--sh)}
+.metric-card .lbl{font-size:11px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+.metric-card .val{font-size:22px;font-weight:800;color:var(--ink);line-height:1}
+.metric-card .val.wine{color:var(--wine)}.metric-card .val.gold{color:var(--gold)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.chip{padding:6px 14px;border-radius:999px;border:1px solid var(--line);font:inherit;font-size:13px;font-weight:700;cursor:pointer;background:var(--card);color:var(--sub);transition:all .15s}
+.chip:hover{border-color:var(--wine);color:var(--wine)}.chip.on{background:var(--wine);color:#fff;border-color:var(--wine)}
+.chip-area{border-radius:8px;font-size:12px;padding:5px 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh);overflow:hidden;margin-bottom:16px}
+.card-hdr{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.card-hdr-title{font-size:13px;font-weight:800;color:var(--ink);text-transform:uppercase;letter-spacing:.05em}
+.card-body{padding:16px 18px}
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{padding:8px 12px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--sub);border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--bg)}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:800}
+.badge.ok{background:var(--ok-bg);color:var(--ok)}.badge.bad{background:var(--bad-bg);color:var(--bad)}
+.badge.area{background:var(--wine-light);color:var(--wine)}
+.av{width:32px;height:32px;border-radius:50%;background:var(--wine);color:#fff;font-size:11px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.persona-row{display:flex;align-items:center;gap:10px}
+.persona-name{font-weight:700;font-size:13px}
+.persona-sub{font-size:11px;color:var(--sub)}
+.days-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:16px}
+.day-cell{aspect-ratio:1;border-radius:6px;border:1px solid var(--line);background:var(--bg);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--faint);transition:all .12s}
+.day-cell:hover{border-color:var(--wine);color:var(--wine)}
+.day-cell.worked{background:var(--wine);border-color:var(--wine);color:#fff}
+.day-cell.dom{opacity:.35;cursor:default;pointer-events:none}
+.day-cell .dn{font-size:13px;font-weight:800}.day-cell .ds{font-size:9px;margin-top:1px}
+.concepto-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+.concepto-row:last-child{border-bottom:none}
+.toggle-btn{width:26px;height:26px;border-radius:6px;border:1px solid var(--line);background:var(--bg);cursor:pointer;display:flex;align-items:center;justify-content:center;flex:none;transition:all .12s;font-size:13px}
+.toggle-btn.on{background:var(--wine);border-color:var(--wine);color:#fff}.toggle-btn.off{color:transparent}
+.concepto-lbl{flex:1;font-size:13px;font-weight:600;color:var(--ink)}
+.emb-counter{display:flex;align-items:center;gap:8px;margin-top:8px;padding:8px;background:var(--gold-light);border-radius:var(--r-sm)}
+.emb-counter label{font-size:12px;font-weight:700;color:var(--sub);flex:1}
+.emb-counter input{width:70px;padding:5px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font:inherit;font-size:14px;font-weight:800;text-align:center}
+.aj-input{width:90px;padding:5px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font:inherit;font-size:13px;text-align:right}
+.nota-input{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font:inherit;font-size:12px;resize:none;background:var(--bg)}
+.sec-title{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--sub);margin-bottom:10px}
+.div{height:1px;background:var(--line);margin:14px 0}
+.empty{text-align:center;padding:40px 20px;color:var(--faint);font-size:13px;font-weight:700}
+.pill-HORNOS{background:#FEF3C7;color:#92400E}
+.pill-EMBETUNADO{background:#FCE7F3;color:#831843}
+.pill-ARMADO{background:#E0E7FF;color:#3730A3}
+.pill-CRUCERO{background:#D1FAE5;color:#065F46}
+@media(max-width:700px){.hdr{padding:10px 14px}main{padding:14px}.metrics{grid-template-columns:1fr 1fr}}
+</style>
 </head>
 <body>
-  <div id="root"></div>
-  <script>
-    const e = React.createElement;
-    const AREAS = ["HORNOS", "EMBETUNADO", "ARMADO", "CRUCERO"];
-    const TODAY = new Date();
-
-    function api(path, options = {}) {
-      const token = localStorage.getItem("pd_logistica_access");
-      const headers = Object.assign({"Content-Type": "application/json"}, options.headers || {});
-      if (token) headers.Authorization = `Bearer ${token}`;
-      return fetch(path, Object.assign({}, options, {headers})).then(async (response) => {
-        const text = await response.text();
-        const data = text ? JSON.parse(text) : null;
-        if (!response.ok) throw new Error(data?.detail || data?.error || "Error de API");
-        return data;
-      });
+<div id="root"></div>
+<script>
+const h=React.createElement;
+const TODAY=new Date();
+const MESES=['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const AREAS=['HORNOS','EMBETUNADO','ARMADO','CRUCERO'];
+const AREA_LABELS={HORNOS:'Hornos',EMBETUNADO:'Embetunado',ARMADO:'Armado',CRUCERO:'Crucero'};
+function api(path,opts={}){
+  const csrfMatch=document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+  const headers={'Content-Type':'application/json','X-CSRFToken':csrfMatch?decodeURIComponent(csrfMatch[1]):'',...(opts.headers||{})};
+  return fetch(path,{...opts,headers,credentials:'same-origin'}).then(async r=>{
+    if(r.status===403||r.status===401){
+      window.location.href='/login/?next='+encodeURIComponent(window.location.pathname);
+      return null;
     }
-
-    function money(value) {
-      return Number(value || 0).toLocaleString("es-MX", {style: "currency", currency: "MXN"});
-    }
-
-    function App() {
-      const [tab, setTab] = React.useState("config");
-      const [mes, setMes] = React.useState(TODAY.getMonth() + 1);
-      const [anio, setAnio] = React.useState(TODAY.getFullYear());
-      const [periodo, setPeriodo] = React.useState(null);
-      const [bonos, setBonos] = React.useState([]);
-      const [empleados, setEmpleados] = React.useState([]);
-      const [area, setArea] = React.useState("HORNOS");
-      const [selectedBono, setSelectedBono] = React.useState(null);
-      const [registros, setRegistros] = React.useState([]);
-      const [status, setStatus] = React.useState("");
-
-      React.useEffect(() => { cargarTodo(); }, [mes, anio]);
-      React.useEffect(() => { if (selectedBono) cargarRegistros(selectedBono.id); }, [selectedBono?.id]);
-
-      function cargarTodo() {
-        setStatus("Cargando");
-        Promise.all([
-          api(`/api/bonos-produccion/periodos/?mes=${mes}&anio=${anio}`),
-          api("/api/rrhh/empleados/?activo=true&limit=500"),
-          api(`/api/bonos-produccion/bonos/resumen/?mes=${mes}&anio=${anio}`).catch(() => ({bonos: []})),
-        ]).then(([periodos, empleadosResp, resumen]) => {
-          setPeriodo(periodos.results ? periodos.results[0] : periodos[0]);
-          const rows = empleadosResp.results || empleadosResp;
-          setEmpleados(rows.filter((emp) => (emp.sucursal || "").toLowerCase() === "matriz"));
-          setBonos(resumen.bonos || []);
-          setStatus("");
-        }).catch((err) => setStatus(err.message));
-      }
-
-      function crearPeriodo() {
-        api("/api/bonos-produccion/periodos/", {
-          method: "POST",
-          body: JSON.stringify({mes: Number(mes), anio: Number(anio), dias_laborables: 23}),
-        }).then(() => cargarTodo()).catch((err) => setStatus(err.message));
-      }
-
-      function inicializar() {
-        if (!periodo) return;
-        api(`/api/bonos-produccion/periodos/${periodo.id}/inicializar-bonos/`, {method: "POST", body: "{}"})
-          .then(() => cargarTodo())
-          .catch((err) => setStatus(err.message));
-      }
-
-      function cargarRegistros(bonoId) {
-        api(`/api/bonos-produccion/registros-diarios/?bono=${bonoId}`)
-          .then((rows) => setRegistros(rows.results || rows))
-          .catch((err) => setStatus(err.message));
-      }
-
-      function guardarDia(dia, patch) {
-        const existente = registros.find((r) => Number(r.dia) === dia);
-        const payload = Object.assign({
-          bono: selectedBono.id,
-          dia,
-          tiene_uniforme: true,
-          tiene_puntualidad: true,
-          tiene_asistencia: true,
-          tiene_produccion: true,
-          cantidad_embetunados: 0,
-          observacion: "",
-        }, existente || {}, patch);
-        api(`/api/bonos-produccion/registros-diarios/${existente ? `${existente.id}/` : ""}`, {
-          method: existente ? "PUT" : "POST",
-          body: JSON.stringify(payload),
-        }).then(() => {
-          cargarRegistros(selectedBono.id);
-          cargarTodo();
-        }).catch((err) => setStatus(err.message));
-      }
-
-      function actualizarBono(id, patch) {
-        const bono = bonos.find((item) => item.id === id);
-        api(`/api/bonos-produccion/bonos/${id}/`, {
-          method: "PATCH",
-          body: JSON.stringify(Object.assign({}, patch)),
-        }).then(() => cargarTodo()).catch((err) => setStatus(err.message));
-      }
-
-      const bonosArea = bonos.filter((b) => b.area === area);
-      const empleadoArea = empleados.filter((emp) => (emp.area || "").toUpperCase() === area);
-
-      return e("div", {className: "shell"},
-        e("header", {className: "topbar"},
-          e("div", null, e("h1", null, "Bonos de producción"), e("div", {className: "status"}, status)),
-          e("div", {className: "period-controls"},
-            e("input", {type: "number", min: 1, max: 12, value: mes, onChange: (ev) => setMes(ev.target.value)}),
-            e("input", {type: "number", min: 2024, value: anio, onChange: (ev) => setAnio(ev.target.value)}),
-            e("button", {className: "secondary", onClick: cargarTodo}, "Actualizar")
-          )
+    const t=await r.text();
+    const d=t?JSON.parse(t):null;
+    if(!r.ok)throw new Error(d?.detail||d?.error||`Error ${r.status}`);
+    return d;
+  });
+}
+function money(v){return Number(v||0).toLocaleString('es-MX',{style:'currency',currency:'MXN'});}
+function initials(n){return(n||'').split(' ').filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase();}
+function esDom(d,m,a){return new Date(a,m-1,d).getDay()===0;}
+function diasEnMes(m,a){return new Date(a,m,0).getDate();}
+const IconFactory=()=>h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'#fff',strokeWidth:2,strokeLinecap:'round',strokeLinejoin:'round',style:{width:18,height:18}},h('rect',{x:2,y:7,width:20,height:15,rx:2}),h('polyline',{points:'17 2 12 7 7 2'}));
+const IconCheck=()=>h('span',null,'✓');
+function Badge({ok}){return h('span',{className:`badge ${ok?'ok':'bad'}`},ok?'✓ Pasa':'✗ No pasa');}
+function AreaPill({area}){return h('span',{className:`badge area pill-${area}`,style:{fontSize:11}},AREA_LABELS[area]||area);}
+function AreaChips({area,setArea}){
+  return h('div',{className:'chips'},AREAS.map(a=>h('button',{key:a,className:`chip chip-area ${area===a?'on':''}`,onClick:()=>setArea(a)},AREA_LABELS[a])));
+}
+function App(){
+  const [tab,setTab]=React.useState('config');
+  const [mes,setMes]=React.useState(TODAY.getMonth()+1);
+  const [anio,setAnio]=React.useState(TODAY.getFullYear());
+  const [periodo,setPeriodo]=React.useState(null);
+  const [bonos,setBonos]=React.useState([]);
+  const [area,setArea]=React.useState('HORNOS');
+  const [selectedBono,setSelectedBono]=React.useState(null);
+  const [registros,setRegistros]=React.useState([]);
+  const [status,setStatus]=React.useState('');
+  const [statusType,setStatusType]=React.useState('ok');
+  const [loading,setLoading]=React.useState(false);
+  React.useEffect(()=>{cargarTodo();},[mes,anio]);
+  React.useEffect(()=>{if(selectedBono)cargarRegistros(selectedBono.id);else setRegistros([]);},[selectedBono?.id]);
+  function cargarTodo(){
+    setLoading(true);
+    Promise.all([
+      api(`/api/bonos-produccion/periodos/?mes=${mes}&anio=${anio}`),
+      api(`/api/bonos-produccion/bonos/resumen/?mes=${mes}&anio=${anio}`).catch(()=>({bonos:[]})),
+    ]).then(([periodos,resumen])=>{
+      const p=periodos.results?periodos.results[0]:(Array.isArray(periodos)?periodos[0]:null);
+      setPeriodo(p||null);setBonos(resumen.bonos||[]);setLoading(false);
+    }).catch(err=>{showStatus(err.message,'err');setLoading(false);});
+  }
+  function cargarRegistros(id){
+    api(`/api/bonos-produccion/registros-diarios/?bono=${id}`).then(r=>setRegistros(r.results||r)).catch(err=>showStatus(err.message,'err'));
+  }
+  function crearPeriodo(){
+    api('/api/bonos-produccion/periodos/',{method:'POST',body:JSON.stringify({mes:+mes,anio:+anio,dias_laborables:23})})
+      .then(()=>{showStatus('Periodo creado','ok');cargarTodo();}).catch(err=>showStatus(err.message,'err'));
+  }
+  function inicializar(){
+    if(!periodo)return;
+    api(`/api/bonos-produccion/periodos/${periodo.id}/inicializar-bonos/`,{method:'POST',body:'{}'})
+      .then(r=>{showStatus(`${r.creados} empleados inicializados`,'ok');cargarTodo();}).catch(err=>showStatus(err.message,'err'));
+  }
+  function guardarDia(dia,patch){
+    if(!selectedBono)return;
+    const ex=registros.find(r=>+r.dia===dia);
+    const payload={bono:selectedBono.id,dia,tiene_uniforme:true,tiene_puntualidad:true,tiene_asistencia:true,tiene_produccion:true,cantidad_embetunados:0,observacion:'',...(ex||{}),...patch};
+    const url=ex?`/api/bonos-produccion/registros-diarios/${ex.id}/`:'/api/bonos-produccion/registros-diarios/';
+    api(url,{method:ex?'PUT':'POST',body:JSON.stringify(payload)}).then(()=>{cargarRegistros(selectedBono.id);cargarTodo();}).catch(err=>showStatus(err.message,'err'));
+  }
+  function actualizarBono(id,patch){
+    api(`/api/bonos-produccion/bonos/${id}/`,{method:'PATCH',body:JSON.stringify(patch)}).then(()=>{showStatus('Guardado','ok');cargarTodo();}).catch(err=>showStatus(err.message,'err'));
+  }
+  function showStatus(msg,type='ok'){setStatus(msg);setStatusType(type);setTimeout(()=>setStatus(''),4000);}
+  const bonosArea=bonos.filter(b=>b.area===area);
+  const totalGlobal=bonos.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
+  const pasan=bonos.filter(b=>b.pasa_asistencia&&b.pasa_uniforme&&b.pasa_puntualidad&&b.pasa_produccion).length;
+  return h('div',null,
+    h('header',{className:'hdr'},
+      h('div',{className:'hdr-brand'},
+        h('div',{className:'hdr-icon'},h(IconFactory)),
+        h('div',null,h('div',{className:'hdr-title'},"Bonos de Produccion"),h('div',{className:'hdr-sub'},"Pollyana's Dolce · "+MESES[+mes]+' '+anio))
+      ),
+      h('div',{className:'hdr-controls'},
+        h('input',{type:'number',min:1,max:12,value:mes,onChange:e=>setMes(+e.target.value),title:'Mes'}),
+        h('input',{type:'number',value:anio,onChange:e=>setAnio(+e.target.value),style:{width:70},title:'Año'}),
+        h('button',{className:'btn btn-wine',onClick:cargarTodo},loading?'Cargando…':'Actualizar')
+      )
+    ),
+    status&&h('div',{className:`status-bar ${statusType}`},status),
+    h('div',{className:'tabs-wrap'},
+      [['config','Configuracion'],['captura','Captura diaria'],['resumen','Resumen mensual'],['ajustes','Ajustes'],['revision','Revision por area']].map(([id,lbl])=>
+        h('button',{key:id,className:`tab-btn ${tab===id?'on':''}`,onClick:()=>setTab(id)},lbl))
+    ),
+    h('main',null,
+      h('div',{className:'periodo-bar'},
+        h('span',{className:'periodo-label'},'Periodo:'),
+        periodo?h('span',{className:'periodo-id'},`ID ${periodo.id} · ${periodo.dias_laborables} dias lab.`):h('span',{style:{color:'var(--faint)',fontSize:13}},'Sin periodo para este mes'),
+        !periodo&&h('button',{className:'btn btn-wine btn-sm',onClick:crearPeriodo},'Crear periodo'),
+        periodo&&h('button',{className:'btn btn-ghost btn-sm',onClick:inicializar},'Inicializar empleados')
+      ),
+      h('div',{className:'metrics'},
+        h('div',{className:'metric-card'},h('div',{className:'lbl'},'Total a pagar'),h('div',{className:'val gold'},money(totalGlobal))),
+        h('div',{className:'metric-card'},h('div',{className:'lbl'},'Empleados'),h('div',{className:'val'},bonos.length)),
+        h('div',{className:'metric-card'},h('div',{className:'lbl'},'Pasan todo'),h('div',{className:'val wine'},pasan)),
+        h('div',{className:'metric-card'},h('div',{className:'lbl'},'Area activa'),h('div',{className:'val',style:{fontSize:14}},AREA_LABELS[area]))
+      ),
+      tab==='config'&&h(ConfigTab,{bonos,area,setArea}),
+      tab==='captura'&&h(CapturaTab,{bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia,mes,anio}),
+      tab==='resumen'&&h(ResumenTab,{bonos,area,setArea}),
+      tab==='ajustes'&&h(AjustesTab,{bonosArea,area,setArea,actualizarBono}),
+      tab==='revision'&&h(RevisionTab,{bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia})
+    )
+  );
+}
+function ConfigTab({bonos,area,setArea}){
+  return h('div',null,h(AreaChips,{area,setArea}),
+    h('div',{className:'card'},
+      h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},AREA_LABELS[area]),h('span',{style:{fontSize:12,color:'var(--sub)',fontWeight:700}},`${bonos.filter(b=>b.area===area).length} empleados`)),
+      h('div',{className:'tbl-wrap'},h('table',null,
+        h('thead',null,h('tr',null,h('th',null,'Empleado'),h('th',null,'Area'),h('th',null,'Uniforme'),h('th',null,'Asistencia'),h('th',null,'Puntualidad'),h('th',null,'Produccion'),h('th',null,'Total'))),
+        h('tbody',null,bonos.filter(b=>b.area===area).map(b=>h('tr',{key:b.id},
+          h('td',null,h('div',{className:'persona-row'},h('div',{className:'av'},initials(b.empleado_nombre)),h('div',{className:'persona-name'},b.empleado_nombre))),
+          h('td',null,h(AreaPill,{area:b.area})),
+          h('td',null,h(Badge,{ok:b.pasa_uniforme})),h('td',null,h(Badge,{ok:b.pasa_asistencia})),
+          h('td',null,h(Badge,{ok:b.pasa_puntualidad})),h('td',null,h(Badge,{ok:b.pasa_produccion})),
+          h('td',{style:{fontWeight:800,color:'var(--wine)'}},money(b.total_a_pagar))
+        )))
+      ))
+    )
+  );
+}
+function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia,mes,anio}){
+  const [selDia,setSelDia]=React.useState(null);
+  const total=diasEnMes(+mes,+anio);
+  const regActivos=registros.filter(r=>r.tiene_asistencia);
+  const diaActual=selDia?registros.find(r=>+r.dia===selDia):null;
+  function togDia(dia){
+    const r=registros.find(x=>+x.dia===dia);
+    if(r&&r.tiene_asistencia){guardarDia(dia,{tiene_asistencia:false,tiene_uniforme:false,tiene_puntualidad:false,tiene_produccion:false});if(selDia===dia)setSelDia(null);}
+    else{guardarDia(dia,{tiene_asistencia:true,tiene_uniforme:true,tiene_puntualidad:true,tiene_produccion:true});setSelDia(dia);}
+  }
+  return h('div',null,
+    h(AreaChips,{area,setArea}),
+    h('div',{className:'card'},
+      h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},AREA_LABELS[area]+' — Selecciona empleado')),
+      h('div',{className:'card-body'},
+        bonosArea.length===0?h('div',{className:'empty'},'Sin empleados en esta area para el periodo.'):
+        h('div',{className:'chips',style:{marginBottom:0}},bonosArea.map(b=>h('button',{key:b.id,className:`chip ${selectedBono?.id===b.id?'on':''}`,onClick:()=>setSelectedBono(b)},b.empleado_nombre.split(' ')[0])))
+      )
+    ),
+    selectedBono&&h('div',{className:'card'},
+      h('div',{className:'card-hdr'},
+        h('div',{style:{display:'flex',alignItems:'center',gap:10}},
+          h('div',{className:'av'},initials(selectedBono.empleado_nombre)),
+          h('div',null,h('div',{className:'persona-name'},selectedBono.empleado_nombre),h('div',{className:'persona-sub'},`${regActivos.length} dias registrados`))
         ),
-        e("main", null,
-          e("nav", {className: "tabs"}, [
-            ["config", "Configuración"], ["captura", "Captura diaria"], ["resumen", "Resumen mensual"], ["ajustes", "Ajustes"], ["revision", "Revisión por área"]
-          ].map(([id, label]) => e("button", {key: id, className: tab === id ? "active" : "ghost", onClick: () => setTab(id)}, label))),
-          tab === "config" && e(ConfigPanel, {periodo, empleados: empleadoArea, area, setArea, crearPeriodo, inicializar}),
-          tab === "captura" && e(CapturaPanel, {area, setArea, bonosArea, selectedBono, setSelectedBono, registros, guardarDia}),
-          tab === "resumen" && e(ResumenPanel, {bonos}),
-          tab === "ajustes" && e(AjustesPanel, {bonos, actualizarBono}),
-          tab === "revision" && e(RevisionPanel, {area, setArea, bonosArea, selectedBono, setSelectedBono, registros, guardarDia})
+        h('div',{style:{display:'flex',gap:6,flexWrap:'wrap'}},
+          h(Badge,{ok:selectedBono.pasa_asistencia}),h(Badge,{ok:selectedBono.pasa_uniforme}),h(Badge,{ok:selectedBono.pasa_produccion}),
+          h('span',{style:{fontWeight:800,color:'var(--wine)',fontSize:14}},money(selectedBono.total_a_pagar))
         )
-      );
-    }
-
-    function AreaChips({area, setArea}) {
-      return e("div", {className: "chips"}, AREAS.map((item) =>
-        e("button", {key: item, className: area === item ? "active" : "ghost", onClick: () => setArea(item)}, item)
-      ));
-    }
-
-    function ConfigPanel({periodo, empleados, area, setArea, crearPeriodo, inicializar}) {
-      return e("section", {className: "panel"},
-        e("div", {className: "actions"},
-          periodo ? e("span", {className: "status"}, `Período activo ID ${periodo.id}`) : e("button", {onClick: crearPeriodo}, "Crear período"),
-          periodo && e("button", {onClick: inicializar}, "Inicializar bonos")
-        ),
-        e("div", {className: "panel"}, e(AreaChips, {area, setArea})),
-        e("div", {className: "table-wrap"}, e("table", null,
-          e("thead", null, e("tr", null, ["Código", "Empleado", "Área", "Puesto", "Sucursal"].map((h) => e("th", {key: h}, h)))),
-          e("tbody", null, empleados.map((emp) => e("tr", {key: emp.id},
-            e("td", null, emp.codigo),
-            e("td", null, emp.nombre),
-            e("td", null, emp.area),
-            e("td", null, emp.puesto),
-            e("td", null, emp.sucursal)
-          )))
-        ))
-      );
-    }
-
-    function CapturaPanel({area, setArea, bonosArea, selectedBono, setSelectedBono, registros, guardarDia}) {
-      return e("section", {className: "panel"},
-        e(AreaChips, {area, setArea}),
-        e("div", {className: "chips"}, bonosArea.map((bono) =>
-          e("button", {key: bono.id, className: selectedBono?.id === bono.id ? "active" : "ghost", onClick: () => setSelectedBono(bono)}, bono.empleado_nombre)
-        )),
-        selectedBono && e("div", {className: "day-grid"}, Array.from({length: 31}, (_, idx) => {
-          const dia = idx + 1;
-          const reg = registros.find((item) => Number(item.dia) === dia) || {};
-          return e("div", {className: "day", key: dia},
-            e("strong", null, `Día ${dia}`),
-            e("div", {className: "checks"}, ["uniforme", "puntualidad", "asistencia", "produccion"].map((key) =>
-              e("label", {key}, e("input", {
-                type: "checkbox",
-                checked: reg[`tiene_${key}`] !== false,
-                onChange: (ev) => guardarDia(dia, {[`tiene_${key}`]: ev.target.checked})
-              }), key)
-            )),
-            selectedBono.area === "EMBETUNADO" && e("input", {
-              type: "number",
-              min: 0,
-              value: reg.cantidad_embetunados || 0,
-              onChange: (ev) => guardarDia(dia, {cantidad_embetunados: Number(ev.target.value)})
-            })
+      ),
+      h('div',{className:'card-body'},
+        h('div',{className:'sec-title'},'Clic en el dia para registrar asistencia'),
+        h('div',{className:'days-grid'},Array.from({length:total},(_,i)=>i+1).map(d=>{
+          const dom=esDom(d,+mes,+anio);
+          const r=registros.find(x=>+x.dia===d);
+          const worked=r?.tiene_asistencia;
+          return h('div',{key:d,className:`day-cell ${dom?'dom':''} ${worked?'worked':''}`,onClick:()=>{if(!dom){togDia(d);setSelDia(d);}}},
+            h('span',{className:'dn'},d),h('span',{className:'ds'},worked?'✓':dom?'D':''));
+        })),
+        regActivos.length>0&&h('div',null,
+          h('div',{className:'div'}),
+          h('div',{className:'sec-title'},'Detalle por dia trabajado'),
+          h('div',{className:'chips'},regActivos.map(r=>h('button',{key:r.dia,className:`chip ${selDia===+r.dia?'on':''}`,style:{padding:'4px 10px',fontSize:12},onClick:()=>setSelDia(+r.dia)},r.dia))),
+          diaActual&&h('div',null,
+            [{k:'tiene_uniforme',lbl:'Uniforme'},{k:'tiene_puntualidad',lbl:'Puntualidad'},{k:'tiene_produccion',lbl:'Produccion'}].map(({k,lbl})=>
+              h('div',{key:k,className:'concepto-row'},
+                h('div',{className:`toggle-btn ${diaActual[k]?'on':'off'}`,onClick:()=>guardarDia(selDia,{[k]:!diaActual[k]})},diaActual[k]&&h(IconCheck)),
+                h('span',{className:'concepto-lbl'},lbl),h(Badge,{ok:diaActual[k]})
+              )
+            ),
+            area==='EMBETUNADO'&&h('div',{className:'emb-counter'},
+              h('label',null,'🎂 Pasteles embetunados'),
+              h('input',{type:'number',min:0,value:diaActual.cantidad_embetunados||0,onChange:e=>guardarDia(selDia,{cantidad_embetunados:+e.target.value})})
+            ),
+            h('div',{className:'concepto-row'},
+              h('span',{className:'concepto-lbl'},'Observacion'),
+              h('textarea',{className:'nota-input',rows:2,defaultValue:diaActual.observacion||'',onBlur:e=>guardarDia(selDia,{observacion:e.target.value}),placeholder:'Opcional…'})
+            )
+          )
+        )
+      )
+    )
+  );
+}
+function ResumenTab({bonos,area,setArea}){
+  if(!bonos.length)return h('div',{className:'empty'},'Sin datos. Crea el periodo e inicializa empleados.');
+  const totalGlobal=bonos.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
+  const embonos=bonos.filter(b=>b.area==='EMBETUNADO');
+  const maxEmb=embonos.reduce((m,b)=>Math.max(m,b.total_embetunados||0),0);
+  return h('div',null,
+    h(AreaChips,{area,setArea}),
+    h('div',{className:'metrics',style:{marginBottom:20}},
+      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Total global'),h('div',{className:'val gold'},money(totalGlobal))),
+      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Empleados'),h('div',{className:'val'},bonos.length)),
+      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Pasan todo'),h('div',{className:'val wine'},bonos.filter(b=>b.pasa_asistencia&&b.pasa_uniforme&&b.pasa_puntualidad&&b.pasa_produccion).length)),
+      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Area'),h('div',{className:'val',style:{fontSize:14}},AREA_LABELS[area]))
+    ),
+    h('div',{className:'card'},
+      h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},AREA_LABELS[area]),h('div',{style:{fontWeight:800,color:'var(--gold)',fontSize:14}},money(bonos.filter(b=>b.area===area).reduce((s,b)=>s+Number(b.total_a_pagar||0),0)))),
+      h('div',{className:'tbl-wrap'},h('table',null,
+        h('thead',null,h('tr',null,[h('th',null,'Empleado'),h('th',null,'Dias'),h('th',null,'Uniforme'),h('th',null,'Asistencia'),h('th',null,'Puntualidad'),h('th',null,'Produccion'),area==='EMBETUNADO'&&h('th',null,'Embet.'),area==='EMBETUNADO'&&h('th',null,'Premio'),h('th',null,'Total')].filter(Boolean))),
+        h('tbody',null,bonos.filter(b=>b.area===area).map(b=>{
+          const esGanador=area==='EMBETUNADO'&&maxEmb>0&&(b.total_embetunados||0)===maxEmb;
+          return h('tr',{key:b.id},
+            h('td',null,h('div',{className:'persona-row'},h('div',{className:'av'},initials(b.empleado_nombre)),h('div',null,h('div',{className:'persona-name'},b.empleado_nombre+(esGanador?' ⭐':'')),esGanador&&h('div',{className:'persona-sub',style:{color:'var(--gold)'}},'Mas embetunados')))),
+            h('td',null,b.dias_trabajados||0),h('td',null,h(Badge,{ok:b.pasa_uniforme})),h('td',null,h(Badge,{ok:b.pasa_asistencia})),
+            h('td',null,h(Badge,{ok:b.pasa_puntualidad})),h('td',null,h(Badge,{ok:b.pasa_produccion})),
+            area==='EMBETUNADO'&&h('td',null,b.total_embetunados||0),
+            area==='EMBETUNADO'&&h('td',null,money(b.monto_premio_embetunado||0)),
+            h('td',{style:{fontWeight:800,color:'var(--wine)'}},money(b.total_a_pagar))
           );
         }))
-      );
-    }
-
-    function ResumenPanel({bonos}) {
-      return e("section", {className: "panel table-wrap"}, e("table", null,
-        e("thead", null, e("tr", null, ["Empleado", "Área", "Asistencia", "Puntualidad", "Uniforme", "Producción", "Total"].map((h) => e("th", {key: h}, h)))),
-        e("tbody", null, bonos.map((b) => e("tr", {key: b.id},
-          e("td", null, b.empleado_nombre),
-          e("td", null, b.area),
-          e("td", null, badge(b.pasa_asistencia)),
-          e("td", null, badge(b.pasa_puntualidad)),
-          e("td", null, badge(b.pasa_uniforme)),
-          e("td", null, badge(b.pasa_produccion)),
-          e("td", null, money(b.total_a_pagar))
-        )))
-      ));
-    }
-
-    function AjustesPanel({bonos, actualizarBono}) {
-      return e("section", {className: "panel table-wrap"}, e("table", null,
-        e("thead", null, e("tr", null, ["Empleado", "Ajuste +", "Ajuste -", "Bono extra", "Total"].map((h) => e("th", {key: h}, h)))),
-        e("tbody", null, bonos.map((b) => e("tr", {key: b.id},
-          e("td", null, b.empleado_nombre),
-          e("td", null, e("input", {type: "number", defaultValue: b.ajuste_positivo, onBlur: (ev) => actualizarBono(b.id, {ajuste_positivo: ev.target.value})})),
-          e("td", null, e("input", {type: "number", defaultValue: b.ajuste_negativo, onBlur: (ev) => actualizarBono(b.id, {ajuste_negativo: ev.target.value})})),
-          e("td", null, e("input", {type: "number", defaultValue: b.bono_extra, onBlur: (ev) => actualizarBono(b.id, {bono_extra: ev.target.value})})),
-          e("td", null, money(b.total_a_pagar))
-        )))
-      ));
-    }
-
-    function RevisionPanel({area, setArea, bonosArea, selectedBono, setSelectedBono, registros, guardarDia}) {
-      return e("section", {className: "panel"},
-        e(AreaChips, {area, setArea}),
-        e("div", {className: "chips"}, bonosArea.map((bono) =>
-          e("button", {key: bono.id, className: selectedBono?.id === bono.id ? "active" : "ghost", onClick: () => setSelectedBono(bono)}, bono.empleado_nombre)
-        )),
-        selectedBono && e("div", {className: "grid"}, registros.map((reg) =>
-          e("label", {key: reg.id}, `Día ${reg.dia}`, e("textarea", {
-            defaultValue: reg.observacion,
-            rows: 3,
-            onBlur: (ev) => guardarDia(Number(reg.dia), {observacion: ev.target.value})
-          }))
-        ))
-      );
-    }
-
-    function badge(value) {
-      return e("span", {className: `badge ${value ? "ok" : "bad"}`}, value ? "Pasa" : "No pasa");
-    }
-
-    ReactDOM.createRoot(document.getElementById("root")).render(e(App));
-  </script>
+      ))
+    )
+  );
+}
+function AjustesTab({bonosArea,area,setArea,actualizarBono}){
+  return h('div',null,h(AreaChips,{area,setArea}),
+    bonosArea.length===0?h('div',{className:'empty'},'Sin empleados en esta area.'):
+    bonosArea.map(b=>h('div',{key:b.id,className:'card',style:{marginBottom:10}},
+      h('div',{className:'card-hdr'},
+        h('div',{style:{display:'flex',alignItems:'center',gap:10}},h('div',{className:'av'},initials(b.empleado_nombre)),h('div',null,h('div',{className:'persona-name'},b.empleado_nombre),h(AreaPill,{area:b.area}))),
+        h('div',{style:{fontWeight:800,color:'var(--wine)',fontSize:15}},money(b.total_a_pagar))
+      ),
+      h('div',{className:'card-body'},
+        h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12}},
+          h('label',{style:{display:'grid',gap:4,fontSize:12,fontWeight:700,color:'var(--sub)'}},'Ajuste positivo (+)',h('input',{className:'aj-input',type:'number',defaultValue:b.ajuste_positivo||0,min:0,onBlur:e=>actualizarBono(b.id,{ajuste_positivo:e.target.value})})),
+          h('label',{style:{display:'grid',gap:4,fontSize:12,fontWeight:700,color:'var(--sub)'}},'Ajuste negativo (-)',h('input',{className:'aj-input',type:'number',defaultValue:b.ajuste_negativo||0,min:0,onBlur:e=>actualizarBono(b.id,{ajuste_negativo:e.target.value})})),
+          h('label',{style:{display:'grid',gap:4,fontSize:12,fontWeight:700,color:'var(--sub)'}},'Bono extra',h('input',{className:'aj-input',type:'number',defaultValue:b.bono_extra||0,min:0,onBlur:e=>actualizarBono(b.id,{bono_extra:e.target.value})}))
+        )
+      )
+    ))
+  );
+}
+function RevisionTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia}){
+  return h('div',null,h(AreaChips,{area,setArea}),
+    h('div',{className:'card'},
+      h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},'Observaciones — '+AREA_LABELS[area])),
+      h('div',{className:'card-body'},
+        h('div',{className:'chips',style:{marginBottom:14}},bonosArea.map(b=>h('button',{key:b.id,className:`chip ${selectedBono?.id===b.id?'on':''}`,onClick:()=>setSelectedBono(b)},b.empleado_nombre.split(' ')[0]))),
+        selectedBono&&(registros.length===0?h('div',{className:'empty'},'Sin dias registrados.'):
+          h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:10}},
+            registros.filter(r=>r.tiene_asistencia).map(r=>h('div',{key:r.id,style:{background:'var(--bg)',border:'1px solid var(--line)',borderRadius:8,padding:10}},
+              h('div',{style:{fontWeight:800,fontSize:12,color:'var(--sub)',marginBottom:6}},`Dia ${r.dia}`),
+              h('div',{style:{display:'flex',gap:4,flexWrap:'wrap',marginBottom:8}},h(Badge,{ok:r.tiene_uniforme}),h(Badge,{ok:r.tiene_puntualidad}),h(Badge,{ok:r.tiene_produccion})),
+              area==='EMBETUNADO'&&r.cantidad_embetunados>0&&h('div',{style:{fontSize:12,color:'var(--gold)',fontWeight:700,marginBottom:6}},`🎂 ${r.cantidad_embetunados} pasteles`),
+              h('textarea',{className:'nota-input',rows:2,defaultValue:r.observacion||'',onBlur:e=>guardarDia(+r.dia,{observacion:e.target.value}),placeholder:'Observacion del dia…'})
+            ))
+          )
+        )
+      )
+    )
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(h(App));
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/bonos-produccion/sw.js', {scope: '/bonos-produccion/'})
+      .catch((err) => console.warn('No se pudo registrar el service worker de bonos producción', err));
+  });
+}
+</script>
 </body>
 </html>
