@@ -51,6 +51,31 @@
   .assign-card-title { color: var(--vino); font-size: 17px; font-weight: 800; }
   .assign-card-note { color: var(--texto-light); font-size: 13px; margin-top: 3px; }
   .assign-card-body { padding: 14px 16px 16px; }
+  .assign-toolbar {
+    align-items: end;
+    display: grid;
+    gap: 8px;
+    grid-template-columns: minmax(220px, 1fr) auto;
+    margin-bottom: 14px;
+  }
+  .assign-search {
+    display: grid;
+    gap: 6px;
+  }
+  .assign-search label {
+    color: var(--texto);
+    font-size: 12px;
+    font-weight: 900;
+  }
+  .assign-search input {
+    min-height: 38px;
+  }
+  .assign-search-note {
+    color: var(--texto-light);
+    font-size: 12px;
+    font-weight: 800;
+    min-height: 18px;
+  }
   .assign-list { display: grid; gap: 9px; }
   .employee-row {
     border: 1px solid var(--rosa);
@@ -87,6 +112,7 @@
   .status-line { color: var(--texto-light); font-weight: 800; min-height: 22px; }
   @media (max-width: 860px) {
     .assign-layout { grid-template-columns: 1fr; }
+    .assign-toolbar { grid-template-columns: 1fr; }
     .employee-row { grid-template-columns: 36px minmax(0, 1fr); }
     .employee-row .assign-action { grid-column: 1 / -1; width: 100%; }
   }
@@ -129,6 +155,14 @@
         </div>
       </div>
       <div class="assign-card-body">
+        <div class="assign-toolbar">
+          <div class="assign-search">
+            <label for="employee-search">Buscar empleado</label>
+            <input id="employee-search" class="input-field" type="search" autocomplete="off" placeholder="Empieza a teclear nombre, código, área o sucursal" data-employee-search>
+            <div class="assign-search-note" data-search-note></div>
+          </div>
+          <button class="assign-action" type="button" data-clear-search>Limpiar</button>
+        </div>
         <div class="assign-card-title">Asignados</div>
         <div class="assign-list" data-assigned></div>
         <div style="height:16px"></div>
@@ -147,7 +181,7 @@
     {id: "ARMADO", nombre: "Armado"},
     {id: "CRUCERO", nombre: "Crucero"},
   ];
-  const state = {mode: "ventas", choices: [], selected: null, assigned: [], pool: []};
+  const state = {mode: "ventas", choices: [], selected: null, assigned: [], pool: [], search: ""};
   const root = document.getElementById("rrhh-assignment-app");
   const els = {
     status: root.querySelector("[data-status]"),
@@ -157,6 +191,9 @@
     selectorNote: root.querySelector("[data-selector-note]"),
     currentTitle: root.querySelector("[data-current-title]"),
     currentNote: root.querySelector("[data-current-note]"),
+    search: root.querySelector("[data-employee-search]"),
+    searchNote: root.querySelector("[data-search-note]"),
+    clearSearch: root.querySelector("[data-clear-search]"),
     assigned: root.querySelector("[data-assigned]"),
     pool: root.querySelector("[data-pool]"),
   };
@@ -182,6 +219,37 @@
 
   function setStatus(message) {
     els.status.textContent = message || "";
+  }
+
+  function normalize(value) {
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+  }
+
+  function employeeSearchText(employee) {
+    return normalize([
+      employee.nombre,
+      employee.codigo,
+      employee.area,
+      employee.puesto,
+      employee.sucursal,
+      employee.rfc,
+      employee.curp,
+      employee.nss,
+    ].filter(Boolean).join(" "));
+  }
+
+  function filterEmployees(rows) {
+    const query = normalize(state.search);
+    if (!query) return rows;
+    const terms = query.split(/\s+/).filter(Boolean);
+    return rows.filter(employee => {
+      const text = employeeSearchText(employee);
+      return terms.every(term => text.includes(term));
+    });
   }
 
   function employeeRow(employee, actionLabel, actionClass, onClick) {
@@ -226,16 +294,33 @@
     els.assigned.innerHTML = "";
     els.pool.innerHTML = "";
     if (!state.selected) {
+      els.search.disabled = true;
+      els.clearSearch.disabled = true;
+      els.searchNote.textContent = "";
       els.assigned.innerHTML = '<div class="empty-state">Selecciona un destino.</div>';
       els.pool.innerHTML = '<div class="empty-state">Selecciona un destino.</div>';
       return;
     }
-    if (!state.assigned.length) els.assigned.innerHTML = '<div class="empty-state">Sin empleados asignados.</div>';
-    state.assigned.forEach(employee => {
+    els.search.disabled = false;
+    els.clearSearch.disabled = !state.search;
+    const assignedRows = filterEmployees(state.assigned);
+    const poolRows = filterEmployees(state.pool);
+    const totalRows = state.assigned.length + state.pool.length;
+    const visibleRows = assignedRows.length + poolRows.length;
+    els.searchNote.textContent = state.search
+      ? `${visibleRows} coincidencia${visibleRows === 1 ? "" : "s"} de ${totalRows} empleados cargados`
+      : `${totalRows} empleados cargados`;
+
+    if (!assignedRows.length) {
+      els.assigned.innerHTML = `<div class="empty-state">${state.search ? "Sin coincidencias en asignados." : "Sin empleados asignados."}</div>`;
+    }
+    assignedRows.forEach(employee => {
       els.assigned.appendChild(employeeRow(employee, "Quitar", "warning", () => clearAssignment(employee)));
     });
-    if (!state.pool.length) els.pool.innerHTML = '<div class="empty-state">No hay empleados pendientes.</div>';
-    state.pool.forEach(employee => {
+    if (!poolRows.length) {
+      els.pool.innerHTML = `<div class="empty-state">${state.search ? "Sin coincidencias pendientes." : "No hay empleados pendientes."}</div>`;
+    }
+    poolRows.forEach(employee => {
       els.pool.appendChild(employeeRow(employee, "Asignar aquí", "primary", () => assignHere(employee)));
     });
   }
@@ -296,12 +381,26 @@
     state.selected = null;
     state.assigned = [];
     state.pool = [];
+    state.search = "";
+    els.search.value = "";
     try {
       await loadChoices();
     } catch (error) {
       setStatus(error.message);
     }
   }));
+
+  els.search.addEventListener("input", event => {
+    state.search = event.target.value;
+    render();
+  });
+
+  els.clearSearch.addEventListener("click", () => {
+    state.search = "";
+    els.search.value = "";
+    render();
+    els.search.focus();
+  });
 
   loadChoices().catch(error => setStatus(error.message));
 })();
