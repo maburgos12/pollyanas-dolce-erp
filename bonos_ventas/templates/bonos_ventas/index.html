@@ -126,7 +126,18 @@
     function VentasPanel({ventas,syncPos}) { return e("section", {className:"panel"}, e("button", {onClick:syncPos}, "Sincronizar desde POS"), table(["Sucursal","Categoría","Anterior","Actual","%","Bono"], ventas.map(v => [v.sucursal_nombre,v.categoria,v.cantidad_anterior,v.cantidad_actual,`${v.pct_crecimiento}%`,money(v.monto_bono_categoria)]))); }
     function ResumenPanel({bonos}) { return table(["Empleado","Sucursal","Asistencia","Uniforme","Puntualidad","Sub1","Bono ventas","Total"], bonos.map(b => [b.empleado_nombre,b.sucursal_nombre,badge(b.pasa_asistencia),badge(b.pasa_uniforme),badge(b.pasa_puntualidad),money(b.sub1),money(b.bono_ventas),money(b.total_a_pagar)])); }
     function AjustesPanel({bonos,patchBono}) { return table(["Empleado","Ajuste +","Ajuste -","Bono extra","Total"], bonos.map(b => [b.empleado_nombre,e("input",{type:"number",defaultValue:b.ajuste_positivo,onBlur:ev=>patchBono(b.id,{ajuste_positivo:ev.target.value})}),e("input",{type:"number",defaultValue:b.ajuste_negativo,onBlur:ev=>patchBono(b.id,{ajuste_negativo:ev.target.value})}),e("input",{type:"number",defaultValue:b.bono_extra,onBlur:ev=>patchBono(b.id,{bono_extra:ev.target.value})}),money(b.total_a_pagar)])); }
-    function table(headers, rows) { return e("section", {className:"panel table"}, e("table", null, e("thead", null, e("tr", null, headers.map(h => e("th", {key:h}, h)))), e("tbody", null, rows.map((row,i) => e("tr", {key:i}, row.map((cell,j) => e("td", {key:j}, cell)))))); }
+    function table(headers, rows) {
+      return e("section", {className:"panel table"},
+        e("table", null,
+          e("thead", null,
+            e("tr", null, headers.map(h => e("th", {key:h}, h)))
+          ),
+          e("tbody", null,
+            rows.map((row, i) => e("tr", {key:i}, row.map((cell, j) => e("td", {key:j}, cell))))
+          )
+        )
+      );
+    }
     ReactDOM.createRoot(document.getElementById("root")).render(e(App));
   </script>
 </body>
