@@ -1338,6 +1338,7 @@
           ? nombreLimpio.split(/\s+/)[0]
           : (username || "repartidor");
         return {
+          username,
           nombre: nombreLimpio || username || "repartidor",
           primerNombre,
           repartidor,
@@ -1592,6 +1593,47 @@
         `;
       }
 
+      function cierreCombustibleExcepcionUnica(actual = state.bitacoraSalida) {
+        return Boolean(
+          state.perfil?.username === "rep.jorge.lopez" &&
+          actual &&
+          (Number(actual.id) === 42 || actual.folio === "GS-PM1-0012") &&
+          !tieneCargasCombustibleRuta(actual)
+        );
+      }
+
+      function shouldShowCierreJorgeModal() {
+        const actual = state.bitacoraSalida;
+        if (!cierreCombustibleExcepcionUnica(actual)) return false;
+        return !sessionStorage.getItem(`pd_cierre_jorge_unico_${actual.id || actual.folio}`);
+      }
+
+      function dismissCierreJorgeModal() {
+        const actual = state.bitacoraSalida;
+        if (actual) sessionStorage.setItem(`pd_cierre_jorge_unico_${actual.id || actual.folio}`, "true");
+        renderDashboard();
+      }
+
+      function cierreJorgeModal() {
+        const actual = state.bitacoraSalida;
+        if (!shouldShowCierreJorgeModal()) return "";
+        return `
+          <section class="fuel-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="jorge-close-title">
+            <article class="fuel-modal">
+              <button class="fuel-close" type="button" onclick="dismissCierreJorgeModal()" aria-label="Cerrar aviso">×</button>
+              <div class="fuel-icon">⛽</div>
+              <div class="fuel-label">Aviso único</div>
+              <h2 id="jorge-close-title">Puedes cerrar tu turno actual</h2>
+              <p>Jorge, por única ocasión podrás cerrar el turno ${escapeHtml(actual.folio || "")} y abrir uno nuevo.</p>
+              <div class="fuel-notice">
+                A partir del siguiente turno, si cargas gasolina debes registrarla en Bitácora con litros, importe total y foto del ticket antes de cerrar.
+              </div>
+              <button class="primary-btn" type="button" onclick="dismissCierreJorgeModal()">Continuar</button>
+            </article>
+          </section>
+        `;
+      }
+
       function resumenSemanalCard() {
         const resumen = state.resumenSemanal;
         if (!resumen) return "";
@@ -1629,6 +1671,7 @@
         render(shell(`
           ${resumenSemanalCard()}
           ${combustibleAlertaModal()}
+          ${cierreJorgeModal()}
           <p class="unit-line">Selecciona la unidad al iniciar cada captura.</p>
           <button class="dashboard-help" onclick="showScreen('ayuda')" type="button">? Ayuda rapida</button>
           <div class="dash-grid">
@@ -2558,6 +2601,7 @@
 
       function requiereCargaCombustibleAntesDeCerrar(actual, draft) {
         if (!actual || !draft?.nivel_gas_llegada || tieneCargasCombustibleRuta(actual)) return false;
+        if (cierreCombustibleExcepcionUnica(actual)) return false;
         const salida = gasLevelRank(actual.nivel_gas_salida);
         const llegada = gasLevelRank(draft.nivel_gas_llegada);
         return salida !== null && llegada !== null && llegada > salida;
@@ -2734,6 +2778,7 @@
         } else {
           const cargasRuta = actual.cargas_combustible || [];
           const requiereCargaAntesDeCerrar = requiereCargaCombustibleAntesDeCerrar(actual, draft);
+          const cierreJorgePermitido = cierreCombustibleExcepcionUnica(actual);
           body = `
             <p class="unit-line">Turno activo · ${escapeHtml(actual.unidad_codigo)} · Folio: ${escapeHtml(actual.folio)}</p>
             <section class="card report-card">
@@ -2766,6 +2811,11 @@
               ${requiereCargaAntesDeCerrar ? `
                 <div class="daily-banner warning">
                   El nivel de gasolina de llegada es mayor al de salida. Registra la carga de gasolina antes de cerrar el turno.
+                </div>
+              ` : ""}
+              ${cierreJorgePermitido ? `
+                <div class="daily-banner warning">
+                  Aviso único para Jorge: puedes cerrar este turno actual. En el siguiente turno, toda carga de gasolina debe registrarse con litros, importe total y foto del ticket.
                 </div>
               ` : ""}
               <div class="field">
