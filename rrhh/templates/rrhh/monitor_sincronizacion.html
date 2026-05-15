@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block title %}RRHH · Monitor checador{% endblock %}
+{% block page_title %}Monitor de sincronización checador{% endblock %}
+
+{% block extra_css %}
+<style>
+  .monitor-page { display: grid; gap: 18px; }
+  .monitor-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .monitor-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 18px; }
+  .monitor-value { color: var(--vino); font-size: 30px; font-weight: 900; line-height: 1; }
+  .monitor-label { color: var(--texto); font-weight: 800; margin-top: 8px; }
+  .monitor-section { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 18px; }
+  .monitor-title { color: var(--vino); font-size: 16px; font-weight: 900; margin: 0 0 12px; }
+  .monitor-table { width: 100%; border-collapse: collapse; }
+  .monitor-table th, .monitor-table td { border-bottom: 1px solid var(--rosa); padding: 10px; text-align: left; }
+  .monitor-table th { color: var(--vino); font-size: 12px; text-transform: uppercase; }
+  .badge-source, .badge-falta {
+    display: inline-flex;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 900;
+    padding: 4px 9px;
+    text-transform: uppercase;
+  }
+  .badge-hikconnect_api { background: rgba(201, 168, 76, .18); color: #9b780f; }
+  .badge-hikconnect_excel { background: rgba(139, 34, 82, .14); color: var(--vino); }
+  .badge-manual { background: #eee; color: #555; }
+  .badge-point { background: #e8f3ff; color: #23527c; }
+  .badge-falta { background: #fde2e2; color: #b42318; }
+  @media (max-width: 900px) {
+    .monitor-grid { grid-template-columns: 1fr; }
+    .monitor-table { font-size: 13px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="monitor-page">
+  <div class="monitor-grid">
+    <article class="monitor-card">
+      <div class="monitor-value">{{ resumen.total_activos }}</div>
+      <div class="monitor-label">Total activos</div>
+    </article>
+    <article class="monitor-card">
+      <div class="monitor-value">{{ resumen.con_asistencia_hoy }}</div>
+      <div class="monitor-label">Con asistencia hoy</div>
+    </article>
+    <article class="monitor-card">
+      <div class="monitor-value">{{ resumen.sin_asistencia_hoy }}</div>
+      <div class="monitor-label">Sin asistencia hoy</div>
+    </article>
+  </div>
+
+  <article class="monitor-section">
+    <h2 class="monitor-title">Asistencia de hoy · {{ hoy|date:"Y-m-d" }}</h2>
+    <table class="monitor-table">
+      <thead>
+        <tr>
+          <th>Empleado</th>
+          <th>Entrada</th>
+          <th>Salida</th>
+          <th>Mins</th>
+          <th>Fuente</th>
+          <th>Turno</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for asistencia in asistencias_hoy %}
+        <tr>
+          <td>{{ asistencia.empleado.nombre }}</td>
+          <td>{{ asistencia.entrada|date:"H:i"|default:"-" }}</td>
+          <td>{{ asistencia.salida|date:"H:i"|default:"-" }}</td>
+          <td>{{ asistencia.minutos_trabajados }}</td>
+          <td><span class="badge-source badge-{{ asistencia.fuente }}">{{ asistencia.get_fuente_display }}</span></td>
+          <td>{{ asistencia.turno|default:"-" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6">Sin asistencias registradas hoy.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </article>
+
+  <article class="monitor-section">
+    <h2 class="monitor-title">Sin asistencia hoy</h2>
+    <table class="monitor-table">
+      <thead>
+        <tr>
+          <th>Empleado</th>
+          <th>Área</th>
+          <th>Sucursal</th>
+          <th>Estatus</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for empleado in emp_sin_asistencia %}
+        <tr>
+          <td>{{ empleado.nombre }}</td>
+          <td>{{ empleado.area|default:"-" }}</td>
+          <td>{{ empleado.sucursal|default:"-" }}</td>
+          <td><span class="badge-falta">Falta</span></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4">Todos los empleados activos tienen asistencia registrada hoy.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </article>
+
+  <article class="monitor-section">
+    <h2 class="monitor-title">Últimas sincronizaciones API</h2>
+    <table class="monitor-table">
+      <thead>
+        <tr>
+          <th>Empleado</th>
+          <th>Fecha</th>
+          <th>Status</th>
+          <th>Creado en</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for asistencia in ultimas_por_api %}
+        <tr>
+          <td>{{ asistencia.empleado.nombre }}</td>
+          <td>{{ asistencia.fecha|date:"Y-m-d" }}</td>
+          <td><span class="badge-source badge-{{ asistencia.fuente }}">{{ asistencia.get_fuente_display }}</span></td>
+          <td>{{ asistencia.creado_en|date:"Y-m-d H:i" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4">Sin sincronizaciones API registradas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </article>
+</section>
+{% endblock %}

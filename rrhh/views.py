@@ -39,6 +39,7 @@ def _module_tabs(active: str) -> list[dict]:
     return [
         {"label": "Capital Humano", "url_name": "rrhh:rrhh_dashboard", "active": active == "dashboard"},
         {"label": "Asistencias", "url_name": "rrhh:rrhh_asistencias", "active": active == "asistencias"},
+        {"label": "Monitor checador", "url_name": "rrhh:rrhh_monitor_sync", "active": active == "monitor_sync"},
         {"label": "Horas extra", "url_name": "rrhh:rrhh_he_list", "active": active == "horas_extra"},
         {"label": "Permisos", "url_name": "rrhh:rrhh_permisos_list", "active": active == "permisos"},
         {"label": "Préstamos", "url_name": "rrhh:rrhh_prestamos_lista", "active": active == "prestamos"},
