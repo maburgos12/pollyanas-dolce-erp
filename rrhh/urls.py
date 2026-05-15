@@ -2,6 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from . import api_views, views, views_prestamos
+from .views_html import asignacion_sucursal_view, asignacion_sucursales_api
 
 app_name = "rrhh"
 
@@ -16,6 +17,8 @@ urlpatterns = [
     path("api/mi-perfil/", api_views.mi_perfil, name="rrhh_mi_perfil"),
     path("", views.empleados, name="home"),
     path("empleados/", views.empleados, name="empleados"),
+    path("asignacion-sucursal/", asignacion_sucursal_view, name="rrhh_asignacion_sucursal"),
+    path("api/asignacion-sucursales/", asignacion_sucursales_api, name="rrhh_asignacion_sucursales_api"),
     path("nomina/", views.nomina, name="nomina"),
     path("nomina/<int:pk>/", views.nomina_detail, name="nomina_detail"),
     path("nomina/<int:pk>/estatus/<str:estatus>/", views.nomina_status, name="nomina_status"),
