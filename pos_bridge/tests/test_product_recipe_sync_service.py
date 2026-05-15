@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from io import StringIO
 from datetime import timedelta
+from unittest.mock import patch
 
+from django.core.management import call_command
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from maestros.models import Insumo, UnidadMedida
-from pos_bridge.models import PointExtractionLog, PointProduct, PointRecipeExtractionRun, PointRecipeNode, PointSyncJob
+from pos_bridge.models import PointExtractionLog, PointProduct, PointRecipeExtractionRun, PointRecipeNode, PointRecipeNodeLine, PointSyncJob
 from pos_bridge.services.product_recipe_sync_service import PointProductRecipeSyncService, PointRecipeSyncResult
 from pos_bridge.services.sync_service import PointSyncService
 from recetas.models import LineaReceta, Receta
@@ -925,3 +928,73 @@ class PointSyncServiceRecipeJobTests(TestCase):
         self.assertEqual(sync_job.status, PointSyncJob.STATUS_SUCCESS)
         self.assertEqual(sync_job.result_summary["point_retry_events"], 2)
         self.assertEqual(sync_job.result_summary["point_relogin_events"], 1)
+
+
+class RunProductRecipeSyncCommandTests(TestCase):
+    def setUp(self):
+        self.unit_pza = UnidadMedida.objects.create(codigo="pza", nombre="Pieza", tipo=UnidadMedida.TIPO_PIEZA)
+
+    def _fake_run_product_recipe_sync(self, **kwargs):
+        job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_RECIPES,
+            status=PointSyncJob.STATUS_SUCCESS,
+            parameters={
+                "branch_hint": kwargs.get("branch_hint") or "",
+                "product_codes": kwargs.get("product_codes") or [],
+            },
+            result_summary={
+                "products_selected": 1,
+                "lineas_created": 1,
+                "raw_exports": ["/tmp/nonexistent_command_dry_run_recipe_sync.json"],
+            },
+        )
+        run = PointRecipeExtractionRun.objects.create(
+            sync_job=job,
+            workspace="Matriz",
+            root_codes=kwargs.get("product_codes") or [],
+        )
+        node = PointRecipeNode.objects.create(
+            run=run,
+            source_type=PointRecipeNode.SOURCE_PRODUCT,
+            node_kind=PointRecipeNode.KIND_FINAL_PRODUCT,
+            point_pk="383",
+            point_code="11203",
+            point_name="Bollo Mini Chocolate",
+            depth=0,
+        )
+        PointRecipeNodeLine.objects.create(
+            node=node,
+            position=1,
+            point_code="HARINA",
+            point_name="Harina Nevada",
+            quantity="0.100",
+            unit=self.unit_pza,
+            classification=PointRecipeNodeLine.COMPONENT_DIRECT_INPUT,
+            match_method="POINT_CODE",
+            match_score=100,
+        )
+        return job
+
+    def test_run_product_recipe_sync_dry_run_rolls_back_and_prints_preview(self):
+        out = StringIO()
+
+        with patch(
+            "pos_bridge.management.commands.run_product_recipe_sync.run_product_recipe_sync",
+            side_effect=self._fake_run_product_recipe_sync,
+        ):
+            call_command(
+                "run_product_recipe_sync",
+                "--product-code",
+                "11203",
+                "--dry-run",
+                stdout=out,
+            )
+
+        output = out.getvalue()
+        self.assertIn('"dry_run": true', output)
+        self.assertIn("Bollo Mini Chocolate", output)
+        self.assertIn("Harina Nevada", output)
+        self.assertIn("[DRY-RUN] No se persistió nada", output)
+        self.assertEqual(PointSyncJob.objects.count(), 0)
+        self.assertEqual(PointRecipeExtractionRun.objects.count(), 0)
+        self.assertEqual(PointRecipeNode.objects.count(), 0)
