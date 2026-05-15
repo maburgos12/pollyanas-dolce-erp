@@ -484,6 +484,8 @@ class LogisticaLavadoUnidadSerializer(serializers.ModelSerializer):
     unidad_descripcion = serializers.CharField(source="unidad.descripcion", read_only=True)
     repartidor_nombre = serializers.SerializerMethodField()
     tipo_lavado_display = serializers.CharField(source="get_tipo_lavado_display", read_only=True)
+    partes_lavadas = serializers.ListField(child=serializers.CharField(), read_only=True)
+    partes_lavadas_display = serializers.CharField(read_only=True)
 
     class Meta:
         model = LavadoUnidad
@@ -495,6 +497,11 @@ class LogisticaLavadoUnidadSerializer(serializers.ModelSerializer):
             "fecha",
             "tipo_lavado",
             "tipo_lavado_display",
+            "lavado_exterior",
+            "lavado_interior",
+            "lavado_caja_refrigerada",
+            "partes_lavadas",
+            "partes_lavadas_display",
             "costo",
             "foto_evidencia",
             "registrado_por",
@@ -523,12 +530,30 @@ class LogisticaLavadoUnidadSerializer(serializers.ModelSerializer):
 class LogisticaLavadoUnidadCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = LavadoUnidad
-        fields = ["unidad", "tipo_lavado", "costo", "foto_evidencia", "latitud", "longitud", "notas"]
+        fields = [
+            "unidad",
+            "lavado_exterior",
+            "lavado_interior",
+            "lavado_caja_refrigerada",
+            "costo",
+            "foto_evidencia",
+            "latitud",
+            "longitud",
+            "notas",
+        ]
 
     def validate(self, attrs):
         unidad = attrs.get("unidad")
         if not unidad or not unidad.activa:
             raise serializers.ValidationError("Selecciona una unidad activa.")
+        if not any(
+            [
+                attrs.get("lavado_exterior"),
+                attrs.get("lavado_interior"),
+                attrs.get("lavado_caja_refrigerada"),
+            ]
+        ):
+            raise serializers.ValidationError("Selecciona al menos una parte lavada.")
         if not attrs.get("foto_evidencia"):
             raise serializers.ValidationError("La foto del lavado es obligatoria.")
         costo = attrs.get("costo")

@@ -233,8 +233,8 @@ class ServicioRealizadoUnidadAdmin(admin.ModelAdmin):
 
 @admin.register(LavadoUnidad)
 class LavadoUnidadAdmin(admin.ModelAdmin):
-    list_display = ("unidad", "fecha", "tipo_lavado", "costo", "registrado_por", "ip_registro")
-    list_filter = ("unidad", "tipo_lavado", "fecha")
+    list_display = ("unidad", "fecha", "partes_lavadas_display", "costo", "registrado_por", "ip_registro")
+    list_filter = ("unidad", "lavado_exterior", "lavado_interior", "lavado_caja_refrigerada", "fecha")
     search_fields = ("unidad__codigo", "notas", "registrado_por__username")
     autocomplete_fields = ("unidad", "registrado_por")
     readonly_fields = ("fecha_registro",)
