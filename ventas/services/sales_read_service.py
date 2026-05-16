@@ -220,6 +220,21 @@ def _coverage_materially_better(candidate: dict[str, Any], baseline: dict[str, A
     )
 
 
+def get_point_sales_category_totals(*, start_date: date, end_date: date, sucursal_id: int | None = None) -> list[dict]:
+    queryset = PointDailySale.objects.filter(
+        sale_date__gte=start_date,
+        sale_date__lt=end_date,
+        branch__erp_branch__isnull=False,
+    )
+    if sucursal_id:
+        queryset = queryset.filter(branch__erp_branch_id=sucursal_id)
+    return list(
+        queryset.values("branch__erp_branch_id", "product__category")
+        .annotate(total=Sum("quantity"))
+        .order_by("branch__erp_branch_id", "product__category")
+    )
+
+
 def _select_range_response(
     candidates: list[dict[str, Any]],
     *,

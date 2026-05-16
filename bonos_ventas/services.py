@@ -4,9 +4,7 @@ from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 
-from django.db.models import Sum
-
-from pos_bridge.models import PointDailySale
+from ventas.services.sales_read_service import get_point_sales_category_totals
 
 from .models import ConfigBonoVentasPeriodo, VentaCategoriaSucursal
 
@@ -32,17 +30,8 @@ def _month_range(anio: int, mes: int) -> tuple[date, date]:
 
 
 def _ventas_por_sucursal_categoria(start: date, end: date, sucursal_id: int | None = None) -> dict[tuple[int, str], Decimal]:
-    qs = PointDailySale.objects.filter(
-        sale_date__gte=start,
-        sale_date__lt=end,
-        branch__erp_branch__isnull=False,
-    )
-    if sucursal_id:
-        qs = qs.filter(branch__erp_branch_id=sucursal_id)
-    qs = qs.values("branch__erp_branch_id", "product__category").annotate(total=Sum("quantity"))
-
     totals = defaultdict(Decimal)
-    for row in qs:
+    for row in get_point_sales_category_totals(start_date=start, end_date=end, sucursal_id=sucursal_id):
         categoria = MAPEO_CATEGORIAS.get(row["product__category"])
         if not categoria:
             continue
