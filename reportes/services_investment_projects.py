@@ -31,6 +31,14 @@ ZERO = Decimal("0")
 TWO_PLACES = Decimal("0.01")
 FOUR_PLACES = Decimal("0.0001")
 
+# Guardrail: si COGS supera este múltiplo de ventas, el costo histórico es inválido.
+# Un ratio de 2.0 significa COGS > 200% de ventas, físicamente imposible en operación normal.
+_COGS_RATIO_THRESHOLD = Decimal("2")
+
+# Límites del campo DecimalField(max_digits=8, decimal_places=4) usado en porcentajes de snapshot.
+_PCT_FIELD_MAX = Decimal("9999.9999")
+_PCT_FIELD_MIN = Decimal("-9999.9999")
+
 SERVICE_CATEGORY_CODES = {"SERVICIOS_SUC", "LUZ_SUC", "AGUA_SUC", "GAS_SUC"}
 MARKETING_CATEGORY_CODES = {"MARKETING_SUC", "MARKETING_APERTURA", "PUBLICIDAD_SUC"}
 TOTAL_BRANCH_EXPENSE_CATEGORY_CODES = {"OPEX_TOTAL_SUC"}
@@ -162,6 +170,17 @@ def _percent_value(numerator: Decimal | None, denominator: Decimal | None) -> De
     if ratio is None:
         return None
     return _quantize(ratio * Decimal("100"), FOUR_PLACES)
+
+
+def _clamp_pct(value: Decimal | None) -> Decimal | None:
+    """Evita overflow en DecimalField(max_digits=8, decimal_places=4) para porcentajes."""
+    if value is None:
+        return None
+    if value > _PCT_FIELD_MAX:
+        return _PCT_FIELD_MAX
+    if value < _PCT_FIELD_MIN:
+        return _PCT_FIELD_MIN
+    return value
 
 
 def _json_safe(value):
@@ -485,9 +504,22 @@ class ProyectoInversionRefreshService:
                 sales_total=Sum("venta_total"),
                 cogs_total=Sum("costo_estimado"),
             )
+            sales_agg = _as_decimal(agg.get("sales_total"))
+            cogs_agg = _as_decimal(agg.get("cogs_total"))
+            # Guardrail: costo histórico contaminado cuando COGS > 200% de ventas.
+            # Esto ocurre cuando ProductoCostoOperativoMensual tiene costos de un mes
+            # diferente al período analizado (p.ej. apertura con muy pocas ventas
+            # pero costos completos aplicados). Se descarta el costo y se agrega gap.
+            if sales_agg > ZERO and cogs_agg > ZERO and (cogs_agg / sales_agg) > _COGS_RATIO_THRESHOLD:
+                issues.append(
+                    f"Costo de venta ({cogs_agg:.2f}) excede {_COGS_RATIO_THRESHOLD * 100:.0f}% "
+                    f"de ventas ({sales_agg:.2f}); costo histórico no confiable para este periodo — "
+                    "se omite para evitar distorsión en flujo operativo."
+                )
+                cogs_agg = None
             return {
-                "sales_total": _as_decimal(agg.get("sales_total")),
-                "cogs_total": _as_decimal(agg.get("cogs_total")),
+                "sales_total": sales_agg,
+                "cogs_total": cogs_agg,
                 "source": "fact_venta_diaria",
                 "issues": issues,
             }
@@ -996,11 +1028,11 @@ class ProyectoInversionRefreshService:
                 "monto_recuperacion_mes": _quantize(recovery_amount),
                 "recuperacion_acumulada": _quantize(cumulative_recovery),
                 "saldo_pendiente": _quantize(pending_balance),
-                "porcentaje_recuperado": recovery_pct,
-                "cash_on_cash": cash_on_cash,
-                "roi_mensual": roi_monthly,
-                "roi_acumulado": roi_cumulative,
-                "roi_anualizado": roi_annualized,
+                "porcentaje_recuperado": _clamp_pct(recovery_pct),
+                "cash_on_cash": _clamp_pct(cash_on_cash),
+                "roi_mensual": _clamp_pct(roi_monthly),
+                "roi_acumulado": _clamp_pct(roi_cumulative),
+                "roi_anualizado": _clamp_pct(roi_annualized),
                 "payback_real_meses": payback_real,
                 "payback_proyectado_meses": projected_payback,
                 "payback_forecast_meses": forecast["payback_months"],
@@ -1011,7 +1043,7 @@ class ProyectoInversionRefreshService:
                 "health_score": health_score,
                 "health_status": health_status,
                 "van": van,
-                "tir": tir,
+                "tir": _clamp_pct(tir),
                 "fuentes": {
                     "ventas_source": sales_payload["source"],
                     "gastos_source": expense_payload["source"],
