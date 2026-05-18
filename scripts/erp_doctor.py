@@ -1210,17 +1210,48 @@ def production_readonly_finance_checks() -> list[CheckResult]:
         f"cd {PRODUCTION_DIR} && {PRODUCTION_COMPOSE} exec -T web "
         "python scripts/erp_doctor.py --finance-only-json"
     )
-    result = run_command("Production investment finance sanity", [*ssh_base, remote], timeout=300)
-    raw_output = "\n".join(str(line) for line in result.details)
+    command = [*ssh_base, remote]
+    command_text = shlex.join(command)
+    started = time.monotonic()
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=ROOT,
+            env=os.environ,
+            text=True,
+            capture_output=True,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return [
+            CheckResult(
+                name="Production investment finance sanity",
+                severity="FAIL",
+                status="FAIL",
+                command=command_text,
+                duration_ms=int((time.monotonic() - started) * 1000),
+                summary="Timeout despues de 300s.",
+                details=trim_output((exc.stdout or "") + "\n" + (exc.stderr or "")),
+            )
+        ]
+    raw_output = completed.stdout.strip()
     try:
         payload = json.loads(raw_output)
         return [CheckResult(**item) for item in payload]
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
-        result.status = "FAIL"
-        result.severity = "FAIL"
-        result.summary = "No fue posible interpretar JSON de auditoria financiera en produccion."
-        result.details = [str(exc), *result.details]
-        return [result]
+        output = "\n".join(part for part in [completed.stdout, completed.stderr] if part)
+        return [
+            CheckResult(
+                name="Production investment finance sanity",
+                severity="FAIL",
+                status="FAIL",
+                command=command_text,
+                exit_code=completed.returncode,
+                duration_ms=int((time.monotonic() - started) * 1000),
+                summary="No fue posible interpretar JSON de auditoria financiera en produccion.",
+                details=[str(exc), *trim_output(output)],
+            )
+        ]
 
 
 def check_docker() -> list[CheckResult]:
