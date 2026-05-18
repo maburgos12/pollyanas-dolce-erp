@@ -12,6 +12,7 @@ import sys
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -75,6 +76,16 @@ CRITICAL_BEAT_TASKS = [
         "expected_cron": {"minute": "30", "hour": "1"},
     },
 ]
+INVESTMENT_COGS_RATIO_THRESHOLD = Decimal("2.0")
+PERCENT_FIELD_MIN = Decimal("-9999.9999")
+PERCENT_FIELD_MAX = Decimal("9999.9999")
+GUAMUCHIL_PROJECT_ID = 1
+GUAMUCHIL_PROJECT_NAME = "Apertura Guamuchil 2026"
+GUAMUCHIL_EXPECTED_INVESTMENT = Decimal("1121753.85")
+GUAMUCHIL_RECON_PREFIX = "GML_RECON_2026_05_18"
+GUAMUCHIL_EXPECTED_RECON_ROWS = 69
+GUAMUCHIL_OLD_PLACEHOLDER_DESCRIPTION = "Inversion apertura importado presupuesto 2026"
+GUAMUCHIL_OLD_PLACEHOLDER_AMOUNT = Decimal("492343.00")
 
 
 @dataclass
@@ -638,6 +649,580 @@ def check_celery_beat_schedules(fix: bool = False) -> CheckResult:
     )
 
 
+def _as_decimal(value: object) -> Decimal:
+    if value is None:
+        return Decimal("0")
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return Decimal("0")
+
+
+def _money(value: object) -> str:
+    return str(_as_decimal(value).quantize(Decimal("0.01")))
+
+
+def _ratio(numerator: object, denominator: object) -> Decimal | None:
+    denominator_decimal = _as_decimal(denominator)
+    if denominator_decimal == 0:
+        return None
+    return (_as_decimal(numerator) / denominator_decimal).quantize(Decimal("0.0001"))
+
+
+def _percent(numerator: object, denominator: object) -> Decimal | None:
+    denominator_decimal = _as_decimal(denominator)
+    if denominator_decimal == 0:
+        return None
+    return ((_as_decimal(numerator) / denominator_decimal) * Decimal("100")).quantize(Decimal("0.0001"))
+
+
+def _period_label(value: object) -> str:
+    if hasattr(value, "date"):
+        value = value.date()
+    if hasattr(value, "isoformat"):
+        return value.isoformat()[:7]
+    return str(value)[:7]
+
+
+def _period_start(value: object):
+    if hasattr(value, "date"):
+        value = value.date()
+    return value.replace(day=1)
+
+
+def _next_month_start(value: object):
+    period = _period_start(value)
+    if period.month == 12:
+        return period.replace(year=period.year + 1, month=1, day=1)
+    return period.replace(month=period.month + 1, day=1)
+
+
+def _branch_label(row: dict[str, object]) -> str:
+    code = row.get("sucursal__codigo") or row.get("sucursal_codigo") or ""
+    name = row.get("sucursal__nombre") or row.get("sucursal_nombre") or ""
+    if code and name:
+        return f"{code} - {name}"
+    return str(code or name or "Sin sucursal")
+
+
+def _finance_db_ready(check_name: str) -> CheckResult | None:
+    host, port, error = get_default_db_connection_info()
+    if error:
+        return CheckResult(
+            name=check_name,
+            severity="SKIPPED",
+            status="SKIPPED",
+            command=error.command,
+            exit_code=error.exit_code,
+            duration_ms=error.duration_ms,
+            summary="DB no configurada/disponible; auditoria financiera read-only omitida.",
+            details=error.details,
+        )
+    assert host is not None
+    assert port is not None
+    if not db_is_reachable(host, port, timeout=2.0):
+        return skipped(
+            check_name,
+            f"DB no alcanzable (host: {host}:{port}); auditoria financiera read-only omitida.",
+            "Django ORM SELECT agregados",
+        )
+    return None
+
+
+def _top_cogs_offenders(FactVentaDiaria, branch_id: int | None, period: object) -> list[dict[str, object]]:
+    from django.db.models import Sum
+
+    start = _period_start(period)
+    end = _next_month_start(period)
+    rows = (
+        FactVentaDiaria.objects.filter(
+            sucursal_id=branch_id,
+            fecha__gte=start,
+            fecha__lt=end,
+        )
+        .values("producto_clave", "producto_nombre", "categoria")
+        .annotate(ventas=Sum("venta_total"), cogs=Sum("costo_estimado"))
+    )
+    offenders = []
+    for item in rows:
+        item_ratio = _ratio(item["cogs"], item["ventas"])
+        if item_ratio is None:
+            continue
+        offenders.append({
+            "producto_clave": item["producto_clave"],
+            "producto_nombre": item["producto_nombre"],
+            "categoria": item["categoria"],
+            "ventas": _money(item["ventas"]),
+            "costo": _money(item["cogs"]),
+            "ratio": str(item_ratio),
+        })
+    offenders.sort(key=lambda item: (_as_decimal(item["ratio"]), _as_decimal(item["costo"])), reverse=True)
+    return offenders[:5]
+
+
+def check_investment_cogs_sanity() -> CheckResult:
+    started = time.monotonic()
+    try:
+        _setup_django()
+        from django.db.models import Sum
+        from django.db.models.functions import TruncMonth
+        from reportes.models import FactVentaDiaria
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult(
+            name="Investment COGS sanity",
+            severity="FAIL",
+            status="FAIL",
+            command="FactVentaDiaria ORM SELECT",
+            duration_ms=int((time.monotonic() - started) * 1000),
+            summary="Error al inicializar Django para revisar COGS.",
+            details=[str(exc)],
+        )
+
+    details: list[dict[str, object]] = []
+    rows = (
+        FactVentaDiaria.objects.annotate(periodo=TruncMonth("fecha"))
+        .values("sucursal_id", "sucursal__codigo", "sucursal__nombre", "periodo")
+        .annotate(ventas=Sum("venta_total"), cogs=Sum("costo_estimado"))
+        .order_by("periodo", "sucursal__codigo")
+    )
+    for row in rows:
+        ratio = _ratio(row["cogs"], row["ventas"])
+        if ratio is None or ratio <= INVESTMENT_COGS_RATIO_THRESHOLD:
+            continue
+        period = _period_label(row["periodo"])
+        interpretation = "costo no confiable; no tratar como utilidad negativa real"
+        details.append({
+            "label": f"{_branch_label(row)} {period}",
+            "status": "WARN",
+            "summary": f"COGS/ventas={ratio} supera {INVESTMENT_COGS_RATIO_THRESHOLD}",
+            "sucursal": _branch_label(row),
+            "periodo": period,
+            "ventas": _money(row["ventas"]),
+            "costo": _money(row["cogs"]),
+            "ratio": str(ratio),
+            "interpretation": interpretation,
+            "top_offenders": _top_cogs_offenders(FactVentaDiaria, row["sucursal_id"], row["periodo"]),
+        })
+
+    status = "WARN" if details else "OK"
+    summary = (
+        f"{len(details)} sucursal/mes con COGS/ventas > {INVESTMENT_COGS_RATIO_THRESHOLD}; "
+        "reportar como costo no confiable, no utilidad negativa real."
+        if details
+        else "Sin ratios COGS/ventas absurdos en FactVentaDiaria."
+    )
+    return CheckResult(
+        name="Investment COGS sanity",
+        severity=status,
+        status=status,
+        command="FactVentaDiaria GROUP BY sucursal, mes",
+        exit_code=0,
+        duration_ms=int((time.monotonic() - started) * 1000),
+        summary=summary,
+        details=details,
+    )
+
+
+def check_investment_project_consistency() -> CheckResult:
+    started = time.monotonic()
+    try:
+        _setup_django()
+        from django.db.models import Count, Sum
+        from reportes.models import ProyectoInversion, ProyectoInversionGasto
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult(
+            name="Investment project consistency",
+            severity="FAIL",
+            status="FAIL",
+            command="ProyectoInversion ORM SELECT",
+            duration_ms=int((time.monotonic() - started) * 1000),
+            summary="Error al inicializar Django para revisar proyectos de inversion.",
+            details=[str(exc)],
+        )
+
+    details: list[dict[str, object]] = []
+    global_status = "OK"
+    projects = ProyectoInversion.objects.all().order_by("id").annotate(detail_total=Sum("gastos_inversion__monto_total"))
+    for project in projects:
+        real = _as_decimal(project.monto_inversion_real)
+        detail_total = _as_decimal(project.detail_total)
+        if abs(real - detail_total) > Decimal("0.01"):
+            global_status = "FAIL"
+            details.append({
+                "label": f"{project.id} - {project.nombre_proyecto}",
+                "status": "FAIL",
+                "summary": "monto_inversion_real no cuadra contra detalle CAPEX",
+                "project_id": project.id,
+                "monto_inversion_real": _money(real),
+                "detalle_gastos_total": _money(detail_total),
+                "diferencia": _money(real - detail_total),
+            })
+
+        reconciled_count = ProyectoInversionGasto.objects.filter(
+            proyecto=project,
+        ).exclude(referencia_contable="").count()
+        placeholder_rows = ProyectoInversionGasto.objects.filter(
+            proyecto=project,
+            categoria=ProyectoInversionGasto.CATEGORIA_OTROS,
+            descripcion__icontains=GUAMUCHIL_OLD_PLACEHOLDER_DESCRIPTION,
+            monto_total__gt=0,
+        )
+        if reconciled_count and placeholder_rows.exists():
+            if global_status == "OK":
+                global_status = "WARN"
+            details.append({
+                "label": f"{project.id} - {project.nombre_proyecto}",
+                "status": "WARN",
+                "summary": "placeholder OTROS activo junto con partidas reconciliadas",
+                "project_id": project.id,
+                "placeholder_count": placeholder_rows.count(),
+                "placeholder_total": _money(placeholder_rows.aggregate(total=Sum("monto_total"))["total"]),
+                "reconciled_count": reconciled_count,
+            })
+
+    duplicates = (
+        ProyectoInversionGasto.objects.exclude(referencia_contable="")
+        .values("proyecto_id", "proyecto__nombre_proyecto", "referencia_contable")
+        .annotate(count=Count("id"), total=Sum("monto_total"))
+        .filter(count__gt=1)
+        .order_by("proyecto_id", "referencia_contable")
+    )
+    for duplicate in duplicates:
+        if global_status == "OK":
+            global_status = "WARN"
+        details.append({
+            "label": f"{duplicate['proyecto_id']} - {duplicate['referencia_contable']}",
+            "status": "WARN",
+            "summary": "referencia_contable duplicada dentro del proyecto",
+            "project_id": duplicate["proyecto_id"],
+            "project_name": duplicate["proyecto__nombre_proyecto"],
+            "referencia_contable": duplicate["referencia_contable"],
+            "count": duplicate["count"],
+            "total": _money(duplicate["total"]),
+        })
+
+    try:
+        guamuchil = ProyectoInversion.objects.get(pk=GUAMUCHIL_PROJECT_ID)
+    except ProyectoInversion.DoesNotExist:
+        if global_status == "OK":
+            global_status = "WARN"
+        details.append({
+            "label": GUAMUCHIL_PROJECT_NAME,
+            "status": "WARN",
+            "summary": "proyecto especifico id=1 no encontrado",
+            "project_id": GUAMUCHIL_PROJECT_ID,
+        })
+    else:
+        if abs(_as_decimal(guamuchil.monto_inversion_real) - GUAMUCHIL_EXPECTED_INVESTMENT) > Decimal("0.01"):
+            global_status = "FAIL"
+            details.append({
+                "label": f"{guamuchil.id} - {guamuchil.nombre_proyecto}",
+                "status": "FAIL",
+                "summary": "inversion real esperada de Guamuchil no coincide",
+                "expected": _money(GUAMUCHIL_EXPECTED_INVESTMENT),
+                "actual": _money(guamuchil.monto_inversion_real),
+            })
+        recon_count = ProyectoInversionGasto.objects.filter(
+            proyecto=guamuchil,
+            referencia_contable__startswith=GUAMUCHIL_RECON_PREFIX,
+        ).count()
+        if recon_count != GUAMUCHIL_EXPECTED_RECON_ROWS:
+            global_status = "FAIL"
+            details.append({
+                "label": f"{guamuchil.id} - {guamuchil.nombre_proyecto}",
+                "status": "FAIL",
+                "summary": "conteo de partidas reconciliadas GML no coincide",
+                "expected": GUAMUCHIL_EXPECTED_RECON_ROWS,
+                "actual": recon_count,
+                "referencia_prefix": GUAMUCHIL_RECON_PREFIX,
+            })
+        old_placeholder_total = ProyectoInversionGasto.objects.filter(
+            proyecto=guamuchil,
+            categoria=ProyectoInversionGasto.CATEGORIA_OTROS,
+            descripcion__icontains=GUAMUCHIL_OLD_PLACEHOLDER_DESCRIPTION,
+        ).aggregate(total=Sum("monto_total"))["total"]
+        if _as_decimal(old_placeholder_total) != 0:
+            global_status = "FAIL"
+            details.append({
+                "label": f"{guamuchil.id} - {guamuchil.nombre_proyecto}",
+                "status": "FAIL",
+                "summary": "placeholder viejo OTROS debe estar en 0",
+                "expected": "0.00",
+                "actual": _money(old_placeholder_total),
+                "placeholder_description": GUAMUCHIL_OLD_PLACEHOLDER_DESCRIPTION,
+                "placeholder_reference_amount": _money(GUAMUCHIL_OLD_PLACEHOLDER_AMOUNT),
+            })
+
+    summary = "Proyectos de inversion cuadran contra detalle CAPEX."
+    if details:
+        fail_count = sum(1 for item in details if item["status"] == "FAIL")
+        warn_count = sum(1 for item in details if item["status"] == "WARN")
+        summary = f"{fail_count} FAIL, {warn_count} WARN en consistencia de proyectos de inversion."
+    return CheckResult(
+        name="Investment project consistency",
+        severity=global_status,
+        status=global_status,
+        command="ProyectoInversion/ProyectoInversionGasto ORM SELECT",
+        exit_code=0,
+        duration_ms=int((time.monotonic() - started) * 1000),
+        summary=summary,
+        details=details,
+    )
+
+
+def check_investment_snapshot_readiness() -> CheckResult:
+    started = time.monotonic()
+    try:
+        _setup_django()
+        from django.db.models import Max, Sum
+        from django.db.models.functions import TruncMonth
+        from reportes.models import FactVentaDiaria, ProyectoInversion
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult(
+            name="Investment snapshot readiness",
+            severity="FAIL",
+            status="FAIL",
+            command="ProyectoInversion snapshot ORM SELECT",
+            duration_ms=int((time.monotonic() - started) * 1000),
+            summary="Error al inicializar Django para revisar snapshots.",
+            details=[str(exc)],
+        )
+
+    details: list[dict[str, object]] = []
+    active_statuses = [ProyectoInversion.ESTATUS_ACTIVO, ProyectoInversion.ESTATUS_EN_RECUPERACION]
+    projects = ProyectoInversion.objects.filter(estatus__in=active_statuses).select_related("sucursal_relacionada")
+    for project in projects:
+        snapshots = project.snapshots_mensuales.order_by("-periodo")
+        latest_snapshot = snapshots.first()
+        if project.fecha_apertura and latest_snapshot is None:
+            details.append({
+                "label": f"{project.id} - {project.nombre_proyecto}",
+                "status": "WARN",
+                "summary": "tiene fecha_apertura pero no tiene snapshots mensuales",
+                "project_id": project.id,
+                "fecha_apertura": project.fecha_apertura.isoformat(),
+            })
+
+        if not project.sucursal_relacionada_id:
+            continue
+
+        last_sale_month = (
+            FactVentaDiaria.objects.filter(sucursal_id=project.sucursal_relacionada_id)
+            .annotate(periodo=TruncMonth("fecha"))
+            .aggregate(last_period=Max("periodo"))["last_period"]
+        )
+        if latest_snapshot and last_sale_month and _period_start(latest_snapshot.periodo) < _period_start(last_sale_month):
+            details.append({
+                "label": f"{project.id} - {project.nombre_proyecto}",
+                "status": "WARN",
+                "summary": "latest snapshot es anterior al ultimo mes con ventas",
+                "project_id": project.id,
+                "latest_snapshot": _period_label(latest_snapshot.periodo),
+                "last_sales_month": _period_label(last_sale_month),
+            })
+
+        sales_rows = (
+            FactVentaDiaria.objects.filter(sucursal_id=project.sucursal_relacionada_id)
+            .annotate(periodo=TruncMonth("fecha"))
+            .values("periodo")
+            .annotate(ventas=Sum("venta_total"), cogs=Sum("costo_estimado"))
+            .order_by("periodo")
+        )
+        for row in sales_rows:
+            ratio = _ratio(row["cogs"], row["ventas"])
+            if ratio is None or ratio <= INVESTMENT_COGS_RATIO_THRESHOLD:
+                continue
+            details.append({
+                "label": f"{project.id} - {project.nombre_proyecto} {_period_label(row['periodo'])}",
+                "status": "WARN",
+                "summary": "costo_venta_mensual potencial supera 200% de ventas",
+                "project_id": project.id,
+                "periodo": _period_label(row["periodo"]),
+                "ventas": _money(row["ventas"]),
+                "costo": _money(row["cogs"]),
+                "ratio": str(ratio),
+                "interpretation": "costo no confiable; snapshot debe guardar costo nulo/guardrail",
+            })
+
+    status = "WARN" if details else "OK"
+    summary = f"{len(details)} riesgos de snapshots de inversion detectados." if details else "Snapshots de inversion listos segun ventas disponibles."
+    return CheckResult(
+        name="Investment snapshot readiness",
+        severity=status,
+        status=status,
+        command="ProyectoInversionSnapshotMensual ORM SELECT",
+        exit_code=0,
+        duration_ms=int((time.monotonic() - started) * 1000),
+        summary=summary,
+        details=details,
+    )
+
+
+def check_decimal_overflow_guard() -> CheckResult:
+    started = time.monotonic()
+    pct_fields = [
+        "porcentaje_recuperado",
+        "cash_on_cash",
+        "roi_mensual",
+        "roi_acumulado",
+        "roi_anualizado",
+        "tir",
+    ]
+    try:
+        _setup_django()
+        from reportes.models import ProyectoInversion, ProyectoInversionSnapshotMensual
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult(
+            name="Decimal overflow guard",
+            severity="FAIL",
+            status="FAIL",
+            command="ProyectoInversionSnapshotMensual ORM SELECT",
+            duration_ms=int((time.monotonic() - started) * 1000),
+            summary="Error al inicializar Django para revisar overflow decimal.",
+            details=[str(exc)],
+        )
+
+    details: list[dict[str, object]] = []
+    for snapshot in ProyectoInversionSnapshotMensual.objects.select_related("proyecto").order_by("proyecto_id", "periodo"):
+        for field_name in pct_fields:
+            value = getattr(snapshot, field_name, None)
+            if value is None:
+                continue
+            decimal_value = _as_decimal(value)
+            if decimal_value < PERCENT_FIELD_MIN or decimal_value > PERCENT_FIELD_MAX:
+                details.append({
+                    "label": f"{snapshot.proyecto_id} {_period_label(snapshot.periodo)} {field_name}",
+                    "status": "FAIL",
+                    "summary": "valor decimal almacenado excede DecimalField(max_digits=8, decimal_places=4)",
+                    "project_id": snapshot.proyecto_id,
+                    "periodo": _period_label(snapshot.periodo),
+                    "field": field_name,
+                    "value": str(decimal_value),
+                    "min": str(PERCENT_FIELD_MIN),
+                    "max": str(PERCENT_FIELD_MAX),
+                })
+
+    for project in ProyectoInversion.objects.prefetch_related("snapshots_mensuales").order_by("id"):
+        investment = _as_decimal(project.monto_inversion_real)
+        running_free_cashflow = Decimal("0")
+        for snapshot in project.snapshots_mensuales.order_by("periodo"):
+            running_free_cashflow += _as_decimal(snapshot.flujo_libre)
+            potential_values = {
+                "porcentaje_recuperado": _percent(snapshot.recuperacion_acumulada, investment),
+                "roi_mensual": _percent(snapshot.flujo_libre, investment),
+                "roi_acumulado": _percent(running_free_cashflow, investment),
+            }
+            if investment == 0 and any(
+                _as_decimal(getattr(snapshot, field_name, None)) != 0
+                for field_name in ["flujo_libre", "recuperacion_acumulada", "monto_recuperacion_mes"]
+            ):
+                details.append({
+                    "label": f"{project.id} - {project.nombre_proyecto} {_period_label(snapshot.periodo)}",
+                    "status": "FAIL",
+                    "summary": "snapshot tiene flujo/recuperacion pero inversion real es 0; porcentaje potencial dividiria entre cero",
+                    "project_id": project.id,
+                    "periodo": _period_label(snapshot.periodo),
+                    "monto_inversion_real": _money(investment),
+                })
+                continue
+            for field_name, value in potential_values.items():
+                if value is None:
+                    continue
+                if value < PERCENT_FIELD_MIN or value > PERCENT_FIELD_MAX:
+                    details.append({
+                        "label": f"{project.id} - {project.nombre_proyecto} {_period_label(snapshot.periodo)} {field_name}",
+                        "status": "FAIL",
+                        "summary": "porcentaje potencial excede rango seguro antes de guardar snapshot",
+                        "project_id": project.id,
+                        "periodo": _period_label(snapshot.periodo),
+                        "field": field_name,
+                        "value": str(value),
+                        "min": str(PERCENT_FIELD_MIN),
+                        "max": str(PERCENT_FIELD_MAX),
+                    })
+
+    status = "FAIL" if details else "OK"
+    summary = f"{len(details)} riesgos de overflow decimal detectados." if details else "Sin riesgo de overflow decimal en porcentajes de snapshots."
+    return CheckResult(
+        name="Decimal overflow guard",
+        severity=status,
+        status=status,
+        command="ProyectoInversionSnapshotMensual percentage range SELECT",
+        exit_code=0,
+        duration_ms=int((time.monotonic() - started) * 1000),
+        summary=summary,
+        details=details,
+    )
+
+
+def _run_finance_check_safely(name: str, check_func) -> CheckResult:
+    try:
+        return check_func()
+    except Exception as exc:  # noqa: BLE001
+        try:
+            from django.db.utils import OperationalError
+        except Exception:  # noqa: BLE001
+            OperationalError = ()  # type: ignore[assignment]
+        if isinstance(exc, OperationalError):
+            return skipped(
+                name,
+                f"DB configurada pero no usable para auditoria financiera read-only: {exc}",
+                "Django ORM SELECT agregados",
+            )
+        return CheckResult(
+            name=name,
+            severity="FAIL",
+            status="FAIL",
+            command="Django ORM SELECT agregados",
+            summary="Error ejecutando auditoria financiera read-only.",
+            details=[str(exc)],
+        )
+
+
+def check_investment_finance_sanity() -> list[CheckResult]:
+    db_error = _finance_db_ready("Investment finance sanity")
+    if db_error:
+        return [db_error]
+    return [
+        _run_finance_check_safely("Investment COGS sanity", check_investment_cogs_sanity),
+        _run_finance_check_safely("Investment project consistency", check_investment_project_consistency),
+        _run_finance_check_safely("Investment snapshot readiness", check_investment_snapshot_readiness),
+        _run_finance_check_safely("Decimal overflow guard", check_decimal_overflow_guard),
+    ]
+
+
+def production_readonly_finance_checks() -> list[CheckResult]:
+    if not PRODUCTION_KEY.exists():
+        return [skipped("Production investment finance sanity", f"No existe llave SSH esperada: {PRODUCTION_KEY}")]
+    ssh_base = [
+        "ssh",
+        "-i",
+        str(PRODUCTION_KEY),
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=10",
+        PRODUCTION_HOST,
+    ]
+    remote = (
+        f"cd {PRODUCTION_DIR} && {PRODUCTION_COMPOSE} exec -T web "
+        "python scripts/erp_doctor.py --finance-only-json"
+    )
+    result = run_command("Production investment finance sanity", [*ssh_base, remote], timeout=300)
+    raw_output = "\n".join(str(line) for line in result.details)
+    try:
+        payload = json.loads(raw_output)
+        return [CheckResult(**item) for item in payload]
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        result.status = "FAIL"
+        result.severity = "FAIL"
+        result.summary = "No fue posible interpretar JSON de auditoria financiera en produccion."
+        result.details = [str(exc), *result.details]
+        return [result]
+
+
 def check_docker() -> list[CheckResult]:
     if not (ROOT / "docker-compose.yml").exists():
         return [skipped("Docker compose", "No existe docker-compose.yml.")]
@@ -710,10 +1295,12 @@ def production_readonly_checks() -> list[CheckResult]:
             "PY".format(dir=PRODUCTION_DIR, compose=PRODUCTION_COMPOSE),
         ),
     ]
-    return [
+    checks = [
         run_command(name, [*ssh_base, remote], timeout=240)
         for name, remote in remote_checks
     ]
+    checks.extend(production_readonly_finance_checks())
+    return checks
 
 
 def build_report(args: argparse.Namespace | SimpleNamespace) -> dict:
@@ -729,6 +1316,7 @@ def build_report(args: argparse.Namespace | SimpleNamespace) -> dict:
         checks.extend(check_js())
         checks.extend(check_celery())
         checks.extend(check_docker())
+        checks.extend(check_investment_finance_sanity())
         if args.full or args.fix:
             beat_check = check_celery_beat_schedules(fix=args.fix)
             if args.fix:
@@ -883,7 +1471,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Ejecuta diagnosticos seguros de solo lectura contra el VPS de produccion.",
     )
+    parser.add_argument("--finance-only-json", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.finance_only_json:
+        return args
     if not args.quick and not args.full:
         args.quick = True
     return args
@@ -891,6 +1482,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
+    if args.finance_only_json:
+        checks = check_investment_finance_sanity()
+        print(json.dumps([asdict(check) for check in checks], ensure_ascii=False, indent=2))
+        return 0
     report = run_doctor(
         quick=args.quick,
         full=args.full,
