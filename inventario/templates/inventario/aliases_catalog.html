@@ -3,6 +3,7 @@
 {% block page_title %}Inventario · Referencias{% endblock %}
 
 {% block content %}
+<div class="module-shell bi-shell">
 <nav class="module-tabs">
   <a class="module-tab" href="{% url 'inventario:home' %}">Dashboard</a>
   <a class="module-tab" href="{% url 'inventario:existencias' %}">Existencias</a>
@@ -13,155 +14,50 @@
   <a class="module-tab" href="{% url 'inventario:importar_archivos' %}">Cortes Almacén</a>
 </nav>
 
-{% if erp_command_center %}
-<section class="card">
-  <div class="card-header">Resumen del módulo</div>
-  <div class="kpi-grid kpi-mini">
-    <article class="kpi-card">
-      <div class="kpi-label">Responsable principal</div>
-      <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
-      <div class="kpi-label">Semáforo global</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-number">{{ erp_command_center.blockers }}</div>
-      <div class="kpi-label">Bloqueos abiertos</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-label">Siguiente paso</div>
-      <div class="muted" style="margin-top:8px;">{{ erp_command_center.next_step }}</div>
-      <div style="margin-top:10px;">
-        <a class="btn btn-secondary" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
-      </div>
-    </article>
-  </div>
-</section>
-{% endif %}
-
-<section class="card">
-  <div class="card-header">Cierre operativo de referencias</div>
-  <div class="enterprise-flow-grid mb-3">
-    {% for row in references_workflow_rows %}
-    <article class="enterprise-flow-card">
-      <div class="enterprise-flow-step">Paso {{ row.step }}</div>
-      <div class="enterprise-flow-title">{{ row.title }}</div>
-      <div class="enterprise-flow-text">{{ row.detail }}</div>
-      <div class="enterprise-flow-metrics">
-        <span class="badge {% if row.tone == 'success' %}badge-success{% else %}badge-warning{% endif %}">
-          {% if row.tone == 'success' %}Cerrado{% else %}Abierto{% endif %}
-        </span>
-        <span class="muted">Responsable {{ row.owner }} · Cierre {{ row.completion }}% · Abiertos {{ row.open }} · Cerrados {{ row.closed }}</span>
-      </div>
-      <div class="muted" style="margin-top:8px;">Siguiente paso: {{ row.next_step }}</div>
-      <a class="btn btn-secondary btn-sm" href="{{ row.action_href }}">{{ row.action_label }}</a>
-    </article>
-    {% endfor %}
-  </div>
-  <div class="enterprise-release-banner mb-3 {% if references_release_summary.tone == 'success' %}is-success{% else %}is-warning{% endif %}">
-    <div>
-      <strong>{{ references_release_summary.label }}</strong>
-      <div class="muted">{{ references_release_summary.detail }}</div>
+<section class="bi-hero">
+  <div class="bi-hero-main">
+    <div class="bi-kicker">Inventario</div>
+    <h1 class="bi-hero-title">Referencias ERP</h1>
+    <p class="bi-copy">Equivalencias entre nombres de almacén, Point y recetas con el catálogo maestro de insumos. Consolida duplicados y libera referencias para que fluyan a costeo, compras e inventario.</p>
+    <div class="bi-hero-highlights">
+      <article class="bi-hero-highlight">
+        <div class="bi-hero-highlight-label">Cobertura ERP</div>
+        <div class="bi-hero-highlight-value {% if matching_summary.match_rate >= 98 %}is-success{% elif matching_summary.match_rate >= 95 %}is-warning{% else %}is-danger{% endif %}">
+          {{ matching_summary.match_rate|floatformat:1 }}%
+        </div>
+        <div class="bi-hero-highlight-meta">{{ matching_summary.ok_runs }}/{{ matching_summary.runs_count }} cortes cerrados</div>
+      </article>
+      <article class="bi-hero-highlight">
+        <div class="bi-hero-highlight-label">Por validar</div>
+        <div class="bi-hero-highlight-value {% if matching_summary.total_unmatched > 0 %}is-warning{% else %}is-success{% endif %}">
+          {{ matching_summary.total_unmatched }}
+        </div>
+        <div class="bi-hero-highlight-meta">{{ matching_summary.total_matched }} consolidadas en {{ matching_summary.runs_count }} cortes</div>
+      </article>
     </div>
   </div>
-  <div class="enterprise-pill-grid enterprise-pill-grid-compact">
-    <div class="enterprise-pill-card is-active">
-      <div class="enterprise-pill-title">Siguiente paso</div>
-      <div class="enterprise-pill-text">{{ references_next_step_summary }}</div>
-    </div>
-    {% for card in reference_module_cards %}
-    <div class="enterprise-pill-card {% if card.tone == 'warning' %}is-active{% endif %}">
-      <div class="enterprise-pill-title">{{ card.title }}</div>
-      <div class="enterprise-pill-text">{{ card.detail }}</div>
-      <a class="btn btn-secondary btn-sm" href="{{ card.href }}">{{ card.action }}</a>
-    </div>
-    {% endfor %}
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Flujo de referencias</div>
-  <div class="enterprise-pill-grid">
-    <div class="enterprise-pill-card is-active">
-      <div class="enterprise-pill-title">01 Fuente operativa</div>
-      <div class="enterprise-pill-text">Almacén, recetas y fuente comercial externa alimentan nombres y códigos desde operación real.</div>
-    </div>
-    <div class="enterprise-pill-card">
-      <div class="enterprise-pill-title">02 Artículo maestro</div>
-      <div class="enterprise-pill-text">Cada referencia debe consolidarse en un solo artículo maestro activo.</div>
-    </div>
-    <div class="enterprise-pill-card">
-      <div class="enterprise-pill-title">03 Cierre operativo</div>
-      <div class="enterprise-pill-text">Solo artículos consolidados pasan a inventario, compras, costeo y reabasto.</div>
+  {% if latest_sync %}
+  <div class="bi-hero-side">
+    <div class="bi-hero-status-grid">
+      <article class="bi-status-card">
+        <span class="bi-status-label">Último corte</span>
+        <strong>{{ latest_sync.started_at|date:"d/m H:i" }}</strong>
+      </article>
+      <article class="bi-status-card">
+        <span class="bi-status-label">Consolidados</span>
+        <strong>{{ latest_sync.matched }}</strong>
+      </article>
+      <article class="bi-status-card">
+        <span class="bi-status-label">Pendientes</span>
+        <strong>{{ latest_sync.unmatched }}</strong>
+      </article>
+      <article class="bi-status-card">
+        <span class="bi-status-label">Origen</span>
+        <strong>{{ latest_sync.get_source_display }}</strong>
+      </article>
     </div>
   </div>
-</section>
-
-{% if executive_radar_rows %}
-<section class="card">
-  <div class="card-header">Resumen de seguimiento</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Tramo</th>
-          <th>Responsable</th>
-          <th>Bloqueo dominante</th>
-          <th>Depende de</th>
-          <th>Cierre</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in executive_radar_rows %}
-        <tr>
-          <td><strong>{{ row.phase }}</strong><div class="muted">{{ row.status }}</div></td>
-          <td>{{ row.owner }}</td>
-          <td>{{ row.dominant_blocker }}</td>
-          <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
-          <td>{{ row.progress_pct }}%</td>
-          <td>{{ row.next_step }}</td>
-          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-{% endif %}
-
-<section class="card">
-  <div class="card-header">Seguimiento por frente</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Frente</th>
-          <th>Responsable</th>
-          <th>Bloqueos</th>
-          <th>Cierre</th>
-          <th>Detalle</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in erp_governance_rows %}
-        <tr>
-          <td>{{ row.front }}</td>
-          <td>{{ row.owner }}</td>
-          <td>{{ row.blockers }}</td>
-          <td>{{ row.completion }}%</td>
-          <td>{{ row.detail }}</td>
-          <td>{{ row.next_step }}</td>
-          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  {% endif %}
 </section>
 
 <section class="card">
@@ -199,14 +95,14 @@
 </section>
 
 <section class="card">
-      <div class="card-header">Control de referencias</div>
+  <div class="card-header">Control de referencias</div>
   <p class="muted">Herramientas para revisar referencias, consolidar artículos maestros y cerrar duplicados operativos dentro del catálogo.</p>
 
   <div class="table-responsive" style="margin-top:8px;">
     <table class="table table-striped">
       <thead>
         <tr>
-            <th style="width:50%;">Cierre del maestro</th>
+          <th style="width:50%;">Cierre del maestro</th>
           <th style="width:50%;">Gobierno del catálogo</th>
         </tr>
       </thead>
@@ -385,38 +281,17 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Mesa ERP de referencias abiertas</div>
+  <div class="card-header">Mesa de referencias abiertas</div>
   <p class="muted">Prioriza nombres repetidos entre fuentes para consolidar un solo artículo ERP por operación real.</p>
 
   {% if pending_focus %}
-  <div class="alert enterprise-focus-alert enterprise-focus-alert-{{ pending_focus.tone }} mb-3">
-    <div class="enterprise-focus-alert-copy">
-      <div class="enterprise-focus-alert-title">Bloqueo ERP prioritario</div>
-      <div class="enterprise-focus-alert-summary">{{ pending_focus.summary }}</div>
-      <div class="enterprise-focus-alert-detail">{{ pending_focus.action_detail }}</div>
+  <div class="alert alert-warning mb-3" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+    <div>
+      <strong>{{ pending_focus.label }}</strong>
+      <div>{{ pending_focus.summary }}</div>
+      <div class="muted">{{ pending_focus.action_detail }}</div>
     </div>
-    <div class="enterprise-focus-alert-actions">
-      <span class="badge {% if pending_focus.tone == 'success' %}bg-success{% else %}bg-warning text-dark{% endif %}">
-        {{ pending_focus.label }}
-      </span>
-      <a class="btn btn-primary btn-sm" href="{{ pending_focus.action_url }}">{{ pending_focus.action_label }}</a>
-    </div>
-  </div>
-  {% endif %}
-
-  {% if pending_source_cards %}
-  <div class="kpi-mini mb-3">
-    {% for card in pending_source_cards %}
-    <div class="kpi-card">
-      <div class="kpi-number is-warning">{{ card.count }}</div>
-      <div class="kpi-label">{{ card.source|title }}</div>
-      <div class="muted mt-1">{{ card.top_name }}</div>
-      <div class="muted mt-1">Confianza máx: {{ card.top_score|floatformat:0 }}</div>
-      <div class="mt-2">
-        <a class="btn btn-secondary btn-sm" href="{% url 'inventario:aliases_catalog' %}?q={{ card.top_name|urlencode }}">{{ card.source|title }}</a>
-      </div>
-    </div>
-    {% endfor %}
+    <a class="btn btn-primary btn-sm" href="{{ pending_focus.action_url }}">{{ pending_focus.action_label }}</a>
   </div>
   {% endif %}
 
@@ -628,7 +503,7 @@
                 <input type="hidden" name="alias_name" value="{{ row.nombre_muestra }}">
                 <input type="hidden" name="suggestion" value="{{ row.suggestion }}">
                 <input type="hidden" name="score_min" value="90">
-              <button class="btn btn-primary" type="submit">Liberar propuesta</button>
+                <button class="btn btn-primary" type="submit">Liberar propuesta</button>
               </form>
               {% endif %}
             </div>
@@ -662,7 +537,7 @@
         <option value="">Selecciona insumo...</option>
         {% for i in insumo_alias_targets %}
         <option value="{{ i.id }}">{{ i.nombre }}{% if i.canonical_variant_count > 1 %} · Oficial ({{ i.canonical_variant_count }} variantes){% endif %}</option>
-      {% endfor %}
+        {% endfor %}
       </select>
     </div>
     <div style="grid-column:1/-1; display:flex; justify-content:flex-end;">
@@ -759,7 +634,7 @@
   <form method="post" style="display:flex; justify-content:flex-end; margin-top:8px;">
     {% csrf_token %}
     <input type="hidden" name="action" value="clear_import_preview">
-      <button class="btn btn-secondary" type="submit">Limpiar revisión</button>
+    <button class="btn btn-secondary" type="submit">Limpiar revisión</button>
   </form>
 </section>
 {% endif %}
@@ -796,9 +671,7 @@
   {% endif %}
   {% if hidden_pending_run and can_manage_inventario %}
   <div class="toolbar" style="margin-top:10px;">
-    <span class="muted">
-      Hay un corte oculto: #{{ hidden_pending_run.id }} ({{ hidden_pending_run.started_at|date:"Y-m-d H:i" }}).
-    </span>
+    <span class="muted">Hay un corte oculto: #{{ hidden_pending_run.id }} ({{ hidden_pending_run.started_at|date:"Y-m-d H:i" }}).</span>
     <form method="post" class="inline-form">
       {% csrf_token %}
       <input type="hidden" name="action" value="reset_hidden_pending">
@@ -831,7 +704,7 @@
           <td class="text-end">{{ run.unmatched }}</td>
           <td>
             {% if run.has_preview %}
-              {% if run.is_hidden %}<span class="badge-amarillo">Oculto</span>{% else %}<span class="badge-verde">Con validación</span>{% endif %}
+              {% if run.is_hidden %}<span class="badge bg-warning">Oculto</span>{% else %}<span class="badge bg-success">Con validación</span>{% endif %}
             {% else %}
               <span class="text-muted">Sin validación</span>
             {% endif %}
@@ -866,45 +739,45 @@
   {% endif %}
 
   {% if pending_preview %}
-    <p class="muted">Da clic en "Usar en alta" para copiar el nombre origen y crear la referencia rápidamente.</p>
-    <div class="table-responsive">
-      <table class="table table-striped">
-        <thead>
-          <tr>
-            <th>Fuente</th>
-            <th>Fila</th>
-            <th>Nombre origen</th>
-            <th>Sugerencia</th>
-            <th class="text-end">Score</th>
-            {% if can_manage_inventario %}<th>Acción</th>{% endif %}
-          </tr>
-        </thead>
-        <tbody>
-          {% for p in pending_preview %}
-          <tr>
-            <td>{{ p.source }}</td>
-            <td>{{ p.row }}</td>
-            <td>{{ p.nombre_origen }}</td>
-            <td>{{ p.sugerencia|default:"-" }}</td>
-            <td class="text-end">{{ p.score }}</td>
-            {% if can_manage_inventario %}
-            <td>
-              <button type="button" class="btn btn-secondary copy-pending-name" data-name="{{ p.nombre_origen|escape }}">Usar en alta</button>
-            </td>
-            {% endif %}
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% if can_manage_inventario %}
-    <form method="post" style="display:flex; justify-content:flex-end; margin-top:8px;">
-      {% csrf_token %}
-      <input type="hidden" name="action" value="clear_pending">
-      {% if latest_pending_run %}<input type="hidden" name="hide_run_id" value="{{ latest_pending_run.id }}">{% endif %}
-      <button class="btn btn-secondary" type="submit">Limpiar revisión en pantalla</button>
-    </form>
-    {% endif %}
+  <p class="muted">Da clic en "Usar en alta" para copiar el nombre origen y crear la referencia rápidamente.</p>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Fuente</th>
+          <th>Fila</th>
+          <th>Nombre origen</th>
+          <th>Sugerencia</th>
+          <th class="text-end">Score</th>
+          {% if can_manage_inventario %}<th>Acción</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in pending_preview %}
+        <tr>
+          <td>{{ p.source }}</td>
+          <td>{{ p.row }}</td>
+          <td>{{ p.nombre_origen }}</td>
+          <td>{{ p.sugerencia|default:"-" }}</td>
+          <td class="text-end">{{ p.score }}</td>
+          {% if can_manage_inventario %}
+          <td>
+            <button type="button" class="btn btn-secondary copy-pending-name" data-name="{{ p.nombre_origen|escape }}">Usar en alta</button>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if can_manage_inventario %}
+  <form method="post" style="display:flex; justify-content:flex-end; margin-top:8px;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="clear_pending">
+    {% if latest_pending_run %}<input type="hidden" name="hide_run_id" value="{{ latest_pending_run.id }}">{% endif %}
+    <button class="btn btn-secondary" type="submit">Limpiar revisión en pantalla</button>
+  </form>
+  {% endif %}
   {% endif %}
 </section>
 
@@ -1050,6 +923,7 @@
   </div>
   {% endif %}
 </section>
+</div>
 {% endblock %}
 
 {% block extra_js %}
