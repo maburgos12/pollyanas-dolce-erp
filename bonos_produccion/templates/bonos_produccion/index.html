@@ -73,6 +73,19 @@ tr:hover td{background:var(--bg)}
 .persona-row{display:flex;align-items:center;gap:10px}
 .persona-name{font-weight:700;font-size:13px}
 .persona-sub{font-size:11px;color:var(--sub)}
+.employee-picker{display:grid;gap:10px}
+.employee-search-wrap{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r-sm);padding:8px 10px}
+.employee-search{flex:1;min-width:0;border:none;background:transparent;font:inherit;font-size:14px;font-weight:700;color:var(--ink);outline:none}
+.employee-search::placeholder{color:var(--faint);font-weight:700}
+.employee-count{font-size:11px;font-weight:800;color:var(--wine);background:var(--wine-light);border-radius:999px;padding:3px 8px;white-space:nowrap}
+.employee-list{display:grid;gap:6px;max-height:330px;overflow-y:auto;padding-right:2px}
+.employee-row{width:100%;display:flex;align-items:center;gap:10px;text-align:left;padding:10px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--card);font:inherit;cursor:pointer;color:var(--ink);transition:background .12s,border-color .12s,box-shadow .12s}
+.employee-row:hover{border-color:var(--wine);background:var(--wine-light)}
+.employee-row.on{border-color:var(--wine);background:var(--wine-light);box-shadow:inset 3px 0 0 var(--wine)}
+.employee-row-main{flex:1;min-width:0}
+.employee-row .persona-name{white-space:normal}
+.employee-row-right{font-size:12px;font-weight:800;color:var(--wine);white-space:nowrap}
+.employee-empty{padding:18px;text-align:center;border:1px dashed var(--line);border-radius:var(--r-sm);color:var(--faint);font-size:13px;font-weight:700}
 .days-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:16px}
 .day-cell{aspect-ratio:1;border-radius:6px;border:1px solid var(--line);background:var(--bg);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--faint);transition:all .12s}
 .day-cell:hover{border-color:var(--wine);color:var(--wine)}
@@ -131,6 +144,30 @@ function Badge({ok}){return h('span',{className:`badge ${ok?'ok':'bad'}`},ok?'�
 function AreaPill({area}){return h('span',{className:`badge area pill-${area}`,style:{fontSize:11}},AREA_LABELS[area]||area);}
 function AreaChips({area,setArea}){
   return h('div',{className:'chips'},AREAS.map(a=>h('button',{key:a,className:`chip chip-area ${area===a?'on':''}`,onClick:()=>setArea(a)},AREA_LABELS[a])));
+}
+function normalizeText(v){
+  return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+}
+function EmployeeSearchList({items,selected,onSelect,placeholder,emptyText,metaText,rightText}){
+  const [query,setQuery]=React.useState('');
+  const q=normalizeText(query);
+  const filtered=q?items.filter(b=>normalizeText([b.empleado_nombre,b.area,b.sucursal_nombre,b.puesto].join(' ')).includes(q)):items;
+  return h('div',{className:'employee-picker'},
+    h('div',{className:'employee-search-wrap'},
+      h('input',{className:'employee-search',value:query,onChange:e=>setQuery(e.target.value),placeholder:placeholder||'Buscar empleado por nombre...',autoComplete:'off'}),
+      h('span',{className:'employee-count'},`${filtered.length}/${items.length}`)
+    ),
+    h('div',{className:'employee-list'},
+      filtered.length?filtered.map(b=>h('button',{key:b.id,type:'button',className:`employee-row ${selected?.id===b.id?'on':''}`,onClick:()=>onSelect(b)},
+        h('div',{className:'av'},initials(b.empleado_nombre)),
+        h('div',{className:'employee-row-main'},
+          h('div',{className:'persona-name'},b.empleado_nombre),
+          h('div',{className:'persona-sub'},metaText?metaText(b):(AREA_LABELS[b.area]||b.area||'Produccion'))
+        ),
+        rightText&&h('div',{className:'employee-row-right'},rightText(b))
+      )):h('div',{className:'employee-empty'},query?'Sin coincidencias para esa busqueda':(emptyText||'Sin empleados disponibles'))
+    )
+  );
 }
 function App(){
   const [tab,setTab]=React.useState('config');
@@ -242,6 +279,8 @@ function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registr
   const total=diasEnMes(+mes,+anio);
   const regActivos=registros.filter(r=>r.tiene_asistencia);
   const diaActual=selDia?registros.find(r=>+r.dia===selDia):null;
+  const bonosAreaIds=bonosArea.map(b=>b.id).join(',');
+  React.useEffect(()=>{if(selectedBono&&!bonosArea.some(b=>b.id===selectedBono.id))setSelectedBono(null);},[bonosAreaIds,selectedBono?.id]);
   function togDia(dia){
     const r=registros.find(x=>+x.dia===dia);
     if(r&&r.tiene_asistencia){guardarDia(dia,{tiene_asistencia:false,tiene_uniforme:false,tiene_puntualidad:false,tiene_produccion:false});if(selDia===dia)setSelDia(null);}
@@ -253,7 +292,7 @@ function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registr
       h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},AREA_LABELS[area]+' — Selecciona empleado')),
       h('div',{className:'card-body'},
         bonosArea.length===0?h('div',{className:'empty'},'Sin empleados en esta area para el periodo.'):
-        h('div',{className:'chips',style:{marginBottom:0}},bonosArea.map(b=>h('button',{key:b.id,className:`chip ${selectedBono?.id===b.id?'on':''}`,onClick:()=>setSelectedBono(b)},b.empleado_nombre.split(' ')[0])))
+        h(EmployeeSearchList,{items:bonosArea,selected:selectedBono,onSelect:setSelectedBono,placeholder:'Teclea nombre o apellido...',rightText:b=>money(b.total_a_pagar)})
       )
     ),
     selectedBono&&h('div',{className:'card'},
@@ -352,11 +391,14 @@ function AjustesTab({bonosArea,area,setArea,actualizarBono}){
   );
 }
 function RevisionTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia}){
+  const bonosAreaIds=bonosArea.map(b=>b.id).join(',');
+  React.useEffect(()=>{if(selectedBono&&!bonosArea.some(b=>b.id===selectedBono.id))setSelectedBono(null);},[bonosAreaIds,selectedBono?.id]);
   return h('div',null,h(AreaChips,{area,setArea}),
     h('div',{className:'card'},
       h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},'Observaciones — '+AREA_LABELS[area])),
       h('div',{className:'card-body'},
-        h('div',{className:'chips',style:{marginBottom:14}},bonosArea.map(b=>h('button',{key:b.id,className:`chip ${selectedBono?.id===b.id?'on':''}`,onClick:()=>setSelectedBono(b)},b.empleado_nombre.split(' ')[0]))),
+        bonosArea.length===0?h('div',{className:'empty'},'Sin empleados en esta area.'):
+        h(EmployeeSearchList,{items:bonosArea,selected:selectedBono,onSelect:setSelectedBono,placeholder:'Buscar empleado para revisar...',rightText:b=>`${b.dias_trabajados||0} dias`}),
         selectedBono&&(registros.length===0?h('div',{className:'empty'},'Sin dias registrados.'):
           h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:10}},
             registros.filter(r=>r.tiene_asistencia).map(r=>h('div',{key:r.id,style:{background:'var(--bg)',border:'1px solid var(--line)',borderRadius:8,padding:10}},
