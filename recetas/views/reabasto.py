@@ -2914,12 +2914,16 @@ def _reabasto_enterprise_board(
     recetas_producto: list[Receta],
     inventario_map: dict[int, Any],
     fecha_operacion: date,
+    active_receta_ids: set[int] | None = None,
 ) -> dict[str, Any]:
+    if active_receta_ids is not None:
+        recetas_producto = [receta for receta in recetas_producto if receta.id in active_receta_ids]
+
     blocker_cards_map = {
         "sin_inventario": {"key": "sin_inventario", "label": "Sin inventario CEDIS", "tone": "danger", "count": 0},
         "sin_empaque": {"key": "sin_empaque", "label": "Sin empaque", "tone": "warning", "count": 0},
-        "maestro_incompleto": {"key": "maestro_incompleto", "label": "Maestro incompleto", "tone": "warning", "count": 0},
-        "pendiente": {"key": "pendiente", "label": "Receta por validar", "tone": "danger", "count": 0},
+        "maestro_incompleto": {"key": "maestro_incompleto", "label": "Artículo ligado incompleto", "tone": "warning", "count": 0},
+        "pendiente": {"key": "pendiente", "label": "BOM por validar", "tone": "danger", "count": 0},
         "lista": {"key": "lista", "label": "Lista para operar", "tone": "success", "count": 0},
     }
     detail_rows: list[dict[str, Any]] = []
@@ -2939,11 +2943,17 @@ def _reabasto_enterprise_board(
                 }
             )
         elif health["label"] == "Maestro incompleto":
+            gap = _recipe_master_gap_summary(receta)
+            gap_count = int(gap.get("dominant_count") or 0)
+            gap_label = str(gap.get("dominant_label") or "").strip()
+            detail = health["description"]
+            if gap_count and gap_label:
+                detail = f"{gap_count} artículo(s) ligado(s) con {gap_label}; la receta existe, pero el artículo maestro bloquea operación."
             blockers.append(
                 {
                     "key": "maestro_incompleto",
-                    "label": "Maestro incompleto",
-                    "detail": health["description"],
+                    "label": "Artículo ligado incompleto",
+                    "detail": detail,
                     "action_label": "Abrir receta",
                     "action_url": reverse("recetas:receta_detail", args=[receta.id]),
                 }
@@ -2952,7 +2962,7 @@ def _reabasto_enterprise_board(
             blockers.append(
                 {
                     "key": "pendiente",
-                    "label": "Receta por validar",
+                    "label": "BOM por validar",
                     "detail": health["description"],
                     "action_label": "Abrir receta",
                     "action_url": reverse("recetas:receta_detail", args=[receta.id]),
@@ -3003,6 +3013,7 @@ def _reabasto_enterprise_board(
         "detail_rows": detail_rows[:12],
         "blocked_total": len(blocked_recipe_ids),
         "ready_total": blocker_cards_map["lista"]["count"],
+        "scope_total": len(recetas_producto),
     }
 
 
@@ -20224,9 +20235,18 @@ def reabasto_cedis(request: HttpRequest) -> HttpResponse:
     )
     inventario_map = {inv.receta_id: inv for inv in inventario_cedis}
     productos_sin_inventario = [r for r in recetas_producto if r.id not in inventario_map]
+    consolidado_rows = _consolidado_reabasto_por_fecha(fecha_operacion)
+    active_reabasto_receta_ids = {
+        int(row["receta_id"])
+        for row in consolidado_rows
+        if row.get("receta_id")
+    }
+    active_scope_hash = hashlib.sha1(
+        ",".join(str(receta_id) for receta_id in sorted(active_reabasto_receta_ids)).encode("utf-8")
+    ).hexdigest()[:12]
     board_cache_key = (
         f"reabasto:enterprise-board:{fecha_operacion.isoformat()}:"
-        f"{len(recetas_producto)}:{len(inventario_map)}"
+        f"{len(recetas_producto)}:{len(inventario_map)}:{len(active_reabasto_receta_ids)}:{active_scope_hash}"
     )
     reabasto_enterprise_board = cache.get(board_cache_key)
     if reabasto_enterprise_board is None:
@@ -20234,10 +20254,10 @@ def reabasto_cedis(request: HttpRequest) -> HttpResponse:
             recetas_producto=recetas_producto,
             inventario_map=inventario_map,
             fecha_operacion=fecha_operacion,
+            active_receta_ids=active_reabasto_receta_ids,
         )
         cache.set(board_cache_key, reabasto_enterprise_board, 300)
 
-    consolidado_rows = _consolidado_reabasto_por_fecha(fecha_operacion)
     total_solicitado = sum((row["total_solicitado"] for row in consolidado_rows), Decimal("0"))
     total_faltante = sum((row["cedis_faltante_producir"] for row in consolidado_rows), Decimal("0"))
     stage_key = (request.GET.get("stage_key") or "auto").strip().lower()

@@ -345,9 +345,10 @@
   <details class="erp-advanced-panel reabasto-details" id="bloqueos-abastecimiento">
     <summary class="erp-advanced-summary">
       <span>Bloqueos de abastecimiento</span>
-      <span class="muted">{{ reabasto_enterprise_board.blocked_total }} bloqueadas · {{ reabasto_enterprise_board.ready_total }} listas</span>
+      <span class="muted">{{ reabasto_enterprise_board.blocked_total }} bloqueadas del día · {{ reabasto_enterprise_board.ready_total }} listas</span>
     </summary>
     <div class="erp-advanced-body">
+      <p class="muted mb-2">Validación limitada a los productos incluidos en el reabasto consolidado de la fecha; no al catálogo completo de recetas.</p>
       <div class="kpi-grid kpi-mini">
         {% for item in reabasto_enterprise_board.blocker_cards %}
         <article class="kpi-card {% if item.is_active %}is-active{% endif %}">
