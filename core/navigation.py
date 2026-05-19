@@ -118,15 +118,43 @@ NAV_GROUPS = [
 
 
 def build_nav_groups(user, current_path: str) -> list[dict]:
-    groups = []
+    visible_items = []
     current_path = current_path or ""
+    for group_index, group in enumerate(NAV_GROUPS):
+        for item_index, (module, submodule, label, url, prefixes) in enumerate(group["items"]):
+            if not can_view_submodule(user, module, submodule):
+                continue
+            matches = [prefix for prefix in prefixes if current_path.startswith(prefix)]
+            best_prefix_len = max((len(prefix) for prefix in matches), default=0)
+            visible_items.append(
+                {
+                    "group_index": group_index,
+                    "item_index": item_index,
+                    "module": module,
+                    "submodule": submodule,
+                    "label": label,
+                    "url": url,
+                    "prefixes": prefixes,
+                    "best_prefix_len": best_prefix_len,
+                }
+            )
+    active_key = None
+    active_candidates = [item for item in visible_items if item["best_prefix_len"] > 0]
+    if active_candidates:
+        active_item = max(
+            active_candidates,
+            key=lambda item: (item["best_prefix_len"], item["url"] == current_path, item["group_index"], item["item_index"]),
+        )
+        active_key = (active_item["module"], active_item["submodule"], active_item["url"])
+
+    groups = []
     for group in NAV_GROUPS:
         items = []
         active_group = False
         for module, submodule, label, url, prefixes in group["items"]:
             if not can_view_submodule(user, module, submodule):
                 continue
-            active = any(current_path.startswith(prefix) for prefix in prefixes)
+            active = active_key == (module, submodule, url)
             active_group = active_group or active
             items.append(
                 {
