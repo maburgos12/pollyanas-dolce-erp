@@ -8,21 +8,56 @@
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/investment_projects.css' %}?v=20260406c">
 <style>
+  :root { --bamoa-wine:#8B2252; --bamoa-gold:#C9A84C; --bamoa-gold-light:#f5e9c8; --bamoa-danger:#b91c1c; --bamoa-row-border:#e5e7eb; }
   .bamoa-step-nav { display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:1rem; }
   .bamoa-step-button { border:1px solid rgba(139,34,82,.22); background:#fff; color:#5f1838; border-radius:8px; padding:.65rem .85rem; font-weight:800; cursor:pointer; }
-  .bamoa-step-button.is-active { background:#8B2252; color:#fff; border-color:#8B2252; }
+  .bamoa-step-button.is-active { background:var(--bamoa-wine); color:#fff; border-color:var(--bamoa-wine); }
   .bamoa-step { display:none; }
-  .bamoa-step.is-active { display:block; }
-  .bamoa-table-input, .bamoa-table-select { width:100%; min-width:8rem; border:1px solid rgba(15,23,42,.16); border-radius:6px; padding:.45rem .5rem; font:inherit; }
-  .bamoa-row-actions { display:flex; gap:.4rem; justify-content:flex-end; }
-  .bamoa-icon-button { border:1px solid rgba(139,34,82,.22); background:#fff; color:#8B2252; border-radius:6px; padding:.45rem .6rem; cursor:pointer; font-weight:800; }
-  .bamoa-icon-button.is-danger { color:#a21caf; border-color:rgba(162,28,175,.22); }
+  .bamoa-step.is-active, .bamoa-step.active { display:block; }
+  #bamoa-partidas-table { table-layout:fixed; width:100%; border-collapse:separate; border-spacing:0; }
+  #bamoa-partidas-table thead th { background:var(--bamoa-wine); color:#fff; font-family:'Nunito', sans-serif; font-size:.75rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase; padding:.5rem .75rem; border:0; white-space:nowrap; }
+  #bamoa-partidas-table col.col-categoria { width: 17%; }
+  #bamoa-partidas-table col.col-descripcion { width: 26%; }
+  #bamoa-partidas-table col.col-proveedor { width: 18%; }
+  #bamoa-partidas-table col.col-monto { width: 12%; }
+  #bamoa-partidas-table col.col-iva { width: 9%; }
+  #bamoa-partidas-table col.col-total { width: 11%; }
+  #bamoa-partidas-table col.col-acciones { width: 7%; }
+  #bamoa-partidas-table tbody tr { background:#fff; transition:background .15s; }
+  #bamoa-partidas-table tbody tr:nth-child(even) { background:#fafafa; }
+  #bamoa-partidas-table tbody tr:hover { background:var(--bamoa-gold-light); }
+  #bamoa-partidas-table tbody td { padding:.4rem .5rem; border-bottom:1px solid var(--bamoa-row-border); vertical-align:middle; }
+  .bamoa-table-input, .bamoa-table-select { display:block; width:100%; padding:.35rem .5rem; font-size:.85rem; font-family:'Nunito', sans-serif; color:#111827; background:#fff; border:1px solid #d1d5db; border-radius:.375rem; outline:0; transition:border-color .15s, box-shadow .15s; pointer-events:auto; user-select:text; -webkit-user-select:text; }
+  .bamoa-table-input:focus, .bamoa-table-select:focus { border-color:var(--bamoa-wine); box-shadow:0 0 0 3px rgba(139,34,82,.15); background:#fff; z-index:2; position:relative; }
+  .bamoa-table-input[type="number"], .bamoa-row-total { text-align:right; }
+  .bamoa-row-total { font-weight:700; color:var(--bamoa-wine); font-size:.9rem; white-space:nowrap; }
+  .bamoa-btn-eliminar { display:inline-flex; align-items:center; justify-content:center; width:2rem; height:2rem; padding:0; border:1px solid #fca5a5; border-radius:.375rem; background:#fff1f1; color:var(--bamoa-danger); cursor:pointer; transition:background .15s, border-color .15s; font-size:1rem; line-height:1; }
+  .bamoa-btn-eliminar:hover { background:#fee2e2; border-color:var(--bamoa-danger); }
+  .bamoa-icon-button { border:1px solid rgba(139,34,82,.22); background:#fff; color:var(--bamoa-wine); border-radius:.375rem; padding:.45rem .6rem; cursor:pointer; font-weight:800; }
+  .bamoa-btn-agregar, .bamoa-btn-importar, .bamoa-btn-submit { display:inline-flex; align-items:center; gap:.4rem; border-radius:.5rem; font-family:'Nunito', sans-serif; cursor:pointer; transition:background .15s, transform .1s; }
+  .bamoa-btn-agregar { padding:.45rem 1rem; border:2px dashed var(--bamoa-wine); background:transparent; color:var(--bamoa-wine); font-size:.875rem; font-weight:700; }
+  .bamoa-btn-agregar:hover { background:rgba(139,34,82,.06); }
+  .bamoa-btn-importar { padding:.45rem 1rem; border:1px solid var(--bamoa-gold); background:var(--bamoa-gold-light); color:#7c5c00; font-size:.875rem; font-weight:600; }
+  .bamoa-btn-importar:hover { background:#edd98a; }
+  .bamoa-btn-submit { padding:.65rem 1.75rem; background:var(--bamoa-wine); color:#fff; border:0; font-size:1rem; font-weight:700; box-shadow:0 2px 8px rgba(139,34,82,.25); }
+  .bamoa-btn-submit:hover { background:#6e1a40; transform:translateY(-1px); }
+  .bamoa-btn-submit:active { transform:translateY(0); }
+  .bamoa-category-totals { display:flex; flex-wrap:wrap; gap:.75rem; margin-top:1rem; }
+  .bamoa-cat-pill { display:flex; flex-direction:column; align-items:flex-start; padding:.5rem .875rem; border-radius:.5rem; background:#f9f5fb; border:1px solid #e4d0ec; min-width:10rem; }
+  .bamoa-cat-pill__label { font-size:.65rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#6b7280; font-family:'Nunito', sans-serif; }
+  .bamoa-cat-pill__value { font-size:1.1rem; font-weight:800; color:var(--bamoa-wine); font-family:'Playfair Display', serif; }
+  .bamoa-comparativo-table { width:100%; font-size:.8rem; border-collapse:collapse; font-family:'Nunito', sans-serif; }
+  .bamoa-comparativo-table th { background:#f3f4f6; color:#374151; font-weight:700; padding:.4rem .6rem; text-align:left; border-bottom:2px solid #e5e7eb; }
+  .bamoa-comparativo-table td { padding:.4rem .6rem; border-bottom:1px solid #f3f4f6; vertical-align:middle; }
+  .bamoa-comparativo-table td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .bamoa-delta-menos { color: #15803d; font-weight: 700; }
+  .bamoa-delta-mas { color: #b45309; font-weight: 700; }
+  .bamoa-delta-igual { color: #6b7280; }
+  .bamoa-row-actions { display:flex; gap:.4rem; justify-content:center; }
   .bamoa-summary-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:.75rem; }
   .bamoa-modal { position:fixed; inset:0; background:rgba(15,23,42,.42); display:none; align-items:center; justify-content:center; z-index:50; padding:1rem; }
   .bamoa-modal.is-open { display:flex; }
   .bamoa-modal-panel { width:min(920px, 96vw); max-height:86vh; overflow:auto; background:#fff; border-radius:10px; padding:1rem; box-shadow:0 24px 70px rgba(15,23,42,.26); }
-  .bamoa-comparison-delta.is-good { color:#047857; font-weight:900; }
-  .bamoa-comparison-delta.is-warning { color:#b45309; font-weight:900; }
   .bamoa-total-line { display:flex; justify-content:space-between; gap:1rem; padding:.6rem 0; border-top:1px solid rgba(15,23,42,.08); }
 </style>
 {% endblock %}
@@ -143,28 +178,37 @@
                 <div class="investment-kicker">Paso 2</div>
                 <h2 class="investment-panel-title">Partidas de inversión</h2>
               </div>
-              <div class="investment-actions">
-                <button class="investment-action-link" type="button" id="addPartidaBtn">Agregar partida</button>
-                <button class="investment-action-link is-ghost" type="button" id="openImportModalBtn">Importar de Guamúchil</button>
+              <div style="display:flex;gap:.75rem;align-items:center;margin-bottom:1rem;flex-wrap:wrap;">
+                <button class="bamoa-btn-agregar" type="button" id="btnAgregarPartida">+ Agregar partida</button>
+                <button class="bamoa-btn-importar" type="button" id="openImportModalBtn">Importar de Guamúchil</button>
               </div>
             </div>
-            <div class="investment-table-wrap">
-              <table class="investment-table">
+            <div class="table-responsive" style="border-radius:.5rem;overflow:hidden;border:1px solid #e5e7eb;">
+              <table id="bamoa-partidas-table">
+                <colgroup>
+                  <col class="col-categoria">
+                  <col class="col-descripcion">
+                  <col class="col-proveedor">
+                  <col class="col-monto">
+                  <col class="col-iva">
+                  <col class="col-total">
+                  <col class="col-acciones">
+                </colgroup>
                 <thead>
                   <tr>
                     <th>Categoría</th>
                     <th>Descripción</th>
                     <th>Proveedor estimado</th>
-                    <th>Monto</th>
-                    <th>IVA</th>
-                    <th>Total</th>
-                    <th>Acciones</th>
+                    <th style="text-align:right">Monto</th>
+                    <th style="text-align:right">IVA</th>
+                    <th style="text-align:right">Total</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody id="partidasTableBody"></tbody>
               </table>
             </div>
-            <div class="investment-kpis" id="totalesCategoria"></div>
+            <div class="bamoa-category-totals" id="categoryTotalsContainer"></div>
           </section>
 
           <section class="bamoa-step" data-step="3">
@@ -279,7 +323,7 @@
               </table>
             </div>
             <div class="investment-form-actions">
-              <button class="investment-button" type="submit" id="submitBamoaBtn">Crear proyecto con partidas y 3 escenarios</button>
+              <button class="bamoa-btn-submit" type="submit" id="submitBamoaBtn">Crear proyecto con escenarios</button>
             </div>
           </section>
         </article>
@@ -295,13 +339,13 @@
           </div>
           <div class="investment-muted">69 partidas reales cargadas en producción.</div>
           <div class="investment-table-wrap" style="margin-top:1rem;">
-            <table class="investment-table">
+            <table class="bamoa-comparativo-table">
               <thead>
                 <tr>
                   <th>Categoría</th>
-                  <th>Guamúchil</th>
-                  <th>Bamoa plan</th>
-                  <th>Delta</th>
+                  <th style="text-align:right">Guamúchil</th>
+                  <th style="text-align:right">Bamoa plan</th>
+                  <th style="text-align:right">Delta</th>
                 </tr>
               </thead>
               <tbody id="comparativoBody"></tbody>
@@ -363,6 +407,10 @@
       return match ? match.label : value;
     }
 
+    function formatPeso(value) {
+      return money.format(Number(value || 0));
+    }
+
     function partidaTotal(partida) {
       return Number(partida.monto || 0) + Number(partida.iva || 0);
     }
@@ -381,56 +429,158 @@
       return totals;
     }
 
-    function categoryOptions(selected) {
-      return categorias.map((item) => `<option value="${item.value}" ${item.value === selected ? "selected" : ""}>${item.label}</option>`).join("");
-    }
-
-    function updatePartida(index, field, value) {
-      if (!partidas[index]) return;
-      partidas[index][field] = ["monto", "iva"].includes(field) ? Number(value || 0) : value;
-      renderTablaPartidas();
-    }
-
-    function removePartida(index) {
-      partidas.splice(index, 1);
-      renderTablaPartidas();
-    }
-
     function renderTablaPartidas() {
-      const body = document.getElementById("partidasTableBody");
-      body.innerHTML = partidas.map((partida, index) => `
-        <tr>
-          <td><select class="bamoa-table-select" data-index="${index}" data-field="categoria">${categoryOptions(partida.categoria)}</select></td>
-          <td><input class="bamoa-table-input" data-index="${index}" data-field="descripcion" value="${partida.descripcion || ""}"></td>
-          <td><input class="bamoa-table-input" data-index="${index}" data-field="proveedor_nombre" value="${partida.proveedor_nombre || ""}"></td>
-          <td><input class="bamoa-table-input" type="number" step="0.01" min="0" data-index="${index}" data-field="monto" value="${Number(partida.monto || 0)}"></td>
-          <td><input class="bamoa-table-input" type="number" step="0.01" min="0" data-index="${index}" data-field="iva" value="${Number(partida.iva || 0)}"></td>
-          <td><strong>${money.format(partidaTotal(partida))}</strong></td>
-          <td><div class="bamoa-row-actions"><button class="bamoa-icon-button is-danger" type="button" data-remove-index="${index}">Eliminar</button></div></td>
-        </tr>
-      `).join("");
-      body.querySelectorAll("[data-index][data-field]").forEach((input) => {
-        input.addEventListener("input", (event) => updatePartida(Number(event.target.dataset.index), event.target.dataset.field, event.target.value));
-        input.addEventListener("change", (event) => updatePartida(Number(event.target.dataset.index), event.target.dataset.field, event.target.value));
+      const tbody = document.getElementById("partidasTableBody");
+      tbody.innerHTML = "";
+
+      partidas.forEach((partida, index) => {
+        const tr = document.createElement("tr");
+
+        const tdCat = document.createElement("td");
+        const selCat = document.createElement("select");
+        selCat.className = "bamoa-table-select";
+        categorias.forEach((categoria) => {
+          const option = document.createElement("option");
+          option.value = categoria.value;
+          option.textContent = categoria.label;
+          if (categoria.value === partida.categoria) option.selected = true;
+          selCat.appendChild(option);
+        });
+        selCat.addEventListener("change", function () {
+          partidas[index].categoria = this.value;
+          actualizarTotalesCategorias();
+          actualizarComparativo();
+          renderRevision();
+        });
+        tdCat.appendChild(selCat);
+
+        const tdDesc = document.createElement("td");
+        const inpDesc = document.createElement("input");
+        inpDesc.type = "text";
+        inpDesc.className = "bamoa-table-input";
+        inpDesc.placeholder = "Descripción del concepto";
+        inpDesc.value = partida.descripcion || "";
+        inpDesc.addEventListener("input", function () { partidas[index].descripcion = this.value; });
+        inpDesc.addEventListener("click", function (event) { event.stopPropagation(); this.focus(); });
+        tdDesc.appendChild(inpDesc);
+
+        const tdProv = document.createElement("td");
+        const inpProv = document.createElement("input");
+        inpProv.type = "text";
+        inpProv.className = "bamoa-table-input";
+        inpProv.placeholder = "Proveedor";
+        inpProv.value = partida.proveedor_nombre || "";
+        inpProv.addEventListener("input", function () { partidas[index].proveedor_nombre = this.value; });
+        inpProv.addEventListener("click", function (event) { event.stopPropagation(); this.focus(); });
+        tdProv.appendChild(inpProv);
+
+        const tdMonto = document.createElement("td");
+        const inpMonto = document.createElement("input");
+        inpMonto.type = "number";
+        inpMonto.className = "bamoa-table-input";
+        inpMonto.placeholder = "0.00";
+        inpMonto.min = "0";
+        inpMonto.step = "0.01";
+        inpMonto.value = partida.monto || 0;
+        inpMonto.addEventListener("input", function () {
+          partidas[index].monto = parseFloat(this.value) || 0;
+          actualizarTotalFila(tr, partidas[index]);
+          actualizarTotalesCategorias();
+          actualizarComparativo();
+          calcularEscenariosPreview();
+          renderRevision();
+        });
+        inpMonto.addEventListener("click", function (event) { event.stopPropagation(); this.select(); });
+        tdMonto.appendChild(inpMonto);
+
+        const tdIva = document.createElement("td");
+        const inpIva = document.createElement("input");
+        inpIva.type = "number";
+        inpIva.className = "bamoa-table-input";
+        inpIva.placeholder = "0";
+        inpIva.min = "0";
+        inpIva.step = "0.01";
+        inpIva.value = partida.iva || 0;
+        inpIva.addEventListener("input", function () {
+          partidas[index].iva = parseFloat(this.value) || 0;
+          actualizarTotalFila(tr, partidas[index]);
+          actualizarTotalesCategorias();
+          actualizarComparativo();
+          renderRevision();
+        });
+        inpIva.addEventListener("click", function (event) { event.stopPropagation(); this.select(); });
+        tdIva.appendChild(inpIva);
+
+        const tdTotal = document.createElement("td");
+        tdTotal.className = "bamoa-row-total";
+        tdTotal.dataset.totalCell = "1";
+        tdTotal.textContent = formatPeso(partidaTotal(partida));
+
+        const tdAcc = document.createElement("td");
+        tdAcc.style.textAlign = "center";
+        const btnElim = document.createElement("button");
+        btnElim.type = "button";
+        btnElim.className = "bamoa-btn-eliminar";
+        btnElim.title = "Eliminar partida";
+        btnElim.innerHTML = "&#x2715;";
+        btnElim.addEventListener("click", function () {
+          partidas.splice(index, 1);
+          renderTablaPartidas();
+          actualizarTotalesCategorias();
+          actualizarComparativo();
+          calcularEscenariosPreview();
+          renderRevision();
+        });
+        tdAcc.appendChild(btnElim);
+
+        tr.appendChild(tdCat);
+        tr.appendChild(tdDesc);
+        tr.appendChild(tdProv);
+        tr.appendChild(tdMonto);
+        tr.appendChild(tdIva);
+        tr.appendChild(tdTotal);
+        tr.appendChild(tdAcc);
+        tbody.appendChild(tr);
       });
-      body.querySelectorAll("[data-remove-index]").forEach((button) => {
-        button.addEventListener("click", () => removePartida(Number(button.dataset.removeIndex)));
-      });
-      renderTotalesCategoria();
+
+      actualizarTotalesCategorias();
       actualizarComparativo();
       calcularEscenariosPreview();
       renderRevision();
     }
 
-    function renderTotalesCategoria() {
+    function actualizarTotalFila(tr, partida) {
+      const totalCell = tr.querySelector("[data-total-cell]");
+      if (totalCell) totalCell.textContent = formatPeso(partidaTotal(partida));
+    }
+
+    function actualizarTotalesCategorias() {
       const totals = calcularTotalesPorCategoria();
-      document.getElementById("totalesCategoria").innerHTML = Object.keys(totals).sort().map((categoria) => `
-        <article class="investment-kpi-card">
-          <div class="investment-kpi-label">${categoriaLabel(categoria)}</div>
-          <div class="investment-kpi-value">${money.format(totals[categoria])}</div>
-          <div class="investment-kpi-note">Plan Bamoa</div>
-        </article>
-      `).join("");
+      const container = document.getElementById("categoryTotalsContainer");
+      if (!container) return;
+
+      container.innerHTML = "";
+      Object.keys(totals).sort().forEach((categoria) => {
+        if (totals[categoria] <= 0) return;
+        const pill = document.createElement("div");
+        pill.className = "bamoa-cat-pill";
+        pill.innerHTML =
+          `<span class="bamoa-cat-pill__label">${categoriaLabel(categoria)}</span>` +
+          `<span class="bamoa-cat-pill__value">${formatPeso(totals[categoria])}</span>`;
+        container.appendChild(pill);
+      });
+
+      const totalGeneral = Object.values(totals).reduce((sum, value) => sum + value, 0);
+      if (totalGeneral > 0) {
+        const pillTotal = document.createElement("div");
+        pillTotal.className = "bamoa-cat-pill";
+        pillTotal.style.borderColor = "#8B2252";
+        pillTotal.style.background = "#f9f0f4";
+        pillTotal.innerHTML =
+          '<span class="bamoa-cat-pill__label" style="color:#8B2252">TOTAL INVERSIÓN</span>' +
+          `<span class="bamoa-cat-pill__value">${formatPeso(totalGeneral)}</span>`;
+        container.appendChild(pillTotal);
+      }
     }
 
     function actualizarComparativo() {
@@ -442,22 +592,22 @@
         const bamoa = Number(totals[categoria] || 0);
         const delta = gml > 0 ? ((bamoa - gml) / gml) * 100 : null;
         const deltaLabel = delta === null ? "-" : `${delta > 0 ? "+" : ""}${pct.format(delta)}%`;
-        const deltaClass = delta === null || delta <= 0 ? "is-good" : "is-warning";
+        const deltaClass = delta === null ? "bamoa-delta-igual" : (delta <= 0 ? "bamoa-delta-menos" : "bamoa-delta-mas");
         return `
           <tr>
             <td>${guamuchil[categoria]?.label || categoriaLabel(categoria)}</td>
-            <td>${money.format(gml)}</td>
-            <td>${money.format(bamoa)}</td>
-            <td class="bamoa-comparison-delta ${deltaClass}">${deltaLabel}</td>
+            <td class="num">${formatPeso(gml)}</td>
+            <td class="num">${formatPeso(bamoa)}</td>
+            <td class="num ${deltaClass}">${deltaLabel}</td>
           </tr>
         `;
       });
       rows.push(`
         <tr>
           <td><strong>Total</strong></td>
-          <td><strong>${money.format(Number('{{ guamuchil_total|default:0 }}'))}</strong></td>
-          <td><strong>${money.format(totalInversionPlan())}</strong></td>
-          <td></td>
+          <td class="num"><strong>${formatPeso(Number('{{ guamuchil_total|default:0 }}'))}</strong></td>
+          <td class="num"><strong>${formatPeso(totalInversionPlan())}</strong></td>
+          <td class="num"></td>
         </tr>
       `);
       body.innerHTML = rows.join("");
@@ -554,7 +704,7 @@
     document.querySelectorAll("[data-step-target]").forEach((button) => {
       button.addEventListener("click", () => navegarPaso(Number(button.dataset.stepTarget)));
     });
-    document.getElementById("addPartidaBtn").addEventListener("click", () => {
+    document.getElementById("btnAgregarPartida").addEventListener("click", () => {
       partidas.push({ categoria: "OTROS", descripcion: "", proveedor_nombre: "", monto: 0, iva: 0, notas: "" });
       renderTablaPartidas();
     });
@@ -577,6 +727,7 @@
     });
     ["deposito_renta", "renta_mensual", "nomina_mensual", "servicios_mensual", "marketing_mensual", "otros_fijos_mensual", "ventas_promedio_base", "margen_bruto_pct"].forEach((id) => {
       document.getElementById(id)?.addEventListener("input", () => {
+        actualizarTotalesCategorias();
         actualizarComparativo();
         calcularEscenariosPreview();
         renderRevision();
