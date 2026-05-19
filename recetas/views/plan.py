@@ -1,5 +1,6 @@
 import hashlib
 import csv
+import json
 from io import BytesIO
 from math import exp, sqrt
 from datetime import date, datetime, timedelta
@@ -22,6 +23,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -16805,7 +16807,12 @@ def _resumen_cierre_sucursales_reabasto(fecha_operacion: date, sucursales: list[
 
 @login_required
 @permission_required("recetas.view_planproduccion", raise_exception=True)
+@never_cache
 def plan_produccion(request: HttpRequest) -> HttpResponse:
+    plan_view_mode = (request.GET.get("vista") or "operativo").strip().lower()
+    plan_view_modes = {"operativo", "pronostico", "mrp", "documentos", "estado"}
+    if plan_view_mode not in plan_view_modes:
+        plan_view_mode = "operativo"
     estado_plan = (request.GET.get("estado_plan") or "all").strip().lower()
     estado_plan_map = {
         "all": None,
@@ -16863,6 +16870,48 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
         plan_actual = planes.first()
 
     recetas_disponibles = Receta.objects.order_by("tipo", "nombre")
+    recetas_disponibles_json = json.dumps(
+        list(
+            Receta.objects.filter(tipo=Receta.TIPO_PRODUCTO_FINAL, pasa_modulo_produccion=True)
+            .values("id", "nombre")
+            .order_by("nombre")[:250]
+        ),
+        default=str,
+    )
+    grupos_usuario = {str(name).lower() for name in request.user.groups.values_list("name", flat=True)}
+    es_dg = request.user.is_superuser or "dg" in grupos_usuario
+    es_produccion = "produccion" in grupos_usuario
+    if not es_dg:
+        plan_view_mode = "operativo"
+    fecha_hoy = timezone.localdate()
+    plan_hoy = (
+        PlanProduccion.objects.filter(fecha_produccion=fecha_hoy)
+        .order_by("-id")
+        .first()
+    )
+    estado_hoy = "SIN_PLAN"
+    estado_hoy_label = "Sin plan"
+    if plan_hoy:
+        if plan_hoy.estado == PlanProduccion.ESTADO_CERRADO:
+            estado_hoy = "CERRADO"
+            estado_hoy_label = "Cerrado"
+        elif plan_hoy.autorizado:
+            estado_hoy = "LIBERADO"
+            estado_hoy_label = "Liberado"
+        else:
+            estado_hoy = plan_hoy.estado or PlanProduccion.ESTADO_BORRADOR
+            estado_hoy_label = {
+                PlanProduccion.ESTADO_BORRADOR: "Borrador",
+                PlanProduccion.ESTADO_CONSUMO_APLICADO: "Consumo aplicado",
+            }.get(estado_hoy, estado_hoy.title())
+    pasos_plan = [
+        {"numero": 1, "label": "Inicio", "completado": bool(plan_hoy), "activo": True},
+        {"numero": 2, "label": "Demanda", "completado": bool(plan_hoy and plan_hoy.items.exists()), "activo": False},
+        {"numero": 3, "label": "Ajuste", "completado": bool(plan_hoy and plan_hoy.items.exists()), "activo": False},
+        {"numero": 4, "label": "Insumos", "completado": bool(plan_hoy and plan_hoy.items.exists()), "activo": False},
+        {"numero": 5, "label": "Liberación", "completado": bool(plan_hoy and plan_hoy.autorizado), "activo": False},
+        {"numero": 6, "label": "Flujo", "completado": False, "activo": False},
+    ]
     explosion = _plan_explosion(plan_actual) if plan_actual else None
     plan_vs_pronostico = _plan_vs_pronostico(plan_actual) if plan_actual else None
     periodo_pronostico_default = _normalize_periodo_mes(request.GET.get("periodo"))
@@ -17079,10 +17128,67 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
     branch_supply_rows = _plan_branch_supply_rows(
         branch_priority_rows=branch_priority_rows,
     )
+    mode_base_params = {}
+    if plan_actual:
+        mode_base_params["plan_id"] = str(plan_actual.id)
+    if periodo_pronostico_default:
+        mode_base_params["periodo"] = periodo_pronostico_default
+    if mrp_periodo:
+        mode_base_params["mrp_periodo"] = mrp_periodo
+    if mrp_periodo_tipo:
+        mode_base_params["mrp_periodo_tipo"] = mrp_periodo_tipo
+
+    def mode_url(mode: str, anchor: str) -> str:
+        params = {**mode_base_params, "vista": mode}
+        return f"{reverse('recetas:plan_produccion')}?{urlencode(params)}{anchor}"
+
+    plan_view_tabs = [
+        {
+            "key": "operativo",
+            "label": "Operativo",
+            "description": "Producción, insumos y acciones del plan",
+            "url": mode_url("operativo", "#plan-operativo"),
+        },
+        {
+            "key": "pronostico",
+            "label": "Pronóstico",
+            "description": "Base comercial y forecast",
+            "url": mode_url("pronostico", "#plan-pronosticos"),
+        },
+        {
+            "key": "mrp",
+            "label": "MRP",
+            "description": "Materiales y faltantes",
+            "url": mode_url("mrp", "#mrp-consolidado"),
+        },
+        {
+            "key": "documentos",
+            "label": "Documentos",
+            "description": "Compras y trazabilidad",
+            "url": mode_url("documentos", "#plan-control-documental"),
+        },
+        {
+            "key": "estado",
+            "label": "Estado DG",
+            "description": "Seguimiento ejecutivo",
+            "url": mode_url("estado", "#plan-estado-dg"),
+        },
+    ]
+    for tab in plan_view_tabs:
+        tab["active"] = tab["key"] == plan_view_mode
     return render(
         request,
         "recetas/plan_produccion.html",
         {
+            "plan_view_mode": plan_view_mode,
+            "vista": plan_view_mode,
+            "plan_view_tabs": plan_view_tabs,
+            "es_dg": es_dg,
+            "es_produccion": es_produccion,
+            "estado_hoy": estado_hoy,
+            "estado_hoy_label": estado_hoy_label,
+            "fecha_hoy": fecha_hoy,
+            "pasos": pasos_plan,
             "planes": planes[:30],
             "plan_status_dashboard": plan_status_dashboard,
             "plan_status_cards": plan_status_cards,
@@ -17092,6 +17198,7 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
             "dg_group_by": dg_filters["group_by"],
             "plan_actual": plan_actual,
             "recetas_disponibles": recetas_disponibles,
+            "recetas_disponibles_json": recetas_disponibles_json,
             "explosion": explosion,
             "plan_vs_pronostico": plan_vs_pronostico,
             "periodo_pronostico_default": periodo_pronostico_default,
@@ -17146,6 +17253,287 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
                 fallback_url=reverse("recetas:plan_produccion"),
             ),
         },
+    )
+
+
+def _plan_model_unavailable_response() -> JsonResponse:
+    return JsonResponse({"ok": False, "mensaje": "Modelo pendiente de crear"}, status=501)
+
+
+def _plan_json_body(request: HttpRequest) -> dict[str, Any]:
+    if not request.body:
+        return {}
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except (TypeError, ValueError, UnicodeDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _plan_estado_api(plan: PlanProduccion | None) -> str:
+    if plan is None:
+        return "SIN_PLAN"
+    if plan.estado == PlanProduccion.ESTADO_CERRADO:
+        return "CERRADO"
+    if plan.autorizado:
+        return "LIBERADO"
+    return plan.estado or PlanProduccion.ESTADO_BORRADOR
+
+
+def _plan_decimal(value: object, default: Decimal = Decimal("0")) -> Decimal:
+    try:
+        return Decimal(str(value or "0"))
+    except Exception:
+        return default
+
+
+def _plan_decimal_json(value: object, places: str = "0.001") -> str:
+    return str(_plan_decimal(value).quantize(Decimal(places)))
+
+
+def _plan_bom_payload_from_rows(rows: list[dict[str, Any]], total: Decimal) -> dict[str, Any]:
+    cedis: list[dict[str, Any]] = []
+    compras: list[dict[str, Any]] = []
+    for row in rows:
+        cantidad = _plan_decimal(row.get("cantidad"))
+        faltante = _plan_decimal(row.get("faltante", cantidad))
+        costo_estimado = _plan_decimal(row.get("costo_total"))
+        item = {
+            "insumo_id": row.get("insumo_id") or row.get("parent_recipe_id"),
+            "nombre": row.get("nombre") or "",
+            "cantidad": _plan_decimal_json(cantidad),
+            "unidad": row.get("unidad") or "pz",
+        }
+        is_cedis = bool(row.get("is_derived_parent")) or row.get("origen") == "Interno"
+        if is_cedis:
+            cedis.append(item)
+        else:
+            compras.append(
+                {
+                    **item,
+                    "cantidad": _plan_decimal_json(faltante if faltante > 0 else cantidad),
+                    "costo_estimado": _plan_decimal_json(costo_estimado, "0.01"),
+                }
+            )
+    return {
+        "ok": True,
+        "cedis": cedis,
+        "compras": compras,
+        "total_costo_estimado": _plan_decimal_json(total, "0.01"),
+    }
+
+
+def _plan_transient_bom_payload(items: list[dict[str, Any]]) -> dict[str, Any]:
+    receta_ids = [int(item.get("receta_id")) for item in items if str(item.get("receta_id") or "").isdigit()]
+    recetas = {
+        receta.id: receta
+        for receta in Receta.objects.filter(id__in=receta_ids)
+        .prefetch_related("lineas__insumo__unidad_base", "lineas__insumo__proveedor_principal", "lineas__unidad")
+    }
+    unit_cost_cache: Dict[tuple[int, str], Decimal | None] = {}
+    rows: dict[int, dict[str, Any]] = {}
+    total = Decimal("0")
+    for raw_item in items:
+        receta = recetas.get(_to_int_safe(raw_item.get("receta_id")))
+        if not receta:
+            continue
+        cantidad = _plan_decimal(raw_item.get("cantidad_final") or raw_item.get("cantidad"))
+        if cantidad <= 0:
+            continue
+        for linea in receta.lineas.all():
+            if not linea.insumo_id:
+                continue
+            qty = _plan_decimal(linea.cantidad) * cantidad
+            if qty <= 0:
+                continue
+            unit_cost = _linea_unit_cost(linea, unit_cost_cache) or Decimal("0")
+            costo = qty * unit_cost
+            total += costo
+            if linea.insumo_id not in rows:
+                article_class = _insumo_article_class(linea.insumo)
+                rows[linea.insumo_id] = {
+                    "insumo_id": linea.insumo_id,
+                    "nombre": linea.insumo.nombre,
+                    "origen": article_class["label"],
+                    "unidad": _linea_unit_code(linea),
+                    "cantidad": Decimal("0"),
+                    "faltante": Decimal("0"),
+                    "costo_total": Decimal("0"),
+                }
+            rows[linea.insumo_id]["cantidad"] += qty
+            rows[linea.insumo_id]["faltante"] += qty
+            rows[linea.insumo_id]["costo_total"] += costo
+    return _plan_bom_payload_from_rows(sorted(rows.values(), key=lambda r: r["nombre"].lower()), total)
+
+
+@login_required
+@require_POST
+def api_guardar_borrador(request: HttpRequest) -> JsonResponse:
+    if PlanProduccion is None or PlanProduccionItem is None:
+        return _plan_model_unavailable_response()
+    payload = _plan_json_body(request)
+    raw_items = payload.get("items") if isinstance(payload.get("items"), list) else []
+    items: list[PlanProduccionItem] = []
+    receta_ids = [int(item.get("receta_id")) for item in raw_items if str(item.get("receta_id") or "").isdigit()]
+    recetas = {receta.id: receta for receta in Receta.objects.filter(id__in=receta_ids)}
+    for raw_item in raw_items:
+        receta = recetas.get(_to_int_safe(raw_item.get("receta_id")))
+        cantidad = _plan_decimal(raw_item.get("cantidad_final") or raw_item.get("cantidad"))
+        if not receta or cantidad <= 0:
+            continue
+        items.append(
+            PlanProduccionItem(
+                receta=receta,
+                cantidad=cantidad,
+                cantidad_sugerida=_plan_decimal(raw_item.get("cantidad")),
+                cantidad_autorizada=cantidad,
+                notas=str(payload.get("fuente") or raw_item.get("fuente") or "Plan V2")[:160],
+                metadata={
+                    "fuente": payload.get("fuente") or "",
+                    "destino": raw_item.get("destino") or "CEDIS",
+                    "api": "plan-produccion-v2",
+                },
+            )
+        )
+    if not items:
+        return JsonResponse({"ok": False, "mensaje": "Agrega al menos un producto con cantidad mayor a 0."}, status=400)
+
+    hoy = timezone.localdate()
+    with transaction.atomic():
+        plan = (
+            PlanProduccion.objects.select_for_update()
+            .filter(
+                fecha_produccion=hoy,
+                estado__in=[PlanProduccion.ESTADO_BORRADOR, PlanProduccion.ESTADO_CONSUMO_APLICADO],
+            )
+            .order_by("-id")
+            .first()
+        )
+        if plan is None:
+            plan = PlanProduccion.objects.create(
+                nombre=f"Plan diario {hoy:%Y-%m-%d}",
+                fecha_produccion=hoy,
+                estado=PlanProduccion.ESTADO_BORRADOR,
+                creado_por=request.user,
+                origen_automatizacion="plan-produccion-v2",
+                metadata={"fuente": payload.get("fuente") or "", "api": "plan-produccion-v2"},
+            )
+        else:
+            plan.estado = PlanProduccion.ESTADO_BORRADOR
+            plan.autorizado = False
+            plan.autorizado_en = None
+            plan.autorizado_por = None
+            plan.metadata = {**(plan.metadata or {}), "fuente": payload.get("fuente") or "", "api": "plan-produccion-v2"}
+            plan.save(update_fields=["estado", "autorizado", "autorizado_en", "autorizado_por", "metadata", "actualizado_en"])
+        plan.items.all().delete()
+        for item in items:
+            item.plan = plan
+        PlanProduccionItem.objects.bulk_create(items)
+        if hasattr(cache, "delete_pattern"):
+            cache.delete_pattern(f"plan-produccion:explosion:{plan.id}:*")
+    return JsonResponse({"ok": True, "plan_id": plan.id, "mensaje": "Borrador guardado correctamente."})
+
+
+@login_required
+@require_POST
+def api_calcular_bom(request: HttpRequest) -> JsonResponse:
+    if PlanProduccion is None:
+        return _plan_model_unavailable_response()
+    payload = _plan_json_body(request)
+    plan_id = _to_int_safe(payload.get("plan_id"))
+    if plan_id:
+        plan = get_object_or_404(PlanProduccion, pk=plan_id)
+        explosion = _plan_explosion(plan)
+        return JsonResponse(_plan_bom_payload_from_rows(explosion.get("insumos", []), explosion.get("costo_total") or Decimal("0")))
+    raw_items = payload.get("items") if isinstance(payload.get("items"), list) else []
+    if not raw_items:
+        return JsonResponse({"ok": False, "mensaje": "No hay productos para calcular."}, status=400)
+    return JsonResponse(_plan_transient_bom_payload(raw_items))
+
+
+@login_required
+@require_POST
+def api_liberar_plan(request: HttpRequest) -> JsonResponse:
+    if PlanProduccion is None:
+        return _plan_model_unavailable_response()
+    grupos_usuario = {str(name).lower() for name in request.user.groups.values_list("name", flat=True)}
+    if not (request.user.is_superuser or "dg" in grupos_usuario or "produccion" in grupos_usuario):
+        raise PermissionDenied
+    payload = _plan_json_body(request)
+    plan = get_object_or_404(PlanProduccion, pk=_to_int_safe(payload.get("plan_id")))
+    if not plan.items.exists():
+        return JsonResponse({"ok": False, "mensaje": "Carga demanda antes de liberar el plan."}, status=400)
+    explosion = _plan_explosion(plan)
+    if explosion.get("lineas_sin_match") or explosion.get("lineas_sin_cantidad") or explosion.get("lineas_sin_costo_unitario"):
+        return JsonResponse({"ok": False, "mensaje": "Hay datos maestros pendientes antes de liberar."}, status=400)
+    plan.autorizado = True
+    plan.autorizado_en = timezone.now()
+    plan.autorizado_por = request.user
+    plan.metadata = {**(plan.metadata or {}), "liberacion": {"api": "plan-produccion-v2", "usuario_id": request.user.id}}
+    plan.save(update_fields=["autorizado", "autorizado_en", "autorizado_por", "metadata", "actualizado_en"])
+    return JsonResponse({"ok": True, "mensaje": "Plan liberado correctamente.", "estado": "LIBERADO"})
+
+
+@login_required
+def api_demanda_sugerida(request: HttpRequest) -> JsonResponse:
+    fecha_base = _parse_date_safe(request.GET.get("fecha")) or timezone.localdate()
+    fechas = [fecha_base - timedelta(days=7 * offset) for offset in range(1, 5)]
+    rows = (
+        PointDailySale.objects.filter(sale_date__in=fechas)
+        .select_related("receta", "product")
+        .values("receta_id", "receta__nombre", "product__name", "product__sku", "product__external_id")
+        .annotate(total=Sum("quantity"), dias=Count("sale_date", distinct=True))
+        .order_by("-total")[:80]
+    )
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        receta_id = row.get("receta_id")
+        receta_nombre = row.get("receta__nombre")
+        if not receta_id:
+            receta = _resolve_receta_for_sales(row.get("product__name") or "", row.get("product__sku") or row.get("product__external_id") or "")
+            if not receta:
+                continue
+            receta_id = receta.id
+            receta_nombre = receta.nombre
+        total = _plan_decimal(row.get("total"))
+        promedio = total / Decimal("4")
+        items.append(
+            {
+                "receta_id": receta_id,
+                "nombre": receta_nombre or row.get("product__name") or "Producto sin nombre",
+                "promedio_semanal": _plan_decimal_json(promedio),
+                "desviacion": "0.000",
+            }
+        )
+    return JsonResponse({"ok": True, "items": items, "mensaje": "" if items else "Sin histórico suficiente para la fecha seleccionada."})
+
+
+@login_required
+def api_estado_hoy(request: HttpRequest) -> JsonResponse:
+    if PlanProduccion is None:
+        return _plan_model_unavailable_response()
+    hoy = timezone.localdate()
+    plan = PlanProduccion.objects.filter(fecha_produccion=hoy).prefetch_related("items").order_by("-id").first()
+    estado = _plan_estado_api(plan)
+    productos = plan.items.count() if plan else 0
+    bom_calculado = bool(productos)
+    paso_actual = 1
+    if productos:
+        paso_actual = 4 if bom_calculado else 3
+    if estado == "LIBERADO":
+        paso_actual = 6
+    return JsonResponse(
+        {
+            "tiene_plan": bool(plan),
+            "plan_id": plan.id if plan else None,
+            "estado": estado,
+            "paso_actual": paso_actual,
+            "resumen": {
+                "productos": productos,
+                "fuente": (plan.metadata or {}).get("fuente", "") if plan else "",
+                "bom_calculado": bom_calculado,
+            },
+        }
     )
 
 

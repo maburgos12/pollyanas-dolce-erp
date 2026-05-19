@@ -39,6 +39,8 @@ from .plan import (
     plan_produccion_solicitud_print, plan_produccion_solicitud_compras_print,
     plan_produccion_generar_solicitudes, plan_produccion_aplicar_consumo,
     plan_produccion_cerrar,
+    api_guardar_borrador, api_calcular_bom, api_liberar_plan,
+    api_demanda_sugerida, api_estado_hoy,
     dg_operacion_dashboard, dg_operacion_dashboard_export,
     produccion_cedis_weekly_dashboard,
 )
