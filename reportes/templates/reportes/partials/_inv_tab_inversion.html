@@ -1,0 +1,45 @@
+{% load humanize %}
+<section class="inv-panel">
+  <h2>Inversión</h2>
+  <div class="inv-kpis">
+    <div class="inv-kpi"><span class="inv-label">Planeado</span><div class="inv-value">${{ project.monto_inversion_planeado|floatformat:2|intcomma }}</div></div>
+    <div class="inv-kpi"><span class="inv-label">Real</span><div class="inv-value">${{ project.monto_inversion_real|floatformat:2|intcomma }}</div></div>
+    <div class="inv-kpi"><span class="inv-label">Partidas</span><div class="inv-value">{{ gastos.count|intcomma }}</div></div>
+    <div class="inv-kpi"><span class="inv-label">Capital aportado</span><div class="inv-value">${{ project.capital_inicial_aportado|floatformat:2|intcomma }}</div></div>
+    <div class="inv-kpi"><span class="inv-label">Deuda</span><div class="inv-value">${{ project.deuda_asociada|floatformat:2|intcomma }}</div></div>
+    <div class="inv-kpi"><span class="inv-label">Avance</span><div class="inv-value">{% if project.monto_inversion_planeado %}{% widthratio project.monto_inversion_real project.monto_inversion_planeado 100 %}%{% else %}0%{% endif %}</div></div>
+  </div>
+</section>
+
+<section class="inv-panel">
+  <h2>Registrar gasto CAPEX</h2>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="add_expense">
+    <div class="inv-form-grid">
+      <div><label class="inv-label">Fecha</label><input class="inv-input" type="date" name="fecha"></div>
+      <div><label class="inv-label">Categoría</label><select class="inv-select" name="categoria">{% for value,label in categorias_gasto %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+      <div><label class="inv-label">Descripción</label><input class="inv-input" name="descripcion" required></div>
+      <div><label class="inv-label">Proveedor</label><input class="inv-input" name="proveedor_nombre"></div>
+      <div><label class="inv-label">Monto</label><input class="inv-input" type="number" step="0.01" name="monto" required></div>
+      <div><label class="inv-label">IVA</label><input class="inv-input" type="number" step="0.01" name="iva" value="0"></div>
+      <div><label class="inv-label">Referencia contable</label><input class="inv-input" name="referencia_contable"></div>
+      <div><label class="inv-label">Notas</label><input class="inv-input" name="notas"></div>
+    </div>
+    <div class="inv-actions" style="margin-top:1rem"><button class="inv-button" type="submit">Agregar gasto</button></div>
+  </form>
+</section>
+
+<section class="inv-panel">
+  <h2>Gastos registrados</h2>
+  <table class="inv-table">
+    <thead><tr><th>Fecha</th><th>Categoría</th><th>Descripción</th><th>Proveedor</th><th class="num">Total</th></tr></thead>
+    <tbody>
+      {% for gasto in gastos %}
+        <tr><td>{{ gasto.fecha|date:"Y-m-d" }}</td><td>{{ gasto.get_categoria_display }}</td><td>{{ gasto.descripcion }}</td><td>{{ gasto.proveedor_nombre|default:"-" }}</td><td class="num">${{ gasto.monto_total|floatformat:2|intcomma }}</td></tr>
+      {% empty %}
+        <tr><td colspan="5">Sin gastos registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
