@@ -4940,11 +4940,11 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   display: flex;
   gap: 24px;
   align-items: flex-start;
-  background: linear-gradient(135deg, #fff 55%, var(--rosa) 100%);
-  border: 1px solid rgba(139, 34, 82, 0.1);
+  background: linear-gradient(135deg, #fff7fa 0%, var(--rosa) 100%);
+  border: 1.5px solid rgba(139, 34, 82, 0.18);
   border-radius: var(--radius-md);
-  padding: var(--card-padding);
-  box-shadow: 0 4px 16px rgba(67, 24, 41, 0.06);
+  padding: 24px;
+  box-shadow: 0 6px 24px rgba(67, 24, 41, 0.10);
 }
 
 .bi-hero-main {
