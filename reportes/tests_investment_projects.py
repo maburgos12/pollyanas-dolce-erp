@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import patch
@@ -198,7 +199,7 @@ class ProyectoInversionViewsTests(TestCase):
         )
 
 
-class BamoaWizardTests(TestCase):
+class BamoaWizardV2Tests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="dg_bamoa", password="pass123", first_name="Dirección")
         group, _ = Group.objects.get_or_create(name="DG")
@@ -220,14 +221,41 @@ class BamoaWizardTests(TestCase):
                 "SELECT setval(pg_get_serial_sequence(%s, %s), %s)",
                 [ProyectoInversion._meta.db_table, "id", self.guamuchil.pk],
             )
-        for idx in range(69):
+        obra_civil = [
+            ("Remodelación y adaptación local", "Arq. Itzel Castro Orrantia", Decimal("632345.94")),
+            ("Diseño supervisión y administración", "Arq. Itzel Castro Orrantia", Decimal("82204.97")),
+        ]
+        for idx, (descripcion, proveedor, monto) in enumerate(obra_civil, start=1):
+            ProyectoInversionGasto.objects.create(
+                proyecto=self.guamuchil,
+                fecha=date(2026, 1, 1),
+                categoria=ProyectoInversionGasto.CATEGORIA_OBRA_CIVIL,
+                descripcion=descripcion,
+                proveedor_nombre=proveedor,
+                monto_total=monto,
+                referencia_contable=f"GML_RECON_2026_05_18_OBRA_{idx:03d}",
+            )
+        for idx in range(15):
+            monto = Decimal("179612.59") if idx == 14 else Decimal("10000.00")
             ProyectoInversionGasto.objects.create(
                 proyecto=self.guamuchil,
                 fecha=date(2026, 1, 1),
                 categoria=ProyectoInversionGasto.CATEGORIA_EQUIPAMIENTO,
-                descripcion=f"GML partida {idx + 1}",
-                monto_total=Decimal("1.00"),
-                referencia_contable=f"GML_RECON_2026_05_18_{idx + 1:03d}",
+                descripcion=f"GML equipo {idx + 1}",
+                proveedor_nombre="Proveedor equipo",
+                monto_total=monto,
+                referencia_contable=f"GML_RECON_2026_05_18_EQ_{idx + 1:03d}",
+            )
+        for idx in range(52):
+            monto = Decimal("36590.35") if idx == 51 else Decimal("1000.00")
+            ProyectoInversionGasto.objects.create(
+                proyecto=self.guamuchil,
+                fecha=date(2026, 1, 1),
+                categoria=ProyectoInversionGasto.CATEGORIA_MOBILIARIO,
+                descripcion=f"GML mobiliario {idx + 1}",
+                proveedor_nombre="Proveedor mobiliario",
+                monto_total=monto,
+                referencia_contable=f"GML_RECON_2026_05_18_MOB_{idx + 1:03d}",
             )
 
         self.sucursal = Sucursal.objects.create(codigo="TUN", nombre="El Túnel", activa=True)
@@ -284,45 +312,100 @@ class BamoaWizardTests(TestCase):
         self.assertEqual(benchmark["ventas_mensuales_avg"], 26000.0)
         self.assertEqual(benchmark["ticket_promedio"], 0.0)
 
-    def test_get_wizard_precarga_benchmark(self):
+    def _post_payload(self, *, partidas=None, fecha_inicio="2026-06-01"):
+        if partidas is None:
+            partidas = [
+                {
+                    "categoria": ProyectoInversionGasto.CATEGORIA_OBRA_CIVIL,
+                    "subcategoria": "",
+                    "descripcion": "Remodelación local Bamoa",
+                    "proveedor_nombre": "Arquitecta",
+                    "monto": "190000.00",
+                    "iva": "0",
+                    "notas": "Plan inicial",
+                },
+                {
+                    "categoria": ProyectoInversionGasto.CATEGORIA_EQUIPAMIENTO,
+                    "subcategoria": "",
+                    "descripcion": "Vitrina refrigerada",
+                    "proveedor_nombre": "Proveedor equipo",
+                    "monto": "35000.00",
+                    "iva": "5600.00",
+                    "notas": "",
+                },
+            ]
+        return {
+            "action": "create_bamoa_project",
+            "nombre_proyecto": "Apertura Bamoa 2026",
+            "fecha_inicio": fecha_inicio,
+            "fecha_apertura": "",
+            "partidas_json": json.dumps(partidas),
+            "deuda_asociada": "0",
+            "tasa_interes_anual": "0",
+            "plazo_deuda_meses": "0",
+            "pago_mensual_deuda_estimado": "0",
+            "discount_rate": "12",
+            "roi_objetivo": "25",
+            "payback_objetivo_meses": "24",
+            "renta_mensual": "4000.00",
+            "nomina_mensual": "18000.00",
+            "servicios_mensual": "7000.00",
+            "marketing_mensual": "2500.00",
+            "otros_fijos_mensual": "1500.00",
+            "ventas_promedio_base": "26000.00",
+            "margen_bruto_pct": "45",
+            "crecimiento_mensual_pct": "0.8",
+            "horizonte_meses": "36",
+        }
+
+    def test_get_wizard_carga_comparativo_guamuchil(self):
         response = self.client.get(reverse("reportes:proyecto_bamoa_wizard"))
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("benchmark", response.context)
+        self.assertIn("guamuchil_por_categoria", response.context)
+        self.assertIn(ProyectoInversionGasto.CATEGORIA_OBRA_CIVIL, response.context["guamuchil_por_categoria"])
         self.assertContains(response, "Apertura Bamoa 2026")
-        self.assertContains(response, "Crear proyecto con 3 escenarios")
+        self.assertContains(response, "Partidas de inversión")
         self.assertContains(
             response,
             f'action="{reverse("reportes:proyecto_bamoa_wizard")}"',
         )
 
-    def test_post_crea_proyecto_y_tres_escenarios(self):
+    def test_api_bamoa_guamuchil_benchmark(self):
+        response = self.client.get(reverse("reportes:api_bamoa_guamuchil_benchmark"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["partidas"], 69)
+        self.assertEqual(payload["total"], 1121753.85)
+        self.assertTrue(any(row["categoria"] == ProyectoInversionGasto.CATEGORIA_OBRA_CIVIL for row in payload["categorias"]))
+
+    def test_post_crea_partidas_como_ProyectoInversionGasto(self):
         response = self.client.post(
             reverse("reportes:proyecto_bamoa_wizard"),
-            {
-                "action": "create_bamoa_project",
-                "nombre_proyecto": "Apertura Bamoa 2026",
-                "fecha_inicio": "2026-06-01",
-                "fecha_apertura": "",
-                "monto_inversion_planeado": "1200000.00",
-                "capital_inicial_aportado": "1200000.00",
-                "deuda_asociada": "0",
-                "tasa_interes_anual": "0",
-                "plazo_deuda_meses": "0",
-                "pago_mensual_deuda_estimado": "0",
-                "discount_rate": "12",
-                "roi_objetivo": "25",
-                "payback_objetivo_meses": "24",
-                "ventas_promedio_base": "26000.00",
-                "margen_bruto_pct": "45",
-                "gastos_operativos_mensuales": "9000.00",
-                "crecimiento_mensual_pct": "0.8",
-                "horizonte_meses": "36",
-            },
+            self._post_payload(),
             follow=True,
         )
 
         self.assertEqual(response.status_code, 200)
+        proyecto = ProyectoInversion.objects.get(nombre_proyecto="Apertura Bamoa 2026")
+        gasto = proyecto.gastos_inversion.get(descripcion="Remodelación local Bamoa")
+        self.assertEqual(gasto.categoria, ProyectoInversionGasto.CATEGORIA_OBRA_CIVIL)
+        self.assertEqual(gasto.proveedor_nombre, "Arquitecta")
+        self.assertEqual(gasto.monto_total, Decimal("190000.00"))
+
+    def test_post_inversion_total_suma_partidas(self):
+        self.client.post(reverse("reportes:proyecto_bamoa_wizard"), self._post_payload())
+
+        proyecto = ProyectoInversion.objects.get(nombre_proyecto="Apertura Bamoa 2026")
+        self.assertEqual(proyecto.monto_inversion_planeado, Decimal("230600.00"))
+        self.assertEqual(proyecto.capital_inicial_aportado, Decimal("230600.00"))
+
+    def test_post_crea_tres_escenarios(self):
+        self.client.post(reverse("reportes:proyecto_bamoa_wizard"), self._post_payload())
+
         proyecto = ProyectoInversion.objects.get(nombre_proyecto="Apertura Bamoa 2026")
         self.assertEqual(proyecto.escenarios.count(), 3)
         self.assertEqual(
@@ -333,6 +416,8 @@ class BamoaWizardTests(TestCase):
                 ProyectoInversionEscenario.TIPO_OPTIMISTA,
             },
         )
+        base = proyecto.escenarios.get(tipo_escenario=ProyectoInversionEscenario.TIPO_BASE)
+        self.assertEqual(base.gastos_operativos_mensuales, Decimal("33000.00"))
 
     def test_post_sin_fecha_inicio_redirige_con_error(self):
         before = ProyectoInversion.objects.count()
@@ -341,7 +426,15 @@ class BamoaWizardTests(TestCase):
             {
                 "action": "create_bamoa_project",
                 "nombre_proyecto": "Apertura Bamoa 2026",
-                "monto_inversion_planeado": "1200000.00",
+                "partidas_json": json.dumps(
+                    [
+                        {
+                            "categoria": ProyectoInversionGasto.CATEGORIA_OBRA_CIVIL,
+                            "descripcion": "Remodelación local Bamoa",
+                            "monto": "190000.00",
+                        }
+                    ]
+                ),
                 "ventas_promedio_base": "26000.00",
             },
         )
@@ -349,23 +442,34 @@ class BamoaWizardTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(ProyectoInversion.objects.count(), before)
 
-    def test_no_modifica_proyecto_guamuchil(self):
+    def test_post_sin_partidas_redirige_con_error(self):
+        before = ProyectoInversion.objects.count()
+        response = self.client.post(
+            reverse("reportes:proyecto_bamoa_wizard"),
+            self._post_payload(partidas=[]),
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(ProyectoInversion.objects.count(), before)
+
+    def test_guamuchil_pk1_intacto_despues_del_post(self):
         self.client.post(
             reverse("reportes:proyecto_bamoa_wizard"),
-            {
-                "action": "create_bamoa_project",
-                "nombre_proyecto": "Apertura Bamoa 2026",
-                "fecha_inicio": "2026-06-01",
-                "monto_inversion_planeado": "1200000.00",
-                "ventas_promedio_base": "26000.00",
-                "gastos_operativos_mensuales": "9000.00",
-            },
+            self._post_payload(),
         )
 
         self.guamuchil.refresh_from_db()
         self.assertEqual(self.guamuchil.nombre_proyecto, "Apertura Guamuchil 2026")
         self.assertEqual(self.guamuchil.monto_inversion_real, Decimal("1121753.85"))
         self.assertEqual(self.guamuchil.gastos_inversion.count(), 69)
+
+    def test_referencia_contable_lleva_prefijo_BAMOA_PLAN(self):
+        self.client.post(reverse("reportes:proyecto_bamoa_wizard"), self._post_payload())
+
+        proyecto = ProyectoInversion.objects.get(nombre_proyecto="Apertura Bamoa 2026")
+        referencias = list(proyecto.gastos_inversion.values_list("referencia_contable", flat=True))
+        self.assertTrue(referencias)
+        self.assertTrue(all(ref.startswith(f"BAMOA_PLAN_{proyecto.pk}") for ref in referencias))
 
     def test_export_excel_descarga_xlsx(self):
         response = self.client.get(

@@ -7,6 +7,24 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/investment_projects.css' %}?v=20260406c">
+<style>
+  .bamoa-step-nav { display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:1rem; }
+  .bamoa-step-button { border:1px solid rgba(139,34,82,.22); background:#fff; color:#5f1838; border-radius:8px; padding:.65rem .85rem; font-weight:800; cursor:pointer; }
+  .bamoa-step-button.is-active { background:#8B2252; color:#fff; border-color:#8B2252; }
+  .bamoa-step { display:none; }
+  .bamoa-step.is-active { display:block; }
+  .bamoa-table-input, .bamoa-table-select { width:100%; min-width:8rem; border:1px solid rgba(15,23,42,.16); border-radius:6px; padding:.45rem .5rem; font:inherit; }
+  .bamoa-row-actions { display:flex; gap:.4rem; justify-content:flex-end; }
+  .bamoa-icon-button { border:1px solid rgba(139,34,82,.22); background:#fff; color:#8B2252; border-radius:6px; padding:.45rem .6rem; cursor:pointer; font-weight:800; }
+  .bamoa-icon-button.is-danger { color:#a21caf; border-color:rgba(162,28,175,.22); }
+  .bamoa-summary-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:.75rem; }
+  .bamoa-modal { position:fixed; inset:0; background:rgba(15,23,42,.42); display:none; align-items:center; justify-content:center; z-index:50; padding:1rem; }
+  .bamoa-modal.is-open { display:flex; }
+  .bamoa-modal-panel { width:min(920px, 96vw); max-height:86vh; overflow:auto; background:#fff; border-radius:10px; padding:1rem; box-shadow:0 24px 70px rgba(15,23,42,.26); }
+  .bamoa-comparison-delta.is-good { color:#047857; font-weight:900; }
+  .bamoa-comparison-delta.is-warning { color:#b45309; font-weight:900; }
+  .bamoa-total-line { display:flex; justify-content:space-between; gap:1rem; padding:.6rem 0; border-top:1px solid rgba(15,23,42,.08); }
+</style>
 {% endblock %}
 
 {% block content %}
@@ -21,18 +39,18 @@
     <article class="investment-hero">
       <div class="investment-kicker">Planeación</div>
       <h1 class="investment-title">Apertura Bamoa 2026</h1>
-      <p class="investment-copy">Alta controlada del proyecto con benchmark del ERP, referencia de Guamúchil y tres escenarios financieros listos para revisar en el dashboard.</p>
+      <p class="investment-copy">Captura por partidas, supuestos operativos y comparación directa contra la inversión real de Guamúchil.</p>
       <div class="investment-meta">
         <span class="investment-pill">{{ benchmark.data_source|default:"Sin fuente de ventas" }}</span>
         <span class="investment-pill">{{ benchmark.periodo_inicio|default:"" }}{% if benchmark.periodo_fin %} a {{ benchmark.periodo_fin }}{% endif %}</span>
-        <span class="investment-pill">Sin duplicar Guamúchil</span>
+        <span class="investment-pill">Guamúchil: ${{ guamuchil_total|floatformat:2|intcomma }}</span>
       </div>
     </article>
     <aside class="investment-side">
       <div class="investment-actions">
         <a class="investment-action-link is-ghost" href="{% url 'reportes:proyectos_inversion_sucursales' %}">Volver a sucursales</a>
       </div>
-      <div class="investment-muted">Referencia reconciliada de Guamúchil: ${{ guamuchil_inversion_real|floatformat:2|intcomma }}. Monto sugerido editable para Bamoa: ${{ inversion_referencia|floatformat:2|intcomma }}.</div>
+      <div class="investment-muted">El proyecto se crea con partidas `ProyectoInversionGasto`, 3 escenarios y metadata de benchmark.</div>
     </aside>
   </section>
 
@@ -57,191 +75,521 @@
       <div class="investment-kpi-note">{{ benchmark.detalle_por_sucursal|length|intcomma }} sucursales incluidas</div>
     </article>
     <article class="investment-kpi-card">
-      <div class="investment-kpi-label">Gasto operativo promedio</div>
+      <div class="investment-kpi-label">Gasto operativo</div>
       <div class="investment-kpi-value">${{ gastos_sugeridos|floatformat:2|intcomma }}</div>
       <div class="investment-kpi-note">Desde snapshots mensuales</div>
     </article>
     <article class="investment-kpi-card">
-      <div class="investment-kpi-label">Margen bruto benchmark</div>
+      <div class="investment-kpi-label">Margen bruto</div>
       <div class="investment-kpi-value">{{ benchmark.margen_bruto_pct_avg|default:0|floatformat:2 }}%</div>
-      <div class="investment-kpi-note">Sólo snapshots con fuente FACT</div>
+      <div class="investment-kpi-note">Sólo snapshots FACT</div>
     </article>
   </section>
 
-  <section class="investment-layout">
-    <div class="investment-main">
-      <article class="investment-panel">
-        <div class="investment-panel-head">
-          <div>
-            <div class="investment-kicker">Captura</div>
-            <h2 class="investment-panel-title">Supuestos base de Bamoa</h2>
+  <form method="post" action="{% url 'reportes:proyecto_bamoa_wizard' %}" id="form-bamoa">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="create_bamoa_project">
+    <input type="hidden" name="partidas_json" id="partidas_json">
+
+    <section class="investment-layout">
+      <div class="investment-main">
+        <article class="investment-panel">
+          <div class="bamoa-step-nav" aria-label="Pasos del wizard">
+            <button class="bamoa-step-button is-active" type="button" data-step-target="1">1. Datos generales</button>
+            <button class="bamoa-step-button" type="button" data-step-target="2">2. Partidas de inversión</button>
+            <button class="bamoa-step-button" type="button" data-step-target="3">3. Supuestos operativos</button>
+            <button class="bamoa-step-button" type="button" data-step-target="4">4. Revisión</button>
           </div>
-        </div>
-        <form method="post" action="{% url 'reportes:proyecto_bamoa_wizard' %}" id="bamoaProjectForm">
-          {% csrf_token %}
-          <input type="hidden" name="action" value="create_bamoa_project">
-          <div class="investment-field-grid">
-            <div class="investment-field">
-              <label for="nombre_proyecto">Nombre del proyecto</label>
-              <input id="nombre_proyecto" type="text" name="nombre_proyecto" value="Apertura Bamoa 2026" required>
+
+          <section class="bamoa-step is-active" data-step="1">
+            <div class="investment-panel-head">
+              <div>
+                <div class="investment-kicker">Paso 1</div>
+                <h2 class="investment-panel-title">Datos generales</h2>
+              </div>
+            </div>
+            <div class="investment-field-grid">
+              <div class="investment-field">
+                <label for="nombre_proyecto">Nombre del proyecto</label>
+                <input id="nombre_proyecto" type="text" name="nombre_proyecto" value="Apertura Bamoa 2026" required>
+              </div>
+              <div class="investment-field">
+                <label for="fecha_inicio">Fecha inicio</label>
+                <input id="fecha_inicio" type="date" name="fecha_inicio" value="2026-06-01" required>
+              </div>
+              <div class="investment-field">
+                <label for="fecha_apertura">Fecha apertura estimada</label>
+                <input id="fecha_apertura" type="date" name="fecha_apertura">
+              </div>
+              <div class="investment-field">
+                <label for="sucursal_relacionada_id">Sucursal relacionada</label>
+                <select id="sucursal_relacionada_id" name="sucursal_relacionada_id">
+                  <option value="">Sin asignar</option>
+                  {% for sucursal in sucursales %}
+                  <option value="{{ sucursal.id }}">{{ sucursal.codigo }} · {{ sucursal.nombre }}</option>
+                  {% endfor %}
+                </select>
+              </div>
             </div>
             <div class="investment-field">
-              <label for="fecha_inicio">Fecha inicio</label>
-              <input id="fecha_inicio" type="date" name="fecha_inicio" value="2026-06-01" required>
+              <label for="observaciones">Observaciones</label>
+              <textarea id="observaciones" name="observaciones" rows="4">Sucursal pequeña de pickup y punto de venta. Local de 5 m de frente por 7 m de fondo. Surtido desde CEDIS Guasave cada 2 días según movimiento.</textarea>
             </div>
-            <div class="investment-field">
-              <label for="fecha_apertura">Fecha apertura estimada</label>
-              <input id="fecha_apertura" type="date" name="fecha_apertura">
+          </section>
+
+          <section class="bamoa-step" data-step="2">
+            <div class="investment-panel-head">
+              <div>
+                <div class="investment-kicker">Paso 2</div>
+                <h2 class="investment-panel-title">Partidas de inversión</h2>
+              </div>
+              <div class="investment-actions">
+                <button class="investment-action-link" type="button" id="addPartidaBtn">Agregar partida</button>
+                <button class="investment-action-link is-ghost" type="button" id="openImportModalBtn">Importar de Guamúchil</button>
+              </div>
             </div>
-            <div class="investment-field">
-              <label for="monto_inversion_planeado">Inversión planeada</label>
-              <input id="monto_inversion_planeado" type="number" step="0.01" min="0" name="monto_inversion_planeado" value="{{ inversion_referencia }}" required>
+            <div class="investment-table-wrap">
+              <table class="investment-table">
+                <thead>
+                  <tr>
+                    <th>Categoría</th>
+                    <th>Descripción</th>
+                    <th>Proveedor estimado</th>
+                    <th>Monto</th>
+                    <th>IVA</th>
+                    <th>Total</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="partidasTableBody"></tbody>
+              </table>
             </div>
-            <div class="investment-field">
-              <label for="capital_inicial_aportado">Capital aportado</label>
-              <input id="capital_inicial_aportado" type="number" step="0.01" min="0" name="capital_inicial_aportado" value="{{ inversion_referencia }}">
+            <div class="investment-kpis" id="totalesCategoria"></div>
+          </section>
+
+          <section class="bamoa-step" data-step="3">
+            <div class="investment-panel-head">
+              <div>
+                <div class="investment-kicker">Paso 3</div>
+                <h2 class="investment-panel-title">Supuestos operativos</h2>
+              </div>
             </div>
-            <div class="investment-field">
-              <label for="deuda_asociada">Deuda asociada</label>
-              <input id="deuda_asociada" type="number" step="0.01" min="0" name="deuda_asociada" value="0">
+            <div class="investment-grid-2">
+              <article class="investment-form-card">
+                <div class="investment-kicker">Costos fijos mensuales</div>
+                <div class="investment-field-grid">
+                  <div class="investment-field">
+                    <label for="renta_mensual">Renta mensual</label>
+                    <input id="renta_mensual" type="number" step="0.01" min="0" name="renta_mensual" value="{{ renta_sugerida }}">
+                  </div>
+                  <div class="investment-field">
+                    <label for="deposito_renta">Depósito</label>
+                    <input id="deposito_renta" type="number" step="0.01" min="0" name="deposito_renta" value="{{ deposito_sugerido }}">
+                  </div>
+                  <div class="investment-field">
+                    <label for="nomina_mensual">Nómina mensual estimada</label>
+                    <input id="nomina_mensual" type="number" step="0.01" min="0" name="nomina_mensual" value="0">
+                  </div>
+                  <div class="investment-field">
+                    <label for="servicios_mensual">Servicios</label>
+                    <input id="servicios_mensual" type="number" step="0.01" min="0" name="servicios_mensual" value="0">
+                  </div>
+                  <div class="investment-field">
+                    <label for="marketing_mensual">Marketing mensual</label>
+                    <input id="marketing_mensual" type="number" step="0.01" min="0" name="marketing_mensual" value="0">
+                  </div>
+                  <div class="investment-field">
+                    <label for="otros_fijos_mensual">Otros fijos</label>
+                    <input id="otros_fijos_mensual" type="number" step="0.01" min="0" name="otros_fijos_mensual" value="0">
+                  </div>
+                </div>
+              </article>
+
+              <article class="investment-form-card">
+                <div class="investment-kicker">Ventas y retorno</div>
+                <div class="investment-field-grid">
+                  <div class="investment-field">
+                    <label for="ventas_promedio_base">Ventas promedio mensual base</label>
+                    <input id="ventas_promedio_base" type="number" step="0.01" min="0" name="ventas_promedio_base" value="{{ ventas_sugeridas }}" required>
+                  </div>
+                  <div class="investment-field">
+                    <label for="margen_bruto_pct">Margen bruto %</label>
+                    <input id="margen_bruto_pct" type="number" step="0.0001" min="0" name="margen_bruto_pct" value="45">
+                  </div>
+                  <div class="investment-field">
+                    <label for="crecimiento_mensual_pct">Crecimiento mensual %</label>
+                    <input id="crecimiento_mensual_pct" type="number" step="0.0001" name="crecimiento_mensual_pct" value="0.8">
+                  </div>
+                  <div class="investment-field">
+                    <label for="horizonte_meses">Horizonte meses</label>
+                    <input id="horizonte_meses" type="number" step="1" min="1" name="horizonte_meses" value="36">
+                  </div>
+                  <div class="investment-field">
+                    <label for="discount_rate">Discount rate %</label>
+                    <input id="discount_rate" type="number" step="0.0001" min="0" name="discount_rate" value="12">
+                  </div>
+                  <div class="investment-field">
+                    <label for="roi_objetivo">ROI objetivo %</label>
+                    <input id="roi_objetivo" type="number" step="0.01" min="0" name="roi_objetivo" value="25">
+                  </div>
+                  <div class="investment-field">
+                    <label for="payback_objetivo_meses">Payback objetivo meses</label>
+                    <input id="payback_objetivo_meses" type="number" step="1" min="1" name="payback_objetivo_meses" value="24">
+                  </div>
+                  <div class="investment-field">
+                    <label for="deuda_asociada">Deuda asociada</label>
+                    <input id="deuda_asociada" type="number" step="0.01" min="0" name="deuda_asociada" value="0">
+                  </div>
+                  <div class="investment-field">
+                    <label for="tasa_interes_anual">Tasa interés anual %</label>
+                    <input id="tasa_interes_anual" type="number" step="0.0001" min="0" name="tasa_interes_anual" value="0">
+                  </div>
+                  <div class="investment-field">
+                    <label for="plazo_deuda_meses">Plazo deuda meses</label>
+                    <input id="plazo_deuda_meses" type="number" step="1" min="0" name="plazo_deuda_meses" value="0">
+                  </div>
+                  <div class="investment-field">
+                    <label for="pago_mensual_deuda_estimado">Pago mensual deuda</label>
+                    <input id="pago_mensual_deuda_estimado" type="number" step="0.01" min="0" name="pago_mensual_deuda_estimado" value="0">
+                  </div>
+                </div>
+              </article>
             </div>
-            <div class="investment-field">
-              <label for="tasa_interes_anual">Tasa interés anual %</label>
-              <input id="tasa_interes_anual" type="number" step="0.0001" min="0" name="tasa_interes_anual" value="0">
+          </section>
+
+          <section class="bamoa-step" data-step="4">
+            <div class="investment-panel-head">
+              <div>
+                <div class="investment-kicker">Paso 4</div>
+                <h2 class="investment-panel-title">Revisión y confirmación</h2>
+              </div>
             </div>
-            <div class="investment-field">
-              <label for="plazo_deuda_meses">Plazo deuda meses</label>
-              <input id="plazo_deuda_meses" type="number" step="1" min="0" name="plazo_deuda_meses" value="0">
+            <div class="bamoa-summary-grid" id="revisionResumen"></div>
+            <div class="investment-table-wrap" style="margin-top:1rem;">
+              <table class="investment-table">
+                <thead>
+                  <tr>
+                    <th>Escenario</th>
+                    <th>Ventas</th>
+                    <th>Gastos</th>
+                    <th>Utilidad mensual estimada</th>
+                  </tr>
+                </thead>
+                <tbody id="escenariosPreviewBody"></tbody>
+              </table>
             </div>
-            <div class="investment-field">
-              <label for="pago_mensual_deuda_estimado">Pago mensual deuda</label>
-              <input id="pago_mensual_deuda_estimado" type="number" step="0.01" min="0" name="pago_mensual_deuda_estimado" value="0">
+            <div class="investment-form-actions">
+              <button class="investment-button" type="submit" id="submitBamoaBtn">Crear proyecto con partidas y 3 escenarios</button>
             </div>
-            <div class="investment-field">
-              <label for="ventas_promedio_base">Ventas promedio base</label>
-              <input id="ventas_promedio_base" type="number" step="0.01" min="0" name="ventas_promedio_base" value="{{ ventas_sugeridas }}" required>
-            </div>
-            <div class="investment-field">
-              <label for="margen_bruto_pct">Margen bruto %</label>
-              <input id="margen_bruto_pct" type="number" step="0.0001" min="0" name="margen_bruto_pct" value="45">
-            </div>
-            <div class="investment-field">
-              <label for="gastos_operativos_mensuales">Gastos operativos mensuales</label>
-              <input id="gastos_operativos_mensuales" type="number" step="0.01" min="0" name="gastos_operativos_mensuales" value="{{ gastos_sugeridos }}">
-            </div>
-            <div class="investment-field">
-              <label for="crecimiento_mensual_pct">Crecimiento mensual %</label>
-              <input id="crecimiento_mensual_pct" type="number" step="0.0001" name="crecimiento_mensual_pct" value="0.8">
-            </div>
-            <div class="investment-field">
-              <label for="horizonte_meses">Horizonte meses</label>
-              <input id="horizonte_meses" type="number" step="1" min="1" name="horizonte_meses" value="36">
-            </div>
-            <div class="investment-field">
-              <label for="discount_rate">Discount rate %</label>
-              <input id="discount_rate" type="number" step="0.0001" min="0" name="discount_rate" value="12">
-            </div>
-            <div class="investment-field">
-              <label for="roi_objetivo">ROI objetivo %</label>
-              <input id="roi_objetivo" type="number" step="0.01" min="0" name="roi_objetivo" value="25">
-            </div>
-            <div class="investment-field">
-              <label for="payback_objetivo_meses">Payback objetivo meses</label>
-              <input id="payback_objetivo_meses" type="number" step="1" min="1" name="payback_objetivo_meses" value="24">
-            </div>
-            <div class="investment-field">
-              <label for="sucursal_relacionada_id">Sucursal relacionada</label>
-              <select id="sucursal_relacionada_id" name="sucursal_relacionada_id">
-                <option value="">Sin asignar</option>
-                {% for sucursal in sucursales %}
-                <option value="{{ sucursal.id }}">{{ sucursal.codigo }} · {{ sucursal.nombre }}</option>
-                {% endfor %}
-              </select>
+          </section>
+        </article>
+      </div>
+
+      <aside class="investment-sidebar">
+        <article class="investment-form-card">
+          <div class="investment-panel-head">
+            <div>
+              <div class="investment-kicker">Referencia Guamúchil</div>
+              <h2 class="investment-panel-title">${{ guamuchil_total|floatformat:2|intcomma }}</h2>
             </div>
           </div>
-          <div class="investment-field">
-            <label for="observaciones">Observaciones</label>
-            <textarea id="observaciones" name="observaciones" rows="4">Sucursal pequeña de pickup y punto de venta. Local de 5 m de frente por 7 m de fondo. Surtido desde CEDIS Guasave cada 2 días según movimiento.</textarea>
+          <div class="investment-muted">69 partidas reales cargadas en producción.</div>
+          <div class="investment-table-wrap" style="margin-top:1rem;">
+            <table class="investment-table">
+              <thead>
+                <tr>
+                  <th>Categoría</th>
+                  <th>Guamúchil</th>
+                  <th>Bamoa plan</th>
+                  <th>Delta</th>
+                </tr>
+              </thead>
+              <tbody id="comparativoBody"></tbody>
+            </table>
           </div>
-          <div class="investment-form-actions">
-            <button class="investment-button" type="submit">Crear proyecto con 3 escenarios</button>
-          </div>
-        </form>
-      </article>
+        </article>
+      </aside>
+    </section>
+  </form>
+</div>
+
+<div class="bamoa-modal" id="importModal" role="dialog" aria-modal="true" aria-labelledby="importModalTitle">
+  <div class="bamoa-modal-panel">
+    <div class="investment-panel-head">
+      <div>
+        <div class="investment-kicker">Guamúchil</div>
+        <h2 class="investment-panel-title" id="importModalTitle">Importar partidas de referencia</h2>
+      </div>
+      <button class="bamoa-icon-button" type="button" id="closeImportModalBtn">Cerrar</button>
     </div>
-
-    <aside class="investment-sidebar">
-      <article class="investment-form-card">
-        <div class="investment-panel-head">
-          <div>
-            <div class="investment-kicker">Escenarios</div>
-            <h2 class="investment-panel-title">Preview</h2>
-          </div>
-        </div>
-        <div class="investment-portfolio-list" id="scenarioPreview"></div>
-      </article>
-
-      <article class="investment-form-card">
-        <div class="investment-panel-head">
-          <div>
-            <div class="investment-kicker">Benchmark</div>
-            <h2 class="investment-panel-title">Detalle por sucursal</h2>
-          </div>
-        </div>
-        <div class="investment-portfolio-list">
-          {% for row in benchmark.detalle_por_sucursal %}
-          <article class="investment-project-row">
-            <div class="investment-project-top">
-              <strong>{{ row.codigo }} · {{ row.nombre }}</strong>
-              <span class="investment-status-pill is-open">{{ row.meses_con_datos }} meses</span>
-            </div>
-            <div class="investment-muted">Ventas promedio ${{ row.ventas_mensuales_avg|floatformat:2|intcomma }}</div>
-          </article>
-          {% empty %}
-          <div class="investment-empty">No hay detalle disponible para el periodo seleccionado.</div>
-          {% endfor %}
-        </div>
-      </article>
-    </aside>
-  </section>
+    <div class="investment-table-wrap">
+      <table class="investment-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Categoría</th>
+            <th>Descripción</th>
+            <th>Proveedor</th>
+            <th>Monto</th>
+          </tr>
+        </thead>
+        <tbody id="importRows"></tbody>
+      </table>
+    </div>
+    <div class="investment-form-actions">
+      <button class="investment-button" type="button" id="importSelectedBtn">Importar seleccionadas</button>
+    </div>
+  </div>
 </div>
 
 <script>
   (function () {
-    const preview = document.getElementById("scenarioPreview");
-    const form = document.getElementById("bamoaProjectForm");
-    if (!preview || !form) return;
-
+    const categorias = JSON.parse('{{ categorias_json|escapejs }}');
+    const guamuchil = JSON.parse('{{ guamuchil_por_categoria_json|escapejs }}');
+    const referencias = JSON.parse('{{ partidas_referencia_gml_json|escapejs }}');
     const money = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
-    const numberValue = (id) => Number(document.getElementById(id)?.value || 0);
-    const scenarios = [
-      ["Conservador", 0.88, 1.06, "is-warning"],
-      ["Base", 1, 1, "is-open"],
-      ["Optimista", 1.12, 0.97, "is-active"],
+    const pct = new Intl.NumberFormat("es-MX", { maximumFractionDigits: 1 });
+    let currentStep = 1;
+    let partidas = [
+      { categoria: "OBRA_CIVIL", descripcion: "Remodelación local Bamoa", proveedor_nombre: "", monto: 190000, iva: 0, notas: "" }
     ];
 
-    function renderPreview() {
-      const sales = numberValue("ventas_promedio_base");
-      const expenses = numberValue("gastos_operativos_mensuales");
-      const margin = numberValue("margen_bruto_pct") / 100;
-      preview.innerHTML = scenarios.map(([name, salesFactor, expenseFactor, cssClass]) => {
-        const projectedSales = sales * salesFactor;
-        const projectedExpenses = expenses * expenseFactor;
-        const freeCashflow = (projectedSales * margin) - projectedExpenses;
-        return `
-          <article class="investment-project-row">
-            <div class="investment-project-top">
-              <strong>${name}</strong>
-              <span class="investment-status-pill ${cssClass}">${money.format(freeCashflow)}</span>
-            </div>
-            <div class="investment-muted">Ventas ${money.format(projectedSales)} · Gastos ${money.format(projectedExpenses)}</div>
-          </article>
-        `;
-      }).join("");
+    function numberValue(id) {
+      return Number(document.getElementById(id)?.value || 0);
     }
 
-    form.addEventListener("input", renderPreview);
-    renderPreview();
+    function categoriaLabel(value) {
+      const match = categorias.find((item) => item.value === value);
+      return match ? match.label : value;
+    }
+
+    function partidaTotal(partida) {
+      return Number(partida.monto || 0) + Number(partida.iva || 0);
+    }
+
+    function totalInversionPlan() {
+      return partidas.reduce((sum, partida) => sum + partidaTotal(partida), 0) + numberValue("deposito_renta");
+    }
+
+    function calcularTotalesPorCategoria() {
+      const totals = {};
+      partidas.forEach((partida) => {
+        totals[partida.categoria] = (totals[partida.categoria] || 0) + partidaTotal(partida);
+      });
+      const deposito = numberValue("deposito_renta");
+      if (deposito > 0) totals.OTROS = (totals.OTROS || 0) + deposito;
+      return totals;
+    }
+
+    function categoryOptions(selected) {
+      return categorias.map((item) => `<option value="${item.value}" ${item.value === selected ? "selected" : ""}>${item.label}</option>`).join("");
+    }
+
+    function updatePartida(index, field, value) {
+      if (!partidas[index]) return;
+      partidas[index][field] = ["monto", "iva"].includes(field) ? Number(value || 0) : value;
+      renderTablaPartidas();
+    }
+
+    function removePartida(index) {
+      partidas.splice(index, 1);
+      renderTablaPartidas();
+    }
+
+    function renderTablaPartidas() {
+      const body = document.getElementById("partidasTableBody");
+      body.innerHTML = partidas.map((partida, index) => `
+        <tr>
+          <td><select class="bamoa-table-select" data-index="${index}" data-field="categoria">${categoryOptions(partida.categoria)}</select></td>
+          <td><input class="bamoa-table-input" data-index="${index}" data-field="descripcion" value="${partida.descripcion || ""}"></td>
+          <td><input class="bamoa-table-input" data-index="${index}" data-field="proveedor_nombre" value="${partida.proveedor_nombre || ""}"></td>
+          <td><input class="bamoa-table-input" type="number" step="0.01" min="0" data-index="${index}" data-field="monto" value="${Number(partida.monto || 0)}"></td>
+          <td><input class="bamoa-table-input" type="number" step="0.01" min="0" data-index="${index}" data-field="iva" value="${Number(partida.iva || 0)}"></td>
+          <td><strong>${money.format(partidaTotal(partida))}</strong></td>
+          <td><div class="bamoa-row-actions"><button class="bamoa-icon-button is-danger" type="button" data-remove-index="${index}">Eliminar</button></div></td>
+        </tr>
+      `).join("");
+      body.querySelectorAll("[data-index][data-field]").forEach((input) => {
+        input.addEventListener("input", (event) => updatePartida(Number(event.target.dataset.index), event.target.dataset.field, event.target.value));
+        input.addEventListener("change", (event) => updatePartida(Number(event.target.dataset.index), event.target.dataset.field, event.target.value));
+      });
+      body.querySelectorAll("[data-remove-index]").forEach((button) => {
+        button.addEventListener("click", () => removePartida(Number(button.dataset.removeIndex)));
+      });
+      renderTotalesCategoria();
+      actualizarComparativo();
+      calcularEscenariosPreview();
+      renderRevision();
+    }
+
+    function renderTotalesCategoria() {
+      const totals = calcularTotalesPorCategoria();
+      document.getElementById("totalesCategoria").innerHTML = Object.keys(totals).sort().map((categoria) => `
+        <article class="investment-kpi-card">
+          <div class="investment-kpi-label">${categoriaLabel(categoria)}</div>
+          <div class="investment-kpi-value">${money.format(totals[categoria])}</div>
+          <div class="investment-kpi-note">Plan Bamoa</div>
+        </article>
+      `).join("");
+    }
+
+    function actualizarComparativo() {
+      const totals = calcularTotalesPorCategoria();
+      const categories = Array.from(new Set([...Object.keys(guamuchil), ...Object.keys(totals)])).sort();
+      const body = document.getElementById("comparativoBody");
+      const rows = categories.map((categoria) => {
+        const gml = Number(guamuchil[categoria]?.total || 0);
+        const bamoa = Number(totals[categoria] || 0);
+        const delta = gml > 0 ? ((bamoa - gml) / gml) * 100 : null;
+        const deltaLabel = delta === null ? "-" : `${delta > 0 ? "+" : ""}${pct.format(delta)}%`;
+        const deltaClass = delta === null || delta <= 0 ? "is-good" : "is-warning";
+        return `
+          <tr>
+            <td>${guamuchil[categoria]?.label || categoriaLabel(categoria)}</td>
+            <td>${money.format(gml)}</td>
+            <td>${money.format(bamoa)}</td>
+            <td class="bamoa-comparison-delta ${deltaClass}">${deltaLabel}</td>
+          </tr>
+        `;
+      });
+      rows.push(`
+        <tr>
+          <td><strong>Total</strong></td>
+          <td><strong>${money.format(Number('{{ guamuchil_total|default:0 }}'))}</strong></td>
+          <td><strong>${money.format(totalInversionPlan())}</strong></td>
+          <td></td>
+        </tr>
+      `);
+      body.innerHTML = rows.join("");
+    }
+
+    function gastosOperativos() {
+      return numberValue("renta_mensual") + numberValue("nomina_mensual") + numberValue("servicios_mensual") + numberValue("marketing_mensual") + numberValue("otros_fijos_mensual");
+    }
+
+    function calcularEscenariosPreview() {
+      const ventas = numberValue("ventas_promedio_base");
+      const margen = numberValue("margen_bruto_pct") / 100;
+      const gastos = gastosOperativos();
+      const escenarios = [
+        ["Conservador", ventas * 0.88, gastos * 1.06],
+        ["Base", ventas, gastos],
+        ["Optimista", ventas * 1.12, gastos * 0.97],
+      ];
+      document.getElementById("escenariosPreviewBody").innerHTML = escenarios.map(([nombre, ventasEsc, gastosEsc]) => `
+        <tr>
+          <td>${nombre}</td>
+          <td>${money.format(ventasEsc)}</td>
+          <td>${money.format(gastosEsc)}</td>
+          <td><strong>${money.format((ventasEsc * margen) - gastosEsc)}</strong></td>
+        </tr>
+      `).join("");
+    }
+
+    function renderRevision() {
+      const totals = calcularTotalesPorCategoria();
+      const categoryCards = Object.keys(totals).sort().map((categoria) => `
+        <article class="investment-kpi-card">
+          <div class="investment-kpi-label">${categoriaLabel(categoria)}</div>
+          <div class="investment-kpi-value">${money.format(totals[categoria])}</div>
+          <div class="investment-kpi-note">Inversión planeada</div>
+        </article>
+      `).join("");
+      document.getElementById("revisionResumen").innerHTML = `
+        <article class="investment-kpi-card">
+          <div class="investment-kpi-label">Total inversión planeada</div>
+          <div class="investment-kpi-value">${money.format(totalInversionPlan())}</div>
+          <div class="investment-kpi-note">${partidas.length} partidas + depósito si aplica</div>
+        </article>
+        <article class="investment-kpi-card">
+          <div class="investment-kpi-label">Gastos operativos</div>
+          <div class="investment-kpi-value">${money.format(gastosOperativos())}</div>
+          <div class="investment-kpi-note">Mensual</div>
+        </article>
+        ${categoryCards}
+      `;
+      document.getElementById("submitBamoaBtn").textContent = `Crear proyecto con ${partidas.length} partidas y 3 escenarios`;
+    }
+
+    function serializarPartidas() {
+      document.getElementById("partidas_json").value = JSON.stringify(partidas);
+    }
+
+    function navegarPaso(step) {
+      currentStep = step;
+      document.querySelectorAll(".bamoa-step").forEach((section) => section.classList.toggle("is-active", Number(section.dataset.step) === currentStep));
+      document.querySelectorAll(".bamoa-step-button").forEach((button) => button.classList.toggle("is-active", Number(button.dataset.stepTarget) === currentStep));
+      calcularEscenariosPreview();
+      renderRevision();
+    }
+
+    function validarAntesDeSometer() {
+      if (partidas.length === 0) {
+        alert("Debes agregar al menos una partida de inversión.");
+        return false;
+      }
+      if (totalInversionPlan() <= 0) {
+        alert("El total de la inversión debe ser mayor a cero.");
+        return false;
+      }
+      if (numberValue("ventas_promedio_base") <= 0) {
+        alert("Las ventas promedio base deben ser mayores a cero.");
+        return false;
+      }
+      return true;
+    }
+
+    function renderImportRows() {
+      document.getElementById("importRows").innerHTML = referencias.map((referencia, index) => `
+        <tr>
+          <td><input type="checkbox" data-import-index="${index}"></td>
+          <td>${referencia.categoria_label || categoriaLabel(referencia.categoria)}</td>
+          <td>${referencia.descripcion || ""}</td>
+          <td>${referencia.proveedor_nombre || "-"}</td>
+          <td>${money.format(Number(referencia.monto_total || 0))}</td>
+        </tr>
+      `).join("");
+    }
+
+    document.querySelectorAll("[data-step-target]").forEach((button) => {
+      button.addEventListener("click", () => navegarPaso(Number(button.dataset.stepTarget)));
+    });
+    document.getElementById("addPartidaBtn").addEventListener("click", () => {
+      partidas.push({ categoria: "OTROS", descripcion: "", proveedor_nombre: "", monto: 0, iva: 0, notas: "" });
+      renderTablaPartidas();
+    });
+    document.getElementById("openImportModalBtn").addEventListener("click", () => document.getElementById("importModal").classList.add("is-open"));
+    document.getElementById("closeImportModalBtn").addEventListener("click", () => document.getElementById("importModal").classList.remove("is-open"));
+    document.getElementById("importSelectedBtn").addEventListener("click", () => {
+      document.querySelectorAll("[data-import-index]:checked").forEach((checkbox) => {
+        const referencia = referencias[Number(checkbox.dataset.importIndex)];
+        partidas.push({
+          categoria: referencia.categoria || "OTROS",
+          descripcion: referencia.descripcion || "",
+          proveedor_nombre: referencia.proveedor_nombre || "",
+          monto: Number(referencia.monto_total || 0),
+          iva: 0,
+          notas: "Importada desde referencia Guamúchil",
+        });
+      });
+      document.getElementById("importModal").classList.remove("is-open");
+      renderTablaPartidas();
+    });
+    ["deposito_renta", "renta_mensual", "nomina_mensual", "servicios_mensual", "marketing_mensual", "otros_fijos_mensual", "ventas_promedio_base", "margen_bruto_pct"].forEach((id) => {
+      document.getElementById(id)?.addEventListener("input", () => {
+        actualizarComparativo();
+        calcularEscenariosPreview();
+        renderRevision();
+      });
+    });
+    document.getElementById("form-bamoa").addEventListener("submit", (event) => {
+      serializarPartidas();
+      if (!validarAntesDeSometer()) event.preventDefault();
+    });
+
+    renderImportRows();
+    renderTablaPartidas();
+    navegarPaso(1);
   })();
 </script>
 {% endblock %}
