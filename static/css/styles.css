@@ -4936,7 +4936,7 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
 }
 /* ================================================================
    PLAN DE PRODUCCION - V2
-   Version: 20260519-plan-produccion-v2-desktop
+   Version: 20260519-plan-produccion-v2-desktop-2
    ================================================================ */
 .plan-shell{max-width:860px;margin:0 auto;padding:0 0 4rem}
 .plan-header{display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:1rem;margin-bottom:1.5rem}
@@ -4993,7 +4993,7 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
 .plan-desktop-resumen{display:none}
 @media (min-width:1100px){
   .page-plan-produccion .container{width:100%;margin:0;padding:clamp(18px,1.8vw,30px) clamp(22px,2.2vw,40px)}
-  .plan-shell{width:100%;max-width:1500px;margin:0;padding:0 0 4rem}
+  .plan-shell{width:100%;max-width:1500px;margin:0;padding:clamp(18px,1.8vw,30px) clamp(22px,2.2vw,40px) 4rem}
   .plan-header{display:grid;grid-template-columns:minmax(320px,1fr) auto;align-items:end;margin-bottom:1.15rem}
   .plan-header__titulo h1{font-size:1.7rem}
   .plan-operativo{display:grid;grid-template-columns:minmax(0,1fr) 320px;grid-template-areas:"progreso progreso" "pasos resumen";gap:1rem 1.15rem;align-items:start}
