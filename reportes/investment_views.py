@@ -2006,7 +2006,7 @@ def inversiones_wizard(request: HttpRequest) -> HttpResponse:
         if errores:
             for error in errores:
                 messages.error(request, error)
-            return redirect("reportes:inversiones_wizard")
+            return redirect("inversiones:wizard")
 
         inversion_total = sum(
             _parse_decimal(str(partida.get("monto", 0))) + _parse_decimal(str(partida.get("iva", 0)))
@@ -2113,7 +2113,7 @@ def inversiones_wizard(request: HttpRequest) -> HttpResponse:
                 payload={"nombre": project.nombre_proyecto, "partidas": len(partidas_validas)},
             )
             messages.success(request, f"Proyecto '{project.nombre_proyecto}' creado.")
-            return redirect("reportes:inversiones_detalle", project_id=project.pk)
+            return redirect("inversiones:detalle", project_id=project.pk)
 
     return render(
         request,
@@ -2183,7 +2183,7 @@ def inversiones_detalle(request: HttpRequest, project_id: int) -> HttpResponse:
             )
             log_event(request.user, "UPDATE", "reportes.ProyectoInversion", project.pk, payload={"action": action})
             messages.success(request, "Ficha del proyecto actualizada.")
-            return redirect("reportes:inversiones_detalle", project_id=project.pk)
+            return redirect("inversiones:detalle", project_id=project.pk)
 
         if action == "add_expense":
             monto = _parse_decimal(request.POST.get("monto"))
@@ -2219,7 +2219,7 @@ def inversiones_detalle(request: HttpRequest, project_id: int) -> HttpResponse:
                 payload={"project_id": project.pk, "monto_total": str(expense.monto_total)},
             )
             messages.success(request, "Gasto registrado.")
-            return redirect("reportes:inversiones_detalle", project_id=project.pk)
+            return redirect("inversiones:detalle", project_id=project.pk)
 
         if action == "generar_estudio_mercado":
             meta = project.metadata or {}
@@ -2252,7 +2252,7 @@ def inversiones_detalle(request: HttpRequest, project_id: int) -> HttpResponse:
                 messages.error(request, f"Error al generar estudio: {resultado['error']}")
             else:
                 messages.success(request, f"Estudio de mercado generado. Score: {resultado.get('score_viabilidad')}/100")
-            return redirect("reportes:inversiones_detalle", project_id=project.pk)
+            return redirect("inversiones:detalle", project_id=project.pk)
 
         if action == "actualizar_supuestos":
             meta = project.metadata or {}
@@ -2303,7 +2303,7 @@ def inversiones_detalle(request: HttpRequest, project_id: int) -> HttpResponse:
                 user=request.user,
             )
             messages.success(request, "Supuestos financieros actualizados y escenarios recalculados.")
-            return redirect("reportes:inversiones_detalle", project_id=project.pk)
+            return redirect("inversiones:detalle", project_id=project.pk)
 
         if action == "refresh_project":
             try:
@@ -2312,7 +2312,7 @@ def inversiones_detalle(request: HttpRequest, project_id: int) -> HttpResponse:
             except Exception as exc:
                 logger.warning("refresh_project inversiones_detalle: %s", exc)
                 messages.warning(request, "No se pudieron actualizar métricas con datos operativos actuales.")
-            return redirect("reportes:inversiones_detalle", project_id=project.pk)
+            return redirect("inversiones:detalle", project_id=project.pk)
 
     gastos = project.gastos_inversion.order_by("fecha", "categoria", "id")
     snapshots = project.snapshots_mensuales.order_by("periodo")
