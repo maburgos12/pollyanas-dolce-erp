@@ -4,12 +4,13 @@ import csv
 from io import BytesIO
 from datetime import date
 from decimal import Decimal, InvalidOperation
+import json
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -1455,9 +1456,9 @@ def proyecto_inversion_detail(request: HttpRequest, project_id: int) -> HttpResp
 @login_required
 def proyecto_bamoa_wizard(request: HttpRequest) -> HttpResponse:
     """
-    Crea el proyecto Apertura Bamoa 2026 dentro del módulo existente de inversiones.
-    El formulario se pre-carga con benchmark real de sucursales activas.
+    Wizard multi-paso para crear Bamoa 2026 con partidas de inversión.
     """
+    from django.db.models import Count, Sum
     from reportes.services_investment_projects import _benchmark_sucursales_activas
 
     _require_reportes_access(request.user)
@@ -1469,17 +1470,96 @@ def proyecto_bamoa_wizard(request: HttpRequest) -> HttpResponse:
     except Exception as exc:
         bm_error = str(exc)
 
+    guamuchil_por_categoria: dict[str, dict[str, object]] = {}
+    guamuchil_total = Decimal("0")
+    partidas_referencia_gml: list[dict[str, object]] = []
+    try:
+        p_gml = ProyectoInversion.objects.get(pk=1)
+        cats = (
+            p_gml.gastos_inversion.values("categoria")
+            .annotate(total=Sum("monto_total"), num_partidas=Count("id"))
+            .order_by("categoria")
+        )
+        category_labels = dict(ProyectoInversionGasto.CATEGORIA_CHOICES)
+        for category in cats:
+            guamuchil_por_categoria[category["categoria"]] = {
+                "total": float(category["total"] or 0),
+                "num_partidas": category["num_partidas"],
+                "label": category_labels.get(category["categoria"], category["categoria"]),
+            }
+        guamuchil_total = _parse_decimal(str(p_gml.monto_inversion_real))
+        partidas_referencia_gml = list(
+            p_gml.gastos_inversion.values("categoria", "descripcion", "proveedor_nombre", "monto_total")
+            .order_by("categoria", "-monto_total")[:30]
+        )
+        for partida in partidas_referencia_gml:
+            partida["monto_total"] = float(partida["monto_total"] or 0)
+            partida["categoria_label"] = category_labels.get(partida["categoria"], partida["categoria"])
+    except ProyectoInversion.DoesNotExist:
+        pass
+    except Exception as exc:
+        import logging
+
+        logging.getLogger(__name__).warning("guamuchil benchmark error: %s", exc)
+
     if request.method == "POST" and request.POST.get("action") == "create_bamoa_project":
         errores = []
         nombre_proyecto = (request.POST.get("nombre_proyecto") or "Apertura Bamoa 2026").strip()
         fecha_inicio = _parse_date(request.POST.get("fecha_inicio"))
-        monto_inversion = _parse_decimal(request.POST.get("monto_inversion_planeado"))
+        fecha_apertura = _parse_date(request.POST.get("fecha_apertura"))
         ventas_base = _parse_decimal(request.POST.get("ventas_promedio_base"))
+
+        try:
+            partidas_raw = json.loads(request.POST.get("partidas_json") or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            partidas_raw = []
+            errores.append("Error al leer las partidas de inversión.")
+
+        allowed_categories = {key for key, _ in ProyectoInversionGasto.CATEGORIA_CHOICES}
+        partidas_validas = []
+        for partida in partidas_raw:
+            if not isinstance(partida, dict):
+                continue
+            descripcion = (partida.get("descripcion") or "").strip()
+            monto = _parse_decimal(str(partida.get("monto", 0)))
+            iva = _parse_decimal(str(partida.get("iva", 0)))
+            if not descripcion or monto <= 0:
+                continue
+            categoria = (partida.get("categoria") or ProyectoInversionGasto.CATEGORIA_OTROS).strip()
+            if categoria not in allowed_categories:
+                categoria = ProyectoInversionGasto.CATEGORIA_OTROS
+            partidas_validas.append(
+                {
+                    "categoria": categoria,
+                    "subcategoria": (partida.get("subcategoria") or "").strip(),
+                    "descripcion": descripcion,
+                    "proveedor_nombre": (partida.get("proveedor_nombre") or "").strip(),
+                    "monto": monto,
+                    "iva": iva,
+                    "monto_total": monto + iva,
+                    "notas": (partida.get("notas") or "").strip(),
+                }
+            )
+
+        deposito_renta = _parse_decimal(request.POST.get("deposito_renta"), default="0")
+        if deposito_renta > 0:
+            partidas_validas.append(
+                {
+                    "categoria": ProyectoInversionGasto.CATEGORIA_OTROS,
+                    "subcategoria": "Depósito",
+                    "descripcion": "Depósito de renta Bamoa",
+                    "proveedor_nombre": "",
+                    "monto": deposito_renta,
+                    "iva": Decimal("0"),
+                    "monto_total": deposito_renta,
+                    "notas": "Capturado desde supuestos operativos del wizard.",
+                }
+            )
 
         if not fecha_inicio:
             errores.append("La fecha de inicio es obligatoria.")
-        if monto_inversion <= 0:
-            errores.append("El monto de inversión planeado debe ser mayor a cero.")
+        if not partidas_validas:
+            errores.append("Debes capturar al menos una partida de inversión con monto mayor a cero.")
         if ventas_base <= 0:
             errores.append("Las ventas promedio base deben ser mayores a cero.")
         existing_project = ProyectoInversion.objects.filter(nombre_proyecto=nombre_proyecto).first()
@@ -1491,8 +1571,14 @@ def proyecto_bamoa_wizard(request: HttpRequest) -> HttpResponse:
                 messages.error(request, error)
             return redirect("reportes:proyecto_bamoa_wizard")
 
+        inversion_total = sum((partida["monto_total"] for partida in partidas_validas), Decimal("0"))
+        renta = _parse_decimal(request.POST.get("renta_mensual"), default="4000")
+        nomina = _parse_decimal(request.POST.get("nomina_mensual"))
+        servicios = _parse_decimal(request.POST.get("servicios_mensual"))
+        marketing = _parse_decimal(request.POST.get("marketing_mensual"))
+        otros_fijos = _parse_decimal(request.POST.get("otros_fijos_mensual"))
+        gastos_totales = renta + nomina + servicios + marketing + otros_fijos
         margen_base = _parse_decimal(request.POST.get("margen_bruto_pct"), default="45")
-        gastos_base = _parse_decimal(request.POST.get("gastos_operativos_mensuales"))
         crecimiento = _parse_decimal(request.POST.get("crecimiento_mensual_pct"), default="0.8")
         horizonte_meses = _parse_int(request.POST.get("horizonte_meses"), default=36) or 36
 
@@ -1502,11 +1588,11 @@ def proyecto_bamoa_wizard(request: HttpRequest) -> HttpResponse:
                 tipo_proyecto=ProyectoInversion.TIPO_APERTURA_SUCURSAL,
                 sucursal_relacionada_id=_parse_int(request.POST.get("sucursal_relacionada_id")) or None,
                 fecha_inicio=fecha_inicio,
-                fecha_apertura=_parse_date(request.POST.get("fecha_apertura")),
+                fecha_apertura=fecha_apertura,
                 responsable=request.user,
                 estatus=ProyectoInversion.ESTATUS_PLANEACION,
-                monto_inversion_planeado=monto_inversion,
-                capital_inicial_aportado=_parse_decimal(request.POST.get("capital_inicial_aportado")),
+                monto_inversion_planeado=inversion_total,
+                capital_inicial_aportado=inversion_total,
                 deuda_asociada=_parse_decimal(request.POST.get("deuda_asociada")),
                 tasa_interes_anual=_parse_decimal(request.POST.get("tasa_interes_anual")),
                 plazo_deuda_meses=_parse_int(request.POST.get("plazo_deuda_meses")),
@@ -1520,14 +1606,37 @@ def proyecto_bamoa_wizard(request: HttpRequest) -> HttpResponse:
                 observaciones=(request.POST.get("observaciones") or "").strip(),
                 metadata={
                     "benchmark_snapshot": benchmark,
-                    "creado_desde": "proyecto_bamoa_wizard",
-                    "fuentes": {
-                        "ventas": benchmark.get("data_source"),
-                        "ticket": "PointDailyBranchIndicator",
-                        "gastos": "ProyectoInversionSnapshotMensual",
+                    "guamuchil_referencia": guamuchil_por_categoria,
+                    "supuestos_operativos": {
+                        "renta": float(renta),
+                        "deposito_renta": float(deposito_renta),
+                        "nomina": float(nomina),
+                        "servicios": float(servicios),
+                        "marketing": float(marketing),
+                        "otros_fijos": float(otros_fijos),
+                        "gastos_totales": float(gastos_totales),
                     },
+                    "creado_desde": "proyecto_bamoa_wizard_v2",
                 },
             )
+
+            for partida in partidas_validas:
+                ProyectoInversionGasto.objects.create(
+                    proyecto=project,
+                    fecha=fecha_inicio,
+                    categoria=partida["categoria"],
+                    subcategoria=partida["subcategoria"],
+                    descripcion=partida["descripcion"],
+                    proveedor_nombre=partida["proveedor_nombre"],
+                    monto=partida["monto"],
+                    iva=partida["iva"],
+                    monto_total=partida["monto_total"],
+                    metodo_pago="",
+                    financiado=False,
+                    referencia_contable=f"BAMOA_PLAN_{project.pk}",
+                    notas=partida["notas"],
+                    capturado_por=request.user,
+                )
 
             escenarios_def = [
                 {
@@ -1536,8 +1645,8 @@ def proyecto_bamoa_wizard(request: HttpRequest) -> HttpResponse:
                     "ventas_promedio_mensuales": (ventas_base * Decimal("0.88")).quantize(Decimal("0.01")),
                     "crecimiento_mensual_pct": (crecimiento * Decimal("0.85")).quantize(Decimal("0.0001")),
                     "margen_bruto_pct": (margen_base * Decimal("0.96")).quantize(Decimal("0.0001")),
-                    "gastos_operativos_mensuales": (gastos_base * Decimal("1.06")).quantize(Decimal("0.01")),
-                    "notas": "Escenario conservador: -12% ventas, +6% gastos contra base.",
+                    "gastos_operativos_mensuales": (gastos_totales * Decimal("1.06")).quantize(Decimal("0.01")),
+                    "notas": "Conservador: -12% ventas, +6% gastos contra base.",
                 },
                 {
                     "nombre": "Base",
@@ -1545,8 +1654,8 @@ def proyecto_bamoa_wizard(request: HttpRequest) -> HttpResponse:
                     "ventas_promedio_mensuales": ventas_base,
                     "crecimiento_mensual_pct": crecimiento,
                     "margen_bruto_pct": margen_base,
-                    "gastos_operativos_mensuales": gastos_base,
-                    "notas": "Escenario base: benchmark promedio de sucursales activas.",
+                    "gastos_operativos_mensuales": gastos_totales,
+                    "notas": "Base: supuestos capturados en wizard.",
                 },
                 {
                     "nombre": "Optimista",
@@ -1554,8 +1663,8 @@ def proyecto_bamoa_wizard(request: HttpRequest) -> HttpResponse:
                     "ventas_promedio_mensuales": (ventas_base * Decimal("1.12")).quantize(Decimal("0.01")),
                     "crecimiento_mensual_pct": (crecimiento * Decimal("1.15")).quantize(Decimal("0.0001")),
                     "margen_bruto_pct": (margen_base * Decimal("1.04")).quantize(Decimal("0.0001")),
-                    "gastos_operativos_mensuales": (gastos_base * Decimal("0.97")).quantize(Decimal("0.01")),
-                    "notas": "Escenario optimista: +12% ventas, -3% gastos contra base.",
+                    "gastos_operativos_mensuales": (gastos_totales * Decimal("0.97")).quantize(Decimal("0.01")),
+                    "notas": "Optimista: +12% ventas, -3% gastos contra base.",
                 },
             ]
 
@@ -1569,6 +1678,13 @@ def proyecto_bamoa_wizard(request: HttpRequest) -> HttpResponse:
                 )
                 scenario_service.compute(project, scenario)
 
+            try:
+                ProyectoInversionRefreshService().refresh_project(project, user=request.user)
+            except Exception as exc:
+                import logging
+
+                logging.getLogger(__name__).warning("refresh inicial Bamoa: %s", exc)
+
             log_event(
                 request.user,
                 "CREATE",
@@ -1576,16 +1692,20 @@ def proyecto_bamoa_wizard(request: HttpRequest) -> HttpResponse:
                 project.pk,
                 payload={
                     "nombre_proyecto": project.nombre_proyecto,
-                    "origen": "proyecto_bamoa_wizard",
+                    "origen": "proyecto_bamoa_wizard_v2",
+                    "partidas": len(partidas_validas),
+                    "inversion_total": float(inversion_total),
                     "escenarios_creados": 3,
                 },
             )
-            messages.success(request, f"Proyecto '{project.nombre_proyecto}' creado con 3 escenarios.")
+            messages.success(
+                request,
+                f"Proyecto '{project.nombre_proyecto}' creado con {len(partidas_validas)} partidas y 3 escenarios.",
+            )
             return redirect("reportes:proyecto_inversion_detail", project_id=project.pk)
 
-    ventas_sugeridas = Decimal(str(benchmark.get("ventas_mensuales_avg") or 0)).quantize(Decimal("0.01"))
-    gastos_sugeridos = Decimal(str(benchmark.get("gastos_operativos_avg") or 0)).quantize(Decimal("0.01"))
-    ticket_sugerido = Decimal(str(benchmark.get("ticket_promedio") or 0)).quantize(Decimal("0.01"))
+    categorias_choices = ProyectoInversionGasto.CATEGORIA_CHOICES
+    categorias_json = json.dumps([{"value": value, "label": label} for value, label in categorias_choices])
 
     return render(
         request,
@@ -1594,16 +1714,50 @@ def proyecto_bamoa_wizard(request: HttpRequest) -> HttpResponse:
             "module_tabs": _project_module_tabs("sucursales"),
             "benchmark": benchmark,
             "bm_error": bm_error,
-            "ventas_sugeridas": ventas_sugeridas,
-            "gastos_sugeridos": gastos_sugeridos,
-            "ticket_sugerido": ticket_sugerido,
-            "sucursales": Sucursal.objects.filter(activa=True).order_by("codigo", "nombre"),
-            "inversion_referencia": Decimal("1200000.00"),
-            "guamuchil_inversion_real": Decimal("1121753.85"),
-            "project_types": ProyectoInversion.TIPO_CHOICES,
+            "guamuchil_por_categoria": guamuchil_por_categoria,
+            "guamuchil_total": float(guamuchil_total),
+            "guamuchil_por_categoria_json": json.dumps(guamuchil_por_categoria),
+            "partidas_referencia_gml_json": json.dumps(partidas_referencia_gml),
+            "categorias_choices": categorias_choices,
+            "categorias_json": categorias_json,
+            "ventas_sugeridas": float(benchmark.get("ventas_mensuales_avg") or 0),
+            "gastos_sugeridos": float(benchmark.get("gastos_operativos_avg") or 0),
+            "ticket_sugerido": float(benchmark.get("ticket_promedio") or 0),
+            "sucursales": Sucursal.objects.filter(activa=True).order_by("nombre"),
+            "renta_sugerida": 4000,
+            "deposito_sugerido": 4000,
             "today": timezone.localdate(),
         },
     )
+
+
+@login_required
+def api_bamoa_guamuchil_benchmark(request: HttpRequest) -> JsonResponse:
+    """Retorna benchmark de inversión Guamúchil para el wizard Bamoa."""
+    from django.db.models import Count, Sum
+
+    _require_reportes_access(request.user)
+    try:
+        project = ProyectoInversion.objects.get(pk=1)
+        category_labels = dict(ProyectoInversionGasto.CATEGORIA_CHOICES)
+        categories = list(
+            project.gastos_inversion.values("categoria")
+            .annotate(total=Sum("monto_total"), num_partidas=Count("id"))
+            .order_by("categoria")
+        )
+        for category in categories:
+            category["total"] = float(category["total"] or 0)
+            category["label"] = category_labels.get(category["categoria"], category["categoria"])
+        return JsonResponse(
+            {
+                "ok": True,
+                "categorias": categories,
+                "total": float(project.monto_inversion_real),
+                "partidas": project.gastos_inversion.count(),
+            }
+        )
+    except Exception as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=500)
 
 
 @login_required

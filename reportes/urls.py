@@ -73,4 +73,9 @@ urlpatterns = [
         investment_views.proyecto_viabilidad_export_excel,
         name="proyecto_viabilidad_export_excel",
     ),
+    path(
+        "proyectos-inversion/api/guamuchil-benchmark/",
+        investment_views.api_bamoa_guamuchil_benchmark,
+        name="api_bamoa_guamuchil_benchmark",
+    ),
 ]
