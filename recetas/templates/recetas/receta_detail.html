@@ -11,7 +11,6 @@
       <div class="text-muted">Hoja: {{ receta.sheet_name }}</div>
     </div>
     <div class="recipe-actions">
-      <a class="btn btn-secondary" href="{% url 'recetas:matching_pendientes' %}">Ver pendientes</a>
       <a class="btn btn-secondary" href="{% url 'recetas:drivers_costeo' %}">Drivers costeo</a>
       <a class="btn btn-primary" href="{% url 'recetas:linea_create' receta.id %}">Agregar línea</a>
       <a class="btn btn-outline-secondary" href="{% url 'recetas:recetas_list' %}">Volver</a>
@@ -107,7 +106,7 @@
         </div>
         <div class="kpi-body">
           <div class="kpi-number {% if total_sin_match > 0 %}is-danger{% else %}is-success{% endif %}">{{ total_sin_match }}</div>
-          <div class="kpi-label">Sin Match</div>
+          <div class="kpi-label">Sin artículo</div>
         </div>
       </div>
     </article>

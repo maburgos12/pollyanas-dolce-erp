@@ -8457,6 +8457,12 @@ def drivers_costeo_importar(request: HttpRequest) -> HttpResponse:
 @login_required
 @permission_required("recetas.change_lineareceta", raise_exception=True)
 def matching_pendientes(request: HttpRequest) -> HttpResponse:
+    messages.info(
+        request,
+        "La validación manual de matching ya no se usa como módulo operativo; la fuente vigente es la extracción de Point.",
+    )
+    return redirect("recetas:recetas_list")
+
     q = request.GET.get("q", "").strip()
     receta_id_raw = (request.GET.get("receta") or "").strip()
     receta_filter = None

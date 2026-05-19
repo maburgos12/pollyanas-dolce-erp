@@ -290,7 +290,7 @@
                 </span>
               </td>
               <td>{{ resultado.lineas_sin_match }} componente(s) siguen sin artículo maestro.</td>
-              <td><a class="btn btn-secondary btn-sm" href="{% url 'recetas:matching_pendientes' %}?receta={{ receta_id }}">Abrir validación BOM</a></td>
+              <td><a class="btn btn-secondary btn-sm" href="{% url 'recetas:receta_detail' receta_id %}">Revisar receta</a></td>
             </tr>
             <tr>
               <td><strong>Cantidades operativas</strong></td>

@@ -282,8 +282,7 @@
             {% endif %}
             <hr class="section-sep">
             <div class="quick-actions">
-                <a href="{% url 'maestros:point_pending_review' %}" class="btn btn-secondary btn-sm">Pendientes Point</a>
-                <a href="{% url 'recetas:matching_pendientes' %}" class="btn btn-secondary btn-sm">Matching Recetas</a>
+                <a href="{% url 'maestros:point_pending_review' %}" class="btn btn-secondary btn-sm">Integración comercial</a>
                 <a href="{% url 'inventario:aliases_catalog' %}" class="btn btn-secondary btn-sm">Aliases Inventario</a>
             </div>
         </section>
@@ -389,14 +388,6 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-1.5a3.5 3.5 0 0 0-3.5-3.5H6.5A3.5 3.5 0 0 0 3 19.5V21"/><circle cx="9.5" cy="8" r="3.5"/><path d="M18 8v6M15 11h6"/></svg>
             </span>
             Capital Humano
-        </a>
-        {% endif %}
-        {% if can_review_matching %}
-        <a href="{% url 'recetas:matching_pendientes' %}" class="quick-action-card">
-            <span class="quick-action-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-            </span>
-            Matching
         </a>
         {% endif %}
     </div>
