@@ -69,6 +69,8 @@ tr:hover td{background:var(--bg)}
 .badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:800}
 .badge.ok{background:var(--ok-bg);color:var(--ok)}.badge.bad{background:var(--bad-bg);color:var(--bad)}
 .badge.area{background:var(--wine-light);color:var(--wine)}
+.badge.pending{background:#FEF3C7;color:#92400E}
+.badge.info{background:var(--wine-light);color:var(--wine)}
 .av{width:32px;height:32px;border-radius:50%;background:var(--wine);color:#fff;font-size:11px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;flex:none}
 .persona-row{display:flex;align-items:center;gap:10px}
 .persona-name{font-weight:700;font-size:13px}
@@ -86,6 +88,23 @@ tr:hover td{background:var(--bg)}
 .employee-row .persona-name{white-space:normal}
 .employee-row-right{font-size:12px;font-weight:800;color:var(--wine);white-space:nowrap}
 .employee-empty{padding:18px;text-align:center;border:1px dashed var(--line);border-radius:var(--r-sm);color:var(--faint);font-size:13px;font-weight:700}
+.perm-layout{display:grid;grid-template-columns:minmax(290px,420px) 1fr;gap:16px;align-items:start}
+.form-grid{display:grid;gap:12px}
+.field{display:grid;gap:5px}
+.field label{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--sub)}
+.form-control{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--bg);color:var(--ink);font:inherit;font-size:13px}
+.form-control:focus{outline:none;border-color:var(--wine);background:#fff}
+.segmented{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.segment{border:1px solid var(--line);border-radius:var(--r-sm);background:var(--card);color:var(--sub);font:inherit;font-size:12px;font-weight:800;padding:8px;cursor:pointer}
+.segment.on{background:var(--wine);border-color:var(--wine);color:#fff}
+.permission-list{display:grid;gap:10px}
+.permission-item{border:1px solid var(--line);border-radius:var(--r);background:var(--card);padding:12px;display:grid;gap:8px}
+.permission-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.permission-title{font-size:13px;font-weight:800;color:var(--ink)}
+.permission-meta{font-size:11px;color:var(--sub);font-weight:700}
+.permission-reason{font-size:13px;color:var(--ink);background:var(--bg);border-radius:var(--r-sm);padding:8px}
+.permission-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.preview-note{font-size:12px;font-weight:700;color:var(--sub);background:var(--gold-light);border:1px solid rgba(201,168,76,.28);border-radius:var(--r-sm);padding:9px 10px}
 .days-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:16px}
 .day-cell{aspect-ratio:1;border-radius:6px;border:1px solid var(--line);background:var(--bg);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--faint);transition:all .12s}
 .day-cell:hover{border-color:var(--wine);color:var(--wine)}
@@ -109,7 +128,7 @@ tr:hover td{background:var(--bg)}
 .pill-EMBETUNADO{background:#FCE7F3;color:#831843}
 .pill-ARMADO{background:#E0E7FF;color:#3730A3}
 .pill-CRUCERO{background:#D1FAE5;color:#065F46}
-@media(max-width:700px){.hdr{padding:10px 14px}main{padding:14px}.metrics{grid-template-columns:1fr 1fr}}
+@media(max-width:700px){.hdr{padding:10px 14px}main{padding:14px}.metrics{grid-template-columns:1fr 1fr}.perm-layout{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -120,6 +139,16 @@ const TODAY=new Date();
 const MESES=['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const AREAS=['HORNOS','EMBETUNADO','ARMADO','CRUCERO'];
 const AREA_LABELS={HORNOS:'Hornos',EMBETUNADO:'Embetunado',ARMADO:'Armado',CRUCERO:'Crucero'};
+const MOCK_PERMISOS_PRODUCCION=[
+  {id:1,empleado_nombre:'Carlos Medina Lopez',area:'HORNOS',tipo:'Tiempo parcial',fecha:'2026-05-20',horario:'12:30 - 14:30',goce:'Con goce',estado:'Solicitado',motivo:'Cita medica programada.'},
+  {id:2,empleado_nombre:'Marisol Xanteco Mena',area:'EMBETUNADO',tipo:'Dia completo',fecha:'2026-05-21',horario:'Todo el dia',goce:'Sin goce',estado:'Preautorizado',motivo:'Tramite familiar.'},
+  {id:3,empleado_nombre:'Roberto Sanchez',area:'ARMADO',tipo:'Tiempo parcial',fecha:'2026-05-23',horario:'15:00 - 17:00',goce:'Con goce',estado:'Aprobado RRHH',motivo:'Consulta personal.'},
+];
+const MOCK_EQUIPO_PRODUCCION=[
+  {id:'mp1',empleado_nombre:'Carlos Medina Lopez',area:'HORNOS'},
+  {id:'mp2',empleado_nombre:'Marisol Xanteco Mena',area:'EMBETUNADO'},
+  {id:'mp3',empleado_nombre:'Roberto Sanchez',area:'ARMADO'},
+];
 function api(path,opts={}){
   const csrfMatch=document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
   const headers={'Content-Type':'application/json','X-CSRFToken':csrfMatch?decodeURIComponent(csrfMatch[1]):'',...(opts.headers||{})};
@@ -233,7 +262,7 @@ function App(){
     ),
     status&&h('div',{className:`status-bar ${statusType}`},status),
     h('div',{className:'tabs-wrap'},
-      [['config','Configuracion'],['captura','Captura diaria'],['resumen','Resumen mensual'],['ajustes','Ajustes'],['revision','Revision por area']].map(([id,lbl])=>
+      [['config','Configuracion'],['captura','Captura diaria'],['permisos','Permisos'],['resumen','Resumen mensual'],['ajustes','Ajustes'],['revision','Revision por area']].map(([id,lbl])=>
         h('button',{key:id,className:`tab-btn ${tab===id?'on':''}`,onClick:()=>setTab(id)},lbl))
     ),
     h('main',null,
@@ -251,6 +280,7 @@ function App(){
       ),
       tab==='config'&&h(ConfigTab,{bonos,area,setArea}),
       tab==='captura'&&h(CapturaTab,{bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia,mes,anio}),
+      tab==='permisos'&&h(PermisosTab,{bonos,area,setArea,mes,anio,showStatus}),
       tab==='resumen'&&h(ResumenTab,{bonos,area,setArea}),
       tab==='ajustes'&&h(AjustesTab,{bonosArea,area,setArea,actualizarBono}),
       tab==='revision'&&h(RevisionTab,{bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia})
@@ -271,6 +301,128 @@ function ConfigTab({bonos,area,setArea}){
           h('td',{style:{fontWeight:800,color:'var(--wine)'}},money(b.total_a_pagar))
         )))
       ))
+    )
+  );
+}
+function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
+  const [empleados,setEmpleados]=React.useState([]);
+  const [permisos,setPermisos]=React.useState([]);
+  const [selected,setSelected]=React.useState(null);
+  const [tipo,setTipo]=React.useState('permiso_hora');
+  const [goce,setGoce]=React.useState(true);
+  const [fecha,setFecha]=React.useState(new Date().toISOString().slice(0,10));
+  const [desde,setDesde]=React.useState('12:30');
+  const [hasta,setHasta]=React.useState('14:30');
+  const [motivo,setMotivo]=React.useState('');
+  const [loading,setLoading]=React.useState(false);
+  const equipoFallback=bonos.length?bonos.map(b=>({id:b.empleado,empleado_nombre:b.empleado_nombre,area:b.area})):MOCK_EQUIPO_PRODUCCION;
+  const equipoBase=empleados.length?empleados:equipoFallback;
+  const equipoArea=equipoBase.filter(b=>b.area===area);
+  const equipo=equipoArea.length?equipoArea:equipoBase;
+  React.useEffect(()=>{cargarPermisos();},[mes,anio,area]);
+  React.useEffect(()=>{if(!selected&&equipo.length)setSelected(equipo[0]);else if(selected&&!equipo.some(b=>b.id===selected.id))setSelected(equipo[0]||null);},[area,equipo.map(b=>b.id).join(','),selected?.id]);
+  function cargarPermisos(){
+    setLoading(true);
+    const qs=new URLSearchParams({mes:String(mes),anio:String(anio),area});
+    api(`/api/bonos-produccion/permisos/?${qs.toString()}`)
+      .then(d=>{setEmpleados(d.empleados||[]);setPermisos(d.permisos||[]);setLoading(false);})
+      .catch(err=>{showStatus(err.message,'err');setLoading(false);});
+  }
+  const pendientes=permisos.filter(p=>p.estado_jefe==='pendiente'&&p.estado==='solicitado').length;
+  const preaut=permisos.filter(p=>p.estado_jefe==='preautorizado').length;
+  const sinGoce=permisos.filter(p=>!p.goce_sueldo).length;
+  function estadoLabel(p){
+    if(p.estado==='aprobado')return'Aprobado RRHH';
+    if(p.estado_jefe==='preautorizado')return'Preautorizado';
+    if(p.estado_jefe==='rechazado')return'Rechazado jefe';
+    return'Solicitado';
+  }
+  function badgeClass(p){
+    if(p.estado==='aprobado')return'info';
+    if(p.estado_jefe==='preautorizado')return'ok';
+    if(p.estado_jefe==='rechazado'||p.estado==='rechazado')return'bad';
+    return'pending';
+  }
+  function submitPermiso(){
+    if(!selected){showStatus('Selecciona un empleado.','err');return;}
+    if(!motivo.trim()){showStatus('Captura el motivo del permiso.','err');return;}
+    api('/api/bonos-produccion/permisos/',{method:'POST',body:JSON.stringify({
+      empleado:selected.id,
+      tipo,
+      fecha_inicio:`${fecha}T${desde}:00`,
+      fecha_fin:hasta?`${fecha}T${hasta}:00`:null,
+      goce_sueldo:goce,
+      motivo,
+    })}).then(p=>{showStatus(`Permiso ${p.folio} creado`,'ok');setMotivo('');cargarPermisos();}).catch(err=>showStatus(err.message,'err'));
+  }
+  function accion(p,kind){
+    api(`/api/bonos-produccion/permisos/${p.id}/${kind}/`,{method:'POST',body:'{}'})
+      .then(()=>{showStatus(kind==='preautorizar'?'Permiso preautorizado':'Permiso rechazado','ok');cargarPermisos();})
+      .catch(err=>showStatus(err.message,'err'));
+  }
+  function fmtFecha(p){
+    const ini=new Date(p.fecha_inicio);
+    const fin=p.fecha_fin?new Date(p.fecha_fin):null;
+    const fechaTxt=ini.toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit',year:'numeric'});
+    const horaIni=ini.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+    const horaFin=fin?fin.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}):'';
+    return `${fechaTxt} · ${p.tipo==='permiso_dia'?'Todo el dia':`${horaIni} - ${horaFin}`}`;
+  }
+  return h('div',null,
+    h(AreaChips,{area,setArea}),
+    h('div',{className:'metrics'},
+      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Pendientes jefe'),h('div',{className:'val wine'},pendientes)),
+      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Preautorizados'),h('div',{className:'val'},preaut)),
+      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Sin goce'),h('div',{className:'val gold'},sinGoce))
+    ),
+    h('div',{className:'perm-layout'},
+      h('div',{className:'card'},
+        h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},'Nueva solicitud')),
+        h('div',{className:'card-body'},
+          h('div',{className:'preview-note'},'El jefe preautoriza desde Bonos; RRHH conserva la aprobacion final en Capital Humano.'),
+          h('div',{style:{height:12}}),
+          h(EmployeeSearchList,{items:equipo,selected,onSelect:setSelected,placeholder:'Buscar empleado del area...',metaText:b=>AREA_LABELS[b.area]||b.area||'Produccion'}),
+          h('div',{className:'div'}),
+          h('div',{className:'form-grid'},
+            h('div',{className:'field'},h('label',null,'Tipo de permiso'),h('div',{className:'segmented'},
+              [['permiso_hora','Tiempo parcial'],['permiso_dia','Dia completo']].map(([v,lbl])=>h('button',{key:v,type:'button',className:`segment ${tipo===v?'on':''}`,onClick:()=>setTipo(v)},lbl))
+            )),
+            h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+              h('div',{className:'field'},h('label',null,'Fecha'),h('input',{className:'form-control',type:'date',value:fecha,onChange:e=>setFecha(e.target.value)})),
+              h('div',{className:'field'},h('label',null,'Area'),h('input',{className:'form-control',value:selected?(AREA_LABELS[selected.area]||selected.area||''):'' ,readOnly:true}))
+            ),
+            h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+              h('div',{className:'field'},h('label',null,'Desde'),h('input',{className:'form-control',type:'time',value:desde,onChange:e=>setDesde(e.target.value)})),
+              h('div',{className:'field'},h('label',null,'Hasta'),h('input',{className:'form-control',type:'time',value:hasta,onChange:e=>setHasta(e.target.value)}))
+            ),
+            h('div',{className:'field'},h('label',null,'Goce de sueldo'),h('div',{className:'segmented'},
+              [[true,'Con goce'],[false,'Sin goce']].map(([v,lbl])=>h('button',{key:lbl,type:'button',className:`segment ${goce===v?'on':''}`,onClick:()=>setGoce(v)},lbl))
+            )),
+            h('div',{className:'field'},h('label',null,'Motivo'),h('textarea',{className:'form-control',rows:3,value:motivo,onChange:e=>setMotivo(e.target.value),placeholder:'Motivo del permiso...'})),
+            h('button',{className:'btn btn-wine',onClick:submitPermiso},'Enviar a preautorizacion')
+          )
+        )
+      ),
+      h('div',{className:'card'},
+        h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},'Permisos de mi equipo'),h(AreaPill,{area})),
+        h('div',{className:'card-body'},
+          loading?h('div',{className:'empty'},'Cargando permisos...'):
+          permisos.length?h('div',{className:'permission-list'},
+            permisos.map(p=>h('div',{key:p.id,className:'permission-item'},
+              h('div',{className:'permission-top'},
+                h('div',null,h('div',{className:'permission-title'},p.empleado_nombre),h('div',{className:'permission-meta'},`${AREA_LABELS[p.area]||p.area} · ${fmtFecha(p)}`)),
+                h('span',{className:`badge ${badgeClass(p)}`},estadoLabel(p))
+              ),
+              h('div',{className:'permission-meta'},`${p.tipo_label} · ${p.goce_label} · ${p.folio}`),
+              h('div',{className:'permission-reason'},p.motivo),
+              p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('div',{className:'permission-actions'},
+                h('button',{className:'btn btn-ghost btn-sm',onClick:()=>accion(p,'rechazar')},'Rechazar'),
+                h('button',{className:'btn btn-wine btn-sm',onClick:()=>accion(p,'preautorizar')},'Preautorizar')
+              )
+            ))
+          ):h('div',{className:'empty'},'Sin permisos registrados para esta area.')
+        )
+      )
     )
   );
 }

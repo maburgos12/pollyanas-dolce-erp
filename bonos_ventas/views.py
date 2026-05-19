@@ -9,6 +9,7 @@ from rest_framework.response import Response
 
 from core.models import Sucursal
 from rrhh.models import Empleado, NominaPeriodo
+from rrhh.bonos_permisos import BasePermisosEquipoViewSet
 
 from .models import (
     BonoVentasEmpleado,
@@ -197,3 +198,18 @@ class RegistroDiarioVentasViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         instance = serializer.save()
         _recalcular_desde_registros(instance.bono)
+
+
+class PermisosVentasEquipoViewSet(BasePermisosEquipoViewSet):
+    origen_solicitud = "bonos_ventas"
+
+    def empleados_queryset(self):
+        qs = Empleado.objects.filter(area__iexact="VENTAS")
+        sucursal_id = self.request.query_params.get("sucursal")
+        if sucursal_id:
+            try:
+                sucursal = Sucursal.objects.get(pk=sucursal_id)
+                qs = qs.filter(sucursal__iexact=sucursal.nombre)
+            except Sucursal.DoesNotExist:
+                return Empleado.objects.none()
+        return qs

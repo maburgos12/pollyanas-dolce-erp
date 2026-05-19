@@ -1260,7 +1260,10 @@ def permisos_list(request):
             messages.success(request, f"Permiso {permiso.folio} rechazado.")
         return redirect("rrhh:rrhh_permisos_list")
 
-    permisos = PermisoSalida.objects.select_related("empleado", "autorizado_por").order_by("-creado_en")[:500]
+    permisos = (
+        PermisoSalida.objects.select_related("empleado", "autorizado_por", "autorizado_jefe_por")
+        .order_by("-creado_en")[:500]
+    )
     return render(
         request,
         "rrhh/permisos_list.html",

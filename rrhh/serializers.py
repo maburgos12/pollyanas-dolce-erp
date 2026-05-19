@@ -58,12 +58,24 @@ class PermisoSalidaSerializer(serializers.ModelSerializer):
             "fecha_fin",
             "motivo",
             "estado",
+            "estado_jefe",
             "goce_sueldo",
+            "autorizado_jefe_por",
+            "fecha_autorizacion_jefe",
+            "origen_solicitud",
             "folio",
             "foto_evidencia",
             "creado_en",
         ]
-        read_only_fields = ["folio", "estado", "creado_en"]
+        read_only_fields = [
+            "folio",
+            "estado",
+            "estado_jefe",
+            "autorizado_jefe_por",
+            "fecha_autorizacion_jefe",
+            "origen_solicitud",
+            "creado_en",
+        ]
         extra_kwargs = {"empleado": {"required": False}}
 
     def validate_empleado(self, empleado: Empleado) -> Empleado:

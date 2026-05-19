@@ -354,6 +354,22 @@ class PermisoSalida(models.Model):
         (ESTADO_RECHAZADO, "Rechazado"),
         (ESTADO_CANCELADO, "Cancelado"),
     ]
+    ESTADO_JEFE_PENDIENTE = "pendiente"
+    ESTADO_JEFE_PREAUTORIZADO = "preautorizado"
+    ESTADO_JEFE_RECHAZADO = "rechazado"
+    ESTADO_JEFE_CHOICES = [
+        (ESTADO_JEFE_PENDIENTE, "Pendiente de jefe"),
+        (ESTADO_JEFE_PREAUTORIZADO, "Preautorizado por jefe"),
+        (ESTADO_JEFE_RECHAZADO, "Rechazado por jefe"),
+    ]
+    ORIGEN_RRHH = "rrhh"
+    ORIGEN_BONOS_VENTAS = "bonos_ventas"
+    ORIGEN_BONOS_PRODUCCION = "bonos_produccion"
+    ORIGEN_CHOICES = [
+        (ORIGEN_RRHH, "Capital Humano"),
+        (ORIGEN_BONOS_VENTAS, "Bonos ventas"),
+        (ORIGEN_BONOS_PRODUCCION, "Bonos producción"),
+    ]
 
     empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.CASCADE, related_name="permisos")
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES)
@@ -361,11 +377,21 @@ class PermisoSalida(models.Model):
     fecha_fin = models.DateTimeField(null=True, blank=True)
     motivo = models.TextField()
     estado = models.CharField(max_length=12, choices=ESTADO_CHOICES, default=ESTADO_SOLICITADO)
+    estado_jefe = models.CharField(max_length=16, choices=ESTADO_JEFE_CHOICES, default=ESTADO_JEFE_PENDIENTE)
     goce_sueldo = models.BooleanField(
         default=True,
         verbose_name="Con goce de sueldo",
         help_text="Desmarca si el permiso es sin goce de sueldo",
     )
+    autorizado_jefe_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="permisos_preautorizados_jefe",
+    )
+    fecha_autorizacion_jefe = models.DateTimeField(null=True, blank=True)
+    origen_solicitud = models.CharField(max_length=24, choices=ORIGEN_CHOICES, default=ORIGEN_RRHH)
     autorizado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
