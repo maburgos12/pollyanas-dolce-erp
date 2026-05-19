@@ -25,6 +25,8 @@ class BonosVentasTests(TestCase):
         self.assertIn("credentials:'same-origin'", content)
         self.assertIn("/bonos-ventas/manifest.json", content)
         self.assertIn("/bonos-ventas/sw.js", content)
+        self.assertIn("employee-search", content)
+        self.assertIn("Teclea nombre o apellido", content)
         self.assertNotIn("pd_logistica_access", content)
 
     def test_manifest_y_service_worker_de_ventas_sirven_con_content_type_correcto(self):
