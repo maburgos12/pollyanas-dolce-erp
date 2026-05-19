@@ -4936,7 +4936,7 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
 }
 /* ================================================================
    PLAN DE PRODUCCION - V2
-   Version: 20260519-plan-produccion-v2-audit
+   Version: 20260519-plan-produccion-v2-audit-2
    ================================================================ */
 .plan-shell{max-width:860px;margin:0 auto;padding:0 0 4rem}
 .plan-header{display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:1rem;margin-bottom:1.5rem}
@@ -4991,7 +4991,7 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
 .plan-toast{position:fixed;right:1.25rem;bottom:1.25rem;z-index:9999;max-width:min(360px,calc(100vw - 2.5rem));padding:.7rem 1rem;border:1px solid rgba(139,34,82,.22);border-radius:8px;background:#fff;box-shadow:0 12px 30px rgba(49,36,43,.16);color:var(--vino);font-size:.88rem;font-weight:800;animation:plan-toast-in .18s ease-out}.plan-toast--ok{border-color:rgba(201,168,76,.38);color:#8a5d0d}.plan-toast--error{background:#fff1f5}@keyframes plan-toast-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}@media (prefers-reduced-motion:reduce){.plan-toast,.plan-btn,.plan-paso__chevron{animation:none;transition:none}.plan-btn:hover:not(:disabled){transform:none}}
 .plan-produccion-shell>.plan-daily-header,.plan-produccion-shell>.plan-daily-tabs,.plan-produccion-shell>.plan-daily-section,.plan-produccion-shell>.plan-daily-layout,.plan-produccion-shell>.plan-process-board{display:none}
 @media (min-width:900px) and (max-width:1099px){.plan-shell{max-width:1040px}.plan-header__titulo h1{font-size:1.6rem}.plan-kpis{grid-template-columns:repeat(4,minmax(118px,1fr))}}
-@media (max-width:720px){.plan-shell{padding-bottom:2.5rem}.plan-header{flex-direction:column}.plan-kpis{grid-template-columns:1fr 1fr}.plan-siguiente{align-items:stretch;flex-direction:column}.plan-paso__body{padding:.9rem}.plan-accion-row{align-items:stretch;flex-direction:column}.plan-btn{width:100%;min-height:44px}.plan-input-cantidad,.plan-input-ajuste,.plan-select-destino{min-height:44px}.plan-fuente-opcion span{min-height:44px}.plan-flujo-diagrama{align-items:stretch;flex-direction:column}.plan-flujo-flecha{transform:rotate(90deg);align-self:center}}
+@media (max-width:720px){.page-plan-produccion .main-content{overflow-x:hidden}.plan-shell{width:100%;max-width:100%;padding:0 .75rem 2.5rem}.plan-header{flex-direction:column}.plan-header__meta{width:100%;min-width:0}.plan-vista-tabs{width:100%;max-width:100%;scroll-snap-type:x proximity}.plan-vista-tabs a{flex:0 0 auto;scroll-snap-align:start}.plan-progreso{max-width:100%;margin-inline:0}.plan-progreso__paso{flex:0 0 76px;min-width:76px}.plan-kpis{grid-template-columns:1fr 1fr}.plan-siguiente{align-items:stretch;flex-direction:column}.plan-paso__body{padding:.9rem}.plan-accion-row{align-items:stretch;flex-direction:column}.plan-btn{width:100%;min-height:44px}.plan-input-cantidad,.plan-input-ajuste,.plan-select-destino{min-height:44px}.plan-fuente-opcion span{min-height:44px}.plan-flujo-diagrama{align-items:stretch;flex-direction:column}.plan-flujo-flecha{transform:rotate(90deg);align-self:center}}
 
 /* Ajuste desktop: usar el ancho real del ERP sin saturar el flujo operativo. */
 .plan-desktop-resumen{display:none}
