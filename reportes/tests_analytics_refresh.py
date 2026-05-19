@@ -21,7 +21,13 @@ from maestros.models import Insumo, UnidadMedida
 from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointDailySale, PointProduct, PointProductionLine, PointSalesDailyProductFact, PointWasteLine
 from reportes.analytics_service import full_rebuild, rebuild_sales_facts, mark_analytics_dirty
 from reportes.analytics_service import refresh_dashboard_daily_ops_materialized_view, refresh_dashboard_full_materialized_view
-from reportes.models import AnalyticRefreshWindow, FactInventarioDiario, FactProduccionDiaria, FactVentaDiaria
+from reportes.models import (
+    AnalyticRefreshWindow,
+    FactInventarioDiario,
+    FactProduccionDiaria,
+    FactVentaDiaria,
+    ProductoCostoOperativoMensual,
+)
 from reportes.sales_dashboard_freshness import ensure_sales_dashboard_freshness
 from reportes.views import _sales_refresh_status
 from recetas.models import Receta
@@ -108,6 +114,88 @@ class AnalyticsSalesFactSourceSelectionTests(TestCase):
         sources = {row.sucursal.codigo: row.source_kind for row in fact_rows}
         self.assertEqual(sources["MATRIZ-T"], FactVentaDiaria.SOURCE_AUTHORITATIVE)
         self.assertEqual(sources["CRUCERO-T"], FactVentaDiaria.SOURCE_V2)
+
+    def test_rebuild_sales_facts_uses_month_aligned_cost_not_future_latest_cost(self):
+        sale_date = date(2026, 1, 8)
+        branch = Sucursal.objects.create(codigo="COST-MONTH", nombre="Costo Mes", activa=True)
+        receta = Receta.objects.create(
+            nombre="Pastel Costo Mes",
+            codigo_point="COST01",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            categoria="Pastel Grande",
+            hash_contenido="month-aligned-cost-test",
+        )
+        ProductoCostoOperativoMensual.objects.create(
+            periodo=date(2026, 1, 1),
+            receta=receta,
+            costo_fabricacion_unit=Decimal("2.00"),
+        )
+        ProductoCostoOperativoMensual.objects.create(
+            periodo=date(2026, 4, 1),
+            receta=receta,
+            costo_fabricacion_unit=Decimal("500.00"),
+        )
+        VentaAutoritativaPoint.objects.create(
+            branch=branch,
+            sale_date=sale_date,
+            product=receta,
+            product_code="COST01",
+            point_name="Pastel Costo Mes",
+            category="Pastel Grande",
+            quantity=Decimal("4"),
+            gross_amount=Decimal("100.00"),
+            discount_amount=Decimal("0.00"),
+            total_amount=Decimal("100.00"),
+            tax_amount=Decimal("0.00"),
+            net_amount=Decimal("100.00"),
+        )
+
+        rebuild_sales_facts(start_date=sale_date, end_date=sale_date)
+
+        fact = FactVentaDiaria.objects.get(fecha=sale_date)
+        self.assertEqual(fact.costo_estimado, Decimal("8.00"))
+        self.assertEqual(fact.margen, Decimal("92.00"))
+        self.assertEqual(fact.metadata["costing"]["source"], "producto_costo_operativo_mensual")
+        self.assertEqual(fact.metadata["costing"]["period"], "2026-01-01")
+        self.assertEqual(fact.metadata["costing"]["unit_cost"], "2.000000")
+
+    def test_rebuild_sales_facts_does_not_use_future_cost_when_monthly_cost_is_missing(self):
+        sale_date = date(2026, 1, 8)
+        branch = Sucursal.objects.create(codigo="COST-MISS", nombre="Costo Faltante", activa=True)
+        receta = Receta.objects.create(
+            nombre="Pastel Costo Faltante",
+            codigo_point="COST02",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            categoria="Pastel Grande",
+            hash_contenido="missing-monthly-cost-test",
+        )
+        ProductoCostoOperativoMensual.objects.create(
+            periodo=date(2026, 4, 1),
+            receta=receta,
+            costo_fabricacion_unit=Decimal("500.00"),
+        )
+        VentaAutoritativaPoint.objects.create(
+            branch=branch,
+            sale_date=sale_date,
+            product=receta,
+            product_code="COST02",
+            point_name="Pastel Costo Faltante",
+            category="Pastel Grande",
+            quantity=Decimal("4"),
+            gross_amount=Decimal("100.00"),
+            discount_amount=Decimal("0.00"),
+            total_amount=Decimal("100.00"),
+            tax_amount=Decimal("0.00"),
+            net_amount=Decimal("100.00"),
+        )
+
+        rebuild_sales_facts(start_date=sale_date, end_date=sale_date)
+
+        fact = FactVentaDiaria.objects.get(fecha=sale_date)
+        self.assertEqual(fact.costo_estimado, Decimal("0.00"))
+        self.assertEqual(fact.margen, Decimal("100.00"))
+        self.assertEqual(fact.metadata["costing"]["source"], "missing_monthly_cost")
+        self.assertIsNone(fact.metadata["costing"]["period"])
 
 
 class BIForceRefreshEndpointTests(TestCase):

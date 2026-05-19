@@ -17,7 +17,6 @@ from maestros.models import CostoInsumo
 from pos_bridge.historical_freeze import assert_not_frozen
 from pos_bridge.models import PointDailySale, PointProductionLine, PointSalesDailyProductFact, PointTransferLine, PointWasteLine
 from pos_bridge.services.sales_matching_service import PointSalesMatchingService
-from recetas.utils.derived_product_presentations import get_total_cost_map
 from reportes.models import (
     AnalyticAuditLog,
     AnalyticRefreshWindow,
@@ -225,21 +224,50 @@ def _preferred_legacy_endpoint_by_branch_day(
     return preferred
 
 
-def _latest_recipe_unit_cost_map(recipe_ids: set[int]) -> dict[int, Decimal]:
-    if not recipe_ids:
+def _recipe_unit_cost_map_by_month(
+    recipe_ids: set[int],
+    months: list[date],
+) -> dict[tuple[int, date], dict[str, object]]:
+    """Costo unitario vigente por receta y mes, sin mirar costos futuros."""
+    if not recipe_ids or not months:
         return {}
-    latest_rows = (
-        ProductoCostoOperativoMensual.objects.filter(receta_id__in=recipe_ids)
-        .order_by("receta_id", "-periodo")
-        .distinct("receta_id")
-        .values_list("receta_id", "costo_fabricacion_unit")
-    )
-    cost_map = {int(recipe_id): _to_decimal(unit_cost) for recipe_id, unit_cost in latest_rows}
-    missing_ids = sorted(set(int(recipe_id) for recipe_id in recipe_ids) - set(cost_map))
-    if missing_ids:
-        fallback_map = get_total_cost_map(missing_ids)
-        for recipe_id, fallback_cost in fallback_map.items():
-            cost_map[int(recipe_id)] = _to_decimal(fallback_cost)
+
+    clean_recipe_ids = sorted(int(recipe_id) for recipe_id in recipe_ids)
+    sorted_months = sorted(_month_start(month) for month in months)
+    max_month = max(sorted_months)
+    cost_rows_by_recipe: dict[int, list[tuple[date, Decimal]]] = defaultdict(list)
+    for recipe_id, period, unit_cost in (
+        ProductoCostoOperativoMensual.objects.filter(
+            receta_id__in=clean_recipe_ids,
+            periodo__lte=max_month,
+        )
+        .order_by("receta_id", "periodo")
+        .values_list("receta_id", "periodo", "costo_fabricacion_unit")
+    ):
+        cost_rows_by_recipe[int(recipe_id)].append((_month_start(period), _to_decimal(unit_cost)))
+
+    cost_map: dict[tuple[int, date], dict[str, object]] = {}
+    for recipe_id in clean_recipe_ids:
+        recipe_rows = cost_rows_by_recipe.get(recipe_id, [])
+        row_index = 0
+        current_period: date | None = None
+        current_cost: Decimal | None = None
+        for month in sorted_months:
+            while row_index < len(recipe_rows) and recipe_rows[row_index][0] <= month:
+                current_period, current_cost = recipe_rows[row_index]
+                row_index += 1
+            if current_period is None or current_cost is None or current_cost <= ZERO:
+                cost_map[(recipe_id, month)] = {
+                    "unit_cost": ZERO,
+                    "source": "missing_monthly_cost",
+                    "period": None,
+                }
+                continue
+            cost_map[(recipe_id, month)] = {
+                "unit_cost": current_cost,
+                "source": "producto_costo_operativo_mensual",
+                "period": current_period,
+            }
     return cost_map
 
 
@@ -460,16 +488,30 @@ def rebuild_sales_facts(*, start_date: date, end_date: date) -> int:
                 )
             )
 
-    cost_map = _latest_recipe_unit_cost_map(recipe_ids)
+    cost_map = _recipe_unit_cost_map_by_month(recipe_ids, _month_sequence(start_date, end_date))
     for row in fact_rows:
-        unit_cost = cost_map.get(int(row.receta_id)) if row.receta_id else None
+        row_metadata = dict(row.metadata or {})
+        row_month = _month_start(row.fecha)
+        cost_payload = cost_map.get((int(row.receta_id), row_month)) if row.receta_id else None
+        unit_cost = _to_decimal(cost_payload.get("unit_cost")) if cost_payload else None
         if unit_cost is not None and unit_cost > 0:
             estimated_cost = (_to_decimal(row.cantidad) * _to_decimal(unit_cost)).quantize(Decimal("0.01"))
             row.costo_estimado = estimated_cost
             row.margen = (_to_decimal(row.venta_neta) - estimated_cost).quantize(Decimal("0.01"))
+            row_metadata["costing"] = {
+                "source": cost_payload.get("source"),
+                "period": cost_payload.get("period").isoformat() if cost_payload.get("period") else None,
+                "unit_cost": str(unit_cost),
+            }
         else:
             row.costo_estimado = ZERO
             row.margen = _to_decimal(row.venta_neta).quantize(Decimal("0.01"))
+            row_metadata["costing"] = {
+                "source": "missing_recipe" if not row.receta_id else "missing_monthly_cost",
+                "period": None,
+                "unit_cost": "0",
+            }
+        row.metadata = row_metadata
 
     merged_rows: dict[tuple[date, int | None, str, str], FactVentaDiaria] = {}
     for row in fact_rows:
