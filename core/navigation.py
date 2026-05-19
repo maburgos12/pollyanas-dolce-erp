@@ -41,7 +41,6 @@ NAV_GROUPS = [
             ("recetas", "catalogo", "Recetas", "/recetas/", ["/recetas/"]),
             ("recetas", "costeo", "Costeo", "/recetas/costeo/", ["/recetas/costeo/", "/recetas/drivers-costeo/"]),
             ("recetas", "margenes", "Monitor de márgenes", "/recetas/monitor-margenes/", ["/recetas/monitor-margenes/"]),
-            ("recetas", "matching", "Matching", "/recetas/matching/pendientes/", ["/recetas/matching/"]),
             ("recetas", "mrp", "MRP", "/recetas/mrp/", ["/recetas/mrp/"]),
         ],
     },
