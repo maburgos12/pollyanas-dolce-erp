@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth.models import Group, User
 from django.db import connection
@@ -273,6 +274,16 @@ class BamoaWizardTests(TestCase):
         self.assertEqual(benchmark["ticket_promedio"], 260.0)
         self.assertEqual(benchmark["sucursales_incluidas"], [self.sucursal.id])
 
+    def test_benchmark_no_rompe_si_ticket_point_falla(self):
+        with patch("pos_bridge.models.PointDailyBranchIndicator.objects") as mocked_manager:
+            mocked_manager.filter.side_effect = RuntimeError("Point indicators unavailable")
+
+            benchmark = _benchmark_sucursales_activas(sucursal_ids=[self.sucursal.id], meses=12)
+
+        self.assertEqual(benchmark["data_source"], "VentaAutoritativaPoint")
+        self.assertEqual(benchmark["ventas_mensuales_avg"], 26000.0)
+        self.assertEqual(benchmark["ticket_promedio"], 0.0)
+
     def test_get_wizard_precarga_benchmark(self):
         response = self.client.get(reverse("reportes:proyecto_bamoa_wizard"))
 
@@ -280,6 +291,10 @@ class BamoaWizardTests(TestCase):
         self.assertIn("benchmark", response.context)
         self.assertContains(response, "Apertura Bamoa 2026")
         self.assertContains(response, "Crear proyecto con 3 escenarios")
+        self.assertContains(
+            response,
+            f'action="{reverse("reportes:proyecto_bamoa_wizard")}"',
+        )
 
     def test_post_crea_proyecto_y_tres_escenarios(self):
         response = self.client.post(

@@ -77,7 +77,7 @@
             <h2 class="investment-panel-title">Supuestos base de Bamoa</h2>
           </div>
         </div>
-        <form method="post" id="bamoaProjectForm">
+        <form method="post" action="{% url 'reportes:proyecto_bamoa_wizard' %}" id="bamoaProjectForm">
           {% csrf_token %}
           <input type="hidden" name="action" value="create_bamoa_project">
           <div class="investment-field-grid">

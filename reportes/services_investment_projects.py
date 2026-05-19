@@ -1712,7 +1712,6 @@ def _benchmark_sucursales_activas(
     from django.db.models.functions import TruncMonth
 
     from core.models import Sucursal
-    from pos_bridge.models import PointDailyBranchIndicator
 
     meses = max(int(meses or 12), 1)
     periodo_fin = timezone.localdate().replace(day=1) - timedelta(days=1)
@@ -1766,18 +1765,23 @@ def _benchmark_sucursales_activas(
         else ZERO
     )
 
-    indicator_qs = PointDailyBranchIndicator.objects.filter(
-        branch__erp_branch_id__in=sucursal_ids,
-        indicator_date__gte=periodo_inicio,
-        indicator_date__lte=periodo_fin,
-        total_amount__gt=0,
-        total_tickets__gt=0,
-    )
-    indicator_totals = indicator_qs.aggregate(total_amount=Sum("total_amount"), total_tickets=Sum("total_tickets"))
     ticket_promedio = ZERO
-    total_tickets = _as_decimal(indicator_totals.get("total_tickets"))
-    if total_tickets > ZERO:
-        ticket_promedio = _quantize(_as_decimal(indicator_totals.get("total_amount")) / total_tickets) or ZERO
+    try:
+        from pos_bridge.models import PointDailyBranchIndicator
+
+        indicator_qs = PointDailyBranchIndicator.objects.filter(
+            branch__erp_branch_id__in=sucursal_ids,
+            indicator_date__gte=periodo_inicio,
+            indicator_date__lte=periodo_fin,
+            total_amount__gt=0,
+            total_tickets__gt=0,
+        )
+        indicator_totals = indicator_qs.aggregate(total_amount=Sum("total_amount"), total_tickets=Sum("total_tickets"))
+        total_tickets = _as_decimal(indicator_totals.get("total_tickets"))
+        if total_tickets > ZERO:
+            ticket_promedio = _quantize(_as_decimal(indicator_totals.get("total_amount")) / total_tickets) or ZERO
+    except Exception as exc:
+        logger.warning("No se pudo calcular ticket promedio de PointDailyBranchIndicator: %s", exc)
 
     snapshots_qs = ProyectoInversionSnapshotMensual.objects.filter(
         proyecto__sucursal_relacionada_id__in=sucursal_ids,
