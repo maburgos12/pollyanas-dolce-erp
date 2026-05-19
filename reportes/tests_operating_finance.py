@@ -322,6 +322,47 @@ class OperatingFinanceSnapshotServiceTests(TestCase):
         self.assertEqual(company_row.indirecto_prod_total, Decimal("0.00"))
         self.assertEqual(company_row.utilidad_operativa_total, Decimal("-438.06"))
 
+    def test_build_snapshot_does_not_use_future_weekly_cost_for_historical_month(self):
+        PointDailySale.objects.create(
+            branch=self.point_branch,
+            product=self.point_product,
+            receta=self.receta,
+            sale_date=date(2026, 1, 15),
+            quantity=Decimal("5"),
+            total_amount=Decimal("925"),
+            gross_amount=Decimal("925"),
+            net_amount=Decimal("797.41"),
+        )
+
+        OperatingFinanceSnapshotService().build_snapshot(period_start=date(2026, 1, 1))
+
+        product_row = ProductoCostoOperativoMensual.objects.get(periodo=date(2026, 1, 1), receta=self.receta)
+        self.assertEqual(product_row.costo_mp_unit, Decimal("0"))
+        self.assertEqual(product_row.costo_fabricacion_unit, Decimal("0"))
+        self.assertEqual(product_row.metadata["cost_source"], "")
+
+    def test_build_snapshot_zeroes_untrusted_product_cost_above_two_times_asp(self):
+        RecetaCostoHistoricoMensual.objects.create(
+            periodo=date(2026, 3, 1),
+            receta=self.receta,
+            costo_total=Decimal("50000"),
+            costo_por_unidad_rendimiento=None,
+            lineas_costeadas=1,
+            lineas_totales=1,
+            coverage_pct=Decimal("100"),
+            metadata={"source": "corrupt_fixture"},
+        )
+
+        OperatingFinanceSnapshotService().build_snapshot(period_start=date(2026, 3, 1))
+
+        product_row = ProductoCostoOperativoMensual.objects.get(periodo=date(2026, 3, 1), receta=self.receta)
+        self.assertEqual(product_row.costo_mp_unit, Decimal("0"))
+        self.assertEqual(product_row.mano_obra_prod_unit, Decimal("0"))
+        self.assertEqual(product_row.costo_fabricacion_unit, Decimal("0"))
+        self.assertTrue(product_row.metadata["guardrail_applied"])
+        self.assertEqual(product_row.metadata["guardrail_reason"], "COSTO_FABRICACION_UNIT_GT_2X_ASP")
+        self.assertEqual(product_row.metadata["raw_costo_mp_unit"], "50000.000000")
+
     def test_branch_expense_uses_exact_center_rule_before_generic_rule(self):
         categoria = CategoriaGasto.objects.get(codigo="RENTA_SUC")
         generic_rule = ReglaAsignacionGasto.objects.get(categoria_gasto=categoria, centro_costo__isnull=True)

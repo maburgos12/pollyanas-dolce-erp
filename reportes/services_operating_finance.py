@@ -34,6 +34,7 @@ from reportes.product_business_rules import (
 from ventas.services.sales_read_service import get_sales_range
 
 logger = logging.getLogger(__name__)
+COST_GUARDRAIL_MAX_COGS_TO_SALES_RATIO = Decimal("2.0")
 
 # Productos definidos por negocio como REVENTA fija.
 # Confirmación esperada: Dirección / negocio.
@@ -356,10 +357,17 @@ class OperatingFinanceSnapshotService:
             .order_by("receta_id")
         )
         for row in monthly_rows:
+            monthly_unit_cost = as_decimal(row.costo_por_unidad_rendimiento)
+            unit_cost_field = "costo_por_unidad_rendimiento"
+            if monthly_unit_cost <= 0:
+                monthly_unit_cost = as_decimal(row.costo_total)
+                unit_cost_field = "costo_total"
             latest[row.receta_id] = {
-                "costo_mp": as_decimal(row.costo_total),
+                "costo_mp": monthly_unit_cost,
                 "costo_total": as_decimal(row.costo_total),
                 "source": "MONTHLY_HISTORICAL",
+                "source_period": row.periodo.isoformat(),
+                "unit_cost_field": unit_cost_field,
             }
 
         qs = (
@@ -378,25 +386,56 @@ class OperatingFinanceSnapshotService:
                 "costo_mp": as_decimal(row.costo_mp),
                 "costo_total": as_decimal(row.costo_total),
                 "source": "WEEKLY_SNAPSHOT",
-            }
-
-        fallback_qs = (
-            RecetaCostoSemanal.objects.filter(
-                scope_type=RecetaCostoSemanal.SCOPE_RECIPE,
-                receta__tipo="PRODUCTO_FINAL",
-            )
-            .select_related("receta")
-            .order_by("receta_id", "-week_start", "-id")
-        )
-        for row in fallback_qs:
-            if row.receta_id in latest:
-                continue
-            latest[row.receta_id] = {
-                "costo_mp": as_decimal(row.costo_mp),
-                "costo_total": as_decimal(row.costo_total),
-                "source": "WEEKLY_SNAPSHOT_LATEST_FALLBACK",
+                "source_period": row.week_start.isoformat(),
+                "unit_cost_field": "costo_mp",
             }
         return latest
+
+    def _apply_product_cost_guardrail(
+        self,
+        *,
+        receta_id: int,
+        cost_components: dict[str, Decimal],
+        asp: Decimal,
+        source: dict,
+    ) -> tuple[dict[str, Decimal], dict]:
+        costo_fabricacion_unit = sum(cost_components.values(), Decimal("0"))
+        metadata = {
+            "guardrail_applied": False,
+            "cost_source": source.get("source", ""),
+            "cost_source_period": source.get("source_period", ""),
+            "unit_cost_field": source.get("unit_cost_field", ""),
+        }
+        if asp <= 0 or costo_fabricacion_unit <= 0:
+            return cost_components, metadata
+
+        max_allowed = asp * COST_GUARDRAIL_MAX_COGS_TO_SALES_RATIO
+        if costo_fabricacion_unit <= max_allowed:
+            return cost_components, metadata
+
+        metadata.update(
+            {
+                "guardrail_applied": True,
+                "guardrail_reason": "COSTO_FABRICACION_UNIT_GT_2X_ASP",
+                "guardrail_threshold_ratio": str(COST_GUARDRAIL_MAX_COGS_TO_SALES_RATIO),
+                "guardrail_asp": str(asp),
+                "raw_costo_mp_unit": str(cost_components["costo_mp_unit"]),
+                "raw_mano_obra_prod_unit": str(cost_components["mano_obra_prod_unit"]),
+                "raw_indirecto_prod_unit": str(cost_components["indirecto_prod_unit"]),
+                "raw_empaque_prod_unit": str(cost_components["empaque_prod_unit"]),
+                "raw_costo_fabricacion_unit": str(costo_fabricacion_unit),
+                "receta_id": receta_id,
+            }
+        )
+        return (
+            {
+                "costo_mp_unit": Decimal("0"),
+                "mano_obra_prod_unit": Decimal("0"),
+                "indirecto_prod_unit": Decimal("0"),
+                "empaque_prod_unit": Decimal("0"),
+            },
+            metadata,
+        )
 
     def _sales_by_recipe_branch(self, period_start: date, period_end: date) -> dict[tuple[int, int], dict]:
         data: dict[tuple[int, int], dict] = {}
@@ -703,6 +742,21 @@ class OperatingFinanceSnapshotService:
             mano_obra_unit = manufacturing_by_bucket.get(CategoriaGasto.BUCKET_MANO_OBRA, Decimal("0")) / units if units > 0 else Decimal("0")
             indirecto_unit = manufacturing_by_bucket.get(CategoriaGasto.BUCKET_INDIRECTO, Decimal("0")) / units if units > 0 else Decimal("0")
             empaque_unit = manufacturing_by_bucket.get(CategoriaGasto.BUCKET_EMPAQUE, Decimal("0")) / units if units > 0 else Decimal("0")
+            cost_components, cost_metadata = self._apply_product_cost_guardrail(
+                receta_id=receta_id,
+                asp=asp,
+                source=base_cost,
+                cost_components={
+                    "costo_mp_unit": costo_mp,
+                    "mano_obra_prod_unit": mano_obra_unit,
+                    "indirecto_prod_unit": indirecto_unit,
+                    "empaque_prod_unit": empaque_unit,
+                },
+            )
+            costo_mp = cost_components["costo_mp_unit"]
+            mano_obra_unit = cost_components["mano_obra_prod_unit"]
+            indirecto_unit = cost_components["indirecto_prod_unit"]
+            empaque_unit = cost_components["empaque_prod_unit"]
             costo_fabricacion_unit = costo_mp + mano_obra_unit + indirecto_unit + empaque_unit
             ProductoCostoOperativoMensual.objects.update_or_create(
                 periodo=period_start,
@@ -718,7 +772,7 @@ class OperatingFinanceSnapshotService:
                     "costo_fabricacion_unit": costo_fabricacion_unit,
                     "metadata": {
                         "period_end": period_end.isoformat(),
-                        "cost_source": base_cost.get("source", ""),
+                        **cost_metadata,
                     },
                 },
             )
