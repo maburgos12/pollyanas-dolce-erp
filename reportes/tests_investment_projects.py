@@ -4,11 +4,13 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.contrib.auth.models import Group, User
+from django.db import connection
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
 from core.models import Sucursal
+from pos_bridge.models import PointBranch, PointDailyBranchIndicator
 from reportes.models import (
     CategoriaGasto,
     CentroCosto,
@@ -20,8 +22,9 @@ from reportes.models import (
     ProyectoInversionPagoDeuda,
     ProyectoInversionSnapshotMensual,
 )
-from reportes.services_investment_projects import ProyectoInversionRefreshService
+from reportes.services_investment_projects import ProyectoInversionRefreshService, _benchmark_sucursales_activas
 from reportes.services_operating_finance import OperatingFinanceBootstrapService
+from ventas.models import VentaAutoritativaPoint
 
 
 class ProyectoInversionRefreshServiceTests(TestCase):
@@ -150,7 +153,7 @@ class ProyectoInversionViewsTests(TestCase):
     def test_portfolio_and_detail_render(self):
         response = self.client.get(reverse("reportes:proyectos_inversion"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Portafolio de proyectos de inversión")
+        self.assertContains(response, "Desempeño actual de sucursales")
         self.assertContains(response, "Sucursal Centro 2026")
 
         detail = self.client.get(reverse("reportes:proyecto_inversion_detail", args=[self.project.pk]))
@@ -190,5 +193,172 @@ class ProyectoInversionViewsTests(TestCase):
         self.assertEqual(export_response.status_code, 200)
         self.assertEqual(
             export_response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+
+class BamoaWizardTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="dg_bamoa", password="pass123", first_name="Dirección")
+        group, _ = Group.objects.get_or_create(name="DG")
+        self.user.groups.add(group)
+        self.client.login(username="dg_bamoa", password="pass123")
+
+        self.guamuchil = ProyectoInversion.objects.create(
+            id=1,
+            nombre_proyecto="Apertura Guamuchil 2026",
+            tipo_proyecto=ProyectoInversion.TIPO_APERTURA_SUCURSAL,
+            fecha_inicio=date(2026, 1, 1),
+            fecha_apertura=date(2026, 3, 24),
+            estatus=ProyectoInversion.ESTATUS_EN_RECUPERACION,
+            monto_inversion_planeado=Decimal("1200000.00"),
+            monto_inversion_real=Decimal("1121753.85"),
+        )
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT setval(pg_get_serial_sequence(%s, %s), %s)",
+                [ProyectoInversion._meta.db_table, "id", self.guamuchil.pk],
+            )
+        for idx in range(69):
+            ProyectoInversionGasto.objects.create(
+                proyecto=self.guamuchil,
+                fecha=date(2026, 1, 1),
+                categoria=ProyectoInversionGasto.CATEGORIA_EQUIPAMIENTO,
+                descripcion=f"GML partida {idx + 1}",
+                monto_total=Decimal("1.00"),
+                referencia_contable=f"GML_RECON_2026_05_18_{idx + 1:03d}",
+            )
+
+        self.sucursal = Sucursal.objects.create(codigo="TUN", nombre="El Túnel", activa=True)
+        self.point_branch = PointBranch.objects.create(
+            external_id="PB-TUN",
+            name="El Túnel",
+            status=PointBranch.STATUS_ACTIVE,
+            erp_branch=self.sucursal,
+        )
+        VentaAutoritativaPoint.objects.create(
+            branch=self.sucursal,
+            sale_date=date(2026, 4, 10),
+            product_code="PASTEL-001",
+            point_name="Pastel prueba",
+            quantity=Decimal("10"),
+            total_amount=Decimal("26000.00"),
+        )
+        PointDailyBranchIndicator.objects.create(
+            branch=self.point_branch,
+            indicator_date=date(2026, 4, 10),
+            total_amount=Decimal("26000.00"),
+            total_tickets=100,
+            total_avg_ticket=Decimal("260.00"),
+        )
+        ProyectoInversionSnapshotMensual.objects.create(
+            proyecto=self.guamuchil,
+            periodo=date(2026, 4, 1),
+            periodo_fin=date(2026, 4, 30),
+            ventas_mensuales=Decimal("26000.00"),
+            utilidad_bruta=Decimal("14000.00"),
+            gastos_operativos=Decimal("9000.00"),
+            utilidad_operativa=Decimal("5000.00"),
+            flujo_libre=Decimal("5000.00"),
+            payback_real_meses=Decimal("24.00"),
+            roi_acumulado=Decimal("12.50"),
+            data_source=ProyectoInversionSnapshotMensual.DATA_SOURCE_FACT,
+        )
+
+    def test_benchmark_sucursales_activas_usa_datos_reales(self):
+        benchmark = _benchmark_sucursales_activas(sucursal_ids=[self.sucursal.id], meses=12)
+
+        self.assertEqual(benchmark["data_source"], "VentaAutoritativaPoint")
+        self.assertEqual(benchmark["ventas_mensuales_avg"], 26000.0)
+        self.assertEqual(benchmark["ticket_promedio"], 260.0)
+        self.assertEqual(benchmark["sucursales_incluidas"], [self.sucursal.id])
+
+    def test_get_wizard_precarga_benchmark(self):
+        response = self.client.get(reverse("reportes:proyecto_bamoa_wizard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("benchmark", response.context)
+        self.assertContains(response, "Apertura Bamoa 2026")
+        self.assertContains(response, "Crear proyecto con 3 escenarios")
+
+    def test_post_crea_proyecto_y_tres_escenarios(self):
+        response = self.client.post(
+            reverse("reportes:proyecto_bamoa_wizard"),
+            {
+                "action": "create_bamoa_project",
+                "nombre_proyecto": "Apertura Bamoa 2026",
+                "fecha_inicio": "2026-06-01",
+                "fecha_apertura": "",
+                "monto_inversion_planeado": "1200000.00",
+                "capital_inicial_aportado": "1200000.00",
+                "deuda_asociada": "0",
+                "tasa_interes_anual": "0",
+                "plazo_deuda_meses": "0",
+                "pago_mensual_deuda_estimado": "0",
+                "discount_rate": "12",
+                "roi_objetivo": "25",
+                "payback_objetivo_meses": "24",
+                "ventas_promedio_base": "26000.00",
+                "margen_bruto_pct": "45",
+                "gastos_operativos_mensuales": "9000.00",
+                "crecimiento_mensual_pct": "0.8",
+                "horizonte_meses": "36",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        proyecto = ProyectoInversion.objects.get(nombre_proyecto="Apertura Bamoa 2026")
+        self.assertEqual(proyecto.escenarios.count(), 3)
+        self.assertEqual(
+            set(proyecto.escenarios.values_list("tipo_escenario", flat=True)),
+            {
+                ProyectoInversionEscenario.TIPO_CONSERVADOR,
+                ProyectoInversionEscenario.TIPO_BASE,
+                ProyectoInversionEscenario.TIPO_OPTIMISTA,
+            },
+        )
+
+    def test_post_sin_fecha_inicio_redirige_con_error(self):
+        before = ProyectoInversion.objects.count()
+        response = self.client.post(
+            reverse("reportes:proyecto_bamoa_wizard"),
+            {
+                "action": "create_bamoa_project",
+                "nombre_proyecto": "Apertura Bamoa 2026",
+                "monto_inversion_planeado": "1200000.00",
+                "ventas_promedio_base": "26000.00",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(ProyectoInversion.objects.count(), before)
+
+    def test_no_modifica_proyecto_guamuchil(self):
+        self.client.post(
+            reverse("reportes:proyecto_bamoa_wizard"),
+            {
+                "action": "create_bamoa_project",
+                "nombre_proyecto": "Apertura Bamoa 2026",
+                "fecha_inicio": "2026-06-01",
+                "monto_inversion_planeado": "1200000.00",
+                "ventas_promedio_base": "26000.00",
+                "gastos_operativos_mensuales": "9000.00",
+            },
+        )
+
+        self.guamuchil.refresh_from_db()
+        self.assertEqual(self.guamuchil.nombre_proyecto, "Apertura Guamuchil 2026")
+        self.assertEqual(self.guamuchil.monto_inversion_real, Decimal("1121753.85"))
+        self.assertEqual(self.guamuchil.gastos_inversion.count(), 69)
+
+    def test_export_excel_descarga_xlsx(self):
+        response = self.client.get(
+            reverse("reportes:proyecto_viabilidad_export_excel", args=[self.guamuchil.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )

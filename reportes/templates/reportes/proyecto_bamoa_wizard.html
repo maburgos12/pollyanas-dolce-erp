@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Reportes - Bamoa 2026{% endblock %}
+{% block page_title %}Reportes · Bamoa 2026{% endblock %}
+{% block body_class %}page-reportes-investment-projects{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/investment_projects.css' %}?v=20260406c">
+{% endblock %}
+
+{% block content %}
+<div class="investment-shell">
+  <nav class="module-tabs">
+    {% for tab in module_tabs %}
+    <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
+    {% endfor %}
+  </nav>
+
+  <section class="investment-header">
+    <article class="investment-hero">
+      <div class="investment-kicker">Planeación</div>
+      <h1 class="investment-title">Apertura Bamoa 2026</h1>
+      <p class="investment-copy">Alta controlada del proyecto con benchmark del ERP, referencia de Guamúchil y tres escenarios financieros listos para revisar en el dashboard.</p>
+      <div class="investment-meta">
+        <span class="investment-pill">{{ benchmark.data_source|default:"Sin fuente de ventas" }}</span>
+        <span class="investment-pill">{{ benchmark.periodo_inicio|default:"" }}{% if benchmark.periodo_fin %} a {{ benchmark.periodo_fin }}{% endif %}</span>
+        <span class="investment-pill">Sin duplicar Guamúchil</span>
+      </div>
+    </article>
+    <aside class="investment-side">
+      <div class="investment-actions">
+        <a class="investment-action-link is-ghost" href="{% url 'reportes:proyectos_inversion_sucursales' %}">Volver a sucursales</a>
+      </div>
+      <div class="investment-muted">Referencia reconciliada de Guamúchil: ${{ guamuchil_inversion_real|floatformat:2|intcomma }}. Monto sugerido editable para Bamoa: ${{ inversion_referencia|floatformat:2|intcomma }}.</div>
+    </aside>
+  </section>
+
+  {% if bm_error %}
+  <section class="investment-alert-stack">
+    <article class="investment-alert is-critical">
+      <strong>Benchmark no disponible</strong>
+      <span>{{ bm_error }}</span>
+    </article>
+  </section>
+  {% endif %}
+
+  <section class="investment-kpis">
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Ticket promedio Point</div>
+      <div class="investment-kpi-value">${{ ticket_sugerido|floatformat:2|intcomma }}</div>
+      <div class="investment-kpi-note">Ponderado por tickets reales</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Ventas mensuales benchmark</div>
+      <div class="investment-kpi-value">${{ ventas_sugeridas|floatformat:2|intcomma }}</div>
+      <div class="investment-kpi-note">{{ benchmark.detalle_por_sucursal|length|intcomma }} sucursales incluidas</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Gasto operativo promedio</div>
+      <div class="investment-kpi-value">${{ gastos_sugeridos|floatformat:2|intcomma }}</div>
+      <div class="investment-kpi-note">Desde snapshots mensuales</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Margen bruto benchmark</div>
+      <div class="investment-kpi-value">{{ benchmark.margen_bruto_pct_avg|default:0|floatformat:2 }}%</div>
+      <div class="investment-kpi-note">Sólo snapshots con fuente FACT</div>
+    </article>
+  </section>
+
+  <section class="investment-layout">
+    <div class="investment-main">
+      <article class="investment-panel">
+        <div class="investment-panel-head">
+          <div>
+            <div class="investment-kicker">Captura</div>
+            <h2 class="investment-panel-title">Supuestos base de Bamoa</h2>
+          </div>
+        </div>
+        <form method="post" id="bamoaProjectForm">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="create_bamoa_project">
+          <div class="investment-field-grid">
+            <div class="investment-field">
+              <label for="nombre_proyecto">Nombre del proyecto</label>
+              <input id="nombre_proyecto" type="text" name="nombre_proyecto" value="Apertura Bamoa 2026" required>
+            </div>
+            <div class="investment-field">
+              <label for="fecha_inicio">Fecha inicio</label>
+              <input id="fecha_inicio" type="date" name="fecha_inicio" value="2026-06-01" required>
+            </div>
+            <div class="investment-field">
+              <label for="fecha_apertura">Fecha apertura estimada</label>
+              <input id="fecha_apertura" type="date" name="fecha_apertura">
+            </div>
+            <div class="investment-field">
+              <label for="monto_inversion_planeado">Inversión planeada</label>
+              <input id="monto_inversion_planeado" type="number" step="0.01" min="0" name="monto_inversion_planeado" value="{{ inversion_referencia }}" required>
+            </div>
+            <div class="investment-field">
+              <label for="capital_inicial_aportado">Capital aportado</label>
+              <input id="capital_inicial_aportado" type="number" step="0.01" min="0" name="capital_inicial_aportado" value="{{ inversion_referencia }}">
+            </div>
+            <div class="investment-field">
+              <label for="deuda_asociada">Deuda asociada</label>
+              <input id="deuda_asociada" type="number" step="0.01" min="0" name="deuda_asociada" value="0">
+            </div>
+            <div class="investment-field">
+              <label for="tasa_interes_anual">Tasa interés anual %</label>
+              <input id="tasa_interes_anual" type="number" step="0.0001" min="0" name="tasa_interes_anual" value="0">
+            </div>
+            <div class="investment-field">
+              <label for="plazo_deuda_meses">Plazo deuda meses</label>
+              <input id="plazo_deuda_meses" type="number" step="1" min="0" name="plazo_deuda_meses" value="0">
+            </div>
+            <div class="investment-field">
+              <label for="pago_mensual_deuda_estimado">Pago mensual deuda</label>
+              <input id="pago_mensual_deuda_estimado" type="number" step="0.01" min="0" name="pago_mensual_deuda_estimado" value="0">
+            </div>
+            <div class="investment-field">
+              <label for="ventas_promedio_base">Ventas promedio base</label>
+              <input id="ventas_promedio_base" type="number" step="0.01" min="0" name="ventas_promedio_base" value="{{ ventas_sugeridas }}" required>
+            </div>
+            <div class="investment-field">
+              <label for="margen_bruto_pct">Margen bruto %</label>
+              <input id="margen_bruto_pct" type="number" step="0.0001" min="0" name="margen_bruto_pct" value="45">
+            </div>
+            <div class="investment-field">
+              <label for="gastos_operativos_mensuales">Gastos operativos mensuales</label>
+              <input id="gastos_operativos_mensuales" type="number" step="0.01" min="0" name="gastos_operativos_mensuales" value="{{ gastos_sugeridos }}">
+            </div>
+            <div class="investment-field">
+              <label for="crecimiento_mensual_pct">Crecimiento mensual %</label>
+              <input id="crecimiento_mensual_pct" type="number" step="0.0001" name="crecimiento_mensual_pct" value="0.8">
+            </div>
+            <div class="investment-field">
+              <label for="horizonte_meses">Horizonte meses</label>
+              <input id="horizonte_meses" type="number" step="1" min="1" name="horizonte_meses" value="36">
+            </div>
+            <div class="investment-field">
+              <label for="discount_rate">Discount rate %</label>
+              <input id="discount_rate" type="number" step="0.0001" min="0" name="discount_rate" value="12">
+            </div>
+            <div class="investment-field">
+              <label for="roi_objetivo">ROI objetivo %</label>
+              <input id="roi_objetivo" type="number" step="0.01" min="0" name="roi_objetivo" value="25">
+            </div>
+            <div class="investment-field">
+              <label for="payback_objetivo_meses">Payback objetivo meses</label>
+              <input id="payback_objetivo_meses" type="number" step="1" min="1" name="payback_objetivo_meses" value="24">
+            </div>
+            <div class="investment-field">
+              <label for="sucursal_relacionada_id">Sucursal relacionada</label>
+              <select id="sucursal_relacionada_id" name="sucursal_relacionada_id">
+                <option value="">Sin asignar</option>
+                {% for sucursal in sucursales %}
+                <option value="{{ sucursal.id }}">{{ sucursal.codigo }} · {{ sucursal.nombre }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="investment-field">
+            <label for="observaciones">Observaciones</label>
+            <textarea id="observaciones" name="observaciones" rows="4">Sucursal pequeña de pickup y punto de venta. Local de 5 m de frente por 7 m de fondo. Surtido desde CEDIS Guasave cada 2 días según movimiento.</textarea>
+          </div>
+          <div class="investment-form-actions">
+            <button class="investment-button" type="submit">Crear proyecto con 3 escenarios</button>
+          </div>
+        </form>
+      </article>
+    </div>
+
+    <aside class="investment-sidebar">
+      <article class="investment-form-card">
+        <div class="investment-panel-head">
+          <div>
+            <div class="investment-kicker">Escenarios</div>
+            <h2 class="investment-panel-title">Preview</h2>
+          </div>
+        </div>
+        <div class="investment-portfolio-list" id="scenarioPreview"></div>
+      </article>
+
+      <article class="investment-form-card">
+        <div class="investment-panel-head">
+          <div>
+            <div class="investment-kicker">Benchmark</div>
+            <h2 class="investment-panel-title">Detalle por sucursal</h2>
+          </div>
+        </div>
+        <div class="investment-portfolio-list">
+          {% for row in benchmark.detalle_por_sucursal %}
+          <article class="investment-project-row">
+            <div class="investment-project-top">
+              <strong>{{ row.codigo }} · {{ row.nombre }}</strong>
+              <span class="investment-status-pill is-open">{{ row.meses_con_datos }} meses</span>
+            </div>
+            <div class="investment-muted">Ventas promedio ${{ row.ventas_mensuales_avg|floatformat:2|intcomma }}</div>
+          </article>
+          {% empty %}
+          <div class="investment-empty">No hay detalle disponible para el periodo seleccionado.</div>
+          {% endfor %}
+        </div>
+      </article>
+    </aside>
+  </section>
+</div>
+
+<script>
+  (function () {
+    const preview = document.getElementById("scenarioPreview");
+    const form = document.getElementById("bamoaProjectForm");
+    if (!preview || !form) return;
+
+    const money = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
+    const numberValue = (id) => Number(document.getElementById(id)?.value || 0);
+    const scenarios = [
+      ["Conservador", 0.88, 1.06, "is-warning"],
+      ["Base", 1, 1, "is-open"],
+      ["Optimista", 1.12, 0.97, "is-active"],
+    ];
+
+    function renderPreview() {
+      const sales = numberValue("ventas_promedio_base");
+      const expenses = numberValue("gastos_operativos_mensuales");
+      const margin = numberValue("margen_bruto_pct") / 100;
+      preview.innerHTML = scenarios.map(([name, salesFactor, expenseFactor, cssClass]) => {
+        const projectedSales = sales * salesFactor;
+        const projectedExpenses = expenses * expenseFactor;
+        const freeCashflow = (projectedSales * margin) - projectedExpenses;
+        return `
+          <article class="investment-project-row">
+            <div class="investment-project-top">
+              <strong>${name}</strong>
+              <span class="investment-status-pill ${cssClass}">${money.format(freeCashflow)}</span>
+            </div>
+            <div class="investment-muted">Ventas ${money.format(projectedSales)} · Gastos ${money.format(projectedExpenses)}</div>
+          </article>
+        `;
+      }).join("");
+    }
+
+    form.addEventListener("input", renderPreview);
+    renderPreview();
+  })();
+</script>
+{% endblock %}
