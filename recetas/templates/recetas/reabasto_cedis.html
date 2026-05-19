@@ -1,246 +1,267 @@
 {% extends "base.html" %}
 {% block title %}Reabasto CEDIS{% endblock %}
-{% block page_title %}Recetas · Reabasto Sucursal a CEDIS{% endblock %}
+{% block page_title %}Reabasto CEDIS{% endblock %}
+{% block body_class %}page-reabasto-cedis{% endblock %}
+
+{% block extra_css %}
+<style>
+  .page-reabasto-cedis .reabasto-shell {
+    gap: 14px;
+  }
+
+  .page-reabasto-cedis .reabasto-card {
+    padding: 18px;
+  }
+
+  .page-reabasto-cedis .reabasto-top {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+    gap: 16px;
+    align-items: start;
+  }
+
+  .page-reabasto-cedis .reabasto-title {
+    margin: 0 0 6px;
+    font-size: 32px;
+    line-height: 1.08;
+  }
+
+  .page-reabasto-cedis .reabasto-route {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 14px;
+  }
+
+  .page-reabasto-cedis .reabasto-route-item,
+  .page-reabasto-cedis .reabasto-filter,
+  .page-reabasto-cedis .reabasto-metric,
+  .page-reabasto-cedis .reabasto-action-box {
+    border: 1px solid rgba(110, 32, 58, .12);
+    border-radius: 10px;
+    background: #fff;
+  }
+
+  .page-reabasto-cedis .reabasto-route-item {
+    padding: 10px 12px;
+  }
+
+  .page-reabasto-cedis .reabasto-route-item strong {
+    display: block;
+    color: var(--vino);
+    margin-bottom: 3px;
+  }
+
+  .page-reabasto-cedis .reabasto-filter {
+    padding: 12px;
+  }
+
+  .page-reabasto-cedis .reabasto-filter .form-group + .form-group {
+    margin-top: 10px;
+  }
+
+  .page-reabasto-cedis .reabasto-filter-actions,
+  .page-reabasto-cedis .reabasto-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .page-reabasto-cedis .reabasto-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .page-reabasto-cedis .reabasto-metric {
+    padding: 12px;
+    min-height: 88px;
+  }
+
+  .page-reabasto-cedis .reabasto-metric-value {
+    display: block;
+    font-size: 24px;
+    line-height: 1.1;
+    font-weight: 800;
+    color: var(--vino);
+    overflow-wrap: anywhere;
+  }
+
+  .page-reabasto-cedis .reabasto-decision {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .page-reabasto-cedis .reabasto-decision-title {
+    margin: 0 0 4px;
+    font-size: 20px;
+    line-height: 1.2;
+    color: var(--vino);
+  }
+
+  .page-reabasto-cedis .reabasto-status-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .page-reabasto-cedis .reabasto-action-box {
+    padding: 12px;
+  }
+
+  .page-reabasto-cedis .reabasto-action-box .kpi-number {
+    font-size: 24px;
+  }
+
+  .page-reabasto-cedis .reabasto-details {
+    margin: 0;
+  }
+
+  .page-reabasto-cedis .reabasto-details .erp-advanced-body {
+    gap: 12px;
+  }
+
+  .page-reabasto-cedis .reabasto-compact-table th,
+  .page-reabasto-cedis .reabasto-compact-table td {
+    white-space: normal;
+  }
+
+  @media (max-width: 980px) {
+    .page-reabasto-cedis .reabasto-top,
+    .page-reabasto-cedis .reabasto-route,
+    .page-reabasto-cedis .reabasto-metrics,
+    .page-reabasto-cedis .reabasto-status-grid,
+    .page-reabasto-cedis .reabasto-decision {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="module-shell plan-produccion-shell">
+<div class="module-shell plan-produccion-shell reabasto-shell">
   {% if not ui_access.branch_capture_only %}
-  <div class="card" id="filtro-operativo">
-    <div class="card-header">Filtro Operativo</div>
-    <form class="form-grid-auto" method="get">
-      <div class="form-group">
-        <label class="form-label">Fecha de operación</label>
-        <input class="form-control" type="date" name="fecha" value="{{ fecha_operacion|date:'Y-m-d' }}">
+  <section class="card reabasto-card" id="filtro-operativo">
+    <div class="reabasto-top">
+      <div>
+        <h1 class="card-header reabasto-title">Reabasto CEDIS</h1>
+        <p class="muted mb-0">Corte diario de sucursales, plan CEDIS y compras del reabasto.</p>
+        <div class="reabasto-route">
+          <div class="reabasto-route-item">
+            <strong>1. Cierres</strong>
+            <span class="muted">{{ resumen_cierre.en_tiempo }} en tiempo · {{ resumen_cierre.pendientes }} pendientes</span>
+          </div>
+          <div class="reabasto-route-item">
+            <strong>2. Plan</strong>
+            <span class="muted">{{ total_faltante|floatformat:2 }} por producir</span>
+          </div>
+          <div class="reabasto-route-item">
+            <strong>3. Compras</strong>
+            <span class="muted">{{ reabasto_daily_control.generation_gate.overall_label }}</span>
+          </div>
+        </div>
       </div>
-      <div class="form-group">
-        <label class="form-label">Sucursal</label>
-        {% if sucursal_locked and sucursal %}
-          <input class="form-control" type="text" value="{{ sucursal.codigo }} - {{ sucursal.nombre }}" readonly>
-          <input type="hidden" name="sucursal_id" value="{{ sucursal.id }}">
-        {% else %}
-          <select class="form-select" name="sucursal_id">
-            <option value="" {% if not sucursal %}selected{% endif %}>Selecciona sucursal...</option>
-            {% for s in sucursales %}
-              <option value="{{ s.id }}" {% if sucursal and sucursal.id == s.id %}selected{% endif %}>
-                {{ s.codigo }} - {{ s.nombre }}
-              </option>
-            {% endfor %}
-          </select>
-        {% endif %}
+
+      <form class="reabasto-filter" method="get">
+        <div class="form-group">
+          <label class="form-label">Fecha de operación</label>
+          <input class="form-control" type="date" name="fecha" value="{{ fecha_operacion|date:'Y-m-d' }}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Sucursal</label>
+          {% if sucursal_locked and sucursal %}
+            <input class="form-control" type="text" value="{{ sucursal.codigo }} - {{ sucursal.nombre }}" readonly>
+            <input type="hidden" name="sucursal_id" value="{{ sucursal.id }}">
+          {% else %}
+            <select class="form-select" name="sucursal_id">
+              <option value="" {% if not sucursal %}selected{% endif %}>Todas las sucursales</option>
+              {% for s in sucursales %}
+              <option value="{{ s.id }}" {% if sucursal and sucursal.id == s.id %}selected{% endif %}>{{ s.codigo }} - {{ s.nombre }}</option>
+              {% endfor %}
+            </select>
+          {% endif %}
+        </div>
+        <div class="reabasto-filter-actions">
+          <button class="btn btn-primary" type="submit">Aplicar</button>
+          <a class="btn btn-secondary" href="{% url 'recetas:reabasto_cedis_consolidado_export' %}?fecha={{ fecha_operacion|date:'Y-m-d' }}&format=xlsx">Exportar XLSX</a>
+          <a class="btn btn-secondary" href="{% url 'recetas:consolidado_cedis_revision' %}?fecha={{ fecha_operacion|date:'Y-m-d' }}">Consolidado nocturno</a>
+        </div>
+      </form>
+    </div>
+
+    <div class="reabasto-metrics">
+      <div class="reabasto-metric">
+        <span class="reabasto-metric-value">{{ solicitudes_hoy|length }}</span>
+        <span class="muted">Solicitudes</span>
       </div>
-      <div class="form-group" style="align-self:end;">
-        <button class="btn btn-primary" type="submit">Aplicar</button>
+      <div class="reabasto-metric">
+        <span class="reabasto-metric-value">{{ total_solicitado|floatformat:2 }}</span>
+        <span class="muted">Solicitado</span>
       </div>
-      <div class="form-group" style="align-self:end;">
-        <a class="btn btn-secondary" href="{% url 'recetas:reabasto_cedis_consolidado_export' %}?fecha={{ fecha_operacion|date:'Y-m-d' }}&format=xlsx">Exportar consolidado XLSX</a>
+      <div class="reabasto-metric">
+        <span class="reabasto-metric-value">{{ total_faltante|floatformat:2 }}</span>
+        <span class="muted">Faltante CEDIS</span>
       </div>
-      <div class="form-group" style="align-self:end;">
-        <a class="btn btn-primary" href="{% url 'recetas:consolidado_cedis_revision' %}?fecha={{ fecha_operacion|date:'Y-m-d' }}">Abrir consolidado nocturno</a>
+      <div class="reabasto-metric">
+        <span class="reabasto-metric-value">{{ reabasto_daily_control.stage_label }}</span>
+        <span class="muted">{{ reabasto_daily_control.stage_detail }}</span>
       </div>
-    </form>
+    </div>
+
     {% if can_manage_reabasto %}
-    <div class="alert {% if reabasto_daily_control.generation_gate.overall_tone == 'success' %}alert-success{% elif reabasto_daily_control.generation_gate.overall_tone == 'primary' %}alert-soft{% else %}alert-danger{% endif %}" style="margin-top: 12px;">
-      <strong>Gate de generación:</strong>
-      {{ reabasto_daily_control.generation_gate.overall_label }}.
-      {{ reabasto_daily_control.generation_gate.overall_detail }}
-    </div>
-    <div class="kpi-grid kpi-mini" style="margin-top: 12px;">
-      {% for item in reabasto_daily_control.generation_gate.checks %}
-      <article class="kpi-card">
-        <div class="kpi-number {% if item.is_ready %}is-success{% else %}is-danger{% endif %}">{% if item.is_ready %}OK{% else %}Bloqueado{% endif %}</div>
-        <div class="kpi-label">{{ item.label }}</div>
-        <div class="muted">{{ item.detail }}</div>
-        <a class="btn btn-secondary btn-sm" href="{{ item.action_url }}">{{ item.action_label }}</a>
-      </article>
-      {% endfor %}
-    </div>
-    <div class="toolbar" style="margin-top: 10px;">
+    <div class="reabasto-actions">
       <form method="post" action="{% url 'recetas:reabasto_cedis_generar_plan' %}">
         {% csrf_token %}
         <input type="hidden" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}">
-        <button class="btn btn-primary" type="submit" {% if not reabasto_daily_control.generation_gate.can_generate_plan %}disabled{% endif %}>Generar plan CEDIS desde faltante</button>
+        <button class="btn btn-primary" type="submit" {% if not reabasto_daily_control.generation_gate.can_generate_plan %}disabled{% endif %}>Generar plan CEDIS</button>
       </form>
       <form method="post" action="{% url 'recetas:reabasto_cedis_generar_compras' %}">
         {% csrf_token %}
         <input type="hidden" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}">
-        <button class="btn btn-secondary" type="submit" {% if not reabasto_daily_control.generation_gate.can_generate_compras %}disabled{% endif %}>Generar compras (solicitudes + OC)</button>
+        <button class="btn btn-secondary" type="submit" {% if not reabasto_daily_control.generation_gate.can_generate_compras %}disabled{% endif %}>Generar compras</button>
       </form>
+      <a class="btn btn-secondary" href="{{ reabasto_daily_control.next_action_url }}">{{ reabasto_daily_control.next_action_label }}</a>
     </div>
-    <p class="muted mb-0" style="margin-top: 8px;">
-      Plan:
-      {% if reabasto_daily_control.generation_gate.can_generate_plan %}
-        <strong>habilitado</strong>
-      {% else %}
-        <strong>bloqueado</strong>
-      {% endif %}
-      · Compras:
-      {% if reabasto_daily_control.generation_gate.can_generate_compras %}
-        <strong>habilitadas</strong>
-      {% else %}
-        <strong>bloqueadas</strong>
-      {% endif %}
-    </p>
     {% endif %}
-    <p class="muted mb-0">
-      Solicitudes del día: <strong>{{ solicitudes_hoy|length }}</strong> ·
-      Total solicitado: <strong>{{ total_solicitado|floatformat:2 }}</strong> ·
-      Faltante a producir CEDIS: <strong>{{ total_faltante|floatformat:2 }}</strong>
-    </p>
-    {% if sucursal_locked and sucursal %}
-    <p class="muted mb-0">
-      Captura de sucursal: estás trabajando sobre <strong>{{ sucursal.codigo }}</strong>. Para producir mañana, registra y envía hoy al cierre.
-    </p>
-    {% endif %}
-  </div>
-  <div class="card">
-    <div class="card-header">Resumen operativo CEDIS</div>
-    {% if daily_decision_rows %}
-    <section class="card mb-3">
-      <div class="card-header">Top decisiones del reabasto</div>
-      <div class="kpi-grid kpi-mini">
+  </section>
+
+  <section class="card reabasto-card">
+    <div class="reabasto-decision">
+      <div>
+        <div class="card-header">Siguiente acción</div>
+        {% if daily_decision_rows %}
+          {% for row in daily_decision_rows %}
+            {% if forloop.first %}
+            <h2 class="reabasto-decision-title">{{ row.title }}</h2>
+            <p class="muted mb-0">{{ row.detail }}</p>
+            {% endif %}
+          {% endfor %}
+        {% else %}
+          <h2 class="reabasto-decision-title">{{ reabasto_daily_control.stage_label }}</h2>
+          <p class="muted mb-0">{{ reabasto_daily_control.stage_detail }}</p>
+        {% endif %}
+      </div>
+      {% if daily_decision_rows %}
         {% for row in daily_decision_rows %}
-        <article class="kpi-card">
-          <div class="kpi-number {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">#{{ forloop.counter }}</div>
-          <div class="kpi-label">{{ row.title }}</div>
-          <div class="muted">{{ row.detail }}</div>
-          <a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a>
-        </article>
+          {% if forloop.first %}
+          <a class="btn btn-primary" href="{{ row.url }}">{{ row.cta }}</a>
+          {% endif %}
         {% endfor %}
-      </div>
-    </section>
-    {% endif %}
-    {% if demand_history_summary %}
-    <div class="kpi-grid kpi-mini" style="margin-bottom: 12px;">
-      <article class="kpi-card">
-        <div class="kpi-number {% if demand_history_summary.tone == 'danger' %}is-danger{% elif demand_history_summary.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ demand_history_summary.status }}</div>
-        <div class="kpi-label">Base comparable</div>
-        <div class="muted">{{ demand_history_summary.detail }}</div>
-      </article>
-      <article class="kpi-card">
-        <div class="kpi-number">{{ demand_history_summary.branch_count }}</div>
-        <div class="kpi-label">Sucursales comparables</div>
-        <div class="muted">{{ demand_history_summary.recipe_count }} productos observados</div>
-      </article>
-      <article class="kpi-card">
-        <div class="kpi-number">{{ demand_history_summary.total_units|floatformat:0 }}</div>
-        <div class="kpi-label">Unidades de referencia</div>
-        <div class="muted">{{ demand_history_summary.scope_label }}</div>
-      </article>
-      <article class="kpi-card">
-        <div class="kpi-number">{{ demand_history_summary.sample_days }}</div>
-        <div class="kpi-label">Días comparables</div>
-        <div class="muted">Misma lógica temporal previa a {{ fecha_operacion|date:'Y-m-d' }}</div>
-      </article>
-      <article class="kpi-card">
-        <div class="kpi-number">{{ demand_history_summary.years_observed }}</div>
-        <div class="kpi-label">Años observados</div>
-        <div class="muted">{{ demand_history_summary.comparable_years }} temporadas comparables</div>
-      </article>
+      {% else %}
+      <a class="btn btn-primary" href="{{ reabasto_daily_control.next_action_url }}">{{ reabasto_daily_control.next_action_label }}</a>
+      {% endif %}
     </div>
-    <div class="kpi-grid kpi-mini" style="margin-bottom: 12px;">
-      <article class="kpi-card">
-        <div class="kpi-label">Sucursales líderes</div>
-        {% if demand_history_summary.top_branches %}
-          {% for row in demand_history_summary.top_branches %}
-          <div class="muted" style="margin-top:8px;"><strong>{{ row.sucursal__codigo|default:"SIN-COD" }}</strong> · {{ row.sucursal__nombre|default:"Sucursal" }} · {{ row.total|floatformat:0 }}</div>
-          {% endfor %}
-        {% else %}
-          <div class="muted" style="margin-top:8px;">Sin cobertura histórica comparable.</div>
-        {% endif %}
-      </article>
-      <article class="kpi-card">
-        <div class="kpi-label">Productos líderes</div>
-        {% if demand_history_summary.top_recipes %}
-          {% for row in demand_history_summary.top_recipes %}
-          <div class="muted" style="margin-top:8px;"><strong>{{ row.receta__nombre }}</strong> · {{ row.total|floatformat:0 }}</div>
-          {% endfor %}
-        {% else %}
-          <div class="muted" style="margin-top:8px;">Sin productos con histórico comparable.</div>
-        {% endif %}
-      </article>
-    </div>
-    {% endif %}
-    {% if branch_priority_rows %}
-    <section class="card mb-3">
-      <div class="card-header">Sucursales a priorizar hoy</div>
-      <div class="table-responsive">
-        <table class="table table-striped align-middle">
-          <thead>
-            <tr>
-              <th>Sucursal</th>
-              <th>Estatus</th>
-              <th>Detalle</th>
-              <th class="text-end">Demanda comparable</th>
-              <th class="text-end">Sugerido</th>
-              <th class="text-end">Solicitado</th>
-              <th>Acción</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in branch_priority_rows %}
-            <tr>
-              <td><strong>{{ row.sucursal_codigo }}</strong> · {{ row.sucursal_nombre }}</td>
-              <td>
-                <span class="badge {% if row.tone == 'danger' %}bg-danger{% elif row.tone == 'warning' %}bg-warning text-dark{% elif row.tone == 'primary' %}bg-primary{% else %}bg-success{% endif %}">
-                  {{ row.status }}
-                </span>
-              </td>
-              <td>{{ row.detail }}</td>
-              <td class="text-end">{{ row.historico_units|floatformat:0 }}</td>
-              <td class="text-end">{{ row.sugerido_total|floatformat:1 }}</td>
-              <td class="text-end">{{ row.solicitado_total|floatformat:1 }}</td>
-              <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </section>
-    {% endif %}
-    {% if branch_supply_rows %}
-    <section class="card mb-3">
-      <div class="card-header">Insumo a asegurar por sucursal</div>
-      <div class="table-responsive">
-        <table class="table table-striped align-middle">
-          <thead>
-            <tr>
-              <th>Sucursal</th>
-              <th>Producto</th>
-              <th>Insumo</th>
-              <th class="text-end">Requerido</th>
-              <th class="text-end">Stock</th>
-              <th class="text-end">Brecha</th>
-              <th>Faltante maestro</th>
-              <th>Acción</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in branch_supply_rows %}
-            <tr>
-              <td><strong>{{ row.sucursal_codigo }}</strong> · {{ row.sucursal_nombre }}</td>
-              <td>{{ row.dominant_recipe_name }}</td>
-              <td><strong>{{ row.insumo_nombre }}</strong></td>
-              <td class="text-end">{{ row.required_qty|floatformat:2 }} {{ row.unidad }}</td>
-              <td class="text-end">{{ row.stock_actual|floatformat:2 }} {{ row.unidad }}</td>
-              <td class="text-end">{{ row.shortage|floatformat:2 }} {{ row.unidad }}</td>
-              <td>{% if row.master_missing %}{{ row.master_missing|join:", " }}{% elif row.missing_cost %}Costo pendiente{% else %}Listo{% endif %}</td>
-              <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </section>
-    {% endif %}
-    <div class="toolbar mb-2">
-      <span class="badge {% if reabasto_daily_control.stage_tone == 'danger' %}badge-rojo{% elif reabasto_daily_control.stage_tone == 'warning' %}badge-amarillo{% elif reabasto_daily_control.stage_tone == 'primary' %}badge-primary{% else %}badge-verde{% endif %}">
-        {{ reabasto_daily_control.stage_label }}
-      </span>
-      <a class="btn btn-secondary btn-sm" href="{{ reabasto_daily_control.next_action_url }}">{{ reabasto_daily_control.next_action_label }}</a>
-    </div>
-    <p class="muted">{{ reabasto_daily_control.stage_detail }}</p>
-    <div class="kpi-grid kpi-mini">
+  </section>
+
+  <section class="card reabasto-card">
+    <div class="card-header">Estado del día</div>
+    <div class="reabasto-status-grid">
       {% for item in reabasto_daily_control.control_cards %}
-      <article class="kpi-card">
+      <article class="reabasto-action-box">
         <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% elif item.tone == 'primary' %}is-primary{% else %}is-success{% endif %}">{{ item.count }}</div>
         <div class="kpi-label">{{ item.label }}</div>
         <div class="muted">{{ item.detail }}</div>
@@ -248,764 +269,133 @@
       </article>
       {% endfor %}
     </div>
-    {% if reabasto_daily_control.document_cards %}
-    <div class="table-responsive" style="margin-top: 12px;">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Documento</th>
-            <th>Total</th>
-            <th>Detalle</th>
-            <th>Acción</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for item in reabasto_daily_control.document_cards %}
-          <tr>
-            <td>{{ item.label }}</td>
-            <td>{{ item.count }}</td>
-            <td>{{ item.detail }}</td>
-            <td><a class="btn btn-secondary btn-sm" href="{{ item.action_url }}">{{ item.action_label }}</a></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% endif %}
-    {% if critical_path_rows or executive_radar_rows or reabasto_daily_control.document_stage_rows %}
-    <details class="erp-advanced-panel mt-3">
-      <summary class="erp-advanced-summary">
-        <span>Ver análisis de trazabilidad y control</span>
-        <span class="muted">Prioridades, cierres y seguimiento</span>
-      </summary>
-      <div class="erp-advanced-body">
-    {% endif %}
-    {% if critical_path_rows %}
-    <h4 style="margin-top: 0;">Prioridades de atención</h4>
-    <div class="table-responsive" style="margin-top: 12px;">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Prioridad</th>
-            <th>Tramo</th>
-            <th>Responsable</th>
-            <th>Estatus</th>
-            <th class="text-end">Bloqueos</th>
-            <th>Cierre</th>
-            <th>Depende de</th>
-            <th>Siguiente paso</th>
-            <th>Acción</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in critical_path_rows %}
-          <tr>
-            <td><strong>{{ row.rank }}</strong></td>
-            <td><strong>{{ row.title }}</strong><div class="muted">{{ row.detail }}</div></td>
-            <td>{{ row.owner }}</td>
-            <td>{{ row.status }}</td>
-            <td class="text-end">{{ row.count }}</td>
-            <td>{{ row.completion }}%</td>
-            <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
-            <td>{{ row.next_step }}</td>
-            <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% endif %}
-    {% if reabasto_daily_control.trunk_handoff_rows %}
-    {% if reabasto_daily_control.generation_gate.demand_gate %}
-    <section class="card mb-3" id="historico-demanda">
-      <div class="card-header">Control de demanda comercial</div>
+  </section>
+
+  <details class="erp-advanced-panel reabasto-details">
+    <summary class="erp-advanced-summary">
+      <span>Validaciones de generación</span>
+      <span class="muted">{{ reabasto_daily_control.generation_gate.overall_label }}</span>
+    </summary>
+    <div class="erp-advanced-body">
+      <div class="alert {% if reabasto_daily_control.generation_gate.overall_tone == 'success' %}alert-success{% elif reabasto_daily_control.generation_gate.overall_tone == 'primary' %}alert-soft{% else %}alert-danger{% endif %}">
+        <strong>{{ reabasto_daily_control.generation_gate.overall_label }}:</strong>
+        {{ reabasto_daily_control.generation_gate.overall_detail }}
+      </div>
       <div class="kpi-grid kpi-mini">
+        {% for item in reabasto_daily_control.generation_gate.checks %}
         <article class="kpi-card">
-          <div class="kpi-number {% if reabasto_daily_control.generation_gate.demand_gate.tone == 'danger' %}is-danger{% elif reabasto_daily_control.generation_gate.demand_gate.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ reabasto_daily_control.generation_gate.demand_gate.status }}</div>
-          <div class="kpi-label">Semáforo de demanda</div>
-          <div class="muted" style="margin-top:8px;">{{ reabasto_daily_control.generation_gate.demand_gate.detail }}</div>
+          <div class="kpi-number {% if item.is_ready %}is-success{% else %}is-danger{% endif %}">{% if item.is_ready %}OK{% else %}Bloqueado{% endif %}</div>
+          <div class="kpi-label">{{ item.label }}</div>
+          <div class="muted">{{ item.detail }}</div>
+          <a class="btn btn-secondary btn-sm" href="{{ item.action_url }}">{{ item.action_label }}</a>
         </article>
-        <article class="kpi-card">
-          <div class="kpi-number">{{ reabasto_daily_control.generation_gate.demand_gate.blockers }}</div>
-          <div class="kpi-label">Bloqueos comerciales</div>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-label">Siguiente paso</div>
-          <div class="muted" style="margin-top:8px;">{{ reabasto_daily_control.generation_gate.demand_gate.next_step }}</div>
-          <div style="margin-top:10px;">
-            <a class="btn btn-secondary" href="{{ reabasto_daily_control.generation_gate.demand_gate.action_url }}">{{ reabasto_daily_control.generation_gate.demand_gate.action_label }}</a>
-          </div>
-        </article>
+        {% endfor %}
       </div>
-    </section>
-    {% endif %}
-    {% if reabasto_daily_control.master_demand_rows %}
-    <div class="alert alert-danger" style="margin-bottom: 16px;">
-      <strong>Liberación operativa retenida:</strong>
-      El reabasto no debe generar plan ni compras mientras el maestro crítico por demanda siga abierto.
-      <a class="btn btn-secondary btn-sm" href="{{ reabasto_daily_control.generation_gate.master_demand_gate.action_url }}" style="margin-left:8px;">{{ reabasto_daily_control.generation_gate.master_demand_gate.action_label }}</a>
     </div>
-    {% endif %}
-    {% if reabasto_daily_control.trunk_handoff_summary %}
-    <section class="card mb-3">
-      <div class="card-header">Cierre troncal ERP consolidado</div>
+  </details>
+
+  <details class="erp-advanced-panel reabasto-details" id="cierre-sucursales">
+    <summary class="erp-advanced-summary">
+      <span>Cierres de sucursal</span>
+      <span class="muted">{{ resumen_cierre.en_tiempo }} en tiempo · {{ resumen_cierre.pendientes }} pendientes</span>
+    </summary>
+    <div class="erp-advanced-body">
       <div class="kpi-grid kpi-mini">
-        <article class="kpi-card">
-          <div class="kpi-label">Responsable troncal</div>
-          <div style="font-weight:700; margin-top:8px;">{{ reabasto_daily_control.trunk_handoff_summary.owner }}</div>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-number {% if reabasto_daily_control.trunk_handoff_summary.tone == 'danger' %}is-danger{% elif reabasto_daily_control.trunk_handoff_summary.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ reabasto_daily_control.trunk_handoff_summary.status }}</div>
-          <div class="kpi-label">Semáforo troncal</div>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-number">{{ reabasto_daily_control.trunk_handoff_summary.completion }}%</div>
-          <div class="kpi-label">Cierre promedio</div>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-number">{{ reabasto_daily_control.trunk_handoff_summary.blockers }}</div>
-          <div class="kpi-label">Bloqueos abiertos</div>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-label">Prioridad actual</div>
-          <div class="muted" style="margin-top:8px;">{{ reabasto_daily_control.trunk_handoff_summary.priority_label }}</div>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-label">Siguiente paso</div>
-          <div class="muted" style="margin-top:8px;">{{ reabasto_daily_control.trunk_handoff_summary.next_step }}</div>
-          <div style="margin-top:10px;">
-            <a class="btn btn-secondary" href="{{ reabasto_daily_control.trunk_handoff_summary.url }}">{{ reabasto_daily_control.trunk_handoff_summary.cta }}</a>
-          </div>
-        </article>
+        <article class="kpi-card"><div class="kpi-number">{{ resumen_cierre.total }}</div><div class="kpi-label">Sucursales</div></article>
+        <article class="kpi-card"><div class="kpi-number is-success">{{ resumen_cierre.en_tiempo }}</div><div class="kpi-label">En tiempo</div></article>
+        <article class="kpi-card"><div class="kpi-number is-warning">{{ resumen_cierre.tardias }}</div><div class="kpi-label">Tardías</div></article>
+        <article class="kpi-card"><div class="kpi-number is-danger">{{ resumen_cierre.pendientes }}</div><div class="kpi-label">Sin cierre</div></article>
       </div>
-    </section>
-    {% endif %}
-    <h4 style="margin-top: 16px;">Dependencias del flujo</h4>
-    <p class="muted">
-      Expone cómo el reabasto del día baja al flujo troncal del ERP: cierres/plan, compras documentales e inventario/reabasto CEDIS.
-    </p>
-    <div class="table-responsive" style="margin-top: 12px;">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Tramo ERP</th>
-            <th>Responsable</th>
-            <th>Estatus</th>
-            <th class="text-end">Bloqueos</th>
-            <th>Cierre</th>
-            <th>Depende de</th>
-            <th>Criterio de salida</th>
-            <th>Siguiente paso</th>
-            <th>Acción</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in reabasto_daily_control.trunk_handoff_rows %}
-          <tr>
-            <td><strong>{{ row.label }}</strong><div class="muted">{{ row.detail }}</div></td>
-            <td>{{ row.owner }}</td>
-            <td>{{ row.status }}</td>
-            <td class="text-end">{{ row.blockers }}</td>
-            <td>{{ row.completion }}%</td>
-            <td>{{ row.depends_on }}</td>
-            <td>{{ row.exit_criteria }}</td>
-            <td>{{ row.next_step }}</td>
-            <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% endif %}
-    {% if executive_radar_rows %}
-    <h4 style="margin-top: 16px;">Resumen de seguimiento</h4>
-    <div class="table-responsive" style="margin-top: 12px;">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Tramo</th>
-            <th>Responsable</th>
-            <th>Bloqueo dominante</th>
-            <th>Depende de</th>
-            <th>Cierre</th>
-            <th>Siguiente paso</th>
-            <th>Acción</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in executive_radar_rows %}
-          <tr>
-            <td><strong>{{ row.phase }}</strong><div class="muted">{{ row.status }}</div></td>
-            <td>{{ row.owner }}</td>
-            <td>{{ row.dominant_blocker }}</td>
-            <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
-            <td>{{ row.progress_pct }}%</td>
-            <td>{{ row.next_step }}</td>
-            <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% endif %}
-    {% if reabasto_daily_control.document_stage_rows %}
-    <h4 style="margin-top: 16px;">Control por frente</h4>
-    <p class="muted">
-      Vista resumida del reabasto por frente documental. Muestra responsable, bloqueos abiertos, porcentaje de cierre y siguiente paso operativo.
-    </p>
-    <div class="table-responsive" style="margin-top: 12px;">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Frente</th>
-            <th>Responsable</th>
-            <th class="text-end">Bloqueos</th>
-            <th>Cierre</th>
-            <th>Detalle</th>
-            <th>Siguiente paso</th>
-            <th>Acción</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in reabasto_daily_control.document_stage_rows %}
-          <tr>
-            <td><strong>{{ row.label }}</strong></td>
-            <td>{{ row.owner|default:"Operación ERP" }}</td>
-            <td class="text-end">{{ row.open_count }}</td>
-            <td>
-              <div class="erp-progress-track">
-                <div class="erp-progress-fill {% if row.semaphore_tone == 'danger' %}is-danger{% elif row.semaphore_tone == 'warning' %}is-warning{% elif row.semaphore_tone == 'primary' %}is-primary{% elif row.semaphore_tone == 'success' %}is-success{% endif %}" style="width: {{ row.progress_pct }}%;"></div>
-              </div>
-              <div class="muted mt-1">{{ row.progress_pct }}%</div>
-            </td>
-            <td>{{ row.detail }}</td>
-            <td>{{ row.next_step|default:"Seguir flujo documental" }}</td>
-            <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% endif %}
-    {% if critical_path_rows or executive_radar_rows or reabasto_daily_control.document_stage_rows %}
-      </div>
-    </details>
-    {% endif %}
-    <div class="table-responsive" style="margin-top: 12px;">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Etapa</th>
-            <th>Responsable</th>
-            <th>Cierre</th>
-            <th>Abiertos</th>
-            <th>Cerrados</th>
-            <th>Detalle</th>
-            <th>Siguiente paso</th>
-            <th>Acción</th>
-            <th>Foco</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in reabasto_daily_control.document_stage_rows %}
-          <tr>
-            <td>{{ row.label }}</td>
-            <td>{{ row.owner|default:"Operación ERP" }}</td>
-            <td>
-              <div class="erp-progress-track">
-                <div class="erp-progress-fill {% if row.semaphore_tone == 'danger' %}is-danger{% elif row.semaphore_tone == 'warning' %}is-warning{% elif row.semaphore_tone == 'primary' %}is-primary{% elif row.semaphore_tone == 'success' %}is-success{% endif %}" style="width: {{ row.progress_pct }}%;"></div>
-              </div>
-              <div class="muted mt-1">Cierre {{ row.progress_pct }}% · {{ row.closed_count }}/{{ row.total_count|default:0 }}</div>
-            </td>
-            <td>{{ row.open_count }}</td>
-            <td>{{ row.closed_count }}</td>
-            <td>{{ row.detail }}</td>
-            <td>
-              <strong>{{ row.next_step|default:"Seguir flujo documental" }}</strong>
-              {% if row.action_detail %}
-              <div class="muted mt-1">{{ row.action_detail }}</div>
-              {% endif %}
-            </td>
-            <td>
-              <a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a>
-              {% if row.edit_url %}
-              <a class="btn btn-secondary btn-sm" href="{{ row.edit_url }}">Editar artículo</a>
-              {% endif %}
-            </td>
-            <td><a class="btn btn-secondary btn-sm" href="{{ row.focus_url }}">Enfocar</a></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% if reabasto_daily_control.pipeline_steps %}
-    <div class="kpi-grid kpi-mini" style="margin-top: 12px;">
-      {% for step in reabasto_daily_control.pipeline_steps %}
-      <article class="kpi-card">
-        <div class="kpi-number {% if step.semaphore_tone == 'danger' %}is-danger{% elif step.semaphore_tone == 'warning' %}is-warning{% elif step.semaphore_tone == 'primary' %}is-primary{% elif step.semaphore_tone == 'success' %}is-success{% endif %}">
-          {{ step.semaphore_label }}
-        </div>
-        <div class="kpi-label">{{ step.label }}</div>
-        <div class="muted">Responsable {{ step.owner|default:"Operación ERP" }}</div>
-        <div class="muted">Docs {{ step.count }} · Abiertos {{ step.open }} · Cerrados {{ step.closed }}</div>
-        <div class="erp-progress-track" style="margin-top: 8px;">
-          <div class="erp-progress-fill {% if step.semaphore_tone == 'danger' %}is-danger{% elif step.semaphore_tone == 'warning' %}is-warning{% elif step.semaphore_tone == 'primary' %}is-primary{% elif step.semaphore_tone == 'success' %}is-success{% endif %}" style="width: {{ step.progress_pct }}%;"></div>
-        </div>
-        <div class="muted mt-1">Cierre {{ step.progress_pct }}%</div>
-        <div class="muted">{{ step.detail }}</div>
-        {% if step.action_detail %}
-        <div class="muted mt-1">{{ step.action_detail }}</div>
-        {% endif %}
-        <div class="muted mt-1"><strong>Siguiente paso:</strong> {{ step.next_step|default:"Seguir etapa" }}</div>
-        <a class="btn btn-secondary btn-sm" href="{{ step.action_url }}">{{ step.action_label }}</a>
-      </article>
-      {% endfor %}
-    </div>
-    {% endif %}
-    {% if reabasto_daily_control.purchase_gate %}
-    <div class="alert {% if reabasto_daily_control.purchase_gate.tone == 'success' %}alert-success{% elif reabasto_daily_control.purchase_gate.tone == 'primary' %}alert-soft{% else %}alert-danger{% endif %}" style="margin-top: 12px;">
-      <strong>Semáforo documental:</strong>
-      {{ reabasto_daily_control.purchase_gate.label }}.
-      {{ reabasto_daily_control.purchase_gate.detail }}
-      <a class="btn btn-secondary btn-sm" href="{{ reabasto_daily_control.purchase_gate.cta_url }}" style="margin-left: 8px;">{{ reabasto_daily_control.purchase_gate.cta_label }}</a>
-    </div>
-    {% endif %}
-    {% if reabasto_daily_control.stage_focus %}
-    <div class="alert {% if reabasto_daily_control.stage_focus.tone == 'success' %}alert-success{% elif reabasto_daily_control.stage_focus.tone == 'primary' %}alert-soft{% elif reabasto_daily_control.stage_focus.tone == 'warning' %}alert-warning{% else %}alert-danger{% endif %}" style="margin-top: 12px;">
-      <strong>Bloqueo prioritario por etapa:</strong>
-      {{ reabasto_daily_control.stage_focus.label }}.
-      {{ reabasto_daily_control.stage_focus.summary }}
-      <a class="btn btn-secondary btn-sm" href="{{ reabasto_daily_control.stage_focus.action_url }}" style="margin-left: 8px;">{{ reabasto_daily_control.stage_focus.action_label }}</a>
-    </div>
-    <div class="kpi-grid kpi-mini" style="margin-top: 12px;">
-      <article class="kpi-card">
-        <div class="kpi-number {% if reabasto_daily_control.stage_focus.blocked_count > 0 %}is-danger{% elif reabasto_daily_control.stage_focus.open_count > 0 %}is-warning{% else %}is-success{% endif %}">{{ reabasto_daily_control.stage_focus.blocked_count }}</div>
-        <div class="kpi-label">Bloqueos etapa activa</div>
-        <div class="muted">{{ reabasto_daily_control.stage_focus.label }}</div>
-      </article>
-      <article class="kpi-card">
-        <div class="kpi-number {% if reabasto_daily_control.stage_focus.open_count > 0 %}is-warning{% else %}is-success{% endif %}">{{ reabasto_daily_control.stage_focus.open_count }}</div>
-        <div class="kpi-label">Abiertos en etapa</div>
-        <div class="muted">{{ reabasto_daily_control.stage_focus.detail }}</div>
-      </article>
-      <article class="kpi-card">
-        <div class="kpi-number {% if reabasto_daily_control.stage_focus.closed_count > 0 %}is-success{% else %}is-primary{% endif %}">{{ reabasto_daily_control.stage_focus.closed_count }}</div>
-        <div class="kpi-label">Cerrados en etapa</div>
-        <div class="muted">{{ reabasto_daily_control.stage_focus.label }}</div>
-      </article>
-    </div>
-    {% if reabasto_daily_control.stage_focus.blocker_rows %}
-    <div class="table-responsive" style="margin-top: 12px;">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Documento</th>
-            <th>Folio</th>
-            <th>Estatus</th>
-            <th>Detalle</th>
-            <th>Acción</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in reabasto_daily_control.stage_focus.blocker_rows %}
-          <tr>
-            <td>{{ row.scope }}</td>
-            <td>{{ row.folio }}</td>
-            <td>{{ row.status }}</td>
-            <td>{{ row.detail }}</td>
-            <td>
-              <a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a>
-              {% if row.edit_url %}
-              <a class="btn btn-secondary btn-sm" href="{{ row.edit_url }}">Editar artículo</a>
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% endif %}
-    {% endif %}
-    {% if reabasto_daily_control.closure_checks %}
-    <h4 style="margin-top: 16px;">Cierre del plan</h4>
-    <div class="kpi-grid kpi-mini" style="margin-top: 12px;">
-      {% for item in reabasto_daily_control.closure_checks %}
-      <article class="kpi-card {% if reabasto_daily_control.closure_focus and reabasto_daily_control.closure_focus.key == item.key %}is-active{% endif %}">
-        <div class="kpi-number {% if item.is_ready %}is-success{% else %}is-danger{% endif %}">{% if item.is_ready %}OK{% else %}Bloqueado{% endif %}</div>
-        <div class="kpi-label">{{ item.label }}</div>
-        <div class="muted">{{ item.detail }}</div>
-        <div class="inline-actions">
-          <a class="btn btn-secondary btn-sm" href="{{ item.action_url }}">{{ item.action_label }}</a>
-          <a class="btn btn-secondary btn-sm" href="{{ item.focus_url }}">Enfocar</a>
-        </div>
-      </article>
-      {% endfor %}
-    </div>
-    {% endif %}
-    {% if reabasto_daily_control.closure_focus %}
-    <div class="alert {% if reabasto_daily_control.closure_focus.tone == 'success' %}alert-success{% elif reabasto_daily_control.closure_focus.tone == 'warning' %}alert-warning{% else %}alert-danger{% endif %}" style="margin-top: 12px;">
-      <strong>Cierre prioritario:</strong>
-      {{ reabasto_daily_control.closure_focus.label }}.
-      {{ reabasto_daily_control.closure_focus.summary }}
-      <a class="btn btn-secondary btn-sm" href="{{ reabasto_daily_control.closure_focus.action_url }}" style="margin-left: 8px;">{{ reabasto_daily_control.closure_focus.action_label }}</a>
-      <div class="muted" style="margin-top: 6px;">{{ reabasto_daily_control.closure_focus.action_detail }}</div>
-    </div>
-    {% endif %}
-    {% if reabasto_daily_control.closure_focus_rows %}
-    <div class="table-responsive" style="margin-top: 12px;">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Ámbito</th>
-            <th>Folio</th>
-            <th>Estatus</th>
-            <th>Detalle</th>
-            <th>Acción</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in reabasto_daily_control.closure_focus_rows %}
-          <tr>
-            <td>{{ row.scope }}</td>
-            <td>{{ row.folio }}</td>
-            <td>{{ row.status }}</td>
-            <td>{{ row.detail }}</td>
-            <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% endif %}
-    {% if reabasto_daily_control.handoff_checks %}
-    <h4 style="margin-top: 16px;">Entregas entre etapas</h4>
-    <div class="kpi-grid kpi-mini" style="margin-top: 12px;">
-      {% for item in reabasto_daily_control.handoff_checks %}
-      <article class="kpi-card {% if reabasto_daily_control.handoff_focus and reabasto_daily_control.handoff_focus.key == item.key %}is-active{% endif %}">
-        <div class="kpi-number {% if item.is_ready %}is-success{% else %}is-danger{% endif %}">{% if item.is_ready %}OK{% else %}Bloqueado{% endif %}</div>
-        <div class="kpi-label">{{ item.label }}</div>
-        <div class="muted">{{ item.detail }}</div>
-        <div class="inline-actions">
-          <a class="btn btn-secondary btn-sm" href="{{ item.action_url }}">{{ item.action_label }}</a>
-          <a class="btn btn-secondary btn-sm" href="{{ item.focus_url }}">Enfocar</a>
-        </div>
-      </article>
-      {% endfor %}
-    </div>
-    {% endif %}
-    {% if reabasto_daily_control.handoff_focus %}
-    <div class="alert {% if reabasto_daily_control.handoff_focus.tone == 'success' %}alert-success{% elif reabasto_daily_control.handoff_focus.tone == 'warning' %}alert-warning{% else %}alert-danger{% endif %}" style="margin-top: 12px;">
-      <strong>Entrega prioritaria:</strong>
-      {{ reabasto_daily_control.handoff_focus.label }}.
-      {{ reabasto_daily_control.handoff_focus.summary }}
-      <a class="btn btn-secondary btn-sm" href="{{ reabasto_daily_control.handoff_focus.action_url }}" style="margin-left: 8px;">{{ reabasto_daily_control.handoff_focus.action_label }}</a>
-      <div class="muted" style="margin-top: 6px;">{{ reabasto_daily_control.handoff_focus.action_detail }}</div>
-    </div>
-    {% endif %}
-    {% if reabasto_daily_control.handoff_focus_rows %}
-    <div class="table-responsive" style="margin-top: 12px;">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Ámbito</th>
-            <th>Folio</th>
-            <th>Estatus</th>
-            <th>Detalle</th>
-            <th>Acción</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in reabasto_daily_control.handoff_focus_rows %}
-          <tr>
-            <td>{{ row.scope }}</td>
-            <td>{{ row.folio }}</td>
-            <td>{{ row.status }}</td>
-            <td>{{ row.detail }}</td>
-            <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% endif %}
-    {% if reabasto_daily_control.document_blocker_rows %}
-    <div class="table-responsive" style="margin-top: 12px;">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Documento</th>
-            <th>Folio</th>
-            <th>Estatus</th>
-            <th>Detalle</th>
-            <th>Acción</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in reabasto_daily_control.document_blocker_rows %}
-          <tr>
-            <td>{{ row.scope }}</td>
-            <td>{{ row.folio }}</td>
-            <td>{{ row.status }}</td>
-            <td>{{ row.detail }}</td>
-            <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% endif %}
-    {% if reabasto_daily_control.master_demand_rows %}
-    <h4 style="margin-top: 16px;">Demanda crítica bloqueada por maestro</h4>
-    <div class="table-responsive" style="margin-top: 12px;">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Artículo</th>
-            <th>Unidades observadas</th>
-            <th>Requerido en plan</th>
-            <th>Faltante maestro</th>
-            <th>Acción</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in reabasto_daily_control.master_demand_rows %}
-          <tr>
-            <td>{{ row.insumo_nombre }}</td>
-            <td>{{ row.historico_units|floatformat:0 }}</td>
-            <td>{{ row.required_qty|floatformat:2 }}</td>
-            <td>{{ row.missing|join:", " }}</td>
-            <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">Cerrar artículo</a></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% endif %}
-  </div>
-  <div class="card" id="bloqueos-abastecimiento">
-    <div class="card-header">Bloqueos enterprise para abastecimiento</div>
-    <p class="muted">Productos finales que hoy todavía no están listos para reabasto CEDIS por receta, empaque, inventario o maestro.</p>
-    <div class="kpi-grid kpi-mini">
-      {% for item in reabasto_enterprise_board.blocker_cards %}
-      <article class="kpi-card {% if item.is_active %}is-active{% endif %}">
-        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% elif item.tone == 'primary' %}is-primary{% else %}is-success{% endif %}">{{ item.count }}</div>
-        <div class="kpi-label">{{ item.label }}</div>
-        <div class="inline-actions">
-          <a class="btn btn-secondary btn-sm" href="{{ item.focus_url }}">Enfocar</a>
-        </div>
-      </article>
-      {% endfor %}
-    </div>
-    <p class="muted mb-0" style="margin-top: 10px;">
-      Bloqueadas: <strong>{{ reabasto_enterprise_board.blocked_total }}</strong>
-      · Listas: <strong>{{ reabasto_enterprise_board.ready_total }}</strong>
-    </p>
-    {% if reabasto_enterprise_board.focus %}
-    <div class="alert {% if reabasto_enterprise_board.focus.tone == 'danger' %}alert-danger{% else %}alert-warning{% endif %}" style="margin-top: 12px;">
-      <strong>Bloqueo operativo enfocado:</strong>
-      {{ reabasto_enterprise_board.focus.label }}.
-      {{ reabasto_enterprise_board.focus.summary }}
-      <a class="btn btn-secondary btn-sm" href="{{ reabasto_enterprise_board.focus.action_url }}" style="margin-left: 8px;">{{ reabasto_enterprise_board.focus.action_label }}</a>
-    </div>
-    {% endif %}
-    {% if reabasto_enterprise_board.selected_focus_key and reabasto_enterprise_board.selected_focus_key != "auto" %}
-    <div class="alert alert-info" style="margin-top: 12px;">
-      <strong>Vista enfocada:</strong>
-      bloqueos operativos del grupo seleccionado.
-      <a class="btn btn-secondary btn-sm" href="{% url 'recetas:reabasto_cedis' %}?fecha={{ fecha_operacion|date:'Y-m-d' }}" style="margin-left: 8px;">Quitar foco</a>
-    </div>
-    {% endif %}
-    {% if reabasto_enterprise_board.detail_rows %}
-    <div class="table-responsive" style="margin-top: 12px;">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Producto</th>
-            <th>Bloqueo</th>
-            <th>Detalle</th>
-            <th>Acción</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in reabasto_enterprise_board.detail_rows %}
-          <tr>
-            <td>{{ row.receta_nombre }}</td>
-            <td>
-              {% if row.blocker_label == 'Sin inventario CEDIS' or row.blocker_label == 'Receta por validar' %}
-              <span class="badge-rojo">{{ row.blocker_label }}</span>
-              {% else %}
-              <span class="badge-amarillo">{{ row.blocker_label }}</span>
-              {% endif %}
-            </td>
-            <td>{{ row.detail }}</td>
-            <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% endif %}
-    {% if reabasto_daily_control.master_focus %}
-    <div class="alert {% if reabasto_daily_control.master_focus.tone == 'success' %}alert-success{% elif reabasto_daily_control.master_focus.tone == 'warning' %}alert-warning{% else %}alert-danger{% endif %}" style="margin-top: 12px;">
-      <strong>Bloqueo maestro prioritario:</strong>
-      {{ reabasto_daily_control.master_focus.label }}.
-      {{ reabasto_daily_control.master_focus.summary }}
-      <a class="btn btn-secondary btn-sm" href="{{ reabasto_daily_control.master_focus.action_url }}" style="margin-left: 8px;">{{ reabasto_daily_control.master_focus.action_label }}</a>
-      {% if reabasto_daily_control.master_focus.edit_url %}
-      <a class="btn btn-secondary btn-sm" href="{{ reabasto_daily_control.master_focus.edit_url }}" style="margin-left: 8px;">Editar artículo</a>
+      {% if resumen_cierre.pendientes_codigos %}
+      <div class="alert alert-danger">Sucursales sin cierre operativo: {{ resumen_cierre.pendientes_codigos|join:", " }}.</div>
       {% endif %}
-      <div class="muted" style="margin-top: 6px;">{{ reabasto_daily_control.master_focus.action_detail }}</div>
+      <div class="table-responsive">
+        <table class="table reabasto-compact-table">
+          <thead>
+            <tr>
+              <th>Sucursal</th>
+              <th>Estado</th>
+              <th>Actualización</th>
+              <th>Semáforo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in resumen_cierre.detalle %}
+            <tr>
+              <td>{{ row.sucursal.codigo }} - {{ row.sucursal.nombre }}</td>
+              <td>{{ row.estado_label }}</td>
+              <td>{% if row.actualizado_en %}{{ row.actualizado_en|date:"d/m/Y H:i" }}{% else %}-{% endif %}</td>
+              <td>
+                {% if row.semaforo == 'verde' %}
+                  <span class="badge-verde">OK</span>
+                {% elif row.semaforo == 'amarillo' %}
+                  <span class="badge-amarillo">Atención</span>
+                {% else %}
+                  <span class="badge-rojo">Bloqueado</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
-    {% endif %}
-    {% if reabasto_daily_control.selected_master_focus_key and reabasto_daily_control.selected_master_focus_key != "auto" %}
-    <div class="alert alert-info" style="margin-top: 12px;">
-      <strong>Vista enfocada:</strong>
-      bloqueos del maestro para la clase seleccionada.
-      <a class="btn btn-secondary btn-sm" href="{% url 'recetas:reabasto_cedis' %}?fecha={{ fecha_operacion|date:'Y-m-d' }}" style="margin-left: 8px;">Quitar foco</a>
+  </details>
+
+  <details class="erp-advanced-panel reabasto-details" id="bloqueos-abastecimiento">
+    <summary class="erp-advanced-summary">
+      <span>Bloqueos de abastecimiento</span>
+      <span class="muted">{{ reabasto_enterprise_board.blocked_total }} bloqueadas · {{ reabasto_enterprise_board.ready_total }} listas</span>
+    </summary>
+    <div class="erp-advanced-body">
+      <div class="kpi-grid kpi-mini">
+        {% for item in reabasto_enterprise_board.blocker_cards %}
+        <article class="kpi-card {% if item.is_active %}is-active{% endif %}">
+          <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% elif item.tone == 'primary' %}is-primary{% else %}is-success{% endif %}">{{ item.count }}</div>
+          <div class="kpi-label">{{ item.label }}</div>
+          <a class="btn btn-secondary btn-sm" href="{{ item.focus_url }}">Enfocar</a>
+        </article>
+        {% endfor %}
+      </div>
+
+      {% if reabasto_enterprise_board.focus %}
+      <div class="alert {% if reabasto_enterprise_board.focus.tone == 'danger' %}alert-danger{% else %}alert-warning{% endif %}">
+        <strong>{{ reabasto_enterprise_board.focus.label }}:</strong>
+        {{ reabasto_enterprise_board.focus.summary }}
+        <a class="btn btn-secondary btn-sm" href="{{ reabasto_enterprise_board.focus.action_url }}">{{ reabasto_enterprise_board.focus.action_label }}</a>
+      </div>
+      {% endif %}
+
+      {% if reabasto_enterprise_board.detail_rows %}
+      <div class="table-responsive">
+        <table class="table reabasto-compact-table">
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th>Bloqueo</th>
+              <th>Detalle</th>
+              <th>Acción</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in reabasto_enterprise_board.detail_rows %}
+            <tr>
+              <td>{{ row.receta_nombre }}</td>
+              <td>{{ row.blocker_label }}</td>
+              <td>{{ row.detail }}</td>
+              <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
     </div>
-    {% endif %}
-    {% if reabasto_daily_control.master_summary %}
-    <div class="kpi-grid kpi-mini" style="margin-top: 12px;">
-      <article class="kpi-card kpi-card-summary">
-        <div class="kpi-number {% if reabasto_daily_control.master_summary.tone == 'success' %}is-success{% elif reabasto_daily_control.master_summary.tone == 'warning' %}is-warning{% else %}is-danger{% endif %}">{{ reabasto_daily_control.master_summary.progress_pct }}%</div>
-        <div class="kpi-label">{{ reabasto_daily_control.master_summary.label }}</div>
-        <div class="muted mt-2">Listos {{ reabasto_daily_control.master_summary.ready_count }} · bloqueados {{ reabasto_daily_control.master_summary.blocked_count }}</div>
-        <div class="muted mt-2">{{ reabasto_daily_control.master_summary.detail }}</div>
-      </article>
-    </div>
-    {% endif %}
-    {% if reabasto_daily_control.master_blocker_class_cards %}
-    <h4 style="margin-top: 16px;">Bloqueos del catálogo ERP</h4>
-    <div class="kpi-grid kpi-mini" style="margin-top: 12px;">
-      {% for card in reabasto_daily_control.master_blocker_class_cards %}
-      <article class="kpi-card {% if card.is_active %}is-active{% endif %}">
-        <div class="kpi-number {% if card.class_key == 'EMPAQUE' %}is-warning{% elif card.class_key == 'INTERNO' %}is-primary{% else %}is-danger{% endif %}">{{ card.count }}</div>
-        <div class="kpi-label">{{ card.class_label }}</div>
-        <div class="muted">Faltante dominante: {{ card.dominant_label }} ({{ card.dominant_count }})</div>
-        {% if card.action_detail %}
-        <div class="muted" style="margin-top: 6px;">{{ card.action_detail }}</div>
-        {% endif %}
-        <div class="inline-actions" style="margin-top: 8px;">
-          <a class="btn btn-secondary btn-sm" href="{{ card.action_url }}">{{ card.action_label }}</a>
-          <a class="btn btn-secondary btn-sm" href="{{ card.focus_url }}">Enfocar</a>
-        </div>
-      </article>
-      {% endfor %}
-    </div>
-    {% endif %}
-    {% if reabasto_daily_control.master_focus_rows %}
-    <div class="table-responsive" style="margin-top: 12px;">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Clase</th>
-            <th>Artículo</th>
-            <th>Faltante</th>
-            <th>Impacto</th>
-            <th>Acción</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in reabasto_daily_control.master_focus_rows %}
-          <tr>
-            <td>{{ row.class_label }}</td>
-            <td>{{ row.insumo_nombre }}</td>
-            <td><span class="badge badge-amarillo">{{ row.missing_field }}</span></td>
-            <td>{{ row.detail }}</td>
-            <td>
-              <a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a>
-              {% if row.edit_url %}
-              <a class="btn btn-secondary btn-sm" href="{{ row.edit_url }}">Editar artículo</a>
-              {% endif %}
-            </td>
-          </tr>
-          {% if row.action_detail %}
-          <tr class="table-row-detail">
-            <td colspan="5">{{ row.action_detail }}</td>
-          </tr>
-          {% endif %}
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% endif %}
-  </div>
-  {% endif %}
-  {% if not ui_access.branch_capture_only %}
-  <div class="card" id="cierre-sucursales">
-    <div class="card-header">Control de Cierre de Sucursales (arranque CEDIS 8:00 AM)</div>
-    <p class="muted">
-      Para producir el <strong>{{ fecha_operacion|date:"d/m/Y" }}</strong>, la carga debe quedar enviada el
-      <strong>{{ resumen_cierre.fecha_corte|date:"d/m/Y" }}</strong> al cierre de sucursal.
-    </p>
-    <div class="kpi-mini">
-      <article class="kpi-card">
-        <div class="kpi-number">{{ resumen_cierre.total }}</div>
-        <div class="kpi-label">Sucursales activas</div>
-      </article>
-      <article class="kpi-card">
-        <div class="kpi-number is-success">{{ resumen_cierre.en_tiempo }}</div>
-        <div class="kpi-label">Enviadas en tiempo</div>
-      </article>
-      <article class="kpi-card">
-        <div class="kpi-number is-warning">{{ resumen_cierre.tardias }}</div>
-        <div class="kpi-label">Enviadas tardías</div>
-      </article>
-      <article class="kpi-card">
-        <div class="kpi-number is-warning">{{ resumen_cierre.borrador }}</div>
-        <div class="kpi-label">En borrador</div>
-      </article>
-      <article class="kpi-card">
-        <div class="kpi-number is-danger">{{ resumen_cierre.pendientes }}</div>
-        <div class="kpi-label">Sin cierre</div>
-      </article>
-      <article class="kpi-card">
-        <div class="kpi-number {% if resumen_cierre.listo_8am %}is-success{% else %}is-danger{% endif %}">
-          {% if resumen_cierre.listo_8am %}LISTO{% else %}RIESGO{% endif %}
-        </div>
-        <div class="kpi-label">Estado 8:00 AM</div>
-      </article>
-    </div>
-    {% if resumen_cierre.pendientes_codigos %}
-    <div class="alert alert-danger">
-      Sucursales sin cierre operativo: {{ resumen_cierre.pendientes_codigos|join:", " }}.
-    </div>
-    {% endif %}
-    <div class="table-responsive">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Sucursal</th>
-            <th>Estado</th>
-            <th>Última actualización</th>
-            <th>Semáforo</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in resumen_cierre.detalle %}
-          <tr>
-            <td>{{ row.sucursal.codigo }} - {{ row.sucursal.nombre }}</td>
-            <td>{{ row.estado_label }}</td>
-            <td>{% if row.actualizado_en %}{{ row.actualizado_en|date:"d/m/Y H:i" }}{% else %}-{% endif %}</td>
-            <td>
-              {% if row.semaforo == 'verde' %}
-                <span class="badge-verde">OK</span>
-              {% elif row.semaforo == 'amarillo' %}
-                <span class="badge-amarillo">Atención</span>
-              {% else %}
-                <span class="badge-rojo">Bloqueado</span>
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
+  </details>
   {% endif %}
 
   {% if sucursal %}
-  <div class="card">
+  <section class="card reabasto-card" id="captura-sucursal">
     <div class="card-header">
       {% if show_simple_capture %}
         Cierre diario de sucursal · {{ sucursal.codigo }}
@@ -1029,12 +419,8 @@
       {% csrf_token %}
       <input type="hidden" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}">
       <input type="hidden" name="sucursal_id" value="{{ sucursal.id }}">
-      <p class="muted mb-2">
-        Captura simple para sucursal: llena <strong>stock final de cierre</strong>. El sistema calcula automáticamente la
-        <strong>solicitud requerida</strong> para reabastecer stock mínimo.
-      </p>
       <div class="table-responsive">
-        <table class="table">
+        <table class="table reabasto-compact-table">
           <thead>
             <tr>
               <th>Producto</th>
@@ -1051,29 +437,15 @@
                 {{ row.receta.nombre }}
                 <input type="hidden" name="row_receta_id" value="{{ row.receta.id }}">
               </td>
+              <td><span class="js-stock-min" data-receta="{{ row.receta.id }}">{{ row.policy.stock_minimo|floatformat:2 }}</span></td>
               <td>
-                <span class="js-stock-min" data-receta="{{ row.receta.id }}">{{ row.policy.stock_minimo|floatformat:2 }}</span>
+                <input class="form-control js-stock-final" type="number" step="0.001" min="0" name="stock_reportado_{{ row.receta.id }}" value="{{ row.stock_reportado|floatformat:3 }}" data-receta="{{ row.receta.id }}">
               </td>
-              <td>
-                <input
-                  class="form-control js-stock-final"
-                  type="number"
-                  step="0.001"
-                  min="0"
-                  name="stock_reportado_{{ row.receta.id }}"
-                  value="{{ row.stock_reportado|floatformat:3 }}"
-                  data-receta="{{ row.receta.id }}"
-                >
-              </td>
-              <td>
-                <span class="badge badge-primary js-sugerido" data-receta="{{ row.receta.id }}">{{ row.sugerido|floatformat:2 }}</span>
-              </td>
-              <td>
-                <input class="form-control" type="text" name="observaciones_{{ row.receta.id }}" maxlength="255" value="{{ row.observaciones }}">
-              </td>
+              <td><span class="badge badge-primary js-sugerido" data-receta="{{ row.receta.id }}">{{ row.sugerido|floatformat:2 }}</span></td>
+              <td><input class="form-control" type="text" name="observaciones_{{ row.receta.id }}" maxlength="255" value="{{ row.observaciones }}"></td>
             </tr>
             {% empty %}
-            <tr><td colspan="5">No hay políticas cargadas para esta sucursal. Contacta a Compras/Administración.</td></tr>
+            <tr><td colspan="5">No hay políticas cargadas para esta sucursal.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -1101,308 +473,96 @@
           {% endfor %}
         </select>
       </div>
-      <div class="form-group">
-        <label class="form-label">Stock reportado</label>
-        <input class="form-control" type="number" step="0.001" min="0" name="stock_reportado" value="0">
-      </div>
-      <div class="form-group">
-        <label class="form-label">En tránsito</label>
-        <input class="form-control" type="number" step="0.001" min="0" name="en_transito" value="0">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Consumo proyectado</label>
-        <input class="form-control" type="number" step="0.001" min="0" name="consumo_proyectado" value="0">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Solicitado (vacío = sugerido)</label>
-        <input class="form-control" type="number" step="0.001" min="0" name="solicitado" placeholder="Auto sugerido">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Justificación</label>
-        <input class="form-control" type="text" name="justificacion" maxlength="255">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Observaciones</label>
-        <input class="form-control" type="text" name="observaciones" maxlength="255">
-      </div>
-      <div class="form-group" style="align-self:end;">
-        <button class="btn btn-primary" type="submit">Agregar renglón</button>
-      </div>
-    </form>
-
-    <form class="form-grid-auto mb-2" method="post" action="{% url 'recetas:reabasto_cedis_importar' %}" enctype="multipart/form-data">
-      {% csrf_token %}
-      <input type="hidden" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}">
-      <input type="hidden" name="sucursal_id" value="{{ sucursal.id }}">
-      <div class="form-group">
-        <label class="form-label">Carga masiva de solicitud (CSV/XLSX)</label>
-        <input class="form-control" type="file" name="archivo" accept=".csv,.xlsx,.xlsm" required>
-      </div>
-      <div class="form-group" style="align-self:end;">
-        <button class="btn btn-secondary" type="submit">Importar archivo</button>
-      </div>
-    </form>
-    <p class="muted mb-2">Columnas sugeridas: <code>receta</code>, <code>codigo_comercial</code>, <code>solicitado</code>, <code>stock_reportado</code>, <code>en_transito</code>, <code>consumo_proyectado</code>, <code>justificacion</code>, <code>observaciones</code>.</p>
-
-    {% if solicitud %}
-    <form class="form-grid-auto mb-2" method="post" action="{% url 'recetas:reabasto_cedis_estado_guardar' solicitud.id %}">
-      {% csrf_token %}
-      <div class="form-group">
-        <label class="form-label">Estado solicitud</label>
-        <select class="form-select" name="estado">
-          <option value="BORRADOR" {% if solicitud.estado == 'BORRADOR' %}selected{% endif %}>Borrador</option>
-          <option value="ENVIADA" {% if solicitud.estado == 'ENVIADA' %}selected{% endif %}>Enviada a CEDIS</option>
-          <option value="ATENDIDA" {% if solicitud.estado == 'ATENDIDA' %}selected{% endif %}>Atendida por CEDIS</option>
-          <option value="CANCELADA" {% if solicitud.estado == 'CANCELADA' %}selected{% endif %}>Cancelada</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Notas</label>
-        <input class="form-control" type="text" name="notas" value="{{ solicitud.notas }}">
-      </div>
-      <div class="form-group" style="align-self:end;">
-        <button class="btn btn-primary" type="submit">Guardar estado</button>
-      </div>
+      <div class="form-group"><label class="form-label">Stock reportado</label><input class="form-control" type="number" step="0.001" min="0" name="stock_reportado" value="0"></div>
+      <div class="form-group"><label class="form-label">En tránsito</label><input class="form-control" type="number" step="0.001" min="0" name="en_transito" value="0"></div>
+      <div class="form-group"><label class="form-label">Consumo proyectado</label><input class="form-control" type="number" step="0.001" min="0" name="consumo_proyectado" value="0"></div>
+      <div class="form-group"><label class="form-label">Solicitado</label><input class="form-control" type="number" step="0.001" min="0" name="solicitado" placeholder="Auto sugerido"></div>
+      <div class="form-group"><label class="form-label">Justificación</label><input class="form-control" type="text" name="justificacion" maxlength="255"></div>
+      <div class="form-group"><label class="form-label">Observaciones</label><input class="form-control" type="text" name="observaciones" maxlength="255"></div>
+      <div class="form-group" style="align-self:end;"><button class="btn btn-primary" type="submit">Agregar renglón</button></div>
     </form>
     {% endif %}
-    {% endif %}
 
-    <div class="table-responsive">
-      <table class="table">
-        <thead>
-          {% if show_simple_capture %}
-          <tr>
-            <th>Producto</th>
-            <th>Stock final</th>
-            <th>Solicitado</th>
-            <th>Estado</th>
-            <th>Observaciones</th>
-          </tr>
-          {% else %}
-          <tr>
-            <th>Producto</th>
-            <th>Stock</th>
-            <th>Tránsito</th>
-            <th>Consumo proj.</th>
-            <th>Sugerido</th>
-            <th>Solicitado</th>
-            <th>Delta</th>
-            <th>Política</th>
-            <th>Acciones</th>
-          </tr>
-          {% endif %}
-        </thead>
-        <tbody>
-          {% for row in rows_detalle %}
-          {% if show_simple_capture %}
-          <tr>
-            <td>{{ row.receta.nombre }}</td>
-            <td>{{ row.stock_reportado|floatformat:2 }}</td>
-            <td>{{ row.solicitado|floatformat:2 }}</td>
-            <td>
-              {% if solicitud %}
-                {{ solicitud.get_estado_display }}
+    <details class="erp-advanced-panel reabasto-details">
+      <summary class="erp-advanced-summary">
+        <span>Renglones de la solicitud</span>
+        <span class="muted">{{ rows_detalle|length }} productos</span>
+      </summary>
+      <div class="erp-advanced-body">
+        <div class="table-responsive">
+          <table class="table reabasto-compact-table">
+            <thead>
+              {% if show_simple_capture %}
+              <tr>
+                <th>Producto</th>
+                <th>Stock final</th>
+                <th>Solicitado</th>
+                <th>Estado</th>
+                <th>Observaciones</th>
+              </tr>
               {% else %}
-                Sin guardar
+              <tr>
+                <th>Producto</th>
+                <th>Stock</th>
+                <th>Tránsito</th>
+                <th>Consumo</th>
+                <th>Sugerido</th>
+                <th>Solicitado</th>
+                <th>Delta</th>
+                <th>Política</th>
+                <th>Acciones</th>
+              </tr>
               {% endif %}
-            </td>
-            <td>{{ row.linea.observaciones|default:"-" }}</td>
-          </tr>
-          {% else %}
-          <tr>
-            <td>{{ row.receta.nombre }}</td>
-            <td>{{ row.stock_reportado|floatformat:2 }}</td>
-            <td>{{ row.en_transito|floatformat:2 }}</td>
-            <td>{{ row.consumo_proyectado|floatformat:2 }}</td>
-            <td>{{ row.sugerido|floatformat:2 }}</td>
-            <td>{{ row.solicitado|floatformat:2 }}</td>
-            <td>{% if row.delta > 0 %}+{% endif %}{{ row.delta|floatformat:2 }}</td>
-            <td>
-              {% if row.policy %}
-                Min {{ row.policy.stock_minimo|floatformat:2 }} · Obj {{ row.policy.stock_objetivo|floatformat:2 }}
+            </thead>
+            <tbody>
+              {% for row in rows_detalle %}
+              {% if show_simple_capture %}
+              <tr>
+                <td>{{ row.receta.nombre }}</td>
+                <td>{{ row.stock_reportado|floatformat:2 }}</td>
+                <td>{{ row.solicitado|floatformat:2 }}</td>
+                <td>{% if solicitud %}{{ solicitud.get_estado_display }}{% else %}Sin guardar{% endif %}</td>
+                <td>{{ row.linea.observaciones|default:"-" }}</td>
+              </tr>
               {% else %}
-                <span class="badge badge-warning">Sin política</span>
+              <tr>
+                <td>{{ row.receta.nombre }}</td>
+                <td>{{ row.stock_reportado|floatformat:2 }}</td>
+                <td>{{ row.en_transito|floatformat:2 }}</td>
+                <td>{{ row.consumo_proyectado|floatformat:2 }}</td>
+                <td>{{ row.sugerido|floatformat:2 }}</td>
+                <td>{{ row.solicitado|floatformat:2 }}</td>
+                <td>{% if row.delta > 0 %}+{% endif %}{{ row.delta|floatformat:2 }}</td>
+                <td>{% if row.policy %}Min {{ row.policy.stock_minimo|floatformat:2 }} · Obj {{ row.policy.stock_objetivo|floatformat:2 }}{% else %}<span class="badge badge-warning">Sin política</span>{% endif %}</td>
+                <td>
+                  {% if row.linea %}
+                  <form method="post" action="{% url 'recetas:reabasto_cedis_linea_eliminar' row.linea.id %}">
+                    {% csrf_token %}
+                    <button class="btn btn-danger btn-small" type="submit">Eliminar</button>
+                  </form>
+                  {% else %}
+                  -
+                  {% endif %}
+                </td>
+              </tr>
               {% endif %}
-            </td>
-            <td>
-              {% if row.linea %}
-              <form method="post" action="{% url 'recetas:reabasto_cedis_linea_eliminar' row.linea.id %}">
-                {% csrf_token %}
-                <button class="btn btn-danger btn-small" type="submit">Eliminar</button>
-              </form>
-              {% else %}
-              -
-              {% endif %}
-            </td>
-          </tr>
-          {% endif %}
-          {% empty %}
-          {% if show_simple_capture %}
-          <tr><td colspan="5">Sin renglones guardados para esta solicitud.</td></tr>
-          {% else %}
-          <tr><td colspan="9">Sin renglones para esta solicitud.</td></tr>
-          {% endif %}
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
+              {% empty %}
+              <tr><td colspan="{% if show_simple_capture %}5{% else %}9{% endif %}">Sin renglones para esta solicitud.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </details>
+  </section>
   {% elif not ui_access.branch_capture_only %}
-  <div class="card">
-    <div class="alert alert-info">Selecciona una sucursal para capturar o revisar el reabasto.</div>
-  </div>
+  <section class="card reabasto-card">
+    <div class="alert alert-info mb-0">Selecciona una sucursal para capturar o revisar una solicitud.</div>
+  </section>
   {% elif branch_capture_only_mode %}
-  <div class="card">
-    <div class="alert alert-danger">Tu usuario no tiene sucursal asignada. Contacta a administración para habilitar captura de cierre.</div>
-  </div>
-  {% endif %}
-
-  {% if not ui_access.branch_capture_only %}
-  <div class="card">
-    <div class="card-header">Política de stock por sucursal-producto</div>
-    {% if sucursal %}
-    {% if can_manage_reabasto %}
-    <form class="form-grid-auto mb-2" method="post" action="{% url 'recetas:reabasto_cedis_politica_guardar' %}">
-      {% csrf_token %}
-      <input type="hidden" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}">
-      <input type="hidden" name="sucursal_id" value="{{ sucursal.id }}">
-      <div class="form-group">
-        <label class="form-label">Producto final</label>
-        <select class="form-select" name="receta_id" required>
-          <option value="">Selecciona...</option>
-          {% for receta in recetas_producto %}
-          <option value="{{ receta.id }}">{{ receta.nombre }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="form-group"><label class="form-label">Stock mínimo</label><input class="form-control" type="number" step="0.001" min="0" name="stock_minimo" value="0"></div>
-      <div class="form-group"><label class="form-label">Stock objetivo</label><input class="form-control" type="number" step="0.001" min="0" name="stock_objetivo" value="0"></div>
-      <div class="form-group"><label class="form-label">Stock máximo</label><input class="form-control" type="number" step="0.001" min="0" name="stock_maximo" value="0"></div>
-      <div class="form-group"><label class="form-label">Días cobertura</label><input class="form-control" type="number" min="1" name="dias_cobertura" value="1"></div>
-      <div class="form-group"><label class="form-label">Stock seguridad</label><input class="form-control" type="number" step="0.001" min="0" name="stock_seguridad" value="0"></div>
-      <div class="form-group"><label class="form-label">Lote mínimo</label><input class="form-control" type="number" step="0.001" min="0" name="lote_minimo" value="0"></div>
-      <div class="form-group"><label class="form-label">Múltiplo empaque</label><input class="form-control" type="number" step="0.001" min="0.001" name="multiplo_empaque" value="1"></div>
-      <div class="form-group" style="align-self:end;"><button class="btn btn-secondary" type="submit">Guardar política</button></div>
-    </form>
-    {% else %}
-    <div class="alert alert-info">Solo Compras/Administración puede editar políticas.</div>
-    {% endif %}
-    {% else %}
-    <p class="muted">No hay sucursal activa seleccionada.</p>
-    {% endif %}
-
-    {% if rows_detalle %}
-    <div class="table-responsive">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Producto</th>
-            <th>Stock mínimo</th>
-            <th>Stock objetivo</th>
-            <th>Stock máximo</th>
-            <th>Días cobertura</th>
-            <th>Lote mínimo</th>
-            <th>Múltiplo</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in rows_detalle %}
-          <tr>
-            <td>{{ row.receta.nombre }}</td>
-            <td>{% if row.policy %}{{ row.policy.stock_minimo|floatformat:2 }}{% else %}-{% endif %}</td>
-            <td>{% if row.policy %}{{ row.policy.stock_objetivo|floatformat:2 }}{% else %}-{% endif %}</td>
-            <td>{% if row.policy %}{{ row.policy.stock_maximo|floatformat:2 }}{% else %}-{% endif %}</td>
-            <td>{% if row.policy %}{{ row.policy.dias_cobertura }}{% else %}-{% endif %}</td>
-            <td>{% if row.policy %}{{ row.policy.lote_minimo|floatformat:2 }}{% else %}-{% endif %}</td>
-            <td>{% if row.policy %}{{ row.policy.multiplo_empaque|floatformat:2 }}{% else %}-{% endif %}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% endif %}
-  </div>
-
-  <div class="card" id="inventario-cedis">
-    <div class="card-header">Inventario de producto terminado en CEDIS</div>
-    {% if can_manage_reabasto %}
-    <form class="form-grid-auto mb-2" method="post" action="{% url 'recetas:reabasto_cedis_inventario_guardar' %}">
-      {% csrf_token %}
-      <input type="hidden" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}">
-      {% if sucursal %}<input type="hidden" name="sucursal_id" value="{{ sucursal.id }}">{% endif %}
-      <div class="form-group">
-        <label class="form-label">Producto final</label>
-        <select class="form-select" name="receta_id" required>
-          <option value="">Selecciona...</option>
-          {% for receta in recetas_producto %}
-          <option value="{{ receta.id }}">{{ receta.nombre }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="form-group"><label class="form-label">Stock actual</label><input class="form-control" type="number" step="0.001" min="0" name="stock_actual" value="0"></div>
-      <div class="form-group"><label class="form-label">Stock reservado</label><input class="form-control" type="number" step="0.001" min="0" name="stock_reservado" value="0"></div>
-      <div class="form-group" style="align-self:end;"><button class="btn btn-secondary" type="submit">Guardar inventario CEDIS</button></div>
-    </form>
-    {% else %}
-    <div class="alert alert-info">Solo Compras/Administración puede editar inventario CEDIS.</div>
-    {% endif %}
-    <div class="table-responsive">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Producto</th>
-            <th>Stock actual</th>
-            <th>Reservado</th>
-            <th>Disponible</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for inv in inventario_cedis %}
-          <tr>
-            <td>{{ inv.receta.nombre }}</td>
-            <td>{{ inv.stock_actual|floatformat:2 }}</td>
-            <td>{{ inv.stock_reservado|floatformat:2 }}</td>
-            <td>{{ inv.disponible|floatformat:2 }}</td>
-          </tr>
-          {% empty %}
-          <tr><td colspan="4">Sin inventario CEDIS capturado.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="card" id="consolidado-cedis">
-    <div class="card-header">Consolidado sucursales vs CEDIS ({{ fecha_operacion|date:"d/m/Y" }})</div>
-    <div class="table-responsive">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Producto</th>
-            <th>Sucursales</th>
-            <th>Total sugerido</th>
-            <th>Total solicitado</th>
-            <th>CEDIS disponible</th>
-            <th>Faltante a producir</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in consolidado_rows %}
-          <tr>
-            <td>{{ row.receta }}</td>
-            <td>{{ row.sucursales }}</td>
-            <td>{{ row.total_sugerido|floatformat:2 }}</td>
-            <td>{{ row.total_solicitado|floatformat:2 }}</td>
-            <td>{{ row.cedis_disponible|floatformat:2 }}</td>
-            <td>{{ row.cedis_faltante_producir|floatformat:2 }}</td>
-          </tr>
-          {% empty %}
-          <tr><td colspan="6">Sin solicitudes registradas para esta fecha.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
+  <section class="card reabasto-card">
+    <div class="alert alert-danger mb-0">Tu usuario no tiene sucursal asignada. Contacta a administración.</div>
+  </section>
   {% endif %}
 </div>
 {% endblock %}
@@ -1419,26 +579,20 @@
     };
 
     const fmt = (n) => n.toFixed(2);
-
-    const stockMinNodes = Array.from(document.querySelectorAll(".js-stock-min[data-receta]"));
     const stockMinMap = {};
-    for (const node of stockMinNodes) {
-      const rid = node.dataset.receta;
-      stockMinMap[rid] = parseNumber(node.textContent);
+
+    for (const node of document.querySelectorAll(".js-stock-min[data-receta]")) {
+      stockMinMap[node.dataset.receta] = parseNumber(node.textContent);
     }
 
     const recalc = (rid) => {
       const stockInput = document.querySelector(`.js-stock-final[data-receta="${rid}"]`);
       const sugNode = document.querySelector(`.js-sugerido[data-receta="${rid}"]`);
       if (!stockInput || !sugNode) return;
-      const stockMin = stockMinMap[rid] || 0;
-      const stockFinal = parseNumber(stockInput.value);
-      const sugerido = Math.max(stockMin - stockFinal, 0);
-      sugNode.textContent = fmt(sugerido);
+      sugNode.textContent = fmt(Math.max((stockMinMap[rid] || 0) - parseNumber(stockInput.value), 0));
     };
 
-    const stockInputs = Array.from(document.querySelectorAll(".js-stock-final[data-receta]"));
-    for (const input of stockInputs) {
+    for (const input of document.querySelectorAll(".js-stock-final[data-receta]")) {
       const rid = input.dataset.receta;
       recalc(rid);
       input.addEventListener("input", () => recalc(rid));
