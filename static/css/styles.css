@@ -4936,7 +4936,7 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
 }
 /* ================================================================
    PLAN DE PRODUCCION - V2
-   Version: 20260519-plan-produccion-v2
+   Version: 20260519-plan-produccion-v2-desktop
    ================================================================ */
 .plan-shell{max-width:860px;margin:0 auto;padding:0 0 4rem}
 .plan-header{display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:1rem;margin-bottom:1.5rem}
@@ -4988,3 +4988,35 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
 .plan-toast{position:fixed;right:1.25rem;bottom:1.25rem;z-index:9999;max-width:min(360px,calc(100vw - 2.5rem));padding:.7rem 1rem;border:1px solid rgba(139,34,82,.22);border-radius:8px;background:#fff;box-shadow:0 12px 30px rgba(49,36,43,.16);color:var(--vino);font-size:.88rem;font-weight:800;animation:plan-toast-in .18s ease-out}.plan-toast--ok{border-color:rgba(201,168,76,.38);color:#8a5d0d}.plan-toast--error{background:#fff1f5}@keyframes plan-toast-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .plan-produccion-shell>.plan-daily-header,.plan-produccion-shell>.plan-daily-tabs,.plan-produccion-shell>.plan-daily-section,.plan-produccion-shell>.plan-daily-layout,.plan-produccion-shell>.plan-process-board{display:none}
 @media (max-width:720px){.plan-shell{padding-bottom:2.5rem}.plan-header{flex-direction:column}.plan-kpis{grid-template-columns:1fr 1fr}.plan-paso__body{padding:.9rem}.plan-accion-row{align-items:stretch;flex-direction:column}.plan-btn{width:100%}.plan-flujo-diagrama{align-items:stretch;flex-direction:column}.plan-flujo-flecha{transform:rotate(90deg);align-self:center}}
+
+/* Ajuste desktop: usar el ancho real del ERP sin saturar el flujo operativo. */
+.plan-desktop-resumen{display:none}
+@media (min-width:1100px){
+  .page-plan-produccion .container{width:100%;margin:0;padding:clamp(18px,1.8vw,30px) clamp(22px,2.2vw,40px)}
+  .plan-shell{width:100%;max-width:1500px;margin:0;padding:0 0 4rem}
+  .plan-header{display:grid;grid-template-columns:minmax(320px,1fr) auto;align-items:end;margin-bottom:1.15rem}
+  .plan-header__titulo h1{font-size:1.7rem}
+  .plan-operativo{display:grid;grid-template-columns:minmax(0,1fr) 320px;grid-template-areas:"progreso progreso" "pasos resumen";gap:1rem 1.15rem;align-items:start}
+  .plan-progreso{grid-area:progreso;max-width:1120px;margin-bottom:.2rem}
+  .plan-pasos{grid-area:pasos;gap:.7rem;min-width:0}
+  .plan-paso__header{padding:1rem 1.15rem}
+  .plan-paso__body{padding:1.15rem 1.25rem 1.25rem}
+  .plan-kpis{grid-template-columns:repeat(4,minmax(132px,1fr))}
+  .plan-desktop-resumen{position:sticky;top:1.2rem;grid-area:resumen;display:block;border:1px solid #eadde4;border-radius:12px;background:#fff;box-shadow:0 10px 28px rgba(139,34,82,.07);padding:1rem}
+  .plan-desktop-resumen__header{display:flex;align-items:flex-start;justify-content:space-between;gap:.8rem;padding-bottom:.8rem;border-bottom:1px solid #f0e7ec;color:#31242b;font-size:.95rem;font-weight:900}
+  .plan-desktop-resumen__header strong{display:inline-flex;align-items:center;min-height:24px;padding:.18rem .55rem;border-radius:999px;background:rgba(201,168,76,.18);color:#8a5d0d;font-size:.76rem}
+  .plan-desktop-resumen__datos{display:grid;gap:.65rem;margin:.9rem 0 0}
+  .plan-desktop-resumen__datos div{display:grid;grid-template-columns:96px 1fr;gap:.65rem;align-items:baseline}
+  .plan-desktop-resumen__datos dt{color:#927f89;font-size:.72rem;font-weight:900;letter-spacing:.04em;text-transform:uppercase}
+  .plan-desktop-resumen__datos dd{margin:0;color:var(--vino);font-size:.95rem;font-weight:900;text-align:right}
+  .plan-desktop-resumen__acciones{display:grid;gap:.55rem;margin-top:1rem;padding-top:1rem;border-top:1px solid #f0e7ec}
+  .plan-desktop-resumen__acciones .plan-btn{width:100%}
+}
+@media (min-width:1500px){
+  .plan-shell{max-width:1680px}
+  .plan-operativo{grid-template-columns:minmax(820px,1080px) 340px;gap:1.1rem 1.35rem}
+}
+@media (min-width:1900px){
+  .plan-shell{max-width:1760px}
+  .plan-operativo{grid-template-columns:minmax(900px,1160px) 360px}
+}

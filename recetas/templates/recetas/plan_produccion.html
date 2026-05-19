@@ -39,6 +39,31 @@
         {% endfor %}
       </div>
 
+      <aside class="plan-desktop-resumen" aria-label="Resumen del plan diario">
+        <div class="plan-desktop-resumen__header">
+          <span>Resumen del día</span>
+          <strong data-plan-resumen="estado">{{ estado_hoy_label }}</strong>
+        </div>
+        <dl class="plan-desktop-resumen__datos">
+          <div>
+            <dt>Fecha</dt>
+            <dd>{{ fecha_hoy|date:"d/m/Y" }}</dd>
+          </div>
+          <div>
+            <dt>Fuente</dt>
+            <dd data-plan-resumen="fuente">Sin cargar</dd>
+          </div>
+          <div>
+            <dt>Productos</dt>
+            <dd data-plan-resumen="productos">{{ plan_actual.items.count|default:0 }}</dd>
+          </div>
+        </dl>
+        <div class="plan-desktop-resumen__acciones">
+          <button type="button" class="plan-btn plan-btn--primario" onclick="irAPaso(2)">Cargar demanda</button>
+          <button type="button" class="plan-btn plan-btn--secundario" onclick="irAPaso(4)">Ver insumos</button>
+        </div>
+      </aside>
+
       <div class="plan-pasos" id="plan-pasos">
         <details class="plan-paso" id="paso-1" open>
           <summary class="plan-paso__header">
@@ -228,6 +253,18 @@ function actualizarProgreso() {
   });
 }
 
+function actualizarResumenPlan() {
+  document.querySelectorAll('[data-plan-resumen="estado"]').forEach(function (el) {
+    el.textContent = document.getElementById("kpi-estado").textContent || "Sin plan";
+  });
+  document.querySelectorAll('[data-plan-resumen="fuente"]').forEach(function (el) {
+    el.textContent = document.getElementById("kpi-fuente").textContent || "Sin cargar";
+  });
+  document.querySelectorAll('[data-plan-resumen="productos"]').forEach(function (el) {
+    el.textContent = document.getElementById("kpi-productos").textContent || "0";
+  });
+}
+
 function irAPaso(n) {
   document.querySelectorAll(".plan-paso").forEach(function (details) { details.open = false; });
   const target = document.getElementById("paso-" + n);
@@ -299,6 +336,7 @@ function usarComoBase() {
   }
   document.getElementById("kpi-fuente").textContent = PLAN.fuente;
   document.getElementById("kpi-productos").textContent = PLAN.items.length;
+  actualizarResumenPlan();
   renderizarTablaAjuste();
   document.getElementById("check-demanda").checked = true;
   irAPaso(3);
@@ -336,6 +374,7 @@ async function guardarBorrador() {
     if (!data.ok) throw new Error(data.mensaje || "No se pudo guardar.");
     PLAN.id = data.plan_id;
     document.getElementById("kpi-estado").textContent = "Borrador";
+    actualizarResumenPlan();
     document.getElementById("check-ajustes").checked = true;
     mostrarToast("Borrador guardado correctamente.", "ok");
   } catch (e) {
@@ -418,6 +457,7 @@ async function liberarPlan() {
     if (!data.ok) throw new Error(data.mensaje || "No se pudo liberar.");
     PLAN.estado = "LIBERADO";
     document.getElementById("kpi-estado").textContent = "Liberado";
+    actualizarResumenPlan();
     mostrarToast("Plan liberado correctamente.", "ok");
     irAPaso(6);
   } catch (e) {
@@ -455,6 +495,7 @@ document.addEventListener("DOMContentLoaded", function () {
       if (data.resumen) {
         document.getElementById("kpi-productos").textContent = data.resumen.productos || 0;
         document.getElementById("kpi-fuente").textContent = data.resumen.fuente || "Cargada";
+        actualizarResumenPlan();
       }
     })
     .catch(function () {});
