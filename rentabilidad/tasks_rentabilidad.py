@@ -21,6 +21,7 @@ from datetime import date
 from decimal import Decimal
 from celery import shared_task
 from django.db import transaction
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
     # from gastos.models import GastoFijo
     # from hr.models import NominaDetalle
 
-    hoy = date.today()
+    hoy = timezone.localdate()
     if year is None or month is None:
         # Mes anterior (cerrado)
         if hoy.month == 1:
@@ -286,8 +287,8 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
 @shared_task
 def recalcular_rentabilidad_periodo_actual():
     """Actualiza el mes en curso (datos parciales) cada noche."""
-    hoy = date.today()
-    return recalcular_rentabilidad_mensual.delay(hoy.year, hoy.month)
+    hoy = timezone.localdate()
+    return recalcular_rentabilidad_mensual(year=hoy.year, month=hoy.month)
 
 
 @shared_task
