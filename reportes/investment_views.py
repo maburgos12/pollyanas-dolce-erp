@@ -1890,3 +1890,625 @@ def proyecto_viabilidad_export_excel(request: HttpRequest, project_id: int) -> H
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     wb.save(response)
     return response
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Módulo rediseñado de proyectos de inversión
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@login_required
+def inversiones_portafolio(request: HttpRequest) -> HttpResponse:
+    """Lista limpia del portafolio de proyectos de inversión."""
+    _require_reportes_access(request.user)
+
+    proyectos = ProyectoInversion.objects.select_related(
+        "sucursal_relacionada", "responsable"
+    ).prefetch_related("snapshots_mensuales", "alertas").order_by("-fecha_inicio", "-id")
+
+    proyectos_enriquecidos = []
+    for proyecto in proyectos:
+        ultimo_snapshot = proyecto.snapshots_mensuales.order_by("-periodo").first()
+        market_study = (proyecto.metadata or {}).get("market_study", {})
+        proyectos_enriquecidos.append(
+            {
+                "proyecto": proyecto,
+                "ultimo_snapshot": ultimo_snapshot,
+                "alertas_activas": proyecto.alertas.filter(activa=True).count(),
+                "score_mercado": market_study.get("score_viabilidad"),
+                "veredicto_mercado": market_study.get("veredicto"),
+                "tiene_estudio": bool(market_study and not market_study.get("error")),
+            }
+        )
+
+    resumen = {
+        "total": proyectos.count(),
+        "en_planeacion": proyectos.filter(estatus=ProyectoInversion.ESTATUS_PLANEACION).count(),
+        "en_ejecucion": proyectos.filter(estatus=ProyectoInversion.ESTATUS_EJECUCION).count(),
+        "activos": proyectos.filter(estatus=ProyectoInversion.ESTATUS_ACTIVO).count(),
+        "en_recuperacion": proyectos.filter(estatus=ProyectoInversion.ESTATUS_EN_RECUPERACION).count(),
+    }
+
+    return render(
+        request,
+        "reportes/inversiones_portafolio.html",
+        {
+            "module_tabs": _project_module_tabs("sucursales"),
+            "proyectos": proyectos_enriquecidos,
+            "resumen": resumen,
+            "project_statuses": ProyectoInversion.ESTATUS_CHOICES,
+            "project_types": ProyectoInversion.TIPO_CHOICES,
+            "sucursales": Sucursal.objects.filter(activa=True).order_by("nombre"),
+            "responsables": User.objects.filter(is_active=True).order_by("first_name", "username"),
+        },
+    )
+
+
+@login_required
+def inversiones_wizard(request: HttpRequest) -> HttpResponse:
+    """
+    Wizard unificado para crear ProyectoInversion, partidas CAPEX y
+    escenarios financieros sobre los modelos existentes.
+    """
+    import logging
+
+    from django.db.models import Count, Sum
+    from reportes.services_investment_projects import _benchmark_sucursales_activas
+
+    logger = logging.getLogger(__name__)
+    _require_reportes_access(request.user)
+
+    benchmark = {}
+    try:
+        benchmark = _benchmark_sucursales_activas(meses=12)
+    except Exception as exc:
+        logger.warning("benchmark inversiones_wizard: %s", exc)
+
+    guamuchil_categorias = {}
+    guamuchil_total = Decimal("0")
+    try:
+        guamuchil = ProyectoInversion.objects.get(pk=1)
+        for row in guamuchil.gastos_inversion.values("categoria").annotate(total=Sum("monto_total"), n=Count("id")):
+            guamuchil_categorias[row["categoria"]] = {
+                "total": float(row["total"] or 0),
+                "n": row["n"],
+                "label": dict(ProyectoInversionGasto.CATEGORIA_CHOICES).get(row["categoria"], row["categoria"]),
+            }
+        guamuchil_total = guamuchil.monto_inversion_real or Decimal("0")
+    except Exception as exc:
+        logger.warning("benchmark Guamúchil inversiones_wizard: %s", exc)
+
+    if request.method == "POST" and request.POST.get("action") == "crear_proyecto":
+        errores = []
+        fecha_inicio = _parse_date(request.POST.get("fecha_inicio"))
+        if not fecha_inicio:
+            errores.append("La fecha de inicio es obligatoria.")
+
+        try:
+            partidas_raw = json.loads(request.POST.get("partidas_json") or "[]")
+        except Exception:
+            partidas_raw = []
+            errores.append("Error al leer partidas de inversión.")
+
+        partidas_validas = [
+            partida
+            for partida in partidas_raw
+            if str(partida.get("descripcion", "")).strip()
+            and _parse_decimal(str(partida.get("monto", 0))) > 0
+        ]
+        if not partidas_validas:
+            errores.append("Agrega al menos una partida de inversión con monto mayor a cero.")
+
+        ventas_base = _parse_decimal(request.POST.get("ventas_promedio_base"))
+        if ventas_base <= 0:
+            errores.append("Las ventas promedio base deben ser mayores a cero.")
+
+        if errores:
+            for error in errores:
+                messages.error(request, error)
+            return redirect("reportes:inversiones_wizard")
+
+        inversion_total = sum(
+            _parse_decimal(str(partida.get("monto", 0))) + _parse_decimal(str(partida.get("iva", 0)))
+            for partida in partidas_validas
+        )
+        renta = _parse_decimal(request.POST.get("renta_mensual"))
+        nomina = _parse_decimal(request.POST.get("nomina_mensual"))
+        servicios = _parse_decimal(request.POST.get("servicios_mensual"))
+        marketing = _parse_decimal(request.POST.get("marketing_mensual"))
+        otros = _parse_decimal(request.POST.get("otros_fijos_mensual"))
+        gastos_fijos = renta + nomina + servicios + marketing + otros
+        margen = _parse_decimal(request.POST.get("margen_bruto_pct"), default="45")
+        crecimiento = _parse_decimal(request.POST.get("crecimiento_mensual_pct"), default="0.8")
+        horizonte = _parse_int(request.POST.get("horizonte_meses"), default=36)
+
+        with transaction.atomic():
+            project = ProyectoInversion.objects.create(
+                nombre_proyecto=(request.POST.get("nombre_proyecto") or "Nuevo proyecto").strip(),
+                tipo_proyecto=(request.POST.get("tipo_proyecto") or ProyectoInversion.TIPO_APERTURA_SUCURSAL).strip(),
+                sucursal_relacionada_id=_parse_int(request.POST.get("sucursal_relacionada_id")) or None,
+                fecha_inicio=fecha_inicio,
+                fecha_apertura=_parse_date(request.POST.get("fecha_apertura")),
+                responsable=request.user,
+                estatus=ProyectoInversion.ESTATUS_PLANEACION,
+                monto_inversion_planeado=inversion_total,
+                capital_inicial_aportado=inversion_total,
+                deuda_asociada=_parse_decimal(request.POST.get("deuda_asociada")),
+                tasa_interes_anual=_parse_decimal(request.POST.get("tasa_interes_anual")),
+                plazo_deuda_meses=_parse_int(request.POST.get("plazo_deuda_meses")),
+                discount_rate=_parse_decimal(request.POST.get("discount_rate"), default="12"),
+                roi_objetivo=_parse_decimal(request.POST.get("roi_objetivo"), default="25"),
+                payback_objetivo_meses=_parse_int(request.POST.get("payback_objetivo_meses"), default=24),
+                recovery_strategy=ProyectoInversion.RECOVERY_FULL_NET_CASHFLOW,
+                recovery_percentage=Decimal("1"),
+                cierre_por_recuperacion_total=True,
+                observaciones=(request.POST.get("observaciones") or "").strip(),
+                metadata={
+                    "benchmark_snapshot": benchmark,
+                    "supuestos_operativos": {
+                        "renta": float(renta),
+                        "nomina": float(nomina),
+                        "servicios": float(servicios),
+                        "marketing": float(marketing),
+                        "otros": float(otros),
+                        "gastos_fijos_total": float(gastos_fijos),
+                        "ventas_base": float(ventas_base),
+                        "margen_pct": float(margen),
+                        "crecimiento_mensual_pct": float(crecimiento),
+                        "horizonte_meses": horizonte,
+                    },
+                    "ubicacion": {
+                        "ciudad": (request.POST.get("ciudad") or "").strip(),
+                        "colonia": (request.POST.get("colonia") or "").strip(),
+                        "m2": float(_parse_decimal(request.POST.get("m2_local"))),
+                        "descripcion": (request.POST.get("descripcion_ubicacion") or "").strip(),
+                        "renta_mensual": float(renta),
+                        "deposito": float(_parse_decimal(request.POST.get("deposito"))),
+                        "competidores_conocidos": (request.POST.get("competidores_conocidos") or "").strip(),
+                    },
+                    "wizard_version": "v3",
+                },
+            )
+
+            for partida in partidas_validas:
+                monto = _parse_decimal(str(partida.get("monto", 0)))
+                iva = _parse_decimal(str(partida.get("iva", 0)))
+                ProyectoInversionGasto.objects.create(
+                    proyecto=project,
+                    fecha=fecha_inicio,
+                    categoria=partida.get("categoria") or ProyectoInversionGasto.CATEGORIA_OTROS,
+                    subcategoria=(partida.get("subcategoria") or "").strip(),
+                    descripcion=(partida.get("descripcion") or "Partida").strip(),
+                    proveedor_nombre=(partida.get("proveedor_nombre") or "").strip(),
+                    monto=monto,
+                    iva=iva,
+                    monto_total=monto + iva,
+                    metodo_pago="",
+                    financiado=False,
+                    referencia_contable=f"PLAN_{project.pk}_{partida.get('categoria', 'OTROS')}",
+                    notas=(partida.get("notas") or "").strip(),
+                    capturado_por=request.user,
+                )
+
+            _upsert_escenarios_inversion(
+                project,
+                ventas_base=ventas_base,
+                gastos_fijos=gastos_fijos,
+                margen=margen,
+                crecimiento=crecimiento,
+                horizonte=horizonte,
+                user=request.user,
+            )
+
+            try:
+                ProyectoInversionRefreshService().refresh_project(project, user=request.user)
+            except Exception as exc:
+                logger.warning("refresh inicial inversiones_wizard: %s", exc)
+
+            log_event(
+                request.user,
+                "CREATE",
+                "reportes.ProyectoInversion",
+                project.pk,
+                payload={"nombre": project.nombre_proyecto, "partidas": len(partidas_validas)},
+            )
+            messages.success(request, f"Proyecto '{project.nombre_proyecto}' creado.")
+            return redirect("reportes:inversiones_detalle", project_id=project.pk)
+
+    return render(
+        request,
+        "reportes/inversiones_wizard.html",
+        {
+            "module_tabs": _project_module_tabs("sucursales"),
+            "benchmark": benchmark,
+            "gml_cats_json": json.dumps(guamuchil_categorias),
+            "gml_total": float(guamuchil_total),
+            "categorias_json": json.dumps(
+                [{"value": value, "label": label} for value, label in ProyectoInversionGasto.CATEGORIA_CHOICES]
+            ),
+            "project_types": ProyectoInversion.TIPO_CHOICES,
+            "sucursales": Sucursal.objects.filter(activa=True).order_by("nombre"),
+            "ventas_sugeridas": float(benchmark.get("ventas_mensuales_avg") or 0),
+            "gastos_sugeridos": float(benchmark.get("gastos_operativos_avg") or 0),
+        },
+    )
+
+
+@login_required
+def inversiones_detalle(request: HttpRequest, project_id: int) -> HttpResponse:
+    """Detalle unificado con tabs Ficha, Inversión, Mercado, Finanzas y Seguimiento."""
+    import logging
+
+    from django.db.models import Sum
+    from reportes.services_investment_projects import _benchmark_sucursales_activas
+    from reportes.services_market_study import generar_estudio_mercado
+
+    logger = logging.getLogger(__name__)
+    _require_reportes_access(request.user)
+    project = get_object_or_404(
+        ProyectoInversion.objects.select_related("sucursal_relacionada", "responsable"),
+        pk=project_id,
+    )
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+
+        if action == "editar_ficha":
+            project.nombre_proyecto = (request.POST.get("nombre_proyecto") or project.nombre_proyecto).strip()
+            project.tipo_proyecto = (request.POST.get("tipo_proyecto") or project.tipo_proyecto).strip()
+            project.fecha_apertura = _parse_date(request.POST.get("fecha_apertura")) or project.fecha_apertura
+            project.sucursal_relacionada_id = _parse_int(request.POST.get("sucursal_relacionada_id")) or None
+            project.observaciones = (request.POST.get("observaciones") or "").strip()
+            meta = project.metadata or {}
+            meta["ubicacion"] = {
+                "ciudad": (request.POST.get("ciudad") or "").strip(),
+                "colonia": (request.POST.get("colonia") or "").strip(),
+                "m2": float(_parse_decimal(request.POST.get("m2_local"))),
+                "descripcion": (request.POST.get("descripcion_ubicacion") or "").strip(),
+                "renta_mensual": float(_parse_decimal(request.POST.get("renta_mensual"))),
+                "deposito": float(_parse_decimal(request.POST.get("deposito"))),
+                "competidores_conocidos": (request.POST.get("competidores_conocidos") or "").strip(),
+            }
+            project.metadata = meta
+            project.save(
+                update_fields=[
+                    "nombre_proyecto",
+                    "tipo_proyecto",
+                    "fecha_apertura",
+                    "sucursal_relacionada",
+                    "observaciones",
+                    "metadata",
+                    "actualizado_en",
+                ]
+            )
+            log_event(request.user, "UPDATE", "reportes.ProyectoInversion", project.pk, payload={"action": action})
+            messages.success(request, "Ficha del proyecto actualizada.")
+            return redirect("reportes:inversiones_detalle", project_id=project.pk)
+
+        if action == "add_expense":
+            monto = _parse_decimal(request.POST.get("monto"))
+            iva = _parse_decimal(request.POST.get("iva"))
+            expense = ProyectoInversionGasto.objects.create(
+                proyecto=project,
+                fecha=_parse_date(request.POST.get("fecha")) or timezone.localdate(),
+                categoria=(request.POST.get("categoria") or ProyectoInversionGasto.CATEGORIA_OTROS).strip(),
+                subcategoria=(request.POST.get("subcategoria") or "").strip(),
+                descripcion=(request.POST.get("descripcion") or "Gasto").strip(),
+                proveedor_id=_parse_int(request.POST.get("proveedor_id")) or None,
+                proveedor_nombre=(request.POST.get("proveedor_nombre") or "").strip(),
+                monto=monto,
+                iva=iva,
+                monto_total=monto + iva,
+                metodo_pago=(request.POST.get("metodo_pago") or "").strip(),
+                financiado=bool(request.POST.get("financiado")),
+                referencia_contable=(request.POST.get("referencia_contable") or "").strip(),
+                orden_compra_id=_parse_int(request.POST.get("orden_compra_id")) or None,
+                evidencia_url=(request.POST.get("evidencia_url") or "").strip(),
+                notas=(request.POST.get("notas") or "").strip(),
+                capturado_por=request.user,
+            )
+            try:
+                ProyectoInversionRefreshService().refresh_project(project, user=request.user)
+            except Exception as exc:
+                logger.warning("refresh add_expense inversiones_detalle: %s", exc)
+            log_event(
+                request.user,
+                "CREATE",
+                "reportes.ProyectoInversionGasto",
+                expense.pk,
+                payload={"project_id": project.pk, "monto_total": str(expense.monto_total)},
+            )
+            messages.success(request, "Gasto registrado.")
+            return redirect("reportes:inversiones_detalle", project_id=project.pk)
+
+        if action == "generar_estudio_mercado":
+            meta = project.metadata or {}
+            ubicacion = meta.get("ubicacion", {})
+            try:
+                benchmark = _benchmark_sucursales_activas(meses=12)
+            except Exception:
+                benchmark = {}
+            resultado = generar_estudio_mercado(
+                ciudad=ubicacion.get("ciudad") or (request.POST.get("ciudad") or ""),
+                colonia=ubicacion.get("colonia") or (request.POST.get("colonia") or ""),
+                descripcion_ubicacion=ubicacion.get("descripcion") or "",
+                m2_local=ubicacion.get("m2") or None,
+                renta_mensual=ubicacion.get("renta_mensual") or None,
+                ticket_promedio_cadena=benchmark.get("ticket_promedio"),
+                ventas_promedio_cadena=benchmark.get("ventas_mensuales_avg"),
+                competidores_conocidos=ubicacion.get("competidores_conocidos") or "",
+            )
+            meta["market_study"] = resultado
+            project.metadata = meta
+            project.save(update_fields=["metadata", "actualizado_en"])
+            log_event(
+                request.user,
+                "AI_MARKET_STUDY",
+                "reportes.ProyectoInversion",
+                project.pk,
+                payload={"score": resultado.get("score_viabilidad"), "veredicto": resultado.get("veredicto")},
+            )
+            if resultado.get("error"):
+                messages.error(request, f"Error al generar estudio: {resultado['error']}")
+            else:
+                messages.success(request, f"Estudio de mercado generado. Score: {resultado.get('score_viabilidad')}/100")
+            return redirect("reportes:inversiones_detalle", project_id=project.pk)
+
+        if action == "actualizar_supuestos":
+            meta = project.metadata or {}
+            renta = _parse_decimal(request.POST.get("renta_mensual"))
+            nomina = _parse_decimal(request.POST.get("nomina_mensual"))
+            servicios = _parse_decimal(request.POST.get("servicios_mensual"))
+            marketing = _parse_decimal(request.POST.get("marketing_mensual"))
+            otros = _parse_decimal(request.POST.get("otros_fijos_mensual"))
+            gastos_fijos = _parse_decimal(request.POST.get("gastos_fijos_total"))
+            if gastos_fijos <= 0:
+                gastos_fijos = renta + nomina + servicios + marketing + otros
+            ventas_base = _parse_decimal(request.POST.get("ventas_promedio_base"))
+            margen = _parse_decimal(request.POST.get("margen_bruto_pct"), default="45")
+            crecimiento = _parse_decimal(request.POST.get("crecimiento_mensual_pct"), default="0.8")
+            horizonte = _parse_int(request.POST.get("horizonte_meses"), default=36)
+            meta["supuestos_operativos"] = {
+                "renta": float(renta),
+                "nomina": float(nomina),
+                "servicios": float(servicios),
+                "marketing": float(marketing),
+                "otros": float(otros),
+                "gastos_fijos_total": float(gastos_fijos),
+                "ventas_base": float(ventas_base),
+                "margen_pct": float(margen),
+                "crecimiento_mensual_pct": float(crecimiento),
+                "horizonte_meses": horizonte,
+            }
+            project.discount_rate = _parse_decimal(request.POST.get("discount_rate"), default="12")
+            project.roi_objetivo = _parse_decimal(request.POST.get("roi_objetivo"), default="25")
+            project.payback_objetivo_meses = _parse_int(request.POST.get("payback_objetivo_meses"), default=24)
+            project.metadata = meta
+            project.save(
+                update_fields=[
+                    "discount_rate",
+                    "roi_objetivo",
+                    "payback_objetivo_meses",
+                    "metadata",
+                    "actualizado_en",
+                ]
+            )
+            _upsert_escenarios_inversion(
+                project,
+                ventas_base=ventas_base,
+                gastos_fijos=gastos_fijos,
+                margen=margen,
+                crecimiento=crecimiento,
+                horizonte=horizonte,
+                user=request.user,
+            )
+            messages.success(request, "Supuestos financieros actualizados y escenarios recalculados.")
+            return redirect("reportes:inversiones_detalle", project_id=project.pk)
+
+        if action == "refresh_project":
+            try:
+                ProyectoInversionRefreshService().refresh_project(project, user=request.user)
+                messages.success(request, "Métricas actualizadas.")
+            except Exception as exc:
+                logger.warning("refresh_project inversiones_detalle: %s", exc)
+                messages.warning(request, "No se pudieron actualizar métricas con datos operativos actuales.")
+            return redirect("reportes:inversiones_detalle", project_id=project.pk)
+
+    gastos = project.gastos_inversion.order_by("fecha", "categoria", "id")
+    snapshots = project.snapshots_mensuales.order_by("periodo")
+    escenarios = project.escenarios.order_by("tipo_escenario", "nombre")
+    alertas = project.alertas.filter(activa=True).order_by("-last_detected_at")
+    ultimo_snapshot = snapshots.last()
+    gastos_por_cat = {
+        row["categoria"]: float(row["total"] or 0)
+        for row in gastos.values("categoria").annotate(total=Sum("monto_total"))
+    }
+    meta = project.metadata or {}
+    market_study = meta.get("market_study", {})
+    ubicacion = meta.get("ubicacion", {})
+    supuestos_op = meta.get("supuestos_operativos", {})
+    proyeccion = _calcular_proyeccion_simple(project, supuestos_op, escenarios)
+    snapshots_chart = json.dumps(
+        [
+            {
+                "periodo": str(snapshot.periodo),
+                "ventas": float(snapshot.ventas_mensuales or 0),
+                "utilidad_operativa": float(snapshot.utilidad_operativa or 0),
+                "recuperacion_acumulada": float(snapshot.recuperacion_acumulada or 0),
+                "saldo_pendiente": float(snapshot.saldo_pendiente or 0),
+            }
+            for snapshot in snapshots
+        ]
+    )
+    escenarios_resumen = []
+    for escenario in escenarios:
+        utilidad_estimada = (
+            escenario.ventas_promedio_mensuales * escenario.margen_bruto_pct / 100
+            - escenario.gastos_operativos_mensuales
+        )
+        escenarios_resumen.append(
+            {
+                "escenario": escenario,
+                "utilidad_estimada": utilidad_estimada,
+            }
+        )
+    escenarios_chart = json.dumps(
+        [
+            {
+                "nombre": row["escenario"].nombre,
+                "tipo": row["escenario"].tipo_escenario,
+                "ventas": float(row["escenario"].ventas_promedio_mensuales),
+                "gastos": float(row["escenario"].gastos_operativos_mensuales),
+                "margen": float(row["escenario"].margen_bruto_pct),
+                "horizonte": row["escenario"].horizonte_meses,
+                "utilidad_estimada": float(row["utilidad_estimada"]),
+            }
+            for row in escenarios_resumen
+        ]
+    )
+
+    return render(
+        request,
+        "reportes/inversiones_detalle.html",
+        {
+            "module_tabs": _project_module_tabs("sucursales"),
+            "project": project,
+            "gastos": gastos,
+            "gastos_por_cat": gastos_por_cat,
+            "snapshots": snapshots,
+            "escenarios": escenarios,
+            "escenarios_resumen": escenarios_resumen,
+            "alertas": alertas,
+            "ultimo_snapshot": ultimo_snapshot,
+            "market_study": market_study,
+            "ubicacion": ubicacion,
+            "supuestos_op": supuestos_op,
+            "proyeccion": proyeccion,
+            "snapshots_chart": snapshots_chart,
+            "escenarios_chart": escenarios_chart,
+            "tab_activo": request.GET.get("tab", "ficha"),
+            "sucursales": Sucursal.objects.filter(activa=True).order_by("nombre"),
+            "project_types": ProyectoInversion.TIPO_CHOICES,
+            "project_statuses": ProyectoInversion.ESTATUS_CHOICES,
+            "categorias_gasto": ProyectoInversionGasto.CATEGORIA_CHOICES,
+        },
+    )
+
+
+def _upsert_escenarios_inversion(
+    project: ProyectoInversion,
+    *,
+    ventas_base: Decimal,
+    gastos_fijos: Decimal,
+    margen: Decimal,
+    crecimiento: Decimal,
+    horizonte: int,
+    user,
+) -> None:
+    escenarios = [
+        ("Conservador", ProyectoInversionEscenario.TIPO_CONSERVADOR, Decimal("0.88"), Decimal("1.06")),
+        ("Base", ProyectoInversionEscenario.TIPO_BASE, Decimal("1.00"), Decimal("1.00")),
+        ("Optimista", ProyectoInversionEscenario.TIPO_OPTIMISTA, Decimal("1.12"), Decimal("0.97")),
+    ]
+    for nombre, tipo, modificador_ventas, modificador_costos in escenarios:
+        ProyectoInversionEscenario.objects.update_or_create(
+            proyecto=project,
+            nombre=nombre,
+            defaults={
+                "tipo_escenario": tipo,
+                "ventas_promedio_mensuales": (ventas_base * modificador_ventas).quantize(Decimal("0.01")),
+                "margen_bruto_pct": margen,
+                "gastos_operativos_mensuales": (gastos_fijos * modificador_costos).quantize(Decimal("0.01")),
+                "crecimiento_mensual_pct": crecimiento,
+                "horizonte_meses": horizonte,
+                "capturado_por": user,
+            },
+        )
+
+
+def _calcular_proyeccion_simple(project, supuestos_op: dict, escenarios) -> dict:
+    """Calcula métricas financieras básicas sin dependencias externas."""
+    def _supuesto(key: str, default):
+        value = supuestos_op.get(key)
+        return default if value in (None, "") else value
+
+    ventas_base = float(_supuesto("ventas_base", 0))
+    margen_pct = float(_supuesto("margen_pct", 45)) / 100
+    gastos_fijos = float(_supuesto("gastos_fijos_total", 0))
+    crecimiento = float(_supuesto("crecimiento_mensual_pct", 0.8)) / 100
+    horizonte = int(_supuesto("horizonte_meses", 36))
+    inversion = float(project.monto_inversion_planeado or 0)
+    discount_anual = float(project.discount_rate or 12) / 100
+    discount_mensual = (1 + discount_anual) ** (1 / 12) - 1
+
+    if inversion <= 0 or ventas_base <= 0:
+        return {"disponible": False}
+
+    flujos = [-inversion]
+    for mes in range(1, horizonte + 1):
+        ventas_mes = ventas_base * (1 + crecimiento) ** (mes - 1)
+        utilidad_bruta = ventas_mes * margen_pct
+        flujos.append(utilidad_bruta - gastos_fijos)
+
+    vpn = sum(flujo / (1 + discount_mensual) ** idx for idx, flujo in enumerate(flujos))
+    tir_mensual = None
+    try:
+        tasa = 0.01
+        for _ in range(500):
+            npv = sum(flujo / (1 + tasa) ** idx for idx, flujo in enumerate(flujos))
+            dnpv = sum(
+                -idx * flujo / (1 + tasa) ** (idx + 1)
+                for idx, flujo in enumerate(flujos)
+                if idx > 0
+            )
+            if abs(dnpv) < 1e-10:
+                break
+            nueva_tasa = tasa - npv / dnpv
+            if abs(nueva_tasa - tasa) < 1e-7:
+                tasa = nueva_tasa
+                break
+            tasa = nueva_tasa
+        if tasa > -1:
+            tir_mensual = tasa
+    except Exception:
+        tir_mensual = None
+
+    tir_anual = ((1 + tir_mensual) ** 12 - 1) * 100 if tir_mensual is not None else None
+    utilidad_total = sum(flujos[1:])
+    roi = (utilidad_total / inversion) * 100 if inversion > 0 else 0
+    acumulado = -inversion
+    payback_meses = None
+    for mes, flujo in enumerate(flujos[1:], start=1):
+        previo = acumulado
+        acumulado += flujo
+        if acumulado >= 0:
+            denominador = abs(previo) + abs(acumulado)
+            fraccion = abs(previo) / denominador if denominador > 0 else 0
+            payback_meses = round(mes - 1 + fraccion, 1)
+            break
+
+    pe_mensual = gastos_fijos / margen_pct if margen_pct > 0 else None
+    flujo_acumulado = -inversion
+    flujo_acum_chart = [round(flujo_acumulado, 2)]
+    for flujo in flujos[1:]:
+        flujo_acumulado += flujo
+        flujo_acum_chart.append(round(flujo_acumulado, 2))
+
+    return {
+        "disponible": True,
+        "inversion": round(inversion, 2),
+        "vpn": round(vpn, 2),
+        "tir_anual": round(tir_anual, 2) if tir_anual is not None else None,
+        "roi": round(roi, 2),
+        "payback_meses": payback_meses,
+        "pe_mensual": round(pe_mensual, 2) if pe_mensual else None,
+        "utilidad_total": round(utilidad_total, 2),
+        "horizonte": horizonte,
+        "flujo_acum_chart": json.dumps(flujo_acum_chart[::3]),
+        "viable": bool(
+            tir_anual is not None
+            and tir_anual >= 15
+            and vpn >= 0
+            and (payback_meses is None or payback_meses <= 36)
+        ),
+    }

@@ -78,4 +78,19 @@ urlpatterns = [
         investment_views.api_bamoa_guamuchil_benchmark,
         name="api_bamoa_guamuchil_benchmark",
     ),
+    path(
+        "inversiones/",
+        investment_views.inversiones_portafolio,
+        name="inversiones_portafolio",
+    ),
+    path(
+        "inversiones/nuevo/",
+        investment_views.inversiones_wizard,
+        name="inversiones_wizard",
+    ),
+    path(
+        "inversiones/<int:project_id>/",
+        investment_views.inversiones_detalle,
+        name="inversiones_detalle",
+    ),
 ]

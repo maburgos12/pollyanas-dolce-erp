@@ -1,0 +1,277 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Reportes - Nuevo Proyecto de Inversión{% endblock %}
+{% block page_title %}Reportes · Nuevo Proyecto de Inversión{% endblock %}
+{% block body_class %}page-reportes-inversiones-wizard{% endblock %}
+
+{% block extra_css %}
+<style>
+  :root { --inv-wine:#8B2252; --inv-gold:#C9A84C; --inv-light:#f8f4ec; --inv-line:#e5e7eb; --inv-muted:#6b7280; }
+  .inv-shell { max-width:1400px; margin:0 auto; padding:1.5rem; font-family:"Nunito", system-ui, sans-serif; }
+  .module-tabs { display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:1rem; }
+  .module-tab { padding:.45rem .85rem; border:1px solid var(--inv-line); border-radius:.5rem; color:#374151; text-decoration:none; background:#fff; }
+  .module-tab.active { background:var(--inv-wine); color:#fff; border-color:var(--inv-wine); }
+  .inv-title { margin:0; font-family:"Playfair Display", Georgia, serif; color:var(--inv-wine); font-size:2rem; }
+  .inv-copy { color:var(--inv-muted); margin:.35rem 0 1.25rem; }
+  .inv-layout { display:grid; grid-template-columns:minmax(0,2.2fr) minmax(280px,.8fr); gap:1rem; align-items:start; }
+  .inv-panel { background:#fff; border:1px solid var(--inv-line); border-radius:.75rem; padding:1rem; }
+  .inv-steps { display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:1rem; }
+  .inv-step-pill { border:1px solid var(--inv-line); background:#fff; border-radius:999px; padding:.35rem .75rem; font-weight:800; font-size:.82rem; color:#374151; }
+  .inv-step-pill.active { background:var(--inv-wine); color:#fff; border-color:var(--inv-wine); }
+  .inv-step { display:none; } .inv-step.active { display:block; }
+  .inv-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.85rem; }
+  .inv-field label { display:block; font-size:.74rem; font-weight:900; text-transform:uppercase; letter-spacing:.05em; color:#4b5563; margin-bottom:.25rem; }
+  .inv-input, .inv-select, .inv-textarea { width:100%; border:1px solid #d1d5db; border-radius:.45rem; padding:.55rem .65rem; font:inherit; background:#fff; color:#111827; }
+  .inv-textarea { min-height:92px; resize:vertical; }
+  .inv-table { width:100%; border-collapse:separate; border-spacing:0; table-layout:fixed; }
+  .inv-table th { background:var(--inv-wine); color:#fff; padding:.5rem; text-align:left; font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
+  .inv-table td { border-bottom:1px solid var(--inv-line); padding:.45rem; vertical-align:middle; }
+  .inv-table input,.inv-table select { width:100%; border:1px solid #d1d5db; border-radius:.35rem; padding:.42rem; font:inherit; background:#fff; }
+  .inv-table input[type=number] { text-align:right; }
+  .inv-actions { display:flex; gap:.65rem; justify-content:space-between; flex-wrap:wrap; margin-top:1rem; }
+  .inv-button { border:0; border-radius:.5rem; padding:.65rem 1rem; background:var(--inv-wine); color:#fff; font-weight:900; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; }
+  .inv-button.secondary { background:#fff; border:1px solid var(--inv-wine); color:var(--inv-wine); }
+  .inv-button.danger { background:#fee2e2; color:#991b1b; border:1px solid #fecaca; padding:.4rem .55rem; }
+  .inv-kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.75rem; margin-bottom:1rem; }
+  .inv-kpi { background:#fff; border:1px solid var(--inv-line); border-radius:.6rem; padding:.8rem; }
+  .inv-label { font-size:.7rem; text-transform:uppercase; letter-spacing:.06em; color:var(--inv-muted); font-weight:900; }
+  .inv-value { font-family:"Playfair Display", Georgia, serif; color:var(--inv-wine); font-size:1.35rem; font-weight:900; }
+  .inv-ref-table { width:100%; border-collapse:collapse; font-size:.84rem; }
+  .inv-ref-table th,.inv-ref-table td { border-bottom:1px solid #f3f4f6; padding:.45rem; text-align:right; }
+  .inv-ref-table th:first-child,.inv-ref-table td:first-child { text-align:left; }
+  .inv-review-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.75rem; }
+  .inv-review-card { border:1px solid var(--inv-line); background:#fafafa; border-radius:.6rem; padding:.8rem; }
+  @media (max-width:1000px){ .inv-layout,.inv-form-grid,.inv-kpis,.inv-review-grid{grid-template-columns:1fr;} }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="inv-shell">
+  <nav class="module-tabs">
+    {% for tab in module_tabs %}
+      <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
+    {% endfor %}
+  </nav>
+
+  <h1 class="inv-title">Nuevo Proyecto de Inversión</h1>
+  <p class="inv-copy">Captura la ficha, presupuesto por partidas, operación mensual y revisión financiera inicial en un solo flujo.</p>
+
+  <section class="inv-kpis">
+    <article class="inv-kpi"><div class="inv-label">Ticket promedio</div><div class="inv-value">${{ benchmark.ticket_promedio|default:0|floatformat:2|intcomma }}</div></article>
+    <article class="inv-kpi"><div class="inv-label">Ventas benchmark</div><div class="inv-value">${{ benchmark.ventas_mensuales_avg|default:0|floatformat:2|intcomma }}</div></article>
+    <article class="inv-kpi"><div class="inv-label">Gasto operativo</div><div class="inv-value">${{ benchmark.gastos_operativos_avg|default:0|floatformat:2|intcomma }}</div></article>
+    <article class="inv-kpi"><div class="inv-label">Fuente</div><div class="inv-value" style="font-size:1rem">{{ benchmark.data_source|default:"N/D" }}</div></article>
+  </section>
+
+  <form method="post" id="inversionWizardForm" action="{% url 'reportes:inversiones_wizard' %}">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="crear_proyecto">
+    <input type="hidden" name="partidas_json" id="partidas_json">
+
+    <div class="inv-layout">
+      <main class="inv-panel">
+        <div class="inv-steps">
+          <button type="button" class="inv-step-pill active" data-step-target="1">1. Ficha</button>
+          <button type="button" class="inv-step-pill" data-step-target="2">2. Presupuesto</button>
+          <button type="button" class="inv-step-pill" data-step-target="3">3. Operación</button>
+          <button type="button" class="inv-step-pill" data-step-target="4">4. Revisión</button>
+        </div>
+
+        <section class="inv-step active" data-step="1">
+          <div class="inv-form-grid">
+            <div class="inv-field"><label>Nombre del proyecto</label><input class="inv-input" name="nombre_proyecto" value="Apertura Bamoa 2026" required></div>
+            <div class="inv-field"><label>Tipo</label><select class="inv-select" name="tipo_proyecto">{% for value,label in project_types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+            <div class="inv-field"><label>Ciudad</label><input class="inv-input" name="ciudad" value="Guasave"></div>
+            <div class="inv-field"><label>Colonia</label><input class="inv-input" name="colonia" value="Bamoa"></div>
+            <div class="inv-field"><label>m2 local</label><input class="inv-input" type="number" step="0.01" name="m2_local" value="45"></div>
+            <div class="inv-field"><label>Sucursal relacionada</label><select class="inv-select" name="sucursal_relacionada_id"><option value="">Sin relación</option>{% for sucursal in sucursales %}<option value="{{ sucursal.id }}">{{ sucursal.nombre }}</option>{% endfor %}</select></div>
+            <div class="inv-field"><label>Fecha inicio</label><input class="inv-input" type="date" name="fecha_inicio" value="2026-06-01" required></div>
+            <div class="inv-field"><label>Fecha apertura estimada</label><input class="inv-input" type="date" name="fecha_apertura" value="2026-08-01"></div>
+            <div class="inv-field" style="grid-column:1/-1"><label>Descripción de ubicación</label><textarea class="inv-textarea" name="descripcion_ubicacion">Sucursal pequeña de pickup y punto de venta para validar demanda local antes de escalar operación.</textarea></div>
+          </div>
+        </section>
+
+        <section class="inv-step" data-step="2">
+          <div style="display:flex;gap:.65rem;flex-wrap:wrap;margin-bottom:.85rem">
+            <button type="button" class="inv-button secondary" id="addPartidaBtn">Agregar partida</button>
+            <button type="button" class="inv-button secondary" id="importGuamuchilBtn">Usar referencia Guamúchil</button>
+          </div>
+          <div style="overflow:auto;border:1px solid var(--inv-line);border-radius:.6rem">
+            <table class="inv-table">
+              <colgroup>
+                <col style="width:18%"><col style="width:27%"><col style="width:18%"><col style="width:12%"><col style="width:10%"><col style="width:10%"><col style="width:5%">
+              </colgroup>
+              <thead><tr><th>Categoría</th><th>Descripción</th><th>Proveedor</th><th>Monto</th><th>IVA</th><th>Total</th><th></th></tr></thead>
+              <tbody id="partidasBody"></tbody>
+            </table>
+          </div>
+          <div id="totalesCategorias" style="margin-top:1rem"></div>
+        </section>
+
+        <section class="inv-step" data-step="3">
+          <div class="inv-form-grid">
+            <div class="inv-field"><label>Renta mensual</label><input class="inv-input js-operacion" type="number" step="0.01" name="renta_mensual" value="4000"></div>
+            <div class="inv-field"><label>Depósito</label><input class="inv-input" type="number" step="0.01" name="deposito" value="4000"></div>
+            <div class="inv-field"><label>Nómina mensual</label><input class="inv-input js-operacion" type="number" step="0.01" name="nomina_mensual" value="18000"></div>
+            <div class="inv-field"><label>Servicios</label><input class="inv-input js-operacion" type="number" step="0.01" name="servicios_mensual" value="7000"></div>
+            <div class="inv-field"><label>Marketing mensual</label><input class="inv-input js-operacion" type="number" step="0.01" name="marketing_mensual" value="2500"></div>
+            <div class="inv-field"><label>Otros fijos</label><input class="inv-input js-operacion" type="number" step="0.01" name="otros_fijos_mensual" value="1500"></div>
+            <div class="inv-field"><label>Ventas promedio base</label><input class="inv-input js-fin" type="number" step="0.01" name="ventas_promedio_base" value="{{ ventas_sugeridas|default:260000 }}"></div>
+            <div class="inv-field"><label>Margen bruto %</label><input class="inv-input js-fin" type="number" step="0.01" name="margen_bruto_pct" value="45"></div>
+            <div class="inv-field"><label>Crecimiento mensual %</label><input class="inv-input js-fin" type="number" step="0.01" name="crecimiento_mensual_pct" value="0.8"></div>
+            <div class="inv-field"><label>Horizonte meses</label><input class="inv-input js-fin" type="number" name="horizonte_meses" value="36"></div>
+            <div class="inv-field"><label>Discount rate %</label><input class="inv-input" type="number" step="0.01" name="discount_rate" value="12"></div>
+            <div class="inv-field"><label>ROI objetivo %</label><input class="inv-input" type="number" step="0.01" name="roi_objetivo" value="25"></div>
+            <div class="inv-field"><label>Payback objetivo meses</label><input class="inv-input" type="number" name="payback_objetivo_meses" value="24"></div>
+          </div>
+        </section>
+
+        <section class="inv-step" data-step="4">
+          <div class="inv-review-grid" id="escenariosPreview"></div>
+          <div class="inv-panel" style="margin-top:1rem;background:#fafafa">
+            <div class="inv-label">Total inversión planeada</div>
+            <div class="inv-value" id="reviewTotal">$0.00</div>
+            <p class="inv-copy" id="reviewResumen"></p>
+          </div>
+          <button type="submit" class="inv-button" style="margin-top:1rem">Crear proyecto con escenarios</button>
+        </section>
+
+        <div class="inv-actions">
+          <button type="button" class="inv-button secondary" id="prevStepBtn">Anterior</button>
+          <button type="button" class="inv-button" id="nextStepBtn">Siguiente</button>
+        </div>
+      </main>
+
+      <aside class="inv-panel">
+        <div class="inv-label">Referencia Guamúchil</div>
+        <div class="inv-value">${{ gml_total|floatformat:2|intcomma }}</div>
+        <p class="inv-copy">Comparativo de presupuesto planeado contra la sucursal de referencia.</p>
+        <table class="inv-ref-table">
+          <thead><tr><th>Categoría</th><th>Guamúchil</th><th>Plan</th><th>Delta</th></tr></thead>
+          <tbody id="comparativoBody"></tbody>
+        </table>
+      </aside>
+    </div>
+  </form>
+</div>
+
+<script>
+  const categorias = {{ categorias_json|safe }};
+  const gmlCats = {{ gml_cats_json|safe }};
+  let step = 1;
+  let partidas = [
+    { categoria: "OBRA_CIVIL", descripcion: "Remodelación local", proveedor_nombre: "", monto: 190000, iva: 0 }
+  ];
+  const money = (value) => new Intl.NumberFormat("es-MX", { style:"currency", currency:"MXN" }).format(Number(value || 0));
+  const numberValue = (selector) => Number(document.querySelector(selector)?.value || 0);
+
+  function renderSteps() {
+    document.querySelectorAll(".inv-step").forEach((node) => node.classList.toggle("active", Number(node.dataset.step) === step));
+    document.querySelectorAll(".inv-step-pill").forEach((node) => node.classList.toggle("active", Number(node.dataset.stepTarget) === step));
+    document.getElementById("prevStepBtn").style.visibility = step === 1 ? "hidden" : "visible";
+    document.getElementById("nextStepBtn").style.display = step === 4 ? "none" : "inline-flex";
+    renderReview();
+  }
+
+  function renderPartidas() {
+    const body = document.getElementById("partidasBody");
+    body.innerHTML = "";
+    partidas.forEach((partida, idx) => {
+      const tr = document.createElement("tr");
+      const total = Number(partida.monto || 0) + Number(partida.iva || 0);
+      tr.innerHTML = `
+        <td><select data-field="categoria">${categorias.map((cat) => `<option value="${cat.value}" ${cat.value === partida.categoria ? "selected" : ""}>${cat.label}</option>`).join("")}</select></td>
+        <td><input data-field="descripcion" value="${partida.descripcion || ""}" placeholder="Descripción"></td>
+        <td><input data-field="proveedor_nombre" value="${partida.proveedor_nombre || ""}" placeholder="Proveedor"></td>
+        <td><input data-field="monto" type="number" step="0.01" min="0" value="${partida.monto || 0}"></td>
+        <td><input data-field="iva" type="number" step="0.01" min="0" value="${partida.iva || 0}"></td>
+        <td style="text-align:right;font-weight:900;color:#8B2252">${money(total)}</td>
+        <td><button type="button" class="inv-button danger" data-delete="${idx}">X</button></td>`;
+      tr.querySelectorAll("[data-field]").forEach((input) => {
+        input.addEventListener("input", () => {
+          const field = input.dataset.field;
+          partidas[idx][field] = ["monto", "iva"].includes(field) ? Number(input.value || 0) : input.value;
+          renderPartidas();
+        });
+      });
+      tr.querySelector("[data-delete]").addEventListener("click", () => {
+        partidas.splice(idx, 1);
+        renderPartidas();
+      });
+      body.appendChild(tr);
+    });
+    renderTotales();
+    renderComparativo();
+    renderReview();
+  }
+
+  function totalesPorCategoria() {
+    return partidas.reduce((acc, partida) => {
+      const cat = partida.categoria || "OTROS";
+      acc[cat] = (acc[cat] || 0) + Number(partida.monto || 0) + Number(partida.iva || 0);
+      return acc;
+    }, {});
+  }
+
+  function renderTotales() {
+    const labels = Object.fromEntries(categorias.map((cat) => [cat.value, cat.label]));
+    const totals = totalesPorCategoria();
+    const total = Object.values(totals).reduce((a, b) => a + b, 0);
+    document.getElementById("totalesCategorias").innerHTML = Object.keys(totals).sort().map((cat) =>
+      `<span class="inv-step-pill">${labels[cat] || cat}: ${money(totals[cat])}</span>`
+    ).join(" ") + ` <span class="inv-step-pill active">Total: ${money(total)}</span>`;
+  }
+
+  function renderComparativo() {
+    const totals = totalesPorCategoria();
+    const keys = Array.from(new Set([...Object.keys(gmlCats), ...Object.keys(totals)])).sort();
+    document.getElementById("comparativoBody").innerHTML = keys.map((cat) => {
+      const gml = Number(gmlCats[cat]?.total || 0);
+      const plan = Number(totals[cat] || 0);
+      const delta = gml > 0 ? ((plan - gml) / gml) * 100 : null;
+      return `<tr><td>${gmlCats[cat]?.label || cat}</td><td>${money(gml)}</td><td>${money(plan)}</td><td>${delta === null ? "N/D" : delta.toFixed(0) + "%"}</td></tr>`;
+    }).join("");
+  }
+
+  function renderReview() {
+    const total = Object.values(totalesPorCategoria()).reduce((a, b) => a + b, 0);
+    const gastos = ["renta_mensual", "nomina_mensual", "servicios_mensual", "marketing_mensual", "otros_fijos_mensual"].reduce((sum, name) => sum + Number(document.querySelector(`[name=${name}]`)?.value || 0), 0);
+    const ventas = numberValue("[name=ventas_promedio_base]");
+    const margen = numberValue("[name=margen_bruto_pct]") / 100;
+    const scenarios = [
+      ["Conservador", .88, 1.06],
+      ["Base", 1, 1],
+      ["Optimista", 1.12, .97],
+    ];
+    document.getElementById("reviewTotal").textContent = money(total);
+    document.getElementById("reviewResumen").textContent = `${partidas.length} partidas capturadas. Gastos fijos mensuales: ${money(gastos)}.`;
+    document.getElementById("escenariosPreview").innerHTML = scenarios.map(([name, mv, mc]) => {
+      const utilidad = (ventas * mv * margen) - (gastos * mc);
+      return `<article class="inv-review-card"><div class="inv-label">${name}</div><div class="inv-value">${money(utilidad)}</div><div class="inv-copy">Utilidad mensual estimada</div></article>`;
+    }).join("");
+  }
+
+  document.getElementById("addPartidaBtn").addEventListener("click", () => {
+    partidas.push({ categoria:"OTROS", descripcion:"", proveedor_nombre:"", monto:0, iva:0 });
+    renderPartidas();
+  });
+  document.getElementById("importGuamuchilBtn").addEventListener("click", () => {
+    Object.keys(gmlCats).forEach((cat) => partidas.push({ categoria:cat, descripcion:`Referencia ${gmlCats[cat].label}`, proveedor_nombre:"", monto:0, iva:0 }));
+    renderPartidas();
+  });
+  document.querySelectorAll("[data-step-target]").forEach((button) => button.addEventListener("click", () => { step = Number(button.dataset.stepTarget); renderSteps(); }));
+  document.getElementById("nextStepBtn").addEventListener("click", () => { step = Math.min(4, step + 1); renderSteps(); });
+  document.getElementById("prevStepBtn").addEventListener("click", () => { step = Math.max(1, step - 1); renderSteps(); });
+  document.querySelectorAll(".js-operacion,.js-fin").forEach((input) => input.addEventListener("input", renderReview));
+  document.getElementById("inversionWizardForm").addEventListener("submit", (event) => {
+    document.getElementById("partidas_json").value = JSON.stringify(partidas);
+    if (!partidas.length || !partidas.some((p) => Number(p.monto || 0) > 0 && String(p.descripcion || "").trim())) {
+      event.preventDefault();
+      alert("Agrega al menos una partida con descripción y monto mayor a cero.");
+    }
+  });
+  renderPartidas();
+  renderSteps();
+</script>
+{% endblock %}

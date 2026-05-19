@@ -1,0 +1,32 @@
+{% load humanize %}
+<section class="inv-panel">
+  <h2>Ficha</h2>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="editar_ficha">
+    <div class="inv-form-grid">
+      <div><label class="inv-label">Nombre</label><input class="inv-input" name="nombre_proyecto" value="{{ project.nombre_proyecto }}"></div>
+      <div><label class="inv-label">Tipo</label><select class="inv-select" name="tipo_proyecto">{% for value,label in project_types %}<option value="{{ value }}"{% if project.tipo_proyecto == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+      <div><label class="inv-label">Ciudad</label><input class="inv-input" name="ciudad" value="{{ ubicacion.ciudad|default:'' }}"></div>
+      <div><label class="inv-label">Colonia</label><input class="inv-input" name="colonia" value="{{ ubicacion.colonia|default:'' }}"></div>
+      <div><label class="inv-label">m2 local</label><input class="inv-input" type="number" step="0.01" name="m2_local" value="{{ ubicacion.m2|default:0 }}"></div>
+      <div><label class="inv-label">Renta mensual</label><input class="inv-input" type="number" step="0.01" name="renta_mensual" value="{{ ubicacion.renta_mensual|default:0 }}"></div>
+      <div><label class="inv-label">Depósito</label><input class="inv-input" type="number" step="0.01" name="deposito" value="{{ ubicacion.deposito|default:0 }}"></div>
+      <div><label class="inv-label">Fecha apertura</label><input class="inv-input" type="date" name="fecha_apertura" value="{% if project.fecha_apertura %}{{ project.fecha_apertura|date:'Y-m-d' }}{% endif %}"></div>
+      <div><label class="inv-label">Sucursal relacionada</label><select class="inv-select" name="sucursal_relacionada_id"><option value="">Sin relación</option>{% for sucursal in sucursales %}<option value="{{ sucursal.id }}"{% if project.sucursal_relacionada_id == sucursal.id %} selected{% endif %}>{{ sucursal.nombre }}</option>{% endfor %}</select></div>
+      <div><label class="inv-label">Competidores conocidos</label><input class="inv-input" name="competidores_conocidos" value="{{ ubicacion.competidores_conocidos|default:'' }}"></div>
+      <div style="grid-column:1/-1"><label class="inv-label">Descripción de ubicación</label><textarea class="inv-textarea" name="descripcion_ubicacion">{{ ubicacion.descripcion|default:'' }}</textarea></div>
+      <div style="grid-column:1/-1"><label class="inv-label">Observaciones</label><textarea class="inv-textarea" name="observaciones">{{ project.observaciones }}</textarea></div>
+    </div>
+    <div class="inv-actions" style="margin-top:1rem"><button class="inv-button" type="submit">Guardar ficha</button></div>
+  </form>
+</section>
+
+<section class="inv-panel">
+  <h2>Timeline ejecutivo</h2>
+  <div class="inv-grid-3">
+    <div class="inv-kpi"><span class="inv-label">Planeación</span><div class="inv-value">{{ project.fecha_inicio|date:"Y-m-d" }}</div></div>
+    <div class="inv-kpi"><span class="inv-label">Apertura</span><div class="inv-value">{% if project.fecha_apertura %}{{ project.fecha_apertura|date:"Y-m-d" }}{% else %}Pendiente{% endif %}</div></div>
+    <div class="inv-kpi"><span class="inv-label">Recuperación</span><div class="inv-value">{{ project.get_estatus_display }}</div></div>
+  </div>
+</section>

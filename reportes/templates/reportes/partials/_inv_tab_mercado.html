@@ -1,0 +1,41 @@
+{% load humanize %}
+<section class="inv-panel">
+  <h2>Mercado</h2>
+  {% if market_study and not market_study.error %}
+    <div class="inv-grid-2">
+      <div style="display:flex;gap:1rem;align-items:center">
+        <div class="score-circle {% if market_study.score_viabilidad >= 75 %}ok{% elif market_study.score_viabilidad >= 55 %}warn{% else %}risk{% endif %}">{{ market_study.score_viabilidad }}</div>
+        <div>
+          <span class="inv-label">Veredicto</span>
+          <div class="inv-value">{{ market_study.veredicto }}</div>
+          <p class="inv-copy">{{ market_study.resumen_ejecutivo }}</p>
+        </div>
+      </div>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="generar_estudio_mercado">
+        <button class="inv-button secondary" type="submit">Regenerar estudio con IA</button>
+      </form>
+    </div>
+    <div class="inv-grid-2" style="margin-top:1rem">
+      <article class="inv-panel"><h3>Perfil demográfico</h3><p>{{ market_study.perfil_demografico.descripcion }}</p><p class="inv-muted">Población 2km: {{ market_study.perfil_demografico.poblacion_estimada_radio_2km|default:"N/D" }}</p></article>
+      <article class="inv-panel"><h3>Ubicación</h3><p>{{ market_study.analisis_ubicacion.accesibilidad }}</p><p class="inv-muted">Visibilidad: {{ market_study.analisis_ubicacion.visibilidad }}</p></article>
+      <article class="inv-panel"><h3>Competencia</h3><p>Nivel: {{ market_study.competencia.nivel_competencia }}</p><p class="inv-muted">Directos estimados: {{ market_study.competencia.competidores_directos_estimados }}</p></article>
+      <article class="inv-panel"><h3>Demanda</h3><p>Ventas mes 1: ${{ market_study.proyeccion_demanda.ventas_mensuales_estimadas_mes1|floatformat:2|intcomma }}</p><p class="inv-muted">Ticket estimado: ${{ market_study.proyeccion_demanda.ticket_promedio_estimado|floatformat:2|intcomma }}</p></article>
+    </div>
+    <div class="foda-grid" style="margin-top:1rem">
+      <article class="inv-panel"><h3>Fortalezas</h3><ul>{% for item in market_study.foda.fortalezas %}<li>{{ item }}</li>{% endfor %}</ul></article>
+      <article class="inv-panel"><h3>Oportunidades</h3><ul>{% for item in market_study.foda.oportunidades %}<li>{{ item }}</li>{% endfor %}</ul></article>
+      <article class="inv-panel"><h3>Debilidades</h3><ul>{% for item in market_study.foda.debilidades %}<li>{{ item }}</li>{% endfor %}</ul></article>
+      <article class="inv-panel"><h3>Amenazas</h3><ul>{% for item in market_study.foda.amenazas %}<li>{{ item }}</li>{% endfor %}</ul></article>
+    </div>
+  {% else %}
+    {% if market_study.error %}<p class="inv-copy">Último intento: {{ market_study.error }}</p>{% endif %}
+    <p class="inv-copy">Genera un estudio de mercado con la ubicación capturada en la ficha. Se guardará en metadata del proyecto.</p>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="generar_estudio_mercado">
+      <button class="inv-button" type="submit">Generar estudio con IA</button>
+    </form>
+  {% endif %}
+</section>
