@@ -58,9 +58,15 @@
             <dd data-plan-resumen="productos">{{ plan_actual.items.count|default:0 }}</dd>
           </div>
         </dl>
+        <ol class="plan-desktop-resumen__flujo" aria-label="Orden operativo">
+          <li>Demanda</li>
+          <li>Ajuste</li>
+          <li>Insumos</li>
+          <li>Liberación</li>
+        </ol>
         <div class="plan-desktop-resumen__acciones">
           <button type="button" class="plan-btn plan-btn--primario" onclick="irAPaso(2)">Cargar demanda</button>
-          <button type="button" class="plan-btn plan-btn--secundario" onclick="irAPaso(4)">Ver insumos</button>
+          <button type="button" class="plan-btn plan-btn--secundario" onclick="irAPaso(4)">Revisar insumos</button>
         </div>
       </aside>
 
@@ -78,7 +84,12 @@
               <article class="plan-kpi"><span class="plan-kpi__label">Fuente</span><strong class="plan-kpi__valor" id="kpi-fuente">Sin cargar</strong></article>
               <article class="plan-kpi"><span class="plan-kpi__label">Productos</span><strong class="plan-kpi__valor" id="kpi-productos">{{ plan_actual.items.count|default:0 }}</strong></article>
             </div>
-            <div class="plan-accion-row">
+            <div class="plan-siguiente">
+              <div class="plan-siguiente__texto">
+                <span>Siguiente acción</span>
+                <strong>Cargar demanda base</strong>
+                <p>Selecciona histórico, manual o solicitud ventas. Después ajustas cantidades finales antes de calcular insumos.</p>
+              </div>
               <button type="button" class="plan-btn plan-btn--primario" onclick="irAPaso(2)">Cargar demanda</button>
             </div>
           </div>
@@ -153,10 +164,10 @@
           </summary>
           <div class="plan-paso__body">
             <div class="plan-checklist" id="plan-checklist">
-              <label class="plan-check-item"><input type="checkbox" id="check-demanda"><span>Demanda validada y cargada</span></label>
-              <label class="plan-check-item"><input type="checkbox" id="check-ajustes"><span>Cantidades ajustadas y borrador guardado</span></label>
-              <label class="plan-check-item"><input type="checkbox" id="check-bom"><span>BOM calculado sin errores</span></label>
-              <label class="plan-check-item"><input type="checkbox" id="check-compras"><span>Compras faltantes revisadas</span></label>
+              <label class="plan-check-item"><input type="checkbox" id="check-demanda" name="demanda_validada"><span>Demanda validada y cargada</span></label>
+              <label class="plan-check-item"><input type="checkbox" id="check-ajustes" name="ajustes_guardados"><span>Cantidades ajustadas y borrador guardado</span></label>
+              <label class="plan-check-item"><input type="checkbox" id="check-bom" name="bom_calculada"><span>BOM calculado sin errores</span></label>
+              <label class="plan-check-item"><input type="checkbox" id="check-compras" name="compras_revisadas"><span>Compras faltantes revisadas</span></label>
             </div>
             <div class="plan-resumen-liberacion" id="resumen-liberacion"></div>
             <div class="plan-accion-row">
@@ -240,6 +251,8 @@ function escapeHTML(value) {
 function mostrarToast(msg, tipo) {
   const toast = document.createElement("div");
   toast.className = `plan-toast plan-toast--${tipo}`;
+  toast.setAttribute("role", tipo === "error" ? "alert" : "status");
+  toast.setAttribute("aria-live", tipo === "error" ? "assertive" : "polite");
   toast.textContent = msg;
   document.body.appendChild(toast);
   setTimeout(function () { toast.remove(); }, 3200);
@@ -272,7 +285,8 @@ function irAPaso(n) {
   target.open = true;
   PLAN.paso_actual = n;
   actualizarProgreso();
-  target.scrollIntoView({behavior: "smooth", block: "start"});
+  const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  target.scrollIntoView({behavior: reduceMotion ? "auto" : "smooth", block: "start"});
 }
 
 function renderizarTablaDemanda(items, container) {
@@ -284,7 +298,7 @@ function renderizarTablaDemanda(items, container) {
   items.forEach(function (item) {
     const nombre = escapeHTML(item.nombre);
     const promedio = Number(item.promedio_semanal || 0);
-    html += `<tr><td>${nombre}</td><td class="plan-tabla__num">${promedio.toFixed(2)}</td><td class="plan-tabla__num"><input type="number" class="plan-input-cantidad" data-receta="${item.receta_id}" data-nombre="${nombre}" value="${Math.round(promedio)}" min="0"></td></tr>`;
+    html += `<tr><td>${nombre}</td><td class="plan-tabla__num">${promedio.toFixed(2)}</td><td class="plan-tabla__num"><input type="number" class="plan-input-cantidad" name="demanda_${item.receta_id}" aria-label="Cantidad sugerida para ${nombre}" inputmode="numeric" data-receta="${item.receta_id}" data-nombre="${nombre}" value="${Math.round(promedio)}" min="0"></td></tr>`;
   });
   html += "</tbody></table>";
   container.innerHTML = html;
@@ -310,7 +324,7 @@ function mostrarTablaManual() {
   let html = '<table class="plan-tabla"><thead><tr><th>Producto</th><th class="plan-tabla__num">Cantidad</th></tr></thead><tbody>';
   PLAN_RECETAS.forEach(function (receta) {
     const nombre = escapeHTML(receta.nombre);
-    html += `<tr><td>${nombre}</td><td class="plan-tabla__num"><input type="number" class="plan-input-cantidad" data-receta="${receta.id}" data-nombre="${nombre}" value="0" min="0"></td></tr>`;
+    html += `<tr><td>${nombre}</td><td class="plan-tabla__num"><input type="number" class="plan-input-cantidad" name="demanda_${receta.id}" aria-label="Cantidad manual para ${nombre}" inputmode="numeric" data-receta="${receta.id}" data-nombre="${nombre}" value="0" min="0"></td></tr>`;
   });
   html += "</tbody></table>";
   container.innerHTML = html;
@@ -346,7 +360,8 @@ function renderizarTablaAjuste() {
   const container = document.getElementById("tabla-ajuste-container");
   let html = '<table class="plan-tabla"><thead><tr><th>Producto</th><th class="plan-tabla__num">Base</th><th class="plan-tabla__num">Final</th><th>Destino</th></tr></thead><tbody>';
   PLAN.items.forEach(function (item, index) {
-    html += `<tr><td>${escapeHTML(item.nombre)}</td><td class="plan-tabla__num">${Number(item.cantidad).toFixed(2)}</td><td class="plan-tabla__num"><input type="number" class="plan-input-ajuste" data-idx="${index}" value="${item.cantidad_final}" min="0"></td><td><select class="plan-select-destino" data-idx="${index}"><option value="CEDIS">CEDIS</option><option value="SUCURSAL">Sucursales</option></select></td></tr>`;
+    const nombre = escapeHTML(item.nombre);
+    html += `<tr><td>${nombre}</td><td class="plan-tabla__num">${Number(item.cantidad).toFixed(2)}</td><td class="plan-tabla__num"><input type="number" class="plan-input-ajuste" name="ajuste_${item.receta_id}" aria-label="Cantidad final para ${nombre}" inputmode="numeric" data-idx="${index}" value="${item.cantidad_final}" min="0"></td><td><select class="plan-select-destino" name="destino_${item.receta_id}" aria-label="Destino para ${nombre}" data-idx="${index}"><option value="CEDIS">CEDIS</option><option value="SUCURSAL">Sucursales</option></select></td></tr>`;
   });
   html += "</tbody></table>";
   container.innerHTML = html;
