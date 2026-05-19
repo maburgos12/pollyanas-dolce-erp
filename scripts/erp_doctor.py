@@ -77,6 +77,7 @@ CRITICAL_BEAT_TASKS = [
     },
 ]
 INVESTMENT_COGS_RATIO_THRESHOLD = Decimal("2.0")
+INVESTMENT_COGS_OFFENDER_LIMIT = 20
 PERCENT_FIELD_MIN = Decimal("-9999.9999")
 PERCENT_FIELD_MAX = Decimal("9999.9999")
 GUAMUCHIL_PROJECT_ID = 1
@@ -731,6 +732,52 @@ def _finance_db_ready(check_name: str) -> CheckResult | None:
     return None
 
 
+def _cost_sources_for_recipes(recipe_ids: set[int], period_start: object) -> dict[int, dict[str, object]]:
+    from reportes.models import ProductoCostoOperativoMensual
+
+    if not recipe_ids:
+        return {}
+
+    latest_rows = (
+        ProductoCostoOperativoMensual.objects.filter(receta_id__in=recipe_ids)
+        .order_by("receta_id", "-periodo")
+        .distinct("receta_id")
+    )
+    aligned_rows = (
+        ProductoCostoOperativoMensual.objects.filter(
+            receta_id__in=recipe_ids,
+            periodo__lte=period_start,
+        )
+        .order_by("receta_id", "-periodo")
+        .distinct("receta_id")
+    )
+    sources: dict[int, dict[str, object]] = {
+        recipe_id: {
+            "latest_period": None,
+            "latest_unit_cost": None,
+            "period_aligned_period": None,
+            "period_aligned_unit_cost": None,
+            "latest_differs_from_period": False,
+        }
+        for recipe_id in recipe_ids
+    }
+    for row in latest_rows:
+        payload = sources.setdefault(int(row.receta_id), {})
+        payload["latest_period"] = _period_label(row.periodo)
+        payload["latest_unit_cost"] = _money(row.costo_fabricacion_unit)
+    for row in aligned_rows:
+        payload = sources.setdefault(int(row.receta_id), {})
+        payload["period_aligned_period"] = _period_label(row.periodo)
+        payload["period_aligned_unit_cost"] = _money(row.costo_fabricacion_unit)
+    for payload in sources.values():
+        payload["latest_differs_from_period"] = bool(
+            payload.get("latest_period")
+            and payload.get("period_aligned_period")
+            and payload["latest_period"] != payload["period_aligned_period"]
+        )
+    return sources
+
+
 def _top_cogs_offenders(FactVentaDiaria, branch_id: int | None, period: object) -> list[dict[str, object]]:
     from django.db.models import Sum
 
@@ -742,24 +789,36 @@ def _top_cogs_offenders(FactVentaDiaria, branch_id: int | None, period: object) 
             fecha__gte=start,
             fecha__lt=end,
         )
-        .values("producto_clave", "producto_nombre", "categoria")
-        .annotate(ventas=Sum("venta_total"), cogs=Sum("costo_estimado"))
+        .values("receta_id", "producto_clave", "producto_nombre", "categoria", "source_kind")
+        .annotate(
+            cantidad=Sum("cantidad"),
+            ventas=Sum("venta_total"),
+            cogs=Sum("costo_estimado"),
+        )
     )
-    offenders = []
-    for item in rows:
+    materialized = list(rows)
+    recipe_ids = {int(item["receta_id"]) for item in materialized if item.get("receta_id")}
+    cost_sources = _cost_sources_for_recipes(recipe_ids, start)
+    offenders: list[dict[str, object]] = []
+    for item in materialized:
         item_ratio = _ratio(item["cogs"], item["ventas"])
-        if item_ratio is None:
-            continue
+        implied_unit_cost = _ratio(item["cogs"], item["cantidad"])
+        receta_id = int(item["receta_id"]) if item.get("receta_id") else None
         offenders.append({
+            "receta_id": receta_id,
             "producto_clave": item["producto_clave"],
             "producto_nombre": item["producto_nombre"],
             "categoria": item["categoria"],
+            "source_kind": item["source_kind"],
+            "cantidad": _money(item["cantidad"]),
             "ventas": _money(item["ventas"]),
             "costo": _money(item["cogs"]),
-            "ratio": str(item_ratio),
+            "ratio_cogs_ventas": str(item_ratio) if item_ratio is not None else None,
+            "costo_unitario_usado_implicito": _money(implied_unit_cost),
+            "cost_source": cost_sources.get(receta_id, {}) if receta_id else {},
         })
-    offenders.sort(key=lambda item: (_as_decimal(item["ratio"]), _as_decimal(item["costo"])), reverse=True)
-    return offenders[:5]
+    offenders.sort(key=lambda item: (_as_decimal(item["costo"]), _as_decimal(item["ratio_cogs_ventas"])), reverse=True)
+    return offenders[:INVESTMENT_COGS_OFFENDER_LIMIT]
 
 
 def check_investment_cogs_sanity() -> CheckResult:
