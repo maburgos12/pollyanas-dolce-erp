@@ -1,254 +1,106 @@
 {% extends "base.html" %}
+{% load static humanize %}
 {% block title %}Maestros - Proveedores{% endblock %}
 {% block page_title %}Maestros · Proveedores{% endblock %}
 
 {% block content %}
-<nav class="module-tabs">
-  <a class="module-tab active" href="{% url 'maestros:proveedor_list' %}">Proveedores</a>
-  <a class="module-tab" href="{% url 'maestros:insumo_list' %}">Insumos</a>
-</nav>
+<div class="module-shell bi-shell">
+  <nav class="module-tabs">
+    <a class="module-tab active" href="{% url 'maestros:proveedor_list' %}">Proveedores</a>
+    <a class="module-tab" href="{% url 'maestros:insumo_list' %}">Insumos</a>
+    <a class="module-tab" href="{% url 'maestros:point_pending_review' %}">Sincronización Point</a>
+  </nav>
 
-<section class="card">
-  <div class="card-header">Centro de mando ERP</div>
-  <div class="kpi-grid mb-3">
-    <article class="kpi-card">
-      <div class="kpi-label">Responsable principal</div>
-      <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">
-        {{ erp_command_center.status }}
+  <section class="bi-hero">
+    <div class="bi-hero-main">
+      <div class="bi-kicker">Maestros</div>
+      <h1 class="bi-hero-title">Proveedores</h1>
+      <p class="bi-copy">Directorio de proveedores operativos. Mantén razón social, vigencia y lead time actualizados para que el flujo de compras no se detenga.</p>
+      <div class="bi-hero-highlights">
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Total</div>
+          <div class="bi-hero-highlight-value">{{ total_proveedores }}</div>
+        </article>
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Activos</div>
+          <div class="bi-hero-highlight-value">{{ total_activos }}</div>
+        </article>
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Inactivos</div>
+          <div class="bi-hero-highlight-value {% if total_inactivos %}is-warning{% endif %}">{{ total_inactivos }}</div>
+        </article>
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Lead time promedio</div>
+          <div class="bi-hero-highlight-value">{{ avg_lead_time }} días</div>
+        </article>
       </div>
-      <div class="kpi-label">Semáforo global</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-number">{{ erp_command_center.blockers }}</div>
-      <div class="kpi-label">Bloqueos abiertos</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-label">Siguiente paso</div>
-      <div class="muted" style="margin:8px 0 10px;">{{ erp_command_center.next_step }}</div>
-      <a class="btn btn-secondary btn-sm" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
-    </article>
-  </div>
-
-  <div class="kpi-grid mb-3">
-    <div class="kpi-card">
-      <div class="kpi-number">{{ total_proveedores }}</div>
-      <div class="kpi-label">Proveedores</div>
     </div>
-    <div class="kpi-card">
-      <div class="kpi-number is-success">{{ total_activos }}</div>
-      <div class="kpi-label">Activos</div>
+    <div class="bi-hero-side">
+      <a class="btn btn-primary" href="{% url 'maestros:proveedor_create' %}">+ Nuevo proveedor</a>
     </div>
-    <div class="kpi-card">
-      <div class="kpi-number {% if total_inactivos %}is-warning{% else %}is-success{% endif %}">{{ total_inactivos }}</div>
-      <div class="kpi-label">Inactivos</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-number is-primary">{{ avg_lead_time }}</div>
-      <div class="kpi-label">Lead time promedio</div>
-    </div>
-  </div>
+  </section>
 
-  <div class="card-header">Workflow ERP del proveedor</div>
-  <div class="table-responsive mb-3">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Etapa</th>
-          <th>Responsable</th>
-          <th>Cierre</th>
-          <th>Detalle</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in workflow_rows %}
-        <tr>
-          <td><strong>{{ row.step }} · {{ row.title }}</strong></td>
-          <td>{{ row.owner }}</td>
-          <td>
-            <span class="badge {% if row.tone == 'success' %}bg-success{% else %}bg-warning text-dark{% endif %}">{{ row.completion }}%</span>
-          </td>
-          <td>{{ row.detail }}</td>
-          <td>{{ row.next_step }}</td>
-          <td><a class="btn btn-secondary btn-sm" href="{{ row.action_href }}">{{ row.action_label }}</a></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  <section class="card">
+    <form method="get" class="recipes-filters mb-3">
+      <input class="form-control" name="q" value="{{ search_query }}" placeholder="Buscar por nombre...">
+      <select class="form-select" name="estado">
+        <option value="" {% if not estado %}selected{% endif %}>Todos los estatus</option>
+        <option value="activos" {% if estado == "activos" %}selected{% endif %}>Activos</option>
+        <option value="inactivos" {% if estado == "inactivos" %}selected{% endif %}>Inactivos</option>
+      </select>
+      <button class="btn btn-primary" type="submit">Filtrar</button>
+      <a class="btn btn-secondary" href="{% url 'maestros:proveedor_list' %}">Limpiar</a>
+    </form>
 
-  {% if critical_path_rows %}
-  <div class="card-header">Ruta crítica ERP</div>
-  <div class="table-responsive mb-3">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Prioridad</th>
-          <th>Tramo</th>
-          <th>Responsable</th>
-          <th>Brechas</th>
-          <th>Cierre</th>
-          <th>Depende de</th>
-          <th>Lectura ejecutiva</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in critical_path_rows %}
-        <tr>
-          <td><strong>{{ row.rank }}</strong></td>
-          <td>
-            <strong>{{ row.title }}</strong>
-            <div class="muted">{{ row.status }}</div>
-          </td>
-          <td>{{ row.owner }}</td>
-          <td>{{ row.count }}</td>
-          <td>{{ row.completion }}%</td>
-          <td>
-            <strong>{{ row.depends_on }}</strong>
-            <div class="muted">{{ row.dependency_status }}</div>
-          </td>
-          <td>{{ row.detail }}</td>
-          <td>{{ row.next_step }}</td>
-          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
-
-  {% if executive_radar_rows %}
-  <div class="card-header">Radar ejecutivo ERP</div>
-  <div class="table-responsive mb-3">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Tramo</th>
-          <th>Responsable</th>
-          <th>Bloqueo dominante</th>
-          <th>Depende de</th>
-          <th>Cierre</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in executive_radar_rows %}
-        <tr>
-          <td>
-            <strong>{{ row.phase }}</strong>
-            <div class="muted">{{ row.status }}</div>
-          </td>
-          <td>{{ row.owner }}</td>
-          <td>{{ row.dominant_blocker }}</td>
-          <td>
-            <strong>{{ row.depends_on }}</strong>
-            <div class="muted">{{ row.dependency_status }}</div>
-          </td>
-          <td>{{ row.progress_pct }}%</td>
-          <td>{{ row.next_step }}</td>
-          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
-
-  <div class="card-header">Mesa de gobierno ERP</div>
-  <div class="table-responsive mb-3">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Frente</th>
-          <th>Responsable</th>
-          <th>Bloqueos</th>
-          <th>Cierre</th>
-          <th>Detalle</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in erp_governance_rows %}
-        <tr>
-          <td>{{ row.front }}</td>
-          <td>{{ row.owner }}</td>
-          <td>{{ row.blockers }}</td>
-          <td>{{ row.completion }}%</td>
-          <td>{{ row.detail }}</td>
-          <td>{{ row.next_step }}</td>
-          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  <div class="d-flex justify-content-between align-items-center mb-3">
-    <div class="page-section-title mb-0">Catálogo de Proveedores</div>
-    <a class="btn btn-primary" href="{% url 'maestros:proveedor_create' %}">+ Nuevo proveedor</a>
-  </div>
-
-  <form method="get" class="recipes-filters mb-3">
-    <input class="form-control" name="q" value="{{ search_query }}" placeholder="Buscar proveedor...">
-    <select class="form-select" name="estado">
-      <option value="" {% if not estado %}selected{% endif %}>Todos</option>
-      <option value="activos" {% if estado == "activos" %}selected{% endif %}>Activos</option>
-      <option value="inactivos" {% if estado == "inactivos" %}selected{% endif %}>Inactivos</option>
-    </select>
-    <button class="btn btn-primary" type="submit">Filtrar</button>
-    <a class="btn btn-secondary" href="{% url 'maestros:proveedor_list' %}">Limpiar</a>
-  </form>
-
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Proveedor</th>
-          <th class="text-end">Lead time (días)</th>
-          <th>Estatus</th>
-          <th>Acciones</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for p in proveedores %}
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Proveedor</th>
+            <th class="text-end">Lead time (días)</th>
+            <th>Estatus</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in proveedores %}
           <tr>
             <td>{{ p.nombre }}</td>
             <td class="text-end">{{ p.lead_time_dias }}</td>
-            <td>{% if p.activo %}<span class="badge bg-success">Activo</span>{% else %}<span class="badge bg-danger">Inactivo</span>{% endif %}</td>
+            <td>
+              {% if p.activo %}
+              <span class="badge bg-success">Activo</span>
+              {% else %}
+              <span class="badge bg-danger">Inactivo</span>
+              {% endif %}
+            </td>
             <td>
               <div class="recipe-actions">
-                <a href="{% url 'maestros:proveedor_update' p.id %}" class="btn btn-secondary">Editar</a>
-                <a href="{% url 'maestros:proveedor_delete' p.id %}" class="btn btn-danger">Eliminar</a>
+                <a href="{% url 'maestros:proveedor_update' p.id %}" class="btn btn-secondary btn-sm">Editar</a>
+                <a href="{% url 'maestros:proveedor_delete' p.id %}" class="btn btn-danger btn-sm">Eliminar</a>
               </div>
             </td>
           </tr>
-        {% empty %}
+          {% empty %}
           <tr><td colspan="4" class="text-muted">No hay proveedores registrados.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
 
-  {% if is_paginated %}
-  <nav>
-    <ul class="pagination">
-      {% if page_obj.has_previous %}
-      <li><a class="page-link" href="?q={{ search_query }}&estado={{ estado }}&page={{ page_obj.previous_page_number }}">Anterior</a></li>
-      {% endif %}
-      <li><span class="page-link">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span></li>
-      {% if page_obj.has_next %}
-      <li><a class="page-link" href="?q={{ search_query }}&estado={{ estado }}&page={{ page_obj.next_page_number }}">Siguiente</a></li>
-      {% endif %}
-    </ul>
-  </nav>
-  {% endif %}
-</section>
+    {% if is_paginated %}
+    <nav class="mt-3">
+      <ul class="pagination">
+        {% if page_obj.has_previous %}
+        <li><a class="page-link" href="?q={{ search_query }}&estado={{ estado }}&page={{ page_obj.previous_page_number }}">Anterior</a></li>
+        {% endif %}
+        <li><span class="page-link">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span></li>
+        {% if page_obj.has_next %}
+        <li><a class="page-link" href="?q={{ search_query }}&estado={{ estado }}&page={{ page_obj.next_page_number }}">Siguiente</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+    {% endif %}
+  </section>
+</div>
 {% endblock %}
