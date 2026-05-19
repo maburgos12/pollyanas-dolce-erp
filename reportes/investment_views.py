@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -24,12 +25,14 @@ from reportes.models import (
     ProyectoInversionEscenario,
     ProyectoInversionGasto,
     ProyectoInversionPagoDeuda,
+    ProyectoInversionSnapshotMensual,
 )
 from reportes.services_expansion_decision import ExpansionDecisionService
 from reportes.services_expansion_forecast import ExpansionForecastService, recomendar_apertura
 from reportes.services_expansion_calibration import ExpansionCalibrationService
 from reportes.services_expansion_simulations import ExpansionSimulationRegistryService
 from reportes.services_investment_projects import (
+    ProyectoInversionScenarioService,
     ProyectoInversionDashboardService,
     ProyectoInversionRefreshService,
 )
@@ -1447,3 +1450,289 @@ def proyecto_inversion_detail(request: HttpRequest, project_id: int) -> HttpResp
         return response
 
     return render(request, "reportes/proyecto_inversion_detail.html", context)
+
+
+@login_required
+def proyecto_bamoa_wizard(request: HttpRequest) -> HttpResponse:
+    """
+    Crea el proyecto Apertura Bamoa 2026 dentro del módulo existente de inversiones.
+    El formulario se pre-carga con benchmark real de sucursales activas.
+    """
+    from reportes.services_investment_projects import _benchmark_sucursales_activas
+
+    _require_reportes_access(request.user)
+
+    benchmark: dict[str, object] = {}
+    bm_error = None
+    try:
+        benchmark = _benchmark_sucursales_activas(meses=12)
+    except Exception as exc:
+        bm_error = str(exc)
+
+    if request.method == "POST" and request.POST.get("action") == "create_bamoa_project":
+        errores = []
+        nombre_proyecto = (request.POST.get("nombre_proyecto") or "Apertura Bamoa 2026").strip()
+        fecha_inicio = _parse_date(request.POST.get("fecha_inicio"))
+        monto_inversion = _parse_decimal(request.POST.get("monto_inversion_planeado"))
+        ventas_base = _parse_decimal(request.POST.get("ventas_promedio_base"))
+
+        if not fecha_inicio:
+            errores.append("La fecha de inicio es obligatoria.")
+        if monto_inversion <= 0:
+            errores.append("El monto de inversión planeado debe ser mayor a cero.")
+        if ventas_base <= 0:
+            errores.append("Las ventas promedio base deben ser mayores a cero.")
+        existing_project = ProyectoInversion.objects.filter(nombre_proyecto=nombre_proyecto).first()
+        if existing_project:
+            messages.warning(request, f"Ya existe el proyecto '{nombre_proyecto}'. Se abrió el registro existente.")
+            return redirect("reportes:proyecto_inversion_detail", project_id=existing_project.pk)
+        if errores:
+            for error in errores:
+                messages.error(request, error)
+            return redirect("reportes:proyecto_bamoa_wizard")
+
+        margen_base = _parse_decimal(request.POST.get("margen_bruto_pct"), default="45")
+        gastos_base = _parse_decimal(request.POST.get("gastos_operativos_mensuales"))
+        crecimiento = _parse_decimal(request.POST.get("crecimiento_mensual_pct"), default="0.8")
+        horizonte_meses = _parse_int(request.POST.get("horizonte_meses"), default=36) or 36
+
+        with transaction.atomic():
+            project = ProyectoInversion.objects.create(
+                nombre_proyecto=nombre_proyecto,
+                tipo_proyecto=ProyectoInversion.TIPO_APERTURA_SUCURSAL,
+                sucursal_relacionada_id=_parse_int(request.POST.get("sucursal_relacionada_id")) or None,
+                fecha_inicio=fecha_inicio,
+                fecha_apertura=_parse_date(request.POST.get("fecha_apertura")),
+                responsable=request.user,
+                estatus=ProyectoInversion.ESTATUS_PLANEACION,
+                monto_inversion_planeado=monto_inversion,
+                capital_inicial_aportado=_parse_decimal(request.POST.get("capital_inicial_aportado")),
+                deuda_asociada=_parse_decimal(request.POST.get("deuda_asociada")),
+                tasa_interes_anual=_parse_decimal(request.POST.get("tasa_interes_anual")),
+                plazo_deuda_meses=_parse_int(request.POST.get("plazo_deuda_meses")),
+                pago_mensual_deuda_estimado=_parse_decimal(request.POST.get("pago_mensual_deuda_estimado")),
+                discount_rate=_parse_decimal(request.POST.get("discount_rate"), default="12"),
+                roi_objetivo=_parse_decimal(request.POST.get("roi_objetivo"), default="25"),
+                payback_objetivo_meses=_parse_int(request.POST.get("payback_objetivo_meses"), default=24) or 24,
+                recovery_strategy=ProyectoInversion.RECOVERY_FULL_NET_CASHFLOW,
+                recovery_percentage=Decimal("1"),
+                cierre_por_recuperacion_total=True,
+                observaciones=(request.POST.get("observaciones") or "").strip(),
+                metadata={
+                    "benchmark_snapshot": benchmark,
+                    "creado_desde": "proyecto_bamoa_wizard",
+                    "fuentes": {
+                        "ventas": benchmark.get("data_source"),
+                        "ticket": "PointDailyBranchIndicator",
+                        "gastos": "ProyectoInversionSnapshotMensual",
+                    },
+                },
+            )
+
+            escenarios_def = [
+                {
+                    "nombre": "Conservador",
+                    "tipo_escenario": ProyectoInversionEscenario.TIPO_CONSERVADOR,
+                    "ventas_promedio_mensuales": (ventas_base * Decimal("0.88")).quantize(Decimal("0.01")),
+                    "crecimiento_mensual_pct": (crecimiento * Decimal("0.85")).quantize(Decimal("0.0001")),
+                    "margen_bruto_pct": (margen_base * Decimal("0.96")).quantize(Decimal("0.0001")),
+                    "gastos_operativos_mensuales": (gastos_base * Decimal("1.06")).quantize(Decimal("0.01")),
+                    "notas": "Escenario conservador: -12% ventas, +6% gastos contra base.",
+                },
+                {
+                    "nombre": "Base",
+                    "tipo_escenario": ProyectoInversionEscenario.TIPO_BASE,
+                    "ventas_promedio_mensuales": ventas_base,
+                    "crecimiento_mensual_pct": crecimiento,
+                    "margen_bruto_pct": margen_base,
+                    "gastos_operativos_mensuales": gastos_base,
+                    "notas": "Escenario base: benchmark promedio de sucursales activas.",
+                },
+                {
+                    "nombre": "Optimista",
+                    "tipo_escenario": ProyectoInversionEscenario.TIPO_OPTIMISTA,
+                    "ventas_promedio_mensuales": (ventas_base * Decimal("1.12")).quantize(Decimal("0.01")),
+                    "crecimiento_mensual_pct": (crecimiento * Decimal("1.15")).quantize(Decimal("0.0001")),
+                    "margen_bruto_pct": (margen_base * Decimal("1.04")).quantize(Decimal("0.0001")),
+                    "gastos_operativos_mensuales": (gastos_base * Decimal("0.97")).quantize(Decimal("0.01")),
+                    "notas": "Escenario optimista: +12% ventas, -3% gastos contra base.",
+                },
+            ]
+
+            scenario_service = ProyectoInversionScenarioService()
+            for scenario_data in escenarios_def:
+                scenario = ProyectoInversionEscenario.objects.create(
+                    proyecto=project,
+                    horizonte_meses=horizonte_meses,
+                    capturado_por=request.user,
+                    **scenario_data,
+                )
+                scenario_service.compute(project, scenario)
+
+            log_event(
+                request.user,
+                "CREATE",
+                "reportes.ProyectoInversion",
+                project.pk,
+                payload={
+                    "nombre_proyecto": project.nombre_proyecto,
+                    "origen": "proyecto_bamoa_wizard",
+                    "escenarios_creados": 3,
+                },
+            )
+            messages.success(request, f"Proyecto '{project.nombre_proyecto}' creado con 3 escenarios.")
+            return redirect("reportes:proyecto_inversion_detail", project_id=project.pk)
+
+    ventas_sugeridas = Decimal(str(benchmark.get("ventas_mensuales_avg") or 0)).quantize(Decimal("0.01"))
+    gastos_sugeridos = Decimal(str(benchmark.get("gastos_operativos_avg") or 0)).quantize(Decimal("0.01"))
+    ticket_sugerido = Decimal(str(benchmark.get("ticket_promedio") or 0)).quantize(Decimal("0.01"))
+
+    return render(
+        request,
+        "reportes/proyecto_bamoa_wizard.html",
+        {
+            "module_tabs": _project_module_tabs("sucursales"),
+            "benchmark": benchmark,
+            "bm_error": bm_error,
+            "ventas_sugeridas": ventas_sugeridas,
+            "gastos_sugeridos": gastos_sugeridos,
+            "ticket_sugerido": ticket_sugerido,
+            "sucursales": Sucursal.objects.filter(activa=True).order_by("codigo", "nombre"),
+            "inversion_referencia": Decimal("1200000.00"),
+            "guamuchil_inversion_real": Decimal("1121753.85"),
+            "project_types": ProyectoInversion.TIPO_CHOICES,
+            "today": timezone.localdate(),
+        },
+    )
+
+
+@login_required
+def proyecto_viabilidad_export_excel(request: HttpRequest, project_id: int) -> HttpResponse:
+    """Exporta el análisis de viabilidad del proyecto a Excel."""
+    _require_reportes_access(request.user)
+    project = get_object_or_404(ProyectoInversion, pk=project_id)
+    escenarios = list(project.escenarios.all().order_by("tipo_escenario", "nombre"))
+    snapshots = list(
+        project.snapshots_mensuales.filter(
+            data_source__in=[
+                ProyectoInversionSnapshotMensual.DATA_SOURCE_FACT,
+                ProyectoInversionSnapshotMensual.DATA_SOURCE_FALLBACK,
+                ProyectoInversionSnapshotMensual.DATA_SOURCE_ESTIMATED,
+            ]
+        ).order_by("periodo")
+    )
+
+    wb = Workbook()
+    ws_resumen = wb.active
+    ws_resumen.title = "Resumen"
+    for label, value in [
+        ("Proyecto", project.nombre_proyecto),
+        ("Tipo", project.get_tipo_proyecto_display()),
+        ("Estatus", project.get_estatus_display()),
+        ("Fecha inicio", str(project.fecha_inicio)),
+        ("Fecha apertura", str(project.fecha_apertura or "")),
+        ("Inversión planeada", project.monto_inversion_planeado),
+        ("Inversión real", project.monto_inversion_real),
+        ("Capital aportado", project.capital_inicial_aportado),
+        ("Deuda asociada", project.deuda_asociada),
+        ("Tasa interés anual", project.tasa_interes_anual),
+        ("Plazo deuda meses", project.plazo_deuda_meses),
+        ("ROI objetivo", project.roi_objetivo),
+        ("Payback objetivo meses", project.payback_objetivo_meses),
+        ("Discount rate", project.discount_rate),
+        ("Observaciones", project.observaciones),
+    ]:
+        ws_resumen.append([label, value])
+
+    benchmark = (project.metadata or {}).get("benchmark_snapshot", {})
+    ws_benchmark = wb.create_sheet("Benchmark")
+    ws_benchmark.append(["Métrica", "Valor"])
+    for key in [
+        "data_source",
+        "periodo_inicio",
+        "periodo_fin",
+        "ticket_promedio",
+        "ventas_mensuales_avg",
+        "ventas_diarias_avg",
+        "margen_bruto_pct_avg",
+        "gastos_operativos_avg",
+        "utilidad_operativa_avg",
+        "payback_real_avg_meses",
+        "roi_acumulado_avg",
+    ]:
+        ws_benchmark.append([key, benchmark.get(key, "")])
+
+    ws_escenarios = wb.create_sheet("Escenarios")
+    ws_escenarios.append(
+        [
+            "Nombre",
+            "Tipo",
+            "Ventas promedio mensual",
+            "Crecimiento mensual %",
+            "Margen bruto %",
+            "Gastos operativos",
+            "Horizonte meses",
+            "Payback meses",
+            "ROI anual %",
+            "Flujo libre mensual",
+            "Notas",
+        ]
+    )
+    for escenario in escenarios:
+        resultados = escenario.resultados or {}
+        ws_escenarios.append(
+            [
+                escenario.nombre,
+                escenario.get_tipo_escenario_display(),
+                escenario.ventas_promedio_mensuales,
+                escenario.crecimiento_mensual_pct,
+                escenario.margen_bruto_pct,
+                escenario.gastos_operativos_mensuales,
+                escenario.horizonte_meses,
+                resultados.get("payback_months", ""),
+                resultados.get("annual_roi_pct", ""),
+                resultados.get("monthly_free_cashflow", ""),
+                escenario.notas,
+            ]
+        )
+
+    ws_snapshots = wb.create_sheet("Snapshots mensuales")
+    ws_snapshots.append(
+        [
+            "Periodo",
+            "Ventas",
+            "Utilidad bruta",
+            "Gastos operativos",
+            "Utilidad operativa",
+            "Flujo libre",
+            "Recuperación acumulada",
+            "Saldo pendiente",
+            "ROI acumulado %",
+            "Payback real meses",
+            "Health",
+            "Data source",
+        ]
+    )
+    for snapshot in snapshots:
+        ws_snapshots.append(
+            [
+                str(snapshot.periodo),
+                snapshot.ventas_mensuales or 0,
+                snapshot.utilidad_bruta or 0,
+                snapshot.gastos_operativos or 0,
+                snapshot.utilidad_operativa or 0,
+                snapshot.flujo_libre or 0,
+                snapshot.recuperacion_acumulada or 0,
+                snapshot.saldo_pendiente or 0,
+                snapshot.roi_acumulado or 0,
+                snapshot.payback_real_meses or 0,
+                snapshot.health_status,
+                snapshot.data_source,
+            ]
+        )
+
+    filename = f"viabilidad_{project.nombre_proyecto.replace(' ', '_')}_{timezone.localdate()}.xlsx"
+    response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    wb.save(response)
+    return response

@@ -63,4 +63,14 @@ urlpatterns = [
         investment_views.proyecto_inversion_detail,
         name="proyecto_inversion_detail",
     ),
+    path(
+        "proyectos-inversion/nuevo/bamoa/",
+        investment_views.proyecto_bamoa_wizard,
+        name="proyecto_bamoa_wizard",
+    ),
+    path(
+        "proyectos-inversion/<int:project_id>/export-viabilidad/",
+        investment_views.proyecto_viabilidad_export_excel,
+        name="proyecto_viabilidad_export_excel",
+    ),
 ]

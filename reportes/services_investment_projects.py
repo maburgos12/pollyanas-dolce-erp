@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from calendar import monthrange
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import logging
 
@@ -1694,3 +1694,154 @@ class ProyectoInversionDashboardService:
                 "sort_by": sort_by,
             },
         }
+
+
+def _benchmark_sucursales_activas(
+    sucursal_ids: list[int] | None = None,
+    meses: int = 12,
+) -> dict[str, object]:
+    """
+    Calcula KPIs reales de sucursales activas para planeación de proyectos.
+
+    Fuente primaria de ventas: VentaAutoritativaPoint.
+    Fallback: FactVentaDiaria.
+    Ticket promedio: PointDailyBranchIndicator ponderado por tickets.
+    Costos/retorno: snapshots mensuales de proyectos activos o en recuperación.
+    """
+    from django.db.models import Avg, Count
+    from django.db.models.functions import TruncMonth
+
+    from core.models import Sucursal
+
+    meses = max(int(meses or 12), 1)
+    periodo_fin = timezone.localdate().replace(day=1) - timedelta(days=1)
+    periodo_inicio = periodo_fin.replace(day=1)
+    for _ in range(meses - 1):
+        periodo_inicio = (periodo_inicio - timedelta(days=1)).replace(day=1)
+
+    if sucursal_ids is None:
+        sucursal_ids = list(Sucursal.objects.filter(activa=True).order_by("codigo").values_list("id", flat=True))
+    else:
+        sucursal_ids = [int(item) for item in sucursal_ids]
+
+    sucursal_rows = {
+        row.id: row
+        for row in Sucursal.objects.filter(id__in=sucursal_ids).order_by("codigo", "nombre")
+    }
+
+    ventas_qs = VentaAutoritativaPoint.objects.filter(
+        branch_id__in=sucursal_ids,
+        sale_date__gte=periodo_inicio,
+        sale_date__lte=periodo_fin,
+        total_amount__gt=0,
+    )
+    ventas_por_sucursal_mes = list(
+        ventas_qs.annotate(mes=TruncMonth("sale_date"))
+        .values("branch_id", "mes")
+        .annotate(total_mes=Sum("total_amount"))
+        .order_by("branch_id", "mes")
+    )
+    data_source = "VentaAutoritativaPoint"
+
+    if not ventas_por_sucursal_mes:
+        facts_qs = FactVentaDiaria.objects.filter(
+            sucursal_id__in=sucursal_ids,
+            fecha__gte=periodo_inicio,
+            fecha__lte=periodo_fin,
+            venta_total__gt=0,
+        )
+        ventas_por_sucursal_mes = list(
+            facts_qs.annotate(mes=TruncMonth("fecha"))
+            .values("sucursal_id", "mes")
+            .annotate(total_mes=Sum("venta_total"))
+            .order_by("sucursal_id", "mes")
+        )
+        data_source = "FactVentaDiaria"
+
+    total_mensual_rows = [_as_decimal(row.get("total_mes")) for row in ventas_por_sucursal_mes]
+    ventas_mensuales_avg = (
+        _quantize(sum(total_mensual_rows, ZERO) / Decimal(len(total_mensual_rows)))
+        if total_mensual_rows
+        else ZERO
+    )
+
+    ticket_promedio = ZERO
+    try:
+        from pos_bridge.models import PointDailyBranchIndicator
+
+        indicator_qs = PointDailyBranchIndicator.objects.filter(
+            branch__erp_branch_id__in=sucursal_ids,
+            indicator_date__gte=periodo_inicio,
+            indicator_date__lte=periodo_fin,
+            total_amount__gt=0,
+            total_tickets__gt=0,
+        )
+        indicator_totals = indicator_qs.aggregate(total_amount=Sum("total_amount"), total_tickets=Sum("total_tickets"))
+        total_tickets = _as_decimal(indicator_totals.get("total_tickets"))
+        if total_tickets > ZERO:
+            ticket_promedio = _quantize(_as_decimal(indicator_totals.get("total_amount")) / total_tickets) or ZERO
+    except Exception as exc:
+        logger.warning("No se pudo calcular ticket promedio de PointDailyBranchIndicator: %s", exc)
+
+    snapshots_qs = ProyectoInversionSnapshotMensual.objects.filter(
+        proyecto__sucursal_relacionada_id__in=sucursal_ids,
+        proyecto__estatus__in=[
+            ProyectoInversion.ESTATUS_ACTIVO,
+            ProyectoInversion.ESTATUS_EN_RECUPERACION,
+        ],
+        periodo__gte=periodo_inicio,
+        periodo__lte=periodo_fin,
+        data_source=ProyectoInversionSnapshotMensual.DATA_SOURCE_FACT,
+    )
+    snapshot_totals = snapshots_qs.aggregate(
+        ventas=Sum("ventas_mensuales"),
+        utilidad_bruta_total=Sum("utilidad_bruta"),
+        utilidad_bruta_avg=Avg("utilidad_bruta"),
+        gastos_operativos_avg=Avg("gastos_operativos"),
+        utilidad_operativa_avg=Avg("utilidad_operativa"),
+        payback_avg=Avg("payback_real_meses"),
+        roi_avg=Avg("roi_acumulado"),
+        snapshots=Count("id"),
+    )
+    ventas_snapshot = _as_decimal(snapshot_totals.get("ventas"))
+    utilidad_bruta_snapshot = _as_decimal(snapshot_totals.get("utilidad_bruta_total"))
+    margen_bruto_pct_avg = _percent_value(utilidad_bruta_snapshot, ventas_snapshot) or ZERO
+
+    ventas_por_suc: dict[int, list[Decimal]] = {}
+    key_name = "branch_id" if data_source == "VentaAutoritativaPoint" else "sucursal_id"
+    for row in ventas_por_sucursal_mes:
+        suc_id = int(row[key_name])
+        ventas_por_suc.setdefault(suc_id, []).append(_as_decimal(row.get("total_mes")))
+
+    detalle = []
+    for suc_id in sucursal_ids:
+        meses_data = ventas_por_suc.get(suc_id, [])
+        avg_mes = _quantize(sum(meses_data, ZERO) / Decimal(len(meses_data))) if meses_data else ZERO
+        sucursal = sucursal_rows.get(suc_id)
+        detalle.append(
+            {
+                "sucursal_id": suc_id,
+                "codigo": sucursal.codigo if sucursal else "",
+                "nombre": sucursal.nombre if sucursal else "",
+                "ventas_mensuales_avg": float(avg_mes or ZERO),
+                "meses_con_datos": len(meses_data),
+            }
+        )
+
+    return {
+        "ticket_promedio": float(ticket_promedio),
+        "ventas_mensuales_avg": float(ventas_mensuales_avg or ZERO),
+        "ventas_diarias_avg": float(_quantize((ventas_mensuales_avg or ZERO) / Decimal("26")) or ZERO),
+        "margen_bruto_pct_avg": float(_quantize(margen_bruto_pct_avg, FOUR_PLACES) or ZERO),
+        "margen_bruto_abs_avg": float(_as_decimal(snapshot_totals.get("utilidad_bruta_avg"))),
+        "gastos_operativos_avg": float(_as_decimal(snapshot_totals.get("gastos_operativos_avg"))),
+        "utilidad_operativa_avg": float(_as_decimal(snapshot_totals.get("utilidad_operativa_avg"))),
+        "payback_real_avg_meses": float(_as_decimal(snapshot_totals.get("payback_avg"))),
+        "roi_acumulado_avg": float(_as_decimal(snapshot_totals.get("roi_avg"))),
+        "snapshot_count": int(snapshot_totals.get("snapshots") or 0),
+        "data_source": data_source,
+        "periodo_inicio": periodo_inicio.isoformat(),
+        "periodo_fin": periodo_fin.isoformat(),
+        "sucursales_incluidas": sucursal_ids,
+        "detalle_por_sucursal": detalle,
+    }
