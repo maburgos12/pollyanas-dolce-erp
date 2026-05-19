@@ -62,6 +62,7 @@ urlpatterns = [
     path("mermas/", include(("mermas.urls", "mermas"), namespace="mermas")),
     path("mantenimiento/app/", pwa_mantenimiento, name="pwa-mantenimiento"),
     path("reportes/", include(("reportes.urls", "reportes"), namespace="reportes")),
+    path("inversiones/", include(("reportes.urls_inversiones", "inversiones"), namespace="inversiones")),
     path("integraciones/", include(("integraciones.urls", "integraciones"), namespace="integraciones")),
     path(
         "horarios-especiales/",
