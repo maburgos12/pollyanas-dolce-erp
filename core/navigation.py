@@ -19,7 +19,7 @@ NAV_GROUPS = [
         "key": "comercial",
         "label": "Comercial",
         "items": [
-            ("ventas", "pronostico", "Pronóstico", "/recetas/plan-produccion/", ["/recetas/plan-produccion/"]),
+            ("ventas", "pronostico", "Pronóstico", "/ventas/pronostico/", ["/ventas/pronostico/"]),
             ("ventas", "eventos", "Eventos", "/ventas/eventos/", ["/ventas/eventos/"]),
             ("ventas", "tendencias", "Tendencias", "/ventas/tendencias/", ["/ventas/tendencias/"]),
             ("crm", "dashboard", "CRM", "/crm/dashboard/", ["/crm/dashboard/"]),

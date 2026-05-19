@@ -18,6 +18,7 @@ from core.access import ROLE_ADMIN, ROLE_COMPRAS, can_view_compras
 from core.branch_catalog import eligible_operational_branch_qs
 from core.middleware import CanonicalLocalHostMiddleware
 from core.models import Departamento, Sucursal, UserProfile
+from core.navigation import build_nav_groups
 from core.views import _build_dashboard_daily_sales_snapshot, _build_dashboard_sales_history_summary, _compute_budget_semaforo, _compute_plan_forecast_semaforo, _sales_previous_dates, _sales_source_context
 from core.management.commands.ejecutar_rutina_diaria_erp import _prefer_public_database_url_if_needed
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
@@ -36,6 +37,32 @@ class DashboardForecastRobustnessTests(TestCase):
         self.assertEqual(result["recetas_total"], 0)
         self.assertEqual(result["recetas_con_desviacion"], 0)
         self.assertTrue(result["data_unavailable"])
+
+
+class NavigationRoutingTests(TestCase):
+    def test_plan_produccion_activates_only_production_plan(self):
+        user = get_user_model().objects.create_superuser(
+            username="nav_plan_admin",
+            email="nav_plan_admin@example.com",
+            password="test12345",
+        )
+
+        groups = build_nav_groups(user, "/recetas/plan-produccion/")
+        active_items = [(group["key"], item["label"], item["url"]) for group in groups for item in group["items"] if item["active"]]
+
+        self.assertEqual(active_items, [("produccion", "Plan de producción", "/recetas/plan-produccion/")])
+
+    def test_comercial_pronostico_uses_ventas_route(self):
+        user = get_user_model().objects.create_superuser(
+            username="nav_forecast_admin",
+            email="nav_forecast_admin@example.com",
+            password="test12345",
+        )
+
+        groups = build_nav_groups(user, "/ventas/pronostico/")
+        active_items = [(group["key"], item["label"], item["url"]) for group in groups for item in group["items"] if item["active"]]
+
+        self.assertEqual(active_items, [("comercial", "Pronóstico", "/ventas/pronostico/")])
 
 
 class BranchCatalogTests(TestCase):
