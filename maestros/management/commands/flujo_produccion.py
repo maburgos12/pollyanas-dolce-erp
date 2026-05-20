@@ -14,10 +14,16 @@ import csv
 import sys
 from collections import defaultdict, deque
 
+from unidecode import unidecode
+
 from django.core.management.base import BaseCommand
 
 from maestros.models import Insumo
 from recetas.models import LineaReceta, Receta
+
+
+def _norm(text: str) -> str:
+    return " ".join(unidecode((text or "")).lower().strip().split())
 
 
 def _build_graphs(internos: list[Insumo]) -> tuple[dict, dict, dict]:
@@ -26,41 +32,63 @@ def _build_graphs(internos: list[Insumo]) -> tuple[dict, dict, dict]:
       bom       : insumo_id → [{"nombre", "cantidad", "unidad", "tipo"}]
       usado_en  : insumo_id → [{"receta_nombre", "tipo_receta", "cantidad"}]
       deps      : insumo_id → set(insumo_ids que necesita antes de producirse)
+
+    Cada INSUMO_INTERNO se corresponde con una Receta de tipo=PREPARACION cuyo
+    nombre_normalizado coincide con el nombre_normalizado del insumo. No existe FK
+    directa entre Receta e Insumo resultado; el puente es el nombre normalizado.
     """
     interno_ids = {i.id for i in internos}
+
+    # Mapa nombre_norm → insumo_id para encontrar la receta PREPARACION correspondiente
+    norm_to_insumo_id: dict[str, int] = {_norm(i.nombre): i.id for i in internos}
+
+    preparacion_recetas = Receta.objects.filter(
+        tipo=Receta.TIPO_PREPARACION,
+        nombre_normalizado__in=list(norm_to_insumo_id.keys()),
+    ).values("id", "nombre_normalizado")
+
+    receta_to_insumo: dict[int, int] = {}
+    for r in preparacion_recetas:
+        iid = norm_to_insumo_id.get(r["nombre_normalizado"])
+        if iid:
+            receta_to_insumo[r["id"]] = iid
 
     bom: dict[int, list[dict]] = defaultdict(list)
     usado_en: dict[int, list[dict]] = defaultdict(list)
     deps: dict[int, set[int]] = defaultdict(set)
 
-    for linea in (
-        LineaReceta.objects.select_related("insumo", "insumo__unidad_base", "receta")
-        .filter(receta__insumo_resultado__in=interno_ids)
-        .order_by("receta_id", "id")
-    ):
-        receta_insumo_id = linea.receta.insumo_resultado_id
-        componente = linea.insumo
-        unidad = componente.unidad_base.codigo if componente.unidad_base_id else "?"
-        bom[receta_insumo_id].append({
-            "nombre": componente.nombre,
-            "tipo": componente.tipo_item,
-            "cantidad": float(linea.cantidad),
-            "unidad": unidad,
-            "componente_id": componente.id,
-        })
-        if componente.id in interno_ids:
-            deps[receta_insumo_id].add(componente.id)
+    # BOM: componentes de cada receta PREPARACION que produce un interno
+    if receta_to_insumo:
+        for linea in (
+            LineaReceta.objects.select_related("insumo", "insumo__unidad_base", "receta")
+            .filter(receta_id__in=list(receta_to_insumo.keys()), insumo__isnull=False)
+            .order_by("receta_id", "posicion")
+        ):
+            insumo_id = receta_to_insumo[linea.receta_id]
+            componente = linea.insumo
+            unidad = componente.unidad_base.codigo if componente.unidad_base_id else "?"
+            qty = float(linea.cantidad) if linea.cantidad is not None else 0.0
+            bom[insumo_id].append({
+                "nombre": componente.nombre,
+                "tipo": componente.tipo_item,
+                "cantidad": qty,
+                "unidad": unidad,
+                "componente_id": componente.id,
+            })
+            if componente.id in interno_ids:
+                deps[insumo_id].add(componente.id)
 
+    # usado_en: recetas PRODUCTO_FINAL que usan estos internos como ingrediente
     for linea in (
         LineaReceta.objects.select_related("receta", "insumo")
-        .filter(insumo__in=interno_ids)
-        .exclude(receta__insumo_resultado__in=interno_ids)
+        .filter(insumo__in=interno_ids, receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
         .order_by("receta_id")
     ):
+        qty = float(linea.cantidad) if linea.cantidad is not None else 0.0
         usado_en[linea.insumo_id].append({
             "receta_nombre": linea.receta.nombre,
             "tipo_receta": linea.receta.tipo,
-            "cantidad": float(linea.cantidad),
+            "cantidad": qty,
         })
 
     return dict(bom), dict(usado_en), dict(deps)
