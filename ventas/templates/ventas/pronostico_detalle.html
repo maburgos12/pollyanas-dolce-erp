@@ -122,7 +122,14 @@
   </div>
   {% if resumen.confianza_promedio %}
   <div class="forecast-confidence">
-    Confianza del modelo: {{ resumen.confianza_pct|floatformat:0 }}% — basado en intervalo de predicción Prophet.
+    Confianza del modelo: {{ resumen.confianza_pct|floatformat:0 }}% —
+    {% if "prophet" in resumen.metodo %}
+      basado en intervalo de predicción Prophet.
+    {% elif "evento-comparable" in resumen.metodo %}
+      basado en comparable histórico del evento y tendencia reciente.
+    {% else %}
+      basado en dispersión histórica y tendencia reciente.
+    {% endif %}
   </div>
   {% endif %}
 

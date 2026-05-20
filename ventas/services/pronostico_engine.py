@@ -34,18 +34,19 @@ HISTORY_START = date(2022, 1, 1)
 MIN_MODEL_OBSERVATIONS = 30
 SPECIAL_RATIO_MIN = 0.94
 SPECIAL_RATIO_MAX = 1.15
-FECHAS_ESPECIALES = {
+FATHER_DAY_NAME = "Día del Padre"
+FECHAS_ESPECIALES_FIJAS = {
     (1, 6): "Reyes",
     (2, 14): "San Valentín",
     (4, 30): "Día del Niño",
     (5, 10): "Día de las Madres",
-    (6, 21): "Día del Padre",
     (10, 31): "Halloween",
     (11, 2): "Día de Muertos",
     (12, 24): "Nochebuena",
     (12, 25): "Navidad",
     (12, 31): "Año Nuevo",
 }
+FECHAS_ESPECIALES = {**FECHAS_ESPECIALES_FIJAS, (6, 21): FATHER_DAY_NAME}
 FESTIVOS_POLLYANAS = pd.DataFrame(
     {
         "holiday": ["dia_madres"] * 3
@@ -196,11 +197,68 @@ def _ceil(value: Decimal | float) -> int:
     return int(math.ceil(numeric)) if numeric > 0 else 0
 
 
+def _third_sunday_of_june(year: int) -> date:
+    day = date(year, 6, 1)
+    sundays_seen = 0
+    while True:
+        if day.weekday() == 6:
+            sundays_seen += 1
+            if sundays_seen == 3:
+                return day
+        day += timedelta(days=1)
+
+
+def _is_fathers_day(value: date) -> bool:
+    return value == _third_sunday_of_june(value.year)
+
+
+def _special_day_name(value: date) -> str:
+    if _is_fathers_day(value):
+        return FATHER_DAY_NAME
+    return FECHAS_ESPECIALES_FIJAS.get((value.month, value.day), "")
+
+
+def _same_special_day_in_year(anchor_day: date, year: int) -> date | None:
+    special_name = _special_day_name(anchor_day)
+    if not special_name:
+        return None
+    if special_name == FATHER_DAY_NAME:
+        return _third_sunday_of_june(year)
+    try:
+        return date(year, anchor_day.month, anchor_day.day)
+    except ValueError:
+        return None
+
+
+def _special_anchor_days(days: list[date]) -> list[date]:
+    return [day for day in days if _special_day_name(day)]
+
+
+def _special_context_anchor(target_day: date, days: list[date]) -> date | None:
+    anchors = _special_anchor_days(days)
+    if not anchors:
+        return None
+    anchor = min(anchors, key=lambda value: abs((target_day - value).days))
+    if abs((target_day - anchor).days) <= 3:
+        return anchor
+    return None
+
+
+def _previous_special_context_day(target_day: date, days: list[date]) -> date | None:
+    anchor = _special_context_anchor(target_day, days)
+    if not anchor:
+        return None
+    previous_anchor = _same_special_day_in_year(anchor, anchor.year - 1)
+    if not previous_anchor:
+        return None
+    return previous_anchor + (target_day - anchor)
+
+
 def _is_special_context_day(target_day: date) -> bool:
     return (
-        (target_day.month, target_day.day) in FECHAS_ESPECIALES
-        or ((target_day + timedelta(days=1)).month, (target_day + timedelta(days=1)).day) in FECHAS_ESPECIALES
-        or ((target_day - timedelta(days=1)).month, (target_day - timedelta(days=1)).day) in FECHAS_ESPECIALES
+        bool(_special_day_name(target_day))
+        or bool(_special_day_name(target_day + timedelta(days=1)))
+        or bool(_special_day_name(target_day - timedelta(days=1)))
     )
 
 
@@ -226,12 +284,9 @@ def _calcular_producto_prophet(serie_df: pd.DataFrame, fechas_rango: list[date],
 
     previous_event_days: dict[date, date] = {}
     for target_day in fechas_rango:
-        if not _is_special_context_day(target_day):
-            continue
-        try:
-            previous_event_days[target_day] = date(target_day.year - 1, target_day.month, target_day.day)
-        except ValueError:
-            continue
+        previous_day = _previous_special_context_day(target_day, fechas_rango)
+        if previous_day:
+            previous_event_days[target_day] = previous_day
 
     prediction_days = list(dict.fromkeys([*fechas_rango, *previous_event_days.values()]))
     future = pd.DataFrame({"ds": pd.to_datetime(prediction_days)})
@@ -438,9 +493,9 @@ def _empty_result(start_date: date, end_date: date, branch_count: int = 0) -> di
 
 def _special_days(days: list[date]) -> list[dict]:
     return [
-        {"fecha": day, "fecha_iso": day.isoformat(), "nombre": FECHAS_ESPECIALES[(day.month, day.day)]}
+        {"fecha": day, "fecha_iso": day.isoformat(), "nombre": _special_day_name(day)}
         for day in days
-        if (day.month, day.day) in FECHAS_ESPECIALES
+        if _special_day_name(day)
     ]
 
 
@@ -529,8 +584,10 @@ def _history_dataframe(series: pd.Series, special_days: set[tuple[int, int]]) ->
     frame = pd.DataFrame({"fecha": series.index, "qty": series.to_numpy(dtype=float)})
     frame["dia_semana"] = frame["fecha"].dt.weekday
     frame["semana_año"] = frame["fecha"].dt.isocalendar().week.astype(int)
-    frame["es_fecha_especial"] = frame["fecha"].map(lambda value: 1 if (value.month, value.day) in special_days else 0)
-    frame["nombre_evento"] = frame["fecha"].map(lambda value: FECHAS_ESPECIALES.get((value.month, value.day), ""))
+    frame["es_fecha_especial"] = frame["fecha"].map(
+        lambda value: 1 if _special_day_name(value) or (value.month, value.day) in special_days else 0
+    )
+    frame["nombre_evento"] = frame["fecha"].map(_special_day_name)
     return frame
 
 
@@ -665,6 +722,57 @@ def _special_day_forecast(
         _event_confidence(len(event_values)),
         "regresion-estacional+fecha-especial",
     )
+
+
+def _apply_special_context_forecast(
+    forecast_result: dict,
+    *,
+    series: pd.Series,
+    history: dict[date, Decimal],
+    selected_days: list[date],
+    trend_start: date,
+    history_end: date,
+) -> dict:
+    if not _special_anchor_days(selected_days):
+        return forecast_result
+
+    recomendado = list(forecast_result.get("recomendado", [0] * len(selected_days)))
+    conservador = list(forecast_result.get("conservador", [0] * len(selected_days)))
+    agresivo = list(forecast_result.get("agresivo", [0] * len(selected_days)))
+    trend_ratio: float | None = None
+    overrides = 0
+
+    for index, target_day in enumerate(selected_days):
+        comparable_day = _previous_special_context_day(target_day, selected_days)
+        if not comparable_day:
+            continue
+        comparable_qty = history.get(comparable_day, Decimal("0"))
+        if comparable_qty <= 0:
+            continue
+        if trend_ratio is None:
+            trend_ratio = _stl_trend_ratio(series, history, trend_start=trend_start, history_end=history_end)
+        forecast_qty = comparable_qty * Decimal(str(trend_ratio))
+        if index >= len(recomendado):
+            recomendado.extend([0] * (index + 1 - len(recomendado)))
+        if index >= len(conservador):
+            conservador.extend([0] * (index + 1 - len(conservador)))
+        if index >= len(agresivo):
+            agresivo.extend([0] * (index + 1 - len(agresivo)))
+        recomendado[index] = _ceil(forecast_qty)
+        conservador[index] = _ceil(forecast_qty * Decimal("0.92"))
+        agresivo[index] = _ceil(forecast_qty * Decimal("1.10"))
+        overrides += 1
+
+    if not overrides:
+        return forecast_result
+
+    adjusted = {**forecast_result}
+    adjusted["recomendado"] = recomendado
+    adjusted["conservador"] = conservador
+    adjusted["agresivo"] = agresivo
+    adjusted["confianza"] = max(float(forecast_result.get("confianza") or 0.0), _event_confidence(1))
+    adjusted["metodo"] = "evento-comparable+fecha-especial"
+    return adjusted
 
 
 def _forecastable_queryset(branch_ids: set[int], skus_incluidos: set[str] | None = None):
@@ -834,8 +942,8 @@ def calcular_pronostico(
             "fecha": day,
             "fecha_iso": day.isoformat(),
             "fecha_label": _date_label(day),
-            "es_fecha_especial": (day.month, day.day) in FECHAS_ESPECIALES,
-            "nombre_especial": FECHAS_ESPECIALES.get((day.month, day.day)),
+            "es_fecha_especial": bool(_special_day_name(day)),
+            "nombre_especial": _special_day_name(day),
             "total_piezas": 0,
             "total_ingreso": Decimal("0.00"),
             "top_productos": [],
@@ -888,6 +996,14 @@ def calcular_pronostico(
         if forecast_result is None:
             serie_df = pd.DataFrame({"ds": series.index, "y": series.to_numpy(dtype=float)})
             forecast_result = _calcular_serie(serie_df, selected_days)
+        forecast_result = _apply_special_context_forecast(
+            forecast_result,
+            series=series,
+            history=history,
+            selected_days=selected_days,
+            trend_start=trend_start,
+            history_end=history_end,
+        )
 
         category = categoria_producto(
             point_category=product.category,
@@ -978,11 +1094,8 @@ def calcular_pronostico(
         event_branch_weights_by_day: dict[str, tuple[dict[int, Decimal], Decimal]] = {}
         for item in day_values:
             target_day = item["fecha"]
-            if not _is_special_context_day(target_day):
-                continue
-            try:
-                previous_event_day = date(target_day.year - 1, target_day.month, target_day.day)
-            except ValueError:
+            previous_event_day = _previous_special_context_day(target_day, selected_days)
+            if not previous_event_day:
                 continue
             event_weights = {
                 branch_id: history.get(previous_event_day, Decimal("0"))
@@ -1127,6 +1240,8 @@ def calcular_pronostico(
 
     if any("prophet" in method for method in method_counts):
         main_method = "prophet"
+    elif any("evento-comparable" in method for method in method_counts):
+        main_method = "evento-comparable"
     elif any("regresion-estacional" in method for method in method_counts):
         main_method = "regresion-estacional"
     elif any("ets-estacional" in method for method in method_counts):

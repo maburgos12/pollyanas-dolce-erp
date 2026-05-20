@@ -254,7 +254,7 @@
 
   {% if fechas_especiales_en_rango %}
   <div class="forecast-special-banner">
-    ⭐ Este rango incluye {% for item in fechas_especiales_en_rango %}{{ item.nombre }}{% if not forloop.last %}, {% endif %}{% endfor %} — pronóstico basado en Prophet con ajuste híbrido de fecha especial.
+    ⭐ Este rango incluye {% for item in fechas_especiales_en_rango %}{{ item.nombre }}{% if not forloop.last %}, {% endif %}{% endfor %} — el pronóstico usará el comparable histórico del evento cuando exista.
   </div>
   {% endif %}
 
