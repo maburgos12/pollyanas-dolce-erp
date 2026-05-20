@@ -9,6 +9,18 @@
   .page-pronostico-ventas .forecast-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
   .page-pronostico-ventas .production-table-wrap .table thead th { background:#f5e6ed; color:#7b1a48; }
   .page-pronostico-ventas .production-table-wrap .table tbody tr:nth-child(even) { background:#fdf2f6; }
+  .page-pronostico-ventas .saved-forecasts-wrap { overflow-x:auto; padding-bottom:8px; }
+  .page-pronostico-ventas .saved-forecasts-table { min-width:1420px; table-layout:fixed; border-collapse:separate; border-spacing:0; }
+  .page-pronostico-ventas .saved-forecasts-table th,
+  .page-pronostico-ventas .saved-forecasts-table td { vertical-align:middle; overflow-wrap:anywhere; line-height:1.25; }
+  .page-pronostico-ventas .saved-forecasts-table .forecast-number-cell,
+  .page-pronostico-ventas .saved-forecasts-table .forecast-date-cell { white-space:nowrap; overflow-wrap:normal; }
+  .page-pronostico-ventas .forecast-method-cell { font-size:0.92rem; color:#4f464b; }
+  .page-pronostico-ventas .forecast-user-cell { font-size:0.92rem; color:#4f464b; }
+  .page-pronostico-ventas .forecast-actions-cell { width:260px; min-width:260px; white-space:nowrap; overflow:visible; }
+  .page-pronostico-ventas .forecast-row-actions { display:flex; justify-content:flex-end; align-items:center; gap:8px; flex-wrap:nowrap; }
+  .page-pronostico-ventas .forecast-row-actions form { display:inline-flex; margin:0; }
+  .page-pronostico-ventas .forecast-row-actions .btn { min-width:64px; }
   @media (max-width: 900px) {
     .page-pronostico-ventas .forecast-actions { justify-content:flex-start; }
   }
@@ -34,8 +46,18 @@
     <div class="section-header">
       <h2 class="section-header-title">Listado</h2>
     </div>
-    <div class="table-responsive production-table-wrap">
-      <table class="table">
+    <div class="table-responsive production-table-wrap saved-forecasts-wrap">
+      <table class="table saved-forecasts-table">
+        <colgroup>
+          <col style="width:250px;">
+          <col style="width:220px;">
+          <col style="width:110px;">
+          <col style="width:150px;">
+          <col style="width:250px;">
+          <col style="width:230px;">
+          <col style="width:150px;">
+          <col style="width:260px;">
+        </colgroup>
         <thead>
           <tr>
             <th>Nombre</th>
@@ -45,7 +67,7 @@
             <th>Método</th>
             <th>Creado por</th>
             <th>Fecha</th>
-            <th class="text-end">Acciones</th>
+            <th class="text-end forecast-actions-cell">Acciones</th>
           </tr>
         </thead>
         <tbody>
@@ -53,18 +75,20 @@
           <tr>
             <td>{{ item.nombre }}</td>
             <td>{{ item.fecha_inicio }} a {{ item.fecha_fin }}</td>
-            <td class="text-end">{{ item.total_piezas|intcomma }}</td>
-            <td class="text-end">${{ item.total_ingreso|floatformat:2|intcomma }}</td>
-            <td>{{ item.resultado_json.resumen.metodo|default:"-" }}</td>
-            <td>{% if item.creado_por %}{{ item.creado_por.get_username }}{% else %}-{% endif %}</td>
-            <td>{{ item.creado_en|date:"Y-m-d H:i" }}</td>
-            <td class="text-end">
-              <a class="btn btn-secondary btn-sm" href="{% url 'ventas:pronostico_detalle' item.id %}">Ver</a>
-              <a class="btn btn-secondary btn-sm" href="{% url 'ventas:pronostico_excel' item.id %}">Excel</a>
-              <form method="post" action="{% url 'ventas:pronostico_eliminar' item.id %}" style="display:inline;">
-                {% csrf_token %}
-                <button class="btn btn-secondary btn-sm" type="submit" onclick="return confirm('¿Eliminar este pronóstico?')">Eliminar</button>
-              </form>
+            <td class="text-end forecast-number-cell">{{ item.total_piezas|intcomma }}</td>
+            <td class="text-end forecast-number-cell">${{ item.total_ingreso|floatformat:2|intcomma }}</td>
+            <td class="forecast-method-cell">{{ item.resultado_json.resumen.metodo|default:"-" }}</td>
+            <td class="forecast-user-cell">{% if item.creado_por %}{{ item.creado_por.get_username }}{% else %}-{% endif %}</td>
+            <td class="forecast-date-cell">{{ item.creado_en|date:"Y-m-d H:i" }}</td>
+            <td class="text-end forecast-actions-cell">
+              <div class="forecast-row-actions">
+                <a class="btn btn-secondary btn-sm" href="{% url 'ventas:pronostico_detalle' item.id %}">Ver</a>
+                <a class="btn btn-secondary btn-sm" href="{% url 'ventas:pronostico_excel' item.id %}">Excel</a>
+                <form method="post" action="{% url 'ventas:pronostico_eliminar' item.id %}">
+                  {% csrf_token %}
+                  <button class="btn btn-secondary btn-sm" type="submit" onclick="return confirm('¿Eliminar este pronóstico?')">Eliminar</button>
+                </form>
+              </div>
             </td>
           </tr>
           {% empty %}

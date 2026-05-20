@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
@@ -34,6 +35,18 @@ class VentasModuleTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("ventas:pronostico"))
+
+    def test_saved_forecast_tables_use_non_overlapping_columns_and_actions(self):
+        templates_dir = Path(__file__).resolve().parent / "templates" / "ventas"
+        full_list = (templates_dir / "pronostico_lista.html").read_text()
+        dashboard_list = (templates_dir / "pronostico.html").read_text()
+
+        self.assertIn('class="table saved-forecasts-table"', full_list)
+        self.assertIn('class="table saved-forecasts-table"', dashboard_list)
+        self.assertIn("forecast-actions-cell", full_list)
+        self.assertIn("forecast-actions-cell", dashboard_list)
+        self.assertIn("forecast-method-cell", full_list)
+        self.assertIn("forecast-method-cell", dashboard_list)
 
     def test_dia_del_padre_uses_movable_third_sunday(self):
         self.assertEqual(_special_day_name(date(2025, 6, 15)), "Día del Padre")

@@ -8,6 +8,17 @@
 <style>
   .page-pronostico-ventas .forecast-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
   .page-pronostico-ventas .saved-forecast-filters { display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:12px; align-items:end; margin-bottom:16px; }
+  .page-pronostico-ventas .saved-forecasts-wrap { overflow-x:auto; padding-bottom:8px; }
+  .page-pronostico-ventas .saved-forecasts-table { min-width:1220px; table-layout:fixed; border-collapse:separate; border-spacing:0; }
+  .page-pronostico-ventas .saved-forecasts-table th,
+  .page-pronostico-ventas .saved-forecasts-table td { vertical-align:middle; overflow-wrap:anywhere; line-height:1.25; }
+  .page-pronostico-ventas .saved-forecasts-table .forecast-number-cell,
+  .page-pronostico-ventas .saved-forecasts-table .forecast-date-cell { white-space:nowrap; overflow-wrap:normal; }
+  .page-pronostico-ventas .forecast-method-cell { font-size:0.92rem; color:#4f464b; }
+  .page-pronostico-ventas .forecast-actions-cell { width:260px; min-width:260px; white-space:nowrap; overflow:visible; }
+  .page-pronostico-ventas .forecast-row-actions { display:flex; justify-content:flex-end; align-items:center; gap:8px; flex-wrap:nowrap; }
+  .page-pronostico-ventas .forecast-row-actions form { display:inline-flex; margin:0; }
+  .page-pronostico-ventas .forecast-row-actions .btn { min-width:64px; }
   .page-pronostico-ventas .new-forecast-summary { cursor:pointer; padding:12px 0; font-size:16px; font-weight:600; color:#7b1a48; list-style:none; display:flex; align-items:center; gap:8px; user-select:none; }
   .page-pronostico-ventas .new-forecast-summary::-webkit-details-marker { display:none; }
   .page-pronostico-ventas .forecast-product-section > summary { cursor:pointer; list-style:none; user-select:none; }
@@ -214,8 +225,17 @@
       </div>
       <button class="btn btn-primary" type="button" id="saved-forecast-filter">Buscar</button>
     </div>
-    <div class="table-responsive production-table-wrap">
-      <table class="table" id="saved-forecasts-table">
+    <div class="table-responsive production-table-wrap saved-forecasts-wrap">
+      <table class="table saved-forecasts-table" id="saved-forecasts-table">
+        <colgroup>
+          <col style="width:250px;">
+          <col style="width:220px;">
+          <col style="width:110px;">
+          <col style="width:150px;">
+          <col style="width:250px;">
+          <col style="width:150px;">
+          <col style="width:260px;">
+        </colgroup>
         <thead>
           <tr>
             <th>Nombre</th>
@@ -224,7 +244,7 @@
             <th class="text-end">Ingreso</th>
             <th>Método</th>
             <th>Fecha</th>
-            <th class="text-end">Acciones</th>
+            <th class="text-end forecast-actions-cell">Acciones</th>
           </tr>
         </thead>
         <tbody>
@@ -232,17 +252,19 @@
           <tr data-forecast-row data-name="{{ item.nombre|lower }}" data-start='{{ item.fecha_inicio|date:"Y-m-d" }}' data-end='{{ item.fecha_fin|date:"Y-m-d" }}'>
             <td>{{ item.nombre }}</td>
             <td>{{ item.fecha_inicio }} a {{ item.fecha_fin }}</td>
-            <td class="text-end">{{ item.total_piezas|intcomma }}</td>
-            <td class="text-end">${{ item.total_ingreso|floatformat:2|intcomma }}</td>
-            <td>{{ item.resultado_json.resumen.metodo|default:"-" }}</td>
-            <td>{{ item.creado_en|date:"Y-m-d H:i" }}</td>
-            <td class="text-end">
-              <a class="btn btn-secondary btn-sm" href="{% url 'ventas:pronostico_detalle' item.id %}">Ver</a>
-              <a class="btn btn-secondary btn-sm" href="{% url 'ventas:pronostico_excel' item.id %}">Excel</a>
-              <form method="post" action="{% url 'ventas:pronostico_eliminar' item.id %}" style="display:inline;">
-                {% csrf_token %}
-                <button class="btn btn-secondary btn-sm" type="submit" onclick="return confirm('¿Eliminar este pronóstico?')">Eliminar</button>
-              </form>
+            <td class="text-end forecast-number-cell">{{ item.total_piezas|intcomma }}</td>
+            <td class="text-end forecast-number-cell">${{ item.total_ingreso|floatformat:2|intcomma }}</td>
+            <td class="forecast-method-cell">{{ item.resultado_json.resumen.metodo|default:"-" }}</td>
+            <td class="forecast-date-cell">{{ item.creado_en|date:"Y-m-d H:i" }}</td>
+            <td class="text-end forecast-actions-cell">
+              <div class="forecast-row-actions">
+                <a class="btn btn-secondary btn-sm" href="{% url 'ventas:pronostico_detalle' item.id %}">Ver</a>
+                <a class="btn btn-secondary btn-sm" href="{% url 'ventas:pronostico_excel' item.id %}">Excel</a>
+                <form method="post" action="{% url 'ventas:pronostico_eliminar' item.id %}">
+                  {% csrf_token %}
+                  <button class="btn btn-secondary btn-sm" type="submit" onclick="return confirm('¿Eliminar este pronóstico?')">Eliminar</button>
+                </form>
+              </div>
             </td>
           </tr>
           {% empty %}
