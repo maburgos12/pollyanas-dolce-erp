@@ -25,6 +25,7 @@ class BonosProduccionTests(TestCase):
         self.assertIn("/bonos-produccion/sw.js", content)
         self.assertIn("employee-search", content)
         self.assertIn("Teclea nombre o apellido", content)
+        self.assertIn("r.redirected", content)
         self.assertNotIn("pd_logistica_access", content)
 
     def test_manifest_y_service_worker_de_produccion_sirven_con_content_type_correcto(self):
@@ -36,7 +37,9 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(manifest.json()["start_url"], "/bonos-produccion/app/")
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
-        self.assertIn("pollyanas-bonos-produccion-pwa", sw.content.decode())
+        sw_content = sw.content.decode()
+        self.assertIn("pollyanas-bonos-produccion-pwa-v2", sw_content)
+        self.assertIn('cache: "no-store"', sw_content)
 
     def test_api_produccion_acepta_post_con_sesion_y_csrf(self):
         client = Client(enforce_csrf_checks=True)
