@@ -34,6 +34,11 @@ HISTORY_START = date(2022, 1, 1)
 MIN_MODEL_OBSERVATIONS = 30
 SPECIAL_RATIO_MIN = 0.94
 SPECIAL_RATIO_MAX = 1.15
+SPECIAL_CONTEXT_YEAR_WEIGHTS = (
+    Decimal("0.55"),
+    Decimal("0.30"),
+    Decimal("0.15"),
+)
 FATHER_DAY_NAME = "Día del Padre"
 FECHAS_ESPECIALES_FIJAS = {
     (1, 6): "Reyes",
@@ -252,6 +257,80 @@ def _previous_special_context_day(target_day: date, days: list[date]) -> date | 
     if not previous_anchor:
         return None
     return previous_anchor + (target_day - anchor)
+
+
+def _special_context_comparable_days(target_day: date, days: list[date], years_back: int = 3) -> list[date]:
+    anchor = _special_context_anchor(target_day, days)
+    if not anchor:
+        return []
+    offset = target_day - anchor
+    comparables = []
+    for previous_year in range(anchor.year - 1, anchor.year - years_back - 1, -1):
+        previous_anchor = _same_special_day_in_year(anchor, previous_year)
+        if previous_anchor:
+            comparables.append(previous_anchor + offset)
+    return comparables
+
+
+def _event_context_weighted_base(
+    history: dict[date, Decimal],
+    comparable_days: list[date],
+) -> tuple[Decimal, list[dict]]:
+    weighted_sum = Decimal("0")
+    used_weight = Decimal("0")
+    observations = []
+    for index, comparable_day in enumerate(comparable_days):
+        qty = history.get(comparable_day, Decimal("0"))
+        if qty <= 0:
+            continue
+        weight = SPECIAL_CONTEXT_YEAR_WEIGHTS[min(index, len(SPECIAL_CONTEXT_YEAR_WEIGHTS) - 1)]
+        weighted_sum += qty * weight
+        used_weight += weight
+        observations.append({"fecha": comparable_day, "cantidad": qty, "peso": weight})
+    if used_weight <= 0:
+        return Decimal("0"), observations
+    return weighted_sum / used_weight, observations
+
+
+def _event_relation_label(target_day: date, anchor_day: date) -> str:
+    event_name = _special_day_name(anchor_day)
+    offset = (target_day - anchor_day).days
+    if offset == 0:
+        return event_name
+    if offset < 0:
+        days = abs(offset)
+        return f"{days} día{'s' if days != 1 else ''} antes de {event_name}"
+    return f"{offset} día{'s' if offset != 1 else ''} después de {event_name}"
+
+
+def _special_context_explanations(days: list[date]) -> list[dict]:
+    explanations = []
+    for target_day in days:
+        anchor = _special_context_anchor(target_day, days)
+        if not anchor:
+            continue
+        comparables = _special_context_comparable_days(target_day, days)
+        explanations.append(
+            {
+                "fecha": target_day,
+                "fecha_iso": target_day.isoformat(),
+                "fecha_label": _date_label(target_day),
+                "evento": _special_day_name(anchor),
+                "fecha_evento": anchor.isoformat(),
+                "fecha_evento_label": _date_label(anchor),
+                "relacion_evento": _event_relation_label(target_day, anchor),
+                "comparables": [
+                    {
+                        "fecha": comparable_day,
+                        "fecha_iso": comparable_day.isoformat(),
+                        "fecha_label": _date_label(comparable_day),
+                        "anio": comparable_day.year,
+                    }
+                    for comparable_day in comparables
+                ],
+            }
+        )
+    return explanations
 
 
 def _is_special_context_day(target_day: date) -> bool:
@@ -741,12 +820,13 @@ def _apply_special_context_forecast(
     agresivo = list(forecast_result.get("agresivo", [0] * len(selected_days)))
     trend_ratio: float | None = None
     overrides = 0
+    max_observations = 0
 
     for index, target_day in enumerate(selected_days):
-        comparable_day = _previous_special_context_day(target_day, selected_days)
-        if not comparable_day:
+        comparable_days = _special_context_comparable_days(target_day, selected_days)
+        if not comparable_days:
             continue
-        comparable_qty = history.get(comparable_day, Decimal("0"))
+        comparable_qty, observations = _event_context_weighted_base(history, comparable_days)
         if comparable_qty <= 0:
             continue
         if trend_ratio is None:
@@ -762,6 +842,7 @@ def _apply_special_context_forecast(
         conservador[index] = _ceil(forecast_qty * Decimal("0.92"))
         agresivo[index] = _ceil(forecast_qty * Decimal("1.10"))
         overrides += 1
+        max_observations = max(max_observations, len(observations))
 
     if not overrides:
         return forecast_result
@@ -770,7 +851,7 @@ def _apply_special_context_forecast(
     adjusted["recomendado"] = recomendado
     adjusted["conservador"] = conservador
     adjusted["agresivo"] = agresivo
-    adjusted["confianza"] = max(float(forecast_result.get("confianza") or 0.0), _event_confidence(1))
+    adjusted["confianza"] = max(float(forecast_result.get("confianza") or 0.0), _event_confidence(max_observations))
     adjusted["metodo"] = "evento-comparable+fecha-especial"
     return adjusted
 
@@ -937,6 +1018,11 @@ def calcular_pronostico(
     forecast_horizon = max(1, (fecha_fin - history_end).days)
     product_totals: dict[int, dict] = {}
     branch_products: dict[int, dict[int, dict]] = defaultdict(dict)
+    special_context_explanations = _special_context_explanations(selected_days)
+    special_context_by_day = {
+        item["fecha_iso"]: item
+        for item in special_context_explanations
+    }
     day_totals: dict[date, dict] = {
         day: {
             "fecha": day,
@@ -944,6 +1030,7 @@ def calcular_pronostico(
             "fecha_label": _date_label(day),
             "es_fecha_especial": bool(_special_day_name(day)),
             "nombre_especial": _special_day_name(day),
+            "contexto_evento": special_context_by_day.get(day.isoformat()),
             "total_piezas": 0,
             "total_ingreso": Decimal("0.00"),
             "top_productos": [],
@@ -1252,6 +1339,22 @@ def calcular_pronostico(
         main_method = f"{main_method}+fecha-especial"
     confidence_avg = round(confidence_weighted_sum / total_pieces, 3) if total_pieces else 0.0
     fechas_especiales = special_days_in_range
+    model_explanation = ""
+    if special_context_explanations:
+        event_names = sorted({item["evento"] for item in special_context_explanations if item.get("evento")})
+        years = sorted(
+            {
+                comparable["anio"]
+                for item in special_context_explanations
+                for comparable in item.get("comparables", [])
+            },
+            reverse=True,
+        )
+        if event_names and years:
+            model_explanation = (
+                f"Rango tratado como {', '.join(event_names)}: cada fecha se compara con el mismo lugar del evento "
+                f"en {', '.join(str(year) for year in years)} y se ajusta con la tendencia reciente."
+            )
 
     return {
         "fechas": [day.isoformat() for day in selected_days],
@@ -1271,6 +1374,8 @@ def calcular_pronostico(
             "comparable": _period_label(context_comparable_start, context_comparable_end),
             "trend_30": _period_label(trend_start, history_end),
             "trend_30_comparable": _period_label(trend_comparable_start, trend_comparable_end),
+            "comparables_evento": special_context_explanations,
+            "explicacion_modelo": model_explanation,
         },
         "por_categoria": categories,
         "por_dia": por_dia,

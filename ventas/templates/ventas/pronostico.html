@@ -307,6 +307,11 @@
   <div class="forecast-method">
     Modelo: {{ resumen.metodo }} · Tendencia: {{ resumen.tendencia_reciente }} · Comparable: {{ resumen.comparable }}
   </div>
+  {% if resumen.explicacion_modelo %}
+  <div class="forecast-special-banner">
+    {{ resumen.explicacion_modelo }}
+  </div>
+  {% endif %}
 
   <section class="card">
     <div class="section-header">
@@ -384,6 +389,14 @@
             <span>{{ day.fecha_label }}</span>
             {% if day.es_fecha_especial %}<span class="badge bg-warning">{{ day.nombre_especial }}</span>{% endif %}
           </div>
+          {% if day.contexto_evento %}
+          <div class="forecast-method" style="margin:0 0 10px;">
+            {{ day.contexto_evento.relacion_evento }} · usa
+            {% for comparable in day.contexto_evento.comparables %}
+              {{ comparable.fecha_label }}{% if not forloop.last %}, {% endif %}
+            {% endfor %}
+          </div>
+          {% endif %}
           <div class="forecast-day-metrics">
             <div>
               <div class="forecast-day-number">{{ day.total_piezas|intcomma }}</div>
