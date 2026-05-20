@@ -4129,6 +4129,136 @@ class SolicitudVentasForecastTests(TestCase):
         self.assertEqual(row["solicitud_qty"], Decimal("110"))
         self.assertEqual(row["forecast_qty"], row["forecast_base"])
 
+    def test_plan_produccion_muestra_explosion_de_insumos_desde_preview_forecast(self):
+        unidad = UnidadMedida.objects.create(codigo="kg-fsp", nombre="Kg forecast supply", tipo=UnidadMedida.TIPO_MASA)
+        proveedor = Proveedor.objects.create(nombre="Proveedor Forecast Supply")
+        harina = Insumo.objects.create(
+            nombre="Harina Forecast Supply",
+            nombre_normalizado="harina forecast supply",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+        )
+        CostoInsumo.objects.create(
+            insumo=harina,
+            proveedor=proveedor,
+            fecha=date(2026, 4, 1),
+            costo_unitario=Decimal("8.00"),
+            source_hash="forecast-supply-view-cost",
+        )
+        LineaReceta.objects.create(
+            receta=self.receta,
+            posicion=1,
+            insumo=harina,
+            insumo_texto=harina.nombre,
+            cantidad=Decimal("2.5"),
+            unidad=unidad,
+            unidad_texto="kg",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        session = self.client.session
+        session["pronostico_estadistico_preview"] = {
+            "target_start": "2026-04-01",
+            "target_end": "2026-04-30",
+            "target_label": "Abril 2026",
+            "alcance": "mes",
+            "periodo": "2026-04",
+            "sucursal_nombre": "MATRIZ - Matriz",
+            "totals": {"forecast_total": 10.0, "recetas_count": 1},
+            "rows": [
+                {
+                    "receta_id": self.receta.id,
+                    "receta": self.receta.nombre,
+                    "forecast_qty": 10.0,
+                    "forecast_low": 8.0,
+                    "forecast_high": 12.0,
+                }
+            ],
+        }
+        session.save()
+
+        response = self.client.get(reverse("recetas:plan_produccion"), {"periodo": "2026-04"})
+        self.assertEqual(response.status_code, 200)
+        supply = response.context["forecast_supply_context"]
+        self.assertIsNotNone(supply)
+        self.assertEqual(supply["summary"]["estimated_spend"], Decimal("200.00"))
+        self.assertContains(response, "Insumos requeridos desde pronóstico")
+        self.assertContains(response, "Materia prima y empaques")
+        self.assertContains(response, "Harina Forecast Supply")
+        self.assertContains(response, "$200.00")
+
+    def test_forecast_supply_exporta_xlsx_profesional(self):
+        unidad = UnidadMedida.objects.create(codigo="kg-fsx", nombre="Kg forecast supply xlsx", tipo=UnidadMedida.TIPO_MASA)
+        proveedor = Proveedor.objects.create(nombre="Proveedor Forecast Supply XLSX")
+        harina = Insumo.objects.create(
+            nombre="Harina Forecast Supply XLSX",
+            nombre_normalizado="harina forecast supply xlsx",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            categoria="Harinas",
+        )
+        CostoInsumo.objects.create(
+            insumo=harina,
+            proveedor=proveedor,
+            fecha=date(2026, 4, 1),
+            costo_unitario=Decimal("10.00"),
+            source_hash="forecast-supply-xlsx-cost",
+        )
+        LineaReceta.objects.create(
+            receta=self.receta,
+            posicion=1,
+            insumo=harina,
+            insumo_texto=harina.nombre,
+            cantidad=Decimal("3"),
+            unidad=unidad,
+            unidad_texto="kg",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        session = self.client.session
+        session["pronostico_estadistico_preview"] = {
+            "target_start": "2026-04-01",
+            "target_end": "2026-04-30",
+            "target_label": "Abril 2026",
+            "alcance": "mes",
+            "periodo": "2026-04",
+            "sucursal_nombre": "MATRIZ - Matriz",
+            "totals": {"forecast_total": 4.0, "recetas_count": 1},
+            "rows": [
+                {
+                    "receta_id": self.receta.id,
+                    "receta": self.receta.nombre,
+                    "forecast_qty": 4.0,
+                    "forecast_low": 3.0,
+                    "forecast_high": 5.0,
+                }
+            ],
+        }
+        session.save()
+
+        response = self.client.get(reverse("recetas:forecast_supply_export"), {"escenario": "base"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        wb = load_workbook(BytesIO(response.content), data_only=True)
+        self.assertEqual(
+            wb.sheetnames,
+            [
+                "Resumen",
+                "Productos forecast",
+                "Preparados a producir",
+                "Materia prima y empaques",
+                "Explosion multinivel",
+                "Faltantes por corregir",
+            ],
+        )
+        ws = wb["Materia prima y empaques"]
+        self.assertEqual(ws["D2"].value, "Harina Forecast Supply XLSX")
+        self.assertEqual(ws["E2"].value, 12)
+        self.assertEqual(ws["H2"].value, 120)
+
     def test_comparativo_pronostico_vs_solicitud_escenario_bajo(self):
         for month_idx, qty in [(11, "60"), (12, "72"), (1, "81"), (2, "78"), (3, "90")]:
             year = 2025 if month_idx >= 11 else 2026

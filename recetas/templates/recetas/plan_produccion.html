@@ -719,6 +719,141 @@
         href="{% url 'recetas:forecast_preview_export' %}?format=xlsx&periodo={{ periodo_pronostico_default }}{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}"
       >Exportar preview XLSX</a>
     </div>
+    {% if forecast_supply_context %}
+    <section class="card mb-3">
+      <div class="card-header">Insumos requeridos desde pronóstico</div>
+      <p class="muted mb-2">
+        Explosión multinivel del escenario {{ forecast_supply_context.scenario|upper }}: separa preparados internos de materia prima y empaques.
+        El gasto se calcula en hojas comprables para evitar duplicar costo de preparaciones.
+      </p>
+      <div class="toolbar mb-2">
+        <a
+          class="btn btn-secondary"
+          href="{% url 'recetas:forecast_supply_export' %}?escenario={{ forecast_compare_escenario }}&periodo={{ periodo_pronostico_default }}{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}"
+        >Exportar insumos XLSX</a>
+      </div>
+      <div class="kpi-grid kpi-mini" style="margin-bottom:12px;">
+        <article class="kpi-card">
+          <div class="kpi-number">${{ forecast_supply_context.summary.estimated_spend|floatformat:2 }}</div>
+          <div class="kpi-label">Gasto estimado</div>
+          <div class="muted" style="margin-top:8px;">Materia prima y empaques hoja.</div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-number">{{ forecast_supply_context.summary.projected_insumos }}</div>
+          <div class="kpi-label">MP + empaques</div>
+          <div class="muted" style="margin-top:8px;">Consolidado por familia.</div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-number">{{ forecast_supply_context.summary.prepared_insumos }}</div>
+          <div class="kpi-label">Preparados a producir</div>
+          <div class="muted" style="margin-top:8px;">Betunes, panes base y subrecetas.</div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-number">{{ forecast_supply_context.summary.forecast_units|floatformat:2 }}</div>
+          <div class="kpi-label">Unidades forecast</div>
+          <div class="muted" style="margin-top:8px;">Base usada para explotar BOM.</div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-number {% if forecast_supply_context.summary.missing_cost_insumos > 0 %}is-warning{% else %}is-success{% endif %}">{{ forecast_supply_context.summary.missing_cost_insumos }}</div>
+          <div class="kpi-label">Sin costo vigente</div>
+          <div class="muted" style="margin-top:8px;">Bloquean lectura financiera completa.</div>
+        </article>
+      </div>
+      {% if forecast_supply_context.prepared_insumos %}
+      <h4 style="margin:12px 0 8px;">Preparados a producir</h4>
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Familia</th>
+              <th>Categoría</th>
+              <th>Preparado</th>
+              <th class="text-end">Cantidad</th>
+              <th>Productos</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in forecast_supply_context.prepared_insumos %}
+            <tr>
+              <td>{{ row.family }}</td>
+              <td>{{ row.category }}</td>
+              <td><strong>{{ row.insumo_nombre }}</strong></td>
+              <td class="text-end">{{ row.required_gross_qty|floatformat:3 }} {{ row.unidad_codigo|default:"-" }}</td>
+              <td class="muted">{{ row.recipes_text }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+      {% if forecast_supply_context.insumos %}
+      <h4 style="margin:12px 0 8px;">Materia prima y empaques</h4>
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Familia</th>
+              <th>Categoría</th>
+              <th>Insumo</th>
+              <th>Tipo</th>
+              <th class="text-end">Cantidad requerida</th>
+              <th class="text-end">Costo unitario</th>
+              <th class="text-end">Gasto estimado</th>
+              <th>Productos</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in forecast_supply_context.insumos %}
+            <tr>
+              <td>{{ row.family }}</td>
+              <td>{{ row.category }}</td>
+              <td><strong>{{ row.insumo_nombre }}</strong></td>
+              <td>{{ row.article_class_label }}</td>
+              <td class="text-end">{{ row.required_gross_qty|floatformat:3 }} {{ row.unidad_codigo|default:"-" }}</td>
+              <td class="text-end">
+                {% if row.missing_cost %}
+                  <span class="badge badge-amarillo">Sin costo</span>
+                {% else %}
+                  ${{ row.unit_cost|floatformat:2 }}
+                {% endif %}
+              </td>
+              <td class="text-end"><strong>${{ row.estimated_spend|floatformat:2 }}</strong></td>
+              <td class="muted">{{ row.recipes_text }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="muted mb-0">No hay BOM ligada al preview para calcular insumos requeridos.</p>
+      {% endif %}
+      {% if forecast_supply_context.issues %}
+      <h4 style="margin:12px 0 8px;">Faltantes por corregir</h4>
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Severidad</th>
+              <th>Código</th>
+              <th>Insumo</th>
+              <th>Detalle</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in forecast_supply_context.issues %}
+            <tr>
+              <td>{{ row.severity }}</td>
+              <td>{{ row.code }}</td>
+              <td><strong>{{ row.insumo_nombre }}</strong></td>
+              <td class="muted">{{ row.detail }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+    </section>
+    {% endif %}
     <div class="table-responsive">
       <table class="table align-middle">
         <thead>
