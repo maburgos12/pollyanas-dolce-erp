@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 from django.utils import timezone
 
 from maestros.models import Insumo, UnidadMedida
-from recetas.models import LineaReceta, Receta
+from recetas.models import LineaReceta, Receta, RecetaPresentacionDerivada
 from recetas.utils.costeo_snapshot import (
     resolve_line_snapshot_cost,
     resolve_preparation_recipe_for_insumo,
@@ -227,6 +227,19 @@ def build_projection_supply_context(
 
     for recipe_id in recipe_ids:
         _load_recipe_lines(recipe_id)
+
+    # Precargar reglas de presentaciones derivadas (rebanadas) para los productos del forecast
+    derivada_map: dict[int, tuple[int, Decimal]] = {}
+    for row in RecetaPresentacionDerivada.objects.filter(
+        receta_derivada_id__in=recipe_ids, activo=True
+    ).values("receta_derivada_id", "receta_padre_id", "unidades_por_padre"):
+        child_id = int(row["receta_derivada_id"])
+        parent_id = int(row["receta_padre_id"])
+        units = _to_decimal(row["unidades_por_padre"])
+        if units > ZERO:
+            derivada_map[child_id] = (parent_id, units)
+    for parent_id in {pid for pid, _ in derivada_map.values()}:
+        _load_recipe_lines(parent_id)
 
     product_rows: list[dict[str, object]] = []
     purchase_rows: dict[tuple[int, str], dict[str, object]] = {}
@@ -542,10 +555,23 @@ def build_projection_supply_context(
             "notes": "Requerimiento bruto por proyección. No descuenta stock actual.",
             "items": [],
         }
+        bom_lines_to_explode: list[tuple[LineaReceta, Decimal]] = []
+
+        # Líneas directas del producto (empaque, componentes propios)
         for bom_line in _load_recipe_lines(recipe_id):
             gross_required = projection_units * _to_decimal(bom_line.cantidad)
-            if gross_required <= ZERO:
-                continue
+            if gross_required > ZERO:
+                bom_lines_to_explode.append((bom_line, gross_required))
+
+        # Si es presentación derivada (rebanada), agregar líneas del padre escaladas
+        if recipe_id in derivada_map:
+            parent_id, units_per_parent = derivada_map[recipe_id]
+            for parent_line in _load_recipe_lines(parent_id):
+                gross_required = projection_units * _to_decimal(parent_line.cantidad) / units_per_parent
+                if gross_required > ZERO:
+                    bom_lines_to_explode.append((parent_line, gross_required))
+
+        for bom_line, gross_required in bom_lines_to_explode:
             item = explode_line(
                 line=bom_line,
                 quantity=gross_required,

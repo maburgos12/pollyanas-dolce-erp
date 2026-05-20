@@ -93,9 +93,10 @@ def get_parent_unit_cost(receta: Receta) -> Decimal | None:
     units = Decimal(str(relation.unidades_por_padre or 0))
     if units <= 0:
         return None
-    parent_total = _prioritized_version_cost(relation.receta_padre)
-    if parent_total is None or parent_total <= 0:
-        parent_total = relation.receta_padre.costo_total_estimado_decimal
+    # BOM calculado tiene prioridad; POINT_PRODUCTION_REPORT solo como respaldo
+    parent_total = relation.receta_padre.costo_total_estimado_decimal
+    if parent_total <= 0:
+        parent_total = _prioritized_version_cost(relation.receta_padre) or ZERO
     if parent_total <= 0:
         return None
     return parent_total / units
@@ -302,9 +303,10 @@ def get_total_cost_map(recipe_ids: list[int] | set[int] | tuple[int, ...]) -> di
         if relation:
             parent_id, units = relation
             if units > ZERO:
-                parent_total = version_cost_by_parent.get(parent_id)
-                if parent_total is None or parent_total <= ZERO:
-                    parent_total = resolve(parent_id)
+                # BOM calculado primero; POINT_PRODUCTION_REPORT solo como respaldo
+                parent_total = resolve(parent_id)
+                if parent_total <= ZERO:
+                    parent_total = version_cost_by_parent.get(parent_id, ZERO)
                 if parent_total > ZERO:
                     total += parent_total / units
         visiting.discard(recipe_id)
