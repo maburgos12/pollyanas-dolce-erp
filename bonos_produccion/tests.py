@@ -5,12 +5,101 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 
+from core.navigation import NAV_GROUPS
 from rrhh.models import Empleado, NominaLinea, NominaPeriodo, PermisoSalida
 
 from .models import AREA_HORNOS, AREA_LOGISTICA, AREA_PRODUCCION, BonoProduccionEmpleado, ConfigBonoPeriodo
 
 
 class BonosProduccionTests(TestCase):
+    def test_sidebar_de_produccion_apunta_al_dashboard_erp(self):
+        produccion = next(group for group in NAV_GROUPS if group["key"] == "produccion")
+        bonos_item = next(item for item in produccion["items"] if item[0] == "produccion" and item[1] == "bonos")
+
+        self.assertEqual(bonos_item[3], "/bonos-produccion/dashboard/")
+
+    def test_dashboard_erp_muestra_configuracion_y_app_de_captura(self):
+        user = get_user_model().objects.create_superuser(username="admin-bonos", password="x")
+        self.client.force_login(user)
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
+        empleado = Empleado.objects.create(nombre="Empleado Dashboard", area="PRODUCCION")
+        BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado, area=AREA_PRODUCCION)
+
+        response = self.client.get("/bonos-produccion/dashboard/?mes=5&anio=2026")
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Control de configuración y ajustes", content)
+        self.assertIn("Abrir app de captura", content)
+        self.assertIn("Monto logística", content)
+        self.assertIn("Empleado Dashboard", content)
+
+    def test_dashboard_erp_actualiza_configuracion_del_periodo(self):
+        user = get_user_model().objects.create_superuser(username="admin-config-bonos", password="x")
+        self.client.force_login(user)
+        ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
+
+        response = self.client.post(
+            "/bonos-produccion/dashboard/",
+            {
+                "action": "config",
+                "mes": "5",
+                "anio": "2026",
+                "dias_laborables": "24",
+                "monto_hornos": "1100.00",
+                "monto_area_produccion": "900.00",
+                "monto_armado": "875.00",
+                "monto_logistica": "800.00",
+                "monto_crucero": "950.00",
+                "pct_produccion": "65.00",
+                "pct_asistencia": "15.00",
+                "pct_puntualidad": "15.00",
+                "pct_uniforme": "5.00",
+                "premio_embetunado": "400.00",
+                "limite_uniforme": "1",
+                "limite_asistencia": "2",
+                "limite_puntualidad": "2",
+                "limite_produccion": "2",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        periodo = ConfigBonoPeriodo.objects.get(mes=5, anio=2026)
+        self.assertEqual(periodo.dias_laborables, 24)
+        self.assertEqual(periodo.monto_logistica, Decimal("800.00"))
+
+    def test_dashboard_erp_actualiza_ajuste_de_empleado(self):
+        user = get_user_model().objects.create_superuser(username="admin-ajuste-bonos", password="x")
+        self.client.force_login(user)
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
+        empleado = Empleado.objects.create(nombre="Empleado Ajuste", area="PRODUCCION")
+        bono = BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado, area=AREA_PRODUCCION)
+
+        response = self.client.post(
+            "/bonos-produccion/dashboard/",
+            {
+                "action": "ajuste_bono",
+                "mes": "5",
+                "anio": "2026",
+                "bono_id": str(bono.id),
+                "dias_trabajados": "20",
+                "dias_uniforme": "20",
+                "dias_asistencia": "20",
+                "dias_puntualidad": "20",
+                "dias_produccion": "20",
+                "ajuste_positivo": "50.00",
+                "ajuste_negativo": "10.00",
+                "bono_extra": "25.00",
+                "observaciones": "Ajuste operativo",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        bono.refresh_from_db()
+        self.assertEqual(bono.dias_trabajados, 20)
+        self.assertEqual(bono.ajuste_positivo, Decimal("50.00"))
+        self.assertEqual(bono.observaciones, "Ajuste operativo")
+
     def test_pwa_usa_sesion_django_y_expone_csrf(self):
         user = get_user_model().objects.create_user(username="pwa-produccion")
         self.client.force_login(user)

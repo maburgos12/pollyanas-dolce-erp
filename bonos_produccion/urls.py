@@ -2,7 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .views import BonoProduccionViewSet, ConfigBonoPeriodoViewSet, PermisosProduccionEquipoViewSet, RegistroDiarioViewSet
-from .views_html import bonos_produccion_manifest, bonos_produccion_pwa, bonos_produccion_sw
+from .views_html import bonos_produccion_dashboard, bonos_produccion_manifest, bonos_produccion_pwa, bonos_produccion_sw
 
 router = DefaultRouter()
 router.register("periodos", ConfigBonoPeriodoViewSet, basename="bonoproduccion-periodo")
@@ -11,6 +11,7 @@ router.register("registros-diarios", RegistroDiarioViewSet, basename="bonoproduc
 router.register("permisos", PermisosProduccionEquipoViewSet, basename="bonoproduccion-permiso")
 
 urlpatterns = [
+    path("dashboard/", bonos_produccion_dashboard, name="bonos-produccion-dashboard"),
     path("app/", bonos_produccion_pwa, name="bonos-produccion-app"),
     path("manifest.json", bonos_produccion_manifest, name="bonos-produccion-manifest"),
     path("sw.js", bonos_produccion_sw, name="bonos-produccion-sw"),
