@@ -180,16 +180,6 @@ const TODAY = new Date();
 const MESES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const CATS_LABELS = {GRANDE:'Grande',MEDIANO:'Mediano',CHICO:'Chico',MINI:'Mini',VELAS_ACCESORIOS:'Velas/Accesorios',VASOS:'Vasos'};
 const CATS = Object.keys(CATS_LABELS);
-const MOCK_PERMISOS_VENTAS = [
-  {id:1, empleado_nombre:'Maria Fernanda Beltran', sucursal_nombre:'Centro', tipo:'Tiempo parcial', fecha:'2026-05-20', horario:'13:00 - 15:00', goce:'Con goce', estado:'Solicitado', motivo:'Cita medica programada.'},
-  {id:2, empleado_nombre:'Ana Paola Ruiz', sucursal_nombre:'Crucero', tipo:'Dia completo', fecha:'2026-05-22', horario:'Todo el dia', goce:'Sin goce', estado:'Preautorizado', motivo:'Tramite personal.'},
-  {id:3, empleado_nombre:'Sofia Martinez', sucursal_nombre:'El Tunel', tipo:'Tiempo parcial', fecha:'2026-05-23', horario:'09:00 - 11:30', goce:'Con goce', estado:'Aprobado RRHH', motivo:'Consulta familiar.'},
-];
-const MOCK_EQUIPO_VENTAS = [
-  {id:'mv1', empleado_nombre:'Maria Fernanda Beltran', sucursal_nombre:'Centro'},
-  {id:'mv2', empleado_nombre:'Ana Paola Ruiz', sucursal_nombre:'Crucero'},
-  {id:'mv3', empleado_nombre:'Sofia Martinez', sucursal_nombre:'El Tunel'},
-];
 
 function api(path, opts={}) {
   const csrfMatch = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
@@ -564,8 +554,7 @@ function PermisosTab({bonos,sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatu
   const [hasta,setHasta]=React.useState('15:00');
   const [motivo,setMotivo]=React.useState('');
   const [loading,setLoading]=React.useState(false);
-  const equipoFallback = bonos.map(b=>({id:b.empleado,empleado_nombre:b.empleado_nombre,sucursal_nombre:b.sucursal_nombre}));
-  const equipo = empleados.length ? empleados : equipoFallback;
+  const equipo = empleados;
   React.useEffect(()=>{ cargarPermisos(); },[mes,anio,filtroSuc]);
   React.useEffect(()=>{ if(!selected&&equipo.length)setSelected(equipo[0]); },[equipo.map(e=>e.id).join(','),selected?.id]);
   function cargarPermisos(){

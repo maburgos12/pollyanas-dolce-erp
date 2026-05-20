@@ -139,16 +139,6 @@ const TODAY=new Date();
 const MESES=['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const AREAS=['HORNOS','EMBETUNADO','ARMADO','CRUCERO'];
 const AREA_LABELS={HORNOS:'Hornos',EMBETUNADO:'Embetunado',ARMADO:'Armado',CRUCERO:'Crucero'};
-const MOCK_PERMISOS_PRODUCCION=[
-  {id:1,empleado_nombre:'Carlos Medina Lopez',area:'HORNOS',tipo:'Tiempo parcial',fecha:'2026-05-20',horario:'12:30 - 14:30',goce:'Con goce',estado:'Solicitado',motivo:'Cita medica programada.'},
-  {id:2,empleado_nombre:'Marisol Xanteco Mena',area:'EMBETUNADO',tipo:'Dia completo',fecha:'2026-05-21',horario:'Todo el dia',goce:'Sin goce',estado:'Preautorizado',motivo:'Tramite familiar.'},
-  {id:3,empleado_nombre:'Roberto Sanchez',area:'ARMADO',tipo:'Tiempo parcial',fecha:'2026-05-23',horario:'15:00 - 17:00',goce:'Con goce',estado:'Aprobado RRHH',motivo:'Consulta personal.'},
-];
-const MOCK_EQUIPO_PRODUCCION=[
-  {id:'mp1',empleado_nombre:'Carlos Medina Lopez',area:'HORNOS'},
-  {id:'mp2',empleado_nombre:'Marisol Xanteco Mena',area:'EMBETUNADO'},
-  {id:'mp3',empleado_nombre:'Roberto Sanchez',area:'ARMADO'},
-];
 function api(path,opts={}){
   const csrfMatch=document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
   const headers={'Content-Type':'application/json','X-CSRFToken':csrfMatch?decodeURIComponent(csrfMatch[1]):'',...(opts.headers||{})};
@@ -316,8 +306,7 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
   const [hasta,setHasta]=React.useState('14:30');
   const [motivo,setMotivo]=React.useState('');
   const [loading,setLoading]=React.useState(false);
-  const equipoFallback=bonos.length?bonos.map(b=>({id:b.empleado,empleado_nombre:b.empleado_nombre,area:b.area})):MOCK_EQUIPO_PRODUCCION;
-  const equipoBase=empleados.length?empleados:equipoFallback;
+  const equipoBase=empleados;
   const equipoArea=equipoBase.filter(b=>b.area===area);
   const equipo=equipoArea.length?equipoArea:equipoBase;
   React.useEffect(()=>{cargarPermisos();},[mes,anio,area]);
