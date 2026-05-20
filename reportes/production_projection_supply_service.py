@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 from django.utils import timezone
 
 from maestros.models import Insumo, UnidadMedida
-from recetas.models import LineaReceta, Receta, RecetaPresentacionDerivada
+from recetas.models import LineaReceta, Receta, RecetaAgrupacionAddon, RecetaPresentacionDerivada
 from recetas.utils.costeo_snapshot import (
     resolve_line_snapshot_cost,
     resolve_preparation_recipe_for_insumo,
@@ -240,6 +240,21 @@ def build_projection_supply_context(
             derivada_map[child_id] = (parent_id, units)
     for parent_id in {pid for pid, _ in derivada_map.values()}:
         _load_recipe_lines(parent_id)
+
+    # Precargar reglas de agrupación addon (Sabor Fresa → Pay de Queso base) para productos del forecast
+    addon_base_map: dict[int, int] = {}
+    for row in RecetaAgrupacionAddon.objects.filter(
+        addon_receta_id__in=recipe_ids,
+        activo=True,
+        status=RecetaAgrupacionAddon.STATUS_APPROVED,
+        addon_receta__isnull=False,
+    ).values("addon_receta_id", "base_receta_id"):
+        addon_id = int(row["addon_receta_id"])
+        base_id = int(row["base_receta_id"])
+        if addon_id not in addon_base_map:
+            addon_base_map[addon_id] = base_id
+    for base_id in set(addon_base_map.values()):
+        _load_recipe_lines(base_id)
 
     product_rows: list[dict[str, object]] = []
     purchase_rows: dict[tuple[int, str], dict[str, object]] = {}
@@ -570,6 +585,14 @@ def build_projection_supply_context(
                 gross_required = projection_units * _to_decimal(parent_line.cantidad) / units_per_parent
                 if gross_required > ZERO:
                     bom_lines_to_explode.append((parent_line, gross_required))
+
+        # Si es un addon (Sabor Fresa, Guayaba, etc.), agregar líneas del pay base (1:1)
+        if recipe_id in addon_base_map:
+            base_id = addon_base_map[recipe_id]
+            for base_line in _load_recipe_lines(base_id):
+                gross_required = projection_units * _to_decimal(base_line.cantidad)
+                if gross_required > ZERO:
+                    bom_lines_to_explode.append((base_line, gross_required))
 
         for bom_line, gross_required in bom_lines_to_explode:
             item = explode_line(
