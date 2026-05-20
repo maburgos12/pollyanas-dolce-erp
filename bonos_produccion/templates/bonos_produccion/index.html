@@ -145,7 +145,8 @@ function api(path,opts={}){
   const csrfMatch=document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
   const headers={'Content-Type':'application/json','X-CSRFToken':csrfMatch?decodeURIComponent(csrfMatch[1]):'',...(opts.headers||{})};
   return fetch(path,{...opts,headers,credentials:'same-origin'}).then(async r=>{
-    if(r.status===403||r.status===401){
+    const contentType=(r.headers.get('content-type')||'').toLowerCase();
+    if(r.status===403||r.status===401||r.redirected||contentType.includes('text/html')){
       window.location.href='/login/?next='+encodeURIComponent(window.location.pathname);
       return null;
     }
