@@ -43,6 +43,12 @@ class VentasModuleTests(SimpleTestCase):
 
         self.assertIn('class="table saved-forecasts-table"', full_list)
         self.assertIn('class="table saved-forecasts-table"', dashboard_list)
+        self.assertIn("--table-min-width", full_list)
+        self.assertIn("--table-min-width", dashboard_list)
+        self.assertIn(".saved-forecasts-wrap > table.saved-forecasts-table td:nth-child(n+3)", full_list)
+        self.assertIn(".saved-forecasts-wrap > table.saved-forecasts-table td:nth-child(n+3)", dashboard_list)
+        self.assertIn("white-space:normal", full_list)
+        self.assertIn("white-space:normal", dashboard_list)
         self.assertIn("forecast-actions-cell", full_list)
         self.assertIn("forecast-actions-cell", dashboard_list)
         self.assertIn("forecast-method-cell", full_list)
