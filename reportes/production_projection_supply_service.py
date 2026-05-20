@@ -563,14 +563,13 @@ def build_projection_supply_context(
             if gross_required > ZERO:
                 bom_lines_to_explode.append((bom_line, gross_required))
 
-        # Si es presentación derivada (rebanada), agregar líneas de ingredientes del padre escaladas.
-        # Se excluye el EMPAQUE del padre (Domo pastel, AL-2923, etc.) porque la rebanada ya
-        # tiene su propio empaque en sus líneas directas (Rebanada Cuadrada/Triangular, cuchara, etiqueta).
+        # Si es presentación derivada (rebanada), agregar todas las líneas del padre escaladas.
+        # El empaque del padre (Domo pastel, AL-2923, etc.) SÍ se incluye fraccionado: cuando un
+        # pastel/pay se rebana, el empaque del formato entero ya fue usado y se descarta, por lo que
+        # su costo y requerimiento se traslada proporcionalmente a cada rebanada.
         if recipe_id in derivada_map:
             parent_id, units_per_parent = derivada_map[recipe_id]
             for parent_line in _load_recipe_lines(parent_id):
-                if getattr(parent_line.insumo, "tipo_item", None) == Insumo.TIPO_EMPAQUE:
-                    continue
                 gross_required = projection_units * _to_decimal(parent_line.cantidad) / units_per_parent
                 if gross_required > ZERO:
                     bom_lines_to_explode.append((parent_line, gross_required))
