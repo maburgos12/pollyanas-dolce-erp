@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     BonoVentasEmpleadoViewSet,
     ConfigBonoVentasPeriodoViewSet,
+    PermisosVentasEquipoViewSet,
     RegistroDiarioVentasViewSet,
     VentaCategoriaSucursalViewSet,
 )
@@ -14,6 +15,7 @@ router.register("periodos", ConfigBonoVentasPeriodoViewSet, basename="bonoventas
 router.register("ventas-categoria", VentaCategoriaSucursalViewSet, basename="bonoventas-cat")
 router.register("bonos", BonoVentasEmpleadoViewSet, basename="bonoventas-bono")
 router.register("registros-diarios", RegistroDiarioVentasViewSet, basename="bonoventas-registro")
+router.register("permisos", PermisosVentasEquipoViewSet, basename="bonoventas-permiso")
 
 urlpatterns = [
     path("app/", bonos_ventas_pwa, name="bonos-ventas-app"),

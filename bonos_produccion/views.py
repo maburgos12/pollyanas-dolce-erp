@@ -9,6 +9,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from rrhh.models import Empleado, NominaPeriodo
+from rrhh.bonos_permisos import BasePermisosEquipoViewSet
 
 from .models import (
     AREA_EMBETUNADO,
@@ -172,3 +173,18 @@ class RegistroDiarioViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         instance = serializer.save()
         _recalcular_desde_registros(instance.bono)
+
+
+class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
+    origen_solicitud = "bonos_produccion"
+
+    def empleados_queryset(self):
+        areas_validas = {code for code, _ in AREAS_PRODUCCION}
+        qs = Empleado.objects.filter(area__in=[*areas_validas, "PRODUCCION"])
+        area = self.request.query_params.get("area")
+        if area:
+            area_normalizada = normalizar_area_produccion(area)
+            if area_normalizada not in areas_validas:
+                return Empleado.objects.none()
+            qs = qs.filter(area=area_normalizada)
+        return qs

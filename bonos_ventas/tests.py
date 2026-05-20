@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from decimal import Decimal
 
@@ -6,7 +7,7 @@ from django.test import Client, TestCase
 
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointDailySale, PointProduct
-from rrhh.models import Empleado, NominaLinea, NominaPeriodo
+from rrhh.models import Empleado, NominaLinea, NominaPeriodo, PermisoSalida
 
 from .models import BonoVentasEmpleado, ConfigBonoVentasPeriodo, VentaCategoriaSucursal
 from .services import sync_ventas_categorias
@@ -129,3 +130,43 @@ class BonosVentasTests(TestCase):
         self.assertEqual(payload["total_ventas"], 2)
         self.assertEqual(payload["sin_sucursal"], [sin_sucursal.nombre])
         self.assertTrue(BonoVentasEmpleado.objects.filter(periodo=periodo, empleado=con_sucursal, sucursal=sucursal).exists())
+
+    def test_permisos_equipo_ventas_crea_y_preautoriza(self):
+        user = get_user_model().objects.create_user(username="jefe-ventas")
+        self.client.force_login(user)
+        sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
+        empleado = Empleado.objects.create(nombre="Empleado Ventas Permiso", area="VENTAS", sucursal="Payán")
+        Empleado.objects.create(nombre="Empleado Produccion", area="HORNOS")
+
+        listado = self.client.get(f"/api/bonos-ventas/permisos/?mes=5&anio=2026&sucursal={sucursal.id}")
+
+        self.assertEqual(listado.status_code, 200)
+        self.assertEqual([row["id"] for row in listado.json()["empleados"]], [empleado.id])
+
+        creado = self.client.post(
+            "/api/bonos-ventas/permisos/",
+            json.dumps(
+                {
+                    "empleado": empleado.id,
+                    "tipo": PermisoSalida.TIPO_PERMISO_HORA,
+                    "fecha_inicio": "2026-05-20T13:00:00",
+                    "fecha_fin": "2026-05-20T15:00:00",
+                    "goce_sueldo": "false",
+                    "motivo": "Cita medica",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(creado.status_code, 201)
+        permiso = PermisoSalida.objects.get(pk=creado.json()["id"])
+        self.assertEqual(permiso.origen_solicitud, PermisoSalida.ORIGEN_BONOS_VENTAS)
+        self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_PENDIENTE)
+        self.assertFalse(permiso.goce_sueldo)
+
+        preautorizado = self.client.post(f"/api/bonos-ventas/permisos/{permiso.id}/preautorizar/")
+
+        self.assertEqual(preautorizado.status_code, 200)
+        permiso.refresh_from_db()
+        self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_PREAUTORIZADO)
+        self.assertEqual(permiso.autorizado_jefe_por, user)

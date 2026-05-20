@@ -112,8 +112,19 @@ class HoraExtraAdmin(admin.ModelAdmin):
 
 @admin.register(PermisoSalida)
 class PermisoAdmin(admin.ModelAdmin):
-    list_display = ("folio", "empleado", "tipo", "fecha_inicio", "estado", "goce_sueldo", "autorizado_por")
-    list_filter = ("tipo", "estado", "goce_sueldo", "fecha_inicio")
+    list_display = (
+        "folio",
+        "empleado",
+        "tipo",
+        "fecha_inicio",
+        "origen_solicitud",
+        "estado_jefe",
+        "estado",
+        "goce_sueldo",
+        "autorizado_jefe_por",
+        "autorizado_por",
+    )
+    list_filter = ("tipo", "origen_solicitud", "estado_jefe", "estado", "goce_sueldo", "fecha_inicio")
     search_fields = ("folio", "empleado__nombre", "empleado__codigo", "motivo")
     readonly_fields = ("folio",)
 

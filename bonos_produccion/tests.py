@@ -1,10 +1,11 @@
+import json
 from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 
-from rrhh.models import Empleado, NominaLinea, NominaPeriodo
+from rrhh.models import Empleado, NominaLinea, NominaPeriodo, PermisoSalida
 
 from .models import AREA_HORNOS, BonoProduccionEmpleado, ConfigBonoPeriodo
 
@@ -108,3 +109,42 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(response.json()["creados"], 1)
         bono = BonoProduccionEmpleado.objects.get(periodo=periodo, empleado=empleado)
         self.assertEqual(bono.area, AREA_HORNOS)
+
+    def test_permisos_equipo_produccion_crea_y_rechaza(self):
+        user = get_user_model().objects.create_user(username="jefe-produccion")
+        self.client.force_login(user)
+        empleado = Empleado.objects.create(nombre="Empleado Hornos Permiso", area="HORNOS")
+        Empleado.objects.create(nombre="Empleado Ventas", area="VENTAS")
+
+        listado = self.client.get("/api/bonos-produccion/permisos/?mes=5&anio=2026&area=HORNOS")
+
+        self.assertEqual(listado.status_code, 200)
+        self.assertEqual([row["id"] for row in listado.json()["empleados"]], [empleado.id])
+
+        creado = self.client.post(
+            "/api/bonos-produccion/permisos/",
+            json.dumps(
+                {
+                    "empleado": empleado.id,
+                    "tipo": PermisoSalida.TIPO_PERMISO_DIA,
+                    "fecha_inicio": "2026-05-21T08:00:00",
+                    "fecha_fin": "2026-05-21T16:00:00",
+                    "goce_sueldo": True,
+                    "motivo": "Tramite familiar",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(creado.status_code, 201)
+        permiso = PermisoSalida.objects.get(pk=creado.json()["id"])
+        self.assertEqual(permiso.origen_solicitud, PermisoSalida.ORIGEN_BONOS_PRODUCCION)
+        self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_PENDIENTE)
+
+        rechazado = self.client.post(f"/api/bonos-produccion/permisos/{permiso.id}/rechazar/")
+
+        self.assertEqual(rechazado.status_code, 200)
+        permiso.refresh_from_db()
+        self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_RECHAZADO)
+        self.assertEqual(permiso.estado, PermisoSalida.ESTADO_RECHAZADO)
+        self.assertEqual(permiso.autorizado_jefe_por, user)
