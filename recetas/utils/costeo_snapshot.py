@@ -35,6 +35,17 @@ POINT_UNIT_ALIASES = {
     "piezas": "pza",
     "unidad": "unidad",
     "unidades": "unidad",
+    "u": "unidad",
+    "gli": "lt",
+    "galon": "lt",
+    "galón": "lt",
+    "galones": "lt",
+    "gfn": "lt",
+    "garafon": "lt",
+    "garafón": "lt",
+    "cja": "pza",
+    "caja": "pza",
+    "cajas": "pza",
 }
 _ACTIVE_PREPARATION_RECIPE_IDS: ContextVar[tuple[int, ...]] = ContextVar(
     "_ACTIVE_PREPARATION_RECIPE_IDS",
@@ -173,19 +184,6 @@ def resolve_preparation_recipe_unit_cost(prep_recipe: Receta | None) -> tuple[De
     if prep_recipe is None:
         return None, None, "NO_PREPARACION"
 
-    production_report_cost = (
-        RecetaCostoVersion.objects.filter(
-            receta=prep_recipe,
-            fuente="POINT_PRODUCTION_REPORT",
-            costo_total__gt=0,
-        )
-        .order_by("-version_num", "-creado_en", "-id")
-        .values_list("costo_total", flat=True)
-        .first()
-    )
-    if production_report_cost is not None:
-        return _q6(production_report_cost), prep_recipe.rendimiento_unidad, "POINT_PRODUCTION_REPORT"
-
     recipe_id = int(prep_recipe.id or 0)
     active_recipe_ids = _ACTIVE_PREPARATION_RECIPE_IDS.get()
     if recipe_id and recipe_id in active_recipe_ids:
@@ -204,6 +202,21 @@ def resolve_preparation_recipe_unit_cost(prep_recipe: Receta | None) -> tuple[De
     quantized_cost = _q6(unit_cost)
     if quantized_cost > 0:
         return quantized_cost, prep_recipe.rendimiento_unidad, "RECETA_PREPARACION"
+
+    # BOM sin costo — usar POINT_PRODUCTION_REPORT como respaldo
+    production_report_cost = (
+        RecetaCostoVersion.objects.filter(
+            receta=prep_recipe,
+            fuente="POINT_PRODUCTION_REPORT",
+            costo_total__gt=0,
+        )
+        .order_by("-version_num", "-creado_en", "-id")
+        .values_list("costo_total", flat=True)
+        .first()
+    )
+    if production_report_cost is not None:
+        return _q6(production_report_cost), prep_recipe.rendimiento_unidad, "POINT_PRODUCTION_REPORT"
+
     return None, prep_recipe.rendimiento_unidad, "RECETA_PREPARACION_SIN_COSTO"
 
 
@@ -211,6 +224,8 @@ def resolve_insumo_unit_cost(insumo: Insumo | None) -> tuple[Decimal | None, Uni
     if not insumo:
         return None, None, "NO_INSUMO"
 
+    # Preparaciones internas: el costo BOM (o POINT_PRODUCTION_REPORT como respaldo) es correcto.
+    # Insumos de compra: no tendrán prep_recipe, van directamente a CostoInsumo.
     prep_recipe = resolve_preparation_recipe_for_insumo(insumo)
     prep_cost, prep_unit, prep_label = resolve_preparation_recipe_unit_cost(prep_recipe)
     if prep_cost is not None and prep_cost > 0:
@@ -219,6 +234,9 @@ def resolve_insumo_unit_cost(insumo: Insumo | None) -> tuple[Decimal | None, Uni
     latest, source_unit = _latest_canonical_cost_with_unit(insumo)
     if latest is not None and latest > 0:
         return _q6(latest), source_unit, "COSTO_CANONICO"
+
+    if prep_recipe is not None:
+        return None, prep_unit, prep_label
 
     return None, None, "SIN_COSTO"
 
