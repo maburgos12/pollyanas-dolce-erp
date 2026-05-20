@@ -33,6 +33,13 @@ class BonosProduccionTests(TestCase):
         self.assertIn("Abrir app de captura", content)
         self.assertIn("Monto logística", content)
         self.assertIn("Empleado Dashboard", content)
+        self.assertEqual(response["Cache-Control"], "max-age=0, no-cache, no-store, must-revalidate, private")
+
+    def test_raiz_web_de_bonos_produccion_redirige_al_dashboard(self):
+        response = self.client.get("/bonos-produccion/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/bonos-produccion/dashboard/")
 
     def test_dashboard_erp_actualiza_configuracion_del_periodo(self):
         user = get_user_model().objects.create_superuser(username="admin-config-bonos", password="x")
