@@ -24,7 +24,8 @@ def _match(k: str, keywords: list[str]) -> bool:
 # Reglas en orden estricto de prioridad (la primera que haga match gana).
 # Keywords con espacios evitan falsos positivos por substring parcial.
 RULES: list[tuple[str, list[str]]] = [
-    # 1. Limpieza — debe ir primero para no confundirse con empaques o alimentos
+    # 1. Limpieza — primero para evitar confusión con empaques o alimentos
+    #    "vinagre" aquí captura "Vinagre de Manzana" antes que FRUTAS toque " manzana"
     ("LIMPIEZA", [
         "bactericida", "pinol", "power clean", "suavel",
         "papel de bano", "papel higienico", "papel bano",
@@ -41,8 +42,8 @@ RULES: list[tuple[str, list[str]]] = [
         "cubrebocas", " cofia ", "gorra basic", " mandil",
         "rollo anti-insecto", "rollo antiinsecto",
         "liquido limpiacristales", "antiseptico",
-        "bactericida", "sorbato", "garrafon 19",
-        "toalla rollo fapsa",
+        "sorbato", "garrafon 19", "toalla rollo fapsa",
+        "vinagre",
     ]),
 
     # 2. Colorantes y decoración — antes de cualquier alimento
@@ -55,7 +56,7 @@ RULES: list[tuple[str, list[str]]] = [
         "liston ", "estrella deco", "deco azucar",
     ]),
 
-    # 3. Bebidas alcohólicas y no alcohólicas (keywords específicos, sin "te" genérico)
+    # 3. Bebidas alcohólicas y no alcohólicas
     ("BEBIDAS", [
         "nescafe", " cafe ", "agua purificada", "agua purif",
         " jugo ", "refresco", "licor43", " licor ",
@@ -66,6 +67,15 @@ RULES: list[tuple[str, list[str]]] = [
 
     # 4. Huevos
     ("HUEVOS", [" huevo", "clara de huevo", "yema de huevo"]),
+
+    # 4b. Empaques especiales 3 leches — antes de LACTEOS para que " leche" no los absorba
+    #     También captura "MOLDE PAN NUMERO 30" antes de que PAN tome " pan "
+    ("EMPAQUES", [
+        "domo 3 leche", "charola 3 leche", "molde 3 leche",
+        "rebanada 3 leche", "molde pan",
+        "1414b caja", " caja chica", "caja grande",
+        "rebanada triangular",
+    ]),
 
     # 5. Frutas — keywords específicos
     ("FRUTAS", [
@@ -116,20 +126,20 @@ RULES: list[tuple[str, list[str]]] = [
         "cobertura dona",
     ]),
 
-    # 12. Complementos (sal, especias, aditivos, nueces, levadura)
-    ("COMPLEMENTOS", [
-        " sal ", "vinagre", " levadura", " nuez", " almendra",
-        "ajonjoli", " canela", "bicarbonato", "polvo hornear",
-        "extracto de vainilla", "esencia de", " avena",
-        "grenetina", "goma xantana", "sorbato de",
-        "desmoldante", " crumble",
-    ]),
-
-    # 13. Masas e insumos producidos (batidos, bases de producción)
+    # 12. Masas — antes de COMPLEMENTOS para que " masa " gane sobre " nuez"
     ("MASAS", [
         " masa ", "base cheesecake", "base 3 leches",
         " bizcocho", " brownie",
         " batidor ",
+    ]),
+
+    # 13. Complementos (sal, especias, aditivos, nueces, levadura)
+    ("COMPLEMENTOS", [
+        " sal ", " levadura", " nuez", " almendra",
+        "ajonjoli", " canela", "bicarbonato", "polvo hornear",
+        "extracto de vainilla", "esencia de", " avena",
+        "grenetina", "goma xantana", "sorbato de",
+        "desmoldante", " crumble",
     ]),
 
     # 14. Pan (productos de panadería)
@@ -153,32 +163,29 @@ RULES: list[tuple[str, list[str]]] = [
         "bolsa de brillo", "bolsa jumbo", "bolsa papel kraft",
         "caja rosa", "impresion caja", "impresion m20",
         "impresion 2 bollos", " bisagra", " manga ",
-        "domo 3 leches", "charola 3 leches", "molde 3 leches",
-        " cupcake",
+        " cupcake", "bolsa camiseta reb",
     ]),
 
     # 16. Desechables (vasos, cucharas, platos)
-    ("DESACHABLES", []),  # placeholder — cubierto por subcaso específico
-
-    # 17. Desechables reales
     ("DESECHABLES", [
         " vaso", " cuchara", " plato ", "desechable", " cubierto",
-        "cinta adhesiva", "liga no", "liga payaso",
+        "cinta adhesiva", "cinta transparente", "liga no", "liga payaso",
         "8oz", "9oz", "12oz", "16oz", "20oz",
-        "bolsa camiseta reb", "portavasos", "porta vasos",
+        "portavasos", "porta vasos",
         "vaso litro", " servilleta",
     ]),
 
-    # 18. Etiquetas y papelería
+    # 17. Etiquetas y papelería
     ("ETIQUETAS", [
         " etiqueta", "papelcliche", "papel cliche", " sticker",
+        " tarjeta ",
     ]),
 
-    # 19. Útiles de cocina y equipamiento (no comestibles)
+    # 18. Útiles de cocina y equipamiento (no comestibles)
     ("UTILES", [
         "bascula", "espatula", " estan ", "mesa de trabajo",
         "set de cuchillos", "cartera acero", " red negra",
-        "garrafon 19", "rollo anti",
+        "rollo anti",
     ]),
 ]
 
