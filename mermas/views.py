@@ -1,6 +1,7 @@
 from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
+from django.contrib.auth import logout
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
@@ -187,7 +188,9 @@ def app_home(request):
                 "now": timezone.localtime(),
             },
         )
-    raise PermissionDenied("No tienes acceso a la app de mermas.")
+    logout(request)
+    messages.warning(request, "Inicia sesión con tu usuario autorizado de la app de mermas.")
+    return redirect("/login/?next=/mermas/app/")
 
 
 @login_required
