@@ -261,8 +261,10 @@ def _insumo_operational_profile(insumo: Insumo):
         missing.append("proveedor principal")
     if tipo in {Insumo.TIPO_INTERNO, Insumo.TIPO_EMPAQUE} and not (insumo.categoria or "").strip():
         missing.append("categoría")
-    if insumo.activo and not (insumo.codigo_point or "").strip():
-        missing.append("código comercial")
+    # Código Point solo requerido en MATERIA_PRIMA (se compra externamente y debe estar en catálogo Point)
+    # INSUMO_INTERNO y EMPAQUE se producen/gestionan internamente; su trazabilidad es la receta, no el código Point
+    if tipo == Insumo.TIPO_MATERIA_PRIMA and insumo.activo and not (insumo.codigo_point or "").strip():
+        missing.append("código comercial Point")
 
     if not insumo.activo:
         readiness_label = "Inactivo"
