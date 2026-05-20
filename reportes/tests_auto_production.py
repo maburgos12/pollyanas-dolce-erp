@@ -16,6 +16,7 @@ from inventario.stock_trace import TRACE_MANUAL_SYNC, build_stock_trace
 from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
 from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob
 from recetas.models import LineaReceta, Receta, RecetaCostoVersion
+from recetas.utils.costeo_snapshot import resolve_preparation_recipe_for_insumo
 from reportes.auto_production_service import (
     approve_production_order,
     execute_production_order,
@@ -762,6 +763,34 @@ class ProjectionSupplyContextTests(TestCase):
         self.assertNotIn("Betún Mantequilla Proyección", purchase_by_name)
         self.assertEqual(context["summary"]["estimated_spend"], Decimal("156.00"))
         self.assertEqual(context["summary"]["prepared_insumos"], 1)
+
+    def test_preparation_resolver_prefers_point_code_over_stale_derived_id(self):
+        wrong_prep = Receta.objects.create(
+            nombre="Preparación Stale",
+            codigo_point="STALE-PREP",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("1"),
+            rendimiento_unidad=self.unit_kg,
+            hash_contenido="hash-stale-prep",
+        )
+        correct_prep = Receta.objects.create(
+            nombre="Pan Vainilla Dawn Mini Test",
+            codigo_point="01VDMINI-TEST",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("1"),
+            rendimiento_unidad=self.unit_kg,
+            hash_contenido="hash-correct-point-prep",
+        )
+        stale_internal = Insumo.objects.create(
+            codigo=f"DERIVADO:RECETA:{wrong_prep.id}:PREPARACION",
+            codigo_point=correct_prep.codigo_point,
+            nombre="Pan Vainilla Dawn Mini Test",
+            nombre_normalizado="pan vainilla dawn mini test",
+            unidad_base=self.unit_kg,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+
+        self.assertEqual(resolve_preparation_recipe_for_insumo(stale_internal), correct_prep)
 
 
 class ProjectionSupplyViewTests(TestCase):
