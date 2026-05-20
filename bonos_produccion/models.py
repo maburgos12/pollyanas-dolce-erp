@@ -10,13 +10,16 @@ from rrhh.models import Empleado, NominaLinea, NominaPeriodo
 
 AREA_HORNOS = "HORNOS"
 AREA_EMBETUNADO = "EMBETUNADO"
+AREA_PRODUCCION = "PRODUCCION"
 AREA_ARMADO = "ARMADO"
+AREA_LOGISTICA = "LOGISTICA"
 AREA_CRUCERO = "CRUCERO"
 
 AREAS_PRODUCCION = [
     (AREA_HORNOS, "Hornos"),
-    (AREA_EMBETUNADO, "Embetunado"),
+    (AREA_PRODUCCION, "Producción"),
     (AREA_ARMADO, "Armado"),
+    (AREA_LOGISTICA, "Logística"),
     (AREA_CRUCERO, "Crucero"),
 ]
 
@@ -28,8 +31,13 @@ def normalizar_area_produccion(value: str) -> str:
         "HORNOS": AREA_HORNOS,
         "EMBETUNADO": AREA_EMBETUNADO,
         "EMBETUNADOS": AREA_EMBETUNADO,
+        "PRODUCCION": AREA_PRODUCCION,
+        "PRODUCCIÓN": AREA_PRODUCCION,
+        "PROD": AREA_PRODUCCION,
         "ARMADO": AREA_ARMADO,
         "ARMADOS": AREA_ARMADO,
+        "LOGISTICA": AREA_LOGISTICA,
+        "LOGÍSTICA": AREA_LOGISTICA,
         "CRUCERO": AREA_CRUCERO,
     }
     return aliases.get(area, area)
@@ -45,7 +53,9 @@ class ConfigBonoPeriodo(models.Model):
     dias_laborables = models.PositiveSmallIntegerField(default=23)
     monto_hornos = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("1000.00"))
     monto_embetunado = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("850.00"))
+    monto_area_produccion = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("850.00"))
     monto_armado = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("850.00"))
+    monto_logistica = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("850.00"))
     monto_crucero = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("950.00"))
     pct_produccion = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("65.00"))
     pct_asistencia = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("15.00"))
@@ -73,7 +83,9 @@ class ConfigBonoPeriodo(models.Model):
         return {
             AREA_HORNOS: self.monto_hornos,
             AREA_EMBETUNADO: self.monto_embetunado,
+            AREA_PRODUCCION: self.monto_area_produccion,
             AREA_ARMADO: self.monto_armado,
+            AREA_LOGISTICA: self.monto_logistica,
             AREA_CRUCERO: self.monto_crucero,
         }.get(normalizar_area_produccion(area), Decimal("0.00"))
 

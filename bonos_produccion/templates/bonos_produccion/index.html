@@ -126,7 +126,9 @@ tr:hover td{background:var(--bg)}
 .empty{text-align:center;padding:40px 20px;color:var(--faint);font-size:13px;font-weight:700}
 .pill-HORNOS{background:#FEF3C7;color:#92400E}
 .pill-EMBETUNADO{background:#FCE7F3;color:#831843}
+.pill-PRODUCCION{background:#FCE7F3;color:#831843}
 .pill-ARMADO{background:#E0E7FF;color:#3730A3}
+.pill-LOGISTICA{background:#E0F2FE;color:#075985}
 .pill-CRUCERO{background:#D1FAE5;color:#065F46}
 @media(max-width:700px){.hdr{padding:10px 14px}main{padding:14px}.metrics{grid-template-columns:1fr 1fr}.perm-layout{grid-template-columns:1fr}}
 </style>
@@ -137,8 +139,8 @@ tr:hover td{background:var(--bg)}
 const h=React.createElement;
 const TODAY=new Date();
 const MESES=['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-const AREAS=['HORNOS','EMBETUNADO','ARMADO','CRUCERO'];
-const AREA_LABELS={HORNOS:'Hornos',EMBETUNADO:'Embetunado',ARMADO:'Armado',CRUCERO:'Crucero'};
+const AREAS=['HORNOS','PRODUCCION','ARMADO','LOGISTICA','CRUCERO'];
+const AREA_LABELS={HORNOS:'Hornos',EMBETUNADO:'Embetunado',PRODUCCION:'Produccion',ARMADO:'Armado',LOGISTICA:'Logistica',CRUCERO:'Crucero'};
 function api(path,opts={}){
   const csrfMatch=document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
   const headers={'Content-Type':'application/json','X-CSRFToken':csrfMatch?decodeURIComponent(csrfMatch[1]):'',...(opts.headers||{})};

@@ -7,7 +7,7 @@ from django.test import Client, TestCase
 
 from rrhh.models import Empleado, NominaLinea, NominaPeriodo, PermisoSalida
 
-from .models import AREA_HORNOS, BonoProduccionEmpleado, ConfigBonoPeriodo
+from .models import AREA_HORNOS, AREA_LOGISTICA, AREA_PRODUCCION, BonoProduccionEmpleado, ConfigBonoPeriodo
 
 
 class BonosProduccionTests(TestCase):
@@ -108,7 +108,26 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["creados"], 1)
         bono = BonoProduccionEmpleado.objects.get(periodo=periodo, empleado=empleado)
-        self.assertEqual(bono.area, AREA_HORNOS)
+        self.assertEqual(bono.area, AREA_PRODUCCION)
+
+    def test_logistica_es_area_valida_de_bonos_produccion(self):
+        periodo = ConfigBonoPeriodo.objects.create(mes=6, anio=2026)
+        empleado = Empleado.objects.create(nombre="Empleado Logistica", area="LOGISTICA")
+
+        bono = BonoProduccionEmpleado.objects.create(
+            periodo=periodo,
+            empleado=empleado,
+            area=AREA_LOGISTICA,
+            dias_trabajados=10,
+            dias_uniforme=10,
+            dias_asistencia=10,
+            dias_puntualidad=10,
+            dias_produccion=10,
+        )
+        bono.recalcular()
+
+        self.assertEqual(bono.area, AREA_LOGISTICA)
+        self.assertEqual(bono.total_a_pagar, Decimal("850.00"))
 
     def test_permisos_equipo_produccion_crea_y_rechaza(self):
         user = get_user_model().objects.create_user(username="jefe-produccion")
