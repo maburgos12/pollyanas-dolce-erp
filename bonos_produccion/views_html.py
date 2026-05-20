@@ -16,7 +16,16 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 
 from core.access import can_manage_submodule, can_view_submodule
 
-from .models import AREAS_PRODUCCION, BonoProduccionEmpleado, ConfigBonoPeriodo
+from .models import AREA_PRODUCCION, AREAS_PRODUCCION, BonoProduccionEmpleado, ConfigBonoArea, ConfigBonoPeriodo
+
+
+AREA_AMOUNT_FIELDS = {
+    "HORNOS": "monto_hornos",
+    "PRODUCCION": "monto_area_produccion",
+    "ARMADO": "monto_armado",
+    "LOGISTICA": "monto_logistica",
+    "CRUCERO": "monto_crucero",
+}
 
 
 def _parse_int(raw: str | None, default: int = 0) -> int:
@@ -58,32 +67,38 @@ def bonos_produccion_dashboard(request):
         if action == "config":
             periodo, _ = ConfigBonoPeriodo.objects.get_or_create(mes=mes, anio=anio)
             periodo.dias_laborables = _parse_int(request.POST.get("dias_laborables"), periodo.dias_laborables)
-            periodo.monto_hornos = _parse_decimal(request.POST.get("monto_hornos"))
-            periodo.monto_area_produccion = _parse_decimal(request.POST.get("monto_area_produccion"))
-            periodo.monto_armado = _parse_decimal(request.POST.get("monto_armado"))
-            periodo.monto_logistica = _parse_decimal(request.POST.get("monto_logistica"))
-            periodo.monto_crucero = _parse_decimal(request.POST.get("monto_crucero"))
-            periodo.pct_produccion = _parse_decimal(request.POST.get("pct_produccion"))
-            periodo.pct_asistencia = _parse_decimal(request.POST.get("pct_asistencia"))
-            periodo.pct_puntualidad = _parse_decimal(request.POST.get("pct_puntualidad"))
-            periodo.pct_uniforme = _parse_decimal(request.POST.get("pct_uniforme"))
+            for area, amount_field in AREA_AMOUNT_FIELDS.items():
+                setattr(periodo, amount_field, _parse_decimal(request.POST.get(amount_field)))
             periodo.premio_embetunado = _parse_decimal(request.POST.get("premio_embetunado"))
-            periodo.limite_uniforme = _parse_int(request.POST.get("limite_uniforme"), periodo.limite_uniforme)
-            periodo.limite_asistencia = _parse_int(request.POST.get("limite_asistencia"), periodo.limite_asistencia)
-            periodo.limite_puntualidad = _parse_int(request.POST.get("limite_puntualidad"), periodo.limite_puntualidad)
-            periodo.limite_produccion = _parse_int(request.POST.get("limite_produccion"), periodo.limite_produccion)
             periodo.creado_por = periodo.creado_por or request.user
             periodo.save()
+
+            periodo.asegurar_reglas_area()
+            for area, _label in AREAS_PRODUCCION:
+                regla = periodo.get_regla_area(area)
+                prefix = f"regla_{area.lower()}"
+                usa_produccion = request.POST.get(f"{prefix}_usa_produccion") == "on"
+                regla.usa_produccion = usa_produccion
+                regla.pct_produccion = _parse_decimal(request.POST.get(f"{prefix}_pct_produccion")) if usa_produccion else Decimal("0.00")
+                regla.pct_asistencia = _parse_decimal(request.POST.get(f"{prefix}_pct_asistencia"))
+                regla.pct_puntualidad = _parse_decimal(request.POST.get(f"{prefix}_pct_puntualidad"))
+                regla.pct_uniforme = _parse_decimal(request.POST.get(f"{prefix}_pct_uniforme"))
+                regla.limite_produccion = (
+                    _parse_int(request.POST.get(f"{prefix}_limite_produccion"), regla.limite_produccion)
+                    if usa_produccion
+                    else 0
+                )
+                regla.limite_asistencia = _parse_int(request.POST.get(f"{prefix}_limite_asistencia"), regla.limite_asistencia)
+                regla.limite_puntualidad = _parse_int(request.POST.get(f"{prefix}_limite_puntualidad"), regla.limite_puntualidad)
+                regla.limite_uniforme = _parse_int(request.POST.get(f"{prefix}_limite_uniforme"), regla.limite_uniforme)
+                regla.save()
+            periodo.recalcular_todos()
             messages.success(request, "Configuración de bonos producción guardada.")
             return _dashboard_redirect(mes, anio)
 
         periodo = get_object_or_404(ConfigBonoPeriodo, mes=mes, anio=anio)
         if action == "recalcular":
-            total = 0
-            for bono in periodo.bonos.select_related("empleado"):
-                bono.recalcular()
-                bono.save()
-                total += 1
+            total = periodo.recalcular_todos()
             messages.success(request, f"Bonos recalculados: {total}.")
             return _dashboard_redirect(mes, anio)
 
@@ -94,6 +109,8 @@ def bonos_produccion_dashboard(request):
             bono.dias_asistencia = _parse_int(request.POST.get("dias_asistencia"), bono.dias_asistencia)
             bono.dias_puntualidad = _parse_int(request.POST.get("dias_puntualidad"), bono.dias_puntualidad)
             bono.dias_produccion = _parse_int(request.POST.get("dias_produccion"), bono.dias_produccion)
+            if bono.area == AREA_PRODUCCION:
+                bono.total_embetunados = _parse_int(request.POST.get("total_embetunados"), bono.total_embetunados)
             bono.ajuste_positivo = _parse_decimal(request.POST.get("ajuste_positivo"))
             bono.ajuste_negativo = _parse_decimal(request.POST.get("ajuste_negativo"))
             bono.bono_extra = _parse_decimal(request.POST.get("bono_extra"))
@@ -101,12 +118,14 @@ def bonos_produccion_dashboard(request):
             bono.desc_ajuste_negativo = (request.POST.get("desc_ajuste_negativo") or "").strip()[:200]
             bono.desc_bono_extra = (request.POST.get("desc_bono_extra") or "").strip()[:200]
             bono.observaciones = (request.POST.get("observaciones") or "").strip()
-            bono.recalcular()
             bono.save()
+            periodo.recalcular_todos()
             messages.success(request, f"Ajuste guardado para {bono.empleado.nombre}.")
             return _dashboard_redirect(mes, anio)
 
     periodo = ConfigBonoPeriodo.objects.filter(mes=mes, anio=anio).first()
+    if periodo:
+        periodo.asegurar_reglas_area()
     bonos = list(
         BonoProduccionEmpleado.objects.filter(periodo=periodo).select_related("empleado").order_by("area", "empleado__nombre")
         if periodo
@@ -116,12 +135,28 @@ def bonos_produccion_dashboard(request):
     area_rows = []
     for area, label in AREAS_PRODUCCION:
         rows = [bono for bono in bonos if bono.area == area]
+        regla = periodo.get_regla_area(area) if periodo else None
+        rule_values = {
+            "pct_produccion": regla.pct_produccion,
+            "pct_asistencia": regla.pct_asistencia,
+            "pct_puntualidad": regla.pct_puntualidad,
+            "pct_uniforme": regla.pct_uniforme,
+            "limite_produccion": regla.limite_produccion,
+            "limite_asistencia": regla.limite_asistencia,
+            "limite_puntualidad": regla.limite_puntualidad,
+            "limite_uniforme": regla.limite_uniforme,
+            "usa_produccion": regla.usa_produccion,
+        } if regla else ConfigBonoArea.defaults_for_area(area)
         area_rows.append(
             {
                 "area": area,
                 "label": label,
                 "count": len(rows),
                 "total": sum((bono.total_a_pagar for bono in rows), Decimal("0")),
+                "monto": periodo.get_monto_area(area) if periodo else Decimal("0"),
+                "regla": regla,
+                **rule_values,
+                "prefix": f"regla_{area.lower()}",
             }
         )
 
@@ -148,15 +183,7 @@ def bonos_produccion_dashboard(request):
                 "monto_armado": Decimal("850.00"),
                 "monto_logistica": Decimal("850.00"),
                 "monto_crucero": Decimal("950.00"),
-                "pct_produccion": Decimal("65.00"),
-                "pct_asistencia": Decimal("15.00"),
-                "pct_puntualidad": Decimal("15.00"),
-                "pct_uniforme": Decimal("5.00"),
                 "premio_embetunado": Decimal("400.00"),
-                "limite_uniforme": 1,
-                "limite_asistencia": 2,
-                "limite_puntualidad": 2,
-                "limite_produccion": 2,
             },
         },
     )

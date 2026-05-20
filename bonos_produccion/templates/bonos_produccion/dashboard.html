@@ -7,47 +7,63 @@
 
 {% block extra_css %}
 <style>
-  .bonos-shell{display:grid;gap:1.25rem}
-  .bonos-hero{background:#fff;border:1px solid #ede6f0;border-radius:14px;padding:1.35rem;box-shadow:0 1px 3px rgba(0,0,0,.06);display:grid;grid-template-columns:minmax(0,1.4fr) minmax(280px,.8fr);gap:1rem;align-items:start}
-  .bonos-kicker{font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;color:#8b2252;font-weight:800}
-  .bonos-title{font-size:1.8rem;font-weight:900;margin:.2rem 0;color:#1c1520}
-  .bonos-copy{color:#6b5f70;max-width:58rem}
-  .bonos-actions{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:1rem}
-  .bonos-btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;border-radius:8px;border:1px solid #e7ddeb;padding:.65rem .9rem;font-weight:800;text-decoration:none;background:#fff;color:#1c1520;cursor:pointer}
+  .bonos-shell{max-width:1320px;margin:0 auto;padding:0 .75rem 2rem;display:grid;gap:1rem}
+  .bonos-hero{background:#fff;border:1px solid #ede6f0;border-radius:12px;padding:1.15rem 1.25rem;box-shadow:0 1px 3px rgba(0,0,0,.06);display:grid;grid-template-columns:minmax(0,1.5fr) minmax(300px,.75fr);gap:1rem;align-items:end}
+  .bonos-kicker{font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#8b2252;font-weight:800}
+  .bonos-title{font-size:1.55rem;font-weight:900;margin:.15rem 0;color:#1c1520}
+  .bonos-copy{color:#6b5f70;max-width:62rem;margin:0}
+  .bonos-actions{display:flex;gap:.55rem;flex-wrap:wrap;margin-top:.9rem}
+  .bonos-btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;border-radius:8px;border:1px solid #e7ddeb;padding:.6rem .85rem;font-weight:800;text-decoration:none;background:#fff;color:#1c1520;cursor:pointer}
   .bonos-btn.primary{background:#8b2252;color:#fff;border-color:#8b2252}
   .bonos-btn:disabled{opacity:.55;cursor:not-allowed}
-  .period-filter{display:grid;grid-template-columns:1fr 1fr auto;gap:.6rem;align-items:end}
-  .bonos-field{display:grid;gap:.35rem}
-  .bonos-field label{font-size:.76rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#6b5f70}
-  .bonos-field input,.bonos-field textarea{width:100%;border:1px solid #e7ddeb;border-radius:8px;padding:.62rem .7rem;font:inherit;background:#fbf8fb}
-  .kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.85rem}
+  .period-filter{display:grid;grid-template-columns:1fr 1fr auto;gap:.55rem;align-items:end}
+  .bonos-field{display:grid;gap:.3rem}
+  .bonos-field label{font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#6b5f70}
+  .bonos-field input,.bonos-field textarea,.bonos-field select{width:100%;border:1px solid #e7ddeb;border-radius:8px;padding:.58rem .65rem;font:inherit;background:#fbf8fb}
+  .kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem}
   .kpi-card,.bonos-card{background:#fff;border:1px solid #ede6f0;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
-  .kpi-card{padding:1rem}
-  .kpi-label{font-size:.75rem;text-transform:uppercase;letter-spacing:.07em;color:#6b5f70;font-weight:800}
-  .kpi-value{font-size:1.6rem;font-weight:900;color:#1c1520;margin-top:.2rem}
+  .kpi-card{padding:.95rem 1rem}
+  .kpi-label{font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:#6b5f70;font-weight:800}
+  .kpi-value{font-size:1.45rem;font-weight:900;color:#1c1520;margin-top:.15rem}
   .kpi-value.wine{color:#8b2252}.kpi-value.gold{color:#c9a84c}
-  .bonos-card-h{padding:1rem 1.1rem;border-bottom:1px solid #ede6f0;display:flex;justify-content:space-between;gap:1rem;align-items:center;flex-wrap:wrap}
+  .bonos-card-h{padding:.9rem 1rem;border-bottom:1px solid #ede6f0;display:flex;justify-content:space-between;gap:1rem;align-items:center;flex-wrap:wrap}
   .bonos-card-title{font-weight:900;text-transform:uppercase;letter-spacing:.06em}
-  .bonos-card-body{padding:1.1rem}
-  .config-grid{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:.85rem}
-  .area-grid{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:.85rem}
-  .area-chip{padding:.9rem;border:1px solid #ede6f0;border-radius:10px;background:#fbf8fb}
-  .area-chip span{display:block;color:#6b5f70;font-size:.75rem;font-weight:800;text-transform:uppercase}
-  .area-chip strong{display:block;font-size:1.15rem;margin-top:.2rem}
-  .table-wrap{overflow-x:auto}
-  .bonos-table{width:100%;border-collapse:collapse;font-size:.88rem}
-  .bonos-table th{padding:.65rem;text-align:left;border-bottom:1px solid #ede6f0;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:#6b5f70}
-  .bonos-table td{padding:.65rem;border-bottom:1px solid #f0e8f2;vertical-align:top}
-  .bonos-table tr:last-child td{border-bottom:0}
+  .bonos-card-body{padding:1rem}
+  .config-grid{display:grid;grid-template-columns:repeat(6,minmax(128px,1fr));gap:.75rem}
+  .area-grid{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:.75rem}
+  .area-chip{padding:.85rem;border:1px solid #ede6f0;border-radius:10px;background:#fbf8fb}
+  .area-chip span{display:block;color:#6b5f70;font-size:.72rem;font-weight:800;text-transform:uppercase}
+  .area-chip strong{display:block;font-size:1.05rem;margin-top:.15rem}
+  .rule-grid{display:grid;grid-template-columns:repeat(5,minmax(210px,1fr));gap:.8rem;margin-top:1rem}
+  .rule-card{border:1px solid #ede6f0;border-radius:10px;background:#fff;overflow:hidden}
+  .rule-card summary{display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding:.85rem 1rem;cursor:pointer;font-weight:900}
+  .rule-card summary::marker{content:""}
+  .rule-card summary small{font-weight:800;color:#6b5f70}
+  .rule-body{border-top:1px solid #ede6f0;padding:1rem;display:grid;gap:.75rem}
+  .rule-row{display:grid;grid-template-columns:1fr 92px 82px;gap:.5rem;align-items:end}
+  .rule-row.rule-disabled{display:none}
+  .check-row{display:flex;align-items:center;gap:.45rem;font-size:.82rem;font-weight:800;color:#6b5f70}
+  .filter-bar{display:grid;grid-template-columns:minmax(240px,1fr) auto;gap:.75rem;align-items:center}
+  .area-filter{display:flex;gap:.45rem;flex-wrap:wrap}
+  .area-filter button{border:1px solid #e7ddeb;background:#fff;border-radius:999px;padding:.45rem .75rem;font:inherit;font-weight:800;color:#6b5f70;cursor:pointer}
+  .area-filter button.active{background:#8b2252;border-color:#8b2252;color:#fff}
+  .search-input{border:1px solid #e7ddeb;border-radius:999px;padding:.7rem .95rem;font:inherit;background:#fbf8fb}
+  .employee-list{display:grid;gap:.65rem;margin-top:1rem}
+  .employee-card{border:1px solid #ede6f0;border-radius:10px;background:#fff;overflow:hidden}
+  .employee-card[hidden]{display:none}
+  .employee-card summary{display:grid;grid-template-columns:minmax(240px,1fr) 120px 120px 110px;gap:.75rem;align-items:center;padding:.85rem 1rem;cursor:pointer}
+  .employee-card summary::marker{content:""}
   .employee-name{font-weight:900}.employee-meta{font-size:.78rem;color:#6b5f70}
-  .mini-input{width:78px;border:1px solid #e7ddeb;border-radius:7px;padding:.45rem .5rem;font:inherit}
-  .money-input{width:96px;border:1px solid #e7ddeb;border-radius:7px;padding:.45rem .5rem;font:inherit}
-  .status-pill{display:inline-flex;border-radius:999px;padding:.25rem .55rem;font-size:.72rem;font-weight:900}
-  .status-pill.ok{background:#dcfce7;color:#166534}.status-pill.bad{background:#fee2e2;color:#991b1b}
-  .adjust-grid{display:grid;grid-template-columns:repeat(3,minmax(100px,1fr));gap:.45rem}
-  .note-input{min-width:220px;min-height:38px}
-  @media(max-width:980px){.bonos-hero{grid-template-columns:1fr}.kpi-grid,.area-grid{grid-template-columns:repeat(2,1fr)}.config-grid{grid-template-columns:repeat(2,1fr)}}
-  @media(max-width:620px){.period-filter,.kpi-grid,.area-grid,.config-grid{grid-template-columns:1fr}}
+  .employee-total{font-weight:900;color:#8b2252;text-align:right}
+  .employee-body{border-top:1px solid #ede6f0;padding:1rem;display:grid;gap:.8rem}
+  .adjust-grid{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:.75rem}
+  .money-grid{display:grid;grid-template-columns:repeat(3,minmax(130px,1fr));gap:.75rem}
+  .status-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:.28rem .6rem;font-size:.72rem;font-weight:900;white-space:nowrap}
+  .status-pill.ok{background:#dcfce7;color:#166534}.status-pill.bad{background:#fee2e2;color:#991b1b}.status-pill.neutral{background:#f4edf4;color:#8b2252}
+  .empty-state{padding:1rem;border:1px dashed #e7ddeb;border-radius:10px;color:#6b5f70;background:#fbf8fb}
+  @media(max-width:1180px){.rule-grid{grid-template-columns:repeat(2,minmax(220px,1fr))}.config-grid{grid-template-columns:repeat(3,1fr)}.employee-card summary{grid-template-columns:1fr 100px 100px}}
+  @media(max-width:900px){.bonos-hero{grid-template-columns:1fr}.kpi-grid,.area-grid{grid-template-columns:repeat(2,1fr)}.filter-bar{grid-template-columns:1fr}.adjust-grid,.money-grid{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:620px){.period-filter,.kpi-grid,.area-grid,.config-grid,.rule-grid,.adjust-grid,.money-grid{grid-template-columns:1fr}.employee-card summary{grid-template-columns:1fr}.employee-total{text-align:left}}
 </style>
 {% endblock %}
 
@@ -57,7 +73,7 @@
     <div>
       <div class="bonos-kicker">Producción · bonos</div>
       <h1 class="bonos-title">Control de configuración y ajustes</h1>
-      <p class="bonos-copy">Panel ERP para configurar montos, días laborables, límites y ajustes administrativos. La app móvil queda para captura diaria de asistencia, permisos y operación en piso.</p>
+      <p class="bonos-copy">Configura montos base, reglas por área y ajustes puntuales. La primera vista queda limpia; cada área y empleado se abre solo cuando necesitas editarlo.</p>
       <div class="bonos-actions">
         <a class="bonos-btn primary" href="/bonos-produccion/app/?captura=1">Abrir app de captura</a>
         {% if periodo %}
@@ -109,15 +125,44 @@
           <div class="bonos-field"><label>Monto armado</label><input name="monto_armado" type="number" step="0.01" value="{% if periodo %}{{ periodo.monto_armado }}{% else %}{{ defaults.monto_armado }}{% endif %}"></div>
           <div class="bonos-field"><label>Monto logística</label><input name="monto_logistica" type="number" step="0.01" value="{% if periodo %}{{ periodo.monto_logistica }}{% else %}{{ defaults.monto_logistica }}{% endif %}"></div>
           <div class="bonos-field"><label>Monto crucero</label><input name="monto_crucero" type="number" step="0.01" value="{% if periodo %}{{ periodo.monto_crucero }}{% else %}{{ defaults.monto_crucero }}{% endif %}"></div>
-          <div class="bonos-field"><label>% producción</label><input name="pct_produccion" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_produccion }}{% else %}{{ defaults.pct_produccion }}{% endif %}"></div>
-          <div class="bonos-field"><label>% asistencia</label><input name="pct_asistencia" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_asistencia }}{% else %}{{ defaults.pct_asistencia }}{% endif %}"></div>
-          <div class="bonos-field"><label>% puntualidad</label><input name="pct_puntualidad" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_puntualidad }}{% else %}{{ defaults.pct_puntualidad }}{% endif %}"></div>
-          <div class="bonos-field"><label>% uniforme</label><input name="pct_uniforme" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_uniforme }}{% else %}{{ defaults.pct_uniforme }}{% endif %}"></div>
-          <div class="bonos-field"><label>Límite uniforme</label><input name="limite_uniforme" type="number" min="0" value="{% if periodo %}{{ periodo.limite_uniforme }}{% else %}{{ defaults.limite_uniforme }}{% endif %}"></div>
-          <div class="bonos-field"><label>Límite asistencia</label><input name="limite_asistencia" type="number" min="0" value="{% if periodo %}{{ periodo.limite_asistencia }}{% else %}{{ defaults.limite_asistencia }}{% endif %}"></div>
-          <div class="bonos-field"><label>Límite puntualidad</label><input name="limite_puntualidad" type="number" min="0" value="{% if periodo %}{{ periodo.limite_puntualidad }}{% else %}{{ defaults.limite_puntualidad }}{% endif %}"></div>
-          <div class="bonos-field"><label>Límite producción</label><input name="limite_produccion" type="number" min="0" value="{% if periodo %}{{ periodo.limite_produccion }}{% else %}{{ defaults.limite_produccion }}{% endif %}"></div>
           <div class="bonos-field"><label>Premio embetunado</label><input name="premio_embetunado" type="number" step="0.01" value="{% if periodo %}{{ periodo.premio_embetunado }}{% else %}{{ defaults.premio_embetunado }}{% endif %}"></div>
+        </div>
+
+        <div class="rule-grid">
+          {% for row in area_rows %}
+          <details class="rule-card" {% if forloop.first %}open{% endif %}>
+            <summary>
+              <span>{{ row.label }}</span>
+              <small>{{ row.count }} empleados · ${{ row.monto|floatformat:2|intcomma }}</small>
+            </summary>
+            <div class="rule-body">
+              <label class="check-row">
+                <input class="js-use-production" type="checkbox" name="{{ row.prefix }}_usa_produccion" {% if row.usa_produccion %}checked{% endif %}>
+                Usa concepto producción
+              </label>
+              <div class="rule-row js-production-row">
+                <div class="bonos-field"><label>% producción</label><input name="{{ row.prefix }}_pct_produccion" type="number" step="0.01" value="{{ row.pct_produccion }}"></div>
+                <div class="bonos-field"><label>Límite</label><input name="{{ row.prefix }}_limite_produccion" type="number" min="0" value="{{ row.limite_produccion }}"></div>
+                <span class="status-pill neutral">Producción</span>
+              </div>
+              <div class="rule-row">
+                <div class="bonos-field"><label>% asistencia</label><input name="{{ row.prefix }}_pct_asistencia" type="number" step="0.01" value="{{ row.pct_asistencia }}"></div>
+                <div class="bonos-field"><label>Límite</label><input name="{{ row.prefix }}_limite_asistencia" type="number" min="0" value="{{ row.limite_asistencia }}"></div>
+                <span class="status-pill neutral">Asistencia</span>
+              </div>
+              <div class="rule-row">
+                <div class="bonos-field"><label>% puntualidad</label><input name="{{ row.prefix }}_pct_puntualidad" type="number" step="0.01" value="{{ row.pct_puntualidad }}"></div>
+                <div class="bonos-field"><label>Límite</label><input name="{{ row.prefix }}_limite_puntualidad" type="number" min="0" value="{{ row.limite_puntualidad }}"></div>
+                <span class="status-pill neutral">Puntualidad</span>
+              </div>
+              <div class="rule-row">
+                <div class="bonos-field"><label>% uniforme</label><input name="{{ row.prefix }}_pct_uniforme" type="number" step="0.01" value="{{ row.pct_uniforme }}"></div>
+                <div class="bonos-field"><label>Límite</label><input name="{{ row.prefix }}_limite_uniforme" type="number" min="0" value="{{ row.limite_uniforme }}"></div>
+                <span class="status-pill neutral">Uniforme</span>
+              </div>
+            </div>
+          </details>
+          {% endfor %}
         </div>
         <div class="bonos-actions"><button class="bonos-btn primary" type="submit" {% if not can_manage %}disabled{% endif %}>Guardar configuración</button></div>
       </form>
@@ -132,64 +177,117 @@
 
   <section class="bonos-card">
     <div class="bonos-card-h">
-      <div class="bonos-card-title">Ajustes por empleado</div>
-      <span>{{ bonos|length }} registros</span>
+      <div>
+        <div class="bonos-card-title">Ajustes por empleado</div>
+        <div class="employee-meta">Busca por nombre o filtra por área. Cada empleado se despliega individualmente.</div>
+      </div>
+      <span id="visible-count">{{ bonos|length }} registros</span>
     </div>
-    <div class="bonos-card-body table-wrap">
+    <div class="bonos-card-body">
       {% if bonos %}
-      <table class="bonos-table">
-        <thead>
-          <tr>
-            <th>Empleado</th>
-            <th>Área</th>
-            <th>Días</th>
-            <th>Conceptos</th>
-            <th>Ajustes</th>
-            <th>Total</th>
-            <th>Guardar</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for bono in bonos %}
-          <tr>
-              <td>
-                <form method="post" id="bono-form-{{ bono.id }}">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="ajuste_bono">
-                <input type="hidden" name="mes" value="{{ mes }}">
-                <input type="hidden" name="anio" value="{{ anio }}">
-                <input type="hidden" name="bono_id" value="{{ bono.id }}">
-                </form>
-                <div class="employee-name">{{ bono.empleado.nombre }}</div><div class="employee-meta">Código {{ bono.empleado.codigo|default:"-" }}</div>
-              </td>
-              <td>{{ bono.get_area_display }}</td>
-              <td><input class="mini-input" form="bono-form-{{ bono.id }}" name="dias_trabajados" type="number" min="0" value="{{ bono.dias_trabajados }}"></td>
-              <td>
-                <div class="adjust-grid">
-                  <label>Uniforme <input class="mini-input" form="bono-form-{{ bono.id }}" name="dias_uniforme" type="number" min="0" value="{{ bono.dias_uniforme }}"></label>
-                  <label>Asistencia <input class="mini-input" form="bono-form-{{ bono.id }}" name="dias_asistencia" type="number" min="0" value="{{ bono.dias_asistencia }}"></label>
-                  <label>Puntualidad <input class="mini-input" form="bono-form-{{ bono.id }}" name="dias_puntualidad" type="number" min="0" value="{{ bono.dias_puntualidad }}"></label>
-                  <label>Producción <input class="mini-input" form="bono-form-{{ bono.id }}" name="dias_produccion" type="number" min="0" value="{{ bono.dias_produccion }}"></label>
-                </div>
-              </td>
-              <td>
-                <div class="adjust-grid">
-                  <label>+ <input class="money-input" form="bono-form-{{ bono.id }}" name="ajuste_positivo" type="number" step="0.01" value="{{ bono.ajuste_positivo }}"></label>
-                  <label>- <input class="money-input" form="bono-form-{{ bono.id }}" name="ajuste_negativo" type="number" step="0.01" value="{{ bono.ajuste_negativo }}"></label>
-                  <label>Extra <input class="money-input" form="bono-form-{{ bono.id }}" name="bono_extra" type="number" step="0.01" value="{{ bono.bono_extra }}"></label>
-                </div>
-                <textarea class="note-input" form="bono-form-{{ bono.id }}" name="observaciones" placeholder="Observación">{{ bono.observaciones }}</textarea>
-              </td>
-              <td><strong>${{ bono.total_a_pagar|floatformat:2|intcomma }}</strong><br>{% if bono.pasa_asistencia and bono.pasa_uniforme and bono.pasa_puntualidad and bono.pasa_produccion %}<span class="status-pill ok">Pasa</span>{% else %}<span class="status-pill bad">Revisar</span>{% endif %}</td>
-              <td><button class="bonos-btn" type="submit" form="bono-form-{{ bono.id }}" {% if not can_manage %}disabled{% endif %}>Guardar</button></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      <div class="filter-bar">
+        <input id="employee-search" class="search-input" type="search" placeholder="Buscar empleado por nombre, código o área..." autocomplete="off">
+        <div class="area-filter" id="area-filter">
+          <button type="button" class="active" data-area="ALL">Todas</button>
+          {% for row in area_rows %}<button type="button" data-area="{{ row.area }}">{{ row.label }}</button>{% endfor %}
+        </div>
+      </div>
+      <div class="employee-list" id="employee-list">
+        {% for bono in bonos %}
+        <details class="employee-card" data-area="{{ bono.area }}" data-search="{{ bono.empleado.nombre|lower }} {{ bono.empleado.codigo|default:''|lower }} {{ bono.get_area_display|lower }}">
+          <summary>
+            <div>
+              <div class="employee-name">{{ bono.empleado.nombre }}</div>
+              <div class="employee-meta">Código {{ bono.empleado.codigo|default:"-" }} · {{ bono.get_area_display }}</div>
+            </div>
+            <span class="status-pill neutral">{{ bono.dias_trabajados }} días</span>
+            {% if bono.area == "PRODUCCION" %}<span class="status-pill neutral">{{ bono.total_embetunados }} embet.</span>{% else %}<span></span>{% endif %}
+            <div class="employee-total">${{ bono.total_a_pagar|floatformat:2|intcomma }}</div>
+          </summary>
+          <div class="employee-body">
+            <form method="post" id="bono-form-{{ bono.id }}">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="ajuste_bono">
+              <input type="hidden" name="mes" value="{{ mes }}">
+              <input type="hidden" name="anio" value="{{ anio }}">
+              <input type="hidden" name="bono_id" value="{{ bono.id }}">
+              <div class="adjust-grid">
+                <div class="bonos-field"><label>Días trabajados</label><input name="dias_trabajados" type="number" min="0" value="{{ bono.dias_trabajados }}"></div>
+                <div class="bonos-field"><label>Días uniforme</label><input name="dias_uniforme" type="number" min="0" value="{{ bono.dias_uniforme }}"></div>
+                <div class="bonos-field"><label>Días asistencia</label><input name="dias_asistencia" type="number" min="0" value="{{ bono.dias_asistencia }}"></div>
+                <div class="bonos-field"><label>Días puntualidad</label><input name="dias_puntualidad" type="number" min="0" value="{{ bono.dias_puntualidad }}"></div>
+                <div class="bonos-field"><label>Días producción</label><input name="dias_produccion" type="number" min="0" value="{{ bono.dias_produccion }}"></div>
+                {% if bono.area == "PRODUCCION" %}
+                <div class="bonos-field"><label>Productos embetunados</label><input name="total_embetunados" type="number" min="0" value="{{ bono.total_embetunados }}"></div>
+                {% endif %}
+              </div>
+              <div class="money-grid">
+                <div class="bonos-field"><label>Ajuste positivo</label><input name="ajuste_positivo" type="number" step="0.01" value="{{ bono.ajuste_positivo }}"></div>
+                <div class="bonos-field"><label>Ajuste negativo</label><input name="ajuste_negativo" type="number" step="0.01" value="{{ bono.ajuste_negativo }}"></div>
+                <div class="bonos-field"><label>Bono extra</label><input name="bono_extra" type="number" step="0.01" value="{{ bono.bono_extra }}"></div>
+              </div>
+              <div class="bonos-field"><label>Observaciones</label><textarea name="observaciones" rows="2" placeholder="Observación del ajuste">{{ bono.observaciones }}</textarea></div>
+              <div class="bonos-actions">
+                {% if bono.pasa_asistencia and bono.pasa_uniforme and bono.pasa_puntualidad and bono.pasa_produccion %}<span class="status-pill ok">Pasa</span>{% else %}<span class="status-pill bad">Revisar</span>{% endif %}
+                {% if bono.gano_premio_embetunado %}<span class="status-pill ok">Premio embetunado</span>{% endif %}
+                <button class="bonos-btn primary" type="submit" {% if not can_manage %}disabled{% endif %}>Guardar ajuste</button>
+              </div>
+            </form>
+          </div>
+        </details>
+        {% endfor %}
+      </div>
+      <div class="empty-state" id="empty-filter" hidden>No hay empleados con ese filtro.</div>
       {% else %}
-      <p>No hay empleados inicializados en este período. Crea la configuración y después inicializa desde la app de captura.</p>
+      <p class="empty-state">No hay empleados inicializados en este período. Crea la configuración y después inicializa desde la app de captura.</p>
       {% endif %}
     </div>
   </section>
 </div>
+
+<script>
+  (function(){
+    function normalize(value){
+      return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+    }
+    document.querySelectorAll('.rule-card').forEach(function(card){
+      var check = card.querySelector('.js-use-production');
+      var row = card.querySelector('.js-production-row');
+      function sync(){
+        if(!check || !row) return;
+        row.classList.toggle('rule-disabled', !check.checked);
+      }
+      if(check){ check.addEventListener('change', sync); sync(); }
+    });
+    var search = document.getElementById('employee-search');
+    var cards = Array.from(document.querySelectorAll('.employee-card'));
+    var buttons = Array.from(document.querySelectorAll('#area-filter button'));
+    var visibleCount = document.getElementById('visible-count');
+    var empty = document.getElementById('empty-filter');
+    var area = 'ALL';
+    function applyFilter(){
+      var q = normalize(search ? search.value : '');
+      var count = 0;
+      cards.forEach(function(card){
+        var matchArea = area === 'ALL' || card.dataset.area === area;
+        var matchText = !q || normalize(card.dataset.search).includes(q);
+        var visible = matchArea && matchText;
+        card.hidden = !visible;
+        if(visible) count += 1;
+      });
+      if(visibleCount) visibleCount.textContent = count + ' registros';
+      if(empty) empty.hidden = count !== 0;
+    }
+    buttons.forEach(function(btn){
+      btn.addEventListener('click', function(){
+        buttons.forEach(function(b){ b.classList.remove('active'); });
+        btn.classList.add('active');
+        area = btn.dataset.area || 'ALL';
+        applyFilter();
+      });
+    });
+    if(search) search.addEventListener('input', applyFilter);
+    applyFilter();
+  })();
+</script>
 {% endblock %}

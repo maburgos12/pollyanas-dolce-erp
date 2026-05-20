@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import BonoProduccionEmpleado, ConfigBonoPeriodo, RegistroDiarioProduccion
+from .models import BonoProduccionEmpleado, ConfigBonoArea, ConfigBonoPeriodo, RegistroDiarioProduccion
 
 
 class RegistroDiarioInline(admin.TabularInline):
@@ -17,6 +17,23 @@ class RegistroDiarioInline(admin.TabularInline):
     ]
 
 
+class ConfigBonoAreaInline(admin.TabularInline):
+    model = ConfigBonoArea
+    extra = 0
+    fields = [
+        "area",
+        "usa_produccion",
+        "pct_produccion",
+        "pct_asistencia",
+        "pct_puntualidad",
+        "pct_uniforme",
+        "limite_produccion",
+        "limite_asistencia",
+        "limite_puntualidad",
+        "limite_uniforme",
+    ]
+
+
 @admin.register(ConfigBonoPeriodo)
 class ConfigBonoPeriodoAdmin(admin.ModelAdmin):
     list_display = [
@@ -30,6 +47,13 @@ class ConfigBonoPeriodoAdmin(admin.ModelAdmin):
         "monto_crucero",
     ]
     list_filter = ["anio", "mes"]
+    inlines = [ConfigBonoAreaInline]
+
+
+@admin.register(ConfigBonoArea)
+class ConfigBonoAreaAdmin(admin.ModelAdmin):
+    list_display = ["periodo", "area", "usa_produccion", "pct_produccion", "pct_asistencia", "pct_puntualidad", "pct_uniforme"]
+    list_filter = ["area", "usa_produccion"]
 
 
 @admin.register(BonoProduccionEmpleado)

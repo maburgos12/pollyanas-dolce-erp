@@ -472,7 +472,7 @@ function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registr
                 h('span',{className:'concepto-lbl'},lbl),h(Badge,{ok:diaActual[k]})
               )
             ),
-            area==='EMBETUNADO'&&h('div',{className:'emb-counter'},
+            (['EMBETUNADO','PRODUCCION'].includes(area))&&h('div',{className:'emb-counter'},
               h('label',null,'🎂 Pasteles embetunados'),
               h('input',{type:'number',min:0,value:diaActual.cantidad_embetunados||0,onChange:e=>guardarDia(selDia,{cantidad_embetunados:+e.target.value})})
             ),
@@ -489,7 +489,7 @@ function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registr
 function ResumenTab({bonos,area,setArea}){
   if(!bonos.length)return h('div',{className:'empty'},'Sin datos. Crea el periodo e inicializa empleados.');
   const totalGlobal=bonos.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
-  const embonos=bonos.filter(b=>b.area==='EMBETUNADO');
+  const embonos=bonos.filter(b=>['EMBETUNADO','PRODUCCION'].includes(b.area));
   const maxEmb=embonos.reduce((m,b)=>Math.max(m,b.total_embetunados||0),0);
   return h('div',null,
     h(AreaChips,{area,setArea}),
@@ -502,15 +502,15 @@ function ResumenTab({bonos,area,setArea}){
     h('div',{className:'card'},
       h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},AREA_LABELS[area]),h('div',{style:{fontWeight:800,color:'var(--gold)',fontSize:14}},money(bonos.filter(b=>b.area===area).reduce((s,b)=>s+Number(b.total_a_pagar||0),0)))),
       h('div',{className:'tbl-wrap'},h('table',null,
-        h('thead',null,h('tr',null,[h('th',null,'Empleado'),h('th',null,'Dias'),h('th',null,'Uniforme'),h('th',null,'Asistencia'),h('th',null,'Puntualidad'),h('th',null,'Produccion'),area==='EMBETUNADO'&&h('th',null,'Embet.'),area==='EMBETUNADO'&&h('th',null,'Premio'),h('th',null,'Total')].filter(Boolean))),
+        h('thead',null,h('tr',null,[h('th',null,'Empleado'),h('th',null,'Dias'),h('th',null,'Uniforme'),h('th',null,'Asistencia'),h('th',null,'Puntualidad'),h('th',null,'Produccion'),(['EMBETUNADO','PRODUCCION'].includes(area))&&h('th',null,'Embet.'),(['EMBETUNADO','PRODUCCION'].includes(area))&&h('th',null,'Premio'),h('th',null,'Total')].filter(Boolean))),
         h('tbody',null,bonos.filter(b=>b.area===area).map(b=>{
-          const esGanador=area==='EMBETUNADO'&&maxEmb>0&&(b.total_embetunados||0)===maxEmb;
+          const esGanador=(['EMBETUNADO','PRODUCCION'].includes(area))&&maxEmb>0&&(b.total_embetunados||0)===maxEmb;
           return h('tr',{key:b.id},
             h('td',null,h('div',{className:'persona-row'},h('div',{className:'av'},initials(b.empleado_nombre)),h('div',null,h('div',{className:'persona-name'},b.empleado_nombre+(esGanador?' ⭐':'')),esGanador&&h('div',{className:'persona-sub',style:{color:'var(--gold)'}},'Mas embetunados')))),
             h('td',null,b.dias_trabajados||0),h('td',null,h(Badge,{ok:b.pasa_uniforme})),h('td',null,h(Badge,{ok:b.pasa_asistencia})),
             h('td',null,h(Badge,{ok:b.pasa_puntualidad})),h('td',null,h(Badge,{ok:b.pasa_produccion})),
-            area==='EMBETUNADO'&&h('td',null,b.total_embetunados||0),
-            area==='EMBETUNADO'&&h('td',null,money(b.monto_premio_embetunado||0)),
+            (['EMBETUNADO','PRODUCCION'].includes(area))&&h('td',null,b.total_embetunados||0),
+            (['EMBETUNADO','PRODUCCION'].includes(area))&&h('td',null,money(b.monto_premio_embetunado||0)),
             h('td',{style:{fontWeight:800,color:'var(--wine)'}},money(b.total_a_pagar))
           );
         }))
@@ -550,7 +550,7 @@ function RevisionTab({bonosArea,area,setArea,selectedBono,setSelectedBono,regist
             registros.filter(r=>r.tiene_asistencia).map(r=>h('div',{key:r.id,style:{background:'var(--bg)',border:'1px solid var(--line)',borderRadius:8,padding:10}},
               h('div',{style:{fontWeight:800,fontSize:12,color:'var(--sub)',marginBottom:6}},`Dia ${r.dia}`),
               h('div',{style:{display:'flex',gap:4,flexWrap:'wrap',marginBottom:8}},h(Badge,{ok:r.tiene_uniforme}),h(Badge,{ok:r.tiene_puntualidad}),h(Badge,{ok:r.tiene_produccion})),
-              area==='EMBETUNADO'&&r.cantidad_embetunados>0&&h('div',{style:{fontSize:12,color:'var(--gold)',fontWeight:700,marginBottom:6}},`🎂 ${r.cantidad_embetunados} pasteles`),
+              (['EMBETUNADO','PRODUCCION'].includes(area))&&r.cantidad_embetunados>0&&h('div',{style:{fontSize:12,color:'var(--gold)',fontWeight:700,marginBottom:6}},`🎂 ${r.cantidad_embetunados} pasteles`),
               h('textarea',{className:'nota-input',rows:2,defaultValue:r.observacion||'',onBlur:e=>guardarDia(+r.dia,{observacion:e.target.value}),placeholder:'Observacion del dia…'})
             ))
           )

@@ -1,7 +1,6 @@
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Max
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -12,7 +11,6 @@ from rrhh.models import Empleado, NominaPeriodo
 from rrhh.bonos_permisos import BasePermisosEquipoViewSet
 
 from .models import (
-    AREA_EMBETUNADO,
     AREA_HORNOS,
     AREA_PRODUCCION,
     AREAS_PRODUCCION,
@@ -132,17 +130,13 @@ class BonoProduccionViewSet(viewsets.ModelViewSet):
         bonos = list(
             BonoProduccionEmpleado.objects.filter(periodo__mes=mes, periodo__anio=anio).select_related("empleado", "periodo")
         )
-        max_embetunado = (
-            BonoProduccionEmpleado.objects.filter(periodo__mes=mes, periodo__anio=anio, area=AREA_EMBETUNADO)
-            .aggregate(maximo=Max("total_embetunados"))
-            .get("maximo")
-            or 0
-        )
         with transaction.atomic():
-            for bono in bonos:
-                bono.gano_premio_embetunado = bono.area == AREA_EMBETUNADO and max_embetunado > 0 and bono.total_embetunados == max_embetunado
-                bono.recalcular()
-                bono.save()
+            periodo = ConfigBonoPeriodo.objects.filter(mes=mes, anio=anio).first()
+            if periodo:
+                periodo.recalcular_todos()
+                bonos = list(
+                    BonoProduccionEmpleado.objects.filter(periodo=periodo).select_related("empleado", "periodo")
+                )
 
         data = BonoProduccionResumenSerializer(bonos, many=True).data
         total = sum(Decimal(row["total_a_pagar"]) for row in data)
