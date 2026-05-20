@@ -27,6 +27,10 @@ from ventas.services.pronostico_engine import (
     ORDEN_CATEGORIAS,
     WEEKDAYS_ES,
 )
+from ventas.services.sales_freshness import (
+    get_forecast_sales_freshness,
+    queue_forecast_sales_refresh_if_needed,
+)
 from ventas.tasks import calcular_y_guardar_pronostico
 
 
@@ -592,6 +596,23 @@ def _get_pronostico_for_user(user, pk: int) -> PronosticoGuardado:
     return get_object_or_404(_pronosticos_for_user(user), pk=pk)
 
 
+def _block_stale_sales_forecast(request) -> bool:
+    freshness = queue_forecast_sales_refresh_if_needed(triggered_by_id=request.user.id)
+    if freshness.is_fresh:
+        return False
+
+    messages.warning(
+        request,
+        (
+            "Ventas Point atrasadas: ultimo dia cargado "
+            f"{freshness.latest_label}; requerido {freshness.target_label}. "
+            f"Se lanzo actualizacion solo de ventas ({freshness.refresh_days} dias). "
+            "Vuelve a generar el pronostico cuando termine."
+        ),
+    )
+    return True
+
+
 @login_required
 def PronosticoVentasView(request):
     if not _can_view_pronostico(request.user):
@@ -616,6 +637,8 @@ def PronosticoVentasView(request):
         if not selected_product_skus:
             form_errors.append("Selecciona al menos un producto para incluir en el pronostico.")
         if not form_errors and fecha_inicio and fecha_fin:
+            if _block_stale_sales_forecast(request):
+                return redirect("ventas:pronostico")
             nombre = f"Pronóstico {fecha_inicio.isoformat()} a {fecha_fin.isoformat()}"
             task = calcular_y_guardar_pronostico.delay(
                 nombre,
@@ -640,6 +663,7 @@ def PronosticoVentasView(request):
         "selected_product_skus": set(selected_product_skus),
         "form_errors": form_errors,
         "pronosticos_guardados": _pronosticos_for_user(request.user)[:10],
+        "sales_freshness": get_forecast_sales_freshness(),
         **_empty_result_context({}),
     }
     return render(request, "ventas/pronostico.html", context)
@@ -686,6 +710,9 @@ def PronosticoGuardarView(request):
 
     if not nombre:
         nombre = f"Pronóstico {fecha_inicio} a {fecha_fin}"
+
+    if _block_stale_sales_forecast(request):
+        return redirect("ventas:pronostico")
 
     task = calcular_y_guardar_pronostico.delay(
         nombre=nombre,

@@ -11,6 +11,10 @@ from ventas.services.pronostico_engine import (
     _previous_special_context_day,
     _special_day_name,
 )
+from ventas.services.sales_freshness import (
+    build_forecast_sales_freshness,
+    queue_forecast_sales_refresh_if_needed,
+)
 
 
 class VentasModuleTests(SimpleTestCase):
@@ -72,3 +76,51 @@ class VentasModuleTests(SimpleTestCase):
 
         self.assertEqual(adjusted["recomendado"], [10, 20, 30])
         self.assertEqual(adjusted["metodo"], "evento-comparable+fecha-especial")
+
+    def test_forecast_sales_freshness_detects_stale_point_sales(self):
+        freshness = build_forecast_sales_freshness(
+            latest_sale_date=date(2026, 4, 19),
+            reference_date=date(2026, 5, 20),
+        )
+
+        self.assertFalse(freshness.is_fresh)
+        self.assertEqual(freshness.target_sale_date, date(2026, 5, 19))
+        self.assertEqual(freshness.missing_days, 30)
+        self.assertEqual(freshness.refresh_days, 30)
+
+    def test_forecast_sales_freshness_accepts_current_closed_sales_day(self):
+        freshness = build_forecast_sales_freshness(
+            latest_sale_date=date(2026, 5, 19),
+            reference_date=date(2026, 5, 20),
+        )
+
+        self.assertTrue(freshness.is_fresh)
+        self.assertEqual(freshness.refresh_days, 0)
+
+    @patch("ventas.services.sales_freshness.task_daily_sales_sync.delay")
+    @patch("ventas.services.sales_freshness.latest_sales_fact_date")
+    def test_stale_forecast_sales_queues_only_sales_refresh(self, latest_date, delay):
+        latest_date.return_value = date(2026, 4, 19)
+        delay.return_value.id = "sales-task-1"
+
+        freshness = queue_forecast_sales_refresh_if_needed(
+            triggered_by_id=7,
+            reference_date=date(2026, 5, 20),
+        )
+
+        self.assertFalse(freshness.is_fresh)
+        self.assertEqual(freshness.refresh_task_id, "sales-task-1")
+        delay.assert_called_once_with(days=30, lag_days=1, triggered_by_id=7)
+
+    @patch("ventas.services.sales_freshness.task_daily_sales_sync.delay")
+    @patch("ventas.services.sales_freshness.latest_sales_fact_date")
+    def test_fresh_forecast_sales_does_not_queue_refresh(self, latest_date, delay):
+        latest_date.return_value = date(2026, 5, 19)
+
+        freshness = queue_forecast_sales_refresh_if_needed(
+            triggered_by_id=7,
+            reference_date=date(2026, 5, 20),
+        )
+
+        self.assertTrue(freshness.is_fresh)
+        delay.assert_not_called()
