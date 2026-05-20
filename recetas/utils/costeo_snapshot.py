@@ -127,16 +127,17 @@ def resolve_preparation_recipe_for_insumo(insumo: Insumo | None) -> Receta | Non
         return None
 
     qs = Receta.objects.filter(tipo=Receta.TIPO_PREPARACION)
+    point_code = (insumo.codigo_point or "").strip()
+    if point_code:
+        receta = qs.filter(codigo_point__iexact=point_code).order_by("id").first()
+        if receta:
+            return receta
+
     derived_code = (insumo.codigo or "").strip()
     derived_match = re.match(r"^DERIVADO:RECETA:(\d+):PREPARACION$", derived_code)
     if derived_match:
         receta_id = int(derived_match.group(1))
         receta = qs.filter(id=receta_id).order_by("id").first()
-        if receta:
-            return receta
-
-    if (insumo.codigo_point or "").strip():
-        receta = qs.filter(codigo_point__iexact=(insumo.codigo_point or "").strip()).order_by("id").first()
         if receta:
             return receta
 
