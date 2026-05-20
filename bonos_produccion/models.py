@@ -89,12 +89,42 @@ class ConfigBonoPeriodo(models.Model):
             AREA_CRUCERO: self.monto_crucero,
         }.get(normalizar_area_produccion(area), Decimal("0.00"))
 
+    def get_regla_area(self, area: str) -> "ConfigBonoArea":
+        area = normalizar_area_produccion(area)
+        regla, _ = self.reglas_area.get_or_create(
+            area=area,
+            defaults=ConfigBonoArea.defaults_for_area(area),
+        )
+        return regla
+
     @transaction.atomic
-    def aplicar_a_nomina(self, nomina: NominaPeriodo) -> int:
-        updated = 0
-        for bono in self.bonos.select_related("empleado").filter(estatus__in=["BORRADOR", "CERRADO"]):
+    def asegurar_reglas_area(self) -> None:
+        for area, _label in AREAS_PRODUCCION:
+            self.reglas_area.get_or_create(area=area, defaults=ConfigBonoArea.defaults_for_area(area))
+
+    @transaction.atomic
+    def recalcular_todos(self) -> int:
+        self.asegurar_reglas_area()
+        bonos = list(self.bonos.select_related("empleado"))
+        max_embetunados = max(
+            (bono.total_embetunados or 0 for bono in bonos if bono.area == AREA_PRODUCCION),
+            default=0,
+        )
+        for bono in bonos:
+            bono.gano_premio_embetunado = (
+                bono.area == AREA_PRODUCCION
+                and max_embetunados > 0
+                and (bono.total_embetunados or 0) == max_embetunados
+            )
             bono.recalcular()
             bono.save()
+        return len(bonos)
+
+    @transaction.atomic
+    def aplicar_a_nomina(self, nomina: NominaPeriodo) -> int:
+        self.recalcular_todos()
+        updated = 0
+        for bono in self.bonos.select_related("empleado").filter(estatus__in=["BORRADOR", "CERRADO"]):
             linea, _ = NominaLinea.objects.get_or_create(periodo=nomina, empleado=bono.empleado)
             linea.dias_trabajados = Decimal(bono.dias_trabajados)
             linea.bonos = bono.total_a_pagar
@@ -103,6 +133,57 @@ class ConfigBonoPeriodo(models.Model):
         nomina.recompute_totals()
         nomina.save(update_fields=["total_bruto", "total_descuentos", "total_neto", "updated_at"])
         return updated
+
+
+class ConfigBonoArea(models.Model):
+    periodo = models.ForeignKey(ConfigBonoPeriodo, on_delete=models.CASCADE, related_name="reglas_area")
+    area = models.CharField(max_length=20, choices=AREAS_PRODUCCION)
+    pct_produccion = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("65.00"))
+    pct_asistencia = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("15.00"))
+    pct_puntualidad = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("15.00"))
+    pct_uniforme = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("5.00"))
+    limite_uniforme = models.PositiveSmallIntegerField(default=1)
+    limite_asistencia = models.PositiveSmallIntegerField(default=2)
+    limite_puntualidad = models.PositiveSmallIntegerField(default=2)
+    limite_produccion = models.PositiveSmallIntegerField(default=2)
+    usa_produccion = models.BooleanField(default=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("periodo", "area")
+        ordering = ["area"]
+        verbose_name = "Regla de bono por área"
+        verbose_name_plural = "Reglas de bonos por área"
+
+    def __str__(self) -> str:
+        return f"{self.periodo} - {self.get_area_display()}"
+
+    @classmethod
+    def defaults_for_area(cls, area: str) -> dict:
+        area = normalizar_area_produccion(area)
+        defaults = {
+            "pct_produccion": Decimal("65.00"),
+            "pct_asistencia": Decimal("15.00"),
+            "pct_puntualidad": Decimal("15.00"),
+            "pct_uniforme": Decimal("5.00"),
+            "limite_uniforme": 1,
+            "limite_asistencia": 2,
+            "limite_puntualidad": 2,
+            "limite_produccion": 2,
+            "usa_produccion": True,
+        }
+        if area == AREA_LOGISTICA:
+            defaults.update(
+                {
+                    "pct_produccion": Decimal("0.00"),
+                    "pct_asistencia": Decimal("50.00"),
+                    "pct_puntualidad": Decimal("30.00"),
+                    "pct_uniforme": Decimal("20.00"),
+                    "limite_produccion": 0,
+                    "usa_produccion": False,
+                }
+            )
+        return defaults
 
 
 class BonoProduccionEmpleado(models.Model):
@@ -165,18 +246,21 @@ class BonoProduccionEmpleado(models.Model):
 
     def recalcular(self) -> None:
         cfg = self.periodo
+        regla = cfg.get_regla_area(self.area)
         base = _money(cfg.get_monto_area(self.area))
         dias_base = self._base_dias()
 
-        self.pasa_uniforme = (dias_base - int(self.dias_uniforme or 0)) <= cfg.limite_uniforme
-        self.pasa_asistencia = (dias_base - int(self.dias_asistencia or 0)) <= cfg.limite_asistencia
-        self.pasa_puntualidad = (dias_base - int(self.dias_puntualidad or 0)) <= cfg.limite_puntualidad
-        self.pasa_produccion = (dias_base - int(self.dias_produccion or 0)) <= cfg.limite_produccion
+        self.pasa_uniforme = (dias_base - int(self.dias_uniforme or 0)) <= regla.limite_uniforme
+        self.pasa_asistencia = (dias_base - int(self.dias_asistencia or 0)) <= regla.limite_asistencia
+        self.pasa_puntualidad = (dias_base - int(self.dias_puntualidad or 0)) <= regla.limite_puntualidad
+        self.pasa_produccion = True
+        if regla.usa_produccion:
+            self.pasa_produccion = (dias_base - int(self.dias_produccion or 0)) <= regla.limite_produccion
 
-        self.monto_uniforme = self._monto_concepto(base, cfg.pct_uniforme, self.pasa_uniforme)
-        self.monto_asistencia = self._monto_concepto(base, cfg.pct_asistencia, self.pasa_asistencia)
-        self.monto_puntualidad = self._monto_concepto(base, cfg.pct_puntualidad, self.pasa_puntualidad)
-        self.monto_produccion = self._monto_concepto(base, cfg.pct_produccion, self.pasa_produccion)
+        self.monto_uniforme = self._monto_concepto(base, regla.pct_uniforme, self.pasa_uniforme)
+        self.monto_asistencia = self._monto_concepto(base, regla.pct_asistencia, self.pasa_asistencia)
+        self.monto_puntualidad = self._monto_concepto(base, regla.pct_puntualidad, self.pasa_puntualidad)
+        self.monto_produccion = self._monto_concepto(base, regla.pct_produccion, self.pasa_produccion and regla.usa_produccion)
         self.monto_premio_embetunado = _money(cfg.premio_embetunado if self.gano_premio_embetunado else 0)
 
         self.total_a_pagar = _money(

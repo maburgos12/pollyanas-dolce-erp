@@ -32,6 +32,8 @@ class BonosProduccionTests(TestCase):
         self.assertIn("Control de configuración y ajustes", content)
         self.assertIn("Abrir app de captura", content)
         self.assertIn("Monto logística", content)
+        self.assertIn("Buscar empleado por nombre", content)
+        self.assertIn("Usa concepto producción", content)
         self.assertIn("Empleado Dashboard", content)
         self.assertEqual(response["Cache-Control"], "max-age=0, no-cache, no-store, must-revalidate, private")
 
@@ -58,15 +60,51 @@ class BonosProduccionTests(TestCase):
                 "monto_armado": "875.00",
                 "monto_logistica": "800.00",
                 "monto_crucero": "950.00",
-                "pct_produccion": "65.00",
-                "pct_asistencia": "15.00",
-                "pct_puntualidad": "15.00",
-                "pct_uniforme": "5.00",
                 "premio_embetunado": "400.00",
-                "limite_uniforme": "1",
-                "limite_asistencia": "2",
-                "limite_puntualidad": "2",
-                "limite_produccion": "2",
+                "regla_hornos_usa_produccion": "on",
+                "regla_hornos_pct_produccion": "60.00",
+                "regla_hornos_pct_asistencia": "20.00",
+                "regla_hornos_pct_puntualidad": "15.00",
+                "regla_hornos_pct_uniforme": "5.00",
+                "regla_hornos_limite_produccion": "2",
+                "regla_hornos_limite_asistencia": "2",
+                "regla_hornos_limite_puntualidad": "2",
+                "regla_hornos_limite_uniforme": "1",
+                "regla_produccion_usa_produccion": "on",
+                "regla_produccion_pct_produccion": "65.00",
+                "regla_produccion_pct_asistencia": "15.00",
+                "regla_produccion_pct_puntualidad": "15.00",
+                "regla_produccion_pct_uniforme": "5.00",
+                "regla_produccion_limite_produccion": "2",
+                "regla_produccion_limite_asistencia": "2",
+                "regla_produccion_limite_puntualidad": "2",
+                "regla_produccion_limite_uniforme": "1",
+                "regla_armado_usa_produccion": "on",
+                "regla_armado_pct_produccion": "65.00",
+                "regla_armado_pct_asistencia": "15.00",
+                "regla_armado_pct_puntualidad": "15.00",
+                "regla_armado_pct_uniforme": "5.00",
+                "regla_armado_limite_produccion": "2",
+                "regla_armado_limite_asistencia": "2",
+                "regla_armado_limite_puntualidad": "2",
+                "regla_armado_limite_uniforme": "1",
+                "regla_logistica_pct_produccion": "0.00",
+                "regla_logistica_pct_asistencia": "50.00",
+                "regla_logistica_pct_puntualidad": "30.00",
+                "regla_logistica_pct_uniforme": "20.00",
+                "regla_logistica_limite_produccion": "0",
+                "regla_logistica_limite_asistencia": "3",
+                "regla_logistica_limite_puntualidad": "2",
+                "regla_logistica_limite_uniforme": "1",
+                "regla_crucero_usa_produccion": "on",
+                "regla_crucero_pct_produccion": "65.00",
+                "regla_crucero_pct_asistencia": "15.00",
+                "regla_crucero_pct_puntualidad": "15.00",
+                "regla_crucero_pct_uniforme": "5.00",
+                "regla_crucero_limite_produccion": "2",
+                "regla_crucero_limite_asistencia": "2",
+                "regla_crucero_limite_puntualidad": "2",
+                "regla_crucero_limite_uniforme": "1",
             },
         )
 
@@ -74,6 +112,11 @@ class BonosProduccionTests(TestCase):
         periodo = ConfigBonoPeriodo.objects.get(mes=5, anio=2026)
         self.assertEqual(periodo.dias_laborables, 24)
         self.assertEqual(periodo.monto_logistica, Decimal("800.00"))
+        regla_hornos = periodo.reglas_area.get(area=AREA_HORNOS)
+        regla_logistica = periodo.reglas_area.get(area=AREA_LOGISTICA)
+        self.assertEqual(regla_hornos.pct_produccion, Decimal("60.00"))
+        self.assertFalse(regla_logistica.usa_produccion)
+        self.assertEqual(regla_logistica.pct_asistencia, Decimal("50.00"))
 
     def test_dashboard_erp_actualiza_ajuste_de_empleado(self):
         user = get_user_model().objects.create_superuser(username="admin-ajuste-bonos", password="x")
@@ -94,6 +137,7 @@ class BonosProduccionTests(TestCase):
                 "dias_asistencia": "20",
                 "dias_puntualidad": "20",
                 "dias_produccion": "20",
+                "total_embetunados": "14",
                 "ajuste_positivo": "50.00",
                 "ajuste_negativo": "10.00",
                 "bono_extra": "25.00",
@@ -104,8 +148,68 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(response.status_code, 302)
         bono.refresh_from_db()
         self.assertEqual(bono.dias_trabajados, 20)
+        self.assertEqual(bono.total_embetunados, 14)
         self.assertEqual(bono.ajuste_positivo, Decimal("50.00"))
         self.assertEqual(bono.observaciones, "Ajuste operativo")
+
+    def test_reglas_por_area_permiten_logistica_sin_concepto_produccion(self):
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026, monto_logistica=Decimal("1000.00"))
+        periodo.asegurar_reglas_area()
+        regla = periodo.reglas_area.get(area=AREA_LOGISTICA)
+        self.assertFalse(regla.usa_produccion)
+
+        empleado = Empleado.objects.create(nombre="Empleado Logistica", area="LOGISTICA")
+        bono = BonoProduccionEmpleado.objects.create(
+            periodo=periodo,
+            empleado=empleado,
+            area=AREA_LOGISTICA,
+            dias_trabajados=20,
+            dias_uniforme=20,
+            dias_asistencia=20,
+            dias_puntualidad=20,
+            dias_produccion=0,
+        )
+
+        bono.recalcular()
+
+        self.assertTrue(bono.pasa_produccion)
+        self.assertEqual(bono.monto_produccion, Decimal("0.00"))
+        self.assertEqual(bono.total_a_pagar, Decimal("1000.00"))
+
+    def test_premio_embetunado_se_asigna_en_area_produccion(self):
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026, premio_embetunado=Decimal("400.00"))
+        empleado_1 = Empleado.objects.create(nombre="Empleado Produccion 1", area="PRODUCCION")
+        empleado_2 = Empleado.objects.create(nombre="Empleado Produccion 2", area="PRODUCCION")
+        bono_1 = BonoProduccionEmpleado.objects.create(
+            periodo=periodo,
+            empleado=empleado_1,
+            area=AREA_PRODUCCION,
+            dias_trabajados=20,
+            dias_uniforme=20,
+            dias_asistencia=20,
+            dias_puntualidad=20,
+            dias_produccion=20,
+            total_embetunados=12,
+        )
+        bono_2 = BonoProduccionEmpleado.objects.create(
+            periodo=periodo,
+            empleado=empleado_2,
+            area=AREA_PRODUCCION,
+            dias_trabajados=20,
+            dias_uniforme=20,
+            dias_asistencia=20,
+            dias_puntualidad=20,
+            dias_produccion=20,
+            total_embetunados=18,
+        )
+
+        periodo.recalcular_todos()
+
+        bono_1.refresh_from_db()
+        bono_2.refresh_from_db()
+        self.assertFalse(bono_1.gano_premio_embetunado)
+        self.assertTrue(bono_2.gano_premio_embetunado)
+        self.assertEqual(bono_2.monto_premio_embetunado, Decimal("400.00"))
 
     def test_pwa_usa_sesion_django_y_expone_csrf(self):
         user = get_user_model().objects.create_user(username="pwa-produccion")
