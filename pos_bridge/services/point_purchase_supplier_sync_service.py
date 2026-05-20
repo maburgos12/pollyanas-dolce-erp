@@ -109,15 +109,11 @@ class PointPurchaseSupplierSyncService:
                 pass
 
             # Obtener todas las compras del período
-            compras_resp = page.request.get(
-                f"{base}/InventoryPurchases/GetCompras",
-                params={
-                    "fechaInicio": fI,
-                    "fechaFin": fF,
-                    "fkproveedor": "",
-                    "fkSucursal": "null",
-                },
+            compras_url = (
+                f"{base}/InventoryPurchases/GetCompras"
+                f"?fechaInicio={fI}&fechaFin={fF}&fkproveedor=&fkSucursal=null"
             )
+            compras_resp = page.request.get(compras_url)
             compras = compras_resp.json()
             if not isinstance(compras, list):
                 return {}
@@ -136,8 +132,7 @@ class PointPurchaseSupplierSyncService:
                     continue
 
                 detail_resp = page.request.get(
-                    f"{base}/InventoryPurchases/GetComprabyId",
-                    params={"fkCompra": fk},
+                    f"{base}/InventoryPurchases/GetComprabyId?fkCompra={fk}"
                 )
                 if detail_resp.status != 200:
                     continue
