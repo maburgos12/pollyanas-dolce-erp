@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 
 from core.navigation import NAV_GROUPS
 from rrhh.models import Empleado, NominaLinea, NominaPeriodo, PermisoSalida
@@ -11,10 +11,8 @@ from rrhh.models import Empleado, NominaLinea, NominaPeriodo, PermisoSalida
 from .models import AREA_HORNOS, AREA_LOGISTICA, AREA_PRODUCCION, BonoProduccionEmpleado, ConfigBonoPeriodo
 
 
+@override_settings(SECURE_SSL_REDIRECT=False)
 class BonosProduccionTests(TestCase):
-    def setUp(self):
-        self.client.defaults["wsgi.url_scheme"] = "https"
-
     def test_sidebar_de_produccion_apunta_al_dashboard_erp(self):
         produccion = next(group for group in NAV_GROUPS if group["key"] == "produccion")
         bonos_item = next(item for item in produccion["items"] if item[0] == "produccion" and item[1] == "bonos")
@@ -275,7 +273,7 @@ class BonosProduccionTests(TestCase):
         self.assertIn('cache: "no-store"', sw_content)
 
     def test_api_produccion_acepta_post_con_sesion_y_csrf(self):
-        client = Client(enforce_csrf_checks=True, **{"wsgi.url_scheme": "https"})
+        client = Client(enforce_csrf_checks=True)
         user = get_user_model().objects.create_user(username="csrf-produccion")
         client.force_login(user)
         client.get("/bonos-produccion/app/?captura=1")
