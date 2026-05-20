@@ -54,6 +54,13 @@ class VentasModuleTests(SimpleTestCase):
         self.assertIn("forecast-method-cell", full_list)
         self.assertIn("forecast-method-cell", dashboard_list)
 
+    def test_saved_forecast_detail_labels_confidence_as_saved_snapshot(self):
+        template = (Path(__file__).resolve().parent / "templates" / "ventas" / "pronostico_detalle.html").read_text()
+
+        self.assertIn("Confianza guardada", template)
+        self.assertIn("cálculo generado", template)
+        self.assertIn("vuelve a generar el pronóstico", template)
+
     def test_dia_del_padre_uses_movable_third_sunday(self):
         self.assertEqual(_special_day_name(date(2025, 6, 15)), "Día del Padre")
         self.assertEqual(_special_day_name(date(2026, 6, 21)), "Día del Padre")

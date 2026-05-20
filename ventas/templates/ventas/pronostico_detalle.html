@@ -127,14 +127,9 @@
   {% endif %}
   {% if resumen.confianza_promedio %}
   <div class="forecast-confidence">
-    Confianza del modelo: {{ resumen.confianza_pct|floatformat:0 }}% —
-    {% if "prophet" in resumen.metodo %}
-      basado en intervalo de predicción Prophet.
-    {% elif "evento-comparable" in resumen.metodo %}
-      basado en comparable histórico del evento y tendencia reciente.
-    {% else %}
-      basado en dispersión histórica y tendencia reciente.
-    {% endif %}
+    Confianza guardada: {{ resumen.confianza_pct|floatformat:0 }}% —
+    cálculo generado el {{ pronostico.creado_en|date:"Y-m-d H:i" }}.
+    Para aplicar reglas actuales, venta nueva o datos corregidos, vuelve a generar el pronóstico.
   </div>
   {% endif %}
 
