@@ -180,11 +180,25 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
 
     def empleados_queryset(self):
         areas_validas = {code for code, _ in AREAS_PRODUCCION}
-        qs = Empleado.objects.filter(area__in=[*areas_validas, "PRODUCCION"])
         area = self.request.query_params.get("area")
+        mes = self.request.query_params.get("mes")
+        anio = self.request.query_params.get("anio")
         if area:
             area_normalizada = normalizar_area_produccion(area)
             if area_normalizada not in areas_validas:
                 return Empleado.objects.none()
-            qs = qs.filter(area=area_normalizada)
-        return qs
+            if mes and anio:
+                empleados_periodo = BonoProduccionEmpleado.objects.filter(
+                    periodo__mes=mes,
+                    periodo__anio=anio,
+                    area=area_normalizada,
+                ).values_list("empleado_id", flat=True)
+                return Empleado.objects.filter(id__in=empleados_periodo)
+            return Empleado.objects.filter(area=area_normalizada)
+        if mes and anio:
+            empleados_periodo = BonoProduccionEmpleado.objects.filter(
+                periodo__mes=mes,
+                periodo__anio=anio,
+            ).values_list("empleado_id", flat=True)
+            return Empleado.objects.filter(id__in=empleados_periodo)
+        return Empleado.objects.filter(area__in=[*areas_validas, "PRODUCCION"])
