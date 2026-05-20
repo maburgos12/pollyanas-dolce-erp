@@ -122,6 +122,24 @@ def convert_unit_cost(
     return _q6(cost * (target_factor / source_factor))
 
 
+def preparation_recipe_matches_insumo(receta: Receta | None, insumo: Insumo | None) -> bool:
+    if receta is None or insumo is None:
+        return False
+
+    point_code = (insumo.codigo_point or "").strip()
+    recipe_point_code = (receta.codigo_point or "").strip()
+    if point_code and recipe_point_code and point_code.upper() == recipe_point_code.upper():
+        return True
+
+    recipe_name = (receta.nombre_normalizado or normalizar_nombre(receta.nombre or "")).strip()
+    insumo_names = {
+        normalizar_nombre(raw or "")
+        for raw in (insumo.nombre, insumo.nombre_point, insumo.nombre_normalizado)
+        if normalizar_nombre(raw or "")
+    }
+    return bool(recipe_name and recipe_name in insumo_names)
+
+
 def resolve_preparation_recipe_for_insumo(insumo: Insumo | None) -> Receta | None:
     if not insumo:
         return None
@@ -138,7 +156,7 @@ def resolve_preparation_recipe_for_insumo(insumo: Insumo | None) -> Receta | Non
     if derived_match:
         receta_id = int(derived_match.group(1))
         receta = qs.filter(id=receta_id).order_by("id").first()
-        if receta:
+        if preparation_recipe_matches_insumo(receta, insumo):
             return receta
 
     for raw_name in [insumo.nombre, insumo.nombre_point]:
@@ -209,8 +227,11 @@ def resolve_line_snapshot_cost(linea: LineaReceta) -> tuple[Decimal | None, str]
     if not linea.insumo_id or linea.insumo is None:
         return None, "NO_INSUMO"
 
+    line_snapshot_cost = _q6(getattr(linea, "costo_unitario_snapshot", None))
     unit_cost, source_unit, source_label = resolve_insumo_unit_cost(linea.insumo)
     if unit_cost is None or unit_cost <= 0:
+        if line_snapshot_cost > 0:
+            return line_snapshot_cost, "LINEA_SNAPSHOT"
         return None, source_label
 
     target_unit = linea.unidad
@@ -221,6 +242,8 @@ def resolve_line_snapshot_cost(linea: LineaReceta) -> tuple[Decimal | None, str]
     if target_unit is None:
         target_unit = linea.insumo.unidad_base or source_unit
     if target_unit is None or source_unit is None:
+        if line_snapshot_cost > 0:
+            return line_snapshot_cost, f"{source_label}_SIN_UNIDAD_LINEA_SNAPSHOT"
         return None, f"{source_label}_SIN_UNIDAD"
 
     converted = convert_unit_cost(unit_cost, source_unit=source_unit, target_unit=target_unit)
@@ -229,5 +252,8 @@ def resolve_line_snapshot_cost(linea: LineaReceta) -> tuple[Decimal | None, str]
 
     if source_unit.id == target_unit.id:
         return unit_cost, source_label
+
+    if line_snapshot_cost > 0:
+        return line_snapshot_cost, f"{source_label}_UNIDAD_INCOMPATIBLE_LINEA_SNAPSHOT"
 
     return None, f"{source_label}_UNIDAD_INCOMPATIBLE"
