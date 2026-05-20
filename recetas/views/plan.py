@@ -88,7 +88,8 @@ from ..utils.matching import match_insumo
 from ..utils.normalizacion import normalizar_nombre
 from ..catalogs import familia_categoria_catalogo_json, familias_producto_catalogo
 from reportes.executive_panels import _partial_month_amount_quantity
-from ventas.models import VentaAutoritativaPoint
+from reportes.production_projection_supply_service import build_projection_supply_context_from_saved_forecast
+from ventas.models import PronosticoGuardado, VentaAutoritativaPoint
 
 OFFICIAL_POINT_SOURCE = "/Report/PrintReportes?idreporte=3"
 RECENT_POINT_SOURCE = "/Report/VentasCategorias"
@@ -16810,7 +16811,7 @@ def _resumen_cierre_sucursales_reabasto(fecha_operacion: date, sucursales: list[
 @never_cache
 def plan_produccion(request: HttpRequest) -> HttpResponse:
     plan_view_mode = (request.GET.get("vista") or "operativo").strip().lower()
-    plan_view_modes = {"operativo", "pronostico", "mrp", "documentos", "estado"}
+    plan_view_modes = {"operativo", "pronostico", "insumos_proyectados", "mrp", "documentos", "estado"}
     if plan_view_mode not in plan_view_modes:
         plan_view_mode = "operativo"
     estado_plan = (request.GET.get("estado_plan") or "all").strip().lower()
@@ -16881,9 +16882,41 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
     grupos_usuario = {str(name).lower() for name in request.user.groups.values_list("name", flat=True)}
     es_dg = request.user.is_superuser or "dg" in grupos_usuario
     es_produccion = "produccion" in grupos_usuario
-    if not es_dg:
+    if not es_dg and plan_view_mode != "insumos_proyectados":
         plan_view_mode = "operativo"
     fecha_hoy = timezone.localdate()
+    insumos_pronosticos = []
+    insumos_selected_pronostico_id = request.GET.get("pronostico_id") or ""
+    insumos_selected_escenario = (request.GET.get("escenario") or "recomendado").strip().lower()
+    if insumos_selected_escenario not in {"conservador", "recomendado", "agresivo"}:
+        insumos_selected_escenario = "recomendado"
+    insumos_projected_context = None
+    insumos_projected_error = ""
+    try:
+        insumos_pronosticos_qs = (
+            PronosticoGuardado.objects.select_related("creado_por")
+            .prefetch_related("sucursales")
+            .order_by("-creado_en")
+        )
+        if not (es_dg or es_produccion or request.user.is_superuser):
+            insumos_pronosticos_qs = insumos_pronosticos_qs.filter(creado_por=request.user)
+        insumos_pronosticos = list(insumos_pronosticos_qs[:25])
+        selected_forecast_id = _to_int_safe(insumos_selected_pronostico_id)
+        if plan_view_mode == "insumos_proyectados" and selected_forecast_id:
+            selected_pronostico = next(
+                (pronostico for pronostico in insumos_pronosticos if pronostico.id == selected_forecast_id),
+                None,
+            )
+            if selected_pronostico is None:
+                insumos_projected_error = "No se encontró el pronóstico seleccionado o no tienes acceso."
+            else:
+                insumos_projected_context = build_projection_supply_context_from_saved_forecast(
+                    selected_pronostico,
+                    scenario=insumos_selected_escenario,
+                )
+    except (OperationalError, ProgrammingError):
+        insumos_pronosticos = []
+        insumos_projected_error = "La tabla de pronósticos no está disponible en este entorno."
     plan_hoy = (
         PlanProduccion.objects.filter(fecha_produccion=fecha_hoy)
         .order_by("-id")
@@ -17156,6 +17189,12 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
             "url": mode_url("pronostico", "#plan-pronosticos"),
         },
         {
+            "key": "insumos_proyectados",
+            "label": "Insumos proyectados",
+            "description": "BOM desde pronósticos guardados",
+            "url": mode_url("insumos_proyectados", "#plan-insumos-proyectados"),
+        },
+        {
             "key": "mrp",
             "label": "MRP",
             "description": "Materiales y faltantes",
@@ -17232,6 +17271,11 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
             "branch_supply_rows": branch_supply_rows,
             "forecast_compare_escenario": forecast_compare_escenario,
             "forecast_run_escenario_default": forecast_run_escenario_default,
+            "insumos_pronosticos": insumos_pronosticos,
+            "insumos_selected_pronostico_id": insumos_selected_pronostico_id,
+            "insumos_selected_escenario": insumos_selected_escenario,
+            "insumos_projected_context": insumos_projected_context,
+            "insumos_projected_error": insumos_projected_error,
             "sucursales": sucursales,
             "alcance_estadistico": alcance_estadistico,
             "fecha_base_estadistica": fecha_base_estadistica,

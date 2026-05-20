@@ -13,13 +13,18 @@
       </div>
       <div class="plan-header__meta">
         <span class="plan-meta-fecha">{{ fecha_hoy|date:"l d \d\e F \d\e Y" }}</span>
-        {% if es_dg %}
+        {% if es_dg or es_produccion %}
         <nav class="plan-vista-tabs" aria-label="Vistas del plan">
           <a href="?vista=operativo" class="{% if vista == 'operativo' %}active{% endif %}">Operativo</a>
+          {% if es_dg %}
           <a href="?vista=pronostico" class="{% if vista == 'pronostico' %}active{% endif %}">Pronóstico</a>
+          {% endif %}
+          <a href="?vista=insumos_proyectados" class="{% if vista == 'insumos_proyectados' %}active{% endif %}">Insumos proyectados</a>
+          {% if es_dg %}
           <a href="?vista=mrp" class="{% if vista == 'mrp' %}active{% endif %}">MRP</a>
           <a href="?vista=documentos" class="{% if vista == 'documentos' %}active{% endif %}">Documentos</a>
           <a href="?vista=estado" class="{% if vista == 'estado' %}active{% endif %}">Estado DG</a>
+          {% endif %}
         </nav>
         {% endif %}
       </div>
@@ -196,7 +201,7 @@
         </details>
       </div>
     </section>
-    {% elif es_dg %}
+    {% elif es_dg or vista == "insumos_proyectados" %}
     <section class="plan-secundaria">
       {% if vista == "pronostico" %}
       <h2>Pronóstico</h2>
@@ -205,6 +210,110 @@
         <article class="plan-kpi"><span class="plan-kpi__label">Pronósticos</span><strong class="plan-kpi__valor">{{ pronosticos_periodo_count|default:0 }}</strong></article>
         <article class="plan-kpi"><span class="plan-kpi__label">Solicitudes venta</span><strong class="plan-kpi__valor">{{ solicitudes_venta_count|default:0 }}</strong></article>
         <article class="plan-kpi"><span class="plan-kpi__label">Histórico</span><strong class="plan-kpi__valor">{{ ventas_historicas_count|default:0 }}</strong></article>
+      </div>
+      {% elif vista == "insumos_proyectados" %}
+      <div id="plan-insumos-proyectados" class="plan-proyeccion">
+        <div class="plan-proyeccion__header">
+          <div>
+            <h2>Insumos proyectados</h2>
+            <p>Calcula BOM desde un pronóstico guardado. Esta vista no crea plan, compras ni autorización.</p>
+          </div>
+          <span class="plan-proyeccion__badge">Simulación</span>
+        </div>
+
+        <form method="get" class="plan-proyeccion__form">
+          <input type="hidden" name="vista" value="insumos_proyectados">
+          <label>
+            <span>Pronóstico</span>
+            <select name="pronostico_id" class="plan-select-proyeccion">
+              <option value="">Selecciona un pronóstico guardado</option>
+              {% for pronostico in insumos_pronosticos %}
+              <option value="{{ pronostico.id }}" {% if pronostico.id|stringformat:"s" == insumos_selected_pronostico_id %}selected{% endif %}>
+                {{ pronostico.nombre }} · {{ pronostico.fecha_inicio|date:"d/m/Y" }}-{{ pronostico.fecha_fin|date:"d/m/Y" }}
+              </option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            <span>Escenario</span>
+            <select name="escenario" class="plan-select-proyeccion">
+              <option value="recomendado" {% if insumos_selected_escenario == "recomendado" %}selected{% endif %}>Recomendado</option>
+              <option value="conservador" {% if insumos_selected_escenario == "conservador" %}selected{% endif %}>Conservador</option>
+              <option value="agresivo" {% if insumos_selected_escenario == "agresivo" %}selected{% endif %}>Agresivo</option>
+            </select>
+          </label>
+          <button type="submit" class="plan-btn plan-btn--primario">Calcular insumos</button>
+        </form>
+
+        {% if insumos_projected_error %}
+        <p class="plan-hint plan-hint--error">{{ insumos_projected_error }}</p>
+        {% elif not insumos_pronosticos %}
+        <p class="plan-hint">Todavía no hay pronósticos guardados disponibles para calcular insumos.</p>
+        {% elif not insumos_projected_context %}
+        <p class="plan-hint">Selecciona un pronóstico y un escenario para explotar la receta a insumos.</p>
+        {% else %}
+        <div class="plan-kpis plan-proyeccion__kpis">
+          <article class="plan-kpi"><span class="plan-kpi__label">Productos</span><strong class="plan-kpi__valor">{{ insumos_projected_context.summary.projected_products }}</strong></article>
+          <article class="plan-kpi"><span class="plan-kpi__label">Insumos</span><strong class="plan-kpi__valor">{{ insumos_projected_context.summary.projected_insumos }}</strong></article>
+          <article class="plan-kpi"><span class="plan-kpi__label">Piezas forecast</span><strong class="plan-kpi__valor">{{ insumos_projected_context.summary.forecast_units|floatformat:0 }}</strong></article>
+          <article class="plan-kpi"><span class="plan-kpi__label">Costo estimado</span><strong class="plan-kpi__valor">${{ insumos_projected_context.summary.total_cost_estimate|floatformat:2 }}</strong></article>
+        </div>
+
+        <div class="plan-proyeccion__decision">
+          <strong>{{ insumos_projected_context.source_name }}</strong>
+          <span>{{ insumos_projected_context.date_range_label }} · {{ insumos_projected_context.scenario_label }}</span>
+          <p>{{ insumos_projected_context.formula_note }}</p>
+        </div>
+
+        {% if insumos_projected_context.blockers %}
+        <div class="plan-proyeccion__alerta">
+          <strong>{{ insumos_projected_context.summary.blockers }} bloqueo(s) para revisar</strong>
+          <div class="plan-proyeccion__bloqueos">
+            {% for blocker in insumos_projected_context.blockers|slice:":6" %}
+            <span>{{ blocker.tipo }} · {{ blocker.nombre }}</span>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+
+        <div class="plan-panel-tabla plan-proyeccion__tabla">
+          <table class="plan-tabla">
+            <thead>
+              <tr>
+                <th>Insumo</th>
+                <th>Tipo</th>
+                <th>Cantidad bruta</th>
+                <th>Unidad</th>
+                <th>Costo est.</th>
+                <th>Productos</th>
+                <th>Sucursales</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in insumos_projected_context.insumos %}
+              <tr>
+                <td><strong>{{ row.insumo_nombre }}</strong></td>
+                <td><span class="plan-tag plan-tag--{{ row.article_class }}">{{ row.article_class_label }}</span></td>
+                <td class="plan-tabla__num">{{ row.required_gross_qty|floatformat:3 }}</td>
+                <td>{{ row.unidad_codigo|default:"pz" }}</td>
+                <td class="plan-tabla__num">${{ row.cost_estimate|floatformat:2 }}</td>
+                <td>{{ row.recipes_text|truncatechars:90 }}</td>
+                <td>{{ row.branches_text|default:"Todas"|truncatechars:70 }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="7">No hay insumos calculados para este pronóstico.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="plan-proyeccion__acciones">
+          <span>Decisión opcional:</span>
+          <button type="button" class="plan-btn plan-btn--outline" disabled>Exportar</button>
+          <button type="button" class="plan-btn plan-btn--outline" disabled>Convertir a plan</button>
+          <button type="button" class="plan-btn plan-btn--outline" disabled>Compartir a compras</button>
+        </div>
+        {% endif %}
       </div>
       {% elif vista == "mrp" %}
       <h2>MRP</h2>
