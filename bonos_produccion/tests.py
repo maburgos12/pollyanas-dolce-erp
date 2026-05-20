@@ -12,6 +12,9 @@ from .models import AREA_HORNOS, AREA_LOGISTICA, AREA_PRODUCCION, BonoProduccion
 
 
 class BonosProduccionTests(TestCase):
+    def setUp(self):
+        self.client.defaults["wsgi.url_scheme"] = "https"
+
     def test_sidebar_de_produccion_apunta_al_dashboard_erp(self):
         produccion = next(group for group in NAV_GROUPS if group["key"] == "produccion")
         bonos_item = next(item for item in produccion["items"] if item[0] == "produccion" and item[1] == "bonos")
@@ -272,7 +275,7 @@ class BonosProduccionTests(TestCase):
         self.assertIn('cache: "no-store"', sw_content)
 
     def test_api_produccion_acepta_post_con_sesion_y_csrf(self):
-        client = Client(enforce_csrf_checks=True)
+        client = Client(enforce_csrf_checks=True, **{"wsgi.url_scheme": "https"})
         user = get_user_model().objects.create_user(username="csrf-produccion")
         client.force_login(user)
         client.get("/bonos-produccion/app/?captura=1")
