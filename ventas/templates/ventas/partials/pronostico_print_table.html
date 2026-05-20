@@ -1,0 +1,58 @@
+{% load humanize %}
+<table>
+  <colgroup>
+    <col style="width:34px;">
+    <col style="width:230px;">
+    {% for fecha in fechas_tabla %}
+    <col style="width:78px;">
+    {% endfor %}
+    <col style="width:78px;">
+    <col style="width:80px;">
+    <col style="width:96px;">
+    <col style="width:58px;">
+  </colgroup>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Producto</th>
+      {% for fecha in fechas_tabla %}
+      <th class="num">{{ fecha.label }}</th>
+      {% endfor %}
+      <th class="num">Total</th>
+      <th class="num">Precio</th>
+      <th class="num">Ingreso</th>
+      <th class="num">%</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for category in categorias %}
+    <tr class="category-row">
+      <td colspan="{{ fechas_tabla|length|add:2 }}">{{ category.categoria }}</td>
+      <td class="num">{{ category.subtotal_piezas|intcomma }}</td>
+      <td></td>
+      <td class="num">${{ category.subtotal_ingreso|floatformat:2|intcomma }}</td>
+      <td></td>
+    </tr>
+    {% for product in category.productos %}
+    <tr>
+      <td>{{ forloop.counter }}</td>
+      <td class="product-name">{{ product.nombre }}<small>{{ product.familia }}</small></td>
+      {% for day in product.dias_lista %}
+      <td class="num">{{ day.recomendado|intcomma }}</td>
+      {% endfor %}
+      <td class="num">{{ product.total_piezas|intcomma }}</td>
+      <td class="num">${{ product.precio|floatformat:2|intcomma }}</td>
+      <td class="num">${{ product.total_ingreso|floatformat:2|intcomma }}</td>
+      <td class="num">{{ product.pct_total|floatformat:2 }}%</td>
+    </tr>
+    {% endfor %}
+    {% endfor %}
+    <tr class="total-row">
+      <td colspan="{{ fechas_tabla|length|add:2 }}">{{ total_label }}</td>
+      <td class="num">{{ total_piezas|intcomma }}</td>
+      <td></td>
+      <td class="num">${{ total_ingreso|floatformat:2|intcomma }}</td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>

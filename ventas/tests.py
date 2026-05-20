@@ -61,6 +61,18 @@ class VentasModuleTests(SimpleTestCase):
         self.assertIn("cálculo generado", template)
         self.assertIn("vuelve a generar el pronóstico", template)
 
+    def test_saved_forecast_print_uses_standalone_document(self):
+        detail_template = (Path(__file__).resolve().parent / "templates" / "ventas" / "pronostico_detalle.html").read_text()
+        print_template = (Path(__file__).resolve().parent / "templates" / "ventas" / "pronostico_print.html").read_text()
+
+        self.assertEqual(reverse("ventas:pronostico_print", args=[123]), "/ventas/pronostico/guardados/123/imprimir/")
+        self.assertIn("ventas:pronostico_print", detail_template)
+        self.assertNotIn('onclick="window.print()"', detail_template)
+        self.assertIn("window.print()", print_template)
+        self.assertNotIn('{% extends "base.html" %}', print_template)
+        self.assertIn("Resumen general", print_template)
+        self.assertIn("Por sucursal", print_template)
+
     def test_dia_del_padre_uses_movable_third_sunday(self):
         self.assertEqual(_special_day_name(date(2025, 6, 15)), "Día del Padre")
         self.assertEqual(_special_day_name(date(2026, 6, 21)), "Día del Padre")

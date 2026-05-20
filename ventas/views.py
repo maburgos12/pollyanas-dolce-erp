@@ -596,6 +596,18 @@ def _get_pronostico_for_user(user, pk: int) -> PronosticoGuardado:
     return get_object_or_404(_pronosticos_for_user(user), pk=pk)
 
 
+def _build_pronostico_detail_context(pronostico: PronosticoGuardado) -> dict:
+    resultados = pronostico.resultado_json or {}
+    tiene_real, comparativa, resumen_comparativa = _build_comparativa_real(pronostico, resultados)
+    return {
+        "pronostico": pronostico,
+        "tiene_real": tiene_real,
+        "comparativa": comparativa,
+        "resumen_comparativa": resumen_comparativa,
+        **_empty_result_context(resultados),
+    }
+
+
 def _block_stale_sales_forecast(request) -> bool:
     freshness = queue_forecast_sales_refresh_if_needed(triggered_by_id=request.user.id)
     if freshness.is_fresh:
@@ -738,16 +750,7 @@ def PronosticoDetalleView(request, pk: int):
     if not _can_view_pronostico(request.user):
         raise PermissionDenied("No tienes permisos para ver este pronostico.")
     pronostico = _get_pronostico_for_user(request.user, pk)
-    resultados = pronostico.resultado_json or {}
-    tiene_real, comparativa, resumen_comparativa = _build_comparativa_real(pronostico, resultados)
-    context = {
-        "pronostico": pronostico,
-        "tiene_real": tiene_real,
-        "comparativa": comparativa,
-        "resumen_comparativa": resumen_comparativa,
-        **_empty_result_context(resultados),
-    }
-    return render(request, "ventas/pronostico_detalle.html", context)
+    return render(request, "ventas/pronostico_detalle.html", _build_pronostico_detail_context(pronostico))
 
 
 @login_required
@@ -756,6 +759,14 @@ def PronosticoExcelView(request, pk: int):
         raise PermissionDenied("No tienes permisos para exportar este pronostico.")
     pronostico = _get_pronostico_for_user(request.user, pk)
     return _build_pronostico_excel_response(pronostico)
+
+
+@login_required
+def PronosticoPrintView(request, pk: int):
+    if not _can_view_pronostico(request.user):
+        raise PermissionDenied("No tienes permisos para imprimir este pronostico.")
+    pronostico = _get_pronostico_for_user(request.user, pk)
+    return render(request, "ventas/pronostico_print.html", _build_pronostico_detail_context(pronostico))
 
 
 @login_required

@@ -71,7 +71,7 @@
       </div>
       <div class="forecast-actions">
         <a class="btn btn-primary" href="{% url 'ventas:pronostico_excel' pronostico.id %}">Exportar Excel</a>
-        <button class="btn btn-secondary" type="button" onclick="window.print()">Imprimir</button>
+        <a class="btn btn-secondary" href="{% url 'ventas:pronostico_print' pronostico.id %}" target="_blank" rel="noopener">Imprimir</a>
         <a class="btn btn-secondary" href="{% url 'ventas:pronostico_guardados' %}">Volver</a>
       </div>
     </div>
