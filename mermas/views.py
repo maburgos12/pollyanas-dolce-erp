@@ -99,6 +99,8 @@ def _registros_visibles(user):
 
 @login_required
 def dashboard(request):
+    if not _can_dashboard(request.user) and (_can_capture(request.user) or _can_receive(request.user)):
+        return redirect("mermas:app")
     _require_dashboard(request.user)
     registros = _registros_visibles(request.user)
     estatus = request.GET.get("estatus", "").strip()
