@@ -16,7 +16,7 @@ from inventario.stock_trace import TRACE_MANUAL_SYNC, build_stock_trace
 from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
 from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob
 from recetas.models import LineaReceta, Receta, RecetaCostoVersion
-from recetas.utils.costeo_snapshot import resolve_preparation_recipe_for_insumo
+from recetas.utils.costeo_snapshot import resolve_line_snapshot_cost, resolve_preparation_recipe_for_insumo
 from reportes.auto_production_service import (
     approve_production_order,
     execute_production_order,
@@ -626,6 +626,139 @@ class ProjectionSupplyContextTests(TestCase):
         self.assertEqual(internal_row["unit_cost"], Decimal("5.000000"))
         self.assertEqual(internal_row["estimated_spend"], Decimal("30.00"))
         self.assertEqual(internal_row["cost_sources_text"], "POINT_PRODUCTION_REPORT")
+
+    def test_preparation_resolution_rejects_stale_derived_recipe_when_name_mismatches(self):
+        stale_recipe = Receta.objects.create(
+            nombre="Mermelada Fresa Liquida Proyección",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("1"),
+            rendimiento_unidad=self.unit_kg,
+            hash_contenido="hash-stale-derived-prep",
+        )
+        internal_input = Insumo.objects.create(
+            codigo=f"DERIVADO:RECETA:{stale_recipe.id}:PREPARACION",
+            nombre="Galleta Para Pay Proyección",
+            nombre_normalizado="galleta para pay proyeccion",
+            unidad_base=self.unit_kg,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+
+        self.assertIsNone(resolve_preparation_recipe_for_insumo(internal_input))
+
+    def test_projection_supply_uses_canonical_cost_when_stale_derived_recipe_mismatches(self):
+        unit_g = UnidadMedida.objects.create(
+            codigo="g-prj",
+            nombre="Gramo proyección",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1"),
+        )
+        unit_kg = UnidadMedida.objects.create(
+            codigo="kg-prj-canon",
+            nombre="Kilo canónico proyección",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        stale_recipe = Receta.objects.create(
+            nombre="Mermelada Fresa Liquida Proyección",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("1"),
+            rendimiento_unidad=self.unit_kg,
+            hash_contenido="hash-stale-derived-canonical",
+        )
+        internal_input = Insumo.objects.create(
+            codigo=f"DERIVADO:RECETA:{stale_recipe.id}:PREPARACION",
+            nombre="Galleta Para Pay Proyección",
+            nombre_normalizado="galleta para pay proyeccion",
+            unidad_base=unit_kg,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        CostoInsumo.objects.create(
+            insumo=internal_input,
+            proveedor=self.provider,
+            fecha=self.target_date,
+            costo_unitario=Decimal("250.00"),
+            source_hash="projection-stale-canonical-cost",
+        )
+        recipe = Receta.objects.create(
+            nombre="Pay Galleta Proyección",
+            codigo_point="PAYGALPRJ",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-pay-galleta-proj",
+        )
+        LineaReceta.objects.create(
+            receta=recipe,
+            posicion=1,
+            insumo=internal_input,
+            insumo_texto=internal_input.nombre,
+            cantidad=Decimal("100"),
+            unidad=unit_g,
+            unidad_texto="g",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+
+        context = build_projection_supply_context(
+            target_date=self.target_date,
+            forecast_context={
+                "target_label": "Forecast costo canónico",
+                "summary": {"forecast_units": Decimal("1")},
+                "rows": [
+                    {
+                        "branch_id": self.branch.id,
+                        "branch_code": self.branch.codigo,
+                        "branch_name": self.branch.nombre,
+                        "recipe_id": recipe.id,
+                        "recipe_name": recipe.nombre,
+                        "forecast_qty": Decimal("1"),
+                        "buffer_units": Decimal("0"),
+                    }
+                ],
+            },
+        )
+
+        insumo_row = context["insumos"][0]
+        self.assertEqual(insumo_row["unit_cost"], Decimal("0.250000"))
+        self.assertEqual(insumo_row["estimated_spend"], Decimal("25.00"))
+        self.assertEqual(insumo_row["cost_sources_text"], "COSTO_CANONICO")
+        self.assertEqual(context["summary"]["missing_cost_insumos"], 0)
+
+    def test_line_snapshot_cost_is_used_when_preparation_unit_is_incompatible(self):
+        unit_pz = UnidadMedida.objects.create(codigo="pz-prj-snap", nombre="Pieza snapshot", tipo=UnidadMedida.TIPO_PIEZA)
+        prep_recipe = Receta.objects.create(
+            nombre="Pan Snapshot Proyección",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("1"),
+            rendimiento_unidad=unit_pz,
+            hash_contenido="hash-snapshot-incompatible-prep",
+        )
+        internal_input = Insumo.objects.create(
+            codigo=f"DERIVADO:RECETA:{prep_recipe.id}:PREPARACION",
+            nombre="Pan Snapshot Proyección",
+            nombre_normalizado="pan snapshot proyeccion",
+            unidad_base=self.unit_kg,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        RecetaCostoVersion.objects.create(
+            receta=prep_recipe,
+            version_num=1,
+            hash_snapshot="hash-snapshot-incompatible-cost",
+            costo_total=Decimal("10.00"),
+            fuente="POINT_PRODUCTION_REPORT",
+        )
+        line = LineaReceta.objects.create(
+            receta=self.recipe,
+            posicion=2,
+            insumo=internal_input,
+            insumo_texto=internal_input.nombre,
+            cantidad=Decimal("2"),
+            unidad=self.unit_kg,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("3.50"),
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+
+        resolved_cost, source = resolve_line_snapshot_cost(line)
+        self.assertEqual(resolved_cost, Decimal("3.500000"))
+        self.assertEqual(source, "POINT_PRODUCTION_REPORT_UNIDAD_INCOMPATIBLE_LINEA_SNAPSHOT")
 
     def test_projection_supply_explodes_internal_preparations_without_double_costing(self):
         unit_pz = UnidadMedida.objects.create(codigo="pz-prj", nombre="Pieza proyección", tipo=UnidadMedida.TIPO_PIEZA)

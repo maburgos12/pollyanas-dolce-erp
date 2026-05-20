@@ -8,6 +8,7 @@ from django.db.models import DecimalField
 from recetas.models import LineaReceta, Receta, RecetaCostoVersion, RecetaPresentacionDerivada
 from recetas.utils.costeo_snapshot import (
     convert_unit_cost,
+    preparation_recipe_matches_insumo,
     resolve_insumo_unit_cost,
     resolve_preparation_recipe_unit_cost,
 )
@@ -192,12 +193,7 @@ def get_total_cost_map(recipe_ids: list[int] | set[int] | tuple[int, ...]) -> di
 
         for insumo_id, insumo in missing_insumos.items():
             prep_recipe = None
-            derived_code = (insumo.codigo or "").strip()
-            if derived_code.startswith("DERIVADO:RECETA:") and derived_code.endswith(":PREPARACION"):
-                parts = derived_code.split(":")
-                if len(parts) >= 3 and parts[2].isdigit():
-                    prep_recipe = prep_by_id.get(int(parts[2]))
-            if prep_recipe is None and (insumo.codigo_point or "").strip():
+            if (insumo.codigo_point or "").strip():
                 prep_recipe = prep_by_code.get((insumo.codigo_point or "").strip().upper())
             if prep_recipe is None:
                 for raw_name in (insumo.nombre, insumo.nombre_point):
@@ -206,6 +202,14 @@ def get_total_cost_map(recipe_ids: list[int] | set[int] | tuple[int, ...]) -> di
                         prep_recipe = prep_by_name.get(normalized_name)
                     if prep_recipe is not None:
                         break
+            if prep_recipe is None:
+                derived_code = (insumo.codigo or "").strip()
+                if derived_code.startswith("DERIVADO:RECETA:") and derived_code.endswith(":PREPARACION"):
+                    parts = derived_code.split(":")
+                    if len(parts) >= 3 and parts[2].isdigit():
+                        candidate = prep_by_id.get(int(parts[2]))
+                        if preparation_recipe_matches_insumo(candidate, insumo):
+                            prep_recipe = candidate
             prep_cost, prep_unit, prep_label = resolve_preparation_recipe_unit_cost(prep_recipe)
             if prep_cost is not None and prep_cost > 0:
                 insumo_cost_cache[insumo_id] = (
