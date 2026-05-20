@@ -165,6 +165,11 @@ def bonos_produccion_dashboard(request):
 @login_required
 @ensure_csrf_cookie
 def bonos_produccion_pwa(request):
+    force_capture = (request.GET.get("captura") or "").strip().lower() in {"1", "true", "si", "sí"}
+    user_agent = (request.headers.get("User-Agent") or "").lower()
+    is_mobile = any(token in user_agent for token in ("iphone", "ipad", "android", "mobile"))
+    if not force_capture and not is_mobile:
+        return redirect("bonos_produccion:bonos-produccion-dashboard")
     return render(request, "bonos_produccion/index.html")
 
 

@@ -2,7 +2,7 @@
   "name": "Pollyana's Bonos Produccion",
   "short_name": "Bonos Prod.",
   "description": "Captura y revision mensual de bonos de produccion",
-  "start_url": "/bonos-produccion/app/",
+  "start_url": "/bonos-produccion/app/?captura=1",
   "scope": "/bonos-produccion/",
   "display": "standalone",
   "background_color": "#F9F5F8",

@@ -111,7 +111,7 @@ class BonosProduccionTests(TestCase):
         user = get_user_model().objects.create_user(username="pwa-produccion")
         self.client.force_login(user)
 
-        response = self.client.get("/bonos-produccion/app/")
+        response = self.client.get("/bonos-produccion/app/?captura=1")
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("csrftoken", response.cookies)
@@ -124,24 +124,54 @@ class BonosProduccionTests(TestCase):
         self.assertIn("r.redirected", content)
         self.assertNotIn("pd_logistica_access", content)
 
+    def test_app_de_produccion_redirige_a_dashboard_en_escritorio(self):
+        user = get_user_model().objects.create_user(username="desktop-produccion")
+        self.client.force_login(user)
+
+        response = self.client.get(
+            "/bonos-produccion/app/",
+            HTTP_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/bonos-produccion/dashboard/")
+
+    def test_app_de_produccion_conserva_pwa_en_movil_o_captura_forzada(self):
+        user = get_user_model().objects.create_user(username="mobile-produccion")
+        self.client.force_login(user)
+
+        mobile = self.client.get(
+            "/bonos-produccion/app/",
+            HTTP_USER_AGENT="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile/15E148",
+        )
+        forced = self.client.get(
+            "/bonos-produccion/app/?captura=1",
+            HTTP_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        )
+
+        self.assertEqual(mobile.status_code, 200)
+        self.assertEqual(forced.status_code, 200)
+        self.assertIn("Bonos de Produccion", mobile.content.decode())
+        self.assertIn("Bonos de Produccion", forced.content.decode())
+
     def test_manifest_y_service_worker_de_produccion_sirven_con_content_type_correcto(self):
         manifest = self.client.get("/bonos-produccion/manifest.json")
         sw = self.client.get("/bonos-produccion/sw.js")
 
         self.assertEqual(manifest.status_code, 200)
         self.assertEqual(manifest["Content-Type"], "application/manifest+json")
-        self.assertEqual(manifest.json()["start_url"], "/bonos-produccion/app/")
+        self.assertEqual(manifest.json()["start_url"], "/bonos-produccion/app/?captura=1")
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-produccion-pwa-v2", sw_content)
+        self.assertIn("pollyanas-bonos-produccion-pwa-v3", sw_content)
         self.assertIn('cache: "no-store"', sw_content)
 
     def test_api_produccion_acepta_post_con_sesion_y_csrf(self):
         client = Client(enforce_csrf_checks=True)
         user = get_user_model().objects.create_user(username="csrf-produccion")
         client.force_login(user)
-        client.get("/bonos-produccion/app/")
+        client.get("/bonos-produccion/app/?captura=1")
         csrf_token = client.cookies["csrftoken"].value
 
         response = client.post(
