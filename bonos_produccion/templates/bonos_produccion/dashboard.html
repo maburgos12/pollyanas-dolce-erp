@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Bonos producción · Dashboard{% endblock %}
+{% block page_title %}Bonos producción{% endblock %}
+{% block body_class %}page-bonos-produccion-dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+  .bonos-shell{display:grid;gap:1.25rem}
+  .bonos-hero{background:#fff;border:1px solid #ede6f0;border-radius:14px;padding:1.35rem;box-shadow:0 1px 3px rgba(0,0,0,.06);display:grid;grid-template-columns:minmax(0,1.4fr) minmax(280px,.8fr);gap:1rem;align-items:start}
+  .bonos-kicker{font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;color:#8b2252;font-weight:800}
+  .bonos-title{font-size:1.8rem;font-weight:900;margin:.2rem 0;color:#1c1520}
+  .bonos-copy{color:#6b5f70;max-width:58rem}
+  .bonos-actions{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:1rem}
+  .bonos-btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;border-radius:8px;border:1px solid #e7ddeb;padding:.65rem .9rem;font-weight:800;text-decoration:none;background:#fff;color:#1c1520;cursor:pointer}
+  .bonos-btn.primary{background:#8b2252;color:#fff;border-color:#8b2252}
+  .bonos-btn:disabled{opacity:.55;cursor:not-allowed}
+  .period-filter{display:grid;grid-template-columns:1fr 1fr auto;gap:.6rem;align-items:end}
+  .bonos-field{display:grid;gap:.35rem}
+  .bonos-field label{font-size:.76rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#6b5f70}
+  .bonos-field input,.bonos-field textarea{width:100%;border:1px solid #e7ddeb;border-radius:8px;padding:.62rem .7rem;font:inherit;background:#fbf8fb}
+  .kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.85rem}
+  .kpi-card,.bonos-card{background:#fff;border:1px solid #ede6f0;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+  .kpi-card{padding:1rem}
+  .kpi-label{font-size:.75rem;text-transform:uppercase;letter-spacing:.07em;color:#6b5f70;font-weight:800}
+  .kpi-value{font-size:1.6rem;font-weight:900;color:#1c1520;margin-top:.2rem}
+  .kpi-value.wine{color:#8b2252}.kpi-value.gold{color:#c9a84c}
+  .bonos-card-h{padding:1rem 1.1rem;border-bottom:1px solid #ede6f0;display:flex;justify-content:space-between;gap:1rem;align-items:center;flex-wrap:wrap}
+  .bonos-card-title{font-weight:900;text-transform:uppercase;letter-spacing:.06em}
+  .bonos-card-body{padding:1.1rem}
+  .config-grid{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:.85rem}
+  .area-grid{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:.85rem}
+  .area-chip{padding:.9rem;border:1px solid #ede6f0;border-radius:10px;background:#fbf8fb}
+  .area-chip span{display:block;color:#6b5f70;font-size:.75rem;font-weight:800;text-transform:uppercase}
+  .area-chip strong{display:block;font-size:1.15rem;margin-top:.2rem}
+  .table-wrap{overflow-x:auto}
+  .bonos-table{width:100%;border-collapse:collapse;font-size:.88rem}
+  .bonos-table th{padding:.65rem;text-align:left;border-bottom:1px solid #ede6f0;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:#6b5f70}
+  .bonos-table td{padding:.65rem;border-bottom:1px solid #f0e8f2;vertical-align:top}
+  .bonos-table tr:last-child td{border-bottom:0}
+  .employee-name{font-weight:900}.employee-meta{font-size:.78rem;color:#6b5f70}
+  .mini-input{width:78px;border:1px solid #e7ddeb;border-radius:7px;padding:.45rem .5rem;font:inherit}
+  .money-input{width:96px;border:1px solid #e7ddeb;border-radius:7px;padding:.45rem .5rem;font:inherit}
+  .status-pill{display:inline-flex;border-radius:999px;padding:.25rem .55rem;font-size:.72rem;font-weight:900}
+  .status-pill.ok{background:#dcfce7;color:#166534}.status-pill.bad{background:#fee2e2;color:#991b1b}
+  .adjust-grid{display:grid;grid-template-columns:repeat(3,minmax(100px,1fr));gap:.45rem}
+  .note-input{min-width:220px;min-height:38px}
+  @media(max-width:980px){.bonos-hero{grid-template-columns:1fr}.kpi-grid,.area-grid{grid-template-columns:repeat(2,1fr)}.config-grid{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:620px){.period-filter,.kpi-grid,.area-grid,.config-grid{grid-template-columns:1fr}}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="bonos-shell">
+  <section class="bonos-hero">
+    <div>
+      <div class="bonos-kicker">Producción · bonos</div>
+      <h1 class="bonos-title">Control de configuración y ajustes</h1>
+      <p class="bonos-copy">Panel ERP para configurar montos, días laborables, límites y ajustes administrativos. La app móvil queda para captura diaria de asistencia, permisos y operación en piso.</p>
+      <div class="bonos-actions">
+        <a class="bonos-btn primary" href="/bonos-produccion/app/">Abrir app de captura</a>
+        {% if periodo %}
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="recalcular">
+          <input type="hidden" name="mes" value="{{ mes }}">
+          <input type="hidden" name="anio" value="{{ anio }}">
+          <button class="bonos-btn" type="submit" {% if not can_manage %}disabled{% endif %}>Recalcular período</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    <form class="period-filter" method="get">
+      <div class="bonos-field">
+        <label for="mes">Mes</label>
+        <input id="mes" name="mes" type="number" min="1" max="12" value="{{ mes }}">
+      </div>
+      <div class="bonos-field">
+        <label for="anio">Año</label>
+        <input id="anio" name="anio" type="number" value="{{ anio }}">
+      </div>
+      <button class="bonos-btn primary" type="submit">Ver período</button>
+    </form>
+  </section>
+
+  <section class="kpi-grid">
+    <article class="kpi-card"><div class="kpi-label">Total a pagar</div><div class="kpi-value gold">${{ total_bonos|floatformat:2|intcomma }}</div></article>
+    <article class="kpi-card"><div class="kpi-label">Empleados</div><div class="kpi-value">{{ bonos|length|intcomma }}</div></article>
+    <article class="kpi-card"><div class="kpi-label">Pasan todo</div><div class="kpi-value wine">{{ passing|intcomma }}</div></article>
+    <article class="kpi-card"><div class="kpi-label">Días laborables</div><div class="kpi-value">{% if periodo %}{{ periodo.dias_laborables }}{% else %}-{% endif %}</div></article>
+  </section>
+
+  <section class="bonos-card">
+    <div class="bonos-card-h">
+      <div class="bonos-card-title">Configuración del período</div>
+      {% if not periodo %}<span class="status-pill bad">Sin período creado</span>{% endif %}
+    </div>
+    <div class="bonos-card-body">
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="config">
+        <input type="hidden" name="mes" value="{{ mes }}">
+        <input type="hidden" name="anio" value="{{ anio }}">
+        <div class="config-grid">
+          <div class="bonos-field"><label>Días laborables</label><input name="dias_laborables" type="number" min="1" value="{% if periodo %}{{ periodo.dias_laborables }}{% else %}{{ defaults.dias_laborables }}{% endif %}"></div>
+          <div class="bonos-field"><label>Monto hornos</label><input name="monto_hornos" type="number" step="0.01" value="{% if periodo %}{{ periodo.monto_hornos }}{% else %}{{ defaults.monto_hornos }}{% endif %}"></div>
+          <div class="bonos-field"><label>Monto producción</label><input name="monto_area_produccion" type="number" step="0.01" value="{% if periodo %}{{ periodo.monto_area_produccion }}{% else %}{{ defaults.monto_area_produccion }}{% endif %}"></div>
+          <div class="bonos-field"><label>Monto armado</label><input name="monto_armado" type="number" step="0.01" value="{% if periodo %}{{ periodo.monto_armado }}{% else %}{{ defaults.monto_armado }}{% endif %}"></div>
+          <div class="bonos-field"><label>Monto logística</label><input name="monto_logistica" type="number" step="0.01" value="{% if periodo %}{{ periodo.monto_logistica }}{% else %}{{ defaults.monto_logistica }}{% endif %}"></div>
+          <div class="bonos-field"><label>Monto crucero</label><input name="monto_crucero" type="number" step="0.01" value="{% if periodo %}{{ periodo.monto_crucero }}{% else %}{{ defaults.monto_crucero }}{% endif %}"></div>
+          <div class="bonos-field"><label>% producción</label><input name="pct_produccion" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_produccion }}{% else %}{{ defaults.pct_produccion }}{% endif %}"></div>
+          <div class="bonos-field"><label>% asistencia</label><input name="pct_asistencia" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_asistencia }}{% else %}{{ defaults.pct_asistencia }}{% endif %}"></div>
+          <div class="bonos-field"><label>% puntualidad</label><input name="pct_puntualidad" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_puntualidad }}{% else %}{{ defaults.pct_puntualidad }}{% endif %}"></div>
+          <div class="bonos-field"><label>% uniforme</label><input name="pct_uniforme" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_uniforme }}{% else %}{{ defaults.pct_uniforme }}{% endif %}"></div>
+          <div class="bonos-field"><label>Límite uniforme</label><input name="limite_uniforme" type="number" min="0" value="{% if periodo %}{{ periodo.limite_uniforme }}{% else %}{{ defaults.limite_uniforme }}{% endif %}"></div>
+          <div class="bonos-field"><label>Límite asistencia</label><input name="limite_asistencia" type="number" min="0" value="{% if periodo %}{{ periodo.limite_asistencia }}{% else %}{{ defaults.limite_asistencia }}{% endif %}"></div>
+          <div class="bonos-field"><label>Límite puntualidad</label><input name="limite_puntualidad" type="number" min="0" value="{% if periodo %}{{ periodo.limite_puntualidad }}{% else %}{{ defaults.limite_puntualidad }}{% endif %}"></div>
+          <div class="bonos-field"><label>Límite producción</label><input name="limite_produccion" type="number" min="0" value="{% if periodo %}{{ periodo.limite_produccion }}{% else %}{{ defaults.limite_produccion }}{% endif %}"></div>
+          <div class="bonos-field"><label>Premio embetunado</label><input name="premio_embetunado" type="number" step="0.01" value="{% if periodo %}{{ periodo.premio_embetunado }}{% else %}{{ defaults.premio_embetunado }}{% endif %}"></div>
+        </div>
+        <div class="bonos-actions"><button class="bonos-btn primary" type="submit" {% if not can_manage %}disabled{% endif %}>Guardar configuración</button></div>
+      </form>
+    </div>
+  </section>
+
+  <section class="area-grid">
+    {% for row in area_rows %}
+    <article class="area-chip"><span>{{ row.label }}</span><strong>{{ row.count }} empleados</strong><small>${{ row.total|floatformat:2|intcomma }}</small></article>
+    {% endfor %}
+  </section>
+
+  <section class="bonos-card">
+    <div class="bonos-card-h">
+      <div class="bonos-card-title">Ajustes por empleado</div>
+      <span>{{ bonos|length }} registros</span>
+    </div>
+    <div class="bonos-card-body table-wrap">
+      {% if bonos %}
+      <table class="bonos-table">
+        <thead>
+          <tr>
+            <th>Empleado</th>
+            <th>Área</th>
+            <th>Días</th>
+            <th>Conceptos</th>
+            <th>Ajustes</th>
+            <th>Total</th>
+            <th>Guardar</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for bono in bonos %}
+          <tr>
+              <td>
+                <form method="post" id="bono-form-{{ bono.id }}">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="ajuste_bono">
+                <input type="hidden" name="mes" value="{{ mes }}">
+                <input type="hidden" name="anio" value="{{ anio }}">
+                <input type="hidden" name="bono_id" value="{{ bono.id }}">
+                </form>
+                <div class="employee-name">{{ bono.empleado.nombre }}</div><div class="employee-meta">Código {{ bono.empleado.codigo|default:"-" }}</div>
+              </td>
+              <td>{{ bono.get_area_display }}</td>
+              <td><input class="mini-input" form="bono-form-{{ bono.id }}" name="dias_trabajados" type="number" min="0" value="{{ bono.dias_trabajados }}"></td>
+              <td>
+                <div class="adjust-grid">
+                  <label>Uniforme <input class="mini-input" form="bono-form-{{ bono.id }}" name="dias_uniforme" type="number" min="0" value="{{ bono.dias_uniforme }}"></label>
+                  <label>Asistencia <input class="mini-input" form="bono-form-{{ bono.id }}" name="dias_asistencia" type="number" min="0" value="{{ bono.dias_asistencia }}"></label>
+                  <label>Puntualidad <input class="mini-input" form="bono-form-{{ bono.id }}" name="dias_puntualidad" type="number" min="0" value="{{ bono.dias_puntualidad }}"></label>
+                  <label>Producción <input class="mini-input" form="bono-form-{{ bono.id }}" name="dias_produccion" type="number" min="0" value="{{ bono.dias_produccion }}"></label>
+                </div>
+              </td>
+              <td>
+                <div class="adjust-grid">
+                  <label>+ <input class="money-input" form="bono-form-{{ bono.id }}" name="ajuste_positivo" type="number" step="0.01" value="{{ bono.ajuste_positivo }}"></label>
+                  <label>- <input class="money-input" form="bono-form-{{ bono.id }}" name="ajuste_negativo" type="number" step="0.01" value="{{ bono.ajuste_negativo }}"></label>
+                  <label>Extra <input class="money-input" form="bono-form-{{ bono.id }}" name="bono_extra" type="number" step="0.01" value="{{ bono.bono_extra }}"></label>
+                </div>
+                <textarea class="note-input" form="bono-form-{{ bono.id }}" name="observaciones" placeholder="Observación">{{ bono.observaciones }}</textarea>
+              </td>
+              <td><strong>${{ bono.total_a_pagar|floatformat:2|intcomma }}</strong><br>{% if bono.pasa_asistencia and bono.pasa_uniforme and bono.pasa_puntualidad and bono.pasa_produccion %}<span class="status-pill ok">Pasa</span>{% else %}<span class="status-pill bad">Revisar</span>{% endif %}</td>
+              <td><button class="bonos-btn" type="submit" form="bono-form-{{ bono.id }}" {% if not can_manage %}disabled{% endif %}>Guardar</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p>No hay empleados inicializados en este período. Crea la configuración y después inicializa desde la app de captura.</p>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}

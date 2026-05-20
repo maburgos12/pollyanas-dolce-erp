@@ -34,7 +34,7 @@ NAV_GROUPS = [
         "label": "Producción",
         "items": [
             ("produccion", "plan", "Plan de producción", "/recetas/plan-produccion/", ["/recetas/plan-produccion/"]),
-            ("produccion", "bonos", "Bonos producción", "/bonos-produccion/app/", ["/bonos-produccion/"]),
+            ("produccion", "bonos", "Bonos producción", "/bonos-produccion/dashboard/", ["/bonos-produccion/"]),
             ("produccion", "reabasto_cedis", "Reabasto CEDIS", "/recetas/reabasto-cedis/", ["/recetas/reabasto-cedis/"]),
             ("produccion", "consolidado_cedis", "Consolidado CEDIS", "/recetas/consolidado-cedis/", ["/recetas/consolidado-cedis/"]),
             ("produccion", "cedis_semanal", "Producción CEDIS semanal", "/recetas/produccion-cedis/semanal/", ["/recetas/produccion-cedis/semanal/"]),
