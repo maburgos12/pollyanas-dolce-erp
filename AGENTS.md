@@ -32,6 +32,39 @@ ERP operativo de Pollyana's Dolce, cadena de pastelerías en Sinaloa, México.
 - Commitear con mensajes descriptivos en español o inglés técnico
 - Push a main solo cuando check da 0 errores
 
+## Regla de cierre obligatorio
+
+Ningún cambio, ajuste, corrección o carga de datos se considera terminado hasta
+que el resultado final esté validado en el lugar real donde se usa. No cerrar
+solo con "la API responde", "la base de datos tiene datos" o "los tests pasan"
+si el usuario final necesita verlo o usarlo en una pantalla, app, reporte,
+correo, archivo, PDF, Excel, endpoint, permiso o flujo operativo.
+
+Flujo estándar para cambios de código:
+1. Auditar primero el estado real: código, datos, logs, permisos, sesión,
+   navegador o producción según aplique.
+2. Crear rama nueva para el trabajo.
+3. Hacer el cambio mínimo necesario, sin mezclar hilos ni tocar archivos/datos
+   no relacionados.
+4. Validar localmente o en el contenedor con checks, tests, lint o validación
+   equivalente según el tipo de cambio.
+5. Abrir PR, mergearlo y desplegar al ambiente correcto.
+6. Ejecutar `migrate`, `collectstatic`, build o restart solo cuando aplique.
+7. Validar el resultado final en producción o en el ambiente objetivo con
+   evidencia concreta.
+
+Para UI, PWA, permisos, navegación o flujos visibles, validar con navegador real
+o con el usuario real afectado. Revisar también consola, Network/XHR, logs,
+sesión, permisos, service worker y caché si algo no aparece.
+
+Para datos operativos, validar el conteo y los registros en la tabla correcta,
+y luego confirmar que aparecen en la pantalla, reporte o app donde se usan.
+No alterar datos maestros, RRHH, nómina, ventas, inventario o configuración de
+producción salvo que Mauricio lo pida explícitamente.
+
+Si no se puede validar el resultado final, no dar la tarea por cerrada. Reportar
+el bloqueo exacto, lo que sí quedó hecho y qué falta para confirmar.
+
 ## Arquitectura de módulos (14 apps Django)
 | App | Responsabilidad |
 |-----|----------------|
