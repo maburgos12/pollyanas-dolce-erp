@@ -19,9 +19,6 @@ from pos_bridge.services.point_purchase_supplier_sync_service import (
     PointPurchaseSupplierSyncService,
 )
 from pos_bridge.services.recipe_identity_service import PointRecipeIdentityService
-from recetas.utils.normalizacion import normalizar_nombre
-
-
 class Command(BaseCommand):
     help = (
         "Extrae el historial de compras desde Point y asigna proveedor_principal a cada insumo. "
@@ -80,19 +77,16 @@ class Command(BaseCommand):
         service = PointPurchaseSupplierSyncService()
         identity = PointRecipeIdentityService()
 
-        rows = service.scrape_purchase_rows(desde=desde, hasta=hasta)
-        self.stdout.write(f"Point entregó {len(rows)} líneas de compra.\n")
+        insumo_proveedor_map = service.fetch_purchase_map(desde=desde, hasta=hasta)
+        self.stdout.write(f"Point: {len(insumo_proveedor_map)} artículos distintos con proveedor.\n")
 
-        if not rows:
+        if not insumo_proveedor_map:
             self.stdout.write(self.style.WARNING(
-                "Sin filas de compras. Verifica el rango de fechas o la conexión."
+                "Sin datos de compras. Verifica el rango de fechas o la conexión."
             ))
             if dry:
                 transaction.set_rollback(True)
             return
-
-        insumo_proveedor_map = service.build_insumo_supplier_map(rows)
-        self.stdout.write(f"Insumos distintos en compras: {len(insumo_proveedor_map)}\n")
 
         updated = 0
         sin_match = 0
@@ -109,7 +103,6 @@ class Command(BaseCommand):
                 continue
 
             insumo = resolved.insumo
-            proveedor_norm = normalizar_nombre(proveedor_name)
 
             try:
                 proveedor_obj, _ = Proveedor.objects.get_or_create(
@@ -138,8 +131,7 @@ class Command(BaseCommand):
             updated += 1
 
         self.stdout.write(f"\n{'─'*60}")
-        self.stdout.write(f"  Líneas de compra     : {len(rows)}")
-        self.stdout.write(f"  Insumos en compras   : {len(insumo_proveedor_map)}")
+        self.stdout.write(f"  Artículos en compras : {len(insumo_proveedor_map)}")
         self.stdout.write(f"  Actualizados         : {updated}")
         self.stdout.write(f"  Sin cambio           : {sin_cambio}")
         self.stdout.write(f"  Sin match ERP        : {sin_match}  ← no encontrados en catálogo ERP")
