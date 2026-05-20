@@ -298,6 +298,7 @@ function App(){
 
   const bonosFiltrados = filtroSuc ? bonos.filter(b=>String(b.sucursal)===filtroSuc) : bonos;
   const totalPagar = bonosFiltrados.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
+  const showBonusContext = tab !== 'permisos';
 
   return h('div',null,
     // HEADER
@@ -328,7 +329,7 @@ function App(){
 
     h('main',null,
       // PERIODO BAR
-      h('div',{className:'periodo-bar'},
+      showBonusContext && h('div',{className:'periodo-bar'},
         h('span',{className:'periodo-label'},'Período:'),
         periodo
           ? h('span',{className:'periodo-id'},`ID ${periodo.id} · ${periodo.dias_laborables} días lab.`)
@@ -345,7 +346,7 @@ function App(){
       ),
 
       // MÉTRICAS GLOBALES
-      tab!=='ventas' && h('div',{className:'metrics'},
+      showBonusContext && tab!=='ventas' && h('div',{className:'metrics'},
         h('div',{className:'metric-card'},h('div',{className:'lbl'},'Total a pagar'),h('div',{className:'val gold'},money(totalPagar))),
         h('div',{className:'metric-card'},h('div',{className:'lbl'},'Empleadas'),h('div',{className:'val'},bonosFiltrados.length)),
         h('div',{className:'metric-card'},h('div',{className:'lbl'},'Pasan asistencia'),h('div',{className:'val wine'},bonosFiltrados.filter(b=>b.pasa_asistencia).length)),
@@ -354,7 +355,7 @@ function App(){
 
       tab==='config' && h(ConfigTab,{bonos:bonosFiltrados,sucursales,filtroSuc,setFiltroSuc}),
       tab==='captura' && h(CapturaTab,{bonos:bonosFiltrados,mes,anio,showStatus}),
-      tab==='permisos' && h(PermisosTab,{bonos:bonosFiltrados,mes,anio,filtroSuc,showStatus}),
+      tab==='permisos' && h(PermisosTab,{bonos,sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatus}),
       tab==='ventas' && h(VentasTab,{ventas,periodo,syncPos,cargar,showStatus}),
       tab==='resumen' && h(ResumenTab,{bonos:bonosFiltrados,sucursales}),
       tab==='ajustes' && h(AjustesTab,{bonos:bonosFiltrados,cargar,showStatus})
@@ -552,7 +553,7 @@ function CapturaTab({bonos,mes,anio,showStatus}){
 }
 
 // ── PERMISOS TAB PREVIEW ─────────────────────────────────────────────────────
-function PermisosTab({bonos,mes,anio,filtroSuc,showStatus}){
+function PermisosTab({bonos,sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatus}){
   const [empleados,setEmpleados]=React.useState([]);
   const [permisos,setPermisos]=React.useState([]);
   const [selected,setSelected]=React.useState(null);
@@ -593,11 +594,12 @@ function PermisosTab({bonos,mes,anio,filtroSuc,showStatus}){
   function submitPermiso(){
     if(!selected){ showStatus('Selecciona una empleada.','err'); return; }
     if(!motivo.trim()){ showStatus('Captura el motivo del permiso.','err'); return; }
+    if(tipo==='permiso_hora'&&(!desde||!hasta)){ showStatus('Captura hora desde y hasta para permiso parcial.','err'); return; }
     api('/api/bonos-ventas/permisos/',{method:'POST',body:JSON.stringify({
       empleado:selected.id,
       tipo,
-      fecha_inicio:`${fecha}T${desde}:00`,
-      fecha_fin:hasta?`${fecha}T${hasta}:00`:null,
+      fecha_inicio:tipo==='permiso_dia'?`${fecha}T00:00:00`:`${fecha}T${desde}:00`,
+      fecha_fin:tipo==='permiso_dia'?null:`${fecha}T${hasta}:00`,
       goce_sueldo:goce,
       motivo,
     })}).then(p=>{ showStatus(`Permiso ${p.folio} creado`,'ok'); setMotivo(''); cargarPermisos(); }).catch(err=>showStatus(err.message,'err'));
@@ -616,6 +618,13 @@ function PermisosTab({bonos,mes,anio,filtroSuc,showStatus}){
     return `${fechaTxt} · ${p.tipo==='permiso_dia'?'Todo el dia':`${horaIni} - ${horaFin}`}`;
   }
   return h('div',null,
+    h('div',{className:'periodo-bar'},
+      h('span',{className:'periodo-label'},'Sucursal:'),
+      h('select',{value:filtroSuc,onChange:e=>setFiltroSuc(e.target.value),style:{padding:'6px 10px',border:'1px solid var(--line)',borderRadius:6,font:'inherit',fontSize:13,background:'var(--card)'}},
+        h('option',{value:''},'Todas'),
+        sucursales.map(([id,nom])=>h('option',{key:id,value:id},nom))
+      )
+    ),
     h('div',{className:'metrics'},
       h('div',{className:'metric-card'},h('div',{className:'lbl'},'Pendientes jefe'),h('div',{className:'val wine'},pendientes)),
       h('div',{className:'metric-card'},h('div',{className:'lbl'},'Preautorizados'),h('div',{className:'val'},preaut)),
@@ -637,10 +646,10 @@ function PermisosTab({bonos,mes,anio,filtroSuc,showStatus}){
               h('div',{className:'field'},h('label',null,'Fecha'),h('input',{className:'form-control',type:'date',value:fecha,onChange:e=>setFecha(e.target.value)})),
               h('div',{className:'field'},h('label',null,'Sucursal'),h('input',{className:'form-control',value:selected?.sucursal_nombre||'',readOnly:true}))
             ),
-            h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+            tipo==='permiso_hora'?h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
               h('div',{className:'field'},h('label',null,'Desde'),h('input',{className:'form-control',type:'time',value:desde,onChange:e=>setDesde(e.target.value)})),
               h('div',{className:'field'},h('label',null,'Hasta'),h('input',{className:'form-control',type:'time',value:hasta,onChange:e=>setHasta(e.target.value)}))
-            ),
+            ):h('div',{className:'preview-note'},'Dia completo: no necesitas capturar horario de entrada y salida.'),
             h('div',{className:'field'},h('label',null,'Goce de sueldo'),h('div',{className:'segmented'},
               [[true,'Con goce'],[false,'Sin goce']].map(([v,lbl])=>h('button',{key:lbl,type:'button',className:`segment ${goce===v?'on':''}`,onClick:()=>setGoce(v)},lbl))
             )),

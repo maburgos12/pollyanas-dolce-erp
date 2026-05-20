@@ -248,6 +248,7 @@ function App(){
   const bonosArea=bonos.filter(b=>b.area===area);
   const totalGlobal=bonos.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
   const pasan=bonos.filter(b=>b.pasa_asistencia&&b.pasa_uniforme&&b.pasa_puntualidad&&b.pasa_produccion).length;
+  const showBonusContext=tab!=='permisos';
   return h('div',null,
     h('header',{className:'hdr'},
       h('div',{className:'hdr-brand'},
@@ -266,13 +267,13 @@ function App(){
         h('button',{key:id,className:`tab-btn ${tab===id?'on':''}`,onClick:()=>setTab(id)},lbl))
     ),
     h('main',null,
-      h('div',{className:'periodo-bar'},
+      showBonusContext&&h('div',{className:'periodo-bar'},
         h('span',{className:'periodo-label'},'Periodo:'),
         periodo?h('span',{className:'periodo-id'},`ID ${periodo.id} · ${periodo.dias_laborables} dias lab.`):h('span',{style:{color:'var(--faint)',fontSize:13}},'Sin periodo para este mes'),
         !periodo&&h('button',{className:'btn btn-wine btn-sm',onClick:crearPeriodo},'Crear periodo'),
         periodo&&h('button',{className:'btn btn-ghost btn-sm',onClick:inicializar},'Inicializar empleados')
       ),
-      h('div',{className:'metrics'},
+      showBonusContext&&h('div',{className:'metrics'},
         h('div',{className:'metric-card'},h('div',{className:'lbl'},'Total a pagar'),h('div',{className:'val gold'},money(totalGlobal))),
         h('div',{className:'metric-card'},h('div',{className:'lbl'},'Empleados'),h('div',{className:'val'},bonos.length)),
         h('div',{className:'metric-card'},h('div',{className:'lbl'},'Pasan todo'),h('div',{className:'val wine'},pasan)),
@@ -346,11 +347,12 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
   function submitPermiso(){
     if(!selected){showStatus('Selecciona un empleado.','err');return;}
     if(!motivo.trim()){showStatus('Captura el motivo del permiso.','err');return;}
+    if(tipo==='permiso_hora'&&(!desde||!hasta)){showStatus('Captura hora desde y hasta para permiso parcial.','err');return;}
     api('/api/bonos-produccion/permisos/',{method:'POST',body:JSON.stringify({
       empleado:selected.id,
       tipo,
-      fecha_inicio:`${fecha}T${desde}:00`,
-      fecha_fin:hasta?`${fecha}T${hasta}:00`:null,
+      fecha_inicio:tipo==='permiso_dia'?`${fecha}T00:00:00`:`${fecha}T${desde}:00`,
+      fecha_fin:tipo==='permiso_dia'?null:`${fecha}T${hasta}:00`,
       goce_sueldo:goce,
       motivo,
     })}).then(p=>{showStatus(`Permiso ${p.folio} creado`,'ok');setMotivo('');cargarPermisos();}).catch(err=>showStatus(err.message,'err'));
@@ -391,10 +393,10 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
               h('div',{className:'field'},h('label',null,'Fecha'),h('input',{className:'form-control',type:'date',value:fecha,onChange:e=>setFecha(e.target.value)})),
               h('div',{className:'field'},h('label',null,'Area'),h('input',{className:'form-control',value:selected?(AREA_LABELS[selected.area]||selected.area||''):'' ,readOnly:true}))
             ),
-            h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+            tipo==='permiso_hora'?h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
               h('div',{className:'field'},h('label',null,'Desde'),h('input',{className:'form-control',type:'time',value:desde,onChange:e=>setDesde(e.target.value)})),
               h('div',{className:'field'},h('label',null,'Hasta'),h('input',{className:'form-control',type:'time',value:hasta,onChange:e=>setHasta(e.target.value)}))
-            ),
+            ):h('div',{className:'preview-note'},'Dia completo: no necesitas capturar horario de entrada y salida.'),
             h('div',{className:'field'},h('label',null,'Goce de sueldo'),h('div',{className:'segmented'},
               [[true,'Con goce'],[false,'Sin goce']].map(([v,lbl])=>h('button',{key:lbl,type:'button',className:`segment ${goce===v?'on':''}`,onClick:()=>setGoce(v)},lbl))
             )),
