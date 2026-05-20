@@ -38,6 +38,7 @@ def _dashboard_redirect(mes: int, anio: int):
 
 
 @login_required
+@never_cache
 def bonos_produccion_dashboard(request):
     if not can_view_submodule(request.user, "produccion", "bonos"):
         raise PermissionDenied
