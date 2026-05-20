@@ -19,7 +19,16 @@ class RegistroDiarioInline(admin.TabularInline):
 
 @admin.register(ConfigBonoPeriodo)
 class ConfigBonoPeriodoAdmin(admin.ModelAdmin):
-    list_display = ["mes", "anio", "dias_laborables", "monto_hornos", "monto_embetunado", "monto_armado", "monto_crucero"]
+    list_display = [
+        "mes",
+        "anio",
+        "dias_laborables",
+        "monto_hornos",
+        "monto_area_produccion",
+        "monto_armado",
+        "monto_logistica",
+        "monto_crucero",
+    ]
     list_filter = ["anio", "mes"]
 
 

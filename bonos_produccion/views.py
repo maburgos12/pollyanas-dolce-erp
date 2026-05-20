@@ -14,6 +14,7 @@ from rrhh.bonos_permisos import BasePermisosEquipoViewSet
 from .models import (
     AREA_EMBETUNADO,
     AREA_HORNOS,
+    AREA_PRODUCCION,
     AREAS_PRODUCCION,
     BonoProduccionEmpleado,
     ConfigBonoPeriodo,
@@ -71,7 +72,7 @@ class ConfigBonoPeriodoViewSet(viewsets.ModelViewSet):
         for empleado in empleados:
             area = normalizar_area_produccion(empleado.area)
             if area not in areas_validas:
-                area = AREA_HORNOS
+                area = AREA_PRODUCCION
             considerados += 1
             _, created = BonoProduccionEmpleado.objects.get_or_create(
                 periodo=periodo,
