@@ -34,20 +34,21 @@
   .area-chip{padding:.85rem;border:1px solid #ede6f0;border-radius:10px;background:#fbf8fb}
   .area-chip span{display:block;color:#6b5f70;font-size:.72rem;font-weight:800;text-transform:uppercase}
   .area-chip strong{display:block;font-size:1.05rem;margin-top:.15rem}
-  .rule-config{display:grid;gap:.85rem;margin-top:1rem}
-  .rule-selector{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:.6rem}
-  .rule-tab{border:1px solid #e7ddeb;background:#fff;border-radius:10px;padding:.8rem .9rem;text-align:left;font:inherit;cursor:pointer;color:#1c1520}
+  .rule-config{display:block;margin-top:1rem}
+  .rule-selector{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:.6rem;margin-bottom:.85rem}
+  .rule-tab{border:1px solid #e7ddeb;background:#fff;border-radius:10px;padding:.75rem .85rem;text-align:left;font:inherit;cursor:pointer;color:#1c1520;display:flex;align-items:center;justify-content:space-between;gap:.75rem;min-height:68px}
   .rule-tab strong{display:block;font-size:.96rem;font-weight:900}
-  .rule-tab span{display:block;margin-top:.15rem;font-size:.78rem;font-weight:800;color:#6b5f70}
+  .rule-tab span{display:block;margin-top:0;font-size:.78rem;font-weight:800;color:#6b5f70;text-align:right;line-height:1.25}
   .rule-tab.active{border-color:#8b2252;background:#8b2252;color:#fff}
   .rule-tab.active span{color:#f4edf4}
-  .rule-panel{border:1px solid #ede6f0;border-radius:10px;background:#fff}
-  .rule-panel[hidden]{display:none}
+  .rule-panel-stack{display:block;width:100%;clear:both}
+  .rule-panel{display:block;width:100%;max-width:100%;border:1px solid #ede6f0;border-radius:10px;background:#fff;overflow:hidden}
+  .rule-panel[hidden]{display:none!important}
   .rule-panel-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.9rem 1rem;border-bottom:1px solid #ede6f0}
   .rule-panel-title{font-size:1rem;font-weight:900}
   .rule-panel-meta{font-size:.82rem;font-weight:800;color:#6b5f70}
   .rule-body{padding:1rem;display:grid;gap:.9rem}
-  .rule-concepts{display:grid;grid-template-columns:repeat(4,minmax(170px,1fr));gap:.75rem}
+  .rule-concepts{display:grid;grid-template-columns:repeat(4,minmax(170px,1fr));gap:.75rem;width:100%}
   .rule-row{border:1px solid #ede6f0;border-radius:10px;background:#fbf8fb;padding:.8rem;display:grid;grid-template-columns:1fr 1fr;gap:.65rem;align-items:end}
   .rule-row .status-pill{grid-column:1 / -1}
   .rule-row.rule-disabled{display:none}
@@ -137,19 +138,21 @@
           <div class="bonos-field"><label>Premio embetunado</label><input name="premio_embetunado" type="number" step="0.01" value="{% if periodo %}{{ periodo.premio_embetunado }}{% else %}{{ defaults.premio_embetunado }}{% endif %}"></div>
         </div>
 
-        <div class="rule-config">
-          <div class="rule-selector" id="rule-selector">
-            {% for row in area_rows %}
-            <button class="rule-tab {% if forloop.first %}active{% endif %}" type="button" data-rule-area="{{ row.area }}">
-              <strong>{{ row.label }}</strong>
-              <span>{{ row.count }} empleados · ${{ row.monto|floatformat:2|intcomma }}</span>
-            </button>
-            {% endfor %}
-          </div>
-          {% for row in area_rows %}
-          <section class="rule-panel" data-rule-panel="{{ row.area }}" {% if not forloop.first %}hidden{% endif %}>
-            <div class="rule-panel-head">
-              <div>
+	        <div class="rule-config">
+	          <div class="rule-selector" id="rule-selector">
+	            {% for row in area_rows %}
+	            <button class="rule-tab {% if forloop.first %}active{% endif %}" type="button" data-rule-area="{{ row.area }}">
+	              <strong>{{ row.label }}</strong>
+	              <span>{{ row.count }} empleados · ${{ row.monto|floatformat:2|intcomma }}</span>
+	            </button>
+	            {% endfor %}
+	          </div>
+	        </div>
+	        <div class="rule-panel-stack">
+	          {% for row in area_rows %}
+	          <section class="rule-panel" data-rule-panel="{{ row.area }}" {% if not forloop.first %}hidden{% endif %}>
+	            <div class="rule-panel-head">
+	              <div>
                 <div class="rule-panel-title">{{ row.label }}</div>
                 <div class="rule-panel-meta">{{ row.count }} empleados · monto base ${{ row.monto|floatformat:2|intcomma }}</div>
               </div>
@@ -182,10 +185,10 @@
                   <div class="bonos-field"><label>Límite</label><input name="{{ row.prefix }}_limite_uniforme" type="number" min="0" value="{{ row.limite_uniforme }}"></div>
                 </div>
               </div>
-            </div>
-          </section>
-          {% endfor %}
-        </div>
+	            </div>
+	          </section>
+	          {% endfor %}
+	        </div>
         <div class="bonos-actions"><button class="bonos-btn primary" type="submit" {% if not can_manage %}disabled{% endif %}>Guardar configuración</button></div>
       </form>
     </div>
