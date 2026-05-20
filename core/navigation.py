@@ -148,31 +148,40 @@ NAV_GROUPS = [
 def build_nav_groups(user, current_path: str) -> list[dict]:
     groups = []
     current_path = current_path or ""
+    visible_groups = []
+    best_match_len = 0
     for group in NAV_GROUPS:
         items = []
-        active_group = False
         for module, submodule, label, url, prefixes in group["items"]:
             if not can_view_submodule(user, module, submodule):
                 continue
-            active = any(current_path.startswith(prefix) for prefix in prefixes)
-            active_group = active_group or active
+            match_len = max((len(prefix) for prefix in prefixes if current_path.startswith(prefix)), default=0)
+            best_match_len = max(best_match_len, match_len)
             items.append(
                 {
                     "label": label,
                     "url": url,
-                    "active": active,
+                    "active": False,
+                    "_match_len": match_len,
                     "module": module,
                     "submodule": submodule,
                     "initial": label[:1],
                 }
             )
         if items:
-            groups.append(
+            visible_groups.append(
                 {
                     "key": group["key"],
                     "label": group["label"],
                     "items": items,
-                    "active": active_group,
+                    "active": False,
                 }
             )
+    for group in visible_groups:
+        active_group = False
+        for item in group["items"]:
+            item["active"] = bool(best_match_len and item.pop("_match_len") == best_match_len)
+            active_group = active_group or item["active"]
+        group["active"] = active_group
+        groups.append(group)
     return groups

@@ -25,7 +25,7 @@ from .plan import (
     _resolve_receta_for_sales, _resolve_solicitud_window,
     _resolve_sucursal_for_sales, _ui_to_model_alcance,
     # public views
-    forecast_preview_export, forecast_vs_solicitud_export, forecast_backtest_export,
+    forecast_preview_export, forecast_supply_export, forecast_vs_solicitud_export, forecast_backtest_export,
     pronosticos_descargar_plantilla, pronosticos_importar,
     ventas_historicas_descargar_plantilla, ventas_historicas_importar,
     solicitud_ventas_descargar_plantilla, solicitud_ventas_guardar,

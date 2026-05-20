@@ -13,9 +13,9 @@ from core.access import ROLE_DG
 from core.models import Sucursal
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
 from inventario.stock_trace import TRACE_MANUAL_SYNC, build_stock_trace
-from maestros.models import Insumo, Proveedor, UnidadMedida
+from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
 from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob
-from recetas.models import LineaReceta, Receta
+from recetas.models import LineaReceta, Receta, RecetaCostoVersion
 from reportes.auto_production_service import (
     approve_production_order,
     execute_production_order,
@@ -534,6 +534,234 @@ class ProjectionSupplyContextTests(TestCase):
             insumo_row["required_gross_qty"],
             (product_row["forecast_qty"] * Decimal("1.5")).quantize(Decimal("0.001")),
         )
+
+    def test_projection_supply_calculates_estimated_spend_from_latest_cost(self):
+        CostoInsumo.objects.create(
+            insumo=self.insumo,
+            proveedor=self.provider,
+            fecha=self.target_date,
+            costo_unitario=Decimal("12.50"),
+            source_hash="projection-supply-cost",
+        )
+        context = build_projection_supply_context(
+            target_date=self.target_date,
+            forecast_context={
+                "target_label": "Forecast prueba",
+                "summary": {"forecast_units": Decimal("20")},
+                "rows": [
+                    {
+                        "branch_id": self.branch.id,
+                        "branch_code": self.branch.codigo,
+                        "branch_name": self.branch.nombre,
+                        "recipe_id": self.recipe.id,
+                        "recipe_name": self.recipe.nombre,
+                        "forecast_qty": Decimal("20"),
+                        "buffer_units": Decimal("0"),
+                    }
+                ],
+            },
+        )
+
+        insumo_row = context["insumos"][0]
+        self.assertEqual(insumo_row["article_class_label"], "Materia prima")
+        self.assertEqual(insumo_row["unit_cost"], Decimal("12.50"))
+        self.assertEqual(insumo_row["estimated_spend"], Decimal("375.00"))
+        self.assertEqual(context["summary"]["estimated_spend"], Decimal("375.00"))
+
+    def test_projection_supply_uses_costed_preparation_for_internal_input(self):
+        prep_recipe = Receta.objects.create(
+            nombre="Batida Proyección",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("1"),
+            rendimiento_unidad=self.unit_kg,
+            hash_contenido="hash-projection-prep-cost",
+        )
+        internal_input = Insumo.objects.create(
+            codigo=f"DERIVADO:RECETA:{prep_recipe.id}:PREPARACION",
+            nombre="Batida Proyección",
+            nombre_normalizado="batida proyeccion",
+            unidad_base=self.unit_kg,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        RecetaCostoVersion.objects.create(
+            receta=prep_recipe,
+            version_num=1,
+            hash_snapshot="hash-projection-prep-cost-v1",
+            costo_total=Decimal("5.00"),
+            fuente="POINT_PRODUCTION_REPORT",
+        )
+        LineaReceta.objects.create(
+            receta=self.recipe,
+            posicion=2,
+            insumo=internal_input,
+            insumo_texto=internal_input.nombre,
+            cantidad=Decimal("3"),
+            unidad_texto="kg",
+            unidad=self.unit_kg,
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+
+        context = build_projection_supply_context(
+            target_date=self.target_date,
+            forecast_context={
+                "target_label": "Forecast preparación",
+                "summary": {"forecast_units": Decimal("2")},
+                "rows": [
+                    {
+                        "branch_id": self.branch.id,
+                        "branch_code": self.branch.codigo,
+                        "branch_name": self.branch.nombre,
+                        "recipe_id": self.recipe.id,
+                        "recipe_name": self.recipe.nombre,
+                        "forecast_qty": Decimal("2"),
+                        "buffer_units": Decimal("0"),
+                    }
+                ],
+            },
+        )
+
+        internal_row = next(row for row in context["insumos"] if row["insumo_id"] == internal_input.id)
+        self.assertEqual(internal_row["article_class_label"], "Insumo interno")
+        self.assertEqual(internal_row["unit_cost"], Decimal("5.000000"))
+        self.assertEqual(internal_row["estimated_spend"], Decimal("30.00"))
+        self.assertEqual(internal_row["cost_sources_text"], "POINT_PRODUCTION_REPORT")
+
+    def test_projection_supply_explodes_internal_preparations_without_double_costing(self):
+        unit_pz = UnidadMedida.objects.create(codigo="pz-prj", nombre="Pieza proyección", tipo=UnidadMedida.TIPO_PIEZA)
+        unit_lt = UnidadMedida.objects.create(codigo="lt-prj", nombre="Litro proyección", tipo=UnidadMedida.TIPO_VOLUMEN)
+        huevo = Insumo.objects.create(
+            nombre="Huevo Proyección",
+            nombre_normalizado="huevo proyeccion",
+            unidad_base=unit_pz,
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            categoria="Lácteos y huevo",
+            proveedor_principal=self.provider,
+        )
+        aceite = Insumo.objects.create(
+            nombre="Aceite Proyección",
+            nombre_normalizado="aceite proyeccion",
+            unidad_base=unit_lt,
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            categoria="Aceites",
+            proveedor_principal=self.provider,
+        )
+        caja = Insumo.objects.create(
+            nombre="Caja Proyección",
+            nombre_normalizado="caja proyeccion",
+            unidad_base=unit_pz,
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            categoria="Cajas",
+            proveedor_principal=self.provider,
+        )
+        for insumo, costo, source_hash in [
+            (huevo, "2.00", "projection-huevo-cost"),
+            (aceite, "30.00", "projection-aceite-cost"),
+            (caja, "1.00", "projection-caja-cost"),
+        ]:
+            CostoInsumo.objects.create(
+                insumo=insumo,
+                proveedor=self.provider,
+                fecha=self.target_date,
+                costo_unitario=Decimal(costo),
+                source_hash=source_hash,
+            )
+        prep_recipe = Receta.objects.create(
+            nombre="Betún Mantequilla Proyección",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("10"),
+            rendimiento_unidad=self.unit_kg,
+            familia="Betunes",
+            categoria="Mantequilla",
+            hash_contenido="hash-projection-betun-cost",
+        )
+        betun = Insumo.objects.create(
+            codigo=f"DERIVADO:RECETA:{prep_recipe.id}:PREPARACION",
+            nombre="Betún Mantequilla Proyección",
+            nombre_normalizado="betun mantequilla proyeccion",
+            unidad_base=self.unit_kg,
+            tipo_item=Insumo.TIPO_INTERNO,
+            categoria="Betunes",
+        )
+        RecetaCostoVersion.objects.create(
+            receta=prep_recipe,
+            version_num=1,
+            hash_snapshot="hash-projection-betun-cost-v1",
+            costo_total=Decimal("150.00"),
+            fuente="POINT_PRODUCTION_REPORT",
+        )
+        LineaReceta.objects.create(
+            receta=prep_recipe,
+            posicion=1,
+            insumo=huevo,
+            insumo_texto=huevo.nombre,
+            cantidad=Decimal("20"),
+            unidad=unit_pz,
+            unidad_texto="pz",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        LineaReceta.objects.create(
+            receta=prep_recipe,
+            posicion=2,
+            insumo=aceite,
+            insumo_texto=aceite.nombre,
+            cantidad=Decimal("2"),
+            unidad=unit_lt,
+            unidad_texto="lt",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        LineaReceta.objects.create(
+            receta=self.recipe,
+            posicion=2,
+            insumo=betun,
+            insumo_texto=betun.nombre,
+            cantidad=Decimal("5"),
+            unidad=self.unit_kg,
+            unidad_texto="kg",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        LineaReceta.objects.create(
+            receta=self.recipe,
+            posicion=3,
+            insumo=caja,
+            insumo_texto=caja.nombre,
+            cantidad=Decimal("2"),
+            unidad=unit_pz,
+            unidad_texto="pz",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+
+        context = build_projection_supply_context(
+            target_date=self.target_date,
+            forecast_context={
+                "target_label": "Forecast multinivel",
+                "summary": {"forecast_units": Decimal("3")},
+                "rows": [
+                    {
+                        "branch_id": self.branch.id,
+                        "branch_code": self.branch.codigo,
+                        "branch_name": self.branch.nombre,
+                        "recipe_id": self.recipe.id,
+                        "recipe_name": self.recipe.nombre,
+                        "forecast_qty": Decimal("3"),
+                        "buffer_units": Decimal("0"),
+                    }
+                ],
+            },
+        )
+
+        prepared = next(row for row in context["prepared_insumos"] if row["insumo_id"] == betun.id)
+        self.assertEqual(prepared["required_gross_qty"], Decimal("15.000"))
+        self.assertEqual(prepared["unidad_codigo"], "kg-prj")
+        self.assertEqual(prepared["family"], "Betunes")
+        self.assertEqual(prepared["category"], "Mantequilla")
+
+        purchase_by_name = {row["insumo_nombre"]: row for row in context["insumos"]}
+        self.assertEqual(purchase_by_name["Huevo Proyección"]["required_gross_qty"], Decimal("30.000"))
+        self.assertEqual(purchase_by_name["Aceite Proyección"]["required_gross_qty"], Decimal("3.000"))
+        self.assertEqual(purchase_by_name["Caja Proyección"]["required_gross_qty"], Decimal("6.000"))
+        self.assertNotIn("Betún Mantequilla Proyección", purchase_by_name)
+        self.assertEqual(context["summary"]["estimated_spend"], Decimal("156.00"))
+        self.assertEqual(context["summary"]["prepared_insumos"], 1)
 
 
 class ProjectionSupplyViewTests(TestCase):

@@ -86,6 +86,7 @@ from ..utils.matching import match_insumo
 from ..utils.normalizacion import normalizar_nombre
 from ..catalogs import familia_categoria_catalogo_json, familias_producto_catalogo
 from reportes.executive_panels import _partial_month_amount_quantity
+from reportes.production_projection_supply_service import build_projection_supply_context_from_forecast_preview
 from ventas.models import VentaAutoritativaPoint
 
 OFFICIAL_POINT_SOURCE = "/Report/PrintReportes?idreporte=3"
@@ -15081,6 +15082,14 @@ def _forecast_vs_solicitud_filename(compare: dict[str, Any], export_format: str)
     return f"pronostico_vs_solicitud_{start_txt}_{end_txt}_{escenario}.{export_format}"
 
 
+def _forecast_supply_filename(payload: dict[str, Any], escenario: str) -> str:
+    start_txt = str(payload.get("target_start") or timezone.localdate().isoformat()).replace("-", "")
+    end_txt = str(payload.get("target_end") or payload.get("target_start") or timezone.localdate().isoformat()).replace("-", "")
+    alcance = str(payload.get("alcance") or "mes").lower()
+    scenario = str(escenario or "base").lower()
+    return f"insumos_requeridos_forecast_{alcance}_{start_txt}_{end_txt}_{scenario}.xlsx"
+
+
 def _forecast_backtest_filename(payload: dict[str, Any], export_format: str) -> str:
     scope = payload.get("scope") or {}
     alcance = str(scope.get("alcance") or "mes").lower()
@@ -15217,7 +15226,177 @@ def forecast_preview_export(request: HttpRequest) -> HttpResponse:
                 row.get("observaciones") or "",
                 int(row.get("muestras") or 0),
             ]
+    )
+    return response
+
+
+@login_required
+@permission_required("recetas.view_planproduccion", raise_exception=True)
+def forecast_supply_export(request: HttpRequest) -> HttpResponse:
+    payload = request.session.get("pronostico_estadistico_preview")
+    if not payload:
+        messages.warning(request, "No hay preview de pronóstico para explotar insumos.")
+        return _redirect_plan_produccion_with_request_params(request)
+
+    escenario = (request.GET.get("escenario") or request.GET.get("forecast_compare_escenario") or "base").strip().lower()
+    if escenario not in {"base", "bajo", "alto"}:
+        escenario = "base"
+    supply = build_projection_supply_context_from_forecast_preview(payload, escenario=escenario)
+    if not supply:
+        messages.warning(request, "No hay insumos requeridos para exportar.")
+        return _redirect_plan_produccion_with_request_params(request)
+
+    wb = Workbook()
+
+    def style_header(ws):
+        for cell in ws[1]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="1F4E79")
+            cell.alignment = Alignment(horizontal="center")
+
+    ws_resumen = wb.active
+    ws_resumen.title = "Resumen"
+    ws_resumen.append(["Campo", "Valor"])
+    ws_resumen.append(["Rango", supply.get("target_label") or ""])
+    ws_resumen.append(["Escenario", str(supply.get("scenario") or escenario).upper()])
+    ws_resumen.append(["Unidades forecast", float(supply["summary"].get("forecast_units") or 0)])
+    ws_resumen.append(["Productos proyectados", int(supply["summary"].get("projected_products") or 0)])
+    ws_resumen.append(["Preparados a producir", int(supply["summary"].get("prepared_insumos") or 0)])
+    ws_resumen.append(["Materia prima y empaques", int(supply["summary"].get("projected_insumos") or 0)])
+    ws_resumen.append(["Gasto estimado", float(supply["summary"].get("estimated_spend") or 0)])
+    ws_resumen.append(["Insumos sin costo", int(supply["summary"].get("missing_cost_insumos") or 0)])
+    ws_resumen.append(["Faltantes por corregir", int(supply["summary"].get("issues") or 0)])
+    ws_resumen.append(["Nota", supply.get("formula_note") or ""])
+    style_header(ws_resumen)
+
+    ws_productos = wb.create_sheet("Productos forecast")
+    ws_productos.append(["Sucursal", "Receta ID", "Receta", "Forecast", "Buffer", "Lineas explosion"])
+    for row in supply.get("products") or []:
+        ws_productos.append(
+            [
+                row.get("branch_code") or row.get("branch_name") or "",
+                int(row.get("recipe_id") or 0),
+                row.get("recipe_name") or "",
+                float(row.get("forecast_qty") or 0),
+                float(row.get("buffer_units") or 0),
+                len(row.get("items") or []),
+            ]
         )
+    style_header(ws_productos)
+
+    ws_preparados = wb.create_sheet("Preparados a producir")
+    ws_preparados.append(["Familia", "Categoria", "Preparado", "Receta preparacion", "Cantidad", "Unidad", "Productos"])
+    for row in supply.get("prepared_insumos") or []:
+        ws_preparados.append(
+            [
+                row.get("family") or "",
+                row.get("category") or "",
+                row.get("insumo_nombre") or "",
+                row.get("prep_recipe_name") or "",
+                float(row.get("required_gross_qty") or 0),
+                row.get("unidad_codigo") or "",
+                row.get("recipes_text") or "",
+            ]
+        )
+    style_header(ws_preparados)
+
+    ws_insumos = wb.create_sheet("Materia prima y empaques")
+    ws_insumos.append(
+        [
+            "Familia",
+            "Categoria",
+            "Tipo",
+            "Insumo",
+            "Cantidad",
+            "Unidad",
+            "Costo unitario",
+            "Gasto estimado",
+            "Fuente costo",
+            "Productos",
+        ]
+    )
+    for row in supply.get("purchase_insumos") or supply.get("insumos") or []:
+        ws_insumos.append(
+            [
+                row.get("family") or "",
+                row.get("category") or "",
+                row.get("article_class_label") or "",
+                row.get("insumo_nombre") or "",
+                float(row.get("required_gross_qty") or 0),
+                row.get("unidad_codigo") or "",
+                float(row.get("unit_cost") or 0),
+                float(row.get("estimated_spend") or 0),
+                row.get("cost_sources_text") or "",
+                row.get("recipes_text") or "",
+            ]
+        )
+    style_header(ws_insumos)
+
+    ws_explosion = wb.create_sheet("Explosion multinivel")
+    ws_explosion.append(
+        [
+            "Nivel",
+            "Ruta",
+            "Producto forecast",
+            "Receta",
+            "Tipo",
+            "Insumo",
+            "Cantidad",
+            "Unidad",
+            "Costo unitario",
+            "Gasto estimado",
+            "Fuente",
+            "Rollup",
+        ]
+    )
+    for row in supply.get("explosion_rows") or []:
+        ws_explosion.append(
+            [
+                int(row.get("level") or 0),
+                row.get("path") or "",
+                row.get("product_name") or "",
+                row.get("recipe_name") or "",
+                row.get("article_class_label") or "",
+                row.get("insumo_nombre") or "",
+                float(row.get("required_gross_qty") or 0),
+                row.get("unidad_codigo") or "",
+                float(row.get("unit_cost") or 0),
+                float(row.get("estimated_spend") or 0),
+                row.get("cost_source") or "",
+                row.get("rollup_kind") or "",
+            ]
+        )
+    style_header(ws_explosion)
+
+    ws_issues = wb.create_sheet("Faltantes por corregir")
+    ws_issues.append(["Severidad", "Codigo", "Producto", "Receta", "Insumo", "Detalle"])
+    for row in supply.get("issues") or []:
+        ws_issues.append(
+            [
+                row.get("severity") or "",
+                row.get("code") or "",
+                row.get("product_name") or "",
+                row.get("recipe_name") or "",
+                row.get("insumo_nombre") or "",
+                row.get("detail") or "",
+            ]
+        )
+    style_header(ws_issues)
+
+    for ws in wb.worksheets:
+        ws.freeze_panes = "A2"
+        for column_cells in ws.columns:
+            max_length = max(len(str(cell.value or "")) for cell in column_cells)
+            ws.column_dimensions[column_cells[0].column_letter].width = min(max(max_length + 2, 12), 48)
+
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{_forecast_supply_filename(payload, escenario)}"'
     return response
 
 
@@ -16952,6 +17131,13 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
     except (OperationalError, ProgrammingError):
         forecast_vs_solicitud = None
         solicitudes_venta_unavailable = True
+    try:
+        forecast_supply_context = build_projection_supply_context_from_forecast_preview(
+            forecast_preview,
+            escenario=forecast_compare_escenario,
+        )
+    except (OperationalError, ProgrammingError):
+        forecast_supply_context = None
     forecast_preview_summary = _forecast_preview_operational_summary(forecast_preview)
     demand_gate_summary = _commercial_signal_gate(
         forecast_preview_summary,
@@ -17113,6 +17299,7 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
             "solicitudes_venta_fecha_max": solicitudes_venta_fecha_max,
             "solicitudes_venta_unavailable": solicitudes_venta_unavailable,
             "forecast_preview": forecast_preview,
+            "forecast_supply_context": forecast_supply_context,
             "forecast_backtest": forecast_backtest,
             "forecast_vs_solicitud": forecast_vs_solicitud,
             "forecast_preview_summary": forecast_preview_summary,

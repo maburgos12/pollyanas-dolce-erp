@@ -18,6 +18,7 @@ from core.access import ROLE_ADMIN, ROLE_COMPRAS, can_view_compras
 from core.branch_catalog import eligible_operational_branch_qs
 from core.middleware import CanonicalLocalHostMiddleware
 from core.models import Departamento, Sucursal, UserProfile
+from core.navigation import build_nav_groups
 from core.views import _build_dashboard_daily_sales_snapshot, _build_dashboard_sales_history_summary, _compute_budget_semaforo, _compute_plan_forecast_semaforo, _sales_previous_dates, _sales_source_context
 from core.management.commands.ejecutar_rutina_diaria_erp import _prefer_public_database_url_if_needed
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
@@ -25,6 +26,24 @@ from maestros.models import CostoInsumo, Insumo, PointPendingMatch, UnidadMedida
 from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointDailySale, PointProduct, PointSalesDailyCategoryFact, PointSalesDailyProductFact
 from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, PoliticaStockSucursalProducto, Receta, VentaHistorica
 from reportes.models import CentroCosto
+
+
+class NavigationActiveStateTests(TestCase):
+    def _active_labels(self, path: str) -> list[str]:
+        with patch("core.navigation.can_view_submodule", return_value=True):
+            groups = build_nav_groups(SimpleNamespace(is_authenticated=True, is_superuser=True), path)
+        return [
+            item["label"]
+            for group in groups
+            for item in group["items"]
+            if item["active"]
+        ]
+
+    def test_plan_produccion_does_not_also_activate_recetas_catalog(self):
+        self.assertEqual(self._active_labels("/recetas/plan-produccion/"), ["Plan de producción"])
+
+    def test_recetas_catalog_does_not_capture_plan_routes(self):
+        self.assertEqual(self._active_labels("/recetas/"), ["Recetas"])
 
 
 class DashboardForecastRobustnessTests(TestCase):

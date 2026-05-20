@@ -103,6 +103,11 @@ urlpatterns = [
         name="forecast_preview_export",
     ),
     path(
+        "plan-produccion/pronosticos/insumos/export/",
+        views.forecast_supply_export,
+        name="forecast_supply_export",
+    ),
+    path(
         "plan-produccion/pronosticos/vs-solicitud/export/",
         views.forecast_vs_solicitud_export,
         name="forecast_vs_solicitud_export",
