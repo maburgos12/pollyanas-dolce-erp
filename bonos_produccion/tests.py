@@ -113,7 +113,9 @@ class BonosProduccionTests(TestCase):
     def test_permisos_equipo_produccion_crea_y_rechaza(self):
         user = get_user_model().objects.create_user(username="jefe-produccion")
         self.client.force_login(user)
-        empleado = Empleado.objects.create(nombre="Empleado Hornos Permiso", area="HORNOS")
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
+        empleado = Empleado.objects.create(nombre="Empleado Hornos Permiso", area="PRODUCCION")
+        BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado, area=AREA_HORNOS)
         Empleado.objects.create(nombre="Empleado Ventas", area="VENTAS")
 
         listado = self.client.get("/api/bonos-produccion/permisos/?mes=5&anio=2026&area=HORNOS")
