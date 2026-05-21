@@ -31,6 +31,8 @@ class PointInventoryCostRow:
     total_cost: Decimal
     last_movement: str
     raw_row: list[str]
+    # "supply" → sección Insumos (#tablaInsumosPA), "product" → sección Productos (#tablaProductosPA)
+    kind: str = "supply"
 
 
 @dataclass(slots=True)
@@ -46,6 +48,9 @@ class PointInventoryCostCaptureResult:
     zero_cost_samples: list[dict[str, str]]
     resale_costs_created: int = 0
     resale_costs_existing: int = 0
+    # Desglose por sección: insumos vs. productos de reventa
+    supply_rows_seen: int = 0
+    product_rows_seen: int = 0
 
 
 class PointInventoryCostCaptureService:
@@ -97,6 +102,57 @@ class PointInventoryCostCaptureService:
             total_cost=self._dec(total_cost),
             last_movement=last_movement,
             raw_row=cells,
+        )
+
+    def _normalize_product_row(
+        self, *, category_name: str, branch_name: str, row: list[str]
+    ) -> PointInventoryCostRow | None:
+        """
+        Parsea una fila de la tabla de Productos en Point (#tablaProductosPA).
+        Columnas esperadas (proveedor ya pre-filtrado en el dropdown):
+          [internal_id?,] código, nombre, cantidad, unidad, costo_unitario, costo_total, último_movimiento[, opciones]
+        """
+        # Quitar celdas vacías al final (columna "Opciones" suele tener botones sin texto)
+        cells = [str(cell or "").strip() for cell in row]
+        while cells and not cells[-1]:
+            cells.pop()
+        if len(cells) < 5:
+            return None
+        # Variante con id interno (9+ cols) o sin él (7-8 cols)
+        if len(cells) >= 9:
+            point_internal_id, point_code, point_name, quantity, unit, unit_cost, total_cost, *rest = cells
+            last_movement = rest[0] if rest else ""
+        elif len(cells) >= 7:
+            point_internal_id = ""
+            point_code, point_name, quantity, unit, unit_cost, total_cost, *rest = cells
+            last_movement = rest[0] if rest else ""
+        elif len(cells) >= 6:
+            point_internal_id = ""
+            point_code, point_name, quantity, unit, unit_cost, total_cost = cells[:6]
+            last_movement = ""
+        else:
+            point_internal_id = ""
+            point_code = cells[0] if len(cells) > 0 else ""
+            point_name = cells[1] if len(cells) > 1 else ""
+            quantity = cells[2] if len(cells) > 2 else "0"
+            unit = cells[3] if len(cells) > 3 else ""
+            unit_cost = cells[4] if len(cells) > 4 else "0"
+            total_cost = "0"
+            last_movement = ""
+        return PointInventoryCostRow(
+            branch_name=branch_name,
+            category_name=category_name,
+            point_internal_id=point_internal_id,
+            point_code=point_code,
+            point_name=point_name,
+            point_category="",  # la tabla de productos no tiene columna de categoría propia
+            quantity=self._dec(quantity),
+            unit=unit,
+            unit_cost=self._dec(unit_cost),
+            total_cost=self._dec(total_cost),
+            last_movement=last_movement,
+            raw_row=cells,
+            kind="product",
         )
 
     def _expand_search_scope(
@@ -179,8 +235,9 @@ class PointInventoryCostCaptureService:
             else:
                 branch_name = branch_hint
 
-            category_options = page.list_category_options(kind="supplies")
-            for option in category_options:
+            # ── Paso 1: sección Insumos (#tablaInsumosPA) ─────────────────────
+            supply_options = page.list_category_options(kind="supplies")
+            for option in supply_options:
                 label = str(option.get("label") or "").strip()
                 value = str(option.get("value") or "").strip()
                 if not value or "SELECCIONE" in label.upper():
@@ -195,6 +252,31 @@ class PointInventoryCostCaptureService:
                         results.append(normalized)
                         continue
                     haystack = normalizar_nombre(f"{normalized.point_code} {normalized.point_name} {normalized.point_category}")
+                    if point_codes and normalized.point_code.upper() in point_codes:
+                        results.append(normalized)
+                        continue
+                    if normalized_queries and any(query and query in haystack for query in normalized_queries):
+                        results.append(normalized)
+
+            # ── Paso 2: sección Productos (#tablaProductosPA) ─────────────────
+            # Aquí viven los productos de reventa (pirotecnia, bebidas, decorativos…).
+            # El dropdown de categoría filtra por proveedor, no por categoría de insumo.
+            product_options = page.list_category_options(kind="products")
+            for option in product_options:
+                label = str(option.get("label") or "").strip()
+                value = str(option.get("value") or "").strip()
+                if not value or "SELECCIONE" in label.upper():
+                    continue
+                page.select_category(value, kind="products")
+                payload = page.extract_inventory_table(kind="products")
+                for raw_row in payload.get("rows") or []:
+                    normalized = self._normalize_product_row(category_name=label, branch_name=branch_name, row=raw_row)
+                    if normalized is None:
+                        continue
+                    if include_all_rows:
+                        results.append(normalized)
+                        continue
+                    haystack = normalizar_nombre(f"{normalized.point_code} {normalized.point_name}")
                     if point_codes and normalized.point_code.upper() in point_codes:
                         results.append(normalized)
                         continue
@@ -333,6 +415,37 @@ class PointInventoryCostCaptureService:
 
         for row in rows:
             branch_name = row.branch_name or branch_name
+
+            if row.kind == "product":
+                # Filas de la sección Productos → solo ProductoReventaCosto
+                _resale_cost, resale_was_created, resale_status = self.persist_resale_product_cost_row(
+                    row, supplier_name=supplier_name
+                )
+                if resale_status == "CREATED":
+                    resale_created += 1
+                elif resale_status == "EXISTS":
+                    resale_existing += 1
+                elif resale_status == "NO_MATCH_POINT_PRODUCT":
+                    unresolved += 1
+                    if len(unresolved_samples) < sample_limit:
+                        unresolved_samples.append({
+                            "point_code": row.point_code,
+                            "point_name": row.point_name,
+                            "category": row.category_name,
+                            "kind": "product",
+                        })
+                elif resale_status == "UNIT_COST_ZERO":
+                    zero_cost += 1
+                    if len(zero_cost_samples) < sample_limit:
+                        zero_cost_samples.append({
+                            "point_code": row.point_code,
+                            "point_name": row.point_name,
+                            "category": row.category_name,
+                            "kind": "product",
+                        })
+                continue  # no intentar persist_cost_row para filas de productos
+
+            # Filas de la sección Insumos → intentar ProductoReventaCosto Y CostoInsumo
             _resale_cost, resale_was_created, resale_status = self.persist_resale_product_cost_row(
                 row,
                 supplier_name=supplier_name,
@@ -351,6 +464,7 @@ class PointInventoryCostCaptureService:
                             "point_code": row.point_code,
                             "point_name": row.point_name,
                             "category": row.category_name,
+                            "kind": "supply",
                         }
                     )
                 continue
@@ -362,6 +476,7 @@ class PointInventoryCostCaptureService:
                             "point_code": row.point_code,
                             "point_name": row.point_name,
                             "category": row.category_name,
+                            "kind": "supply",
                         }
                     )
                 continue
@@ -370,6 +485,8 @@ class PointInventoryCostCaptureService:
             else:
                 existing += 1
 
+        product_rows = sum(1 for r in rows if r.kind == "product")
+        supply_rows = len(rows) - product_rows
         return PointInventoryCostCaptureResult(
             branch_name=branch_name,
             rows_seen=len(rows),
@@ -382,4 +499,6 @@ class PointInventoryCostCaptureService:
             zero_cost_samples=zero_cost_samples,
             resale_costs_created=resale_created,
             resale_costs_existing=resale_existing,
+            supply_rows_seen=supply_rows,
+            product_rows_seen=product_rows,
         )

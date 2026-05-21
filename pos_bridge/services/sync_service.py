@@ -492,6 +492,8 @@ class PointSyncService:
                 summary.update(
                     {
                         "inventory_cost_rows_seen": cost_result.rows_seen,
+                        "inventory_cost_supply_rows": cost_result.supply_rows_seen,
+                        "inventory_cost_product_rows": cost_result.product_rows_seen,
                         "inventory_cost_costs_created": cost_result.costs_created,
                         "inventory_cost_costs_existing": cost_result.costs_existing,
                         "inventory_cost_resale_costs_created": cost_result.resale_costs_created,
