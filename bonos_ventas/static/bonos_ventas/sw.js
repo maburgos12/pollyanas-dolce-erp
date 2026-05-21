@@ -1,6 +1,5 @@
-const CACHE_NAME = "pollyanas-bonos-ventas-pwa-v1";
+const CACHE_NAME = "pollyanas-bonos-ventas-pwa-v2";
 const SHELL_ASSETS = [
-  "/bonos-ventas/app/",
   "/bonos-ventas/manifest.json",
   "/static/bonos_ventas/icons/icon-192.png",
   "https://unpkg.com/react@18/umd/react.production.min.js",
@@ -38,6 +37,16 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   if (event.request.method !== "GET") return;
+
+  const acceptsHtml = event.request.headers.get("accept")?.includes("text/html");
+  const isBonosHtml = url.pathname === "/bonos-ventas/app/" || url.pathname.startsWith("/bonos-ventas/dashboard/");
+
+  if (isBonosHtml || acceptsHtml || url.pathname === "/bonos-ventas/sw.js") {
+    event.respondWith(
+      fetch(event.request, {cache: "no-store"}).catch(() => caches.match(event.request))
+    );
+    return;
+  }
 
   event.respondWith(
     caches.match(event.request).then((cached) => {

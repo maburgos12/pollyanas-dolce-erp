@@ -2,7 +2,7 @@
   "name": "Pollyana's Bonos Ventas",
   "short_name": "Bonos Ventas",
   "description": "Captura y revision mensual de bonos de ventas",
-  "start_url": "/bonos-ventas/app/",
+  "start_url": "/bonos-ventas/app/?captura=1",
   "scope": "/bonos-ventas/",
   "display": "standalone",
   "background_color": "#F9F5F8",

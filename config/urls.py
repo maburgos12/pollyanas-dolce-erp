@@ -57,6 +57,7 @@ urlpatterns = [
     path("rrhh/", include(("rrhh.urls", "rrhh"), namespace="rrhh")),
     path("bonos-produccion/", RedirectView.as_view(url="/bonos-produccion/dashboard/", permanent=False)),
     path("bonos-produccion/", include(("bonos_produccion.urls", "bonos_produccion"), namespace="bonos_produccion")),
+    path("bonos-ventas/", RedirectView.as_view(url="/bonos-ventas/dashboard/", permanent=False)),
     path("bonos-ventas/", include(("bonos_ventas.urls", "bonos_ventas"), namespace="bonos_ventas")),
     path("logistica/", include(("logistica.urls", "logistica"), namespace="logistica")),
     path("fallas/", include(("fallas.urls", "fallas"), namespace="fallas")),
