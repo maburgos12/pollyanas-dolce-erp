@@ -37,6 +37,8 @@ body{background:var(--bg);color:var(--ink);font-family:Nunito,sans-serif;font-si
 .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:var(--r-sm);font:inherit;font-size:13px;font-weight:700;cursor:pointer;border:none;transition:opacity .15s,background .15s}
 .btn-wine{background:var(--wine);color:#fff}.btn-wine:hover{opacity:.88}
 .btn-ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}.btn-ghost:hover{background:var(--line)}
+.btn-logout{color:var(--bad);border-color:rgba(153,27,27,.24);text-decoration:none;background:#fff}
+.btn-logout:hover{background:var(--bad-bg);border-color:rgba(153,27,27,.38)}
 .btn-sm{padding:5px 10px;font-size:12px}
 .status-bar{background:var(--wine);color:#fff;font-size:12px;font-weight:700;padding:6px 20px;display:flex;align-items:center;gap:8px}
 .status-bar.ok{background:#166534}.status-bar.err{background:#991B1B}
@@ -248,10 +250,11 @@ function App(){
         h('div',{className:'hdr-icon'},h(IconFactory)),
         h('div',null,h('div',{className:'hdr-title'},"Bonos de Produccion"),h('div',{className:'hdr-sub'},"Pollyana's Dolce · "+MESES[+mes]+' '+anio))
       ),
-      h('div',{className:'hdr-controls'},
+        h('div',{className:'hdr-controls'},
         h('input',{type:'number',min:1,max:12,value:mes,onChange:e=>setMes(+e.target.value),title:'Mes'}),
         h('input',{type:'number',value:anio,onChange:e=>setAnio(+e.target.value),style:{width:70},title:'Año'}),
-        h('button',{className:'btn btn-wine',onClick:cargarTodo},loading?'Cargando…':'Actualizar')
+        h('button',{className:'btn btn-wine',onClick:cargarTodo},loading?'Cargando…':'Actualizar'),
+        h('a',{className:'btn btn-ghost btn-logout',href:'/logout/',title:'Cerrar sesión del ERP'},'Cerrar sesión')
       )
     ),
     status&&h('div',{className:`status-bar ${statusType}`},status),

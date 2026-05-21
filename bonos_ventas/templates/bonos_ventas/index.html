@@ -39,6 +39,8 @@ body{background:var(--bg);color:var(--ink);font-family:Nunito,sans-serif;font-si
 .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:var(--r-sm);font:inherit;font-size:13px;font-weight:700;cursor:pointer;border:none;transition:opacity .15s,background .15s}
 .btn-wine{background:var(--wine);color:#fff}.btn-wine:hover{opacity:.88}
 .btn-ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}.btn-ghost:hover{background:var(--line)}
+.btn-logout{color:var(--bad);border-color:rgba(153,27,27,.24);text-decoration:none;background:#fff}
+.btn-logout:hover{background:var(--bad-bg);border-color:rgba(153,27,27,.38)}
 .btn-gold{background:var(--gold);color:#1C1520}.btn-gold:hover{opacity:.88}
 .btn-sm{padding:5px 10px;font-size:12px}
 /* STATUS BAR */
@@ -303,7 +305,8 @@ function App(){
       h('div',{className:'hdr-controls'},
         h('input',{type:'number',min:1,max:12,value:mes,onChange:e=>setMes(+e.target.value),title:'Mes'}),
         h('input',{type:'number',value:anio,onChange:e=>setAnio(+e.target.value),style:{width:70},title:'Año'}),
-        h('button',{className:'btn btn-wine',onClick:cargar}, loading?'Cargando…':'Actualizar')
+        h('button',{className:'btn btn-wine',onClick:cargar}, loading?'Cargando…':'Actualizar'),
+        h('a',{className:'btn btn-ghost btn-logout',href:'/logout/',title:'Cerrar sesión del ERP'},'Cerrar sesión')
       )
     ),
 

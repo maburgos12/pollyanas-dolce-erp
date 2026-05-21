@@ -108,6 +108,8 @@ class BonosVentasTests(TestCase):
         self.assertIn("credentials:'same-origin'", content)
         self.assertIn("/bonos-ventas/manifest.json", content)
         self.assertIn("/bonos-ventas/sw.js", content)
+        self.assertIn("href:'/logout/'", content)
+        self.assertIn("Cerrar sesión", content)
         self.assertIn("employee-search", content)
         self.assertIn("Teclea nombre o apellido", content)
         self.assertNotIn("pd_logistica_access", content)
