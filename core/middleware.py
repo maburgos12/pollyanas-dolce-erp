@@ -11,7 +11,12 @@ from django.middleware.csrf import get_token
 from django.shortcuts import redirect
 from django.utils.deprecation import MiddlewareMixin
 
-from core.access import is_branch_capture_only, is_mermas_only, is_repartidor_only
+from core.access import (
+    is_bonos_produccion_capture_only,
+    is_branch_capture_only,
+    is_mermas_only,
+    is_repartidor_only,
+)
 
 
 ERP_BUILD_TAG = "2026.03.13-enterprise-01"
@@ -98,6 +103,43 @@ class BranchCaptureOnlyMiddleware:
             and not any(path.startswith(prefix) for prefix in self.ALLOWED_PREFIXES)
         ):
             return redirect("/recetas/reabasto-cedis/captura/")
+
+        return self.get_response(request)
+
+
+class BonosProduccionCaptureOnlyMiddleware:
+    """
+    Usuarios creados solo para captura de bonos de producción no deben navegar
+    el ERP administrativo.
+    """
+
+    ALLOWED_PREFIXES = (
+        "/bp/",
+        "/bonos-produccion/app/",
+        "/bonos-produccion/manifest.json",
+        "/bonos-produccion/sw.js",
+        "/api/bonos-produccion/",
+        "/logout/",
+        "/login/",
+        "/static/",
+        "/favicon.ico",
+    )
+    CAPTURE_URL = "/bonos-produccion/app/?captura=1"
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        user = getattr(request, "user", None)
+        path = request.path or "/"
+
+        if (
+            user
+            and user.is_authenticated
+            and is_bonos_produccion_capture_only(user)
+            and not any(path.startswith(prefix) for prefix in self.ALLOWED_PREFIXES)
+        ):
+            return redirect(self.CAPTURE_URL)
 
         return self.get_response(request)
 

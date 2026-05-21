@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 from compras.models import PresupuestoCompraPeriodo, SolicitudCompra
 from control.models import MermaPOS
-from core.access import ROLE_ADMIN, ROLE_COMPRAS, can_view_compras
+from core.access import ROLE_ADMIN, ROLE_BONOS_PRODUCCION_CAPTURA, ROLE_COMPRAS, can_view_compras
 from core.branch_catalog import eligible_operational_branch_qs
 from core.middleware import CanonicalLocalHostMiddleware
 from core.models import Departamento, Sucursal, UserProfile
@@ -151,6 +151,24 @@ class LoginViewAuthenticatedRedirectTests(TestCase):
         self.assertEqual(response_prod["Location"], "/bonos-produccion/app/?captura=1")
         self.assertEqual(response_ventas.status_code, 302)
         self.assertEqual(response_ventas["Location"], "/bonos-ventas/app/?captura=1")
+
+    def test_bonos_produccion_capture_only_user_cannot_navigate_erp(self):
+        group = Group.objects.create(name=ROLE_BONOS_PRODUCCION_CAPTURA)
+        user = get_user_model().objects.create_user(username="julissa.angulo", password="test12345")
+        user.groups.add(group)
+        self.client.force_login(user)
+
+        dashboard = self.client.get("/dashboard/")
+        admin_panel = self.client.get("/bonos-produccion/dashboard/")
+        app = self.client.get("/bonos-produccion/app/")
+        api = self.client.get("/api/bonos-produccion/periodos/")
+
+        self.assertEqual(dashboard.status_code, 302)
+        self.assertEqual(dashboard["Location"], "/bonos-produccion/app/?captura=1")
+        self.assertEqual(admin_panel.status_code, 302)
+        self.assertEqual(admin_panel["Location"], "/bonos-produccion/app/?captura=1")
+        self.assertEqual(app.status_code, 200)
+        self.assertEqual(api.status_code, 200)
 
 
 class DashboardHomologacionContextTests(TestCase):

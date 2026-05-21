@@ -14,7 +14,7 @@ from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import ensure_csrf_cookie
 
-from core.access import can_manage_submodule, can_view_submodule
+from core.access import can_manage_submodule, can_view_submodule, is_bonos_produccion_capture_only
 
 from .models import AREA_PRODUCCION, AREAS_PRODUCCION, BonoProduccionEmpleado, ConfigBonoArea, ConfigBonoPeriodo
 
@@ -195,6 +195,8 @@ def bonos_produccion_pwa(request):
     force_capture = (request.GET.get("captura") or "").strip().lower() in {"1", "true", "si", "sí"}
     user_agent = (request.headers.get("User-Agent") or "").lower()
     is_mobile = any(token in user_agent for token in ("iphone", "ipad", "android", "mobile"))
+    if is_bonos_produccion_capture_only(request.user):
+        force_capture = True
     if not force_capture and not is_mobile:
         return redirect("bonos_produccion:bonos-produccion-dashboard")
     return render(request, "bonos_produccion/index.html")
