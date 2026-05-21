@@ -145,6 +145,32 @@ def task_inventory_sync(
     )
 
 
+@shared_task(name="pos_bridge.purchase_resale_cost_sync", bind=True, max_retries=1, default_retry_delay=600, acks_late=True)
+def task_purchase_resale_cost_sync(
+    self,
+    *,
+    dias: int = 365,
+    max_compras: int = 900,
+):
+    from pos_bridge.services.point_purchase_resale_cost_service import PointPurchaseResaleCostSyncService
+
+    result = PointPurchaseResaleCostSyncService().sync_from_point(
+        dias=dias,
+        max_compras=max_compras,
+        apply=True,
+    )
+    return {
+        "purchases_seen": result.purchases_seen,
+        "details_seen": result.details_seen,
+        "matched_products": result.matched_products,
+        "created": result.created,
+        "existing": result.existing,
+        "zero_or_invalid_cost": result.zero_or_invalid_cost,
+        "unresolved": result.unresolved,
+        "products": sorted(result.imported_products)[:80],
+    }
+
+
 @shared_task(
     name="pos_bridge.realtime_inventory_sync",
     bind=True,
