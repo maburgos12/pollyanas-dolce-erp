@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Auditoría Inventario{% endblock %}
+{% block page_title %}Auditoría Inventario — Point vs ERP{% endblock %}
+
+{% block extra_css %}
+<style>
+  .kpi-strip { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:20px; }
+  .kpi-chip  { padding:8px 18px; border-radius:20px; font-size:13px; font-weight:700; cursor:pointer; border:2px solid transparent; }
+  .kpi-chip:hover { opacity:.85; }
+  .kpi-chip.active { border-color: var(--texto); }
+  .chip-ok      { background:#e8f5e9; color:#2e7d32; }
+  .chip-bajo    { background:#ffebee; color:#c62828; }
+  .chip-alto    { background:#fff8e1; color:#e65100; }
+  .chip-sinpoint{ background:#f3e5f5; color:#6a1b9a; }
+  .chip-sinerp  { background:#fce4ec; color:#880e4f; }
+  .chip-total   { background:var(--gris-suave); color:var(--texto); }
+
+  .audit-table th { white-space:nowrap; position:sticky; top:0; background:#fff; z-index:1; }
+  .audit-table td { vertical-align:middle; }
+  .disc-pos  { color:#e65100; font-weight:700; }
+  .disc-neg  { color:#c62828; font-weight:700; }
+  .disc-ok   { color:#2e7d32; }
+
+  .badge-OK       { background:#e8f5e9; color:#2e7d32; }
+  .badge-ALTO     { background:#fff3e0; color:#e65100; }
+  .badge-BAJO     { background:#ffebee; color:#c62828; }
+  .badge-SIN_POINT{ background:#f3e5f5; color:#6a1b9a; }
+  .badge-SIN_ERP  { background:#fce4ec; color:#880e4f; }
+
+  tr.row-BAJO     { background:#fff5f5 !important; }
+  tr.row-ALTO     { background:#fffde7 !important; }
+  tr.row-SIN_ERP  { background:#fce4ec !important; }
+  tr.row-SIN_POINT{ background:#f9f0ff !important; }
+
+  .sync-info { font-size:12px; color:var(--texto-light); margin-bottom:12px; }
+  .filter-bar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+{# ── Sync info ─────────────────────────────────────────────── #}
+<div class="sync-info">
+  {% if last_sync_fecha %}
+    Último sync Point: <strong>{{ last_sync_fecha|date:"d/m/Y H:i" }}</strong>
+    &nbsp;·&nbsp; ref: <code>{{ last_sync_ref }}</code>
+  {% else %}
+    <span style="color:var(--rojo)">Sin sincronización con Point — ejecuta <code>python manage.py sync_inventario_desde_point --apply</code></span>
+  {% endif %}
+</div>
+
+{# ── KPI strip ─────────────────────────────────────────────── #}
+<div class="kpi-strip">
+  <a href="?desde={{ desde }}&hasta={{ hasta }}&q={{ filtro_q }}" class="kpi-chip chip-total {% if not filtro_estado %}active{% endif %}" style="text-decoration:none">
+    Todo &nbsp;<strong>{{ total_ok|add:total_bajo|add:total_alto|add:total_sin_point|add:total_sin_erp }}</strong>
+  </a>
+  <a href="?desde={{ desde }}&hasta={{ hasta }}&q={{ filtro_q }}&estado=BAJO" class="kpi-chip chip-bajo {% if filtro_estado == 'BAJO' %}active{% endif %}" style="text-decoration:none">
+    ⬇ ERP &lt; Point &nbsp;<strong>{{ total_bajo }}</strong>
+  </a>
+  <a href="?desde={{ desde }}&hasta={{ hasta }}&q={{ filtro_q }}&estado=ALTO" class="kpi-chip chip-alto {% if filtro_estado == 'ALTO' %}active{% endif %}" style="text-decoration:none">
+    ⬆ ERP &gt; Point &nbsp;<strong>{{ total_alto }}</strong>
+  </a>
+  <a href="?desde={{ desde }}&hasta={{ hasta }}&q={{ filtro_q }}&estado=OK" class="kpi-chip chip-ok {% if filtro_estado == 'OK' %}active{% endif %}" style="text-decoration:none">
+    ✓ OK &nbsp;<strong>{{ total_ok }}</strong>
+  </a>
+  <a href="?desde={{ desde }}&hasta={{ hasta }}&q={{ filtro_q }}&estado=SIN_POINT" class="kpi-chip chip-sinpoint {% if filtro_estado == 'SIN_POINT' %}active{% endif %}" style="text-decoration:none">
+    Sin Point &nbsp;<strong>{{ total_sin_point }}</strong>
+  </a>
+  <a href="?desde={{ desde }}&hasta={{ hasta }}&q={{ filtro_q }}&estado=SIN_ERP" class="kpi-chip chip-sinerp {% if filtro_estado == 'SIN_ERP' %}active{% endif %}" style="text-decoration:none">
+    Sin ERP &nbsp;<strong>{{ total_sin_erp }}</strong>
+  </a>
+</div>
+
+{# ── Filtros ───────────────────────────────────────────────── #}
+<div class="filter-bar">
+  <form method="get" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <input type="text" name="q" value="{{ filtro_q }}" class="form-control"
+           style="width:200px" placeholder="Buscar insumo...">
+    <input type="date" name="desde" value="{{ desde }}" class="form-control" style="width:150px">
+    <span style="color:var(--texto-light)">a</span>
+    <input type="date" name="hasta" value="{{ hasta }}" class="form-control" style="width:150px">
+    {% if filtro_estado %}<input type="hidden" name="estado" value="{{ filtro_estado }}">{% endif %}
+    <label style="font-size:13px;display:flex;align-items:center;gap:6px">
+      <input type="checkbox" name="solo_disc" value="1" {% if solo_discrepancias %}checked{% endif %}>
+      Solo discrepancias
+    </label>
+    <button type="submit" class="btn btn-secondary btn-sm">Filtrar</button>
+    <a href="{% url 'inventario:auditoria_inventario' %}" class="btn btn-sm" style="background:#f0f0f0">Limpiar</a>
+  </form>
+</div>
+
+{# ── Tabla ─────────────────────────────────────────────────── #}
+<div class="table-wrapper">
+  <table class="table table-striped audit-table" style="font-size:13px">
+    <thead>
+      <tr>
+        <th>Insumo</th>
+        <th>Ud.</th>
+        <th style="text-align:right" title="Stock actual en ERP (captura manual)">ERP stock</th>
+        <th style="text-align:right" title="Stock último sync de Point ALMACEN">Point stock</th>
+        <th style="text-align:right" title="ERP stock − Point stock">Discrepancia</th>
+        <th style="text-align:right" title="Entradas manuales en el período">Entradas</th>
+        <th style="text-align:right" title="Salidas manuales en el período">Salidas</th>
+        <th style="text-align:right" title="Consumos registrados en el período">Consumos</th>
+        <th style="text-align:right" title="Compras recibidas en el período">Compras</th>
+        <th>Estado</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr class="row-{{ r.estado }}">
+        <td><strong>{{ r.nombre }}</strong></td>
+        <td>{{ r.unidad }}</td>
+        <td style="text-align:right;font-weight:700">{{ r.erp_stock|floatformat:2 }}</td>
+        <td style="text-align:right">
+          {% if r.point_stock is not None %}{{ r.point_stock|floatformat:2 }}
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+        <td style="text-align:right">
+          {% if r.discrepancia is not None %}
+            <span class="{% if r.discrepancia > 0 %}disc-pos{% elif r.discrepancia < 0 %}disc-neg{% else %}disc-ok{% endif %}">
+              {% if r.discrepancia > 0 %}+{% endif %}{{ r.discrepancia|floatformat:2 }}
+            </span>
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+        <td style="text-align:right;color:var(--verde)">{% if r.entradas %}+{{ r.entradas|floatformat:2 }}{% else %}—{% endif %}</td>
+        <td style="text-align:right;color:var(--rojo)">{% if r.salidas %}-{{ r.salidas|floatformat:2 }}{% else %}—{% endif %}</td>
+        <td style="text-align:right;color:var(--texto-light)">{% if r.consumos %}{{ r.consumos|floatformat:2 }}{% else %}—{% endif %}</td>
+        <td style="text-align:right;color:var(--verde)">{% if r.compras %}+{{ r.compras|floatformat:2 }}{% else %}—{% endif %}</td>
+        <td>
+          <span class="badge badge-{{ r.estado }}" style="font-size:11px">
+            {% if r.estado == "OK" %}✓ OK
+            {% elif r.estado == "ALTO" %}⬆ ERP alto
+            {% elif r.estado == "BAJO" %}⬇ ERP bajo
+            {% elif r.estado == "SIN_POINT" %}Sin Point
+            {% else %}Sin ERP{% endif %}
+          </span>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="10" class="text-center muted">Sin registros para este filtro.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="muted" style="font-size:12px;margin-top:8px">
+  <strong>Discrepancia</strong> = Stock ERP − Stock Point. Positivo: ERP tiene más que Point; negativo: ERP tiene menos.
+  <br>Las <strong>Entradas/Salidas/Consumos/Compras</strong> corresponden al período {{ desde }} → {{ hasta }}.
+</div>
+
+{% endblock %}

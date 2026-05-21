@@ -6378,3 +6378,217 @@ def captura_diaria(request: HttpRequest) -> HttpResponse:
             "insumo_options_json": __import__("json").dumps(insumo_options, default=str),
         },
     )
+
+
+# ─── Auditoría Point vs ERP ──────────────────────────────────────────────────
+
+@login_required
+def auditoria_inventario(request: HttpRequest) -> HttpResponse:
+    """
+    Cruza el stock de Point ALMACEN (último sync) contra las entradas/salidas
+    manuales del ERP y las compras recibidas.
+
+    Columnas por insumo:
+      - Stock Point  : cantidad del último AJUSTE con ref SYNC_POINT_*
+      - Stock ERP    : ExistenciaInsumo.stock_actual
+      - Entradas ERP : suma de ENTRADA en el período
+      - Salidas ERP  : suma de SALIDA en el período
+      - Consumos     : suma de CONSUMO en el período
+      - Compras      : suma de recepciones de compra en el período
+      - Discrepancia : Stock ERP − Stock Point
+      - Estado       : OK / ALTO / BAJO / SIN_POINT / SIN_ERP
+    """
+    if not can_view_inventario(request.user):
+        raise PermissionDenied("No tienes permisos para ver Inventario.")
+
+    import json as _json
+    from datetime import date as _date
+
+    # ── Período ────────────────────────────────────────────────────────────────
+    today = timezone.localdate()
+    default_desde = today.replace(day=1).isoformat()
+    default_hasta = today.isoformat()
+    desde_str = (request.GET.get("desde") or default_desde).strip()
+    hasta_str = (request.GET.get("hasta") or default_hasta).strip()
+    try:
+        desde = _date.fromisoformat(desde_str)
+    except ValueError:
+        desde = today.replace(day=1)
+    try:
+        hasta = _date.fromisoformat(hasta_str)
+    except ValueError:
+        hasta = today
+
+    filtro_q = (request.GET.get("q") or "").strip()
+    filtro_estado = (request.GET.get("estado") or "").strip()
+    solo_discrepancias = request.GET.get("solo_disc") == "1"
+
+    # ── Último snapshot de Point (SYNC_POINT) ─────────────────────────────────
+    # Last reference date
+    last_sync_qs = (
+        MovimientoInventario.objects
+        .filter(referencia__startswith="SYNC_POINT")
+        .order_by("-fecha")
+    )
+    last_sync_fecha = None
+    last_sync_ref = "—"
+    if last_sync_qs.exists():
+        last_mov = last_sync_qs.first()
+        last_sync_fecha = last_mov.fecha
+        last_sync_ref = last_mov.referencia
+
+    # Build map: insumo_id → Point stock (from last sync batch)
+    point_stock: dict[int, Decimal] = {}
+    if last_sync_fecha:
+        # All movements in the same sync run share the same referencia
+        for mov in MovimientoInventario.objects.filter(referencia=last_sync_ref).select_related("insumo"):
+            point_stock[mov.insumo_id] = Decimal(str(mov.cantidad or 0))
+
+    # ── ERP stock (ExistenciaInsumo) ───────────────────────────────────────────
+    exist_qs = ExistenciaInsumo.objects.select_related("insumo__unidad_base").order_by("insumo__nombre")
+    if filtro_q:
+        exist_qs = exist_qs.filter(insumo__nombre__icontains=filtro_q)
+
+    exist_map: dict[int, ExistenciaInsumo] = {e.insumo_id: e for e in exist_qs}
+
+    # ── Movements in period ────────────────────────────────────────────────────
+    from django.utils.timezone import make_aware
+    from datetime import datetime as _dt, timezone as _tz
+    desde_dt = make_aware(_dt(desde.year, desde.month, desde.day, 0, 0, 0), _tz.utc)
+    hasta_dt = make_aware(_dt(hasta.year, hasta.month, hasta.day, 23, 59, 59), _tz.utc)
+
+    mov_period = (
+        MovimientoInventario.objects
+        .filter(fecha__gte=desde_dt, fecha__lte=hasta_dt)
+        .exclude(referencia__startswith="SYNC_POINT")
+        .values("insumo_id", "tipo")
+        .annotate(total=Sum("cantidad"))
+    )
+    entradas: dict[int, Decimal] = defaultdict(Decimal)
+    salidas: dict[int, Decimal] = defaultdict(Decimal)
+    consumos: dict[int, Decimal] = defaultdict(Decimal)
+    for row in mov_period:
+        iid = row["insumo_id"]
+        t = row["tipo"]
+        val = Decimal(str(row["total"] or 0))
+        if t == MovimientoInventario.TIPO_ENTRADA:
+            entradas[iid] += val
+        elif t == MovimientoInventario.TIPO_SALIDA:
+            salidas[iid] += val
+        elif t == MovimientoInventario.TIPO_CONSUMO:
+            consumos[iid] += val
+
+    # ── Compras recibidas en período ───────────────────────────────────────────
+    compras_map: dict[int, Decimal] = defaultdict(Decimal)
+    try:
+        from compras.models import LineaRecepcion
+        for lr in (
+            LineaRecepcion.objects
+            .filter(recepcion__fecha__gte=desde_dt, recepcion__fecha__lte=hasta_dt)
+            .select_related("recepcion")
+            .values("insumo_id")
+            .annotate(total=Sum("cantidad_recibida"))
+        ):
+            if lr["insumo_id"]:
+                compras_map[lr["insumo_id"]] += Decimal(str(lr["total"] or 0))
+    except Exception:
+        pass
+
+    # ── Point insumos not yet in ERP ───────────────────────────────────────────
+    # insumo IDs covered by Point but potentially missing from ERP exist map
+    all_insumo_ids = set(exist_map.keys()) | set(point_stock.keys())
+
+    # Pull insumo objects for Point-only insumos
+    from maestros.models import Insumo as _Insumo
+    extra_insumos = {
+        i.id: i
+        for i in _Insumo.objects.filter(
+            id__in=(set(point_stock.keys()) - set(exist_map.keys()))
+        ).select_related("unidad_base")
+    }
+
+    # ── Build rows ─────────────────────────────────────────────────────────────
+    ZERO = Decimal("0")
+    rows = []
+    for iid in sorted(all_insumo_ids):
+        ei = exist_map.get(iid)
+        insumo = ei.insumo if ei else extra_insumos.get(iid)
+        if not insumo:
+            continue
+
+        nombre = insumo.nombre
+        if filtro_q and filtro_q.lower() not in nombre.lower():
+            continue
+
+        erp_stock = Decimal(str(ei.stock_actual if ei else 0))
+        p_stock = point_stock.get(iid)
+        ent = entradas.get(iid, ZERO)
+        sal = salidas.get(iid, ZERO)
+        con = consumos.get(iid, ZERO)
+        com = compras_map.get(iid, ZERO)
+
+        disc = None
+        estado = "SIN_POINT"
+        if p_stock is not None:
+            disc = erp_stock - p_stock
+            if abs(disc) < Decimal("0.5"):
+                estado = "OK"
+            elif disc > 0:
+                estado = "ALTO"
+            else:
+                estado = "BAJO"
+        elif ei:
+            estado = "SIN_POINT"
+        else:
+            estado = "SIN_ERP"
+
+        if filtro_estado and estado != filtro_estado:
+            continue
+        if solo_discrepancias and estado in ("OK", "SIN_POINT"):
+            continue
+
+        rows.append({
+            "insumo_id": iid,
+            "nombre": nombre,
+            "unidad": insumo.unidad_base.codigo if (insumo.unidad_base if insumo else None) else "—",
+            "erp_stock": erp_stock,
+            "point_stock": p_stock,
+            "discrepancia": disc,
+            "entradas": ent,
+            "salidas": sal,
+            "consumos": con,
+            "compras": com,
+            "estado": estado,
+        })
+
+    # Sort by estado severity then nombre
+    estado_order = {"BAJO": 0, "ALTO": 1, "SIN_ERP": 2, "SIN_POINT": 3, "OK": 4}
+    rows.sort(key=lambda r: (estado_order.get(r["estado"], 9), r["nombre"]))
+
+    # ── Summary KPIs ───────────────────────────────────────────────────────────
+    total_ok = sum(1 for r in rows if r["estado"] == "OK")
+    total_alto = sum(1 for r in rows if r["estado"] == "ALTO")
+    total_bajo = sum(1 for r in rows if r["estado"] == "BAJO")
+    total_sin_point = sum(1 for r in rows if r["estado"] == "SIN_POINT")
+    total_sin_erp = sum(1 for r in rows if r["estado"] == "SIN_ERP")
+
+    return render(
+        request,
+        "inventario/auditoria_inventario.html",
+        {
+            "page_title": "Auditoría inventario Point vs ERP",
+            "rows": rows,
+            "desde": desde.isoformat(),
+            "hasta": hasta.isoformat(),
+            "filtro_q": filtro_q,
+            "filtro_estado": filtro_estado,
+            "solo_discrepancias": solo_discrepancias,
+            "last_sync_fecha": last_sync_fecha,
+            "last_sync_ref": last_sync_ref,
+            "total_ok": total_ok,
+            "total_alto": total_alto,
+            "total_bajo": total_bajo,
+            "total_sin_point": total_sin_point,
+            "total_sin_erp": total_sin_erp,
+        },
+    )
