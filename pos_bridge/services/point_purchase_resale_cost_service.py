@@ -15,6 +15,13 @@ from recetas.utils.normalizacion import normalizar_nombre
 from reportes.models import ProductoReventaCosto
 
 
+PURCHASE_ARTICLE_PRODUCT_ALIASES = {
+    # Point registra la compra física de la tarjeta por el diseño/proveedor,
+    # pero el producto vendido conserva el nombre comercial de temporada.
+    "tarjeta happy mothers day": ("tarjeta de regalo dia de las madres", "tarjeta de regalo día de las madres", "78421", "1411"),
+}
+
+
 @dataclass(slots=True)
 class PointPurchaseResaleCostSyncResult:
     purchases_seen: int = 0
@@ -83,7 +90,15 @@ class PointPurchaseResaleCostSyncService:
         return index
 
     def _resolve_product(self, article_name: str, product_index: dict[str, PointProduct]) -> PointProduct | None:
-        return product_index.get(normalizar_nombre(article_name))
+        article_key = normalizar_nombre(article_name)
+        product = product_index.get(article_key)
+        if product is not None:
+            return product
+        for alias in PURCHASE_ARTICLE_PRODUCT_ALIASES.get(article_key, ()):
+            product = product_index.get(normalizar_nombre(alias))
+            if product is not None:
+                return product
+        return None
 
     def fetch_purchase_payloads(
         self,

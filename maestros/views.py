@@ -4024,11 +4024,7 @@ def costos_adquisicion(request):
     # ── Ventas del período por producto (para chip "Vendidos sin costo") ────────
     from pos_bridge.models.sales import PointDailySale
     from django.db.models import Sum as _Sum
-    from rentabilidad.views_rentabilidad import _ANTICIPO_KEYWORDS
-
-    def _es_anticipo_local(nombre: str) -> bool:
-        lower = (nombre or "").lower()
-        return any(kw in lower for kw in _ANTICIPO_KEYWORDS)
+    from rentabilidad.views_rentabilidad import _es_anticipo as _es_anticipo_local
     hoy = timezone.localdate()
     if filtro_periodo == "30d":
         periodo_desde = hoy - timedelta(days=30)

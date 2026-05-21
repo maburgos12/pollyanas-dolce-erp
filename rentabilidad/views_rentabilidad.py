@@ -25,11 +25,14 @@ from core.access import can_manage_rentabilidad, can_view_rentabilidad
 # (tarjetas de regalo, vales). Contablemente son un pasivo hasta redención,
 # no una venta con margen normal. Se excluyen de alertas de "sin costo".
 _ANTICIPO_KEYWORDS = ("tarjeta de regalo", "gift card", "vale de regalo", "e-gift")
+_REVENTA_FISICA_KEYWORDS = ("dia de las madres", "día de las madres", "mothers day")
 
 
 def _es_anticipo(nombre: str) -> bool:
     """Retorna True si el nombre del producto corresponde a un anticipo/pasivo."""
     lower = (nombre or "").lower()
+    if any(kw in lower for kw in _REVENTA_FISICA_KEYWORDS):
+        return False
     return any(kw in lower for kw in _ANTICIPO_KEYWORDS)
 
 

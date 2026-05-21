@@ -1885,3 +1885,20 @@ class CostosAdquisicionRecipeMappingTests(TestCase):
         self.assertEqual(row["tipo"], "fabricado")
         self.assertEqual(row["fuente"], "RECETA")
         self.assertEqual(row["costo_vigente"], Decimal("5.60"))
+
+    def test_tarjeta_dia_madres_is_reventa_not_anticipo(self):
+        PointProduct.objects.create(
+            external_id="1032",
+            sku="1411",
+            name="TARJETA DE REGALO DIA DE LAS MADRES",
+            category="Otros postres",
+        )
+
+        response = self.client.get(reverse("maestros:costos_adquisicion"), {"q": "DIA DE LAS MADRES"})
+
+        self.assertEqual(response.status_code, 200)
+        row = response.context["rows"][0]
+        self.assertEqual(row["nombre"], "TARJETA DE REGALO DIA DE LAS MADRES")
+        self.assertEqual(row["tipo"], "reventa")
+        self.assertFalse(row["es_anticipo"])
+        self.assertTrue(row["editable"])
