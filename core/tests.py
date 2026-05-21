@@ -134,6 +134,23 @@ class LoginViewAuthenticatedRedirectTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "/bonos-ventas/app/?captura=1")
 
+    def test_short_bonus_links_keep_login_next_simple(self):
+        self.client.logout()
+
+        response = self.client.get("/bp/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/login/?next=/bp/")
+
+    def test_authenticated_short_bonus_links_open_capture_apps(self):
+        response_prod = self.client.get("/bp/")
+        response_ventas = self.client.get("/bv/")
+
+        self.assertEqual(response_prod.status_code, 302)
+        self.assertEqual(response_prod["Location"], "/bonos-produccion/app/?captura=1")
+        self.assertEqual(response_ventas.status_code, 302)
+        self.assertEqual(response_ventas["Location"], "/bonos-ventas/app/?captura=1")
+
 
 class DashboardHomologacionContextTests(TestCase):
     def setUp(self):

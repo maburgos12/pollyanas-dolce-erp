@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.conf import settings
+from django.contrib.auth.decorators import login_required
 from django.urls import path, include, re_path
 from django.views.static import serve as static_serve
 from django.views.generic import RedirectView
@@ -44,6 +45,16 @@ urlpatterns = [
 
     path("", core_views.home_redirect, name="home"),
     path("dashboard/", core_views.dashboard, name="dashboard"),
+    path(
+        "bp/",
+        login_required(RedirectView.as_view(url="/bonos-produccion/app/?captura=1", permanent=False)),
+        name="shortcut-bonos-produccion-app",
+    ),
+    path(
+        "bv/",
+        login_required(RedirectView.as_view(url="/bonos-ventas/app/?captura=1", permanent=False)),
+        name="shortcut-bonos-ventas-app",
+    ),
     path("plan-produccion/", RedirectView.as_view(url="/recetas/plan-produccion/", permanent=False)),
     path("maestros/", include(("maestros.urls", "maestros"), namespace="maestros")),
     path("recetas/", include(("recetas.urls", "recetas"), namespace="recetas")),
