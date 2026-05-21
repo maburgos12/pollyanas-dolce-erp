@@ -20,7 +20,7 @@ NAV_GROUPS = [
         "label": "Comercial",
         "items": [
             ("ventas", "pronostico", "Pronóstico", "/ventas/pronostico/", ["/ventas/pronostico/", "/ventas/"]),
-            ("ventas", "bonos", "Bonos ventas", "/bonos-ventas/app/", ["/bonos-ventas/"]),
+            ("ventas", "bonos", "Bonos ventas", "/bonos-ventas/dashboard/", ["/bonos-ventas/"]),
             ("crm", "dashboard", "CRM", "/crm/dashboard/", ["/crm/dashboard/"]),
             ("crm", "clientes", "Clientes", "/crm/clientes/", ["/crm/clientes/"]),
             ("crm", "pedidos", "Pedidos", "/crm/pedidos/", ["/crm/pedidos/"]),

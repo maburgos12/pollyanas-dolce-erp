@@ -1,0 +1,311 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Bonos ventas · Dashboard{% endblock %}
+{% block page_title %}Bonos ventas{% endblock %}
+{% block body_class %}page-bonos-ventas-dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+  .bonos-shell{max-width:1320px;margin:0 auto;padding:0 .75rem 2rem;display:grid;gap:1rem}
+  .bonos-hero{background:#fff;border:1px solid #ede6f0;border-radius:12px;padding:1.15rem 1.25rem;box-shadow:0 1px 3px rgba(0,0,0,.06);display:grid;grid-template-columns:minmax(0,1.5fr) minmax(300px,.75fr);gap:1rem;align-items:end}
+  .bonos-kicker{font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#8b2252;font-weight:800}
+  .bonos-title{font-size:1.55rem;font-weight:900;margin:.15rem 0;color:#1c1520}
+  .bonos-copy{color:#6b5f70;max-width:62rem;margin:0}
+  .bonos-actions{display:flex;gap:.55rem;flex-wrap:wrap;margin-top:.9rem}
+  .bonos-btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;border-radius:8px;border:1px solid #e7ddeb;padding:.6rem .85rem;font-weight:800;text-decoration:none;background:#fff;color:#1c1520;cursor:pointer}
+  .bonos-btn.primary{background:#8b2252;color:#fff;border-color:#8b2252}
+  .bonos-btn:disabled{opacity:.55;cursor:not-allowed}
+  .period-filter{display:grid;grid-template-columns:1fr 1fr auto;gap:.55rem;align-items:end}
+  .bonos-field{display:grid;gap:.3rem}
+  .bonos-field label{font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#6b5f70}
+  .bonos-field input,.bonos-field textarea,.bonos-field select{width:100%;border:1px solid #e7ddeb;border-radius:8px;padding:.58rem .65rem;font:inherit;background:#fbf8fb}
+  .kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem}
+  .kpi-card,.bonos-card{background:#fff;border:1px solid #ede6f0;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+  .kpi-card{padding:.95rem 1rem}
+  .kpi-label{font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:#6b5f70;font-weight:800}
+  .kpi-value{font-size:1.45rem;font-weight:900;color:#1c1520;margin-top:.15rem}
+  .kpi-value.wine{color:#8b2252}.kpi-value.gold{color:#c9a84c}
+  .bonos-card-h{padding:.9rem 1rem;border-bottom:1px solid #ede6f0;display:flex;justify-content:space-between;gap:1rem;align-items:center;flex-wrap:wrap}
+  .bonos-card-title{font-weight:900;text-transform:uppercase;letter-spacing:.06em}
+  .bonos-card-body{padding:1rem}
+  .config-grid{display:grid;grid-template-columns:repeat(5,minmax(128px,1fr));gap:.75rem}
+  .concept-grid{display:grid;grid-template-columns:repeat(3,minmax(220px,1fr));gap:.75rem;margin-top:1rem}
+  .concept-card{border:1px solid #ede6f0;border-radius:10px;background:#fbf8fb;padding:.85rem;display:grid;grid-template-columns:1fr 1fr;gap:.65rem;align-items:end}
+  .concept-card strong{grid-column:1 / -1;font-size:.8rem;text-transform:uppercase;letter-spacing:.06em}
+  .category-grid{display:grid;grid-template-columns:repeat(6,minmax(130px,1fr));gap:.75rem;margin-top:1rem}
+  .branch-grid{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:.75rem}
+  .branch-chip{padding:.85rem;border:1px solid #ede6f0;border-radius:10px;background:#fbf8fb}
+  .branch-chip span{display:block;color:#6b5f70;font-size:.72rem;font-weight:800;text-transform:uppercase}
+  .branch-chip strong{display:block;font-size:1.05rem;margin-top:.15rem}
+  .filter-bar{display:grid;grid-template-columns:minmax(240px,1fr) auto;gap:.75rem;align-items:center}
+  .branch-filter{display:flex;gap:.45rem;flex-wrap:wrap}
+  .branch-filter button{border:1px solid #e7ddeb;background:#fff;border-radius:999px;padding:.45rem .75rem;font:inherit;font-weight:800;color:#6b5f70;cursor:pointer}
+  .branch-filter button.active{background:#8b2252;border-color:#8b2252;color:#fff}
+  .search-input{border:1px solid #e7ddeb;border-radius:999px;padding:.7rem .95rem;font:inherit;background:#fbf8fb}
+  .employee-list{display:grid;gap:.65rem;margin-top:1rem}
+  .employee-card{border:1px solid #ede6f0;border-radius:10px;background:#fff;overflow:hidden}
+  .employee-card[hidden]{display:none}
+  .employee-card summary{display:grid;grid-template-columns:minmax(240px,1fr) 130px 100px 120px 110px;gap:.75rem;align-items:center;padding:.85rem 1rem;cursor:pointer}
+  .employee-card summary::marker{content:""}
+  .employee-name{font-weight:900}.employee-meta{font-size:.78rem;color:#6b5f70}
+  .employee-total{font-weight:900;color:#8b2252;text-align:right}
+  .employee-body{border-top:1px solid #ede6f0;padding:1rem;display:grid;gap:.8rem}
+  .adjust-grid{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:.75rem}
+  .money-grid{display:grid;grid-template-columns:repeat(3,minmax(130px,1fr));gap:.75rem}
+  .status-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:.28rem .6rem;font-size:.72rem;font-weight:900;white-space:nowrap}
+  .status-pill.ok{background:#dcfce7;color:#166534}.status-pill.bad{background:#fee2e2;color:#991b1b}.status-pill.neutral{background:#f4edf4;color:#8b2252}
+  .category-table-wrap{overflow-x:auto}
+  .category-table{width:100%;border-collapse:collapse;font-size:.9rem}
+  .category-table th{padding:.7rem .8rem;text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:#6b5f70;border-bottom:1px solid #ede6f0}
+  .category-table td{padding:.7rem .8rem;border-bottom:1px solid #ede6f0}
+  .empty-state{padding:1rem;border:1px dashed #e7ddeb;border-radius:10px;color:#6b5f70;background:#fbf8fb}
+  @media(max-width:1180px){.config-grid,.category-grid{grid-template-columns:repeat(3,1fr)}.concept-grid{grid-template-columns:1fr}.employee-card summary{grid-template-columns:1fr 120px 100px}}
+  @media(max-width:900px){.bonos-hero{grid-template-columns:1fr}.kpi-grid,.branch-grid{grid-template-columns:repeat(2,1fr)}.filter-bar{grid-template-columns:1fr}.adjust-grid,.money-grid{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:620px){.period-filter,.kpi-grid,.branch-grid,.config-grid,.category-grid,.adjust-grid,.money-grid{grid-template-columns:1fr}.employee-card summary{grid-template-columns:1fr}.employee-total{text-align:left}}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="bonos-shell">
+  <section class="bonos-hero">
+    <div>
+      <div class="bonos-kicker">Ventas · bonos</div>
+      <h1 class="bonos-title">Control de configuración y ajustes</h1>
+      <p class="bonos-copy">Configura presentación, bono por crecimiento, pesos por categoría y ajustes puntuales. La captura diaria sigue en la app; el ERP queda para administración y revisión.</p>
+      <div class="bonos-actions">
+        <a class="bonos-btn primary" href="/bonos-ventas/app/?captura=1">Abrir app de captura</a>
+        {% if periodo %}
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="recalcular">
+          <input type="hidden" name="mes" value="{{ mes }}">
+          <input type="hidden" name="anio" value="{{ anio }}">
+          <button class="bonos-btn" type="submit" {% if not can_manage %}disabled{% endif %}>Recalcular período</button>
+        </form>
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="sync_pos">
+          <input type="hidden" name="mes" value="{{ mes }}">
+          <input type="hidden" name="anio" value="{{ anio }}">
+          <button class="bonos-btn" type="submit" {% if not can_manage %}disabled{% endif %}>Sincronizar POS</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    <form class="period-filter" method="get">
+      <div class="bonos-field">
+        <label for="mes">Mes</label>
+        <input id="mes" name="mes" type="number" min="1" max="12" value="{{ mes }}">
+      </div>
+      <div class="bonos-field">
+        <label for="anio">Año</label>
+        <input id="anio" name="anio" type="number" value="{{ anio }}">
+      </div>
+      <button class="bonos-btn primary" type="submit">Ver período</button>
+    </form>
+  </section>
+
+  <section class="kpi-grid">
+    <article class="kpi-card"><div class="kpi-label">Total a pagar</div><div class="kpi-value gold">${{ total_bonos|floatformat:2|intcomma }}</div></article>
+    <article class="kpi-card"><div class="kpi-label">Empleadas</div><div class="kpi-value">{{ bonos|length|intcomma }}</div></article>
+    <article class="kpi-card"><div class="kpi-label">Pasan asistencia</div><div class="kpi-value wine">{{ passing_asistencia|intcomma }}</div></article>
+    <article class="kpi-card"><div class="kpi-label">Con bono ventas</div><div class="kpi-value">{{ con_bono_ventas|intcomma }}</div></article>
+  </section>
+
+  <section class="bonos-card">
+    <div class="bonos-card-h">
+      <div class="bonos-card-title">Configuración del período</div>
+      {% if not periodo %}<span class="status-pill bad">Sin período creado</span>{% endif %}
+    </div>
+    <div class="bonos-card-body">
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="config">
+        <input type="hidden" name="mes" value="{{ mes }}">
+        <input type="hidden" name="anio" value="{{ anio }}">
+        <div class="config-grid">
+          <div class="bonos-field"><label>Días laborables</label><input name="dias_laborables" type="number" min="1" value="{% if periodo %}{{ periodo.dias_laborables }}{% else %}{{ defaults.dias_laborables }}{% endif %}"></div>
+          <div class="bonos-field"><label>Bono base</label><input name="bono_base" type="number" step="0.01" value="{% if periodo %}{{ periodo.bono_base }}{% else %}{{ defaults.bono_base }}{% endif %}"></div>
+          <div class="bonos-field"><label>Bono ventas adicional</label><input name="bono_ventas_adicional" type="number" step="0.01" value="{% if periodo %}{{ periodo.bono_ventas_adicional }}{% else %}{{ defaults.bono_ventas_adicional }}{% endif %}"></div>
+          <div class="bonos-field"><label>Umbral crecimiento %</label><input name="umbral_crecimiento_pct" type="number" step="0.01" value="{% if periodo %}{{ periodo.umbral_crecimiento_pct }}{% else %}{{ defaults.umbral_crecimiento_pct }}{% endif %}"></div>
+        </div>
+
+        <div class="concept-grid">
+          <div class="concept-card">
+            <strong>Uniforme</strong>
+            <div class="bonos-field"><label>%</label><input name="pct_uniforme" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_uniforme }}{% else %}{{ defaults.pct_uniforme }}{% endif %}"></div>
+            <div class="bonos-field"><label>Límite</label><input name="limite_uniforme" type="number" min="0" value="{% if periodo %}{{ periodo.limite_uniforme }}{% else %}{{ defaults.limite_uniforme }}{% endif %}"></div>
+          </div>
+          <div class="concept-card">
+            <strong>Asistencia</strong>
+            <div class="bonos-field"><label>%</label><input name="pct_asistencia" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_asistencia }}{% else %}{{ defaults.pct_asistencia }}{% endif %}"></div>
+            <div class="bonos-field"><label>Límite</label><input name="limite_asistencia" type="number" min="0" value="{% if periodo %}{{ periodo.limite_asistencia }}{% else %}{{ defaults.limite_asistencia }}{% endif %}"></div>
+          </div>
+          <div class="concept-card">
+            <strong>Puntualidad</strong>
+            <div class="bonos-field"><label>%</label><input name="pct_puntualidad" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_puntualidad }}{% else %}{{ defaults.pct_puntualidad }}{% endif %}"></div>
+            <div class="bonos-field"><label>Límite</label><input name="limite_puntualidad" type="number" min="0" value="{% if periodo %}{{ periodo.limite_puntualidad }}{% else %}{{ defaults.limite_puntualidad }}{% endif %}"></div>
+          </div>
+        </div>
+
+        <div class="category-grid">
+          {% for row in category_rows %}
+          <div class="bonos-field"><label>Peso {{ row.label }}</label><input name="{{ row.field }}" type="number" step="0.01" value="{{ row.value }}"></div>
+          {% endfor %}
+        </div>
+        <div class="bonos-actions"><button class="bonos-btn primary" type="submit" {% if not can_manage %}disabled{% endif %}>Guardar configuración</button></div>
+      </form>
+    </div>
+  </section>
+
+  {% if periodo %}
+  <section class="bonos-card">
+    <div class="bonos-card-h">
+      <div class="bonos-card-title">Período {{ periodo.mes }}/{{ periodo.anio }}</div>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="inicializar">
+        <input type="hidden" name="mes" value="{{ mes }}">
+        <input type="hidden" name="anio" value="{{ anio }}">
+        <button class="bonos-btn" type="submit" {% if not can_manage %}disabled{% endif %}>Inicializar empleados</button>
+      </form>
+    </div>
+    <div class="bonos-card-body">
+      <div class="branch-grid">
+        {% for row in sucursal_rows %}
+        <article class="branch-chip"><span>{{ row.nombre }}</span><strong>{{ row.count }} empleadas</strong><small>${{ row.total|floatformat:2|intcomma }} · {{ row.categorias_activas }} categorías activas</small></article>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="bonos-card">
+    <div class="bonos-card-h">
+      <div>
+        <div class="bonos-card-title">Ajustes por empleada</div>
+        <div class="employee-meta">Busca por nombre o filtra por sucursal. Cada empleada se despliega individualmente.</div>
+      </div>
+      <span id="visible-count">{{ bonos|length }} registros</span>
+    </div>
+    <div class="bonos-card-body">
+      {% if bonos %}
+      <div class="filter-bar">
+        <input id="employee-search" class="search-input" type="search" placeholder="Buscar empleada por nombre, código o sucursal..." autocomplete="off">
+        <div class="branch-filter" id="branch-filter">
+          <button type="button" class="active" data-branch="ALL">Todas</button>
+          {% for row in sucursal_rows %}{% if row.count %}<button type="button" data-branch="{{ row.id }}">{{ row.nombre }}</button>{% endif %}{% endfor %}
+        </div>
+      </div>
+      <div class="employee-list" id="employee-list">
+        {% for bono in bonos %}
+        <details class="employee-card" data-branch="{{ bono.sucursal_id }}" data-search="{{ bono.empleado.nombre|lower }} {{ bono.empleado.codigo|default:''|lower }} {{ bono.sucursal.nombre|lower }}">
+          <summary>
+            <div><div class="employee-name">{{ bono.empleado.nombre }}</div><div class="employee-meta">{{ bono.sucursal.nombre }} · {{ bono.empleado.codigo|default:"Sin código" }}</div></div>
+            <span class="status-pill neutral">{{ bono.sucursal.nombre }}</span>
+            <span>{{ bono.dias_trabajados }} días</span>
+            <span class="status-pill {% if bono.pasa_asistencia %}ok{% else %}bad{% endif %}">{% if bono.pasa_asistencia %}Asistencia{% else %}No asistencia{% endif %}</span>
+            <span class="employee-total">${{ bono.total_a_pagar|floatformat:2|intcomma }}</span>
+          </summary>
+          <form class="employee-body" method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="ajuste_bono">
+            <input type="hidden" name="bono_id" value="{{ bono.id }}">
+            <input type="hidden" name="mes" value="{{ mes }}">
+            <input type="hidden" name="anio" value="{{ anio }}">
+            <div class="money-grid">
+              <div class="kpi-card"><div class="kpi-label">Sub 1</div><div class="kpi-value">${{ bono.sub1|floatformat:2|intcomma }}</div></div>
+              <div class="kpi-card"><div class="kpi-label">Bono ventas</div><div class="kpi-value gold">${{ bono.bono_ventas|floatformat:2|intcomma }}</div></div>
+              <div class="kpi-card"><div class="kpi-label">Total</div><div class="kpi-value wine">${{ bono.total_a_pagar|floatformat:2|intcomma }}</div></div>
+            </div>
+            <div class="adjust-grid">
+              <div class="bonos-field"><label>Días trabajados</label><input name="dias_trabajados" type="number" min="0" value="{{ bono.dias_trabajados }}"></div>
+              <div class="bonos-field"><label>Días uniforme</label><input name="dias_uniforme" type="number" min="0" value="{{ bono.dias_uniforme }}"></div>
+              <div class="bonos-field"><label>Días asistencia</label><input name="dias_asistencia" type="number" min="0" value="{{ bono.dias_asistencia }}"></div>
+              <div class="bonos-field"><label>Días puntualidad</label><input name="dias_puntualidad" type="number" min="0" value="{{ bono.dias_puntualidad }}"></div>
+            </div>
+            <div class="adjust-grid">
+              <div class="bonos-field"><label>Ajuste positivo</label><input name="ajuste_positivo" type="number" step="0.01" value="{{ bono.ajuste_positivo }}"></div>
+              <div class="bonos-field"><label>Ajuste negativo</label><input name="ajuste_negativo" type="number" step="0.01" value="{{ bono.ajuste_negativo }}"></div>
+              <div class="bonos-field"><label>Bono extra</label><input name="bono_extra" type="number" step="0.01" value="{{ bono.bono_extra }}"></div>
+              <div class="bonos-field"><label>Observaciones</label><textarea name="observaciones" rows="2">{{ bono.observaciones }}</textarea></div>
+            </div>
+            <div class="adjust-grid">
+              <div class="bonos-field"><label>Motivo ajuste +</label><input name="desc_ajuste_positivo" value="{{ bono.desc_ajuste_positivo }}"></div>
+              <div class="bonos-field"><label>Motivo ajuste -</label><input name="desc_ajuste_negativo" value="{{ bono.desc_ajuste_negativo }}"></div>
+              <div class="bonos-field"><label>Motivo bono extra</label><input name="desc_bono_extra" value="{{ bono.desc_bono_extra }}"></div>
+              <div class="bonos-field"><label>&nbsp;</label><button class="bonos-btn primary" type="submit" {% if not can_manage %}disabled{% endif %}>Guardar ajuste</button></div>
+            </div>
+          </form>
+        </details>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state">Sin bonos inicializados para este período.</div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="bonos-card">
+    <div class="bonos-card-h"><div class="bonos-card-title">Ventas por categoría</div><span>{{ ventas_categoria|length }} registros</span></div>
+    <div class="bonos-card-body">
+      {% if ventas_categoria %}
+      <div class="category-table-wrap">
+        <table class="category-table">
+          <thead><tr><th>Sucursal</th><th>Categoría</th><th>Actual</th><th>Anterior</th><th>Crecimiento</th><th>Bono</th><th>Fuente</th></tr></thead>
+          <tbody>
+            {% for venta in ventas_categoria %}
+            <tr>
+              <td>{{ venta.sucursal.nombre }}</td>
+              <td>{{ venta.get_categoria_display }}</td>
+              <td>{{ venta.cantidad_actual|floatformat:0|intcomma }}</td>
+              <td>{{ venta.cantidad_anterior|floatformat:0|intcomma }}</td>
+              <td><span class="status-pill {% if venta.activo_bono %}ok{% else %}neutral{% endif %}">{{ venta.pct_crecimiento|floatformat:2 }}%</span></td>
+              <td>${{ venta.monto_bono_categoria|floatformat:2|intcomma }}</td>
+              <td>{{ venta.get_fuente_display }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state">Sin ventas por categoría. Usa “Sincronizar POS” cuando el período exista.</div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+  var search = document.getElementById('employee-search');
+  var filters = Array.from(document.querySelectorAll('#branch-filter button'));
+  var cards = Array.from(document.querySelectorAll('.employee-card'));
+  var count = document.getElementById('visible-count');
+  var activeBranch = 'ALL';
+  function normalize(text){return (text || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');}
+  function applyFilters(){
+    var q = normalize(search ? search.value : '');
+    var visible = 0;
+    cards.forEach(function(card){
+      var branchOk = activeBranch === 'ALL' || card.dataset.branch === activeBranch;
+      var textOk = !q || normalize(card.dataset.search).includes(q);
+      var show = branchOk && textOk;
+      card.hidden = !show;
+      if(show) visible += 1;
+    });
+    if(count) count.textContent = visible + ' registros';
+  }
+  if(search) search.addEventListener('input', applyFilters);
+  filters.forEach(function(btn){
+    btn.addEventListener('click', function(){
+      activeBranch = btn.dataset.branch;
+      filters.forEach(function(item){ item.classList.toggle('active', item === btn); });
+      applyFilters();
+    });
+  });
+})();
+</script>
+{% endblock %}

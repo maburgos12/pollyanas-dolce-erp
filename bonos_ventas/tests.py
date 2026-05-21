@@ -3,8 +3,9 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 
+from core.navigation import NAV_GROUPS
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointDailySale, PointProduct
 from rrhh.models import Empleado, NominaLinea, NominaPeriodo, PermisoSalida
@@ -13,12 +14,93 @@ from .models import BonoVentasEmpleado, ConfigBonoVentasPeriodo, VentaCategoriaS
 from .services import sync_ventas_categorias
 
 
+@override_settings(SECURE_SSL_REDIRECT=False)
 class BonosVentasTests(TestCase):
+    def test_sidebar_de_ventas_apunta_al_dashboard_erp(self):
+        comercial = next(group for group in NAV_GROUPS if group["key"] == "comercial")
+        bonos_item = next(item for item in comercial["items"] if item[0] == "ventas" and item[1] == "bonos")
+
+        self.assertEqual(bonos_item[3], "/bonos-ventas/dashboard/")
+
+    def test_dashboard_erp_muestra_configuracion_y_app_de_captura(self):
+        user = get_user_model().objects.create_superuser(username="admin-bonos-ventas", password="x")
+        self.client.force_login(user)
+        sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
+        empleado = Empleado.objects.create(nombre="Empleada Dashboard Ventas", area="VENTAS", sucursal="Payán")
+        periodo = ConfigBonoVentasPeriodo.objects.create(mes=5, anio=2026)
+        BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal)
+
+        response = self.client.get("/bonos-ventas/dashboard/?mes=5&anio=2026")
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Control de configuración y ajustes", content)
+        self.assertIn("Abrir app de captura", content)
+        self.assertIn("Bono ventas adicional", content)
+        self.assertIn("Buscar empleada por nombre", content)
+        self.assertIn("Empleada Dashboard Ventas", content)
+        self.assertEqual(response["Cache-Control"], "max-age=0, no-cache, no-store, must-revalidate, private")
+
+    def test_raiz_web_de_bonos_ventas_redirige_al_dashboard(self):
+        response = self.client.get("/bonos-ventas/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/bonos-ventas/dashboard/")
+
+    def test_app_desktop_redirige_al_dashboard_y_captura_forzada_funciona(self):
+        user = get_user_model().objects.create_user(username="desktop-ventas")
+        self.client.force_login(user)
+
+        redirected = self.client.get("/bonos-ventas/app/", HTTP_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X)")
+        forced = self.client.get("/bonos-ventas/app/?captura=1", HTTP_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X)")
+
+        self.assertEqual(redirected.status_code, 302)
+        self.assertEqual(redirected["Location"], "/bonos-ventas/dashboard/")
+        self.assertEqual(forced.status_code, 200)
+
+    def test_dashboard_erp_actualiza_configuracion_del_periodo(self):
+        user = get_user_model().objects.create_superuser(username="admin-config-ventas", password="x")
+        self.client.force_login(user)
+        ConfigBonoVentasPeriodo.objects.create(mes=5, anio=2026)
+
+        response = self.client.post(
+            "/bonos-ventas/dashboard/",
+            {
+                "action": "config",
+                "mes": "5",
+                "anio": "2026",
+                "dias_laborables": "24",
+                "bono_base": "350.00",
+                "pct_uniforme": "15.00",
+                "pct_asistencia": "40.00",
+                "pct_puntualidad": "20.00",
+                "limite_uniforme": "1",
+                "limite_asistencia": "2",
+                "limite_puntualidad": "1",
+                "bono_ventas_adicional": "500.00",
+                "umbral_crecimiento_pct": "6.00",
+                "peso_grande": "20.00",
+                "peso_mediano": "30.00",
+                "peso_chico": "20.00",
+                "peso_mini": "15.00",
+                "peso_velas_accesorios": "5.00",
+                "peso_vasos": "10.00",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        periodo = ConfigBonoVentasPeriodo.objects.get(mes=5, anio=2026)
+        self.assertEqual(periodo.dias_laborables, 24)
+        self.assertEqual(periodo.bono_base, Decimal("350.00"))
+        self.assertEqual(periodo.pct_asistencia, Decimal("40.00"))
+        self.assertEqual(periodo.bono_ventas_adicional, Decimal("500.00"))
+        self.assertEqual(periodo.umbral_crecimiento_pct, Decimal("6.00"))
+
     def test_pwa_usa_sesion_django_y_expone_csrf(self):
         user = get_user_model().objects.create_user(username="pwa-ventas")
         self.client.force_login(user)
 
-        response = self.client.get("/bonos-ventas/app/")
+        response = self.client.get("/bonos-ventas/app/?captura=1")
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("csrftoken", response.cookies)
@@ -36,16 +118,18 @@ class BonosVentasTests(TestCase):
 
         self.assertEqual(manifest.status_code, 200)
         self.assertEqual(manifest["Content-Type"], "application/manifest+json")
-        self.assertEqual(manifest.json()["start_url"], "/bonos-ventas/app/")
+        self.assertEqual(manifest.json()["start_url"], "/bonos-ventas/app/?captura=1")
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
-        self.assertIn("pollyanas-bonos-ventas-pwa", sw.content.decode())
+        sw_content = sw.content.decode()
+        self.assertIn("pollyanas-bonos-ventas-pwa-v2", sw_content)
+        self.assertIn('url.pathname.startsWith("/bonos-ventas/dashboard/")', sw_content)
 
     def test_api_ventas_acepta_post_con_sesion_y_csrf(self):
         client = Client(enforce_csrf_checks=True)
         user = get_user_model().objects.create_user(username="csrf-ventas")
         client.force_login(user)
-        client.get("/bonos-ventas/app/")
+        client.get("/bonos-ventas/app/?captura=1")
         csrf_token = client.cookies["csrftoken"].value
 
         response = client.post(

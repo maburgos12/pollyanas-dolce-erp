@@ -8,7 +8,7 @@ from .views import (
     RegistroDiarioVentasViewSet,
     VentaCategoriaSucursalViewSet,
 )
-from .views_html import bonos_ventas_manifest, bonos_ventas_pwa, bonos_ventas_sw
+from .views_html import bonos_ventas_dashboard, bonos_ventas_manifest, bonos_ventas_pwa, bonos_ventas_sw
 
 router = DefaultRouter()
 router.register("periodos", ConfigBonoVentasPeriodoViewSet, basename="bonoventas-periodo")
@@ -18,6 +18,7 @@ router.register("registros-diarios", RegistroDiarioVentasViewSet, basename="bono
 router.register("permisos", PermisosVentasEquipoViewSet, basename="bonoventas-permiso")
 
 urlpatterns = [
+    path("dashboard/", bonos_ventas_dashboard, name="bonos-ventas-dashboard"),
     path("app/", bonos_ventas_pwa, name="bonos-ventas-app"),
     path("manifest.json", bonos_ventas_manifest, name="bonos-ventas-manifest"),
     path("sw.js", bonos_ventas_sw, name="bonos-ventas-sw"),
