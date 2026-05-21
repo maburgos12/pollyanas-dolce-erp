@@ -346,15 +346,6 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(hour=6, minute=0, day_of_month="6"),
         # Día 6 de cada mes — después del cierre automático (día 5)
     },
-    # --- Sync semanal: costos de adquisición desde Compras Point ---
-    "pos_bridge: sync costos compras reventa": {
-        "task": "pos_bridge.sync_purchase_resale_costs",
-        "schedule": crontab(hour=10, minute=0, day_of_week="1"),  # Lunes 10:00
-        # Complementa el sync diario de existencias ALMACEN (09:15).
-        # Captura el costo de factura real de los 35 días anteriores.
-        # Idempotente por source_hash, seguro correrlo con overlap.
-        "kwargs": {"dias": 35, "apply": True},
-    },
     # --- Monitoreo variación de costos de reventa ---
     "reportes: monitoreo variacion costos reventa": {
         "task": "reportes.monitoreo_variacion_costos_reventa",

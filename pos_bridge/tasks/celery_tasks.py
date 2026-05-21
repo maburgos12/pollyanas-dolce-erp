@@ -304,39 +304,6 @@ def task_recipe_gap_audit(self, *, branch_hint: str | None = None, product_codes
     )
 
 
-@shared_task(
-    name="pos_bridge.sync_purchase_resale_costs",
-    bind=True,
-    max_retries=1,
-    default_retry_delay=900,
-    acks_late=True,
-    time_limit=3600,
-    soft_time_limit=3300,
-)
-def task_sync_purchase_resale_costs(
-    self,
-    *,
-    dias: int = 35,
-    apply: bool = True,
-    triggered_by_id: int | None = None,
-):
-    """
-    Sincroniza costos de adquisición de reventa desde historial de Compras Point.
-    Complementa el sync diario de existencias (que puede devolver unit_cost=0
-    cuando Point no tiene stock). La fuente de compras es el costo de factura real.
-    """
-    from pos_bridge.services.point_purchase_resale_cost_service import PointPurchaseResaleCostSyncService
-
-    result = PointPurchaseResaleCostSyncService().sync_from_point(dias=dias, apply=apply)
-    return {
-        "purchases_seen": result.purchases_seen,
-        "details_seen": result.details_seen,
-        "matched_products": result.matched_products,
-        "created": result.created,
-        "existing": result.existing,
-        "zero_or_invalid_cost": result.zero_or_invalid_cost,
-        "unresolved": result.unresolved,
-    }
 
 
 @shared_task(
