@@ -127,6 +127,25 @@ class Command(BaseCommand):
             },
         )
 
+        purchase_resale_cost_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="35",
+            hour="2",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="pos_bridge: costos reventa desde compras Point",
+            defaults={
+                "task": "pos_bridge.purchase_resale_cost_sync",
+                "crontab": purchase_resale_cost_cron,
+                "interval": None,
+                "kwargs": json.dumps({"dias": 365, "max_compras": 900}),
+                "enabled": True,
+            },
+        )
+
         inventory_close_cron, _ = CrontabSchedule.objects.get_or_create(
             minute="0",
             hour="23",
