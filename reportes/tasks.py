@@ -115,3 +115,99 @@ def task_alerta_produccion_sin_registros(self):
 
 
 from reportes.tasks_doctor import erp_doctor_daily_report  # noqa: E402,F401
+
+
+@shared_task(name="reportes.monitoreo_variacion_costos_reventa", bind=True, max_retries=1, default_retry_delay=300)
+def task_monitoreo_variacion_costos_reventa(self):
+    """
+    Compara el costo actual de cada producto de reventa contra el costo del mes anterior.
+    Si la variación es mayor al UMBRAL (10%), genera una alerta por email.
+    Corre el día 2 de cada mes, después del cierre mensual (día 1).
+    """
+    from decimal import Decimal
+    from django.conf import settings
+    from django.core.mail import send_mail
+    from django.utils import timezone
+    from reportes.models import ProductoReventaCosto, ProductoReventaCostoHistoricoMensual
+
+    UMBRAL_PCT = Decimal("10")
+
+    hoy = timezone.localdate()
+    mes_actual = hoy.replace(day=1)
+    mes_anterior = (mes_actual - timedelta(days=1)).replace(day=1)
+
+    # Último costo registrado por producto (puede ser cualquier fuente)
+    costos_actuales = {}
+    for rc in (
+        ProductoReventaCosto.objects
+        .select_related("producto_point")
+        .order_by("producto_point_id", "-fecha_vigencia")
+    ):
+        if rc.producto_point_id not in costos_actuales:
+            costos_actuales[rc.producto_point_id] = rc
+
+    # Histórico del mes anterior
+    historico = {
+        h.producto_point_id: h
+        for h in ProductoReventaCostoHistoricoMensual.objects.filter(periodo=mes_anterior)
+    }
+
+    alertas = []
+    for pid, rc in costos_actuales.items():
+        hist = historico.get(pid)
+        if hist is None or hist.costo_promedio <= 0:
+            continue
+        costo_prev = hist.costo_promedio
+        costo_curr = rc.costo_unitario
+        if costo_prev <= 0:
+            continue
+        variacion_pct = abs(costo_curr - costo_prev) / costo_prev * 100
+        if variacion_pct >= UMBRAL_PCT:
+            direccion = "▲ SUBIÓ" if costo_curr > costo_prev else "▼ BAJÓ"
+            alertas.append({
+                "nombre": rc.producto_point.name,
+                "costo_prev": float(costo_prev),
+                "costo_curr": float(costo_curr),
+                "variacion_pct": float(variacion_pct),
+                "direccion": direccion,
+                "fuente": rc.fuente,
+            })
+
+    result = {
+        "periodo_anterior": mes_anterior.isoformat(),
+        "productos_comparados": len(costos_actuales),
+        "con_variacion": len(alertas),
+    }
+
+    if not alertas:
+        return result
+
+    alertas.sort(key=lambda x: -x["variacion_pct"])
+
+    lineas = [
+        f"  {a['direccion']} {a['nombre']}: "
+        f"${a['costo_prev']:.4f} → ${a['costo_curr']:.4f} "
+        f"({a['variacion_pct']:.1f}%) [{a['fuente']}]"
+        for a in alertas
+    ]
+    body = (
+        f"Alerta automática ERP Pollyana's Dolce — Variación de costos de reventa\n"
+        f"Período anterior: {mes_anterior:%B %Y}\n"
+        f"Productos con variación ≥ {UMBRAL_PCT}%: {len(alertas)}\n\n"
+        + "\n".join(lineas)
+        + "\n\nGestionar costos: https://erp.pollyanasdolce.com/maestros/costos-adquisicion/\n"
+        "-- ERP Pollyana's Dolce"
+    )
+
+    try:
+        send_mail(
+            subject=f"[ERP] {len(alertas)} producto(s) con variación de costo ≥{UMBRAL_PCT}% — {mes_anterior:%b %Y}",
+            message=body,
+            from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "erp@pollyanasdolce.com"),
+            recipient_list=["maburgos12@pollyanasdolce.com"],
+            fail_silently=False,
+        )
+    except Exception as exc:
+        raise self.retry(exc=exc)
+
+    return {**result, "email_enviado": True}

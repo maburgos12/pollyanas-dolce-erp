@@ -111,6 +111,7 @@ INSTALLED_APPS = [
     "bonos_ventas",
     "logistica",
     "fallas",
+    "mantenimiento",
     "mermas",
     "integraciones",
     "horarios_especiales",
@@ -344,6 +345,12 @@ CELERY_BEAT_SCHEDULE = {
         "task": "rentabilidad.tasks_rentabilidad.recalcular_rentabilidad_mensual",
         "schedule": crontab(hour=6, minute=0, day_of_month="6"),
         # Día 6 de cada mes — después del cierre automático (día 5)
+    },
+    # --- Monitoreo variación de costos de reventa ---
+    "reportes: monitoreo variacion costos reventa": {
+        "task": "reportes.monitoreo_variacion_costos_reventa",
+        "schedule": crontab(hour=7, minute=30, day_of_month="2"),
+        # Día 2 de cada mes — después del snapshot mensual del día 1
     },
 }
 
