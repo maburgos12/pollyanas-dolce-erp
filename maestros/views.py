@@ -4024,6 +4024,11 @@ def costos_adquisicion(request):
     # ── Ventas del período por producto (para chip "Vendidos sin costo") ────────
     from pos_bridge.models.sales import PointDailySale
     from django.db.models import Sum as _Sum
+    from rentabilidad.views_rentabilidad import _ANTICIPO_KEYWORDS
+
+    def _es_anticipo_local(nombre: str) -> bool:
+        lower = (nombre or "").lower()
+        return any(kw in lower for kw in _ANTICIPO_KEYWORDS)
     hoy = timezone.localdate()
     if filtro_periodo == "30d":
         periodo_desde = hoy - timedelta(days=30)
@@ -4165,22 +4170,28 @@ def costos_adquisicion(request):
         else:
             precio_promedio_ventas = None
 
+        es_anticipo = tipo == "reventa" and _es_anticipo_local(p.name)
+
         if tiene_costo:
             con_costo += 1
         else:
             sin_costo += 1
-            if ventas_monto > ZERO:
+            # Anticipos (tarjetas de regalo) se excluyen de la alerta urgente:
+            # son pasivos/anticipos contables, no productos con margen real.
+            if ventas_monto > ZERO and not es_anticipo:
                 vendidos_sin_costo_count += 1
 
         if filtro_estado == "sin_costo" and tiene_costo:
             continue
         if filtro_estado == "con_costo" and not tiene_costo:
             continue
-        if filtro_estado == "vendidos_sin_costo" and (tiene_costo or ventas_monto <= ZERO):
+        if filtro_estado == "vendidos_sin_costo" and (tiene_costo or ventas_monto <= ZERO or es_anticipo):
             continue
 
         # Precio de referencia para el form de edición:
-        # primero PointProduct.precio, luego precio promedio de ventas
+        # primero PointProduct.precio, luego precio promedio de ventas.
+        # IMPORTANTE: solo es referencia para validar margen; el costo real
+        # debe venir de factura/proveedor/Point ALMACEN.
         precio_ref = p.precio if p.precio else precio_promedio_ventas
 
         rows.append({
@@ -4188,6 +4199,7 @@ def costos_adquisicion(request):
             "nombre": p.name,
             "categoria": p.category or "Sin categoría",
             "tipo": tipo,
+            "es_anticipo": es_anticipo,
             "costo_vigente": costo_vigente,
             "fecha_costo": fecha_costo,
             "fuente": fuente,
@@ -4196,7 +4208,7 @@ def costos_adquisicion(request):
             "precio_venta_fuente": "point" if p.precio else ("ventas" if precio_promedio_ventas else None),
             "ventas_monto": ventas_monto,
             "ventas_cantidad": ventas_cantidad,
-            "editable": tipo == "reventa" and can_manage,
+            "editable": tipo == "reventa" and not es_anticipo and can_manage,
         })
 
     # Sort: en "vendidos_sin_costo" ordenar por ingreso en riesgo descendente

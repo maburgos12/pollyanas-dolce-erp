@@ -21,6 +21,17 @@ import calendar
 from .models_rentabilidad import SucursalRentabilidad, EstadoRentabilidad
 from core.access import can_manage_rentabilidad, can_view_rentabilidad
 
+# Palabras clave que identifican productos de tipo anticipo/pasivo
+# (tarjetas de regalo, vales). Contablemente son un pasivo hasta redención,
+# no una venta con margen normal. Se excluyen de alertas de "sin costo".
+_ANTICIPO_KEYWORDS = ("tarjeta de regalo", "gift card", "vale de regalo", "e-gift")
+
+
+def _es_anticipo(nombre: str) -> bool:
+    """Retorna True si el nombre del producto corresponde a un anticipo/pasivo."""
+    lower = (nombre or "").lower()
+    return any(kw in lower for kw in _ANTICIPO_KEYWORDS)
+
 
 def _require_view_rentabilidad(user):
     if not can_view_rentabilidad(user):
@@ -159,19 +170,23 @@ def _build_productos_panel(periodo, fecha_inicio, fecha_fin):
     costo_faltante = 0
     costo_faltante_reventa = 0
     costo_faltante_fabricado = 0
+    costo_faltante_anticipo = 0  # tarjetas/vales: pasivo, no alerta de costo
     for row in rows:
         cantidad = Decimal(row["cantidad"] or 0)
         venta = Decimal(row["venta"] or 0)
         costo_unitario = Decimal("0")
         tipo = "Sin clasificar"
         tiene_costo = False
+        nombre_producto = row["product__name"] or "Producto sin nombre"
+        es_anticipo = _es_anticipo(nombre_producto)
+
         if row["receta_id"]:
             costo_unitario = costos_recetas.get(row["receta_id"], Decimal("0"))
             tipo = "Fabricado"
             tiene_costo = costo_unitario > 0
         elif row["product_id"]:
             costo_unitario = costos_reventa.get(row["product_id"], Decimal("0"))
-            tipo = "Reventa"
+            tipo = "Anticipo" if es_anticipo else "Reventa"
             tiene_costo = costo_unitario > 0
 
         costo_total = (costo_unitario * cantidad).quantize(Decimal("0.01"))
@@ -179,14 +194,18 @@ def _build_productos_panel(periodo, fecha_inicio, fecha_fin):
         margen = _pct(utilidad, venta)
         if not tiene_costo and venta > 0:
             costo_faltante += 1
-            if tipo == "Reventa":
+            if es_anticipo:
+                costo_faltante_anticipo += 1
+                # Anticipos no se alertan como "sin costo de adquisición"
+            elif tipo == "Reventa":
                 costo_faltante_reventa += 1
             elif tipo == "Fabricado":
                 costo_faltante_fabricado += 1
         productos.append({
-            "nombre": row["product__name"] or "Producto sin nombre",
+            "nombre": nombre_producto,
             "categoria": row["product__category"] or "Sin categoría",
             "tipo": tipo,
+            "es_anticipo": es_anticipo,
             "cantidad": cantidad,
             "venta": venta,
             "costo_unitario": costo_unitario,
@@ -206,6 +225,7 @@ def _build_productos_panel(periodo, fecha_inicio, fecha_fin):
         "costo_faltante": costo_faltante,
         "costo_faltante_reventa": costo_faltante_reventa,
         "costo_faltante_fabricado": costo_faltante_fabricado,
+        "costo_faltante_anticipo": costo_faltante_anticipo,
         "productos_revisados": len(productos),
     }
 
@@ -264,12 +284,18 @@ def _build_alertas_panel(sucursales_data, productos_panel, gastos_panel, max_sal
 
     if productos_panel["costo_faltante_reventa"]:
         n = productos_panel["costo_faltante_reventa"]
+        n_anticipo = productos_panel["costo_faltante_anticipo"]
+        nota_anticipo = (
+            f" ({n_anticipo} tarjeta{'s' if n_anticipo > 1 else ''} de regalo excluida{'s' if n_anticipo > 1 else ''} — son anticipos/pasivos)"
+            if n_anticipo else ""
+        )
         alertas.append({
             "nivel": "alto",
             "titulo": f"{n} producto{'s' if n > 1 else ''} de reventa sin costo de adquisición",
             "detalle": (
-                f"{n} productos de reventa vendidos no tienen costo unitario en ProductoReventaCosto "
-                f"(velas, pirotecnia, refrescos, etc.). No afecta recetas fabricadas; afecta margen de reventa."
+                f"{n} productos de reventa vendidos no tienen costo en ProductoReventaCosto "
+                f"(velas, pirotecnia, refrescos, decorativos, bebidas, etc.). "
+                f"Capturar costo real de factura/proveedor en /maestros/costos-adquisicion/.{nota_anticipo}"
             ),
         })
     if productos_panel["costo_faltante_fabricado"]:

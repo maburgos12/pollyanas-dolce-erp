@@ -17,6 +17,7 @@
   .badge-POINT_ALMACEN  { background:#f3e5f5; color:#6a1b9a; }
   .badge-MANUAL         { background:#e8f5e9; color:#2e7d32; }
   .badge-sin            { background:#ffebee; color:#c62828; }
+  .badge-anticipo       { background:#fff8e1; color:#f57f17; }
 
   .tipo-fabricado { color:#1565c0; font-size:11px; }
   .tipo-reventa   { color:#6a1b9a; font-size:11px; }
@@ -138,7 +139,12 @@
           {% endif %}
         </td>
         <td>
-          {% if r.fuente == 'RECETA' %}
+          {% if r.es_anticipo %}
+            <span class="badge badge-anticipo" style="font-size:11px"
+                  title="Tarjeta de regalo / vale — pasivo contable hasta redención. No requiere costo de adquisición.">
+              Anticipo/Pasivo
+            </span>
+          {% elif r.fuente == 'RECETA' %}
             <span class="badge badge-RECETA" style="font-size:11px">Receta</span>
           {% elif r.fuente == 'POINT_ALMACEN' %}
             <span class="badge badge-POINT_ALMACEN" style="font-size:11px">Point auto</span>
@@ -202,7 +208,10 @@
 
 <div class="muted" style="font-size:11px;margin-top:6px">
   El sync automático de Point captura costos diariamente a las 09:15.
-  Los costos manuales tienen prioridad en la consulta de rentabilidad.
+  Los costos manuales tienen prioridad en la consulta de rentabilidad. &nbsp;·&nbsp;
+  <strong>~P.vta (prom.)</strong>: precio promedio vendido del período — solo referencia para validar margen.
+  El costo real debe venir de factura, proveedor o captura manual autorizada. &nbsp;·&nbsp;
+  <strong>Anticipo/Pasivo</strong>: tarjetas de regalo y vales — son un pasivo contable hasta que se redimen, no generan margen de reventa normal.
 </div>
 
 {% endblock %}
