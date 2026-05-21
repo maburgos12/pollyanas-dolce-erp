@@ -10,6 +10,7 @@ ROLE_LOGISTICA = "LOGISTICA"
 ROLE_RRHH = "RRHH"
 ROLE_LECTURA = "LECTURA"
 ROLE_REPARTIDOR = "repartidor"
+ROLE_BONOS_PRODUCCION_CAPTURA = "bonos_produccion_captura"
 
 ROLE_ORDER = [
     ROLE_DG,
@@ -565,6 +566,19 @@ def is_branch_capture_only(user: AbstractBaseUser) -> bool:
     if not profile:
         return False
     return bool(getattr(profile, "modo_captura_sucursal", False))
+
+
+def is_bonos_produccion_capture_only(user: AbstractBaseUser) -> bool:
+    if not user or not user.is_authenticated or user.is_superuser or user.is_staff:
+        return False
+    groups = _group_names(user)
+    allowed_groups = {ROLE_BONOS_PRODUCCION_CAPTURA}
+    active_modules = {
+        module
+        for module, access in _explicit_access_map(user).items()
+        if _normalize_access(access) != ACCESS_NONE
+    }
+    return bool(groups.intersection(allowed_groups)) and groups.issubset(allowed_groups) and not active_modules
 
 
 def _get_role_label(user: AbstractBaseUser) -> str:

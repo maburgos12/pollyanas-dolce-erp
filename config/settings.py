@@ -133,6 +133,7 @@ MIDDLEWARE = [
     "core.middleware.EnsureCSRFCookieOnHtmlMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "core.middleware.BonosProduccionCaptureOnlyMiddleware",
     "core.middleware.BranchCaptureOnlyMiddleware",
     "core.middleware.RepartidorOnlyMiddleware",
     "core.middleware.MermasOnlyMiddleware",
