@@ -116,7 +116,7 @@ class Command(BaseCommand):
 
         # Build lookup maps
         nombre_map = {_norm(i.nombre): i for i in Insumo.objects.select_related("unidad_base").all()}
-        alias_map = {_norm(a.alias): a.insumo for a in InsumoAlias.objects.select_related("insumo").all()}
+        alias_map = {_norm(a.nombre): a.insumo for a in InsumoAlias.objects.select_related("insumo").all()}
 
         wb = openpyxl.load_workbook(str(path), data_only=True)
 
