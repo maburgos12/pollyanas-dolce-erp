@@ -224,6 +224,8 @@ class BonosProduccionTests(TestCase):
         self.assertIn("credentials:'same-origin'", content)
         self.assertIn("/bonos-produccion/manifest.json", content)
         self.assertIn("/bonos-produccion/sw.js", content)
+        self.assertIn("href:'/logout/'", content)
+        self.assertIn("Cerrar sesión", content)
         self.assertIn("employee-search", content)
         self.assertIn("Teclea nombre o apellido", content)
         self.assertIn("r.redirected", content)
