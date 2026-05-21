@@ -157,6 +157,8 @@ def _build_productos_panel(periodo, fecha_inicio, fecha_fin):
 
     productos = []
     costo_faltante = 0
+    costo_faltante_reventa = 0
+    costo_faltante_fabricado = 0
     for row in rows:
         cantidad = Decimal(row["cantidad"] or 0)
         venta = Decimal(row["venta"] or 0)
@@ -177,6 +179,10 @@ def _build_productos_panel(periodo, fecha_inicio, fecha_fin):
         margen = _pct(utilidad, venta)
         if not tiene_costo and venta > 0:
             costo_faltante += 1
+            if tipo == "Reventa":
+                costo_faltante_reventa += 1
+            elif tipo == "Fabricado":
+                costo_faltante_fabricado += 1
         productos.append({
             "nombre": row["product__name"] or "Producto sin nombre",
             "categoria": row["product__category"] or "Sin categoría",
@@ -198,6 +204,8 @@ def _build_productos_panel(periodo, fecha_inicio, fecha_fin):
             key=lambda row: (row["tiene_costo"], row["margen"], -row["venta"]),
         )[:12],
         "costo_faltante": costo_faltante,
+        "costo_faltante_reventa": costo_faltante_reventa,
+        "costo_faltante_fabricado": costo_faltante_fabricado,
         "productos_revisados": len(productos),
     }
 
@@ -254,11 +262,25 @@ def _build_alertas_panel(sucursales_data, productos_panel, gastos_panel, max_sal
                 "detalle": f"Avance PE {r.porcentaje_avance_pe}%. Faltan ${r.brecha_pe.quantize(Decimal('0.01')):,.2f} aprox. para cubrir estructura fija.",
             })
 
-    if productos_panel["costo_faltante"]:
+    if productos_panel["costo_faltante_reventa"]:
+        n = productos_panel["costo_faltante_reventa"]
         alertas.append({
             "nivel": "alto",
-            "titulo": "Productos vendidos sin costo completo",
-            "detalle": f"{productos_panel['costo_faltante']} productos del ranking no tienen costo unitario detectado. Impactan margen y utilidad.",
+            "titulo": f"{n} producto{'s' if n > 1 else ''} de reventa sin costo de adquisición",
+            "detalle": (
+                f"{n} productos de reventa vendidos no tienen costo unitario en ProductoReventaCosto "
+                f"(velas, pirotecnia, refrescos, etc.). No afecta recetas fabricadas; afecta margen de reventa."
+            ),
+        })
+    if productos_panel["costo_faltante_fabricado"]:
+        n = productos_panel["costo_faltante_fabricado"]
+        alertas.append({
+            "nivel": "alto",
+            "titulo": f"{n} producto{'s' if n > 1 else ''} fabricado{'s' if n > 1 else ''} sin costo de receta",
+            "detalle": (
+                f"{n} productos fabricados del ranking no tienen RecetaCostoVersion vigente. "
+                f"Revisar costeo de recetas."
+            ),
         })
     if gastos_panel["registros"] == 0:
         alertas.append({
