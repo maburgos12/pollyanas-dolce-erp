@@ -124,7 +124,7 @@
         <td>
           {% if r.editable %}
           <button class="btn btn-sm btn-secondary" style="font-size:11px"
-                  onclick="toggleEdit({{ r.id }}, '{{ r.nombre|escapejs }}', {{ r.costo_vigente|default:0 }})">
+                  onclick="toggleEdit({{ r.id }}, '{{ r.nombre|escapejs }}', {{ r.costo_vigente|default:0 }}, {{ r.precio_venta|default:'null' }})">
             Editar costo
           </button>
           {% endif %}
@@ -138,11 +138,18 @@
             {% csrf_token %}
             <input type="hidden" name="producto_id" value="{{ r.id }}">
             <span style="font-weight:700;font-size:13px">{{ r.nombre|truncatechars:30 }}</span>
+            {% if r.precio_venta %}
+            <span id="pvta-{{ r.id }}" style="font-size:11px;color:var(--texto-light);white-space:nowrap">
+              P.vta: ${{ r.precio_venta|floatformat:2 }}
+            </span>
+            {% endif %}
             <input type="number" name="costo_unitario" id="costo-{{ r.id }}" class="form-control"
                    step="0.0001" min="0" style="width:130px" placeholder="Costo unitario"
-                   value="{{ r.costo_vigente|default:'' }}">
+                   value="{{ r.costo_vigente|default:'' }}"
+                   oninput="calcMargen({{ r.id }}, {{ r.precio_venta|default:'null' }})">
+            <span id="margen-{{ r.id }}" style="font-size:11px;white-space:nowrap;min-width:70px"></span>
             <input type="text" name="proveedor_nombre" class="form-control"
-                   style="width:180px" placeholder="Proveedor (opcional)">
+                   style="width:160px" placeholder="Proveedor (opcional)">
             <button type="submit" class="btn btn-primary btn-sm">Guardar</button>
             <button type="button" class="btn btn-sm" style="background:#f0f0f0"
                     onclick="toggleEdit({{ r.id }})">Cancelar</button>
@@ -166,17 +173,28 @@
 
 {% block extra_js %}
 <script>
-function toggleEdit(id, nombre, costoActual) {
+function toggleEdit(id, nombre, costoActual, precioVenta) {
   const row = document.getElementById('editrow-' + id);
   if (!row) return;
   const visible = row.style.display !== 'none';
-  // Hide all open edit rows
   document.querySelectorAll('[id^="editrow-"]').forEach(r => r.style.display = 'none');
   if (!visible) {
     row.style.display = '';
     const inp = document.getElementById('costo-' + id);
     if (inp) { inp.focus(); inp.select(); }
+    calcMargen(id, precioVenta);
   }
+}
+
+function calcMargen(id, precioVenta) {
+  const inp = document.getElementById('costo-' + id);
+  const el  = document.getElementById('margen-' + id);
+  if (!inp || !el || !precioVenta) return;
+  const costo = parseFloat(inp.value);
+  if (isNaN(costo) || costo <= 0) { el.textContent = ''; return; }
+  const margen = ((precioVenta - costo) / precioVenta * 100);
+  const color  = margen < 10 ? '#c62828' : margen < 25 ? '#e65100' : '#2e7d32';
+  el.innerHTML = `<span style="color:${color};font-weight:700">${margen.toFixed(1)}% margen</span>`;
 }
 </script>
 {% endblock %}

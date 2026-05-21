@@ -4048,6 +4048,7 @@ def costos_adquisicion(request):
             ultima_fecha=Subquery(ultimo_fecha_sub, output_field=DateField()),
         )
         .order_by("category", "name")
+        .only("id", "name", "category", "active", "precio")
     )
 
     if filtro_q:
@@ -4152,6 +4153,7 @@ def costos_adquisicion(request):
             "fecha_costo": fecha_costo,
             "fuente": fuente,
             "tiene_costo": tiene_costo,
+            "precio_venta": p.precio,   # referencia para captura manual
             "editable": tipo == "reventa" and can_manage,
         })
 
