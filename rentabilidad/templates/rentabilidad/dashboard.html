@@ -875,7 +875,7 @@
         {% with r=item.obj %}
         <div class="rank-item">
           <div><strong>{{ r.sucursal.nombre }}</strong><div class="muted">PE ${{ r.punto_equilibrio_mensual|floatformat:0|intcomma }}</div></div>
-          <strong>{% if r.porcentaje_avance_pe >= 100 %}Cubierto{% else %}{{ r.porcentaje_avance_pe }}%{% endif %}</strong>
+          <strong>{% if r.punto_equilibrio_mensual <= 0 %}Pendiente{% elif r.porcentaje_avance_pe >= 100 %}Cubierto{% else %}{{ r.porcentaje_avance_pe }}%{% endif %}</strong>
         </div>
         {% endwith %}
         {% endfor %}
@@ -1042,11 +1042,13 @@
             <td class="num" data-label="Margen bruto">{{ r.porcentaje_margen_bruto }}%</td>
             <td class="num" data-label="Gasto fijo">${{ r.gasto_fijo_total|floatformat:0|intcomma }}</td>
             <td data-label="Punto equilibrio">
-              <div class="pe-progress {% if r.porcentaje_avance_pe >= 100 %}is-ok{% elif r.porcentaje_avance_pe >= 85 %}is-mid{% else %}is-low{% endif %}">
+              <div class="pe-progress {% if r.punto_equilibrio_mensual <= 0 %}is-low{% elif r.porcentaje_avance_pe >= 100 %}is-ok{% elif r.porcentaje_avance_pe >= 85 %}is-mid{% else %}is-low{% endif %}">
                 <div class="metric-stack">
                   <strong>${{ r.punto_equilibrio_mensual|floatformat:0|intcomma }}</strong>
                   <span class="cell-note">
-                    {% if r.porcentaje_avance_pe >= 100 %}
+                    {% if r.punto_equilibrio_mensual <= 0 %}
+                    PE pendiente
+                    {% elif r.porcentaje_avance_pe >= 100 %}
                     PE cubierto
                     {% else %}
                     Avance {{ r.porcentaje_avance_pe }}%
@@ -1054,7 +1056,9 @@
                   </span>
                 </div>
                 <div class="pe-progress-value">
-                  {% if r.brecha_pe > 0 %}
+                  {% if r.punto_equilibrio_mensual <= 0 %}
+                  <span class="negative">sin gasto fijo</span>
+                  {% elif r.brecha_pe > 0 %}
                   <span class="negative">${{ r.brecha_pe|floatformat:0|intcomma }}</span>
                   {% else %}
                   <span class="positive">cubierto</span>
