@@ -4054,7 +4054,41 @@ def costos_adquisicion(request):
         products_qs = products_qs.filter(name__icontains=filtro_q)
 
     # ── Recetas con costo vigente ──────────────────────────────────────────────
-    from recetas.models import RecetaCostoVersion, Receta
+    # Receta no tiene FK directa a PointProduct; el enlace real es por codigo_point
+    # y aliases normalizados.
+    def _point_code_keys(value):
+        raw = (value or "").strip()
+        normalized = normalizar_codigo_point(raw)
+        keys = {raw, normalized}
+        if raw:
+            keys.add(raw.lstrip("0") or raw)
+        if normalized:
+            keys.add(normalized.lstrip("0") or normalized)
+        return {key for key in keys if key}
+
+    point_product_by_code = {}
+    for product_id, external_id in PointProduct.objects.exclude(external_id="").values_list("id", "external_id"):
+        for key in _point_code_keys(external_id):
+            point_product_by_code.setdefault(key, product_id)
+
+    receta_product_by_id = {}
+    for receta_id, codigo in Receta.objects.exclude(codigo_point="").values_list("id", "codigo_point"):
+        for key in _point_code_keys(codigo):
+            product_id = point_product_by_code.get(key)
+            if product_id:
+                receta_product_by_id.setdefault(receta_id, product_id)
+                break
+
+    alias_rows = RecetaCodigoPointAlias.objects.filter(activo=True).values_list("receta_id", "codigo_point")
+    for receta_id, codigo in alias_rows:
+        if receta_id in receta_product_by_id:
+            continue
+        for key in _point_code_keys(codigo):
+            product_id = point_product_by_code.get(key)
+            if product_id:
+                receta_product_by_id[receta_id] = product_id
+                break
+
     receta_by_product: dict[int, dict] = {}
     for rcv in (
         RecetaCostoVersion.objects
@@ -4062,8 +4096,9 @@ def costos_adquisicion(request):
         .filter(costo_total__gt=0)
         .order_by("receta_id", "-creado_en")
     ):
-        if rcv.receta.product_point_id and rcv.receta.product_point_id not in receta_by_product:
-            receta_by_product[rcv.receta.product_point_id] = {
+        product_id = receta_product_by_id.get(rcv.receta_id)
+        if product_id and product_id not in receta_by_product:
+            receta_by_product[product_id] = {
                 "costo": rcv.costo_por_unidad_rendimiento or rcv.costo_total,
                 "fecha": rcv.creado_en.date() if rcv.creado_en else None,
             }
