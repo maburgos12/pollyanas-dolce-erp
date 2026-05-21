@@ -10,6 +10,11 @@
   "orientation": "portrait",
   "icons": [
     {
+      "src": "/static/bonos_ventas/icons/apple-touch-icon-180.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
       "src": "/static/bonos_ventas/icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png"

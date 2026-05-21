@@ -107,6 +107,7 @@ class BonosVentasTests(TestCase):
         content = response.content.decode()
         self.assertIn("credentials:'same-origin'", content)
         self.assertIn("/bonos-ventas/manifest.json", content)
+        self.assertIn("/static/bonos_ventas/icons/apple-touch-icon-180.png?v=20260521", content)
         self.assertIn("/bonos-ventas/sw.js", content)
         self.assertIn("href:'/logout/'", content)
         self.assertIn("Cerrar sesión", content)
@@ -121,6 +122,10 @@ class BonosVentasTests(TestCase):
         self.assertEqual(manifest.status_code, 200)
         self.assertEqual(manifest["Content-Type"], "application/manifest+json")
         self.assertEqual(manifest.json()["start_url"], "/bonos-ventas/app/?captura=1")
+        self.assertIn(
+            "/static/bonos_ventas/icons/apple-touch-icon-180.png",
+            [icon["src"] for icon in manifest.json()["icons"]],
+        )
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
