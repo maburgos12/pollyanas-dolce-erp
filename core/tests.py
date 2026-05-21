@@ -116,6 +116,7 @@ class CanonicalLocalHostMiddlewareTests(TestCase):
         self.assertEqual(response["Location"], "http://localhost:8011/login/?next=/dashboard/")
 
 
+@override_settings(SECURE_SSL_REDIRECT=False)
 class LoginViewAuthenticatedRedirectTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(username="johana.lopez", password="test12345")
