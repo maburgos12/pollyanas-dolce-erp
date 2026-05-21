@@ -115,3 +115,61 @@ class PointPurchaseResaleCostSyncServiceTests(TestCase):
         row = ProductoReventaCosto.objects.get(producto_point=product)
         self.assertEqual(str(row.costo_unitario), "4.180000")
         self.assertEqual(row.proveedor_nombre, "IMPRENTA MARCOPOLO")
+
+    def test_sync_purchase_payloads_resolves_mom_sign_purchase_aliases(self):
+        letrero_10 = PointProduct.objects.create(
+            external_id="908",
+            sku="6984",
+            name="Letrero Mom 10cm",
+            category="Letreros",
+            active=True,
+        )
+        letrero_15 = PointProduct.objects.create(
+            external_id="1033",
+            sku="02124",
+            name="Letrero Mom 15cm",
+            category="Letreros",
+            active=True,
+        )
+        service = PointPurchaseResaleCostSyncService()
+
+        result = service.sync_purchase_payloads(
+            apply=True,
+            purchases=[
+                {
+                    "FK_Movimiento": "253122",
+                    "Folio": "253122",
+                    "Proveedor": "JESUS NORBERTO BELTRAN LOPEZ",
+                    "Sucursal": "Almacen",
+                    "Fecha_compra": "2025-05-09T07:00:00",
+                }
+            ],
+            details_by_purchase={
+                "253122": [
+                    {
+                        "Articulo": "LETRERO MOM ACRILICO 10 CMS",
+                        "Cantidad": 100,
+                        "Unidad": "PZA",
+                        "Costo_unitario": 23.20,
+                        "Costo_total": 2320.00,
+                    },
+                    {
+                        "Articulo": "LETRERO MOM ACRILICO 12 CMS",
+                        "Cantidad": 120,
+                        "Unidad": "PZA",
+                        "Costo_unitario": 27.84,
+                        "Costo_total": 3340.80,
+                    },
+                ]
+            },
+        )
+
+        self.assertEqual(result.created, 2)
+        self.assertEqual(
+            str(ProductoReventaCosto.objects.get(producto_point=letrero_10).costo_unitario),
+            "23.200000",
+        )
+        self.assertEqual(
+            str(ProductoReventaCosto.objects.get(producto_point=letrero_15).costo_unitario),
+            "27.840000",
+        )

@@ -19,6 +19,10 @@ PURCHASE_ARTICLE_PRODUCT_ALIASES = {
     # Point registra la compra física de la tarjeta por el diseño/proveedor,
     # pero el producto vendido conserva el nombre comercial de temporada.
     "tarjeta happy mothers day": ("tarjeta de regalo dia de las madres", "tarjeta de regalo día de las madres", "78421", "1411"),
+    # Compras de letreros Mom capturadas por descripción del proveedor; en venta
+    # se usaron SKUs comerciales distintos.
+    "letrero mom acrilico 10 cms": ("letrero mom 10cm", "6984"),
+    "letrero mom acrilico 12 cms": ("letrero mom 15cm", "02124"),
 }
 
 
