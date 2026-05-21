@@ -6174,3 +6174,207 @@ def conteo_fisico_export(request: HttpRequest, conteo_id: int) -> HttpResponse:
     )
     response["Content-Disposition"] = f'attachment; filename="conteo_fisico_{conteo.periodo:%Y_%m}.xlsx"'
     return response
+
+
+# ─── CAPTURA DIARIA ALMACÉN ──────────────────────────────────────────────────
+
+from .models import ALMACEN_CHOICES, ALMACEN_LABELS  # noqa: E402
+
+
+def _captura_diaria_insumo_options():
+    """Insumos activos con su existencia y almacén para el selector."""
+    from django.db.models import OuterRef, Subquery
+    insumos = (
+        Insumo.objects.filter(activo=True)
+        .select_related("unidad_base", "existenciainsumo")
+        .order_by("nombre")
+    )
+    rows = []
+    for ins in insumos:
+        exist = getattr(ins, "existenciainsumo", None)
+        rows.append(
+            {
+                "id": ins.id,
+                "nombre": ins.nombre,
+                "unidad": getattr(ins.unidad_base, "codigo", "") or "",
+                "almacen": exist.almacen if exist else "ALMACEN_1",
+                "almacen_label": ALMACEN_LABELS.get(exist.almacen if exist else "ALMACEN_1", ""),
+                "stock_actual": float(exist.stock_actual) if exist else 0,
+            }
+        )
+    return rows
+
+
+@login_required
+def captura_diaria(request: HttpRequest) -> HttpResponse:
+    """Vista principal de captura diaria de entradas y salidas de almacén."""
+    if not can_view_inventario(request.user):
+        raise PermissionDenied("No tienes permisos para ver Inventario.")
+
+    can_manage = can_manage_inventario(request.user)
+
+    if request.method == "POST" and can_manage:
+        action = (request.POST.get("action") or "").strip()
+
+        if action in ("registrar_entrada", "registrar_salida"):
+            insumo_id = request.POST.get("insumo_id")
+            insumo = canonical_insumo_by_id(insumo_id)
+            if not insumo:
+                messages.error(request, "Insumo no encontrado.")
+                return redirect("inventario:captura_diaria")
+
+            cantidad_raw = (request.POST.get("cantidad") or "").strip()
+            try:
+                cantidad = Decimal(cantidad_raw)
+                if cantidad <= 0:
+                    raise ValueError
+            except (InvalidOperation, ValueError):
+                messages.error(request, "Cantidad inválida.")
+                return redirect("inventario:captura_diaria")
+
+            fecha_raw = (request.POST.get("fecha") or "").strip()
+            try:
+                from datetime import datetime as _dt
+                fecha_date = _dt.strptime(fecha_raw, "%Y-%m-%d").date()
+                fecha_dt = timezone.datetime(
+                    fecha_date.year, fecha_date.month, fecha_date.day,
+                    8, 0, tzinfo=timezone.utc,
+                )
+            except (ValueError, TypeError):
+                messages.error(request, "Fecha inválida.")
+                return redirect("inventario:captura_diaria")
+
+            almacen = (request.POST.get("almacen") or "ALMACEN_1").strip()
+            notas = (request.POST.get("notas") or "").strip()[:255]
+            tipo = (
+                MovimientoInventario.TIPO_ENTRADA
+                if action == "registrar_entrada"
+                else MovimientoInventario.TIPO_SALIDA
+            )
+
+            with transaction.atomic():
+                mov = MovimientoInventario.objects.create(
+                    fecha=fecha_dt,
+                    tipo=tipo,
+                    insumo=insumo,
+                    cantidad=cantidad,
+                    almacen=almacen,
+                    notas=notas,
+                    registrado_por=request.user.get_full_name() or request.user.username,
+                    referencia=f"MANUAL_{timezone.localdate():%Y%m%d}",
+                )
+                exist, _ = ExistenciaInsumo.objects.get_or_create(
+                    insumo=insumo,
+                    defaults={"almacen": almacen},
+                )
+                if tipo == MovimientoInventario.TIPO_ENTRADA:
+                    exist.stock_actual = (exist.stock_actual or Decimal("0")) + cantidad
+                    tipo_label = "Entrada"
+                else:
+                    exist.stock_actual = max(
+                        Decimal("0"), (exist.stock_actual or Decimal("0")) - cantidad
+                    )
+                    tipo_label = "Salida"
+                exist.actualizado_en = timezone.now()
+                exist.save(update_fields=["stock_actual", "actualizado_en"])
+
+                log_event(
+                    request,
+                    action=f"INVENTARIO_{tipo}",
+                    model="MovimientoInventario",
+                    obj_id=mov.pk,
+                    detail=f"{tipo_label} {cantidad} {insumo.nombre}",
+                )
+
+            messages.success(
+                request,
+                f"{'Entrada' if tipo == MovimientoInventario.TIPO_ENTRADA else 'Salida'} registrada: "
+                f"{cantidad} {getattr(insumo.unidad_base, 'codigo', '') or ''} de {insumo.nombre}.",
+            )
+            return redirect("inventario:captura_diaria")
+
+    # ── GET ──────────────────────────────────────────────────────────────────
+    hoy = timezone.localdate()
+    filtro_almacen = (request.GET.get("almacen") or "").strip()
+    filtro_q = (request.GET.get("q") or "").strip().upper()
+
+    # Ultimos movimientos del día (últimos 50)
+    movs_qs = (
+        MovimientoInventario.objects.filter(
+            tipo__in=[MovimientoInventario.TIPO_ENTRADA, MovimientoInventario.TIPO_SALIDA]
+        )
+        .select_related("insumo", "insumo__unidad_base")
+        .order_by("-fecha")[:100]
+    )
+    movs_hoy = [m for m in movs_qs if m.fecha.date() == hoy]
+    movs_recientes = list(movs_qs)[:50]
+
+    # Stock con alertas
+    existencias_qs = ExistenciaInsumo.objects.select_related("insumo", "insumo__unidad_base").order_by(
+        "almacen", "insumo__nombre"
+    )
+    if filtro_almacen:
+        existencias_qs = existencias_qs.filter(almacen=filtro_almacen)
+
+    exist_rows = []
+    for ex in existencias_qs:
+        nombre = ex.insumo.nombre
+        if filtro_q and filtro_q not in nombre.upper():
+            continue
+        consumo = ex.consumo_diario_promedio or Decimal("0")
+        dias_cobertura = None
+        if consumo > 0:
+            dias_cobertura = round(float(ex.stock_actual) / float(consumo), 1)
+        alerta = "ok"
+        if ex.punto_reorden > 0 and ex.stock_actual <= ex.punto_reorden:
+            alerta = "reorden"
+        if ex.stock_minimo > 0 and ex.stock_actual <= ex.stock_minimo:
+            alerta = "critico"
+        if ex.stock_maximo > 0 and ex.stock_actual > ex.stock_maximo:
+            alerta = "exceso"
+        exist_rows.append(
+            {
+                "id": ex.id,
+                "insumo_id": ex.insumo_id,
+                "nombre": nombre,
+                "unidad": getattr(ex.insumo.unidad_base, "codigo", "") or "",
+                "almacen": ex.almacen,
+                "almacen_label": ALMACEN_LABELS.get(ex.almacen, ex.almacen),
+                "stock_actual": ex.stock_actual,
+                "stock_minimo": ex.stock_minimo,
+                "stock_maximo": ex.stock_maximo,
+                "punto_reorden": ex.punto_reorden,
+                "consumo_diario": consumo,
+                "dias_cobertura": dias_cobertura,
+                "dias_llegada": ex.dias_llegada_pedido,
+                "alerta": alerta,
+            }
+        )
+
+    # Summary counts
+    total_criticos = sum(1 for r in exist_rows if r["alerta"] == "critico")
+    total_reorden = sum(1 for r in exist_rows if r["alerta"] == "reorden")
+    total_exceso = sum(1 for r in exist_rows if r["alerta"] == "exceso")
+
+    insumo_options = _captura_diaria_insumo_options()
+
+    return render(
+        request,
+        "inventario/captura_diaria.html",
+        {
+            "page_title": "Captura diaria almacén",
+            "hoy": hoy,
+            "hoy_iso": hoy.isoformat(),
+            "can_manage": can_manage,
+            "almacen_choices": ALMACEN_CHOICES,
+            "filtro_almacen": filtro_almacen,
+            "filtro_q": filtro_q,
+            "exist_rows": exist_rows,
+            "movs_hoy": movs_hoy,
+            "movs_recientes": movs_recientes,
+            "total_criticos": total_criticos,
+            "total_reorden": total_reorden,
+            "total_exceso": total_exceso,
+            "insumo_options_json": __import__("json").dumps(insumo_options, default=str),
+        },
+    )

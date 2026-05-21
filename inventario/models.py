@@ -7,8 +7,24 @@ from django.utils import timezone
 from maestros.models import Insumo
 
 
+ALMACEN_CHOICES = [
+    ("ALMACEN_1", "Almacén 1 (principal)"),
+    ("ALMACEN_CASA_1", "Almacén Casa 1"),
+    ("ALMACEN_CASA_2", "Almacén Casa 2"),
+    ("CUARTO_FRIO", "Cuarto Frío"),
+    ("VELAS", "Almacén de Velas"),
+    ("LIMPIEZA", "Almacén de Limpieza"),
+    ("OTRO", "Otro"),
+]
+ALMACEN_LABELS = dict(ALMACEN_CHOICES)
+
+
 class ExistenciaInsumo(models.Model):
     insumo = models.OneToOneField(Insumo, on_delete=models.CASCADE)
+    almacen = models.CharField(
+        max_length=20, choices=ALMACEN_CHOICES, default="ALMACEN_1",
+        verbose_name="Almacén / Ubicación", db_index=True,
+    )
     stock_actual = models.DecimalField(max_digits=18, decimal_places=3, default=0)
     punto_reorden = models.DecimalField(max_digits=18, decimal_places=3, default=0)
     stock_minimo = models.DecimalField(max_digits=18, decimal_places=3, default=0)
@@ -22,7 +38,7 @@ class ExistenciaInsumo(models.Model):
     class Meta:
         verbose_name = "Existencia de insumo"
         verbose_name_plural = "Existencias de insumos"
-        ordering = ["insumo__nombre"]
+        ordering = ["almacen", "insumo__nombre"]
 
     def __str__(self):
         return self.insumo.nombre
@@ -45,6 +61,9 @@ class MovimientoInventario(models.Model):
     insumo = models.ForeignKey(Insumo, on_delete=models.PROTECT)
     cantidad = models.DecimalField(max_digits=18, decimal_places=3)
     referencia = models.CharField(max_length=120, blank=True, default="")
+    almacen = models.CharField(max_length=20, choices=ALMACEN_CHOICES, default="ALMACEN_1", blank=True)
+    notas = models.CharField(max_length=255, blank=True, default="", verbose_name="Notas / destino")
+    registrado_por = models.CharField(max_length=120, blank=True, default="", verbose_name="Registrado por")
     source_hash = models.CharField(max_length=64, unique=True, null=True, blank=True)
 
     class Meta:

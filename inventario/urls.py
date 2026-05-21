@@ -20,4 +20,5 @@ urlpatterns = [
     path("importar/", views.importar_archivos, name="importar_archivos"),
     path("carga-almacen/", views.importar_archivos, name="carga_almacen"),
     path("sync-drive-now/", views.sync_drive_now, name="sync_drive_now"),
+    path("captura/", views.captura_diaria, name="captura_diaria"),
 ]
