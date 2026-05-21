@@ -20,4 +20,5 @@ urlpatterns = [
     path('insumos/crear/', views.InsumoCreateView.as_view(), name='insumo_create'),
     path('insumos/<int:pk>/editar/', views.InsumoUpdateView.as_view(), name='insumo_update'),
     path('insumos/<int:pk>/eliminar/', views.InsumoDeleteView.as_view(), name='insumo_delete'),
+    path('costos-adquisicion/', views.costos_adquisicion, name='costos_adquisicion'),
 ]

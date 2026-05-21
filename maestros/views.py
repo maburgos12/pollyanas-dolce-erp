@@ -3951,3 +3951,194 @@ def point_pending_review(request):
             "executive_radar_rows": _maestros_executive_radar_rows(workflow_rows, workflow_rows),
         },
     )
+
+
+# ─── Costos de adquisición (reventa + insumos) ────────────────────────────────
+
+@login_required
+def costos_adquisicion(request):
+    """
+    Catálogo de costos de adquisición para todos los productos vendidos.
+    - Fabricados: muestra costo de receta vigente (RecetaCostoVersion)
+    - Reventa   : muestra ProductoReventaCosto vigente, permite edición manual
+    - Insumos   : muestra CostoInsumo más reciente
+
+    POST: guarda un ProductoReventaCosto con fuente=MANUAL para el producto indicado.
+    """
+    if not can_view_maestros(request.user):
+        raise PermissionDenied("No tienes permisos para ver Maestros.")
+
+    can_manage = has_any_role(request.user, ROLE_ADMIN, ROLE_COMPRAS)
+
+    from reportes.models import ProductoReventaCosto
+    from pos_bridge.models.product import PointProduct
+    from recetas.models import RecetaCostoVersion
+    from django.db.models import Max, OuterRef, Subquery
+
+    # ── POST: guardar costo manual ─────────────────────────────────────────────
+    if request.method == "POST" and can_manage:
+        prod_id = request.POST.get("producto_id", "").strip()
+        costo_raw = (request.POST.get("costo_unitario") or "").strip()
+        proveedor_nombre = (request.POST.get("proveedor_nombre") or "").strip()[:255]
+
+        try:
+            producto = PointProduct.objects.get(pk=int(prod_id))
+        except (ValueError, TypeError, PointProduct.DoesNotExist):
+            messages.error(request, "Producto no encontrado.")
+            return redirect("maestros:costos_adquisicion")
+
+        try:
+            costo = Decimal(costo_raw)
+            if costo < 0:
+                raise ValueError
+        except (Exception,):
+            messages.error(request, "Costo inválido.")
+            return redirect("maestros:costos_adquisicion")
+
+        fecha = timezone.localdate()
+        source_hash = hashlib.sha256(
+            f"MANUAL|{producto.id}|{fecha.isoformat()}|{costo}".encode()
+        ).hexdigest()
+
+        ProductoReventaCosto.objects.update_or_create(
+            source_hash=source_hash,
+            defaults={
+                "producto_point": producto,
+                "costo_unitario": costo,
+                "fecha_vigencia": fecha,
+                "fuente": ProductoReventaCosto.FUENTE_MANUAL,
+                "proveedor_nombre": proveedor_nombre,
+            },
+        )
+        log_event(request.user, "costos_adquisicion_manual",
+                  f"{producto.name} → ${costo} ({proveedor_nombre})")
+        messages.success(request, f"Costo de {producto.name} guardado: ${costo:,.4f}")
+        return redirect("maestros:costos_adquisicion")
+
+    # ── Filtros ────────────────────────────────────────────────────────────────
+    filtro_q = (request.GET.get("q") or "").strip()
+    filtro_estado = (request.GET.get("estado") or "").strip()  # sin_costo | con_costo | zero_point
+    filtro_tipo = (request.GET.get("tipo") or "").strip()      # reventa | fabricado
+
+    # ── Último costo de reventa por producto ───────────────────────────────────
+    ultimo_costo_sub = (
+        ProductoReventaCosto.objects
+        .filter(producto_point=OuterRef("pk"))
+        .order_by("-fecha_vigencia", "-creado_en")
+        .values("costo_unitario")[:1]
+    )
+    ultimo_fuente_sub = (
+        ProductoReventaCosto.objects
+        .filter(producto_point=OuterRef("pk"))
+        .order_by("-fecha_vigencia", "-creado_en")
+        .values("fuente")[:1]
+    )
+    ultimo_fecha_sub = (
+        ProductoReventaCosto.objects
+        .filter(producto_point=OuterRef("pk"))
+        .order_by("-fecha_vigencia", "-creado_en")
+        .values("fecha_vigencia")[:1]
+    )
+
+    products_qs = (
+        PointProduct.objects
+        .annotate(
+            ultimo_costo=Subquery(ultimo_costo_sub, output_field=DecimalField()),
+            ultima_fuente=Subquery(ultimo_fuente_sub),
+            ultima_fecha=Subquery(ultimo_fecha_sub, output_field=DateField()),
+        )
+        .order_by("category", "name")
+    )
+
+    if filtro_q:
+        products_qs = products_qs.filter(name__icontains=filtro_q)
+
+    # ── Recetas con costo vigente ──────────────────────────────────────────────
+    from recetas.models import RecetaCostoVersion, Receta
+    receta_by_product: dict[int, dict] = {}
+    for rcv in (
+        RecetaCostoVersion.objects
+        .select_related("receta")
+        .filter(costo_total__gt=0)
+        .order_by("receta_id", "-creado_en")
+    ):
+        if rcv.receta.product_point_id and rcv.receta.product_point_id not in receta_by_product:
+            receta_by_product[rcv.receta.product_point_id] = {
+                "costo": rcv.costo_por_unidad_rendimiento or rcv.costo_total,
+                "fecha": rcv.creado_en.date() if rcv.creado_en else None,
+            }
+
+    # ── Build rows ─────────────────────────────────────────────────────────────
+    ZERO = Decimal("0")
+    rows = []
+    sin_costo = 0
+    con_costo = 0
+    zero_point = 0
+
+    for p in products_qs:
+        receta_info = receta_by_product.get(p.id)
+        if receta_info:
+            tipo = "fabricado"
+            costo_vigente = receta_info["costo"]
+            fecha_costo = receta_info["fecha"]
+            fuente = "RECETA"
+            tiene_costo = costo_vigente > ZERO
+        else:
+            tipo = "reventa"
+            costo_vigente = p.ultimo_costo or ZERO
+            fecha_costo = p.ultima_fecha
+            fuente = p.ultima_fuente or ""
+            tiene_costo = costo_vigente > ZERO
+
+        if filtro_tipo and filtro_tipo != tipo:
+            continue
+
+        if tiene_costo:
+            con_costo += 1
+        else:
+            sin_costo += 1
+
+        # "zero_point" = producto con sync de Point pero cost=0 (Point no tiene el dato)
+        es_zero_point = (tipo == "reventa" and not tiene_costo and fuente == "")
+
+        if filtro_estado == "sin_costo" and tiene_costo:
+            continue
+        if filtro_estado == "con_costo" and not tiene_costo:
+            continue
+        if filtro_estado == "zero_point" and not es_zero_point:
+            continue
+
+        rows.append({
+            "id": p.id,
+            "nombre": p.name,
+            "categoria": p.category or "Sin categoría",
+            "tipo": tipo,
+            "costo_vigente": costo_vigente,
+            "fecha_costo": fecha_costo,
+            "fuente": fuente,
+            "tiene_costo": tiene_costo,
+            "editable": tipo == "reventa" and can_manage,
+        })
+
+    # Sort: sin costo primero, luego por categoría
+    rows.sort(key=lambda r: (r["tiene_costo"], r["categoria"], r["nombre"]))
+
+    # Categories for filter
+    categorias = sorted({r["categoria"] for r in rows})
+
+    return render(
+        request,
+        "maestros/costos_adquisicion.html",
+        {
+            "page_title": "Costos de adquisición",
+            "rows": rows,
+            "filtro_q": filtro_q,
+            "filtro_estado": filtro_estado,
+            "filtro_tipo": filtro_tipo,
+            "categorias": categorias,
+            "can_manage": can_manage,
+            "total": len(rows),
+            "sin_costo": sin_costo,
+            "con_costo": con_costo,
+        },
+    )
