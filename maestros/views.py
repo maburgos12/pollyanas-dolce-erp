@@ -4017,8 +4017,32 @@ def costos_adquisicion(request):
 
     # ── Filtros ────────────────────────────────────────────────────────────────
     filtro_q = (request.GET.get("q") or "").strip()
-    filtro_estado = (request.GET.get("estado") or "").strip()  # sin_costo | con_costo | zero_point
+    filtro_estado = (request.GET.get("estado") or "").strip()  # sin_costo | con_costo | vendidos_sin_costo
     filtro_tipo = (request.GET.get("tipo") or "").strip()      # reventa | fabricado
+    filtro_periodo = (request.GET.get("periodo") or "mes").strip()  # mes | 30d | 90d
+
+    # ── Ventas del período por producto (para chip "Vendidos sin costo") ────────
+    from pos_bridge.models.sales import PointDailySale
+    from django.db.models import Sum as _Sum
+    hoy = timezone.localdate()
+    if filtro_periodo == "30d":
+        periodo_desde = hoy - timedelta(days=30)
+    elif filtro_periodo == "90d":
+        periodo_desde = hoy - timedelta(days=90)
+    else:  # mes
+        periodo_desde = hoy.replace(day=1)
+
+    ventas_por_producto: dict[int, dict] = {}
+    for vrow in (
+        PointDailySale.objects
+        .filter(sale_date__gte=periodo_desde)
+        .values("product_id")
+        .annotate(monto=_Sum("total_amount"), cantidad=_Sum("quantity"))
+    ):
+        ventas_por_producto[vrow["product_id"]] = {
+            "monto": vrow["monto"] or Decimal("0"),
+            "cantidad": vrow["cantidad"] or Decimal("0"),
+        }
 
     # ── Último costo de reventa por producto ───────────────────────────────────
     ultimo_costo_sub = (
@@ -4109,7 +4133,7 @@ def costos_adquisicion(request):
     rows = []
     sin_costo = 0
     con_costo = 0
-    zero_point = 0
+    vendidos_sin_costo_count = 0
 
     for p in products_qs:
         receta_info = receta_by_product.get(p.id)
@@ -4129,20 +4153,35 @@ def costos_adquisicion(request):
         if filtro_tipo and filtro_tipo != tipo:
             continue
 
+        # Ventas del período para este producto
+        venta = ventas_por_producto.get(p.id)
+        ventas_monto = venta["monto"] if venta else ZERO
+        ventas_cantidad = venta["cantidad"] if venta else ZERO
+        # Precio promedio vendido: fallback cuando PointProduct.precio es null
+        if venta and ventas_cantidad > 0:
+            precio_promedio_ventas = (
+                Decimal(str(venta["monto"])) / Decimal(str(venta["cantidad"]))
+            ).quantize(Decimal("0.01"))
+        else:
+            precio_promedio_ventas = None
+
         if tiene_costo:
             con_costo += 1
         else:
             sin_costo += 1
-
-        # "zero_point" = producto con sync de Point pero cost=0 (Point no tiene el dato)
-        es_zero_point = (tipo == "reventa" and not tiene_costo and fuente == "")
+            if ventas_monto > ZERO:
+                vendidos_sin_costo_count += 1
 
         if filtro_estado == "sin_costo" and tiene_costo:
             continue
         if filtro_estado == "con_costo" and not tiene_costo:
             continue
-        if filtro_estado == "zero_point" and not es_zero_point:
+        if filtro_estado == "vendidos_sin_costo" and (tiene_costo or ventas_monto <= ZERO):
             continue
+
+        # Precio de referencia para el form de edición:
+        # primero PointProduct.precio, luego precio promedio de ventas
+        precio_ref = p.precio if p.precio else precio_promedio_ventas
 
         rows.append({
             "id": p.id,
@@ -4153,12 +4192,18 @@ def costos_adquisicion(request):
             "fecha_costo": fecha_costo,
             "fuente": fuente,
             "tiene_costo": tiene_costo,
-            "precio_venta": p.precio,   # referencia para captura manual
+            "precio_venta": precio_ref,
+            "precio_venta_fuente": "point" if p.precio else ("ventas" if precio_promedio_ventas else None),
+            "ventas_monto": ventas_monto,
+            "ventas_cantidad": ventas_cantidad,
             "editable": tipo == "reventa" and can_manage,
         })
 
-    # Sort: sin costo primero, luego por categoría
-    rows.sort(key=lambda r: (r["tiene_costo"], r["categoria"], r["nombre"]))
+    # Sort: en "vendidos_sin_costo" ordenar por ingreso en riesgo descendente
+    if filtro_estado == "vendidos_sin_costo":
+        rows.sort(key=lambda r: -float(r["ventas_monto"] or 0))
+    else:
+        rows.sort(key=lambda r: (r["tiene_costo"], r["categoria"], r["nombre"]))
 
     # Categories for filter
     categorias = sorted({r["categoria"] for r in rows})
@@ -4172,10 +4217,13 @@ def costos_adquisicion(request):
             "filtro_q": filtro_q,
             "filtro_estado": filtro_estado,
             "filtro_tipo": filtro_tipo,
+            "filtro_periodo": filtro_periodo,
             "categorias": categorias,
             "can_manage": can_manage,
             "total": len(rows),
             "sin_costo": sin_costo,
             "con_costo": con_costo,
+            "vendidos_sin_costo": vendidos_sin_costo_count,
+            "periodo_desde": periodo_desde,
         },
     )
