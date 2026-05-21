@@ -13,7 +13,8 @@ from compras.models import SolicitudCompra
 from inventario.models import AjusteInventario, ExistenciaInsumo, MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch, Proveedor, UnidadMedida
 from maestros.utils.canonical_catalog import canonical_member_ids, latest_costo_canonico
-from recetas.models import LineaReceta, Receta, VentaHistorica
+from pos_bridge.models import PointProduct
+from recetas.models import LineaReceta, Receta, RecetaCostoVersion, VentaHistorica
 
 
 class PointPendingReviewTests(TestCase):
@@ -1842,3 +1843,45 @@ class MaestroEnterpriseCockpitTests(TestCase):
         self.assertContains(response, "Cierre prioritario del día")
         self.assertContains(response, "Liberación diaria retenida")
         self.assertEqual(response.context["demand_priority_summary"]["critical_count"], 1)
+
+
+class CostosAdquisicionRecipeMappingTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_superuser(
+            username="admin_costos",
+            email="admin_costos@example.com",
+            password="test12345",
+        )
+        self.client.force_login(self.user)
+
+    def test_fabricado_uses_point_sku_when_external_id_differs_from_recipe_code(self):
+        PointProduct.objects.create(
+            external_id="1013",
+            sku="0-2",
+            name="Latte",
+            category="Café",
+        )
+        receta = Receta.objects.create(
+            nombre="Latte",
+            codigo_point="0-2",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            modo_costeo=Receta.MODO_COSTEO_FABRICADO,
+            hash_contenido="hash-latte",
+        )
+        RecetaCostoVersion.objects.create(
+            receta=receta,
+            version_num=1,
+            hash_snapshot="hash-latte-cost",
+            costo_total=Decimal("5.60"),
+            costo_por_unidad_rendimiento=Decimal("5.60"),
+        )
+
+        response = self.client.get(reverse("maestros:costos_adquisicion"), {"q": "Latte"})
+
+        self.assertEqual(response.status_code, 200)
+        row = response.context["rows"][0]
+        self.assertEqual(row["nombre"], "Latte")
+        self.assertEqual(row["tipo"], "fabricado")
+        self.assertEqual(row["fuente"], "RECETA")
+        self.assertEqual(row["costo_vigente"], Decimal("5.60"))

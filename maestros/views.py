@@ -4097,9 +4097,12 @@ def costos_adquisicion(request):
         return {key for key in keys if key}
 
     point_product_by_code = {}
-    for product_id, external_id in PointProduct.objects.exclude(external_id="").values_list("id", "external_id"):
-        for key in _point_code_keys(external_id):
-            point_product_by_code.setdefault(key, product_id)
+    for product_id, external_id, sku in PointProduct.objects.values_list("id", "external_id", "sku"):
+        # El código operativo de receta en Point normalmente vive en SKU/Código
+        # de producto; external_id es el PK interno de Point y puede diferir.
+        for raw_code in (sku, external_id):
+            for key in _point_code_keys(raw_code):
+                point_product_by_code.setdefault(key, product_id)
 
     receta_product_by_id = {}
     for receta_id, codigo in Receta.objects.exclude(codigo_point="").values_list("id", "codigo_point"):
