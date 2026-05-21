@@ -116,6 +116,25 @@ class CanonicalLocalHostMiddlewareTests(TestCase):
         self.assertEqual(response["Location"], "http://localhost:8011/login/?next=/dashboard/")
 
 
+class LoginViewAuthenticatedRedirectTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(username="johana.lopez", password="test12345")
+        self.client.force_login(self.user)
+
+    def test_authenticated_user_gets_redirected_from_login_to_dashboard(self):
+        response = self.client.get("/login/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/dashboard/")
+        self.assertIn("no-cache", response["Cache-Control"])
+
+    def test_authenticated_user_gets_redirected_from_login_to_safe_next(self):
+        response = self.client.get("/login/?next=/bonos-ventas/app/%3Fcaptura%3D1")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/bonos-ventas/app/?captura=1")
+
+
 class DashboardHomologacionContextTests(TestCase):
     def setUp(self):
         user_model = get_user_model()

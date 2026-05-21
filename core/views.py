@@ -21,6 +21,7 @@ from django.contrib.auth.models import Group
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.cache import never_cache
 from core.access import (
     ROLE_ADMIN,
     ROLE_DG,
@@ -2655,6 +2656,7 @@ def _build_dashboard_daily_decisions(
     return decisions[:5]
 
 
+@never_cache
 def login_view(request: HttpRequest) -> HttpResponse:
     next_url = (request.POST.get("next") or request.GET.get("next") or "").strip()
     redirect_url = "dashboard"
@@ -2664,6 +2666,11 @@ def login_view(request: HttpRequest) -> HttpResponse:
         require_https=request.is_secure(),
     ):
         redirect_url = next_url
+
+    if request.user.is_authenticated:
+        if is_branch_capture_only(request.user):
+            return _redirect_capture_module()
+        return redirect(redirect_url)
 
     if request.method == "POST":
         username = request.POST.get("username", "")
