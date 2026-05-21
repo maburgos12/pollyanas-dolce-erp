@@ -13,7 +13,7 @@ Sheets procesadas:
 from __future__ import annotations
 
 import hashlib
-from datetime import date, datetime
+from datetime import date, datetime, timezone as dt_timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -233,7 +233,7 @@ class Command(BaseCommand):
 
                     if not dry_run:
                         MovimientoInventario.objects.create(
-                            fecha=datetime(year, month, day, 8, 0, tzinfo=timezone.utc),
+                            fecha=datetime(year, month, day, 8, 0, tzinfo=dt_timezone.utc),
                             tipo=tipo,
                             insumo=insumo,
                             cantidad=cantidad,
