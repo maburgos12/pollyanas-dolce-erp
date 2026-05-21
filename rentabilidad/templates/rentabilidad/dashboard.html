@@ -6,15 +6,17 @@
 {% block extra_css %}
 <style>
   :root {
-    --rent-ink: #1f1714;
-    --rent-muted: #7b6f68;
-    --rent-line: #eadfd7;
-    --rent-paper: #fffaf4;
+    --rent-ink: #20151a;
+    --rent-muted: #6f5f66;
+    --rent-line: #eadce4;
+    --rent-paper: #fff8fb;
     --rent-card: #ffffff;
-    --rent-cocoa: #5a2d25;
-    --rent-cocoa-2: #2b1714;
-    --rent-caramel: #d99a45;
-    --rent-cream: #fbefe0;
+    --rent-vino: #8b2252;
+    --rent-vino-deep: #541331;
+    --rent-vino-soft: #f9eef4;
+    --rent-dorado: #c9a84c;
+    --rent-dorado-soft: #fff7df;
+    --rent-cream: #fff3e8;
     --rent-green: #1f7a4d;
     --rent-red: #b42318;
     --rent-amber: #b7791f;
@@ -25,18 +27,19 @@
     display: grid;
     gap: 1.25rem;
     color: var(--rent-ink);
+    font-family: "Nunito", sans-serif;
   }
 
   .rent-hero {
     position: relative;
     overflow: hidden;
     border-radius: 24px;
-    padding: 1.4rem;
+    padding: clamp(1rem, 2vw, 1.45rem);
     background:
-      radial-gradient(circle at 92% 14%, rgba(217,154,69,.42), transparent 24%),
-      linear-gradient(135deg, var(--rent-cocoa-2), var(--rent-cocoa) 58%, #7a3b2b);
+      radial-gradient(circle at 92% 10%, rgba(201,168,76,.42), transparent 24%),
+      linear-gradient(135deg, var(--rent-vino-deep), var(--rent-vino) 62%, #a63368);
     color: #fff;
-    box-shadow: 0 22px 60px rgba(90,45,37,.22);
+    box-shadow: 0 22px 60px rgba(139,34,82,.22);
   }
 
   .rent-hero::after {
@@ -65,23 +68,27 @@
     font-size: .78rem;
     letter-spacing: .14em;
     text-transform: uppercase;
-    color: rgba(255,255,255,.72);
+    color: rgba(255,255,255,.86);
     font-weight: 800;
   }
 
   .rent-hero h1 {
     margin: 0;
-    font-family: Georgia, "Times New Roman", serif;
-    font-size: clamp(2rem, 4.5vw, 4rem);
-    line-height: .94;
-    max-width: 880px;
+    font-family: "Playfair Display", serif;
+    font-size: clamp(1.75rem, 3.1vw, 3.25rem);
+    line-height: 1.06;
+    max-width: 760px;
+    color: #fff;
+    text-wrap: balance;
+    text-shadow: 0 2px 18px rgba(0,0,0,.24);
   }
 
   .rent-hero-copy {
     margin: .75rem 0 0;
-    max-width: 760px;
-    color: rgba(255,255,255,.78);
-    font-size: .98rem;
+    max-width: 720px;
+    color: rgba(255,255,255,.9);
+    font-size: .95rem;
+    line-height: 1.48;
   }
 
   .rent-actions {
@@ -109,7 +116,7 @@
     border-radius: 999px;
     padding: .38rem .75rem;
     background: #fff;
-    color: var(--rent-cocoa-2);
+    color: var(--rent-vino-deep);
     font-weight: 800;
   }
 
@@ -117,12 +124,12 @@
   .btn-ia {
     border: 0;
     border-radius: 999px;
-    background: var(--rent-caramel);
+    background: var(--rent-dorado);
     color: #fff;
     cursor: pointer;
     font-weight: 800;
     padding: .7rem 1rem;
-    box-shadow: 0 12px 22px rgba(217,154,69,.22);
+    box-shadow: 0 12px 22px rgba(201,168,76,.24);
   }
 
   .btn-ia {
@@ -173,12 +180,13 @@
 
   .rent-tabs {
     display: flex;
+    flex-wrap: wrap;
     gap: .45rem;
-    overflow-x: auto;
+    overflow-x: hidden;
     padding: .35rem;
     background: var(--rent-paper);
     border: 1px solid var(--rent-line);
-    border-radius: 999px;
+    border-radius: 24px;
   }
 
   .rent-tab {
@@ -195,9 +203,9 @@
   }
 
   .rent-tab.is-active {
-    background: var(--rent-cocoa);
+    background: var(--rent-vino);
     color: #fff;
-    box-shadow: 0 8px 18px rgba(90,45,37,.16);
+    box-shadow: 0 8px 18px rgba(139,34,82,.18);
   }
 
   .kpi-grid {
@@ -228,7 +236,7 @@
     position: absolute;
     inset: 0 0 auto;
     height: 4px;
-    background: linear-gradient(90deg, var(--rent-caramel), rgba(217,154,69,0));
+    background: linear-gradient(90deg, var(--rent-dorado), rgba(201,168,76,0));
   }
 
   .kpi-label {
@@ -262,6 +270,12 @@
     gap: 1rem;
   }
 
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: .9rem;
+  }
+
   .rent-panel {
     padding: 1rem;
   }
@@ -277,6 +291,7 @@
   .panel-head h2,
   .panel-head h3 {
     margin: 0;
+    font-family: "Playfair Display", serif;
     font-size: 1.05rem;
     color: var(--rent-ink);
   }
@@ -332,7 +347,7 @@
 
   .branch-name {
     font-weight: 900;
-    color: var(--rent-cocoa);
+    color: var(--rent-vino);
     text-decoration: none;
   }
 
@@ -383,8 +398,45 @@
   .bar-fill {
     height: 100%;
     border-radius: 999px;
-    background: linear-gradient(90deg, var(--rent-caramel), var(--rent-green));
+    background: linear-gradient(90deg, var(--rent-dorado), var(--rent-green));
     max-width: 100%;
+  }
+
+  .pe-progress {
+    min-width: 128px;
+  }
+
+  .pe-progress-value {
+    display: flex;
+    justify-content: space-between;
+    gap: .5rem;
+    font-size: .78rem;
+    font-weight: 850;
+    color: var(--rent-ink);
+  }
+
+  .pe-progress .bar-track {
+    margin-top: .28rem;
+    height: 7px;
+  }
+
+  .pe-progress.is-low .bar-fill { background: var(--rent-red); }
+  .pe-progress.is-mid .bar-fill { background: var(--rent-amber); }
+  .pe-progress.is-ok .bar-fill { background: var(--rent-green); }
+
+  .metric-stack {
+    display: grid;
+    gap: .25rem;
+  }
+
+  .metric-stack strong {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .cell-note {
+    color: var(--rent-muted);
+    font-size: .75rem;
+    font-weight: 750;
   }
 
   .diagnostic-stack {
@@ -411,7 +463,7 @@
   }
 
   .table-wrap {
-    overflow-x: auto;
+    overflow-x: hidden;
     border: 1px solid var(--rent-line);
     border-radius: 18px;
     background: #fff;
@@ -420,11 +472,12 @@
   .rent-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: .86rem;
+    font-size: clamp(.78rem, .78vw, .86rem);
+    table-layout: fixed;
   }
 
   .rent-table th {
-    background: var(--rent-cocoa);
+    background: var(--rent-vino);
     color: #fff;
     text-align: left;
     padding: .72rem .85rem;
@@ -438,9 +491,18 @@
     padding: .72rem .85rem;
     border-bottom: 1px solid #f2e8df;
     vertical-align: middle;
+    overflow-wrap: anywhere;
   }
 
   .rent-table tbody tr:nth-child(even) { background: #fffcf8; }
+
+  .rent-table tr.ia-row {
+    background: var(--rent-paper);
+  }
+
+  .rent-table tr.ia-row td {
+    padding: 0;
+  }
   .rent-table td.num,
   .rent-table th.num {
     text-align: right;
@@ -481,7 +543,7 @@
     font-size: .78rem;
   }
 
-  .product-type { background: var(--rent-cream); color: var(--rent-cocoa); }
+  .product-type { background: var(--rent-cream); color: var(--rent-vino); }
   .product-type.is-missing { background: #fee4e2; color: #912018; }
 
   .rank-item {
@@ -508,17 +570,22 @@
 
   .ia-panel {
     background: var(--rent-paper);
-    border: 1px solid var(--rent-line);
-    border-left: 5px solid var(--rent-caramel);
-    border-radius: 14px;
-    padding: .9rem;
+    border-left: 5px solid var(--rent-dorado);
+    padding: 1rem;
     color: #4b403a;
+  }
+
+  @media (max-width: 1280px) {
+    .rent-table {
+      font-size: .78rem;
+    }
   }
 
   @media (max-width: 1180px) {
     .kpi-grid,
     .source-strip,
-    .branch-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .branch-grid,
+    .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .section-grid { grid-template-columns: 1fr; }
     .product-row { grid-template-columns: 1fr 1fr; }
   }
@@ -529,10 +596,80 @@
     .kpi-grid,
     .source-strip,
     .branch-grid,
+    .summary-grid,
     .mini-metrics { grid-template-columns: 1fr; }
     .diagnostic-line { grid-template-columns: 1fr; gap: .35rem; }
     .diagnostic-line strong { text-align: left; }
     .product-row { grid-template-columns: 1fr; }
+  }
+
+  @media (max-width: 900px) {
+    .table-wrap {
+      border: 0;
+      background: transparent;
+    }
+
+    .rent-table,
+    .rent-table tbody,
+    .rent-table tr,
+    .rent-table td {
+      display: block;
+      width: 100%;
+    }
+
+    .rent-table thead {
+      display: none;
+    }
+
+    .rent-table tr {
+      background: #fff;
+      border: 1px solid var(--rent-line);
+      border-radius: 18px;
+      margin-bottom: .75rem;
+      padding: .35rem .75rem;
+    }
+
+    .rent-table tr.ia-row {
+      border: 0;
+      background: transparent;
+      margin-top: -.65rem;
+      padding: 0;
+    }
+
+    .rent-table tr.ia-row td {
+      display: block;
+      padding: 0;
+    }
+
+    .rent-table td {
+      display: grid;
+      grid-template-columns: 118px minmax(0, 1fr);
+      gap: .75rem;
+      border-bottom: 1px solid #f2e8df;
+      padding: .65rem 0;
+      text-align: left !important;
+    }
+
+    .rent-table td:last-child {
+      border-bottom: 0;
+    }
+
+    .rent-table td::before {
+      content: attr(data-label);
+      color: var(--rent-muted);
+      font-weight: 850;
+      font-size: .72rem;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+
+    .rent-table td.full-row {
+      display: block;
+    }
+
+    .rent-table td.full-row::before {
+      content: none;
+    }
   }
 </style>
 {% endblock %}
@@ -621,8 +758,8 @@
   <section class="rent-panel">
     <div class="panel-head">
       <div>
-        <h2>Resumen por sucursal</h2>
-        <p>La lectura principal: cuánto vende, cuánto deja, si cubre su estructura y si recupera inversión.</p>
+        <h2>Lectura General</h2>
+        <p>Una vista corta para ubicar concentración de venta, margen bajo y presión de punto de equilibrio.</p>
       </div>
       <div class="estado-dist">
         <span class="estado-pill estado-SUBSIDIADA">{{ conteo_estados.SUBSIDIADA }} subsidiadas</span>
@@ -633,35 +770,26 @@
       </div>
     </div>
 
-    <div class="branch-grid">
-      {% for item in sucursales_data %}
-      {% with r=item.obj %}
-      <article class="branch-card">
-        <div class="branch-top">
-          <div>
-            <a class="branch-name" href="{% url 'rentabilidad_detalle' r.pk %}">{{ r.sucursal.nombre }}</a>
-            <div class="muted" style="font-size:.78rem;">Peso en venta: {{ item.peso_venta }}%</div>
-          </div>
-          <span class="estado-badge estado-{{ r.estado }}">{{ r.get_estado_display }}</span>
-        </div>
-        <div class="branch-money {% if r.utilidad_operativa >= 0 %}positive{% else %}negative{% endif %}">
-          ${{ r.utilidad_operativa|floatformat:0|intcomma }}
-        </div>
-        <div class="muted" style="font-size:.82rem;">Ventas ${{ r.ventas_netas|floatformat:0|intcomma }}</div>
-        <div class="mini-metrics">
-          <div class="mini-metric"><span>Margen bruto</span><strong>{{ r.porcentaje_margen_bruto }}%</strong></div>
-          <div class="mini-metric"><span>Avance PE</span><strong>{{ r.porcentaje_avance_pe }}%</strong></div>
-          <div class="mini-metric"><span>Costo variable</span><strong>{{ item.costo_variable_pct }}%</strong></div>
-          <div class="mini-metric"><span>Gasto fijo</span><strong>{{ item.gasto_fijo_pct }}%</strong></div>
-        </div>
-        <div class="bar-track" title="Avance de punto de equilibrio">
-          <div class="bar-fill" style="width:{{ r.porcentaje_avance_pe|floatformat:0 }}%;"></div>
-        </div>
+    <div class="summary-grid">
+      <article class="mini-metric">
+        <span>Mayor aporte de utilidad</span>
+        {% with top=diagnostico.ranking_utilidad.0.obj %}
+        <strong>{{ top.sucursal.nombre|default:"Sin datos" }}</strong>
+        {% if top %}<div class="muted">${{ top.utilidad_operativa|floatformat:0|intcomma }} de utilidad</div>{% endif %}
+        {% endwith %}
       </article>
-      {% endwith %}
-      {% empty %}
-      <p class="muted">No hay registros de rentabilidad para este periodo.</p>
-      {% endfor %}
+      <article class="mini-metric">
+        <span>Margen más presionado</span>
+        {% with low=diagnostico.ranking_margen.0.obj %}
+        <strong>{{ low.sucursal.nombre|default:"Sin datos" }}</strong>
+        {% if low %}<div class="muted">{{ low.porcentaje_margen_bruto }}% margen bruto</div>{% endif %}
+        {% endwith %}
+      </article>
+      <article class="mini-metric">
+        <span>Dato que revisar</span>
+        <strong>{{ alertas_panel|length }} alertas</strong>
+        <div class="muted">Abrir pestaña Alertas para ver causas y fuente.</div>
+      </article>
     </div>
   </section>
   {% endif %}
@@ -747,7 +875,7 @@
         {% with r=item.obj %}
         <div class="rank-item">
           <div><strong>{{ r.sucursal.nombre }}</strong><div class="muted">PE ${{ r.punto_equilibrio_mensual|floatformat:0|intcomma }}</div></div>
-          <strong>{{ r.porcentaje_avance_pe }}%</strong>
+          <strong>{% if r.porcentaje_avance_pe >= 100 %}Cubierto{% else %}{{ r.porcentaje_avance_pe }}%{% endif %}</strong>
         </div>
         {% endwith %}
         {% endfor %}
@@ -821,12 +949,12 @@
           <tbody>
             {% for row in gastos_panel.por_categoria %}
             <tr>
-              <td><strong>{{ row.categoria_gasto__nombre }}</strong><div class="muted">{{ row.categoria_gasto__codigo }}</div></td>
-              <td class="num">{{ row.registros|intcomma }}</td>
-              <td class="num">${{ row.total|floatformat:0|intcomma }}</td>
+              <td data-label="Categoría"><strong>{{ row.categoria_gasto__nombre }}</strong><div class="muted">{{ row.categoria_gasto__codigo }}</div></td>
+              <td class="num" data-label="Registros">{{ row.registros|intcomma }}</td>
+              <td class="num" data-label="Monto">${{ row.total|floatformat:0|intcomma }}</td>
             </tr>
             {% empty %}
-            <tr><td colspan="3" class="muted">No hay gastos reales cargados para este periodo.</td></tr>
+            <tr><td colspan="3" class="muted full-row">No hay gastos reales cargados para este periodo.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -879,6 +1007,7 @@
   </section>
   {% endif %}
 
+  {% if active_tab == 'resumen' %}
   <section class="rent-panel">
     <div class="panel-head">
       <div>
@@ -890,37 +1019,60 @@
       <table class="rent-table">
         <thead>
           <tr>
-            <th>Sucursal</th>
-            <th>Estado</th>
-            <th class="num">Ventas</th>
-            <th class="num">Costo variable</th>
-            <th class="num">Margen bruto</th>
-            <th class="num">Gasto fijo</th>
-            <th class="num">Punto equilibrio</th>
-            <th class="num">Avance PE</th>
-            <th class="num">Utilidad op.</th>
-            <th class="num">Payback</th>
-            <th>IA</th>
+            <th style="width:15%;">Sucursal</th>
+            <th class="num" style="width:12%;">Ventas</th>
+            <th class="num" style="width:13%;">Costo variable</th>
+            <th class="num" style="width:11%;">Margen bruto</th>
+            <th class="num" style="width:11%;">Gasto fijo</th>
+            <th style="width:17%;">Punto equilibrio</th>
+            <th class="num" style="width:12%;">Utilidad op.</th>
+            <th style="width:9%;">IA</th>
           </tr>
         </thead>
         <tbody>
           {% for item in sucursales_data %}
           {% with r=item.obj %}
           <tr>
-            <td><a class="branch-name" href="{% url 'rentabilidad_detalle' r.pk %}">{{ r.sucursal.nombre }}</a></td>
-            <td><span class="estado-badge estado-{{ r.estado }}">{{ r.get_estado_display }}</span></td>
-            <td class="num">${{ r.ventas_netas|floatformat:0|intcomma }}</td>
-            <td class="num">${{ r.costo_variable_total|floatformat:0|intcomma }}</td>
-            <td class="num">{{ r.porcentaje_margen_bruto }}%</td>
-            <td class="num">${{ r.gasto_fijo_total|floatformat:0|intcomma }}</td>
-            <td class="num">${{ r.punto_equilibrio_mensual|floatformat:0|intcomma }}</td>
-            <td class="num">{{ r.porcentaje_avance_pe }}%</td>
-            <td class="num {% if r.utilidad_operativa >= 0 %}positive{% else %}negative{% endif %}">${{ r.utilidad_operativa|floatformat:0|intcomma }}</td>
-            <td class="num">{% if r.payback_meses_estimados is not None %}{% if r.payback_meses_estimados == 0 %}Completado{% else %}{{ r.payback_meses_estimados }} meses{% endif %}{% else %}<span class="negative">No viable</span>{% endif %}</td>
-            <td><button class="btn-ia" onclick="analizarSucursal({{ r.pk }}, this)">{% if r.diagnostico_ia %}Ver{% else %}Analizar{% endif %}</button></td>
+            <td data-label="Sucursal">
+              <a class="branch-name" href="{% url 'rentabilidad_detalle' r.pk %}">{{ r.sucursal.nombre }}</a>
+              <div style="margin-top:.25rem;"><span class="estado-badge estado-{{ r.estado }}">{{ r.get_estado_display }}</span></div>
+            </td>
+            <td class="num" data-label="Ventas">${{ r.ventas_netas|floatformat:0|intcomma }}</td>
+            <td class="num" data-label="Costo variable">${{ r.costo_variable_total|floatformat:0|intcomma }}</td>
+            <td class="num" data-label="Margen bruto">{{ r.porcentaje_margen_bruto }}%</td>
+            <td class="num" data-label="Gasto fijo">${{ r.gasto_fijo_total|floatformat:0|intcomma }}</td>
+            <td data-label="Punto equilibrio">
+              <div class="pe-progress {% if r.porcentaje_avance_pe >= 100 %}is-ok{% elif r.porcentaje_avance_pe >= 85 %}is-mid{% else %}is-low{% endif %}">
+                <div class="metric-stack">
+                  <strong>${{ r.punto_equilibrio_mensual|floatformat:0|intcomma }}</strong>
+                  <span class="cell-note">
+                    {% if r.porcentaje_avance_pe >= 100 %}
+                    PE cubierto
+                    {% else %}
+                    Avance {{ r.porcentaje_avance_pe }}%
+                    {% endif %}
+                  </span>
+                </div>
+                <div class="pe-progress-value">
+                  {% if r.brecha_pe > 0 %}
+                  <span class="negative">${{ r.brecha_pe|floatformat:0|intcomma }}</span>
+                  {% else %}
+                  <span class="positive">cubierto</span>
+                  {% endif %}
+                </div>
+                <div class="bar-track"><div class="bar-fill" style="width:{{ r.porcentaje_avance_pe|floatformat:0 }}%;"></div></div>
+              </div>
+            </td>
+            <td class="num {% if r.utilidad_operativa >= 0 %}positive{% else %}negative{% endif %}" data-label="Utilidad op.">${{ r.utilidad_operativa|floatformat:0|intcomma }}</td>
+            <td data-label="IA">
+              <div class="metric-stack">
+                <span class="cell-note">{% if r.payback_meses_estimados is not None %}{% if r.payback_meses_estimados == 0 %}Completado{% else %}{{ r.payback_meses_estimados }} meses{% endif %}{% else %}<span class="negative">No viable</span>{% endif %}</span>
+                <button class="btn-ia" onclick="analizarSucursal({{ r.pk }}, this)">{% if r.diagnostico_ia %}Ver{% else %}Analizar{% endif %}</button>
+              </div>
+            </td>
           </tr>
-          <tr id="ia-row-{{ r.pk }}" style="display:none;">
-            <td colspan="11">
+          <tr id="ia-row-{{ r.pk }}" class="ia-row" style="display:none;">
+            <td colspan="8" class="full-row">
               <div class="ia-panel" id="ia-panel-{{ r.pk }}">
                 {% if r.diagnostico_ia %}
                 <strong>{{ r.diagnostico_ia }}</strong>
@@ -939,12 +1091,13 @@
           </tr>
           {% endwith %}
           {% empty %}
-          <tr><td colspan="11" class="muted">No hay registros de rentabilidad para este periodo.</td></tr>
+          <tr><td colspan="8" class="muted full-row">No hay registros de rentabilidad para este periodo.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </section>
+  {% endif %}
 
   <p class="muted" style="font-size:.78rem;">
     Fórmulas: margen bruto = ventas netas - costo variable. Utilidad operativa = margen bruto - gasto fijo.
