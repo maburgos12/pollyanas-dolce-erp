@@ -266,6 +266,42 @@ def get_point_sales_period_summary(*, start_date: date, end_date: date) -> dict[
     }
 
 
+def get_promotion_sales_totals(
+    *,
+    start_date: date,
+    end_date: date,
+    point_product_ids: list[int] | None = None,
+    product_keys: list[str] | None = None,
+    receta_id: int | None = None,
+    receta_code: str | None = None,
+    product_name_query: str | None = None,
+) -> dict[str, Decimal]:
+    queryset = FactVentaDiaria.objects.filter(fecha__gte=start_date, fecha__lte=end_date)
+    filters = Q()
+    if point_product_ids:
+        filters |= Q(point_product_id__in=point_product_ids)
+    if product_keys:
+        filters |= Q(producto_clave__in=product_keys)
+    if receta_id is not None:
+        filters |= Q(receta_id=receta_id)
+    if receta_code:
+        filters |= Q(producto_clave__iexact=receta_code)
+    if product_name_query:
+        filters |= Q(producto_nombre__icontains=product_name_query)
+    if not filters:
+        return {"quantity": ZERO, "sales": ZERO, "cost": ZERO}
+    totals = queryset.filter(filters).aggregate(
+        quantity=Sum("cantidad"),
+        sales=Sum("venta_total"),
+        cost=Sum("costo_estimado"),
+    )
+    return {
+        "quantity": _as_decimal(totals.get("quantity")),
+        "sales": _as_decimal(totals.get("sales")),
+        "cost": _as_decimal(totals.get("cost")),
+    }
+
+
 def _select_range_response(
     candidates: list[dict[str, Any]],
     *,

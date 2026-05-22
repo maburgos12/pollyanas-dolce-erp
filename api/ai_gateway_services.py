@@ -10,7 +10,6 @@ from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.db import models, transaction
 from django.db.models import Count, Q, Sum
-from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from control.services import build_discrepancias_report, resolve_period_range
@@ -46,8 +45,7 @@ from maestros.utils.canonical_catalog import canonical_insumo, canonical_insumo_
 from recetas.models import PlanProduccion, PlanProduccionItem, Receta, RecetaCostoVersion
 from recetas.utils.normalizacion import normalizar_nombre
 from reportes.bi_utils import compute_bi_snapshot, serialize_bi_for_api
-from reportes.models import FactVentaDiaria
-from ventas.services.sales_read_service import get_sales_range, get_sales_range_grouped
+from ventas.services.sales_read_service import get_promotion_sales_totals, get_sales_range, get_sales_range_grouped
 
 ZERO = Decimal("0")
 
@@ -939,7 +937,7 @@ def _resolve_product_recipe(product: PointProduct | None, query: str) -> Receta 
     return Receta.objects.filter(nombre_normalizado__icontains=normalized_query).order_by("id").first()
 
 
-def _promotion_sales_queryset(
+def _promotion_sales_totals(
     *,
     product: PointProduct | None,
     products: list[PointProduct] | None = None,
@@ -948,27 +946,24 @@ def _promotion_sales_queryset(
     start: date,
     end: date,
 ):
-    qs = FactVentaDiaria.objects.filter(fecha__gte=start, fecha__lte=end)
-    filters = Q()
+    point_product_ids = []
+    product_keys = set()
     if products:
-        product_ids = [row.id for row in products]
-        product_keys = {
-            key
-            for row in products
-            for key in (row.sku, row.external_id)
-            if key
-        }
-        filters |= Q(point_product_id__in=product_ids)
-        if product_keys:
-            filters |= Q(producto_clave__in=product_keys)
+        point_product_ids.extend(row.id for row in products)
+        product_keys.update(key for row in products for key in (row.sku, row.external_id) if key)
     if product is not None:
-        filters |= Q(point_product=product) | Q(producto_clave__iexact=product.sku) | Q(producto_clave__iexact=product.external_id)
-    if receta is not None:
-        filters |= Q(receta=receta) | Q(producto_clave__iexact=receta.codigo_point)
+        point_product_ids.append(product.id)
+        product_keys.update(key for key in (product.sku, product.external_id) if key)
     normalized_query = _normalize_promotion_text(query)
-    if normalized_query:
-        filters |= Q(producto_nombre__icontains=query)
-    return qs.filter(filters) if filters else qs.none()
+    return get_promotion_sales_totals(
+        start_date=start,
+        end_date=end,
+        point_product_ids=point_product_ids,
+        product_keys=sorted(product_keys),
+        receta_id=receta.id if receta is not None else None,
+        receta_code=receta.codigo_point if receta is not None else None,
+        product_name_query=query if normalized_query else None,
+    )
 
 
 def _latest_recipe_cost(receta: Receta | None) -> Decimal:
@@ -1016,18 +1011,13 @@ def _handle_promotion_profitability(_user, arguments: dict[str, Any]) -> dict[st
         group_sku, group_name, group_products = _resolve_promotion_product_group(query)
         product = None if group_products else _resolve_promotion_product(query)
         receta = None if group_products else _resolve_product_recipe(product, query)
-        sales_qs = _promotion_sales_queryset(
+        totals = _promotion_sales_totals(
             product=product,
             products=group_products,
             receta=receta,
             query=query,
             start=start_date,
             end=end_date,
-        )
-        totals = sales_qs.aggregate(
-            quantity=Coalesce(Sum("cantidad"), ZERO),
-            sales=Coalesce(Sum("venta_total"), ZERO),
-            cost=Coalesce(Sum("costo_estimado"), ZERO),
         )
         baseline_units = Decimal(str(totals.get("quantity") or 0))
         observed_sales = Decimal(str(totals.get("sales") or 0))
@@ -1129,7 +1119,7 @@ def _handle_promotion_profitability(_user, arguments: dict[str, Any]) -> dict[st
     )
     return {
         "status": "ok",
-        "sources": ["pos_bridge.PointProduct", "reportes.FactVentaDiaria", "recetas.Receta"],
+        "sources": ["pos_bridge.PointProduct", "ventas.services.sales_read_service", "recetas.Receta"],
         "filters": {
             "promotion_type": "3x2",
             "event_name": event_name,
