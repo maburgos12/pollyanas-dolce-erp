@@ -14,7 +14,7 @@ from rest_framework.test import APITestCase
 from compras.models import OrdenCompra, SolicitudCompra
 from core.access import ROLE_ALMACEN, ROLE_COMPRAS, ROLE_DG, ROLE_LECTURA, ROLE_PRODUCCION
 from core.models import AuditLog, Sucursal, UserProfile
-from maestros.models import Insumo, Proveedor, UnidadMedida
+from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
 from orquestacion.models import AgentExecutionLink, AgentSuggestion
 from pos_bridge.models import PointBranch, PointDailySale, PointInventorySnapshot, PointProduct, PointSyncJob
 from recetas.models import Receta, RecetaCostoVersion
@@ -162,6 +162,7 @@ class AIGatewayApiTests(APITestCase):
         self.assertIn("erp.get_dashboard", tool_keys)
         self.assertIn("erp.get_sales_summary", tool_keys)
         self.assertIn("erp.get_inventory_low_stock", tool_keys)
+        self.assertIn("erp.get_current_input_cost", tool_keys)
         self.assertIn("erp.get_purchase_requests", tool_keys)
         self.assertIn("erp.get_purchase_orders", tool_keys)
         self.assertIn("erp.get_recipe_cost_history", tool_keys)
@@ -261,6 +262,49 @@ class AIGatewayApiTests(APITestCase):
         self.assertEqual(response.data["display_name"], "Costo historico de receta")
         self.assertEqual(response.data["argument_schema"]["required"], ["receta_id"])
         self.assertIn("/api/ai-gateway/tools/erp.get_recipe_cost_history/", response.data["endpoints"]["detail_path"])
+
+    def test_invoke_current_input_cost_resolves_fresa_fresca_as_insumo(self):
+        fresa = Insumo.objects.create(
+            nombre="Fresa Fresca",
+            unidad_base=self.unidad,
+            proveedor_principal=self.proveedor,
+            activo=True,
+        )
+        mermelada = Insumo.objects.create(
+            nombre="Mermelada Fresa",
+            unidad_base=self.unidad,
+            proveedor_principal=self.proveedor,
+            activo=True,
+        )
+        CostoInsumo.objects.create(
+            insumo=fresa,
+            proveedor=self.proveedor,
+            fecha=timezone.localdate(),
+            costo_unitario=Decimal("78.500000"),
+            source_hash="ai-gateway-fresa-fresca-cost",
+        )
+        CostoInsumo.objects.create(
+            insumo=mermelada,
+            proveedor=self.proveedor,
+            fecha=timezone.localdate(),
+            costo_unitario=Decimal("42.000000"),
+            source_hash="ai-gateway-mermelada-fresa-cost",
+        )
+
+        self.client.force_authenticate(self.user_lectura)
+        response = self.client.post(
+            self._invoke_url("erp.get_current_input_cost"),
+            {"arguments": {"q": "fresa fresca"}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response.data["result"]["payload"]
+        self.assertEqual(response.data["result"]["sources"], ["maestros.CostoInsumo", "maestros.Insumo"])
+        self.assertEqual(payload["insumo"], "Fresa Fresca")
+        self.assertEqual(payload["unidad_base"], "kg")
+        self.assertEqual(payload["costo_unitario"], 78.5)
+        self.assertEqual(payload["costo_source_insumo"], "Fresa Fresca")
 
     def test_invoke_sales_summary_logs_audit(self):
         self.client.force_authenticate(self.user_lectura)
