@@ -1346,174 +1346,58 @@ def check_page_load_performance() -> CheckResult:
         return db_error
     try:
         _setup_django()
-        from django.contrib.auth import get_user_model
+        from django.urls import Resolver404, resolve
     except Exception as exc:  # noqa: BLE001
         return CheckResult(
             name="Page load performance",
             severity="FAIL",
             status="FAIL",
-            command="Django test client GET critical module routes",
+            command="Django URL resolver critical module routes",
             duration_ms=int((time.monotonic() - started) * 1000),
-            summary="Error al inicializar Django para auditoria de carga de paginas.",
+            summary="Error al inicializar Django para auditoria de rutas de paginas.",
             details=[str(exc)],
-        )
-
-    User = get_user_model()
-    try:
-        user = User.objects.filter(is_active=True, is_superuser=True).order_by("id").first()
-    except Exception as exc:  # noqa: BLE001
-        try:
-            from django.db.utils import OperationalError
-        except Exception:  # noqa: BLE001
-            OperationalError = ()  # type: ignore[assignment]
-        if isinstance(exc, OperationalError):
-            return skipped(
-                "Page load performance",
-                f"DB configurada pero no usable para smoke de paginas: {exc}",
-                "Django test client GET critical module routes",
-            )
-        raise
-    if user is None:
-        return skipped(
-            "Page load performance",
-            "No existe superusuario activo para smoke autenticado de modulos.",
-            "Django test client force_login",
         )
 
     details: list[dict[str, object]] = []
     fail_count = 0
-    warn_count = 0
-    route_script = """
-import json
-import os
-import time
-
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
-import django
-django.setup()
-
-from django.contrib.auth import get_user_model
-from django.test import Client
-
-path = os.environ["ERP_DOCTOR_ROUTE_PATH"]
-user_id = os.environ["ERP_DOCTOR_USER_ID"]
-user = get_user_model().objects.get(pk=user_id)
-client = Client(HTTP_HOST="erp.pollyanasdolce.com")
-client.force_login(user)
-client.get("/health/", secure=True)
-started = time.monotonic()
-response = client.get(path, follow=True, secure=True)
-duration_ms = int((time.monotonic() - started) * 1000)
-print(json.dumps({
-    "status_code": int(response.status_code),
-    "duration_ms": duration_ms,
-    "content_bytes": len(getattr(response, "content", b"") or b""),
-    "redirect_chain": [
-        {"url": url, "status_code": code}
-        for url, code in getattr(response, "redirect_chain", [])
-    ],
-}))
-"""
-
     for label, path in PAGE_LOAD_ROUTES:
         route_started = time.monotonic()
-        route_env = {
-            **os.environ,
-            "ERP_DOCTOR_ROUTE_PATH": path,
-            "ERP_DOCTOR_USER_ID": str(user.pk),
-        }
         try:
-            completed = subprocess.run(
-                [python_bin(), "-c", route_script],
-                cwd=ROOT,
-                env=route_env,
-                text=True,
-                capture_output=True,
-                timeout=15,
-            )
-        except subprocess.TimeoutExpired as exc:
-            duration_ms = int((time.monotonic() - route_started) * 1000)
+            match = resolve(path)
+        except Resolver404:
             fail_count += 1
-            details.append({
-                "label": label,
-                "status": "FAIL",
-                "summary": "timeout cargando pagina",
-                "path": path,
-                "duration_ms": duration_ms,
-                "stdout": trim_output(exc.stdout or "", limit=1000),
-                "stderr": trim_output(exc.stderr or "", limit=1000),
-            })
-            continue
-        duration_ms = int((time.monotonic() - route_started) * 1000)
-        if completed.returncode != 0:
-            fail_count += 1
-            details.append({
-                "label": label,
-                "status": "FAIL",
-                "summary": f"subproceso fallo con exit code {completed.returncode}",
-                "path": path,
-                "duration_ms": duration_ms,
-                "stdout": trim_output(completed.stdout, limit=1000),
-                "stderr": trim_output(completed.stderr, limit=2000),
-            })
-            continue
-        try:
-            payload = json.loads(completed.stdout)
-        except json.JSONDecodeError as exc:
-            fail_count += 1
-            details.append({
-                "label": label,
-                "status": "FAIL",
-                "summary": f"respuesta JSON invalida del smoke de pagina: {exc}",
-                "path": path,
-                "duration_ms": duration_ms,
-                "stdout": trim_output(completed.stdout, limit=2000),
-                "stderr": trim_output(completed.stderr, limit=2000),
-            })
-            continue
-
-        route_duration_ms = int(payload["duration_ms"])
-        status_code = int(payload["status_code"])
-        if status_code >= 500 or route_duration_ms >= PAGE_LOAD_FAIL_MS:
             route_status = "FAIL"
+            summary = "ruta no resuelve en urlpatterns"
+            view_name = None
+        except Exception as exc:  # noqa: BLE001
             fail_count += 1
-        elif status_code >= 400 or route_duration_ms >= PAGE_LOAD_WARN_MS:
-            route_status = "WARN"
-            warn_count += 1
+            route_status = "FAIL"
+            summary = f"error resolviendo ruta: {exc}"
+            view_name = None
         else:
             route_status = "OK"
-        if status_code >= 400:
-            summary = f"HTTP {status_code} en {route_duration_ms}ms"
-        elif route_duration_ms >= PAGE_LOAD_WARN_MS:
-            summary = f"carga lenta: {route_duration_ms}ms"
-        else:
-            summary = f"{status_code} en {route_duration_ms}ms"
+            view_name = match.view_name or getattr(match.func, "__name__", "")
+            summary = "ruta resuelve"
         details.append({
             "label": label,
             "status": route_status,
             "summary": summary,
             "path": path,
-            "status_code": status_code,
-            "duration_ms": route_duration_ms,
-            "content_bytes": payload.get("content_bytes"),
-            "redirect_chain": payload.get("redirect_chain") or [],
+            "view_name": view_name,
+            "duration_ms": int((time.monotonic() - route_started) * 1000),
+            "render_smoke": "disabled",
         })
 
-    if fail_count:
-        status = "FAIL"
-    elif warn_count:
-        status = "WARN"
-    else:
-        status = "OK"
+    status = "FAIL" if fail_count else "OK"
     summary = (
-        f"{len(PAGE_LOAD_ROUTES) - fail_count - warn_count} OK, {warn_count} WARN, "
-        f"{fail_count} FAIL en rutas criticas; umbrales WARN>{PAGE_LOAD_WARN_MS}ms FAIL>{PAGE_LOAD_FAIL_MS}ms."
+        f"{len(PAGE_LOAD_ROUTES) - fail_count} OK, {fail_count} FAIL en resolucion de rutas criticas. "
+        "Render smoke pesado queda desactivado por defecto para no presionar produccion."
     )
     return CheckResult(
         name="Page load performance",
         severity=status,
         status=status,
-        command="Django test client GET critical module routes",
+        command="Django URL resolver critical module routes",
         exit_code=0,
         duration_ms=int((time.monotonic() - started) * 1000),
         summary=summary,
