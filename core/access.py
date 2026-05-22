@@ -38,6 +38,7 @@ ACCESS_MODULES = [
     ("ventas", "Ventas"),
     ("crm", "CRM"),
     ("produccion", "Producción"),
+    ("mantenimiento", "Mantenimiento"),
     ("logistica", "Logística"),
     ("fallas", "Fallas / Mantenimiento"),
     ("mermas", "Mermas"),
@@ -80,6 +81,11 @@ ACCESS_SUBMODULES = {
         ("consolidado_cedis", "Consolidado CEDIS"),
         ("cedis_semanal", "Producción CEDIS semanal"),
         ("bonos", "Bonos producción"),
+    ],
+    "mantenimiento": [
+        ("dashboard", "Dashboard"),
+        ("bandeja", "Bandeja de seguimiento"),
+        ("app", "App mantenimiento"),
     ],
     "logistica": [
         ("dashboard", "Dashboard"),

@@ -5,7 +5,6 @@ from django.urls import path, include, re_path
 from django.views.static import serve as static_serve
 from django.views.generic import RedirectView
 from core import views as core_views
-from mantenimiento.views import pwa_mantenimiento
 from orquestacion import chat_views as ai_chat_views
 from rentabilidad import views_rentabilidad
 
@@ -73,7 +72,7 @@ urlpatterns = [
     path("logistica/", include(("logistica.urls", "logistica"), namespace="logistica")),
     path("fallas/", include(("fallas.urls", "fallas"), namespace="fallas")),
     path("mermas/", include(("mermas.urls", "mermas"), namespace="mermas")),
-    path("mantenimiento/app/", pwa_mantenimiento, name="pwa-mantenimiento"),
+    path("mantenimiento/", include(("mantenimiento.urls", "mantenimiento"), namespace="mantenimiento")),
     path("reportes/", include(("reportes.urls", "reportes"), namespace="reportes")),
     path("inversiones/", include(("reportes.urls_inversiones", "inversiones"), namespace="inversiones")),
     path("integraciones/", include(("integraciones.urls", "integraciones"), namespace="integraciones")),
@@ -94,7 +93,7 @@ urlpatterns = [
     path("api/bonos-produccion/", include("bonos_produccion.urls")),
     path("api/bonos-ventas/", include("bonos_ventas.urls")),
     path("api/fallas/", include(("fallas.urls", "fallas_api"), namespace="fallas_api")),
-    path("api/mantenimiento/", include("mantenimiento.urls")),
+    path("api/mantenimiento/", include(("mantenimiento.api_urls", "mantenimiento_api"), namespace="mantenimiento_api")),
     path("api/pos-bridge/", include(("pos_bridge.api.urls", "pos_bridge_api"), namespace="pos_bridge_api")),
 ]
 

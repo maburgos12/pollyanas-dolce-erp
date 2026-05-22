@@ -86,6 +86,13 @@ NAV_GROUPS = [
         ],
     },
     {
+        "key": "mantenimiento",
+        "label": "Mantenimiento",
+        "items": [
+            ("mantenimiento", "dashboard", "Mantenimiento", "/mantenimiento/", ["/mantenimiento/"]),
+        ],
+    },
+    {
         "key": "logistica",
         "label": "Logística",
         "items": [
