@@ -61,7 +61,7 @@
       Todo mantenimiento <span class="mant-count">{{ counts.sucursales|add:counts.logistica }}</span>
     </a>
     <a href="{% url 'mantenimiento:dashboard' %}?origen=sucursales" class="{% if origen == 'sucursales' %}active{% endif %}">
-      Sucursales / Producción / CEDIS <span class="mant-count">{{ counts.sucursales }}</span>
+      Sucursales / Producción (CEDIS) <span class="mant-count">{{ counts.sucursales }}</span>
     </a>
     <a href="{% url 'mantenimiento:dashboard' %}?origen=logistica" class="{% if origen == 'logistica' %}active{% endif %}">
       Logística <span class="mant-count">{{ counts.logistica }}</span>
@@ -75,7 +75,7 @@
     </div>
     <div class="mant-kpi">
       <strong>{{ counts.sucursales }}</strong>
-      <span>Sucursales / CEDIS</span>
+      <span>Sucursales / Producción</span>
     </div>
     <div class="mant-kpi">
       <strong>{{ counts.logistica }}</strong>
