@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Mermas{% endblock %}
 
@@ -41,6 +42,7 @@
         .mermas-header { flex-direction: column; }
     }
 </style>
+<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}">
 {% endblock %}
 
 {% block content %}

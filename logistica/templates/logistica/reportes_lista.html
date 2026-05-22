@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load humanize %}
+{% load static humanize %}
 
 {% block title %}Logística · Reportes{% endblock %}
 {% block page_title %}Logística · Reportes ERP{% endblock %}
@@ -35,6 +35,7 @@
   @media (max-width: 980px) { .reports-filter { grid-template-columns: repeat(2, minmax(0, 1fr)); } .report-detail-grid { grid-template-columns: 1fr; } }
   @media (max-width: 620px) { .logi-box { padding: 18px; } .logi-box-head, .logi-table-head { display: grid; } .reports-filter, .logi-filter-actions, .report-pager { grid-template-columns: 1fr; flex-direction: column; align-items: stretch; } }
 </style>
+<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}">
 {% endblock %}
 
 {% block content %}

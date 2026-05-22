@@ -240,3 +240,249 @@ select:focus {
   background: var(--pd-wine) !important;
   color: #fff !important;
 }
+
+.module-shell,
+.bi-shell,
+.kanban-shell,
+.exec-shell,
+.ops-shell,
+.fleet-shell,
+.logs-shell,
+.reports-shell,
+.capture-shell,
+.unit-shell,
+.unit-detail-shell,
+.unit-form-shell,
+.mermas-page,
+.fallas-card {
+  color: var(--pd-ink) !important;
+}
+
+.module-tabs {
+  background: transparent !important;
+  border-bottom: 1px solid var(--pd-line) !important;
+  gap: 8px !important;
+  overflow-x: auto !important;
+  padding-bottom: 10px !important;
+}
+
+.module-tab {
+  background: var(--pd-card) !important;
+  border: 1px solid var(--pd-line) !important;
+  border-radius: 8px !important;
+  color: var(--pd-ink) !important;
+  font-weight: 800 !important;
+  letter-spacing: 0 !important;
+  min-height: 38px !important;
+}
+
+.module-tab.active,
+.module-tab:hover,
+.module-tab:focus {
+  background: var(--pd-wine) !important;
+  border-color: var(--pd-wine) !important;
+  color: #fff !important;
+}
+
+.btn,
+.btn-small,
+.btn-soft,
+.btn-wine,
+.input-field,
+.fallas-input {
+  border-radius: 6px !important;
+  letter-spacing: 0 !important;
+}
+
+.btn-primary,
+.btn.btn-primary,
+.btn-wine {
+  background: var(--pd-wine) !important;
+  border-color: var(--pd-wine) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+
+.btn-secondary,
+.btn.btn-secondary,
+.btn-soft {
+  background: var(--pd-card) !important;
+  border: 1px solid var(--pd-line) !important;
+  color: var(--pd-ink) !important;
+  box-shadow: none !important;
+}
+
+.btn-secondary:hover,
+.btn-secondary:focus,
+.btn-soft:hover,
+.btn-soft:focus {
+  background: var(--pd-wine-light) !important;
+  border-color: var(--pd-wine) !important;
+  color: var(--pd-ink) !important;
+}
+
+.card,
+.bi-card,
+.bi-hero,
+.bi-hero-highlight,
+.bi-status-card,
+.bi-summary-chip,
+.kanban-col,
+.ticket-card,
+.ticket-modal-panel,
+.exec-kpi,
+.exec-empty,
+.fleet-card,
+.fleet-detail,
+.logi-box,
+.capture-kpi,
+.unit-kpi,
+.unit-check-card,
+.unit-modal-panel,
+.ops-stat,
+.ops-focus-card,
+.ops-summary-card,
+.metric-card,
+.fallas-card,
+.kpi-chart-card {
+  background: var(--pd-card) !important;
+  border-color: var(--pd-line) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--pd-shadow) !important;
+}
+
+.card-header,
+.bi-kicker,
+.bi-hero-title,
+.bi-status-label,
+.kanban-head strong,
+.exec-kpi strong,
+.exec-card-head h2,
+.fleet-head h2,
+.logi-box-title,
+.logi-table-title,
+.capture-kpi strong,
+.capture-section-head h2,
+.unit-title h1,
+.unit-pane-head h2,
+.unit-modal-panel h2,
+.unit-form-field label,
+.ops-stat strong,
+.ops-focus-card strong,
+.ops-summary-card strong,
+.metric-label,
+.metric-value,
+.fallas-title,
+.fallas-kicker,
+.fallas-table th {
+  color: var(--pd-wine) !important;
+  letter-spacing: 0 !important;
+}
+
+.bi-copy,
+.bi-hero-highlight-label,
+.bi-hero-highlight-meta,
+.ticket-meta,
+.exec-muted,
+.exec-kpi small,
+.fleet-muted,
+.logi-box-copy,
+.log-muted,
+.capture-muted,
+.capture-empty,
+.unit-muted,
+.fallas-muted,
+.fallas-empty,
+.mermas-header p {
+  color: var(--pd-muted) !important;
+}
+
+.table,
+.fallas-table {
+  background: var(--pd-card) !important;
+  color: var(--pd-ink) !important;
+  border-color: var(--pd-line) !important;
+}
+
+.table th,
+.fallas-table th {
+  background: var(--pd-wine-light) !important;
+  color: var(--pd-wine) !important;
+  border-color: var(--pd-line) !important;
+  text-transform: uppercase;
+  letter-spacing: 0 !important;
+}
+
+.table td,
+.fallas-table td {
+  border-color: var(--pd-line) !important;
+  color: var(--pd-ink) !important;
+}
+
+.table-striped tbody tr:nth-of-type(odd),
+.fallas-table tr:hover td,
+tr.log-overdue td,
+.report-detail {
+  background: rgba(139, 34, 82, .035) !important;
+}
+
+.input-field,
+.fallas-input,
+.bi-control input,
+.bi-control select,
+.logs-filter select,
+.logs-filter input,
+.reports-filter select,
+.reports-filter input,
+.capture-filter input,
+.capture-filter select {
+  background: var(--pd-bg) !important;
+  border: 1px solid var(--pd-line) !important;
+  color: var(--pd-ink) !important;
+}
+
+.kanban-count,
+.ticket-badge,
+.exec-badge,
+.fleet-badge,
+.log-badge,
+.report-badge,
+.capture-badge,
+.unit-badge,
+.ops-chip,
+.badge,
+.fallas-badge {
+  border-radius: 999px !important;
+  box-shadow: none !important;
+  letter-spacing: 0 !important;
+}
+
+.bi-hero {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .98), rgba(255, 255, 255, .92)),
+    radial-gradient(circle at 95% 8%, rgba(201, 168, 76, .16), transparent 28%) !important;
+}
+
+@media (max-width: 760px) {
+  .module-shell,
+  .bi-shell,
+  .kanban-shell,
+  .exec-shell,
+  .ops-shell,
+  .fleet-shell,
+  .logs-shell,
+  .reports-shell,
+  .capture-shell,
+  .unit-shell,
+  .unit-detail-shell,
+  .unit-form-shell,
+  .mermas-page {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+
+  .module-tabs {
+    margin-left: -2px !important;
+    margin-right: -2px !important;
+  }
+}
