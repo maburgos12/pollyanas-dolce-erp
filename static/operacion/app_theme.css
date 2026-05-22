@@ -1,0 +1,242 @@
+:root {
+  --pd-wine: #8b2252;
+  --pd-wine-light: rgba(139, 34, 82, .08);
+  --pd-gold: #c9a84c;
+  --pd-gold-light: rgba(201, 168, 76, .14);
+  --pd-ink: #1c1520;
+  --pd-muted: #6b5f70;
+  --pd-line: #ede6f0;
+  --pd-bg: #f9f5f8;
+  --pd-card: #fff;
+  --pd-shadow: 0 1px 3px rgba(0, 0, 0, .07), 0 1px 2px rgba(0, 0, 0, .04);
+  --bg: var(--pd-bg);
+  --surface: var(--pd-card);
+  --border: var(--pd-line);
+  --wine: var(--pd-wine);
+  --gold: var(--pd-gold);
+  --text: var(--pd-ink);
+  --text-muted: var(--pd-muted);
+}
+
+html,
+body,
+.merma-app-body .main-content {
+  background: var(--pd-bg) !important;
+  color: var(--pd-ink) !important;
+}
+
+#app,
+.merma-shell {
+  color: var(--pd-ink);
+}
+
+.brand-title,
+.mini-brand,
+.screen-title,
+.app-header h1,
+.topbar h1,
+.form-block h2,
+.card h2 {
+  color: var(--pd-wine) !important;
+  letter-spacing: 0 !important;
+}
+
+.brand-subtitle,
+.unit-line,
+.secondary-link,
+.hello,
+.muted,
+.app-header span,
+.topbar .muted,
+.meta,
+.card-sub,
+.field label,
+label {
+  color: var(--pd-muted) !important;
+}
+
+.panel,
+.card,
+.form-block,
+.queue-card,
+.empty,
+.select-card,
+.option-card,
+.unit-card,
+.review-card,
+.fuel-sheet,
+.fuel-alert-card,
+.weekly-card,
+.daily-check-card,
+.difference-box {
+  background: var(--pd-card) !important;
+  border-color: var(--pd-line) !important;
+  color: var(--pd-ink) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--pd-shadow) !important;
+}
+
+.panel {
+  margin-top: 24px !important;
+}
+
+input,
+textarea,
+select,
+.file-trigger,
+.receipt-product,
+.receipt-qty {
+  background: var(--pd-bg) !important;
+  border-color: var(--pd-line) !important;
+  color: var(--pd-ink) !important;
+  border-radius: 6px !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #9a8d9f !important;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--pd-wine) !important;
+}
+
+.primary-btn,
+.mermas-btn.primary {
+  background: var(--pd-wine) !important;
+  color: #fff !important;
+  border-color: var(--pd-wine) !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+
+.secondary-btn,
+.logout,
+.mermas-btn,
+.add-btn,
+.icon-btn,
+.tipo-btn,
+.receipt-choice,
+.dashboard-help,
+.fuel-route-btn {
+  background: var(--pd-card) !important;
+  border: 1px solid var(--pd-line) !important;
+  color: var(--pd-ink) !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+
+.secondary-btn:hover,
+.secondary-btn:focus,
+.logout:hover,
+.logout:focus,
+.dash-btn:hover,
+.dash-btn:focus,
+.select-card:hover,
+.select-card.selected,
+.tipo-btn.selected,
+.receipt-choice.active {
+  border-color: var(--pd-wine) !important;
+  background: var(--pd-wine-light) !important;
+  color: var(--pd-ink) !important;
+}
+
+.dash-grid {
+  gap: 10px !important;
+}
+
+.dash-btn {
+  min-height: 116px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
+  align-items: flex-start !important;
+  gap: 8px !important;
+  border: 1px solid var(--pd-line) !important;
+  border-radius: 10px !important;
+  background: var(--pd-card) !important;
+  color: var(--pd-ink) !important;
+  box-shadow: var(--pd-shadow) !important;
+  text-align: left !important;
+  line-height: 1.18 !important;
+}
+
+.dash-btn:hover,
+.dash-btn:focus {
+  box-shadow: inset 3px 0 0 var(--pd-wine), var(--pd-shadow) !important;
+}
+
+.app-glyph {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(139, 34, 82, .16);
+  border-radius: 14px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, .95), rgba(249, 245, 248, .72)),
+    radial-gradient(circle at 75% 16%, rgba(201, 168, 76, .18), transparent 42%);
+  color: var(--pd-wine);
+}
+
+.app-glyph svg {
+  width: 30px;
+  height: 30px;
+  display: block;
+}
+
+.app-glyph .stroke {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.app-glyph .soft {
+  fill: rgba(139, 34, 82, .08);
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.app-glyph .gold-stroke {
+  fill: none;
+  stroke: var(--pd-gold);
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.topbar,
+.app-header {
+  border-bottom: 1px solid var(--pd-line);
+  padding-bottom: 12px;
+}
+
+.footer,
+.sticky-submit {
+  background: rgba(255, 255, 255, .96) !important;
+  border-color: var(--pd-line) !important;
+  color: var(--pd-muted) !important;
+}
+
+.badge,
+.status-pill {
+  box-shadow: none !important;
+}
+
+.data-table,
+.data-table td {
+  background: var(--pd-card) !important;
+  color: var(--pd-ink) !important;
+  border-color: var(--pd-line) !important;
+}
+
+.data-table th {
+  background: var(--pd-wine) !important;
+  color: #fff !important;
+}

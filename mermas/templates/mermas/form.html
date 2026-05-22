@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Registrar merma{% endblock %}
 {% block body_class %}merma-app-body{% endblock %}
@@ -38,6 +39,7 @@
         .icon-btn { width: 44px; }
     }
 </style>
+<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}">
 {% endblock %}
 
 {% block content %}

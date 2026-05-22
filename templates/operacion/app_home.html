@@ -1,0 +1,325 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ app_title }} · Pollyana's Dolce</title>
+  <style>
+    :root {
+      --wine: #8b2252;
+      --wine-light: rgba(139, 34, 82, .08);
+      --gold: #c9a84c;
+      --gold-light: rgba(201, 168, 76, .14);
+      --ink: #1c1520;
+      --muted: #6b5f70;
+      --line: #ede6f0;
+      --bg: #f9f5f8;
+      --card: #fff;
+      --r: 10px;
+      --r-sm: 6px;
+      --shadow: 0 1px 3px rgba(0, 0, 0, .07), 0 1px 2px rgba(0, 0, 0, .04);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Nunito, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    a { color: inherit; text-decoration: none; }
+    .page {
+      min-height: 100vh;
+      display: grid;
+      place-items: start center;
+      padding: 18px;
+    }
+    .shell {
+      width: min(100%, 520px);
+      min-height: calc(100vh - 36px);
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .top {
+      padding: 13px 16px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+    .brand-logo {
+      width: 58px;
+      height: 36px;
+      object-fit: contain;
+      flex: 0 0 auto;
+      filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .08));
+    }
+    .brand h1 {
+      margin: 0;
+      color: var(--wine);
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 22px;
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+    .brand small {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .session-chip {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--wine-light);
+      color: var(--wine);
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    .content {
+      flex: 1;
+      padding: 18px;
+    }
+    .profile-card {
+      border: 1px solid var(--line);
+      border-radius: var(--r);
+      background: linear-gradient(180deg, #fff, rgba(249, 245, 248, .7));
+      box-shadow: var(--shadow);
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .profile-card h2 {
+      margin: 0;
+      font-size: 21px;
+      line-height: 1.14;
+    }
+    .profile-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 10px;
+    }
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--card);
+      color: var(--muted);
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 850;
+    }
+    .intro {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-weight: 750;
+    }
+    .action-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .action {
+      min-height: 124px;
+      border: 1px solid var(--line);
+      border-radius: var(--r);
+      background: var(--card);
+      box-shadow: var(--shadow);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: background .15s ease, border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+    }
+    .action:hover,
+    .action:focus {
+      outline: none;
+      border-color: rgba(139, 34, 82, .55);
+      background: var(--wine-light);
+      box-shadow: inset 3px 0 0 var(--wine), var(--shadow);
+      transform: translateY(-1px);
+    }
+    .action b {
+      display: block;
+      margin-top: 10px;
+      font-size: 16px;
+      line-height: 1.18;
+    }
+    .action small {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-weight: 750;
+      line-height: 1.32;
+    }
+    .mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      background:
+        linear-gradient(145deg, rgba(255, 255, 255, .95), rgba(249, 245, 248, .72)),
+        radial-gradient(circle at 75% 16%, rgba(201, 168, 76, .18), transparent 42%);
+      border: 1px solid rgba(139, 34, 82, .16);
+      color: var(--wine);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .8), 0 1px 2px rgba(28, 21, 32, .06);
+    }
+    .glyph {
+      width: 30px;
+      height: 30px;
+      display: block;
+    }
+    .stroke {
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.9;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .soft {
+      fill: rgba(139, 34, 82, .08);
+      stroke: currentColor;
+      stroke-width: 1.7;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .gold-stroke {
+      fill: none;
+      stroke: var(--gold);
+      stroke-width: 1.9;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .gold-fill { fill: rgba(201, 168, 76, .22); }
+    .empty {
+      border: 1px dashed rgba(139, 34, 82, .28);
+      border-radius: var(--r);
+      background: var(--gold-light);
+      color: #4f3416;
+      padding: 14px;
+      font-weight: 800;
+    }
+    .bottom {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border-top: 1px solid var(--line);
+      padding: 12px 16px;
+      background: var(--card);
+    }
+    .bottom a {
+      color: var(--wine);
+      font-weight: 900;
+      font-size: 13px;
+    }
+    .bottom span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .sr-symbols {
+      position: absolute;
+      width: 0;
+      height: 0;
+      overflow: hidden;
+    }
+    @media (max-width: 520px) {
+      .page { padding: 0; }
+      .shell {
+        min-height: 100vh;
+        border-radius: 0;
+        border-left: 0;
+        border-right: 0;
+      }
+      .action-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <svg class="sr-symbols" aria-hidden="true">
+    <symbol id="icon-merma" viewBox="0 0 32 32"><path class="gold-fill" d="M8 13h16l-2 10H10z"/><path class="stroke" d="M8 13h16l-2 10H10L8 13Z"/><path class="gold-stroke" d="M11 10c1.5-2.2 3.5-3.2 6-3 2.1.2 3.6 1.1 4.7 2.8"/><path class="stroke" d="M12 17h8M13 20h5"/></symbol>
+    <symbol id="icon-reporte" viewBox="0 0 32 32"><path class="soft" d="M8 10h16v14H8z"/><path class="gold-stroke" d="M13 15h6M16 12v6"/><path class="stroke" d="M10 8h12M11 24l-3 3M21 24l3 3"/></symbol>
+    <symbol id="icon-mantenimiento" viewBox="0 0 32 32"><path class="gold-fill" d="M10 21l3 3 9-9-3-3z"/><path class="stroke" d="M10 21l3 3 9-9-3-3-9 9Z"/><path class="gold-stroke" d="M20 7c1.6-.5 3.5-.2 4.8 1.1l-3.2 3.2 2.1 2.1 3.2-3.2c.8 2.5-.4 5.4-2.9 6.6"/><path class="stroke" d="M8 24l-2 2"/></symbol>
+    <symbol id="icon-falla" viewBox="0 0 32 32"><path class="soft" d="M16 5 27 25H5L16 5Z"/><path class="gold-stroke" d="M16 12v6"/><path class="stroke" d="M16 23h.1"/></symbol>
+    <symbol id="icon-cierre" viewBox="0 0 32 32"><path class="soft" d="M8 9h16v16H8z"/><path class="gold-stroke" d="M11 15l3.5 3.5L22 11"/><path class="stroke" d="M12 7v4M20 7v4M8 13h16"/></symbol>
+    <symbol id="icon-recibir" viewBox="0 0 32 32"><path class="soft" d="M7 12h18v12H7z"/><path class="gold-stroke" d="M16 5v11m0 0-4-4m4 4 4-4"/><path class="stroke" d="M10 20h12"/></symbol>
+    <symbol id="icon-historial" viewBox="0 0 32 32"><path class="soft" d="M10 7h12v18H10z"/><path class="gold-stroke" d="M13 12h6M13 16h6M13 20h4"/><path class="stroke" d="M8 10h2M8 15h2M8 20h2"/></symbol>
+    <symbol id="icon-ruta" viewBox="0 0 32 32"><path class="gold-stroke" d="M8 23c6-1 3-11 9-12 3-.5 4.8 1.3 7 3"/><path class="soft" d="M7 20a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/><path class="stroke" d="M24 10a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></symbol>
+    <symbol id="icon-entrega" viewBox="0 0 32 32"><path class="soft" d="M7 10h13v12H7z"/><path class="stroke" d="M20 14h4l3 4v4h-7"/><path class="gold-stroke" d="m11 16 3 3 6-7"/><path class="stroke" d="M11 24h.1M24 24h.1"/></symbol>
+    <symbol id="icon-inspeccion" viewBox="0 0 32 32"><path class="soft" d="M9 6h14v20H9z"/><path class="gold-stroke" d="m12 14 2 2 5-6"/><path class="stroke" d="M12 20h8M13 6h6M13 26h6"/></symbol>
+    <symbol id="icon-lavado" viewBox="0 0 32 32"><path class="gold-stroke" d="M11 7c2.2 2.5 3.3 4.7 3.3 6.4a3.3 3.3 0 0 1-6.6 0C7.7 11.7 8.8 9.5 11 7Z"/><path class="soft" d="M21 12c2 2.2 3 4.1 3 5.7a3 3 0 0 1-6 0c0-1.6 1-3.5 3-5.7Z"/><path class="stroke" d="M8 25h17"/></symbol>
+    <symbol id="icon-bitacora" viewBox="0 0 32 32"><path class="soft" d="M9 6h14v20H9z"/><path class="gold-stroke" d="m12 13 2 2 4-5M12 21h8"/><path class="stroke" d="M12 17h8M21 6v20"/></symbol>
+    <symbol id="icon-tickets" viewBox="0 0 32 32"><path class="soft" d="M7 10h18v12H7z"/><path class="stroke" d="M7 14a2 2 0 0 0 0 4M25 14a2 2 0 0 1 0 4"/><path class="gold-stroke" d="M13 16h6M16 12v8"/></symbol>
+    <symbol id="icon-flota" viewBox="0 0 32 32"><path class="soft" d="M7 13h14l4 4v5H7z"/><path class="stroke" d="M10 24h.1M23 24h.1M10 13l2-4h8l3 8"/><path class="gold-stroke" d="M13 17h5"/></symbol>
+  </svg>
+  <main class="page">
+    <section class="shell">
+      <header class="top">
+        <div class="brand">
+          <img class="brand-logo" src="{% static 'operacion/pollyanas-logo-transparent.png' %}" alt="Pollyana's Dolce">
+          <div>
+            <h1>App<br>Operativa</h1>
+            <small>Acceso a la app, no al ERP completo</small>
+          </div>
+        </div>
+        <div class="session-chip">Sesión activa</div>
+      </header>
+
+      <div class="content">
+        <section class="profile-card">
+          <h2>{{ location_label }}</h2>
+          <div class="profile-meta">
+            <span class="pill">{{ user_label }}</span>
+            <span class="pill">{{ role_label }}</span>
+            <span class="pill">{{ scope_label }}</span>
+          </div>
+        </section>
+
+        <p class="intro">Selecciona la actividad que corresponde a tu operación. Solo se muestran accesos permitidos para esta sesión.</p>
+
+        {% if has_tiles %}
+          <div class="action-grid">
+            {% for tile in tiles %}
+              <a class="action" href="{{ tile.href }}" aria-label="{{ tile.title }}. {{ tile.detail }}">
+                <span class="mark">
+                  <svg class="glyph" aria-hidden="true"><use href="#icon-{{ tile.icon }}"></use></svg>
+                </span>
+                <span>
+                  <b>{{ tile.title }}</b>
+                  <small>{{ tile.detail }}</small>
+                </span>
+              </a>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="empty">Tu usuario no tiene actividades operativas asignadas en esta app. Solicita acceso al módulo correspondiente.</div>
+        {% endif %}
+      </div>
+
+      <footer class="bottom">
+        <span>{{ username }}</span>
+        <a href="{% url 'logout' %}">Cerrar sesión</a>
+      </footer>
+    </section>
+  </main>
+</body>
+</html>

@@ -489,6 +489,7 @@
         margin-top: 8px;
       }
     </style>
+    <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}">
   </head>
   <body>
     <div id="app"></div>
@@ -617,6 +618,14 @@
         }, 120);
       }
 
+      function appGlyph(name) {
+        const icons = {
+          falla: `<svg viewBox="0 0 32 32"><path class="soft" d="M16 5 27 25H5L16 5Z"/><path class="gold-stroke" d="M16 12v6"/><path class="stroke" d="M16 23h.1"/></svg>`,
+          historial: `<svg viewBox="0 0 32 32"><path class="soft" d="M10 7h12v18H10z"/><path class="gold-stroke" d="M13 12h6M13 16h6M13 20h4"/><path class="stroke" d="M8 10h2M8 15h2M8 20h2"/></svg>`
+        };
+        return `<span class="app-glyph" aria-hidden="true">${icons[name] || icons.falla}</span>`;
+      }
+
       function shell(content) {
         const nombre = esc(state.perfil?.nombre || "Sucursal");
         return `
@@ -654,7 +663,7 @@
                 <input id="username" name="username" autocomplete="username" required>
               </div>
               <div class="field">
-                <label for="password">Contrasena</label>
+                <label for="password">Contraseña</label>
                 <input id="password" name="password" type="password" autocomplete="current-password" required>
               </div>
               <button class="primary-btn" type="submit">Entrar</button>
@@ -672,7 +681,7 @@
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({username: form.get("username"), password: form.get("password")})
         });
-        if (!response.ok) return renderLogin("Usuario o contrasena incorrectos");
+        if (!response.ok) return renderLogin("Usuario o contraseña incorrectos");
         setTokens(await response.json());
         await showScreen("dashboard");
       }
@@ -718,10 +727,10 @@
         await loadMisReportes();
         const abiertos = state.misReportes.filter((r) => !["cerrado", "cancelado"].includes(r.estatus)).length;
         render(shell(`
-          <p class="unit-line">Reporta fallas de sucursal con foto y ubicacion.</p>
+          <p class="unit-line">Reporta fallas de sucursal con foto y ubicación.</p>
           <div class="dash-grid">
-            <button class="dash-btn" onclick="startNuevoReporte()">Reportar<br>Falla</button>
-            <button class="dash-btn" onclick="showScreen('mis_reportes')">Mis<br>Reportes ${abiertos ? `<span class="badge">${abiertos}</span>` : ""}</button>
+            <button class="dash-btn" onclick="startNuevoReporte()">${appGlyph("falla")}<span>Reportar falla</span></button>
+            <button class="dash-btn" onclick="showScreen('mis_reportes')">${appGlyph("historial")}<span>Mis Reportes</span>${abiertos ? `<span class="badge">${abiertos}</span>` : ""}</button>
           </div>
         `));
       }
@@ -778,7 +787,7 @@
         if (d.step === 2 && (!d.titulo.trim() || !d.descripcion.trim())) {
           return renderNuevoReporte("Captura titulo y descripcion.");
         }
-        if (d.step === 2 && !isGeoReady(d)) return renderNuevoReporte("Se requiere ubicacion para continuar.");
+        if (d.step === 2 && !isGeoReady(d)) return renderNuevoReporte("Se requiere ubicación para continuar.");
         if (d.step === 2 && !d.foto) return renderNuevoReporte("La foto debe tomarse en este momento.");
         d.step = Math.min(3, d.step + 1);
         renderNuevoReporte();
@@ -866,7 +875,7 @@
               <p class="gps-registered">Ubicacion registrada</p>
               ${error ? `<p class="error">${esc(error)}</p>` : ""}
               <div class="actions">
-                <button class="secondary-btn" onclick="prevReporteStep()">Atras</button>
+                <button class="secondary-btn" onclick="prevReporteStep()">Atrás</button>
                 <button class="primary-btn" onclick="nextReporteStep()" ${ubicacionLista && d.foto ? "" : "disabled"}>Siguiente</button>
               </div>
             </div>
@@ -888,7 +897,7 @@
             </section>
             ${error ? `<p class="error">${esc(error)}</p>` : ""}
             <div class="actions">
-              <button class="secondary-btn" onclick="prevReporteStep()">Atras</button>
+              <button class="secondary-btn" onclick="prevReporteStep()">Atrás</button>
               <button class="primary-btn" onclick="enviarReporte()" ${isGeoReady(d) && d.foto ? "" : "disabled"}>Enviar reporte</button>
             </div>
           `;
@@ -950,10 +959,10 @@
         const loading = d.geoStatus === "loading";
         const unavailable = d.geoStatus === "unavailable";
         const message = denied
-          ? "Bloqueaste el acceso a tu ubicacion.\n1. Toca el icono de candado en tu navegador\n2. Activa el permiso de Ubicacion\n3. Recarga la pagina"
+          ? "Bloqueaste el acceso a tu ubicación.\n1. Toca el icono de candado en tu navegador\n2. Activa el permiso de ubicación\n3. Recarga la página"
           : unavailable
-            ? "No pudimos obtener tu ubicacion. Verifica que el GPS este activado e intenta de nuevo."
-            : "Esta accion requiere tu ubicacion.\nPresiona Permitir cuando el navegador lo solicite.";
+            ? "No pudimos obtener tu ubicación. Verifica que el GPS esté activado e intenta de nuevo."
+            : "Esta acción requiere tu ubicación.\nPresiona Permitir cuando el navegador lo solicite.";
         return `
           <div class="gps-overlay" role="dialog" aria-modal="true">
             <section class="gps-card">
@@ -961,7 +970,7 @@
               <h2 class="gps-title">Ubicacion requerida</h2>
               <p class="gps-message">${esc(message)}</p>
               <button class="primary-btn" onclick="requestGeo()" ${loading ? "disabled" : ""}>
-                ${loading ? "Obteniendo ubicacion..." : denied || unavailable ? "Reintentar" : "Activar ubicacion"}
+                ${loading ? "Obteniendo ubicación..." : denied || unavailable ? "Reintentar" : "Activar ubicación"}
               </button>
             </section>
           </div>
@@ -991,7 +1000,7 @@
 
       async function enviarReporte() {
         const d = state.draft;
-        if (!isGeoReady(d) || !d.foto) return renderNuevoReporte("Se requiere ubicacion y foto tomada en este momento.");
+        if (!isGeoReady(d) || !d.foto) return renderNuevoReporte("Se requiere ubicación y foto tomada en este momento.");
         const form = new FormData();
         form.append("sucursal", d.sucursal);
         form.append("categoria", d.categoria);

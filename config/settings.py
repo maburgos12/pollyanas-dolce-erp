@@ -113,6 +113,7 @@ INSTALLED_APPS = [
     "fallas",
     "mantenimiento",
     "mermas",
+    "operacion",
     "integraciones",
     "horarios_especiales",
     "pos_bridge",
