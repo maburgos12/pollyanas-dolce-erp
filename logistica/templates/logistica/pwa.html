@@ -1634,6 +1634,38 @@
         `;
       }
 
+      function shouldShowAvisoKmJorgeModal() {
+        const actual = state.bitacoraSalida;
+        if (state.perfil?.username !== "compras.jorge@pollyanasdolce.com") return false;
+        if (!actual?.id) return false;
+        return !sessionStorage.getItem("pd_aviso_km_jorge_gs_pm1_0019");
+      }
+
+      function dismissAvisoKmJorgeModal() {
+        sessionStorage.setItem("pd_aviso_km_jorge_gs_pm1_0019", "true");
+        renderDashboard();
+      }
+
+      function avisoKmJorgeModal() {
+        if (!shouldShowAvisoKmJorgeModal()) return "";
+        return `
+          <section class="fuel-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="jorge-km-title">
+            <article class="fuel-modal pending">
+              <button class="fuel-close" type="button" onclick="dismissAvisoKmJorgeModal()" aria-label="Cerrar aviso">×</button>
+              <div class="fuel-icon">📸</div>
+              <div class="fuel-label">Aviso operativo</div>
+              <h2 id="jorge-km-title">Revisa tu cierre de turno</h2>
+              <p>Se detectó que el día 21 de mayo de 2026 cerraste el folio GS-PM1-0019 con kilómetros que no correspondían al tablero.</p>
+              <div class="fuel-notice">
+                La imagen del cierre muestra el tablero apagado, por lo que no se puede corroborar gasolina ni kilometraje.
+                Favor de ejecutar correctamente las instrucciones para evitar contratiempos.
+              </div>
+              <button class="primary-btn" type="button" onclick="dismissAvisoKmJorgeModal()">Entendido</button>
+            </article>
+          </section>
+        `;
+      }
+
       function resumenSemanalCard() {
         const resumen = state.resumenSemanal;
         if (!resumen) return "";
@@ -1672,6 +1704,7 @@
           ${resumenSemanalCard()}
           ${combustibleAlertaModal()}
           ${cierreJorgeModal()}
+          ${avisoKmJorgeModal()}
           <p class="unit-line">Selecciona la unidad al iniciar cada captura.</p>
           <button class="dashboard-help" onclick="showScreen('ayuda')" type="button">? Ayuda rapida</button>
           <div class="dash-grid">
