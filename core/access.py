@@ -39,6 +39,7 @@ ACCESS_MODULES = [
     ("crm", "CRM"),
     ("produccion", "Producción"),
     ("mantenimiento", "Mantenimiento"),
+    ("seguimiento", "Seguimiento personal"),
     ("logistica", "Logística"),
     ("fallas", "Fallas / Mantenimiento"),
     ("mermas", "Mermas"),
@@ -86,6 +87,9 @@ ACCESS_SUBMODULES = {
         ("dashboard", "Dashboard"),
         ("bandeja", "Bandeja de seguimiento"),
         ("app", "App mantenimiento"),
+    ],
+    "seguimiento": [
+        ("mi_tablero", "Mis minutas, proyectos y compromisos"),
     ],
     "logistica": [
         ("dashboard", "Dashboard"),
@@ -349,6 +353,8 @@ def _role_module_access(user: AbstractBaseUser, module: str) -> str:
             return ACCESS_MANAGE
     if ROLE_RRHH in groups and module == "rrhh":
         return ACCESS_MANAGE
+    if module == "seguimiento" and groups.intersection({role.upper() for role in ROLE_ORDER}):
+        return ACCESS_MANAGE
     return ACCESS_NONE
 
 
@@ -399,6 +405,10 @@ def get_submodule_access(user: AbstractBaseUser, module: str, submodule: str) ->
     module = (module or "").strip().lower()
     submodule = (submodule or "").strip().lower()
     if _module_locked(user, module):
+        return ACCESS_NONE
+    if module in {"produccion", "ventas"} and submodule == "bonos":
+        if has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_RRHH):
+            return ACCESS_MANAGE
         return ACCESS_NONE
     key = f"{module}.{submodule}"
     explicit = _explicit_access_map(user)

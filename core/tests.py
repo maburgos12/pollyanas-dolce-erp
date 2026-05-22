@@ -142,6 +142,8 @@ class LoginViewAuthenticatedRedirectTests(TestCase):
         self.assertEqual(response["Location"], "/login/?next=/bp/")
 
     def test_authenticated_short_bonus_links_open_capture_apps(self):
+        self.user.is_superuser = True
+        self.user.save(update_fields=["is_superuser"])
         response_prod = self.client.get("/bp/")
         response_ventas = self.client.get("/bv/")
 

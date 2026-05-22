@@ -28,7 +28,16 @@
                     <button class="sidebar-group-toggle" data-group="{{ group.key }}" aria-expanded="{% if group.active or forloop.first %}true{% else %}false{% endif %}">
                         <span class="sidebar-group-title">
                             <span class="nav-icon" aria-hidden="true">
-                                {% if group.key == "direccion" %}
+                                {% if group.key == "mi_trabajo" %}
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M8 6h13"/>
+                                    <path d="M8 12h13"/>
+                                    <path d="M8 18h13"/>
+                                    <path d="m3 6 1 1 2-2"/>
+                                    <path d="m3 12 1 1 2-2"/>
+                                    <path d="m3 18 1 1 2-2"/>
+                                </svg>
+                                {% elif group.key == "direccion" %}
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                                     <rect x="3" y="3" width="8" height="8" rx="1.5"/>
                                     <rect x="13" y="3" width="8" height="5" rx="1.5"/>

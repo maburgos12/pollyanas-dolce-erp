@@ -4,10 +4,11 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 
 from core.models import Sucursal
+from core.access import can_view_submodule
 from rrhh.models import Empleado, NominaPeriodo
 from rrhh.bonos_permisos import BasePermisosEquipoViewSet
 
@@ -27,6 +28,12 @@ from .serializers import (
 from .services import sync_ventas_categorias
 
 
+class CanAccessBonosVentas(BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(user and user.is_authenticated and can_view_submodule(user, "ventas", "bonos"))
+
+
 def _recalcular_desde_registros(bono: BonoVentasEmpleado) -> None:
     registros = bono.registros.all()
     bono.dias_trabajados = registros.count()
@@ -40,7 +47,7 @@ def _recalcular_desde_registros(bono: BonoVentasEmpleado) -> None:
 class ConfigBonoVentasPeriodoViewSet(viewsets.ModelViewSet):
     queryset = ConfigBonoVentasPeriodo.objects.all()
     serializer_class = ConfigBonoVentasPeriodoSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanAccessBonosVentas]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -101,7 +108,7 @@ class ConfigBonoVentasPeriodoViewSet(viewsets.ModelViewSet):
 class VentaCategoriaSucursalViewSet(viewsets.ModelViewSet):
     queryset = VentaCategoriaSucursal.objects.select_related("periodo", "sucursal")
     serializer_class = VentaCategoriaSucursalSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanAccessBonosVentas]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -130,7 +137,7 @@ class VentaCategoriaSucursalViewSet(viewsets.ModelViewSet):
 class BonoVentasEmpleadoViewSet(viewsets.ModelViewSet):
     queryset = BonoVentasEmpleado.objects.select_related("empleado", "periodo", "sucursal").prefetch_related("registros")
     serializer_class = BonoVentasEmpleadoSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanAccessBonosVentas]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -182,7 +189,7 @@ class BonoVentasEmpleadoViewSet(viewsets.ModelViewSet):
 class RegistroDiarioVentasViewSet(viewsets.ModelViewSet):
     queryset = RegistroDiarioVentas.objects.select_related("bono__empleado", "bono__periodo")
     serializer_class = RegistroDiarioVentasSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanAccessBonosVentas]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -201,6 +208,7 @@ class RegistroDiarioVentasViewSet(viewsets.ModelViewSet):
 
 
 class PermisosVentasEquipoViewSet(BasePermisosEquipoViewSet):
+    permission_classes = [IsAuthenticated, CanAccessBonosVentas]
     origen_solicitud = "bonos_ventas"
 
     def empleados_queryset(self):

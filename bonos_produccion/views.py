@@ -4,11 +4,12 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 
 from rrhh.models import Empleado, NominaPeriodo
 from rrhh.bonos_permisos import BasePermisosEquipoViewSet
+from core.access import can_view_submodule, is_bonos_produccion_capture_only
 
 from .models import (
     AREA_HORNOS,
@@ -27,6 +28,16 @@ from .serializers import (
 )
 
 
+class CanAccessBonosProduccion(BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(
+            user
+            and user.is_authenticated
+            and (is_bonos_produccion_capture_only(user) or can_view_submodule(user, "produccion", "bonos"))
+        )
+
+
 def _recalcular_desde_registros(bono: BonoProduccionEmpleado) -> None:
     registros = bono.registros.all()
     bono.dias_trabajados = registros.count()
@@ -42,7 +53,7 @@ def _recalcular_desde_registros(bono: BonoProduccionEmpleado) -> None:
 class ConfigBonoPeriodoViewSet(viewsets.ModelViewSet):
     queryset = ConfigBonoPeriodo.objects.all()
     serializer_class = ConfigBonoPeriodoSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanAccessBonosProduccion]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -95,7 +106,7 @@ class ConfigBonoPeriodoViewSet(viewsets.ModelViewSet):
 class BonoProduccionViewSet(viewsets.ModelViewSet):
     queryset = BonoProduccionEmpleado.objects.select_related("empleado", "periodo").prefetch_related("registros")
     serializer_class = BonoProduccionSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanAccessBonosProduccion]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -152,7 +163,7 @@ class BonoProduccionViewSet(viewsets.ModelViewSet):
 class RegistroDiarioViewSet(viewsets.ModelViewSet):
     queryset = RegistroDiarioProduccion.objects.select_related("bono__empleado", "bono__periodo")
     serializer_class = RegistroDiarioSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanAccessBonosProduccion]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -171,6 +182,7 @@ class RegistroDiarioViewSet(viewsets.ModelViewSet):
 
 
 class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
+    permission_classes = [IsAuthenticated, CanAccessBonosProduccion]
     origen_solicitud = "bonos_produccion"
 
     def empleados_queryset(self):

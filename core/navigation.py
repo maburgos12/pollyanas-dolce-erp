@@ -3,6 +3,13 @@ from core.access import can_view_submodule
 
 NAV_GROUPS = [
     {
+        "key": "mi_trabajo",
+        "label": "Mi trabajo",
+        "items": [
+            ("seguimiento", "mi_tablero", "Mis acuerdos", "/seguimiento/", ["/seguimiento/"]),
+        ],
+    },
+    {
         "key": "direccion",
         "label": "Dirección",
         "items": [
