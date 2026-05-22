@@ -899,7 +899,7 @@ def _resolve_promotion_product(query: str) -> PointProduct | None:
         search |= Q(name__icontains=query) | Q(sku__iexact=query) | Q(external_id__iexact=query)
     for token in _promotion_tokens(query):
         search |= Q(normalized_name__icontains=token)
-    candidates = list(PointProduct.objects.filter(q_filter & search).distinct()[:50])
+    candidates = list(PointProduct.objects.filter(q_filter & search).distinct())
     ranked = [(candidate, _score_promotion_product(candidate, query)) for candidate in candidates]
     ranked = [(candidate, score) for candidate, score in ranked if score > 0]
     ranked.sort(key=lambda item: (-item[1], item[0].name.lower(), item[0].id))
