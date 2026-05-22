@@ -118,6 +118,8 @@ select:focus {
 .add-btn,
 .icon-btn,
 .tipo-btn,
+.toolbar button,
+.card-actions button,
 .receipt-choice,
 .dashboard-help,
 .fuel-route-btn {
@@ -132,15 +134,35 @@ select:focus {
 .secondary-btn:focus,
 .logout:hover,
 .logout:focus,
+.toolbar button:hover,
+.toolbar button:focus,
+.card-actions button:hover,
+.card-actions button:focus,
 .dash-btn:hover,
 .dash-btn:focus,
 .select-card:hover,
 .select-card.selected,
 .tipo-btn.selected,
+.toolbar button.active,
 .receipt-choice.active {
   border-color: var(--pd-wine) !important;
   background: var(--pd-wine-light) !important;
   color: var(--pd-ink) !important;
+}
+
+.toolbar button.active {
+  border-color: var(--pd-gold) !important;
+  color: #7a5d11 !important;
+  background: var(--pd-gold-light) !important;
+}
+
+.card-actions {
+  gap: 8px !important;
+}
+
+.card-actions button {
+  min-height: 38px !important;
+  font-size: 12px !important;
 }
 
 .dash-grid {

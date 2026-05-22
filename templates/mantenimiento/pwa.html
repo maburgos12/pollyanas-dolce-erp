@@ -13,13 +13,13 @@
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
     <style>
       :root {
-        --bg: #0f0f14;
-        --surface: #1a1a24;
-        --border: #2a2a38;
+        --bg: #f9f5f8;
+        --surface: #ffffff;
+        --border: #ede6f0;
         --wine: #8B2252;
         --gold: #C9A84C;
-        --text: #e8e0d5;
-        --text-muted: #888888;
+        --text: #1c1520;
+        --text-muted: #6b5f70;
         --danger: #e64f64;
         --warning: #e6b84f;
         --success: #51b56f;
@@ -99,7 +99,7 @@
         min-height: 48px;
         border: 1px solid var(--border);
         border-radius: 10px;
-        background: #111118;
+        background: #f9f5f8;
         color: var(--text);
         outline: none;
         padding: 12px 13px;
@@ -120,7 +120,7 @@
       .secondary-btn {
         border: 1px solid var(--border);
         border-radius: 10px;
-        background: transparent;
+        background: var(--surface);
         color: var(--text);
         font-weight: 800;
         padding: 12px 14px;
@@ -145,7 +145,8 @@
       .logout {
         min-height: 40px;
         border-radius: 999px;
-        background: #261521;
+        background: rgba(139, 34, 82, .08);
+        border: 1px solid var(--border);
         color: var(--text);
         font-size: 13px;
         font-weight: 800;
@@ -182,7 +183,7 @@
       }
       .select-card:hover, .select-card.selected {
         border-color: var(--wine);
-        background: #2a1423;
+        background: rgba(139, 34, 82, .08);
       }
       .card-label {
         margin: 0 0 4px;
@@ -211,7 +212,7 @@
       }
       .tipo-btn.selected {
         border-color: var(--gold);
-        background: #1f1a10;
+        background: rgba(201, 168, 76, .14);
       }
       .progress {
         display: flex;
@@ -246,7 +247,7 @@
         justify-content: center;
         border: 1px solid var(--border);
         border-radius: 10px;
-        background: #111118;
+        background: #f9f5f8;
         color: var(--text);
         font-weight: 900;
         padding: 12px 13px;
@@ -316,7 +317,7 @@
         max-width: 430px;
         margin: 0 auto;
         border-top: 1px solid var(--border);
-        background: rgba(15,15,20,.94);
+        background: rgba(255, 255, 255, .96);
         color: var(--text-muted);
         text-align: center;
         font-size: 12px;
@@ -362,15 +363,17 @@
         min-height: 42px;
         border: 1px solid var(--border);
         border-radius: 10px;
-        background: #111118;
+        background: var(--surface);
         color: var(--text);
         font-size: 12px;
         font-weight: 900;
         padding: 9px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .07), 0 1px 2px rgba(0, 0, 0, .04);
       }
       .toolbar button.active {
         border-color: var(--gold);
-        color: var(--gold);
+        color: #4f3416;
+        background: rgba(201, 168, 76, .14);
       }
       .status-chip {
         display: inline-flex;
@@ -395,12 +398,21 @@
       .card-actions button {
         min-height: 38px;
         border-radius: 9px;
-        background: #111118;
+        background: var(--surface);
         border: 1px solid var(--border);
         color: var(--text);
         font-size: 12px;
         font-weight: 900;
         padding: 8px 10px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .07), 0 1px 2px rgba(0, 0, 0, .04);
+      }
+      .toolbar button:hover,
+      .toolbar button:focus,
+      .card-actions button:hover,
+      .card-actions button:focus {
+        border-color: var(--wine);
+        background: rgba(139, 34, 82, .08);
+        color: var(--text);
       }
       .search-row {
         display: grid;
