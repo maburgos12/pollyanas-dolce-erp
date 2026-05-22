@@ -8,8 +8,8 @@
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260326a">
 <style>
-  .page-mantenimiento-dashboard .container{width:100%;max-width:none;margin:0;padding:clamp(12px,1.3vw,22px);overflow-x:hidden}
-  .page-mantenimiento-dashboard .bi-shell{width:100%;max-width:none;margin:0}
+  .page-mantenimiento-dashboard .container{width:100%;max-width:none;margin:0;padding:clamp(18px,1.8vw,32px);overflow-x:hidden}
+  .page-mantenimiento-dashboard .bi-shell{width:100%;max-width:none;margin:0;gap:16px}
   .mant-tabs .module-tab{white-space:nowrap}
   .mant-origin-tabs{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .mant-origin-tab{display:inline-flex;align-items:center;gap:8px;min-height:38px;border:1px solid rgba(139,34,82,.14);border-radius:999px;background:#fff;color:#8B2252;text-decoration:none;font-weight:900;padding:8px 14px}
@@ -21,8 +21,11 @@
   .mant-col-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:6px 6px 10px;border-bottom:1px solid #f0e1e8;margin-bottom:10px}
   .mant-col-head strong{display:block;color:#3a2b30;font-size:16px}
   .mant-col-head span{display:block;margin-top:2px;color:#77656d;font-size:12px}
-  .mant-col-count{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;border-radius:999px;background:#8B2252;color:#fff;font-weight:900}
-  .mant-ticket{display:grid;gap:10px;background:#fffafc;border:1px solid #f0c9d9;border-radius:12px;padding:12px;margin-bottom:10px}
+  .mant-col-count{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;flex:0 0 32px;border-radius:999px;background:#8B2252;color:#fff;font-size:13px;font-weight:900;line-height:1;text-align:center;font-variant-numeric:tabular-nums}
+  .mant-col-body{display:grid;gap:10px;max-height:min(520px,58vh);overflow-y:auto;padding-right:4px;overscroll-behavior:contain}
+  .mant-col-body::-webkit-scrollbar{width:8px}
+  .mant-col-body::-webkit-scrollbar-thumb{background:#e3b9ca;border-radius:999px}
+  .mant-ticket{display:grid;gap:10px;background:#fffafc;border:1px solid #f0c9d9;border-radius:12px;padding:12px}
   .mant-ticket-title{color:#8B2252;font-weight:900;line-height:1.2}
   .mant-ticket-meta{color:#77656d;font-size:12px;line-height:1.45}
   .mant-ticket-tags{display:flex;gap:6px;flex-wrap:wrap}
@@ -31,6 +34,11 @@
   .mant-badge.sucursales{background:#eef4ff;color:#1d4ed8}
   .mant-ticket-actions{display:flex;gap:8px;flex-wrap:wrap}
   .mant-empty{color:#77656d;border:1px dashed #e8b7cb;border-radius:12px;padding:14px;font-size:13px}
+  .mant-flow-demo{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px}
+  .mant-flow-step{border:1px solid rgba(139,34,82,.12);border-radius:12px;background:#fff;padding:11px 12px;min-height:108px}
+  .mant-flow-step span{display:block;color:#8b7180;font-size:11px;font-weight:900;text-transform:uppercase}
+  .mant-flow-step strong{display:block;margin-top:6px;color:#8B2252;font-size:14px;line-height:1.2}
+  .mant-flow-step small{display:block;margin-top:7px;color:#6f6170;line-height:1.3}
   .mant-breakdown{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
   .mant-breakdown-list{display:grid}
   .mant-breakdown-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-top:1px solid #f0e1e8;color:#3a2b30;font-weight:900}
@@ -149,6 +157,14 @@
         <a class="btn btn-secondary btn-sm" href="{% url 'mantenimiento:app' %}">Levantar reporte</a>
       </div>
     </div>
+    <div class="mant-flow-demo" aria-label="Ejemplo visual de avance">
+      <article class="mant-flow-step"><span>Nuevo</span><strong>Horno CEDIS reportado</strong><small>Reporte recibido y pendiente de revisión.</small></article>
+      <article class="mant-flow-step"><span>Diagnóstico</span><strong>Revisión inicial</strong><small>Se valida falla, activo y prioridad.</small></article>
+      <article class="mant-flow-step"><span>Cotización</span><strong>Proveedor asignado</strong><small>Se captura taller, monto estimado y evidencia.</small></article>
+      <article class="mant-flow-step"><span>Programado</span><strong>Visita agendada</strong><small>Fecha acordada para atención del servicio.</small></article>
+      <article class="mant-flow-step"><span>En atención</span><strong>Trabajo activo</strong><small>El proveedor está atendiendo el caso.</small></article>
+      <article class="mant-flow-step"><span>Validación</span><strong>Cierre y factura</strong><small>Se confirma resultado, costo final y folio.</small></article>
+    </div>
     <div class="mant-board">
       {% for column in kanban_columns %}
         <article class="mant-col">
@@ -156,40 +172,42 @@
             <div><strong>{{ column.label }}</strong><span>{{ column.hint }}</span></div>
             <span class="mant-col-count">{{ column.items|length }}</span>
           </div>
-          {% for item in column.items %}
-            <article class="mant-ticket">
-              <div class="mant-ticket-tags">
-                <span class="mant-badge {{ item.origen }}">{{ item.origen|title }}</span>
-                <span class="mant-badge">{{ item.prioridad }}</span>
-              </div>
-              <div>
-                <div class="mant-ticket-title">{{ item.referencia }} · {{ item.titulo }}</div>
-                <div class="mant-ticket-meta">{{ item.ubicacion|default:"Sin ubicación" }}{% if item.activo %} · {{ item.activo }}{% endif %}<br>{{ item.fecha|date:"d/m/Y H:i" }}</div>
-              </div>
-              <div class="mant-ticket-meta">{{ item.descripcion|truncatechars:110 }}</div>
-              {% if item.proveedor or item.costo_estimado or item.costo_real %}
-                <div class="mant-ticket-meta">{{ item.proveedor|default:"Sin proveedor" }} · Est. ${{ item.costo_estimado|default:"0" }} · Real ${{ item.costo_real|default:"0" }}</div>
-              {% endif %}
-              <div class="mant-ticket-actions">
-                <button
-                  class="btn btn-secondary btn-sm"
-                  type="button"
-                  data-open-follow
-                  data-action="{% url 'mantenimiento:mant-actualizar' item.tipo item.id %}"
-                  data-type="{{ item.tipo }}"
-                  data-status="{{ item.estatus }}"
-                  data-provider="{{ item.proveedor|default:'' }}"
-                  data-estimated="{{ item.costo_estimado|default:'' }}"
-                  data-real="{{ item.costo_real|default:'' }}"
-                  data-asset-id="{{ item.activo_id|default:'' }}"
-                  data-title="{{ item.referencia }} · {{ item.titulo }}"
-                  data-meta="{{ item.ubicacion|default:'Sin ubicación' }} · {{ item.estatus_display }}"
-                >Trabajar</button>
-              </div>
-            </article>
-          {% empty %}
-            <div class="mant-empty">Sin casos en esta etapa.</div>
-          {% endfor %}
+          <div class="mant-col-body">
+            {% for item in column.items %}
+              <article class="mant-ticket">
+                <div class="mant-ticket-tags">
+                  <span class="mant-badge {{ item.origen }}">{{ item.origen|title }}</span>
+                  <span class="mant-badge">{{ item.prioridad }}</span>
+                </div>
+                <div>
+                  <div class="mant-ticket-title">{{ item.referencia }} · {{ item.titulo }}</div>
+                  <div class="mant-ticket-meta">{{ item.ubicacion|default:"Sin ubicación" }}{% if item.activo %} · {{ item.activo }}{% endif %}<br>{{ item.fecha|date:"d/m/Y H:i" }}</div>
+                </div>
+                <div class="mant-ticket-meta">{{ item.descripcion|truncatechars:110 }}</div>
+                {% if item.proveedor or item.costo_estimado or item.costo_real %}
+                  <div class="mant-ticket-meta">{{ item.proveedor|default:"Sin proveedor" }} · Est. ${{ item.costo_estimado|default:"0" }} · Real ${{ item.costo_real|default:"0" }}</div>
+                {% endif %}
+                <div class="mant-ticket-actions">
+                  <button
+                    class="btn btn-secondary btn-sm"
+                    type="button"
+                    data-open-follow
+                    data-action="{% url 'mantenimiento:mant-actualizar' item.tipo item.id %}"
+                    data-type="{{ item.tipo }}"
+                    data-status="{{ item.estatus }}"
+                    data-provider="{{ item.proveedor|default:'' }}"
+                    data-estimated="{{ item.costo_estimado|default:'' }}"
+                    data-real="{{ item.costo_real|default:'' }}"
+                    data-asset-id="{{ item.activo_id|default:'' }}"
+                    data-title="{{ item.referencia }} · {{ item.titulo }}"
+                    data-meta="{{ item.ubicacion|default:'Sin ubicación' }} · {{ item.estatus_display }}"
+                  >Trabajar</button>
+                </div>
+              </article>
+            {% empty %}
+              <div class="mant-empty">Sin casos en esta etapa.</div>
+            {% endfor %}
+          </div>
         </article>
       {% endfor %}
     </div>
