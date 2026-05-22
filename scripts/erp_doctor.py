@@ -1390,7 +1390,7 @@ def check_page_load_performance() -> CheckResult:
     for label, path in PAGE_LOAD_ROUTES:
         route_started = time.monotonic()
         try:
-            response = client.get(path, follow=True)
+            response = client.get(path, follow=True, secure=True)
             duration_ms = int((time.monotonic() - route_started) * 1000)
             status_code = int(response.status_code)
             redirect_chain = [
