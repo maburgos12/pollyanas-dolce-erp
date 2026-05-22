@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
-from decimal import Decimal
+from datetime import date, timedelta
+from decimal import Decimal, ROUND_CEILING
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -36,7 +36,7 @@ from core.access import (
 from core.audit import log_event
 from core.models import AuditLog
 from orquestacion.models import AgentDefinition, AgentExecutionLink, AgentSuggestion, AgentTask, OrchestrationRun
-from pos_bridge.models import PointBranch, PointInventorySnapshot, PointSyncJob
+from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob
 from pos_bridge.tasks.run_daily_sales_sync import run_daily_sales_sync
 from pos_bridge.tasks.run_inventory_sync import run_inventory_sync
 from pos_bridge.tasks.run_product_recipe_sync import run_product_recipe_sync
@@ -46,6 +46,7 @@ from maestros.utils.canonical_catalog import canonical_insumo, canonical_insumo_
 from recetas.models import PlanProduccion, PlanProduccionItem, Receta, RecetaCostoVersion
 from recetas.utils.normalizacion import normalizar_nombre
 from reportes.bi_utils import compute_bi_snapshot, serialize_bi_for_api
+from reportes.models import FactVentaDiaria
 from ventas.services.sales_read_service import get_sales_range, get_sales_range_grouped
 
 ZERO = Decimal("0")
@@ -789,6 +790,302 @@ def _handle_current_input_cost(_user, arguments: dict[str, Any]) -> dict[str, An
     }
 
 
+PROMOTION_STOPWORDS = {
+    "con",
+    "crema",
+    "de",
+    "del",
+    "dia",
+    "día",
+    "el",
+    "en",
+    "la",
+    "las",
+    "los",
+    "pastel",
+    "producto",
+    "productos",
+    "promocion",
+    "promoción",
+}
+
+
+def _money(value: Decimal) -> Decimal:
+    return Decimal(str(value or 0)).quantize(Decimal("0.01"))
+
+
+def _float_money(value: Decimal) -> float:
+    return float(_money(value))
+
+
+def _parse_promotion_queries(arguments: dict[str, Any]) -> list[str]:
+    raw = arguments.get("product_queries")
+    if isinstance(raw, list):
+        queries = [str(item).strip() for item in raw if str(item or "").strip()]
+    else:
+        text = str(raw or arguments.get("q") or arguments.get("products") or "").strip()
+        queries = [chunk.strip() for chunk in text.split(",") if chunk.strip()]
+    return queries[:12]
+
+
+def _promotion_tokens(query: str) -> list[str]:
+    tokens = []
+    for token in normalizar_nombre(query).split():
+        if token in PROMOTION_STOPWORDS or len(token) < 3:
+            continue
+        tokens.append(token)
+    return tokens[:8]
+
+
+def _score_promotion_product(product: PointProduct, query: str) -> int:
+    normalized_query = normalizar_nombre(query)
+    normalized_name = product.normalized_name or normalizar_nombre(product.name)
+    normalized_sku = normalizar_nombre(product.sku or "")
+    score = 0
+    if normalized_name == normalized_query:
+        score = 1000
+    elif normalized_sku and normalized_sku == normalized_query:
+        score = 980
+    elif normalized_query and normalized_name.startswith(normalized_query):
+        score = 850
+    elif normalized_query and normalized_query in normalized_name:
+        score = 700
+    tokens = _promotion_tokens(query)
+    if tokens:
+        matched = sum(1 for token in tokens if token in normalized_name)
+        score = max(score, 420 + matched * 60)
+    if product.precio and product.precio > 0:
+        score += 25
+    return score
+
+
+def _resolve_promotion_product(query: str) -> PointProduct | None:
+    normalized_query = normalizar_nombre(query)
+    q_filter = Q(active=True)
+    search = Q()
+    if normalized_query:
+        search |= Q(normalized_name__icontains=normalized_query)
+    if query:
+        search |= Q(name__icontains=query) | Q(sku__iexact=query) | Q(external_id__iexact=query)
+    for token in _promotion_tokens(query):
+        search |= Q(normalized_name__icontains=token)
+    candidates = list(PointProduct.objects.filter(q_filter & search).distinct()[:50])
+    ranked = [(candidate, _score_promotion_product(candidate, query)) for candidate in candidates]
+    ranked = [(candidate, score) for candidate, score in ranked if score > 0]
+    ranked.sort(key=lambda item: (-item[1], item[0].name.lower(), item[0].id))
+    return ranked[0][0] if ranked else None
+
+
+def _resolve_product_recipe(product: PointProduct | None, query: str) -> Receta | None:
+    if product is not None:
+        receta = Receta.objects.filter(
+            Q(codigo_point__iexact=product.sku)
+            | Q(codigo_point__iexact=product.external_id)
+            | Q(nombre_normalizado__icontains=product.normalized_name or normalizar_nombre(product.name))
+        ).order_by("id").first()
+        if receta is not None:
+            return receta
+    normalized_query = normalizar_nombre(query)
+    if not normalized_query:
+        return None
+    return Receta.objects.filter(nombre_normalizado__icontains=normalized_query).order_by("id").first()
+
+
+def _promotion_sales_queryset(*, product: PointProduct | None, receta: Receta | None, query: str, start: date, end: date):
+    qs = FactVentaDiaria.objects.filter(fecha__gte=start, fecha__lte=end)
+    filters = Q()
+    if product is not None:
+        filters |= Q(point_product=product) | Q(producto_clave__iexact=product.sku) | Q(producto_clave__iexact=product.external_id)
+    if receta is not None:
+        filters |= Q(receta=receta) | Q(producto_clave__iexact=receta.codigo_point)
+    normalized_query = normalizar_nombre(query)
+    if normalized_query:
+        filters |= Q(producto_nombre__icontains=query)
+    return qs.filter(filters) if filters else qs.none()
+
+
+def _latest_recipe_cost(receta: Receta | None) -> Decimal:
+    if receta is None:
+        return ZERO
+    try:
+        cost = Decimal(str(receta.costo_total_estimado_decimal or 0))
+    except Exception:
+        cost = ZERO
+    if cost > 0:
+        return cost
+    version = (
+        RecetaCostoVersion.objects.filter(receta=receta, costo_total__gt=0)
+        .order_by("-version_num", "-creado_en", "-id")
+        .values_list("costo_total", flat=True)
+        .first()
+    )
+    return Decimal(str(version or 0))
+
+
+def _ceil_decimal(value: Decimal) -> int | None:
+    if value <= 0:
+        return None
+    return int(value.to_integral_value(rounding=ROUND_CEILING))
+
+
+def _handle_promotion_profitability(_user, arguments: dict[str, Any]) -> dict[str, Any]:
+    promotion_type = str(arguments.get("promotion_type") or "3x2").strip().lower()
+    if promotion_type not in {"3x2", "3 x 2", "3por2", "3_por_2"}:
+        raise PermissionDenied("Solo se soporta simulación 3x2 en esta primera herramienta.")
+    product_queries = _parse_promotion_queries(arguments)
+    if not product_queries:
+        raise PermissionDenied("product_queries es obligatorio para analizar una promoción.")
+    event_name = str(arguments.get("event_name") or "Promoción").strip() or "Promoción"
+    lookback_days = _parse_int(arguments.get("lookback_days"), default=30, min_value=1, max_value=365)
+    expected_uplift_pct = _parse_decimal(arguments.get("expected_uplift_pct"), default=Decimal("50"))
+    marketing_budget = _parse_decimal(arguments.get("marketing_budget"), default=ZERO)
+    today = timezone.localdate()
+    end_date = _parse_iso_date(arguments.get("end_date")) or today
+    start_date = _parse_iso_date(arguments.get("start_date")) or (end_date - timedelta(days=lookback_days - 1))
+
+    items = []
+    data_gaps = []
+    for query in product_queries:
+        product = _resolve_promotion_product(query)
+        receta = _resolve_product_recipe(product, query)
+        sales_qs = _promotion_sales_queryset(product=product, receta=receta, query=query, start=start_date, end=end_date)
+        totals = sales_qs.aggregate(
+            quantity=Coalesce(Sum("cantidad"), ZERO),
+            sales=Coalesce(Sum("venta_total"), ZERO),
+            cost=Coalesce(Sum("costo_estimado"), ZERO),
+        )
+        baseline_units = Decimal(str(totals.get("quantity") or 0))
+        observed_sales = Decimal(str(totals.get("sales") or 0))
+        observed_cost = Decimal(str(totals.get("cost") or 0))
+        price = Decimal(str(product.precio or 0)) if product and product.precio else ZERO
+        if price <= 0 and baseline_units > 0:
+            price = observed_sales / baseline_units
+        unit_cost = observed_cost / baseline_units if baseline_units > 0 and observed_cost > 0 else _latest_recipe_cost(receta)
+        expected_units = (baseline_units * (Decimal("1") + (expected_uplift_pct / Decimal("100")))).quantize(Decimal("0.001"))
+        promo_effective_price = price * Decimal("2") / Decimal("3")
+        normal_margin = price - unit_cost
+        promo_margin = promo_effective_price - unit_cost
+        baseline_profit = baseline_units * normal_margin
+        promo_profit = expected_units * promo_margin
+        profit_delta = promo_profit - baseline_profit
+        break_even_units = _ceil_decimal(baseline_profit / promo_margin) if promo_margin > 0 else None
+        break_even_uplift = (
+            ((Decimal(break_even_units) / baseline_units) - Decimal("1")) * Decimal("100")
+            if break_even_units is not None and baseline_units > 0
+            else None
+        )
+        if product is None:
+            data_gaps.append(f"No encontré producto Point para '{query}'.")
+        if price <= 0:
+            data_gaps.append(f"Falta precio vigente para '{query}'.")
+        if unit_cost <= 0:
+            data_gaps.append(f"Falta costo unitario para '{query}'.")
+        if baseline_units <= 0:
+            data_gaps.append(f"Falta histórico reciente de venta para '{query}'.")
+
+        if price <= 0 or unit_cost <= 0 or baseline_units <= 0:
+            recommendation = "DATOS_INSUFICIENTES"
+        elif promo_margin <= 0 or profit_delta < 0:
+            recommendation = "NO_CONVIENE"
+        elif break_even_uplift is not None and break_even_uplift > expected_uplift_pct + Decimal("20"):
+            recommendation = "RIESGO_ALTO"
+        else:
+            recommendation = "CONVIENE"
+
+        items.append(
+            {
+                "query": query,
+                "product_id": product.id if product else None,
+                "product_sku": product.sku if product else "",
+                "product_name": product.name if product else "",
+                "receta_id": receta.id if receta else None,
+                "receta": receta.nombre if receta else "",
+                "normal_unit_price": _float_money(price),
+                "unit_cost": _float_money(unit_cost),
+                "promo_effective_unit_price": _float_money(promo_effective_price),
+                "discount_pct": 33.33,
+                "normal_margin_per_unit": _float_money(normal_margin),
+                "promo_margin_per_unit": _float_money(promo_margin),
+                "normal_margin_pct": float(((normal_margin / price) * 100).quantize(Decimal("0.01"))) if price > 0 else None,
+                "promo_margin_pct": (
+                    float(((promo_margin / promo_effective_price) * 100).quantize(Decimal("0.01")))
+                    if promo_effective_price > 0
+                    else None
+                ),
+                "baseline_units": float(baseline_units),
+                "expected_units": float(expected_units),
+                "baseline_profit": _float_money(baseline_profit),
+                "promo_profit": _float_money(promo_profit),
+                "profit_delta": _float_money(profit_delta),
+                "break_even_units": break_even_units,
+                "break_even_uplift_pct": float(break_even_uplift.quantize(Decimal("0.01"))) if break_even_uplift is not None else None,
+                "recommendation": recommendation,
+                "finance_note": "El 3x2 reduce el precio efectivo a 66.67% del precio normal.",
+            }
+        )
+
+    total_baseline_profit = sum(Decimal(str(row["baseline_profit"])) for row in items)
+    total_promo_profit = sum(Decimal(str(row["promo_profit"])) for row in items)
+    total_profit_delta = total_promo_profit - total_baseline_profit - marketing_budget
+    ranked = sorted(
+        items,
+        key=lambda row: (row["recommendation"] != "CONVIENE", -Decimal(str(row["profit_delta"]))),
+    )
+    return {
+        "status": "ok",
+        "sources": ["pos_bridge.PointProduct", "reportes.FactVentaDiaria", "recetas.Receta"],
+        "filters": {
+            "promotion_type": "3x2",
+            "event_name": event_name,
+            "product_queries": product_queries,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "expected_uplift_pct": float(expected_uplift_pct),
+            "marketing_budget": _float_money(marketing_budget),
+        },
+        "payload": {
+            "promotion_type": "3x2",
+            "event_name": event_name,
+            "expected_uplift_pct": float(expected_uplift_pct),
+            "marketing_budget": _float_money(marketing_budget),
+            "items": items,
+            "returned": len(items),
+            "finance": {
+                "baseline_profit": _float_money(total_baseline_profit),
+                "promo_profit_before_marketing": _float_money(total_promo_profit),
+                "promo_profit_after_marketing": _float_money(total_promo_profit - marketing_budget),
+                "profit_delta_after_marketing": _float_money(total_profit_delta),
+            },
+            "marketing": {
+                "message": "Usar el 3x2 solo como gancho de volumen; medir uplift real contra el punto de equilibrio por producto.",
+                "suggested_controls": ["fechas limitadas", "stock objetivo por sucursal", "pieza extra visible en ticket", "no combinar con otros descuentos"],
+            },
+            "operations": {
+                "requires_supply_plan": True,
+                "notes": ["Validar fresa, crema, empaques, capacidad de producción y merma esperada antes de publicar."],
+            },
+            "accounting": {
+                "discount_treatment": "Registrar el 3x2 como descuento/promoción contra venta bruta; no mezclarlo con costo de producción.",
+                "audit_note": "La utilidad se calcula como venta neta promocional menos costo estimado; no incluye nómina fija ni gasto operativo general.",
+            },
+            "decision_summary": {
+                "overall_recommendation": "CONVIENE" if total_profit_delta > 0 and not data_gaps else "REVISAR",
+                "ranked_products": [
+                    {
+                        "product_sku": row["product_sku"],
+                        "product_name": row["product_name"],
+                        "recommendation": row["recommendation"],
+                        "profit_delta": row["profit_delta"],
+                        "break_even_units": row["break_even_units"],
+                    }
+                    for row in ranked
+                ],
+                "data_gaps": data_gaps,
+            },
+        },
+    }
+
+
 def _handle_recipe_cost_history(_user, arguments: dict[str, Any]) -> dict[str, Any]:
     receta_id = arguments.get("receta_id")
     if receta_id in {None, ""}:
@@ -1043,6 +1340,10 @@ def _can_view_input_costs(user) -> bool:
     return can_view_recetas(user) or can_view_compras(user) or can_view_reportes(user)
 
 
+def _can_analyze_promotions(user) -> bool:
+    return can_view_reportes(user) or has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_VENTAS)
+
+
 def _can_view_purchases(user) -> bool:
     return can_view_compras(user)
 
@@ -1197,6 +1498,48 @@ TOOLS: dict[str, AIToolDefinition] = {
         result_contract={
             "status": "ok|not_found|no_cost",
             "payload": {"insumo": "nombre canonico", "costo_unitario": "number|null", "unidad_base": "unidad"},
+        },
+    ),
+    "erp.analyze_promotion_profitability": AIToolDefinition(
+        key="erp.analyze_promotion_profitability",
+        name="Análisis financiero de promoción",
+        description=(
+            "Simula una promoción 3x2 por producto con precio Point, costo observado, margen, utilidad, "
+            "punto de equilibrio, notas de marketing, operación y contabilidad."
+        ),
+        operation_type="analyze",
+        data_domain="finance",
+        branch_scoped=False,
+        requires_approval=False,
+        access_check=_can_analyze_promotions,
+        handler=_handle_promotion_profitability,
+        argument_schema={
+            "type": "object",
+            "required": ["product_queries"],
+            "properties": {
+                "promotion_type": {"type": "string", "enum": ["3x2"], "default": "3x2"},
+                "event_name": {"type": "string"},
+                "product_queries": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Lista de productos o términos Point/ERP a comparar.",
+                },
+                "expected_uplift_pct": {"type": "number", "default": 50},
+                "marketing_budget": {"type": "number", "default": 0},
+                "start_date": {"type": "string", "format": "date"},
+                "end_date": {"type": "string", "format": "date"},
+                "lookback_days": {"type": "integer", "minimum": 1, "maximum": 365, "default": 30},
+            },
+        },
+        result_contract={
+            "status": "ok",
+            "payload": {
+                "items": "tabla comparativa por producto",
+                "finance": "totales financieros",
+                "marketing": "lectura comercial",
+                "operations": "riesgos operativos",
+                "accounting": "tratamiento contable",
+            },
         },
     ),
     "erp.get_discrepancies": AIToolDefinition(
@@ -1427,6 +1770,7 @@ OPENAPI_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "erp.get_sales_trends",
             "erp.get_inventory_low_stock",
             "erp.get_current_input_cost",
+            "erp.analyze_promotion_profitability",
             "erp.get_recipe_cost_history",
             "erp.create_production_plan_draft",
         ],
