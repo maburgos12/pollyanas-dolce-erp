@@ -3,8 +3,10 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.test import Client, TestCase, override_settings
 
+from core.access import ROLE_PRODUCCION, ROLE_RRHH
 from core.navigation import NAV_GROUPS
 from rrhh.models import Empleado, NominaLinea, NominaPeriodo, PermisoSalida
 
@@ -229,6 +231,9 @@ class BonosProduccionTests(TestCase):
         self.assertIn("Cerrar sesión", content)
         self.assertIn("employee-search", content)
         self.assertIn("Teclea nombre o apellido", content)
+        self.assertIn("Vista previa tamaño carta", content)
+        self.assertIn("Imprimir / PDF", content)
+        self.assertIn("Firma empleado", content)
         self.assertIn("r.redirected", content)
         self.assertNotIn("pd_logistica_access", content)
 
@@ -341,6 +346,8 @@ class BonosProduccionTests(TestCase):
 
     def test_inicializar_bonos_usa_area_produccion_sin_sucursal(self):
         user = get_user_model().objects.create_user(username="bonos")
+        user.groups.add(Group.objects.create(name=ROLE_PRODUCCION))
+        user.groups.add(Group.objects.create(name=ROLE_RRHH))
         self.client.force_login(user)
         periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
         empleado = Empleado.objects.create(nombre="Empleado Produccion", area="PRODUCCION", sucursal="")
@@ -373,6 +380,8 @@ class BonosProduccionTests(TestCase):
 
     def test_permisos_equipo_produccion_crea_y_rechaza(self):
         user = get_user_model().objects.create_user(username="jefe-produccion")
+        user.groups.add(Group.objects.create(name=ROLE_PRODUCCION))
+        user.groups.add(Group.objects.create(name=ROLE_RRHH))
         self.client.force_login(user)
         periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
         empleado = Empleado.objects.create(nombre="Empleado Hornos Permiso", area="PRODUCCION")
