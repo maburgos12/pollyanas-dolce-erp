@@ -405,6 +405,14 @@ class AIGatewayApiTests(APITestCase):
             ("REB2", "Pastel de Snickers Rebanada", "Rebanada", Decimal("70.00"), Decimal("20"), Decimal("1400.00"), Decimal("500.00")),
             ("SAB1", "Sabor Fresa Rebanada Pay", "Rebanada", None, Decimal("100"), Decimal("0.00"), Decimal("100.00")),
         ]
+        for index in range(60):
+            PointProduct.objects.create(
+                external_id=f"FILLER-{index}",
+                sku=f"FILLER-{index}",
+                name=f"Pastel Fresas con Crema Relleno {index:02d}",
+                category="Pastel Mediano",
+                precio=Decimal("490.00"),
+            )
         for sku, name, category, price, quantity, sales, cost in fixtures:
             product = PointProduct.objects.create(
                 external_id=f"{sku}-PROMO2",
