@@ -48,7 +48,7 @@ class BonosVentasTests(TestCase):
         self.assertEqual(response["Location"], "/bonos-ventas/dashboard/")
 
     def test_app_desktop_redirige_al_dashboard_y_captura_forzada_funciona(self):
-        user = get_user_model().objects.create_user(username="desktop-ventas")
+        user = get_user_model().objects.create_superuser(username="desktop-ventas")
         self.client.force_login(user)
 
         redirected = self.client.get("/bonos-ventas/app/", HTTP_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X)")
@@ -97,7 +97,7 @@ class BonosVentasTests(TestCase):
         self.assertEqual(periodo.umbral_crecimiento_pct, Decimal("6.00"))
 
     def test_pwa_usa_sesion_django_y_expone_csrf(self):
-        user = get_user_model().objects.create_user(username="pwa-ventas")
+        user = get_user_model().objects.create_superuser(username="pwa-ventas")
         self.client.force_login(user)
 
         response = self.client.get("/bonos-ventas/app/?captura=1")
@@ -134,7 +134,7 @@ class BonosVentasTests(TestCase):
 
     def test_api_ventas_acepta_post_con_sesion_y_csrf(self):
         client = Client(enforce_csrf_checks=True)
-        user = get_user_model().objects.create_user(username="csrf-ventas")
+        user = get_user_model().objects.create_superuser(username="csrf-ventas")
         client.force_login(user)
         client.get("/bonos-ventas/app/?captura=1")
         csrf_token = client.cookies["csrftoken"].value

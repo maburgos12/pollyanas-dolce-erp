@@ -112,6 +112,7 @@ INSTALLED_APPS = [
     "logistica",
     "fallas",
     "mantenimiento",
+    "seguimiento",
     "mermas",
     "integraciones",
     "horarios_especiales",

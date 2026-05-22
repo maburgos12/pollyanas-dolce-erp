@@ -1,0 +1,121 @@
+from datetime import timedelta
+
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase, override_settings
+from django.utils import timezone
+
+from core.access import can_view_submodule
+from core.navigation import build_nav_groups
+from rrhh.models import Empleado
+
+from .models import SeguimientoChecklistItem, SeguimientoComentario, SeguimientoEvidencia, SeguimientoItem
+from .services import empleado_de_usuario
+
+
+@override_settings(SECURE_SSL_REDIRECT=False)
+class SeguimientoColaboradorTests(TestCase):
+    def setUp(self):
+        self.group = Group.objects.create(name="PRODUCCION")
+        self.user = get_user_model().objects.create_user(
+            username="carolina.cayetano",
+            email="carolina.cayetano@pollyanasdolce.com",
+            first_name="Carolina",
+            last_name="Cayetano",
+            password="test12345",
+        )
+        self.user.groups.add(self.group)
+        self.empleado = Empleado.objects.create(
+            nombre="Carolina Cayetano",
+            email="carolina.cayetano@pollyanasdolce.com",
+            area="PRODUCCION",
+            puesto="Supervisora",
+            sucursal="CEDIS",
+        )
+        self.item = SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_COMPROMISO,
+            titulo="Validar inventarios en cuartos fríos",
+            descripcion="Revisión de inventario final antes de cierre.",
+            entregable_esperado="Diferencias documentadas y enviadas a revisión.",
+            responsable_empleado=self.empleado,
+            area="PRODUCCION",
+            fecha_limite=timezone.now() + timedelta(days=1),
+        )
+        self.check = SeguimientoChecklistItem.objects.create(
+            seguimiento=self.item,
+            titulo="Confirmar avance real",
+        )
+        self.client.force_login(self.user)
+
+    def test_empleado_se_resuelve_por_email_real(self):
+        self.assertEqual(empleado_de_usuario(self.user), self.empleado)
+
+    def test_portal_muestra_trabajo_y_oculta_bonos(self):
+        response = self.client.get("/seguimiento/")
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Mis minutas, proyectos y compromisos", content)
+        self.assertIn("Validar inventarios en cuartos fríos", content)
+        self.assertIn("Retroalimentación", content)
+        self.assertNotIn("Bono", content)
+        self.assertNotIn("Bonos", content)
+
+    def test_checklist_se_puede_palomear(self):
+        response = self.client.post(f"/seguimiento/{self.item.pk}/checklist/{self.check.pk}/")
+
+        self.assertEqual(response.status_code, 302)
+        self.check.refresh_from_db()
+        self.assertTrue(self.check.completado)
+        self.assertEqual(self.check.completado_por, self.user)
+
+    def test_retroalimentacion_coloca_en_revision(self):
+        response = self.client.post(
+            f"/seguimiento/{self.item.pk}/retroalimentacion/",
+            {"comentario": "Inventario revisado, faltan dos diferencias por validar."},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.estatus, SeguimientoItem.ESTATUS_EN_REVISION)
+        self.assertTrue(SeguimientoComentario.objects.filter(seguimiento=self.item, usuario=self.user).exists())
+
+    def test_evidencia_se_adjunta_y_coloca_en_revision(self):
+        archivo = SimpleUploadedFile("evidencia.txt", b"foto o documento", content_type="text/plain")
+
+        response = self.client.post(f"/seguimiento/{self.item.pk}/evidencias/", {"archivo": archivo})
+
+        self.assertEqual(response.status_code, 302)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.estatus, SeguimientoItem.ESTATUS_EN_REVISION)
+        self.assertTrue(SeguimientoEvidencia.objects.filter(seguimiento=self.item, usuario=self.user).exists())
+
+    def test_colaborador_ve_mis_acuerdos_no_bonos(self):
+        groups = build_nav_groups(self.user, "/seguimiento/")
+        labels = [item["label"] for group in groups for item in group["items"]]
+
+        self.assertIn("Mis acuerdos", labels)
+        self.assertNotIn("Bonos producción", labels)
+        self.assertFalse(can_view_submodule(self.user, "produccion", "bonos"))
+
+    def test_accesos_directos_y_apis_de_bonos_quedan_bloqueados(self):
+        response_prod = self.client.get("/bp/")
+        response_ventas = self.client.get("/bv/")
+        api_prod = self.client.get("/api/bonos-produccion/periodos/")
+        api_ventas = self.client.get("/api/bonos-ventas/periodos/")
+
+        self.assertEqual(response_prod.status_code, 302)
+        self.assertEqual(response_prod["Location"], "/seguimiento/")
+        self.assertEqual(response_ventas.status_code, 302)
+        self.assertEqual(response_ventas["Location"], "/seguimiento/")
+        self.assertEqual(api_prod.status_code, 403)
+        self.assertEqual(api_ventas.status_code, 403)
+
+    def test_superusuario_conserva_bonos_en_menu(self):
+        admin = get_user_model().objects.create_superuser(username="admin-seguimiento", password="x")
+
+        labels = [item["label"] for group in build_nav_groups(admin, "/dashboard/") for item in group["items"]]
+
+        self.assertIn("Bonos producción", labels)
+        self.assertIn("Bonos ventas", labels)

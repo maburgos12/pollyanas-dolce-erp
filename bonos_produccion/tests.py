@@ -213,7 +213,7 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(bono_2.monto_premio_embetunado, Decimal("400.00"))
 
     def test_pwa_usa_sesion_django_y_expone_csrf(self):
-        user = get_user_model().objects.create_user(username="pwa-produccion")
+        user = get_user_model().objects.create_superuser(username="pwa-produccion")
         self.client.force_login(user)
 
         response = self.client.get("/bonos-produccion/app/?captura=1")
@@ -233,7 +233,7 @@ class BonosProduccionTests(TestCase):
         self.assertNotIn("pd_logistica_access", content)
 
     def test_app_de_produccion_redirige_a_dashboard_en_escritorio(self):
-        user = get_user_model().objects.create_user(username="desktop-produccion")
+        user = get_user_model().objects.create_superuser(username="desktop-produccion")
         self.client.force_login(user)
 
         response = self.client.get(
@@ -245,7 +245,7 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(response["Location"], "/bonos-produccion/dashboard/")
 
     def test_app_de_produccion_conserva_pwa_en_movil_o_captura_forzada(self):
-        user = get_user_model().objects.create_user(username="mobile-produccion")
+        user = get_user_model().objects.create_superuser(username="mobile-produccion")
         self.client.force_login(user)
 
         mobile = self.client.get(
@@ -282,7 +282,7 @@ class BonosProduccionTests(TestCase):
 
     def test_api_produccion_acepta_post_con_sesion_y_csrf(self):
         client = Client(enforce_csrf_checks=True)
-        user = get_user_model().objects.create_user(username="csrf-produccion")
+        user = get_user_model().objects.create_superuser(username="csrf-produccion")
         client.force_login(user)
         client.get("/bonos-produccion/app/?captura=1")
         csrf_token = client.cookies["csrftoken"].value
