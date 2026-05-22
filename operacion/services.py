@@ -114,17 +114,18 @@ def _append_logistica_tiles(tiles: list[OperacionTile], user, *, mobile_only: bo
         )
         return
 
-    tiles.append(
-        OperacionTile(
-            key="logistica_app",
-            title="Logística móvil",
-            detail="Reportes, inspección, lavado, bitácora y combustible.",
-            href="/logistica/app/",
-            icon="ruta",
-            area="Logística",
+    if _repartidor(user):
+        tiles.append(
+            OperacionTile(
+                key="logistica_app",
+                title="Logística móvil",
+                detail="Reportes, inspección, lavado, bitácora y combustible.",
+                href="/logistica/app/",
+                icon="ruta",
+                area="Logística",
+            )
         )
-    )
-    if can_view_submodule(user, "logistica", "tickets"):
+    if can_manage_submodule(user, "logistica", "tickets"):
         tiles.append(
             OperacionTile(
                 key="logistica_tickets",

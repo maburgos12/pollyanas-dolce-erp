@@ -3190,14 +3190,6 @@
         if ("serviceWorker" in navigator) {
           navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}").catch(() => {});
         }
-        if (state.token) {
-          try {
-            await abrirPantallaInicial();
-            return;
-          } catch (error) {
-            logout(false);
-          }
-        }
 
         try {
           if (await useDjangoSessionToken()) {
@@ -3206,6 +3198,15 @@
           }
         } catch (error) {
           logout(false);
+        }
+
+        if (state.token) {
+          try {
+            await abrirPantallaInicial();
+            return;
+          } catch (error) {
+            logout(false);
+          }
         }
 
         renderLogin();

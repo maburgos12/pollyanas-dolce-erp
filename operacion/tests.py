@@ -109,11 +109,30 @@ class OperacionAppTests(TestCase):
         response = self.client.get("/app/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Logística móvil")
         self.assertContains(response, "Tickets logística")
         self.assertContains(response, "Flota")
         self.assertContains(response, "Rutas")
+        self.assertNotContains(response, "Logística móvil")
         self.assertNotContains(response, "Registrar merma")
+
+    def test_logistica_view_only_user_does_not_see_management_only_tiles(self):
+        user = self._user("logistica.lectura")
+        self._grant(user, "logistica", access=ACCESS_VIEW)
+        self.client.force_login(user)
+
+        response = self.client.get("/app/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Tickets logística")
+        self.assertNotContains(response, "Logística móvil")
+
+    def test_logistica_pwa_rejects_users_without_logistica_or_repartidor_access(self):
+        user = self._user("logistica.sinpermiso")
+        self.client.force_login(user)
+
+        response = self.client.get("/logistica/app/")
+
+        self.assertEqual(response.status_code, 403)
 
     def test_user_without_operational_access_gets_empty_state(self):
         user = self._user("sin.permisos")
@@ -227,9 +246,9 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "Recibir merma")
         self.assertContains(response, "Reportar falla")
         self.assertContains(response, "Mantenimiento")
-        self.assertContains(response, "Logística móvil")
         self.assertContains(response, "Flota")
         self.assertContains(response, "Rutas")
+        self.assertNotContains(response, "Logística móvil")
 
     def test_repartidor_direct_urls_are_limited_to_app_and_logistica_pwa(self):
         group = Group.objects.create(name=ROLE_REPARTIDOR)
@@ -291,8 +310,8 @@ class OperacionAppTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Mantenimiento")
-        self.assertContains(response, "Logística móvil")
         self.assertContains(response, "Tickets logística")
+        self.assertNotContains(response, "Logística móvil")
 
     def test_dg_mermas_tiles_do_not_logout_and_respect_requested_mode(self):
         group = Group.objects.create(name=ROLE_DG)
@@ -368,6 +387,34 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "Reportes")
         self.assertContains(response, "Registrar mantenimiento de equipo")
         self.assertNotContains(response, "Vehículo de flota")
+
+    def test_operational_pwas_prefer_current_django_session_before_cached_token(self):
+        mantenimiento_group = Group.objects.create(name="MANTENIMIENTO")
+        mantenimiento_user = self._user("tecnico.token.actual")
+        mantenimiento_user.groups.add(mantenimiento_group)
+        self.client.force_login(mantenimiento_user)
+        mantenimiento = self.client.get("/mantenimiento/app/")
+        self.assertEqual(mantenimiento.status_code, 200)
+        mantenimiento_html = mantenimiento.content.decode()
+        mantenimiento_boot = mantenimiento_html[mantenimiento_html.index("async function boot()") :]
+        self.assertLess(
+            mantenimiento_boot.index("if (await useDjangoSessionToken())"),
+            mantenimiento_boot.index("if (state.token)"),
+        )
+
+        self.client.logout()
+        logistica_group = Group.objects.create(name=ROLE_LOGISTICA)
+        logistica_user = self._user("logistica.token.actual")
+        logistica_user.groups.add(logistica_group)
+        self.client.force_login(logistica_user)
+        logistica = self.client.get("/logistica/app/")
+        self.assertEqual(logistica.status_code, 200)
+        logistica_html = logistica.content.decode()
+        logistica_boot = logistica_html[logistica_html.index("async function boot()") :]
+        self.assertLess(
+            logistica_boot.index("if (await useDjangoSessionToken())"),
+            logistica_boot.index("if (state.token)"),
+        )
 
     def test_mantenimiento_group_gets_app_tile_and_pwa_access(self):
         group = Group.objects.create(name="MANTENIMIENTO")
