@@ -41,8 +41,10 @@ from pos_bridge.tasks.run_daily_sales_sync import run_daily_sales_sync
 from pos_bridge.tasks.run_inventory_sync import run_inventory_sync
 from pos_bridge.tasks.run_product_recipe_sync import run_product_recipe_sync
 from pos_bridge.utils.helpers import safe_slug
-from maestros.utils.canonical_catalog import canonical_insumo_by_id
+from maestros.models import CostoInsumo, Insumo, InsumoAlias
+from maestros.utils.canonical_catalog import canonical_insumo, canonical_insumo_by_id, canonical_member_ids
 from recetas.models import PlanProduccion, PlanProduccionItem, Receta, RecetaCostoVersion
+from recetas.utils.normalizacion import normalizar_nombre
 from reportes.bi_utils import compute_bi_snapshot, serialize_bi_for_api
 from ventas.services.sales_read_service import get_sales_range, get_sales_range_grouped
 
@@ -615,6 +617,178 @@ def _handle_purchase_orders(_user, arguments: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+INPUT_COST_STOPWORDS = {
+    "actual",
+    "al",
+    "comprando",
+    "compra",
+    "compramos",
+    "comprar",
+    "costo",
+    "cual",
+    "de",
+    "del",
+    "el",
+    "en",
+    "es",
+    "estamos",
+    "kg",
+    "kilo",
+    "kilogramo",
+    "la",
+    "precio",
+    "que",
+}
+
+
+def _input_cost_search_tokens(query: str) -> list[str]:
+    normalized = normalizar_nombre(query)
+    tokens = []
+    for token in normalized.split():
+        if token in INPUT_COST_STOPWORDS:
+            continue
+        if len(token) < 3:
+            continue
+        tokens.append(token)
+    return tokens[:6]
+
+
+def _score_input_candidate(*, insumo: Insumo, query: str, exact_alias_ids: set[int]) -> int:
+    normalized_query = normalizar_nombre(query)
+    normalized_name = insumo.nombre_normalizado or normalizar_nombre(insumo.nombre)
+    normalized_point_name = normalizar_nombre(insumo.nombre_point or "")
+    normalized_code = normalizar_nombre(insumo.codigo or "")
+    normalized_point_code = normalizar_nombre(insumo.codigo_point or "")
+    score = 0
+    if insumo.id in exact_alias_ids:
+        score = max(score, 980)
+    if normalized_name == normalized_query:
+        score = max(score, 1000)
+    if normalized_point_name and normalized_point_name == normalized_query:
+        score = max(score, 960)
+    if normalized_code and normalized_code == normalized_query:
+        score = max(score, 930)
+    if normalized_point_code and normalized_point_code == normalized_query:
+        score = max(score, 930)
+    if normalized_query and normalized_name.startswith(normalized_query):
+        score = max(score, 850)
+    if normalized_query and normalized_query in normalized_name:
+        score = max(score, 650)
+    tokens = _input_cost_search_tokens(query)
+    if tokens and all(token in normalized_name or token in normalized_point_name for token in tokens):
+        score = max(score, 500 + (len(tokens) * 20))
+    if insumo.tipo_item == Insumo.TIPO_MATERIA_PRIMA:
+        score += 40
+    if insumo.unidad_base_id:
+        score += 10
+    return score
+
+
+def _resolve_input_cost_candidates(query: str, *, limit: int) -> list[Insumo]:
+    normalized_query = normalizar_nombre(query)
+    exact_alias_ids = set(
+        InsumoAlias.objects.filter(nombre_normalizado=normalized_query, insumo__activo=True).values_list("insumo_id", flat=True)
+    )
+    q_filter = Q(pk__in=exact_alias_ids)
+    if normalized_query:
+        q_filter |= (
+            Q(nombre_normalizado__icontains=normalized_query)
+            | Q(nombre_point__icontains=query)
+            | Q(codigo__iexact=query)
+            | Q(codigo_point__iexact=query)
+        )
+    tokens = _input_cost_search_tokens(query)
+    for token in tokens:
+        q_filter |= Q(nombre_normalizado__icontains=token) | Q(nombre_point__icontains=token)
+    candidates = list(
+        Insumo.objects.select_related("unidad_base", "proveedor_principal")
+        .filter(q_filter, activo=True)
+        .distinct()[: max(limit * 8, 40)]
+    )
+    ranked = [
+        (candidate, _score_input_candidate(insumo=candidate, query=query, exact_alias_ids=exact_alias_ids))
+        for candidate in candidates
+    ]
+    ranked = [(candidate, score) for candidate, score in ranked if score > 0]
+    ranked.sort(key=lambda item: (-item[1], item[0].nombre.lower(), item[0].id))
+    return [candidate for candidate, _score in ranked[:limit]]
+
+
+def _serialize_input_cost_candidate(insumo: Insumo) -> dict[str, Any]:
+    return {
+        "insumo_id": insumo.id,
+        "insumo": insumo.nombre,
+        "tipo_item": insumo.tipo_item,
+        "unidad_base": insumo.unidad_base.codigo if insumo.unidad_base_id else "",
+        "proveedor_principal": insumo.proveedor_principal.nombre if insumo.proveedor_principal_id else "",
+    }
+
+
+def _handle_current_input_cost(_user, arguments: dict[str, Any]) -> dict[str, Any]:
+    query = str(arguments.get("q") or arguments.get("insumo") or "").strip()
+    insumo_id = arguments.get("insumo_id")
+    limit = _parse_int(arguments.get("limit"), default=8, min_value=1, max_value=25)
+    if insumo_id not in {None, ""}:
+        insumo = canonical_insumo_by_id(insumo_id)
+        candidates = [insumo] if insumo is not None else []
+    elif query:
+        candidates = _resolve_input_cost_candidates(query, limit=limit)
+        insumo = canonical_insumo(candidates[0]) if candidates else None
+    else:
+        raise PermissionDenied("q o insumo_id es obligatorio para consultar costo vigente de insumo.")
+
+    candidate_payload = [_serialize_input_cost_candidate(row) for row in candidates[:limit]]
+    if insumo is None:
+        return {
+            "status": "not_found",
+            "sources": ["maestros.CostoInsumo", "maestros.Insumo"],
+            "filters": {"q": query, "insumo_id": insumo_id, "limit": limit},
+            "payload": {"items": [], "returned": 0, "candidates": candidate_payload},
+        }
+
+    member_ids = canonical_member_ids(insumo)
+    latest_cost = (
+        CostoInsumo.objects.select_related("insumo", "proveedor")
+        .filter(insumo_id__in=member_ids)
+        .order_by("-fecha", "-id")
+        .first()
+    )
+    if latest_cost is None:
+        return {
+            "status": "no_cost",
+            "sources": ["maestros.CostoInsumo", "maestros.Insumo"],
+            "filters": {"q": query, "insumo_id": insumo_id, "limit": limit},
+            "payload": {
+                **_serialize_input_cost_candidate(insumo),
+                "member_ids": member_ids,
+                "costo_unitario": None,
+                "moneda": "",
+                "fecha": "",
+                "proveedor": "",
+                "costo_source_insumo": "",
+                "candidates": candidate_payload,
+            },
+        }
+
+    return {
+        "status": "ok",
+        "sources": ["maestros.CostoInsumo", "maestros.Insumo"],
+        "filters": {"q": query, "insumo_id": insumo_id, "limit": limit},
+        "payload": {
+            **_serialize_input_cost_candidate(insumo),
+            "member_ids": member_ids,
+            "costo_unitario": float(latest_cost.costo_unitario),
+            "moneda": latest_cost.moneda,
+            "fecha": latest_cost.fecha.isoformat(),
+            "proveedor": latest_cost.proveedor.nombre if latest_cost.proveedor_id else "",
+            "costo_source_insumo_id": latest_cost.insumo_id,
+            "costo_source_insumo": latest_cost.insumo.nombre,
+            "source_hash": latest_cost.source_hash,
+            "candidates": candidate_payload,
+        },
+    }
+
+
 def _handle_recipe_cost_history(_user, arguments: dict[str, Any]) -> dict[str, Any]:
     receta_id = arguments.get("receta_id")
     if receta_id in {None, ""}:
@@ -865,6 +1039,10 @@ def _can_view_inventory(user) -> bool:
     return can_view_inventario(user)
 
 
+def _can_view_input_costs(user) -> bool:
+    return can_view_recetas(user) or can_view_compras(user) or can_view_reportes(user)
+
+
 def _can_view_purchases(user) -> bool:
     return can_view_compras(user)
 
@@ -993,6 +1171,33 @@ TOOLS: dict[str, AIToolDefinition] = {
             },
         },
         result_contract={"status": "ok", "payload": {"items": "stock bajo", "returned": "conteo"}},
+    ),
+    "erp.get_current_input_cost": AIToolDefinition(
+        key="erp.get_current_input_cost",
+        name="Costo actual de insumo",
+        description=(
+            "Consulta el costo unitario vigente de compra de un insumo o materia prima, "
+            "por ejemplo kg de fresa fresca. No consulta recetas."
+        ),
+        operation_type="read",
+        data_domain="costing",
+        branch_scoped=False,
+        requires_approval=False,
+        access_check=_can_view_input_costs,
+        handler=_handle_current_input_cost,
+        argument_schema={
+            "type": "object",
+            "anyOf": [{"required": ["q"]}, {"required": ["insumo_id"]}],
+            "properties": {
+                "q": {"type": "string", "description": "nombre, alias o codigo del insumo; ejemplo: fresa fresca"},
+                "insumo_id": {"type": "integer"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 25, "default": 8},
+            },
+        },
+        result_contract={
+            "status": "ok|not_found|no_cost",
+            "payload": {"insumo": "nombre canonico", "costo_unitario": "number|null", "unidad_base": "unidad"},
+        },
     ),
     "erp.get_discrepancies": AIToolDefinition(
         key="erp.get_discrepancies",
@@ -1208,6 +1413,7 @@ OPENAPI_TOOL_PROFILES: dict[str, dict[str, Any]] = {
     "compras": {
         "tool_keys": [
             "erp.get_inventory_low_stock",
+            "erp.get_current_input_cost",
             "erp.get_purchase_requests",
             "erp.get_purchase_orders",
             "erp.get_recipe_cost_history",
@@ -1220,6 +1426,7 @@ OPENAPI_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "erp.get_sales_summary",
             "erp.get_sales_trends",
             "erp.get_inventory_low_stock",
+            "erp.get_current_input_cost",
             "erp.get_recipe_cost_history",
             "erp.create_production_plan_draft",
         ],
