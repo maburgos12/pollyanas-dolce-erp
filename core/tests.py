@@ -13,7 +13,15 @@ from unittest.mock import MagicMock, patch
 
 from compras.models import PresupuestoCompraPeriodo, SolicitudCompra
 from control.models import MermaPOS
-from core.access import ROLE_ADMIN, ROLE_BONOS_PRODUCCION_CAPTURA, ROLE_COMPRAS, can_view_compras
+from core.access import (
+    ROLE_ADMIN,
+    ROLE_BONOS_PRODUCCION_CAPTURA,
+    ROLE_COMPRAS,
+    ROLE_PRODUCCION,
+    ROLE_VENTAS,
+    can_view_compras,
+    can_view_submodule,
+)
 from core.branch_catalog import eligible_operational_branch_qs
 from core.middleware import CanonicalLocalHostMiddleware
 from core.models import Departamento, Sucursal, UserModuleAccess, UserProfile
@@ -183,6 +191,17 @@ class LoginViewAuthenticatedRedirectTests(TestCase):
         self.assertEqual(admin_panel["Location"], "/bonos-produccion/app/?captura=1")
         self.assertEqual(app.status_code, 200)
         self.assertEqual(api.status_code, 200)
+
+    def test_operational_leads_keep_monthly_bonus_submodule_access(self):
+        produccion = get_user_model().objects.create_user(username="carolina.cayetano")
+        ventas = get_user_model().objects.create_user(username="johana.lopez.operativa")
+        produccion.groups.add(Group.objects.create(name=ROLE_PRODUCCION))
+        ventas.groups.add(Group.objects.create(name=ROLE_VENTAS))
+
+        self.assertTrue(can_view_submodule(produccion, "produccion", "bonos"))
+        self.assertTrue(can_view_submodule(ventas, "ventas", "bonos"))
+        self.assertFalse(can_view_submodule(produccion, "ventas", "bonos"))
+        self.assertFalse(can_view_submodule(ventas, "produccion", "bonos"))
 
 
 class DashboardHomologacionContextTests(TestCase):
