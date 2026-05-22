@@ -828,19 +828,42 @@ def _parse_promotion_queries(arguments: dict[str, Any]) -> list[str]:
     return queries[:12]
 
 
+PROMOTION_TOKEN_ALIASES = {
+    "grnde": "grande",
+    "grnade": "grande",
+    "gde": "grande",
+    "mediana": "mediano",
+    "mdno": "mediano",
+    "rebanadas": "rebanada",
+    "vasos": "vaso",
+}
+
+
+def _normalize_promotion_text(value: str) -> str:
+    tokens = []
+    for token in normalizar_nombre(value).split():
+        tokens.append(PROMOTION_TOKEN_ALIASES.get(token, token))
+    return " ".join(tokens)
+
+
 def _promotion_tokens(query: str) -> list[str]:
     tokens = []
-    for token in normalizar_nombre(query).split():
+    for token in _normalize_promotion_text(query).split():
         if token in PROMOTION_STOPWORDS or len(token) < 3:
             continue
         tokens.append(token)
     return tokens[:8]
 
 
+def _promotion_product_text(product: PointProduct) -> str:
+    return _normalize_promotion_text(" ".join([product.name or "", product.category or "", product.sku or ""]))
+
+
 def _score_promotion_product(product: PointProduct, query: str) -> int:
-    normalized_query = normalizar_nombre(query)
-    normalized_name = product.normalized_name or normalizar_nombre(product.name)
-    normalized_sku = normalizar_nombre(product.sku or "")
+    normalized_query = _normalize_promotion_text(query)
+    normalized_name = _normalize_promotion_text(product.normalized_name or product.name)
+    normalized_sku = _normalize_promotion_text(product.sku or "")
+    product_text = _promotion_product_text(product)
     score = 0
     if normalized_name == normalized_query:
         score = 1000
@@ -852,15 +875,22 @@ def _score_promotion_product(product: PointProduct, query: str) -> int:
         score = 700
     tokens = _promotion_tokens(query)
     if tokens:
-        matched = sum(1 for token in tokens if token in normalized_name)
+        matched = sum(1 for token in tokens if token in product_text)
         score = max(score, 420 + matched * 60)
+        if "vaso" in tokens:
+            score += 260 if "vaso" in product_text else -260
+        if "rebanada" in tokens:
+            score += 160 if "rebanada" in product_text else -160
+        for size_token in ("chico", "mini", "mediano", "grande"):
+            if size_token in tokens:
+                score += 180 if size_token in product_text else -120
     if product.precio and product.precio > 0:
         score += 25
     return score
 
 
 def _resolve_promotion_product(query: str) -> PointProduct | None:
-    normalized_query = normalizar_nombre(query)
+    normalized_query = _normalize_promotion_text(query)
     q_filter = Q(active=True)
     search = Q()
     if normalized_query:
@@ -874,6 +904,24 @@ def _resolve_promotion_product(query: str) -> PointProduct | None:
     ranked = [(candidate, score) for candidate, score in ranked if score > 0]
     ranked.sort(key=lambda item: (-item[1], item[0].name.lower(), item[0].id))
     return ranked[0][0] if ranked else None
+
+
+def _is_rebanada_mix_query(query: str) -> bool:
+    normalized_query = _normalize_promotion_text(query)
+    tokens = set(normalized_query.split())
+    return "rebanada" in tokens and bool(tokens & {"revoltura", "surtido", "surtida", "mix", "mezcla"})
+
+
+def _resolve_promotion_product_group(query: str) -> tuple[str, str, list[PointProduct]]:
+    if not _is_rebanada_mix_query(query):
+        return "", "", []
+    products = list(
+        PointProduct.objects.filter(active=True)
+        .filter(Q(category__iexact="Rebanada") | Q(normalized_name__icontains="rebanada") | Q(normalized_name__endswith=" r"))
+        .exclude(Q(normalized_name__startswith="sabor ") | Q(normalized_name__icontains=" topping") | Q(normalized_name__startswith="topping "))
+        .order_by("sku", "name", "id")
+    )
+    return "GRUPO_REBANADAS", "Revoltura de rebanadas de pastel", products
 
 
 def _resolve_product_recipe(product: PointProduct | None, query: str) -> Receta | None:
@@ -891,14 +939,33 @@ def _resolve_product_recipe(product: PointProduct | None, query: str) -> Receta 
     return Receta.objects.filter(nombre_normalizado__icontains=normalized_query).order_by("id").first()
 
 
-def _promotion_sales_queryset(*, product: PointProduct | None, receta: Receta | None, query: str, start: date, end: date):
+def _promotion_sales_queryset(
+    *,
+    product: PointProduct | None,
+    products: list[PointProduct] | None = None,
+    receta: Receta | None,
+    query: str,
+    start: date,
+    end: date,
+):
     qs = FactVentaDiaria.objects.filter(fecha__gte=start, fecha__lte=end)
     filters = Q()
+    if products:
+        product_ids = [row.id for row in products]
+        product_keys = {
+            key
+            for row in products
+            for key in (row.sku, row.external_id)
+            if key
+        }
+        filters |= Q(point_product_id__in=product_ids)
+        if product_keys:
+            filters |= Q(producto_clave__in=product_keys)
     if product is not None:
         filters |= Q(point_product=product) | Q(producto_clave__iexact=product.sku) | Q(producto_clave__iexact=product.external_id)
     if receta is not None:
         filters |= Q(receta=receta) | Q(producto_clave__iexact=receta.codigo_point)
-    normalized_query = normalizar_nombre(query)
+    normalized_query = _normalize_promotion_text(query)
     if normalized_query:
         filters |= Q(producto_nombre__icontains=query)
     return qs.filter(filters) if filters else qs.none()
@@ -946,9 +1013,17 @@ def _handle_promotion_profitability(_user, arguments: dict[str, Any]) -> dict[st
     items = []
     data_gaps = []
     for query in product_queries:
-        product = _resolve_promotion_product(query)
-        receta = _resolve_product_recipe(product, query)
-        sales_qs = _promotion_sales_queryset(product=product, receta=receta, query=query, start=start_date, end=end_date)
+        group_sku, group_name, group_products = _resolve_promotion_product_group(query)
+        product = None if group_products else _resolve_promotion_product(query)
+        receta = None if group_products else _resolve_product_recipe(product, query)
+        sales_qs = _promotion_sales_queryset(
+            product=product,
+            products=group_products,
+            receta=receta,
+            query=query,
+            start=start_date,
+            end=end_date,
+        )
         totals = sales_qs.aggregate(
             quantity=Coalesce(Sum("cantidad"), ZERO),
             sales=Coalesce(Sum("venta_total"), ZERO),
@@ -974,7 +1049,9 @@ def _handle_promotion_profitability(_user, arguments: dict[str, Any]) -> dict[st
             if break_even_units is not None and baseline_units > 0
             else None
         )
-        if product is None:
+        if group_products and baseline_units <= 0:
+            data_gaps.append(f"No encontré venta reciente para la mezcla '{query}'.")
+        if not group_products and product is None:
             data_gaps.append(f"No encontré producto Point para '{query}'.")
         if price <= 0:
             data_gaps.append(f"Falta precio vigente para '{query}'.")
@@ -995,9 +1072,15 @@ def _handle_promotion_profitability(_user, arguments: dict[str, Any]) -> dict[st
         items.append(
             {
                 "query": query,
+                "item_type": "product_group" if group_products else "product",
                 "product_id": product.id if product else None,
-                "product_sku": product.sku if product else "",
-                "product_name": product.name if product else "",
+                "product_sku": group_sku or (product.sku if product else ""),
+                "product_name": group_name or (product.name if product else ""),
+                "product_count": len(group_products) if group_products else 1 if product else 0,
+                "sample_products": [
+                    {"sku": row.sku, "name": row.name}
+                    for row in group_products[:10]
+                ],
                 "receta_id": receta.id if receta else None,
                 "receta": receta.nombre if receta else "",
                 "normal_unit_price": _float_money(price),
@@ -1505,7 +1588,8 @@ TOOLS: dict[str, AIToolDefinition] = {
         name="Análisis financiero de promoción",
         description=(
             "Simula una promoción 3x2 por producto con precio Point, costo observado, margen, utilidad, "
-            "punto de equilibrio, notas de marketing, operación y contabilidad."
+            "punto de equilibrio, notas de marketing, operación y contabilidad. Respeta presentaciones "
+            "como vaso mediano/grande y soporta revoltura/surtido de rebanadas como grupo ponderado."
         ),
         operation_type="analyze",
         data_domain="finance",
@@ -1522,7 +1606,7 @@ TOOLS: dict[str, AIToolDefinition] = {
                 "product_queries": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Lista de productos o términos Point/ERP a comparar.",
+                    "description": "Lista de productos o términos Point/ERP a comparar; ejemplo: vaso fresas con crema mediano, vaso fresas con crema grande, revoltura de rebanadas de pastel.",
                 },
                 "expected_uplift_pct": {"type": "number", "default": 50},
                 "marketing_budget": {"type": "number", "default": 0},
