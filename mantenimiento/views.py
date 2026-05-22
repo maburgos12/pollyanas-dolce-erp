@@ -16,6 +16,7 @@ from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento
 from core.access import can_manage_submodule, can_view_submodule
 from fallas.models import BitacoraFalla, ReporteFalla
 from logistica.models import ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
+from maestros.models import Proveedor
 
 from .serializers import (
     ActivoListSerializer,
@@ -54,6 +55,14 @@ def _parse_decimal(raw):
         return None
 
 
+def _ensure_provider(nombre):
+    nombre = (nombre or "").strip()
+    if not nombre:
+        return None
+    proveedor, _created = Proveedor.objects.get_or_create(nombre=nombre, defaults={"activo": True})
+    return proveedor
+
+
 def _branch_statuses():
     return [ReporteFalla.ESTATUS_ABIERTO, ReporteFalla.ESTATUS_REVISION, ReporteFalla.ESTATUS_PROCESO]
 
@@ -76,6 +85,8 @@ def _branch_falla_item(reporte):
         "referencia": f"Falla #{reporte.id}",
         "ubicacion": reporte.sucursal.nombre if reporte.sucursal_id else "",
         "activo": str(reporte.activo_relacionado) if reporte.activo_relacionado_id else "",
+        "activo_id": reporte.activo_relacionado_id or "",
+        "area": reporte.get_area_display(),
         "categoria": reporte.categoria.nombre if reporte.categoria_id else "",
         "prioridad": reporte.get_prioridad_display(),
         "estatus": reporte.estatus,
@@ -98,6 +109,8 @@ def _branch_order_item(orden):
         "referencia": orden.folio,
         "ubicacion": orden.activo_ref.sucursal.nombre if orden.activo_ref_id and orden.activo_ref.sucursal_id else "",
         "activo": str(orden.activo_ref) if orden.activo_ref_id else "",
+        "activo_id": orden.activo_ref_id or "",
+        "area": "Activo",
         "categoria": "Orden de mantenimiento",
         "prioridad": orden.get_prioridad_display(),
         "estatus": orden.estatus,
@@ -120,6 +133,8 @@ def _logistica_item(reporte):
         "referencia": f"Unidad #{reporte.id}",
         "ubicacion": reporte.unidad.codigo if reporte.unidad_id else "",
         "activo": str(reporte.unidad) if reporte.unidad_id else "",
+        "activo_id": "",
+        "area": "Logística",
         "categoria": "Unidad logística",
         "prioridad": reporte.get_severidad_display(),
         "estatus": reporte.estatus,
@@ -162,6 +177,67 @@ def _unified_counts():
     return {
         "sucursales": sum(1 for item in items if item["origen"] == "sucursales"),
         "logistica": sum(1 for item in items if item["origen"] == "logistica"),
+    }
+
+
+def _item_stage(item):
+    estatus = str(item.get("estatus") or "").lower()
+    proveedor = bool(item.get("proveedor"))
+    costo_estimado = item.get("costo_estimado") is not None
+    if estatus in {"cerrado", "cancelado", "resuelto", "cerrada", "cancelada"}:
+        return "validacion"
+    if estatus in {"abierto", "pendiente"}:
+        return "nuevo"
+    if estatus == "en_revision":
+        return "diagnostico"
+    if estatus == "programado":
+        return "programado"
+    if proveedor or costo_estimado:
+        return "cotizacion"
+    return "atencion"
+
+
+def _top_counts(items, field, limit=4):
+    counts = {}
+    for item in items:
+        key = item.get(field) or "Sin dato"
+        counts[key] = counts.get(key, 0) + 1
+    return sorted(counts.items(), key=lambda row: (-row[1], row[0]))[:limit]
+
+
+def _kanban_columns(items):
+    columns = [
+        {"key": "nuevo", "label": "Nuevo", "hint": "Sin tomar", "items": []},
+        {"key": "diagnostico", "label": "Diagnóstico", "hint": "Revisión inicial", "items": []},
+        {"key": "cotizacion", "label": "Cotización", "hint": "Proveedor y monto", "items": []},
+        {"key": "programado", "label": "Programado", "hint": "Fecha o visita", "items": []},
+        {"key": "atencion", "label": "En atención", "hint": "Trabajo activo", "items": []},
+        {"key": "validacion", "label": "Validación", "hint": "Cierre y factura", "items": []},
+    ]
+    by_key = {column["key"]: column for column in columns}
+    for item in items:
+        item["stage"] = _item_stage(item)
+        by_key.get(item["stage"], by_key["atencion"])["items"].append(item)
+    return columns
+
+
+def _dashboard_summary(items):
+    critical_labels = {"Crítica - Operación detenida", "Crítica", "Crítico"}
+    costo_30d = sum(
+        (item.get("costo_real") or item.get("costo_estimado") or Decimal("0")) for item in items
+    )
+    return {
+        "total": len(items),
+        "fallas_activas": sum(1 for item in items if item["tipo"] == "falla"),
+        "criticas": sum(1 for item in items if item.get("prioridad") in critical_labels),
+        "ordenes_abiertas": sum(1 for item in items if item["tipo"] == "orden"),
+        "reparaciones_flota": sum(1 for item in items if item["tipo"] == "unidad"),
+        "costo_30d": costo_30d,
+        "unidades_activas": Unidad.objects.filter(activa=True).count(),
+        "activos_registrados": Activo.objects.filter(activo=True).count(),
+        "por_ubicacion": _top_counts(items, "ubicacion"),
+        "por_area": _top_counts(items, "area"),
+        "por_tipo": _top_counts(items, "categoria"),
     }
 
 
@@ -325,7 +401,11 @@ def actualizar_item(request, tipo, pk):
             reporte.fecha_cierre = now
             reporte.cerrado_por = request.user
         if proveedor:
+            _ensure_provider(proveedor)
             reporte.proveedor_servicio = proveedor
+        activo_id = request.data.get("activo_id")
+        if activo_id:
+            reporte.activo_relacionado = get_object_or_404(Activo, pk=activo_id, activo=True)
         if costo_estimado is not None:
             reporte.costo_estimado = costo_estimado
         if costo_real is not None:
@@ -348,6 +428,7 @@ def actualizar_item(request, tipo, pk):
         reporte.estatus = estatus
         reporte.asignado_a = request.user
         if proveedor:
+            _ensure_provider(proveedor)
             reporte.proveedor_servicio = proveedor
         if costo_estimado is not None:
             reporte.costo_servicio = costo_estimado
@@ -367,6 +448,7 @@ def actualizar_item(request, tipo, pk):
         if estatus == OrdenMantenimiento.ESTATUS_CERRADA and not orden.fecha_cierre:
             orden.fecha_cierre = timezone.localdate()
         if proveedor:
+            _ensure_provider(proveedor)
             orden.responsable = proveedor
         if costo_real is not None:
             orden.costo_otros = costo_real
@@ -390,11 +472,21 @@ def dashboard(request):
     if origen not in {"", "sucursales", "logistica"}:
         return redirect("mantenimiento:dashboard")
     items = _unified_items(origen)
+    provider_options = Proveedor.objects.filter(activo=True).order_by("nombre")[:120]
+    asset_options = Activo.objects.select_related("sucursal").filter(activo=True).order_by(
+        "sucursal__nombre", "nombre", "codigo"
+    )[:180]
+    fleet_units = Unidad.objects.filter(activa=True).select_related("sucursal").order_by("codigo")[:6]
     return render(
         request,
         "mantenimiento/dashboard.html",
         {
             "items": items,
+            "kanban_columns": _kanban_columns(items),
+            "summary": _dashboard_summary(items),
+            "provider_options": provider_options,
+            "asset_options": asset_options,
+            "fleet_units": fleet_units,
             "origen": origen or "todos",
             "counts": _unified_counts(),
             "estatus_fallas": ReporteFalla.ESTATUS,
