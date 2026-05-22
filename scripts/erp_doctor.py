@@ -1400,6 +1400,7 @@ user_id = os.environ["ERP_DOCTOR_USER_ID"]
 user = get_user_model().objects.get(pk=user_id)
 client = Client(HTTP_HOST="erp.pollyanasdolce.com")
 client.force_login(user)
+client.get("/health/", secure=True)
 started = time.monotonic()
 response = client.get(path, follow=True, secure=True)
 duration_ms = int((time.monotonic() - started) * 1000)
