@@ -336,10 +336,12 @@
     <script>
       const API = "/api/mantenimiento";
       const AUTH_API = "/api/logistica";
+      const ACCESS_KEY = "pd_mantenimiento_access";
+      const REFRESH_KEY = "pd_mantenimiento_refresh";
       const app = document.getElementById("app");
       const state = {
-        token: localStorage.getItem("pd_logistica_access") || "",
-        refreshToken: localStorage.getItem("pd_logistica_refresh") || "",
+        token: localStorage.getItem(ACCESS_KEY) || localStorage.getItem("pd_logistica_access") || "",
+        refreshToken: localStorage.getItem(REFRESH_KEY) || localStorage.getItem("pd_logistica_refresh") || "",
         perfil: null,
         pantalla: "login",
         activos: [],
@@ -386,14 +388,18 @@
       function setTokens(data) {
         state.token = data.access;
         state.refreshToken = data.refresh;
-        localStorage.setItem("pd_logistica_access", data.access);
-        localStorage.setItem("pd_logistica_refresh", data.refresh);
+        localStorage.setItem(ACCESS_KEY, data.access);
+        localStorage.setItem(REFRESH_KEY, data.refresh);
+        localStorage.removeItem("pd_logistica_access");
+        localStorage.removeItem("pd_logistica_refresh");
       }
 
       function logout(doRender = true) {
         state.token = "";
         state.refreshToken = "";
         state.perfil = null;
+        localStorage.removeItem(ACCESS_KEY);
+        localStorage.removeItem(REFRESH_KEY);
         localStorage.removeItem("pd_logistica_access");
         localStorage.removeItem("pd_logistica_refresh");
         if (doRender) showScreen("login");
@@ -417,7 +423,7 @@
           if (refreshed.ok) {
             const data = await refreshed.json();
             state.token = data.access;
-            localStorage.setItem("pd_logistica_access", data.access);
+            localStorage.setItem(ACCESS_KEY, data.access);
             return apiFetch(path, {...options, _retry: true});
           }
           logout(false);
@@ -512,15 +518,15 @@
 
       async function loadPerfil() {
         const res = await apiFetch("/me/");
-        state.perfil = res.ok ? await res.json() : {nombre: "Compras"};
+        state.perfil = res.ok ? await res.json() : {nombre: "Mantenimiento"};
       }
 
       function renderDashboard() {
         render(shell(`
-          <p style="margin:0 0 20px;color:var(--gold);font-weight:800;">¿Qué vas a registrar?</p>
+          <p style="margin:0 0 20px;color:var(--gold);font-weight:800;">Selecciona el origen del mantenimiento</p>
           <div class="dash-grid">
-            <button class="dash-btn" onclick="startEquipo()">Equipo /<br>Maquinaria</button>
-            <button class="dash-btn" onclick="startVehiculo()">Vehículo<br>de flota</button>
+            <button class="dash-btn" onclick="startEquipo()">Sucursales /<br>Producción / CEDIS</button>
+            <button class="dash-btn" onclick="startVehiculo()">Logística<br>Unidades</button>
           </div>
           <div style="margin-top:14px">
             <button class="secondary-btn" style="width:100%" onclick="showScreen('historial')">Ver historial reciente</button>

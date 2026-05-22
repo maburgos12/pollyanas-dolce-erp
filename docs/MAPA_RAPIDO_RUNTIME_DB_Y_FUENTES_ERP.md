@@ -39,7 +39,7 @@ Concentrar en un solo lugar el mapa mínimo que necesita cualquier hilo nuevo pa
 Ese script responde:
 
 - qué base está usando Django en esta sesión
-- si `DATABASE_URL` / `DATABASE_PUBLIC_URL` existen o no
+- si `DATABASE_URL` o las variables `DB_*` existen o no
 - si las tablas canónicas mínimas del ERP están presentes
 - cuántos registros hay en capas críticas como ventas, orquestación y movimientos de CEDIS
 
@@ -47,9 +47,9 @@ Ese script responde:
 
 No seguir con extracción ni comparativas ejecutivas hasta corregir una de estas rutas:
 
-1. cargar el `DATABASE_URL` real
-2. cargar `DATABASE_PUBLIC_URL` si se trabaja local y `railway.internal` no resuelve
-3. correr el comando objetivo dentro de Railway
+1. cargar el `DATABASE_URL` real del VPS
+2. cargar `DB_HOST` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` / `DB_PORT` en entornos locales aprobados
+3. correr el comando objetivo dentro del VPS cuando la validación sea productiva
 
 ## Fuente de verdad: base de datos
 
@@ -64,11 +64,9 @@ Regla vigente:
 - prioridad 2: `DB_HOST` + `DB_NAME` + `DB_USER` + `DB_PASSWORD` + `DB_PORT`
 - SQLite no es ruta operativa válida
 
-### Fallback local para Railway
+### Fuente operativa actual
 
-- `core/management/commands/ejecutar_rutina_diaria_erp.py`
-
-Si `DATABASE_URL` apunta a `railway.internal` y no resuelve localmente, el comando puede cambiar temporalmente a `DATABASE_PUBLIC_URL`.
+El ERP opera contra PostgreSQL del VPS. No usar hosts ni variables heredadas de Railway como fallback operativo.
 
 ### Hallazgo local verificado en esta fecha
 
@@ -170,7 +168,6 @@ La UI visible y el BI no deben decidir cada uno por su cuenta de dónde leer ven
 ### Señales de alerta
 
 - `DATABASE_URL` no está cargado en shell
-- `DATABASE_PUBLIC_URL` no está cargado en shell
 - Django toma la base desde `.env` local y cae en `pollyana_db`
 - faltan tablas críticas del ERP
 - existen tablas pero con `0` registros en capas que deberían tener actividad viva
@@ -186,7 +183,7 @@ La UI visible y el BI no deben decidir cada uno por su cuenta de dónde leer ven
 
 - Si faltan las tablas: no estás en la base ERP correcta.
 - Si las tablas existen pero todo está en cero: probablemente estás en una base de laboratorio, validación o snapshot vacío.
-- Si el repo apunta a PostgreSQL local por `.env`, no asumir que eso equivale al Postgres vivo de Railway.
+- Si el repo apunta a PostgreSQL local por `.env`, no asumir que eso equivale al PostgreSQL vivo del VPS.
 
 ## Evidencia local verificada en esta fecha
 
@@ -209,7 +206,7 @@ La UI visible y el BI no deben decidir cada uno por su cuenta de dónde leer ven
 
 - La terminal sí está en PostgreSQL.
 - Eso no garantiza que esté en la base viva del ERP.
-- Antes de extraer ventas, producción o mermas de marzo 2026 o posteriores, se debe validar la conexión real a la base viva o ejecutar dentro de Railway.
+- Antes de extraer ventas, producción o mermas de marzo 2026 o posteriores, se debe validar la conexión real a la base viva o ejecutar dentro del VPS.
 
 ## Orden recomendado para cualquier análisis nuevo
 
@@ -225,14 +222,13 @@ La UI visible y el BI no deben decidir cada uno por su cuenta de dónde leer ven
 Hoy este repo no trae visible en la shell actual:
 
 - el `DATABASE_URL` vivo de la base operativa
-- el `DATABASE_PUBLIC_URL` vivo para trabajar local contra Railway
 - una marca única dentro del repo que diga “esta es la base productiva real de este hilo”
 
 Hasta que eso no exista, un hilo nuevo todavía puede quedar en una base local correcta técnicamente, pero equivocada operativamente.
 
 ## Siguiente mejora recomendada
 
-1. dejar disponible el `DATABASE_PUBLIC_URL` del entorno vivo en la ruta operativa aprobada
+1. dejar disponible la conexión PostgreSQL del VPS en la ruta operativa aprobada
 2. agregar este chequeo al arranque de comandos sensibles
 3. no permitir comparativas ejecutivas si el diagnóstico detecta base local no viva
 

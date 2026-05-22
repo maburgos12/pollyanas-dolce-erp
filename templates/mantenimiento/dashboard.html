@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block title %}Mantenimiento{% endblock %}
+{% block page_title %}Mantenimiento{% endblock %}
+{% block body_class %}page-mantenimiento-dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+  .mant-shell{display:grid;gap:18px}
+  .mant-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+  .mant-title{margin:0;color:#3f2633;font-family:"Playfair Display",serif;font-size:34px;line-height:1.05}
+  .mant-muted{margin:4px 0 0;color:#75626b}
+  .mant-switch{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+  .mant-switch a{min-height:72px;display:flex;flex-direction:column;justify-content:center;border:1px solid rgba(139,34,82,.18);border-radius:8px;background:#fff;color:#3f2633;text-decoration:none;padding:12px 14px}
+  .mant-switch a.active{border-color:#8B2252;background:#fff6fa}
+  .mant-switch strong{font-size:14px}
+  .mant-switch span{color:#75626b;font-size:12px}
+  .mant-table-wrap{overflow:auto;border:1px solid rgba(139,34,82,.14);border-radius:8px;background:#fff}
+  .mant-table{width:100%;border-collapse:collapse;min-width:1050px}
+  .mant-table th,.mant-table td{padding:11px 12px;border-bottom:1px solid rgba(139,34,82,.10);text-align:left;vertical-align:top}
+  .mant-table th{background:#f7e7ee;color:#8B2252;font-size:11px;text-transform:uppercase}
+  .mant-pill{display:inline-flex;border-radius:999px;padding:3px 8px;font-size:11px;font-weight:900}
+  .mant-origin-sucursales{background:#eff6ff;color:#1d4ed8}
+  .mant-origin-logistica{background:#f0fdf4;color:#166534}
+  .mant-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .mant-input{min-height:36px;border:1px solid rgba(139,34,82,.22);border-radius:8px;padding:6px 8px;font:inherit;background:#fff}
+  .mant-btn{min-height:36px;border:1px solid #8B2252;border-radius:8px;background:#8B2252;color:#fff;font-weight:900;padding:7px 10px}
+  .mant-empty{padding:32px;text-align:center;color:#75626b}
+  @media(max-width:760px){.mant-header,.mant-switch{display:grid;grid-template-columns:1fr}.mant-title{font-size:28px}}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="mant-shell">
+  <section class="mant-header">
+    <div>
+      <h1 class="mant-title">Bandeja de mantenimiento</h1>
+      <p class="mant-muted">Seguimiento operativo separado por origen, sin duplicar reportes.</p>
+    </div>
+    <a class="mant-btn" href="{% url 'mantenimiento:app' %}">Abrir app</a>
+  </section>
+
+  <nav class="mant-switch" aria-label="Filtro de origen">
+    <a href="{% url 'mantenimiento:dashboard' %}" class="{% if origen == 'todos' %}active{% endif %}">
+      <strong>Todo mantenimiento</strong>
+      <span>{{ counts.sucursales|add:counts.logistica }} reportes abiertos</span>
+    </a>
+    <a href="{% url 'mantenimiento:dashboard' %}?origen=sucursales" class="{% if origen == 'sucursales' %}active{% endif %}">
+      <strong>Sucursales / Producción / CEDIS</strong>
+      <span>{{ counts.sucursales }} equipos, activos e instalaciones</span>
+    </a>
+    <a href="{% url 'mantenimiento:dashboard' %}?origen=logistica" class="{% if origen == 'logistica' %}active{% endif %}">
+      <strong>Logística</strong>
+      <span>{{ counts.logistica }} unidades y flota</span>
+    </a>
+  </nav>
+
+  <section class="mant-table-wrap">
+    <table class="mant-table">
+      <thead>
+        <tr>
+          <th>Origen</th>
+          <th>Referencia</th>
+          <th>Ubicación / activo</th>
+          <th>Prioridad</th>
+          <th>Estatus</th>
+          <th>Descripción</th>
+          <th>Proveedor / costo</th>
+          <th>Seguimiento</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          <td><span class="mant-pill mant-origin-{{ item.origen }}">{{ item.origen|title }}</span></td>
+          <td><strong>{{ item.referencia }}</strong><br><span class="mant-muted">{{ item.fecha|date:"d/m/Y H:i" }}</span></td>
+          <td>{{ item.ubicacion }}<br><span class="mant-muted">{{ item.activo|default:"-" }}</span></td>
+          <td>{{ item.prioridad }}</td>
+          <td>{{ item.estatus_display }}</td>
+          <td><strong>{{ item.titulo }}</strong><br><span class="mant-muted">{{ item.descripcion|truncatechars:95 }}</span></td>
+          <td>{{ item.proveedor|default:"-" }}<br><span class="mant-muted">Estimado: ${{ item.costo_estimado|default:"0" }} · Real: ${{ item.costo_real|default:"0" }}</span></td>
+          <td>
+            <form class="mant-actions" method="post" action="{% url 'mantenimiento:mant-actualizar' item.tipo item.id %}">
+              {% csrf_token %}
+              <select class="mant-input" name="estatus">
+                {% if item.tipo == "falla" %}
+                  {% for value,label in estatus_fallas %}<option value="{{ value }}" {% if item.estatus == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                {% elif item.tipo == "unidad" %}
+                  {% for value,label in estatus_unidad %}<option value="{{ value }}" {% if item.estatus == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                {% else %}
+                  {% for value,label in estatus_orden %}<option value="{{ value }}" {% if item.estatus == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                {% endif %}
+              </select>
+              <input class="mant-input" name="proveedor_servicio" placeholder="Proveedor">
+              <input class="mant-input" name="costo_estimado" type="number" step="0.01" min="0" placeholder="Cotización">
+              <input class="mant-input" name="costo_real" type="number" step="0.01" min="0" placeholder="Costo final">
+              <input class="mant-input" name="comentario" placeholder="Comentario">
+              <button class="mant-btn" type="submit">Guardar</button>
+            </form>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="8"><div class="mant-empty">No hay reportes abiertos para este origen.</div></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</div>
+{% endblock %}

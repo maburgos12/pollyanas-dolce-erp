@@ -72,6 +72,7 @@ class UserModuleAccess(models.Model):
 
     MODULOS = [
         ("logistica", "Logística"),
+        ("mantenimiento", "Mantenimiento"),
         ("fallas", "Fallas / Mantenimiento"),
         ("mermas", "Mermas"),
         ("mermas.captura", "Mermas - App sucursal"),
