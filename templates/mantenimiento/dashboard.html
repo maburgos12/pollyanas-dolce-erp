@@ -6,27 +6,43 @@
 
 {% block extra_css %}
 <style>
-  .mant-shell{display:grid;gap:18px}
-  .mant-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
-  .mant-title{margin:0;color:#3f2633;font-family:"Playfair Display",serif;font-size:34px;line-height:1.05}
-  .mant-muted{margin:4px 0 0;color:#75626b}
-  .mant-switch{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
-  .mant-switch a{min-height:72px;display:flex;flex-direction:column;justify-content:center;border:1px solid rgba(139,34,82,.18);border-radius:8px;background:#fff;color:#3f2633;text-decoration:none;padding:12px 14px}
-  .mant-switch a.active{border-color:#8B2252;background:#fff6fa}
-  .mant-switch strong{font-size:14px}
-  .mant-switch span{color:#75626b;font-size:12px}
-  .mant-table-wrap{overflow:auto;border:1px solid rgba(139,34,82,.14);border-radius:8px;background:#fff}
-  .mant-table{width:100%;border-collapse:collapse;min-width:1050px}
-  .mant-table th,.mant-table td{padding:11px 12px;border-bottom:1px solid rgba(139,34,82,.10);text-align:left;vertical-align:top}
-  .mant-table th{background:#f7e7ee;color:#8B2252;font-size:11px;text-transform:uppercase}
-  .mant-pill{display:inline-flex;border-radius:999px;padding:3px 8px;font-size:11px;font-weight:900}
+  .mant-shell{display:grid;gap:16px;max-width:1260px}
+  .mant-header{display:flex;justify-content:space-between;align-items:center;gap:14px}
+  .mant-title{margin:0;color:#3f2633;font-family:"Playfair Display",serif;font-size:30px;line-height:1.05}
+  .mant-muted{color:#75626b}
+  .mant-header p{margin:4px 0 0}
+  .mant-btn{display:inline-flex;align-items:center;justify-content:center;min-height:36px;border:1px solid #8B2252;border-radius:8px;background:#8B2252;color:#fff;text-decoration:none;font-weight:900;padding:7px 12px}
+  .mant-btn.secondary{background:#fff;color:#8B2252}
+  .mant-overview{display:grid;grid-template-columns:1.1fr repeat(3,minmax(0,.9fr));gap:10px}
+  .mant-kpi{border:1px solid rgba(139,34,82,.14);border-radius:8px;background:#fff;padding:12px 14px}
+  .mant-kpi strong{display:block;color:#3f2633;font-size:22px;line-height:1}
+  .mant-kpi span{display:block;margin-top:5px;color:#75626b;font-size:12px;font-weight:800;text-transform:uppercase}
+  .mant-switch{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border:1px solid rgba(139,34,82,.12);border-radius:8px;background:#fff;padding:8px}
+  .mant-switch a{display:inline-flex;gap:8px;align-items:center;border:1px solid transparent;border-radius:8px;color:#3f2633;text-decoration:none;padding:9px 12px;font-size:13px;font-weight:900}
+  .mant-switch a.active{border-color:#8B2252;background:#fff6fa;color:#8B2252}
+  .mant-count{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:22px;border-radius:999px;background:#f3e4eb;color:#8B2252;font-size:11px}
+  .mant-list{display:grid;gap:10px}
+  .mant-item{border:1px solid rgba(139,34,82,.13);border-radius:8px;background:#fff;overflow:hidden}
+  .mant-item-main{display:grid;grid-template-columns:120px minmax(170px,.85fr) minmax(260px,1.35fr) 112px 150px 126px;gap:14px;align-items:start;padding:14px}
+  .mant-ref strong,.mant-desc strong{display:block;color:#3f2633}
+  .mant-ref span,.mant-desc span,.mant-meta{display:block;margin-top:4px;color:#75626b;font-size:12px;line-height:1.25}
+  .mant-pill{display:inline-flex;align-items:center;width:max-content;border-radius:999px;padding:4px 8px;font-size:11px;font-weight:900}
   .mant-origin-sucursales{background:#eff6ff;color:#1d4ed8}
   .mant-origin-logistica{background:#f0fdf4;color:#166534}
-  .mant-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .mant-input{min-height:36px;border:1px solid rgba(139,34,82,.22);border-radius:8px;padding:6px 8px;font:inherit;background:#fff}
-  .mant-btn{min-height:36px;border:1px solid #8B2252;border-radius:8px;background:#8B2252;color:#fff;font-weight:900;padding:7px 10px}
-  .mant-empty{padding:32px;text-align:center;color:#75626b}
-  @media(max-width:760px){.mant-header,.mant-switch{display:grid;grid-template-columns:1fr}.mant-title{font-size:28px}}
+  .mant-priority{background:#f7e7ee;color:#8B2252}
+  .mant-status{background:#eef2ff;color:#3730a3}
+  .mant-money{color:#3f2633;font-size:12px;line-height:1.35}
+  .mant-money b{display:inline-block;min-width:62px;color:#75626b}
+  .mant-follow{border-top:1px solid rgba(139,34,82,.10);background:#fffafb}
+  .mant-follow summary{cursor:pointer;list-style:none;padding:8px 14px;color:#75626b;font-size:12px;font-weight:900}
+  .mant-follow summary::-webkit-details-marker{display:none}
+  .mant-follow summary:after{content:"Abrir seguimiento";float:right;border:1px solid rgba(139,34,82,.18);border-radius:8px;padding:5px 9px;background:#fff;color:#8B2252;font-size:12px}
+  .mant-follow[open] summary:after{content:"Cerrar"}
+  .mant-actions{display:grid;grid-template-columns:160px 1fr 130px 130px minmax(180px,1fr) auto;gap:8px;padding:0 14px 14px}
+  .mant-input{min-height:36px;border:1px solid rgba(139,34,82,.22);border-radius:8px;padding:6px 8px;font:inherit;background:#fff;min-width:0}
+  .mant-empty{padding:34px;text-align:center;border:1px dashed rgba(139,34,82,.22);border-radius:8px;background:#fff;color:#75626b}
+  @media(max-width:1180px){.mant-item-main{grid-template-columns:110px minmax(150px,.8fr) minmax(220px,1fr) 100px 130px}.mant-item-main>.mant-quick{grid-column:1/-1}.mant-actions{grid-template-columns:1fr 1fr 1fr}}
+  @media(max-width:760px){.mant-header,.mant-overview{display:grid;grid-template-columns:1fr}.mant-title{font-size:26px}.mant-switch a{width:100%;justify-content:space-between}.mant-item-main{grid-template-columns:1fr;gap:8px}.mant-actions{grid-template-columns:1fr}}
 </style>
 {% endblock %}
 
@@ -42,68 +58,87 @@
 
   <nav class="mant-switch" aria-label="Filtro de origen">
     <a href="{% url 'mantenimiento:dashboard' %}" class="{% if origen == 'todos' %}active{% endif %}">
-      <strong>Todo mantenimiento</strong>
-      <span>{{ counts.sucursales|add:counts.logistica }} reportes abiertos</span>
+      Todo mantenimiento <span class="mant-count">{{ counts.sucursales|add:counts.logistica }}</span>
     </a>
     <a href="{% url 'mantenimiento:dashboard' %}?origen=sucursales" class="{% if origen == 'sucursales' %}active{% endif %}">
-      <strong>Sucursales / Producción / CEDIS</strong>
-      <span>{{ counts.sucursales }} equipos, activos e instalaciones</span>
+      Sucursales / Producción / CEDIS <span class="mant-count">{{ counts.sucursales }}</span>
     </a>
     <a href="{% url 'mantenimiento:dashboard' %}?origen=logistica" class="{% if origen == 'logistica' %}active{% endif %}">
-      <strong>Logística</strong>
-      <span>{{ counts.logistica }} unidades y flota</span>
+      Logística <span class="mant-count">{{ counts.logistica }}</span>
     </a>
   </nav>
 
-  <section class="mant-table-wrap">
-    <table class="mant-table">
-      <thead>
-        <tr>
-          <th>Origen</th>
-          <th>Referencia</th>
-          <th>Ubicación / activo</th>
-          <th>Prioridad</th>
-          <th>Estatus</th>
-          <th>Descripción</th>
-          <th>Proveedor / costo</th>
-          <th>Seguimiento</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in items %}
-        <tr>
-          <td><span class="mant-pill mant-origin-{{ item.origen }}">{{ item.origen|title }}</span></td>
-          <td><strong>{{ item.referencia }}</strong><br><span class="mant-muted">{{ item.fecha|date:"d/m/Y H:i" }}</span></td>
-          <td>{{ item.ubicacion }}<br><span class="mant-muted">{{ item.activo|default:"-" }}</span></td>
-          <td>{{ item.prioridad }}</td>
-          <td>{{ item.estatus_display }}</td>
-          <td><strong>{{ item.titulo }}</strong><br><span class="mant-muted">{{ item.descripcion|truncatechars:95 }}</span></td>
-          <td>{{ item.proveedor|default:"-" }}<br><span class="mant-muted">Estimado: ${{ item.costo_estimado|default:"0" }} · Real: ${{ item.costo_real|default:"0" }}</span></td>
-          <td>
-            <form class="mant-actions" method="post" action="{% url 'mantenimiento:mant-actualizar' item.tipo item.id %}">
-              {% csrf_token %}
-              <select class="mant-input" name="estatus">
-                {% if item.tipo == "falla" %}
-                  {% for value,label in estatus_fallas %}<option value="{{ value }}" {% if item.estatus == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
-                {% elif item.tipo == "unidad" %}
-                  {% for value,label in estatus_unidad %}<option value="{{ value }}" {% if item.estatus == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
-                {% else %}
-                  {% for value,label in estatus_orden %}<option value="{{ value }}" {% if item.estatus == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
-                {% endif %}
-              </select>
-              <input class="mant-input" name="proveedor_servicio" placeholder="Proveedor">
-              <input class="mant-input" name="costo_estimado" type="number" step="0.01" min="0" placeholder="Cotización">
-              <input class="mant-input" name="costo_real" type="number" step="0.01" min="0" placeholder="Costo final">
-              <input class="mant-input" name="comentario" placeholder="Comentario">
-              <button class="mant-btn" type="submit">Guardar</button>
-            </form>
-          </td>
-        </tr>
-        {% empty %}
-        <tr><td colspan="8"><div class="mant-empty">No hay reportes abiertos para este origen.</div></td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <section class="mant-overview" aria-label="Resumen de mantenimiento">
+    <div class="mant-kpi">
+      <strong>{{ items|length }}</strong>
+      <span>Reportes en esta vista</span>
+    </div>
+    <div class="mant-kpi">
+      <strong>{{ counts.sucursales }}</strong>
+      <span>Sucursales / CEDIS</span>
+    </div>
+    <div class="mant-kpi">
+      <strong>{{ counts.logistica }}</strong>
+      <span>Logística</span>
+    </div>
+    <div class="mant-kpi">
+      <strong>{{ origen|title }}</strong>
+      <span>Filtro activo</span>
+    </div>
+  </section>
+
+  <section class="mant-list" aria-label="Reportes abiertos">
+    {% for item in items %}
+      <article class="mant-item">
+        <div class="mant-item-main">
+          <div>
+            <span class="mant-pill mant-origin-{{ item.origen }}">{{ item.origen|title }}</span>
+            <span class="mant-meta">{{ item.fecha|date:"d/m/Y H:i" }}</span>
+          </div>
+          <div class="mant-ref">
+            <strong>{{ item.referencia }}</strong>
+            <span>{{ item.ubicacion|default:"Sin ubicación" }}{% if item.activo %} · {{ item.activo }}{% endif %}</span>
+          </div>
+          <div class="mant-desc">
+            <strong>{{ item.titulo }}</strong>
+            <span>{{ item.descripcion|truncatechars:150 }}</span>
+          </div>
+          <div>
+            <span class="mant-pill mant-priority">{{ item.prioridad }}</span>
+          </div>
+          <div>
+            <span class="mant-pill mant-status">{{ item.estatus_display }}</span>
+          </div>
+          <div class="mant-money mant-quick">
+            <div><b>Proveedor</b>{{ item.proveedor|default:"-" }}</div>
+            <div><b>Estimado</b>${{ item.costo_estimado|default:"0" }}</div>
+            <div><b>Real</b>${{ item.costo_real|default:"0" }}</div>
+          </div>
+        </div>
+        <details class="mant-follow">
+          <summary>{{ item.referencia }}</summary>
+          <form class="mant-actions" method="post" action="{% url 'mantenimiento:mant-actualizar' item.tipo item.id %}">
+            {% csrf_token %}
+            <select class="mant-input" name="estatus">
+              {% if item.tipo == "falla" %}
+                {% for value,label in estatus_fallas %}<option value="{{ value }}" {% if item.estatus == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+              {% elif item.tipo == "unidad" %}
+                {% for value,label in estatus_unidad %}<option value="{{ value }}" {% if item.estatus == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+              {% else %}
+                {% for value,label in estatus_orden %}<option value="{{ value }}" {% if item.estatus == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+              {% endif %}
+            </select>
+            <input class="mant-input" name="proveedor_servicio" placeholder="Proveedor / taller">
+            <input class="mant-input" name="costo_estimado" type="number" step="0.01" min="0" placeholder="Cotización">
+            <input class="mant-input" name="costo_real" type="number" step="0.01" min="0" placeholder="Costo final">
+            <input class="mant-input" name="comentario" placeholder="Comentario de seguimiento">
+            <button class="mant-btn" type="submit">Guardar</button>
+          </form>
+        </details>
+      </article>
+    {% empty %}
+      <div class="mant-empty">No hay reportes abiertos para este origen.</div>
+    {% endfor %}
   </section>
 </div>
 {% endblock %}
