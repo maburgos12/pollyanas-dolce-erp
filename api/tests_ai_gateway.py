@@ -394,6 +394,80 @@ class AIGatewayApiTests(APITestCase):
         self.assertEqual(mediana["recommendation"], "NO_CONVIENE")
         self.assertGreaterEqual(len(payload["decision_summary"]["ranked_products"]), 3)
 
+    def test_invoke_promotion_profitability_resolves_vasos_and_rebanada_mix(self):
+        today = timezone.localdate()
+
+        fixtures = [
+            ("PFCM", "Pastel de Fresas Con Crema Mediano", "Pastel Mediano", Decimal("490.00"), Decimal("4"), Decimal("1960.00"), Decimal("600.00")),
+            ("VFM", "Vaso Fresas con Crema Mediano", "Vasos Grande", None, Decimal("12"), Decimal("1200.00"), Decimal("420.00")),
+            ("VFG", "Vaso Fresas con Crema Grande", "Vasos Grande", None, Decimal("8"), Decimal("1040.00"), Decimal("360.00")),
+            ("REB1", "Pastel de 3 Leches Rebanada", "Rebanada", Decimal("70.00"), Decimal("10"), Decimal("700.00"), Decimal("220.00")),
+            ("REB2", "Pastel de Snickers Rebanada", "Rebanada", Decimal("70.00"), Decimal("20"), Decimal("1400.00"), Decimal("500.00")),
+            ("SAB1", "Sabor Fresa Rebanada Pay", "Rebanada", None, Decimal("100"), Decimal("0.00"), Decimal("100.00")),
+        ]
+        for sku, name, category, price, quantity, sales, cost in fixtures:
+            product = PointProduct.objects.create(
+                external_id=f"{sku}-PROMO2",
+                sku=sku,
+                name=name,
+                category=category,
+                precio=price,
+            )
+            FactVentaDiaria.objects.create(
+                fecha=today,
+                sucursal=self.sucursal_1,
+                point_product=product,
+                producto_clave=sku,
+                producto_nombre=name,
+                categoria=category,
+                cantidad=quantity,
+                tickets=int(quantity),
+                venta_bruta=sales,
+                descuento=Decimal("0.00"),
+                venta_total=sales,
+                venta_neta=sales,
+                costo_estimado=cost,
+                margen=sales - cost,
+                source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE,
+            )
+
+        self.client.force_authenticate(self.user_dg)
+        response = self.client.post(
+            self._invoke_url("erp.analyze_promotion_profitability"),
+            {
+                "arguments": {
+                    "promotion_type": "3x2",
+                    "product_queries": [
+                        "vaso fresas con crema mediana",
+                        "vaso fresas con crema grnde",
+                        "revoltura de rebanadas de pastel",
+                    ],
+                    "expected_uplift_pct": 60,
+                    "lookback_days": 30,
+                }
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        items = response.data["result"]["payload"]["items"]
+        mediano = next(row for row in items if row["query"] == "vaso fresas con crema mediana")
+        grande = next(row for row in items if row["query"] == "vaso fresas con crema grnde")
+        mix = next(row for row in items if row["query"] == "revoltura de rebanadas de pastel")
+
+        self.assertEqual(mediano["product_sku"], "VFM")
+        self.assertEqual(mediano["product_name"], "Vaso Fresas con Crema Mediano")
+        self.assertEqual(mediano["normal_unit_price"], 100.0)
+        self.assertEqual(grande["product_sku"], "VFG")
+        self.assertEqual(grande["product_name"], "Vaso Fresas con Crema Grande")
+        self.assertEqual(grande["normal_unit_price"], 130.0)
+        self.assertEqual(mix["item_type"], "product_group")
+        self.assertEqual(mix["product_sku"], "GRUPO_REBANADAS")
+        self.assertEqual(mix["product_count"], 2)
+        self.assertEqual(mix["baseline_units"], 30.0)
+        self.assertEqual(mix["normal_unit_price"], 70.0)
+        self.assertEqual(mix["unit_cost"], 24.0)
+
     def test_invoke_sales_summary_logs_audit(self):
         self.client.force_authenticate(self.user_lectura)
         response = self.client.post(
