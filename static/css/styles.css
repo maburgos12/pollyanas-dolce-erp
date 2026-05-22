@@ -2066,7 +2066,17 @@ tr:hover,
 }
 
 .login-logo {
-  font-size: 30px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.login-logo img {
+  display: block;
+  width: 96px;
+  max-width: 34vw;
+  height: auto;
 }
 
 .login-title {
