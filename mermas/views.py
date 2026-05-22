@@ -11,7 +11,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
-from core.access import ACCESS_MANAGE, ACCESS_VIEW
+from core.access import ACCESS_MANAGE, ACCESS_VIEW, get_module_access, get_submodule_access
 from core.models import Sucursal, UserModuleAccess, sucursales_operativas
 from logistica.models import Repartidor
 from recetas.models import Receta
@@ -28,6 +28,10 @@ def _explicit_access(user, *scopes: str) -> str:
     access_levels = list(
         UserModuleAccess.objects.filter(user=user, module__in=modules).values_list("access", flat=True)
     )
+    if scopes:
+        access_levels.extend(get_submodule_access(user, "mermas", scope) for scope in scopes)
+    else:
+        access_levels.append(get_module_access(user, "mermas"))
     if ACCESS_MANAGE in access_levels:
         return ACCESS_MANAGE
     if ACCESS_VIEW in access_levels:
@@ -172,6 +176,21 @@ def _producto_rows_from_post(post):
 
 @login_required
 def app_home(request):
+    modo = (request.GET.get("modo") or "").strip().lower()
+    if modo == "recepcion" and _can_receive(request.user):
+        registros = (
+            _registros_visibles(request.user)
+            .filter(estatus=MermaRegistro.ESTATUS_ENVIADO_CEDIS)
+            .order_by("enviado_en", "id")
+        )
+        return render(
+            request,
+            "mermas/app_recepcion.html",
+            {
+                "registros": registros,
+                "now": timezone.localtime(),
+            },
+        )
     if _can_capture(request.user):
         return crear_registro(request)
     if _can_receive(request.user):

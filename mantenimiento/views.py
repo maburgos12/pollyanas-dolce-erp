@@ -1,3 +1,5 @@
+from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
 from django.db.models import Q
 from django.shortcuts import render
 from rest_framework import generics, permissions
@@ -25,7 +27,7 @@ AUTH = [JWTAuthentication, TokenAuthentication, SessionAuthentication]
 
 
 class EsComprasODG(permissions.BasePermission):
-    GRUPOS = {"compras_logistica", "dg"}
+    GRUPOS = {"compras_logistica", "dg", "DG"}
 
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
@@ -144,5 +146,8 @@ def mi_perfil(request):
     )
 
 
+@login_required
 def pwa_mantenimiento(request):
+    if not EsComprasODG().has_permission(request, None):
+        raise PermissionDenied("No tienes permisos para usar Mantenimiento")
     return render(request, "mantenimiento/pwa.html")

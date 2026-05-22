@@ -169,7 +169,7 @@ def build_operacion_context(user) -> dict:
                     key="mermas_captura",
                     title="Registrar merma",
                     detail="Captura de sucursal con productos, ticket y evidencia.",
-                    href="/mermas/app/",
+                    href="/mermas/app/?modo=captura",
                     icon="merma",
                     area="Sucursal",
                 )
@@ -180,7 +180,7 @@ def build_operacion_context(user) -> dict:
                     key="mermas_recepcion",
                     title="Recibir merma",
                     detail="Validación CEDIS de cantidades, evidencia y repartidor.",
-                    href="/mermas/app/",
+                    href="/mermas/app/?modo=recepcion",
                     icon="recibir",
                     area="CEDIS",
                 )
