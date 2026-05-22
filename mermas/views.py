@@ -277,6 +277,7 @@ def crear_registro(request):
             "sucursales": sucursales,
             "productos_iniciales": productos_iniciales,
             "now": timezone.localtime(),
+            "can_dashboard": _can_dashboard(request.user),
         },
     )
 

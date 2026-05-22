@@ -227,6 +227,29 @@ class OperacionAppTests(TestCase):
         self.assertEqual(blocked.status_code, 302)
         self.assertEqual(blocked["Location"], "/mermas/app/")
 
+    def test_mermas_capture_cancel_returns_to_unified_app_for_branch_user(self):
+        user = self._user("mermas.cancelar", sucursal=self.sucursal)
+        self._grant(user, "mermas.captura")
+        self.client.force_login(user)
+
+        response = self.client.get("/mermas/app/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'href="/app/"')
+        self.assertNotContains(response, 'href="/mermas/"')
+
+    def test_mermas_capture_cancel_keeps_panel_for_dashboard_user(self):
+        user = self._user("mermas.panel", sucursal=self.sucursal)
+        self._grant(user, "mermas.captura")
+        self._grant(user, "mermas.dashboard")
+        self.client.force_login(user)
+
+        response = self.client.get("/mermas/app/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'href="/mermas/"')
+        self.assertContains(response, "Panel")
+
     def test_dg_group_gets_management_surface(self):
         group = Group.objects.create(name=ROLE_DG)
         user = self._user("dg.operacion")

@@ -49,7 +49,11 @@
             <h1>Registrar merma</h1>
             <span>{{ now|date:"d/m/Y H:i" }}</span>
         </div>
+        {% if can_dashboard %}
         <a class="secondary-link" href="{% url 'mermas:dashboard' %}">Panel</a>
+        {% else %}
+        <a class="secondary-link" href="{% url 'operacion:app_home' %}">Inicio</a>
+        {% endif %}
     </header>
 
     {% if messages %}
@@ -122,7 +126,11 @@
         <div class="sticky-submit">
             <div class="sticky-submit-inner">
                 <button class="primary-btn" type="submit">Guardar merma</button>
+                {% if can_dashboard %}
                 <a class="secondary-link" href="{% url 'mermas:dashboard' %}">Cancelar</a>
+                {% else %}
+                <a class="secondary-link" href="{% url 'operacion:app_home' %}">Cancelar</a>
+                {% endif %}
             </div>
         </div>
     </form>
