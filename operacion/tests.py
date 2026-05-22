@@ -430,3 +430,67 @@ class OperacionAppTests(TestCase):
         self.assertIsNotNone(orden.fecha_inicio)
         self.assertEqual(BitacoraMantenimiento.objects.filter(orden=orden).count(), 1)
         self.assertIn("Se inició revisión del motor.", BitacoraMantenimiento.objects.get(orden=orden).comentario)
+
+    def test_mantenimiento_can_create_maintainable_point_for_general_repairs(self):
+        group = Group.objects.create(name="MANTENIMIENTO")
+        user = self._user("tecnico.punto")
+        user.groups.add(group)
+        self.client.force_login(user)
+
+        response = self.client.post(
+            "/api/mantenimiento/activos/rapido/",
+            data={
+                "sucursal": self.sucursal.id,
+                "nombre": "Instalación hidrosanitaria - Cocina",
+                "categoria": "Plomería",
+                "ubicacion": "Cocina",
+                "notas": "Alta desde reparación general: fuga debajo de tarja.",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        activo = Activo.objects.get(id=payload["id"])
+        self.assertTrue(activo.codigo.startswith("PM-"))
+        self.assertEqual(activo.sucursal, self.sucursal)
+        self.assertEqual(activo.nombre, "Instalación hidrosanitaria - Cocina")
+        self.assertEqual(activo.categoria, "Plomería")
+        self.assertEqual(activo.ubicacion, "Cocina")
+        self.assertIn("fuga debajo de tarja", activo.notas)
+
+        orden = self.client.post(
+            "/api/mantenimiento/ordenes/",
+            data={
+                "activo_ref": activo.id,
+                "tipo": OrdenMantenimiento.TIPO_CORRECTIVO,
+                "prioridad": OrdenMantenimiento.PRIORIDAD_ALTA,
+                "descripcion": "Se reparó fuga y se selló conexión.",
+            },
+        )
+        self.assertEqual(orden.status_code, 201)
+        self.assertTrue(OrdenMantenimiento.objects.filter(activo_ref=activo).exists())
+
+    def test_mantenimiento_sucursales_api_does_not_depend_on_existing_assets(self):
+        group = Group.objects.create(name="MANTENIMIENTO")
+        user = self._user("tecnico.sucursales")
+        user.groups.add(group)
+        Activo.objects.all().delete()
+        self.client.force_login(user)
+
+        response = self.client.get("/api/mantenimiento/sucursales/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(self.sucursal.id, [item["id"] for item in response.json()])
+
+    def test_mantenimiento_pwa_exposes_maintainable_point_shortcut(self):
+        group = Group.objects.create(name="MANTENIMIENTO")
+        user = self._user("tecnico.punto.ui")
+        user.groups.add(group)
+        self.client.force_login(user)
+
+        response = self.client.get("/mantenimiento/app/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No encuentro el equipo")
+        self.assertContains(response, "Registrar punto mantenible")

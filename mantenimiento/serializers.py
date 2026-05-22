@@ -31,6 +31,58 @@ class ActivoListSerializer(serializers.ModelSerializer):
         ]
 
 
+class ActivoQuickCreateSerializer(serializers.ModelSerializer):
+    sucursal_nombre = serializers.CharField(source="sucursal.nombre", read_only=True, default="")
+
+    class Meta:
+        model = Activo
+        fields = [
+            "id",
+            "codigo",
+            "nombre",
+            "categoria",
+            "ubicacion",
+            "sucursal",
+            "sucursal_nombre",
+            "estado",
+            "criticidad",
+            "notas",
+        ]
+        read_only_fields = ["id", "codigo", "estado", "criticidad", "sucursal_nombre"]
+        extra_kwargs = {
+            "nombre": {"required": True, "allow_blank": False},
+            "sucursal": {"required": True, "allow_null": False},
+            "categoria": {"required": False, "allow_blank": True},
+            "ubicacion": {"required": False, "allow_blank": True},
+            "notas": {"required": False, "allow_blank": True},
+        }
+
+    def validate_nombre(self, value):
+        value = value.strip()
+        if len(value) < 5:
+            raise serializers.ValidationError("El nombre debe identificar claramente el punto mantenible.")
+        return value
+
+    def create(self, validated_data):
+        if not (validated_data.get("categoria") or "").strip():
+            validated_data["categoria"] = "Infraestructura"
+        validated_data["estado"] = Activo.ESTADO_OPERATIVO
+        validated_data["criticidad"] = Activo.CRITICIDAD_MEDIA
+        validated_data["activo"] = True
+        validated_data["codigo"] = self._next_code(validated_data["sucursal"])
+        return super().create(validated_data)
+
+    def _next_code(self, sucursal):
+        base = (sucursal.codigo or "SUC").upper().replace(" ", "_")[:10]
+        prefix = f"PM-{base}-"
+        seq = Activo.objects.filter(codigo__startswith=prefix).count() + 1
+        codigo = f"{prefix}{seq:04d}"
+        while Activo.objects.filter(codigo=codigo).exists():
+            seq += 1
+            codigo = f"{prefix}{seq:04d}"
+        return codigo
+
+
 class OrdenMantenimientoCreateSerializer(serializers.ModelSerializer):
     costo_real = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, write_only=True)
     proveedor_servicio = serializers.CharField(required=False, allow_blank=True, write_only=True)

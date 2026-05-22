@@ -10,11 +10,13 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from core.access import can_view_module
+from core.models import sucursales_operativas
 from activos.models import Activo, OrdenMantenimiento
 from logistica.models import ReparacionUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
 
 from .serializers import (
     ActivoListSerializer,
+    ActivoQuickCreateSerializer,
     OrdenMantenimientoCreateSerializer,
     OrdenMantenimientoDetailSerializer,
     OrdenMantenimientoListSerializer,
@@ -63,6 +65,12 @@ class ActivoListView(generics.ListAPIView):
                 | Q(ubicacion__icontains=q)
             )
         return qs.order_by("sucursal__nombre", "nombre", "codigo")
+
+
+class ActivoQuickCreateView(generics.CreateAPIView):
+    authentication_classes = AUTH
+    permission_classes = [EsComprasODG]
+    serializer_class = ActivoQuickCreateSerializer
 
 
 class UnidadListView(generics.ListAPIView):
@@ -181,6 +189,17 @@ def mi_perfil(request):
             "grupos": list(user.groups.values_list("name", flat=True)),
         }
     )
+
+
+@api_view(["GET"])
+@authentication_classes(AUTH)
+@permission_classes([EsComprasODG])
+def sucursales(request):
+    data = [
+        {"id": sucursal.id, "codigo": sucursal.codigo, "nombre": sucursal.nombre}
+        for sucursal in sucursales_operativas().order_by("nombre", "codigo")
+    ]
+    return Response(data)
 
 
 @api_view(["GET"])
