@@ -12,6 +12,7 @@ from rrhh.models import Empleado
 
 from .models import SeguimientoChecklistItem, SeguimientoComentario, SeguimientoEvidencia, SeguimientoItem
 from .services import empleado_de_usuario
+from .management.commands.importar_agente_dg_seguimiento import _status_agente_a_erp
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -119,3 +120,24 @@ class SeguimientoColaboradorTests(TestCase):
 
         self.assertIn("Bonos producción", labels)
         self.assertIn("Bonos ventas", labels)
+
+    def test_empleado_se_resuelve_por_tokens_y_area_cuando_rrhh_no_tiene_email(self):
+        ventas = Group.objects.create(name="VENTAS")
+        user = get_user_model().objects.create_user(
+            username="johana.lopez",
+            email="ventas.johanna@pollyanasdolce.com",
+            first_name="Johana",
+            last_name="López",
+        )
+        user.groups.add(ventas)
+        administracion = Empleado.objects.create(nombre="LOPEZ PALOS JOHANA ADELIN", area="ADMINISTRACION", activo=True)
+        empleado_ventas = Empleado.objects.create(nombre="LOPEZ CASTRO ALEJANDRA JOHANA", area="VENTAS", activo=True)
+
+        self.assertEqual(empleado_de_usuario(user), empleado_ventas)
+        self.assertNotEqual(empleado_de_usuario(user), administracion)
+
+    def test_status_de_agente_dg_se_mapea_a_estatus_erp(self):
+        self.assertEqual(_status_agente_a_erp("SUBMITTED"), SeguimientoItem.ESTATUS_EN_REVISION)
+        self.assertEqual(_status_agente_a_erp("COMPLETED"), SeguimientoItem.ESTATUS_COMPLETADO)
+        self.assertEqual(_status_agente_a_erp("AT_RISK"), SeguimientoItem.ESTATUS_BLOQUEADO)
+        self.assertEqual(_status_agente_a_erp("OVERDUE"), SeguimientoItem.ESTATUS_EN_PROCESO)
