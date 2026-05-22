@@ -892,7 +892,7 @@
             </div>
             <div class="field">
               <label for="desc-eq">Descripción / acción realizada</label>
-              <textarea id="desc-eq" placeholder="Describe el trabajo realizado" oninput="state.equipoDraft.descripcion=this.value">${esc(d.descripcion)}</textarea>
+              <textarea id="desc-eq" placeholder="Describe el trabajo realizado" oninput="state.equipoDraft.descripcion=this.value; syncEquipoReviewButton()">${esc(d.descripcion)}</textarea>
             </div>
             <div class="field">
               <label for="prov-eq">Proveedor</label>
@@ -911,7 +911,7 @@
             ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
             <div class="actions">
               <button class="secondary-btn" onclick="prevEquipoStep()">Atrás</button>
-              <button class="primary-btn" onclick="nextEquipoStep()" ${d.tipo && d.descripcion.trim() ? "" : "disabled"}>Revisar</button>
+              <button id="btn-equipo-revisar" class="primary-btn" onclick="nextEquipoStep()" ${puedeRevisarEquipo() ? "" : "disabled"}>Revisar</button>
             </div>
           `;
         } else {
@@ -1158,6 +1158,16 @@
         renderEquipoDraft();
       }
 
+      function puedeRevisarEquipo() {
+        const d = state.equipoDraft;
+        return Boolean(d.tipo && d.descripcion.trim());
+      }
+
+      function syncEquipoReviewButton() {
+        const button = document.getElementById("btn-equipo-revisar");
+        if (button) button.disabled = !puedeRevisarEquipo();
+      }
+
       function nextEquipoStep() {
         const d = state.equipoDraft;
         if (d.step === 1 && !d.activo) return;
@@ -1267,7 +1277,7 @@
           ` : d.modo === "reparacion" ? `
             <div class="field">
               <label for="falla-v">Descripción de la falla</label>
-              <textarea id="falla-v" placeholder="Qué falló y cómo se detectó" oninput="state.vehiculoDraft.descripcionFalla=this.value">${esc(d.descripcionFalla)}</textarea>
+              <textarea id="falla-v" placeholder="Qué falló y cómo se detectó" oninput="state.vehiculoDraft.descripcionFalla=this.value; syncVehiculoReviewButton()">${esc(d.descripcionFalla)}</textarea>
             </div>
             <div class="field">
               <label for="rep-v">Descripción de la reparación</label>
@@ -1308,7 +1318,7 @@
             ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
             <div class="actions">
               <button class="secondary-btn" onclick="prevVehiculoStep()">Atrás</button>
-              <button class="primary-btn" onclick="nextVehiculoStep()" ${puedeAvanzarVehiculo() ? "" : "disabled"}>Revisar</button>
+              <button id="btn-vehiculo-revisar" class="primary-btn" onclick="nextVehiculoStep()" ${puedeAvanzarVehiculo() ? "" : "disabled"}>Revisar</button>
             </div>
           `;
         } else {
@@ -1366,6 +1376,11 @@
         if (d.modo === "servicio") return Boolean(d.tipoServicio);
         if (d.modo === "reparacion") return Boolean(d.descripcionFalla.trim());
         return false;
+      }
+
+      function syncVehiculoReviewButton() {
+        const button = document.getElementById("btn-vehiculo-revisar");
+        if (button) button.disabled = !puedeAvanzarVehiculo();
       }
 
       function nextVehiculoStep() {
