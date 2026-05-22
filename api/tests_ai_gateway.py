@@ -306,6 +306,94 @@ class AIGatewayApiTests(APITestCase):
         self.assertEqual(payload["costo_unitario"], 78.5)
         self.assertEqual(payload["costo_source_insumo"], "Fresa Fresca")
 
+    def test_invoke_promotion_profitability_returns_financial_decision_table(self):
+        today = timezone.localdate()
+        products = [
+            ("FCM", "Fresas con crema mediana", Decimal("120.00"), Decimal("10"), Decimal("1200.00"), Decimal("450.00")),
+            ("FCG", "Fresas con crema grande", Decimal("180.00"), Decimal("6"), Decimal("1080.00"), Decimal("510.00")),
+            ("REB", "Rebanada de pastel fresa", Decimal("65.00"), Decimal("18"), Decimal("1170.00"), Decimal("540.00")),
+        ]
+        for sku, name, price, quantity, sales, cost in products:
+            product = PointProduct.objects.create(
+                external_id=f"{sku}-PROMO",
+                sku=sku,
+                name=name,
+                category="PROMO",
+                precio=price,
+            )
+            receta = Receta.objects.create(
+                nombre=name,
+                hash_contenido=f"hash-{sku.lower()}-promo",
+                codigo_point=sku,
+                tipo=Receta.TIPO_PRODUCTO_FINAL,
+            )
+            FactVentaDiaria.objects.create(
+                fecha=today,
+                sucursal=self.sucursal_1,
+                receta=receta,
+                point_product=product,
+                producto_clave=sku,
+                producto_nombre=name,
+                categoria="PROMO",
+                cantidad=quantity,
+                tickets=int(quantity),
+                venta_bruta=sales,
+                descuento=Decimal("0.00"),
+                venta_total=sales,
+                venta_neta=sales,
+                costo_estimado=cost,
+                margen=sales - cost,
+                source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE,
+            )
+
+        self.client.force_authenticate(self.user_dg)
+        response = self.client.post(
+            self._invoke_url("erp.analyze_promotion_profitability"),
+            {
+                "arguments": {
+                    "promotion_type": "3x2",
+                    "event_name": "Día del Estudiante",
+                    "product_queries": [
+                        "fresas con crema mediana",
+                        "fresas con crema grande",
+                        "rebanada de pastel",
+                    ],
+                    "expected_uplift_pct": 60,
+                    "marketing_budget": 300,
+                    "lookback_days": 30,
+                }
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        result = response.data["result"]
+        self.assertEqual(result["sources"], ["pos_bridge.PointProduct", "reportes.FactVentaDiaria", "recetas.Receta"])
+        payload = result["payload"]
+        self.assertEqual(payload["promotion_type"], "3x2")
+        self.assertEqual(payload["event_name"], "Día del Estudiante")
+        self.assertEqual(payload["expected_uplift_pct"], 60.0)
+        self.assertEqual(payload["returned"], 3)
+        self.assertIn("finance", payload)
+        self.assertIn("marketing", payload)
+        self.assertIn("operations", payload)
+        self.assertIn("accounting", payload)
+
+        mediana = next(row for row in payload["items"] if row["product_sku"] == "FCM")
+        self.assertEqual(mediana["normal_unit_price"], 120.0)
+        self.assertEqual(mediana["unit_cost"], 45.0)
+        self.assertEqual(mediana["promo_effective_unit_price"], 80.0)
+        self.assertEqual(mediana["normal_margin_per_unit"], 75.0)
+        self.assertEqual(mediana["promo_margin_per_unit"], 35.0)
+        self.assertEqual(mediana["baseline_units"], 10.0)
+        self.assertEqual(mediana["expected_units"], 16.0)
+        self.assertEqual(mediana["baseline_profit"], 750.0)
+        self.assertEqual(mediana["promo_profit"], 560.0)
+        self.assertEqual(mediana["profit_delta"], -190.0)
+        self.assertEqual(mediana["break_even_units"], 22)
+        self.assertEqual(mediana["recommendation"], "NO_CONVIENE")
+        self.assertGreaterEqual(len(payload["decision_summary"]["ranked_products"]), 3)
+
     def test_invoke_sales_summary_logs_audit(self):
         self.client.force_authenticate(self.user_lectura)
         response = self.client.post(
