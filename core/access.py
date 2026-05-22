@@ -407,7 +407,9 @@ def get_submodule_access(user: AbstractBaseUser, module: str, submodule: str) ->
     if _module_locked(user, module):
         return ACCESS_NONE
     if module in {"produccion", "ventas"} and submodule == "bonos":
-        if has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_RRHH):
+        if module == "produccion" and has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_RRHH, ROLE_PRODUCCION):
+            return ACCESS_MANAGE
+        if module == "ventas" and has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_RRHH, ROLE_VENTAS):
             return ACCESS_MANAGE
         return ACCESS_NONE
     key = f"{module}.{submodule}"
