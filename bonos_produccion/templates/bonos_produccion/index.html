@@ -109,6 +109,28 @@ tr:hover td{background:var(--bg)}
 .permission-reason{font-size:13px;color:var(--ink);background:var(--bg);border-radius:var(--r-sm);padding:8px}
 .permission-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
 .preview-note{font-size:12px;font-weight:700;color:var(--sub);background:var(--gold-light);border:1px solid rgba(201,168,76,.28);border-radius:var(--r-sm);padding:9px 10px}
+.print-modal{position:fixed;inset:0;z-index:80;background:rgba(28,21,32,.55);display:flex;align-items:flex-start;justify-content:center;padding:18px;overflow:auto}
+.print-dialog{background:var(--card);border-radius:var(--r);box-shadow:0 20px 50px rgba(28,21,32,.22);width:min(940px,100%);overflow:hidden}
+.print-dialog-hdr{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.print-dialog-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.05em}
+.print-actions{display:flex;gap:8px;flex-wrap:wrap}
+.print-preview{background:#ece7ee;padding:16px;overflow:auto}
+.print-page{width:216mm;min-height:279mm;background:#fff;color:#17121a;margin:0 auto;padding:15mm 16mm;box-shadow:0 8px 26px rgba(28,21,32,.18);font-family:Arial,sans-serif;font-size:12px;line-height:1.35}
+.print-head{display:flex;justify-content:space-between;gap:16px;border-bottom:2px solid #8B2252;padding-bottom:10px;margin-bottom:14px}
+.print-brand{font-family:"Playfair Display",serif;color:#8B2252;font-size:22px;font-weight:700}
+.print-doc-title{text-align:right;font-size:16px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+.print-folio{text-align:right;font-size:12px;font-weight:700;color:#6B5F70;margin-top:4px}
+.print-section{border:1px solid #E6DCEB;border-radius:6px;margin-top:10px;overflow:hidden}
+.print-section-title{background:#F7F1F5;color:#8B2252;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:7px 9px;border-bottom:1px solid #E6DCEB}
+.print-grid{display:grid;grid-template-columns:1fr 1fr;gap:0}
+.print-field{padding:8px 9px;border-right:1px solid #E6DCEB;border-bottom:1px solid #E6DCEB;min-height:42px}
+.print-field:nth-child(2n){border-right:none}
+.print-label{font-size:9px;color:#6B5F70;font-weight:800;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px}
+.print-value{font-size:12px;font-weight:700;color:#17121a;white-space:pre-wrap}
+.print-reason{padding:10px 9px;min-height:74px;white-space:pre-wrap}
+.signature-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:24px}
+.signature-line{border-top:1px solid #17121a;text-align:center;padding-top:6px;font-size:10px;font-weight:700;min-height:34px}
+.print-foot{margin-top:14px;font-size:10px;color:#6B5F70}
 .days-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:16px}
 .day-cell{aspect-ratio:1;border-radius:6px;border:1px solid var(--line);background:var(--bg);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--faint);transition:all .12s}
 .day-cell:hover{border-color:var(--wine);color:var(--wine)}
@@ -135,6 +157,13 @@ tr:hover td{background:var(--bg)}
 .pill-LOGISTICA{background:#E0F2FE;color:#075985}
 .pill-CRUCERO{background:#D1FAE5;color:#065F46}
 @media(max-width:700px){.hdr{padding:10px 14px}main{padding:14px}.metrics{grid-template-columns:1fr 1fr}.perm-layout{grid-template-columns:1fr}}
+@media(max-width:760px){.print-page{transform:scale(.56);transform-origin:top left;margin:0}.print-preview{max-height:70vh}.print-dialog{width:100%}}
+@media print{
+  @page{size:letter;margin:0}
+  body *{visibility:hidden!important}
+  .print-page,.print-page *{visibility:visible!important}
+  .print-page{position:absolute;left:0;top:0;width:216mm;min-height:279mm;margin:0;box-shadow:none;padding:15mm 16mm}
+}
 </style>
 </head>
 <body>
@@ -192,6 +221,73 @@ function EmployeeSearchList({items,selected,onSelect,placeholder,emptyText,metaT
         ),
         rightText&&h('div',{className:'employee-row-right'},rightText(b))
       )):h('div',{className:'employee-empty'},query?'Sin coincidencias para esa busqueda':(emptyText||'Sin empleados disponibles'))
+    )
+  );
+}
+function permisoDate(p){
+  const ini=new Date(p.fecha_inicio);
+  return ini.toLocaleDateString('es-MX',{day:'2-digit',month:'long',year:'numeric'});
+}
+function permisoTime(p){
+  if(p.tipo==='permiso_dia')return 'Todo el dia';
+  const ini=new Date(p.fecha_inicio);
+  const fin=p.fecha_fin?new Date(p.fecha_fin):null;
+  const horaIni=ini.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+  const horaFin=fin?fin.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}):'';
+  return `${horaIni} - ${horaFin}`;
+}
+function PrintField({label,value}){
+  return h('div',{className:'print-field'},h('div',{className:'print-label'},label),h('div',{className:'print-value'},value||'—'));
+}
+function PermisoPrintPage({permiso,contextLabel}){
+  return h('section',{className:'print-page'},
+    h('div',{className:'print-head'},
+      h('div',null,h('div',{className:'print-brand'},"Pollyana's Dolce"),h('div',{className:'print-foot'},'Capital Humano · Control de permisos')),
+      h('div',null,h('div',{className:'print-doc-title'},'Solicitud de permiso'),h('div',{className:'print-folio'},permiso.folio||'Sin folio'))
+    ),
+    h('div',{className:'print-section'},
+      h('div',{className:'print-section-title'},'Datos del colaborador'),
+      h('div',{className:'print-grid'},
+        h(PrintField,{label:'Empleado',value:permiso.empleado_nombre}),
+        h(PrintField,{label:'Area / sucursal',value:contextLabel}),
+        h(PrintField,{label:'Puesto',value:permiso.puesto||'—'}),
+        h(PrintField,{label:'Goce de sueldo',value:permiso.goce_label})
+      )
+    ),
+    h('div',{className:'print-section'},
+      h('div',{className:'print-section-title'},'Detalle del permiso'),
+      h('div',{className:'print-grid'},
+        h(PrintField,{label:'Tipo',value:permiso.tipo_label}),
+        h(PrintField,{label:'Fecha',value:permisoDate(permiso)}),
+        h(PrintField,{label:'Horario',value:permisoTime(permiso)}),
+        h(PrintField,{label:'Estado',value:permiso.estado_jefe==='preautorizado'?'Preautorizado por jefe':'Solicitado'})
+      )
+    ),
+    h('div',{className:'print-section'},
+      h('div',{className:'print-section-title'},'Motivo'),
+      h('div',{className:'print-reason'},permiso.motivo||'—')
+    ),
+    h('div',{className:'signature-grid'},
+      h('div',{className:'signature-line'},`Firma empleado · ${permiso.empleado_nombre||''}`),
+      h('div',{className:'signature-line'},'Preautoriza jefe directo'),
+      h('div',{className:'signature-line'},'Capital Humano')
+    ),
+    h('div',{className:'print-foot'},'Documento generado desde Bonos. La autorizacion final permanece en Capital Humano.')
+  );
+}
+function PermisoPrintModal({permiso,onClose,contextLabel}){
+  if(!permiso)return null;
+  const printNow=()=>setTimeout(()=>window.print(),50);
+  return h('div',{className:'print-modal'},
+    h('div',{className:'print-dialog'},
+      h('div',{className:'print-dialog-hdr'},
+        h('div',{className:'print-dialog-title'},'Vista previa tamaño carta'),
+        h('div',{className:'print-actions'},
+          h('button',{className:'btn btn-ghost btn-sm',onClick:onClose},'Cerrar'),
+          h('button',{className:'btn btn-wine btn-sm',onClick:printNow},'Imprimir / PDF')
+        )
+      ),
+      h('div',{className:'print-preview'},h(PermisoPrintPage,{permiso,contextLabel}))
     )
   );
 }
@@ -314,6 +410,7 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
   const [hasta,setHasta]=React.useState('14:30');
   const [motivo,setMotivo]=React.useState('');
   const [loading,setLoading]=React.useState(false);
+  const [previewPermiso,setPreviewPermiso]=React.useState(null);
   const equipoBase=empleados;
   const equipoArea=equipoBase.filter(b=>b.area===area);
   const equipo=equipoArea.length?equipoArea:equipoBase;
@@ -352,12 +449,15 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
       fecha_fin:tipo==='permiso_dia'?null:`${fecha}T${hasta}:00`,
       goce_sueldo:goce,
       motivo,
-    })}).then(p=>{showStatus(`Permiso ${p.folio} creado`,'ok');setMotivo('');cargarPermisos();}).catch(err=>showStatus(err.message,'err'));
+    })}).then(p=>{showStatus(`Permiso ${p.folio} creado`,'ok');setMotivo('');setPreviewPermiso(p);cargarPermisos();}).catch(err=>showStatus(err.message,'err'));
   }
   function accion(p,kind){
     api(`/api/bonos-produccion/permisos/${p.id}/${kind}/`,{method:'POST',body:'{}'})
       .then(()=>{showStatus(kind==='preautorizar'?'Permiso preautorizado':'Permiso rechazado','ok');cargarPermisos();})
       .catch(err=>showStatus(err.message,'err'));
+  }
+  function contextoPermiso(p){
+    return AREA_LABELS[p.area]||p.area||'Produccion';
   }
   function fmtFecha(p){
     const ini=new Date(p.fecha_inicio);
@@ -414,14 +514,17 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
               ),
               h('div',{className:'permission-meta'},`${p.tipo_label} · ${p.goce_label} · ${p.folio}`),
               h('div',{className:'permission-reason'},p.motivo),
-              p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('div',{className:'permission-actions'},
-                h('button',{className:'btn btn-ghost btn-sm',onClick:()=>accion(p,'rechazar')},'Rechazar'),
-                h('button',{className:'btn btn-wine btn-sm',onClick:()=>accion(p,'preautorizar')},'Preautorizar')
+              h('div',{className:'permission-actions'},
+                h('button',{className:'btn btn-ghost btn-sm',onClick:()=>setPreviewPermiso(p)},'Vista carta'),
+                h('button',{className:'btn btn-ghost btn-sm',onClick:()=>{setPreviewPermiso(p);setTimeout(()=>window.print(),80);}},'Imprimir / PDF'),
+                p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-ghost btn-sm',onClick:()=>accion(p,'rechazar')},'Rechazar'),
+                p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-wine btn-sm',onClick:()=>accion(p,'preautorizar')},'Preautorizar')
               )
             ))
           ):h('div',{className:'empty'},'Sin permisos registrados para esta area.')
         )
-      )
+      ),
+      previewPermiso&&h(PermisoPrintModal,{permiso:previewPermiso,onClose:()=>setPreviewPermiso(null),contextLabel:contextoPermiso(previewPermiso)})
     )
   );
 }
