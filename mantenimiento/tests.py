@@ -27,6 +27,9 @@ class MantenimientoUnifiedAccessTests(TestCase):
             module="mantenimiento",
             access=ACCESS_MANAGE,
         )
+        branch = Sucursal.objects.create(codigo="MNTAC", nombre="Mantenimiento Acceso", activa=True)
+        unidad = Unidad.objects.create(codigo="GS-MNT-AC", descripcion="Unidad acceso", sucursal=branch)
+        Repartidor.objects.create(user=self.mantenimiento, sucursal=branch, unidad_asignada=unidad)
         self.compras = user_model.objects.create_user(username="compras_logistica", password="test12345")
         Group.objects.get_or_create(name="compras_logistica")[0].user_set.add(self.compras)
 

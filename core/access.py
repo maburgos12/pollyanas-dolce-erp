@@ -237,6 +237,8 @@ def is_repartidor_only(user: AbstractBaseUser) -> bool:
         return False
     if _explicit_access_map(user).get("mermas.recepcion") == ACCESS_MANAGE:
         return False
+    if _explicit_access_map(user).get("mantenimiento") in {ACCESS_VIEW, ACCESS_MANAGE}:
+        return False
     groups = _group_names(user)
     if not (ROLE_REPARTIDOR in groups or hasattr(user, "repartidor_logistica")):
         return False
