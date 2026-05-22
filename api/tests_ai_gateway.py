@@ -421,6 +421,22 @@ class AIGatewayApiTests(APITestCase):
                 category=category,
                 precio=price,
             )
+            if sku in {"VFM", "VFG"}:
+                receta = Receta.objects.create(
+                    nombre=name,
+                    hash_contenido=f"hash-{sku.lower()}-recipe-promo2",
+                    codigo_point=sku,
+                    tipo=Receta.TIPO_PRODUCTO_FINAL,
+                )
+                RecetaCostoVersion.objects.create(
+                    receta=receta,
+                    version_num=1,
+                    hash_snapshot=f"hash-{sku.lower()}-recipe-cost-promo2",
+                    costo_mp=Decimal("0.00"),
+                    costo_mo=Decimal("0.00"),
+                    costo_indirecto=Decimal("0.00"),
+                    costo_total=Decimal("32.00") if sku == "VFM" else Decimal("36.00"),
+                )
             FactVentaDiaria.objects.create(
                 fecha=today,
                 sucursal=self.sucursal_1,
@@ -466,9 +482,17 @@ class AIGatewayApiTests(APITestCase):
         self.assertEqual(mediano["product_sku"], "VFM")
         self.assertEqual(mediano["product_name"], "Vaso Fresas con Crema Mediano")
         self.assertEqual(mediano["normal_unit_price"], 100.0)
+        self.assertEqual(mediano["receta"], "Vaso Fresas con Crema Mediano")
+        self.assertEqual(mediano["unit_cost"], 32.0)
+        self.assertEqual(mediano["cost_source"], "receta_costo_vigente")
+        self.assertEqual(mediano["observed_unit_cost"], 35.0)
         self.assertEqual(grande["product_sku"], "VFG")
         self.assertEqual(grande["product_name"], "Vaso Fresas con Crema Grande")
         self.assertEqual(grande["normal_unit_price"], 130.0)
+        self.assertEqual(grande["receta"], "Vaso Fresas con Crema Grande")
+        self.assertEqual(grande["unit_cost"], 36.0)
+        self.assertEqual(grande["cost_source"], "receta_costo_vigente")
+        self.assertEqual(grande["observed_unit_cost"], 45.0)
         self.assertEqual(mix["item_type"], "product_group")
         self.assertEqual(mix["product_sku"], "GRUPO_REBANADAS")
         self.assertEqual(mix["product_count"], 2)

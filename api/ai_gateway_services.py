@@ -1035,7 +1035,17 @@ def _handle_promotion_profitability(_user, arguments: dict[str, Any]) -> dict[st
         price = Decimal(str(product.precio or 0)) if product and product.precio else ZERO
         if price <= 0 and baseline_units > 0:
             price = observed_sales / baseline_units
-        unit_cost = observed_cost / baseline_units if baseline_units > 0 and observed_cost > 0 else _latest_recipe_cost(receta)
+        observed_unit_cost = observed_cost / baseline_units if baseline_units > 0 and observed_cost > 0 else ZERO
+        recipe_unit_cost = _latest_recipe_cost(receta)
+        if not group_products and recipe_unit_cost > 0:
+            unit_cost = recipe_unit_cost
+            cost_source = "receta_costo_vigente"
+        elif observed_unit_cost > 0:
+            unit_cost = observed_unit_cost
+            cost_source = "venta_historica_observada"
+        else:
+            unit_cost = recipe_unit_cost
+            cost_source = "receta_costo_vigente" if recipe_unit_cost > 0 else ""
         expected_units = (baseline_units * (Decimal("1") + (expected_uplift_pct / Decimal("100")))).quantize(Decimal("0.001"))
         promo_effective_price = price * Decimal("2") / Decimal("3")
         normal_margin = price - unit_cost
@@ -1085,6 +1095,9 @@ def _handle_promotion_profitability(_user, arguments: dict[str, Any]) -> dict[st
                 "receta": receta.nombre if receta else "",
                 "normal_unit_price": _float_money(price),
                 "unit_cost": _float_money(unit_cost),
+                "cost_source": cost_source,
+                "recipe_unit_cost": _float_money(recipe_unit_cost),
+                "observed_unit_cost": _float_money(observed_unit_cost),
                 "promo_effective_unit_price": _float_money(promo_effective_price),
                 "discount_pct": 33.33,
                 "normal_margin_per_unit": _float_money(normal_margin),
