@@ -339,8 +339,8 @@
       const AUTH_API = "/api/logistica";
       const app = document.getElementById("app");
       const state = {
-        token: localStorage.getItem("pd_logistica_access") || "",
-        refreshToken: localStorage.getItem("pd_logistica_refresh") || "",
+        token: localStorage.getItem("pd_mantenimiento_access") || "",
+        refreshToken: localStorage.getItem("pd_mantenimiento_refresh") || "",
         perfil: null,
         pantalla: "login",
         activos: [],
@@ -387,16 +387,25 @@
       function setTokens(data) {
         state.token = data.access;
         state.refreshToken = data.refresh;
-        localStorage.setItem("pd_logistica_access", data.access);
-        localStorage.setItem("pd_logistica_refresh", data.refresh);
+        localStorage.setItem("pd_mantenimiento_access", data.access);
+        localStorage.setItem("pd_mantenimiento_refresh", data.refresh);
+      }
+
+      async function useDjangoSessionToken() {
+        const res = await fetch(`${API}/session-token/`, {
+          headers: {"Accept": "application/json"}
+        });
+        if (!res.ok) return false;
+        setTokens(await res.json());
+        return true;
       }
 
       function logout(doRender = true) {
         state.token = "";
         state.refreshToken = "";
         state.perfil = null;
-        localStorage.removeItem("pd_logistica_access");
-        localStorage.removeItem("pd_logistica_refresh");
+        localStorage.removeItem("pd_mantenimiento_access");
+        localStorage.removeItem("pd_mantenimiento_refresh");
         if (doRender) showScreen("login");
       }
 
@@ -418,7 +427,7 @@
           if (refreshed.ok) {
             const data = await refreshed.json();
             state.token = data.access;
-            localStorage.setItem("pd_logistica_access", data.access);
+            localStorage.setItem("pd_mantenimiento_access", data.access);
             return apiFetch(path, {...options, _retry: true});
           }
           logout(false);
@@ -522,15 +531,18 @@
 
       async function loadPerfil() {
         const res = await apiFetch("/me/");
-        state.perfil = res.ok ? await res.json() : {nombre: "Compras"};
+        if (res.ok) {
+          state.perfil = await res.json();
+          return;
+        }
+        throw new Error("No tienes permisos para usar Mantenimiento.");
       }
 
       function renderDashboard() {
         render(shell(`
           <p style="margin:0 0 20px;color:var(--gold);font-weight:800;">¿Qué vas a registrar?</p>
-          <div class="dash-grid">
+          <div class="dash-grid" style="grid-template-columns:1fr;">
             <button class="dash-btn" onclick="startEquipo()">${appGlyph("equipo")}<span>Equipo / Maquinaria</span></button>
-            <button class="dash-btn" onclick="startVehiculo()">${appGlyph("vehiculo")}<span>Vehículo de flota</span></button>
           </div>
           <div style="margin-top:14px">
             <button class="secondary-btn" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px" onclick="showScreen('historial')">${appGlyph("historial")}<span>Ver historial reciente</span></button>
@@ -980,13 +992,22 @@
         if (state.token) {
           try {
             await showScreen("dashboard");
+            return;
           } catch (error) {
             logout(false);
-            renderLogin();
           }
-        } else {
-          renderLogin();
         }
+
+        try {
+          if (await useDjangoSessionToken()) {
+            await showScreen("dashboard");
+            return;
+          }
+        } catch (error) {
+          logout(false);
+        }
+
+        renderLogin();
       }
 
       boot();

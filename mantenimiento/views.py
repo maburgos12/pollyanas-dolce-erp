@@ -7,6 +7,7 @@ from rest_framework.authentication import SessionAuthentication, TokenAuthentica
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from activos.models import Activo, OrdenMantenimiento
 from logistica.models import ReparacionUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
@@ -144,6 +145,14 @@ def mi_perfil(request):
             "grupos": list(user.groups.values_list("name", flat=True)),
         }
     )
+
+
+@api_view(["GET"])
+@authentication_classes([SessionAuthentication])
+@permission_classes([EsComprasODG])
+def session_token(request):
+    refresh = RefreshToken.for_user(request.user)
+    return Response({"access": str(refresh.access_token), "refresh": str(refresh)})
 
 
 @login_required

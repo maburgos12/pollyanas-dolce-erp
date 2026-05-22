@@ -330,3 +330,35 @@ class OperacionAppTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["username"], "dg.mantenimiento.api")
+
+    def test_mantenimiento_session_token_uses_django_session_not_logistica_storage(self):
+        group = Group.objects.create(name=ROLE_DG)
+        user = self._user("dg.mantenimiento.token")
+        user.groups.add(group)
+        self.client.force_login(user)
+
+        response = self.client.get("/api/mantenimiento/session-token/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("access", payload)
+        self.assertIn("refresh", payload)
+
+        self.client.logout()
+        perfil = self.client.get("/api/mantenimiento/me/", HTTP_AUTHORIZATION=f"Bearer {payload['access']}")
+        self.assertEqual(perfil.status_code, 200)
+        self.assertEqual(perfil.json()["username"], "dg.mantenimiento.token")
+
+    def test_mantenimiento_pwa_uses_own_token_storage_and_hides_fleet_entry(self):
+        group = Group.objects.create(name=ROLE_DG)
+        user = self._user("dg.mantenimiento.preview")
+        user.groups.add(group)
+        self.client.force_login(user)
+
+        response = self.client.get("/mantenimiento/app/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "pd_mantenimiento_access")
+        self.assertNotContains(response, "pd_logistica_access")
+        self.assertContains(response, "Equipo / Maquinaria")
+        self.assertNotContains(response, "Vehículo de flota")

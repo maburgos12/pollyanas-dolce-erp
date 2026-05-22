@@ -4,6 +4,7 @@ from . import views
 
 urlpatterns = [
     path("me/", views.mi_perfil, name="mant-perfil"),
+    path("session-token/", views.session_token, name="mant-session-token"),
     path("activos/", views.ActivoListView.as_view(), name="mant-activos"),
     path("unidades/", views.UnidadListView.as_view(), name="mant-unidades"),
     path("tipos-servicio/", views.TipoServicioListView.as_view(), name="mant-tipos"),
