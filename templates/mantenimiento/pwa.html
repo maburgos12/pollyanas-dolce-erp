@@ -329,6 +329,85 @@
         padding: 22px;
         text-align: center;
       }
+      .summary-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin: 0 0 14px;
+      }
+      .summary-card {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--surface);
+        padding: 12px;
+      }
+      .summary-card strong {
+        display: block;
+        color: var(--gold);
+        font-size: 22px;
+        line-height: 1;
+      }
+      .summary-card span {
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 800;
+      }
+      .toolbar {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin: 0 0 14px;
+      }
+      .toolbar button {
+        min-height: 42px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #111118;
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 900;
+        padding: 9px;
+      }
+      .toolbar button.active {
+        border-color: var(--gold);
+        color: var(--gold);
+      }
+      .status-chip {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        color: var(--text-muted);
+        font-size: 11px;
+        font-weight: 900;
+        padding: 4px 8px;
+      }
+      .status-chip.critica,
+      .status-chip.alta { color: var(--danger); border-color: rgba(230,79,100,.45); }
+      .status-chip.proceso { color: var(--warning); border-color: rgba(230,184,79,.45); }
+      .status-chip.cerrada { color: var(--success); border-color: rgba(81,181,111,.45); }
+      .card-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .card-actions button {
+        min-height: 38px;
+        border-radius: 9px;
+        background: #111118;
+        border: 1px solid var(--border);
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 900;
+        padding: 8px 10px;
+      }
+      .search-row {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
     </style>
     <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}">
   </head>
@@ -346,6 +425,11 @@
         activos: [],
         unidades: [],
         tiposServicio: [],
+        ordenes: [],
+        ordenActual: null,
+        filtroOrdenes: "abiertas",
+        busquedaEquipo: "",
+        sucursalFiltro: "",
         equipoDraft: emptyEquipoDraft(),
         vehiculoDraft: emptyVehiculoDraft(),
       };
@@ -488,6 +572,10 @@
         if (name === "login") return renderLogin();
         if (!state.perfil) await loadPerfil();
         if (name === "dashboard") return renderDashboard();
+        if (name === "pendientes") return renderPendientes();
+        if (name === "buscar") return renderBuscarEquipo();
+        if (name === "seguimiento") return renderSeguimiento();
+        if (name === "reportes") return renderReportes();
         if (name === "equipo") return renderEquipoDraft();
         if (name === "vehiculo") return renderVehiculoDraft();
         if (name === "historial") return renderHistorial();
@@ -538,15 +626,156 @@
         throw new Error("No tienes permisos para usar Mantenimiento.");
       }
 
-      function renderDashboard() {
+      async function loadOrdenes(force = false) {
+        if (state.ordenes.length && !force) return state.ordenes;
+        const res = await apiFetch("/ordenes/");
+        state.ordenes = res.ok ? await parseListResponse(res) : [];
+        return state.ordenes;
+      }
+
+      function ordenAbierta(orden) {
+        return !["CERRADA", "CANCELADA"].includes(orden.estatus);
+      }
+
+      function metricasMantenimiento() {
+        const ordenes = state.ordenes || [];
+        return {
+          abiertas: ordenes.filter(ordenAbierta).length,
+          proceso: ordenes.filter((o) => o.estatus === "EN_PROCESO").length,
+          criticas: ordenes.filter((o) => ordenAbierta(o) && ["CRITICA", "ALTA"].includes(o.prioridad)).length,
+          cerradas: ordenes.filter((o) => o.estatus === "CERRADA").length,
+        };
+      }
+
+      function statusClass(orden) {
+        if (orden.estatus === "CERRADA") return "cerrada";
+        if (orden.estatus === "EN_PROCESO") return "proceso";
+        return String(orden.prioridad || "").toLowerCase();
+      }
+
+      function ordenCard(orden, {compact = false} = {}) {
+        return `
+          <article class="card report-card">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+              <div>
+                <p style="margin:0;font-weight:900">${esc(orden.activo_nombre || "Activo sin nombre")}</p>
+                <p class="muted">${esc(orden.activo_codigo || "")} · ${esc(orden.sucursal_nombre || "Sin sucursal")}</p>
+              </div>
+              <span class="status-chip ${statusClass(orden)}">${esc(orden.estatus_display || orden.estatus)}</span>
+            </div>
+            <p class="muted">${esc(orden.folio)} · ${esc(orden.tipo_display)} · ${esc(orden.prioridad_display)}</p>
+            ${compact ? "" : `<p style="margin:8px 0 0">${esc(orden.descripcion || "Sin descripción")}</p>`}
+            <div class="card-actions">
+              <button onclick="abrirOrden(${orden.id})">Ver seguimiento</button>
+              ${orden.estatus !== "EN_PROCESO" && ordenAbierta(orden) ? `<button onclick="actualizarOrdenRapida(${orden.id}, 'EN_PROCESO')">Iniciar</button>` : ""}
+              ${orden.estatus !== "CERRADA" ? `<button onclick="actualizarOrdenRapida(${orden.id}, 'CERRADA')">Cerrar</button>` : ""}
+            </div>
+          </article>
+        `;
+      }
+
+      async function renderDashboard() {
+        await loadOrdenes(true);
+        const m = metricasMantenimiento();
         render(shell(`
-          <p style="margin:0 0 20px;color:var(--gold);font-weight:800;">¿Qué vas a registrar?</p>
-          <div class="dash-grid" style="grid-template-columns:1fr;">
-            <button class="dash-btn" onclick="startEquipo()">${appGlyph("equipo")}<span>Equipo / Maquinaria</span></button>
+          <p style="margin:0 0 12px;color:var(--gold);font-weight:800;">Bandeja de mantenimiento</p>
+          <div class="summary-grid">
+            <div class="summary-card"><strong>${m.abiertas}</strong><span>Abiertas</span></div>
+            <div class="summary-card"><strong>${m.proceso}</strong><span>En proceso</span></div>
+            <div class="summary-card"><strong>${m.criticas}</strong><span>Críticas / altas</span></div>
+            <div class="summary-card"><strong>${m.cerradas}</strong><span>Cerradas</span></div>
+          </div>
+          <div class="dash-grid">
+            <button class="dash-btn" onclick="showScreen('pendientes')">${appGlyph("historial")}<span>Pendientes</span></button>
+            <button class="dash-btn" onclick="showScreen('buscar')">${appGlyph("equipo")}<span>Buscar equipo</span></button>
+            <button class="dash-btn" onclick="showScreen('seguimiento')">${appGlyph("historial")}<span>Seguimiento</span></button>
+            <button class="dash-btn" onclick="showScreen('reportes')">${appGlyph("historial")}<span>Reportes</span></button>
           </div>
           <div style="margin-top:14px">
-            <button class="secondary-btn" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px" onclick="showScreen('historial')">${appGlyph("historial")}<span>Ver historial reciente</span></button>
+            <button class="secondary-btn" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px" onclick="startEquipo()">${appGlyph("equipo")}<span>Registrar mantenimiento de equipo</span></button>
           </div>
+        `));
+      }
+
+      async function renderPendientes() {
+        await loadOrdenes(true);
+        const pendientes = state.ordenes.filter(ordenAbierta);
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
+          <h1 class="screen-title" style="margin-top:16px">Pendientes</h1>
+          <div class="toolbar">
+            <button class="${state.filtroOrdenes === "abiertas" ? "active" : ""}" onclick="state.filtroOrdenes='abiertas'; renderPendientes()">Abiertas</button>
+            <button class="${state.filtroOrdenes === "criticas" ? "active" : ""}" onclick="state.filtroOrdenes='criticas'; renderPendientes()">Críticas / altas</button>
+          </div>
+          ${(state.filtroOrdenes === "criticas" ? pendientes.filter((o) => ["CRITICA", "ALTA"].includes(o.prioridad)) : pendientes)
+            .map((orden) => ordenCard(orden)).join("") || `<div class="empty">Sin órdenes pendientes.</div>`}
+        `));
+      }
+
+      function sucursalesDesdeActivos() {
+        const map = new Map();
+        state.activos.forEach((activo) => {
+          if (activo.sucursal) map.set(String(activo.sucursal), activo.sucursal_nombre || "Sin nombre");
+        });
+        return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], "es"));
+      }
+
+      async function renderBuscarEquipo() {
+        await ensureActivos();
+        const q = state.busquedaEquipo.toLowerCase();
+        const filtrados = state.activos.filter((activo) => {
+          const matchesSucursal = !state.sucursalFiltro || String(activo.sucursal) === String(state.sucursalFiltro);
+          const text = `${activo.nombre} ${activo.codigo} ${activo.categoria} ${activo.ubicacion} ${activo.sucursal_nombre}`.toLowerCase();
+          return matchesSucursal && (!q || text.includes(q));
+        });
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
+          <h1 class="screen-title" style="margin-top:16px">Buscar equipo</h1>
+          <div class="search-row">
+            <select onchange="state.sucursalFiltro=this.value; renderBuscarEquipo()">
+              <option value="">Todas las sucursales</option>
+              ${sucursalesDesdeActivos().map(([id, nombre]) => `<option value="${id}" ${String(state.sucursalFiltro) === String(id) ? "selected" : ""}>${esc(nombre)}</option>`).join("")}
+            </select>
+            <input type="search" placeholder="Nombre, código, categoría o ubicación" value="${esc(state.busquedaEquipo)}" oninput="state.busquedaEquipo=this.value; renderBuscarEquipo()">
+          </div>
+          ${filtrados.map((activo) => `
+            <article class="card report-card">
+              <p style="margin:0;font-weight:900">${esc(activo.nombre)}</p>
+              <p class="muted">${esc(activo.codigo)} · ${esc(activo.sucursal_nombre || "Sin sucursal")}</p>
+              <p class="muted">${esc(activo.categoria || "Sin categoría")} · ${esc(activo.ubicacion || "Sin ubicación")}</p>
+              <div class="card-actions">
+                <button onclick="iniciarEquipoDesdeActivo(${activo.id})">Registrar mantenimiento</button>
+                <button onclick="verOrdenesActivo(${activo.id})">Ver órdenes</button>
+              </div>
+            </article>
+          `).join("") || `<div class="empty">Sin equipos con esos filtros.</div>`}
+        `));
+      }
+
+      async function renderSeguimiento() {
+        await loadOrdenes(true);
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
+          <h1 class="screen-title" style="margin-top:16px">Seguimiento</h1>
+          ${state.ordenes.filter(ordenAbierta).map((orden) => ordenCard(orden)).join("") || `<div class="empty">Sin trabajos activos.</div>`}
+        `));
+      }
+
+      async function renderReportes() {
+        await loadOrdenes(true);
+        await ensureActivos();
+        const m = metricasMantenimiento();
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
+          <h1 class="screen-title" style="margin-top:16px">Reportes</h1>
+          <div class="summary-grid">
+            <div class="summary-card"><strong>${m.abiertas}</strong><span>Abiertas</span></div>
+            <div class="summary-card"><strong>${m.criticas}</strong><span>Urgentes</span></div>
+            <div class="summary-card"><strong>${m.cerradas}</strong><span>Cerradas</span></div>
+            <div class="summary-card"><strong>${state.activos.length}</strong><span>Equipos</span></div>
+          </div>
+          <p style="color:var(--gold);font-weight:800;margin:14px 0 10px">Últimos movimientos</p>
+          ${state.ordenes.slice(0, 8).map((orden) => ordenCard(orden, {compact: true})).join("") || `<div class="empty">Sin órdenes registradas.</div>`}
         `));
       }
 
@@ -656,6 +885,120 @@
         state.equipoDraft.activo = activo.id;
         state.equipoDraft.activoLabel = `${activo.nombre} (${activo.codigo})`;
         renderEquipoDraft();
+      }
+
+      function iniciarEquipoDesdeActivo(id) {
+        const activo = state.activos.find((item) => item.id === id);
+        if (!activo) return;
+        state.equipoDraft = emptyEquipoDraft();
+        state.equipoDraft.activo = activo.id;
+        state.equipoDraft.activoLabel = `${activo.nombre} (${activo.codigo})`;
+        state.equipoDraft.step = 2;
+        showScreen("equipo");
+      }
+
+      async function verOrdenesActivo(id) {
+        const res = await apiFetch(`/ordenes/?activo=${id}`);
+        const ordenes = res.ok ? await parseListResponse(res) : [];
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('buscar')">Volver</button>
+          <h1 class="screen-title" style="margin-top:16px">Órdenes del equipo</h1>
+          ${ordenes.map((orden) => ordenCard(orden)).join("") || `<div class="empty">Este equipo no tiene órdenes registradas.</div>`}
+        `));
+      }
+
+      async function abrirOrden(id) {
+        const res = await apiFetch(`/ordenes/${id}/`);
+        if (!res.ok) return renderSeguimiento();
+        state.ordenActual = await res.json();
+        renderOrdenDetalle();
+      }
+
+      function renderOrdenDetalle(error = "") {
+        const orden = state.ordenActual;
+        if (!orden) return showScreen("seguimiento");
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('seguimiento')">Volver</button>
+          <h1 class="screen-title" style="margin-top:16px">${esc(orden.folio)}</h1>
+          <section class="card report-card">
+            <p style="margin:0;font-weight:900">${esc(orden.activo_nombre)}</p>
+            <p class="muted">${esc(orden.activo_codigo)} · ${esc(orden.sucursal_nombre || "Sin sucursal")}</p>
+            <div class="kv"><b>Estatus</b><span>${esc(orden.estatus_display)}</span></div>
+            <div class="kv"><b>Prioridad</b><span>${esc(orden.prioridad_display)}</span></div>
+            <div class="kv"><b>Responsable</b><span>${esc(orden.responsable || "-")}</span></div>
+            <div class="kv"><b>Costo</b><span>${orden.costo_total ? "$" + Number(orden.costo_total).toLocaleString("es-MX") : "-"}</span></div>
+            <p>${esc(orden.descripcion || "Sin descripción")}</p>
+          </section>
+          <section class="card report-card">
+            <div class="field">
+              <label>Estatus</label>
+              <select id="seguimiento-estatus">
+                <option value="PENDIENTE" ${orden.estatus === "PENDIENTE" ? "selected" : ""}>Pendiente</option>
+                <option value="EN_PROCESO" ${orden.estatus === "EN_PROCESO" ? "selected" : ""}>En proceso</option>
+                <option value="CERRADA" ${orden.estatus === "CERRADA" ? "selected" : ""}>Cerrada</option>
+                <option value="CANCELADA" ${orden.estatus === "CANCELADA" ? "selected" : ""}>Cancelada</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Responsable</label>
+              <input id="seguimiento-responsable" value="${esc(orden.responsable || "")}" placeholder="Técnico o proveedor">
+            </div>
+            <div class="field">
+              <label>Comentario de seguimiento</label>
+              <textarea id="seguimiento-comentario" placeholder="Qué se revisó, avance, pendiente o cierre"></textarea>
+            </div>
+            <div class="field">
+              <label>Costo adicional</label>
+              <input id="seguimiento-costo" type="number" step="0.01" min="0" placeholder="0.00">
+            </div>
+            ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
+            <button class="primary-btn" onclick="guardarSeguimientoOrden()">Guardar seguimiento</button>
+          </section>
+          <p style="color:var(--gold);font-weight:800;margin:14px 0 10px">Bitácora</p>
+          ${(orden.bitacora || []).map((item) => `
+            <article class="card report-card">
+              <p style="margin:0;font-weight:900">${esc(item.accion)}</p>
+              <p class="muted">${esc(item.fecha_display)} · ${esc(item.usuario_nombre || "")}</p>
+              <p>${esc(item.comentario || "Sin comentario")}</p>
+            </article>
+          `).join("") || `<div class="empty">Sin seguimiento registrado.</div>`}
+        `));
+      }
+
+      async function guardarSeguimientoOrden() {
+        const orden = state.ordenActual;
+        if (!orden) return;
+        const payload = {
+          estatus: document.getElementById("seguimiento-estatus")?.value,
+          responsable: document.getElementById("seguimiento-responsable")?.value || "",
+          comentario: document.getElementById("seguimiento-comentario")?.value || "",
+        };
+        const costo = document.getElementById("seguimiento-costo")?.value;
+        if (costo) payload.costo_adicional = costo;
+        const res = await apiFetch(`/ordenes/${orden.id}/`, {
+          method: "PATCH",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          return renderOrdenDetalle(Object.values(err).flat().join(" ") || "No se pudo guardar el seguimiento.");
+        }
+        state.ordenActual = await res.json();
+        state.ordenes = [];
+        renderOrdenDetalle();
+      }
+
+      async function actualizarOrdenRapida(id, estatus) {
+        const res = await apiFetch(`/ordenes/${id}/`, {
+          method: "PATCH",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({estatus, comentario: estatus === "CERRADA" ? "Cierre rápido desde bandeja." : "Inicio desde bandeja."}),
+        });
+        if (res.ok) {
+          state.ordenes = [];
+          await showScreen(state.pantalla || "dashboard");
+        }
       }
 
       function filtrarActivos(q) {

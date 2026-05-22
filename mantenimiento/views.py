@@ -2,20 +2,23 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db.models import Q
 from django.shortcuts import render
-from rest_framework import generics, permissions
+from rest_framework import generics, permissions, status
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from core.access import can_view_module
 from activos.models import Activo, OrdenMantenimiento
 from logistica.models import ReparacionUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
 
 from .serializers import (
     ActivoListSerializer,
     OrdenMantenimientoCreateSerializer,
+    OrdenMantenimientoDetailSerializer,
     OrdenMantenimientoListSerializer,
+    OrdenMantenimientoSeguimientoSerializer,
     ReparacionCreateSerializer,
     ReparacionListSerializer,
     ServicioCreateSerializer,
@@ -28,13 +31,13 @@ AUTH = [JWTAuthentication, TokenAuthentication, SessionAuthentication]
 
 
 class EsComprasODG(permissions.BasePermission):
-    GRUPOS = {"compras_logistica", "dg", "DG"}
+    GRUPOS = {"compras_logistica", "dg", "DG", "mantenimiento", "MANTENIMIENTO"}
 
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
         grupos = set(request.user.groups.values_list("name", flat=True))
-        return bool(grupos & self.GRUPOS) or request.user.is_superuser
+        return bool(grupos & self.GRUPOS) or request.user.is_superuser or can_view_module(request.user, "activos")
 
 
 class ActivoListView(generics.ListAPIView):
@@ -88,14 +91,47 @@ class OrdenMantenimientoListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         qs = OrdenMantenimiento.objects.select_related(
             "activo_ref", "activo_ref__sucursal", "creado_por"
-        ).order_by("-id")
+        ).prefetch_related("bitacora").order_by("-id")
         activo = self.request.query_params.get("activo")
         estatus = self.request.query_params.get("estatus")
+        sucursal = self.request.query_params.get("sucursal")
+        prioridad = self.request.query_params.get("prioridad")
+        q = self.request.query_params.get("q")
         if activo:
             qs = qs.filter(activo_ref_id=activo)
         if estatus:
             qs = qs.filter(estatus=estatus)
+        if sucursal:
+            qs = qs.filter(activo_ref__sucursal_id=sucursal)
+        if prioridad:
+            qs = qs.filter(prioridad=prioridad)
+        if q:
+            qs = qs.filter(
+                Q(folio__icontains=q)
+                | Q(descripcion__icontains=q)
+                | Q(responsable__icontains=q)
+                | Q(activo_ref__nombre__icontains=q)
+                | Q(activo_ref__codigo__icontains=q)
+                | Q(activo_ref__sucursal__nombre__icontains=q)
+            )
         return qs
+
+
+class OrdenMantenimientoDetailView(generics.RetrieveAPIView):
+    authentication_classes = AUTH
+    permission_classes = [EsComprasODG]
+    queryset = OrdenMantenimiento.objects.select_related("activo_ref", "activo_ref__sucursal").prefetch_related("bitacora")
+    serializer_class = OrdenMantenimientoDetailSerializer
+
+    def patch(self, request, *args, **kwargs):
+        orden = self.get_object()
+        serializer = OrdenMantenimientoSeguimientoSerializer(
+            data=request.data,
+            context={"orden": orden, "request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        orden = serializer.save()
+        return Response(OrdenMantenimientoDetailSerializer(orden).data, status=status.HTTP_200_OK)
 
 
 class ReparacionListCreateView(generics.ListCreateAPIView):

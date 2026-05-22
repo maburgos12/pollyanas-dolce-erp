@@ -2,6 +2,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.test import TestCase, override_settings
 
+from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento
 from core.access import ACCESS_MANAGE, ACCESS_VIEW, ROLE_DG, ROLE_LOGISTICA, ROLE_REPARTIDOR
 from core.models import Sucursal, UserModuleAccess, UserProfile
 from logistica.models import Repartidor, Unidad
@@ -360,5 +361,72 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "pd_mantenimiento_access")
         self.assertNotContains(response, "pd_logistica_access")
-        self.assertContains(response, "Equipo / Maquinaria")
+        self.assertContains(response, "Bandeja de mantenimiento")
+        self.assertContains(response, "Pendientes")
+        self.assertContains(response, "Buscar equipo")
+        self.assertContains(response, "Seguimiento")
+        self.assertContains(response, "Reportes")
+        self.assertContains(response, "Registrar mantenimiento de equipo")
         self.assertNotContains(response, "Vehículo de flota")
+
+    def test_mantenimiento_group_gets_app_tile_and_pwa_access(self):
+        group = Group.objects.create(name="MANTENIMIENTO")
+        user = self._user("tecnico.mantenimiento")
+        user.groups.add(group)
+        self.client.force_login(user)
+
+        app = self.client.get("/app/")
+        pwa = self.client.get("/mantenimiento/app/")
+        token = self.client.get("/api/mantenimiento/session-token/")
+
+        self.assertEqual(app.status_code, 200)
+        self.assertContains(app, "Mantenimiento")
+        self.assertEqual(pwa.status_code, 200)
+        self.assertEqual(token.status_code, 200)
+
+    def test_activos_access_gets_mantenimiento_app_and_api(self):
+        user = self._user("activos.mantenimiento")
+        self._grant(user, "activos", access=ACCESS_VIEW)
+        self.client.force_login(user)
+
+        app = self.client.get("/app/")
+        pwa = self.client.get("/mantenimiento/app/")
+        perfil = self.client.get("/api/mantenimiento/me/")
+
+        self.assertEqual(app.status_code, 200)
+        self.assertContains(app, "Mantenimiento")
+        self.assertEqual(pwa.status_code, 200)
+        self.assertEqual(perfil.status_code, 200)
+
+    def test_mantenimiento_order_followup_updates_status_and_bitacora(self):
+        group = Group.objects.create(name="MANTENIMIENTO")
+        user = self._user("tecnico.seguimiento")
+        user.groups.add(group)
+        activo = Activo.objects.create(nombre="Batidora QA", sucursal=self.sucursal, categoria="Producción")
+        orden = OrdenMantenimiento.objects.create(
+            activo_ref=activo,
+            tipo=OrdenMantenimiento.TIPO_CORRECTIVO,
+            prioridad=OrdenMantenimiento.PRIORIDAD_ALTA,
+            estatus=OrdenMantenimiento.ESTATUS_PENDIENTE,
+            descripcion="Ruido en motor",
+        )
+        self.client.force_login(user)
+
+        response = self.client.patch(
+            f"/api/mantenimiento/ordenes/{orden.id}/",
+            data={
+                "estatus": OrdenMantenimiento.ESTATUS_EN_PROCESO,
+                "responsable": "Técnico QA",
+                "comentario": "Se inició revisión del motor.",
+                "costo_adicional": "125.50",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        orden.refresh_from_db()
+        self.assertEqual(orden.estatus, OrdenMantenimiento.ESTATUS_EN_PROCESO)
+        self.assertEqual(orden.responsable, "Técnico QA")
+        self.assertIsNotNone(orden.fecha_inicio)
+        self.assertEqual(BitacoraMantenimiento.objects.filter(orden=orden).count(), 1)
+        self.assertIn("Se inició revisión del motor.", BitacoraMantenimiento.objects.get(orden=orden).comentario)

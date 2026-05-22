@@ -6,8 +6,8 @@ from core.access import (
     ACCESS_MANAGE,
     ROLE_DG,
     ROLE_LOGISTICA,
-    can_manage_submodule,
     can_view_module,
+    can_manage_submodule,
     can_view_submodule,
     is_branch_capture_only,
     is_repartidor_only,
@@ -55,7 +55,15 @@ def _can_receive_mermas(user) -> bool:
 
 def _can_use_mantenimiento(user) -> bool:
     groups = _group_names(user)
-    return user.is_superuser or ROLE_DG in groups or "dg" in groups or "compras_logistica" in groups
+    return (
+        user.is_superuser
+        or ROLE_DG in groups
+        or "dg" in groups
+        or "compras_logistica" in groups
+        or "mantenimiento" in groups
+        or "MANTENIMIENTO" in groups
+        or can_view_module(user, "activos")
+    )
 
 
 def _append_logistica_tiles(tiles: list[OperacionTile], user, *, mobile_only: bool = False) -> None:
