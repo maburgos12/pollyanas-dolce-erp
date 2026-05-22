@@ -14,6 +14,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
 from core.access import can_manage_logistica, can_view_logistica
@@ -149,6 +150,25 @@ def _reportes_with_reafirmaciones(qs):
 
 class LogisticaTokenView(TokenObtainPairView):
     parser_classes = [JSONParser, FormParser]
+
+
+class LogisticaSessionTokenView(_LogisticaBaseView):
+    authentication_classes = [SessionAuthentication]
+
+    def get(self, request):
+        user = request.user
+        if not (
+            user.is_superuser
+            or _is_repartidor(user)
+            or _get_repartidor_for_user(user)
+            or _is_compras_logistica(user)
+            or _is_supervisor_logistica(user)
+            or can_view_logistica(user)
+        ):
+            return Response({"detail": "No tienes acceso a logística."}, status=status.HTTP_403_FORBIDDEN)
+
+        refresh = RefreshToken.for_user(user)
+        return Response({"access": str(refresh.access_token), "refresh": str(refresh)}, status=status.HTTP_200_OK)
 
 
 class LogisticaMiPerfilView(_LogisticaBaseView):
@@ -647,7 +667,7 @@ class LogisticaBitacoraSalidaActivaView(_LogisticaBaseView):
             .first()
         )
         if not bitacora:
-            return Response({"detail": "No hay turno abierto."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(status=status.HTTP_204_NO_CONTENT)
         return Response(LogisticaBitacoraSalidaLlegadaSerializer(bitacora).data, status=status.HTTP_200_OK)
 
 

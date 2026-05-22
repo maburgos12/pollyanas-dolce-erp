@@ -3,8 +3,9 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from core.models import Sucursal
 from crm.models import Cliente, PedidoCliente
-from logistica.models import EntregaRuta, RutaEntrega
+from logistica.models import EntregaRuta, Repartidor, RutaEntrega, Unidad
 
 
 class LogisticaViewsTests(TestCase):
@@ -207,3 +208,42 @@ class LogisticaViewsTests(TestCase):
         resp = self.client.get(reverse("logistica:rutas"))
         self.assertEqual(resp.status_code, 302)
         self.assertIn("/login/", resp.url)
+
+
+class LogisticaPwaApiTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="repartidor.api", password="pass123")
+        group, _ = Group.objects.get_or_create(name="repartidor")
+        self.user.groups.add(group)
+        self.sucursal = Sucursal.objects.create(codigo="QA-LOG", nombre="QA Logística", activa=True)
+        self.unidad = Unidad.objects.create(codigo="QA-LOG-1", descripcion="Unidad QA", sucursal=self.sucursal)
+        self.repartidor = Repartidor.objects.create(user=self.user, sucursal=self.sucursal, unidad_asignada=self.unidad)
+        self.client.force_login(self.user)
+
+    def test_bitacora_activa_without_open_shift_returns_null_not_404(self):
+        response = self.client.get(reverse("api_logistica_bitacora_salida_activa"))
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.content, b"")
+
+    def test_session_token_bridges_unified_app_login_to_logistica_pwa(self):
+        response = self.client.get(reverse("api_logistica_auth_session_token"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("access", payload)
+        self.assertIn("refresh", payload)
+
+        self.client.logout()
+        perfil = self.client.get(reverse("api_logistica_mi_perfil"), HTTP_AUTHORIZATION=f"Bearer {payload['access']}")
+        self.assertEqual(perfil.status_code, 200)
+        self.assertEqual(perfil.json()["user"]["username"], self.user.username)
+
+    def test_session_token_rejects_users_without_logistica_access(self):
+        self.client.logout()
+        other = User.objects.create_user(username="sin.logistica", password="pass123")
+        self.client.force_login(other)
+
+        response = self.client.get(reverse("api_logistica_auth_session_token"))
+
+        self.assertEqual(response.status_code, 403)

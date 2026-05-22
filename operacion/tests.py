@@ -165,6 +165,36 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "Mis reportes")
         self.assertNotContains(response, "Reportar falla")
 
+    def test_fallas_branch_user_actions_return_to_unified_app_not_dashboard(self):
+        user = self._user("fallas.sucursal", sucursal=self.sucursal)
+        self._grant(user, "fallas.reportar")
+        self._grant(user, "fallas.mis_reportes")
+        self.client.force_login(user)
+
+        reportar = self.client.get("/fallas/reportar/")
+        mis_reportes = self.client.get("/fallas/mis-reportes/")
+
+        self.assertEqual(reportar.status_code, 200)
+        self.assertContains(reportar, 'href="/app/"')
+        self.assertNotContains(reportar, 'href="/fallas/"')
+        self.assertNotContains(reportar, "Categorías")
+        self.assertEqual(mis_reportes.status_code, 200)
+        self.assertNotContains(mis_reportes, 'href="/fallas/"')
+        self.assertNotContains(mis_reportes, "Categorías")
+
+    def test_fallas_dashboard_user_keeps_dashboard_navigation(self):
+        user = self._user("fallas.dashboard")
+        self._grant(user, "fallas.reportar")
+        self._grant(user, "fallas.mis_reportes")
+        self._grant(user, "fallas.dashboard")
+        self.client.force_login(user)
+
+        response = self.client.get("/fallas/reportar/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'href="/fallas/"')
+        self.assertNotContains(response, 'href="/app/"')
+
     def test_locked_logistica_profile_hides_logistica_tiles_even_with_role(self):
         group = Group.objects.create(name=ROLE_LOGISTICA)
         user = self._user("logistica.bloqueado")

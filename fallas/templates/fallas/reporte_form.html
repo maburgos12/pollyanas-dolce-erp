@@ -30,10 +30,12 @@
 {% block content %}
 <div class="module-shell bi-shell" id="fallas-app">
   <nav class="module-tabs">
+    {% if can_dashboard %}
     <a href="{% url 'fallas:dashboard' %}" class="module-tab">Dashboard</a>
+    {% endif %}
     <a href="{% url 'fallas:pwa-reporte' %}" class="module-tab active">Reportar falla</a>
     <a href="{% url 'fallas:pwa-mis-reportes' %}" class="module-tab">Mis reportes</a>
-    {% if es_dg %}
+    {% if can_dashboard and es_dg %}
     <a href="{% url 'fallas:dashboard' %}?tab=categorias" class="module-tab">Categorías</a>
     {% endif %}
   </nav>
@@ -116,7 +118,11 @@
       </label>
 
       <div class="fallas-actions">
+        {% if can_dashboard %}
         <a class="btn-soft" href="{% url 'fallas:dashboard' %}">Cancelar</a>
+        {% else %}
+        <a class="btn-soft" href="{% url 'operacion:app_home' %}">Cancelar</a>
+        {% endif %}
         <button class="btn-wine" type="submit">Enviar reporte</button>
       </div>
     </form>

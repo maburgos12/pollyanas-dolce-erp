@@ -1418,6 +1418,15 @@
         localStorage.setItem("pd_logistica_refresh", data.refresh);
       }
 
+      async function useDjangoSessionToken() {
+        const response = await fetch(`${API}/auth/session-token/`, {
+          headers: { "Accept": "application/json" }
+        });
+        if (!response.ok) return false;
+        setTokens(await response.json());
+        return true;
+      }
+
       function logout(render = true) {
         state.token = "";
         state.refreshToken = "";
@@ -1537,6 +1546,10 @@
 
       async function loadTurnoActivo() {
         const response = await apiFetch("/bitacora-salida/activa/");
+        if (response.status === 204) {
+          state.bitacoraSalida = null;
+          return state.bitacoraSalida;
+        }
         state.bitacoraSalida = response.ok ? await response.json() : null;
         return state.bitacoraSalida;
       }
@@ -3180,13 +3193,22 @@
         if (state.token) {
           try {
             await abrirPantallaInicial();
+            return;
           } catch (error) {
             logout(false);
-            renderLogin();
           }
-        } else {
-          renderLogin();
         }
+
+        try {
+          if (await useDjangoSessionToken()) {
+            await abrirPantallaInicial();
+            return;
+          }
+        } catch (error) {
+          logout(false);
+        }
+
+        renderLogin();
       }
 
       boot();
