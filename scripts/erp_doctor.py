@@ -1347,7 +1347,6 @@ def check_page_load_performance() -> CheckResult:
     try:
         _setup_django()
         from django.contrib.auth import get_user_model
-        from django.test import Client
     except Exception as exc:  # noqa: BLE001
         return CheckResult(
             name="Page load performance",
@@ -1381,57 +1380,123 @@ def check_page_load_performance() -> CheckResult:
             "Django test client force_login",
         )
 
-    client = Client(HTTP_HOST="erp.pollyanasdolce.com")
-    client.force_login(user)
     details: list[dict[str, object]] = []
     fail_count = 0
     warn_count = 0
+    route_script = """
+import json
+import os
+import time
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+import django
+django.setup()
+
+from django.contrib.auth import get_user_model
+from django.test import Client
+
+path = os.environ["ERP_DOCTOR_ROUTE_PATH"]
+user_id = os.environ["ERP_DOCTOR_USER_ID"]
+user = get_user_model().objects.get(pk=user_id)
+client = Client(HTTP_HOST="erp.pollyanasdolce.com")
+client.force_login(user)
+started = time.monotonic()
+response = client.get(path, follow=True, secure=True)
+duration_ms = int((time.monotonic() - started) * 1000)
+print(json.dumps({
+    "status_code": int(response.status_code),
+    "duration_ms": duration_ms,
+    "content_bytes": len(getattr(response, "content", b"") or b""),
+    "redirect_chain": [
+        {"url": url, "status_code": code}
+        for url, code in getattr(response, "redirect_chain", [])
+    ],
+}))
+"""
 
     for label, path in PAGE_LOAD_ROUTES:
         route_started = time.monotonic()
+        route_env = {
+            **os.environ,
+            "ERP_DOCTOR_ROUTE_PATH": path,
+            "ERP_DOCTOR_USER_ID": str(user.pk),
+        }
         try:
-            response = client.get(path, follow=True, secure=True)
-            duration_ms = int((time.monotonic() - route_started) * 1000)
-            status_code = int(response.status_code)
-            redirect_chain = [
-                {"url": url, "status_code": code}
-                for url, code in getattr(response, "redirect_chain", [])
-            ]
-            content_size = len(getattr(response, "content", b"") or b"")
-            if status_code >= 500 or duration_ms >= PAGE_LOAD_FAIL_MS:
-                route_status = "FAIL"
-                fail_count += 1
-            elif status_code >= 400 or duration_ms >= PAGE_LOAD_WARN_MS:
-                route_status = "WARN"
-                warn_count += 1
-            else:
-                route_status = "OK"
-            if status_code >= 400:
-                summary = f"HTTP {status_code} en {duration_ms}ms"
-            elif duration_ms >= PAGE_LOAD_WARN_MS:
-                summary = f"carga lenta: {duration_ms}ms"
-            else:
-                summary = f"{status_code} en {duration_ms}ms"
-            details.append({
-                "label": label,
-                "status": route_status,
-                "summary": summary,
-                "path": path,
-                "status_code": status_code,
-                "duration_ms": duration_ms,
-                "content_bytes": content_size,
-                "redirect_chain": redirect_chain,
-            })
-        except Exception as exc:  # noqa: BLE001
+            completed = subprocess.run(
+                [python_bin(), "-c", route_script],
+                cwd=ROOT,
+                env=route_env,
+                text=True,
+                capture_output=True,
+                timeout=15,
+            )
+        except subprocess.TimeoutExpired as exc:
             duration_ms = int((time.monotonic() - route_started) * 1000)
             fail_count += 1
             details.append({
                 "label": label,
                 "status": "FAIL",
-                "summary": f"excepcion cargando pagina: {exc}",
+                "summary": "timeout cargando pagina",
                 "path": path,
                 "duration_ms": duration_ms,
+                "stdout": trim_output(exc.stdout or "", limit=1000),
+                "stderr": trim_output(exc.stderr or "", limit=1000),
             })
+            continue
+        duration_ms = int((time.monotonic() - route_started) * 1000)
+        if completed.returncode != 0:
+            fail_count += 1
+            details.append({
+                "label": label,
+                "status": "FAIL",
+                "summary": f"subproceso fallo con exit code {completed.returncode}",
+                "path": path,
+                "duration_ms": duration_ms,
+                "stdout": trim_output(completed.stdout, limit=1000),
+                "stderr": trim_output(completed.stderr, limit=2000),
+            })
+            continue
+        try:
+            payload = json.loads(completed.stdout)
+        except json.JSONDecodeError as exc:
+            fail_count += 1
+            details.append({
+                "label": label,
+                "status": "FAIL",
+                "summary": f"respuesta JSON invalida del smoke de pagina: {exc}",
+                "path": path,
+                "duration_ms": duration_ms,
+                "stdout": trim_output(completed.stdout, limit=2000),
+                "stderr": trim_output(completed.stderr, limit=2000),
+            })
+            continue
+
+        route_duration_ms = int(payload["duration_ms"])
+        status_code = int(payload["status_code"])
+        if status_code >= 500 or route_duration_ms >= PAGE_LOAD_FAIL_MS:
+            route_status = "FAIL"
+            fail_count += 1
+        elif status_code >= 400 or route_duration_ms >= PAGE_LOAD_WARN_MS:
+            route_status = "WARN"
+            warn_count += 1
+        else:
+            route_status = "OK"
+        if status_code >= 400:
+            summary = f"HTTP {status_code} en {route_duration_ms}ms"
+        elif route_duration_ms >= PAGE_LOAD_WARN_MS:
+            summary = f"carga lenta: {route_duration_ms}ms"
+        else:
+            summary = f"{status_code} en {route_duration_ms}ms"
+        details.append({
+            "label": label,
+            "status": route_status,
+            "summary": summary,
+            "path": path,
+            "status_code": status_code,
+            "duration_ms": route_duration_ms,
+            "content_bytes": payload.get("content_bytes"),
+            "redirect_chain": payload.get("redirect_chain") or [],
+        })
 
     if fail_count:
         status = "FAIL"
