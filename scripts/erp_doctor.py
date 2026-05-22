@@ -87,6 +87,32 @@ GUAMUCHIL_RECON_PREFIX = "GML_RECON_2026_05_18"
 GUAMUCHIL_EXPECTED_RECON_ROWS = 69
 GUAMUCHIL_OLD_PLACEHOLDER_DESCRIPTION = "Inversion apertura importado presupuesto 2026"
 GUAMUCHIL_OLD_PLACEHOLDER_AMOUNT = Decimal("492343.00")
+PAGE_LOAD_WARN_MS = 2500
+PAGE_LOAD_FAIL_MS = 8000
+PAGE_LOAD_ROUTES = [
+    ("Dashboard", "/dashboard/"),
+    ("Maestros", "/maestros/"),
+    ("Recetas", "/recetas/"),
+    ("Plan produccion", "/recetas/plan-produccion/"),
+    ("Compras", "/compras/"),
+    ("Inventario", "/inventario/"),
+    ("Activos", "/activos/"),
+    ("Control", "/control/"),
+    ("CRM", "/crm/"),
+    ("Ventas", "/ventas/"),
+    ("RRHH", "/rrhh/"),
+    ("Bonos produccion", "/bonos-produccion/dashboard/"),
+    ("Bonos ventas", "/bonos-ventas/dashboard/"),
+    ("Logistica", "/logistica/"),
+    ("Fallas", "/fallas/"),
+    ("Mermas", "/mermas/"),
+    ("Mantenimiento", "/mantenimiento/app/"),
+    ("Reportes", "/reportes/"),
+    ("Inversiones", "/inversiones/"),
+    ("Rentabilidad", "/rentabilidad/"),
+    ("Horarios especiales", "/horarios-especiales/"),
+    ("Orquestacion", "/orquestacion/"),
+]
 
 
 @dataclass
@@ -718,7 +744,7 @@ def _finance_db_ready(check_name: str) -> CheckResult | None:
             command=error.command,
             exit_code=error.exit_code,
             duration_ms=error.duration_ms,
-            summary="DB no configurada/disponible; auditoria financiera read-only omitida.",
+            summary="DB no configurada/disponible; auditoria read-only omitida.",
             details=error.details,
         )
     assert host is not None
@@ -726,7 +752,7 @@ def _finance_db_ready(check_name: str) -> CheckResult | None:
     if not db_is_reachable(host, port, timeout=2.0):
         return skipped(
             check_name,
-            f"DB no alcanzable (host: {host}:{port}); auditoria financiera read-only omitida.",
+            f"DB no alcanzable (host: {host}:{port}); auditoria read-only omitida.",
             "Django ORM SELECT agregados",
         )
     return None
@@ -1313,6 +1339,183 @@ def production_readonly_finance_checks() -> list[CheckResult]:
         ]
 
 
+def check_page_load_performance() -> CheckResult:
+    started = time.monotonic()
+    db_error = _finance_db_ready("Page load performance")
+    if db_error:
+        return db_error
+    try:
+        _setup_django()
+        from django.contrib.auth import get_user_model
+        from django.test import Client
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult(
+            name="Page load performance",
+            severity="FAIL",
+            status="FAIL",
+            command="Django test client GET critical module routes",
+            duration_ms=int((time.monotonic() - started) * 1000),
+            summary="Error al inicializar Django para auditoria de carga de paginas.",
+            details=[str(exc)],
+        )
+
+    User = get_user_model()
+    try:
+        user = User.objects.filter(is_active=True, is_superuser=True).order_by("id").first()
+    except Exception as exc:  # noqa: BLE001
+        try:
+            from django.db.utils import OperationalError
+        except Exception:  # noqa: BLE001
+            OperationalError = ()  # type: ignore[assignment]
+        if isinstance(exc, OperationalError):
+            return skipped(
+                "Page load performance",
+                f"DB configurada pero no usable para smoke de paginas: {exc}",
+                "Django test client GET critical module routes",
+            )
+        raise
+    if user is None:
+        return skipped(
+            "Page load performance",
+            "No existe superusuario activo para smoke autenticado de modulos.",
+            "Django test client force_login",
+        )
+
+    client = Client(HTTP_HOST="erp.pollyanasdolce.com")
+    client.force_login(user)
+    details: list[dict[str, object]] = []
+    fail_count = 0
+    warn_count = 0
+
+    for label, path in PAGE_LOAD_ROUTES:
+        route_started = time.monotonic()
+        try:
+            response = client.get(path, follow=True)
+            duration_ms = int((time.monotonic() - route_started) * 1000)
+            status_code = int(response.status_code)
+            redirect_chain = [
+                {"url": url, "status_code": code}
+                for url, code in getattr(response, "redirect_chain", [])
+            ]
+            content_size = len(getattr(response, "content", b"") or b"")
+            if status_code >= 500 or duration_ms >= PAGE_LOAD_FAIL_MS:
+                route_status = "FAIL"
+                fail_count += 1
+            elif status_code >= 400 or duration_ms >= PAGE_LOAD_WARN_MS:
+                route_status = "WARN"
+                warn_count += 1
+            else:
+                route_status = "OK"
+            if status_code >= 400:
+                summary = f"HTTP {status_code} en {duration_ms}ms"
+            elif duration_ms >= PAGE_LOAD_WARN_MS:
+                summary = f"carga lenta: {duration_ms}ms"
+            else:
+                summary = f"{status_code} en {duration_ms}ms"
+            details.append({
+                "label": label,
+                "status": route_status,
+                "summary": summary,
+                "path": path,
+                "status_code": status_code,
+                "duration_ms": duration_ms,
+                "content_bytes": content_size,
+                "redirect_chain": redirect_chain,
+            })
+        except Exception as exc:  # noqa: BLE001
+            duration_ms = int((time.monotonic() - route_started) * 1000)
+            fail_count += 1
+            details.append({
+                "label": label,
+                "status": "FAIL",
+                "summary": f"excepcion cargando pagina: {exc}",
+                "path": path,
+                "duration_ms": duration_ms,
+            })
+
+    if fail_count:
+        status = "FAIL"
+    elif warn_count:
+        status = "WARN"
+    else:
+        status = "OK"
+    summary = (
+        f"{len(PAGE_LOAD_ROUTES) - fail_count - warn_count} OK, {warn_count} WARN, "
+        f"{fail_count} FAIL en rutas criticas; umbrales WARN>{PAGE_LOAD_WARN_MS}ms FAIL>{PAGE_LOAD_FAIL_MS}ms."
+    )
+    return CheckResult(
+        name="Page load performance",
+        severity=status,
+        status=status,
+        command="Django test client GET critical module routes",
+        exit_code=0,
+        duration_ms=int((time.monotonic() - started) * 1000),
+        summary=summary,
+        details=details,
+    )
+
+
+def production_readonly_page_performance_checks() -> list[CheckResult]:
+    if not PRODUCTION_KEY.exists():
+        return [skipped("Production page load performance", f"No existe llave SSH esperada: {PRODUCTION_KEY}")]
+    ssh_base = [
+        "ssh",
+        "-i",
+        str(PRODUCTION_KEY),
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=10",
+        PRODUCTION_HOST,
+    ]
+    remote = (
+        f"cd {PRODUCTION_DIR} && {PRODUCTION_COMPOSE} exec -T web "
+        "python scripts/erp_doctor.py --page-performance-only-json"
+    )
+    command = [*ssh_base, remote]
+    command_text = shlex.join(command)
+    started = time.monotonic()
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=ROOT,
+            env=os.environ,
+            text=True,
+            capture_output=True,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return [
+            CheckResult(
+                name="Production page load performance",
+                severity="FAIL",
+                status="FAIL",
+                command=command_text,
+                duration_ms=int((time.monotonic() - started) * 1000),
+                summary="Timeout despues de 300s.",
+                details=trim_output((exc.stdout or "") + "\n" + (exc.stderr or "")),
+            )
+        ]
+    raw_output = completed.stdout.strip()
+    try:
+        payload = json.loads(raw_output)
+        return [CheckResult(**item) for item in payload]
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        output = "\n".join(part for part in [completed.stdout, completed.stderr] if part)
+        return [
+            CheckResult(
+                name="Production page load performance",
+                severity="FAIL",
+                status="FAIL",
+                command=command_text,
+                exit_code=completed.returncode,
+                duration_ms=int((time.monotonic() - started) * 1000),
+                summary="No fue posible interpretar JSON de auditoria de paginas en produccion.",
+                details=[str(exc), *trim_output(output)],
+            )
+        ]
+
+
 def check_docker() -> list[CheckResult]:
     if not (ROOT / "docker-compose.yml").exists():
         return [skipped("Docker compose", "No existe docker-compose.yml.")]
@@ -1390,6 +1593,7 @@ def production_readonly_checks() -> list[CheckResult]:
         for name, remote in remote_checks
     ]
     checks.extend(production_readonly_finance_checks())
+    checks.extend(production_readonly_page_performance_checks())
     return checks
 
 
@@ -1407,6 +1611,7 @@ def build_report(args: argparse.Namespace | SimpleNamespace) -> dict:
         checks.extend(check_celery())
         checks.extend(check_docker())
         checks.extend(check_investment_finance_sanity())
+        checks.append(check_page_load_performance())
         if args.full or args.fix:
             beat_check = check_celery_beat_schedules(fix=args.fix)
             if args.fix:
@@ -1562,8 +1767,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Ejecuta diagnosticos seguros de solo lectura contra el VPS de produccion.",
     )
     parser.add_argument("--finance-only-json", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--page-performance-only-json", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
-    if args.finance_only_json:
+    if args.finance_only_json or args.page_performance_only_json:
         return args
     if not args.quick and not args.full:
         args.quick = True
@@ -1575,6 +1781,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.finance_only_json:
         checks = check_investment_finance_sanity()
         print(json.dumps([asdict(check) for check in checks], ensure_ascii=False, indent=2))
+        return 0
+    if args.page_performance_only_json:
+        print(json.dumps([asdict(check_page_load_performance())], ensure_ascii=False, indent=2))
         return 0
     report = run_doctor(
         quick=args.quick,
