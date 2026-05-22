@@ -27,6 +27,10 @@
   .e-cancelado{background:#f3f4f6;color:#374151;border:1px solid #d1d5db}
   .btn-wine{background:#8B2252;border:1px solid #8B2252;color:#fff;border-radius:12px;padding:10px 14px;font-weight:900;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;min-height:42px}
   .btn-soft{background:#fff;border:1px solid rgba(139,34,82,.22);color:#8B2252;border-radius:12px;padding:10px 14px;font-weight:900;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;min-height:42px}
+  .btn-danger-soft{background:#fff;border:1px solid rgba(153,27,27,.28);color:#991b1b;border-radius:12px;padding:10px 14px;font-weight:900;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;min-height:42px}
+  .fallas-actions{display:flex;gap:8px;flex-wrap:wrap}
+  .fallas-actions form{margin:0}
+  .fallas-action-note{display:block;color:#7a6871;font-size:12px;line-height:1.25}
   .fallas-thumb{width:58px;height:44px;object-fit:cover;border-radius:8px;border:1px solid rgba(139,34,82,.18)}
   .fallas-empty{padding:36px;text-align:center;color:#7a6871}
   .pagination{display:flex;gap:10px;justify-content:center;align-items:center;margin-top:16px}
@@ -74,7 +78,7 @@
       <table class="fallas-table">
         <thead>
           <tr>
-            <th>ID</th><th>Evidencia</th><th>Sucursal</th><th>Reporte</th><th>Categoría</th><th>Prioridad</th><th>Estatus</th><th>Fecha</th>
+            <th>ID</th><th>Evidencia</th><th>Sucursal</th><th>Reporte</th><th>Categoría</th><th>Prioridad</th><th>Estatus</th><th>Fecha</th><th>Acciones</th>
           </tr>
         </thead>
         <tbody>
@@ -88,9 +92,22 @@
             <td><span class="fallas-badge p-{{ reporte.prioridad }}">{{ reporte.get_prioridad_display }}</span></td>
             <td><span class="fallas-badge e-{{ reporte.estatus }}">{{ reporte.get_estatus_display }}</span></td>
             <td>{{ reporte.fecha_reporte|date:"d/m/Y H:i" }}</td>
+            <td>
+              {% if reporte.reportado_por_id == request.user.id and reporte.estatus == "abierto" %}
+              <div class="fallas-actions">
+                <a class="btn-soft" href="{% url 'fallas:pwa-editar-reporte' reporte.id %}">Editar</a>
+                <form method="post" action="{% url 'fallas:pwa-eliminar-reporte' reporte.id %}" onsubmit="return confirm('¿Eliminar el reporte #{{ reporte.id }}? Esta acción no se puede deshacer.');">
+                  {% csrf_token %}
+                  <button class="btn-danger-soft" type="submit">Eliminar</button>
+                </form>
+              </div>
+              {% else %}
+              <span class="fallas-action-note">Sin cambios disponibles</span>
+              {% endif %}
+            </td>
           </tr>
           {% empty %}
-          <tr><td colspan="8"><div class="fallas-empty">No hay reportes registrados con estos filtros.</div></td></tr>
+          <tr><td colspan="9"><div class="fallas-empty">No hay reportes registrados con estos filtros.</div></td></tr>
           {% endfor %}
         </tbody>
       </table>
