@@ -20,6 +20,10 @@ import calendar
 
 from .models_rentabilidad import SucursalRentabilidad, EstadoRentabilidad
 from core.access import can_manage_rentabilidad, can_view_rentabilidad
+from ventas.services.sales_read_service import (
+    get_point_sales_period_summary,
+    get_point_sales_product_panel_rows,
+)
 
 # Palabras clave que identifican productos de tipo anticipo/pasivo
 # (tarjetas de regalo, vales). Contablemente son un pasivo hasta redención,
@@ -151,19 +155,7 @@ def _costos_reventa_para_periodo(producto_ids, periodo, fin_periodo):
 
 
 def _build_productos_panel(periodo, fecha_inicio, fecha_fin):
-    from pos_bridge.models.sales import PointDailySale
-
-    rows = list(
-        PointDailySale.objects
-        .filter(sale_date__gte=fecha_inicio, sale_date__lte=fecha_fin)
-        .values("product_id", "product__name", "product__category", "receta_id")
-        .annotate(
-            venta=Sum("gross_amount"),
-            cantidad=Sum("quantity"),
-            sucursales=Count("branch_id", distinct=True),
-        )
-        .order_by("-venta")[:80]
-    )
+    rows = get_point_sales_product_panel_rows(start_date=fecha_inicio, end_date=fecha_fin)
     receta_ids = [row["receta_id"] for row in rows if row["receta_id"]]
     producto_reventa_ids = [row["product_id"] for row in rows if row["product_id"] and not row["receta_id"]]
     costos_recetas = _costos_recetas_para_periodo(receta_ids, periodo, fecha_fin)
@@ -402,14 +394,13 @@ def dashboard_rentabilidad(request):
     # Alertas urgentes (alerta_nivel == 2)
     alertas_urgentes = [r for r in sucursales_data if r["obj"].alerta_nivel == 2]
 
-    from pos_bridge.models.sales import PointDailySale
-    ventas_fuente = PointDailySale.objects.filter(sale_date__gte=fecha_inicio, sale_date__lte=fecha_fin)
+    ventas_fuente = get_point_sales_period_summary(start_date=fecha_inicio, end_date=fecha_fin)
     fuente_estado = {
-        "max_sale_date": ventas_fuente.aggregate(max_date=Max("sale_date"))["max_date"],
-        "rows": ventas_fuente.count(),
-        "total": ventas_fuente.aggregate(total=Sum("gross_amount"))["total"] or Decimal("0"),
+        "max_sale_date": ventas_fuente["max_sale_date"],
+        "rows": ventas_fuente["rows"],
+        "total": ventas_fuente["total"],
         "rentabilidad_total": totales["ventas_brutas"],
-        "diferencia": (ventas_fuente.aggregate(total=Sum("gross_amount"))["total"] or Decimal("0")) - totales["ventas_brutas"],
+        "diferencia": ventas_fuente["total"] - totales["ventas_brutas"],
         "max_calculado_en": registros.aggregate(max_calc=Max("calculado_en"))["max_calc"],
     }
     fuente_estado["cuadra"] = abs(fuente_estado["diferencia"]) < Decimal("1.00")

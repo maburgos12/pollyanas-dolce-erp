@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Max, Q, Sum
 from django.db.models.functions import TruncMonth
 
 from core.cache_versions import get_or_set_versioned_cache
@@ -233,6 +233,37 @@ def get_point_sales_category_totals(*, start_date: date, end_date: date, sucursa
         .annotate(total=Sum("quantity"))
         .order_by("branch__erp_branch_id", "product__category")
     )
+
+
+def get_point_sales_product_totals(*, start_date: date) -> list[dict]:
+    return list(
+        PointDailySale.objects.filter(sale_date__gte=start_date)
+        .values("product_id")
+        .annotate(monto=Sum("total_amount"), cantidad=Sum("quantity"))
+        .order_by("product_id")
+    )
+
+
+def get_point_sales_product_panel_rows(*, start_date: date, end_date: date, limit: int = 80) -> list[dict]:
+    return list(
+        PointDailySale.objects.filter(sale_date__gte=start_date, sale_date__lte=end_date)
+        .values("product_id", "product__name", "product__category", "receta_id")
+        .annotate(
+            venta=Sum("gross_amount"),
+            cantidad=Sum("quantity"),
+            sucursales=Count("branch_id", distinct=True),
+        )
+        .order_by("-venta")[:limit]
+    )
+
+
+def get_point_sales_period_summary(*, start_date: date, end_date: date) -> dict[str, Any]:
+    queryset = PointDailySale.objects.filter(sale_date__gte=start_date, sale_date__lte=end_date)
+    return {
+        "max_sale_date": queryset.aggregate(max_date=Max("sale_date"))["max_date"],
+        "rows": queryset.count(),
+        "total": queryset.aggregate(total=Sum("gross_amount"))["total"] or ZERO,
+    }
 
 
 def _select_range_response(

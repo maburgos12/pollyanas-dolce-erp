@@ -25,6 +25,7 @@ from core.access import ROLE_ADMIN, ROLE_COMPRAS, can_view_maestros, has_any_rol
 from core.audit import log_event
 from recetas.models import LineaReceta, Receta, RecetaCodigoPointAlias, VentaHistorica, normalizar_codigo_point
 from recetas.utils.normalizacion import normalizar_nombre
+from ventas.services.sales_read_service import get_point_sales_product_totals
 
 from .models import CostoInsumo, PointPendingMatch, Proveedor, Insumo, InsumoAlias, UnidadMedida
 from .utils.canonical_catalog import (
@@ -4022,8 +4023,6 @@ def costos_adquisicion(request):
     filtro_periodo = (request.GET.get("periodo") or "mes").strip()  # mes | 30d | 90d
 
     # ── Ventas del período por producto (para chip "Vendidos sin costo") ────────
-    from pos_bridge.models.sales import PointDailySale
-    from django.db.models import Sum as _Sum
     from rentabilidad.views_rentabilidad import _es_anticipo as _es_anticipo_local
     hoy = timezone.localdate()
     if filtro_periodo == "30d":
@@ -4034,12 +4033,7 @@ def costos_adquisicion(request):
         periodo_desde = hoy.replace(day=1)
 
     ventas_por_producto: dict[int, dict] = {}
-    for vrow in (
-        PointDailySale.objects
-        .filter(sale_date__gte=periodo_desde)
-        .values("product_id")
-        .annotate(monto=_Sum("total_amount"), cantidad=_Sum("quantity"))
-    ):
+    for vrow in get_point_sales_product_totals(start_date=periodo_desde):
         ventas_por_producto[vrow["product_id"]] = {
             "monto": vrow["monto"] or Decimal("0"),
             "cantidad": vrow["cantidad"] or Decimal("0"),
