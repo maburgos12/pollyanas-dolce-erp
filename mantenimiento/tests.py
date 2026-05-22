@@ -49,7 +49,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
         perfil = self.client.get("/api/mantenimiento/me/")
 
         self.assertEqual(portal.status_code, 200)
-        self.assertContains(portal, "Sucursales / Producción / CEDIS")
+        self.assertContains(portal, "Sucursales / Producción (CEDIS)")
         self.assertContains(portal, "Logística")
         self.assertEqual(perfil.status_code, 200)
         self.assertEqual(perfil.json()["username"], "jorge.isaac")
