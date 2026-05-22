@@ -16,7 +16,7 @@ from control.models import MermaPOS
 from core.access import ROLE_ADMIN, ROLE_BONOS_PRODUCCION_CAPTURA, ROLE_COMPRAS, can_view_compras
 from core.branch_catalog import eligible_operational_branch_qs
 from core.middleware import CanonicalLocalHostMiddleware
-from core.models import Departamento, Sucursal, UserProfile
+from core.models import Departamento, Sucursal, UserModuleAccess, UserProfile
 from core.navigation import build_nav_groups
 from core.views import _build_dashboard_daily_sales_snapshot, _build_dashboard_sales_history_summary, _compute_budget_semaforo, _compute_plan_forecast_semaforo, _sales_previous_dates, _sales_source_context
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
@@ -132,6 +132,20 @@ class LoginViewAuthenticatedRedirectTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "/bonos-ventas/app/?captura=1")
+
+    def test_authenticated_erp_user_does_not_keep_mermas_app_next(self):
+        response = self.client.get("/login/?next=/mermas/app/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/dashboard/")
+
+    def test_authenticated_mermas_capture_user_keeps_mermas_app_next(self):
+        UserModuleAccess.objects.create(user=self.user, module="mermas.captura", access=UserModuleAccess.ACCESS_MANAGE)
+
+        response = self.client.get("/login/?next=/mermas/app/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/mermas/app/")
 
     def test_short_bonus_links_keep_login_next_simple(self):
         self.client.logout()
