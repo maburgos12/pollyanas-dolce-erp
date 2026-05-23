@@ -14,6 +14,7 @@
     .app-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
     .app-header h1 { margin: 0; font-family: "Playfair Display", Georgia, serif; font-size: 1.55rem; color: #f4eadc; letter-spacing: 0; }
     .app-header span { color: #b8ab9a; font-size: .9rem; }
+    .app-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
     .form-block { background: #1a1a24; border: 1px solid #2a2a38; border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 12px 28px rgba(0,0,0,.18); }
     .form-block h2 { margin: 0 0 12px; font-family: "Playfair Display", Georgia, serif; font-size: 1.08rem; color: #e8e0d5; letter-spacing: 0; }
     .field { display: grid; gap: 6px; margin-bottom: 12px; }
@@ -49,11 +50,14 @@
             <h1>Registrar merma</h1>
             <span>{{ now|date:"d/m/Y H:i" }}</span>
         </div>
-        {% if can_dashboard %}
-        <a class="secondary-link" href="{% url 'mermas:dashboard' %}">Panel</a>
-        {% else %}
-        <a class="secondary-link" href="{% url 'operacion:app_home' %}">Inicio</a>
-        {% endif %}
+        <nav class="app-header-actions" aria-label="Acciones de sesión">
+            {% if can_dashboard %}
+            <a class="secondary-link" href="{% url 'mermas:dashboard' %}">Panel</a>
+            {% else %}
+            <a class="secondary-link" href="{% url 'operacion:app_home' %}">Inicio</a>
+            {% endif %}
+            <a class="secondary-link" href="{% url 'logout' %}">Salir</a>
+        </nav>
     </header>
 
     {% if messages %}

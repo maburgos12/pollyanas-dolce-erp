@@ -524,7 +524,7 @@
         state.perfil = null;
         localStorage.removeItem("pd_mantenimiento_access");
         localStorage.removeItem("pd_mantenimiento_refresh");
-        if (doRender) showScreen("login");
+        if (doRender) window.location.href = "/logout/";
       }
 
       async function parseListResponse(res) {
