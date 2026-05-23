@@ -368,12 +368,15 @@ class Command(BaseCommand):
 
     def _sync_checklist(self, item: SeguimientoItem, checklist_payload):
         if not checklist_payload:
+            item.checklist.all().delete()
             return
         existing = {check.orden: check for check in item.checklist.all()}
+        desired_orders = set()
         for index, payload in enumerate(checklist_payload, start=1):
             titulo = (payload.get("titulo") or "").strip()
             if not titulo:
                 continue
+            desired_orders.add(index)
             check = existing.get(index)
             defaults = {
                 "titulo": titulo,
@@ -383,6 +386,10 @@ class Command(BaseCommand):
             if check:
                 for key, value in defaults.items():
                     setattr(check, key, value)
+                if not check.completado:
+                    check.completado_por = None
+                    check.completado_at = None
                 check.save()
             else:
                 SeguimientoChecklistItem.objects.create(seguimiento=item, orden=index, **defaults)
+        item.checklist.exclude(orden__in=desired_orders).delete()

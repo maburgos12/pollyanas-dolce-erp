@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from pathlib import Path
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q
@@ -13,6 +15,30 @@ from core.audit import log_event
 
 from .models import SeguimientoChecklistItem, SeguimientoComentario, SeguimientoEvidencia, SeguimientoItem
 from .services import empleado_de_usuario
+
+
+EVIDENCIA_ALLOWED_EXTENSIONS = {
+    ".csv",
+    ".doc",
+    ".docx",
+    ".heic",
+    ".heif",
+    ".jpeg",
+    ".jpg",
+    ".pdf",
+    ".png",
+    ".txt",
+    ".webp",
+    ".xls",
+    ".xlsx",
+}
+EVIDENCIA_BLOCKED_CONTENT_TYPES = {
+    "application/javascript",
+    "image/svg+xml",
+    "text/html",
+    "text/javascript",
+}
+DEFAULT_EVIDENCIA_MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 
 
 def _items_del_usuario(user):
@@ -34,6 +60,22 @@ def _get_item_para_usuario(user, pk):
     if empleado:
         filters |= Q(pk=pk, responsable_empleado=empleado) | Q(pk=pk, participantes_empleado=empleado)
     return get_object_or_404(SeguimientoItem.objects.filter(filters).distinct(), pk=pk)
+
+
+def _validar_archivo_evidencia(archivo) -> str | None:
+    max_bytes = int(getattr(settings, "SEGUIMIENTO_EVIDENCIA_MAX_UPLOAD_BYTES", DEFAULT_EVIDENCIA_MAX_UPLOAD_BYTES))
+    if archivo.size and archivo.size > max_bytes:
+        max_mb = max_bytes / (1024 * 1024)
+        return f"El archivo excede el máximo permitido de {max_mb:g} MB."
+
+    extension = Path(archivo.name or "").suffix.lower()
+    if extension not in EVIDENCIA_ALLOWED_EXTENSIONS:
+        return "Tipo de archivo no permitido para evidencia."
+
+    content_type = (getattr(archivo, "content_type", "") or "").split(";", 1)[0].strip().lower()
+    if content_type in EVIDENCIA_BLOCKED_CONTENT_TYPES:
+        return "Tipo de archivo no permitido para evidencia."
+    return None
 
 
 @login_required
@@ -187,6 +229,10 @@ def subir_evidencia(request, pk):
     archivo = request.FILES.get("archivo")
     if not archivo:
         messages.error(request, "Selecciona un archivo de evidencia.")
+        return redirect("seguimiento:mi_seguimiento")
+    error_archivo = _validar_archivo_evidencia(archivo)
+    if error_archivo:
+        messages.error(request, error_archivo)
         return redirect("seguimiento:mi_seguimiento")
     SeguimientoEvidencia.objects.create(
         seguimiento=item,
