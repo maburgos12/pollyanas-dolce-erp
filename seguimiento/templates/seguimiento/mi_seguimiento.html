@@ -197,6 +197,7 @@
   }
 
   .seguimiento-action-form textarea,
+  .seguimiento-action-form input[type="date"],
   .seguimiento-action-form input[type="file"] {
     width: 100%;
     min-width: 0;
@@ -305,6 +306,11 @@
           <div class="bi-hero-highlight-label">Cumplidos a tiempo</div>
           <div class="bi-hero-highlight-value {% if metrics.cumplidos_a_tiempo %}is-success{% endif %}">{{ metrics.cumplidos_a_tiempo|intcomma }}</div>
           <div class="bi-hero-highlight-meta">Cierres aprobados sin rebasar fecha límite</div>
+        </article>
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Más tiempo solicitado</div>
+          <div class="bi-hero-highlight-value {% if metrics.prorrogas_pendientes %}is-warning{% else %}is-success{% endif %}">{{ metrics.prorrogas_pendientes|intcomma }}</div>
+          <div class="bi-hero-highlight-meta">Solicitudes pendientes de revisión</div>
         </article>
       </div>
     </div>
@@ -441,9 +447,15 @@
             </div>
             <div class="bi-metric">
               <div class="bi-metric-label">Registro</div>
-              <div class="bi-metric-value">Feedback {{ item.comentarios.count }} · Evidencias {{ item.evidencias.count }}</div>
+              <div class="bi-metric-value">Feedback {{ item.comentarios.count }} · Evidencias {{ item.evidencias.count }} · Prórrogas {{ item.prorrogas.count }}</div>
             </div>
           </div>
+
+          {% if item.prorroga_pendiente %}
+          <div class="bi-note pending">
+            <strong>Más tiempo solicitado:</strong> {{ item.prorroga_pendiente.fecha_solicitada|date:"d/m/Y" }} · {{ item.prorroga_pendiente.motivo|truncatechars:120 }}
+          </div>
+          {% endif %}
 
           <div class="bi-progress-track" aria-label="Avance de checklist">
             <span class="bi-progress-fill {% if item.esta_vencido %}is-danger{% elif item.progreso_pct >= 100 %}is-success{% else %}is-plum{% endif %}" style="width: {{ item.progreso_pct }}%"></span>
@@ -472,9 +484,15 @@
               </form>
               <form class="seguimiento-action-form" method="post" action="{% url 'seguimiento:subir_evidencia' item.pk %}" enctype="multipart/form-data">
                 {% csrf_token %}
-                <input type="file" name="archivo" required>
+                <input type="file" name="archivo" accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf" required>
                 <button class="seguimiento-action-button is-primary" type="submit">Subir evidencia</button>
                 <textarea name="comentario" placeholder="Comentario de evidencia"></textarea>
+              </form>
+              <form class="seguimiento-action-form" method="post" action="{% url 'seguimiento:solicitar_prorroga' item.pk %}">
+                {% csrf_token %}
+                <input type="date" name="fecha_solicitada" required>
+                <button class="seguimiento-action-button is-primary" type="submit">Solicitar más tiempo</button>
+                <textarea name="motivo" placeholder="Motivo de la solicitud" required></textarea>
               </form>
             </div>
           </details>

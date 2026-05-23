@@ -1,6 +1,12 @@
 from django.contrib import admin
 
-from .models import SeguimientoChecklistItem, SeguimientoComentario, SeguimientoEvidencia, SeguimientoItem
+from .models import (
+    SeguimientoChecklistItem,
+    SeguimientoComentario,
+    SeguimientoEvidencia,
+    SeguimientoItem,
+    SeguimientoProrrogaSolicitud,
+)
 
 
 class SeguimientoChecklistInline(admin.TabularInline):
@@ -29,3 +35,11 @@ class SeguimientoEvidenciaAdmin(admin.ModelAdmin):
     list_display = ("seguimiento", "usuario", "nombre_original", "estatus", "created_at")
     list_filter = ("estatus",)
     search_fields = ("seguimiento__titulo", "usuario__username", "nombre_original")
+
+
+@admin.register(SeguimientoProrrogaSolicitud)
+class SeguimientoProrrogaSolicitudAdmin(admin.ModelAdmin):
+    list_display = ("seguimiento", "usuario", "fecha_solicitada", "estatus", "created_at")
+    list_filter = ("estatus", "fecha_solicitada")
+    search_fields = ("seguimiento__titulo", "usuario__username", "motivo")
+    autocomplete_fields = ("seguimiento", "usuario", "resuelto_por")
