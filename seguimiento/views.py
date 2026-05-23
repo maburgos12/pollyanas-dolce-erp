@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count, Q
+from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -74,7 +74,43 @@ def mi_seguimiento(request):
         "en_revision": sum(1 for item in items if item.estatus == SeguimientoItem.ESTATUS_EN_REVISION),
         "completados": sum(1 for item in items if item.estatus == SeguimientoItem.ESTATUS_COMPLETADO),
     }
-    by_type = SeguimientoItem.objects.filter(pk__in=[item.pk for item in items]).values("tipo").annotate(total=Count("id"))
+    section_config = [
+        {
+            "tipo": SeguimientoItem.TIPO_COMPROMISO,
+            "title": "Compromisos",
+            "subtitle": "Entregables puntuales y acuerdos con fecha",
+            "tone": "commitment",
+        },
+        {
+            "tipo": SeguimientoItem.TIPO_MINUTA,
+            "title": "Minutas",
+            "subtitle": "Acuerdos derivados de juntas y revisiones",
+            "tone": "minute",
+        },
+        {
+            "tipo": SeguimientoItem.TIPO_PROYECTO,
+            "title": "Proyectos",
+            "subtitle": "Iniciativas con pasos y dependencias",
+            "tone": "project",
+        },
+    ]
+    sections = []
+    for config in section_config:
+        section_items = [item for item in items if item.tipo == config["tipo"]]
+        total_checks = sum(item.checklist_total for item in section_items)
+        done_checks = sum(item.checklist_done for item in section_items)
+        sections.append(
+            {
+                **config,
+                "items": section_items,
+                "total": len(section_items),
+                "abiertos": sum(1 for item in section_items if not item.esta_cerrado),
+                "vencidos": sum(1 for item in section_items if item.esta_vencido),
+                "en_revision": sum(1 for item in section_items if item.estatus == SeguimientoItem.ESTATUS_EN_REVISION),
+                "completados": sum(1 for item in section_items if item.estatus == SeguimientoItem.ESTATUS_COMPLETADO),
+                "progreso_pct": round((done_checks / total_checks) * 100) if total_checks else 0,
+            }
+        )
 
     return render(
         request,
@@ -82,8 +118,8 @@ def mi_seguimiento(request):
         {
             "empleado": empleado,
             "items": items,
+            "sections": sections,
             "metrics": metrics,
-            "by_type": by_type,
             "estatus_en_revision": SeguimientoItem.ESTATUS_EN_REVISION,
         },
     )
