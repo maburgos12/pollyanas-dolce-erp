@@ -9,6 +9,15 @@
   --pd-bg: #f9f5f8;
   --pd-card: #fff;
   --pd-shadow: 0 1px 3px rgba(0, 0, 0, .07), 0 1px 2px rgba(0, 0, 0, .04);
+  --pd-ok-bg: #effaf3;
+  --pd-ok-line: #8bd3a6;
+  --pd-ok-text: #21633b;
+  --pd-warn-bg: #fff8df;
+  --pd-warn-line: #ead28a;
+  --pd-warn-text: #8a6512;
+  --pd-danger-bg: #fff1f5;
+  --pd-danger-line: #f3a5b8;
+  --pd-danger-text: #9f1d52;
   --bg: var(--pd-bg);
   --surface: var(--pd-card);
   --border: var(--pd-line);
@@ -156,6 +165,177 @@ select:focus {
   background: var(--pd-gold-light) !important;
 }
 
+.daily-banner,
+.fuel-notice,
+.pd-alert {
+  background: var(--pd-ok-bg) !important;
+  border: 1px solid var(--pd-ok-line) !important;
+  color: var(--pd-ok-text) !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+}
+
+.daily-banner.warning,
+.fuel-notice.warning,
+.pd-alert-warning,
+.route-fuel-card {
+  background: var(--pd-warn-bg) !important;
+  border-color: var(--pd-warn-line) !important;
+  color: var(--pd-warn-text) !important;
+}
+
+.fuel-modal.pending .fuel-notice,
+.pd-alert-danger {
+  background: var(--pd-danger-bg) !important;
+  border-color: var(--pd-danger-line) !important;
+  color: var(--pd-danger-text) !important;
+}
+
+.daily-banner strong,
+.daily-banner time,
+.fuel-notice strong,
+.fuel-list,
+.route-fuel-item,
+.route-fuel-item span {
+  color: inherit !important;
+}
+
+.chip {
+  background: #f7f3f6 !important;
+  border-color: var(--pd-line) !important;
+  color: var(--pd-muted) !important;
+}
+
+.chip.ok {
+  background: var(--pd-ok-bg) !important;
+  border-color: var(--pd-ok-line) !important;
+  color: var(--pd-ok-text) !important;
+}
+
+.chip.fail {
+  background: var(--pd-danger-bg) !important;
+  border-color: var(--pd-danger-line) !important;
+  color: var(--pd-danger-text) !important;
+}
+
+.chip.pending {
+  background: #f7f3f6 !important;
+  border-color: var(--pd-line) !important;
+  color: var(--pd-muted) !important;
+}
+
+.check-row.ok {
+  background: var(--pd-ok-bg) !important;
+  border-color: var(--pd-ok-line) !important;
+}
+
+.check-row.fail,
+.daily-section-highlight {
+  background: var(--pd-danger-bg) !important;
+  border-color: var(--pd-danger-line) !important;
+}
+
+.daily-counter {
+  background: var(--pd-card) !important;
+  border-color: var(--pd-line) !important;
+  color: var(--pd-wine) !important;
+}
+
+.daily-counter.complete {
+  background: var(--pd-ok-bg) !important;
+  border-color: var(--pd-ok-line) !important;
+  color: var(--pd-ok-text) !important;
+}
+
+.daily-mark-all {
+  background: var(--pd-ok-bg) !important;
+  border-color: var(--pd-ok-line) !important;
+  color: var(--pd-ok-text) !important;
+}
+
+.daily-mark-all:active {
+  background: #dff4e8 !important;
+}
+
+.daily-fail-field label {
+  color: var(--pd-danger-text) !important;
+}
+
+.daily-fail-field textarea {
+  background: var(--pd-danger-bg) !important;
+  border-color: var(--pd-danger-line) !important;
+  color: var(--pd-ink) !important;
+}
+
+.fuel-modal-overlay,
+.fuel-sheet-overlay,
+.gps-overlay {
+  background: rgba(28, 21, 32, .42) !important;
+  backdrop-filter: blur(6px) !important;
+}
+
+.fuel-modal,
+.fuel-sheet,
+.gps-card,
+.pd-modal-card {
+  background: var(--pd-card) !important;
+  border-color: var(--pd-line) !important;
+  color: var(--pd-ink) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 18px 46px rgba(49, 36, 43, .18) !important;
+}
+
+.fuel-modal.pending {
+  border-color: var(--pd-danger-line) !important;
+}
+
+.fuel-close {
+  background: var(--pd-card) !important;
+  border: 1px solid var(--pd-line) !important;
+  color: var(--pd-ink) !important;
+  box-shadow: var(--pd-shadow) !important;
+}
+
+.fuel-icon {
+  background: var(--pd-warn-bg) !important;
+  border-color: var(--pd-warn-line) !important;
+}
+
+.fuel-modal.pending .fuel-icon {
+  background: var(--pd-danger-bg) !important;
+  border-color: var(--pd-danger-line) !important;
+}
+
+.fuel-label,
+.fuel-modal h2,
+.fuel-sheet-head h2,
+.route-fuel-card h2 {
+  color: var(--pd-wine) !important;
+}
+
+.fuel-modal p,
+.gps-message {
+  color: var(--pd-muted) !important;
+}
+
+.route-fuel-item {
+  border-color: var(--pd-warn-line) !important;
+}
+
+.fuel-route-btn,
+.photo-actions .retake {
+  background: var(--pd-warn-bg) !important;
+  border-color: var(--pd-warn-line) !important;
+  color: var(--pd-warn-text) !important;
+}
+
+.photo-actions .keep,
+.file-trigger.loaded {
+  background: var(--pd-ok-bg) !important;
+  border-color: var(--pd-ok-line) !important;
+  color: var(--pd-ok-text) !important;
+}
+
 .card-actions {
   gap: 8px !important;
 }
@@ -249,6 +429,18 @@ select:focus {
 .badge,
 .status-pill {
   box-shadow: none !important;
+}
+
+.badge.turno {
+  background: #f7f3f6 !important;
+  border: 1px solid var(--pd-line) !important;
+  color: var(--pd-muted) !important;
+}
+
+.badge.turno.abierto {
+  background: var(--pd-warn-bg) !important;
+  border-color: var(--pd-warn-line) !important;
+  color: var(--pd-warn-text) !important;
 }
 
 .data-table,
