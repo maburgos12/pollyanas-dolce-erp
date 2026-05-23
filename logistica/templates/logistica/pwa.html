@@ -72,6 +72,15 @@
         letter-spacing: 0;
       }
 
+      .login-logo {
+        display: block;
+        width: min(260px, 78vw);
+        height: auto;
+        max-height: 112px;
+        object-fit: contain;
+        object-position: left center;
+      }
+
       .brand-subtitle {
         margin: 8px 0 0;
         color: var(--gold);
@@ -171,6 +180,15 @@
       .mini-brand {
         font-family: "Playfair Display", serif;
         font-size: 22px;
+      }
+
+      .header-logo {
+        display: block;
+        width: min(154px, 46vw);
+        height: auto;
+        max-height: 58px;
+        object-fit: contain;
+        object-position: left center;
       }
 
       .hello {
@@ -1457,7 +1475,7 @@
         return `
           <div class="topbar">
             <div>
-              <div class="mini-brand">Pollyana's</div>
+              <img class="header-logo" src="{% static 'logistica/pwa/pollyanas-logo-header.png' %}" alt="Pollyana's Dolce">
               <p class="hello">Hola, ${nombre}</p>
               ${licenciaPill()}
             </div>
@@ -1495,7 +1513,7 @@
         render(`
           <main class="login-wrap">
             <section>
-              <h1 class="brand-title">Pollyana's</h1>
+              <img class="login-logo" src="{% static 'logistica/pwa/pollyanas-logo-header.png' %}" alt="Pollyana's Dolce">
               <p class="brand-subtitle">Logística</p>
             </section>
             <form class="panel" onsubmit="login(event)">
