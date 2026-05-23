@@ -6,13 +6,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - Pollyanas Dolce ERP</title>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Nunito:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/styles.css?v=20260505-05">
+    <link rel="stylesheet" href="{% static 'css/styles.css' %}?v=20260522-login-logo">
 </head>
 <body>
     <div class="login-container">
         <div class="login-card">
             <div class="login-header">
-                <div class="login-logo">🍰</div>
+                <div class="login-logo">
+                    <img src="{% static 'core/dolce-logo-pin-transparent.png' %}" alt="Pollyana's Dolce">
+                </div>
                 <h1 class="login-title">Pollyana's Dolce</h1>
                 <div class="login-subtitle">ERP Administrativo</div>
             </div>

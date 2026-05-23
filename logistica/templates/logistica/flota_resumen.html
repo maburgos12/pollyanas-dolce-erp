@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load humanize %}
+{% load static humanize %}
 
 {% block title %}Logística · Flota{% endblock %}
 {% block page_title %}Logística · Resumen de flota{% endblock %}
@@ -23,6 +23,7 @@
   @media (max-width: 980px) { .fleet-grid { grid-template-columns: 1fr; } }
   @media (max-width: 620px) { .fleet-detail-grid { grid-template-columns: 1fr; } .fleet-head { flex-direction: column; } }
 </style>
+<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}">
 {% endblock %}
 
 {% block content %}

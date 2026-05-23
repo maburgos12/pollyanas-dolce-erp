@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load humanize %}
+{% load static humanize %}
 
 {% block title %}Logística · {{ unidad.codigo }}{% endblock %}
 {% block page_title %}Logística · Ficha de unidad{% endblock %}
@@ -44,6 +44,7 @@
   .clickable-row { cursor: pointer; }
   @media (max-width: 760px) { .unit-form-grid, .unit-check-grid { grid-template-columns: 1fr; } .unit-pane-head { align-items: stretch; flex-direction: column; } }
 </style>
+<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}">
 {% endblock %}
 
 {% block content %}

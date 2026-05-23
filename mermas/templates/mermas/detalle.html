@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}{{ registro.folio }}{% endblock %}
 {% block body_class %}merma-app-body{% endblock %}
@@ -58,6 +59,7 @@
         .evidence-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
 </style>
+<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}">
 {% endblock %}
 
 {% block content %}

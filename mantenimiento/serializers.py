@@ -6,6 +6,7 @@ existentes de activos y logística.
 
 from decimal import Decimal
 
+from django.utils import timezone
 from rest_framework import serializers
 
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento
@@ -28,6 +29,58 @@ class ActivoListSerializer(serializers.ModelSerializer):
             "estado",
             "criticidad",
         ]
+
+
+class ActivoQuickCreateSerializer(serializers.ModelSerializer):
+    sucursal_nombre = serializers.CharField(source="sucursal.nombre", read_only=True, default="")
+
+    class Meta:
+        model = Activo
+        fields = [
+            "id",
+            "codigo",
+            "nombre",
+            "categoria",
+            "ubicacion",
+            "sucursal",
+            "sucursal_nombre",
+            "estado",
+            "criticidad",
+            "notas",
+        ]
+        read_only_fields = ["id", "codigo", "estado", "criticidad", "sucursal_nombre"]
+        extra_kwargs = {
+            "nombre": {"required": True, "allow_blank": False},
+            "sucursal": {"required": True, "allow_null": False},
+            "categoria": {"required": False, "allow_blank": True},
+            "ubicacion": {"required": False, "allow_blank": True},
+            "notas": {"required": False, "allow_blank": True},
+        }
+
+    def validate_nombre(self, value):
+        value = value.strip()
+        if len(value) < 5:
+            raise serializers.ValidationError("El nombre debe identificar claramente el punto mantenible.")
+        return value
+
+    def create(self, validated_data):
+        if not (validated_data.get("categoria") or "").strip():
+            validated_data["categoria"] = "Infraestructura"
+        validated_data["estado"] = Activo.ESTADO_OPERATIVO
+        validated_data["criticidad"] = Activo.CRITICIDAD_MEDIA
+        validated_data["activo"] = True
+        validated_data["codigo"] = self._next_code(validated_data["sucursal"])
+        return super().create(validated_data)
+
+    def _next_code(self, sucursal):
+        base = (sucursal.codigo or "SUC").upper().replace(" ", "_")[:10]
+        prefix = f"PM-{base}-"
+        seq = Activo.objects.filter(codigo__startswith=prefix).count() + 1
+        codigo = f"{prefix}{seq:04d}"
+        while Activo.objects.filter(codigo=codigo).exists():
+            seq += 1
+            codigo = f"{prefix}{seq:04d}"
+        return codigo
 
 
 class OrdenMantenimientoCreateSerializer(serializers.ModelSerializer):
@@ -95,6 +148,10 @@ class OrdenMantenimientoCreateSerializer(serializers.ModelSerializer):
 class OrdenMantenimientoListSerializer(serializers.ModelSerializer):
     activo_nombre = serializers.CharField(source="activo_ref.nombre", read_only=True)
     activo_codigo = serializers.CharField(source="activo_ref.codigo", read_only=True)
+    activo_categoria = serializers.CharField(source="activo_ref.categoria", read_only=True)
+    activo_ubicacion = serializers.CharField(source="activo_ref.ubicacion", read_only=True)
+    activo_estado = serializers.CharField(source="activo_ref.estado", read_only=True)
+    activo_criticidad = serializers.CharField(source="activo_ref.criticidad", read_only=True)
     sucursal_nombre = serializers.CharField(source="activo_ref.sucursal.nombre", read_only=True, default="")
     tipo_display = serializers.CharField(source="get_tipo_display", read_only=True)
     estatus_display = serializers.CharField(source="get_estatus_display", read_only=True)
@@ -108,6 +165,10 @@ class OrdenMantenimientoListSerializer(serializers.ModelSerializer):
             "folio",
             "activo_nombre",
             "activo_codigo",
+            "activo_categoria",
+            "activo_ubicacion",
+            "activo_estado",
+            "activo_criticidad",
             "sucursal_nombre",
             "tipo",
             "tipo_display",
@@ -125,6 +186,81 @@ class OrdenMantenimientoListSerializer(serializers.ModelSerializer):
             "fecha_inicio",
             "fecha_cierre",
         ]
+
+
+class BitacoraMantenimientoSerializer(serializers.ModelSerializer):
+    usuario_nombre = serializers.SerializerMethodField()
+    fecha_display = serializers.DateTimeField(source="fecha", format="%d/%m/%Y %H:%M", read_only=True)
+
+    class Meta:
+        model = BitacoraMantenimiento
+        fields = ["id", "fecha", "fecha_display", "accion", "comentario", "usuario_nombre", "costo_adicional"]
+
+    def get_usuario_nombre(self, obj):
+        if not obj.usuario:
+            return ""
+        return obj.usuario.get_full_name() or obj.usuario.username
+
+
+class OrdenMantenimientoDetailSerializer(OrdenMantenimientoListSerializer):
+    bitacora = BitacoraMantenimientoSerializer(many=True, read_only=True)
+
+    class Meta(OrdenMantenimientoListSerializer.Meta):
+        fields = OrdenMantenimientoListSerializer.Meta.fields + ["bitacora"]
+
+
+class OrdenMantenimientoSeguimientoSerializer(serializers.Serializer):
+    estatus = serializers.ChoiceField(choices=OrdenMantenimiento.ESTATUS_CHOICES, required=False)
+    comentario = serializers.CharField(required=False, allow_blank=True)
+    costo_adicional = serializers.DecimalField(max_digits=18, decimal_places=2, required=False)
+    responsable = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        if not attrs:
+            raise serializers.ValidationError("No hay cambios para guardar.")
+        return attrs
+
+    def save(self, **kwargs):
+        orden = self.context["orden"]
+        request = self.context["request"]
+        cambios = []
+        estatus = self.validated_data.get("estatus")
+        responsable = self.validated_data.get("responsable")
+        comentario = self.validated_data.get("comentario", "").strip()
+        costo_adicional = self.validated_data.get("costo_adicional")
+
+        if estatus and estatus != orden.estatus:
+            orden.estatus = estatus
+            cambios.append(f"Estatus: {orden.get_estatus_display()}")
+            today = timezone.localdate()
+            if estatus == OrdenMantenimiento.ESTATUS_EN_PROCESO and not orden.fecha_inicio:
+                orden.fecha_inicio = today
+            if estatus == OrdenMantenimiento.ESTATUS_CERRADA and not orden.fecha_cierre:
+                orden.fecha_cierre = today
+
+        if responsable is not None and responsable.strip() != orden.responsable:
+            orden.responsable = responsable.strip()
+            cambios.append(f"Responsable: {orden.responsable or 'Sin responsable'}")
+
+        if costo_adicional:
+            orden.costo_otros = (orden.costo_otros or Decimal("0")) + costo_adicional
+            cambios.append(f"Costo adicional: ${costo_adicional}")
+
+        update_fields = ["estatus", "responsable", "fecha_inicio", "fecha_cierre", "costo_otros", "actualizado_en"]
+        orden.save(update_fields=update_fields)
+
+        accion = "Seguimiento actualizado"
+        bitacora_texto = comentario
+        if cambios:
+            bitacora_texto = " | ".join(cambios + ([comentario] if comentario else []))
+        BitacoraMantenimiento.objects.create(
+            orden=orden,
+            usuario=request.user,
+            accion=accion,
+            comentario=bitacora_texto,
+            costo_adicional=costo_adicional or Decimal("0"),
+        )
+        return orden
 
 
 class UnidadListSerializer(serializers.ModelSerializer):

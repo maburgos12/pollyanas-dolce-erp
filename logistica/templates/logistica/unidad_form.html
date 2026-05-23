@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Logística · {% if unidad %}Editar unidad{% else %}Nueva unidad{% endif %}{% endblock %}
 {% block page_title %}Logística · {% if unidad %}Editar unidad{% else %}Nueva unidad{% endif %}{% endblock %}
@@ -18,6 +19,7 @@
     .unit-form-actions { flex-direction: column; }
   }
 </style>
+<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}">
 {% endblock %}
 
 {% block content %}

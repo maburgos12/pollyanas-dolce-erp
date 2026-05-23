@@ -114,6 +114,7 @@ INSTALLED_APPS = [
     "mantenimiento",
     "seguimiento",
     "mermas",
+    "operacion",
     "integraciones",
     "horarios_especiales",
     "pos_bridge",

@@ -13,13 +13,13 @@
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
     <style>
       :root {
-        --bg: #0f0f14;
-        --surface: #1a1a24;
-        --border: #2a2a38;
+        --bg: #f9f5f8;
+        --surface: #ffffff;
+        --border: #ede6f0;
         --wine: #8B2252;
         --gold: #C9A84C;
-        --text: #e8e0d5;
-        --text-muted: #888888;
+        --text: #1c1520;
+        --text-muted: #6b5f70;
         --danger: #e64f64;
         --warning: #e6b84f;
         --success: #51b56f;
@@ -99,7 +99,7 @@
         min-height: 48px;
         border: 1px solid var(--border);
         border-radius: 10px;
-        background: #111118;
+        background: #f9f5f8;
         color: var(--text);
         outline: none;
         padding: 12px 13px;
@@ -120,7 +120,7 @@
       .secondary-btn {
         border: 1px solid var(--border);
         border-radius: 10px;
-        background: transparent;
+        background: var(--surface);
         color: var(--text);
         font-weight: 800;
         padding: 12px 14px;
@@ -145,7 +145,8 @@
       .logout {
         min-height: 40px;
         border-radius: 999px;
-        background: #261521;
+        background: rgba(139, 34, 82, .08);
+        border: 1px solid var(--border);
         color: var(--text);
         font-size: 13px;
         font-weight: 800;
@@ -182,7 +183,7 @@
       }
       .select-card:hover, .select-card.selected {
         border-color: var(--wine);
-        background: #2a1423;
+        background: rgba(139, 34, 82, .08);
       }
       .card-label {
         margin: 0 0 4px;
@@ -211,7 +212,7 @@
       }
       .tipo-btn.selected {
         border-color: var(--gold);
-        background: #1f1a10;
+        background: rgba(201, 168, 76, .14);
       }
       .progress {
         display: flex;
@@ -246,7 +247,7 @@
         justify-content: center;
         border: 1px solid var(--border);
         border-radius: 10px;
-        background: #111118;
+        background: #f9f5f8;
         color: var(--text);
         font-weight: 900;
         padding: 12px 13px;
@@ -280,6 +281,16 @@
         grid-template-columns: 1fr 1fr;
         gap: 10px;
         margin-top: 16px;
+      }
+      .inline-note {
+        border: 1px solid rgba(201, 168, 76, .35);
+        border-radius: 10px;
+        background: rgba(201, 168, 76, .11);
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 800;
+        margin: 12px 0;
+        padding: 12px;
       }
       .confirm {
         margin-top: 28px;
@@ -316,7 +327,7 @@
         max-width: 430px;
         margin: 0 auto;
         border-top: 1px solid var(--border);
-        background: rgba(15,15,20,.94);
+        background: rgba(255, 255, 255, .96);
         color: var(--text-muted);
         text-align: center;
         font-size: 12px;
@@ -329,25 +340,121 @@
         padding: 22px;
         text-align: center;
       }
+      .summary-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin: 0 0 14px;
+      }
+      .summary-card {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--surface);
+        padding: 12px;
+      }
+      .summary-card strong {
+        display: block;
+        color: var(--gold);
+        font-size: 22px;
+        line-height: 1;
+      }
+      .summary-card span {
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 800;
+      }
+      .toolbar {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin: 0 0 14px;
+      }
+      .toolbar button {
+        min-height: 42px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--surface);
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 900;
+        padding: 9px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .07), 0 1px 2px rgba(0, 0, 0, .04);
+      }
+      .toolbar button.active {
+        border-color: var(--gold);
+        color: #4f3416;
+        background: rgba(201, 168, 76, .14);
+      }
+      .status-chip {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        color: var(--text-muted);
+        font-size: 11px;
+        font-weight: 900;
+        padding: 4px 8px;
+      }
+      .status-chip.critica,
+      .status-chip.alta { color: var(--danger); border-color: rgba(230,79,100,.45); }
+      .status-chip.proceso { color: var(--warning); border-color: rgba(230,184,79,.45); }
+      .status-chip.cerrada { color: var(--success); border-color: rgba(81,181,111,.45); }
+      .card-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .card-actions button {
+        min-height: 38px;
+        border-radius: 9px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 900;
+        padding: 8px 10px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .07), 0 1px 2px rgba(0, 0, 0, .04);
+      }
+      .toolbar button:hover,
+      .toolbar button:focus,
+      .card-actions button:hover,
+      .card-actions button:focus {
+        border-color: var(--wine);
+        background: rgba(139, 34, 82, .08);
+        color: var(--text);
+      }
+      .search-row {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
     </style>
+    <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}">
   </head>
   <body>
     <div id="app"></div>
     <script>
       const API = "/api/mantenimiento";
       const AUTH_API = "/api/logistica";
-      const ACCESS_KEY = "pd_mantenimiento_access";
-      const REFRESH_KEY = "pd_mantenimiento_refresh";
       const app = document.getElementById("app");
       const state = {
-        token: localStorage.getItem(ACCESS_KEY) || localStorage.getItem("pd_logistica_access") || "",
-        refreshToken: localStorage.getItem(REFRESH_KEY) || localStorage.getItem("pd_logistica_refresh") || "",
+        token: localStorage.getItem("pd_mantenimiento_access") || "",
+        refreshToken: localStorage.getItem("pd_mantenimiento_refresh") || "",
         perfil: null,
         pantalla: "login",
         activos: [],
+        sucursales: [],
         unidades: [],
         tiposServicio: [],
+        ordenes: [],
+        ordenActual: null,
+        filtroOrdenes: "abiertas",
+        busquedaEquipo: "",
+        sucursalFiltro: "",
         equipoDraft: emptyEquipoDraft(),
+        puntoDraft: emptyPuntoDraft(),
         vehiculoDraft: emptyVehiculoDraft(),
       };
 
@@ -362,6 +469,16 @@
           costoReal: "",
           foto: null,
           fotoPreview: "",
+        };
+      }
+
+      function emptyPuntoDraft() {
+        return {
+          sucursal: "",
+          nombre: "",
+          categoria: "Infraestructura",
+          ubicacion: "",
+          notas: "",
         };
       }
 
@@ -388,20 +505,25 @@
       function setTokens(data) {
         state.token = data.access;
         state.refreshToken = data.refresh;
-        localStorage.setItem(ACCESS_KEY, data.access);
-        localStorage.setItem(REFRESH_KEY, data.refresh);
-        localStorage.removeItem("pd_logistica_access");
-        localStorage.removeItem("pd_logistica_refresh");
+        localStorage.setItem("pd_mantenimiento_access", data.access);
+        localStorage.setItem("pd_mantenimiento_refresh", data.refresh);
+      }
+
+      async function useDjangoSessionToken() {
+        const res = await fetch(`${API}/session-token/`, {
+          headers: {"Accept": "application/json"}
+        });
+        if (!res.ok) return false;
+        setTokens(await res.json());
+        return true;
       }
 
       function logout(doRender = true) {
         state.token = "";
         state.refreshToken = "";
         state.perfil = null;
-        localStorage.removeItem(ACCESS_KEY);
-        localStorage.removeItem(REFRESH_KEY);
-        localStorage.removeItem("pd_logistica_access");
-        localStorage.removeItem("pd_logistica_refresh");
+        localStorage.removeItem("pd_mantenimiento_access");
+        localStorage.removeItem("pd_mantenimiento_refresh");
         if (doRender) showScreen("login");
       }
 
@@ -423,7 +545,7 @@
           if (refreshed.ok) {
             const data = await refreshed.json();
             state.token = data.access;
-            localStorage.setItem(ACCESS_KEY, data.access);
+            localStorage.setItem("pd_mantenimiento_access", data.access);
             return apiFetch(path, {...options, _retry: true});
           }
           logout(false);
@@ -447,6 +569,15 @@
           app.innerHTML = html;
           app.classList.remove("is-changing");
         }, 120);
+      }
+
+      function appGlyph(name) {
+        const icons = {
+          equipo: `<svg viewBox="0 0 32 32"><path class="gold-fill" d="M10 21l3 3 9-9-3-3z"/><path class="stroke" d="M10 21l3 3 9-9-3-3-9 9Z"/><path class="gold-stroke" d="M20 7c1.6-.5 3.5-.2 4.8 1.1l-3.2 3.2 2.1 2.1 3.2-3.2c.8 2.5-.4 5.4-2.9 6.6"/><path class="stroke" d="M8 24l-2 2"/></svg>`,
+          vehiculo: `<svg viewBox="0 0 32 32"><path class="soft" d="M8 14h16v8H8z"/><path class="stroke" d="M11 23h.1M22 23h.1M11 14l2-5h7l3 5"/><path class="gold-stroke" d="M23 7l2 2-5 5-2-2 5-5Z"/></svg>`,
+          historial: `<svg viewBox="0 0 32 32"><path class="soft" d="M10 7h12v18H10z"/><path class="gold-stroke" d="M13 12h6M13 16h6M13 20h4"/><path class="stroke" d="M8 10h2M8 15h2M8 20h2"/></svg>`
+        };
+        return `<span class="app-glyph" aria-hidden="true">${icons[name] || icons.equipo}</span>`;
       }
 
       function shell(content) {
@@ -475,7 +606,12 @@
         if (name === "login") return renderLogin();
         if (!state.perfil) await loadPerfil();
         if (name === "dashboard") return renderDashboard();
+        if (name === "pendientes") return renderPendientes();
+        if (name === "buscar") return renderBuscarEquipo();
+        if (name === "seguimiento") return renderSeguimiento();
+        if (name === "reportes") return renderReportes();
         if (name === "equipo") return renderEquipoDraft();
+        if (name === "punto") return renderPuntoMantenible();
         if (name === "vehiculo") return renderVehiculoDraft();
         if (name === "historial") return renderHistorial();
       }
@@ -518,19 +654,175 @@
 
       async function loadPerfil() {
         const res = await apiFetch("/me/");
-        state.perfil = res.ok ? await res.json() : {nombre: "Mantenimiento"};
+        if (res.ok) {
+          state.perfil = await res.json();
+          return;
+        }
+        throw new Error("No tienes permisos para usar Mantenimiento.");
       }
 
-      function renderDashboard() {
+      async function loadOrdenes(force = false) {
+        if (state.ordenes.length && !force) return state.ordenes;
+        const res = await apiFetch("/ordenes/");
+        state.ordenes = res.ok ? await parseListResponse(res) : [];
+        return state.ordenes;
+      }
+
+      function ordenAbierta(orden) {
+        return !["CERRADA", "CANCELADA"].includes(orden.estatus);
+      }
+
+      function metricasMantenimiento() {
+        const ordenes = state.ordenes || [];
+        return {
+          abiertas: ordenes.filter(ordenAbierta).length,
+          proceso: ordenes.filter((o) => o.estatus === "EN_PROCESO").length,
+          criticas: ordenes.filter((o) => ordenAbierta(o) && ["CRITICA", "ALTA"].includes(o.prioridad)).length,
+          cerradas: ordenes.filter((o) => o.estatus === "CERRADA").length,
+        };
+      }
+
+      function statusClass(orden) {
+        if (orden.estatus === "CERRADA") return "cerrada";
+        if (orden.estatus === "EN_PROCESO") return "proceso";
+        return String(orden.prioridad || "").toLowerCase();
+      }
+
+      function ordenCard(orden, {compact = false} = {}) {
+        return `
+          <article class="card report-card">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+              <div>
+                <p style="margin:0;font-weight:900">${esc(orden.activo_nombre || "Activo sin nombre")}</p>
+                <p class="muted">${esc(orden.activo_codigo || "")} · ${esc(orden.sucursal_nombre || "Sin sucursal")}</p>
+              </div>
+              <span class="status-chip ${statusClass(orden)}">${esc(orden.estatus_display || orden.estatus)}</span>
+            </div>
+            <p class="muted">${esc(orden.folio)} · ${esc(orden.tipo_display)} · ${esc(orden.prioridad_display)}</p>
+            ${compact ? "" : `<p style="margin:8px 0 0">${esc(orden.descripcion || "Sin descripción")}</p>`}
+            <div class="card-actions">
+              <button onclick="abrirOrden(${orden.id})">Ver seguimiento</button>
+              ${orden.estatus !== "EN_PROCESO" && ordenAbierta(orden) ? `<button onclick="actualizarOrdenRapida(${orden.id}, 'EN_PROCESO')">Iniciar</button>` : ""}
+              ${orden.estatus !== "CERRADA" ? `<button onclick="actualizarOrdenRapida(${orden.id}, 'CERRADA')">Cerrar</button>` : ""}
+            </div>
+          </article>
+        `;
+      }
+
+      async function renderDashboard() {
+        await loadOrdenes(true);
+        const m = metricasMantenimiento();
         render(shell(`
-          <p style="margin:0 0 20px;color:var(--gold);font-weight:800;">Selecciona el origen del mantenimiento</p>
+          <p style="margin:0 0 12px;color:var(--gold);font-weight:800;">Bandeja de mantenimiento</p>
+          <div class="summary-grid">
+            <div class="summary-card"><strong>${m.abiertas}</strong><span>Abiertas</span></div>
+            <div class="summary-card"><strong>${m.proceso}</strong><span>En proceso</span></div>
+            <div class="summary-card"><strong>${m.criticas}</strong><span>Críticas / altas</span></div>
+            <div class="summary-card"><strong>${m.cerradas}</strong><span>Cerradas</span></div>
+          </div>
           <div class="dash-grid">
-            <button class="dash-btn" onclick="startEquipo()">Sucursales /<br>Producción (CEDIS)</button>
-            <button class="dash-btn" onclick="startVehiculo()">Logística<br>Unidades</button>
+            <button class="dash-btn" onclick="showScreen('pendientes')">${appGlyph("historial")}<span>Pendientes</span></button>
+            <button class="dash-btn" onclick="showScreen('buscar')">${appGlyph("equipo")}<span>Buscar equipo</span></button>
+            <button class="dash-btn" onclick="showScreen('seguimiento')">${appGlyph("historial")}<span>Seguimiento</span></button>
+            <button class="dash-btn" onclick="showScreen('reportes')">${appGlyph("historial")}<span>Reportes</span></button>
           </div>
           <div style="margin-top:14px">
-            <button class="secondary-btn" style="width:100%" onclick="showScreen('historial')">Ver historial reciente</button>
+            <button class="secondary-btn" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px" onclick="startEquipo()">${appGlyph("equipo")}<span>Registrar mantenimiento de equipo</span></button>
           </div>
+        `));
+      }
+
+      async function renderPendientes() {
+        await loadOrdenes(true);
+        const pendientes = state.ordenes.filter(ordenAbierta);
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
+          <h1 class="screen-title" style="margin-top:16px">Pendientes</h1>
+          <div class="toolbar">
+            <button class="${state.filtroOrdenes === "abiertas" ? "active" : ""}" onclick="state.filtroOrdenes='abiertas'; renderPendientes()">Abiertas</button>
+            <button class="${state.filtroOrdenes === "criticas" ? "active" : ""}" onclick="state.filtroOrdenes='criticas'; renderPendientes()">Críticas / altas</button>
+          </div>
+          ${(state.filtroOrdenes === "criticas" ? pendientes.filter((o) => ["CRITICA", "ALTA"].includes(o.prioridad)) : pendientes)
+            .map((orden) => ordenCard(orden)).join("") || `<div class="empty">Sin órdenes pendientes.</div>`}
+        `));
+      }
+
+      function sucursalesDesdeActivos() {
+        const map = new Map();
+        state.activos.forEach((activo) => {
+          if (activo.sucursal) map.set(String(activo.sucursal), activo.sucursal_nombre || "Sin nombre");
+        });
+        return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], "es"));
+      }
+
+      function sucursalesDisponibles() {
+        const map = new Map();
+        state.sucursales.forEach((sucursal) => {
+          map.set(String(sucursal.id), sucursal.nombre || sucursal.codigo || "Sin nombre");
+        });
+        sucursalesDesdeActivos().forEach(([id, nombre]) => map.set(String(id), nombre));
+        return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], "es"));
+      }
+
+      async function renderBuscarEquipo() {
+        await ensureActivos();
+        const q = state.busquedaEquipo.toLowerCase();
+        const filtrados = state.activos.filter((activo) => {
+          const matchesSucursal = !state.sucursalFiltro || String(activo.sucursal) === String(state.sucursalFiltro);
+          const text = `${activo.nombre} ${activo.codigo} ${activo.categoria} ${activo.ubicacion} ${activo.sucursal_nombre}`.toLowerCase();
+          return matchesSucursal && (!q || text.includes(q));
+        });
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
+          <h1 class="screen-title" style="margin-top:16px">Buscar equipo</h1>
+          <div class="search-row">
+            <select onchange="state.sucursalFiltro=this.value; renderBuscarEquipo()">
+              <option value="">Todas las sucursales</option>
+              ${sucursalesDesdeActivos().map(([id, nombre]) => `<option value="${id}" ${String(state.sucursalFiltro) === String(id) ? "selected" : ""}>${esc(nombre)}</option>`).join("")}
+            </select>
+            <input type="search" placeholder="Nombre, código, categoría o ubicación" value="${esc(state.busquedaEquipo)}" oninput="state.busquedaEquipo=this.value; renderBuscarEquipo()">
+          </div>
+          ${filtrados.map((activo) => `
+            <article class="card report-card">
+              <p style="margin:0;font-weight:900">${esc(activo.nombre)}</p>
+              <p class="muted">${esc(activo.codigo)} · ${esc(activo.sucursal_nombre || "Sin sucursal")}</p>
+              <p class="muted">${esc(activo.categoria || "Sin categoría")} · ${esc(activo.ubicacion || "Sin ubicación")}</p>
+              <div class="card-actions">
+                <button onclick="iniciarEquipoDesdeActivo(${activo.id})">Registrar mantenimiento</button>
+                <button onclick="verOrdenesActivo(${activo.id})">Ver órdenes</button>
+              </div>
+            </article>
+          `).join("") || `<div class="empty">Sin equipos con esos filtros.</div>`}
+          <div style="margin-top:14px">
+            <button class="secondary-btn" style="width:100%" onclick="startPuntoMantenible()">Registrar punto mantenible</button>
+          </div>
+        `));
+      }
+
+      async function renderSeguimiento() {
+        await loadOrdenes(true);
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
+          <h1 class="screen-title" style="margin-top:16px">Seguimiento</h1>
+          ${state.ordenes.filter(ordenAbierta).map((orden) => ordenCard(orden)).join("") || `<div class="empty">Sin trabajos activos.</div>`}
+        `));
+      }
+
+      async function renderReportes() {
+        await loadOrdenes(true);
+        await ensureActivos();
+        const m = metricasMantenimiento();
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
+          <h1 class="screen-title" style="margin-top:16px">Reportes</h1>
+          <div class="summary-grid">
+            <div class="summary-card"><strong>${m.abiertas}</strong><span>Abiertas</span></div>
+            <div class="summary-card"><strong>${m.criticas}</strong><span>Urgentes</span></div>
+            <div class="summary-card"><strong>${m.cerradas}</strong><span>Cerradas</span></div>
+            <div class="summary-card"><strong>${state.activos.length}</strong><span>Equipos</span></div>
+          </div>
+          <p style="color:var(--gold);font-weight:800;margin:14px 0 10px">Últimos movimientos</p>
+          ${state.ordenes.slice(0, 8).map((orden) => ordenCard(orden, {compact: true})).join("") || `<div class="empty">Sin órdenes registradas.</div>`}
         `));
       }
 
@@ -543,6 +835,12 @@
         if (state.activos.length) return;
         const res = await apiFetch("/activos/");
         state.activos = res.ok ? await parseListResponse(res) : [];
+      }
+
+      async function ensureSucursales() {
+        if (state.sucursales.length) return;
+        const res = await apiFetch("/sucursales/");
+        state.sucursales = res.ok ? await parseListResponse(res) : [];
       }
 
       function activoCard(activo) {
@@ -568,6 +866,10 @@
               <input type="search" placeholder="Buscar por nombre, código o sucursal" oninput="filtrarActivos(this.value)">
             </div>
             <div class="card-list" id="lista-activos">${lista}</div>
+            <div class="inline-note">
+              Si no existe el equipo, área o instalación en la base, registra primero un punto mantenible.
+            </div>
+            <button class="secondary-btn" style="width:100%" onclick="startPuntoMantenible()">No encuentro el equipo</button>
             <div class="actions">
               <button class="secondary-btn" onclick="showScreen('dashboard')">Cancelar</button>
               <button class="primary-btn" onclick="nextEquipoStep()" ${d.activo ? "" : "disabled"}>Siguiente</button>
@@ -590,7 +892,7 @@
             </div>
             <div class="field">
               <label for="desc-eq">Descripción / acción realizada</label>
-              <textarea id="desc-eq" placeholder="Describe el trabajo realizado" oninput="state.equipoDraft.descripcion=this.value">${esc(d.descripcion)}</textarea>
+              <textarea id="desc-eq" placeholder="Describe el trabajo realizado" oninput="state.equipoDraft.descripcion=this.value; syncEquipoReviewButton()">${esc(d.descripcion)}</textarea>
             </div>
             <div class="field">
               <label for="prov-eq">Proveedor</label>
@@ -609,7 +911,7 @@
             ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
             <div class="actions">
               <button class="secondary-btn" onclick="prevEquipoStep()">Atrás</button>
-              <button class="primary-btn" onclick="nextEquipoStep()" ${d.tipo && d.descripcion.trim() ? "" : "disabled"}>Revisar</button>
+              <button id="btn-equipo-revisar" class="primary-btn" onclick="nextEquipoStep()" ${puedeRevisarEquipo() ? "" : "disabled"}>Revisar</button>
             </div>
           `;
         } else {
@@ -634,12 +936,205 @@
         render(shell(body));
       }
 
+      async function startPuntoMantenible() {
+        await Promise.all([ensureActivos(), ensureSucursales()]);
+        state.puntoDraft = emptyPuntoDraft();
+        if (state.sucursalFiltro) state.puntoDraft.sucursal = state.sucursalFiltro;
+        showScreen("punto");
+      }
+
+      async function renderPuntoMantenible(error = "") {
+        await Promise.all([ensureActivos(), ensureSucursales()]);
+        const d = state.puntoDraft;
+        const sucursales = sucursalesDisponibles();
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('equipo')">Volver</button>
+          <h1 class="screen-title" style="margin-top:16px">Registrar punto mantenible</h1>
+          <p class="muted" style="margin-top:0">Úsalo para reparaciones generales como fugas, contactos eléctricos, puertas, tarjas, paredes, drenajes o áreas de trabajo.</p>
+          <section class="card report-card">
+            <div class="field">
+              <label>Sucursal</label>
+              <select onchange="state.puntoDraft.sucursal=this.value">
+                <option value="">Selecciona sucursal</option>
+                ${sucursales.map(([id, nombre]) => `<option value="${id}" ${String(d.sucursal) === String(id) ? "selected" : ""}>${esc(nombre)}</option>`).join("")}
+              </select>
+            </div>
+            <div class="field">
+              <label>Nombre del punto</label>
+              <input value="${esc(d.nombre)}" placeholder="Ej. Instalación hidrosanitaria - Cocina" oninput="state.puntoDraft.nombre=this.value">
+            </div>
+            <div class="field">
+              <label>Tipo</label>
+              <select onchange="state.puntoDraft.categoria=this.value">
+                ${["Infraestructura", "Plomería", "Electricidad", "Refrigeración", "Gas", "Mobiliario", "Otro"].map((item) =>
+                  `<option value="${item}" ${d.categoria === item ? "selected" : ""}>${item}</option>`
+                ).join("")}
+              </select>
+            </div>
+            <div class="field">
+              <label>Ubicación</label>
+              <input value="${esc(d.ubicacion)}" placeholder="Ej. Cocina, barra, baño, almacén" oninput="state.puntoDraft.ubicacion=this.value">
+            </div>
+            <div class="field">
+              <label>Detalle inicial</label>
+              <textarea placeholder="Describe qué se detectó o qué se reparó" oninput="state.puntoDraft.notas=this.value">${esc(d.notas)}</textarea>
+            </div>
+            ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
+            <button class="primary-btn" onclick="guardarPuntoMantenible()">Guardar y continuar</button>
+          </section>
+        `));
+      }
+
+      async function guardarPuntoMantenible() {
+        const d = state.puntoDraft;
+        if (!d.sucursal) return renderPuntoMantenible("Selecciona la sucursal.");
+        if (!d.nombre.trim()) return renderPuntoMantenible("Escribe el nombre del punto mantenible.");
+        const res = await apiFetch("/activos/rapido/", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            sucursal: d.sucursal,
+            nombre: d.nombre.trim(),
+            categoria: d.categoria,
+            ubicacion: d.ubicacion.trim(),
+            notas: d.notas.trim(),
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          return renderPuntoMantenible(Object.values(err).flat().join(" ") || "No se pudo registrar el punto mantenible.");
+        }
+        const activo = await res.json();
+        state.activos = [activo, ...state.activos.filter((item) => item.id !== activo.id)];
+        state.equipoDraft = emptyEquipoDraft();
+        state.equipoDraft.activo = activo.id;
+        state.equipoDraft.activoLabel = `${activo.nombre} (${activo.codigo})`;
+        state.equipoDraft.descripcion = d.notas || "";
+        state.equipoDraft.tipo = "CORRECTIVO";
+        state.equipoDraft.step = 2;
+        showScreen("equipo");
+      }
+
       function seleccionarActivo(id) {
         const activo = state.activos.find((item) => item.id === id);
         if (!activo) return;
         state.equipoDraft.activo = activo.id;
         state.equipoDraft.activoLabel = `${activo.nombre} (${activo.codigo})`;
         renderEquipoDraft();
+      }
+
+      function iniciarEquipoDesdeActivo(id) {
+        const activo = state.activos.find((item) => item.id === id);
+        if (!activo) return;
+        state.equipoDraft = emptyEquipoDraft();
+        state.equipoDraft.activo = activo.id;
+        state.equipoDraft.activoLabel = `${activo.nombre} (${activo.codigo})`;
+        state.equipoDraft.step = 2;
+        showScreen("equipo");
+      }
+
+      async function verOrdenesActivo(id) {
+        const res = await apiFetch(`/ordenes/?activo=${id}`);
+        const ordenes = res.ok ? await parseListResponse(res) : [];
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('buscar')">Volver</button>
+          <h1 class="screen-title" style="margin-top:16px">Órdenes del equipo</h1>
+          ${ordenes.map((orden) => ordenCard(orden)).join("") || `<div class="empty">Este equipo no tiene órdenes registradas.</div>`}
+        `));
+      }
+
+      async function abrirOrden(id) {
+        const res = await apiFetch(`/ordenes/${id}/`);
+        if (!res.ok) return renderSeguimiento();
+        state.ordenActual = await res.json();
+        renderOrdenDetalle();
+      }
+
+      function renderOrdenDetalle(error = "") {
+        const orden = state.ordenActual;
+        if (!orden) return showScreen("seguimiento");
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('seguimiento')">Volver</button>
+          <h1 class="screen-title" style="margin-top:16px">${esc(orden.folio)}</h1>
+          <section class="card report-card">
+            <p style="margin:0;font-weight:900">${esc(orden.activo_nombre)}</p>
+            <p class="muted">${esc(orden.activo_codigo)} · ${esc(orden.sucursal_nombre || "Sin sucursal")}</p>
+            <div class="kv"><b>Estatus</b><span>${esc(orden.estatus_display)}</span></div>
+            <div class="kv"><b>Prioridad</b><span>${esc(orden.prioridad_display)}</span></div>
+            <div class="kv"><b>Responsable</b><span>${esc(orden.responsable || "-")}</span></div>
+            <div class="kv"><b>Costo</b><span>${orden.costo_total ? "$" + Number(orden.costo_total).toLocaleString("es-MX") : "-"}</span></div>
+            <p>${esc(orden.descripcion || "Sin descripción")}</p>
+          </section>
+          <section class="card report-card">
+            <div class="field">
+              <label>Estatus</label>
+              <select id="seguimiento-estatus">
+                <option value="PENDIENTE" ${orden.estatus === "PENDIENTE" ? "selected" : ""}>Pendiente</option>
+                <option value="EN_PROCESO" ${orden.estatus === "EN_PROCESO" ? "selected" : ""}>En proceso</option>
+                <option value="CERRADA" ${orden.estatus === "CERRADA" ? "selected" : ""}>Cerrada</option>
+                <option value="CANCELADA" ${orden.estatus === "CANCELADA" ? "selected" : ""}>Cancelada</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Responsable</label>
+              <input id="seguimiento-responsable" value="${esc(orden.responsable || "")}" placeholder="Técnico o proveedor">
+            </div>
+            <div class="field">
+              <label>Comentario de seguimiento</label>
+              <textarea id="seguimiento-comentario" placeholder="Qué se revisó, avance, pendiente o cierre"></textarea>
+            </div>
+            <div class="field">
+              <label>Costo adicional</label>
+              <input id="seguimiento-costo" type="number" step="0.01" min="0" placeholder="0.00">
+            </div>
+            ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
+            <button class="primary-btn" onclick="guardarSeguimientoOrden()">Guardar seguimiento</button>
+          </section>
+          <p style="color:var(--gold);font-weight:800;margin:14px 0 10px">Bitácora</p>
+          ${(orden.bitacora || []).map((item) => `
+            <article class="card report-card">
+              <p style="margin:0;font-weight:900">${esc(item.accion)}</p>
+              <p class="muted">${esc(item.fecha_display)} · ${esc(item.usuario_nombre || "")}</p>
+              <p>${esc(item.comentario || "Sin comentario")}</p>
+            </article>
+          `).join("") || `<div class="empty">Sin seguimiento registrado.</div>`}
+        `));
+      }
+
+      async function guardarSeguimientoOrden() {
+        const orden = state.ordenActual;
+        if (!orden) return;
+        const payload = {
+          estatus: document.getElementById("seguimiento-estatus")?.value,
+          responsable: document.getElementById("seguimiento-responsable")?.value || "",
+          comentario: document.getElementById("seguimiento-comentario")?.value || "",
+        };
+        const costo = document.getElementById("seguimiento-costo")?.value;
+        if (costo) payload.costo_adicional = costo;
+        const res = await apiFetch(`/ordenes/${orden.id}/`, {
+          method: "PATCH",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          return renderOrdenDetalle(Object.values(err).flat().join(" ") || "No se pudo guardar el seguimiento.");
+        }
+        state.ordenActual = await res.json();
+        state.ordenes = [];
+        renderOrdenDetalle();
+      }
+
+      async function actualizarOrdenRapida(id, estatus) {
+        const res = await apiFetch(`/ordenes/${id}/`, {
+          method: "PATCH",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({estatus, comentario: estatus === "CERRADA" ? "Cierre rápido desde bandeja." : "Inicio desde bandeja."}),
+        });
+        if (res.ok) {
+          state.ordenes = [];
+          await showScreen(state.pantalla || "dashboard");
+        }
       }
 
       function filtrarActivos(q) {
@@ -661,6 +1156,16 @@
         state.equipoDraft.foto = file;
         state.equipoDraft.fotoPreview = URL.createObjectURL(file);
         renderEquipoDraft();
+      }
+
+      function puedeRevisarEquipo() {
+        const d = state.equipoDraft;
+        return Boolean(d.tipo && d.descripcion.trim());
+      }
+
+      function syncEquipoReviewButton() {
+        const button = document.getElementById("btn-equipo-revisar");
+        if (button) button.disabled = !puedeRevisarEquipo();
       }
 
       function nextEquipoStep() {
@@ -772,7 +1277,7 @@
           ` : d.modo === "reparacion" ? `
             <div class="field">
               <label for="falla-v">Descripción de la falla</label>
-              <textarea id="falla-v" placeholder="Qué falló y cómo se detectó" oninput="state.vehiculoDraft.descripcionFalla=this.value">${esc(d.descripcionFalla)}</textarea>
+              <textarea id="falla-v" placeholder="Qué falló y cómo se detectó" oninput="state.vehiculoDraft.descripcionFalla=this.value; syncVehiculoReviewButton()">${esc(d.descripcionFalla)}</textarea>
             </div>
             <div class="field">
               <label for="rep-v">Descripción de la reparación</label>
@@ -813,7 +1318,7 @@
             ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
             <div class="actions">
               <button class="secondary-btn" onclick="prevVehiculoStep()">Atrás</button>
-              <button class="primary-btn" onclick="nextVehiculoStep()" ${puedeAvanzarVehiculo() ? "" : "disabled"}>Revisar</button>
+              <button id="btn-vehiculo-revisar" class="primary-btn" onclick="nextVehiculoStep()" ${puedeAvanzarVehiculo() ? "" : "disabled"}>Revisar</button>
             </div>
           `;
         } else {
@@ -871,6 +1376,11 @@
         if (d.modo === "servicio") return Boolean(d.tipoServicio);
         if (d.modo === "reparacion") return Boolean(d.descripcionFalla.trim());
         return false;
+      }
+
+      function syncVehiculoReviewButton() {
+        const button = document.getElementById("btn-vehiculo-revisar");
+        if (button) button.disabled = !puedeAvanzarVehiculo();
       }
 
       function nextVehiculoStep() {
@@ -973,16 +1483,26 @@
         if ("serviceWorker" in navigator) {
           navigator.serviceWorker.register("{% static 'mantenimiento/sw.js' %}").catch(() => {});
         }
+
+        try {
+          if (await useDjangoSessionToken()) {
+            await showScreen("dashboard");
+            return;
+          }
+        } catch (error) {
+          logout(false);
+        }
+
         if (state.token) {
           try {
             await showScreen("dashboard");
+            return;
           } catch (error) {
             logout(false);
-            renderLogin();
           }
-        } else {
-          renderLogin();
         }
+
+        renderLogin();
       }
 
       boot();

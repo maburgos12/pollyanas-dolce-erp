@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Logística · Unidades{% endblock %}
 {% block page_title %}Logística · Unidades{% endblock %}
@@ -17,6 +18,7 @@
     .unit-head, .unit-search, .unit-actions, .unit-pager { align-items: stretch; flex-direction: column; }
   }
 </style>
+<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}">
 {% endblock %}
 
 {% block content %}

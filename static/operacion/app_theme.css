@@ -1,0 +1,510 @@
+:root {
+  --pd-wine: #8b2252;
+  --pd-wine-light: rgba(139, 34, 82, .08);
+  --pd-gold: #c9a84c;
+  --pd-gold-light: rgba(201, 168, 76, .14);
+  --pd-ink: #1c1520;
+  --pd-muted: #6b5f70;
+  --pd-line: #ede6f0;
+  --pd-bg: #f9f5f8;
+  --pd-card: #fff;
+  --pd-shadow: 0 1px 3px rgba(0, 0, 0, .07), 0 1px 2px rgba(0, 0, 0, .04);
+  --bg: var(--pd-bg);
+  --surface: var(--pd-card);
+  --border: var(--pd-line);
+  --wine: var(--pd-wine);
+  --gold: var(--pd-gold);
+  --text: var(--pd-ink);
+  --text-muted: var(--pd-muted);
+}
+
+html,
+body,
+.merma-app-body .main-content {
+  background: var(--pd-bg) !important;
+  color: var(--pd-ink) !important;
+}
+
+#app,
+.merma-shell {
+  color: var(--pd-ink);
+}
+
+.brand-title,
+.mini-brand,
+.screen-title,
+.app-header h1,
+.topbar h1,
+.form-block h2,
+.card h2 {
+  color: var(--pd-wine) !important;
+  letter-spacing: 0 !important;
+}
+
+.brand-subtitle,
+.unit-line,
+.secondary-link,
+.hello,
+.muted,
+.app-header span,
+.topbar .muted,
+.meta,
+.card-sub,
+.field label,
+label {
+  color: var(--pd-muted) !important;
+}
+
+.panel,
+.card,
+.form-block,
+.queue-card,
+.empty,
+.select-card,
+.option-card,
+.unit-card,
+.review-card,
+.fuel-sheet,
+.fuel-alert-card,
+.weekly-card,
+.daily-check-card,
+.difference-box {
+  background: var(--pd-card) !important;
+  border-color: var(--pd-line) !important;
+  color: var(--pd-ink) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--pd-shadow) !important;
+}
+
+.panel {
+  margin-top: 24px !important;
+}
+
+input,
+textarea,
+select,
+.file-trigger,
+.receipt-product,
+.receipt-qty {
+  background: var(--pd-bg) !important;
+  border-color: var(--pd-line) !important;
+  color: var(--pd-ink) !important;
+  border-radius: 6px !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #9a8d9f !important;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--pd-wine) !important;
+}
+
+.primary-btn,
+.mermas-btn.primary {
+  background: var(--pd-wine) !important;
+  color: #fff !important;
+  border-color: var(--pd-wine) !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+
+.secondary-btn,
+.logout,
+.mermas-btn,
+.add-btn,
+.icon-btn,
+.tipo-btn,
+.toolbar button,
+.card-actions button,
+.receipt-choice,
+.dashboard-help,
+.fuel-route-btn {
+  background: var(--pd-card) !important;
+  border: 1px solid var(--pd-line) !important;
+  color: var(--pd-ink) !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+
+.secondary-btn:hover,
+.secondary-btn:focus,
+.logout:hover,
+.logout:focus,
+.toolbar button:hover,
+.toolbar button:focus,
+.card-actions button:hover,
+.card-actions button:focus,
+.dash-btn:hover,
+.dash-btn:focus,
+.select-card:hover,
+.select-card.selected,
+.tipo-btn.selected,
+.toolbar button.active,
+.receipt-choice.active {
+  border-color: var(--pd-wine) !important;
+  background: var(--pd-wine-light) !important;
+  color: var(--pd-ink) !important;
+}
+
+.toolbar button.active {
+  border-color: var(--pd-gold) !important;
+  color: #7a5d11 !important;
+  background: var(--pd-gold-light) !important;
+}
+
+.card-actions {
+  gap: 8px !important;
+}
+
+.card-actions button {
+  min-height: 38px !important;
+  font-size: 12px !important;
+}
+
+.dash-grid {
+  gap: 10px !important;
+}
+
+.dash-btn {
+  min-height: 116px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
+  align-items: flex-start !important;
+  gap: 8px !important;
+  border: 1px solid var(--pd-line) !important;
+  border-radius: 10px !important;
+  background: var(--pd-card) !important;
+  color: var(--pd-ink) !important;
+  box-shadow: var(--pd-shadow) !important;
+  text-align: left !important;
+  line-height: 1.18 !important;
+}
+
+.dash-btn:hover,
+.dash-btn:focus {
+  box-shadow: inset 3px 0 0 var(--pd-wine), var(--pd-shadow) !important;
+}
+
+.app-glyph {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(139, 34, 82, .16);
+  border-radius: 14px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, .95), rgba(249, 245, 248, .72)),
+    radial-gradient(circle at 75% 16%, rgba(201, 168, 76, .18), transparent 42%);
+  color: var(--pd-wine);
+}
+
+.app-glyph svg {
+  width: 30px;
+  height: 30px;
+  display: block;
+}
+
+.app-glyph .stroke {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.app-glyph .soft {
+  fill: rgba(139, 34, 82, .08);
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.app-glyph .gold-stroke {
+  fill: none;
+  stroke: var(--pd-gold);
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.topbar,
+.app-header {
+  border-bottom: 1px solid var(--pd-line);
+  padding-bottom: 12px;
+}
+
+.footer,
+.sticky-submit {
+  background: rgba(255, 255, 255, .96) !important;
+  border-color: var(--pd-line) !important;
+  color: var(--pd-muted) !important;
+}
+
+.badge,
+.status-pill {
+  box-shadow: none !important;
+}
+
+.data-table,
+.data-table td {
+  background: var(--pd-card) !important;
+  color: var(--pd-ink) !important;
+  border-color: var(--pd-line) !important;
+}
+
+.data-table th {
+  background: var(--pd-wine) !important;
+  color: #fff !important;
+}
+
+.module-shell,
+.bi-shell,
+.kanban-shell,
+.exec-shell,
+.ops-shell,
+.fleet-shell,
+.logs-shell,
+.reports-shell,
+.capture-shell,
+.unit-shell,
+.unit-detail-shell,
+.unit-form-shell,
+.mermas-page,
+.fallas-card {
+  color: var(--pd-ink) !important;
+}
+
+.module-tabs {
+  background: transparent !important;
+  border-bottom: 1px solid var(--pd-line) !important;
+  gap: 8px !important;
+  overflow-x: auto !important;
+  padding-bottom: 10px !important;
+}
+
+.module-tab {
+  background: var(--pd-card) !important;
+  border: 1px solid var(--pd-line) !important;
+  border-radius: 8px !important;
+  color: var(--pd-ink) !important;
+  font-weight: 800 !important;
+  letter-spacing: 0 !important;
+  min-height: 38px !important;
+}
+
+.module-tab.active,
+.module-tab:hover,
+.module-tab:focus {
+  background: var(--pd-wine) !important;
+  border-color: var(--pd-wine) !important;
+  color: #fff !important;
+}
+
+.btn,
+.btn-small,
+.btn-soft,
+.btn-wine,
+.input-field,
+.fallas-input {
+  border-radius: 6px !important;
+  letter-spacing: 0 !important;
+}
+
+.btn-primary,
+.btn.btn-primary,
+.btn-wine {
+  background: var(--pd-wine) !important;
+  border-color: var(--pd-wine) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+
+.btn-secondary,
+.btn.btn-secondary,
+.btn-soft {
+  background: var(--pd-card) !important;
+  border: 1px solid var(--pd-line) !important;
+  color: var(--pd-ink) !important;
+  box-shadow: none !important;
+}
+
+.btn-secondary:hover,
+.btn-secondary:focus,
+.btn-soft:hover,
+.btn-soft:focus {
+  background: var(--pd-wine-light) !important;
+  border-color: var(--pd-wine) !important;
+  color: var(--pd-ink) !important;
+}
+
+.card,
+.bi-card,
+.bi-hero,
+.bi-hero-highlight,
+.bi-status-card,
+.bi-summary-chip,
+.kanban-col,
+.ticket-card,
+.ticket-modal-panel,
+.exec-kpi,
+.exec-empty,
+.fleet-card,
+.fleet-detail,
+.logi-box,
+.capture-kpi,
+.unit-kpi,
+.unit-check-card,
+.unit-modal-panel,
+.ops-stat,
+.ops-focus-card,
+.ops-summary-card,
+.metric-card,
+.fallas-card,
+.kpi-chart-card {
+  background: var(--pd-card) !important;
+  border-color: var(--pd-line) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--pd-shadow) !important;
+}
+
+.card-header,
+.bi-kicker,
+.bi-hero-title,
+.bi-status-label,
+.kanban-head strong,
+.exec-kpi strong,
+.exec-card-head h2,
+.fleet-head h2,
+.logi-box-title,
+.logi-table-title,
+.capture-kpi strong,
+.capture-section-head h2,
+.unit-title h1,
+.unit-pane-head h2,
+.unit-modal-panel h2,
+.unit-form-field label,
+.ops-stat strong,
+.ops-focus-card strong,
+.ops-summary-card strong,
+.metric-label,
+.metric-value,
+.fallas-title,
+.fallas-kicker,
+.fallas-table th {
+  color: var(--pd-wine) !important;
+  letter-spacing: 0 !important;
+}
+
+.bi-copy,
+.bi-hero-highlight-label,
+.bi-hero-highlight-meta,
+.ticket-meta,
+.exec-muted,
+.exec-kpi small,
+.fleet-muted,
+.logi-box-copy,
+.log-muted,
+.capture-muted,
+.capture-empty,
+.unit-muted,
+.fallas-muted,
+.fallas-empty,
+.mermas-header p {
+  color: var(--pd-muted) !important;
+}
+
+.table,
+.fallas-table {
+  background: var(--pd-card) !important;
+  color: var(--pd-ink) !important;
+  border-color: var(--pd-line) !important;
+}
+
+.table th,
+.fallas-table th {
+  background: var(--pd-wine-light) !important;
+  color: var(--pd-wine) !important;
+  border-color: var(--pd-line) !important;
+  text-transform: uppercase;
+  letter-spacing: 0 !important;
+}
+
+.table td,
+.fallas-table td {
+  border-color: var(--pd-line) !important;
+  color: var(--pd-ink) !important;
+}
+
+.table-striped tbody tr:nth-of-type(odd),
+.fallas-table tr:hover td,
+tr.log-overdue td,
+.report-detail {
+  background: rgba(139, 34, 82, .035) !important;
+}
+
+.input-field,
+.fallas-input,
+.bi-control input,
+.bi-control select,
+.logs-filter select,
+.logs-filter input,
+.reports-filter select,
+.reports-filter input,
+.capture-filter input,
+.capture-filter select {
+  background: var(--pd-bg) !important;
+  border: 1px solid var(--pd-line) !important;
+  color: var(--pd-ink) !important;
+}
+
+.kanban-count,
+.ticket-badge,
+.exec-badge,
+.fleet-badge,
+.log-badge,
+.report-badge,
+.capture-badge,
+.unit-badge,
+.ops-chip,
+.badge,
+.fallas-badge {
+  border-radius: 999px !important;
+  box-shadow: none !important;
+  letter-spacing: 0 !important;
+}
+
+.bi-hero {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .98), rgba(255, 255, 255, .92)),
+    radial-gradient(circle at 95% 8%, rgba(201, 168, 76, .16), transparent 28%) !important;
+}
+
+@media (max-width: 760px) {
+  .module-shell,
+  .bi-shell,
+  .kanban-shell,
+  .exec-shell,
+  .ops-shell,
+  .fleet-shell,
+  .logs-shell,
+  .reports-shell,
+  .capture-shell,
+  .unit-shell,
+  .unit-detail-shell,
+  .unit-form-shell,
+  .mermas-page {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+
+  .module-tabs {
+    margin-left: -2px !important;
+    margin-right: -2px !important;
+  }
+}

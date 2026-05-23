@@ -5,23 +5,28 @@ from django.core.exceptions import PermissionDenied
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from rest_framework import generics
+from rest_framework import generics, status
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento
-from core.access import can_manage_submodule, can_view_submodule
+from core.access import can_manage_submodule, can_view_module, can_view_submodule
+from core.models import sucursales_operativas
 from fallas.models import BitacoraFalla, ReporteFalla
 from logistica.models import ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
 from maestros.models import Proveedor
 
 from .serializers import (
     ActivoListSerializer,
+    ActivoQuickCreateSerializer,
     OrdenMantenimientoCreateSerializer,
+    OrdenMantenimientoDetailSerializer,
     OrdenMantenimientoListSerializer,
+    OrdenMantenimientoSeguimientoSerializer,
     ReparacionCreateSerializer,
     ReparacionListSerializer,
     ServicioCreateSerializer,
@@ -34,10 +39,20 @@ AUTH = [JWTAuthentication, TokenAuthentication, SessionAuthentication]
 
 
 class EsMantenimiento(BasePermission):
+    GRUPOS = {"dg", "DG", "mantenimiento", "MANTENIMIENTO"}
+
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
-        return can_manage_submodule(request.user, "mantenimiento", "bandeja")
+        grupos = set(request.user.groups.values_list("name", flat=True))
+        return (
+            request.user.is_superuser
+            or bool(grupos & self.GRUPOS)
+            or can_view_module(request.user, "activos")
+            or can_manage_submodule(request.user, "mantenimiento", "bandeja")
+            or can_view_submodule(request.user, "mantenimiento", "app")
+            or can_view_submodule(request.user, "mantenimiento", "dashboard")
+        )
 
 
 def _require_mantenimiento(user):
@@ -272,6 +287,12 @@ class ActivoListView(generics.ListAPIView):
         return qs.order_by("sucursal__nombre", "nombre", "codigo")
 
 
+class ActivoQuickCreateView(generics.CreateAPIView):
+    authentication_classes = AUTH
+    permission_classes = [EsMantenimiento]
+    serializer_class = ActivoQuickCreateSerializer
+
+
 class UnidadListView(generics.ListAPIView):
     authentication_classes = AUTH
     permission_classes = [EsMantenimiento]
@@ -301,11 +322,44 @@ class OrdenMantenimientoListCreateView(generics.ListCreateAPIView):
         ).order_by("-id")
         activo = self.request.query_params.get("activo")
         estatus = self.request.query_params.get("estatus")
+        sucursal = self.request.query_params.get("sucursal")
+        prioridad = self.request.query_params.get("prioridad")
+        q = self.request.query_params.get("q")
         if activo:
             qs = qs.filter(activo_ref_id=activo)
         if estatus:
             qs = qs.filter(estatus=estatus)
+        if sucursal:
+            qs = qs.filter(activo_ref__sucursal_id=sucursal)
+        if prioridad:
+            qs = qs.filter(prioridad=prioridad)
+        if q:
+            qs = qs.filter(
+                Q(folio__icontains=q)
+                | Q(descripcion__icontains=q)
+                | Q(responsable__icontains=q)
+                | Q(activo_ref__nombre__icontains=q)
+                | Q(activo_ref__codigo__icontains=q)
+                | Q(activo_ref__sucursal__nombre__icontains=q)
+            )
         return qs
+
+
+class OrdenMantenimientoDetailView(generics.RetrieveAPIView):
+    authentication_classes = AUTH
+    permission_classes = [EsMantenimiento]
+    queryset = OrdenMantenimiento.objects.select_related("activo_ref", "activo_ref__sucursal").prefetch_related("bitacora")
+    serializer_class = OrdenMantenimientoDetailSerializer
+
+    def patch(self, request, *args, **kwargs):
+        orden = self.get_object()
+        serializer = OrdenMantenimientoSeguimientoSerializer(
+            data=request.data,
+            context={"orden": orden, "request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        orden = serializer.save()
+        return Response(OrdenMantenimientoDetailSerializer(orden).data, status=status.HTTP_200_OK)
 
 
 class ReparacionListCreateView(generics.ListCreateAPIView):
@@ -355,6 +409,25 @@ def mi_perfil(request):
             "grupos": list(user.groups.values_list("name", flat=True)),
         }
     )
+
+
+@api_view(["GET"])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def sucursales(request):
+    data = [
+        {"id": sucursal.id, "codigo": sucursal.codigo, "nombre": sucursal.nombre}
+        for sucursal in sucursales_operativas().order_by("nombre", "codigo")
+    ]
+    return Response(data)
+
+
+@api_view(["GET"])
+@authentication_classes([SessionAuthentication])
+@permission_classes([EsMantenimiento])
+def session_token(request):
+    refresh = RefreshToken.for_user(request.user)
+    return Response({"access": str(refresh.access_token), "refresh": str(refresh)})
 
 
 @api_view(["GET"])
@@ -496,5 +569,8 @@ def dashboard(request):
     )
 
 
+@login_required
 def pwa_mantenimiento(request):
+    if not EsMantenimiento().has_permission(request, None):
+        raise PermissionDenied("No tienes permisos para usar Mantenimiento")
     return render(request, "mantenimiento/pwa.html")

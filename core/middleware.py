@@ -82,6 +82,7 @@ class BranchCaptureOnlyMiddleware:
     """
 
     ALLOWED_PREFIXES = (
+        "/app/",
         "/recetas/reabasto-cedis/",
         "/logout/",
         "/login/",
@@ -150,6 +151,7 @@ class RepartidorOnlyMiddleware:
     """
 
     ALLOWED_PREFIXES = (
+        "/app/",
         "/logistica/app/",
         "/api/logistica/",
         "/logout/",
@@ -182,6 +184,7 @@ class MermasOnlyMiddleware:
     """
 
     ALLOWED_PREFIXES = (
+        "/app/",
         "/mermas/",
         "/logout/",
         "/login/",
