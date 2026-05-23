@@ -28,12 +28,6 @@
     grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
-  .seguimiento-policy-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-  }
-
   .seguimiento-board {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -258,8 +252,7 @@
   }
 
   @media (max-width: 1040px) {
-    .seguimiento-kpi-grid,
-    .seguimiento-policy-grid {
+    .seguimiento-kpi-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
@@ -270,7 +263,6 @@
     }
 
     .seguimiento-kpi-grid,
-    .seguimiento-policy-grid,
     .seguimiento-list,
     .seguimiento-meta-grid,
     .seguimiento-action-form {
@@ -290,7 +282,7 @@
     <div class="bi-hero-main">
       <div class="bi-kicker">Seguimiento DG</div>
       <h1 class="bi-hero-title seguimiento-hero-title">Mis minutas, proyectos y compromisos</h1>
-      <p class="bi-copy seguimiento-copy">Panel personal de seguimiento ERP para compromisos, acuerdos de minuta, pasos de proyecto, checklist, retroalimentación y evidencias propias.</p>
+      <p class="bi-copy seguimiento-copy">Acuerdos asignados, avances y evidencias.</p>
       <div class="bi-hero-highlights">
         <article class="bi-hero-highlight">
           <div class="bi-hero-highlight-label">Acuerdos acumulados</div>
@@ -345,46 +337,23 @@
     <article class="bi-kpi-card">
       <div class="bi-kpi-value">{{ metrics.total|intcomma }}</div>
       <div class="bi-kpi-label">Acuerdos acumulados</div>
-      <div class="bi-kpi-note">Todo lo asignado o compartido con tu usuario.</div>
     </article>
     <article class="bi-kpi-card">
       <div class="bi-kpi-value {% if metrics.abiertos %}warning{% else %}success{% endif %}">{{ metrics.abiertos|intcomma }}</div>
       <div class="bi-kpi-label">Abiertos</div>
-      <div class="bi-kpi-note">Pendientes, en proceso o en revisión.</div>
     </article>
     <article class="bi-kpi-card">
       <div class="bi-kpi-value {% if metrics.por_vencer_24h %}warning{% else %}success{% endif %}">{{ metrics.por_vencer_24h|intcomma }}</div>
       <div class="bi-kpi-label">Por vencer (24h)</div>
-      <div class="bi-kpi-note">Compromisos que requieren avance inmediato.</div>
     </article>
     <article class="bi-kpi-card">
       <div class="bi-kpi-value {% if metrics.vencidos %}danger{% else %}success{% endif %}">{{ metrics.vencidos|intcomma }}</div>
       <div class="bi-kpi-label">Vencidos</div>
-      <div class="bi-kpi-note">Casos que ya rebasaron fecha límite.</div>
     </article>
     <article class="bi-kpi-card">
       <div class="bi-kpi-value {% if metrics.cumplidos_a_tiempo %}success{% else %}warning{% endif %}">{{ metrics.cumplidos_a_tiempo|intcomma }}</div>
       <div class="bi-kpi-label">Cumplidos a tiempo</div>
-      <div class="bi-kpi-note">Cierres aprobados dentro de plazo.</div>
     </article>
-  </section>
-
-  <section class="bi-panel">
-    <div class="bi-panel-head">
-      <div>
-        <div class="bi-kicker">Alcance</div>
-        <h2 class="bi-panel-title">Control visible y auditable</h2>
-      </div>
-      <div class="bi-panel-actions">
-        <span class="bi-pill success">Datos operativos</span>
-        <span class="bi-pill warning">Permisos personales</span>
-      </div>
-    </div>
-    <div class="seguimiento-policy-grid">
-      <div class="bi-note"><strong>Visible:</strong> minutas, proyectos, compromisos, checklist, retroalimentación y evidencias propias.</div>
-      <div class="bi-note pending"><strong>No visible:</strong> información económica, compensación y nómina sensible.</div>
-      <div class="bi-note"><strong>Auditable:</strong> cada avance, comentario y evidencia queda registrado en bitácora del ERP.</div>
-    </div>
   </section>
 
   <div class="seguimiento-board">

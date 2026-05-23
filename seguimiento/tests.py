@@ -79,8 +79,12 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertIn("Validar inventarios en cuartos fríos", content)
         self.assertIn("Retroalimentación", content)
         self.assertIn("Solicitar más tiempo", content)
-        self.assertIn("No visible:", content)
-        self.assertIn("información económica, compensación y nómina sensible", content)
+        self.assertNotIn("Alcance", content)
+        self.assertNotIn("Control visible y auditable", content)
+        self.assertNotIn("Visible:", content)
+        self.assertNotIn("No visible:", content)
+        self.assertNotIn("Auditable:", content)
+        self.assertNotIn("información económica, compensación y nómina sensible", content)
 
     def test_checklist_se_puede_palomear(self):
         response = self.client.post(f"/seguimiento/{self.item.pk}/checklist/{self.check.pk}/")
