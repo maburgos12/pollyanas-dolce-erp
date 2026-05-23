@@ -83,6 +83,29 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertTrue(self.check.completado)
         self.assertEqual(self.check.completado_por, self.user)
 
+    def test_usuario_ajeno_no_ve_ni_actualiza_acuerdo(self):
+        otro = get_user_model().objects.create_user(username="usuario.ajeno", password="test12345")
+        self.client.force_login(otro)
+
+        response = self.client.get("/seguimiento/")
+        self.assertNotContains(response, "Validar inventarios en cuartos fríos")
+
+        toggle_response = self.client.post(f"/seguimiento/{self.item.pk}/checklist/{self.check.pk}/")
+        feedback_response = self.client.post(
+            f"/seguimiento/{self.item.pk}/retroalimentacion/",
+            {"comentario": "Intento ajeno"},
+        )
+        archivo = SimpleUploadedFile("evidencia.txt", b"foto o documento", content_type="text/plain")
+        evidencia_response = self.client.post(f"/seguimiento/{self.item.pk}/evidencias/", {"archivo": archivo})
+
+        self.assertEqual(toggle_response.status_code, 404)
+        self.assertEqual(feedback_response.status_code, 404)
+        self.assertEqual(evidencia_response.status_code, 404)
+        self.check.refresh_from_db()
+        self.assertFalse(self.check.completado)
+        self.assertFalse(SeguimientoComentario.objects.filter(seguimiento=self.item, comentario="Intento ajeno").exists())
+        self.assertFalse(SeguimientoEvidencia.objects.filter(seguimiento=self.item, usuario=otro).exists())
+
     def test_retroalimentacion_coloca_en_revision(self):
         response = self.client.post(
             f"/seguimiento/{self.item.pk}/retroalimentacion/",
@@ -103,6 +126,23 @@ class SeguimientoColaboradorTests(TestCase):
         self.item.refresh_from_db()
         self.assertEqual(self.item.estatus, SeguimientoItem.ESTATUS_EN_REVISION)
         self.assertTrue(SeguimientoEvidencia.objects.filter(seguimiento=self.item, usuario=self.user).exists())
+
+    def test_evidencia_rechaza_archivo_activo(self):
+        archivo = SimpleUploadedFile("evidencia.html", b"<script>alert(1)</script>", content_type="text/html")
+
+        response = self.client.post(f"/seguimiento/{self.item.pk}/evidencias/", {"archivo": archivo})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(SeguimientoEvidencia.objects.filter(seguimiento=self.item, usuario=self.user).exists())
+
+    @override_settings(SEGUIMIENTO_EVIDENCIA_MAX_UPLOAD_BYTES=4)
+    def test_evidencia_rechaza_archivo_mayor_al_limite(self):
+        archivo = SimpleUploadedFile("evidencia.txt", b"12345", content_type="text/plain")
+
+        response = self.client.post(f"/seguimiento/{self.item.pk}/evidencias/", {"archivo": archivo})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(SeguimientoEvidencia.objects.filter(seguimiento=self.item, usuario=self.user).exists())
 
     def test_colaborador_ve_mis_acuerdos_y_conserva_bonos_operativos_de_su_rol(self):
         groups = build_nav_groups(self.user, "/seguimiento/")
@@ -180,6 +220,55 @@ class SeguimientoColaboradorTests(TestCase):
         content = response.content.decode()
         self.assertContains(response, "Producto Mes Junio")
         self.assertIn("Compartido", content)
+
+    def test_importador_elimina_checks_que_desaparecen_de_agente_dg(self):
+        command = ImportarAgenteDGCommand()
+        counters = {"created": 0, "updated": 0, "skipped": 0}
+        row = {
+            "id": 9,
+            "titulo": "Proyecto con pasos variables",
+            "descripcion": "Validar limpieza de pasos",
+            "expected_deliverable": "",
+            "status": "IN_PROGRESS",
+            "target_date": timezone.now() + timedelta(days=5),
+            "user_email": self.user.email,
+            "user_name": self.user.get_full_name(),
+            "user_id": 4,
+            "area_name": "Proyecto",
+        }
+
+        command._upsert_item(
+            row,
+            "minute_projects",
+            SeguimientoItem.TIPO_PROYECTO,
+            counters,
+            checklist=[
+                {"titulo": "Paso vigente", "descripcion": "", "completado": True},
+                {"titulo": "Paso removido", "descripcion": "", "completado": False},
+            ],
+        )
+        item = SeguimientoItem.objects.get(titulo="Proyecto con pasos variables")
+        check = item.checklist.get(orden=1)
+        check.completado_por = self.user
+        check.completado_at = timezone.now()
+        check.save(update_fields=["completado_por", "completado_at"])
+
+        command._upsert_item(
+            row,
+            "minute_projects",
+            SeguimientoItem.TIPO_PROYECTO,
+            counters,
+            checklist=[
+                {"titulo": "Paso vigente actualizado", "descripcion": "", "completado": False},
+            ],
+        )
+
+        checks = list(item.checklist.order_by("orden"))
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0].titulo, "Paso vigente actualizado")
+        self.assertFalse(checks[0].completado)
+        self.assertIsNone(checks[0].completado_por)
+        self.assertIsNone(checks[0].completado_at)
 
     def test_superusuario_conserva_bonos_en_menu(self):
         admin = get_user_model().objects.create_superuser(username="admin-seguimiento", password="x")
