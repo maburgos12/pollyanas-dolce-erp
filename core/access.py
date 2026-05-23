@@ -38,6 +38,8 @@ ACCESS_MODULES = [
     ("ventas", "Ventas"),
     ("crm", "CRM"),
     ("produccion", "Producción"),
+    ("mantenimiento", "Mantenimiento"),
+    ("seguimiento", "Seguimiento personal"),
     ("logistica", "Logística"),
     ("fallas", "Fallas / Mantenimiento"),
     ("mermas", "Mermas"),
@@ -80,6 +82,14 @@ ACCESS_SUBMODULES = {
         ("consolidado_cedis", "Consolidado CEDIS"),
         ("cedis_semanal", "Producción CEDIS semanal"),
         ("bonos", "Bonos producción"),
+    ],
+    "mantenimiento": [
+        ("dashboard", "Dashboard"),
+        ("bandeja", "Bandeja de seguimiento"),
+        ("app", "App mantenimiento"),
+    ],
+    "seguimiento": [
+        ("mi_tablero", "Mis minutas, proyectos y compromisos"),
     ],
     "logistica": [
         ("dashboard", "Dashboard"),
@@ -231,6 +241,8 @@ def is_repartidor_only(user: AbstractBaseUser) -> bool:
         return False
     if _explicit_access_map(user).get("mermas.recepcion") == ACCESS_MANAGE:
         return False
+    if _explicit_access_map(user).get("mantenimiento") in {ACCESS_VIEW, ACCESS_MANAGE}:
+        return False
     groups = _group_names(user)
     if not (ROLE_REPARTIDOR in groups or hasattr(user, "repartidor_logistica")):
         return False
@@ -341,6 +353,8 @@ def _role_module_access(user: AbstractBaseUser, module: str) -> str:
             return ACCESS_MANAGE
     if ROLE_RRHH in groups and module == "rrhh":
         return ACCESS_MANAGE
+    if module == "seguimiento" and groups.intersection({role.upper() for role in ROLE_ORDER}):
+        return ACCESS_MANAGE
     return ACCESS_NONE
 
 
@@ -391,6 +405,12 @@ def get_submodule_access(user: AbstractBaseUser, module: str, submodule: str) ->
     module = (module or "").strip().lower()
     submodule = (submodule or "").strip().lower()
     if _module_locked(user, module):
+        return ACCESS_NONE
+    if module in {"produccion", "ventas"} and submodule == "bonos":
+        if module == "produccion" and has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_RRHH, ROLE_PRODUCCION):
+            return ACCESS_MANAGE
+        if module == "ventas" and has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_RRHH, ROLE_VENTAS):
+            return ACCESS_MANAGE
         return ACCESS_NONE
     key = f"{module}.{submodule}"
     explicit = _explicit_access_map(user)

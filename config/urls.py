@@ -1,11 +1,10 @@
 from django.contrib import admin
 from django.conf import settings
-from django.contrib.auth.decorators import login_required
 from django.urls import path, include, re_path
 from django.views.static import serve as static_serve
 from django.views.generic import RedirectView
+from core import shortcut_views
 from core import views as core_views
-from mantenimiento.views import pwa_mantenimiento
 from orquestacion import chat_views as ai_chat_views
 from rentabilidad import views_rentabilidad
 
@@ -47,12 +46,12 @@ urlpatterns = [
     path("dashboard/", core_views.dashboard, name="dashboard"),
     path(
         "bp/",
-        login_required(RedirectView.as_view(url="/bonos-produccion/app/?captura=1", permanent=False)),
+        shortcut_views.shortcut_bonos_produccion,
         name="shortcut-bonos-produccion-app",
     ),
     path(
         "bv/",
-        login_required(RedirectView.as_view(url="/bonos-ventas/app/?captura=1", permanent=False)),
+        shortcut_views.shortcut_bonos_ventas,
         name="shortcut-bonos-ventas-app",
     ),
     path("plan-produccion/", RedirectView.as_view(url="/recetas/plan-produccion/", permanent=False)),
@@ -74,7 +73,8 @@ urlpatterns = [
     path("logistica/", include(("logistica.urls", "logistica"), namespace="logistica")),
     path("fallas/", include(("fallas.urls", "fallas"), namespace="fallas")),
     path("mermas/", include(("mermas.urls", "mermas"), namespace="mermas")),
-    path("mantenimiento/app/", pwa_mantenimiento, name="pwa-mantenimiento"),
+    path("mantenimiento/", include(("mantenimiento.urls", "mantenimiento"), namespace="mantenimiento")),
+    path("seguimiento/", include(("seguimiento.urls", "seguimiento"), namespace="seguimiento")),
     path("reportes/", include(("reportes.urls", "reportes"), namespace="reportes")),
     path("inversiones/", include(("reportes.urls_inversiones", "inversiones"), namespace="inversiones")),
     path("integraciones/", include(("integraciones.urls", "integraciones"), namespace="integraciones")),
@@ -95,7 +95,7 @@ urlpatterns = [
     path("api/bonos-produccion/", include("bonos_produccion.urls")),
     path("api/bonos-ventas/", include("bonos_ventas.urls")),
     path("api/fallas/", include(("fallas.urls", "fallas_api"), namespace="fallas_api")),
-    path("api/mantenimiento/", include("mantenimiento.urls")),
+    path("api/mantenimiento/", include(("mantenimiento.api_urls", "mantenimiento_api"), namespace="mantenimiento_api")),
     path("api/pos-bridge/", include(("pos_bridge.api.urls", "pos_bridge_api"), namespace="pos_bridge_api")),
 ]
 

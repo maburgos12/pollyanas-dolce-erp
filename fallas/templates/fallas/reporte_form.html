@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}Reportar falla{% endblock %}
-{% block page_title %}Fallas · Reportar{% endblock %}
+{% block title %}{% if modo_edicion %}Editar reporte{% else %}Reportar falla{% endif %}{% endblock %}
+{% block page_title %}Fallas · {% if modo_edicion %}Editar reporte{% else %}Reportar{% endif %}{% endblock %}
 {% block body_class %}page-fallas-reportar{% endblock %}
 
 {% block extra_css %}
@@ -33,7 +33,7 @@
     {% if can_dashboard %}
     <a href="{% url 'fallas:dashboard' %}" class="module-tab">Dashboard</a>
     {% endif %}
-    <a href="{% url 'fallas:pwa-reporte' %}" class="module-tab active">Reportar falla</a>
+    <a href="{% url 'fallas:pwa-reporte' %}" class="module-tab {% if not modo_edicion %}active{% endif %}">Reportar falla</a>
     <a href="{% url 'fallas:pwa-mis-reportes' %}" class="module-tab">Mis reportes</a>
     {% if can_dashboard and es_dg %}
     <a href="{% url 'fallas:dashboard' %}?tab=categorias" class="module-tab">Categorías</a>
@@ -44,13 +44,19 @@
     <div class="fallas-head">
       <div>
         <div class="fallas-kicker">Captura ERP</div>
-        <h1 class="fallas-title">Reportar falla</h1>
-        <p class="fallas-muted">Registra la falla con evidencia, sucursal y prioridad para seguimiento de Compras/DG.</p>
+        <h1 class="fallas-title">{% if modo_edicion %}Editar reporte #{{ reporte.id }}{% else %}Reportar falla{% endif %}</h1>
+        <p class="fallas-muted">{% if modo_edicion %}Corrige la información del reporte antes de que entre a seguimiento.{% else %}Registra la falla con evidencia, sucursal y prioridad para seguimiento de Compras/DG.{% endif %}</p>
       </div>
       <a class="btn-soft" href="{% url 'fallas:pwa-mis-reportes' %}">Ver mis reportes</a>
     </div>
 
-    <div class="fallas-note">Esta pantalla pertenece al ERP. No abre la app móvil ni redirige a la PWA.</div>
+    <div class="fallas-note">
+      {% if modo_edicion %}
+      Solo puedes editar reportes propios que siguen en estatus Abierto. Si ya está en revisión o proceso, avisa al responsable para ajustar el seguimiento.
+      {% else %}
+      Esta pantalla pertenece al ERP. No abre la app móvil ni redirige a la PWA.
+      {% endif %}
+    </div>
 
     <form class="fallas-form" method="post" enctype="multipart/form-data" style="margin-top:18px;">
       {% csrf_token %}
@@ -58,7 +64,7 @@
         <select class="fallas-input" name="sucursal" required>
           <option value="">Selecciona sucursal</option>
           {% for sucursal in sucursales %}
-          <option value="{{ sucursal.id }}">{{ sucursal.codigo }} · {{ sucursal.nombre }}</option>
+          <option value="{{ sucursal.id }}" {% if reporte and reporte.sucursal_id == sucursal.id %}selected{% endif %}>{{ sucursal.codigo }} · {{ sucursal.nombre }}</option>
           {% endfor %}
         </select>
       </label>
@@ -67,7 +73,7 @@
         <select class="fallas-input" name="categoria" required>
           <option value="">Selecciona categoría</option>
           {% for categoria in categorias %}
-          <option value="{{ categoria.id }}">{{ categoria.get_tipo_display }} · {{ categoria.nombre }}</option>
+          <option value="{{ categoria.id }}" {% if reporte and reporte.categoria_id == categoria.id %}selected{% endif %}>{{ categoria.get_tipo_display }} · {{ categoria.nombre }}</option>
           {% endfor %}
         </select>
       </label>
@@ -75,7 +81,7 @@
       <label class="fallas-field">Área
         <select class="fallas-input" name="area" required>
           {% for value,label in areas %}
-          <option value="{{ value }}">{{ label }}</option>
+          <option value="{{ value }}" {% if reporte and reporte.area == value %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </label>
@@ -84,7 +90,7 @@
         <select class="fallas-input" name="activo_relacionado">
           <option value="">Sin activo relacionado</option>
           {% for activo in activos %}
-          <option value="{{ activo.id }}">{{ activo.codigo }} · {{ activo.nombre }}</option>
+          <option value="{{ activo.id }}" {% if reporte and reporte.activo_relacionado_id == activo.id %}selected{% endif %}>{{ activo.codigo }} · {{ activo.nombre }}</option>
           {% endfor %}
         </select>
       </label>
@@ -92,38 +98,43 @@
       <label class="fallas-field">Prioridad
         <select class="fallas-input" name="prioridad" required>
           {% for value,label in prioridades %}
-          <option value="{{ value }}">{{ label }}</option>
+          <option value="{{ value }}" {% if reporte and reporte.prioridad == value %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </label>
 
       <label class="fallas-field full">Título
-        <input class="fallas-input" name="titulo" maxlength="200" required placeholder="Ej. Refrigerador no enfría">
+        <input class="fallas-input" name="titulo" maxlength="200" required placeholder="Ej. Refrigerador no enfría" value="{{ reporte.titulo|default:'' }}">
       </label>
 
       <label class="fallas-field full">Descripción
-        <textarea class="fallas-input" name="descripcion" required placeholder="Describe qué está pasando, desde cuándo y cómo afecta la operación."></textarea>
+        <textarea class="fallas-input" name="descripcion" required placeholder="Describe qué está pasando, desde cuándo y cómo afecta la operación.">{% if reporte %}{{ reporte.descripcion }}{% endif %}</textarea>
       </label>
 
       <label class="fallas-field">Foto de evidencia
-        <input class="fallas-input" type="file" name="foto_evidencia" accept="image/*" required>
+        <input class="fallas-input" type="file" name="foto_evidencia" accept="image/*" {% if not modo_edicion %}required{% endif %}>
+        {% if reporte and reporte.foto_evidencia %}
+        <span class="fallas-muted">Si no cargas otra foto, se conserva la evidencia actual.</span>
+        {% endif %}
       </label>
 
       <label class="fallas-field">GPS opcional
-        <input class="fallas-input" name="latitud" placeholder="Latitud">
+        <input class="fallas-input" name="latitud" placeholder="Latitud" value="{{ reporte.latitud|default:'' }}">
       </label>
 
       <label class="fallas-field">Longitud opcional
-        <input class="fallas-input" name="longitud" placeholder="Longitud">
+        <input class="fallas-input" name="longitud" placeholder="Longitud" value="{{ reporte.longitud|default:'' }}">
       </label>
 
       <div class="fallas-actions">
-        {% if can_dashboard %}
+        {% if modo_edicion %}
+        <a class="btn-soft" href="{% url 'fallas:pwa-mis-reportes' %}">Cancelar</a>
+        {% elif can_dashboard %}
         <a class="btn-soft" href="{% url 'fallas:dashboard' %}">Cancelar</a>
         {% else %}
         <a class="btn-soft" href="{% url 'operacion:app_home' %}">Cancelar</a>
         {% endif %}
-        <button class="btn-wine" type="submit">Enviar reporte</button>
+        <button class="btn-wine" type="submit">{% if modo_edicion %}Guardar cambios{% else %}Enviar reporte{% endif %}</button>
       </div>
     </form>
   </section>

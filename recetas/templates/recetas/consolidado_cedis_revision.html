@@ -390,14 +390,15 @@
       </div>
       {% if plan %}
       <div class="cedis-add-row">
-        <label class="form-label cedis-add-product-label" for="agregar_receta_id">Agregar producto</label>
+        <label class="form-label cedis-add-product-label" for="agregar_receta_search">Agregar producto</label>
         <label class="form-label cedis-add-qty-label" for="agregar_cantidad">Cantidad</label>
-        <select id="agregar_receta_id" class="form-control cedis-add-product" name="agregar_receta_id" {% if plan.autorizado %}disabled{% endif %}>
-          <option value="">Selecciona producto</option>
+        <input id="agregar_receta_search" class="form-control cedis-add-product" list="agregar_receta_options" placeholder="Escribe producto o código" autocomplete="off" {% if plan.autorizado %}disabled{% else %}required{% endif %}>
+        <input id="agregar_receta_id" type="hidden" name="agregar_receta_id">
+        <datalist id="agregar_receta_options">
           {% for receta in recetas_disponibles %}
-          <option value="{{ receta.id }}">{{ receta.nombre }}{% if receta.codigo_point %} · {{ receta.codigo_point }}{% endif %}</option>
+          <option data-id="{{ receta.id }}" value="{{ receta.nombre }}{% if receta.codigo_point %} · {{ receta.codigo_point }}{% endif %}"></option>
           {% endfor %}
-        </select>
+        </datalist>
         <input id="agregar_cantidad" class="form-control text-end cedis-add-qty" type="number" step="0.001" min="0" name="agregar_cantidad" value="0" {% if plan.autorizado %}disabled{% endif %}>
         <button class="btn btn-secondary cedis-add-submit" type="submit" {% if plan.autorizado %}disabled{% endif %}>Agregar</button>
       </div>
@@ -416,4 +417,48 @@
   </form>
   {% endif %}
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (() => {
+    const searchInput = document.getElementById("agregar_receta_search");
+    const hiddenInput = document.getElementById("agregar_receta_id");
+    const optionsList = document.getElementById("agregar_receta_options");
+    const addButton = document.querySelector(".cedis-add-submit");
+
+    if (!searchInput || !hiddenInput || !optionsList || !addButton) {
+      return;
+    }
+
+    const options = Array.from(optionsList.options).map((option) => ({
+      id: option.dataset.id || "",
+      value: option.value || "",
+      normalized: (option.value || "").trim().toLocaleLowerCase("es-MX"),
+    }));
+
+    const syncSelectedProduct = () => {
+      const normalizedValue = searchInput.value.trim().toLocaleLowerCase("es-MX");
+      const match = options.find((option) => option.normalized === normalizedValue);
+      hiddenInput.value = match ? match.id : "";
+      searchInput.setCustomValidity(
+        normalizedValue && !match ? "Selecciona un producto de la lista." : ""
+      );
+    };
+
+    searchInput.addEventListener("input", syncSelectedProduct);
+    searchInput.addEventListener("change", syncSelectedProduct);
+
+    addButton.form?.addEventListener("submit", (event) => {
+      if (event.submitter !== addButton) {
+        return;
+      }
+      syncSelectedProduct();
+      if (!hiddenInput.value) {
+        event.preventDefault();
+        searchInput.reportValidity();
+      }
+    });
+  })();
+</script>
 {% endblock %}

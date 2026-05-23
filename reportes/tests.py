@@ -35,7 +35,12 @@ from recetas.models import (
     VentaHistorica,
 )
 from core.views import _point_sales_month_total as core_point_sales_month_total
-from reportes.executive_panels import build_central_flow_panel, build_monthly_yoy_panel, build_sales_forecast_panel
+from reportes.executive_panels import (
+    build_branch_contribution_panel,
+    build_central_flow_panel,
+    build_monthly_yoy_panel,
+    build_sales_forecast_panel,
+)
 from reportes.bi_utils import compute_bi_snapshot
 from reportes.views import _point_sales_month_total as reportes_point_sales_month_total
 from reportes.views import (
@@ -46,6 +51,7 @@ from reportes.views import (
     _sales_source_context,
     _ventas_historicas_bi_summary,
 )
+from pos_bridge.services.sales_matching_service import PointSalesMatchingService
 from reportes.models import (
     CorteOficialDiario,
     EmpresaResultadoMensual,
@@ -858,6 +864,42 @@ class ReportesBITests(TestCase):
         self.assertContains(resp, "Reventa residual")
         self.assertContains(resp, "Servicio")
         self.assertContains(resp, "$180.00")
+
+    def test_branch_contribution_panel_groups_non_recipe_sales_before_classifying(self):
+        sucursal = self._create_sucursal("SUC-NR", "Sucursal No Receta")
+        point_branch = PointBranch.objects.create(external_id="PB-SUC-NR", name="Sucursal No Receta", erp_branch=sucursal)
+        point_product = PointProduct.objects.create(
+            external_id="NR-SVC-01",
+            sku="SVC01",
+            name="Servicio de domicilio",
+            active=True,
+        )
+        PointDailySale.objects.create(
+            branch=point_branch,
+            product=point_product,
+            receta=None,
+            sale_date=date(2026, 3, 20),
+            quantity=Decimal("2"),
+            total_amount=Decimal("350"),
+            source_endpoint="/Report/PrintReportes?idreporte=3",
+        )
+        PointDailySale.objects.create(
+            branch=point_branch,
+            product=point_product,
+            receta=None,
+            sale_date=date(2026, 3, 21),
+            quantity=Decimal("1"),
+            total_amount=Decimal("175"),
+            source_endpoint="/Report/PrintReportes?idreporte=3",
+        )
+
+        with patch.object(PointSalesMatchingService, "infer_cost_mode", wraps=PointSalesMatchingService().infer_cost_mode) as infer_cost_mode:
+            panel = build_branch_contribution_panel(year=2026)
+
+        self.assertEqual(infer_cost_mode.call_count, 1)
+        row = panel["rows"][0]
+        self.assertEqual(row["non_recipe_total"], Decimal("525"))
+        self.assertEqual(row["non_recipe_service_total"], Decimal("525"))
 
     def test_bi_view_renders_branch_pricing_panel_for_selected_branch(self):
         sucursal = self._create_sucursal("SUC-PRICE", "Sucursal Pricing")

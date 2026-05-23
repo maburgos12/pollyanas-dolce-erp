@@ -14,7 +14,7 @@ from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import ensure_csrf_cookie
 
-from core.access import can_manage_submodule, can_view_submodule
+from core.access import can_manage_submodule, can_view_module, can_view_submodule
 from core.models import Sucursal
 from rrhh.models import Empleado
 
@@ -248,6 +248,8 @@ def bonos_ventas_dashboard(request):
 @login_required
 @ensure_csrf_cookie
 def bonos_ventas_pwa(request):
+    if not can_view_submodule(request.user, "ventas", "bonos"):
+        return redirect("/seguimiento/" if can_view_module(request.user, "seguimiento") else "/dashboard/")
     force_capture = (request.GET.get("captura") or "").strip().lower() in {"1", "true", "si", "sí"}
     user_agent = (request.headers.get("User-Agent") or "").lower()
     is_mobile = any(token in user_agent for token in ("iphone", "ipad", "android", "mobile"))

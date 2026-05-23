@@ -1,4 +1,3 @@
-import os
 from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -14,13 +13,20 @@ from unittest.mock import MagicMock, patch
 
 from compras.models import PresupuestoCompraPeriodo, SolicitudCompra
 from control.models import MermaPOS
-from core.access import ROLE_ADMIN, ROLE_BONOS_PRODUCCION_CAPTURA, ROLE_COMPRAS, can_view_compras
+from core.access import (
+    ROLE_ADMIN,
+    ROLE_BONOS_PRODUCCION_CAPTURA,
+    ROLE_COMPRAS,
+    ROLE_PRODUCCION,
+    ROLE_VENTAS,
+    can_view_compras,
+    can_view_submodule,
+)
 from core.branch_catalog import eligible_operational_branch_qs
 from core.middleware import CanonicalLocalHostMiddleware
-from core.models import Departamento, Sucursal, UserProfile
+from core.models import Departamento, Sucursal, UserModuleAccess, UserProfile
 from core.navigation import build_nav_groups
 from core.views import _build_dashboard_daily_sales_snapshot, _build_dashboard_sales_history_summary, _compute_budget_semaforo, _compute_plan_forecast_semaforo, _sales_previous_dates, _sales_source_context
-from core.management.commands.ejecutar_rutina_diaria_erp import _prefer_public_database_url_if_needed
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo, PointPendingMatch, UnidadMedida
 from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointDailySale, PointProduct, PointSalesDailyCategoryFact, PointSalesDailyProductFact
@@ -135,6 +141,20 @@ class LoginViewAuthenticatedRedirectTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "/bonos-ventas/app/?captura=1")
 
+    def test_authenticated_erp_user_does_not_keep_mermas_app_next(self):
+        response = self.client.get("/login/?next=/mermas/app/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/dashboard/")
+
+    def test_authenticated_mermas_capture_user_keeps_mermas_app_next(self):
+        UserModuleAccess.objects.create(user=self.user, module="mermas.captura", access=UserModuleAccess.ACCESS_MANAGE)
+
+        response = self.client.get("/login/?next=/mermas/app/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/mermas/app/")
+
     def test_short_bonus_links_keep_login_next_simple(self):
         self.client.logout()
 
@@ -144,6 +164,8 @@ class LoginViewAuthenticatedRedirectTests(TestCase):
         self.assertEqual(response["Location"], "/login/?next=/bp/")
 
     def test_authenticated_short_bonus_links_open_capture_apps(self):
+        self.user.is_superuser = True
+        self.user.save(update_fields=["is_superuser"])
         response_prod = self.client.get("/bp/")
         response_ventas = self.client.get("/bv/")
 
@@ -169,6 +191,17 @@ class LoginViewAuthenticatedRedirectTests(TestCase):
         self.assertEqual(admin_panel["Location"], "/bonos-produccion/app/?captura=1")
         self.assertEqual(app.status_code, 200)
         self.assertEqual(api.status_code, 200)
+
+    def test_operational_leads_keep_monthly_bonus_submodule_access(self):
+        produccion = get_user_model().objects.create_user(username="carolina.cayetano")
+        ventas = get_user_model().objects.create_user(username="johana.lopez.operativa")
+        produccion.groups.add(Group.objects.create(name=ROLE_PRODUCCION))
+        ventas.groups.add(Group.objects.create(name=ROLE_VENTAS))
+
+        self.assertTrue(can_view_submodule(produccion, "produccion", "bonos"))
+        self.assertTrue(can_view_submodule(ventas, "ventas", "bonos"))
+        self.assertFalse(can_view_submodule(produccion, "ventas", "bonos"))
+        self.assertFalse(can_view_submodule(ventas, "produccion", "bonos"))
 
 
 class DashboardHomologacionContextTests(TestCase):
@@ -1359,56 +1392,3 @@ class UsersAccessTests(TestCase):
         self.assertContains(response, "Editar Usuario")
         self.assertContains(response, "Sin departamento")
         self.assertNotContains(response, "Sin bloqueos críticos")
-
-
-class RutinaDiariaDatabaseFallbackTests(TestCase):
-    def test_fallback_returns_none_without_public_url(self):
-        with patch.dict(
-            os.environ,
-            {
-                "DATABASE_URL": "postgresql://u:p@postgres.railway.internal:5432/railway",
-            },
-            clear=False,
-        ):
-            os.environ.pop("DATABASE_PUBLIC_URL", None)
-            result = _prefer_public_database_url_if_needed()
-        self.assertIsNone(result)
-
-    @patch("core.management.commands.ejecutar_rutina_diaria_erp.dj_database_url.parse")
-    @patch("core.management.commands.ejecutar_rutina_diaria_erp.socket.getaddrinfo", side_effect=OSError("dns fail"))
-    def test_fallback_switches_to_public_url_when_internal_dns_fails(self, _dns_mock, parse_mock):
-        parse_mock.return_value = {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": "railway",
-            "USER": "postgres",
-            "PASSWORD": "secret",
-            "HOST": "shinkansen.proxy.rlwy.net",
-            "PORT": "29018",
-        }
-        mock_conn = MagicMock()
-        fake_connections = {"default": mock_conn}
-        fake_settings = SimpleNamespace(DATABASES={"default": {"ENGINE": "django.db.backends.postgresql"}})
-
-        with patch.dict(
-            os.environ,
-            {
-                "DATABASE_URL": "postgresql://postgres:secret@postgres.railway.internal:5432/railway",
-                "DATABASE_PUBLIC_URL": "postgresql://postgres:secret@shinkansen.proxy.rlwy.net:29018/railway?sslmode=require",
-            },
-            clear=False,
-        ):
-            with (
-                patch("core.management.commands.ejecutar_rutina_diaria_erp.connections", fake_connections),
-                patch("core.management.commands.ejecutar_rutina_diaria_erp.settings", fake_settings),
-            ):
-                result = _prefer_public_database_url_if_needed()
-                effective_db_url = os.environ.get("DATABASE_URL")
-
-        self.assertIn("DATABASE_URL fallback aplicado", result or "")
-        self.assertIn("DATABASE_PUBLIC_URL", result or "")
-        self.assertEqual(
-            effective_db_url,
-            "postgresql://postgres:secret@shinkansen.proxy.rlwy.net:29018/railway?sslmode=require",
-        )
-        parse_mock.assert_called_once()
-        mock_conn.close.assert_called_once()

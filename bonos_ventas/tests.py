@@ -3,8 +3,10 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.test import Client, TestCase, override_settings
 
+from core.access import ROLE_RRHH, ROLE_VENTAS
 from core.navigation import NAV_GROUPS
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointDailySale, PointProduct
@@ -48,7 +50,7 @@ class BonosVentasTests(TestCase):
         self.assertEqual(response["Location"], "/bonos-ventas/dashboard/")
 
     def test_app_desktop_redirige_al_dashboard_y_captura_forzada_funciona(self):
-        user = get_user_model().objects.create_user(username="desktop-ventas")
+        user = get_user_model().objects.create_superuser(username="desktop-ventas")
         self.client.force_login(user)
 
         redirected = self.client.get("/bonos-ventas/app/", HTTP_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X)")
@@ -97,7 +99,7 @@ class BonosVentasTests(TestCase):
         self.assertEqual(periodo.umbral_crecimiento_pct, Decimal("6.00"))
 
     def test_pwa_usa_sesion_django_y_expone_csrf(self):
-        user = get_user_model().objects.create_user(username="pwa-ventas")
+        user = get_user_model().objects.create_superuser(username="pwa-ventas")
         self.client.force_login(user)
 
         response = self.client.get("/bonos-ventas/app/?captura=1")
@@ -113,6 +115,9 @@ class BonosVentasTests(TestCase):
         self.assertIn("Cerrar sesión", content)
         self.assertIn("employee-search", content)
         self.assertIn("Teclea nombre o apellido", content)
+        self.assertIn("Vista previa tamaño carta", content)
+        self.assertIn("Imprimir / PDF", content)
+        self.assertIn("Firma empleado", content)
         self.assertNotIn("pd_logistica_access", content)
 
     def test_manifest_y_service_worker_de_ventas_sirven_con_content_type_correcto(self):
@@ -134,7 +139,7 @@ class BonosVentasTests(TestCase):
 
     def test_api_ventas_acepta_post_con_sesion_y_csrf(self):
         client = Client(enforce_csrf_checks=True)
-        user = get_user_model().objects.create_user(username="csrf-ventas")
+        user = get_user_model().objects.create_superuser(username="csrf-ventas")
         client.force_login(user)
         client.get("/bonos-ventas/app/?captura=1")
         csrf_token = client.cookies["csrftoken"].value
@@ -207,6 +212,8 @@ class BonosVentasTests(TestCase):
 
     def test_inicializar_bonos_reporta_empleados_ventas_sin_sucursal(self):
         user = get_user_model().objects.create_user(username="bonos")
+        user.groups.add(Group.objects.create(name=ROLE_VENTAS))
+        user.groups.add(Group.objects.create(name=ROLE_RRHH))
         self.client.force_login(user)
         sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
         periodo = ConfigBonoVentasPeriodo.objects.create(mes=5, anio=2026)
@@ -224,6 +231,8 @@ class BonosVentasTests(TestCase):
 
     def test_permisos_equipo_ventas_crea_y_preautoriza(self):
         user = get_user_model().objects.create_user(username="jefe-ventas")
+        user.groups.add(Group.objects.create(name=ROLE_VENTAS))
+        user.groups.add(Group.objects.create(name=ROLE_RRHH))
         self.client.force_login(user)
         sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
         empleado = Empleado.objects.create(nombre="Empleado Ventas Permiso", area="VENTAS", sucursal="Payán")

@@ -829,6 +829,35 @@ class ProductMonthClosureService:
         return buckets
 
     def _load_sales(self, *, month_start: date, month_end: date):
+        sales_source_mode = str(
+            getattr(settings, "PRODUCT_MONTH_CLOSURE_SALES_SOURCE_MODE", "AUTO")
+        ).strip().upper() or "AUTO"
+        prefer_official = sales_source_mode in {"AUTO", "OFFICIAL_MONTHLY_REPORT"}
+        official_error = None
+        if prefer_official:
+            try:
+                buckets, sales_meta = self._load_sales_from_official_monthly_report(
+                    month_start=month_start,
+                    month_end=month_end,
+                )
+                return buckets, sales_meta
+            except Exception as exc:  # noqa: BLE001
+                if sales_source_mode == "OFFICIAL_MONTHLY_REPORT":
+                    raise ProductMonthClosureError(
+                        f"No se pudo cargar el reporte oficial de ventas Point para {month_start:%Y-%m}: {exc}"
+                    ) from exc
+                official_error = exc
+                fallback_buckets, fallback_meta = self._load_sales_from_point_daily_sales_official(
+                    month_start=month_start,
+                    month_end=month_end,
+                )
+                if fallback_buckets:
+                    fallback_meta["fallback_reason"] = str(exc)
+                    fallback_meta["warnings"] = [
+                        "No se pudo usar el reporte oficial mensual; se uso PointDailySale oficial por sucursal y dia."
+                    ]
+                    return fallback_buckets, fallback_meta
+
         fact_buckets = self._load_movement_from_production_facts(
             month_start=month_start,
             month_end=month_end,
@@ -842,41 +871,16 @@ class ProductMonthClosureService:
                 "end_date": month_end.isoformat(),
             }
 
-        sales_source_mode = str(
-            getattr(settings, "PRODUCT_MONTH_CLOSURE_SALES_SOURCE_MODE", "AUTO")
-        ).strip().upper() or "AUTO"
-        prefer_official = sales_source_mode in {"AUTO", "OFFICIAL_MONTHLY_REPORT"}
-        if prefer_official:
-            try:
-                buckets, sales_meta = self._load_sales_from_official_monthly_report(
-                    month_start=month_start,
-                    month_end=month_end,
-                )
-                return buckets, sales_meta
-            except Exception as exc:  # noqa: BLE001
-                if sales_source_mode == "OFFICIAL_MONTHLY_REPORT":
-                    raise ProductMonthClosureError(
-                        f"No se pudo cargar el reporte oficial de ventas Point para {month_start:%Y-%m}: {exc}"
-                    ) from exc
-                fallback_buckets, fallback_meta = self._load_sales_from_point_daily_sales_official(
-                    month_start=month_start,
-                    month_end=month_end,
-                )
-                if fallback_buckets:
-                    fallback_meta["fallback_reason"] = str(exc)
-                    fallback_meta["warnings"] = [
-                        "No se pudo usar el reporte oficial mensual; se uso PointDailySale oficial por sucursal y dia."
-                    ]
-                    return fallback_buckets, fallback_meta
-                bridge_buckets, bridge_meta = self._load_sales_from_bridge_history(
-                    month_start=month_start,
-                    month_end=month_end,
-                )
-                bridge_meta["fallback_reason"] = str(exc)
-                bridge_meta["warnings"] = [
-                    "No se pudo usar el reporte oficial mensual; se uso VentaHistorica POINT_BRIDGE_SALES."
-                ]
-                return bridge_buckets, bridge_meta
+        if official_error is not None:
+            bridge_buckets, bridge_meta = self._load_sales_from_bridge_history(
+                month_start=month_start,
+                month_end=month_end,
+            )
+            bridge_meta["fallback_reason"] = str(official_error)
+            bridge_meta["warnings"] = [
+                "No se pudo usar el reporte oficial mensual; se uso VentaHistorica POINT_BRIDGE_SALES."
+            ]
+            return bridge_buckets, bridge_meta
         return self._load_sales_from_bridge_history(month_start=month_start, month_end=month_end)
 
     def _load_sales_from_point_daily_sales_official(self, *, month_start: date, month_end: date):

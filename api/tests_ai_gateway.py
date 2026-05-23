@@ -14,7 +14,7 @@ from rest_framework.test import APITestCase
 from compras.models import OrdenCompra, SolicitudCompra
 from core.access import ROLE_ALMACEN, ROLE_COMPRAS, ROLE_DG, ROLE_LECTURA, ROLE_PRODUCCION
 from core.models import AuditLog, Sucursal, UserProfile
-from maestros.models import Insumo, Proveedor, UnidadMedida
+from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
 from orquestacion.models import AgentExecutionLink, AgentSuggestion
 from pos_bridge.models import PointBranch, PointDailySale, PointInventorySnapshot, PointProduct, PointSyncJob
 from recetas.models import Receta, RecetaCostoVersion
@@ -162,6 +162,7 @@ class AIGatewayApiTests(APITestCase):
         self.assertIn("erp.get_dashboard", tool_keys)
         self.assertIn("erp.get_sales_summary", tool_keys)
         self.assertIn("erp.get_inventory_low_stock", tool_keys)
+        self.assertIn("erp.get_current_input_cost", tool_keys)
         self.assertIn("erp.get_purchase_requests", tool_keys)
         self.assertIn("erp.get_purchase_orders", tool_keys)
         self.assertIn("erp.get_recipe_cost_history", tool_keys)
@@ -261,6 +262,243 @@ class AIGatewayApiTests(APITestCase):
         self.assertEqual(response.data["display_name"], "Costo historico de receta")
         self.assertEqual(response.data["argument_schema"]["required"], ["receta_id"])
         self.assertIn("/api/ai-gateway/tools/erp.get_recipe_cost_history/", response.data["endpoints"]["detail_path"])
+
+    def test_invoke_current_input_cost_resolves_fresa_fresca_as_insumo(self):
+        fresa = Insumo.objects.create(
+            nombre="Fresa Fresca",
+            unidad_base=self.unidad,
+            proveedor_principal=self.proveedor,
+            activo=True,
+        )
+        mermelada = Insumo.objects.create(
+            nombre="Mermelada Fresa",
+            unidad_base=self.unidad,
+            proveedor_principal=self.proveedor,
+            activo=True,
+        )
+        CostoInsumo.objects.create(
+            insumo=fresa,
+            proveedor=self.proveedor,
+            fecha=timezone.localdate(),
+            costo_unitario=Decimal("78.500000"),
+            source_hash="ai-gateway-fresa-fresca-cost",
+        )
+        CostoInsumo.objects.create(
+            insumo=mermelada,
+            proveedor=self.proveedor,
+            fecha=timezone.localdate(),
+            costo_unitario=Decimal("42.000000"),
+            source_hash="ai-gateway-mermelada-fresa-cost",
+        )
+
+        self.client.force_authenticate(self.user_lectura)
+        response = self.client.post(
+            self._invoke_url("erp.get_current_input_cost"),
+            {"arguments": {"q": "fresa fresca"}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response.data["result"]["payload"]
+        self.assertEqual(response.data["result"]["sources"], ["maestros.CostoInsumo", "maestros.Insumo"])
+        self.assertEqual(payload["insumo"], "Fresa Fresca")
+        self.assertEqual(payload["unidad_base"], "kg")
+        self.assertEqual(payload["costo_unitario"], 78.5)
+        self.assertEqual(payload["costo_source_insumo"], "Fresa Fresca")
+
+    def test_invoke_promotion_profitability_returns_financial_decision_table(self):
+        today = timezone.localdate()
+        products = [
+            ("FCM", "Fresas con crema mediana", Decimal("120.00"), Decimal("10"), Decimal("1200.00"), Decimal("450.00")),
+            ("FCG", "Fresas con crema grande", Decimal("180.00"), Decimal("6"), Decimal("1080.00"), Decimal("510.00")),
+            ("REB", "Rebanada de pastel fresa", Decimal("65.00"), Decimal("18"), Decimal("1170.00"), Decimal("540.00")),
+        ]
+        for sku, name, price, quantity, sales, cost in products:
+            product = PointProduct.objects.create(
+                external_id=f"{sku}-PROMO",
+                sku=sku,
+                name=name,
+                category="PROMO",
+                precio=price,
+            )
+            receta = Receta.objects.create(
+                nombre=name,
+                hash_contenido=f"hash-{sku.lower()}-promo",
+                codigo_point=sku,
+                tipo=Receta.TIPO_PRODUCTO_FINAL,
+            )
+            FactVentaDiaria.objects.create(
+                fecha=today,
+                sucursal=self.sucursal_1,
+                receta=receta,
+                point_product=product,
+                producto_clave=sku,
+                producto_nombre=name,
+                categoria="PROMO",
+                cantidad=quantity,
+                tickets=int(quantity),
+                venta_bruta=sales,
+                descuento=Decimal("0.00"),
+                venta_total=sales,
+                venta_neta=sales,
+                costo_estimado=cost,
+                margen=sales - cost,
+                source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE,
+            )
+
+        self.client.force_authenticate(self.user_dg)
+        response = self.client.post(
+            self._invoke_url("erp.analyze_promotion_profitability"),
+            {
+                "arguments": {
+                    "promotion_type": "3x2",
+                    "event_name": "Día del Estudiante",
+                    "product_queries": [
+                        "fresas con crema mediana",
+                        "fresas con crema grande",
+                        "rebanada de pastel",
+                    ],
+                    "expected_uplift_pct": 60,
+                    "marketing_budget": 300,
+                    "lookback_days": 30,
+                }
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        result = response.data["result"]
+        self.assertEqual(result["sources"], ["pos_bridge.PointProduct", "reportes.FactVentaDiaria", "recetas.Receta"])
+        payload = result["payload"]
+        self.assertEqual(payload["promotion_type"], "3x2")
+        self.assertEqual(payload["event_name"], "Día del Estudiante")
+        self.assertEqual(payload["expected_uplift_pct"], 60.0)
+        self.assertEqual(payload["returned"], 3)
+        self.assertIn("finance", payload)
+        self.assertIn("marketing", payload)
+        self.assertIn("operations", payload)
+        self.assertIn("accounting", payload)
+
+        mediana = next(row for row in payload["items"] if row["product_sku"] == "FCM")
+        self.assertEqual(mediana["normal_unit_price"], 120.0)
+        self.assertEqual(mediana["unit_cost"], 45.0)
+        self.assertEqual(mediana["promo_effective_unit_price"], 80.0)
+        self.assertEqual(mediana["normal_margin_per_unit"], 75.0)
+        self.assertEqual(mediana["promo_margin_per_unit"], 35.0)
+        self.assertEqual(mediana["baseline_units"], 10.0)
+        self.assertEqual(mediana["expected_units"], 16.0)
+        self.assertEqual(mediana["baseline_profit"], 750.0)
+        self.assertEqual(mediana["promo_profit"], 560.0)
+        self.assertEqual(mediana["profit_delta"], -190.0)
+        self.assertEqual(mediana["break_even_units"], 22)
+        self.assertEqual(mediana["recommendation"], "NO_CONVIENE")
+        self.assertGreaterEqual(len(payload["decision_summary"]["ranked_products"]), 3)
+
+    def test_invoke_promotion_profitability_resolves_vasos_and_rebanada_mix(self):
+        today = timezone.localdate()
+
+        fixtures = [
+            ("PFCM", "Pastel de Fresas Con Crema Mediano", "Pastel Mediano", Decimal("490.00"), Decimal("4"), Decimal("1960.00"), Decimal("600.00")),
+            ("VFM", "Vaso Fresas con Crema Mediano", "Vasos Grande", None, Decimal("12"), Decimal("1200.00"), Decimal("420.00")),
+            ("VFG", "Vaso Fresas con Crema Grande", "Vasos Grande", None, Decimal("8"), Decimal("1040.00"), Decimal("360.00")),
+            ("REB1", "Pastel de 3 Leches Rebanada", "Rebanada", Decimal("70.00"), Decimal("10"), Decimal("700.00"), Decimal("220.00")),
+            ("REB2", "Pastel de Snickers Rebanada", "Rebanada", Decimal("70.00"), Decimal("20"), Decimal("1400.00"), Decimal("500.00")),
+            ("SAB1", "Sabor Fresa Rebanada Pay", "Rebanada", None, Decimal("100"), Decimal("0.00"), Decimal("100.00")),
+        ]
+        for index in range(60):
+            PointProduct.objects.create(
+                external_id=f"FILLER-{index}",
+                sku=f"FILLER-{index}",
+                name=f"Pastel Fresas con Crema Relleno {index:02d}",
+                category="Pastel Mediano",
+                precio=Decimal("490.00"),
+            )
+        for sku, name, category, price, quantity, sales, cost in fixtures:
+            product = PointProduct.objects.create(
+                external_id=f"{sku}-PROMO2",
+                sku=sku,
+                name=name,
+                category=category,
+                precio=price,
+            )
+            if sku in {"VFM", "VFG"}:
+                receta = Receta.objects.create(
+                    nombre=name,
+                    hash_contenido=f"hash-{sku.lower()}-recipe-promo2",
+                    codigo_point=sku,
+                    tipo=Receta.TIPO_PRODUCTO_FINAL,
+                )
+                RecetaCostoVersion.objects.create(
+                    receta=receta,
+                    version_num=1,
+                    hash_snapshot=f"hash-{sku.lower()}-recipe-cost-promo2",
+                    costo_mp=Decimal("0.00"),
+                    costo_mo=Decimal("0.00"),
+                    costo_indirecto=Decimal("0.00"),
+                    costo_total=Decimal("32.00") if sku == "VFM" else Decimal("36.00"),
+                )
+            FactVentaDiaria.objects.create(
+                fecha=today,
+                sucursal=self.sucursal_1,
+                point_product=product,
+                producto_clave=sku,
+                producto_nombre=name,
+                categoria=category,
+                cantidad=quantity,
+                tickets=int(quantity),
+                venta_bruta=sales,
+                descuento=Decimal("0.00"),
+                venta_total=sales,
+                venta_neta=sales,
+                costo_estimado=cost,
+                margen=sales - cost,
+                source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE,
+            )
+
+        self.client.force_authenticate(self.user_dg)
+        response = self.client.post(
+            self._invoke_url("erp.analyze_promotion_profitability"),
+            {
+                "arguments": {
+                    "promotion_type": "3x2",
+                    "product_queries": [
+                        "vaso fresas con crema mediana",
+                        "vaso fresas con crema grnde",
+                        "revoltura de rebanadas de pastel",
+                    ],
+                    "expected_uplift_pct": 60,
+                    "lookback_days": 30,
+                }
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        items = response.data["result"]["payload"]["items"]
+        mediano = next(row for row in items if row["query"] == "vaso fresas con crema mediana")
+        grande = next(row for row in items if row["query"] == "vaso fresas con crema grnde")
+        mix = next(row for row in items if row["query"] == "revoltura de rebanadas de pastel")
+
+        self.assertEqual(mediano["product_sku"], "VFM")
+        self.assertEqual(mediano["product_name"], "Vaso Fresas con Crema Mediano")
+        self.assertEqual(mediano["normal_unit_price"], 100.0)
+        self.assertEqual(mediano["receta"], "Vaso Fresas con Crema Mediano")
+        self.assertEqual(mediano["unit_cost"], 32.0)
+        self.assertEqual(mediano["cost_source"], "receta_costo_vigente")
+        self.assertEqual(mediano["observed_unit_cost"], 35.0)
+        self.assertEqual(grande["product_sku"], "VFG")
+        self.assertEqual(grande["product_name"], "Vaso Fresas con Crema Grande")
+        self.assertEqual(grande["normal_unit_price"], 130.0)
+        self.assertEqual(grande["receta"], "Vaso Fresas con Crema Grande")
+        self.assertEqual(grande["unit_cost"], 36.0)
+        self.assertEqual(grande["cost_source"], "receta_costo_vigente")
+        self.assertEqual(grande["observed_unit_cost"], 45.0)
+        self.assertEqual(mix["item_type"], "product_group")
+        self.assertEqual(mix["product_sku"], "GRUPO_REBANADAS")
+        self.assertEqual(mix["product_count"], 2)
+        self.assertEqual(mix["baseline_units"], 30.0)
+        self.assertEqual(mix["normal_unit_price"], 70.0)
+        self.assertEqual(mix["unit_cost"], 24.0)
 
     def test_invoke_sales_summary_logs_audit(self):
         self.client.force_authenticate(self.user_lectura)

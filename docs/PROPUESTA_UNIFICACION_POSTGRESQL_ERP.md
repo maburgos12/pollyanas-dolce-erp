@@ -88,7 +88,7 @@ Ningún hilo, script, comando, vista, agente o dashboard puede:
 - Fuente única: PostgreSQL canónica viva
 - Resolución de conexión:
   1. `DATABASE_URL`
-  2. `DATABASE_PUBLIC_URL` cuando `railway.internal` no resuelva localmente
+  2. `DB_HOST` + `DB_NAME` + `DB_USER` + `DB_PASSWORD` + `DB_PORT` solo para entornos locales/controlados
 - `DB_HOST` + `DB_NAME` + `DB_USER` + `DB_PASSWORD` + `DB_PORT` quedan solo como fallback local controlado, nunca como garantía de “base viva”
 
 ### 4.2 Ventas
@@ -233,7 +233,7 @@ Objetivo:
 
 Acciones:
 1. identificar la base viva real
-2. cargar `DATABASE_URL` o `DATABASE_PUBLIC_URL` real
+2. cargar `DATABASE_URL` real
 3. validar:
    - tablas críticas
    - datos maestros
@@ -360,7 +360,7 @@ Estado:
 ### Sprint B. Nombrar la base canónica
 
 Entregables:
-- variable oficial `DATABASE_URL` o `DATABASE_PUBLIC_URL`
+- variable oficial `DATABASE_URL`
 - `.env` saneado
 - runbook de conexión
 
@@ -397,7 +397,7 @@ Entregables:
 
 ## 9. Checklist de aceptación final
 
-- [ ] Existe una sola `DATABASE_URL` o `DATABASE_PUBLIC_URL` oficial para operación.
+- [ ] Existe una sola `DATABASE_URL` oficial para operación.
 - [ ] `./scripts/diagnose_erp_runtime_context.sh --strict` pasa en verde.
 - [ ] Las tablas críticas existen en la base activa.
 - [ ] Las capas críticas tienen datos defendibles.
@@ -412,7 +412,7 @@ Entregables:
 
 Hoy siguen faltando estos insumos para ejecutar el corte final:
 
-1. la `DATABASE_URL` o `DATABASE_PUBLIC_URL` viva real
+1. la `DATABASE_URL` viva real
 2. confirmación de cuál base PostgreSQL es la operativa
 3. reconciliación firmada de snapshots SQLite vs PostgreSQL
 

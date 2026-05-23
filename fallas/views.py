@@ -83,6 +83,14 @@ def _puede_cambiar_estatus_fallas(user) -> bool:
     return can_manage_submodule(user, "fallas", "gestion")
 
 
+def _puede_modificar_reporte_propio(reporte, user) -> bool:
+    return (
+        user.is_authenticated
+        and reporte.reportado_por_id == user.id
+        and reporte.estatus == ReporteFalla.ESTATUS_ABIERTO
+    )
+
+
 def _filtrar_reportes_por_usuario(qs, user):
     grupos = _group_names(user)
     if user.is_superuser or grupos & GRUPOS_VER_TODO_FALLAS:
@@ -399,6 +407,94 @@ def pwa_reporte(request):
             "prioridades": ReporteFalla.PRIORIDAD,
         },
     )
+
+
+@login_required
+def pwa_editar_reporte(request, pk):
+    if not can_view_submodule(request.user, "fallas", "mis_reportes"):
+        raise PermissionDenied
+
+    reporte = (
+        ReporteFalla.objects.select_related("sucursal", "categoria", "reportado_por")
+        .filter(pk=pk)
+        .first()
+    )
+    if not reporte or not _puede_modificar_reporte_propio(reporte, request.user):
+        raise PermissionDenied
+
+    sucursales = Sucursal.objects.filter(sucursales_operativas_q()).order_by("nombre")
+    if not _puede_cambiar_estatus_fallas(request.user):
+        sucursal_usuario = _sucursal_usuario(request.user)
+        sucursales = sucursales.filter(pk=sucursal_usuario.pk) if sucursal_usuario else sucursales.none()
+
+    categorias = CategoriaFalla.objects.filter(activo=True).order_by("orden", "nombre")
+    activos = Activo.objects.filter(activo=True).order_by("nombre", "codigo")[:150]
+
+    if request.method == "POST":
+        sucursal_id = request.POST.get("sucursal")
+        categoria_id = request.POST.get("categoria")
+        titulo = (request.POST.get("titulo") or "").strip()
+        descripcion = (request.POST.get("descripcion") or "").strip()
+
+        if not all([sucursal_id, categoria_id, titulo, descripcion]):
+            messages.error(request, "Completa sucursal, categoría, título y descripción.")
+        elif not sucursales.filter(pk=sucursal_id).exists():
+            messages.error(request, "No tienes permiso para usar esa sucursal.")
+        else:
+            reporte.sucursal_id = sucursal_id
+            reporte.categoria_id = categoria_id
+            reporte.activo_relacionado_id = request.POST.get("activo_relacionado") or None
+            reporte.area = request.POST.get("area") or ReporteFalla.AREA_GENERAL
+            reporte.titulo = titulo
+            reporte.descripcion = descripcion
+            reporte.prioridad = request.POST.get("prioridad") or ReporteFalla.PRIORIDAD_MEDIA
+            reporte.latitud = request.POST.get("latitud") or None
+            reporte.longitud = request.POST.get("longitud") or None
+            foto = request.FILES.get("foto_evidencia")
+            if foto:
+                reporte.foto_evidencia = foto
+            reporte.save()
+            BitacoraFalla.objects.create(
+                reporte=reporte,
+                usuario=request.user,
+                estatus_anterior=ReporteFalla.ESTATUS_ABIERTO,
+                estatus_nuevo=ReporteFalla.ESTATUS_ABIERTO,
+                comentario="Reporte editado por el usuario que lo levantó.",
+            )
+            messages.success(request, f"Reporte de falla #{reporte.id} actualizado correctamente.")
+            return redirect("fallas:pwa-mis-reportes")
+
+    return render(
+        request,
+        "fallas/reporte_form.html",
+        {
+            "es_dg": request.user.is_superuser or request.user.groups.filter(name__in=["compras_logistica", "dg"]).exists(),
+            "sucursales": sucursales,
+            "categorias": categorias,
+            "activos": activos,
+            "areas": ReporteFalla.AREAS,
+            "prioridades": ReporteFalla.PRIORIDAD,
+            "reporte": reporte,
+            "modo_edicion": True,
+        },
+    )
+
+
+@login_required
+def pwa_eliminar_reporte(request, pk):
+    if request.method != "POST":
+        return redirect("fallas:pwa-mis-reportes")
+    if not can_view_submodule(request.user, "fallas", "mis_reportes"):
+        raise PermissionDenied
+
+    reporte = ReporteFalla.objects.filter(pk=pk).first()
+    if not reporte or not _puede_modificar_reporte_propio(reporte, request.user):
+        raise PermissionDenied
+
+    reporte_id = reporte.id
+    reporte.delete()
+    messages.success(request, f"Reporte de falla #{reporte_id} eliminado correctamente.")
+    return redirect("fallas:pwa-mis-reportes")
 
 
 @login_required

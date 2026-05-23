@@ -3604,6 +3604,21 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
     min-width: 0;
   }
 
+  .sidebar-brand,
+  .sidebar-tagline,
+  .sidebar-nav a span:last-child {
+    display: inline;
+  }
+
+  .sidebar-user {
+    display: flex;
+  }
+
+  .sidebar-nav a {
+    justify-content: flex-start;
+    padding: 8px 12px 8px 36px;
+  }
+
   .header {
     position: static;
     padding: 14px 16px;

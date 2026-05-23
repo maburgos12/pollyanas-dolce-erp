@@ -1,0 +1,331 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Mantenimiento{% endblock %}
+{% block page_title %}Mantenimiento{% endblock %}
+{% block body_class %}page-mantenimiento-dashboard{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260326a">
+<style>
+  .page-mantenimiento-dashboard .container{width:100%;max-width:none;margin:0;padding:clamp(18px,1.8vw,32px);overflow-x:hidden}
+  .page-mantenimiento-dashboard .bi-shell{width:100%;max-width:none;margin:0;gap:16px}
+  .mant-tabs .module-tab{white-space:nowrap}
+  .mant-origin-tabs{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .mant-origin-tab{display:inline-flex;align-items:center;gap:8px;min-height:38px;border:1px solid rgba(139,34,82,.14);border-radius:999px;background:#fff;color:#8B2252;text-decoration:none;font-weight:900;padding:8px 14px}
+  .mant-origin-tab.active{background:#8B2252;border-color:#8B2252;color:#fff}
+  .mant-origin-count{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;border-radius:999px;background:rgba(139,34,82,.12);font-size:12px}
+  .mant-origin-tab.active .mant-origin-count{background:rgba(255,255,255,.24);color:#fff}
+  .mant-board{display:grid;grid-template-columns:repeat(auto-fit,minmax(245px,1fr));gap:12px;align-items:start}
+  .mant-col{min-width:0;border:1px solid rgba(139,34,82,.12);border-radius:14px;background:#fff;padding:10px}
+  .mant-col-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:6px 6px 10px;border-bottom:1px solid #f0e1e8;margin-bottom:10px}
+  .mant-col-head strong{display:block;color:#3a2b30;font-size:16px}
+  .mant-col-head span{display:block;margin-top:2px;color:#77656d;font-size:12px}
+  .mant-col-count{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;flex:0 0 32px;border-radius:999px;background:#8B2252;color:#fff;font-size:13px;font-weight:900;line-height:1;text-align:center;font-variant-numeric:tabular-nums}
+  .mant-col-body{display:grid;gap:10px;max-height:min(520px,58vh);overflow-y:auto;padding-right:4px;overscroll-behavior:contain}
+  .mant-col-body::-webkit-scrollbar{width:8px}
+  .mant-col-body::-webkit-scrollbar-thumb{background:#e3b9ca;border-radius:999px}
+  .mant-ticket{display:grid;gap:10px;background:#fffafc;border:1px solid #f0c9d9;border-radius:12px;padding:12px}
+  .mant-ticket-title{color:#8B2252;font-weight:900;line-height:1.2}
+  .mant-ticket-meta{color:#77656d;font-size:12px;line-height:1.45}
+  .mant-ticket-tags{display:flex;gap:6px;flex-wrap:wrap}
+  .mant-badge{display:inline-flex;width:max-content;border-radius:999px;padding:4px 9px;font-size:11px;font-weight:900;background:#f3dce7;color:#8B2252}
+  .mant-badge.logistica{background:#e8f6ee;color:#166534}
+  .mant-badge.sucursales{background:#eef4ff;color:#1d4ed8}
+  .mant-ticket-actions{display:flex;gap:8px;flex-wrap:wrap}
+  .mant-empty{color:#77656d;border:1px dashed #e8b7cb;border-radius:12px;padding:14px;font-size:13px}
+  .mant-flow-demo{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px}
+  .mant-flow-step{border:1px solid rgba(139,34,82,.12);border-radius:12px;background:#fff;padding:11px 12px;min-height:108px}
+  .mant-flow-step span{display:block;color:#8b7180;font-size:11px;font-weight:900;text-transform:uppercase}
+  .mant-flow-step strong{display:block;margin-top:6px;color:#8B2252;font-size:14px;line-height:1.2}
+  .mant-flow-step small{display:block;margin-top:7px;color:#6f6170;line-height:1.3}
+  .mant-breakdown{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  .mant-breakdown-list{display:grid}
+  .mant-breakdown-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-top:1px solid #f0e1e8;color:#3a2b30;font-weight:900}
+  .mant-breakdown-row:first-child{border-top:0}
+  .mant-breakdown-count{display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;border-radius:999px;background:#8B2252;color:#fff;font-size:12px;font-weight:900}
+  .mant-fleet-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+  .mant-fleet-item{border:1px solid rgba(139,34,82,.10);border-radius:12px;background:#fff;padding:12px}
+  .mant-fleet-item strong{display:block;color:#3a2b30}
+  .mant-fleet-item span{display:block;margin-top:4px;color:#77656d;font-size:13px}
+  .mant-drawer{position:fixed;inset:0;z-index:1300;display:none;background:rgba(31,18,26,.46)}
+  .mant-drawer.is-open{display:flex;justify-content:flex-end}
+  .mant-drawer-panel{width:min(560px,100%);height:100%;background:#fff;box-shadow:-16px 0 45px rgba(0,0,0,.18);padding:22px;overflow-y:auto}
+  .mant-drawer-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;border-bottom:1px solid #f0e1e8;padding-bottom:14px;margin-bottom:16px}
+  .mant-drawer-head h2{margin:0;color:#42292e;font-size:24px}
+  .mant-drawer-head p{margin:5px 0 0;color:#6f6170}
+  .mant-form{display:grid;gap:14px}
+  .mant-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .mant-field{display:grid;gap:6px;color:#513744;font-size:13px;font-weight:900}
+  .mant-input{width:100%;min-height:42px;border:1px solid rgba(139,34,82,.22);border-radius:8px;padding:9px 10px;font:inherit;background:#fff;min-width:0}
+  textarea.mant-input{min-height:116px;resize:vertical}
+  .mant-field.full{grid-column:1/-1}
+  @media(max-width:1180px){.mant-breakdown{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr 1fr}}
+  @media(max-width:760px){.mant-origin-tabs{display:grid}.mant-origin-tab{justify-content:space-between}.mant-form-grid{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr}}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-shell bi-shell">
+  <nav class="module-tabs mant-tabs" aria-label="Submódulos Mantenimiento">
+    <a href="#dashboard" class="module-tab active">Dashboard</a>
+    <a href="#seguimiento" class="module-tab">Seguimiento</a>
+    <a href="#activos" class="module-tab">Activos</a>
+    <a href="#proveedores" class="module-tab">Proveedores</a>
+    <a href="{% url 'mantenimiento:app' %}" class="module-tab">App móvil</a>
+  </nav>
+
+  <section class="bi-hero" id="dashboard">
+    <div class="bi-hero-main">
+      <div class="bi-kicker">Mantenimiento</div>
+      <h1 class="bi-hero-title">Panel de mantenimiento</h1>
+      <p class="bi-copy">Seguimiento unificado de sucursales, Producción (CEDIS), activos y logística sin duplicar reportes.</p>
+      <div class="mant-origin-tabs" aria-label="Filtro de origen">
+        <a href="{% url 'mantenimiento:dashboard' %}" class="mant-origin-tab {% if origen == 'todos' %}active{% endif %}">
+          Todo <span class="mant-origin-count">{{ counts.sucursales|add:counts.logistica }}</span>
+        </a>
+        <a href="{% url 'mantenimiento:dashboard' %}?origen=sucursales" class="mant-origin-tab {% if origen == 'sucursales' %}active{% endif %}">
+          Sucursales / Producción (CEDIS) <span class="mant-origin-count">{{ counts.sucursales }}</span>
+        </a>
+        <a href="{% url 'mantenimiento:dashboard' %}?origen=logistica" class="mant-origin-tab {% if origen == 'logistica' %}active{% endif %}">
+          Logística <span class="mant-origin-count">{{ counts.logistica }}</span>
+        </a>
+      </div>
+    </div>
+    <div class="bi-hero-side">
+      <div class="bi-hero-status-grid">
+        <article class="bi-status-card"><span class="bi-status-label">Fallas activas</span><strong>{{ summary.fallas_activas|intcomma }}</strong></article>
+        <article class="bi-status-card"><span class="bi-status-label">Críticas</span><strong>{{ summary.criticas|intcomma }}</strong></article>
+        <article class="bi-status-card"><span class="bi-status-label">Costo visible</span><strong>${{ summary.costo_30d|floatformat:0|intcomma }}</strong></article>
+        <article class="bi-status-card"><span class="bi-status-label">Unidades activas</span><strong>{{ summary.unidades_activas|intcomma }}</strong></article>
+      </div>
+      <div class="bi-summary-band">
+        <div class="bi-summary-chip"><span>Usuario</span><strong>{{ request.user.get_full_name|default:request.user.username }}</strong></div>
+        <div class="bi-summary-chip"><span>Filtro</span><strong>{{ origen|title }}</strong></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="bi-kpi-grid" aria-label="Indicadores de mantenimiento">
+    <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.total %}warning{% else %}success{% endif %}">{{ summary.total|intcomma }}</div><div class="bi-kpi-label">Reportes visibles</div><div class="bi-kpi-note">Casos del filtro actual.</div></article>
+    <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.ordenes_abiertas %}warning{% else %}success{% endif %}">{{ summary.ordenes_abiertas|intcomma }}</div><div class="bi-kpi-label">Órdenes abiertas</div><div class="bi-kpi-note">Equipo y maquinaria.</div></article>
+    <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.reparaciones_flota %}warning{% else %}success{% endif %}">{{ summary.reparaciones_flota|intcomma }}</div><div class="bi-kpi-label">Reparaciones flota</div><div class="bi-kpi-note">Reportes de unidades.</div></article>
+    <article class="bi-kpi-card"><div class="bi-kpi-value success">{{ summary.activos_registrados|intcomma }}</div><div class="bi-kpi-label">Activos registrados</div><div class="bi-kpi-note">Base de activos disponible.</div></article>
+  </section>
+
+  <section class="mant-breakdown" aria-label="Distribución de mantenimiento">
+    <article class="bi-panel">
+      <div class="bi-panel-head"><div><div class="bi-kicker">Ubicación</div><h2 class="bi-panel-title">Fallas por ubicación</h2></div></div>
+      <div class="mant-breakdown-list">
+        {% for label,count in summary.por_ubicacion %}
+          <div class="mant-breakdown-row"><span>{{ label }}</span><span class="mant-breakdown-count">{{ count }}</span></div>
+        {% empty %}
+          <div class="mant-breakdown-row"><span>Sin reportes</span><span class="mant-breakdown-count">0</span></div>
+        {% endfor %}
+      </div>
+    </article>
+    <article class="bi-panel">
+      <div class="bi-panel-head"><div><div class="bi-kicker">Área</div><h2 class="bi-panel-title">Fallas por área</h2></div></div>
+      <div class="mant-breakdown-list">
+        {% for label,count in summary.por_area %}
+          <div class="mant-breakdown-row"><span>{{ label }}</span><span class="mant-breakdown-count">{{ count }}</span></div>
+        {% empty %}
+          <div class="mant-breakdown-row"><span>Sin reportes</span><span class="mant-breakdown-count">0</span></div>
+        {% endfor %}
+      </div>
+    </article>
+    <article class="bi-panel" id="proveedores">
+      <div class="bi-panel-head"><div><div class="bi-kicker">Tipo</div><h2 class="bi-panel-title">Mantenimiento por tipo</h2></div></div>
+      <div class="mant-breakdown-list">
+        {% for label,count in summary.por_tipo %}
+          <div class="mant-breakdown-row"><span>{{ label }}</span><span class="mant-breakdown-count">{{ count }}</span></div>
+        {% empty %}
+          <div class="mant-breakdown-row"><span>Sin reportes</span><span class="mant-breakdown-count">0</span></div>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+
+  <section class="bi-panel" id="seguimiento">
+    <div class="bi-panel-head">
+      <div>
+        <div class="bi-kicker">Operación</div>
+        <h2 class="bi-panel-title">Seguimiento progresivo</h2>
+        <p class="bi-copy">El tablero muestra en qué etapa está cada caso; el panel lateral guarda avance, proveedor, cotización y cierre.</p>
+      </div>
+      <div class="bi-panel-actions">
+        <a class="btn btn-secondary btn-sm" href="{% url 'mantenimiento:app' %}">Levantar reporte</a>
+      </div>
+    </div>
+    <div class="mant-flow-demo" aria-label="Ejemplo visual de avance">
+      <article class="mant-flow-step"><span>Nuevo</span><strong>Horno CEDIS reportado</strong><small>Reporte recibido y pendiente de revisión.</small></article>
+      <article class="mant-flow-step"><span>Diagnóstico</span><strong>Revisión inicial</strong><small>Se valida falla, activo y prioridad.</small></article>
+      <article class="mant-flow-step"><span>Cotización</span><strong>Proveedor asignado</strong><small>Se captura taller, monto estimado y evidencia.</small></article>
+      <article class="mant-flow-step"><span>Programado</span><strong>Visita agendada</strong><small>Fecha acordada para atención del servicio.</small></article>
+      <article class="mant-flow-step"><span>En atención</span><strong>Trabajo activo</strong><small>El proveedor está atendiendo el caso.</small></article>
+      <article class="mant-flow-step"><span>Validación</span><strong>Cierre y factura</strong><small>Se confirma resultado, costo final y folio.</small></article>
+    </div>
+    <div class="mant-board">
+      {% for column in kanban_columns %}
+        <article class="mant-col">
+          <div class="mant-col-head">
+            <div><strong>{{ column.label }}</strong><span>{{ column.hint }}</span></div>
+            <span class="mant-col-count">{{ column.items|length }}</span>
+          </div>
+          <div class="mant-col-body">
+            {% for item in column.items %}
+              <article class="mant-ticket">
+                <div class="mant-ticket-tags">
+                  <span class="mant-badge {{ item.origen }}">{{ item.origen|title }}</span>
+                  <span class="mant-badge">{{ item.prioridad }}</span>
+                </div>
+                <div>
+                  <div class="mant-ticket-title">{{ item.referencia }} · {{ item.titulo }}</div>
+                  <div class="mant-ticket-meta">{{ item.ubicacion|default:"Sin ubicación" }}{% if item.activo %} · {{ item.activo }}{% endif %}<br>{{ item.fecha|date:"d/m/Y H:i" }}</div>
+                </div>
+                <div class="mant-ticket-meta">{{ item.descripcion|truncatechars:110 }}</div>
+                {% if item.proveedor or item.costo_estimado or item.costo_real %}
+                  <div class="mant-ticket-meta">{{ item.proveedor|default:"Sin proveedor" }} · Est. ${{ item.costo_estimado|default:"0" }} · Real ${{ item.costo_real|default:"0" }}</div>
+                {% endif %}
+                <div class="mant-ticket-actions">
+                  <button
+                    class="btn btn-secondary btn-sm"
+                    type="button"
+                    data-open-follow
+                    data-action="{% url 'mantenimiento:mant-actualizar' item.tipo item.id %}"
+                    data-type="{{ item.tipo }}"
+                    data-status="{{ item.estatus }}"
+                    data-provider="{{ item.proveedor|default:'' }}"
+                    data-estimated="{{ item.costo_estimado|default:'' }}"
+                    data-real="{{ item.costo_real|default:'' }}"
+                    data-asset-id="{{ item.activo_id|default:'' }}"
+                    data-title="{{ item.referencia }} · {{ item.titulo }}"
+                    data-meta="{{ item.ubicacion|default:'Sin ubicación' }} · {{ item.estatus_display }}"
+                  >Trabajar</button>
+                </div>
+              </article>
+            {% empty %}
+              <div class="mant-empty">Sin casos en esta etapa.</div>
+            {% endfor %}
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="bi-panel" id="activos">
+    <div class="bi-panel-head">
+      <div><div class="bi-kicker">Flota</div><h2 class="bi-panel-title">Estado de flota</h2></div>
+    </div>
+    <div class="mant-fleet-grid">
+      {% for unidad in fleet_units %}
+        <article class="mant-fleet-item"><strong>{{ unidad.descripcion|default:unidad.codigo }}</strong><span>{{ unidad.codigo }} · {{ unidad.sucursal|default:"Sin sucursal" }}</span></article>
+      {% empty %}
+        <article class="mant-fleet-item"><strong>Sin unidades activas</strong><span>Logística no tiene unidades visibles.</span></article>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+
+<datalist id="mant-provider-list">
+  {% for proveedor in provider_options %}
+    <option value="{{ proveedor.nombre }}">
+  {% endfor %}
+</datalist>
+
+<template id="mant-status-falla">
+  {% for value,label in estatus_fallas %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+</template>
+<template id="mant-status-unidad">
+  {% for value,label in estatus_unidad %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+</template>
+<template id="mant-status-orden">
+  {% for value,label in estatus_orden %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+</template>
+
+<div class="mant-drawer" id="mantDrawer" role="dialog" aria-modal="true" aria-labelledby="mantDrawerTitle">
+  <aside class="mant-drawer-panel">
+    <div class="mant-drawer-head">
+      <div>
+        <h2 id="mantDrawerTitle">Seguimiento</h2>
+        <p id="mantDrawerMeta">Selecciona un caso para trabajar.</p>
+      </div>
+      <button class="btn btn-secondary btn-sm" type="button" data-close-drawer>Cerrar</button>
+    </div>
+    <form class="mant-form" id="mantFollowForm" method="post">
+      {% csrf_token %}
+      <div class="mant-form-grid">
+        <label class="mant-field">Etapa / estatus
+          <select class="mant-input" name="estatus" id="mantDrawerStatus"></select>
+        </label>
+        <label class="mant-field">Proveedor o taller
+          <input class="mant-input" name="proveedor_servicio" id="mantDrawerProvider" list="mant-provider-list" placeholder="Buscar o escribir proveedor nuevo">
+        </label>
+        <label class="mant-field" id="mantDrawerAssetField">Activo relacionado
+          <select class="mant-input" name="activo_id" id="mantDrawerAsset">
+            <option value="">Sin cambio</option>
+            {% for activo in asset_options %}
+              <option value="{{ activo.id }}">{{ activo.codigo }} · {{ activo.nombre }}{% if activo.sucursal %} · {{ activo.sucursal.nombre }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="mant-field">Cotización
+          <input class="mant-input" name="costo_estimado" id="mantDrawerEstimated" type="number" min="0" step="0.01" placeholder="0.00">
+        </label>
+        <label class="mant-field">Costo final / factura
+          <input class="mant-input" name="costo_real" id="mantDrawerReal" type="number" min="0" step="0.01" placeholder="0.00">
+        </label>
+        <label class="mant-field full">Comentario de avance
+          <textarea class="mant-input" name="comentario" placeholder="Diagnóstico, autorización, proveedor, folio de factura o cierre del trabajo."></textarea>
+        </label>
+      </div>
+      <button class="btn btn-primary" type="submit" style="background:#8B2252;border-color:#8B2252;">Guardar avance</button>
+    </form>
+  </aside>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(() => {
+  const drawer = document.getElementById("mantDrawer");
+  const form = document.getElementById("mantFollowForm");
+  const title = document.getElementById("mantDrawerTitle");
+  const meta = document.getElementById("mantDrawerMeta");
+  const status = document.getElementById("mantDrawerStatus");
+  const provider = document.getElementById("mantDrawerProvider");
+  const estimated = document.getElementById("mantDrawerEstimated");
+  const real = document.getElementById("mantDrawerReal");
+  const asset = document.getElementById("mantDrawerAsset");
+  const assetField = document.getElementById("mantDrawerAssetField");
+
+  function openDrawer(button) {
+    const template = document.getElementById(`mant-status-${button.dataset.type}`);
+    form.action = button.dataset.action;
+    title.textContent = button.dataset.title || "Seguimiento";
+    meta.textContent = button.dataset.meta || "";
+    status.innerHTML = template ? template.innerHTML : "";
+    status.value = button.dataset.status || "";
+    provider.value = button.dataset.provider || "";
+    estimated.value = button.dataset.estimated || "";
+    real.value = button.dataset.real || "";
+    asset.value = button.dataset.assetId || "";
+    assetField.hidden = button.dataset.type === "unidad";
+    drawer.classList.add("is-open");
+  }
+
+  document.querySelectorAll("[data-open-follow]").forEach((button) => {
+    button.addEventListener("click", () => openDrawer(button));
+  });
+  document.querySelectorAll("[data-close-drawer]").forEach((button) => {
+    button.addEventListener("click", () => drawer.classList.remove("is-open"));
+  });
+  drawer.addEventListener("click", (event) => {
+    if (event.target === drawer) drawer.classList.remove("is-open");
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") drawer.classList.remove("is-open");
+  });
+})();
+</script>
+{% endblock %}

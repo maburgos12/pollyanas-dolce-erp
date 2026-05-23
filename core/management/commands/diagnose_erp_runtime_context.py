@@ -7,8 +7,6 @@ from django.conf import settings
 from django.core.management import BaseCommand, CommandError
 from django.db import connection
 
-from core.management.commands.ejecutar_rutina_diaria_erp import _prefer_public_database_url_if_needed
-
 
 CRITICAL_TABLES = (
     "pos_bridge_daily_sales",
@@ -56,7 +54,7 @@ def _collect_context() -> dict:
         "port": str(db.get("PORT") or ""),
         "user": str(db.get("USER") or ""),
         "database_url_present": bool(str(os.environ.get("DATABASE_URL") or "").strip()),
-        "database_public_url_present": bool(str(os.environ.get("DATABASE_PUBLIC_URL") or "").strip()),
+        "db_host_present": bool(str(os.environ.get("DB_HOST") or "").strip()),
         "table_statuses": statuses,
         "critical_counts": table_counts,
     }
@@ -128,7 +126,6 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        db_fallback_msg = _prefer_public_database_url_if_needed()
         context = _collect_context()
         required_db_name = str(options.get("require_db_name") or "").strip() or None
         errors, warnings = _evaluate_context(
@@ -138,17 +135,13 @@ class Command(BaseCommand):
         )
 
         self.stdout.write("Diagnóstico rápido de contexto ERP")
-        if db_fallback_msg:
-            self.stdout.write(f"db_fallback={db_fallback_msg}")
         self.stdout.write(f"ENGINE={context['engine']}")
         self.stdout.write(f"NAME={context['name']}")
         self.stdout.write(f"HOST={context['host']}")
         self.stdout.write(f"PORT={context['port']}")
         self.stdout.write(f"USER={context['user']}")
         self.stdout.write(f"DATABASE_URL={'SET' if context['database_url_present'] else 'EMPTY'}")
-        self.stdout.write(
-            f"DATABASE_PUBLIC_URL={'SET' if context['database_public_url_present'] else 'EMPTY'}"
-        )
+        self.stdout.write(f"DB_HOST={'SET' if context['db_host_present'] else 'EMPTY'}")
         for status in context["table_statuses"]:
             count = "MISSING" if status.count is None else status.count
             self.stdout.write(f"{status.name}|exists={status.exists}|count={count}")

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
-from decimal import Decimal
+from datetime import date, timedelta
+from decimal import Decimal, ROUND_CEILING
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -10,7 +10,6 @@ from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.db import models, transaction
 from django.db.models import Count, Q, Sum
-from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from control.services import build_discrepancias_report, resolve_period_range
@@ -36,15 +35,17 @@ from core.access import (
 from core.audit import log_event
 from core.models import AuditLog
 from orquestacion.models import AgentDefinition, AgentExecutionLink, AgentSuggestion, AgentTask, OrchestrationRun
-from pos_bridge.models import PointBranch, PointInventorySnapshot, PointSyncJob
+from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob
 from pos_bridge.tasks.run_daily_sales_sync import run_daily_sales_sync
 from pos_bridge.tasks.run_inventory_sync import run_inventory_sync
 from pos_bridge.tasks.run_product_recipe_sync import run_product_recipe_sync
 from pos_bridge.utils.helpers import safe_slug
-from maestros.utils.canonical_catalog import canonical_insumo_by_id
+from maestros.models import CostoInsumo, Insumo, InsumoAlias
+from maestros.utils.canonical_catalog import canonical_insumo, canonical_insumo_by_id, canonical_member_ids
 from recetas.models import PlanProduccion, PlanProduccionItem, Receta, RecetaCostoVersion
+from recetas.utils.normalizacion import normalizar_nombre
 from reportes.bi_utils import compute_bi_snapshot, serialize_bi_for_api
-from ventas.services.sales_read_service import get_sales_range, get_sales_range_grouped
+from ventas.services.sales_read_service import get_promotion_sales_totals, get_sales_range, get_sales_range_grouped
 
 ZERO = Decimal("0")
 
@@ -615,6 +616,562 @@ def _handle_purchase_orders(_user, arguments: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+INPUT_COST_STOPWORDS = {
+    "actual",
+    "al",
+    "comprando",
+    "compra",
+    "compramos",
+    "comprar",
+    "costo",
+    "cual",
+    "de",
+    "del",
+    "el",
+    "en",
+    "es",
+    "estamos",
+    "kg",
+    "kilo",
+    "kilogramo",
+    "la",
+    "precio",
+    "que",
+}
+
+
+def _input_cost_search_tokens(query: str) -> list[str]:
+    normalized = normalizar_nombre(query)
+    tokens = []
+    for token in normalized.split():
+        if token in INPUT_COST_STOPWORDS:
+            continue
+        if len(token) < 3:
+            continue
+        tokens.append(token)
+    return tokens[:6]
+
+
+def _score_input_candidate(*, insumo: Insumo, query: str, exact_alias_ids: set[int]) -> int:
+    normalized_query = normalizar_nombre(query)
+    normalized_name = insumo.nombre_normalizado or normalizar_nombre(insumo.nombre)
+    normalized_point_name = normalizar_nombre(insumo.nombre_point or "")
+    normalized_code = normalizar_nombre(insumo.codigo or "")
+    normalized_point_code = normalizar_nombre(insumo.codigo_point or "")
+    score = 0
+    if insumo.id in exact_alias_ids:
+        score = max(score, 980)
+    if normalized_name == normalized_query:
+        score = max(score, 1000)
+    if normalized_point_name and normalized_point_name == normalized_query:
+        score = max(score, 960)
+    if normalized_code and normalized_code == normalized_query:
+        score = max(score, 930)
+    if normalized_point_code and normalized_point_code == normalized_query:
+        score = max(score, 930)
+    if normalized_query and normalized_name.startswith(normalized_query):
+        score = max(score, 850)
+    if normalized_query and normalized_query in normalized_name:
+        score = max(score, 650)
+    tokens = _input_cost_search_tokens(query)
+    if tokens and all(token in normalized_name or token in normalized_point_name for token in tokens):
+        score = max(score, 500 + (len(tokens) * 20))
+    if insumo.tipo_item == Insumo.TIPO_MATERIA_PRIMA:
+        score += 40
+    if insumo.unidad_base_id:
+        score += 10
+    return score
+
+
+def _resolve_input_cost_candidates(query: str, *, limit: int) -> list[Insumo]:
+    normalized_query = normalizar_nombre(query)
+    exact_alias_ids = set(
+        InsumoAlias.objects.filter(nombre_normalizado=normalized_query, insumo__activo=True).values_list("insumo_id", flat=True)
+    )
+    q_filter = Q(pk__in=exact_alias_ids)
+    if normalized_query:
+        q_filter |= (
+            Q(nombre_normalizado__icontains=normalized_query)
+            | Q(nombre_point__icontains=query)
+            | Q(codigo__iexact=query)
+            | Q(codigo_point__iexact=query)
+        )
+    tokens = _input_cost_search_tokens(query)
+    for token in tokens:
+        q_filter |= Q(nombre_normalizado__icontains=token) | Q(nombre_point__icontains=token)
+    candidates = list(
+        Insumo.objects.select_related("unidad_base", "proveedor_principal")
+        .filter(q_filter, activo=True)
+        .distinct()[: max(limit * 8, 40)]
+    )
+    ranked = [
+        (candidate, _score_input_candidate(insumo=candidate, query=query, exact_alias_ids=exact_alias_ids))
+        for candidate in candidates
+    ]
+    ranked = [(candidate, score) for candidate, score in ranked if score > 0]
+    ranked.sort(key=lambda item: (-item[1], item[0].nombre.lower(), item[0].id))
+    return [candidate for candidate, _score in ranked[:limit]]
+
+
+def _serialize_input_cost_candidate(insumo: Insumo) -> dict[str, Any]:
+    return {
+        "insumo_id": insumo.id,
+        "insumo": insumo.nombre,
+        "tipo_item": insumo.tipo_item,
+        "unidad_base": insumo.unidad_base.codigo if insumo.unidad_base_id else "",
+        "proveedor_principal": insumo.proveedor_principal.nombre if insumo.proveedor_principal_id else "",
+    }
+
+
+def _handle_current_input_cost(_user, arguments: dict[str, Any]) -> dict[str, Any]:
+    query = str(arguments.get("q") or arguments.get("insumo") or "").strip()
+    insumo_id = arguments.get("insumo_id")
+    limit = _parse_int(arguments.get("limit"), default=8, min_value=1, max_value=25)
+    if insumo_id not in {None, ""}:
+        insumo = canonical_insumo_by_id(insumo_id)
+        candidates = [insumo] if insumo is not None else []
+    elif query:
+        candidates = _resolve_input_cost_candidates(query, limit=limit)
+        insumo = canonical_insumo(candidates[0]) if candidates else None
+    else:
+        raise PermissionDenied("q o insumo_id es obligatorio para consultar costo vigente de insumo.")
+
+    candidate_payload = [_serialize_input_cost_candidate(row) for row in candidates[:limit]]
+    if insumo is None:
+        return {
+            "status": "not_found",
+            "sources": ["maestros.CostoInsumo", "maestros.Insumo"],
+            "filters": {"q": query, "insumo_id": insumo_id, "limit": limit},
+            "payload": {"items": [], "returned": 0, "candidates": candidate_payload},
+        }
+
+    member_ids = canonical_member_ids(insumo)
+    latest_cost = (
+        CostoInsumo.objects.select_related("insumo", "proveedor")
+        .filter(insumo_id__in=member_ids)
+        .order_by("-fecha", "-id")
+        .first()
+    )
+    if latest_cost is None:
+        return {
+            "status": "no_cost",
+            "sources": ["maestros.CostoInsumo", "maestros.Insumo"],
+            "filters": {"q": query, "insumo_id": insumo_id, "limit": limit},
+            "payload": {
+                **_serialize_input_cost_candidate(insumo),
+                "member_ids": member_ids,
+                "costo_unitario": None,
+                "moneda": "",
+                "fecha": "",
+                "proveedor": "",
+                "costo_source_insumo": "",
+                "candidates": candidate_payload,
+            },
+        }
+
+    return {
+        "status": "ok",
+        "sources": ["maestros.CostoInsumo", "maestros.Insumo"],
+        "filters": {"q": query, "insumo_id": insumo_id, "limit": limit},
+        "payload": {
+            **_serialize_input_cost_candidate(insumo),
+            "member_ids": member_ids,
+            "costo_unitario": float(latest_cost.costo_unitario),
+            "moneda": latest_cost.moneda,
+            "fecha": latest_cost.fecha.isoformat(),
+            "proveedor": latest_cost.proveedor.nombre if latest_cost.proveedor_id else "",
+            "costo_source_insumo_id": latest_cost.insumo_id,
+            "costo_source_insumo": latest_cost.insumo.nombre,
+            "source_hash": latest_cost.source_hash,
+            "candidates": candidate_payload,
+        },
+    }
+
+
+PROMOTION_STOPWORDS = {
+    "con",
+    "crema",
+    "de",
+    "del",
+    "dia",
+    "día",
+    "el",
+    "en",
+    "la",
+    "las",
+    "los",
+    "pastel",
+    "producto",
+    "productos",
+    "promocion",
+    "promoción",
+}
+
+
+def _money(value: Decimal) -> Decimal:
+    return Decimal(str(value or 0)).quantize(Decimal("0.01"))
+
+
+def _float_money(value: Decimal) -> float:
+    return float(_money(value))
+
+
+def _parse_promotion_queries(arguments: dict[str, Any]) -> list[str]:
+    raw = arguments.get("product_queries")
+    if isinstance(raw, list):
+        queries = [str(item).strip() for item in raw if str(item or "").strip()]
+    else:
+        text = str(raw or arguments.get("q") or arguments.get("products") or "").strip()
+        queries = [chunk.strip() for chunk in text.split(",") if chunk.strip()]
+    return queries[:12]
+
+
+PROMOTION_TOKEN_ALIASES = {
+    "grnde": "grande",
+    "grnade": "grande",
+    "gde": "grande",
+    "mediana": "mediano",
+    "mdno": "mediano",
+    "rebanadas": "rebanada",
+    "vasos": "vaso",
+}
+
+
+def _normalize_promotion_text(value: str) -> str:
+    tokens = []
+    for token in normalizar_nombre(value).split():
+        tokens.append(PROMOTION_TOKEN_ALIASES.get(token, token))
+    return " ".join(tokens)
+
+
+def _promotion_tokens(query: str) -> list[str]:
+    tokens = []
+    for token in _normalize_promotion_text(query).split():
+        if token in PROMOTION_STOPWORDS or len(token) < 3:
+            continue
+        tokens.append(token)
+    return tokens[:8]
+
+
+def _promotion_product_text(product: PointProduct) -> str:
+    return _normalize_promotion_text(" ".join([product.name or "", product.category or "", product.sku or ""]))
+
+
+def _score_promotion_product(product: PointProduct, query: str) -> int:
+    normalized_query = _normalize_promotion_text(query)
+    normalized_name = _normalize_promotion_text(product.normalized_name or product.name)
+    normalized_sku = _normalize_promotion_text(product.sku or "")
+    product_text = _promotion_product_text(product)
+    score = 0
+    if normalized_name == normalized_query:
+        score = 1000
+    elif normalized_sku and normalized_sku == normalized_query:
+        score = 980
+    elif normalized_query and normalized_name.startswith(normalized_query):
+        score = 850
+    elif normalized_query and normalized_query in normalized_name:
+        score = 700
+    tokens = _promotion_tokens(query)
+    if tokens:
+        matched = sum(1 for token in tokens if token in product_text)
+        score = max(score, 420 + matched * 60)
+        if "vaso" in tokens:
+            score += 260 if "vaso" in product_text else -260
+        if "rebanada" in tokens:
+            score += 160 if "rebanada" in product_text else -160
+        for size_token in ("chico", "mini", "mediano", "grande"):
+            if size_token in tokens:
+                score += 180 if size_token in product_text else -120
+    if product.precio and product.precio > 0:
+        score += 25
+    return score
+
+
+def _resolve_promotion_product(query: str) -> PointProduct | None:
+    normalized_query = _normalize_promotion_text(query)
+    q_filter = Q(active=True)
+    search = Q()
+    if normalized_query:
+        search |= Q(normalized_name__icontains=normalized_query)
+    if query:
+        search |= Q(name__icontains=query) | Q(sku__iexact=query) | Q(external_id__iexact=query)
+    for token in _promotion_tokens(query):
+        search |= Q(normalized_name__icontains=token)
+    candidates = list(PointProduct.objects.filter(q_filter & search).distinct())
+    ranked = [(candidate, _score_promotion_product(candidate, query)) for candidate in candidates]
+    ranked = [(candidate, score) for candidate, score in ranked if score > 0]
+    ranked.sort(key=lambda item: (-item[1], item[0].name.lower(), item[0].id))
+    return ranked[0][0] if ranked else None
+
+
+def _is_rebanada_mix_query(query: str) -> bool:
+    normalized_query = _normalize_promotion_text(query)
+    tokens = set(normalized_query.split())
+    return "rebanada" in tokens and bool(tokens & {"revoltura", "surtido", "surtida", "mix", "mezcla"})
+
+
+def _resolve_promotion_product_group(query: str) -> tuple[str, str, list[PointProduct]]:
+    if not _is_rebanada_mix_query(query):
+        return "", "", []
+    products = list(
+        PointProduct.objects.filter(active=True)
+        .filter(Q(category__iexact="Rebanada") | Q(normalized_name__icontains="rebanada") | Q(normalized_name__endswith=" r"))
+        .exclude(Q(normalized_name__startswith="sabor ") | Q(normalized_name__icontains=" topping") | Q(normalized_name__startswith="topping "))
+        .order_by("sku", "name", "id")
+    )
+    return "GRUPO_REBANADAS", "Revoltura de rebanadas de pastel", products
+
+
+def _resolve_product_recipe(product: PointProduct | None, query: str) -> Receta | None:
+    if product is not None:
+        receta = Receta.objects.filter(
+            Q(codigo_point__iexact=product.sku)
+            | Q(codigo_point__iexact=product.external_id)
+            | Q(nombre_normalizado__icontains=product.normalized_name or normalizar_nombre(product.name))
+        ).order_by("id").first()
+        if receta is not None:
+            return receta
+    normalized_query = normalizar_nombre(query)
+    if not normalized_query:
+        return None
+    return Receta.objects.filter(nombre_normalizado__icontains=normalized_query).order_by("id").first()
+
+
+def _promotion_sales_totals(
+    *,
+    product: PointProduct | None,
+    products: list[PointProduct] | None = None,
+    receta: Receta | None,
+    query: str,
+    start: date,
+    end: date,
+):
+    point_product_ids = []
+    product_keys = set()
+    if products:
+        point_product_ids.extend(row.id for row in products)
+        product_keys.update(key for row in products for key in (row.sku, row.external_id) if key)
+    if product is not None:
+        point_product_ids.append(product.id)
+        product_keys.update(key for key in (product.sku, product.external_id) if key)
+    normalized_query = _normalize_promotion_text(query)
+    return get_promotion_sales_totals(
+        start_date=start,
+        end_date=end,
+        point_product_ids=point_product_ids,
+        product_keys=sorted(product_keys),
+        receta_id=receta.id if receta is not None else None,
+        receta_code=receta.codigo_point if receta is not None else None,
+        product_name_query=query if normalized_query else None,
+    )
+
+
+def _latest_recipe_cost(receta: Receta | None) -> Decimal:
+    if receta is None:
+        return ZERO
+    try:
+        cost = Decimal(str(receta.costo_total_estimado_decimal or 0))
+    except Exception:
+        cost = ZERO
+    if cost > 0:
+        return cost
+    version = (
+        RecetaCostoVersion.objects.filter(receta=receta, costo_total__gt=0)
+        .order_by("-version_num", "-creado_en", "-id")
+        .values_list("costo_total", flat=True)
+        .first()
+    )
+    return Decimal(str(version or 0))
+
+
+def _ceil_decimal(value: Decimal) -> int | None:
+    if value <= 0:
+        return None
+    return int(value.to_integral_value(rounding=ROUND_CEILING))
+
+
+def _handle_promotion_profitability(_user, arguments: dict[str, Any]) -> dict[str, Any]:
+    promotion_type = str(arguments.get("promotion_type") or "3x2").strip().lower()
+    if promotion_type not in {"3x2", "3 x 2", "3por2", "3_por_2"}:
+        raise PermissionDenied("Solo se soporta simulación 3x2 en esta primera herramienta.")
+    product_queries = _parse_promotion_queries(arguments)
+    if not product_queries:
+        raise PermissionDenied("product_queries es obligatorio para analizar una promoción.")
+    event_name = str(arguments.get("event_name") or "Promoción").strip() or "Promoción"
+    lookback_days = _parse_int(arguments.get("lookback_days"), default=30, min_value=1, max_value=365)
+    expected_uplift_pct = _parse_decimal(arguments.get("expected_uplift_pct"), default=Decimal("50"))
+    marketing_budget = _parse_decimal(arguments.get("marketing_budget"), default=ZERO)
+    today = timezone.localdate()
+    end_date = _parse_iso_date(arguments.get("end_date")) or today
+    start_date = _parse_iso_date(arguments.get("start_date")) or (end_date - timedelta(days=lookback_days - 1))
+
+    items = []
+    data_gaps = []
+    for query in product_queries:
+        group_sku, group_name, group_products = _resolve_promotion_product_group(query)
+        product = None if group_products else _resolve_promotion_product(query)
+        receta = None if group_products else _resolve_product_recipe(product, query)
+        totals = _promotion_sales_totals(
+            product=product,
+            products=group_products,
+            receta=receta,
+            query=query,
+            start=start_date,
+            end=end_date,
+        )
+        baseline_units = Decimal(str(totals.get("quantity") or 0))
+        observed_sales = Decimal(str(totals.get("sales") or 0))
+        observed_cost = Decimal(str(totals.get("cost") or 0))
+        price = Decimal(str(product.precio or 0)) if product and product.precio else ZERO
+        if price <= 0 and baseline_units > 0:
+            price = observed_sales / baseline_units
+        observed_unit_cost = observed_cost / baseline_units if baseline_units > 0 and observed_cost > 0 else ZERO
+        recipe_unit_cost = _latest_recipe_cost(receta)
+        if not group_products and recipe_unit_cost > 0:
+            unit_cost = recipe_unit_cost
+            cost_source = "receta_costo_vigente"
+        elif observed_unit_cost > 0:
+            unit_cost = observed_unit_cost
+            cost_source = "venta_historica_observada"
+        else:
+            unit_cost = recipe_unit_cost
+            cost_source = "receta_costo_vigente" if recipe_unit_cost > 0 else ""
+        expected_units = (baseline_units * (Decimal("1") + (expected_uplift_pct / Decimal("100")))).quantize(Decimal("0.001"))
+        promo_effective_price = price * Decimal("2") / Decimal("3")
+        normal_margin = price - unit_cost
+        promo_margin = promo_effective_price - unit_cost
+        baseline_profit = baseline_units * normal_margin
+        promo_profit = expected_units * promo_margin
+        profit_delta = promo_profit - baseline_profit
+        break_even_units = _ceil_decimal(baseline_profit / promo_margin) if promo_margin > 0 else None
+        break_even_uplift = (
+            ((Decimal(break_even_units) / baseline_units) - Decimal("1")) * Decimal("100")
+            if break_even_units is not None and baseline_units > 0
+            else None
+        )
+        if group_products and baseline_units <= 0:
+            data_gaps.append(f"No encontré venta reciente para la mezcla '{query}'.")
+        if not group_products and product is None:
+            data_gaps.append(f"No encontré producto Point para '{query}'.")
+        if price <= 0:
+            data_gaps.append(f"Falta precio vigente para '{query}'.")
+        if unit_cost <= 0:
+            data_gaps.append(f"Falta costo unitario para '{query}'.")
+        if baseline_units <= 0:
+            data_gaps.append(f"Falta histórico reciente de venta para '{query}'.")
+
+        if price <= 0 or unit_cost <= 0 or baseline_units <= 0:
+            recommendation = "DATOS_INSUFICIENTES"
+        elif promo_margin <= 0 or profit_delta < 0:
+            recommendation = "NO_CONVIENE"
+        elif break_even_uplift is not None and break_even_uplift > expected_uplift_pct + Decimal("20"):
+            recommendation = "RIESGO_ALTO"
+        else:
+            recommendation = "CONVIENE"
+
+        items.append(
+            {
+                "query": query,
+                "item_type": "product_group" if group_products else "product",
+                "product_id": product.id if product else None,
+                "product_sku": group_sku or (product.sku if product else ""),
+                "product_name": group_name or (product.name if product else ""),
+                "product_count": len(group_products) if group_products else 1 if product else 0,
+                "sample_products": [
+                    {"sku": row.sku, "name": row.name}
+                    for row in group_products[:10]
+                ],
+                "receta_id": receta.id if receta else None,
+                "receta": receta.nombre if receta else "",
+                "normal_unit_price": _float_money(price),
+                "unit_cost": _float_money(unit_cost),
+                "cost_source": cost_source,
+                "recipe_unit_cost": _float_money(recipe_unit_cost),
+                "observed_unit_cost": _float_money(observed_unit_cost),
+                "promo_effective_unit_price": _float_money(promo_effective_price),
+                "discount_pct": 33.33,
+                "normal_margin_per_unit": _float_money(normal_margin),
+                "promo_margin_per_unit": _float_money(promo_margin),
+                "normal_margin_pct": float(((normal_margin / price) * 100).quantize(Decimal("0.01"))) if price > 0 else None,
+                "promo_margin_pct": (
+                    float(((promo_margin / promo_effective_price) * 100).quantize(Decimal("0.01")))
+                    if promo_effective_price > 0
+                    else None
+                ),
+                "baseline_units": float(baseline_units),
+                "expected_units": float(expected_units),
+                "baseline_profit": _float_money(baseline_profit),
+                "promo_profit": _float_money(promo_profit),
+                "profit_delta": _float_money(profit_delta),
+                "break_even_units": break_even_units,
+                "break_even_uplift_pct": float(break_even_uplift.quantize(Decimal("0.01"))) if break_even_uplift is not None else None,
+                "recommendation": recommendation,
+                "finance_note": "El 3x2 reduce el precio efectivo a 66.67% del precio normal.",
+            }
+        )
+
+    total_baseline_profit = sum(Decimal(str(row["baseline_profit"])) for row in items)
+    total_promo_profit = sum(Decimal(str(row["promo_profit"])) for row in items)
+    total_profit_delta = total_promo_profit - total_baseline_profit - marketing_budget
+    ranked = sorted(
+        items,
+        key=lambda row: (row["recommendation"] != "CONVIENE", -Decimal(str(row["profit_delta"]))),
+    )
+    return {
+        "status": "ok",
+        "sources": ["pos_bridge.PointProduct", "ventas.services.sales_read_service", "recetas.Receta"],
+        "filters": {
+            "promotion_type": "3x2",
+            "event_name": event_name,
+            "product_queries": product_queries,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "expected_uplift_pct": float(expected_uplift_pct),
+            "marketing_budget": _float_money(marketing_budget),
+        },
+        "payload": {
+            "promotion_type": "3x2",
+            "event_name": event_name,
+            "expected_uplift_pct": float(expected_uplift_pct),
+            "marketing_budget": _float_money(marketing_budget),
+            "items": items,
+            "returned": len(items),
+            "finance": {
+                "baseline_profit": _float_money(total_baseline_profit),
+                "promo_profit_before_marketing": _float_money(total_promo_profit),
+                "promo_profit_after_marketing": _float_money(total_promo_profit - marketing_budget),
+                "profit_delta_after_marketing": _float_money(total_profit_delta),
+            },
+            "marketing": {
+                "message": "Usar el 3x2 solo como gancho de volumen; medir uplift real contra el punto de equilibrio por producto.",
+                "suggested_controls": ["fechas limitadas", "stock objetivo por sucursal", "pieza extra visible en ticket", "no combinar con otros descuentos"],
+            },
+            "operations": {
+                "requires_supply_plan": True,
+                "notes": ["Validar fresa, crema, empaques, capacidad de producción y merma esperada antes de publicar."],
+            },
+            "accounting": {
+                "discount_treatment": "Registrar el 3x2 como descuento/promoción contra venta bruta; no mezclarlo con costo de producción.",
+                "audit_note": "La utilidad se calcula como venta neta promocional menos costo estimado; no incluye nómina fija ni gasto operativo general.",
+            },
+            "decision_summary": {
+                "overall_recommendation": "CONVIENE" if total_profit_delta > 0 and not data_gaps else "REVISAR",
+                "ranked_products": [
+                    {
+                        "product_sku": row["product_sku"],
+                        "product_name": row["product_name"],
+                        "recommendation": row["recommendation"],
+                        "profit_delta": row["profit_delta"],
+                        "break_even_units": row["break_even_units"],
+                    }
+                    for row in ranked
+                ],
+                "data_gaps": data_gaps,
+            },
+        },
+    }
+
+
 def _handle_recipe_cost_history(_user, arguments: dict[str, Any]) -> dict[str, Any]:
     receta_id = arguments.get("receta_id")
     if receta_id in {None, ""}:
@@ -865,6 +1422,14 @@ def _can_view_inventory(user) -> bool:
     return can_view_inventario(user)
 
 
+def _can_view_input_costs(user) -> bool:
+    return can_view_recetas(user) or can_view_compras(user) or can_view_reportes(user)
+
+
+def _can_analyze_promotions(user) -> bool:
+    return can_view_reportes(user) or has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_VENTAS)
+
+
 def _can_view_purchases(user) -> bool:
     return can_view_compras(user)
 
@@ -993,6 +1558,76 @@ TOOLS: dict[str, AIToolDefinition] = {
             },
         },
         result_contract={"status": "ok", "payload": {"items": "stock bajo", "returned": "conteo"}},
+    ),
+    "erp.get_current_input_cost": AIToolDefinition(
+        key="erp.get_current_input_cost",
+        name="Costo actual de insumo",
+        description=(
+            "Consulta el costo unitario vigente de compra de un insumo o materia prima, "
+            "por ejemplo kg de fresa fresca. No consulta recetas."
+        ),
+        operation_type="read",
+        data_domain="costing",
+        branch_scoped=False,
+        requires_approval=False,
+        access_check=_can_view_input_costs,
+        handler=_handle_current_input_cost,
+        argument_schema={
+            "type": "object",
+            "anyOf": [{"required": ["q"]}, {"required": ["insumo_id"]}],
+            "properties": {
+                "q": {"type": "string", "description": "nombre, alias o codigo del insumo; ejemplo: fresa fresca"},
+                "insumo_id": {"type": "integer"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 25, "default": 8},
+            },
+        },
+        result_contract={
+            "status": "ok|not_found|no_cost",
+            "payload": {"insumo": "nombre canonico", "costo_unitario": "number|null", "unidad_base": "unidad"},
+        },
+    ),
+    "erp.analyze_promotion_profitability": AIToolDefinition(
+        key="erp.analyze_promotion_profitability",
+        name="Análisis financiero de promoción",
+        description=(
+            "Simula una promoción 3x2 por producto con precio Point, costo observado, margen, utilidad, "
+            "punto de equilibrio, notas de marketing, operación y contabilidad. Respeta presentaciones "
+            "como vaso mediano/grande y soporta revoltura/surtido de rebanadas como grupo ponderado."
+        ),
+        operation_type="analyze",
+        data_domain="finance",
+        branch_scoped=False,
+        requires_approval=False,
+        access_check=_can_analyze_promotions,
+        handler=_handle_promotion_profitability,
+        argument_schema={
+            "type": "object",
+            "required": ["product_queries"],
+            "properties": {
+                "promotion_type": {"type": "string", "enum": ["3x2"], "default": "3x2"},
+                "event_name": {"type": "string"},
+                "product_queries": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Lista de productos o términos Point/ERP a comparar; ejemplo: vaso fresas con crema mediano, vaso fresas con crema grande, revoltura de rebanadas de pastel.",
+                },
+                "expected_uplift_pct": {"type": "number", "default": 50},
+                "marketing_budget": {"type": "number", "default": 0},
+                "start_date": {"type": "string", "format": "date"},
+                "end_date": {"type": "string", "format": "date"},
+                "lookback_days": {"type": "integer", "minimum": 1, "maximum": 365, "default": 30},
+            },
+        },
+        result_contract={
+            "status": "ok",
+            "payload": {
+                "items": "tabla comparativa por producto",
+                "finance": "totales financieros",
+                "marketing": "lectura comercial",
+                "operations": "riesgos operativos",
+                "accounting": "tratamiento contable",
+            },
+        },
     ),
     "erp.get_discrepancies": AIToolDefinition(
         key="erp.get_discrepancies",
@@ -1208,6 +1843,7 @@ OPENAPI_TOOL_PROFILES: dict[str, dict[str, Any]] = {
     "compras": {
         "tool_keys": [
             "erp.get_inventory_low_stock",
+            "erp.get_current_input_cost",
             "erp.get_purchase_requests",
             "erp.get_purchase_orders",
             "erp.get_recipe_cost_history",
@@ -1220,6 +1856,8 @@ OPENAPI_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "erp.get_sales_summary",
             "erp.get_sales_trends",
             "erp.get_inventory_low_stock",
+            "erp.get_current_input_cost",
+            "erp.analyze_promotion_profitability",
             "erp.get_recipe_cost_history",
             "erp.create_production_plan_draft",
         ],

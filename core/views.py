@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import date
 from datetime import timedelta
 from decimal import Decimal
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 from django.conf import settings
 from django.db import OperationalError, ProgrammingError
@@ -195,6 +195,32 @@ def csrf_failure(request: HttpRequest, reason: str = "", template_name: str | No
 
 def _redirect_capture_module():
     return redirect(reverse("recetas:reabasto_cedis_captura"))
+
+
+def _is_mermas_next_url(next_url: str) -> bool:
+    path = urlsplit(next_url or "").path
+    return path == "/mermas" or path.startswith("/mermas/")
+
+
+def _can_follow_mermas_next(user) -> bool:
+    allowed_access = {UserModuleAccess.ACCESS_VIEW, UserModuleAccess.ACCESS_MANAGE}
+    if any(
+        get_module_access(user, module) in allowed_access
+        for module in ("mermas", "mermas.dashboard", "mermas.captura", "mermas.recepcion")
+    ):
+        return True
+    try:
+        from mermas.models import PersonalEnviosSucursal
+
+        return PersonalEnviosSucursal.objects.filter(user=user, activo=True).exists()
+    except Exception:
+        return False
+
+
+def _login_redirect_for_user(user, redirect_url: str) -> str:
+    if _is_mermas_next_url(redirect_url) and not _can_follow_mermas_next(user):
+        return "dashboard"
+    return redirect_url
 
 
 def _is_checked(payload, key: str) -> bool:
@@ -2670,7 +2696,7 @@ def login_view(request: HttpRequest) -> HttpResponse:
     if request.user.is_authenticated:
         if is_branch_capture_only(request.user):
             return _redirect_capture_module()
-        return redirect(redirect_url)
+        return redirect(_login_redirect_for_user(request.user, redirect_url))
 
     if request.method == "POST":
         username = request.POST.get("username", "")
@@ -2686,7 +2712,7 @@ def login_view(request: HttpRequest) -> HttpResponse:
                 logger.info(f"Login successful for user={username}")
                 if is_branch_capture_only(user):
                     return _redirect_capture_module()
-                return redirect(redirect_url)
+                return redirect(_login_redirect_for_user(user, redirect_url))
             else:
                 logger.warning(f"Authentication failed for username={username}")
         else:

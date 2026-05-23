@@ -2393,31 +2393,34 @@ def build_branch_contribution_panel(*, year: int | None = None) -> dict[str, obj
 
     latest_period = contrib_qs.order_by("-periodo").values_list("periodo", flat=True).first()
 
+    def empty_branch_payload(*, branch_id: int, branch_label: str, branch_code: str) -> dict[str, object]:
+        return {
+            "branch_id": branch_id,
+            "branch_label": branch_label,
+            "branch_code": branch_code,
+            "sales_total": ZERO,
+            "cost_total": ZERO,
+            "commercial_total": ZERO,
+            "contribution_total": ZERO,
+            "units_total": ZERO,
+            "latest_month_sales_total": ZERO,
+            "latest_month_contribution_total": ZERO,
+            "fabricated_sales_total": ZERO,
+            "resale_sales_total": ZERO,
+            "non_recipe_total": ZERO,
+            "non_recipe_resale_total": ZERO,
+            "non_recipe_accessory_total": ZERO,
+            "non_recipe_service_total": ZERO,
+            "top_support": [],
+            "top_drag": [],
+        }
+
     branch_rows: dict[int, dict[str, object]] = {}
     for row in contrib_qs.iterator():
         branch_id = int(row.sucursal_id)
         payload = branch_rows.setdefault(
             branch_id,
-            {
-                "branch_id": branch_id,
-                "branch_label": row.sucursal.nombre,
-                "branch_code": row.sucursal.codigo,
-                "sales_total": ZERO,
-                "cost_total": ZERO,
-                "commercial_total": ZERO,
-                "contribution_total": ZERO,
-                "units_total": ZERO,
-                "latest_month_sales_total": ZERO,
-                "latest_month_contribution_total": ZERO,
-                "fabricated_sales_total": ZERO,
-                "resale_sales_total": ZERO,
-                "non_recipe_total": ZERO,
-                "non_recipe_resale_total": ZERO,
-                "non_recipe_accessory_total": ZERO,
-                "non_recipe_service_total": ZERO,
-                "top_support": [],
-                "top_drag": [],
-            },
+            empty_branch_payload(branch_id=branch_id, branch_label=row.sucursal.nombre, branch_code=row.sucursal.codigo),
         )
         sale_amount = _to_decimal(row.venta_total)
         contribution_amount = _to_decimal(row.contribucion_total)
@@ -2435,60 +2438,51 @@ def build_branch_contribution_panel(*, year: int | None = None) -> dict[str, obj
             payload["fabricated_sales_total"] += sale_amount
 
     sales_matcher = PointSalesMatchingService()
-    non_recipe_qs = PointDailySale.objects.select_related("branch__erp_branch", "product").filter(
-        sale_date__year=target_year,
-        sale_date__month__lte=ytd_cutoff_month,
-        receta__isnull=True,
-        branch__erp_branch_id__isnull=False,
-        branch__erp_branch__activa=True,
+    non_recipe_rows = (
+        PointDailySale.objects.filter(
+            sale_date__year=target_year,
+            sale_date__month__lte=ytd_cutoff_month,
+            receta__isnull=True,
+            branch__erp_branch_id__isnull=False,
+            branch__erp_branch__activa=True,
+        )
+        .values(
+            "branch__erp_branch_id",
+            "branch__erp_branch__nombre",
+            "branch__erp_branch__codigo",
+            "product_id",
+            "product__metadata",
+            "product__category",
+            "product__name",
+            "product__sku",
+        )
+        .annotate(total_amount=Sum("total_amount"))
     )
-    for row in non_recipe_qs.iterator():
-        branch = getattr(row.branch, "erp_branch", None)
-        if branch is None:
-            continue
+    for row in non_recipe_rows.iterator():
+        branch_id = int(row["branch__erp_branch_id"])
+        metadata = row.get("product__metadata") if isinstance(row.get("product__metadata"), dict) else {}
+        sales_payload = {
+            "family": metadata.get("family", ""),
+            "category": row.get("product__category") or "",
+            "name": row.get("product__name") or "",
+            "sku": row.get("product__sku") or "",
+        }
         mode = sales_matcher.infer_cost_mode(
-            {
-                "family": (row.product.metadata or {}).get("family", ""),
-                "category": row.product.category,
-                "name": row.product.name,
-                "sku": row.product.sku,
-            }
+            sales_payload
         )
         if mode == "FABRICADO":
             continue
         payload = branch_rows.setdefault(
-            int(branch.id),
-            {
-                "branch_id": int(branch.id),
-                "branch_label": branch.nombre,
-                "branch_code": branch.codigo,
-                "sales_total": ZERO,
-                "cost_total": ZERO,
-                "commercial_total": ZERO,
-                "contribution_total": ZERO,
-                "units_total": ZERO,
-                "latest_month_sales_total": ZERO,
-                "latest_month_contribution_total": ZERO,
-                "fabricated_sales_total": ZERO,
-                "resale_sales_total": ZERO,
-                "non_recipe_total": ZERO,
-                "non_recipe_resale_total": ZERO,
-                "non_recipe_accessory_total": ZERO,
-                "non_recipe_service_total": ZERO,
-                "top_support": [],
-                "top_drag": [],
-            },
+            branch_id,
+            empty_branch_payload(
+                branch_id=branch_id,
+                branch_label=row["branch__erp_branch__nombre"],
+                branch_code=row["branch__erp_branch__codigo"],
+            ),
         )
-        amount = _to_decimal(row.total_amount)
+        amount = _to_decimal(row["total_amount"])
         payload["non_recipe_total"] += amount
-        bucket = sales_matcher.infer_non_recipe_bucket(
-            {
-                "family": (row.product.metadata or {}).get("family", ""),
-                "category": row.product.category,
-                "name": row.product.name,
-                "sku": row.product.sku,
-            }
-        )
+        bucket = sales_matcher.infer_non_recipe_bucket(sales_payload)
         if bucket == "REVENTA":
             payload["non_recipe_resale_total"] += amount
         elif bucket == "SERVICIO":
