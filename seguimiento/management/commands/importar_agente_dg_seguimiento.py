@@ -73,6 +73,12 @@ PROJECT_STEPS_QUERY = """
     SELECT
         s.id,
         s.project_id,
+        s.owner_user_id,
+        owner.email AS owner_user_email,
+        owner.name AS owner_user_name,
+        s.approver_user_id,
+        approver.email AS approver_user_email,
+        approver.name AS approver_user_name,
         s.title,
         s.description,
         s.deliverable_text,
@@ -80,7 +86,23 @@ PROJECT_STEPS_QUERY = """
         s.order_index,
         s.completed_at
     FROM minute_project_steps s
+    LEFT JOIN users owner ON owner.id = s.owner_user_id
+    LEFT JOIN users approver ON approver.id = s.approver_user_id
     ORDER BY s.project_id, s.order_index, s.id
+"""
+
+PROJECT_PARTICIPANTS_QUERY = """
+    SELECT
+        s.project_id,
+        spp.step_id,
+        spp.user_id,
+        u.email AS user_email,
+        u.name AS user_name,
+        spp.role
+    FROM minute_project_step_participants spp
+    JOIN minute_project_steps s ON s.id = spp.step_id
+    LEFT JOIN users u ON u.id = spp.user_id
+    ORDER BY s.project_id, spp.step_id, spp.id
 """
 
 
@@ -154,10 +176,17 @@ class Command(BaseCommand):
                 minutes = self._fetch_optional(cursor, "minute_agreements", MINUTE_QUERY, options["limit"])
                 projects = self._fetch_optional(cursor, "minute_projects", PROJECT_QUERY, options["limit"])
                 steps = self._fetch_optional(cursor, "minute_project_steps", PROJECT_STEPS_QUERY, 0)
+                participants = self._fetch_optional(
+                    cursor,
+                    "minute_project_step_participants",
+                    PROJECT_PARTICIPANTS_QUERY,
+                    0,
+                )
 
         project_steps = {}
         for step in steps:
             project_steps.setdefault(step["project_id"], []).append(step)
+        project_participants = self._build_project_participants(steps, participants)
 
         counters = {"created": 0, "updated": 0, "skipped": 0}
         with transaction.atomic():
@@ -179,6 +208,7 @@ class Command(BaseCommand):
                         }
                         for step in project_steps.get(row["id"], [])
                     ],
+                    participants=project_participants.get(row["id"], []),
                 )
             if options["dry_run"]:
                 transaction.set_rollback(True)
@@ -214,13 +244,55 @@ class Command(BaseCommand):
                 return user
         return None
 
-    def _upsert_item(self, row, source_table: str, tipo: str, counters: dict[str, int], checklist=None):
+    def _build_project_participants(self, steps, participants):
+        by_project = {}
+
+        def add(project_id, user_id, email, name, role):
+            if not project_id or not user_id:
+                return
+            by_project.setdefault(project_id, {})
+            by_project[project_id][user_id] = {
+                "user_id": user_id,
+                "user_email": email or "",
+                "user_name": name or "",
+                "role": role or "",
+            }
+
+        for step in steps:
+            add(
+                step.get("project_id"),
+                step.get("owner_user_id"),
+                step.get("owner_user_email"),
+                step.get("owner_user_name"),
+                "STEP_OWNER",
+            )
+            add(
+                step.get("project_id"),
+                step.get("approver_user_id"),
+                step.get("approver_user_email"),
+                step.get("approver_user_name"),
+                "STEP_APPROVER",
+            )
+        for participant in participants:
+            add(
+                participant.get("project_id"),
+                participant.get("user_id"),
+                participant.get("user_email"),
+                participant.get("user_name"),
+                participant.get("role"),
+            )
+        return {project_id: list(values.values()) for project_id, values in by_project.items()}
+
+    def _upsert_item(self, row, source_table: str, tipo: str, counters: dict[str, int], checklist=None, participants=None):
         if not row.get("id") or not row.get("titulo"):
             counters["skipped"] += 1
             return
 
         user = self._resolve_user(row)
         empleado = empleado_de_usuario(user) if user else None
+        participant_users, participant_empleados, participant_payload = self._resolve_participants(participants or [])
+        participant_users = [participant for participant in participant_users if not user or participant.pk != user.pk]
+        participant_empleados = [participant for participant in participant_empleados if not empleado or participant.pk != empleado.pk]
         metadata = {
             "source": "agente_dg",
             "source_table": source_table,
@@ -229,6 +301,7 @@ class Command(BaseCommand):
             "source_user_email": row.get("user_email") or "",
             "source_user_name": row.get("user_name") or "",
             "source_status": str(row.get("status") or ""),
+            "source_participants": participant_payload,
         }
         defaults = {
             "tipo": tipo,
@@ -258,10 +331,40 @@ class Command(BaseCommand):
             item = SeguimientoItem.objects.create(**defaults)
             counters["created"] += 1
 
+        item.participantes_user.set(participant_users)
+        item.participantes_empleado.set(participant_empleados)
+
         checklist_payload = checklist
         if checklist_payload is None:
             checklist_payload = [{"titulo": title, "descripcion": "", "completado": False} for title in _checklist_from_json(row.get("checklist_items_json"))]
         self._sync_checklist(item, checklist_payload)
+
+    def _resolve_participants(self, participants):
+        users = []
+        empleados = []
+        payload = []
+        seen_users = set()
+        seen_empleados = set()
+        for participant in participants:
+            user = self._resolve_user(participant)
+            empleado = empleado_de_usuario(user) if user else None
+            if user and user.pk not in seen_users:
+                users.append(user)
+                seen_users.add(user.pk)
+            if empleado and empleado.pk not in seen_empleados:
+                empleados.append(empleado)
+                seen_empleados.add(empleado.pk)
+            payload.append(
+                {
+                    "source_user_id": participant.get("user_id"),
+                    "source_user_email": participant.get("user_email") or "",
+                    "source_user_name": participant.get("user_name") or "",
+                    "role": participant.get("role") or "",
+                    "erp_user_id": user.pk if user else None,
+                    "erp_empleado_id": empleado.pk if empleado else None,
+                }
+            )
+        return users, empleados, payload
 
     def _sync_checklist(self, item: SeguimientoItem, checklist_payload):
         if not checklist_payload:

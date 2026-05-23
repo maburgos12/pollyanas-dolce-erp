@@ -48,6 +48,16 @@ class SeguimientoItem(models.Model):
         null=True,
         blank=True,
     )
+    participantes_user = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        related_name="seguimiento_participaciones",
+        blank=True,
+    )
+    participantes_empleado = models.ManyToManyField(
+        "rrhh.Empleado",
+        related_name="seguimiento_participaciones",
+        blank=True,
+    )
     area = models.CharField(max_length=120, blank=True, default="")
     fecha_limite = models.DateTimeField(null=True, blank=True, db_index=True)
     estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default=ESTATUS_PENDIENTE, db_index=True)
