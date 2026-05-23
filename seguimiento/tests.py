@@ -12,6 +12,7 @@ from rrhh.models import Empleado
 
 from .models import SeguimientoChecklistItem, SeguimientoComentario, SeguimientoEvidencia, SeguimientoItem
 from .services import empleado_de_usuario
+from .management.commands.importar_agente_dg_seguimiento import Command as ImportarAgenteDGCommand
 from .management.commands.importar_agente_dg_seguimiento import _status_agente_a_erp
 
 
@@ -58,6 +59,8 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
         self.assertIn("Mis minutas, proyectos y compromisos", content)
+        self.assertIn("Acuerdos acumulados", content)
+        self.assertIn("Por vencer (24h)", content)
         self.assertIn("Compromisos", content)
         self.assertIn("Minutas", content)
         self.assertIn("Proyectos", content)
@@ -116,6 +119,62 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertEqual(api_prod.status_code, 200)
         self.assertEqual(api_ventas.status_code, 403)
 
+    def test_proyecto_compartido_importado_aparece_a_participante_por_empleado(self):
+        ventas = Group.objects.create(name="VENTAS")
+        johana = get_user_model().objects.create_user(
+            username="johana.lopez",
+            email="ventas.johanna@pollyanasdolce.com",
+            first_name="Johana",
+            last_name="López",
+        )
+        johana.groups.add(ventas)
+        johana_empleado = Empleado.objects.create(
+            nombre="LOPEZ PALOS JOHANA ADELIN",
+            email="ventas.johanna@pollyanasdolce.com",
+            area="ADMINISTRACION",
+            activo=True,
+        )
+        command = ImportarAgenteDGCommand()
+        counters = {"created": 0, "updated": 0, "skipped": 0}
+
+        command._upsert_item(
+            {
+                "id": 6,
+                "titulo": "Producto Mes Junio",
+                "descripcion": "Lanzamiento de producto del mes",
+                "expected_deliverable": "",
+                "status": "AT_RISK",
+                "target_date": timezone.now() + timedelta(days=5),
+                "user_email": johana.email,
+                "user_name": johana.get_full_name(),
+                "user_id": 3,
+                "area_name": "Proyecto",
+            },
+            "minute_projects",
+            SeguimientoItem.TIPO_PROYECTO,
+            counters,
+            checklist=[{"titulo": "Prueba", "descripcion": "", "completado": False}],
+            participants=[
+                {
+                    "user_id": 5,
+                    "user_email": self.user.email,
+                    "user_name": self.user.get_full_name(),
+                    "role": "STEP_OWNER",
+                }
+            ],
+        )
+
+        item = SeguimientoItem.objects.get(titulo="Producto Mes Junio")
+        self.assertEqual(item.responsable_user, johana)
+        self.assertEqual(item.responsable_empleado, johana_empleado)
+        self.assertIn(self.user, item.participantes_user.all())
+        self.assertIn(self.empleado, item.participantes_empleado.all())
+
+        response = self.client.get("/seguimiento/")
+        content = response.content.decode()
+        self.assertContains(response, "Producto Mes Junio")
+        self.assertIn("Compartido", content)
+
     def test_superusuario_conserva_bonos_en_menu(self):
         admin = get_user_model().objects.create_superuser(username="admin-seguimiento", password="x")
 
@@ -133,11 +192,16 @@ class SeguimientoColaboradorTests(TestCase):
             last_name="López",
         )
         user.groups.add(ventas)
-        administracion = Empleado.objects.create(nombre="LOPEZ PALOS JOHANA ADELIN", area="ADMINISTRACION", activo=True)
+        administracion = Empleado.objects.create(
+            nombre="LOPEZ PALOS JOHANA ADELIN",
+            email="ventas.johanna@pollyanasdolce.com",
+            area="ADMINISTRACION",
+            activo=True,
+        )
         empleado_ventas = Empleado.objects.create(nombre="LOPEZ CASTRO ALEJANDRA JOHANA", area="VENTAS", activo=True)
 
-        self.assertEqual(empleado_de_usuario(user), empleado_ventas)
-        self.assertNotEqual(empleado_de_usuario(user), administracion)
+        self.assertEqual(empleado_de_usuario(user), administracion)
+        self.assertNotEqual(empleado_de_usuario(user), empleado_ventas)
 
     def test_status_de_agente_dg_se_mapea_a_estatus_erp(self):
         self.assertEqual(_status_agente_a_erp("SUBMITTED"), SeguimientoItem.ESTATUS_EN_REVISION)

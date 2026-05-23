@@ -84,31 +84,48 @@
   .follow-kpis {
     display: grid;
     grid-template-columns: repeat(5, minmax(120px, 1fr));
-    overflow: hidden;
+    gap: .75rem;
+    padding: .75rem;
+    background: linear-gradient(90deg, #fff 0%, #fff7fb 100%);
   }
 
   .follow-kpi {
-    padding: .78rem 1rem;
-    border-right: 1px solid #eee2e6;
+    min-height: 7.1rem;
+    padding: 1rem .9rem;
+    border: 1px solid #f0b7ca;
+    border-radius: 8px;
+    background: linear-gradient(180deg, #fff 0%, #fff9fc 100%);
+    box-shadow: 0 12px 26px rgba(119, 23, 68, .08);
     min-width: 0;
+    display: grid;
+    place-items: center;
+    align-content: center;
+    text-align: center;
   }
 
-  .follow-kpi:last-child { border-right: 0; }
+  .follow-kpi.is-primary {
+    border-color: #e8a5bf;
+    box-shadow: inset 0 0 0 1px #f8d5e2, 0 14px 28px rgba(119, 23, 68, .12);
+  }
 
   .follow-kpi strong {
     display: block;
-    font-size: 1.45rem;
+    font-size: clamp(2rem, 3vw, 3rem);
     line-height: 1;
-    color: #2f2830;
+    color: #8b174e;
+    font-family: Georgia, "Times New Roman", serif;
+    font-weight: 900;
   }
+
+  .follow-kpi.is-danger strong { color: #dc3535; }
 
   .follow-kpi span {
     display: block;
-    margin-top: .25rem;
+    margin-top: .65rem;
     color: #70666b;
-    font-size: .76rem;
-    font-weight: 900;
-    text-transform: uppercase;
+    font-size: .94rem;
+    font-weight: 850;
+    text-transform: none;
   }
 
   .follow-security {
@@ -134,6 +151,8 @@
   .follow-section {
     overflow: hidden;
     min-width: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .follow-section-header {
@@ -243,6 +262,25 @@
     color: #2f2830;
   }
 
+  .follow-card-topline {
+    display: flex;
+    justify-content: space-between;
+    gap: .55rem;
+    align-items: flex-start;
+  }
+
+  .follow-card-type {
+    color: #771744;
+    background: #fff0f6;
+    border: 1px solid #f0c8d8;
+    border-radius: 999px;
+    padding: .18rem .5rem;
+    font-size: .66rem;
+    line-height: 1;
+    font-weight: 950;
+    white-space: nowrap;
+  }
+
   .follow-card-main p {
     margin: .35rem 0 0;
     color: #655b60;
@@ -277,6 +315,7 @@
   .follow-chip.warn { background: #fff1cc; color: #8a6000; }
   .follow-chip.danger { background: #ffe0e0; color: #a32828; }
   .follow-chip.neutral { background: #f2edf0; color: #5f555b; }
+  .follow-chip.shared { background: #eaf5f6; color: #2f6c77; }
 
   .follow-card-meta {
     display: grid;
@@ -447,8 +486,7 @@
     }
 
     .follow-kpi {
-      border-right: 0;
-      border-bottom: 1px solid #eee2e6;
+      min-height: 6.2rem;
     }
 
     .follow-card-list {
@@ -484,11 +522,11 @@
   </header>
 
   <div class="follow-kpis" aria-label="Resumen">
-    <div class="follow-kpi"><strong>{{ metrics.total }}</strong><span>Total</span></div>
+    <div class="follow-kpi is-primary"><strong>{{ metrics.total }}</strong><span>Acuerdos acumulados</span></div>
     <div class="follow-kpi"><strong>{{ metrics.abiertos }}</strong><span>Abiertos</span></div>
-    <div class="follow-kpi"><strong>{{ metrics.en_revision }}</strong><span>En revisión</span></div>
-    <div class="follow-kpi"><strong>{{ metrics.vencidos }}</strong><span>Vencidos</span></div>
-    <div class="follow-kpi"><strong>{{ metrics.completados }}</strong><span>Completados</span></div>
+    <div class="follow-kpi"><strong>{{ metrics.por_vencer_24h }}</strong><span>Por vencer (24h)</span></div>
+    <div class="follow-kpi is-danger"><strong>{{ metrics.vencidos }}</strong><span>Vencidos</span></div>
+    <div class="follow-kpi"><strong>{{ metrics.cumplidos_a_tiempo }}</strong><span>Cumplidos a tiempo</span></div>
   </div>
 
   <div class="follow-security">
@@ -519,7 +557,10 @@
         {% for item in section.items %}
         <article class="follow-card {% if item.esta_vencido %}is-overdue{% endif %}">
           <div class="follow-card-main">
-            <h3>{{ item.titulo }}</h3>
+            <div class="follow-card-topline">
+              <h3>{{ item.titulo }}</h3>
+              <span class="follow-card-type">{{ item.get_tipo_display }}</span>
+            </div>
             {% if item.descripcion %}<p>{{ item.descripcion|truncatechars:190 }}</p>{% endif %}
             {% if item.entregable_esperado %}<p class="follow-deliverable">Entregable: {{ item.entregable_esperado|truncatechars:160 }}</p>{% endif %}
           </div>
@@ -527,6 +568,7 @@
           <div class="follow-chip-row">
             <span class="follow-chip">{{ item.get_estatus_display }}</span>
             <span class="follow-chip {{ item.prioridad_tone }}">Prioridad {{ item.prioridad_label }}</span>
+            {% if item.es_compartido %}<span class="follow-chip shared">Compartido</span>{% endif %}
             {% if item.area %}<span class="follow-chip neutral">{{ item.area }}</span>{% endif %}
           </div>
 

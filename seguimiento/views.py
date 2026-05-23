@@ -17,22 +17,22 @@ from .services import empleado_de_usuario
 
 def _items_del_usuario(user):
     empleado = empleado_de_usuario(user)
-    filters = Q(responsable_user=user)
+    filters = Q(responsable_user=user) | Q(participantes_user=user)
     if empleado:
-        filters |= Q(responsable_empleado=empleado)
+        filters |= Q(responsable_empleado=empleado) | Q(participantes_empleado=empleado)
     return (
         SeguimientoItem.objects.filter(filters)
         .select_related("responsable_user", "responsable_empleado")
-        .prefetch_related("checklist", "comentarios", "evidencias")
+        .prefetch_related("checklist", "comentarios", "evidencias", "participantes_user", "participantes_empleado")
         .distinct()
     )
 
 
 def _get_item_para_usuario(user, pk):
     empleado = empleado_de_usuario(user)
-    filters = Q(pk=pk, responsable_user=user)
+    filters = Q(pk=pk, responsable_user=user) | Q(pk=pk, participantes_user=user)
     if empleado:
-        filters |= Q(pk=pk, responsable_empleado=empleado)
+        filters |= Q(pk=pk, responsable_empleado=empleado) | Q(pk=pk, participantes_empleado=empleado)
     return get_object_or_404(SeguimientoItem.objects.filter(filters).distinct(), pk=pk)
 
 
@@ -54,6 +54,7 @@ def mi_seguimiento(request):
         item.progreso_pct = round((item.checklist_done / item.checklist_total) * 100) if item.checklist_total else 0
         item.ultima_actividad = max(actividad) if actividad else item.updated_at
         item.origen_display = item.origen or "ERP"
+        item.es_compartido = item.participantes_user.exists() or item.participantes_empleado.exists()
         if item.esta_vencido:
             item.prioridad_label = "Vencido"
             item.prioridad_tone = "danger"
@@ -70,9 +71,20 @@ def mi_seguimiento(request):
     metrics = {
         "total": len(items),
         "abiertos": sum(1 for item in items if not item.esta_cerrado),
+        "por_vencer_24h": sum(
+            1
+            for item in items
+            if item.fecha_limite and now <= item.fecha_limite <= now + timedelta(hours=24) and not item.esta_cerrado
+        ),
         "vencidos": sum(1 for item in items if item.esta_vencido),
         "en_revision": sum(1 for item in items if item.estatus == SeguimientoItem.ESTATUS_EN_REVISION),
         "completados": sum(1 for item in items if item.estatus == SeguimientoItem.ESTATUS_COMPLETADO),
+        "cumplidos_a_tiempo": sum(
+            1
+            for item in items
+            if item.estatus == SeguimientoItem.ESTATUS_COMPLETADO
+            and (not item.fecha_limite or (item.aprobado_at or item.ultima_actividad) <= item.fecha_limite)
+        ),
     }
     section_config = [
         {
