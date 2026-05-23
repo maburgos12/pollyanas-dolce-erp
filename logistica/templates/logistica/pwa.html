@@ -1433,7 +1433,7 @@
         state.perfil = null;
         localStorage.removeItem("pd_logistica_access");
         localStorage.removeItem("pd_logistica_refresh");
-        if (render) showScreen("login");
+        if (render) window.location.href = "/logout/";
       }
 
       function pantallaInicial() {

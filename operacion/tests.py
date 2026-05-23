@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.test import TestCase, override_settings
@@ -53,6 +55,17 @@ class OperacionAppTests(TestCase):
         self.assertNotContains(response, "pd_logistica_access")
         self.assertEqual(dashboard.status_code, 302)
         self.assertEqual(dashboard["Location"], "/logistica/app/")
+
+    def test_unified_app_home_exposes_django_logout(self):
+        user = self._user("operacion.logout", sucursal=self.sucursal)
+        self._grant(user, "mermas.captura")
+        self.client.force_login(user)
+
+        response = self.client.get("/app/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'href="/logout/"')
+        self.assertContains(response, "Cerrar sesión")
 
     def test_mermas_only_user_can_enter_unified_app_without_losing_guardrail(self):
         user = self._user("mermas.colosio", sucursal=self.sucursal)
@@ -159,6 +172,11 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "Recepción y validación")
         self.assertNotContains(response, "Registrar merma")
         self.assertNotContains(response, "Logística móvil")
+
+        recepcion = self.client.get("/mermas/app/?modo=recepcion")
+        self.assertEqual(recepcion.status_code, 200)
+        self.assertContains(recepcion, 'href="/logout/"')
+        self.assertContains(recepcion, "Salir")
 
     def test_explicit_cedis_manage_access_gets_reception_and_mermas_guardrail(self):
         user = self._user("cedis.manage")
@@ -286,6 +304,8 @@ class OperacionAppTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'href="/app/"')
+        self.assertContains(response, 'href="/logout/"')
+        self.assertContains(response, "Salir")
         self.assertNotContains(response, 'href="/mermas/"')
 
     def test_mermas_capture_cancel_keeps_panel_for_dashboard_user(self):
@@ -298,7 +318,15 @@ class OperacionAppTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'href="/mermas/"')
+        self.assertContains(response, 'href="/logout/"')
         self.assertContains(response, "Panel")
+
+    def test_mermas_detail_hidden_sidebar_keeps_logout_escape(self):
+        template = Path(__file__).resolve().parents[1] / "mermas/templates/mermas/detalle.html"
+        html = template.read_text(encoding="utf-8")
+
+        self.assertIn("{% url 'logout' %}", html)
+        self.assertIn(">Salir<", html)
 
     def test_dg_group_gets_management_surface(self):
         group = Group.objects.create(name=ROLE_DG)
@@ -387,6 +415,35 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "Reportes")
         self.assertContains(response, "Registrar mantenimiento de equipo")
         self.assertNotContains(response, "Vehículo de flota")
+
+    def test_pwa_logout_buttons_redirect_to_django_logout(self):
+        mantenimiento_group = Group.objects.create(name="MANTENIMIENTO")
+        mantenimiento_user = self._user("tecnico.logout")
+        mantenimiento_user.groups.add(mantenimiento_group)
+        self.client.force_login(mantenimiento_user)
+        mantenimiento = self.client.get("/mantenimiento/app/")
+        self.assertEqual(mantenimiento.status_code, 200)
+        self.assertContains(mantenimiento, 'window.location.href = "/logout/";')
+
+        self.client.logout()
+        logistica_group = Group.objects.create(name=ROLE_LOGISTICA)
+        logistica_user = self._user("logistica.logout")
+        logistica_user.groups.add(logistica_group)
+        self.client.force_login(logistica_user)
+        logistica = self.client.get("/logistica/app/")
+        self.assertEqual(logistica.status_code, 200)
+        self.assertContains(logistica, 'window.location.href = "/logout/";')
+
+        self.client.logout()
+        fallas_user = self._user("fallas.logout", sucursal=self.sucursal)
+        self._grant(fallas_user, "fallas.reportar")
+        self.client.force_login(fallas_user)
+        fallas = self.client.get("/fallas/reportar/")
+        self.assertEqual(fallas.status_code, 200)
+        self.assertContains(fallas, 'href="/logout/"')
+
+        fallas_pwa_template = Path(__file__).resolve().parents[1] / "fallas/templates/fallas/pwa_reporte.html"
+        self.assertIn('window.location.href = "/logout/";', fallas_pwa_template.read_text(encoding="utf-8"))
 
     def test_operational_pwas_prefer_current_django_session_before_cached_token(self):
         mantenimiento_group = Group.objects.create(name="MANTENIMIENTO")
