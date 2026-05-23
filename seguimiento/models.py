@@ -188,3 +188,41 @@ class SeguimientoEvidencia(models.Model):
 
     def __str__(self) -> str:
         return self.nombre_original
+
+
+class SeguimientoProrrogaSolicitud(models.Model):
+    ESTATUS_PENDIENTE = "PENDIENTE"
+    ESTATUS_APROBADA = "APROBADA"
+    ESTATUS_RECHAZADA = "RECHAZADA"
+    ESTATUS_CHOICES = [
+        (ESTATUS_PENDIENTE, "Pendiente"),
+        (ESTATUS_APROBADA, "Aprobada"),
+        (ESTATUS_RECHAZADA, "Rechazada"),
+    ]
+
+    seguimiento = models.ForeignKey(SeguimientoItem, on_delete=models.CASCADE, related_name="prorrogas")
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="seguimiento_prorrogas")
+    fecha_solicitada = models.DateField()
+    motivo = models.TextField()
+    estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default=ESTATUS_PENDIENTE, db_index=True)
+    resuelto_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="seguimiento_prorrogas_resueltas",
+        null=True,
+        blank=True,
+    )
+    resuelto_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        verbose_name = "Solicitud de prórroga"
+        verbose_name_plural = "Solicitudes de prórroga"
+        indexes = [
+            models.Index(fields=["seguimiento", "estatus"], name="seg_prorroga_item_status_idx"),
+            models.Index(fields=["usuario", "estatus"], name="seg_prorroga_user_status_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.seguimiento_id} · {self.fecha_solicitada:%d/%m/%Y}"

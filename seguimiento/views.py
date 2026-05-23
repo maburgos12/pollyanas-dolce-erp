@@ -8,12 +8,19 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.dateparse import parse_date
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from core.audit import log_event
 
-from .models import SeguimientoChecklistItem, SeguimientoComentario, SeguimientoEvidencia, SeguimientoItem
+from .models import (
+    SeguimientoChecklistItem,
+    SeguimientoComentario,
+    SeguimientoEvidencia,
+    SeguimientoItem,
+    SeguimientoProrrogaSolicitud,
+)
 from .services import empleado_de_usuario
 
 
@@ -21,15 +28,23 @@ EVIDENCIA_ALLOWED_EXTENSIONS = {
     ".csv",
     ".doc",
     ".docx",
+    ".gif",
     ".heic",
     ".heif",
     ".jpeg",
     ".jpg",
+    ".ods",
+    ".odt",
     ".pdf",
     ".png",
+    ".rtf",
+    ".tif",
+    ".tiff",
     ".txt",
     ".webp",
     ".xls",
+    ".xlsb",
+    ".xlsm",
     ".xlsx",
 }
 EVIDENCIA_BLOCKED_CONTENT_TYPES = {
@@ -49,7 +64,14 @@ def _items_del_usuario(user):
     return (
         SeguimientoItem.objects.filter(filters)
         .select_related("responsable_user", "responsable_empleado")
-        .prefetch_related("checklist", "comentarios", "evidencias", "participantes_user", "participantes_empleado")
+        .prefetch_related(
+            "checklist",
+            "comentarios",
+            "evidencias",
+            "prorrogas",
+            "participantes_user",
+            "participantes_empleado",
+        )
         .distinct()
     )
 
@@ -90,6 +112,7 @@ def mi_seguimiento(request):
         actividad.extend(check.updated_at for check in checks if check.updated_at)
         actividad.extend(comentario.created_at for comentario in item.comentarios.all())
         actividad.extend(evidencia.created_at for evidencia in item.evidencias.all())
+        actividad.extend(prorroga.created_at for prorroga in item.prorrogas.all())
 
         item.checklist_total = len(checks)
         item.checklist_done = sum(1 for check in checks if check.completado)
@@ -97,6 +120,14 @@ def mi_seguimiento(request):
         item.ultima_actividad = max(actividad) if actividad else item.updated_at
         item.origen_display = item.origen or "ERP"
         item.es_compartido = item.participantes_user.exists() or item.participantes_empleado.exists()
+        item.prorroga_pendiente = next(
+            (
+                prorroga
+                for prorroga in item.prorrogas.all()
+                if prorroga.estatus == SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE
+            ),
+            None,
+        )
         if item.esta_vencido:
             item.prioridad_label = "Vencido"
             item.prioridad_tone = "danger"
@@ -120,6 +151,12 @@ def mi_seguimiento(request):
         ),
         "vencidos": sum(1 for item in items if item.esta_vencido),
         "en_revision": sum(1 for item in items if item.estatus == SeguimientoItem.ESTATUS_EN_REVISION),
+        "prorrogas_pendientes": sum(
+            1
+            for item in items
+            for prorroga in item.prorrogas.all()
+            if prorroga.estatus == SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE
+        ),
         "completados": sum(1 for item in items if item.estatus == SeguimientoItem.ESTATUS_COMPLETADO),
         "cumplidos_a_tiempo": sum(
             1
@@ -246,4 +283,44 @@ def subir_evidencia(request, pk):
         item.save(update_fields=["estatus", "updated_at"])
     log_event(request.user, "seguimiento.evidencia", "SeguimientoItem", item.pk, {"archivo": archivo.name})
     messages.success(request, "Evidencia enviada para revisión.")
+    return redirect("seguimiento:mi_seguimiento")
+
+
+@login_required
+@require_POST
+def solicitar_prorroga(request, pk):
+    item = _get_item_para_usuario(request.user, pk)
+    fecha_solicitada = parse_date((request.POST.get("fecha_solicitada") or "").strip())
+    motivo = (request.POST.get("motivo") or "").strip()
+    if not fecha_solicitada:
+        messages.error(request, "Selecciona la nueva fecha solicitada.")
+        return redirect("seguimiento:mi_seguimiento")
+    if fecha_solicitada <= timezone.localdate():
+        messages.error(request, "La fecha solicitada debe ser posterior a hoy.")
+        return redirect("seguimiento:mi_seguimiento")
+    if not motivo:
+        messages.error(request, "Escribe el motivo para solicitar más tiempo.")
+        return redirect("seguimiento:mi_seguimiento")
+
+    SeguimientoProrrogaSolicitud.objects.create(
+        seguimiento=item,
+        usuario=request.user,
+        fecha_solicitada=fecha_solicitada,
+        motivo=motivo,
+    )
+    if item.estatus in {
+        SeguimientoItem.ESTATUS_PENDIENTE,
+        SeguimientoItem.ESTATUS_EN_PROCESO,
+        SeguimientoItem.ESTATUS_BLOQUEADO,
+    }:
+        item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
+        item.save(update_fields=["estatus", "updated_at"])
+    log_event(
+        request.user,
+        "seguimiento.prorroga",
+        "SeguimientoItem",
+        item.pk,
+        {"fecha_solicitada": fecha_solicitada.isoformat()},
+    )
+    messages.success(request, "Solicitud de más tiempo enviada para revisión.")
     return redirect("seguimiento:mi_seguimiento")

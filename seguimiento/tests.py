@@ -16,7 +16,13 @@ from core.access import can_view_submodule
 from core.navigation import build_nav_groups
 from rrhh.models import Empleado
 
-from .models import SeguimientoChecklistItem, SeguimientoComentario, SeguimientoEvidencia, SeguimientoItem
+from .models import (
+    SeguimientoChecklistItem,
+    SeguimientoComentario,
+    SeguimientoEvidencia,
+    SeguimientoItem,
+    SeguimientoProrrogaSolicitud,
+)
 from .services import empleado_de_usuario
 from .management.commands.importar_agente_dg_seguimiento import Command as ImportarAgenteDGCommand
 from .management.commands.importar_agente_dg_seguimiento import _status_agente_a_erp
@@ -72,6 +78,7 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertIn("Proyectos", content)
         self.assertIn("Validar inventarios en cuartos fríos", content)
         self.assertIn("Retroalimentación", content)
+        self.assertIn("Solicitar más tiempo", content)
         self.assertIn("No visible:", content)
         self.assertIn("información económica, compensación y nómina sensible", content)
 
@@ -143,6 +150,50 @@ class SeguimientoColaboradorTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertFalse(SeguimientoEvidencia.objects.filter(seguimiento=self.item, usuario=self.user).exists())
+
+    def test_evidencia_acepta_documentos_operativos_e_imagenes(self):
+        casos = [
+            ("soporte.docx", b"word", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            ("reporte.xlsm", b"excel", "application/vnd.ms-excel.sheet.macroEnabled.12"),
+            ("foto.gif", b"GIF89a", "image/gif"),
+        ]
+
+        for nombre, contenido, content_type in casos:
+            with self.subTest(nombre=nombre):
+                archivo = SimpleUploadedFile(nombre, contenido, content_type=content_type)
+                response = self.client.post(f"/seguimiento/{self.item.pk}/evidencias/", {"archivo": archivo})
+
+                self.assertEqual(response.status_code, 302)
+                self.assertTrue(SeguimientoEvidencia.objects.filter(seguimiento=self.item, nombre_original=nombre).exists())
+
+    def test_usuario_solicita_prorroga_sin_evidencia(self):
+        fecha_solicitada = (timezone.localdate() + timedelta(days=5)).isoformat()
+
+        response = self.client.post(
+            f"/seguimiento/{self.item.pk}/prorroga/",
+            {"fecha_solicitada": fecha_solicitada, "motivo": "Necesito cierre de inventario adicional."},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.estatus, SeguimientoItem.ESTATUS_EN_REVISION)
+        solicitud = SeguimientoProrrogaSolicitud.objects.get(seguimiento=self.item)
+        self.assertEqual(solicitud.usuario, self.user)
+        self.assertEqual(solicitud.fecha_solicitada.isoformat(), fecha_solicitada)
+        self.assertEqual(solicitud.motivo, "Necesito cierre de inventario adicional.")
+        self.assertEqual(solicitud.estatus, SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE)
+
+    def test_usuario_ajeno_no_solicita_prorroga(self):
+        otro = get_user_model().objects.create_user(username="usuario.ajeno.prorroga", password="test12345")
+        self.client.force_login(otro)
+
+        response = self.client.post(
+            f"/seguimiento/{self.item.pk}/prorroga/",
+            {"fecha_solicitada": (timezone.localdate() + timedelta(days=5)).isoformat(), "motivo": "Intento ajeno"},
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(SeguimientoProrrogaSolicitud.objects.filter(seguimiento=self.item).exists())
 
     def test_colaborador_ve_mis_acuerdos_y_conserva_bonos_operativos_de_su_rol(self):
         groups = build_nav_groups(self.user, "/seguimiento/")
