@@ -1,10 +1,16 @@
+import json
+import os
 from datetime import timedelta
+from io import StringIO
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from django_celery_beat.models import PeriodicTask
 
 from core.access import can_view_submodule
 from core.navigation import build_nav_groups
@@ -208,3 +214,31 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertEqual(_status_agente_a_erp("COMPLETED"), SeguimientoItem.ESTATUS_COMPLETADO)
         self.assertEqual(_status_agente_a_erp("AT_RISK"), SeguimientoItem.ESTATUS_BLOQUEADO)
         self.assertEqual(_status_agente_a_erp("OVERDUE"), SeguimientoItem.ESTATUS_EN_PROCESO)
+
+    def test_schedule_de_sync_queda_pausado_si_falta_database_url(self):
+        env = {
+            "AGENTE_DG_SYNC_DATABASE_URL": "",
+            "AGENTE_DG_DATABASE_URL": "",
+            "AGENTE_DG_SYNC_ENABLED": "",
+        }
+        with patch.dict(os.environ, env):
+            call_command("setup_seguimiento_schedules", stdout=StringIO())
+
+        task = PeriodicTask.objects.get(name="seguimiento: importar Agente DG")
+        self.assertEqual(task.task, "seguimiento.importar_agente_dg")
+        self.assertFalse(task.enabled)
+        self.assertEqual(json.loads(task.kwargs), {"limit": 0})
+
+    def test_schedule_de_sync_se_activa_si_existe_database_url(self):
+        env = {
+            "AGENTE_DG_SYNC_DATABASE_URL": "postgres://user:pass@example.com:5432/agente",
+            "AGENTE_DG_DATABASE_URL": "",
+        }
+        with patch.dict(os.environ, env):
+            call_command("setup_seguimiento_schedules", "--interval-minutes", "15", "--limit", "25", stdout=StringIO())
+
+        task = PeriodicTask.objects.get(name="seguimiento: importar Agente DG")
+        self.assertTrue(task.enabled)
+        self.assertEqual(task.interval.every, 15)
+        self.assertEqual(task.interval.period, "minutes")
+        self.assertEqual(json.loads(task.kwargs), {"limit": 25})
