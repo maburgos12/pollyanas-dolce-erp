@@ -1,506 +1,278 @@
 {% extends "base.html" %}
+{% load static humanize %}
 
 {% block title %}Mis acuerdos · ERP{% endblock %}
+{% block page_title %}Seguimiento · Mis acuerdos{% endblock %}
+{% block body_class %}page-seguimiento-dashboard{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260326a">
 <style>
-  .follow-shell {
-    width: 100%;
-    max-width: none;
-    margin: 0;
-    padding: 1rem;
-    box-sizing: border-box;
-    display: grid;
-    gap: .9rem;
-    color: #2f2830;
+  .seguimiento-shell {
+    width: min(100%, 1580px);
   }
 
-  .follow-hero,
-  .follow-kpis,
-  .follow-security,
-  .follow-section {
-    width: 100%;
-    background: rgba(255, 255, 255, .97);
-    border: 1px solid #eadde2;
-    border-radius: 8px;
-    box-shadow: 0 8px 20px rgba(83, 15, 47, .06);
+  .seguimiento-tabs {
+    margin-bottom: 0;
   }
 
-  .follow-hero {
-    display: grid;
-    grid-template-columns: minmax(280px, 1fr) minmax(220px, .36fr);
-    align-items: stretch;
-    gap: .8rem;
-    padding: 1rem;
+  .seguimiento-hero-title {
+    font-size: 2rem;
   }
 
-  .follow-title {
-    display: grid;
-    align-content: center;
-    min-width: 0;
+  .seguimiento-copy {
+    max-width: 62ch;
   }
 
-  .follow-title h1 {
-    margin: 0;
-    color: #771744;
-    font-size: 1.72rem;
-    line-height: 1.03;
+  .seguimiento-kpi-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
-  .follow-title p {
-    margin: .35rem 0 0;
-    color: #6d6266;
-    font-size: .78rem;
-    font-weight: 900;
-    letter-spacing: .04em;
-    text-transform: uppercase;
-  }
-
-  .follow-user {
-    border: 1px solid #eadde2;
-    border-radius: 8px;
-    background: #fff9fb;
-    padding: .75rem .85rem;
-    display: grid;
-    gap: .1rem;
-    align-content: center;
-    text-align: right;
-    min-width: 0;
-  }
-
-  .follow-user span {
-    color: #766b70;
-    font-size: .72rem;
-    font-weight: 900;
-    text-transform: uppercase;
-  }
-
-  .follow-user strong {
-    color: #2f2830;
-    font-size: 1rem;
-    line-height: 1.05;
-  }
-
-  .follow-kpis {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(120px, 1fr));
-    gap: .75rem;
-    padding: .75rem;
-    background: linear-gradient(90deg, #fff 0%, #fff7fb 100%);
-  }
-
-  .follow-kpi {
-    min-height: 7.1rem;
-    padding: 1rem .9rem;
-    border: 1px solid #f0b7ca;
-    border-radius: 8px;
-    background: linear-gradient(180deg, #fff 0%, #fff9fc 100%);
-    box-shadow: 0 12px 26px rgba(119, 23, 68, .08);
-    min-width: 0;
-    display: grid;
-    place-items: center;
-    align-content: center;
-    text-align: center;
-  }
-
-  .follow-kpi.is-primary {
-    border-color: #e8a5bf;
-    box-shadow: inset 0 0 0 1px #f8d5e2, 0 14px 28px rgba(119, 23, 68, .12);
-  }
-
-  .follow-kpi strong {
-    display: block;
-    font-size: clamp(2rem, 3vw, 3rem);
-    line-height: 1;
-    color: #8b174e;
-    font-family: Georgia, "Times New Roman", serif;
-    font-weight: 900;
-  }
-
-  .follow-kpi.is-danger strong { color: #dc3535; }
-
-  .follow-kpi span {
-    display: block;
-    margin-top: .65rem;
-    color: #70666b;
-    font-size: .94rem;
-    font-weight: 850;
-    text-transform: none;
-  }
-
-  .follow-security {
+  .seguimiento-policy-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: .5rem;
-    padding: .8rem 1rem;
-    color: #5f555b;
-    font-size: .84rem;
-    font-weight: 750;
-    line-height: 1.25;
+    gap: 8px;
   }
 
-  .follow-security strong { color: #771744; }
-
-  .follow-board {
+  .seguimiento-board {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: .9rem;
+    gap: 12px;
     align-items: start;
   }
 
-  .follow-section {
+  .seguimiento-column {
+    min-width: 0;
     overflow: hidden;
-    min-width: 0;
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
   }
 
-  .follow-section-header {
-    padding: .9rem 1rem .75rem;
-    border-bottom: 1px solid #eee2e6;
-    display: grid;
-    gap: .7rem;
-  }
-
-  .follow-section-title {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: .75rem;
-    min-width: 0;
-  }
-
-  .follow-section-title h2 {
-    margin: 0;
-    font-size: 1.08rem;
-    line-height: 1.08;
-    color: #2f2830;
-  }
-
-  .follow-section-title p {
-    margin: .25rem 0 0;
-    color: #70666b;
-    font-size: .78rem;
-    font-weight: 800;
-    line-height: 1.25;
-  }
-
-  .follow-count {
-    min-width: 2.4rem;
-    min-height: 2.4rem;
-    border-radius: 8px;
-    display: grid;
-    place-items: center;
-    color: #fff;
-    background: #771744;
-    font-weight: 950;
-    font-size: 1.1rem;
-  }
-
-  .follow-section.minute .follow-count { background: #2f6c77; }
-  .follow-section.project .follow-count { background: #7a5d1c; }
-
-  .follow-section-metrics {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: .45rem;
-  }
-
-  .follow-pill-stat {
-    border: 1px solid #eee2e6;
-    border-radius: 8px;
-    padding: .45rem .5rem;
-    background: #fffafd;
-    min-width: 0;
-  }
-
-  .follow-pill-stat strong {
-    display: block;
-    color: #2f2830;
-    font-size: .95rem;
-    line-height: 1;
-  }
-
-  .follow-pill-stat span {
-    display: block;
-    margin-top: .15rem;
-    color: #756a70;
-    font-size: .68rem;
-    font-weight: 900;
-    text-transform: uppercase;
-  }
-
-  .follow-card-list {
-    display: grid;
-    gap: .65rem;
-    padding: .75rem;
-    max-height: calc(100vh - 265px);
-    overflow: auto;
-  }
-
-  .follow-card-list::-webkit-scrollbar { width: 8px; }
-  .follow-card-list::-webkit-scrollbar-thumb { background: #dfcbd4; border-radius: 999px; }
-
-  .follow-card {
-    border: 1px solid #eadde2;
-    border-radius: 8px;
-    background: #fff;
-    padding: .78rem;
-    display: grid;
-    gap: .65rem;
-  }
-
-  .follow-card.is-overdue {
-    border-color: #efb4b4;
-    background: #fffafa;
-  }
-
-  .follow-card-main h3 {
-    margin: 0;
-    font-size: .98rem;
-    line-height: 1.18;
-    color: #2f2830;
-  }
-
-  .follow-card-topline {
-    display: flex;
-    justify-content: space-between;
-    gap: .55rem;
-    align-items: flex-start;
-  }
-
-  .follow-card-type {
-    color: #771744;
-    background: #fff0f6;
-    border: 1px solid #f0c8d8;
-    border-radius: 999px;
-    padding: .18rem .5rem;
-    font-size: .66rem;
-    line-height: 1;
-    font-weight: 950;
-    white-space: nowrap;
-  }
-
-  .follow-card-main p {
-    margin: .35rem 0 0;
-    color: #655b60;
-    font-size: .82rem;
-    line-height: 1.28;
-  }
-
-  .follow-deliverable {
-    color: #43393f;
-    font-weight: 850;
-  }
-
-  .follow-chip-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: .35rem;
-  }
-
-  .follow-chip {
-    display: inline-flex;
+  .seguimiento-column .bi-panel-head {
     align-items: center;
-    min-height: 1.35rem;
-    border-radius: 999px;
-    padding: .1rem .5rem;
-    background: #eef6fb;
-    color: #17628f;
-    font-size: .69rem;
-    font-weight: 950;
-    line-height: 1;
+    margin-bottom: 8px;
   }
 
-  .follow-chip.warn { background: #fff1cc; color: #8a6000; }
-  .follow-chip.danger { background: #ffe0e0; color: #a32828; }
-  .follow-chip.neutral { background: #f2edf0; color: #5f555b; }
-  .follow-chip.shared { background: #eaf5f6; color: #2f6c77; }
+  .seguimiento-count {
+    min-width: 42px;
+    min-height: 42px;
+    border-radius: 12px;
+    display: inline-grid;
+    place-items: center;
+    background: rgba(122, 40, 83, 0.10);
+    color: #7a2853;
+    font-weight: 800;
+    font-size: 1.12rem;
+  }
 
-  .follow-card-meta {
+  .seguimiento-column.minute .seguimiento-count {
+    background: rgba(47, 108, 119, 0.12);
+    color: #2f6c77;
+  }
+
+  .seguimiento-column.project .seguimiento-count {
+    background: rgba(185, 140, 36, 0.14);
+    color: #8b6b1c;
+  }
+
+  .seguimiento-section-metrics {
+    margin-bottom: 10px;
+  }
+
+  .seguimiento-list {
+    max-height: calc(100vh - 330px);
+    overflow: auto;
+    padding-right: 2px;
+  }
+
+  .seguimiento-list::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .seguimiento-list::-webkit-scrollbar-thumb {
+    background: rgba(139, 34, 82, 0.18);
+    border-radius: 999px;
+  }
+
+  .seguimiento-item {
+    padding: 12px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.86);
+    border: 1px solid rgba(139, 34, 82, 0.08);
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .seguimiento-item.is-overdue {
+    border-color: rgba(188, 59, 59, 0.22);
+    background: rgba(255, 250, 250, 0.96);
+  }
+
+  .seguimiento-item-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: flex-start;
+  }
+
+  .seguimiento-item-title {
+    margin: 0;
+    color: #42292e;
+    font-size: 1rem;
+    line-height: 1.18;
+  }
+
+  .seguimiento-item-copy {
+    margin: 5px 0 0;
+    color: #6b5e65;
+    font-size: 0.9rem;
+    line-height: 1.32;
+  }
+
+  .seguimiento-deliverable {
+    color: #4f4249;
+    font-weight: 800;
+  }
+
+  .seguimiento-meta-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: .45rem;
+    gap: 8px;
   }
 
-  .follow-meta {
-    border: 1px solid #eee2e6;
-    border-radius: 8px;
-    padding: .45rem .5rem;
-    background: #fffafd;
-    min-width: 0;
-  }
-
-  .follow-meta span {
-    display: block;
-    color: #766b70;
-    font-size: .67rem;
-    font-weight: 900;
-    text-transform: uppercase;
-  }
-
-  .follow-meta strong {
-    display: block;
-    margin-top: .16rem;
-    color: #2f2830;
-    font-size: .82rem;
+  .seguimiento-meta-grid .bi-metric-value {
+    font-size: 0.95rem;
     line-height: 1.18;
-  }
-
-  .follow-progress {
-    display: grid;
-    gap: .32rem;
-  }
-
-  .follow-progress-bar {
-    width: 100%;
-    height: .45rem;
-    background: #eee7e9;
-    border-radius: 999px;
-    overflow: hidden;
-  }
-
-  .follow-progress-bar i {
-    display: block;
-    height: 100%;
-    background: #2f8457;
-    border-radius: 999px;
-  }
-
-  .follow-progress strong {
-    color: #4e444a;
-    font-size: .74rem;
-    line-height: 1;
-  }
-
-  .follow-card-actions summary {
-    cursor: pointer;
-    list-style: none;
-    border: 1px solid #dfcbd4;
-    border-radius: 8px;
-    padding: .52rem .65rem;
-    color: #771744;
-    background: #fffafd;
-    font-weight: 950;
-    text-align: center;
-  }
-
-  .follow-card-actions summary::-webkit-details-marker { display: none; }
-
-  .follow-action-panel {
-    margin-top: .55rem;
-    padding: .65rem;
-    background: #fbf8f9;
-    border: 1px solid #eee0e6;
-    border-radius: 8px;
-    display: grid;
-    gap: .6rem;
-  }
-
-  .follow-checks {
-    display: flex;
-    flex-wrap: wrap;
-    gap: .4rem;
-  }
-
-  .follow-action-panel form {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: .45rem;
-    align-items: start;
-    margin: 0;
-    min-width: 0;
-  }
-
-  .follow-action-panel form:last-child textarea { grid-column: 1 / -1; }
-
-  .follow-action-panel textarea,
-  .follow-action-panel input[type="file"] {
-    width: 100%;
-    min-width: 0;
-    border: 1px solid #dbcbd2;
-    border-radius: 8px;
-    padding: .52rem .6rem;
-    font: inherit;
-    color: #2f2830;
-    background: #fff;
-  }
-
-  .follow-action-panel textarea {
-    min-height: 4rem;
-    resize: vertical;
-  }
-
-  .follow-btn {
-    border: 1px solid #abdcbc;
-    background: #eaf8ef;
-    color: #2b7a4b;
-    border-radius: 999px;
-    min-height: 2.05rem;
-    padding: .25rem .65rem;
-    font-weight: 950;
-    cursor: pointer;
-    white-space: normal;
     overflow-wrap: anywhere;
   }
 
-  .follow-btn.primary {
-    border-color: #8b2252;
-    background: #8b2252;
+  .seguimiento-action-summary {
+    cursor: pointer;
+    list-style: none;
+    min-height: 38px;
+    border-radius: 12px;
+    border: 1px solid rgba(139, 34, 82, 0.14);
+    background: rgba(255, 255, 255, 0.94);
+    color: #7a2853;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 12px;
+    font-weight: 800;
+  }
+
+  .seguimiento-action-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .seguimiento-action-panel {
+    margin-top: 8px;
+    padding: 10px;
+    border-radius: 16px;
+    background: rgba(250, 246, 248, 0.92);
+    border: 1px solid rgba(139, 34, 82, 0.08);
+    display: grid;
+    gap: 10px;
+  }
+
+  .seguimiento-checks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .seguimiento-checks form,
+  .seguimiento-action-form {
+    margin: 0;
+  }
+
+  .seguimiento-action-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: start;
+  }
+
+  .seguimiento-action-form textarea:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .seguimiento-action-form textarea,
+  .seguimiento-action-form input[type="file"] {
+    width: 100%;
+    min-width: 0;
+    border: 1px solid rgba(139, 34, 82, 0.14);
+    border-radius: 12px;
+    padding: 9px 10px;
+    font: inherit;
+    color: var(--texto);
+    background: rgba(255, 255, 255, 0.96);
+  }
+
+  .seguimiento-action-form textarea {
+    min-height: 72px;
+    resize: vertical;
+  }
+
+  .seguimiento-action-button {
+    min-height: 38px;
+    border-radius: 12px;
+    border: 1px solid rgba(139, 34, 82, 0.12);
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.95);
+    color: #7a2853;
+    font: inherit;
+    font-weight: 800;
+    cursor: pointer;
+    white-space: normal;
+  }
+
+  .seguimiento-action-button.is-done {
+    background: rgba(35, 109, 83, 0.10);
+    color: #236d53;
+    border-color: rgba(35, 109, 83, 0.20);
+  }
+
+  .seguimiento-action-button.is-primary {
+    background: linear-gradient(135deg, var(--vino), var(--vino-light));
     color: #fff;
-    border-radius: 8px;
+    border: 0;
+    box-shadow: 0 8px 20px rgba(139, 34, 82, 0.16);
   }
 
-  .follow-btn.done {
-    background: #eaf8ef;
-    color: #2b7a4b;
-  }
-
-  .follow-empty {
-    padding: 1.5rem .85rem;
+  .seguimiento-empty {
+    padding: 18px 12px;
+    color: #6b5e65;
     text-align: center;
-    color: #655b60;
-    font-weight: 850;
   }
 
   @media (max-width: 1320px) {
-    .follow-board { grid-template-columns: 1fr; }
-    .follow-card-list {
+    .seguimiento-board {
+      grid-template-columns: 1fr;
+    }
+
+    .seguimiento-list {
       max-height: none;
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 
-  @media (max-width: 900px) {
-    .follow-hero,
-    .follow-security {
-      grid-template-columns: 1fr;
-    }
-
-    .follow-user {
-      text-align: left;
-    }
-
-    .follow-kpis {
+  @media (max-width: 1040px) {
+    .seguimiento-kpi-grid,
+    .seguimiento-policy-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .follow-kpi {
-      min-height: 6.2rem;
-    }
-
-    .follow-card-list {
-      grid-template-columns: 1fr;
     }
   }
 
-  @media (max-width: 620px) {
-    .follow-shell { padding: .7rem; }
-    .follow-hero { padding: .85rem; }
-    .follow-title h1 { font-size: 1.45rem; }
-    .follow-card-meta,
-    .follow-action-panel form,
-    .follow-section-metrics {
+  @media (max-width: 760px) {
+    .seguimiento-hero-title {
+      font-size: 1.55rem;
+    }
+
+    .seguimiento-kpi-grid,
+    .seguimiento-policy-grid,
+    .seguimiento-list,
+    .seguimiento-meta-grid,
+    .seguimiento-action-form {
       grid-template-columns: 1fr;
     }
   }
@@ -508,129 +280,211 @@
 {% endblock %}
 
 {% block content %}
-<section class="follow-shell">
-  <header class="follow-hero">
-    <div class="follow-title">
-      <h1>Mis minutas, proyectos y compromisos</h1>
-      <p>Panel personal de seguimiento ERP</p>
+<div class="module-shell bi-shell seguimiento-shell">
+  <nav class="module-tabs seguimiento-tabs" aria-label="Seguimiento">
+    <a class="module-tab active" href="{% url 'seguimiento:mi_seguimiento' %}">Mis acuerdos</a>
+  </nav>
+
+  <section class="bi-hero">
+    <div class="bi-hero-main">
+      <div class="bi-kicker">Seguimiento DG</div>
+      <h1 class="bi-hero-title seguimiento-hero-title">Mis minutas, proyectos y compromisos</h1>
+      <p class="bi-copy seguimiento-copy">Panel personal de seguimiento ERP para compromisos, acuerdos de minuta, pasos de proyecto, checklist, retroalimentación y evidencias propias.</p>
+      <div class="bi-hero-highlights">
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Acuerdos acumulados</div>
+          <div class="bi-hero-highlight-value">{{ metrics.total|intcomma }}</div>
+          <div class="bi-hero-highlight-meta">{{ metrics.abiertos|intcomma }} abiertos · {{ metrics.completados|intcomma }} completados</div>
+        </article>
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Atención inmediata</div>
+          <div class="bi-hero-highlight-value {% if metrics.vencidos %}is-danger{% elif metrics.por_vencer_24h %}is-warning{% else %}is-success{% endif %}">{{ metrics.vencidos|intcomma }}</div>
+          <div class="bi-hero-highlight-meta">{{ metrics.por_vencer_24h|intcomma }} por vencer en 24h</div>
+        </article>
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Cumplidos a tiempo</div>
+          <div class="bi-hero-highlight-value {% if metrics.cumplidos_a_tiempo %}is-success{% endif %}">{{ metrics.cumplidos_a_tiempo|intcomma }}</div>
+          <div class="bi-hero-highlight-meta">Cierres aprobados sin rebasar fecha límite</div>
+        </article>
+      </div>
     </div>
-    <div class="follow-user">
-      <span>Usuario</span>
-      <strong>{{ request.user.get_full_name|default:request.user.username }}</strong>
-      {% if empleado %}<span>{{ empleado.puesto|default:empleado.area }} · {{ empleado.sucursal|default:"ERP" }}</span>{% endif %}
+    <div class="bi-hero-side">
+      <div class="bi-hero-status-grid">
+        <article class="bi-status-card">
+          <span class="bi-status-label">Usuario</span>
+          <strong>{{ request.user.get_full_name|default:request.user.username }}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Área</span>
+          <strong>{% if empleado %}{{ empleado.area|default:"ERP" }}{% else %}ERP{% endif %}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Puesto</span>
+          <strong>{% if empleado %}{{ empleado.puesto|default:"Sin puesto" }}{% else %}Usuario ERP{% endif %}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Sucursal</span>
+          <strong>{% if empleado %}{{ empleado.sucursal|default:"ERP" }}{% else %}ERP{% endif %}</strong>
+        </article>
+      </div>
+      <div class="bi-summary-band">
+        <div class="bi-summary-chip"><span>Fuente</span><strong>Agente DG y ERP</strong></div>
+        <div class="bi-summary-chip"><span>Revisión</span><strong>{{ metrics.en_revision|intcomma }}</strong></div>
+        <div class="bi-summary-chip"><span>Vencidos</span><strong>{{ metrics.vencidos|intcomma }}</strong></div>
+      </div>
     </div>
-  </header>
+  </section>
 
-  <div class="follow-kpis" aria-label="Resumen">
-    <div class="follow-kpi is-primary"><strong>{{ metrics.total }}</strong><span>Acuerdos acumulados</span></div>
-    <div class="follow-kpi"><strong>{{ metrics.abiertos }}</strong><span>Abiertos</span></div>
-    <div class="follow-kpi"><strong>{{ metrics.por_vencer_24h }}</strong><span>Por vencer (24h)</span></div>
-    <div class="follow-kpi is-danger"><strong>{{ metrics.vencidos }}</strong><span>Vencidos</span></div>
-    <div class="follow-kpi"><strong>{{ metrics.cumplidos_a_tiempo }}</strong><span>Cumplidos a tiempo</span></div>
-  </div>
+  <section class="bi-kpi-grid seguimiento-kpi-grid" aria-label="Resumen">
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value">{{ metrics.total|intcomma }}</div>
+      <div class="bi-kpi-label">Acuerdos acumulados</div>
+      <div class="bi-kpi-note">Todo lo asignado o compartido con tu usuario.</div>
+    </article>
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value {% if metrics.abiertos %}warning{% else %}success{% endif %}">{{ metrics.abiertos|intcomma }}</div>
+      <div class="bi-kpi-label">Abiertos</div>
+      <div class="bi-kpi-note">Pendientes, en proceso o en revisión.</div>
+    </article>
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value {% if metrics.por_vencer_24h %}warning{% else %}success{% endif %}">{{ metrics.por_vencer_24h|intcomma }}</div>
+      <div class="bi-kpi-label">Por vencer (24h)</div>
+      <div class="bi-kpi-note">Compromisos que requieren avance inmediato.</div>
+    </article>
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value {% if metrics.vencidos %}danger{% else %}success{% endif %}">{{ metrics.vencidos|intcomma }}</div>
+      <div class="bi-kpi-label">Vencidos</div>
+      <div class="bi-kpi-note">Casos que ya rebasaron fecha límite.</div>
+    </article>
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value {% if metrics.cumplidos_a_tiempo %}success{% else %}warning{% endif %}">{{ metrics.cumplidos_a_tiempo|intcomma }}</div>
+      <div class="bi-kpi-label">Cumplidos a tiempo</div>
+      <div class="bi-kpi-note">Cierres aprobados dentro de plazo.</div>
+    </article>
+  </section>
 
-  <div class="follow-security">
-    <div><strong>Visible:</strong> minutas, proyectos, compromisos, checklist, retroalimentación y evidencias propias.</div>
-    <div><strong>No visible:</strong> información económica, compensación y nómina sensible.</div>
-    <div><strong>Auditable:</strong> cada avance, comentario y evidencia queda registrado en bitácora del ERP.</div>
-  </div>
+  <section class="bi-panel">
+    <div class="bi-panel-head">
+      <div>
+        <div class="bi-kicker">Alcance</div>
+        <h2 class="bi-panel-title">Control visible y auditable</h2>
+      </div>
+      <div class="bi-panel-actions">
+        <span class="bi-pill success">Datos operativos</span>
+        <span class="bi-pill warning">Permisos personales</span>
+      </div>
+    </div>
+    <div class="seguimiento-policy-grid">
+      <div class="bi-note"><strong>Visible:</strong> minutas, proyectos, compromisos, checklist, retroalimentación y evidencias propias.</div>
+      <div class="bi-note pending"><strong>No visible:</strong> información económica, compensación y nómina sensible.</div>
+      <div class="bi-note"><strong>Auditable:</strong> cada avance, comentario y evidencia queda registrado en bitácora del ERP.</div>
+    </div>
+  </section>
 
-  <div class="follow-board">
+  <div class="seguimiento-board">
     {% for section in sections %}
-    <section class="follow-section {{ section.tone }}">
-      <header class="follow-section-header">
-        <div class="follow-section-title">
-          <div>
-            <h2>{{ section.title }}</h2>
-            <p>{{ section.subtitle }}</p>
-          </div>
-          <div class="follow-count">{{ section.total }}</div>
+    <section class="bi-panel seguimiento-column {{ section.tone }}">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">{{ section.title }}</div>
+          <h2 class="bi-panel-title">{{ section.subtitle }}</h2>
         </div>
-        <div class="follow-section-metrics">
-          <div class="follow-pill-stat"><strong>{{ section.abiertos }}</strong><span>Abiertos</span></div>
-          <div class="follow-pill-stat"><strong>{{ section.vencidos }}</strong><span>Vencidos</span></div>
-          <div class="follow-pill-stat"><strong>{{ section.progreso_pct }}%</strong><span>Checks</span></div>
-        </div>
-      </header>
+        <div class="seguimiento-count">{{ section.total|intcomma }}</div>
+      </div>
 
-      <div class="follow-card-list">
+      <div class="bi-metric-strip seguimiento-section-metrics">
+        <div class="bi-metric">
+          <div class="bi-metric-label">Abiertos</div>
+          <div class="bi-metric-value {% if section.abiertos %}warning{% else %}success{% endif %}">{{ section.abiertos|intcomma }}</div>
+        </div>
+        <div class="bi-metric">
+          <div class="bi-metric-label">Vencidos</div>
+          <div class="bi-metric-value {% if section.vencidos %}danger{% else %}success{% endif %}">{{ section.vencidos|intcomma }}</div>
+        </div>
+        <div class="bi-metric">
+          <div class="bi-metric-label">Checks</div>
+          <div class="bi-metric-value">{{ section.progreso_pct }}%</div>
+        </div>
+      </div>
+
+      <div class="bi-list bi-list-dense seguimiento-list">
         {% for item in section.items %}
-        <article class="follow-card {% if item.esta_vencido %}is-overdue{% endif %}">
-          <div class="follow-card-main">
-            <div class="follow-card-topline">
-              <h3>{{ item.titulo }}</h3>
-              <span class="follow-card-type">{{ item.get_tipo_display }}</span>
+        <article class="seguimiento-item {% if item.esta_vencido %}is-overdue{% endif %}">
+          <div>
+            <div class="seguimiento-item-head">
+              <h3 class="seguimiento-item-title">{{ item.titulo }}</h3>
+              <span class="bi-pill {% if item.prioridad_tone == 'danger' %}danger{% elif item.prioridad_tone == 'warn' %}warning{% endif %}">{{ item.get_tipo_display }}</span>
             </div>
-            {% if item.descripcion %}<p>{{ item.descripcion|truncatechars:190 }}</p>{% endif %}
-            {% if item.entregable_esperado %}<p class="follow-deliverable">Entregable: {{ item.entregable_esperado|truncatechars:160 }}</p>{% endif %}
+            {% if item.descripcion %}<p class="seguimiento-item-copy">{{ item.descripcion|truncatechars:190 }}</p>{% endif %}
+            {% if item.entregable_esperado %}<p class="seguimiento-item-copy seguimiento-deliverable">Entregable: {{ item.entregable_esperado|truncatechars:160 }}</p>{% endif %}
           </div>
 
-          <div class="follow-chip-row">
-            <span class="follow-chip">{{ item.get_estatus_display }}</span>
-            <span class="follow-chip {{ item.prioridad_tone }}">Prioridad {{ item.prioridad_label }}</span>
-            {% if item.es_compartido %}<span class="follow-chip shared">Compartido</span>{% endif %}
-            {% if item.area %}<span class="follow-chip neutral">{{ item.area }}</span>{% endif %}
+          <div class="bi-summary-band">
+            <span class="bi-summary-chip"><span>Estatus</span><strong>{{ item.get_estatus_display }}</strong></span>
+            <span class="bi-summary-chip"><span>Prioridad</span><strong>{{ item.prioridad_label }}</strong></span>
+            {% if item.es_compartido %}<span class="bi-summary-chip"><span>Participación</span><strong>Compartido</strong></span>{% endif %}
+            {% if item.area %}<span class="bi-summary-chip"><span>Área</span><strong>{{ item.area }}</strong></span>{% endif %}
           </div>
 
-          <div class="follow-card-meta">
-            <div class="follow-meta">
-              <span>Fecha</span>
-              <strong>{% if item.fecha_limite %}{{ item.fecha_limite|date:"d/m/Y H:i" }}{% else %}Sin fecha{% endif %}</strong>
+          <div class="seguimiento-meta-grid">
+            <div class="bi-metric">
+              <div class="bi-metric-label">Fecha</div>
+              <div class="bi-metric-value">{% if item.fecha_limite %}{{ item.fecha_limite|date:"d/m/Y H:i" }}{% else %}Sin fecha{% endif %}</div>
             </div>
-            <div class="follow-meta">
-              <span>Actividad</span>
-              <strong>{{ item.ultima_actividad|date:"d/m/Y H:i" }}</strong>
+            <div class="bi-metric">
+              <div class="bi-metric-label">Actividad</div>
+              <div class="bi-metric-value">{{ item.ultima_actividad|date:"d/m/Y H:i" }}</div>
             </div>
-            <div class="follow-meta">
-              <span>Origen</span>
-              <strong>{{ item.origen_display }}</strong>
+            <div class="bi-metric">
+              <div class="bi-metric-label">Origen</div>
+              <div class="bi-metric-value">{{ item.origen_display }}</div>
             </div>
-            <div class="follow-meta">
-              <span>Registro</span>
-              <strong>Retroalimentación {{ item.comentarios.count }} · Evidencias {{ item.evidencias.count }}</strong>
+            <div class="bi-metric">
+              <div class="bi-metric-label">Registro</div>
+              <div class="bi-metric-value">Feedback {{ item.comentarios.count }} · Evidencias {{ item.evidencias.count }}</div>
             </div>
           </div>
 
-          <div class="follow-progress">
-            <div class="follow-progress-bar"><i style="width: {{ item.progreso_pct }}%"></i></div>
-            <strong>{{ item.checklist_done }}/{{ item.checklist_total }} checks · {{ item.progreso_pct }}%</strong>
+          <div class="bi-progress-track" aria-label="Avance de checklist">
+            <span class="bi-progress-fill {% if item.esta_vencido %}is-danger{% elif item.progreso_pct >= 100 %}is-success{% else %}is-plum{% endif %}" style="width: {{ item.progreso_pct }}%"></span>
           </div>
+          <div class="bi-subtle">{{ item.checklist_done }}/{{ item.checklist_total }} checks · {{ item.progreso_pct }}%</div>
 
-          <details class="follow-card-actions">
-            <summary>Actualizar seguimiento</summary>
-            <div class="follow-action-panel">
-              <div class="follow-checks">
+          <details>
+            <summary class="seguimiento-action-summary">Actualizar seguimiento</summary>
+            <div class="seguimiento-action-panel">
+              <div class="seguimiento-checks">
                 {% for check in item.checklist.all %}
                 <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk check.pk %}">
                   {% csrf_token %}
-                  <button class="follow-btn {% if check.completado %}done{% endif %}" type="submit">
-                    {% if check.completado %}✓{% else %}○{% endif %} {{ check.titulo }}
+                  <button class="seguimiento-action-button {% if check.completado %}is-done{% endif %}" type="submit">
+                    {% if check.completado %}Listo{% else %}Pendiente{% endif %}: {{ check.titulo }}
                   </button>
                 </form>
                 {% empty %}
-                <span class="follow-chip neutral">Sin checklist</span>
+                <span class="bi-summary-chip"><span>Checklist</span><strong>Sin checklist</strong></span>
                 {% endfor %}
               </div>
-              <form method="post" action="{% url 'seguimiento:registrar_feedback' item.pk %}">
+              <form class="seguimiento-action-form" method="post" action="{% url 'seguimiento:registrar_feedback' item.pk %}">
                 {% csrf_token %}
                 <textarea name="comentario" placeholder="Retroalimentación, avance o resultado" required></textarea>
-                <button class="follow-btn primary" type="submit">Enviar retroalimentación</button>
+                <button class="seguimiento-action-button is-primary" type="submit">Enviar retroalimentación</button>
               </form>
-              <form method="post" action="{% url 'seguimiento:subir_evidencia' item.pk %}" enctype="multipart/form-data">
+              <form class="seguimiento-action-form" method="post" action="{% url 'seguimiento:subir_evidencia' item.pk %}" enctype="multipart/form-data">
                 {% csrf_token %}
                 <input type="file" name="archivo" required>
-                <button class="follow-btn primary" type="submit">Subir evidencia</button>
+                <button class="seguimiento-action-button is-primary" type="submit">Subir evidencia</button>
                 <textarea name="comentario" placeholder="Comentario de evidencia"></textarea>
               </form>
             </div>
           </details>
         </article>
         {% empty %}
-        <div class="follow-empty">Sin registros asignados en esta sección.</div>
+        <div class="seguimiento-empty">Sin registros asignados en esta sección.</div>
         {% endfor %}
       </div>
     </section>
     {% endfor %}
   </div>
-</section>
+</div>
 {% endblock %}
