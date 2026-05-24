@@ -77,13 +77,13 @@ from ..models import (
     SolicitudReabastoCedis,
     SolicitudReabastoCedisLinea,
 )
+from recetas.services.costing_contract import CostContext, resolve_recipe_cost_map
 from ..utils.costeo_versionado import asegurar_version_costeo, calcular_costeo_receta, comparativo_versiones
 from ..utils.costeo_semanal import snapshot_weekly_costs, week_bounds
 from ..utils.costeo_snapshot import resolve_insumo_unit_cost, resolve_line_snapshot_cost
 from ..utils.derived_product_presentations import (
     build_upstream_snapshot as build_derived_product_upstream_snapshot,
     get_active_derived_relation,
-    get_total_cost_map,
 )
 from ..utils.derived_insumos import sync_presentacion_insumo, sync_receta_derivados
 from ..utils.matching import match_insumo
@@ -5790,7 +5790,7 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
     cost_map_cache_key = f"monitor_margenes:cost_map:{reference_end.isoformat()}:{cost_map_signature}"
     cost_map = cache.get(cost_map_cache_key)
     if cost_map is None:
-        cost_map = get_total_cost_map(all_recipe_ids)
+        cost_map = resolve_recipe_cost_map(all_recipe_ids, context=CostContext.CURRENT_LIVE)
         cache.set(cost_map_cache_key, cost_map, timeout=3600)
 
     rows: list[dict[str, Any]] = []
@@ -5803,7 +5803,10 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
 
     for version in latest_versions:
         avg_price, price_points = price_stats_by_recipe.get(version.receta_id, (Decimal("0"), 0))
-        cost = cost_map.get(version.receta_id, Decimal("0")).quantize(Decimal("0.01"))
+        cost_resolution = cost_map.get(version.receta_id)
+        cost = (
+            cost_resolution.total_cost if cost_resolution is not None else Decimal("0")
+        ).quantize(Decimal("0.01"))
         if cost <= 0:
             continue
         margin_pct = None
@@ -5847,7 +5850,9 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
                 "sort_margin": sort_margin,
                 "tipo": version.receta.tipo,
                 "tipo_label": version.receta.get_tipo_display(),
-                "cost_source_label": "Costo actual",
+                "cost_context": CostContext.CURRENT_LIVE.value,
+                "cost_source": cost_resolution.source if cost_resolution else "",
+                "cost_source_label": "Costo vivo VPS",
             }
         )
 
@@ -5868,6 +5873,8 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
                 "Costo",
                 "Margen %",
                 "Estatus",
+                "Contexto costo",
+                "Fuente costo",
                 "Ventas usadas para precio",
             ]
         )
@@ -5882,6 +5889,8 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
                     row["cost"],
                     row["margin_pct"] if row["margin_pct"] is not None else "",
                     row["status_label"],
+                    row["cost_context"],
+                    row["cost_source"],
                     row["price_points"],
                 ]
             )
