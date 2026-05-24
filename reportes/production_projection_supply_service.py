@@ -7,8 +7,8 @@ from django.utils import timezone
 
 from maestros.models import Insumo, UnidadMedida
 from recetas.models import LineaReceta, Receta, RecetaPresentacionDerivada
+from recetas.services.costing_contract import CostContext, resolve_line_cost
 from recetas.utils.costeo_snapshot import (
-    resolve_line_snapshot_cost,
     resolve_preparation_recipe_for_insumo,
 )
 from reportes.forecast_service import build_daily_forecast_context
@@ -281,8 +281,9 @@ def build_projection_supply_context(
         unit = _line_unit(line)
         unidad_codigo = _unit_code(unit)
         article_class = _article_class(insumo)
-        resolved_cost, cost_source = resolve_line_snapshot_cost(line)
-        unit_cost = _to_decimal(resolved_cost)
+        cost_resolution = resolve_line_cost(line, context=CostContext.CURRENT_LIVE)
+        cost_source = cost_resolution.source
+        unit_cost = _to_decimal(cost_resolution.unit_cost)
         required_qty = _quantize_units(quantity)
         estimated_spend = _quantize_money(required_qty * unit_cost)
         family = _insumo_family(insumo, article_class)
@@ -309,7 +310,9 @@ def build_projection_supply_context(
                 "category": category,
                 "required_gross_qty": ZERO,
                 "unit_cost": unit_cost,
+                "cost_context": cost_resolution.context.value,
                 "cost_sources": set(),
+                "unresolved_cost_reasons": set(),
                 "estimated_spend": ZERO,
                 "recipes": set(),
                 "branches": set(),
@@ -318,6 +321,8 @@ def build_projection_supply_context(
         bucket["required_gross_qty"] += required_qty
         bucket["estimated_spend"] += estimated_spend
         bucket["cost_sources"].add(cost_source)
+        if cost_resolution.unresolved:
+            bucket["unresolved_cost_reasons"].add(cost_resolution.unresolved_reason)
         bucket["recipes"].add(str(product_row["recipe_name"]))
         bucket["branches"].add(str(product_row["branch_code"]))
         explosion_rows.append(
@@ -333,7 +338,9 @@ def build_projection_supply_context(
                 "unidad_codigo": unidad_codigo,
                 "unit_cost": unit_cost,
                 "estimated_spend": estimated_spend,
+                "cost_context": cost_resolution.context.value,
                 "cost_source": cost_source,
+                "unresolved_cost_reason": cost_resolution.unresolved_reason,
                 "fallback_reason": forced_source or "",
                 "rollup_kind": "COMPRA",
             }
@@ -349,7 +356,9 @@ def build_projection_supply_context(
             "required_gross_qty": required_qty,
             "formula_qty_per_unit": _quantize_units(_to_decimal(line.cantidad)),
             "unit_cost": unit_cost,
+            "cost_context": cost_resolution.context.value,
             "cost_source": cost_source,
+            "unresolved_cost_reason": cost_resolution.unresolved_reason,
             "estimated_spend": estimated_spend,
             "rollup_kind": "COMPRA",
         }
@@ -401,6 +410,7 @@ def build_projection_supply_context(
                 "unidad_codigo": unidad_codigo,
                 "unit_cost": ZERO,
                 "estimated_spend": ZERO,
+                "cost_context": CostContext.CURRENT_LIVE.value,
                 "cost_source": "PRODUCCION_INTERNA_EXPLOTADA" if prep_recipe else "INSUMO_INTERNO_SIN_PREPARACION",
                 "rollup_kind": "PREPARADO",
             }
@@ -416,6 +426,7 @@ def build_projection_supply_context(
             "required_gross_qty": required_qty,
             "formula_qty_per_unit": _quantize_units(_to_decimal(line.cantidad)),
             "unit_cost": ZERO,
+            "cost_context": CostContext.CURRENT_LIVE.value,
             "cost_source": "PRODUCCION_INTERNA_EXPLOTADA",
             "estimated_spend": ZERO,
             "rollup_kind": "PREPARADO",
@@ -602,9 +613,13 @@ def build_projection_supply_context(
                 "category": row["category"],
                 "required_gross_qty": _quantize_units(_to_decimal(row["required_gross_qty"])),
                 "unit_cost": _to_decimal(row["unit_cost"]),
+                "cost_context": row["cost_context"],
                 "estimated_spend": _quantize_money(_to_decimal(row["estimated_spend"])),
                 "missing_cost": _to_decimal(row["unit_cost"]) <= ZERO,
                 "cost_sources_text": ", ".join(sorted(filter(None, row["cost_sources"]))),
+                "unresolved_cost_reasons_text": ", ".join(
+                    sorted(filter(None, row["unresolved_cost_reasons"]))
+                ),
                 "recipes_text": ", ".join(sorted(filter(None, row["recipes"]))),
                 "branches_text": ", ".join(sorted(filter(None, row["branches"]))),
             }

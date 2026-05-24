@@ -13,6 +13,7 @@ from core.models import Sucursal
 from pos_bridge.models import PointDailySale, PointMonthlySalesOfficial
 from pos_bridge.services.sales_matching_service import PointSalesMatchingService
 from recetas.models import Receta, RecetaCostoSemanal
+from recetas.services.costing_contract import CostContext
 from reportes.models import (
     CategoriaGasto,
     CentroCosto,
@@ -366,6 +367,7 @@ class OperatingFinanceSnapshotService:
                 "costo_mp": monthly_unit_cost,
                 "costo_total": as_decimal(row.costo_total),
                 "source": "MONTHLY_HISTORICAL",
+                "cost_context": CostContext.MONTHLY_CLOSE.value,
                 "source_period": row.periodo.isoformat(),
                 "unit_cost_field": unit_cost_field,
             }
@@ -386,6 +388,7 @@ class OperatingFinanceSnapshotService:
                 "costo_mp": as_decimal(row.costo_mp),
                 "costo_total": as_decimal(row.costo_total),
                 "source": "WEEKLY_SNAPSHOT",
+                "cost_context": CostContext.WEEKLY_SNAPSHOT.value,
                 "source_period": row.week_start.isoformat(),
                 "unit_cost_field": "costo_mp",
             }
@@ -402,6 +405,7 @@ class OperatingFinanceSnapshotService:
         costo_fabricacion_unit = sum(cost_components.values(), Decimal("0"))
         metadata = {
             "guardrail_applied": False,
+            "cost_context": source.get("cost_context", ""),
             "cost_source": source.get("source", ""),
             "cost_source_period": source.get("source_period", ""),
             "unit_cost_field": source.get("unit_cost_field", ""),

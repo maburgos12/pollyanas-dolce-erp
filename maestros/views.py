@@ -24,6 +24,7 @@ from openpyxl import Workbook
 from core.access import ROLE_ADMIN, ROLE_COMPRAS, can_view_maestros, has_any_role
 from core.audit import log_event
 from recetas.models import LineaReceta, Receta, RecetaCodigoPointAlias, VentaHistorica, normalizar_codigo_point
+from recetas.services.costing_contract import CostContext, resolve_recipe_cost_map
 from recetas.utils.normalizacion import normalizar_nombre
 from ventas.services.sales_read_service import get_point_sales_product_totals
 
@@ -3960,7 +3961,7 @@ def point_pending_review(request):
 def costos_adquisicion(request):
     """
     Catálogo de costos de adquisición para todos los productos vendidos.
-    - Fabricados: muestra costo de receta vigente (RecetaCostoVersion)
+    - Fabricados: muestra costo vivo de receta contra la base ERP/VPS
     - Reventa   : muestra ProductoReventaCosto vigente, permite edición manual
     - Insumos   : muestra CostoInsumo más reciente
 
@@ -3973,8 +3974,7 @@ def costos_adquisicion(request):
 
     from reportes.models import ProductoReventaCosto
     from pos_bridge.models.product import PointProduct
-    from recetas.models import RecetaCostoVersion
-    from django.db.models import Max, OuterRef, Subquery
+    from django.db.models import OuterRef, Subquery
 
     # ── POST: guardar costo manual ─────────────────────────────────────────────
     if request.method == "POST" and can_manage:
@@ -4113,17 +4113,29 @@ def costos_adquisicion(request):
                 break
 
     receta_by_product: dict[int, dict] = {}
-    for rcv in (
-        RecetaCostoVersion.objects
-        .select_related("receta")
-        .filter(costo_total__gt=0)
-        .order_by("receta_id", "-creado_en")
-    ):
-        product_id = receta_product_by_id.get(rcv.receta_id)
-        if product_id and product_id not in receta_by_product:
+    linked_recipes = list(
+        Receta.objects
+        .filter(id__in=receta_product_by_id.keys(), tipo=Receta.TIPO_PRODUCTO_FINAL)
+        .select_related("rendimiento_unidad")
+        .order_by("id")
+    )
+    receta_cost_map = resolve_recipe_cost_map(
+        [receta.id for receta in linked_recipes],
+        context=CostContext.CURRENT_LIVE,
+    )
+    for receta in linked_recipes:
+        product_id = receta_product_by_id.get(receta.id)
+        if not product_id or product_id in receta_by_product:
+            continue
+        cost_resolution = receta_cost_map.get(receta.id)
+        if cost_resolution is None:
+            continue
+        if cost_resolution.total_cost > 0:
             receta_by_product[product_id] = {
-                "costo": rcv.costo_por_unidad_rendimiento or rcv.costo_total,
-                "fecha": rcv.creado_en.date() if rcv.creado_en else None,
+                "costo": cost_resolution.total_cost,
+                "fecha": hoy,
+                "fuente": cost_resolution.source,
+                "cost_context": cost_resolution.context.value,
             }
 
     # ── Build rows ─────────────────────────────────────────────────────────────
@@ -4139,13 +4151,15 @@ def costos_adquisicion(request):
             tipo = "fabricado"
             costo_vigente = receta_info["costo"]
             fecha_costo = receta_info["fecha"]
-            fuente = "RECETA"
+            fuente = receta_info["fuente"]
+            cost_context = receta_info["cost_context"]
             tiene_costo = costo_vigente > ZERO
         else:
             tipo = "reventa"
             costo_vigente = p.ultimo_costo or ZERO
             fecha_costo = p.ultima_fecha
             fuente = p.ultima_fuente or ""
+            cost_context = ""
             tiene_costo = costo_vigente > ZERO
 
         if filtro_tipo and filtro_tipo != tipo:
@@ -4196,6 +4210,7 @@ def costos_adquisicion(request):
             "costo_vigente": costo_vigente,
             "fecha_costo": fecha_costo,
             "fuente": fuente,
+            "cost_context": cost_context,
             "tiene_costo": tiene_costo,
             "precio_venta": precio_ref,
             "precio_venta_fuente": "point" if p.precio else ("ventas" if precio_promedio_ventas else None),
