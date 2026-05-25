@@ -16,6 +16,7 @@ from orquestacion.models import (
 )
 from orquestacion.services.chat_service import (
     ChatConfigurationError,
+    _build_tool_definitions,
     create_chat_conversation,
     create_user_turn,
     execute_chat_turn,
@@ -54,6 +55,17 @@ class NativeERPChatServiceTests(TestCase):
         self.assertTrue(
             ChatConversationState.objects.filter(conversation=conversation).exists()
         )
+
+    def test_openai_tool_definitions_do_not_use_forbidden_top_level_schema_keywords(self):
+        tools, tool_map = _build_tool_definitions(self.user)
+
+        self.assertTrue(tools)
+        self.assertIn("erp_get_current_input_cost", tool_map)
+        for tool in tools:
+            parameters = tool["function"]["parameters"]
+            self.assertEqual(parameters.get("type"), "object")
+            for keyword in ("anyOf", "oneOf", "allOf", "not", "enum"):
+                self.assertNotIn(keyword, parameters, tool["function"]["name"])
 
     @patch("orquestacion.services.chat_service._model_client")
     @patch("orquestacion.services.chat_service._build_tool_definitions")

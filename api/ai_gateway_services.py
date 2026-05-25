@@ -1574,12 +1574,12 @@ TOOLS: dict[str, AIToolDefinition] = {
         handler=_handle_current_input_cost,
         argument_schema={
             "type": "object",
-            "anyOf": [{"required": ["q"]}, {"required": ["insumo_id"]}],
             "properties": {
                 "q": {"type": "string", "description": "nombre, alias o codigo del insumo; ejemplo: fresa fresca"},
                 "insumo_id": {"type": "integer"},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 25, "default": 8},
             },
+            "additionalProperties": False,
         },
         result_contract={
             "status": "ok|not_found|no_cost",
