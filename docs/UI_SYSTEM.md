@@ -71,6 +71,22 @@ Orden recomendado:
 3. Graficas o comparativas clave.
 4. Tabla auditable debajo o colapsable.
 
+Reglas para graficas:
+
+- Toda grafica debe vivir en un panel con titulo, corte y fuente visible.
+- Toda grafica debe tener tabla/lista auditable cerca, visible o en `details`.
+- Si Chart.js o el canvas no cargan, la pantalla debe seguir mostrando lectura textual o tabla.
+- Usar colores del sistema, no paletas nuevas por dashboard.
+- No mostrar metricas sin corte, fuente o estado de cobertura.
+
+Reglas para tablas de dashboard:
+
+- Encabezados sticky cuando la tabla sea larga.
+- Numeros, dinero, porcentajes y piezas alineados a la derecha con numeros tabulares.
+- Scroll horizontal solo dentro del contenedor de tabla.
+- Estados con badges consistentes: `success`, `warning`, `danger`, `neutral`.
+- La tabla debe responder que dato audita el KPI o grafica cercano.
+
 ### Administracion o configuracion
 
 Orden recomendado:
