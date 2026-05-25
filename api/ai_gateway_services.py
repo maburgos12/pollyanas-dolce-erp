@@ -36,6 +36,7 @@ from core.audit import log_event
 from core.models import AuditLog
 from orquestacion.models import AgentDefinition, AgentExecutionLink, AgentSuggestion, AgentTask, OrchestrationRun
 from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointInventorySnapshot, PointProduct, PointSyncJob
+from pos_bridge.services.point_ticket_threshold_service import PointTicketThresholdService
 from pos_bridge.tasks.run_daily_sales_sync import run_daily_sales_sync
 from pos_bridge.tasks.run_inventory_sync import run_inventory_sync
 from pos_bridge.tasks.run_product_recipe_sync import run_product_recipe_sync
@@ -417,6 +418,48 @@ def _handle_ticket_amount_threshold(_user, arguments: dict[str, Any]) -> dict[st
     threshold = _parse_decimal(arguments.get("threshold_amount"), default=Decimal("500"))
     if threshold <= 0:
         threshold = Decimal("500")
+    try:
+        point_result = PointTicketThresholdService().fetch_threshold_count(
+            start_date=start_date,
+            end_date=end_date,
+            threshold_amount=threshold,
+            branch_ids=branch_ids,
+        )
+        return {
+            "status": "ok",
+            "sources": [f"Point:{point_result.source_endpoint}"],
+            "filters": {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "branch": arguments.get("branch"),
+                "threshold_amount": float(threshold),
+            },
+            "payload": {
+                "exact_count_available": True,
+                "exact_count": point_result.exact_count,
+                "source_system": "Point",
+                "source_endpoint": point_result.source_endpoint,
+                "method": "Conteo nota por nota con MONTO >= threshold_amount desde Point.",
+                "total_notes": point_result.total_notes,
+                "total_amount": _float_money(point_result.total_amount),
+                "start_date": point_result.start_date.isoformat(),
+                "end_date": point_result.end_date.isoformat(),
+                "threshold_amount": _float_money(point_result.threshold_amount),
+                "request_url": point_result.request_url,
+                "items_by_branch": [
+                    {
+                        "branch_name": row.branch_name,
+                        "exact_count": row.exact_count,
+                        "total_notes": row.total_notes,
+                        "total_amount": _float_money(row.total_amount),
+                    }
+                    for row in point_result.branch_results
+                ],
+            },
+        }
+    except Exception as exc:  # noqa: BLE001
+        point_error = f"{type(exc).__name__}: {str(exc)[:240]}"
+
     qs = PointDailyBranchIndicator.objects.filter(indicator_date__range=(start_date, end_date))
     if branch_ids:
         qs = qs.filter(branch_id__in=branch_ids)
@@ -470,9 +513,12 @@ def _handle_ticket_amount_threshold(_user, arguments: dict[str, Any]) -> dict[st
             "exact_count_available": False,
             "exact_count": None,
             "reason": (
-                "El ERP conserva ventas y tickets agregados por dia/sucursal desde Point; "
-                "no conserva el monto individual de cada ticket en la capa analitica actual."
+                "No se pudo consultar el conteo exacto nota por nota en Point. "
+                "El fallback del ERP conserva ventas y tickets agregados por dia/sucursal; "
+                "no conserva el monto individual de cada ticket en la capa analitica."
             ),
+            "point_exact_query_available": False,
+            "point_exact_query_error": point_error,
             "do_not_infer_zero": True,
             "total_sales": _float_money(total_sales),
             "total_tickets": total_tickets,
