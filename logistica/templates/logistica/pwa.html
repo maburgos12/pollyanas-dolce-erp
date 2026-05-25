@@ -1379,6 +1379,15 @@
         const estado = repartidor.licencia_estado || "sin_datos";
         const dias = repartidor.licencia_dias_para_vencer;
         const expiracion = repartidor.licencia_expiracion || "";
+        if (state.perfil?.username === "marcortez.alvarez.vea" && estado === "sin_datos") {
+          return {
+            estado: "excepcion_temporal",
+            tone: "warning",
+            label: "Licencia pendiente",
+            mensaje: "Acceso autorizado por única ocasión. Entrega tu licencia a administración para mantener habilitada la apertura de turnos.",
+            bloquea: false
+          };
+        }
         if (estado === "vigente") {
           return { estado, tone: "ok", label: "Licencia vigente", mensaje: expiracion ? `Licencia vigente hasta ${expiracion}.` : "Licencia vigente.", bloquea: false };
         }
