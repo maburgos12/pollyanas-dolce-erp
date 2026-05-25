@@ -331,7 +331,7 @@ a.btn:active,
   width: 100%;
   max-width: 1720px;
   margin-inline: auto;
-  padding: clamp(18px, 2.2vw, 32px) clamp(18px, 2.8vw, 36px) clamp(28px, 3vw, 44px);
+  padding-block: clamp(18px, 2.2vw, 32px) clamp(28px, 3vw, 44px);
   box-sizing: border-box;
 }
 
@@ -626,7 +626,7 @@ a.btn:active,
   }
 
   .pd-page-gutters {
-    padding: 16px 14px 28px;
+    padding-block: 16px 28px;
   }
 
   .pd-action-row,
