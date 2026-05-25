@@ -177,6 +177,65 @@ class ApprovePointAddonsSafeCommandTests(TestCase):
         self.assertEqual(rule.status, RecetaAgrupacionAddon.STATUS_APPROVED)
         self.assertTrue(any(item["addon_codigo_point"] == "SFRESAG" for item in payload["approved"]))
 
+    def test_command_materializes_curated_zero_revenue_topping_recipe(self):
+        unit_g = UnidadMedida.objects.create(
+            codigo="g",
+            nombre="Gramo",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1"),
+        )
+        base_medium = Receta.objects.create(
+            nombre="Pastel de Fresas Con Crema Mediano",
+            codigo_point="0100",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido=f"hash-{uuid4()}",
+        )
+        LineaReceta.objects.create(
+            receta=base_medium,
+            posicion=1,
+            insumo=self.base_input,
+            insumo_texto="Base",
+            cantidad=Decimal("1"),
+            unidad=self.unit_pza,
+            unidad_texto="pza",
+            costo_unitario_snapshot=Decimal("20"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+        for name, unit in [
+            ("ETIQUETA G", self.unit_pza),
+            ("Etiqueta Rectangular Aviso", self.unit_pza),
+            ("Fresa Fresca", unit_g),
+        ]:
+            Insumo.objects.create(nombre=name, unidad_base=unit, activo=True)
+        PointProduct.objects.create(
+            external_id="923",
+            sku="SFRESAPM",
+            name="TOPPING FRESA M",
+            category="Pastel Mediano",
+        )
+
+        out = StringIO()
+        call_command("approve_point_addons_safe", stdout=out)
+        payload = json.loads(out.getvalue())
+
+        addon = Receta.objects.get(codigo_point="SFRESAPM")
+        self.assertEqual(addon.nombre, "TOPPING FRESA M")
+        self.assertFalse(addon.pasa_modulo_produccion)
+        self.assertEqual(addon.modo_costeo, Receta.MODO_COSTEO_SERVICIO)
+        self.assertTrue(any(item["addon_codigo_point"] == "SFRESAPM" for item in payload["approved"]))
+        rule = RecetaAgrupacionAddon.objects.get(base_receta=base_medium, addon_codigo_point="SFRESAPM")
+        self.assertEqual(rule.addon_receta, addon)
+        self.assertEqual(rule.status, RecetaAgrupacionAddon.STATUS_APPROVED)
+        self.assertTrue(
+            LineaReceta.objects.filter(
+                receta=addon,
+                insumo__nombre="Fresa Fresca",
+                cantidad=Decimal("200"),
+                unidad=unit_g,
+            ).exists()
+        )
+
     def test_command_keeps_brownie_as_complement_not_history(self):
         brownie_input = Insumo.objects.create(nombre="Brownie", unidad_base=self.unit_pza, activo=True)
         brownie_grande = Receta.objects.create(
