@@ -1332,6 +1332,29 @@ class UsersAccessTests(TestCase):
         response = self.client.get(reverse("users_access"))
         self.assertEqual(response.status_code, 403)
 
+    def test_staff_or_superuser_sees_django_admin_shortcut(self):
+        user_model = get_user_model()
+        superuser = user_model.objects.create_superuser(
+            username="super_admin_link",
+            email="super_admin_link@example.com",
+            password="test12345",
+        )
+        self.client.force_login(superuser)
+
+        response = self.client.get(reverse("users_access"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'href="/admin/"')
+        self.assertContains(response, 'aria-label="Panel admin"')
+
+    def test_erp_admin_without_staff_does_not_see_django_admin_shortcut(self):
+        self.client.force_login(self.admin)
+
+        response = self.client.get(reverse("users_access"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'href="/admin/"')
+
     def test_lock_compras_blocks_access_even_with_compras_role(self):
         self.assertTrue(can_view_compras(self.compras))
         profile, _ = UserProfile.objects.get_or_create(user=self.compras)
