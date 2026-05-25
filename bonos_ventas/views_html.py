@@ -16,8 +16,8 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 
 from core.access import can_manage_submodule, can_view_module, can_view_submodule
 from core.models import Sucursal
-from rrhh.models import Empleado
 
+from .empleados import empleados_elegibles_bonos_ventas
 from .models import BonoVentasEmpleado, CATEGORIAS_PRODUCTO, ConfigBonoVentasPeriodo, VentaCategoriaSucursal
 from .services import sync_ventas_categorias
 
@@ -60,7 +60,7 @@ def _recalcular_periodo(periodo: ConfigBonoVentasPeriodo) -> int:
 
 
 def _inicializar_bonos(periodo: ConfigBonoVentasPeriodo) -> dict[str, object]:
-    empleados = Empleado.objects.filter(activo=True, area="VENTAS").order_by("nombre")
+    empleados = empleados_elegibles_bonos_ventas()
     creados = 0
     sin_sucursal = []
     for empleado in empleados:
