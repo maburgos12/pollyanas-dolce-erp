@@ -7,8 +7,8 @@
 
 {% block extra_css %}
 <style>
-  .bonos-shell{max-width:1320px;margin:0 auto;padding:0 .75rem 2rem;display:grid;gap:1rem}
-  .bonos-hero{background:#fff;border:1px solid #ede6f0;border-radius:12px;padding:1.15rem 1.25rem;box-shadow:0 1px 3px rgba(0,0,0,.06);display:grid;grid-template-columns:minmax(0,1.5fr) minmax(300px,.75fr);gap:1rem;align-items:end}
+  .bonos-shell{width:min(100%,1720px);margin:0 auto;padding:0 0 2rem;display:grid;gap:clamp(.9rem,1.4vw,1.25rem)}
+  .bonos-hero{background:#fff;border:1px solid #ede6f0;border-radius:10px;padding:1.15rem 1.25rem;box-shadow:0 1px 3px rgba(0,0,0,.06);display:grid;grid-template-columns:minmax(0,1.5fr) minmax(300px,.75fr);gap:1rem;align-items:end}
   .bonos-kicker{font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#8b2252;font-weight:800}
   .bonos-title{font-size:1.55rem;font-weight:900;margin:.15rem 0;color:#1c1520}
   .bonos-copy{color:#6b5f70;max-width:62rem;margin:0}
@@ -21,7 +21,7 @@
   .bonos-field label{font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#6b5f70}
   .bonos-field input,.bonos-field textarea,.bonos-field select{width:100%;border:1px solid #e7ddeb;border-radius:8px;padding:.58rem .65rem;font:inherit;background:#fbf8fb}
   .kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem}
-  .kpi-card,.bonos-card{background:#fff;border:1px solid #ede6f0;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+  .kpi-card,.bonos-card{background:#fff;border:1px solid #ede6f0;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
   .kpi-card{padding:.95rem 1rem}
   .kpi-label{font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:#6b5f70;font-weight:800}
   .kpi-value{font-size:1.45rem;font-weight:900;color:#1c1520;margin-top:.15rem}
