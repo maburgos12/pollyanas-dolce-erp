@@ -24,6 +24,10 @@ from pos_bridge.models import (
     PointProduct,
     PointSyncJob,
 )
+from pos_bridge.services.point_ticket_threshold_service import (
+    PointTicketThresholdBranchResult,
+    PointTicketThresholdResult,
+)
 from recetas.models import Receta, RecetaCostoVersion
 from reportes.models import FactVentaDiaria
 
@@ -330,11 +334,13 @@ class AIGatewayApiTests(APITestCase):
         )
 
         self.client.force_authenticate(self.user_lectura)
-        response = self.client.post(
-            self._invoke_url("erp.get_ticket_amount_threshold"),
-            {"arguments": {"start_date": "2026-04-01", "end_date": "2026-04-30", "threshold_amount": 500}},
-            format="json",
-        )
+        with patch("api.ai_gateway_services.PointTicketThresholdService") as service_class:
+            service_class.return_value.fetch_threshold_count.side_effect = RuntimeError("Point no disponible")
+            response = self.client.post(
+                self._invoke_url("erp.get_ticket_amount_threshold"),
+                {"arguments": {"start_date": "2026-04-01", "end_date": "2026-04-30", "threshold_amount": 500}},
+                format="json",
+            )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         result = response.data["result"]
@@ -347,6 +353,47 @@ class AIGatewayApiTests(APITestCase):
         self.assertEqual(payload["total_tickets"], 5)
         self.assertEqual(payload["avg_ticket"], 400.0)
         self.assertEqual(payload["upper_bound_if_all_qualifying_tickets_were_at_least_threshold"], 4)
+        self.assertEqual(payload["point_exact_query_available"], False)
+
+    def test_ticket_amount_threshold_uses_point_notes_for_exact_count(self):
+        point_result = PointTicketThresholdResult(
+            start_date=timezone.datetime(2026, 4, 1).date(),
+            end_date=timezone.datetime(2026, 4, 30).date(),
+            threshold_amount=Decimal("500"),
+            exact_count=2634,
+            total_notes=12498,
+            total_amount=Decimal("3526386.85"),
+            request_url="https://app.pointmeup.com/Report/NotasByPlaza?fi=...",
+            source_endpoint="/Report/NotasByPlaza",
+            branch_results=[
+                PointTicketThresholdBranchResult(
+                    branch_name="Matriz",
+                    exact_count=900,
+                    total_notes=3802,
+                    total_amount=Decimal("1148049.91"),
+                )
+            ],
+        )
+
+        self.client.force_authenticate(self.user_lectura)
+        with patch("api.ai_gateway_services.PointTicketThresholdService") as service_class:
+            service_class.return_value.fetch_threshold_count.return_value = point_result
+            response = self.client.post(
+                self._invoke_url("erp.get_ticket_amount_threshold"),
+                {"arguments": {"start_date": "2026-04-01", "end_date": "2026-04-30", "threshold_amount": 500}},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        result = response.data["result"]
+        payload = result["payload"]
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["sources"], ["Point:/Report/NotasByPlaza"])
+        self.assertTrue(payload["exact_count_available"])
+        self.assertEqual(payload["exact_count"], 2634)
+        self.assertEqual(payload["total_notes"], 12498)
+        self.assertEqual(payload["items_by_branch"][0]["branch_name"], "Matriz")
+        service_class.return_value.fetch_threshold_count.assert_called_once()
 
     def test_invoke_promotion_profitability_returns_financial_decision_table(self):
         today = timezone.localdate()
