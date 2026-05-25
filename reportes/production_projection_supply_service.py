@@ -220,6 +220,7 @@ def build_projection_supply_context(
             line_cache[recipe_id] = list(
                 LineaReceta.objects.filter(receta_id=recipe_id, insumo_id__isnull=False)
                 .exclude(tipo_linea=LineaReceta.TIPO_SUBSECCION)
+                .exclude(match_status=LineaReceta.STATUS_REJECTED)
                 .select_related("insumo", "insumo__unidad_base", "unidad", "receta")
                 .order_by("receta_id", "posicion", "id")
             )
