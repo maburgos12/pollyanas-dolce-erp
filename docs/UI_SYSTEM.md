@@ -137,6 +137,12 @@ Usar componentes compartidos antes de crear HTML nuevo:
 
 Si un modulo necesita un patron que se repetira, crear componente compartido.
 
+Regla de encabezado superior: pantallas operativas, dashboards internos y
+modulos nuevos deben iniciar con `.pd-page-head`, `.pd-eyebrow`,
+`.pd-page-title`, `.pd-page-copy` y `.pd-action-row`. No usar heroes grandes,
+fondos oscuros, gradientes, bloques full-width tipo landing ni encabezados por
+modulo que compitan con el shell del ERP.
+
 ## Reglas Obligatorias
 
 1. No agregar `style=""` en templates nuevos, salvo correos, print/PDF o excepcion documentada.

@@ -17,36 +17,36 @@
     box-shadow: 0 14px 28px rgba(103, 69, 57, 0.08);
   }
   .plan-dg-hero {
-    padding: 24px 26px;
-    background:
-      radial-gradient(circle at top left, rgba(214, 90, 113, 0.16), transparent 30%),
-      radial-gradient(circle at top right, rgba(198, 163, 96, 0.18), transparent 28%),
-      linear-gradient(135deg, #fffaf7 0%, #fff 50%, #fff7f2 100%);
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
   }
   .plan-dg-hero-top {
     display: grid;
-    grid-template-columns: 1.5fr 1fr;
-    gap: 18px;
-    align-items: start;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--pd-space-4);
+    align-items: end;
   }
   .plan-dg-eyebrow {
-    font-size: 0.76rem;
-    letter-spacing: 0.18em;
+    margin: 0 0 var(--pd-space-1);
+    color: var(--pd-wine);
+    font-size: 0.72rem;
+    font-weight: 900;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: #9c6c58;
-    margin-bottom: 10px;
   }
   .plan-dg-title {
-    margin: 0 0 8px;
-    font-family: "Playfair Display", serif;
-    font-size: 1.9rem;
+    margin: 0;
+    color: var(--pd-ink);
+    font-size: clamp(1.35rem, 1.5vw, 1.8rem);
     line-height: 1.08;
-    color: #3e261d;
   }
   .plan-dg-subtitle {
-    margin: 0;
-    color: #715d54;
-    max-width: 62ch;
+    max-width: 72ch;
+    margin: var(--pd-space-1) 0 0;
+    color: var(--pd-muted);
   }
   .plan-dg-toolbar {
     display: flex;
@@ -58,7 +58,11 @@
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
     gap: 10px;
-    margin-top: 16px;
+    margin-top: var(--pd-space-4);
+    padding: 14px;
+    border: 1px solid var(--pd-border);
+    border-radius: var(--pd-radius-lg);
+    background: var(--pd-surface);
   }
   .plan-dg-status-strip {
     display: grid;
@@ -183,7 +187,7 @@
 {% block content %}
 <div class="module-shell plan-dg-shell">
   <section class="plan-dg-hero">
-    <div class="plan-dg-hero-top">
+    <div class="pd-page-head plan-dg-hero-top">
       <div>
         <div class="plan-dg-eyebrow">Tablero DG independiente</div>
         <h1 class="plan-dg-title">Tablero DG independiente</h1>

@@ -6,7 +6,7 @@
 {% block content %}
 <style>
   .costeo-shell { display: grid; gap: 18px; }
-  .costeo-hero { display: grid; gap: 16px; grid-template-columns: 1.8fr 1fr; align-items: start; }
+  .costeo-hero { margin-bottom: 0; }
   .costeo-kpis { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .costeo-kpi { padding: 18px; border: 1px solid rgba(131, 24, 67, 0.08); border-radius: 18px; background: #fff; }
   .costeo-kpi .eyebrow { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #7b6871; margin-bottom: 10px; }
@@ -43,11 +43,11 @@
 </style>
 
 <div class="module-shell costeo-shell">
-  <section class="card costeo-hero">
+  <header class="pd-page-head costeo-hero">
     <div>
-      <div class="eyebrow text-uppercase text-muted" style="letter-spacing:.12em;">Dirección General · Costeo</div>
-      <h2 style="margin:0 0 8px;">Variación semanal de costo de producción</h2>
-      <p class="text-muted mb-0">
+      <div class="pd-eyebrow">Dirección General · Costeo</div>
+      <h1 class="pd-page-title">Variación semanal de costo de producción</h1>
+      <p class="pd-page-copy">
         Historial auditable de costo por receta y por agrupación base + add-on. La lectura principal es materia prima;
         mano de obra e indirectos siguen pendientes de capturar.
       </p>
@@ -58,7 +58,7 @@
         <a class="scope-tab {% if scope == 'todo' %}active{% endif %}" href="?scope=todo{% if selected_week %}&week_start={{ selected_week|date:'Y-m-d' }}{% endif %}">Todo</a>
       </div>
     </div>
-    <div class="d-flex gap-2 flex-wrap justify-content-end">
+    <div class="pd-action-row">
       <a class="btn btn-secondary" href="{% url 'recetas:recetas_list' %}">Abrir recetas</a>
       <a class="btn btn-secondary" href="{% url 'recetas:drivers_costeo' %}">Drivers de costeo</a>
       <form method="post" action="{% url 'recetas:costeo_dashboard_snapshot' %}">
@@ -67,7 +67,7 @@
         <button class="btn btn-primary" type="submit">Actualizar corte semanal</button>
       </form>
     </div>
-  </section>
+  </header>
 
   <section class="card costeo-panel">
     <form method="get" class="costeo-filters">
