@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
@@ -10,6 +11,10 @@ from recetas.models import LineaReceta, Receta, RecetaPresentacionDerivada
 from recetas.services.costing_contract import CostContext, resolve_line_cost
 from recetas.utils.costeo_snapshot import (
     resolve_preparation_recipe_for_insumo,
+)
+from recetas.utils.commercial_composition import (
+    build_commercial_recipe_lookup_context,
+    resolve_commercial_recipe,
 )
 from reportes.forecast_service import build_daily_forecast_context
 
@@ -137,6 +142,10 @@ def _forecast_row_branch_name(row: dict[str, object]) -> str:
     return str(row.get("branch_name") or row.get("sucursal_nombre") or "")
 
 
+def _forecast_row_branch_key(row: dict[str, object]) -> tuple[int, str]:
+    return (_forecast_row_branch_id(row), _forecast_row_branch_code(row).strip().upper())
+
+
 def _scenario_qty_key(escenario: str) -> str:
     scenario = (escenario or "base").strip().lower()
     if scenario == "bajo":
@@ -229,19 +238,6 @@ def build_projection_supply_context(
     for recipe_id in recipe_ids:
         _load_recipe_lines(recipe_id)
 
-    # Precargar reglas de presentaciones derivadas (rebanadas) para los productos del forecast
-    derivada_map: dict[int, tuple[int, Decimal]] = {}
-    for row in RecetaPresentacionDerivada.objects.filter(
-        receta_derivada_id__in=recipe_ids, activo=True
-    ).values("receta_derivada_id", "receta_padre_id", "unidades_por_padre"):
-        child_id = int(row["receta_derivada_id"])
-        parent_id = int(row["receta_padre_id"])
-        units = _to_decimal(row["unidades_por_padre"])
-        if units > ZERO:
-            derivada_map[child_id] = (parent_id, units)
-    for parent_id in {pid for pid, _ in derivada_map.values()}:
-        _load_recipe_lines(parent_id)
-
     product_rows: list[dict[str, object]] = []
     purchase_rows: dict[tuple[int, str], dict[str, object]] = {}
     prepared_rows: dict[tuple[int, str], dict[str, object]] = {}
@@ -268,6 +264,64 @@ def build_projection_supply_context(
                 "product_name": product_name,
             }
         )
+
+    commercial_context = build_commercial_recipe_lookup_context(recipe_ids)
+    branch_recipe_qty: dict[tuple[tuple[int, str], int], Decimal] = defaultdict(lambda: ZERO)
+    for row in forecast_rows:
+        recipe_id = _forecast_row_recipe_id(row)
+        if recipe_id:
+            branch_recipe_qty[(_forecast_row_branch_key(row), recipe_id)] += _to_decimal(row.get("forecast_qty"))
+
+    component_plan_by_row: dict[int, list[tuple[Receta, Decimal, str]]] = {}
+    component_recipe_ids: set[int] = set()
+
+    for index, row in enumerate(forecast_rows):
+        recipe_id = _forecast_row_recipe_id(row)
+        projection_units = _quantize_units(_to_decimal(row.get("forecast_qty")))
+        if not recipe_id or projection_units <= ZERO:
+            continue
+        receta = commercial_context.recipes_by_id.get(recipe_id)
+        if receta is None:
+            add_issue(
+                code="RECETA_NO_ENCONTRADA",
+                severity="error",
+                recipe_name=_forecast_row_recipe_name(row),
+                insumo=None,
+                detail="La receta proyectada no existe en el catálogo del VPS; no se explotó.",
+                product_name=_forecast_row_recipe_name(row),
+            )
+            continue
+
+        resolution = resolve_commercial_recipe(receta, context=commercial_context)
+        rule = resolution.grouped_rule
+        component_plan: list[tuple[Receta, Decimal, str]] = []
+        if rule is not None and rule.addon_receta_id and resolution.resolution_kind == "BASE_PLUS_ADDON":
+            base_qty = branch_recipe_qty.get((_forecast_row_branch_key(row), int(rule.base_receta_id)), ZERO)
+            base_deficit = projection_units - _quantize_units(base_qty)
+            if base_deficit > ZERO:
+                component_plan.append((rule.base_receta, base_deficit, "BASE_POR_COMPLEMENTO"))
+            component_plan.append((rule.addon_receta, projection_units, "COMPLEMENTO"))
+        else:
+            for component_receta in resolution.component_recetas:
+                component_plan.append((component_receta, projection_units, resolution.resolution_kind))
+
+        component_plan_by_row[index] = component_plan
+        for component_receta, _, _ in component_plan:
+            component_recipe_ids.add(int(component_receta.id))
+            _load_recipe_lines(int(component_receta.id))
+
+    # Precargar reglas de presentaciones derivadas (rebanadas) para los productos/componentes a explotar.
+    derivada_map: dict[int, tuple[int, Decimal]] = {}
+    for row in RecetaPresentacionDerivada.objects.filter(
+        receta_derivada_id__in=component_recipe_ids, activo=True
+    ).values("receta_derivada_id", "receta_padre_id", "unidades_por_padre"):
+        child_id = int(row["receta_derivada_id"])
+        parent_id = int(row["receta_padre_id"])
+        units = _to_decimal(row["unidades_por_padre"])
+        if units > ZERO:
+            derivada_map[child_id] = (parent_id, units)
+    for parent_id in {pid for pid, _ in derivada_map.values()}:
+        _load_recipe_lines(parent_id)
 
     def add_purchase_row(
         *,
@@ -441,10 +495,17 @@ def build_projection_supply_context(
         path: list[str],
         active_recipe_ids: tuple[int, ...],
         level: int,
+        skip_nested_packaging_ids: frozenset[int] = frozenset(),
     ) -> dict[str, object] | None:
         if quantity <= ZERO or line.insumo is None:
             return None
         insumo = line.insumo
+        if (
+            level > 1
+            and insumo.tipo_item == Insumo.TIPO_EMPAQUE
+            and int(insumo.id) in skip_nested_packaging_ids
+        ):
+            return None
         line_path = [*path, insumo.nombre]
         path_text = " > ".join(filter(None, line_path))
         if insumo.tipo_item != Insumo.TIPO_INTERNO:
@@ -546,10 +607,11 @@ def build_projection_supply_context(
                 path=line_path,
                 active_recipe_ids=(*active_recipe_ids, prep_id),
                 level=level + 1,
+                skip_nested_packaging_ids=skip_nested_packaging_ids,
             )
         return prepared_item
 
-    for row in forecast_rows:
+    for index, row in enumerate(forecast_rows):
         recipe_id = _forecast_row_recipe_id(row)
         if not recipe_id:
             continue
@@ -564,36 +626,64 @@ def build_projection_supply_context(
             "forecast_qty": projection_units,
             "buffer_units": buffer_units,
             "gross_basis_qty": projection_units,
-            "notes": "Requerimiento bruto por proyección. No descuenta stock actual.",
+            "notes": "Requerimiento bruto por proyección. No descuenta stock actual. Aplica composición comercial base + complemento del VPS.",
             "items": [],
         }
-        bom_lines_to_explode: list[tuple[LineaReceta, Decimal]] = []
+        bom_lines_to_explode: list[tuple[LineaReceta, Decimal, str, str, frozenset[int], int]] = []
+        component_plan = component_plan_by_row.get(index, [])
 
-        # Líneas directas del producto (empaque, componentes propios)
-        for bom_line in _load_recipe_lines(recipe_id):
-            gross_required = projection_units * _to_decimal(bom_line.cantidad)
-            if gross_required > ZERO:
-                bom_lines_to_explode.append((bom_line, gross_required))
+        for component_receta, component_units, component_kind in component_plan:
+            component_id = int(component_receta.id)
+            direct_lines = _load_recipe_lines(component_id)
+            top_level_packaging_ids = frozenset(
+                int(line.insumo_id)
+                for line in direct_lines
+                if line.insumo_id and line.insumo.tipo_item == Insumo.TIPO_EMPAQUE
+            )
 
-        # Si es presentación derivada (rebanada), agregar todas las líneas del padre escaladas.
-        # El empaque del padre (Domo pastel, AL-2923, etc.) SÍ se incluye fraccionado: cuando un
-        # pastel/pay se rebana, el empaque del formato entero ya fue usado y se descarta, por lo que
-        # su costo y requerimiento se traslada proporcionalmente a cada rebanada.
-        if recipe_id in derivada_map:
-            parent_id, units_per_parent = derivada_map[recipe_id]
-            for parent_line in _load_recipe_lines(parent_id):
-                gross_required = projection_units * _to_decimal(parent_line.cantidad) / units_per_parent
+            # Líneas directas del componente comercial (base, complemento o receta directa).
+            for bom_line in direct_lines:
+                gross_required = component_units * _to_decimal(bom_line.cantidad)
                 if gross_required > ZERO:
-                    bom_lines_to_explode.append((parent_line, gross_required))
+                    bom_lines_to_explode.append(
+                        (
+                            bom_line,
+                            gross_required,
+                            component_receta.nombre,
+                            component_kind,
+                            top_level_packaging_ids,
+                            component_id,
+                        )
+                    )
 
-        for bom_line, gross_required in bom_lines_to_explode:
+            # Si el componente es presentación derivada (rebanada), agregar todas las líneas del padre escaladas.
+            # El empaque del padre (Domo pastel, AL-2923, etc.) se incluye fraccionado para que almacén vea
+            # el consumo real requerido por rebanar piezas enteras.
+            if component_id in derivada_map:
+                parent_id, units_per_parent = derivada_map[component_id]
+                for parent_line in _load_recipe_lines(parent_id):
+                    gross_required = component_units * _to_decimal(parent_line.cantidad) / units_per_parent
+                    if gross_required > ZERO:
+                        bom_lines_to_explode.append(
+                            (
+                                parent_line,
+                                gross_required,
+                                component_receta.nombre,
+                                f"{component_kind}_PRESENTACION_DERIVADA",
+                                top_level_packaging_ids,
+                                component_id,
+                            )
+                        )
+
+        for bom_line, gross_required, component_name, component_kind, skip_nested_packaging_ids, component_id in bom_lines_to_explode:
             item = explode_line(
                 line=bom_line,
                 quantity=gross_required,
                 product_row=product_row,
-                path=[str(product_row["recipe_name"])],
-                active_recipe_ids=(recipe_id,),
+                path=[str(product_row["recipe_name"]), component_name, component_kind],
+                active_recipe_ids=(recipe_id, component_id),
                 level=1,
+                skip_nested_packaging_ids=skip_nested_packaging_ids,
             )
             if item:
                 product_row["items"].append(item)

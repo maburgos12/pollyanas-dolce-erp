@@ -15,7 +15,7 @@ from inventario.models import AlmacenSyncRun, ExistenciaInsumo
 from inventario.stock_trace import TRACE_MANUAL_SYNC, build_stock_trace
 from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
 from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob
-from recetas.models import LineaReceta, Receta, RecetaCostoVersion
+from recetas.models import LineaReceta, Receta, RecetaAgrupacionAddon, RecetaCostoVersion
 from recetas.utils.costeo_snapshot import resolve_line_snapshot_cost, resolve_preparation_recipe_for_insumo
 from reportes.auto_production_service import (
     approve_production_order,
@@ -535,6 +535,278 @@ class ProjectionSupplyContextTests(TestCase):
             insumo_row["required_gross_qty"],
             (product_row["forecast_qty"] * Decimal("1.5")).quantize(Decimal("0.001")),
         )
+
+    def test_projection_supply_expands_commercial_addon_to_base_when_base_is_absent(self):
+        base_insumo = Insumo.objects.create(
+            nombre="Base Pay Proyección",
+            nombre_normalizado="base pay proyeccion",
+            unidad_base=self.unit_kg,
+            proveedor_principal=self.provider,
+        )
+        topping_insumo = Insumo.objects.create(
+            nombre="Topping Fresa Proyección",
+            nombre_normalizado="topping fresa proyeccion",
+            unidad_base=self.unit_kg,
+            proveedor_principal=self.provider,
+        )
+        base_recipe = Receta.objects.create(
+            nombre="Pay Base Proyección",
+            codigo_point="PAYBASEPRJ",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-pay-base-projection",
+        )
+        addon_recipe = Receta.objects.create(
+            nombre="Sabor Fresa Proyección",
+            codigo_point="SABFPRJ",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-sabor-fresa-projection",
+        )
+        LineaReceta.objects.create(
+            receta=base_recipe,
+            posicion=1,
+            insumo=base_insumo,
+            insumo_texto=base_insumo.nombre,
+            cantidad=Decimal("2"),
+            unidad=self.unit_kg,
+            unidad_texto="kg",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        LineaReceta.objects.create(
+            receta=addon_recipe,
+            posicion=1,
+            insumo=topping_insumo,
+            insumo_texto=topping_insumo.nombre,
+            cantidad=Decimal("0.25"),
+            unidad=self.unit_kg,
+            unidad_texto="kg",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        RecetaAgrupacionAddon.objects.create(
+            base_receta=base_recipe,
+            addon_receta=addon_recipe,
+            addon_codigo_point=addon_recipe.codigo_point,
+            addon_nombre_point=addon_recipe.nombre,
+            status=RecetaAgrupacionAddon.STATUS_APPROVED,
+            activo=True,
+        )
+
+        context = build_projection_supply_context(
+            target_date=self.target_date,
+            forecast_context={
+                "target_label": "Forecast addon sin base",
+                "summary": {"forecast_units": Decimal("4")},
+                "rows": [
+                    {
+                        "branch_id": self.branch.id,
+                        "branch_code": self.branch.codigo,
+                        "branch_name": self.branch.nombre,
+                        "recipe_id": addon_recipe.id,
+                        "recipe_name": addon_recipe.nombre,
+                        "forecast_qty": Decimal("4"),
+                        "buffer_units": Decimal("0"),
+                    }
+                ],
+            },
+        )
+
+        purchase_by_name = {row["insumo_nombre"]: row for row in context["insumos"]}
+        self.assertEqual(purchase_by_name["Base Pay Proyección"]["required_gross_qty"], Decimal("8.000"))
+        self.assertEqual(purchase_by_name["Topping Fresa Proyección"]["required_gross_qty"], Decimal("1.000"))
+
+    def test_projection_supply_uses_only_addon_lines_when_base_row_already_covers_commercial_base(self):
+        base_insumo = Insumo.objects.create(
+            nombre="Base Grande Proyección",
+            nombre_normalizado="base grande proyeccion",
+            unidad_base=self.unit_kg,
+            proveedor_principal=self.provider,
+        )
+        topping_insumo = Insumo.objects.create(
+            nombre="Topping Grande Proyección",
+            nombre_normalizado="topping grande proyeccion",
+            unidad_base=self.unit_kg,
+            proveedor_principal=self.provider,
+        )
+        base_recipe = Receta.objects.create(
+            nombre="Pastel Base Grande Proyección",
+            codigo_point="PBASEGPRJ",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-pastel-base-grande-projection",
+        )
+        addon_recipe = Receta.objects.create(
+            nombre="Topping Grande Proyección",
+            codigo_point="TOPGPRJ",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-topping-grande-projection",
+        )
+        LineaReceta.objects.create(
+            receta=base_recipe,
+            posicion=1,
+            insumo=base_insumo,
+            insumo_texto=base_insumo.nombre,
+            cantidad=Decimal("3"),
+            unidad=self.unit_kg,
+            unidad_texto="kg",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        LineaReceta.objects.create(
+            receta=addon_recipe,
+            posicion=1,
+            insumo=topping_insumo,
+            insumo_texto=topping_insumo.nombre,
+            cantidad=Decimal("0.5"),
+            unidad=self.unit_kg,
+            unidad_texto="kg",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        RecetaAgrupacionAddon.objects.create(
+            base_receta=base_recipe,
+            addon_receta=addon_recipe,
+            addon_codigo_point=addon_recipe.codigo_point,
+            addon_nombre_point=addon_recipe.nombre,
+            status=RecetaAgrupacionAddon.STATUS_APPROVED,
+            activo=True,
+        )
+
+        context = build_projection_supply_context(
+            target_date=self.target_date,
+            forecast_context={
+                "target_label": "Forecast base mas addon",
+                "summary": {"forecast_units": Decimal("14")},
+                "rows": [
+                    {
+                        "branch_id": self.branch.id,
+                        "branch_code": self.branch.codigo,
+                        "branch_name": self.branch.nombre,
+                        "recipe_id": base_recipe.id,
+                        "recipe_name": base_recipe.nombre,
+                        "forecast_qty": Decimal("10"),
+                        "buffer_units": Decimal("0"),
+                    },
+                    {
+                        "branch_id": self.branch.id,
+                        "branch_code": self.branch.codigo,
+                        "branch_name": self.branch.nombre,
+                        "recipe_id": addon_recipe.id,
+                        "recipe_name": addon_recipe.nombre,
+                        "forecast_qty": Decimal("4"),
+                        "buffer_units": Decimal("0"),
+                    },
+                ],
+            },
+        )
+
+        purchase_by_name = {row["insumo_nombre"]: row for row in context["insumos"]}
+        self.assertEqual(purchase_by_name["Base Grande Proyección"]["required_gross_qty"], Decimal("30.000"))
+        self.assertEqual(purchase_by_name["Topping Grande Proyección"]["required_gross_qty"], Decimal("2.000"))
+
+    def test_projection_supply_does_not_double_count_packaging_repeated_inside_internal_preparation(self):
+        unit_pza = UnidadMedida.objects.create(codigo="pza-prj-pack", nombre="Pieza empaque", tipo=UnidadMedida.TIPO_PIEZA)
+        tapa = Insumo.objects.create(
+            nombre="Tapa Individual Proyección",
+            nombre_normalizado="tapa individual proyeccion",
+            unidad_base=unit_pza,
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            proveedor_principal=self.provider,
+        )
+        molde = Insumo.objects.create(
+            nombre="Molde Individual Proyección",
+            nombre_normalizado="molde individual proyeccion",
+            unidad_base=unit_pza,
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            proveedor_principal=self.provider,
+        )
+        harina_pan = Insumo.objects.create(
+            nombre="Harina Pan Individual Proyección",
+            nombre_normalizado="harina pan individual proyeccion",
+            unidad_base=self.unit_kg,
+            proveedor_principal=self.provider,
+        )
+        pan_recipe = Receta.objects.create(
+            nombre="Pan Individual Proyección",
+            codigo_point="PANINDPRJ",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("1"),
+            rendimiento_unidad=unit_pza,
+            hash_contenido="hash-pan-individual-projection",
+        )
+        pan_input = Insumo.objects.create(
+            codigo=f"DERIVADO:RECETA:{pan_recipe.id}:PREPARACION",
+            nombre=pan_recipe.nombre,
+            nombre_normalizado="pan individual proyeccion",
+            unidad_base=unit_pza,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        final_recipe = Receta.objects.create(
+            nombre="Pastel Individual Proyección",
+            codigo_point="PINDPRJ",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-pastel-individual-projection",
+        )
+        for posicion, insumo in enumerate([tapa, molde], start=1):
+            LineaReceta.objects.create(
+                receta=final_recipe,
+                posicion=posicion,
+                insumo=insumo,
+                insumo_texto=insumo.nombre,
+                cantidad=Decimal("1"),
+                unidad=unit_pza,
+                unidad_texto="pza",
+                match_status=LineaReceta.STATUS_AUTO,
+            )
+            LineaReceta.objects.create(
+                receta=pan_recipe,
+                posicion=posicion,
+                insumo=insumo,
+                insumo_texto=insumo.nombre,
+                cantidad=Decimal("1"),
+                unidad=unit_pza,
+                unidad_texto="pza",
+                match_status=LineaReceta.STATUS_AUTO,
+            )
+        LineaReceta.objects.create(
+            receta=pan_recipe,
+            posicion=3,
+            insumo=harina_pan,
+            insumo_texto=harina_pan.nombre,
+            cantidad=Decimal("0.2"),
+            unidad=self.unit_kg,
+            unidad_texto="kg",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        LineaReceta.objects.create(
+            receta=final_recipe,
+            posicion=3,
+            insumo=pan_input,
+            insumo_texto=pan_input.nombre,
+            cantidad=Decimal("1"),
+            unidad=unit_pza,
+            unidad_texto="pza",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+
+        context = build_projection_supply_context(
+            target_date=self.target_date,
+            forecast_context={
+                "target_label": "Forecast empaque duplicado",
+                "summary": {"forecast_units": Decimal("200")},
+                "rows": [
+                    {
+                        "branch_id": self.branch.id,
+                        "branch_code": self.branch.codigo,
+                        "branch_name": self.branch.nombre,
+                        "recipe_id": final_recipe.id,
+                        "recipe_name": final_recipe.nombre,
+                        "forecast_qty": Decimal("200"),
+                        "buffer_units": Decimal("0"),
+                    }
+                ],
+            },
+        )
+
+        purchase_by_name = {row["insumo_nombre"]: row for row in context["insumos"]}
+        self.assertEqual(purchase_by_name["Tapa Individual Proyección"]["required_gross_qty"], Decimal("200.000"))
+        self.assertEqual(purchase_by_name["Molde Individual Proyección"]["required_gross_qty"], Decimal("200.000"))
+        self.assertEqual(purchase_by_name["Harina Pan Individual Proyección"]["required_gross_qty"], Decimal("40.000"))
 
     def test_projection_supply_ignores_rejected_recipe_lines(self):
         rejected_insumo = Insumo.objects.create(
