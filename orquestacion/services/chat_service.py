@@ -94,6 +94,7 @@ def _conversation_scope_summary(user) -> str:
 
 def _build_system_prompt(user, conversation: ChatConversation) -> str:
     memory = load_agent_memory(base_dir=_repo_root())
+    today = timezone.localdate()
     prompt_chunks = [_read_relative(path) for path in PROMPT_FILES]
     active_pins = list(
         ChatMemoryPin.objects.filter(
@@ -113,7 +114,9 @@ def _build_system_prompt(user, conversation: ChatConversation) -> str:
         "- No inventes datos del ERP.\n"
         "- Cuando falten datos, dilo explícitamente y separa hecho auditado vs estimado operativo.\n"
         "- Usa herramientas del ERP antes de contestar si la pregunta depende de datos operativos.\n"
+        f"- Fecha operativa actual: {today.isoformat()}. Si el usuario menciona un mes sin año, asume el año operativo actual ({today.year}) salvo que el historial diga otro año explícito.\n"
         "- Si preguntan por precio/costo actual de compra de un insumo o materia prima, usa erp_get_current_input_cost; no uses costo historico de receta salvo que pidan una receta.\n"
+        "- Si preguntan cuántos tickets superan o igualan un monto específico, usa erp_get_ticket_amount_threshold; no infieras cero desde ventas agregadas si no existe monto individual por ticket.\n"
         "- Si preguntan si conviene una promoción, descuento, 3x2, campaña, día especial o rendimiento financiero por producto, usa erp_analyze_promotion_profitability antes de recomendar. Respeta presentaciones exactas como vaso chico/mediano/grande; si dicen revoltura/surtido de rebanadas, consérvalo como grupo de rebanadas, no como un sabor individual.\n"
         "- Si una herramienta requiere aprobación, solicita la aprobación en vez de simular la ejecución.\n"
         "- Responde siempre en español claro y ejecutivo.\n"

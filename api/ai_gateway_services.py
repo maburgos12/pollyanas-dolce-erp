@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 from typing import Any, Callable
 from uuid import uuid4
 
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.db import models, transaction
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Max, Min, Q, Sum
 from django.utils import timezone
 
 from control.services import build_discrepancias_report, resolve_period_range
@@ -35,7 +35,7 @@ from core.access import (
 from core.audit import log_event
 from core.models import AuditLog
 from orquestacion.models import AgentDefinition, AgentExecutionLink, AgentSuggestion, AgentTask, OrchestrationRun
-from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob
+from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointInventorySnapshot, PointProduct, PointSyncJob
 from pos_bridge.tasks.run_daily_sales_sync import run_daily_sales_sync
 from pos_bridge.tasks.run_inventory_sync import run_inventory_sync
 from pos_bridge.tasks.run_product_recipe_sync import run_product_recipe_sync
@@ -321,6 +321,10 @@ def _handle_sales_summary(_user, arguments: dict[str, Any]) -> dict[str, Any]:
             "branches_count": len(grouped_branches["rows"]),
             "products_count": len(grouped_products["rows"]),
             "days_count": int(selection.get("coverage_days") or 0),
+            "limitations": {
+                "ticket_amount_distribution_available": False,
+                "use_for_ticket_threshold_questions": False,
+            },
         },
     }
 
@@ -403,6 +407,82 @@ def _handle_sales_trends(_user, arguments: dict[str, Any]) -> dict[str, Any]:
             "source_status": source_status,
             "items": payload,
             "returned": len(payload),
+        },
+    }
+
+
+def _handle_ticket_amount_threshold(_user, arguments: dict[str, Any]) -> dict[str, Any]:
+    start_date, end_date = _resolve_sales_period(arguments)
+    branch_ids = _resolve_sales_branch_scope(arguments)
+    threshold = _parse_decimal(arguments.get("threshold_amount"), default=Decimal("500"))
+    if threshold <= 0:
+        threshold = Decimal("500")
+    qs = PointDailyBranchIndicator.objects.filter(indicator_date__range=(start_date, end_date))
+    if branch_ids:
+        qs = qs.filter(branch_id__in=branch_ids)
+
+    totals = qs.aggregate(
+        total_sales=Sum("total_amount"),
+        total_tickets=Sum("total_tickets"),
+        branch_days=Count("id"),
+        first_date=Min("indicator_date"),
+        last_date=Max("indicator_date"),
+        branches_count=Count("branch_id", distinct=True),
+    )
+    total_sales = Decimal(str(totals.get("total_sales") or 0))
+    total_tickets = int(totals.get("total_tickets") or 0)
+    avg_ticket = (total_sales / Decimal(total_tickets)).quantize(Decimal("0.01")) if total_tickets else ZERO
+    upper_bound = None
+    if threshold > 0 and total_sales > 0:
+        upper_bound = min(total_tickets, int((total_sales / threshold).to_integral_value(rounding=ROUND_FLOOR)))
+
+    branch_payload = []
+    branch_rows = (
+        qs.values("branch__external_id", "branch__name", "branch__erp_branch__codigo", "branch__erp_branch__nombre")
+        .annotate(total_sales=Sum("total_amount"), total_tickets=Sum("total_tickets"), branch_days=Count("id"))
+        .order_by("-total_sales", "branch__name")
+    )
+    for row in branch_rows:
+        row_sales = Decimal(str(row.get("total_sales") or 0))
+        row_tickets = int(row.get("total_tickets") or 0)
+        branch_payload.append(
+            {
+                "branch_external_id": row.get("branch__external_id") or "",
+                "branch_code": row.get("branch__erp_branch__codigo") or "",
+                "branch_name": row.get("branch__erp_branch__nombre") or row.get("branch__name") or "",
+                "total_sales": _float_money(row_sales),
+                "total_tickets": row_tickets,
+                "avg_ticket": _float_money(row_sales / Decimal(row_tickets)) if row_tickets else 0.0,
+                "branch_days": int(row.get("branch_days") or 0),
+            }
+        )
+
+    return {
+        "status": "not_available_exact" if total_tickets else "no_data",
+        "sources": ["pos_bridge.PointDailyBranchIndicator"],
+        "filters": {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "branch": arguments.get("branch"),
+            "threshold_amount": float(threshold),
+        },
+        "payload": {
+            "exact_count_available": False,
+            "exact_count": None,
+            "reason": (
+                "El ERP conserva ventas y tickets agregados por dia/sucursal desde Point; "
+                "no conserva el monto individual de cada ticket en la capa analitica actual."
+            ),
+            "do_not_infer_zero": True,
+            "total_sales": _float_money(total_sales),
+            "total_tickets": total_tickets,
+            "avg_ticket": _float_money(avg_ticket),
+            "branch_days": int(totals.get("branch_days") or 0),
+            "branches_count": int(totals.get("branches_count") or 0),
+            "first_date": totals["first_date"].isoformat() if totals.get("first_date") else "",
+            "last_date": totals["last_date"].isoformat() if totals.get("last_date") else "",
+            "upper_bound_if_all_qualifying_tickets_were_at_least_threshold": upper_bound,
+            "items_by_branch": branch_payload,
         },
     }
 
@@ -1483,7 +1563,10 @@ TOOLS: dict[str, AIToolDefinition] = {
     "erp.get_sales_summary": AIToolDefinition(
         key="erp.get_sales_summary",
         name="Resumen de ventas Point",
-        description="Resume ventas del POS por rango y sucursal.",
+        description=(
+            "Resume ventas agregadas del POS por rango y sucursal. "
+            "No sirve para contar tickets por umbral de monto; para preguntas tipo tickets >= $500 usa erp_get_ticket_amount_threshold."
+        ),
         operation_type="read",
         data_domain="sales",
         branch_scoped=True,
@@ -1539,6 +1622,40 @@ TOOLS: dict[str, AIToolDefinition] = {
             },
         },
         result_contract={"status": "ok", "payload": "serie mensual agregada"},
+    ),
+    "erp.get_ticket_amount_threshold": AIToolDefinition(
+        key="erp.get_ticket_amount_threshold",
+        name="Tickets por umbral de monto",
+        description=(
+            "Evalúa preguntas como cuántos tickets fueron de $500 o más. "
+            "Si el ERP no tiene monto por ticket individual, devuelve la limitación exacta y los agregados auditados; "
+            "no debe inferir cero desde resumen de ventas."
+        ),
+        operation_type="analyze",
+        data_domain="sales",
+        branch_scoped=True,
+        requires_approval=False,
+        access_check=_can_view_sales,
+        handler=_handle_ticket_amount_threshold,
+        argument_schema={
+            "type": "object",
+            "properties": {
+                "start_date": {"type": "string", "format": "date"},
+                "end_date": {"type": "string", "format": "date"},
+                "branch": {"type": "string"},
+                "threshold_amount": {"type": "number", "default": 500},
+            },
+        },
+        result_contract={
+            "status": "not_available_exact|no_data",
+            "payload": {
+                "exact_count_available": "boolean",
+                "exact_count": "null",
+                "total_sales": "number",
+                "total_tickets": "number",
+                "avg_ticket": "number",
+            },
+        },
     ),
     "erp.get_inventory_low_stock": AIToolDefinition(
         key="erp.get_inventory_low_stock",

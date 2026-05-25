@@ -16,7 +16,14 @@ from core.access import ROLE_ALMACEN, ROLE_COMPRAS, ROLE_DG, ROLE_LECTURA, ROLE_
 from core.models import AuditLog, Sucursal, UserProfile
 from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
 from orquestacion.models import AgentExecutionLink, AgentSuggestion
-from pos_bridge.models import PointBranch, PointDailySale, PointInventorySnapshot, PointProduct, PointSyncJob
+from pos_bridge.models import (
+    PointBranch,
+    PointDailyBranchIndicator,
+    PointDailySale,
+    PointInventorySnapshot,
+    PointProduct,
+    PointSyncJob,
+)
 from recetas.models import Receta, RecetaCostoVersion
 from reportes.models import FactVentaDiaria
 
@@ -305,6 +312,41 @@ class AIGatewayApiTests(APITestCase):
         self.assertEqual(payload["unidad_base"], "kg")
         self.assertEqual(payload["costo_unitario"], 78.5)
         self.assertEqual(payload["costo_source_insumo"], "Fresa Fresca")
+
+    def test_ticket_amount_threshold_reports_exact_count_unavailable_from_aggregates(self):
+        PointDailyBranchIndicator.objects.create(
+            branch=self.point_branch_1,
+            indicator_date=timezone.datetime(2026, 4, 1).date(),
+            total_amount=Decimal("1200.00"),
+            total_tickets=3,
+            total_avg_ticket=Decimal("400.00"),
+        )
+        PointDailyBranchIndicator.objects.create(
+            branch=self.point_branch_2,
+            indicator_date=timezone.datetime(2026, 4, 1).date(),
+            total_amount=Decimal("800.00"),
+            total_tickets=2,
+            total_avg_ticket=Decimal("400.00"),
+        )
+
+        self.client.force_authenticate(self.user_lectura)
+        response = self.client.post(
+            self._invoke_url("erp.get_ticket_amount_threshold"),
+            {"arguments": {"start_date": "2026-04-01", "end_date": "2026-04-30", "threshold_amount": 500}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        result = response.data["result"]
+        payload = result["payload"]
+        self.assertEqual(result["status"], "not_available_exact")
+        self.assertFalse(payload["exact_count_available"])
+        self.assertIsNone(payload["exact_count"])
+        self.assertTrue(payload["do_not_infer_zero"])
+        self.assertEqual(payload["total_sales"], 2000.0)
+        self.assertEqual(payload["total_tickets"], 5)
+        self.assertEqual(payload["avg_ticket"], 400.0)
+        self.assertEqual(payload["upper_bound_if_all_qualifying_tickets_were_at_least_threshold"], 4)
 
     def test_invoke_promotion_profitability_returns_financial_decision_table(self):
         today = timezone.localdate()
