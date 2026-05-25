@@ -44,11 +44,25 @@ se agrega token con nombre semantico.
 Stack oficial:
 
 - Cuerpo: `Nunito`.
+- Numeros operativos: `Nunito` con ancho tabular.
 - Display moderado: `Playfair Display`.
 
 Playfair se usa solo para marca, titulos de pagina, KPIs principales o encabezados
 de seccion. No usar Playfair para tablas, formularios, botones ni texto denso.
 No usar `Inter`, `Roboto`, `Open Sans` ni fuentes nuevas en canvas o modulos aislados.
+
+Regla numerica obligatoria:
+
+```css
+font-family: var(--pd-font-number);
+font-variant-numeric: tabular-nums;
+font-feature-settings: var(--pd-numeric-features);
+letter-spacing: 0;
+```
+
+Usar esta regla en dinero, porcentajes, piezas, tickets, IDs visibles, comparativos
+y ejes/tooltips de graficas. La alineacion debe ser a la derecha en tablas y
+matrices auditables; en KPIs puede mantenerse la alineacion del componente.
 
 ## Estructura Por Tipo De Pantalla
 
@@ -128,7 +142,7 @@ Si un modulo necesita un patron que se repetira, crear componente compartido.
 7. No ocultar problemas de layout con `overflow-x: hidden`; usar `clip` en shell y scroll visible en tablas.
 8. Todo boton tiene estados default, hover, focus-visible, active, disabled y loading si aplica.
 9. Todo input mantiene el mismo border-width entre estados.
-10. Numeros monetarios, porcentajes y cantidades usan `font-variant-numeric: tabular-nums`.
+10. Numeros monetarios, porcentajes y cantidades usan `--pd-font-number` con numeros tabulares.
 11. Botones, tabs y links de navegacion no se parten en dos lineas.
 12. Validar mobile en 320, 375, 414 y 768 px cuando toque UI visible.
 

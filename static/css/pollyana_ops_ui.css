@@ -9,6 +9,8 @@
 
   --pd-font-body: "Nunito", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --pd-font-display: "Playfair Display", Georgia, "Times New Roman", serif;
+  --pd-font-number: var(--pd-font-body);
+  --pd-numeric-features: "tnum" 1, "lnum" 1;
 
   --pd-wine: #8b2252;
   --pd-wine-strong: #64153a;
@@ -243,12 +245,25 @@ a.btn:active,
 .kpi-number,
 .metric-value,
 .bi-metric-value,
+.pd-num,
+.pd-money,
+.pd-percent,
+.pd-qty,
 .plan-tabla__num,
 .cedis-num,
+.dg-num,
+.bi-num,
 .num,
 .money,
-.amount {
+.amount,
+.table td.text-end,
+.table th.text-end,
+.pd-table td.text-end,
+.pd-table th.text-end {
+  font-family: var(--pd-font-number);
   font-variant-numeric: tabular-nums;
+  font-feature-settings: var(--pd-numeric-features);
+  letter-spacing: 0;
 }
 
 .badge,
@@ -292,7 +307,9 @@ a.btn:active,
 .table,
 .plan-tabla,
 .cedis-table {
+  font-family: var(--pd-font-body);
   font-variant-numeric: tabular-nums;
+  font-feature-settings: var(--pd-numeric-features);
 }
 
 .table th,
@@ -381,9 +398,12 @@ a.btn:active,
 .pd-kpi strong {
   display: block;
   color: var(--pd-wine);
+  font-family: var(--pd-font-number);
   font-size: 1.18rem;
   line-height: 1;
   font-variant-numeric: tabular-nums;
+  font-feature-settings: var(--pd-numeric-features);
+  letter-spacing: 0;
 }
 
 .pd-kpi span {
@@ -425,7 +445,9 @@ a.btn:active,
   width: 100%;
   min-width: 720px;
   border-collapse: collapse;
+  font-family: var(--pd-font-body);
   font-variant-numeric: tabular-nums;
+  font-feature-settings: var(--pd-numeric-features);
 }
 
 .pd-table th,

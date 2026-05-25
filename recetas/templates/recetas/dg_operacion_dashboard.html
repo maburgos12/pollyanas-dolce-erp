@@ -934,6 +934,11 @@
       axis: "#8e7569",
       fill: "rgba(214, 90, 113, 0.14)",
     };
+    const rootStyles = window.getComputedStyle(document.documentElement);
+    const chartFontFamily = rootStyles.getPropertyValue("--pd-font-number").trim()
+      || rootStyles.getPropertyValue("--pd-font-body").trim()
+      || "\"Nunito\", system-ui, sans-serif";
+    const chartFont = (size = 12, weight = 700) => `${weight} ${size}px ${chartFontFamily}`;
 
     function setupCanvas(canvas) {
       if (!canvas) return null;
@@ -981,7 +986,7 @@
       }
 
       ctx.fillStyle = palette.axis;
-      ctx.font = '12px Inter, sans-serif';
+      ctx.font = chartFont(12, 700);
       labels.forEach((label, index) => {
         const x = pad.left + (chartW * index) / Math.max(labels.length - 1, 1);
         ctx.fillText(label, x - 12, height - 10);
@@ -1015,7 +1020,7 @@
       });
 
       ctx.fillStyle = color;
-      ctx.font = '600 12px Inter, sans-serif';
+      ctx.font = chartFont(12, 800);
       ctx.fillText(formatter(max), 8, pad.top + 4);
       ctx.fillText(formatter(values[values.length - 1] || 0), width - 90, pad.top + 4);
     }
@@ -1036,7 +1041,7 @@
       );
 
       ctx.clearRect(0, 0, width, height);
-      ctx.font = '12px Inter, sans-serif';
+      ctx.font = chartFont(12, 700);
       ctx.fillStyle = palette.axis;
       ctx.strokeStyle = palette.grid;
       ctx.lineWidth = 1;
@@ -1112,10 +1117,10 @@
       ctx.fillStyle = "#fffaf7";
       ctx.fill();
       ctx.fillStyle = "#3e281f";
-      ctx.font = '700 22px Inter, sans-serif';
+      ctx.font = chartFont(22, 900);
       ctx.textAlign = "center";
       ctx.fillText(formatNumber(total), cx, cy + 6);
-      ctx.font = '12px Inter, sans-serif';
+      ctx.font = chartFont(12, 700);
       ctx.fillStyle = palette.axis;
       ctx.fillText("Merma", cx, cy - 16);
 

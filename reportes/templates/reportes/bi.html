@@ -1633,6 +1633,10 @@
       red: "#bc3b3b",
       border: "rgba(145, 36, 86, 0.10)"
     };
+    const rootStyles = window.getComputedStyle(document.documentElement);
+    const chartFontFamily = rootStyles.getPropertyValue("--pd-font-number").trim()
+      || rootStyles.getPropertyValue("--pd-font-body").trim()
+      || "\"Nunito\", system-ui, sans-serif";
     const renderFallbackBarList = (canvas, rows) => {
       if (!canvas || !rows.length) return;
       const host = canvas.parentElement;
@@ -1659,13 +1663,18 @@
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: "index", intersect: false },
+      font: {
+        family: chartFontFamily,
+        size: 12,
+        weight: "700"
+      },
       plugins: {
         legend: {
           labels: {
             usePointStyle: true,
             boxWidth: 10,
             color: "#6f6170",
-            font: { size: 12, weight: "600" }
+            font: { family: chartFontFamily, size: 12, weight: "700" }
           }
         },
         tooltip: {
@@ -1695,6 +1704,11 @@
     const productionCategoryRows = parse("production-category-data");
     const centralFlowRows = parse("central-flow-data");
     const hasChartJs = typeof window.Chart === "function";
+    if (hasChartJs) {
+      Chart.defaults.font.family = chartFontFamily;
+      Chart.defaults.font.weight = "700";
+      Chart.defaults.color = "#6f6170";
+    }
 
     const forecastCtx = document.getElementById("forecastTrendChart");
     if (forecastCtx && forecastRows.length && hasChartJs) {
