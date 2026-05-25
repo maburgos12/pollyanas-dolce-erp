@@ -109,7 +109,9 @@ textarea::placeholder {
 input:focus,
 textarea:focus,
 select:focus {
-  border-color: var(--pd-wine) !important;
+  border-color: var(--pd-gold) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 3px rgba(201, 168, 76, .2) !important;
 }
 
 .primary-btn,

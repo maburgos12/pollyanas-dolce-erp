@@ -1,56 +1,50 @@
 {% extends "base.html" %}
-{% load static %}
-
 {% block title %}Mermas{% endblock %}
 
 {% block extra_css %}
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@700;800&display=swap');
-    body { background: #f7f2ea; }
-    .sidebar { background: #8B2252; }
-    .mermas-page { max-width: 1240px; margin: 0 auto; padding: 18px 20px 36px; }
-    .mermas-header { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; margin-bottom: 18px; }
-    .mermas-page, .mermas-page button, .mermas-page select { font-family: "Nunito", system-ui, sans-serif; }
-    .mermas-header h1 { margin: 0; font-family: "Playfair Display", Georgia, serif; font-size: 1.8rem; color: #32101f; letter-spacing: 0; }
-    .mermas-header p { margin: 6px 0 0; color: #725f65; max-width: 720px; }
-    .mermas-actions { display: flex; gap: 10px; flex-wrap: wrap; }
-    .mermas-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 42px; padding: 0 14px; border-radius: 10px; border: 1px solid #d9c9aa; text-decoration: none; color: #32101f; background: #fff; font-weight: 900; }
-    .mermas-btn.primary { background: #8B2252; border-color: #8B2252; color: #fff; }
-    .metrics-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
-    .metric-card, .panel { background: #fff; border: 1px solid #eadfce; border-radius: 10px; box-shadow: 0 10px 24px rgba(50,16,31,.06); }
-    .metric-card { padding: 14px; }
-    .metric-label { color: #8B2252; font-size: .78rem; font-weight: 900; text-transform: uppercase; }
-    .metric-value { margin-top: 6px; color: #32101f; font-family: "Playfair Display", Georgia, serif; font-size: 1.9rem; font-weight: 800; }
-    .panel { padding: 14px; min-width: 0; }
-    .panel h2 { margin: 0 0 12px; font-family: "Playfair Display", Georgia, serif; font-size: 1.16rem; color: #32101f; letter-spacing: 0; }
-    .panel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
-    .filters { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin-bottom: 12px; }
-    .filters label { display: grid; gap: 5px; color: #6f5962; font-size: .82rem; font-weight: 900; }
-    .filters select { min-width: 190px; height: 40px; border: 1px solid #d9c9aa; border-radius: 10px; padding: 0 10px; background: #fff; }
+    .mermas-page { max-width: 1720px; }
+    .mermas-header { margin-bottom: var(--pd-space-4); }
+    .mermas-actions { display: flex; gap: var(--pd-space-2); flex-wrap: wrap; justify-content: flex-end; }
+    .mermas-btn { display: inline-flex; align-items: center; justify-content: center; min-height: var(--pd-control-height); padding: 0 var(--pd-space-4); border-radius: var(--pd-radius-md); border: 1px solid var(--pd-border); text-decoration: none; color: var(--pd-ink); background: var(--pd-surface); font-weight: 900; white-space: nowrap; }
+    .mermas-btn.primary { background: var(--pd-wine); border-color: var(--pd-wine); color: var(--pd-surface); }
+    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--pd-space-3); margin-bottom: var(--pd-space-3); }
+    .metric-card, .panel { background: var(--pd-surface); border: 1px solid var(--pd-border); border-radius: var(--pd-radius-lg); box-shadow: var(--pd-shadow-low); }
+    .metric-card { min-height: 82px; padding: var(--pd-space-3) var(--pd-space-4); }
+    .metric-label { color: var(--pd-wine); font-size: .72rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; }
+    .metric-value { margin-top: var(--pd-space-2); color: var(--pd-wine); font-family: var(--pd-font-number); font-variant-numeric: tabular-nums; font-feature-settings: var(--pd-numeric-features); font-size: clamp(1.55rem, 2vw, 2rem); font-weight: 900; line-height: 1; }
+    .panel { padding: var(--pd-space-4); min-width: 0; }
+    .panel h2 { margin: 0 0 var(--pd-space-3); font-size: 1.05rem; color: var(--pd-ink); letter-spacing: 0; }
+    .panel-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--pd-space-3); margin-bottom: var(--pd-space-3); }
+    .panel + .panel { margin-top: var(--pd-space-3); }
+    .filters { display: flex; gap: var(--pd-space-2); align-items: end; flex-wrap: wrap; margin-bottom: var(--pd-space-3); }
+    .filters label { display: grid; gap: var(--pd-space-1); color: var(--pd-muted); font-size: .8rem; font-weight: 900; }
+    .filters select { min-width: 190px; min-height: var(--pd-control-height); border: 1px solid var(--pd-border); border-radius: var(--pd-radius-md); padding: 0 var(--pd-space-3); background: var(--pd-surface); }
     .data-table { width: 100%; border-collapse: collapse; }
-    .data-table th, .data-table td { padding: 10px 8px; border-bottom: 1px solid #eadfce; text-align: left; vertical-align: top; }
-    .data-table th { color: #8B2252; font-size: .76rem; text-transform: uppercase; letter-spacing: .02em; }
-    .data-table td { color: #32101f; font-size: .9rem; }
-    .data-table a { color: #8B2252; font-weight: 900; }
-    .badge { display: inline-flex; align-items: center; padding: 4px 8px; border-radius: 999px; background: #f0e7d8; color: #5b4631; font-weight: 900; font-size: .75rem; }
-    .badge.warn { background: #fbf0c8; color: #7c5b00; }
-    .badge.bad { background: #f8dce9; color: #8B2252; }
-    .empty { color: #725f65; padding: 10px 0; }
+    .data-table th, .data-table td { padding: var(--pd-space-3) var(--pd-space-2); border-bottom: 1px solid var(--pd-border); text-align: left; vertical-align: middle; }
+    .data-table th { color: var(--pd-wine); font-size: .72rem; font-weight: 900; text-transform: uppercase; letter-spacing: .04em; }
+    .data-table td { color: var(--pd-ink); font-size: .9rem; }
+    .data-table a { color: var(--pd-wine); font-weight: 900; }
+    .data-table tbody tr:last-child td { border-bottom: 0; }
+    .badge { display: inline-flex; align-items: center; padding: 4px 8px; border-radius: 999px; background: var(--pd-surface-subtle); color: var(--pd-muted); font-weight: 900; font-size: .75rem; }
+    .badge.warn { background: var(--pd-warning-soft); color: var(--pd-warning); }
+    .badge.bad { background: var(--pd-danger-soft); color: var(--pd-danger); }
+    .empty { color: var(--pd-muted); padding: var(--pd-space-1) 0; }
     @media (max-width: 980px) {
         .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .panel-grid { grid-template-columns: 1fr; }
-        .mermas-header { flex-direction: column; }
+        .mermas-actions { justify-content: flex-start; }
     }
 </style>
-<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}">
 {% endblock %}
 
 {% block content %}
-<main class="mermas-page">
-    <header class="mermas-header">
+<main class="mermas-page pd-page-gutters">
+    <header class="mermas-header pd-page-head">
         <div>
-            <h1>Panel de mermas</h1>
-            <p>Seguimiento operativo desde salida de sucursal hasta recepción CEDIS, con evidencias, repartidor y diferencias para ventas.</p>
+            <p class="pd-eyebrow">Operación · Mermas</p>
+            <h1 class="pd-page-title">Panel de mermas</h1>
+            <p class="pd-page-copy">Seguimiento operativo desde salida de sucursal hasta recepción CEDIS, con evidencias, repartidor y diferencias para ventas.</p>
         </div>
         {% if can_capture_mermas %}
         <div class="mermas-actions">

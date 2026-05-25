@@ -142,6 +142,17 @@ lateral contra la barra izquierda y contra el borde derecho de la ventana. No
 compensar esto con margenes negativos ni contenedores full-bleed, salvo print,
 PWA dedicada o una excepcion documentada.
 
+Regla de proporcion Hallmark: no combinar `main-content`, `.pd-page-gutters`,
+`.container` y padding propio del modulo para crear doble o triple marco. Cada
+pantalla debe tener un solo marco lateral, un ancho maximo acorde a su densidad
+operativa y cards sin contenedores decorativos anidados. Si una pantalla se ve
+centrada con demasiado blanco en monitores amplios, aumentar el ancho util del
+modulo o compactar la composicion antes de agregar mas cards.
+
+Regla de foco: todos los campos editables (`input`, `select`, `textarea`,
+`.form-control`, `.form-select`, `.input-field`) usan borde y halo dorado en
+focus. No usar foco vino, azul nativo ni anillos dobles por modulo.
+
 Regla de encabezado superior: pantallas operativas, dashboards internos y
 modulos nuevos deben envolver el contenido en `.pd-page-gutters` e iniciar con `.pd-page-head`, `.pd-eyebrow`,
 `.pd-page-title`, `.pd-page-copy` y `.pd-action-row`. No usar heroes grandes,
