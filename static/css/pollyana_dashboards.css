@@ -174,7 +174,9 @@
 .dg-table {
   border-collapse: separate;
   border-spacing: 0;
+  font-family: var(--pd-font-body);
   font-variant-numeric: tabular-nums;
+  font-feature-settings: var(--pd-numeric-features);
 }
 
 .bi-table th,
@@ -202,7 +204,23 @@
 .bi-num,
 .pd-num {
   text-align: right;
+}
+
+.text-end,
+.dg-num,
+.bi-num,
+.pd-num,
+.bi-metric-value,
+.bi-branch-bar-value,
+.bi-insight-value,
+.bi-mix-pill,
+.dg-metric-value,
+.dg-compact-row-value,
+.dg-small-table td:last-child {
+  font-family: var(--pd-font-number);
   font-variant-numeric: tabular-nums;
+  font-feature-settings: var(--pd-numeric-features);
+  letter-spacing: 0;
 }
 
 .bi-details,
