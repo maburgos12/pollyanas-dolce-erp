@@ -324,6 +324,14 @@ class RRHHViewsTests(TestCase):
         self.assertEqual(empleado.rfc, "DEMO-010101-AA1")
         self.assertEqual(empleado.area, "Administración")
 
+    def test_rrhh_root_requires_rrhh_access(self):
+        user = User.objects.create_user(username="solo.mantenimiento", password="pass123")
+        self.client.force_login(user)
+
+        resp = self.client.get(reverse("rrhh:home"))
+
+        self.assertEqual(resp.status_code, 403)
+
     def test_empleados_can_focus_operational_subset(self):
         self.client.post(
             reverse("rrhh:empleados"),

@@ -12,11 +12,11 @@ router.register(r"api/horas-extra", api_views.HoraExtraViewSet, basename="hora-e
 router.register(r"api/permisos", api_views.PermisoSalidaViewSet, basename="permiso")
 
 urlpatterns = [
-    path("", include(router.urls)),
+    path("", views.empleados, name="home"),
     path("api/me/", api_views.capital_humano_me, name="capital_humano_me"),
     path("api/mi-perfil/", api_views.mi_perfil, name="rrhh_mi_perfil"),
     path("api/asistencia-hik/", api_receptor.receptor_asistencia_hik, name="rrhh_receptor_hik"),
-    path("", views.empleados, name="home"),
+    path("", include(router.urls)),
     path("empleados/", views.empleados, name="empleados"),
     path("asignacion-sucursal/", asignacion_sucursal_view, name="rrhh_asignacion_sucursal"),
     path("api/asignacion-sucursales/", asignacion_sucursales_api, name="rrhh_asignacion_sucursales_api"),
