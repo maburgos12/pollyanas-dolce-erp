@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+
+{% block title %}Sistema visual - Pollyana's Dolce ERP{% endblock %}
+
+{% block content %}
+<section class="pd-preview">
+    <header class="pd-page-head">
+        <div>
+            <p class="pd-eyebrow">Sistema visual interno</p>
+            <h1 class="pd-page-title">Ejemplos aplicados dentro del ERP</h1>
+            <p class="pd-page-copy">
+                Esta pantalla muestra como deben verse nuevos grupos, modulos, secciones,
+                tablas, estados y formularios antes de llevar el patron a pantallas operativas.
+            </p>
+        </div>
+        <div class="pd-action-row">
+            <a class="btn btn-secondary" href="{% url 'users_access' %}">Usuarios</a>
+            <button class="btn btn-primary" type="button">Usar patron</button>
+        </div>
+    </header>
+
+    <div class="pd-kpi-strip pd-preview-band" aria-label="Indicadores de ejemplo">
+        {% for kpi in kpis %}
+        <div class="pd-kpi">
+            <strong>{{ kpi.value }}</strong>
+            <span>{{ kpi.label }}</span>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="pd-preview-layout">
+        <section class="pd-work-panel pd-preview-main" aria-labelledby="preview-workflow-title">
+            <div class="pd-panel-head">
+                <div>
+                    <p class="pd-eyebrow">Operacion diaria</p>
+                    <h2 id="preview-workflow-title">Vista de trabajo recomendada</h2>
+                </div>
+                <div class="pd-filter-row" role="group" aria-label="Filtros de ejemplo">
+                    <select aria-label="Sucursal">
+                        <option>Todas las sucursales</option>
+                        <option>Centro</option>
+                        <option>Leyva</option>
+                        <option>Guamuchil</option>
+                    </select>
+                    <select aria-label="Estado">
+                        <option>Todos los estados</option>
+                        <option>Prioridad</option>
+                        <option>Falta revisar</option>
+                        <option>Cubierto</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="pd-table-wrap">
+                <table class="pd-table">
+                    <thead>
+                        <tr>
+                            <th>Producto</th>
+                            <th>Sucursal</th>
+                            <th>Requerido</th>
+                            <th>Disponible</th>
+                            <th>Estado</th>
+                            <th>Accion</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in rows %}
+                        <tr>
+                            <td>{{ row.producto }}</td>
+                            <td>{{ row.sucursal }}</td>
+                            <td>{{ row.requerido }}</td>
+                            <td>{{ row.disponible }}</td>
+                            <td><span class="pd-status pd-status-{{ row.tone }}">{{ row.estado }}</span></td>
+                            <td><button class="btn btn-secondary pd-table-action" type="button">Abrir</button></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <aside class="pd-work-panel pd-preview-side" aria-labelledby="preview-form-title">
+            <p class="pd-eyebrow">Formulario</p>
+            <h2 id="preview-form-title">Ajuste de ejemplo</h2>
+            <form class="pd-form-preview" action="" method="get">
+                <label>
+                    <span>Modulo</span>
+                    <select name="modulo">
+                        <option>Inventario</option>
+                        <option>Compras</option>
+                        <option>Produccion</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Responsable</span>
+                    <input name="responsable" type="text" value="Administracion" aria-label="Responsable">
+                </label>
+                <label>
+                    <span>Notas</span>
+                    <textarea name="notas" rows="3">Validar faltantes contra CEDIS antes de liberar.</textarea>
+                </label>
+                <button class="btn btn-primary" type="button">Guardar vista</button>
+            </form>
+        </aside>
+    </div>
+
+    <section class="pd-preview-layout pd-preview-compare" aria-label="Comparacion visual">
+        <article class="pd-work-panel">
+            <p class="pd-eyebrow">Evitar</p>
+            <h2>Patron generico</h2>
+            <ul class="pd-rule-list">
+                <li>Bloques sueltos sin jerarquia operativa.</li>
+                <li>Colores nuevos por pantalla sin token compartido.</li>
+                <li>Botones largos para acciones que deberian ser iconos o comandos claros.</li>
+                <li>Tarjetas apiladas que esconden datos de trabajo.</li>
+            </ul>
+        </article>
+        <article class="pd-work-panel">
+            <p class="pd-eyebrow">Usar</p>
+            <h2>Patron Pollyana Ops</h2>
+            <ul class="pd-rule-list pd-rule-list-good">
+                <li>Encabezado compacto con accion principal visible.</li>
+                <li>Indicadores arriba solo cuando cambian la decision.</li>
+                <li>Tabla densa para comparar productos, sucursales y estados.</li>
+                <li>Estados consistentes: cubierto, revisar, prioridad y bloqueado.</li>
+            </ul>
+        </article>
+    </section>
+
+    <section class="pd-work-panel" aria-labelledby="preview-rules-title">
+        <div class="pd-panel-head">
+            <div>
+                <p class="pd-eyebrow">Reglas para nuevas pantallas</p>
+                <h2 id="preview-rules-title">Checklist visual obligatorio</h2>
+            </div>
+            <span class="pd-status pd-status-success">Listo para usar</span>
+        </div>
+        <div class="pd-token-grid">
+            <div>
+                <span class="pd-swatch pd-swatch-wine" aria-hidden="true"></span>
+                <strong>Vino</strong>
+                <span>Acciones principales, enlaces activos y estados de marca.</span>
+            </div>
+            <div>
+                <span class="pd-swatch pd-swatch-gold" aria-hidden="true"></span>
+                <strong>Dorado</strong>
+                <span>Foco, acentos y confirmaciones no criticas.</span>
+            </div>
+            <div>
+                <span class="pd-swatch pd-swatch-paper" aria-hidden="true"></span>
+                <strong>Papel</strong>
+                <span>Fondos de trabajo y contraste suave.</span>
+            </div>
+        </div>
+    </section>
+</section>
+{% endblock %}

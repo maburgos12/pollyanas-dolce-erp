@@ -1,0 +1,161 @@
+# Pollyana Ops UI
+
+Sistema visual oficial para el ERP de Pollyana's Dolce.
+
+Este documento es obligatorio para cualquier adicion de grupo, modulo, seccion,
+PWA, reporte, formulario, dashboard, correo HTML o flujo operativo visible.
+
+## Posicion
+
+El ERP debe sentirse como una herramienta operativa hecha para Pollyana's Dolce:
+calida, sobria, compacta, auditable y especifica para una cadena de pastelerias.
+No debe parecer una landing page, un SaaS generico ni una pantalla generada por IA.
+
+## Principios
+
+1. Operacion primero. La primera vista debe mostrar que hacer ahora.
+2. Marca contenida. El vino identifica, el dorado acentua, ningun color grita.
+3. Densidad ordenada. Mas informacion visible, menos decoracion.
+4. Una sola voz. Navegacion, botones, tablas, formularios, badges y modales deben compartir reglas.
+5. Evidencia visible. Fechas, fuentes de datos, usuario afectado y estado operativo deben ser claros.
+6. Auditoria sin ruido. Lo avanzado o ejecutivo puede existir, pero no debe tapar el trabajo principal.
+
+## Tokens
+
+Todo color, fuente, radio, sombra y spacing reutilizable debe vivir como token CSS.
+Usar los tokens de `static/css/pollyana_ops_ui.css`.
+
+Tokens primarios:
+
+- `--pd-wine`: identidad principal.
+- `--pd-gold`: acento escaso.
+- `--pd-ink`: texto principal.
+- `--pd-muted`: texto secundario.
+- `--pd-paper`: fondo general.
+- `--pd-surface`: paneles.
+- `--pd-border`: bordes.
+- `--pd-success`, `--pd-warning`, `--pd-danger`, `--pd-info`: estados.
+
+Regla: no agregar hex, RGB, HSL u OKLCH nuevos en templates. Si falta un color,
+se agrega token con nombre semantico.
+
+## Tipografia
+
+Stack oficial:
+
+- Cuerpo: `Nunito`.
+- Display moderado: `Playfair Display`.
+
+Playfair se usa solo para marca, titulos de pagina, KPIs principales o encabezados
+de seccion. No usar Playfair para tablas, formularios, botones ni texto denso.
+No usar `Inter`, `Roboto`, `Open Sans` ni fuentes nuevas en canvas o modulos aislados.
+
+## Estructura Por Tipo De Pantalla
+
+### Modulo operativo
+
+Orden recomendado:
+
+1. Encabezado compacto con titulo, contexto y accion principal.
+2. Filtros esenciales.
+3. Formulario, tabla o cola de trabajo.
+4. Resumen KPI breve.
+5. Detalle avanzado en `details` o panel colapsable.
+
+### Dashboard ejecutivo
+
+Orden recomendado:
+
+1. Corte visible y fuente de datos.
+2. KPIs principales.
+3. Graficas o comparativas clave.
+4. Tabla auditable debajo o colapsable.
+
+### Administracion o configuracion
+
+Orden recomendado:
+
+1. Tabla/listado primero.
+2. Filtros compactos.
+3. Accion primaria `Nuevo`.
+4. Formulario o modal dedicado.
+
+### PWA movil
+
+Orden recomendado:
+
+1. Estado de sesion.
+2. Acciones grandes y claras.
+3. Flujo por pasos.
+4. Confirmacion con folio o evidencia.
+
+## Componentes
+
+Usar componentes compartidos antes de crear HTML nuevo:
+
+- `templates/components/section_header.html`
+- `templates/components/kpi_card.html`
+- `templates/components/status_badge.html`
+- `templates/components/empty_state.html`
+- clases `.pd-page-head`, `.pd-work-panel`, `.pd-kpi-strip`, `.pd-action-row`, `.pd-filter-row`
+
+Si un modulo necesita un patron que se repetira, crear componente compartido.
+
+## Reglas Obligatorias
+
+1. No agregar `style=""` en templates nuevos, salvo correos, print/PDF o excepcion documentada.
+2. No agregar bloques `<style>` en templates nuevos. Usar CSS compartido o CSS del modulo.
+3. No usar cards dentro de cards para decorar.
+4. No usar emojis como iconos funcionales.
+5. No usar gradientes grandes, blobs, orbes, glassmorphism o sombras glow.
+6. No usar `transition: all`.
+7. No ocultar problemas de layout con `overflow-x: hidden`; usar `clip` en shell y scroll visible en tablas.
+8. Todo boton tiene estados default, hover, focus-visible, active, disabled y loading si aplica.
+9. Todo input mantiene el mismo border-width entre estados.
+10. Numeros monetarios, porcentajes y cantidades usan `font-variant-numeric: tabular-nums`.
+11. Botones, tabs y links de navegacion no se parten en dos lineas.
+12. Validar mobile en 320, 375, 414 y 768 px cuando toque UI visible.
+
+## Navegacion
+
+Los grupos nuevos se agregan en `core/navigation.py` y deben cumplir:
+
+- Nombre de grupo corto y operativo.
+- Submodulos con verbos o sustantivos claros.
+- No duplicar rutas visibles en dos grupos sin razon operativa.
+- Si el grupo no esta listo para usuarios, no aparece en sidebar.
+- Permisos y visibilidad se validan con el usuario real afectado.
+
+## Modulos Nuevos
+
+Antes de implementar un modulo nuevo, definir:
+
+- Usuario principal.
+- Trabajo principal que resuelve.
+- Accion primaria.
+- Tabla o entidad principal.
+- Estados vacio, error, loading y sin permisos.
+- Fuente de datos visible si muestra metricas.
+- Ruta y grupo de navegacion.
+
+## Anti Patrones Bloqueados
+
+- Hero decorativo de pantalla completa.
+- Tres cards iguales para explicar funciones.
+- Card dentro de card.
+- Gradiente morado/azul o texto con gradiente.
+- Emojis como iconos.
+- Colores inline.
+- Botones con labels largos que envuelven.
+- Metricas inventadas o sin fuente.
+- Graficas sin tabla o fallback auditable.
+
+## Definicion De Terminado
+
+Un cambio visual no esta terminado hasta que:
+
+- pasa `python manage.py check`;
+- si agrega estaticos, se considera `collectstatic --noinput` en deploy;
+- se revisa en navegador real si afecta UI;
+- no agrega nueva deuda de estilo segun `scripts/audit_ui_style.py`;
+- se valida el flujo final donde el usuario lo usa.
