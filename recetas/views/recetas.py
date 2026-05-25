@@ -4971,16 +4971,26 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         for relation in derived_by_receta_id.values()
         if relation.receta_padre_id
     )
-    cost_resolution_by_receta_id = resolve_recipe_cost_map(cost_recipe_ids, context=CostContext.CURRENT_LIVE)
+    snapshot_cost_by_receta_id: dict[int, Decimal] = {}
+    for snapshot_row in (
+        RecetaCostoSemanal.objects.filter(
+            scope_type=RecetaCostoSemanal.SCOPE_RECIPE,
+            receta_id__in=cost_recipe_ids,
+            costo_total__gt=0,
+        )
+        .order_by("receta_id", "-week_start", "-id")
+        .values("receta_id", "costo_total")
+    ):
+        receta_id = int(snapshot_row["receta_id"] or 0)
+        if receta_id and receta_id not in snapshot_cost_by_receta_id:
+            snapshot_cost_by_receta_id[receta_id] = Decimal(str(snapshot_row["costo_total"] or 0))
     for receta in page.object_list:
         setattr(receta, "_effective_equivalence_cache", equivalence_by_receta_id.get(receta.id))
         setattr(receta, "_effective_derived_cache", derived_by_receta_id.get(receta.id))
-        receta_cost = cost_resolution_by_receta_id.get(receta.id)
-        receta.costo_efectivo = receta_cost.total_cost if receta_cost is not None else Decimal("0")
+        receta.costo_efectivo = snapshot_cost_by_receta_id.get(receta.id, Decimal("0"))
         equivalence = equivalence_by_receta_id.get(receta.id)
         if (not receta.costo_efectivo or receta.costo_efectivo <= 0) and equivalence is not None:
-            parent_cost_resolution = cost_resolution_by_receta_id.get(equivalence.receta_padre_id)
-            parent_cost = parent_cost_resolution.total_cost if parent_cost_resolution is not None else Decimal("0")
+            parent_cost = snapshot_cost_by_receta_id.get(equivalence.receta_padre_id, Decimal("0"))
             factor = Decimal(str(equivalence.factor_conversion or 1))
             if parent_cost > 0 and factor > 0:
                 receta.costo_efectivo = parent_cost / factor
