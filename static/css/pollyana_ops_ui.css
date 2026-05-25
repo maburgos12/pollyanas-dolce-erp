@@ -327,6 +327,14 @@ a.btn:active,
   margin-bottom: var(--pd-space-5);
 }
 
+.pd-page-gutters {
+  width: 100%;
+  max-width: 1720px;
+  margin-inline: auto;
+  padding: clamp(18px, 2.2vw, 32px) clamp(18px, 2.8vw, 36px) clamp(28px, 3vw, 44px);
+  box-sizing: border-box;
+}
+
 .pd-page-title {
   margin: 0;
   color: var(--pd-ink);
@@ -615,6 +623,10 @@ a.btn:active,
   .pd-page-head {
     grid-template-columns: 1fr;
     align-items: stretch;
+  }
+
+  .pd-page-gutters {
+    padding: 16px 14px 28px;
   }
 
   .pd-action-row,
