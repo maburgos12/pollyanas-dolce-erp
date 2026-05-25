@@ -4100,6 +4100,49 @@ def audit_log_view(request: HttpRequest) -> HttpResponse:
     return render(request, "core/auditoria.html", context)
 
 
+def ui_system_preview_view(request: HttpRequest) -> HttpResponse:
+    if not request.user.is_authenticated:
+        return redirect("/login/?next=/ui-system/")
+    if not can_manage_users(request.user):
+        raise PermissionDenied("No tienes permisos para ver el sistema visual.")
+
+    context = {
+        "kpis": [
+            {"value": "42", "label": "Ordenes listas"},
+            {"value": "7", "label": "Faltantes criticos"},
+            {"value": "18", "label": "Capturas hoy"},
+            {"value": "31%", "label": "Margen visible"},
+        ],
+        "rows": [
+            {
+                "producto": "Pastel chocolate mediano",
+                "sucursal": "Centro",
+                "requerido": "12 pzas",
+                "disponible": "9 pzas",
+                "estado": "Falta revisar",
+                "tone": "warning",
+            },
+            {
+                "producto": "Gelatina mosaico",
+                "sucursal": "Leyva",
+                "requerido": "24 pzas",
+                "disponible": "27 pzas",
+                "estado": "Cubierto",
+                "tone": "success",
+            },
+            {
+                "producto": "Pay de queso chico",
+                "sucursal": "Guamuchil",
+                "requerido": "8 pzas",
+                "disponible": "3 pzas",
+                "estado": "Prioridad",
+                "tone": "danger",
+            },
+        ],
+    }
+    return render(request, "core/ui_system_preview.html", context)
+
+
 def ai_private_hub_view(request: HttpRequest) -> HttpResponse:
     if not request.user.is_authenticated:
         return redirect("/login/")
