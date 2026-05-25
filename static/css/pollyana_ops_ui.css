@@ -127,14 +127,28 @@ textarea,
 a:focus-visible,
 button:focus-visible,
 summary:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
 [role="button"]:focus-visible,
 [tabindex]:not([tabindex="-1"]):focus-visible {
   outline: 2px solid var(--pd-focus);
   outline-offset: 2px;
   box-shadow: 0 0 0 4px rgba(201, 168, 76, 0.18);
+}
+
+input:focus,
+select:focus,
+textarea:focus,
+.input-field:focus,
+.form-control:focus,
+.form-select:focus,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+.input-field:focus-visible,
+.form-control:focus-visible,
+.form-select:focus-visible {
+  border-color: var(--pd-focus);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(201, 168, 76, 0.2);
 }
 
 input,
