@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load static %}
+{% load static humanize %}
 {% block title %}DG · Operación Integrada{% endblock %}
 {% block page_title %}Dirección General · Operación Integrada{% endblock %}
 {% block body_class %}page-dg-operacion-dashboard{% endblock %}
@@ -603,10 +603,10 @@
       <div class="dg-headline-row">
         <span class="dg-date-pill">Corte {{ point_exec_summary.closure_date|date:"Y-m-d" }}</span>
         <span class="dg-chip {% if point_exec_summary.ticket_data_available %}is-success{% else %}is-warning{% endif %}">
-          Ticket promedio {% if point_exec_summary.ticket_data_available %}${{ point_exec_summary.latest_avg_ticket|floatformat:2 }}{% else %}N/D{% endif %}
+          Ticket promedio {% if point_exec_summary.ticket_data_available %}${{ point_exec_summary.latest_avg_ticket|floatformat:2|intcomma }}{% else %}N/D{% endif %}
         </span>
         <span class="dg-chip {% if point_waste_summary.total_qty > 0 %}is-warning{% else %}is-success{% endif %}">
-          Merma {{ point_waste_summary.total_qty|floatformat:2 }}
+          Merma {{ point_waste_summary.total_qty|floatformat:2|intcomma }}
         </span>
       </div>
     </div>
@@ -640,25 +640,25 @@
     <div class="dg-kpi-grid dg-kpi-grid--4">
       <article class="dg-kpi-card">
         <div class="dg-metric-label">Venta último corte</div>
-        <div class="dg-metric-value">${{ point_exec_summary.latest_sales_amount|floatformat:2 }}</div>
-        <div class="dg-metric-foot">{{ point_exec_summary.latest_units|floatformat:0 }} unidades · corte {{ point_exec_summary.closure_date|date:"d/m/Y" }}</div>
+        <div class="dg-metric-value">${{ point_exec_summary.latest_sales_amount|floatformat:2|intcomma }}</div>
+        <div class="dg-metric-foot">{{ point_exec_summary.latest_units|floatformat:0|intcomma }} unidades · corte {{ point_exec_summary.closure_date|date:"d/m/Y" }}</div>
       </article>
       <article class="dg-kpi-card">
         <div class="dg-metric-label">Tickets último corte</div>
-        <div class="dg-metric-value is-neutral">{{ point_exec_summary.latest_tickets }}</div>
+        <div class="dg-metric-value is-neutral">{{ point_exec_summary.latest_tickets|intcomma }}</div>
         <div class="dg-metric-foot">Sucursales con tickets: {{ point_exec_summary.ticket_branch_count }}/{{ point_exec_summary.active_branch_count }}</div>
       </article>
       <article class="dg-kpi-card">
         <div class="dg-metric-label">Ticket promedio</div>
         <div class="dg-metric-value {% if point_exec_summary.ticket_data_available %}is-success{% else %}is-warning{% endif %}">
-          {% if point_exec_summary.ticket_data_available %}${{ point_exec_summary.latest_avg_ticket|floatformat:2 }}{% else %}N/D{% endif %}
+          {% if point_exec_summary.ticket_data_available %}${{ point_exec_summary.latest_avg_ticket|floatformat:2|intcomma }}{% else %}N/D{% endif %}
         </div>
         <div class="dg-metric-foot">{% if point_exec_summary.ticket_data_available %}promedio real del corte{% else %}sin tickets válidos{% endif %}</div>
       </article>
       <article class="dg-kpi-card">
         <div class="dg-metric-label">Venta acumulada del mes</div>
-        <div class="dg-metric-value">${{ point_exec_summary.month_sales_amount|floatformat:2 }}</div>
-        <div class="dg-metric-foot">{{ point_exec_summary.month_units|floatformat:0 }} unidades · {{ point_exec_summary.month_tickets }} tickets</div>
+        <div class="dg-metric-value">${{ point_exec_summary.month_sales_amount|floatformat:2|intcomma }}</div>
+        <div class="dg-metric-foot">{{ point_exec_summary.month_units|floatformat:0|intcomma }} unidades · {{ point_exec_summary.month_tickets|intcomma }} tickets</div>
       </article>
     </div>
   </section>
@@ -668,18 +668,18 @@
     <div class="dg-kpi-grid dg-kpi-grid--4">
       <article class="dg-kpi-card">
         <div class="dg-metric-label">Producción directa a CEDIS</div>
-        <div class="dg-metric-value">{{ point_central_flow_summary.production_total_qty|floatformat:2 }}</div>
+        <div class="dg-metric-value">{{ point_central_flow_summary.production_total_qty|floatformat:2|intcomma }}</div>
         <div class="dg-metric-foot">{{ point_central_flow_summary.production_rows }} líneas · {{ point_central_flow_summary.production_item_count }} items</div>
       </article>
       <article class="dg-kpi-card">
         <div class="dg-metric-label">Transferencias recibidas en CEDIS</div>
-        <div class="dg-metric-value">{{ point_central_flow_summary.transfer_total_qty|floatformat:2 }}</div>
+        <div class="dg-metric-value">{{ point_central_flow_summary.transfer_total_qty|floatformat:2|intcomma }}</div>
         <div class="dg-metric-foot">{{ point_central_flow_summary.transfer_rows }} líneas · {{ point_central_flow_summary.transfer_item_count }} items</div>
       </article>
       <article class="dg-kpi-card">
         <div class="dg-metric-label">Merma del corte</div>
-        <div class="dg-metric-value {% if point_waste_summary.total_qty > 0 %}is-danger{% else %}is-success{% endif %}">{{ point_waste_summary.total_qty|floatformat:2 }}</div>
-        <div class="dg-metric-foot">${{ point_waste_summary.total_cost|floatformat:2 }} · {{ point_waste_summary.branch_count }} sucursales / frentes</div>
+        <div class="dg-metric-value {% if point_waste_summary.total_qty > 0 %}is-danger{% else %}is-success{% endif %}">{{ point_waste_summary.total_qty|floatformat:2|intcomma }}</div>
+        <div class="dg-metric-foot">${{ point_waste_summary.total_cost|floatformat:2|intcomma }} · {{ point_waste_summary.branch_count }} sucursales / frentes</div>
       </article>
       <article class="dg-kpi-card">
         <div class="dg-metric-label">Sucursales con excepción</div>
@@ -709,7 +709,7 @@
         <div class="dg-compact-row">
           <div class="dg-compact-row-stack">
             <div class="dg-list-item-label">{{ row.branch__erp_branch__codigo }} · {{ row.branch__erp_branch__nombre }}</div>
-            <div class="dg-list-item-meta">{{ row.total_tickets }} tickets · ticket promedio ${{ row.avg_ticket|floatformat:2 }}</div>
+            <div class="dg-list-item-meta">{{ row.total_tickets|intcomma }} tickets · ticket promedio ${{ row.avg_ticket|floatformat:2|intcomma }}</div>
             <div class="dg-meter">
               <span class="dg-meter-fill is-sales" style="width:{% widthratio row.total_amount point_exec_summary.latest_sales_amount 100 %}%"></span>
             </div>
@@ -719,7 +719,7 @@
               </a>
             </div>
           </div>
-          <div class="dg-compact-row-value">${{ row.total_amount|floatformat:2 }}</div>
+          <div class="dg-compact-row-value">${{ row.total_amount|floatformat:2|intcomma }}</div>
         </div>
         {% endfor %}
       </div>
@@ -749,7 +749,7 @@
         <div class="dg-compact-row">
           <div class="dg-compact-row-stack">
             <div class="dg-list-item-label">{{ row.branch_code }} · {{ row.branch_name }}</div>
-            <div class="dg-list-item-meta">{{ row.total_rows }} registros · ${{ row.total_cost|floatformat:2 }}</div>
+            <div class="dg-list-item-meta">{{ row.total_rows }} registros · ${{ row.total_cost|floatformat:2|intcomma }}</div>
             <div class="dg-meter">
               <span class="dg-meter-fill is-waste" style="width:{% widthratio row.total_qty point_waste_summary.total_qty 100 %}%"></span>
             </div>
@@ -761,13 +761,13 @@
             </div>
             {% endif %}
           </div>
-          <div class="dg-compact-row-value">{{ row.total_qty|floatformat:2 }}</div>
+          <div class="dg-compact-row-value">{{ row.total_qty|floatformat:2|intcomma }}</div>
         </div>
         {% endfor %}
       </div>
       <div class="dg-summary-inline" style="margin-top:10px;">
-        <span><strong>{{ point_waste_summary.total_qty|floatformat:2 }}</strong> pzas en el corte</span>
-        <span><strong>${{ point_waste_summary.total_cost|floatformat:2 }}</strong> costo visible</span>
+        <span><strong>{{ point_waste_summary.total_qty|floatformat:2|intcomma }}</strong> pzas en el corte</span>
+        <span><strong>${{ point_waste_summary.total_cost|floatformat:2|intcomma }}</strong> costo visible</span>
       </div>
       {% else %}
       <div class="dg-note">Sin mermas visibles en el último corte.</div>
@@ -776,7 +776,7 @@
         {% for row in point_waste_summary.top_responsibles|slice:":3" %}
         <div class="dg-mini-card">
           <strong>{{ row.responsable_texto }}</strong>
-          <span>{{ row.total_qty|floatformat:2 }} pzas · ${{ row.total_cost|floatformat:2 }}</span>
+          <span>{{ row.total_qty|floatformat:2|intcomma }} pzas · ${{ row.total_cost|floatformat:2|intcomma }}</span>
         </div>
         {% empty %}
         <div class="dg-note">Sin responsables visibles en este corte.</div>
@@ -839,7 +839,7 @@
           <div class="dg-list-item is-{{ row.tone }}">
             <div class="dg-compact-row-stack">
               <div class="dg-list-item-label">{{ row.branch_label }}</div>
-              <div class="dg-list-item-meta">Ventas {{ row.sold_units|floatformat:0 }} · tickets {{ row.sold_tickets }} · cierre {{ row.closing_units|floatformat:0 }}</div>
+              <div class="dg-list-item-meta">Ventas {{ row.sold_units|floatformat:0|intcomma }} · tickets {{ row.sold_tickets|intcomma }} · cierre {{ row.closing_units|floatformat:0|intcomma }}</div>
               <div class="dg-meter">
                 <span class="dg-meter-fill is-risk" style="width:{% if row.tone == 'danger' %}100{% elif row.tone == 'warning' %}62{% else %}35{% endif %}%"></span>
               </div>
