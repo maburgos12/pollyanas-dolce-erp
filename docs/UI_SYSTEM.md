@@ -137,6 +137,11 @@ Usar componentes compartidos antes de crear HTML nuevo:
 
 Si un modulo necesita un patron que se repetira, crear componente compartido.
 
+Regla de marco global: el `main-content` del ERP debe mantener separacion
+lateral contra la barra izquierda y contra el borde derecho de la ventana. No
+compensar esto con margenes negativos ni contenedores full-bleed, salvo print,
+PWA dedicada o una excepcion documentada.
+
 Regla de encabezado superior: pantallas operativas, dashboards internos y
 modulos nuevos deben envolver el contenido en `.pd-page-gutters` e iniciar con `.pd-page-head`, `.pd-eyebrow`,
 `.pd-page-title`, `.pd-page-copy` y `.pd-action-row`. No usar heroes grandes,
