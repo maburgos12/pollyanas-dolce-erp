@@ -1,3 +1,4 @@
+{% load humanize %}
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -277,8 +278,8 @@
           <td>{{ s.insumo.display_name }}</td>
           <td>{{ s.proveedor_sugerido.nombre|default:"-" }}</td>
           <td class="text-end">{{ s.cantidad|floatformat:3 }}</td>
-          <td class="text-end">${{ s.costo_unitario|floatformat:2 }}</td>
-          <td class="text-end">${{ s.presupuesto_estimado|floatformat:2 }}</td>
+          <td class="text-end">${{ s.costo_unitario|floatformat:2|intcomma }}</td>
+          <td class="text-end">${{ s.presupuesto_estimado|floatformat:2|intcomma }}</td>
           <td>{{ s.fecha_requerida }}</td>
           <td>
             {% if s.reabasto_nivel == "critico" %}
@@ -301,7 +302,7 @@
 
     <div class="totals">
       <div><strong>Cantidad total solicitada:</strong> {{ total_cantidad|floatformat:3 }}</div>
-      <div><strong>Presupuesto estimado total:</strong> ${{ total_presupuesto|floatformat:2 }}</div>
+      <div><strong>Presupuesto estimado total:</strong> ${{ total_presupuesto|floatformat:2|intcomma }}</div>
       <div><strong>Críticos:</strong> {{ criticos_count }} · <strong>Bajo reorden:</strong> {{ bajos_count }} · <strong>Suficiente:</strong> {{ ok_count }}</div>
     </div>
 

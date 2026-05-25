@@ -15,7 +15,7 @@
             <td class="num">${{ snap.flujo_libre|default:0|floatformat:2|intcomma }}</td>
             <td class="num">${{ snap.recuperacion_acumulada|default:0|floatformat:2|intcomma }}</td>
             <td class="num">${{ snap.saldo_pendiente|default:0|floatformat:2|intcomma }}</td>
-            <td class="num">{{ snap.roi_acumulado|default:0|floatformat:2 }}%</td>
+            <td class="num">{{ snap.roi_acumulado|default:0|floatformat:2|intcomma }}%</td>
             <td>{{ snap.health_status }}</td>
           </tr>
         {% endfor %}

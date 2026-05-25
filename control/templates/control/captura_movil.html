@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 
+{% load humanize %}
 {% block title %}Control · Captura móvil{% endblock %}
 {% block page_title %}Control · Captura móvil{% endblock %}
 
@@ -551,7 +552,7 @@
           <td>{{ row.fecha|date:"Y-m-d" }}</td>
           <td>{% if row.sucursal %}{{ row.sucursal.codigo }}{% else %}-{% endif %}</td>
           <td>{{ row.producto|default:"-" }}</td>
-          <td>{{ row.cantidad|floatformat:2 }}</td>
+          <td>{{ row.cantidad|floatformat:2|intcomma }}</td>
           <td>{{ row.extra }}</td>
           <td>{{ row.fuente }}</td>
         </tr>

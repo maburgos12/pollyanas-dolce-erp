@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 
+{% load humanize %}
 {% block title %}Control · Discrepancias{% endblock %}
 {% block page_title %}Control · Discrepancias{% endblock %}
 
@@ -116,7 +117,7 @@
     <div class="enterprise-focus-summary">
       <div>
         <div class="enterprise-focus-title">Vista enfocada · {{ focus_summary.title }}</div>
-        <div class="muted">{{ focus_summary.count }} registros visibles.</div>
+        <div class="muted">{{ focus_summary.count|intcomma }} registros visibles.</div>
       </div>
       <a class="btn btn-secondary btn-sm" href="{{ focus_summary.clear_url }}">Quitar foco</a>
     </div>
@@ -126,9 +127,9 @@
 <section class="card">
   <div class="card-header">Discrepancias del corte · {{ report.semaforo_global }}</div>
   <div class="muted" style="margin-bottom:12px;">
-    Producción {{ report.totals.produccion|floatformat:2 }} ·
-    ventas POS {{ report.totals.ventas_pos|floatformat:2 }} ·
-    mermas POS {{ report.totals.mermas_pos|floatformat:2 }}
+    Producción {{ report.totals.produccion|floatformat:2|intcomma }} ·
+    ventas POS {{ report.totals.ventas_pos|floatformat:2|intcomma }} ·
+    mermas POS {{ report.totals.mermas_pos|floatformat:2|intcomma }}
   </div>
   <div class="table-responsive">
     <table class="table table-striped">
@@ -151,12 +152,12 @@
         <tr>
           <td>{{ row.insumo }}</td>
           <td>{{ row.unidad|default:'-' }}</td>
-          <td>{{ row.produccion|floatformat:2 }}</td>
-          <td>{{ row.ventas_pos|floatformat:2 }}</td>
-          <td>{{ row.mermas_pos|floatformat:2 }}</td>
-          <td>{{ row.inventario_teorico|floatformat:2 }}</td>
-          <td>{{ row.inventario_real|floatformat:2 }}</td>
-          <td>{{ row.discrepancia|floatformat:2 }}</td>
+          <td>{{ row.produccion|floatformat:2|intcomma }}</td>
+          <td>{{ row.ventas_pos|floatformat:2|intcomma }}</td>
+          <td>{{ row.mermas_pos|floatformat:2|intcomma }}</td>
+          <td>{{ row.inventario_teorico|floatformat:2|intcomma }}</td>
+          <td>{{ row.inventario_real|floatformat:2|intcomma }}</td>
+          <td>{{ row.discrepancia|floatformat:2|intcomma }}</td>
           <td>{{ row.variacion_pct|floatformat:1 }}%</td>
           <td>
             {% if row.semaforo == 'ROJO' %}

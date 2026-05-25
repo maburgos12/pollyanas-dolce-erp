@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load static %}
+{% load static humanize %}
 
 {% block title %}Logística · Rutas{% endblock %}
 {% block page_title %}Logística · Rutas{% endblock %}
@@ -143,7 +143,7 @@
             <td class="text-end">{{ r.total_entregas }}</td>
             <td class="text-end">{{ r.entregas_completadas }}</td>
             <td class="text-end">{{ r.entregas_incidencia }}</td>
-            <td class="text-end">${{ r.monto_estimado_total|floatformat:2 }}</td>
+            <td class="text-end">${{ r.monto_estimado_total|floatformat:2|intcomma }}</td>
             <td>
               {% if r.estatus == 'COMPLETADA' %}
               <span class="badge bg-success">{{ r.get_estatus_display }}</span>

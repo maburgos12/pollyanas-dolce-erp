@@ -82,7 +82,7 @@
     <article class="investment-kpi-card">
       <div class="investment-kpi-label">Recuperado</div>
       <div class="investment-kpi-value">${{ kpis.cumulative_recovery|floatformat:2|intcomma }}</div>
-      <div class="investment-kpi-note">Pendiente ${{ kpis.pending_balance|floatformat:2|intcomma }} · {{ kpis.recovery_pct|floatformat:2 }}%</div>
+      <div class="investment-kpi-note">Pendiente ${{ kpis.pending_balance|floatformat:2|intcomma }} · {{ kpis.recovery_pct|floatformat:2|intcomma }}%</div>
     </article>
     <article class="investment-kpi-card">
       <div class="investment-kpi-label">Ventas acumuladas</div>
@@ -92,17 +92,17 @@
     <article class="investment-kpi-card">
       <div class="investment-kpi-label">Deuda actual</div>
       <div class="investment-kpi-value">${{ kpis.debt_balance|floatformat:2|intcomma }}</div>
-      <div class="investment-kpi-note">ROI acumulado {{ kpis.roi_cumulative|floatformat:2 }}% · Payback {% if kpis.payback %}{{ kpis.payback|floatformat:2 }} meses{% else %}N/D{% endif %}</div>
+      <div class="investment-kpi-note">ROI acumulado {{ kpis.roi_cumulative|floatformat:2|intcomma }}% · Payback {% if kpis.payback %}{{ kpis.payback|floatformat:2|intcomma }} meses{% else %}N/D{% endif %}</div>
     </article>
     <article class="investment-kpi-card">
       <div class="investment-kpi-label">Cash-on-cash</div>
-      <div class="investment-kpi-value">{{ kpis.cash_on_cash|floatformat:2 }}%</div>
+      <div class="investment-kpi-value">{{ kpis.cash_on_cash|floatformat:2|intcomma }}%</div>
       <div class="investment-kpi-note">Capital propio invertido ${{ project.capital_inicial_aportado|floatformat:2|intcomma }}</div>
     </article>
     <article class="investment-kpi-card">
       <div class="investment-kpi-label">Forecast cierre</div>
       <div class="investment-kpi-value">{% if kpis.forecast_close_date %}{{ kpis.forecast_close_date|date:"Y-m-d" }}{% else %}N/D{% endif %}</div>
-      <div class="investment-kpi-note">Payback forecast {% if kpis.forecast_payback %}{{ kpis.forecast_payback|floatformat:2 }} meses{% else %}N/D{% endif %}</div>
+      <div class="investment-kpi-note">Payback forecast {% if kpis.forecast_payback %}{{ kpis.forecast_payback|floatformat:2|intcomma }} meses{% else %}N/D{% endif %}</div>
     </article>
   </section>
 
@@ -139,8 +139,8 @@
               <div class="investment-progress-bar" style="width: {{ kpis.recovery_progress_pct|floatformat:2 }}%;"></div>
             </div>
             <div class="investment-progress-meta">
-              <span>{{ kpis.recovery_pct|floatformat:2 }}% recuperado</span>
-              <span>{% if kpis.forecast_vs_target is not None %}Gap vs objetivo {{ kpis.forecast_vs_target|floatformat:2 }} meses{% else %}Objetivo pendiente{% endif %}</span>
+              <span>{{ kpis.recovery_pct|floatformat:2|intcomma }}% recuperado</span>
+              <span>{% if kpis.forecast_vs_target is not None %}Gap vs objetivo {{ kpis.forecast_vs_target|floatformat:2|intcomma }} meses{% else %}Objetivo pendiente{% endif %}</span>
             </div>
           </div>
           <div class="investment-chart-card">
@@ -250,7 +250,7 @@
                   </span>
                 </td>
                 <td><span class="investment-status-pill {% if row.data_source == 'FACT' %}is-active{% elif row.data_source == 'FALLBACK' %}is-warning{% else %}is-danger{% endif %}">{{ row.confidence_score }}%</span></td>
-                <td>{% if row.porcentaje_recuperado is not None %}{{ row.porcentaje_recuperado|floatformat:2 }}%{% else %}N/D{% endif %}</td>
+                <td>{% if row.porcentaje_recuperado is not None %}{{ row.porcentaje_recuperado|floatformat:2|intcomma }}%{% else %}N/D{% endif %}</td>
               </tr>
               {% empty %}
               <tr><td colspan="11">Todavía no hay snapshots mensuales materializados.</td></tr>
@@ -494,8 +494,8 @@
                 <td>${{ row.monthly_sales|floatformat:2|intcomma }}</td>
                 <td>{% if row.monthly_net_cashflow is not None %}${{ row.monthly_net_cashflow|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
                 <td>{% if row.monthly_recovery_amount is not None %}${{ row.monthly_recovery_amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
-                <td>{% if row.payback_months is not None %}{{ row.payback_months|floatformat:2 }} meses{% else %}N/D{% endif %}</td>
-                <td>{% if row.annual_roi_pct is not None %}{{ row.annual_roi_pct|floatformat:2 }}%{% else %}N/D{% endif %}</td>
+                <td>{% if row.payback_months is not None %}{{ row.payback_months|floatformat:2|intcomma }} meses{% else %}N/D{% endif %}</td>
+                <td>{% if row.annual_roi_pct is not None %}{{ row.annual_roi_pct|floatformat:2|intcomma }}%{% else %}N/D{% endif %}</td>
               </tr>
               {% empty %}
               <tr><td colspan="6">Sin escenarios guardados.</td></tr>

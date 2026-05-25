@@ -127,7 +127,7 @@
   {% endif %}
   {% if resumen.confianza_promedio %}
   <div class="forecast-confidence">
-    Confianza guardada: {{ resumen.confianza_pct|floatformat:0 }}% —
+    Confianza guardada: {{ resumen.confianza_pct|floatformat:0|intcomma }}% —
     cálculo generado el {{ pronostico.creado_en|date:"Y-m-d H:i" }}.
     Para aplicar reglas actuales, venta nueva o datos corregidos, vuelve a generar el pronóstico.
   </div>
@@ -183,7 +183,7 @@
               <td class="text-end">{{ product.total_piezas|intcomma }}</td>
               <td class="text-end">${{ product.precio|floatformat:2|intcomma }}</td>
               <td class="text-end">${{ product.total_ingreso|floatformat:2|intcomma }}</td>
-              <td class="text-end">{{ product.pct_total|floatformat:2 }}%</td>
+              <td class="text-end">{{ product.pct_total|floatformat:2|intcomma }}%</td>
               <td class="text-center"><span class="forecast-trend {{ product.tendencia }}">{% if product.tendencia == "sube" %}↑{% elif product.tendencia == "baja" %}↓{% else %}→{% endif %} {{ product.factor_tendencia }}x</span></td>
             </tr>
             {% endfor %}
@@ -286,7 +286,7 @@
                 <td class="text-end">{{ product.total_piezas|intcomma }}</td>
                 <td class="text-end">${{ product.precio|floatformat:2|intcomma }}</td>
                 <td class="text-end">${{ product.total_ingreso|floatformat:2|intcomma }}</td>
-                <td class="text-end">{{ product.pct_total|floatformat:2 }}%</td>
+                <td class="text-end">{{ product.pct_total|floatformat:2|intcomma }}%</td>
                 <td class="text-center"><span class="forecast-trend {{ product.tendencia }}">{% if product.tendencia == "sube" %}↑{% elif product.tendencia == "baja" %}↓{% else %}→{% endif %} {{ product.factor_tendencia }}x</span></td>
               </tr>
               {% endfor %}

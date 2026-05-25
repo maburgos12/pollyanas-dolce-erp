@@ -81,7 +81,7 @@
       <article class="ticket-card">
         <div><div class="ticket-title">{{ ticket.unidad.codigo }} · {{ ticket.get_tipo_display }}</div><span class="ticket-badge {{ ticket.severidad }}">{{ ticket.get_severidad_display }}</span></div>
         <div class="ticket-meta">{{ ticket.repartidor }}<br>{{ ticket.fecha_reporte|date:"d/m/Y H:i" }} · hace {{ ticket.fecha_reporte|timesince }}<br>{{ ticket.descripcion|truncatechars:95 }}</div>
-        {% if ticket.proveedor_servicio or ticket.costo_servicio %}<div class="ticket-meta">{{ ticket.proveedor_servicio|default:"Sin proveedor" }} · ${{ ticket.costo_servicio|default:"0"|floatformat:2 }}</div>{% endif %}
+        {% if ticket.proveedor_servicio or ticket.costo_servicio %}<div class="ticket-meta">{{ ticket.proveedor_servicio|default:"Sin proveedor" }} · ${{ ticket.costo_servicio|default:"0"|floatformat:2|intcomma }}</div>{% endif %}
         <div class="ticket-actions">
           <button class="btn btn-primary btn-small" style="background:#8B2252;border-color:#8B2252;" type="button" data-ticket-close-url="{% url 'logistica:ticket_actualizar' ticket.id %}">Cerrar</button>
         </div>
@@ -94,7 +94,7 @@
       <article class="ticket-card">
         <div><div class="ticket-title">{{ ticket.unidad.codigo }} · {{ ticket.get_tipo_display }}</div><span class="ticket-badge {{ ticket.severidad }}">{{ ticket.get_severidad_display }}</span></div>
         <div class="ticket-meta">{{ ticket.repartidor }}<br>{{ ticket.actualizado_en|date:"d/m/Y H:i" }} · cerrado hoy<br>{{ ticket.descripcion|truncatechars:95 }}</div>
-        {% if ticket.proveedor_servicio or ticket.costo_servicio %}<div class="ticket-meta">{{ ticket.proveedor_servicio|default:"Sin proveedor" }} · ${{ ticket.costo_servicio|default:"0"|floatformat:2 }}</div>{% endif %}
+        {% if ticket.proveedor_servicio or ticket.costo_servicio %}<div class="ticket-meta">{{ ticket.proveedor_servicio|default:"Sin proveedor" }} · ${{ ticket.costo_servicio|default:"0"|floatformat:2|intcomma }}</div>{% endif %}
       </article>
       {% empty %}<div class="ticket-empty">Sin tickets cerrados hoy.</div>{% endfor %}
     </article>

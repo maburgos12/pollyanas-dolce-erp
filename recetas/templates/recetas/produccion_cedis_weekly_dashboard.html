@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Dashboard · Producción CEDIS semanal{% endblock %}
 {% block page_title %}Dashboard · Producción CEDIS semanal{% endblock %}
 {% block body_class %}page-produccion-cedis-weekly-dashboard{% endblock %}
@@ -425,12 +426,12 @@
       <div class="cedis-story-grid">
         <div class="cedis-story-card">
           <div class="cedis-story-kicker">Flujo central</div>
-          <div class="cedis-story-value">{{ executive_summary.inflow_units|floatformat:0 }}</div>
+          <div class="cedis-story-value">{{ executive_summary.inflow_units|floatformat:0|intcomma }}</div>
           <p class="cedis-story-copy">Unidades que entraron al centro esta semana combinando producción CEDIS y transferencias recibidas.</p>
         </div>
         <div class="cedis-story-card">
           <div class="cedis-story-kicker">Gap vs venta</div>
-          <div class="cedis-story-value {% if executive_summary.gap_tone == 'success' %}cedis-tone-success{% else %}cedis-tone-danger{% endif %}">{{ executive_summary.inflow_gap_units|floatformat:0 }}</div>
+          <div class="cedis-story-value {% if executive_summary.gap_tone == 'success' %}cedis-tone-success{% else %}cedis-tone-danger{% endif %}">{{ executive_summary.inflow_gap_units|floatformat:0|intcomma }}</div>
           <p class="cedis-story-copy">Diferencia entre entradas centrales y unidades vendidas. Positivo implica holgura; negativo indica presión de surtido.</p>
         </div>
         <div class="cedis-story-card">
@@ -456,7 +457,7 @@
       </div>
       <div class="cedis-quality-grid">
         <div class="cedis-quality-card">
-          <strong>{% if tickets_available %}{{ tickets|floatformat:0 }}{% else %}N/D{% endif %}</strong>
+          <strong>{% if tickets_available %}{{ tickets|floatformat:0|intcomma }}{% else %}N/D{% endif %}</strong>
           <span>Tickets semanales disponibles para monetización del tráfico.</span>
         </div>
         <div class="cedis-quality-card">
@@ -468,7 +469,7 @@
           <span>Producción directa clasificada en categorías productivas comparables contra venta.</span>
         </div>
         <div class="cedis-quality-card">
-          <strong>{{ category_mapping_quality.unclassified_sales_qty|floatformat:0 }} / {{ category_mapping_quality.unclassified_production_qty|floatformat:0 }}</strong>
+          <strong>{{ category_mapping_quality.unclassified_sales_qty|floatformat:0|intcomma }} / {{ category_mapping_quality.unclassified_production_qty|floatformat:0|intcomma }}</strong>
           <span>Venta y entradas aún sin clasificar. No bloquean el tablero, pero sí reducen precisión analítica.</span>
         </div>
       </div>
@@ -478,15 +479,15 @@
   <section class="cedis-grid-4">
     <article class="cedis-card">
       <div class="cedis-label">Cobertura operativa</div>
-      <div class="cedis-value {% if alert_tone == 'success' %}cedis-tone-success{% elif alert_tone == 'danger' %}cedis-tone-danger{% else %}cedis-tone-warning{% endif %}">{{ coverage_ratio|floatformat:2 }}</div>
+      <div class="cedis-value {% if alert_tone == 'success' %}cedis-tone-success{% elif alert_tone == 'danger' %}cedis-tone-danger{% else %}cedis-tone-warning{% endif %}">{{ coverage_ratio|floatformat:2|intcomma }}</div>
       <div class="cedis-foot">Entradas centrales / unidades vendidas. Sirve como semáforo rápido de presión semanal.</div>
     </article>
     <article class="cedis-card">
       <div class="cedis-label">Ventas semana ($)</div>
-      <div class="cedis-value">${{ sales_amount|floatformat:0 }}</div>
+      <div class="cedis-value">${{ sales_amount|floatformat:0|intcomma }}</div>
       <div class="cedis-foot">
         {% if tickets_available %}
-          {{ tickets }} tickets · ticket promedio ${{ avg_ticket|floatformat:0 }}
+          {{ tickets|intcomma }} tickets · ticket promedio ${{ avg_ticket|floatformat:0|intcomma }}
         {% else %}
           Tickets N/D en la fuente semanal actual.
         {% endif %}
@@ -494,7 +495,7 @@
     </article>
     <article class="cedis-card">
       <div class="cedis-label">Unidades vendidas</div>
-      <div class="cedis-value">{{ sales_units|floatformat:0 }}</div>
+      <div class="cedis-value">{{ sales_units|floatformat:0|intcomma }}</div>
       <div class="cedis-foot">Venta comercial de sucursales activas, excluyendo ramas no comerciales.</div>
     </article>
     <article class="cedis-card">
@@ -504,23 +505,23 @@
     </article>
     <article class="cedis-card">
       <div class="cedis-label">Producción CEDIS</div>
-      <div class="cedis-value">{{ production_units|floatformat:0 }}</div>
+      <div class="cedis-value">{{ production_units|floatformat:0|intcomma }}</div>
       <div class="cedis-foot">Producción directa de ramas configuradas como centrales.</div>
     </article>
     <article class="cedis-card">
       <div class="cedis-label">Transferencias a CEDIS</div>
-      <div class="cedis-value">{{ transfer_units|floatformat:0 }}</div>
+      <div class="cedis-value">{{ transfer_units|floatformat:0|intcomma }}</div>
       <div class="cedis-foot">Entradas recibidas por transferencia hacia inventario central.</div>
     </article>
     <article class="cedis-card">
       <div class="cedis-label">Merma semanal ($)</div>
-      <div class="cedis-value {% if waste_cost > 0 %}cedis-tone-warning{% endif %}">${{ waste_cost|floatformat:0 }}</div>
-      <div class="cedis-foot">{{ waste_units|floatformat:0 }} piezas registradas por el personal.</div>
+      <div class="cedis-value {% if waste_cost > 0 %}cedis-tone-warning{% endif %}">${{ waste_cost|floatformat:0|intcomma }}</div>
+      <div class="cedis-foot">{{ waste_units|floatformat:0|intcomma }} piezas registradas por el personal.</div>
     </article>
     <article class="cedis-card">
       <div class="cedis-label">Pronóstico próxima semana</div>
-      <div class="cedis-value">${{ forecast_total_sales_amount|floatformat:0 }}</div>
-      <div class="cedis-foot">Ventas estimadas · {{ forecast_total_units|floatformat:0 }} unidades · producción orientativa {{ forecast_total_production|floatformat:0 }}</div>
+      <div class="cedis-value">${{ forecast_total_sales_amount|floatformat:0|intcomma }}</div>
+      <div class="cedis-foot">Ventas estimadas · {{ forecast_total_units|floatformat:0|intcomma }} unidades · producción orientativa {{ forecast_total_production|floatformat:0|intcomma }}</div>
     </article>
   </section>
 
@@ -563,8 +564,8 @@
         {% for row in weekly_rows %}
         <article class="cedis-week-card">
           <div class="cedis-week-label">{{ row.week_label }}</div>
-          <div class="cedis-week-value">${{ row.sales_amount|floatformat:0 }}</div>
-          <div class="cedis-week-meta">{{ row.sales_units|floatformat:0 }} vendidas · {{ row.production_units|floatformat:0 }} prod. · cobertura {{ row.coverage_ratio|floatformat:2 }}</div>
+          <div class="cedis-week-value">${{ row.sales_amount|floatformat:0|intcomma }}</div>
+          <div class="cedis-week-meta">{{ row.sales_units|floatformat:0|intcomma }} vendidas · {{ row.production_units|floatformat:0|intcomma }} prod. · cobertura {{ row.coverage_ratio|floatformat:2|intcomma }}</div>
         </article>
         {% endfor %}
       </div>
@@ -583,7 +584,7 @@
         {% for row in top_sales_rows|slice:":5" %}
         <article class="cedis-signal-item">
           <strong>{{ row.product }}</strong>
-          <div class="cedis-signal-meta">${{ row.amount|floatformat:0 }} · {{ row.qty|floatformat:0 }} piezas · {{ row.share_pct|floatformat:1 }}%</div>
+          <div class="cedis-signal-meta">${{ row.amount|floatformat:0|intcomma }} · {{ row.qty|floatformat:0|intcomma }} piezas · {{ row.share_pct|floatformat:1 }}%</div>
           <div class="bi-inline-actions">
             <a class="bi-inline-link" href="{{ row.action_url }}">Cruzar producto</a>
           </div>
@@ -605,7 +606,7 @@
         {% for row in top_waste_rows|slice:":5" %}
         <article class="cedis-signal-item">
           <strong>{{ row.product }}</strong>
-          <div class="cedis-signal-meta">${{ row.amount|floatformat:0 }} · {{ row.qty|floatformat:0 }} pzas · {{ row.share_pct|floatformat:1 }}%</div>
+          <div class="cedis-signal-meta">${{ row.amount|floatformat:0|intcomma }} · {{ row.qty|floatformat:0|intcomma }} pzas · {{ row.share_pct|floatformat:1 }}%</div>
           <div class="bi-inline-actions">
             <a class="bi-inline-link" href="{{ row.action_url }}">Cruzar producto</a>
           </div>
@@ -627,7 +628,7 @@
         {% for row in waste_branch_rows|slice:":5" %}
         <article class="cedis-signal-item">
           <strong>{{ row.label }}</strong>
-          <div class="cedis-signal-meta">${{ row.cost|floatformat:0 }} · {{ row.qty|floatformat:0 }} pzas</div>
+          <div class="cedis-signal-meta">${{ row.cost|floatformat:0|intcomma }} · {{ row.qty|floatformat:0|intcomma }} pzas</div>
           <div class="bi-inline-actions">
             <a class="bi-inline-link" href="{{ row.action_url }}">Abrir control semanal</a>
           </div>
@@ -647,7 +648,7 @@
           <p class="cedis-panel-subtitle">
             Semana actual con buckets operativos normalizados. Transferencias quedan fuera de este comparativo para no mezclar logística con producción propia.
             {% if category_mapping_quality.unclassified_sales_qty or category_mapping_quality.unclassified_production_qty %}
-              Queda pendiente de clasificar venta {{ category_mapping_quality.unclassified_sales_qty|floatformat:0 }} pzas y producción {{ category_mapping_quality.unclassified_production_qty|floatformat:0 }} pzas.
+              Queda pendiente de clasificar venta {{ category_mapping_quality.unclassified_sales_qty|floatformat:0|intcomma }} pzas y producción {{ category_mapping_quality.unclassified_production_qty|floatformat:0|intcomma }} pzas.
             {% endif %}
           </p>
         </div>
@@ -656,7 +657,7 @@
         {% for row in category_balance_rows|slice:":6" %}
         <article class="cedis-signal-item">
           <strong>{{ row.label }}</strong>
-          <div class="cedis-signal-meta">Entradas {{ row.production_qty|floatformat:0 }} · ventas {{ row.sales_qty|floatformat:0 }} · delta {{ row.delta|floatformat:0 }}</div>
+          <div class="cedis-signal-meta">Entradas {{ row.production_qty|floatformat:0|intcomma }} · ventas {{ row.sales_qty|floatformat:0|intcomma }} · delta {{ row.delta|floatformat:0|intcomma }}</div>
           <div class="cedis-signal-meta {% if row.tone == 'success' %}cedis-tone-success{% elif row.tone == 'danger' %}cedis-tone-danger{% else %}cedis-tone-warning{% endif %}">{{ row.status }}</div>
         </article>
         {% empty %}
@@ -676,7 +677,7 @@
         {% for row in forecast_rows|slice:":6" %}
         <article class="cedis-signal-item">
           <strong>{{ row.label }}</strong>
-          <div class="cedis-signal-meta">Pron. prod. {{ row.forecast_production_qty|floatformat:0 }} · ventas ${{ row.forecast_sales_amount|floatformat:0 }} · {{ row.forecast_sales_qty|floatformat:0 }} pzas</div>
+          <div class="cedis-signal-meta">Pron. prod. {{ row.forecast_production_qty|floatformat:0|intcomma }} · ventas ${{ row.forecast_sales_amount|floatformat:0|intcomma }} · {{ row.forecast_sales_qty|floatformat:0|intcomma }} pzas</div>
           <div class="cedis-signal-meta">{% if row.trend == "up" %}Tendencia ↑{% else %}Tendencia ↓{% endif %}</div>
         </article>
         {% empty %}
@@ -752,12 +753,12 @@
                 {% for row in weekly_rows %}
                 <tr>
                   <td>{{ row.week_label }}</td>
-                  <td class="cedis-num">${{ row.sales_amount|floatformat:0 }}</td>
-                  <td class="cedis-num">{{ row.sales_units|floatformat:0 }}</td>
-                  <td class="cedis-num">{{ row.production_units|floatformat:0 }}</td>
-                  <td class="cedis-num">{{ row.transfer_units|floatformat:0 }}</td>
-                  <td class="cedis-num">${{ row.waste_cost|floatformat:0 }}</td>
-                  <td class="cedis-num">{{ row.coverage_ratio|floatformat:2 }}</td>
+                  <td class="cedis-num">${{ row.sales_amount|floatformat:0|intcomma }}</td>
+                  <td class="cedis-num">{{ row.sales_units|floatformat:0|intcomma }}</td>
+                  <td class="cedis-num">{{ row.production_units|floatformat:0|intcomma }}</td>
+                  <td class="cedis-num">{{ row.transfer_units|floatformat:0|intcomma }}</td>
+                  <td class="cedis-num">${{ row.waste_cost|floatformat:0|intcomma }}</td>
+                  <td class="cedis-num">{{ row.coverage_ratio|floatformat:2|intcomma }}</td>
                 </tr>
                 {% endfor %}
               </tbody>
@@ -775,9 +776,9 @@
                 {% for row in category_balance_rows %}
                 <tr>
                   <td>{{ row.label }}</td>
-                  <td class="cedis-num">{{ row.production_qty|floatformat:0 }}</td>
-                  <td class="cedis-num">{{ row.sales_qty|floatformat:0 }}</td>
-                  <td class="cedis-num">{{ row.delta|floatformat:0 }}</td>
+                  <td class="cedis-num">{{ row.production_qty|floatformat:0|intcomma }}</td>
+                  <td class="cedis-num">{{ row.sales_qty|floatformat:0|intcomma }}</td>
+                  <td class="cedis-num">{{ row.delta|floatformat:0|intcomma }}</td>
                   <td>{{ row.status }}</td>
                 </tr>
                 {% endfor %}
@@ -796,9 +797,9 @@
                 {% for row in forecast_rows %}
                 <tr>
                   <td>{{ row.label }}</td>
-                  <td class="cedis-num">{{ row.forecast_production_qty|floatformat:0 }}</td>
-                  <td class="cedis-num">${{ row.forecast_sales_amount|floatformat:0 }}</td>
-                  <td class="cedis-num">{{ row.forecast_sales_qty|floatformat:0 }}</td>
+                  <td class="cedis-num">{{ row.forecast_production_qty|floatformat:0|intcomma }}</td>
+                  <td class="cedis-num">${{ row.forecast_sales_amount|floatformat:0|intcomma }}</td>
+                  <td class="cedis-num">{{ row.forecast_sales_qty|floatformat:0|intcomma }}</td>
                   <td class="cedis-num">{% if row.trend == "up" %}↑{% else %}↓{% endif %}</td>
                 </tr>
                 {% endfor %}

@@ -1,5 +1,5 @@
 {% extends "admin/base_site.html" %}
-{% load i18n %}
+{% load i18n humanize %}
 
 {% block content %}
 <div id="content-main">
@@ -17,10 +17,10 @@
   {% endif %}
 
   <div style="margin:12px 0;display:flex;gap:18px;flex-wrap:wrap;">
-    <div><strong>Total plan:</strong> {{ total_plan|floatformat:2 }}</div>
-    <div><strong>Total pronóstico:</strong> {{ total_pronostico|floatformat:2 }}</div>
-    <div><strong>Delta (plan-pronóstico):</strong> {{ total_delta|floatformat:2 }}</div>
-    <div><strong>Delta absoluto:</strong> {{ total_delta_abs|floatformat:2 }}</div>
+    <div><strong>Total plan:</strong> {{ total_plan|floatformat:2|intcomma }}</div>
+    <div><strong>Total pronóstico:</strong> {{ total_pronostico|floatformat:2|intcomma }}</div>
+    <div><strong>Delta (plan-pronóstico):</strong> {{ total_delta|floatformat:2|intcomma }}</div>
+    <div><strong>Delta absoluto:</strong> {{ total_delta_abs|floatformat:2|intcomma }}</div>
     <div><strong>Recetas con desviación:</strong> {{ desviaciones }}</div>
   </div>
 
@@ -38,9 +38,9 @@
       {% for row in rows %}
       <tr>
         <td>{{ row.receta }}</td>
-        <td>{{ row.cantidad_plan|floatformat:2 }}</td>
-        <td>{{ row.cantidad_pronostico|floatformat:2 }}</td>
-        <td>{{ row.delta|floatformat:2 }}</td>
+        <td>{{ row.cantidad_plan|floatformat:2|intcomma }}</td>
+        <td>{{ row.cantidad_pronostico|floatformat:2|intcomma }}</td>
+        <td>{{ row.delta|floatformat:2|intcomma }}</td>
         <td>
           {% if row.sin_pronostico %}
             Sin pronóstico

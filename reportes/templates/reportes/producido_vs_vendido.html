@@ -198,11 +198,11 @@
               {% if group.total.pct_merma is None %}
               <span class="muted">—</span>
               {% elif group.total.dif < 0 or group.total.pct_merma > 15 %}
-              <span class="badge bg-danger">{{ group.total.pct_merma|floatformat:2 }}%</span>
+              <span class="badge bg-danger">{{ group.total.pct_merma|floatformat:2|intcomma }}%</span>
               {% elif group.total.pct_merma >= 5 %}
-              <span class="badge bg-warning">{{ group.total.pct_merma|floatformat:2 }}%</span>
+              <span class="badge bg-warning">{{ group.total.pct_merma|floatformat:2|intcomma }}%</span>
               {% else %}
-              <span class="badge bg-success">{{ group.total.pct_merma|floatformat:2 }}%</span>
+              <span class="badge bg-success">{{ group.total.pct_merma|floatformat:2|intcomma }}%</span>
               {% endif %}
             </td>
             <td class="text-end">{% if group.total.inventario_inicial is None %}<span class="muted">—</span>{% else %}{{ group.total.inventario_inicial|floatformat:"-1"|intcomma }}{% endif %}</td>
@@ -254,11 +254,11 @@
               {% if row.pct_merma is None %}
               <span class="muted">—</span>
               {% elif row.dif < 0 or row.pct_merma > 15 %}
-              <span class="badge bg-danger">{{ row.pct_merma|floatformat:2 }}%</span>
+              <span class="badge bg-danger">{{ row.pct_merma|floatformat:2|intcomma }}%</span>
               {% elif row.pct_merma >= 5 %}
-              <span class="badge bg-warning">{{ row.pct_merma|floatformat:2 }}%</span>
+              <span class="badge bg-warning">{{ row.pct_merma|floatformat:2|intcomma }}%</span>
               {% else %}
-              <span class="badge bg-success">{{ row.pct_merma|floatformat:2 }}%</span>
+              <span class="badge bg-success">{{ row.pct_merma|floatformat:2|intcomma }}%</span>
               {% endif %}
             </td>
             <td class="text-end">{% if row.inventario_inicial is None %}<span class="muted">—</span>{% else %}{{ row.inventario_inicial|floatformat:"-1"|intcomma }}{% endif %}</td>
@@ -298,11 +298,11 @@
               {% if grand_total.pct_merma is None %}
               <span class="muted">—</span>
               {% elif grand_total.dif < 0 or grand_total.pct_merma > 15 %}
-              <span class="badge bg-danger">{{ grand_total.pct_merma|floatformat:2 }}%</span>
+              <span class="badge bg-danger">{{ grand_total.pct_merma|floatformat:2|intcomma }}%</span>
               {% elif grand_total.pct_merma >= 5 %}
-              <span class="badge bg-warning">{{ grand_total.pct_merma|floatformat:2 }}%</span>
+              <span class="badge bg-warning">{{ grand_total.pct_merma|floatformat:2|intcomma }}%</span>
               {% else %}
-              <span class="badge bg-success">{{ grand_total.pct_merma|floatformat:2 }}%</span>
+              <span class="badge bg-success">{{ grand_total.pct_merma|floatformat:2|intcomma }}%</span>
               {% endif %}
             </td>
             <td class="text-end">{% if grand_total.inventario_inicial is None %}<span class="muted">—</span>{% else %}{{ grand_total.inventario_inicial|floatformat:"-1"|intcomma }}{% endif %}</td>

@@ -387,7 +387,7 @@
               <td class="text-end">{{ product.total_piezas|intcomma }}</td>
               <td class="text-end">${{ product.precio|floatformat:2|intcomma }}</td>
               <td class="text-end">${{ product.total_ingreso|floatformat:2|intcomma }}</td>
-              <td class="text-end">{{ product.pct_total|floatformat:2 }}%</td>
+              <td class="text-end">{{ product.pct_total|floatformat:2|intcomma }}%</td>
               <td class="text-center"><span class="forecast-trend {{ product.tendencia }}">{% if product.tendencia == "sube" %}↑{% elif product.tendencia == "baja" %}↓{% else %}→{% endif %} {{ product.factor_tendencia }}x</span></td>
             </tr>
             {% endfor %}
@@ -493,7 +493,7 @@
                 <td class="text-end">{{ product.total_piezas|intcomma }}</td>
                 <td class="text-end">${{ product.precio|floatformat:2|intcomma }}</td>
                 <td class="text-end">${{ product.total_ingreso|floatformat:2|intcomma }}</td>
-                <td class="text-end">{{ product.pct_total|floatformat:2 }}%</td>
+                <td class="text-end">{{ product.pct_total|floatformat:2|intcomma }}%</td>
                 <td class="text-center"><span class="forecast-trend {{ product.tendencia }}">{% if product.tendencia == "sube" %}↑{% elif product.tendencia == "baja" %}↓{% else %}→{% endif %} {{ product.factor_tendencia }}x</span></td>
               </tr>
               {% endfor %}

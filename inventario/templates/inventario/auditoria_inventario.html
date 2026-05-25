@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Auditoría Inventario{% endblock %}
 {% block page_title %}Auditoría Inventario — Point vs ERP{% endblock %}
 
@@ -111,22 +112,22 @@
       <tr class="row-{{ r.estado }}">
         <td><strong>{{ r.nombre }}</strong></td>
         <td>{{ r.unidad }}</td>
-        <td style="text-align:right;font-weight:700">{{ r.erp_stock|floatformat:2 }}</td>
+        <td style="text-align:right;font-weight:700">{{ r.erp_stock|floatformat:2|intcomma }}</td>
         <td style="text-align:right">
-          {% if r.point_stock is not None %}{{ r.point_stock|floatformat:2 }}
+          {% if r.point_stock is not None %}{{ r.point_stock|floatformat:2|intcomma }}
           {% else %}<span class="muted">—</span>{% endif %}
         </td>
         <td style="text-align:right">
           {% if r.discrepancia is not None %}
             <span class="{% if r.discrepancia > 0 %}disc-pos{% elif r.discrepancia < 0 %}disc-neg{% else %}disc-ok{% endif %}">
-              {% if r.discrepancia > 0 %}+{% endif %}{{ r.discrepancia|floatformat:2 }}
+              {% if r.discrepancia > 0 %}+{% endif %}{{ r.discrepancia|floatformat:2|intcomma }}
             </span>
           {% else %}<span class="muted">—</span>{% endif %}
         </td>
-        <td style="text-align:right;color:var(--verde)">{% if r.entradas %}+{{ r.entradas|floatformat:2 }}{% else %}—{% endif %}</td>
-        <td style="text-align:right;color:var(--rojo)">{% if r.salidas %}-{{ r.salidas|floatformat:2 }}{% else %}—{% endif %}</td>
-        <td style="text-align:right;color:var(--texto-light)">{% if r.consumos %}{{ r.consumos|floatformat:2 }}{% else %}—{% endif %}</td>
-        <td style="text-align:right;color:var(--verde)">{% if r.compras %}+{{ r.compras|floatformat:2 }}{% else %}—{% endif %}</td>
+        <td style="text-align:right;color:var(--verde)">{% if r.entradas %}+{{ r.entradas|floatformat:2|intcomma }}{% else %}—{% endif %}</td>
+        <td style="text-align:right;color:var(--rojo)">{% if r.salidas %}-{{ r.salidas|floatformat:2|intcomma }}{% else %}—{% endif %}</td>
+        <td style="text-align:right;color:var(--texto-light)">{% if r.consumos %}{{ r.consumos|floatformat:2|intcomma }}{% else %}—{% endif %}</td>
+        <td style="text-align:right;color:var(--verde)">{% if r.compras %}+{{ r.compras|floatformat:2|intcomma }}{% else %}—{% endif %}</td>
         <td>
           <span class="badge badge-{{ r.estado }}" style="font-size:11px">
             {% if r.estado == "OK" %}✓ OK

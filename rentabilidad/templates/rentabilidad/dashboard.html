@@ -966,7 +966,7 @@
       <div class="rank-list">
         {% for row in gastos_panel.por_sucursal %}
         <div class="rank-item">
-          <div><strong>{{ row.centro_costo__sucursal__nombre }}</strong><div class="muted">{{ row.registros }} registros</div></div>
+          <div><strong>{{ row.centro_costo__sucursal__nombre }}</strong><div class="muted">{{ row.registros|intcomma }} registros</div></div>
           <strong>${{ row.total|floatformat:0|intcomma }}</strong>
         </div>
         {% empty %}

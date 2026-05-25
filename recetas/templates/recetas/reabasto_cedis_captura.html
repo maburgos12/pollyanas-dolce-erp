@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Cierre Sucursal · Reabasto CEDIS{% endblock %}
 {% block page_title %}Cierre Sucursal · Reabasto CEDIS{% endblock %}
 {% block body_class %}page-reabasto-captura{% endblock %}
@@ -270,7 +271,7 @@
                 <input type="hidden" name="row_receta_id" value="{{ row.receta.id }}">
               </td>
               <td>
-                <span class="js-stock-min" data-receta="{{ row.receta.id }}">{{ row.policy.stock_minimo|floatformat:2 }}</span>
+                <span class="js-stock-min" data-receta="{{ row.receta.id }}">{{ row.policy.stock_minimo|floatformat:2|intcomma }}</span>
               </td>
               <td>
                 <input
@@ -284,7 +285,7 @@
                 >
               </td>
               <td>
-                <span class="badge badge-primary js-sugerido" data-receta="{{ row.receta.id }}">{{ row.sugerido|floatformat:2 }}</span>
+                <span class="badge badge-primary js-sugerido" data-receta="{{ row.receta.id }}">{{ row.sugerido|floatformat:2|intcomma }}</span>
               </td>
             </tr>
             {% empty %}

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Inventario - Carga de Almacén{% endblock %}
 {% block page_title %}Inventario · Carga de Almacén{% endblock %}
 
@@ -129,7 +130,7 @@
       <div class="kpi-number is-warning">{{ card.count }}</div>
       <div class="kpi-label">{{ card.source|title }}</div>
       <div class="muted mt-1">{{ card.top_name }}</div>
-      <div class="muted mt-1">Confianza máx: {{ card.top_score|floatformat:0 }}</div>
+      <div class="muted mt-1">Confianza máx: {{ card.top_score|floatformat:0|intcomma }}</div>
       <div class="mt-2">
         <a class="btn btn-secondary btn-sm" href="{% url 'inventario:aliases_catalog' %}">Abrir gobierno de catálogo</a>
       </div>
@@ -370,7 +371,7 @@
           <td>{{ row.sources }}</td>
           <td>{{ row.count }}</td>
           <td>{{ row.sugerencia|default:"-" }}</td>
-          <td class="text-end">{{ row.score_max|floatformat:0 }}</td>
+          <td class="text-end">{{ row.score_max|floatformat:0|intcomma }}</td>
           <td><a class="btn btn-secondary btn-sm" href="{% url 'inventario:aliases_catalog' %}?q={{ row.nombre_origen|urlencode }}">Resolver</a></td>
         </tr>
         {% endfor %}

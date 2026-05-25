@@ -313,7 +313,7 @@
             <strong>{{ row.insumo }}</strong>
             <span class="bi-tone {% if row.semaforo == 'ROJO' %}danger{% elif row.semaforo == 'AMARILLO' %}warning{% else %}success{% endif %}">{{ row.estado }}</span>
           </div>
-          <div class="purchases-compact-meta">Plan {{ row.cantidad_plan|floatformat:2 }} {{ row.unidad }} · real {{ row.cantidad_real|floatformat:2 }} {{ row.unidad }}</div>
+          <div class="purchases-compact-meta">Plan {{ row.cantidad_plan|floatformat:2|intcomma }} {{ row.unidad }} · real {{ row.cantidad_real|floatformat:2|intcomma }} {{ row.unidad }}</div>
           {% if row.alerta %}<div class="bi-subtle">{{ row.alerta }}</div>{% endif %}
           <div class="bi-inline-actions">
             <a class="bi-inline-link" href="{{ row.action_url }}">Abrir insumo</a>

@@ -66,6 +66,9 @@ matrices auditables; en KPIs puede mantenerse la alineacion del componente.
 En templates Django, los importes y cantidades visibles deben aplicar separador
 de miles con `intcomma` despues de `floatformat`, por ejemplo
 `${{ valor|floatformat:2|intcomma }}`.
+La regla se audita con `python3 scripts/audit_numeric_format.py`; no corregir
+variables dentro de `style`, `value`, `data-*`, `<script>` o calculos tecnicos,
+porque esas salidas deben seguir siendo numeros sin separador para el navegador.
 
 ## Estructura Por Tipo De Pantalla
 
@@ -191,4 +194,5 @@ Un cambio visual no esta terminado hasta que:
 - si agrega estaticos, se considera `collectstatic --noinput` en deploy;
 - se revisa en navegador real si afecta UI;
 - no agrega nueva deuda de estilo segun `scripts/audit_ui_style.py`;
+- no deja numeros visibles sin separador segun `scripts/audit_numeric_format.py`;
 - se valida el flujo final donde el usuario lo usa.

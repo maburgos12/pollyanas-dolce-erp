@@ -122,7 +122,7 @@
     </article>
     <article class="audit-kpi">
       <span>% insumos OK</span>
-      <strong>{{ kpis.ok_pct|floatformat:2 }}%</strong>
+      <strong>{{ kpis.ok_pct|floatformat:2|intcomma }}%</strong>
     </article>
     <article class="audit-kpi">
       <span>Alertas activas</span>
@@ -153,7 +153,7 @@
           <td class="audit-num">{{ row.consumo_teorico|floatformat:4|intcomma }}</td>
           <td class="audit-num">{{ row.consumo_real|floatformat:4|intcomma }}</td>
           <td class="audit-num">{{ row.diferencia_unidades|floatformat:4|intcomma }}</td>
-          <td class="audit-num">{{ row.diferencia_pct|floatformat:2 }}%</td>
+          <td class="audit-num">{{ row.diferencia_pct|floatformat:2|intcomma }}%</td>
           <td class="audit-num">${{ row.diferencia_costo|floatformat:2|intcomma }}</td>
           <td><span class="audit-badge {{ row.alerta }}">{{ row.get_alerta_display }}</span></td>
         </tr>

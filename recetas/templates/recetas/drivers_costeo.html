@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Drivers de Costeo{% endblock %}
 {% block page_title %}Recetas · Drivers de Costeo{% endblock %}
 {% block content %}
@@ -234,10 +235,10 @@
             Global
           {% endif %}
         </td>
-        <td class="text-end">{{ d.mo_pct|floatformat:2 }}</td>
-        <td class="text-end">{{ d.indirecto_pct|floatformat:2 }}</td>
-        <td class="text-end">{{ d.mo_fijo|floatformat:2 }}</td>
-        <td class="text-end">{{ d.indirecto_fijo|floatformat:2 }}</td>
+        <td class="text-end">{{ d.mo_pct|floatformat:2|intcomma }}</td>
+        <td class="text-end">{{ d.indirecto_pct|floatformat:2|intcomma }}</td>
+        <td class="text-end">{{ d.mo_fijo|floatformat:2|intcomma }}</td>
+        <td class="text-end">{{ d.indirecto_fijo|floatformat:2|intcomma }}</td>
         <td class="text-end">{{ d.prioridad }}</td>
         <td>{% if d.activo %}<span class="badge badge-verde">Activo</span>{% else %}<span class="badge badge-rojo">Inactivo</span>{% endif %}</td>
         <td>

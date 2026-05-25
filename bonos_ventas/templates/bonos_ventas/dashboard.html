@@ -261,7 +261,7 @@
               <td>{{ venta.get_categoria_display }}</td>
               <td>{{ venta.cantidad_actual|floatformat:0|intcomma }}</td>
               <td>{{ venta.cantidad_anterior|floatformat:0|intcomma }}</td>
-              <td><span class="status-pill {% if venta.activo_bono %}ok{% else %}neutral{% endif %}">{{ venta.pct_crecimiento|floatformat:2 }}%</span></td>
+              <td><span class="status-pill {% if venta.activo_bono %}ok{% else %}neutral{% endif %}">{{ venta.pct_crecimiento|floatformat:2|intcomma }}%</span></td>
               <td>${{ venta.monto_bono_categoria|floatformat:2|intcomma }}</td>
               <td>{{ venta.get_fuente_display }}</td>
             </tr>

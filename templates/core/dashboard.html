@@ -400,10 +400,10 @@
                 <tr>
                     <td><strong>{{ row.insumo_nombre }}</strong></td>
                     <td>{{ row.recipe_names|join:", " }}</td>
-                    <td class="text-end">{{ row.historico_units|floatformat:0 }}</td>
-                    <td class="text-end">{{ row.required_qty|floatformat:2 }}</td>
-                    <td class="text-end">{{ row.stock_actual|floatformat:2 }}</td>
-                    <td class="text-end">{{ row.shortage|floatformat:2 }}</td>
+                    <td class="text-end">{{ row.historico_units|floatformat:0|intcomma }}</td>
+                    <td class="text-end">{{ row.required_qty|floatformat:2|intcomma }}</td>
+                    <td class="text-end">{{ row.stock_actual|floatformat:2|intcomma }}</td>
+                    <td class="text-end">{{ row.shortage|floatformat:2|intcomma }}</td>
                     <td>{% if row.master_missing %}{{ row.master_missing|join:", " }}{% elif row.missing_cost %}Costo pendiente{% else %}Listo{% endif %}</td>
                     <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
                 </tr>
@@ -426,7 +426,7 @@
         </div>
         <div class="kpi-mini executive-kpi-grid executive-kpi-grid-compact">
             <article class="kpi-card executive-kpi-card">
-                <div class="kpi-number">{{ daily_sales_snapshot.total_units|floatformat:0 }}</div>
+                <div class="kpi-number">{{ daily_sales_snapshot.total_units|floatformat:0|intcomma }}</div>
                 <div class="kpi-label">Unidades vendidas</div>
                 <div class="muted executive-kpi-note">{{ daily_sales_snapshot.branch_count }} sucursales · {{ daily_sales_snapshot.recipe_count }} productos</div>
             </article>
@@ -941,7 +941,7 @@
                 <div class="muted executive-kpi-note">{{ sales_history_summary.recipe_count }} productos con histórico</div>
             </article>
             <article class="kpi-card executive-kpi-card">
-                <div class="kpi-number">{{ sales_history_summary.total_units|floatformat:0 }}</div>
+                <div class="kpi-number">{{ sales_history_summary.total_units|floatformat:0|intcomma }}</div>
                 <div class="kpi-label">Unidades históricas</div>
                 <div class="muted executive-kpi-note">${{ sales_history_summary.total_amount|floatformat:2|intcomma }} acumulados</div>
             </article>
@@ -1117,7 +1117,7 @@
                     <div><strong>Arriba de stock máximo:</strong> {{ stock_sobre_max_count }}</div>
                     <div><strong>Riesgo por lead time:</strong> {{ lead_time_risk_count }}</div>
                     <div><strong>Días promedio de llegada:</strong> {{ avg_dias_llegada|floatformat:1 }}</div>
-                    <div><strong>Consumo diario total:</strong> {{ total_consumo_diario|floatformat:2 }}</div>
+                    <div><strong>Consumo diario total:</strong> {{ total_consumo_diario|floatformat:2|intcomma }}</div>
                 </div>
             </section>
 

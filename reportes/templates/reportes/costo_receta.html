@@ -384,7 +384,7 @@
             <td class="text-end">${{ row.budget|floatformat:2|intcomma }}</td>
             <td class="text-end">${{ row.actual|floatformat:2|intcomma }}</td>
             <td class="text-end finance-variance {{ row.tone }}">{% if row.variance > 0 %}+{% endif %}${{ row.variance|floatformat:2|intcomma }}</td>
-            <td class="text-end finance-variance {{ row.tone }}">{% if row.variance_pct > 0 %}+{% endif %}{{ row.variance_pct|floatformat:2 }}%</td>
+            <td class="text-end finance-variance {{ row.tone }}">{% if row.variance_pct > 0 %}+{% endif %}{{ row.variance_pct|floatformat:2|intcomma }}%</td>
           </tr>
           {% empty %}
           <tr><td colspan="5" class="text-muted">Sin conceptos para el periodo.</td></tr>
@@ -834,7 +834,7 @@
               <td>{{ row.label }}</td>
               <td class="text-end">${{ row.costo_total|floatformat:2|intcomma }}</td>
               <td class="text-end">{% if row.delta_total is not None %}{% if row.delta_total > 0 %}+{% endif %}${{ row.delta_total|floatformat:2|intcomma }}{% else %}Base{% endif %}</td>
-              <td class="text-end">{% if row.delta_pct is not None %}{% if row.delta_pct > 0 %}+{% endif %}{{ row.delta_pct|floatformat:2 }}%{% else %}N/D{% endif %}</td>
+              <td class="text-end">{% if row.delta_pct is not None %}{% if row.delta_pct > 0 %}+{% endif %}{{ row.delta_pct|floatformat:2|intcomma }}%{% else %}N/D{% endif %}</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -855,7 +855,7 @@
             <tr>
               <td>{{ row.receta.nombre }}</td>
               <td class="text-end">{{ row.lineas_costeadas }}/{{ row.lineas_total }}</td>
-              <td class="text-end">{{ row.cobertura_pct|floatformat:2 }}%</td>
+              <td class="text-end">{{ row.cobertura_pct|floatformat:2|intcomma }}%</td>
               <td>{% if row.blocked %}Bloqueo maestro/costo{% else %}Cobertura parcial{% endif %}</td>
             </tr>
             {% empty %}

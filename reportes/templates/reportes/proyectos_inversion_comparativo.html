@@ -96,10 +96,10 @@
             <td><a class="investment-inline-link" href="{% url 'reportes:proyecto_inversion_detail' row.project.pk %}">{{ row.project.nombre_proyecto }}</a></td>
             <td>{% if row.project.sucursal_relacionada %}{{ row.project.sucursal_relacionada.codigo }} · {{ row.project.sucursal_relacionada.nombre }}{% else %}Pendiente{% endif %}</td>
             <td>{{ row.project.get_estatus_display }}</td>
-            <td>{{ row.roi|floatformat:2 }}%</td>
-            <td>{{ row.payback|floatformat:2 }} meses</td>
-            <td>{{ row.cash_on_cash|floatformat:2 }}%</td>
-            <td>{{ row.recovery_speed|floatformat:2 }}%</td>
+            <td>{{ row.roi|floatformat:2|intcomma }}%</td>
+            <td>{{ row.payback|floatformat:2|intcomma }} meses</td>
+            <td>{{ row.cash_on_cash|floatformat:2|intcomma }}%</td>
+            <td>{{ row.recovery_speed|floatformat:2|intcomma }}%</td>
             <td><span class="investment-status-pill {% if row.health_score > 80 %}is-active{% elif row.health_score >= 50 %}is-warning{% else %}is-danger{% endif %}">{{ row.health_score }}/100</span></td>
           </tr>
           {% empty %}

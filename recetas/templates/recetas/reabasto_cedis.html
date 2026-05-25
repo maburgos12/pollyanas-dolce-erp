@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Reabasto CEDIS{% endblock %}
 {% block page_title %}Reabasto CEDIS{% endblock %}
 {% block body_class %}page-reabasto-cedis{% endblock %}
@@ -157,7 +158,7 @@
           </div>
           <div class="reabasto-route-item">
             <strong>2. Plan</strong>
-            <span class="muted">{{ total_faltante|floatformat:2 }} por producir</span>
+            <span class="muted">{{ total_faltante|floatformat:2|intcomma }} por producir</span>
           </div>
           <div class="reabasto-route-item">
             <strong>3. Compras</strong>
@@ -199,11 +200,11 @@
         <span class="muted">Solicitudes</span>
       </div>
       <div class="reabasto-metric">
-        <span class="reabasto-metric-value">{{ total_solicitado|floatformat:2 }}</span>
+        <span class="reabasto-metric-value">{{ total_solicitado|floatformat:2|intcomma }}</span>
         <span class="muted">Solicitado</span>
       </div>
       <div class="reabasto-metric">
-        <span class="reabasto-metric-value">{{ total_faltante|floatformat:2 }}</span>
+        <span class="reabasto-metric-value">{{ total_faltante|floatformat:2|intcomma }}</span>
         <span class="muted">Faltante CEDIS</span>
       </div>
       <div class="reabasto-metric">
@@ -438,11 +439,11 @@
                 {{ row.receta.nombre }}
                 <input type="hidden" name="row_receta_id" value="{{ row.receta.id }}">
               </td>
-              <td><span class="js-stock-min" data-receta="{{ row.receta.id }}">{{ row.policy.stock_minimo|floatformat:2 }}</span></td>
+              <td><span class="js-stock-min" data-receta="{{ row.receta.id }}">{{ row.policy.stock_minimo|floatformat:2|intcomma }}</span></td>
               <td>
                 <input class="form-control js-stock-final" type="number" step="0.001" min="0" name="stock_reportado_{{ row.receta.id }}" value="{{ row.stock_reportado|floatformat:3 }}" data-receta="{{ row.receta.id }}">
               </td>
-              <td><span class="badge badge-primary js-sugerido" data-receta="{{ row.receta.id }}">{{ row.sugerido|floatformat:2 }}</span></td>
+              <td><span class="badge badge-primary js-sugerido" data-receta="{{ row.receta.id }}">{{ row.sugerido|floatformat:2|intcomma }}</span></td>
               <td><input class="form-control" type="text" name="observaciones_{{ row.receta.id }}" maxlength="255" value="{{ row.observaciones }}"></td>
             </tr>
             {% empty %}
@@ -520,21 +521,21 @@
               {% if show_simple_capture %}
               <tr>
                 <td>{{ row.receta.nombre }}</td>
-                <td>{{ row.stock_reportado|floatformat:2 }}</td>
-                <td>{{ row.solicitado|floatformat:2 }}</td>
+                <td>{{ row.stock_reportado|floatformat:2|intcomma }}</td>
+                <td>{{ row.solicitado|floatformat:2|intcomma }}</td>
                 <td>{% if solicitud %}{{ solicitud.get_estado_display }}{% else %}Sin guardar{% endif %}</td>
                 <td>{{ row.linea.observaciones|default:"-" }}</td>
               </tr>
               {% else %}
               <tr>
                 <td>{{ row.receta.nombre }}</td>
-                <td>{{ row.stock_reportado|floatformat:2 }}</td>
-                <td>{{ row.en_transito|floatformat:2 }}</td>
-                <td>{{ row.consumo_proyectado|floatformat:2 }}</td>
-                <td>{{ row.sugerido|floatformat:2 }}</td>
-                <td>{{ row.solicitado|floatformat:2 }}</td>
-                <td>{% if row.delta > 0 %}+{% endif %}{{ row.delta|floatformat:2 }}</td>
-                <td>{% if row.policy %}Min {{ row.policy.stock_minimo|floatformat:2 }} · Obj {{ row.policy.stock_objetivo|floatformat:2 }}{% else %}<span class="badge badge-warning">Sin política</span>{% endif %}</td>
+                <td>{{ row.stock_reportado|floatformat:2|intcomma }}</td>
+                <td>{{ row.en_transito|floatformat:2|intcomma }}</td>
+                <td>{{ row.consumo_proyectado|floatformat:2|intcomma }}</td>
+                <td>{{ row.sugerido|floatformat:2|intcomma }}</td>
+                <td>{{ row.solicitado|floatformat:2|intcomma }}</td>
+                <td>{% if row.delta > 0 %}+{% endif %}{{ row.delta|floatformat:2|intcomma }}</td>
+                <td>{% if row.policy %}Min {{ row.policy.stock_minimo|floatformat:2|intcomma }} · Obj {{ row.policy.stock_objetivo|floatformat:2|intcomma }}{% else %}<span class="badge badge-warning">Sin política</span>{% endif %}</td>
                 <td>
                   {% if row.linea %}
                   <form method="post" action="{% url 'recetas:reabasto_cedis_linea_eliminar' row.linea.id %}">

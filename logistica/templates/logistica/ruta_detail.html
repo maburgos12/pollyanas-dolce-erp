@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load static %}
+{% load static humanize %}
 
 {% block title %}Logística · {{ ruta.folio }}{% endblock %}
 {% block page_title %}Logística · {{ ruta.folio }}{% endblock %}
@@ -30,7 +30,7 @@
       <article class="ops-summary-card"><span class="muted">Ruta</span><strong style="font-size:22px;">{{ ruta.nombre }}</strong><div>{{ ruta.folio }}</div></article>
       <article class="ops-summary-card"><span class="muted">Fecha</span><strong style="font-size:22px;">{{ ruta.fecha_ruta|date:"Y-m-d" }}</strong><div>{{ ruta.get_estatus_display }}</div></article>
       <article class="ops-summary-card"><span class="muted">Chofer / unidad</span><strong style="font-size:22px;">{{ ruta.chofer|default:"-" }}</strong><div>{{ ruta.unidad|default:"Sin unidad" }}</div></article>
-      <article class="ops-summary-card"><span class="muted">Monto estimado</span><strong>${{ ruta.monto_estimado_total|floatformat:2 }}</strong><div>{{ ruta.total_entregas }} entregas visibles</div></article>
+      <article class="ops-summary-card"><span class="muted">Monto estimado</span><strong>${{ ruta.monto_estimado_total|floatformat:2|intcomma }}</strong><div>{{ ruta.total_entregas|intcomma }} entregas visibles</div></article>
     </div>
     <div class="table-responsive" style="margin-top:14px;">
       <table class="table table-striped">
@@ -133,7 +133,7 @@
               {% if e.ventana_inicio %}{{ e.ventana_inicio|date:"Y-m-d H:i" }}{% else %}-{% endif %}
               {% if e.ventana_fin %} → {{ e.ventana_fin|date:"Y-m-d H:i" }}{% endif %}
             </td>
-            <td class="text-end">${{ e.monto_estimado|floatformat:2 }}</td>
+            <td class="text-end">${{ e.monto_estimado|floatformat:2|intcomma }}</td>
             <td>
               {% if e.estatus == 'ENTREGADA' %}
               <span class="badge bg-success">{{ e.get_estatus_display }}</span>

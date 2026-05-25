@@ -116,7 +116,7 @@
     </article>
     <article class="investment-kpi-card">
       <div class="investment-kpi-label">Margen bruto</div>
-      <div class="investment-kpi-value">{{ benchmark.margen_bruto_pct_avg|default:0|floatformat:2 }}%</div>
+      <div class="investment-kpi-value">{{ benchmark.margen_bruto_pct_avg|default:0|floatformat:2|intcomma }}%</div>
       <div class="investment-kpi-note">Sólo snapshots FACT</div>
     </article>
   </section>

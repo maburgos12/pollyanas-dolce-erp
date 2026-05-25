@@ -43,7 +43,7 @@
       <td class="num">{{ product.total_piezas|intcomma }}</td>
       <td class="num">${{ product.precio|floatformat:2|intcomma }}</td>
       <td class="num">${{ product.total_ingreso|floatformat:2|intcomma }}</td>
-      <td class="num">{{ product.pct_total|floatformat:2 }}%</td>
+      <td class="num">{{ product.pct_total|floatformat:2|intcomma }}%</td>
     </tr>
     {% endfor %}
     {% endfor %}

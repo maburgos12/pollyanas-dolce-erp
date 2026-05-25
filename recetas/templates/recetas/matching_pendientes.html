@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Recetas · Validación BOM de artículos{% endblock %}
 {% block content %}
 <section class="card recipes-hero-card mb-3">
@@ -307,7 +308,7 @@
         <td>
           {% if l.suggested_insumo %}
             <div><strong>{{ l.suggested_insumo.nombre }}</strong></div>
-            <div class="text-muted">Nivel {{ l.suggested_score|floatformat:0 }}%</div>
+            <div class="text-muted">Nivel {{ l.suggested_score|floatformat:0|intcomma }}%</div>
             {% if l.suggested_is_canonical %}
               <span class="badge bg-info text-dark">Oficial</span>
             {% endif %}

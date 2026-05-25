@@ -57,7 +57,7 @@
     <article class="investment-kpi-card">
       <div class="investment-kpi-label">Recuperado</div>
       <div class="investment-kpi-value">${{ portfolio_kpis.recovered_amount|floatformat:2|intcomma }}</div>
-      <div class="investment-kpi-note">Pendiente ${{ portfolio_kpis.pending_amount|floatformat:2|intcomma }} · {{ portfolio_kpis.recovery_pct|floatformat:2 }}%</div>
+      <div class="investment-kpi-note">Pendiente ${{ portfolio_kpis.pending_amount|floatformat:2|intcomma }} · {{ portfolio_kpis.recovery_pct|floatformat:2|intcomma }}%</div>
     </article>
   </section>
 
@@ -118,7 +118,7 @@
                 <strong>{{ row.project.nombre_proyecto }}</strong>
                 <span class="investment-status-pill is-active">{{ row.classification }}</span>
               </div>
-              <div class="investment-muted">ROI {{ row.roi|floatformat:2 }}% · Health {{ row.health_score }}/100</div>
+              <div class="investment-muted">ROI {{ row.roi|floatformat:2|intcomma }}% · Health {{ row.health_score }}/100</div>
             </article>
             {% empty %}
             <div class="investment-empty">No hay candidatas listas para expandir.</div>
@@ -134,7 +134,7 @@
                 <strong>{{ row.project.nombre_proyecto }}</strong>
                 <span class="investment-status-pill is-warning">{{ row.classification }}</span>
               </div>
-              <div class="investment-muted">ROI {{ row.roi|floatformat:2 }}% · Flujo 3m ${{ row.average_free_cashflow_3m|default:0|floatformat:2|intcomma }}</div>
+              <div class="investment-muted">ROI {{ row.roi|floatformat:2|intcomma }}% · Flujo 3m ${{ row.average_free_cashflow_3m|default:0|floatformat:2|intcomma }}</div>
             </article>
             {% empty %}
             <div class="investment-empty">No hay sucursales críticas en este momento.</div>
@@ -188,11 +188,11 @@
                 </div>
                 <div class="investment-mini-kpi">
                   <span class="investment-muted">ROI acum.</span>
-                  <strong>{{ row.roi_cumulative|floatformat:2 }}%</strong>
+                  <strong>{{ row.roi_cumulative|floatformat:2|intcomma }}%</strong>
                 </div>
                 <div class="investment-mini-kpi">
                   <span class="investment-muted">Cash-on-cash</span>
-                  <strong>{{ row.cash_on_cash|floatformat:2 }}%</strong>
+                  <strong>{{ row.cash_on_cash|floatformat:2|intcomma }}%</strong>
                 </div>
                 <div class="investment-mini-kpi">
                   <span class="investment-muted">Health</span>
@@ -202,7 +202,7 @@
               <div class="investment-muted">
                 Inicio {{ row.project.fecha_inicio|date:"Y-m-d" }}
                 {% if row.project.fecha_apertura %}· Apertura {{ row.project.fecha_apertura|date:"Y-m-d" }}{% endif %}
-                · Recuperación {{ row.recovery_pct|floatformat:2 }}%
+                · Recuperación {{ row.recovery_pct|floatformat:2|intcomma }}%
                 · Alertas {{ row.active_alert_count }}
               </div>
             </div>

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 
+{% load humanize %}
 {% block title %}Activos - Órdenes{% endblock %}
 {% block page_title %}Activos · Órdenes{% endblock %}
 
@@ -551,7 +552,7 @@
             <td>{{ o.get_prioridad_display }}</td>
             <td>{{ o.fecha_programada|date:"Y-m-d" }}</td>
             <td><span class="badge badge-primary">{{ o.estatus }}</span></td>
-            <td>${{ o.costo_total|floatformat:2 }}</td>
+            <td>${{ o.costo_total|floatformat:2|intcomma }}</td>
             <td><span class="badge badge-{% if enterprise.status_tone == 'success' %}success{% elif enterprise.status_tone == 'danger' %}danger{% else %}warning{% endif %}">{{ enterprise.status_label }}</span></td>
             <td>{{ enterprise.next_action }}</td>
             <td>

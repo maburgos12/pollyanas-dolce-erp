@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Inventario - Referencias{% endblock %}
 {% block page_title %}Inventario · Referencias{% endblock %}
 
@@ -73,7 +74,7 @@
     </article>
     <article class="kpi-card">
       <div class="kpi-number {% if matching_summary.match_rate >= 98 %}is-success{% elif matching_summary.match_rate >= 95 %}is-warning{% else %}is-danger{% endif %}">
-        {{ matching_summary.match_rate|floatformat:2 }}%
+        {{ matching_summary.match_rate|floatformat:2|intcomma }}%
       </div>
       <div class="kpi-label">Cobertura ERP</div>
     </article>
@@ -348,7 +349,7 @@
           <td>{{ row.sources }}</td>
           <td class="text-end">{{ row.count }}</td>
           <td>{{ row.sugerencia|default:"-" }}</td>
-          <td class="text-end">{{ row.score_max|floatformat:0 }}</td>
+          <td class="text-end">{{ row.score_max|floatformat:0|intcomma }}</td>
           <td>
             <a class="btn btn-secondary btn-sm" href="{% url 'inventario:aliases_catalog' %}?q={{ row.nombre_origen|urlencode }}">
               Revisar referencia

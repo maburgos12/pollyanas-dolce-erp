@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 
+{% load humanize %}
 {% block title %}RRHH · Empleados{% endblock %}
 {% block page_title %}RRHH · Empleados{% endblock %}
 
@@ -493,7 +494,7 @@
               <td>{{ e.area|default:"-" }}</td>
               <td>{{ e.puesto|default:"-" }}</td>
               <td>{{ e.fecha_ingreso|date:"Y-m-d" }}</td>
-              <td class="text-end">${{ e.salario_diario|floatformat:2 }}</td>
+              <td class="text-end">${{ e.salario_diario|floatformat:2|intcomma }}</td>
               <td>
                 {% if e.activo %}
                   <span class="rrhh-status active">Activo</span>

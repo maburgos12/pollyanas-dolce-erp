@@ -1,3 +1,4 @@
+{% load humanize %}
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -236,8 +237,8 @@
           <td>{{ row.proveedor_sugerido|default:"-" }}</td>
           <td class="text-end">{{ row.cantidad|floatformat:3 }}</td>
           <td>{{ row.unidad }}</td>
-          <td class="text-end">${{ row.costo_unitario|floatformat:2 }}</td>
-          <td class="text-end">${{ row.costo_total|floatformat:2 }}</td>
+          <td class="text-end">${{ row.costo_unitario|floatformat:2|intcomma }}</td>
+          <td class="text-end">${{ row.costo_total|floatformat:2|intcomma }}</td>
         </tr>
         {% empty %}
         <tr>
@@ -266,7 +267,7 @@
           <td>{{ row.nombre }}</td>
           <td class="text-end">{{ row.cantidad|floatformat:3 }}</td>
           <td>{{ row.unidad }}</td>
-          <td class="text-end">${{ row.costo_total|floatformat:2 }}</td>
+          <td class="text-end">${{ row.costo_total|floatformat:2|intcomma }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -276,7 +277,7 @@
     <div class="totals">
       <div><strong>Total productos en plan:</strong> {{ explosion.items_detalle|length }}</div>
       <div><strong>Total insumos consolidados:</strong> {{ explosion.insumos|length }}</div>
-      <div><strong>Costo total estimado del plan:</strong> ${{ explosion.costo_total|floatformat:2 }}</div>
+      <div><strong>Costo total estimado del plan:</strong> ${{ explosion.costo_total|floatformat:2|intcomma }}</div>
     </div>
 
     <div class="signatures">
