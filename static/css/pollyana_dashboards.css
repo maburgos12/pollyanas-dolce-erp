@@ -1,0 +1,276 @@
+/*
+  Pollyana Dashboards v1
+  Capa visual compartida para dashboards, graficas y tablas auditables.
+  No contiene reglas de negocio ni depende de datos calculados en frontend.
+*/
+
+.bi-shell,
+.dg-shell,
+.rent-shell,
+.page-dashboard-executive .home-exec-shell {
+  color: var(--pd-ink);
+}
+
+.bi-hero,
+.bi-panel,
+.bi-kpi-card,
+.bi-filterbar,
+.dg-topbar,
+.dg-panel,
+.dg-kpi-card,
+.dg-status-card,
+.rent-card,
+.home-exec-hero,
+.home-exec-card {
+  border: 1px solid var(--pd-border);
+  border-radius: var(--pd-radius-lg);
+  background: var(--pd-surface);
+  box-shadow: var(--pd-shadow-low);
+}
+
+.bi-hero-title,
+.bi-panel-title,
+.dg-title,
+.dg-panel-title,
+.rent-hero h1,
+.home-exec-hero h1,
+.home-exec-title {
+  color: var(--pd-ink);
+  letter-spacing: 0;
+}
+
+.bi-kicker,
+.dg-eyebrow,
+.rent-eyebrow,
+.home-exec-kicker {
+  color: var(--pd-wine);
+  letter-spacing: 0.08em;
+}
+
+.bi-copy,
+.bi-panel-copy,
+.dg-subtitle,
+.dg-panel-subtitle,
+.rent-hero-copy,
+.home-exec-copy {
+  color: var(--pd-muted);
+}
+
+.bi-pill,
+.dg-pill,
+.dg-chip,
+.dg-date-pill,
+.home-exec-pill {
+  border: 1px solid var(--pd-border);
+  background: var(--pd-wine-soft);
+  color: var(--pd-wine);
+  border-radius: 999px;
+  letter-spacing: 0;
+}
+
+.bi-pill.success,
+.dg-chip.is-success,
+.dg-pill.is-success {
+  border-color: rgba(35, 109, 83, 0.24);
+  background: var(--pd-success-soft);
+  color: var(--pd-success);
+}
+
+.bi-pill.warning,
+.dg-chip.is-warning,
+.dg-pill.is-warning {
+  border-color: rgba(148, 100, 20, 0.24);
+  background: var(--pd-warning-soft);
+  color: var(--pd-warning);
+}
+
+.bi-pill.danger,
+.dg-chip.is-danger,
+.dg-pill.is-danger {
+  border-color: rgba(163, 52, 62, 0.24);
+  background: var(--pd-danger-soft);
+  color: var(--pd-danger);
+}
+
+.bi-chart-stage,
+.dg-chart-card {
+  border: 1px solid var(--pd-border);
+  border-radius: var(--pd-radius-lg);
+  background: var(--pd-surface-subtle);
+  box-shadow: none;
+}
+
+.bi-chart-stage {
+  display: grid;
+  grid-template-rows: 220px auto;
+  gap: var(--pd-space-2);
+  min-height: 0;
+  padding: var(--pd-space-3);
+}
+
+.bi-chart-stage.compact {
+  grid-template-rows: 178px auto;
+  min-height: 0;
+}
+
+.bi-chart-stage canvas {
+  display: block;
+  width: 100% !important;
+  height: 220px !important;
+  max-height: 220px;
+}
+
+.bi-chart-stage.compact canvas {
+  height: 178px !important;
+  max-height: 178px;
+}
+
+.dg-chart-card {
+  padding: var(--pd-space-4);
+}
+
+.dg-chart-surface {
+  display: block;
+  width: 100%;
+  height: 170px;
+  min-height: 170px;
+  max-height: 170px;
+  border-radius: var(--pd-radius-md);
+  background: var(--pd-surface);
+}
+
+.dg-chart-surface.is-short {
+  height: 145px;
+  min-height: 145px;
+  max-height: 145px;
+}
+
+.pd-chart-source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pd-space-2);
+  align-items: center;
+  margin-top: var(--pd-space-2);
+  color: var(--pd-muted);
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+
+.pd-chart-source strong {
+  color: var(--pd-ink-soft);
+  font-weight: 900;
+}
+
+.pd-chart-source::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--pd-gold);
+  flex: 0 0 auto;
+}
+
+.bi-table,
+.dg-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.bi-table th,
+.dg-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  color: var(--pd-wine);
+  background: var(--pd-wine-soft);
+  letter-spacing: 0.06em;
+}
+
+.bi-table td,
+.dg-table td {
+  color: var(--pd-ink-soft);
+}
+
+.bi-table tbody tr:hover,
+.dg-table tbody tr:hover {
+  background: var(--pd-surface-subtle);
+}
+
+.text-end,
+.dg-num,
+.bi-num,
+.pd-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.bi-details,
+.pd-audit-details {
+  border: 1px solid var(--pd-border);
+  border-radius: var(--pd-radius-md);
+  background: var(--pd-surface);
+}
+
+.bi-details summary,
+.pd-audit-details summary {
+  min-height: 40px;
+  padding: var(--pd-space-2) var(--pd-space-3);
+  color: var(--pd-wine);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.bi-details-body {
+  border-top: 1px solid var(--pd-border);
+}
+
+.dg-chart-dot {
+  border: 1px solid rgba(36, 24, 32, 0.08);
+}
+
+.dg-chart-dot.is-sales {
+  background: var(--pd-wine);
+}
+
+.dg-chart-dot.is-ticket {
+  background: var(--pd-success);
+}
+
+.dg-chart-dot.is-waste {
+  background: var(--pd-danger);
+}
+
+.pd-dashboard-checkpoint {
+  display: grid;
+  gap: var(--pd-space-1);
+  padding: var(--pd-space-3);
+  border: 1px solid var(--pd-border);
+  border-radius: var(--pd-radius-md);
+  background: var(--pd-paper);
+}
+
+.pd-dashboard-checkpoint strong {
+  color: var(--pd-ink);
+}
+
+.pd-dashboard-checkpoint span {
+  color: var(--pd-muted);
+  font-size: 0.86rem;
+}
+
+@media (max-width: 760px) {
+  .bi-chart-stage,
+  .dg-chart-card {
+    padding: var(--pd-space-3);
+  }
+
+  .bi-table,
+  .dg-table {
+    min-width: 720px;
+  }
+
+  .pd-chart-source {
+    align-items: flex-start;
+  }
+}

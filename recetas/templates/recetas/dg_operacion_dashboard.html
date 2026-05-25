@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}DG · Operación Integrada{% endblock %}
 {% block page_title %}Dirección General · Operación Integrada{% endblock %}
 {% block body_class %}page-dg-operacion-dashboard{% endblock %}
@@ -590,6 +591,7 @@
     }
   }
 </style>
+<link rel="stylesheet" href="{% static 'css/pollyana_dashboards.css' %}?v=20260525-dashboard-v1">
 {% endblock %}
 {% block content %}
 <div class="module-shell dg-shell">
@@ -797,8 +799,11 @@
         </div>
       </div>
       <canvas id="dg-chart-sales-trend" class="dg-chart-surface is-short"></canvas>
+      <div class="pd-chart-source">
+        <strong>Fuente:</strong> ventas Point · corte {{ point_exec_summary.closure_date|date:"Y-m-d" }}
+      </div>
       <div class="dg-chart-legend">
-        <span><i class="dg-chart-dot" style="background:#d65a71;"></i>Ventas $</span>
+        <span><i class="dg-chart-dot is-sales"></i>Ventas $</span>
       </div>
     </article>
 
@@ -872,8 +877,11 @@
         </div>
       </div>
       <canvas id="dg-chart-ticket-ranking" class="dg-chart-surface is-short"></canvas>
+      <div class="pd-chart-source">
+        <strong>Fuente:</strong> tickets Point · {% if point_chart_bundle.ticket_data_available %}{{ point_chart_bundle.ticket_branch_count }} sucursales{% else %}sin tickets válidos{% endif %}
+      </div>
       <div class="dg-chart-legend">
-        <span><i class="dg-chart-dot" style="background:#3f8d5e;"></i>Ticket promedio</span>
+        <span><i class="dg-chart-dot is-ticket"></i>Ticket promedio</span>
       </div>
     </article>
 
@@ -892,8 +900,11 @@
       </div>
       {% if point_waste_summary.total_rows %}
       <canvas id="dg-chart-waste-share" class="dg-chart-surface is-short"></canvas>
+      <div class="pd-chart-source">
+        <strong>Fuente:</strong> merma Point · corte {{ point_exec_summary.closure_date|date:"Y-m-d" }}
+      </div>
       <div class="dg-chart-legend">
-        <span><i class="dg-chart-dot" style="background:#b14b4b;"></i>Participación por sucursal / frente</span>
+        <span><i class="dg-chart-dot is-waste"></i>Participación por sucursal / frente</span>
       </div>
       {% else %}
       <div class="dg-note">Sin mermas visibles en el último corte.</div>

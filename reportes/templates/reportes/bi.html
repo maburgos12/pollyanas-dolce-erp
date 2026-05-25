@@ -7,6 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260402a">
+<link rel="stylesheet" href="{% static 'css/pollyana_dashboards.css' %}?v=20260525-dashboard-v1">
 {% endblock %}
 
 {% block content %}
@@ -1025,6 +1026,9 @@
       <div class="bi-panel-stack">
         <div class="bi-chart-stage">
           <canvas id="forecastTrendChart" aria-label="Tendencia semanal de ventas y piezas" role="img"></canvas>
+          <div class="pd-chart-source">
+            <strong>Fuente:</strong> ventas ERP/Point · {{ forecast_panel.baseline_label }} · {{ forecast_panel.target_week_label }}
+          </div>
         </div>
         <div class="bi-metric-strip">
           <div class="bi-metric">
@@ -1109,6 +1113,9 @@
       <div class="bi-panel-stack">
         <div class="bi-chart-stage">
           <canvas id="yoyMonthlyChart" aria-label="Comparativo mensual contra año anterior" role="img"></canvas>
+          <div class="pd-chart-source">
+            <strong>Fuente:</strong> ventas materializadas · ventana {{ months_window }} meses · corte comparable
+          </div>
         </div>
         <script>
           const currentYear = {{ current_year|default:2026 }};
@@ -1195,6 +1202,9 @@
       <div class="bi-panel-stack">
         <div class="bi-chart-stage compact">
           <canvas id="profitabilityScatterChart" aria-label="Rentabilidad por producto" role="img"></canvas>
+          <div class="pd-chart-source">
+            <strong>Fuente:</strong> {{ profitability_panel.basis_note }}
+          </div>
         </div>
         <div class="bi-grid-2 bi-grid-tight">
           <div class="bi-list bi-list-compact">
@@ -1287,9 +1297,15 @@
       <div class="bi-grid-2 bi-grid-tight">
           <div class="bi-chart-stage compact">
             <canvas id="productionWeeklyChart" aria-label="Producción contra venta por semana" role="img"></canvas>
+            <div class="pd-chart-source">
+              <strong>Fuente:</strong> {{ production_sales_panel.basis_note }}
+            </div>
           </div>
           <div class="bi-chart-stage compact">
             <canvas id="productionCategoryChart" aria-label="Producción contra venta por categoría" role="img"></canvas>
+            <div class="pd-chart-source">
+              <strong>Lectura:</strong> categorías con producción y venta visibles en el corte
+            </div>
           </div>
         </div>
         {% with latest_row=production_sales_panel.weekly_rows|last %}
@@ -1402,6 +1418,9 @@
       <div class="bi-panel-stack">
         <div class="bi-chart-stage compact">
           <canvas id="centralFlowChart" aria-label="Flujo central histórico mensual" role="img"></canvas>
+          <div class="pd-chart-source">
+            <strong>Fuente:</strong> flujo central histórico · corte común {{ central_flow_panel.cutoff_date }}
+          </div>
         </div>
       <div class="bi-grid-4">
         {% with flow_row=central_flow_panel.rows|last %}
