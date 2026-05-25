@@ -4960,10 +4960,28 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
             activo=True,
         )
     }
+    cost_recipe_ids = set(page_receta_ids)
+    cost_recipe_ids.update(
+        equivalence.receta_padre_id
+        for equivalence in equivalence_by_receta_id.values()
+        if equivalence.receta_padre_id
+    )
+    cost_recipe_ids.update(
+        relation.receta_padre_id
+        for relation in derived_by_receta_id.values()
+        if relation.receta_padre_id
+    )
+    total_cost_by_receta_id = get_total_cost_map(cost_recipe_ids)
     for receta in page.object_list:
         setattr(receta, "_effective_equivalence_cache", equivalence_by_receta_id.get(receta.id))
         setattr(receta, "_effective_derived_cache", derived_by_receta_id.get(receta.id))
-        receta.costo_efectivo = _recipe_effective_cost_display(receta)
+        receta.costo_efectivo = total_cost_by_receta_id.get(receta.id, Decimal("0"))
+        equivalence = equivalence_by_receta_id.get(receta.id)
+        if (not receta.costo_efectivo or receta.costo_efectivo <= 0) and equivalence is not None:
+            parent_cost = total_cost_by_receta_id.get(equivalence.receta_padre_id, Decimal("0"))
+            factor = Decimal(str(equivalence.factor_conversion or 1))
+            if parent_cost > 0 and factor > 0:
+                receta.costo_efectivo = parent_cost / factor
         receta.fuente_display = _recipe_source_display(receta)
         receta.bom_pending = _recipe_counts_as_bom_pending(receta, excluded_point_category_codes)
         if advanced_catalog_metrics_requested:
