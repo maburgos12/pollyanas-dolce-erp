@@ -139,6 +139,13 @@
         border-color: var(--gold);
       }
 
+      select.gas-native-select {
+        border-color: var(--gold);
+        background: #15151e;
+        color: var(--text);
+        font-weight: 800;
+      }
+
       .primary-btn {
         width: 100%;
         border-radius: 10px;
@@ -346,6 +353,7 @@
       .option-card.selected {
         border-color: var(--wine);
         background: #2a1423;
+        box-shadow: 0 0 0 2px rgba(201, 168, 76, 0.22);
       }
 
       .severity-row {
@@ -2375,10 +2383,16 @@
 
       function gasSelector(current, onSelect) {
         return `
+          <select class="gas-native-select" onchange="${onSelect}(this.value)" aria-label="Selecciona nivel de gasolina">
+            <option value="">Selecciona nivel de gasolina</option>
+            ${nivelesGas.map((nivel) => `
+              <option value="${nivel.value}" ${current === nivel.value ? "selected" : ""}>${nivel.label}</option>
+            `).join("")}
+          </select>
           <div class="card-grid">
             ${nivelesGas.map((nivel) => `
-              <button type="button" class="option-card ${current === nivel.value ? "selected" : ""}" onclick="${onSelect}('${nivel.value}')">
-                <span>${nivel.icon}</span><br>${nivel.label}
+              <button type="button" class="option-card ${current === nivel.value ? "selected" : ""}" onclick="${onSelect}('${nivel.value}')" aria-pressed="${current === nivel.value ? "true" : "false"}">
+                <span>${nivel.icon}</span><br>${current === nivel.value ? "✓ " : ""}${nivel.label}
               </button>
             `).join("")}
           </div>
