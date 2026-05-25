@@ -113,6 +113,7 @@ PAY_HISTORY_EQUIVALENCE: dict[str, dict[str, str]] = {
 
 SAFE_APPROVAL_SPECS: tuple[CuratedAddonApproval, ...] = (
     CuratedAddonApproval("SFRESAG", "0001", "Pay de queso grande con sabor fresa."),
+    CuratedAddonApproval("SFRESAM", "0002", "Pay de queso mediano con sabor fresa."),
     CuratedAddonApproval("03SPOREB", "0003", "Pay de queso rebanada con sabor oreo."),
     CuratedAddonApproval("SMANZANAREB", "0003", "Pay de queso rebanada con sabor manzana."),
     CuratedAddonApproval("SOREOG", "0001", "Pay de queso grande con sabor oreo."),
