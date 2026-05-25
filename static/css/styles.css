@@ -86,18 +86,21 @@ h4 {
 }
 
 .sidebar-logo {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
   display: grid;
   place-items: center;
-  background: rgba(255, 255, 255, 0.12);
-  color: #ffe9f1;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 18px rgba(43, 9, 25, 0.18);
+  overflow: hidden;
 }
 
-.sidebar-logo svg {
-  width: 16px;
-  height: 16px;
+.sidebar-logo img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  display: block;
 }
 
 .sidebar-brand {
@@ -3563,26 +3566,124 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
   min-height: 42px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .sidebar {
-    width: 84px;
+    width: 72px;
+    transition: width 0.18s ease, box-shadow 0.18s ease;
+  }
+
+  .layout-wrapper {
+    background:
+      linear-gradient(90deg, rgba(255, 255, 255, 0) 0, rgba(255, 255, 255, 0) 72px, rgba(255, 255, 255, 0.35) 72px, rgba(255, 255, 255, 0.35) 100%);
+  }
+
+  .sidebar:hover,
+  .sidebar:focus-within {
+    width: 252px;
+    box-shadow: 12px 0 32px rgba(83, 15, 47, 0.26);
+  }
+
+  .sidebar-header {
+    display: grid;
+    justify-items: center;
+    padding: 16px 10px 12px;
+  }
+
+  .sidebar:hover .sidebar-header,
+  .sidebar:focus-within .sidebar-header {
+    display: block;
+    padding: 22px 18px 18px;
   }
 
   .sidebar-brand,
   .sidebar-tagline,
+  .sidebar-group-toggle .sidebar-section-label,
+  .sidebar-group-toggle .toggle-chevron,
+  .sidebar-collapsible,
   .sidebar-nav a span:last-child,
   .sidebar-user,
   .logout-link {
     display: none;
   }
 
+  .sidebar:hover .sidebar-brand,
+  .sidebar:hover .sidebar-tagline,
+  .sidebar:hover .sidebar-group-toggle .sidebar-section-label,
+  .sidebar:hover .sidebar-group-toggle .toggle-chevron,
+  .sidebar:hover .sidebar-collapsible:not(.sidebar-collapsed),
+  .sidebar:hover .sidebar-nav a span:last-child,
+  .sidebar:hover .sidebar-user,
+  .sidebar:hover .logout-link,
+  .sidebar:focus-within .sidebar-brand,
+  .sidebar:focus-within .sidebar-tagline,
+  .sidebar:focus-within .sidebar-group-toggle .sidebar-section-label,
+  .sidebar:focus-within .sidebar-group-toggle .toggle-chevron,
+  .sidebar:focus-within .sidebar-collapsible:not(.sidebar-collapsed),
+  .sidebar:focus-within .sidebar-nav a span:last-child,
+  .sidebar:focus-within .sidebar-user,
+  .sidebar:focus-within .logout-link {
+    display: revert;
+  }
+
+  .sidebar:hover .sidebar-user,
+  .sidebar:focus-within .sidebar-user,
+  .sidebar:hover .sidebar-actions,
+  .sidebar:focus-within .sidebar-actions,
+  .sidebar:hover .sidebar-group-title,
+  .sidebar:focus-within .sidebar-group-title {
+    display: flex;
+  }
+
+  .sidebar-nav {
+    padding: 0 8px;
+  }
+
+  .sidebar-group-toggle {
+    justify-content: center;
+    padding: 11px 0;
+  }
+
+  .sidebar:hover .sidebar-group-toggle,
+  .sidebar:focus-within .sidebar-group-toggle {
+    justify-content: space-between;
+    padding: 10px 12px;
+  }
+
+  .sidebar-group-title {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .sidebar:hover .sidebar-group-title,
+  .sidebar:focus-within .sidebar-group-title {
+    justify-content: flex-start;
+    width: auto;
+  }
+
+  .sidebar .nav-icon,
+  .sidebar .nav-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+
   .main-content {
-    margin-left: 84px;
-    width: calc(100% - 84px);
+    margin-left: 72px;
+    width: calc(100% - 72px);
     max-width: none;
   }
 
   .sidebar-nav a {
+    justify-content: center;
+    padding: 9px 0;
+  }
+
+  .sidebar:hover .sidebar-nav a,
+  .sidebar:focus-within .sidebar-nav a {
+    justify-content: flex-start;
+    padding: 8px 12px 8px 36px;
+  }
+
+  .sidebar-actions {
     justify-content: center;
   }
 }
@@ -3595,6 +3696,20 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
 
   .layout-wrapper {
     display: block;
+    background: transparent;
+  }
+
+  .sidebar:hover,
+  .sidebar:focus-within {
+    width: 100%;
+    box-shadow: 8px 0 24px rgba(83, 15, 47, 0.22);
+  }
+
+  .sidebar-header,
+  .sidebar:hover .sidebar-header,
+  .sidebar:focus-within .sidebar-header {
+    display: block;
+    padding: 22px 18px 18px;
   }
 
   .main-content {
@@ -3606,12 +3721,38 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
 
   .sidebar-brand,
   .sidebar-tagline,
-  .sidebar-nav a span:last-child {
+  .sidebar-group-toggle .sidebar-section-label,
+  .sidebar-group-toggle .toggle-chevron,
+  .sidebar-collapsible,
+  .sidebar-nav a span:last-child,
+  .logout-link {
     display: inline;
+  }
+
+  .sidebar-group-toggle .toggle-chevron {
+    display: inline-grid;
+  }
+
+  .sidebar-collapsible {
+    display: block;
   }
 
   .sidebar-user {
     display: flex;
+  }
+
+  .sidebar-group-toggle,
+  .sidebar:hover .sidebar-group-toggle,
+  .sidebar:focus-within .sidebar-group-toggle {
+    justify-content: space-between;
+    padding: 10px 12px;
+  }
+
+  .sidebar-group-title,
+  .sidebar:hover .sidebar-group-title,
+  .sidebar:focus-within .sidebar-group-title {
+    justify-content: flex-start;
+    width: auto;
   }
 
   .sidebar-nav a {
