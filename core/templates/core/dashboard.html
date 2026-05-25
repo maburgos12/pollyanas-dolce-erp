@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 
+{% load humanize %}
 {% block title %}Dashboard - Pollyanas Dolce ERP{% endblock %}
 {% block page_title %}Dashboard Ejecutivo{% endblock %}
 
@@ -116,7 +117,7 @@
                      style="width:min({% widthratio budget_semaforo_mes.ejecutado budget_semaforo_mes.objetivo 100 %}%, 100%)"></div>
             </div>
             <div class="muted" style="font-size:12px;margin-top:4px;">
-                Objetivo ${{ budget_semaforo_mes.objetivo|floatformat:0 }} · Ejecutado ${{ budget_semaforo_mes.ejecutado|floatformat:0 }}
+                Objetivo ${{ budget_semaforo_mes.objetivo|floatformat:0|intcomma }} · Ejecutado ${{ budget_semaforo_mes.ejecutado|floatformat:0|intcomma }}
             </div>
             <div style="margin-top:10px;">
                 <a class="btn btn-secondary btn-sm" href="{% url 'compras:solicitudes' %}?periodo_tipo=mes&periodo_mes={{ budget_semaforo_mes.periodo_mes }}">Ver detalle</a>
@@ -133,7 +134,7 @@
                      style="width:min({% widthratio budget_semaforo_quincena.ejecutado budget_semaforo_quincena.objetivo 100 %}%, 100%)"></div>
             </div>
             <div class="muted" style="font-size:12px;margin-top:4px;">
-                Objetivo ${{ budget_semaforo_quincena.objetivo|floatformat:0 }} · Ejecutado ${{ budget_semaforo_quincena.ejecutado|floatformat:0 }}
+                Objetivo ${{ budget_semaforo_quincena.objetivo|floatformat:0|intcomma }} · Ejecutado ${{ budget_semaforo_quincena.ejecutado|floatformat:0|intcomma }}
             </div>
             <div style="margin-top:10px;">
                 <a class="btn btn-secondary btn-sm" href="{% url 'compras:solicitudes' %}?periodo_tipo={{ budget_semaforo_quincena.periodo_tipo }}&periodo_mes={{ budget_semaforo_quincena.periodo_mes }}">Ver detalle</a>
@@ -235,7 +236,7 @@
                         </tr>
                         <tr>
                             <td>Consumo diario total estimado</td>
-                            <td class="text-end">{{ total_consumo_diario|floatformat:2 }}</td>
+                            <td class="text-end">{{ total_consumo_diario|floatformat:2|intcomma }}</td>
                         </tr>
                     </tbody>
                 </table>

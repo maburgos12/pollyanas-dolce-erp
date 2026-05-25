@@ -95,11 +95,11 @@
             <td class="text-end">{{ row.total_piezas|intcomma }}</td>
             <td class="text-end">${{ row.precio|floatformat:2|intcomma }}</td>
             <td class="text-end">${{ row.total_ingreso|floatformat:2|intcomma }}</td>
-            <td class="text-end">{{ row.pct_del_total|floatformat:2 }}%</td>
+            <td class="text-end">{{ row.pct_del_total|floatformat:2|intcomma }}%</td>
             <td class="text-center">
               <span class="forecast-trend {{ row.tendencia }}">
                 {% if row.tendencia == "sube" %}↑{% elif row.tendencia == "baja" %}↓{% else %}→{% endif %}
-                {{ row.factor_tendencia|floatformat:2 }}x
+                {{ row.factor_tendencia|floatformat:2|intcomma }}x
               </span>
             </td>
           </tr>

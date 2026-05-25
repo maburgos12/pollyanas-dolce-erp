@@ -27,9 +27,9 @@
   <h2>Resultados</h2>
   {% if proyeccion.disponible %}
     <div class="inv-kpis">
-      <div class="inv-kpi"><span class="inv-label">TIR</span><div class="inv-value">{% if proyeccion.tir_anual is not None %}{{ proyeccion.tir_anual|floatformat:2 }}%{% else %}N/D{% endif %}</div></div>
+      <div class="inv-kpi"><span class="inv-label">TIR</span><div class="inv-value">{% if proyeccion.tir_anual is not None %}{{ proyeccion.tir_anual|floatformat:2|intcomma }}%{% else %}N/D{% endif %}</div></div>
       <div class="inv-kpi"><span class="inv-label">VPN</span><div class="inv-value">${{ proyeccion.vpn|floatformat:2|intcomma }}</div></div>
-      <div class="inv-kpi"><span class="inv-label">ROI</span><div class="inv-value">{{ proyeccion.roi|floatformat:2 }}%</div></div>
+      <div class="inv-kpi"><span class="inv-label">ROI</span><div class="inv-value">{{ proyeccion.roi|floatformat:2|intcomma }}%</div></div>
       <div class="inv-kpi"><span class="inv-label">Payback</span><div class="inv-value">{{ proyeccion.payback_meses|default:"N/D" }} meses</div></div>
       <div class="inv-kpi"><span class="inv-label">Punto equilibrio</span><div class="inv-value">${{ proyeccion.pe_mensual|floatformat:2|intcomma }}</div></div>
       <div class="inv-kpi"><span class="inv-label">Viabilidad</span><div class="inv-value">{% if proyeccion.viable %}Verde{% else %}Revisar{% endif %}</div></div>
@@ -47,7 +47,7 @@
     <tbody>
       {% for row in escenarios_resumen %}
         {% with escenario=row.escenario %}
-        <tr><td>{{ escenario.nombre }}</td><td class="num">${{ escenario.ventas_promedio_mensuales|floatformat:2|intcomma }}</td><td class="num">${{ escenario.gastos_operativos_mensuales|floatformat:2|intcomma }}</td><td class="num">{{ escenario.margen_bruto_pct|floatformat:2 }}%</td><td class="num">${{ row.utilidad_estimada|floatformat:2|intcomma }}</td></tr>
+        <tr><td>{{ escenario.nombre }}</td><td class="num">${{ escenario.ventas_promedio_mensuales|floatformat:2|intcomma }}</td><td class="num">${{ escenario.gastos_operativos_mensuales|floatformat:2|intcomma }}</td><td class="num">{{ escenario.margen_bruto_pct|floatformat:2|intcomma }}%</td><td class="num">${{ row.utilidad_estimada|floatformat:2|intcomma }}</td></tr>
         {% endwith %}
       {% empty %}
         <tr><td colspan="5">Sin escenarios todavía.</td></tr>

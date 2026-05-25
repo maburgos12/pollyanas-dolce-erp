@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 
+{% load humanize %}
 {% block title %}RRHH · Nómina{% endblock %}
 {% block page_title %}RRHH · Nómina{% endblock %}
 
@@ -501,9 +502,9 @@
           <td>{{ n.fecha_inicio|date:"Y-m-d" }}</td>
           <td>{{ n.fecha_fin|date:"Y-m-d" }}</td>
           <td><span class="badge bg-primary">{{ n.get_estatus_display }}</span></td>
-          <td class="text-end">${{ n.total_bruto|floatformat:2 }}</td>
-          <td class="text-end">${{ n.total_descuentos|floatformat:2 }}</td>
-          <td class="text-end">${{ n.total_neto|floatformat:2 }}</td>
+          <td class="text-end">${{ n.total_bruto|floatformat:2|intcomma }}</td>
+          <td class="text-end">${{ n.total_descuentos|floatformat:2|intcomma }}</td>
+          <td class="text-end">${{ n.total_neto|floatformat:2|intcomma }}</td>
           <td><a class="btn btn-secondary" href="{% url 'rrhh:nomina_detail' n.id %}">Abrir</a></td>
         </tr>
         {% empty %}

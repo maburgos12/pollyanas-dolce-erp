@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 
+{% load humanize %}
 {% block title %}Capital Humano{% endblock %}
 {% block page_title %}Capital Humano{% endblock %}
 
@@ -44,7 +45,7 @@
       <div class="ch-note">Solicitudes activas</div>
     </article>
     <article class="ch-card">
-      <div class="ch-value">{{ stats.promedio_minutos_mes|floatformat:0 }}</div>
+      <div class="ch-value">{{ stats.promedio_minutos_mes|floatformat:0|intcomma }}</div>
       <div class="ch-label">Minutos promedio</div>
       <div class="ch-note">Mes actual</div>
     </article>

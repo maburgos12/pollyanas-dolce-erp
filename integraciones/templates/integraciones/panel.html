@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 
+{% load humanize %}
 {% block title %}Integraciones - Centro operativo{% endblock %}
 {% block page_title %}Integraciones · Centro operativo{% endblock %}
 
@@ -177,7 +178,7 @@
                 <div style="font-weight:700; margin-top:8px;">{{ integration_monitor.latest_corte.corte_date|date:"Y-m-d"|default:"Sin corte" }}</div>
                 <div class="muted">
                     {% if integration_monitor.latest_corte %}
-                    ${{ integration_monitor.latest_corte.total_amount|floatformat:2 }}
+                    ${{ integration_monitor.latest_corte.total_amount|floatformat:2|intcomma }}
                     {% else %}
                     Sin fila en CorteOficialDiario
                     {% endif %}
@@ -411,14 +412,14 @@
         </article>
         <article class="kpi-card">
             <div class="kpi-number {% if errors_delta_pct > 0 %}is-danger{% elif errors_delta_pct < 0 %}is-success{% else %}is-warning{% endif %}">
-                {{ errors_delta_pct|floatformat:2 }}%
+                {{ errors_delta_pct|floatformat:2|intcomma }}%
             </div>
             <div class="kpi-label">Delta errores vs 24h previas</div>
             <div class="muted">Previo: {{ errors_prev_24h }}</div>
         </article>
         <article class="kpi-card">
             <div class="kpi-number {% if requests_delta_pct > 0 %}is-warning{% elif requests_delta_pct < 0 %}is-success{% else %}is-warning{% endif %}">
-                {{ requests_delta_pct|floatformat:2 }}%
+                {{ requests_delta_pct|floatformat:2|intcomma }}%
             </div>
             <div class="kpi-label">Delta requests vs 24h previas</div>
             <div class="muted">Previo: {{ requests_prev_24h }}</div>
@@ -874,12 +875,12 @@
 
         <div class="integraciones-homologacion-grid mb-3">
             <article class="kpi-card">
-                <div class="kpi-number">{{ integracion_point.insumos.cobertura_pct|floatformat:2 }}%</div>
+                <div class="kpi-number">{{ integracion_point.insumos.cobertura_pct|floatformat:2|intcomma }}%</div>
                 <div class="kpi-label">Cobertura comercial en insumos</div>
                 <div class="muted">{{ integracion_point.insumos.con_codigo_point }}/{{ integracion_point.insumos.activos }}</div>
             </article>
             <article class="kpi-card">
-                <div class="kpi-number is-warning">{{ integracion_point.recetas.cobertura_pct|floatformat:2 }}%</div>
+                <div class="kpi-number is-warning">{{ integracion_point.recetas.cobertura_pct|floatformat:2|intcomma }}%</div>
                 <div class="kpi-label">Cobertura comercial en productos finales</div>
                 <div class="muted">{{ integracion_point.recetas.homologadas }}/{{ integracion_point.recetas.total }}</div>
             </article>
@@ -1233,7 +1234,7 @@
             </article>
             <article class="kpi-card">
                 <div class="kpi-number {% if api_7d_error_rate > 5 %}is-danger{% elif api_7d_error_rate > 0 %}is-warning{% else %}is-success{% endif %}">
-                    {{ api_7d_error_rate|floatformat:2 }}%
+                    {{ api_7d_error_rate|floatformat:2|intcomma }}%
                 </div>
                 <div class="kpi-label">Tasa error 7 días</div>
             </article>
@@ -1260,7 +1261,7 @@
                             <span class="badge-verde">0</span>
                             {% endif %}
                         </td>
-                        <td>{{ row.error_rate_pct|floatformat:2 }}%</td>
+                        <td>{{ row.error_rate_pct|floatformat:2|intcomma }}%</td>
                     </tr>
                 {% endfor %}
                 </tbody>

@@ -109,7 +109,7 @@
     </article>
     <article class="waste-kpi">
       <span>% merma sobre venta</span>
-      <strong>{{ kpis.pct_merma_sobre_venta|floatformat:2 }}%</strong>
+      <strong>{{ kpis.pct_merma_sobre_venta|floatformat:2|intcomma }}%</strong>
     </article>
     <article class="waste-kpi">
       <span>Top productos</span>
@@ -147,7 +147,7 @@
             <span class="waste-risk muted">N/A</span>
             {% else %}
             <span class="waste-risk {% if row.pct_merma_sobre_venta > 5 %}red{% elif row.pct_merma_sobre_venta >= 2 %}yellow{% else %}green{% endif %}">
-              {{ row.pct_merma_sobre_venta|floatformat:2 }}%
+              {{ row.pct_merma_sobre_venta|floatformat:2|intcomma }}%
             </span>
             {% endif %}
           </td>

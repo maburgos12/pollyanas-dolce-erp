@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 
+{% load humanize %}
 {% block title %}RRHH · {{ periodo.folio }}{% endblock %}
 {% block page_title %}RRHH · {{ periodo.folio }}{% endblock %}
 
@@ -386,9 +387,9 @@
         <tr><th>Inicio</th><td>{{ periodo.fecha_inicio|date:"Y-m-d" }}</td></tr>
         <tr><th>Fin</th><td>{{ periodo.fecha_fin|date:"Y-m-d" }}</td></tr>
         <tr><th>Estatus</th><td>{{ periodo.get_estatus_display }}</td></tr>
-        <tr><th>Total bruto</th><td>${{ periodo.total_bruto|floatformat:2 }}</td></tr>
-        <tr><th>Total descuentos</th><td>${{ periodo.total_descuentos|floatformat:2 }}</td></tr>
-        <tr><th>Total neto</th><td>${{ periodo.total_neto|floatformat:2 }}</td></tr>
+        <tr><th>Total bruto</th><td>${{ periodo.total_bruto|floatformat:2|intcomma }}</td></tr>
+        <tr><th>Total descuentos</th><td>${{ periodo.total_descuentos|floatformat:2|intcomma }}</td></tr>
+        <tr><th>Total neto</th><td>${{ periodo.total_neto|floatformat:2|intcomma }}</td></tr>
       </tbody>
     </table>
   </div>
@@ -493,12 +494,12 @@
         {% for l in lineas %}
         <tr>
           <td>{{ l.empleado.nombre }}</td>
-          <td class="text-end">{{ l.dias_trabajados|floatformat:2 }}</td>
-          <td class="text-end">${{ l.salario_base|floatformat:2 }}</td>
-          <td class="text-end">${{ l.bonos|floatformat:2 }}</td>
-          <td class="text-end">${{ l.total_percepciones|floatformat:2 }}</td>
-          <td class="text-end">${{ l.descuentos|floatformat:2 }}</td>
-          <td class="text-end">${{ l.neto_calculado|floatformat:2 }}</td>
+          <td class="text-end">{{ l.dias_trabajados|floatformat:2|intcomma }}</td>
+          <td class="text-end">${{ l.salario_base|floatformat:2|intcomma }}</td>
+          <td class="text-end">${{ l.bonos|floatformat:2|intcomma }}</td>
+          <td class="text-end">${{ l.total_percepciones|floatformat:2|intcomma }}</td>
+          <td class="text-end">${{ l.descuentos|floatformat:2|intcomma }}</td>
+          <td class="text-end">${{ l.neto_calculado|floatformat:2|intcomma }}</td>
           <td>{{ l.observaciones|default:"-" }}</td>
           <td>
             {% if can_manage_rrhh %}

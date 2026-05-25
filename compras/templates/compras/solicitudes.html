@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Compras - Solicitudes{% endblock %}
 {% block page_title %}Compras · Solicitudes{% endblock %}
 {% block body_class %}page-compras-solicitudes{% endblock %}
@@ -289,8 +290,8 @@
             </td>
             <td>{{ s.proveedor_sugerido.nombre|default:"-" }}</td>
             <td class="text-end">{{ s.cantidad }}</td>
-            <td class="text-end">${{ s.costo_unitario|floatformat:2 }}</td>
-            <td class="text-end">${{ s.presupuesto_estimado|floatformat:2 }}</td>
+            <td class="text-end">${{ s.costo_unitario|floatformat:2|intcomma }}</td>
+            <td class="text-end">${{ s.presupuesto_estimado|floatformat:2|intcomma }}</td>
             <td>{{ s.fecha_requerida }}</td>
             <td>{{ s.get_estatus_display }}</td>
             {% if can_manage_compras %}
@@ -325,7 +326,7 @@
       </table>
     </div>
     <p class="muted mb-0">
-      Presupuesto estimado visible: <strong>${{ total_presupuesto|floatformat:2 }}</strong>
+      Presupuesto estimado visible: <strong>${{ total_presupuesto|floatformat:2|intcomma }}</strong>
       {% if solicitudes_total_count > solicitudes_visible_count %}
       · Mostrando {{ solicitudes_visible_count }} de {{ solicitudes_total_count }} solicitudes.
       {% endif %}

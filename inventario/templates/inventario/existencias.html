@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Inventario - Existencias{% endblock %}
 {% block page_title %}Inventario · Existencias{% endblock %}
 
@@ -23,7 +24,7 @@
       {% else %}
         <code>(dias_llegada * consumo_diario_promedio) + stock_minimo</code>.
       {% endif %}
-      Captura manual permitida con desviación máxima de <strong>{{ reorder_max_diff_pct|floatformat:2 }}%</strong> vs recomendado.
+      Captura manual permitida con desviación máxima de <strong>{{ reorder_max_diff_pct|floatformat:2|intcomma }}%</strong> vs recomendado.
     </p>
     {% if can_manage_inventario %}
     <form method="post" class="form-grid-auto" style="margin-bottom:14px;">

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}{{ receta.nombre }}{% endblock %}
 {% block body_class %}page-receta-detail{% endblock %}
 {% block page_title %}Recetas · {{ receta.nombre }}{% endblock %}
@@ -115,13 +116,13 @@
 
 <div class="kpi-mini">
   <div class="kpi-card">
-    <div class="kpi-number">{{ receta.rendimiento_cantidad|default:0|floatformat:2 }}</div>
+    <div class="kpi-number">{{ receta.rendimiento_cantidad|default:0|floatformat:2|intcomma }}</div>
     <div class="kpi-label">Rendimiento{% if receta.rendimiento_unidad %} ({{ receta.rendimiento_unidad.codigo }}){% endif %}</div>
   </div>
   <div class="kpi-card">
     <div class="kpi-number">
       {% if receta.costo_por_unidad_rendimiento %}
-        ${{ receta.costo_por_unidad_rendimiento|floatformat:2 }}
+        ${{ receta.costo_por_unidad_rendimiento|floatformat:2|intcomma }}
       {% else %}
         0
       {% endif %}
@@ -131,7 +132,7 @@
     </div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-number">${{ total_costo_estimado|floatformat:2 }}</div>
+    <div class="kpi-number">${{ total_costo_estimado|floatformat:2|intcomma }}</div>
     <div class="kpi-label">Costo total del producto</div>
   </div>
 </div>
@@ -144,7 +145,7 @@
   </div>
   <div class="kpi-mini mb-3">
     <div class="kpi-card">
-      <div class="kpi-number">${{ total_costo_estimado|floatformat:2 }}</div>
+      <div class="kpi-number">${{ total_costo_estimado|floatformat:2|intcomma }}</div>
       <div class="kpi-label">Costo total batida</div>
     </div>
     <div class="kpi-card">
@@ -160,7 +161,7 @@
     <div class="kpi-card">
       <div class="kpi-number">
         {% if receta.costo_por_unidad_rendimiento %}
-          ${{ receta.costo_por_unidad_rendimiento|floatformat:2 }}
+          ${{ receta.costo_por_unidad_rendimiento|floatformat:2|intcomma }}
         {% else %}
           0
         {% endif %}
@@ -196,7 +197,7 @@
         <tr>
           <th class="mix-row-label">Costo por unidad</th>
           {% for p in presentaciones %}
-            <td class="text-center mix-cell-number">{% if p.costo_por_unidad_estimado %}${{ p.costo_por_unidad_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
+            <td class="text-center mix-cell-number">{% if p.costo_por_unidad_estimado %}${{ p.costo_por_unidad_estimado|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
           {% endfor %}
         </tr>
       </tbody>
@@ -223,27 +224,27 @@
   </div>
   <div class="kpi-mini">
     <div class="kpi-card">
-      <div class="kpi-number">${{ costeo_actual.costo_mp|floatformat:2 }}</div>
+      <div class="kpi-number">${{ costeo_actual.costo_mp|floatformat:2|intcomma }}</div>
       <div class="kpi-label">MP</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-number">${{ costeo_actual.costo_mo|floatformat:2 }}</div>
+      <div class="kpi-number">${{ costeo_actual.costo_mo|floatformat:2|intcomma }}</div>
       <div class="kpi-label">MO</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-number">${{ costeo_actual.costo_indirecto|floatformat:2 }}</div>
+      <div class="kpi-number">${{ costeo_actual.costo_indirecto|floatformat:2|intcomma }}</div>
       <div class="kpi-label">Indirectos</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-number">${{ costeo_actual.costo_total|floatformat:2 }}</div>
+      <div class="kpi-number">${{ costeo_actual.costo_total|floatformat:2|intcomma }}</div>
       <div class="kpi-label">Total MP+MO+IND</div>
     </div>
   </div>
   {% if versiones_comparativo %}
   <div class="alert {% if versiones_comparativo.delta_total >= 0 %}alert-danger{% else %}alert-success{% endif %} mt-2">
     Comparativo v{{ versiones_comparativo.version_actual }} vs v{{ versiones_comparativo.version_previa }}:
-    <strong>${{ versiones_comparativo.delta_total|floatformat:2 }}</strong>
-    ({{ versiones_comparativo.delta_pct|floatformat:2 }}%).
+    <strong>${{ versiones_comparativo.delta_total|floatformat:2|intcomma }}</strong>
+    ({{ versiones_comparativo.delta_pct|floatformat:2|intcomma }}%).
   </div>
   {% endif %}
 </div>
@@ -285,23 +286,23 @@
   {% if version_compare and selected_base and selected_target %}
   <div class="kpi-mini mb-3">
     <div class="kpi-card">
-      <div class="kpi-number {% if version_compare.delta_mp >= 0 %}is-danger{% else %}is-success{% endif %}">${{ version_compare.delta_mp|floatformat:2 }}</div>
+      <div class="kpi-number {% if version_compare.delta_mp >= 0 %}is-danger{% else %}is-success{% endif %}">${{ version_compare.delta_mp|floatformat:2|intcomma }}</div>
       <div class="kpi-label">Delta MP (v{{ selected_target.version_num }} - v{{ selected_base.version_num }})</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-number {% if version_compare.delta_mo >= 0 %}is-danger{% else %}is-success{% endif %}">${{ version_compare.delta_mo|floatformat:2 }}</div>
+      <div class="kpi-number {% if version_compare.delta_mo >= 0 %}is-danger{% else %}is-success{% endif %}">${{ version_compare.delta_mo|floatformat:2|intcomma }}</div>
       <div class="kpi-label">Delta MO</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-number {% if version_compare.delta_indirecto >= 0 %}is-danger{% else %}is-success{% endif %}">${{ version_compare.delta_indirecto|floatformat:2 }}</div>
+      <div class="kpi-number {% if version_compare.delta_indirecto >= 0 %}is-danger{% else %}is-success{% endif %}">${{ version_compare.delta_indirecto|floatformat:2|intcomma }}</div>
       <div class="kpi-label">Delta Indirectos</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-number {% if version_compare.delta_total >= 0 %}is-danger{% else %}is-success{% endif %}">${{ version_compare.delta_total|floatformat:2 }}</div>
+      <div class="kpi-number {% if version_compare.delta_total >= 0 %}is-danger{% else %}is-success{% endif %}">${{ version_compare.delta_total|floatformat:2|intcomma }}</div>
       <div class="kpi-label">
         Delta Total
         {% if version_compare.delta_pct_total != None %}
-          ({{ version_compare.delta_pct_total|floatformat:2 }}%)
+          ({{ version_compare.delta_pct_total|floatformat:2|intcomma }}%)
         {% endif %}
       </div>
     </div>
@@ -329,11 +330,11 @@
           <td>{{ v.creado_en|date:"Y-m-d H:i" }}</td>
           <td>{{ v.fuente }}</td>
           <td>{% if v.driver_scope %}{{ v.driver_scope }} · {{ v.driver_nombre|default:"-" }}{% else %}-{% endif %}</td>
-          <td class="text-end">${{ v.costo_mp|floatformat:2 }}</td>
-          <td class="text-end">${{ v.costo_mo|floatformat:2 }}</td>
-          <td class="text-end">${{ v.costo_indirecto|floatformat:2 }}</td>
-          <td class="text-end"><strong>${{ v.costo_total|floatformat:2 }}</strong></td>
-          <td class="text-end">{% if v.costo_por_unidad_rendimiento %}${{ v.costo_por_unidad_rendimiento|floatformat:2 }}{% else %}-{% endif %}</td>
+          <td class="text-end">${{ v.costo_mp|floatformat:2|intcomma }}</td>
+          <td class="text-end">${{ v.costo_mo|floatformat:2|intcomma }}</td>
+          <td class="text-end">${{ v.costo_indirecto|floatformat:2|intcomma }}</td>
+          <td class="text-end"><strong>${{ v.costo_total|floatformat:2|intcomma }}</strong></td>
+          <td class="text-end">{% if v.costo_por_unidad_rendimiento %}${{ v.costo_por_unidad_rendimiento|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
         </tr>
         {% empty %}
         <tr>
@@ -379,8 +380,8 @@
           <tr>
             <td class="cell-pres-name">{{ p.nombre }}</td>
             <td class="cell-pres-derived">{{ receta.nombre }} - {{ p.nombre }}</td>
-            <td class="cell-pres-qty">{{ p.peso_por_unidad_kg|floatformat:2 }}</td>
-            <td class="cell-pres-cost">{% if p.costo_por_unidad_estimado %}${{ p.costo_por_unidad_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
+            <td class="cell-pres-qty">{{ p.peso_por_unidad_kg|floatformat:2|intcomma }}</td>
+            <td class="cell-pres-cost">{% if p.costo_por_unidad_estimado %}${{ p.costo_por_unidad_estimado|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
             <td>{% if p.activo %}<span class="badge bg-success">Activa</span>{% else %}<span class="badge bg-danger">Inactiva</span>{% endif %}</td>
             <td class="cell-pres-actions">
               <div class="recipe-actions">
@@ -477,14 +478,14 @@
             -
           {% endif %}
         </td>
-        <td class="text-end cell-qty">{% if l.cantidad is not None %}{{ l.cantidad|floatformat:2 }}{% else %}-{% endif %}</td>
+        <td class="text-end cell-qty">{% if l.cantidad is not None %}{{ l.cantidad|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
         <td class="cell-unit">{{ l.unidad_texto }}</td>
-        <td class="text-end cell-cost">{% if l.costo_total_estimado %}${{ l.costo_total_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
+        <td class="text-end cell-cost">{% if l.costo_total_estimado %}${{ l.costo_total_estimado|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
         <td>
           {% if l.match_status == "AUTO_APPROVED" %}
-            <span class="badge bg-success">{{ l.match_method }} {{ l.match_score|floatformat:0 }}</span>
+            <span class="badge bg-success">{{ l.match_method }} {{ l.match_score|floatformat:0|intcomma }}</span>
           {% elif l.match_status == "NEEDS_REVIEW" %}
-            <span class="badge bg-warning text-dark">{{ l.match_method }} {{ l.match_score|floatformat:0 }}</span>
+            <span class="badge bg-warning text-dark">{{ l.match_method }} {{ l.match_score|floatformat:0|intcomma }}</span>
           {% else %}
             <span class="badge bg-danger">NO_MATCH</span>
           {% endif %}
@@ -508,7 +509,7 @@
     <tfoot>
       <tr>
         <th colspan="8" class="text-end">Total</th>
-        <th class="text-end">${{ total_costo_estimado|floatformat:2 }}</th>
+        <th class="text-end">${{ total_costo_estimado|floatformat:2|intcomma }}</th>
         <th colspan="2"></th>
       </tr>
     </tfoot>

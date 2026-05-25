@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}MRP{% endblock %}
 {% block page_title %}Recetas · MRP Operativo{% endblock %}
 {% block content %}
@@ -125,7 +126,7 @@
         <div class="kpi-label">Artículos incompletos</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-number is-primary">${{ resultado.costo_total|floatformat:2 }}</div>
+        <div class="kpi-number is-primary">${{ resultado.costo_total|floatformat:2|intcomma }}</div>
         <div class="kpi-label">Costo total estimado</div>
       </div>
     </div>
@@ -150,7 +151,7 @@
           <div class="muted" style="margin-top:8px;">{{ resultado.demand_signal.comparable_years }} temporadas comparables · {{ resultado.demand_signal.history_span_label }}</div>
         </article>
         <article class="kpi-card">
-          <div class="kpi-number">{{ resultado.demand_signal.historico_total|floatformat:0 }}</div>
+          <div class="kpi-number">{{ resultado.demand_signal.historico_total|floatformat:0|intcomma }}</div>
           <div class="kpi-label">Unidades recientes</div>
           <div class="muted" style="margin-top:8px;">Promedio diario {{ resultado.demand_signal.historico_avg_daily|floatformat:1 }}</div>
         </article>
@@ -172,7 +173,7 @@
         <article class="kpi-card" style="grid-column: span 2;">
           <div class="kpi-label">Sucursales líderes</div>
           {% for row in resultado.demand_signal.top_branches %}
-          <div class="muted" style="margin-top:6px;">{{ row.sucursal__codigo }} - {{ row.sucursal__nombre }} · {{ row.total|floatformat:0 }}</div>
+          <div class="muted" style="margin-top:6px;">{{ row.sucursal__codigo }} - {{ row.sucursal__nombre }} · {{ row.total|floatformat:0|intcomma }}</div>
           {% empty %}
           <div class="muted" style="margin-top:6px;">No hay sucursales con venta reciente para esta receta.</div>
           {% endfor %}
@@ -665,9 +666,9 @@
           </td>
           <td class="text-end">{{ it.cantidad }}</td>
           <td>{{ it.unidad }}</td>
-          <td class="text-end">{{ it.stock_actual|floatformat:2 }}</td>
-          <td class="text-end">{{ it.faltante|floatformat:2 }}</td>
-          <td class="text-end">${{ it.costo|floatformat:2 }}</td>
+          <td class="text-end">{{ it.stock_actual|floatformat:2|intcomma }}</td>
+          <td class="text-end">{{ it.faltante|floatformat:2|intcomma }}</td>
+          <td class="text-end">${{ it.costo|floatformat:2|intcomma }}</td>
           <td>
             <span class="badge {% if it.workflow_health_tone == 'danger' %}badge-rojo{% elif it.workflow_health_tone == 'success' %}badge-verde{% else %}badge-amarillo{% endif %}">
               {{ it.workflow_health_label }}
@@ -689,7 +690,7 @@
                 {{ it.direct_base_replacements.0.reason }}
               </div>
               <div class="muted">
-                Conversión sugerida: {{ it.direct_base_replacements.0.replacement_quantity|floatformat:2 }} {{ it.direct_base_replacements.0.insumo.unidad_base.codigo }}
+                Conversión sugerida: {{ it.direct_base_replacements.0.replacement_quantity|floatformat:2|intcomma }} {{ it.direct_base_replacements.0.insumo.unidad_base.codigo }}
               </div>
               {% if it.direct_base_replacements|length > 1 %}
               <div class="muted">Se detectaron múltiples sugerencias para esta base; conviene revisar la receta.</div>
@@ -703,7 +704,7 @@
             {% if it.is_derived_parent %}
             <div class="muted mt-1">
               Consume <strong>{{ it.parent_recipe_name }}</strong> a razón de
-              {{ it.derived_units_per_parent|floatformat:0 }} derivadas por padre.
+              {{ it.derived_units_per_parent|floatformat:0|intcomma }} derivadas por padre.
             </div>
             {% endif %}
           </td>

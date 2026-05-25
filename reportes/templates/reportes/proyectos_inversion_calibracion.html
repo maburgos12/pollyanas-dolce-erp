@@ -42,7 +42,7 @@
   <section class="investment-kpis">
     <article class="investment-kpi-card">
       <div class="investment-kpi-label">Precisión total</div>
-      <div class="investment-kpi-value">{{ calibration_context.accuracy.accuracy_pct|default:0|floatformat:2 }}%</div>
+      <div class="investment-kpi-value">{{ calibration_context.accuracy.accuracy_pct|default:0|floatformat:2|intcomma }}%</div>
       <div class="investment-kpi-note">{{ calibration_context.accuracy.accurate_cases }} aciertos de {{ calibration_context.accuracy.labeled_cases }} casos etiquetados</div>
     </article>
     <article class="investment-kpi-card">
@@ -75,7 +75,7 @@
     <article class="investment-decision-card {% if calibration_result.applied %}is-positive{% else %}is-warning{% endif %}">
       <div class="investment-kicker">Resultado</div>
       <div class="investment-title" style="font-size:2rem;">{% if calibration_result.applied %}Calibración aplicada{% else %}Sin aplicar{% endif %}</div>
-      <div class="investment-copy">{% if calibration_result.applied %}Mejora estimada de {{ calibration_result.improvement_pct|default:0|floatformat:2 }}% en precisión.{% else %}{{ calibration_result.reason }}{% endif %}</div>
+      <div class="investment-copy">{% if calibration_result.applied %}Mejora estimada de {{ calibration_result.improvement_pct|default:0|floatformat:2|intcomma }}% en precisión.{% else %}{{ calibration_result.reason }}{% endif %}</div>
     </article>
   </section>
   {% endif %}

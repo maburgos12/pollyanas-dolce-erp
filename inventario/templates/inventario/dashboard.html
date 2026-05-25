@@ -195,7 +195,7 @@
         {% for row in top_shortage_rows %}
         <article class="bi-list-item is-tight is-signal-{% if row.coverage_pct == 0 %}danger{% elif row.coverage_pct < 60 %}warning{% else %}neutral{% endif %}">
           <strong>{{ row.name }}</strong>
-          <div>{{ row.coverage_pct|floatformat:0 }}% cobertura · stock {{ row.stock|floatformat:2 }} / reorden {{ row.reorder|floatformat:2 }}</div>
+          <div>{{ row.coverage_pct|floatformat:0|intcomma }}% cobertura · stock {{ row.stock|floatformat:2|intcomma }} / reorden {{ row.reorder|floatformat:2|intcomma }}</div>
           {% if row.missing and row.missing.0 != "Sin faltante" %}
           <div class="bi-subtle">Faltante maestro: {{ row.missing|join:", " }}</div>
           {% endif %}
@@ -229,7 +229,7 @@
         {% for row in commercial_priority_rows %}
         <article class="bi-list-item is-tight is-signal-{{ row.priority_tone|default:'neutral' }}">
           <strong>{{ row.insumo_nombre }}</strong>
-          <div>{{ row.historico_units|floatformat:0|intcomma }} unidades ligadas · brecha {{ row.gap|floatformat:2 }}</div>
+          <div>{{ row.historico_units|floatformat:0|intcomma }} unidades ligadas · brecha {{ row.gap|floatformat:2|intcomma }}</div>
           <div class="bi-subtle">{% if row.recipe_names %}{{ row.recipe_names|join:", " }}{% else %}Sin producto dominante{% endif %}</div>
           <div class="bi-inline-actions">
             <a class="bi-inline-link" href="{{ row.action_url }}">{{ row.action_label|default:"Asegurar artículo" }}</a>
@@ -362,8 +362,8 @@
               {% for row in top_shortage_rows %}
               <tr>
                 <td>{{ row.name }}</td>
-                <td>{{ row.stock|floatformat:2 }}</td>
-                <td>{{ row.reorder|floatformat:2 }}</td>
+                <td>{{ row.stock|floatformat:2|intcomma }}</td>
+                <td>{{ row.reorder|floatformat:2|intcomma }}</td>
                 <td>{{ row.coverage_pct|floatformat:1 }}%</td>
                 <td>
                   <div class="bi-inline-actions">
@@ -405,9 +405,9 @@
               <tr>
                 <td>{{ row.insumo_nombre }}</td>
                 <td>{{ row.dominant_recipe_name }}</td>
-                <td>{{ row.historico_units|floatformat:0 }}</td>
+                <td>{{ row.historico_units|floatformat:0|intcomma }}</td>
                 <td>
-                  {{ row.gap|floatformat:2 }}
+                  {{ row.gap|floatformat:2|intcomma }}
                   <div class="bi-inline-actions">
                     <a class="bi-inline-link" href="{{ row.action_url }}">{{ row.action_label|default:"Asegurar" }}</a>
                   </div>

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Inventario - Alertas{% endblock %}
 {% block page_title %}Inventario · Alertas{% endblock %}
 {% block body_class %}page-inventario-alertas{% endblock %}
@@ -77,7 +78,7 @@
         <div class="muted" style="margin-top:8px;">{{ sales_demand_signal.recipes_count }} productos vendidos</div>
       </article>
       <article class="kpi-card">
-        <div class="kpi-number">{{ sales_demand_signal.units_total|floatformat:0 }}</div>
+        <div class="kpi-number">{{ sales_demand_signal.units_total|floatformat:0|intcomma }}</div>
         <div class="kpi-label">Unidades observadas</div>
         <div class="muted" style="margin-top:8px;">{{ sales_demand_signal.insumos_count }} insumos impactados</div>
       </article>
@@ -89,7 +90,7 @@
       <article class="kpi-card">
         <div class="kpi-label">Productos líderes</div>
         {% for row in sales_demand_signal.top_products %}
-        <div class="muted" style="margin-top:6px;">{{ row.receta__nombre }} · {{ row.total|floatformat:0 }}</div>
+        <div class="muted" style="margin-top:6px;">{{ row.receta__nombre }} · {{ row.total|floatformat:0|intcomma }}</div>
         {% empty %}
         <div class="muted" style="margin-top:6px;">Sin ventas recientes ligadas a estos artículos.</div>
         {% endfor %}
@@ -117,7 +118,7 @@
       <div>{{ daily_critical_close_focus.detail }}</div>
       <div class="muted mt-1">
         Demanda {{ daily_critical_close_focus.historico_units|floatformat:1 }} ·
-        Brecha {{ daily_critical_close_focus.gap|floatformat:2 }} ·
+        Brecha {{ daily_critical_close_focus.gap|floatformat:2|intcomma }} ·
         Faltante {{ daily_critical_close_focus.missing|join:", " }}
       </div>
       {% if daily_critical_close_focus.recipe_names %}
@@ -146,9 +147,9 @@
           <tr>
             <td><strong>{{ row.insumo_nombre }}</strong></td>
             <td><span class="badge {% if row.priority_tone == 'danger' %}bg-danger{% elif row.priority_tone == 'warning' %}bg-warning text-dark{% else %}bg-primary{% endif %}">{{ row.priority_label }}</span></td>
-            <td>{{ row.historico_units|floatformat:0 }}</td>
-            <td>{{ row.gap|floatformat:2 }}</td>
-            <td>{{ row.stock_actual|floatformat:2 }} / {{ row.reorder_point|floatformat:2 }}</td>
+            <td>{{ row.historico_units|floatformat:0|intcomma }}</td>
+            <td>{{ row.gap|floatformat:2|intcomma }}</td>
+            <td>{{ row.stock_actual|floatformat:2|intcomma }} / {{ row.reorder_point|floatformat:2|intcomma }}</td>
             <td>{{ row.master_missing|join:", " }}</td>
             <td>{{ row.recipe_names|join:", " }}</td>
             <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">Abrir artículo</a></td>
@@ -181,9 +182,9 @@
           <tr>
             <td><strong>{{ row.insumo_nombre }}</strong></td>
             <td>{{ row.dominant_recipe_name }}</td>
-            <td>{{ row.historico_units|floatformat:0 }}</td>
-            <td>{{ row.stock_actual|floatformat:2 }} / {{ row.reorder_point|floatformat:2 }}</td>
-            <td>{{ row.gap|floatformat:2 }}</td>
+            <td>{{ row.historico_units|floatformat:0|intcomma }}</td>
+            <td>{{ row.stock_actual|floatformat:2|intcomma }} / {{ row.reorder_point|floatformat:2|intcomma }}</td>
+            <td>{{ row.gap|floatformat:2|intcomma }}</td>
             <td>{{ row.master_missing|join:", " }}</td>
             <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
           </tr>
@@ -212,8 +213,8 @@
           {% for row in critical_master_demand_rows %}
           <tr>
             <td><strong>{{ row.insumo_nombre }}</strong></td>
-            <td>{{ row.historico_units|floatformat:0 }}</td>
-            <td>{{ row.gap|floatformat:2 }}</td>
+            <td>{{ row.historico_units|floatformat:0|intcomma }}</td>
+            <td>{{ row.gap|floatformat:2|intcomma }}</td>
             <td>{{ row.master_missing|join:", " }}</td>
             <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">Cerrar artículo</a></td>
           </tr>

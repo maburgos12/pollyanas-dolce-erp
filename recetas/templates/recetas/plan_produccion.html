@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Plan de Producción{% endblock %}
 {% block page_title %}Recetas · Plan de Producción{% endblock %}
 {% block body_class %}page-plan-produccion{% endblock %}
@@ -54,11 +55,11 @@
             <td>{{ row.detail }}</td>
             <td>
               <strong>{{ row.dominant_recipe_name }}</strong><br>
-              <span class="muted">Histórico: {{ row.dominant_recipe_units|floatformat:0 }}</span>
+              <span class="muted">Histórico: {{ row.dominant_recipe_units|floatformat:0|intcomma }}</span>
             </td>
-            <td class="text-end">{{ row.historico_units|floatformat:0 }}</td>
-            <td class="text-end">{{ row.solicitud_total|floatformat:0 }}</td>
-            <td class="text-end">{{ row.dominant_plan_qty|floatformat:0 }}</td>
+            <td class="text-end">{{ row.historico_units|floatformat:0|intcomma }}</td>
+            <td class="text-end">{{ row.solicitud_total|floatformat:0|intcomma }}</td>
+            <td class="text-end">{{ row.dominant_plan_qty|floatformat:0|intcomma }}</td>
             <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
           </tr>
           {% endfor %}
@@ -90,9 +91,9 @@
             <td><strong>{{ row.sucursal_codigo }}</strong> · {{ row.sucursal_nombre }}</td>
             <td>{{ row.dominant_recipe_name }}</td>
             <td><strong>{{ row.insumo_nombre }}</strong></td>
-            <td class="text-end">{{ row.required_qty|floatformat:2 }} {{ row.unidad }}</td>
-            <td class="text-end">{{ row.stock_actual|floatformat:2 }} {{ row.unidad }}</td>
-            <td class="text-end">{{ row.shortage|floatformat:2 }} {{ row.unidad }}</td>
+            <td class="text-end">{{ row.required_qty|floatformat:2|intcomma }} {{ row.unidad }}</td>
+            <td class="text-end">{{ row.stock_actual|floatformat:2|intcomma }} {{ row.unidad }}</td>
+            <td class="text-end">{{ row.shortage|floatformat:2|intcomma }} {{ row.unidad }}</td>
             <td>{% if row.master_missing %}{{ row.master_missing|join:", " }}{% elif row.missing_cost %}Costo pendiente{% else %}Listo{% endif %}</td>
             <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
           </tr>
@@ -333,7 +334,7 @@
     Carga pronósticos por receta para alimentar la comparación Plan vs Pronóstico.
     Periodo actual: <strong>{{ periodo_pronostico_default }}</strong> ·
     Registros: <strong>{{ pronosticos_periodo_count }}</strong> ·
-    Total: <strong>{{ pronosticos_periodo_total|floatformat:2 }}</strong>
+    Total: <strong>{{ pronosticos_periodo_total|floatformat:2|intcomma }}</strong>
   </p>
   {% if pronosticos_unavailable %}
   <div class="alert alert-info" style="margin-bottom: 12px;">
@@ -375,7 +376,7 @@
   <div class="card-header" style="margin-top:8px;">Historial de Ventas (Base Estadística)</div>
   <p class="muted mb-2">
     Registros: <strong>{{ ventas_historicas_count }}</strong> ·
-    Cantidad acumulada: <strong>{{ ventas_historicas_total|floatformat:2 }}</strong> ·
+    Cantidad acumulada: <strong>{{ ventas_historicas_total|floatformat:2|intcomma }}</strong> ·
     Última fecha: <strong>{% if ventas_hist_fecha_max %}{{ ventas_hist_fecha_max }}{% else %}-{% endif %}</strong>
   </p>
   {% if ventas_historicas_summary %}
@@ -393,7 +394,7 @@
       <div class="muted" style="margin-top:8px;">{{ ventas_historicas_summary.recipe_count }} productos con demanda</div>
     </article>
     <article class="kpi-card">
-      <div class="kpi-number">{{ ventas_historicas_summary.total_units|floatformat:0 }}</div>
+      <div class="kpi-number">{{ ventas_historicas_summary.total_units|floatformat:0|intcomma }}</div>
       <div class="kpi-label">Unidades históricas</div>
       <div class="muted" style="margin-top:8px;">{{ ventas_historicas_summary.date_label }}</div>
     </article>
@@ -409,7 +410,7 @@
       {% if ventas_historicas_summary.top_branches %}
         {% for row in ventas_historicas_summary.top_branches %}
         <div class="muted" style="margin-top:8px;">
-          <strong>{{ row.sucursal__codigo|default:"SIN-COD" }}</strong> · {{ row.sucursal__nombre|default:"Sucursal" }} · {{ row.total|floatformat:0 }}
+          <strong>{{ row.sucursal__codigo|default:"SIN-COD" }}</strong> · {{ row.sucursal__nombre|default:"Sucursal" }} · {{ row.total|floatformat:0|intcomma }}
         </div>
         {% endfor %}
       {% else %}
@@ -421,7 +422,7 @@
       {% if ventas_historicas_summary.top_recipes %}
         {% for row in ventas_historicas_summary.top_recipes %}
         <div class="muted" style="margin-top:8px;">
-          <strong>{{ row.receta__nombre }}</strong> · {{ row.total|floatformat:0 }}
+          <strong>{{ row.receta__nombre }}</strong> · {{ row.total|floatformat:0|intcomma }}
         </div>
         {% endfor %}
       {% else %}
@@ -476,7 +477,7 @@
   <p class="muted mb-2">
     Registros periodo {{ periodo_pronostico_default }}:
     <strong>{{ solicitudes_venta_count }}</strong> ·
-    Cantidad solicitada: <strong>{{ solicitudes_venta_total|floatformat:2 }}</strong> ·
+    Cantidad solicitada: <strong>{{ solicitudes_venta_total|floatformat:2|intcomma }}</strong> ·
     Última fecha: <strong>{% if solicitudes_venta_fecha_max %}{{ solicitudes_venta_fecha_max }}{% else %}-{% endif %}</strong>
   </p>
   {% if solicitudes_venta_unavailable %}
@@ -670,11 +671,11 @@
       Rango: {{ forecast_preview.target_start }} a {{ forecast_preview.target_end }} ·
       Recetas: {{ forecast_preview.totals.recetas_count }} ·
       Confianza mínima: {{ forecast_preview.min_confianza_pct|default:0|floatformat:1 }}% ·
-      Forecast total: {{ forecast_preview.totals.forecast_total|floatformat:2 }} ·
-      Banda baja: {{ forecast_preview.totals.forecast_low_total|floatformat:2 }} ·
-      Banda alta: {{ forecast_preview.totals.forecast_high_total|floatformat:2 }} ·
-      Pronóstico actual: {{ forecast_preview.totals.pronostico_total|floatformat:2 }} ·
-      Delta: {{ forecast_preview.totals.delta_total|floatformat:2 }}
+      Forecast total: {{ forecast_preview.totals.forecast_total|floatformat:2|intcomma }} ·
+      Banda baja: {{ forecast_preview.totals.forecast_low_total|floatformat:2|intcomma }} ·
+      Banda alta: {{ forecast_preview.totals.forecast_high_total|floatformat:2|intcomma }} ·
+      Pronóstico actual: {{ forecast_preview.totals.pronostico_total|floatformat:2|intcomma }} ·
+      Delta: {{ forecast_preview.totals.delta_total|floatformat:2|intcomma }}
     </p>
     {% if forecast_preview_summary %}
     <div class="kpi-grid kpi-mini" style="margin-bottom:12px;">
@@ -701,7 +702,7 @@
       <article class="kpi-card">
         <div class="kpi-label">Productos líderes del forecast</div>
         {% for row in forecast_preview_summary.top_rows %}
-        <div class="muted" style="margin-top:8px;"><strong>{{ row.receta }}</strong> · {{ row.forecast_qty|floatformat:2 }}</div>
+        <div class="muted" style="margin-top:8px;"><strong>{{ row.receta }}</strong> · {{ row.forecast_qty|floatformat:2|intcomma }}</div>
         {% empty %}
         <div class="muted" style="margin-top:8px;">Sin productos en forecast.</div>
         {% endfor %}
@@ -734,7 +735,7 @@
       </div>
       <div class="kpi-grid kpi-mini" style="margin-bottom:12px;">
         <article class="kpi-card">
-          <div class="kpi-number">${{ forecast_supply_context.summary.estimated_spend|floatformat:2 }}</div>
+          <div class="kpi-number">${{ forecast_supply_context.summary.estimated_spend|floatformat:2|intcomma }}</div>
           <div class="kpi-label">Gasto estimado</div>
           <div class="muted" style="margin-top:8px;">Materia prima y empaques hoja.</div>
         </article>
@@ -749,7 +750,7 @@
           <div class="muted" style="margin-top:8px;">Betunes, panes base y subrecetas.</div>
         </article>
         <article class="kpi-card">
-          <div class="kpi-number">{{ forecast_supply_context.summary.forecast_units|floatformat:2 }}</div>
+          <div class="kpi-number">{{ forecast_supply_context.summary.forecast_units|floatformat:2|intcomma }}</div>
           <div class="kpi-label">Unidades forecast</div>
           <div class="muted" style="margin-top:8px;">Base usada para explotar BOM.</div>
         </article>
@@ -814,10 +815,10 @@
                 {% if row.missing_cost %}
                   <span class="badge badge-amarillo">Sin costo</span>
                 {% else %}
-                  ${{ row.unit_cost|floatformat:2 }}
+                  ${{ row.unit_cost|floatformat:2|intcomma }}
                 {% endif %}
               </td>
-              <td class="text-end"><strong>${{ row.estimated_spend|floatformat:2 }}</strong></td>
+              <td class="text-end"><strong>${{ row.estimated_spend|floatformat:2|intcomma }}</strong></td>
               <td class="muted">{{ row.recipes_text }}</td>
             </tr>
             {% endfor %}
@@ -873,11 +874,11 @@
           {% for row in forecast_preview.rows %}
           <tr>
             <td>{{ row.receta }}</td>
-            <td class="text-end">{{ row.forecast_qty|floatformat:2 }}</td>
-            <td class="text-end">{{ row.forecast_low|floatformat:2 }}</td>
-            <td class="text-end">{{ row.forecast_high|floatformat:2 }}</td>
-            <td class="text-end">{{ row.pronostico_actual|floatformat:2 }}</td>
-            <td class="text-end">{{ row.delta|floatformat:2 }}</td>
+            <td class="text-end">{{ row.forecast_qty|floatformat:2|intcomma }}</td>
+            <td class="text-end">{{ row.forecast_low|floatformat:2|intcomma }}</td>
+            <td class="text-end">{{ row.forecast_high|floatformat:2|intcomma }}</td>
+            <td class="text-end">{{ row.pronostico_actual|floatformat:2|intcomma }}</td>
+            <td class="text-end">{{ row.delta|floatformat:2|intcomma }}</td>
             <td>
               {% if row.recomendacion == "SUBIR" %}
               <span class="badge badge-verde">Subir</span>
@@ -905,10 +906,10 @@
       Ventanas: {{ forecast_backtest.totals.windows_evaluated }} ·
       Escenario: {{ forecast_backtest.scope.escenario|default:'base'|upper }} ·
       Confianza mínima: {{ forecast_backtest.scope.min_confianza_pct|default:0|floatformat:1 }}% ·
-      Forecast total: {{ forecast_backtest.totals.forecast_total|floatformat:2 }} ·
-      Real total: {{ forecast_backtest.totals.actual_total|floatformat:2 }} ·
-      Bias: {{ forecast_backtest.totals.bias_total|floatformat:2 }} ·
-      MAE: {{ forecast_backtest.totals.mae_promedio|floatformat:2 }} ·
+      Forecast total: {{ forecast_backtest.totals.forecast_total|floatformat:2|intcomma }} ·
+      Real total: {{ forecast_backtest.totals.actual_total|floatformat:2|intcomma }} ·
+      Bias: {{ forecast_backtest.totals.bias_total|floatformat:2|intcomma }} ·
+      MAE: {{ forecast_backtest.totals.mae_promedio|floatformat:2|intcomma }} ·
       MAPE: {% if forecast_backtest.totals.mape_promedio is not None %}{{ forecast_backtest.totals.mape_promedio|floatformat:1 }}%{% else %}-{% endif %}
     </p>
     {% if forecast_backtest.history_meta %}
@@ -953,10 +954,10 @@
           <tr>
             <td>{{ w.window_start }} a {{ w.window_end }}</td>
             <td class="text-end">{{ w.recetas_count }}</td>
-            <td class="text-end">{{ w.forecast_total|floatformat:2 }}</td>
-            <td class="text-end">{{ w.actual_total|floatformat:2 }}</td>
-            <td class="text-end">{{ w.bias_total|floatformat:2 }}</td>
-            <td class="text-end">{{ w.mae|floatformat:2 }}</td>
+            <td class="text-end">{{ w.forecast_total|floatformat:2|intcomma }}</td>
+            <td class="text-end">{{ w.actual_total|floatformat:2|intcomma }}</td>
+            <td class="text-end">{{ w.bias_total|floatformat:2|intcomma }}</td>
+            <td class="text-end">{{ w.mae|floatformat:2|intcomma }}</td>
             <td class="text-end">{% if w.mape is not None %}{{ w.mape|floatformat:1 }}%{% else %}-{% endif %}</td>
           </tr>
           {% empty %}
@@ -973,9 +974,9 @@
     <p class="muted mb-2">
       Rango: {{ forecast_vs_solicitud.target_start }} a {{ forecast_vs_solicitud.target_end }} ·
       Escenario comparado: {{ forecast_compare_escenario|upper }} ·
-      Forecast total: {{ forecast_vs_solicitud.totals.forecast_total|floatformat:2 }} ·
-      Solicitud total: {{ forecast_vs_solicitud.totals.solicitud_total|floatformat:2 }} ·
-      Delta: {{ forecast_vs_solicitud.totals.delta_total|floatformat:2 }}
+      Forecast total: {{ forecast_vs_solicitud.totals.forecast_total|floatformat:2|intcomma }} ·
+      Solicitud total: {{ forecast_vs_solicitud.totals.solicitud_total|floatformat:2|intcomma }} ·
+      Delta: {{ forecast_vs_solicitud.totals.delta_total|floatformat:2|intcomma }}
     </p>
     {% if forecast_vs_solicitud_summary %}
     <div class="kpi-grid kpi-mini" style="margin-bottom:12px;">
@@ -995,7 +996,7 @@
       <article class="kpi-card">
         <div class="kpi-label">Desviaciones principales</div>
         {% for row in forecast_vs_solicitud_summary.top_rows %}
-        <div class="muted" style="margin-top:8px;"><strong>{{ row.receta }}</strong> · {{ row.delta_qty|floatformat:2 }}</div>
+        <div class="muted" style="margin-top:8px;"><strong>{{ row.receta }}</strong> · {{ row.delta_qty|floatformat:2|intcomma }}</div>
         {% empty %}
         <div class="muted" style="margin-top:8px;">Sin desviaciones relevantes.</div>
         {% endfor %}
@@ -1109,11 +1110,11 @@
           {% for row in forecast_vs_solicitud.rows %}
           <tr>
             <td>{{ row.receta }}</td>
-            <td class="text-end">{{ row.forecast_qty|floatformat:2 }}</td>
-            <td class="text-end">{{ row.forecast_low|floatformat:2 }}</td>
-            <td class="text-end">{{ row.forecast_high|floatformat:2 }}</td>
-            <td class="text-end">{{ row.solicitud_qty|floatformat:2 }}</td>
-            <td class="text-end">{{ row.delta_qty|floatformat:2 }}</td>
+            <td class="text-end">{{ row.forecast_qty|floatformat:2|intcomma }}</td>
+            <td class="text-end">{{ row.forecast_low|floatformat:2|intcomma }}</td>
+            <td class="text-end">{{ row.forecast_high|floatformat:2|intcomma }}</td>
+            <td class="text-end">{{ row.solicitud_qty|floatformat:2|intcomma }}</td>
+            <td class="text-end">{{ row.delta_qty|floatformat:2|intcomma }}</td>
             <td class="text-end">
               {% if row.variacion_pct is not None %}
                 {{ row.variacion_pct|floatformat:1 }}%
@@ -1235,7 +1236,7 @@
       <div class="kpi-label">Alertas capacidad</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-number is-danger">${{ mrp_periodo_resumen.costo_total|floatformat:2 }}</div>
+      <div class="kpi-number is-danger">${{ mrp_periodo_resumen.costo_total|floatformat:2|intcomma }}</div>
       <div class="kpi-label">Costo total período</div>
     </div>
   </div>
@@ -1283,8 +1284,8 @@
         <div class="kpi-number {% if card.faltante_count > 0 %}is-warning{% else %}is-primary{% endif %}">{{ card.count }}</div>
         <div class="kpi-label">{{ card.class_label }}</div>
         <div class="muted mt-2">Faltantes: {{ card.faltante_count }}</div>
-        <div class="muted">Cantidad: {{ card.cantidad_total|floatformat:2 }}</div>
-        <div class="muted">Costo: ${{ card.costo_total|floatformat:2 }}</div>
+        <div class="muted">Cantidad: {{ card.cantidad_total|floatformat:2|intcomma }}</div>
+        <div class="muted">Costo: ${{ card.costo_total|floatformat:2|intcomma }}</div>
         <div class="mt-2">
           <form method="get" class="inline-form">
             {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
@@ -1905,7 +1906,7 @@
       Artículos maestros pendientes {{ enterprise_board.period_health.lineas_sin_match }} ·
       Cantidad por validar {{ enterprise_board.period_health.lineas_sin_cantidad }} ·
       Costo por validar {{ enterprise_board.period_health.lineas_sin_costo_unitario }} ·
-      Costo total ${{ enterprise_board.period_health.costo_total|floatformat:2 }}.
+      Costo total ${{ enterprise_board.period_health.costo_total|floatformat:2|intcomma }}.
       <a href="{{ enterprise_board.period_health.anchor }}">Abrir período</a>
     </div>
     {% endif %}
@@ -2497,7 +2498,7 @@
     <div class="kpi-label">Insumos requeridos</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-number is-danger">${{ explosion.costo_total|floatformat:2 }}</div>
+    <div class="kpi-number is-danger">${{ explosion.costo_total|floatformat:2|intcomma }}</div>
     <div class="kpi-label">Costo total estimado</div>
   </div>
   <div class="kpi-card">
@@ -2535,11 +2536,11 @@
   {% endif %}
   <div class="kpi-mini">
     <div class="kpi-card">
-      <div class="kpi-number">{{ plan_vs_pronostico.total_plan|floatformat:2 }}</div>
+      <div class="kpi-number">{{ plan_vs_pronostico.total_plan|floatformat:2|intcomma }}</div>
       <div class="kpi-label">Cantidad plan</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-number">{{ plan_vs_pronostico.total_pronostico|floatformat:2 }}</div>
+      <div class="kpi-number">{{ plan_vs_pronostico.total_pronostico|floatformat:2|intcomma }}</div>
       <div class="kpi-label">Cantidad pronóstico</div>
     </div>
     <div class="kpi-card">
@@ -2565,9 +2566,9 @@
         <tr>
           <td>{{ row.receta }}</td>
           <td>Ventas / Planeación</td>
-          <td class="text-end">{{ row.cantidad_plan|floatformat:2 }}</td>
-          <td class="text-end">{{ row.cantidad_pronostico|floatformat:2 }}</td>
-          <td class="text-end">{{ row.delta|floatformat:2 }}</td>
+          <td class="text-end">{{ row.cantidad_plan|floatformat:2|intcomma }}</td>
+          <td class="text-end">{{ row.cantidad_pronostico|floatformat:2|intcomma }}</td>
+          <td class="text-end">{{ row.delta|floatformat:2|intcomma }}</td>
           <td>
             {% if row.sin_pronostico %}
               <span class="badge badge-rojo">Sin pronóstico</span>
@@ -2615,7 +2616,7 @@
           <td>Producción / Costeo</td>
           <td class="text-end">{{ row.cantidad|floatformat:3 }}</td>
           <td>{{ row.notas|default:"-" }}</td>
-          <td class="text-end">${{ row.costo_estimado|floatformat:2 }}</td>
+          <td class="text-end">${{ row.costo_estimado|floatformat:2|intcomma }}</td>
           <td>
             {% if row.workflow_health_tone == "danger" %}
             <span class="badge badge-rojo">{{ row.workflow_health_label }}</span>
@@ -2685,8 +2686,8 @@
           <td class="text-end">{{ row.stock_actual|floatformat:3 }}</td>
           <td class="text-end">{{ row.faltante|floatformat:3 }}</td>
           <td>{{ row.unidad }}</td>
-          <td class="text-end">${{ row.costo_unitario|floatformat:2 }}</td>
-          <td class="text-end">${{ row.costo_total|floatformat:2 }}</td>
+          <td class="text-end">${{ row.costo_unitario|floatformat:2|intcomma }}</td>
+          <td class="text-end">${{ row.costo_total|floatformat:2|intcomma }}</td>
           <td>
             {% if row.alerta_capacidad %}
               <span class="badge badge-rojo">Stock insuficiente</span>
@@ -2719,7 +2720,7 @@
       <tfoot>
         <tr>
           <th colspan="11" class="text-end">Costo total plan</th>
-          <th class="text-end">${{ explosion.costo_total|floatformat:2 }}</th>
+          <th class="text-end">${{ explosion.costo_total|floatformat:2|intcomma }}</th>
           <th></th>
         </tr>
       </tfoot>

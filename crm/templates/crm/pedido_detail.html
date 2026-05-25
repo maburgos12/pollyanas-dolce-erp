@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 
+{% load humanize %}
 {% block title %}CRM · {{ pedido.folio }}{% endblock %}
 {% block page_title %}CRM · {{ pedido.folio }}{% endblock %}
 
@@ -28,7 +29,7 @@
       <article class="ops-summary-card"><span class="muted">Cliente</span><strong style="font-size:22px;">{{ pedido.cliente.nombre }}</strong><div>{{ pedido.folio }}</div></article>
       <article class="ops-summary-card"><span class="muted">Estatus</span><strong style="font-size:22px;">{{ pedido.get_estatus_display }}</strong><div>{{ pedido.get_prioridad_display }} · {{ pedido.get_canal_display }}</div></article>
       <article class="ops-summary-card"><span class="muted">Compromiso</span><strong style="font-size:22px;">{{ pedido.fecha_compromiso|date:"Y-m-d"|default:"-" }}</strong><div>{{ pedido.sucursal|default:"Sin sucursal" }}</div></article>
-      <article class="ops-summary-card"><span class="muted">Monto estimado</span><strong>${{ pedido.monto_estimado|floatformat:2 }}</strong><div>{{ seguimientos|length }} eventos en bitácora</div></article>
+      <article class="ops-summary-card"><span class="muted">Monto estimado</span><strong>${{ pedido.monto_estimado|floatformat:2|intcomma }}</strong><div>{{ seguimientos|length }} eventos en bitácora</div></article>
     </div>
     <div class="table-responsive" style="margin-top:14px;">
       <table class="table table-striped">

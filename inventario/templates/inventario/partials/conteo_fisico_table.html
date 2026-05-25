@@ -1,3 +1,4 @@
+{% load humanize %}
 <div class="table-responsive">
   <table class="table table-striped">
     <thead>
@@ -37,7 +38,7 @@
             {{ line.diferencia|floatformat:3 }}
           </span>
         </td>
-        <td id="cost-diff-{{ line.id }}">${{ line.costo_diferencia|floatformat:2 }}</td>
+        <td id="cost-diff-{{ line.id }}">${{ line.costo_diferencia|floatformat:2|intcomma }}</td>
         <td>{{ line.observacion_linea|default:"" }}</td>
       </tr>
       {% empty %}

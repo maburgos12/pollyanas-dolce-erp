@@ -131,11 +131,11 @@
       <div class="investment-stats-list">
         <div class="investment-stat-line">
           <span class="investment-muted">Máx. deuda / ingreso</span>
-          <strong>{{ global_summary.policy.max_debt_to_income_ratio|floatformat:2 }}%</strong>
+          <strong>{{ global_summary.policy.max_debt_to_income_ratio|floatformat:2|intcomma }}%</strong>
         </div>
         <div class="investment-stat-line">
           <span class="investment-muted">Máx. payback promedio</span>
-          <strong>{{ global_summary.policy.max_average_payback_months|floatformat:2 }} meses</strong>
+          <strong>{{ global_summary.policy.max_average_payback_months|floatformat:2|intcomma }} meses</strong>
         </div>
         <div class="investment-stat-line">
           <span class="investment-muted">Flujo libre mínimo</span>
@@ -152,7 +152,7 @@
                 <strong>{{ row.project.nombre_proyecto }}</strong>
                 <span class="investment-status-pill is-active">{{ row.classification }}</span>
               </div>
-              <div class="investment-muted">Health {{ row.health_score }}/100 · ROI {{ row.roi|floatformat:2 }}%</div>
+              <div class="investment-muted">Health {{ row.health_score }}/100 · ROI {{ row.roi|floatformat:2|intcomma }}%</div>
             </article>
             {% empty %}
             <div class="investment-empty">Aún no hay bases fuertes disponibles.</div>
@@ -239,11 +239,11 @@
         </div>
         <div class="investment-chart-card investment-chart-card--summary">
           <div class="investment-kpi-label">ROI esperado</div>
-          <div class="investment-kpi-value">{% if forecast_payload.outputs.projected_roi_pct %}{{ forecast_payload.outputs.projected_roi_pct|floatformat:2 }}%{% else %}N/D{% endif %}</div>
+          <div class="investment-kpi-value">{% if forecast_payload.outputs.projected_roi_pct %}{{ forecast_payload.outputs.projected_roi_pct|floatformat:2|intcomma }}%{% else %}N/D{% endif %}</div>
         </div>
         <div class="investment-chart-card investment-chart-card--summary">
           <div class="investment-kpi-label">Payback esperado</div>
-          <div class="investment-kpi-value">{% if forecast_payload.outputs.projected_payback_months %}{{ forecast_payload.outputs.projected_payback_months|floatformat:2 }} meses{% else %}N/D{% endif %}</div>
+          <div class="investment-kpi-value">{% if forecast_payload.outputs.projected_payback_months %}{{ forecast_payload.outputs.projected_payback_months|floatformat:2|intcomma }} meses{% else %}N/D{% endif %}</div>
         </div>
         <div class="investment-chart-card investment-chart-card--summary">
           <div class="investment-kpi-label">Fecha estimada de cierre</div>
@@ -359,7 +359,7 @@
 	              {% for row in sensitivity_rows %}
 	              <tr>
 	                <th>{{ row.label }}</th>
-	                <td>{{ row.adjustment_pct|floatformat:2 }}%</td>
+	                <td>{{ row.adjustment_pct|floatformat:2|intcomma }}%</td>
 	                <td>{{ row.free_cashflow_display }}</td>
 	                <td>{{ row.payback_display }}</td>
 	                <td>{{ row.roi_display }}</td>
@@ -390,7 +390,7 @@
             </div>
             <div class="investment-stat-line">
               <span class="investment-muted">Margen operativo base</span>
-              <strong>{% if forecast_payload.historical_reference.operating_margin_pct %}{{ forecast_payload.historical_reference.operating_margin_pct|floatformat:2 }}%{% else %}N/D{% endif %}</strong>
+              <strong>{% if forecast_payload.historical_reference.operating_margin_pct %}{{ forecast_payload.historical_reference.operating_margin_pct|floatformat:2|intcomma }}%{% else %}N/D{% endif %}</strong>
             </div>
             <div class="investment-stat-line">
               <span class="investment-muted">Gasto operativo base</span>
@@ -416,7 +416,7 @@
             </div>
             <div class="investment-stat-line">
               <span class="investment-muted">Ajuste de ventas</span>
-              <strong>{% if forecast_payload.inputs.sales_adjustment_pct is not None %}{{ forecast_payload.inputs.sales_adjustment_pct|floatformat:2 }}%{% else %}0.00%{% endif %}</strong>
+              <strong>{% if forecast_payload.inputs.sales_adjustment_pct is not None %}{{ forecast_payload.inputs.sales_adjustment_pct|floatformat:2|intcomma }}%{% else %}0.00%{% endif %}</strong>
             </div>
             <div class="investment-stat-line">
               <span class="investment-muted">Escenario</span>
@@ -536,8 +536,8 @@
 	            <div class="investment-history-grid">
 	              <span>Inversión {{ row.investment_estimate|default:0|floatformat:2|intcomma }}</span>
 	              <span>Escenario {{ row.scenario_label }}</span>
-	              <span>Payback {% if row.projected_payback_months %}{{ row.projected_payback_months|floatformat:2 }} meses{% else %}N/D{% endif %}</span>
-	              <span>ROI {% if row.projected_roi_pct %}{{ row.projected_roi_pct|floatformat:2 }}%{% else %}N/D{% endif %}</span>
+	              <span>Payback {% if row.projected_payback_months %}{{ row.projected_payback_months|floatformat:2|intcomma }} meses{% else %}N/D{% endif %}</span>
+	              <span>ROI {% if row.projected_roi_pct %}{{ row.projected_roi_pct|floatformat:2|intcomma }}%{% else %}N/D{% endif %}</span>
 	            </div>
 	            <div class="investment-inline-note">
 	              <span class="investment-status-pill {% if row.status == 'CANDIDATO' or row.status == 'APROBADO_PRELIMINAR' %}is-active{% elif row.status == 'DESCARTADO' %}is-danger{% else %}is-warning{% endif %}">{{ row.status|lower|capfirst }}</span>

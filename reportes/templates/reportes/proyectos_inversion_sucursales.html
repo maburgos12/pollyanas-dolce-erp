@@ -87,7 +87,7 @@
             <strong>{{ row.project.nombre_proyecto }}</strong>
             <span class="investment-status-pill is-active">{{ row.classification }}</span>
           </div>
-          <div class="investment-muted">Health {{ row.health_score }}/100 · ROI {{ row.roi|floatformat:2 }}% · Payback {% if row.payback_real %}{{ row.payback_real|floatformat:2 }} meses{% else %}N/D{% endif %}</div>
+          <div class="investment-muted">Health {{ row.health_score }}/100 · ROI {{ row.roi|floatformat:2|intcomma }}% · Payback {% if row.payback_real %}{{ row.payback_real|floatformat:2|intcomma }} meses{% else %}N/D{% endif %}</div>
         </article>
         {% empty %}
         <div class="investment-empty">Todavía no hay sucursales con señal fuerte de expansión.</div>
@@ -152,11 +152,11 @@
                 </div>
                 <div class="investment-mini-kpi">
                   <span class="investment-muted">ROI</span>
-                  <strong>{% if not row.is_data_partial %}{{ row.roi_cumulative|floatformat:2 }}%{% else %}Revisar{% endif %}</strong>
+                  <strong>{% if not row.is_data_partial %}{{ row.roi_cumulative|floatformat:2|intcomma }}%{% else %}Revisar{% endif %}</strong>
                 </div>
                 <div class="investment-mini-kpi">
                   <span class="investment-muted">Payback</span>
-                  <strong>{% if row.payback and not row.is_data_partial %}{{ row.payback|floatformat:2 }} meses{% else %}Revisar{% endif %}</strong>
+                  <strong>{% if row.payback and not row.is_data_partial %}{{ row.payback|floatformat:2|intcomma }} meses{% else %}Revisar{% endif %}</strong>
                 </div>
                 <div class="investment-mini-kpi">
                   <span class="investment-muted">Alertas</span>

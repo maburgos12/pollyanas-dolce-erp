@@ -177,7 +177,7 @@
 
     <p class="note">Modelo: {{ resumen.metodo }} · Tendencia: {{ resumen.tendencia_reciente }} · Comparable: {{ resumen.comparable }}</p>
     {% if resumen.confianza_promedio %}
-    <p class="note">Confianza guardada: {{ resumen.confianza_pct|floatformat:0 }}% · cálculo generado el {{ pronostico.creado_en|date:"Y-m-d H:i" }}</p>
+    <p class="note">Confianza guardada: {{ resumen.confianza_pct|floatformat:0|intcomma }}% · cálculo generado el {{ pronostico.creado_en|date:"Y-m-d H:i" }}</p>
     {% endif %}
 
     <section>

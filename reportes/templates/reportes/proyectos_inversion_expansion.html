@@ -61,7 +61,7 @@
     </article>
     <article class="investment-kpi-card">
       <div class="investment-kpi-label">Deuda / ingreso</div>
-      <div class="investment-kpi-value">{{ global_summary.metrics.debt_to_income_ratio_pct|floatformat:2 }}%</div>
+      <div class="investment-kpi-value">{{ global_summary.metrics.debt_to_income_ratio_pct|floatformat:2|intcomma }}%</div>
       <div class="investment-kpi-note">Deuda cartera expansión ${{ global_summary.metrics.debt_total|floatformat:2|intcomma }}</div>
     </article>
     <article class="investment-kpi-card">
@@ -145,9 +145,9 @@
                     {% if row.project.sucursal_relacionada %}{{ row.project.sucursal_relacionada.codigo }} · {{ row.project.sucursal_relacionada.nombre }}{% else %}Sucursal pendiente{% endif %}
                   </div>
                 </td>
-                <td>{{ row.roi|floatformat:2 }}%</td>
-                <td>{% if row.payback_real %}{{ row.payback_real|floatformat:2 }} meses{% else %}N/D{% endif %}</td>
-                <td>{{ row.cash_on_cash|floatformat:2 }}%</td>
+                <td>{{ row.roi|floatformat:2|intcomma }}%</td>
+                <td>{% if row.payback_real %}{{ row.payback_real|floatformat:2|intcomma }} meses{% else %}N/D{% endif %}</td>
+                <td>{{ row.cash_on_cash|floatformat:2|intcomma }}%</td>
                 <td>
                   <span class="investment-status-pill {% if row.health_score >= 80 %}is-active{% elif row.health_score < 50 %}is-warning{% endif %}">{{ row.health_score }}/100</span>
                 </td>
@@ -156,7 +156,7 @@
                 </td>
                 <td>
                   <div>{{ row.recommendation }}</div>
-                  <div class="investment-muted">Flujo libre 3m ${{ row.average_free_cashflow_3m|default:0|floatformat:2|intcomma }} · Tendencia ventas {{ row.sales_trend_pct|default:0|floatformat:2 }}%</div>
+                  <div class="investment-muted">Flujo libre 3m ${{ row.average_free_cashflow_3m|default:0|floatformat:2|intcomma }} · Tendencia ventas {{ row.sales_trend_pct|default:0|floatformat:2|intcomma }}%</div>
                 </td>
               </tr>
               {% empty %}
@@ -184,7 +184,7 @@
         <div class="investment-kpis">
           <article class="investment-kpi-card">
             <div class="investment-kpi-label">Precisión total</div>
-            <div class="investment-kpi-value">{{ calibration_context.accuracy.accuracy_pct|default:0|floatformat:2 }}%</div>
+            <div class="investment-kpi-value">{{ calibration_context.accuracy.accuracy_pct|default:0|floatformat:2|intcomma }}%</div>
             <div class="investment-kpi-note">{{ calibration_context.accuracy.accurate_cases }} aciertos de {{ calibration_context.accuracy.labeled_cases }} casos etiquetados</div>
           </article>
           <article class="investment-kpi-card">
@@ -216,7 +216,7 @@
         <div class="investment-chart-card investment-chart-card--summary" style="margin-top:1rem;">
           <div class="investment-kpi-label">Resultado de recalibración</div>
           {% if calibration_result.applied %}
-          <div class="investment-kpi-value">+{{ calibration_result.improvement_pct|default:0|floatformat:2 }}%</div>
+          <div class="investment-kpi-value">+{{ calibration_result.improvement_pct|default:0|floatformat:2|intcomma }}%</div>
           <div class="investment-kpi-note">Mejora estimada en precisión vs configuración previa.</div>
           {% else %}
           <div class="investment-kpi-value">No aplicada</div>
@@ -391,11 +391,11 @@
           </div>
           <div class="investment-mini-kpi">
             <span class="investment-muted">Máx. deuda / ingreso</span>
-            <strong>{{ global_summary.policy.max_debt_to_income_ratio|floatformat:2 }}%</strong>
+            <strong>{{ global_summary.policy.max_debt_to_income_ratio|floatformat:2|intcomma }}%</strong>
           </div>
           <div class="investment-mini-kpi">
             <span class="investment-muted">Máx. payback promedio</span>
-            <strong>{{ global_summary.policy.max_average_payback_months|floatformat:2 }} meses</strong>
+            <strong>{{ global_summary.policy.max_average_payback_months|floatformat:2|intcomma }} meses</strong>
           </div>
         </div>
         {% if global_summary.global_recommendation.blocked_reasons %}
@@ -486,7 +486,7 @@
             </div>
             <div class="investment-mini-kpi">
               <span class="investment-muted">Payback esperado</span>
-              <strong>{% if forecast_payload.outputs.projected_payback_months %}{{ forecast_payload.outputs.projected_payback_months|floatformat:2 }} meses{% else %}N/D{% endif %}</strong>
+              <strong>{% if forecast_payload.outputs.projected_payback_months %}{{ forecast_payload.outputs.projected_payback_months|floatformat:2|intcomma }} meses{% else %}N/D{% endif %}</strong>
             </div>
           </div>
           <div class="investment-muted">Fecha estimada de recuperación: {{ forecast_payload.outputs.projected_close_date|default:"No disponible" }}</div>

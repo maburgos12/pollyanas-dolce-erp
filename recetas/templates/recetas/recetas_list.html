@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Recetas{% endblock %}
 {% block page_title %}Recetas{% endblock %}
 
@@ -110,7 +111,7 @@
           <td>{% if r.tipo == "PRODUCTO_FINAL" %}<span class="badge bg-primary">Producto final</span>{% else %}<span class="badge bg-success">Preparación</span>{% endif %}</td>
           <td>{{ r.familia|default:"-" }}</td>
           <td>{{ r.categoria|default:"-" }}</td>
-          <td>{% if r.rendimiento_cantidad %}{{ r.rendimiento_cantidad|floatformat:2 }} {{ r.rendimiento_unidad.codigo|default:"" }}{% else %}-{% endif %}</td>
+          <td>{% if r.rendimiento_cantidad %}{{ r.rendimiento_cantidad|floatformat:2|intcomma }} {{ r.rendimiento_unidad.codigo|default:"" }}{% else %}-{% endif %}</td>
           <td>{{ r.fuente_display }}</td>
           <td>
             {% if r.bom_pending %}
@@ -122,7 +123,7 @@
             {% endif %}
           </td>
           <td class="text-end">{{ r.lineas_count }}</td>
-          <td class="text-end">{% if r.costo_efectivo %}${{ r.costo_efectivo|floatformat:2 }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="text-end">{% if r.costo_efectivo %}${{ r.costo_efectivo|floatformat:2|intcomma }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
         </tr>
         {% empty %}
         <tr>

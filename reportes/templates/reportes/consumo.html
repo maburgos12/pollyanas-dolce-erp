@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Reportes - Consumo{% endblock %}
 {% block page_title %}Reportes · Consumo por Periodo{% endblock %}
 {% block body_class %}page-reportes-consumo{% endblock %}
@@ -460,7 +461,7 @@
   <div class="kpi-mini">
     <div class="kpi-card"><div class="kpi-number">{{ total_movimientos }}</div><div class="kpi-label">Movimientos</div></div>
     <div class="kpi-card"><div class="kpi-number is-success">{{ total_insumos }}</div><div class="kpi-label">Insumos</div></div>
-    <div class="kpi-card"><div class="kpi-number">{{ total_cantidad|floatformat:0 }}</div><div class="kpi-label">Cantidad total</div></div>
+    <div class="kpi-card"><div class="kpi-number">{{ total_cantidad|floatformat:0|intcomma }}</div><div class="kpi-label">Cantidad total</div></div>
     <div class="kpi-card"><div class="kpi-number is-success">{{ governance_ready }}</div><div class="kpi-label">Maestro listo</div></div>
     <div class="kpi-card"><div class="kpi-number is-warning">{{ governance_blocked }}</div><div class="kpi-label">Maestro bloqueado</div></div>
   </div>

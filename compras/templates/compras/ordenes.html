@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Compras - Órdenes{% endblock %}
 {% block page_title %}Compras · Órdenes{% endblock %}
 {% block body_class %}page-compras-ordenes{% endblock %}
@@ -157,7 +158,7 @@
             <td>{{ o.proveedor.nombre }}</td>
             <td>{{ o.fecha_emision }}</td>
             <td>{{ o.fecha_entrega_estimada|default:"-" }}</td>
-            <td class="text-end">${{ o.monto_estimado|floatformat:2 }}</td>
+            <td class="text-end">${{ o.monto_estimado|floatformat:2|intcomma }}</td>
             <td>
               {% if o.estatus == "CERRADA" %}
               <span class="badge-verde">{{ o.get_estatus_display }}</span>

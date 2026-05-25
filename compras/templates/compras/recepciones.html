@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Compras - Recepciones{% endblock %}
 {% block page_title %}Compras · Recepciones{% endblock %}
 {% block body_class %}page-compras-recepciones{% endblock %}
@@ -66,7 +67,7 @@
         <select class="input-field" name="orden_id" required>
           <option value="">Orden confirmada o emitida</option>
           {% for o in ordenes %}
-          <option value="{{ o.id }}">{{ o.folio }} · {{ o.proveedor.nombre }} · ${{ o.monto_estimado|floatformat:2 }}</option>
+          <option value="{{ o.id }}">{{ o.folio }} · {{ o.proveedor.nombre }} · ${{ o.monto_estimado|floatformat:2|intcomma }}</option>
           {% endfor %}
         </select>
         <input class="input-field" type="date" name="fecha_recepcion" required>

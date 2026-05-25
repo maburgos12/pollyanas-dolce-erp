@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Captura Diaria Almacén{% endblock %}
 {% block page_title %}Captura Diaria — Almacén{% endblock %}
 
@@ -188,10 +189,10 @@
             <td><strong>{{ r.nombre }}</strong></td>
             <td style="font-size:11px">{{ r.almacen_label }}</td>
             <td>{{ r.unidad }}</td>
-            <td style="text-align:right;font-weight:700">{{ r.stock_actual|floatformat:2 }}</td>
-            <td style="text-align:right;color:var(--texto-light)">{{ r.stock_minimo|floatformat:0 }}</td>
-            <td style="text-align:right;color:var(--texto-light)">{{ r.stock_maximo|floatformat:0 }}</td>
-            <td style="text-align:right">{{ r.punto_reorden|floatformat:0 }}</td>
+            <td style="text-align:right;font-weight:700">{{ r.stock_actual|floatformat:2|intcomma }}</td>
+            <td style="text-align:right;color:var(--texto-light)">{{ r.stock_minimo|floatformat:0|intcomma }}</td>
+            <td style="text-align:right;color:var(--texto-light)">{{ r.stock_maximo|floatformat:0|intcomma }}</td>
+            <td style="text-align:right">{{ r.punto_reorden|floatformat:0|intcomma }}</td>
             <td style="text-align:right">
               {% if r.dias_cobertura is not None %}
                 <span class="dias-cobertura {% if r.dias_cobertura >= 7 %}dias-ok{% elif r.dias_cobertura >= 3 %}dias-bajo{% else %}dias-crit{% endif %}">

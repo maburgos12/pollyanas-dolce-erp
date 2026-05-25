@@ -368,7 +368,7 @@
             <td>${{ area.total_presupuesto|floatformat:2|intcomma }}</td>
             <td>${{ area.total_real|floatformat:2|intcomma }}</td>
             <td>${{ area.total_varianza|floatformat:2|intcomma }}</td>
-            <td>{{ area.varianza_pct|floatformat:2 }}%</td>
+            <td>{{ area.varianza_pct|floatformat:2|intcomma }}%</td>
           </tr>
           {% for row in area.rubros %}
           <tr class="budget-master-row {{ row.type_class }}">
@@ -376,7 +376,7 @@
             <td>${{ row.presupuesto|floatformat:2|intcomma }}</td>
             <td>{% if row.real is not None %}${{ row.real|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
             <td class="budget-master-var {{ row.tone }}">{% if row.varianza is not None %}${{ row.varianza|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
-            <td class="budget-master-var {{ row.tone }}">{% if row.varianza_pct is not None %}{{ row.varianza_pct|floatformat:2 }}%{% else %}-{% endif %}</td>
+            <td class="budget-master-var {{ row.tone }}">{% if row.varianza_pct is not None %}{{ row.varianza_pct|floatformat:2|intcomma }}%{% else %}-{% endif %}</td>
           </tr>
           {% endfor %}
           {% empty %}

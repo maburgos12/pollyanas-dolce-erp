@@ -749,7 +749,7 @@
         <div class="dg-compact-row">
           <div class="dg-compact-row-stack">
             <div class="dg-list-item-label">{{ row.branch_code }} · {{ row.branch_name }}</div>
-            <div class="dg-list-item-meta">{{ row.total_rows }} registros · ${{ row.total_cost|floatformat:2|intcomma }}</div>
+            <div class="dg-list-item-meta">{{ row.total_rows|intcomma }} registros · ${{ row.total_cost|floatformat:2|intcomma }}</div>
             <div class="dg-meter">
               <span class="dg-meter-fill is-waste" style="width:{% widthratio row.total_qty point_waste_summary.total_qty 100 %}%"></span>
             </div>
@@ -893,7 +893,7 @@
         </div>
         <div class="dg-panel-actions">
           <span class="dg-pill {% if point_waste_summary.total_qty > 0 %}is-warning{% else %}is-success{% endif %}">
-            {{ point_waste_summary.total_rows }} registros
+            {{ point_waste_summary.total_rows|intcomma }} registros
           </span>
           <a class="btn btn-secondary" href="{% url 'control:discrepancias' %}">Detalle de merma</a>
         </div>

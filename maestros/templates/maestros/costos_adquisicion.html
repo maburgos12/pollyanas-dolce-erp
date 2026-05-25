@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Costos de adquisición{% endblock %}
 {% block page_title %}Costos de adquisición — Todos los productos{% endblock %}
 
@@ -127,8 +128,8 @@
         </td>
         {% if filtro_estado == 'vendidos_sin_costo' %}
         <td style="text-align:right;font-size:12px">
-          <span style="font-weight:700">${{ r.ventas_monto|floatformat:0 }}</span>
-          <span class="ventas-ref"> · {{ r.ventas_cantidad|floatformat:0 }} uds</span>
+          <span style="font-weight:700">${{ r.ventas_monto|floatformat:0|intcomma }}</span>
+          <span class="ventas-ref"> · {{ r.ventas_cantidad|floatformat:0|intcomma }} uds</span>
         </td>
         {% endif %}
         <td style="text-align:right;font-weight:700">
@@ -179,9 +180,9 @@
             <span id="pvta-{{ r.id }}" style="font-size:11px;color:var(--texto-light);white-space:nowrap"
                   title="{% if r.precio_venta_fuente == 'ventas' %}Precio promedio del período (Point sin precio cargado){% else %}Precio de venta en Point{% endif %}">
               {% if r.precio_venta_fuente == 'ventas' %}
-                ~P.vta: ${{ r.precio_venta|floatformat:2 }} <em class="pvta-approx">(prom.)</em>
+                ~P.vta: ${{ r.precio_venta|floatformat:2|intcomma }} <em class="pvta-approx">(prom.)</em>
               {% else %}
-                P.vta: ${{ r.precio_venta|floatformat:2 }}
+                P.vta: ${{ r.precio_venta|floatformat:2|intcomma }}
               {% endif %}
             </span>
             {% endif %}

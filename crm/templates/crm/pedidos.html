@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 
+{% load humanize %}
 {% block title %}CRM · Pedidos{% endblock %}
 {% block page_title %}CRM · Pedidos{% endblock %}
 
@@ -177,7 +178,7 @@
               <span class="badge bg-primary">{{ p.get_estatus_display }}</span>
               {% endif %}
             </td>
-            <td class="text-end">${{ p.monto_estimado|floatformat:2 }}</td>
+            <td class="text-end">${{ p.monto_estimado|floatformat:2|intcomma }}</td>
             <td><a class="btn btn-secondary" href="{% url 'crm:pedido_detail' p.id %}">Ver</a></td>
           </tr>
           {% empty %}

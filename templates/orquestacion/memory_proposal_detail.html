@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 
+{% load humanize %}
 {% block title %}Detalle de propuesta | ERP{% endblock %}
 
 {% block extra_css %}
@@ -112,7 +113,7 @@
         </div>
         <div class="memory-meta-item">
           <strong>Confianza y repetición</strong>
-          <div>Confianza: {{ proposal.confidence_score|floatformat:2 }}</div>
+          <div>Confianza: {{ proposal.confidence_score|floatformat:2|intcomma }}</div>
           <div class="memory-subtle">Detectado {{ proposal.detected_count }} vez/veces</div>
         </div>
         <div class="memory-meta-item">
