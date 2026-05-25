@@ -63,6 +63,9 @@ letter-spacing: 0;
 Usar esta regla en dinero, porcentajes, piezas, tickets, IDs visibles, comparativos
 y ejes/tooltips de graficas. La alineacion debe ser a la derecha en tablas y
 matrices auditables; en KPIs puede mantenerse la alineacion del componente.
+En templates Django, los importes y cantidades visibles deben aplicar separador
+de miles con `intcomma` despues de `floatformat`, por ejemplo
+`${{ valor|floatformat:2|intcomma }}`.
 
 ## Estructura Por Tipo De Pantalla
 
