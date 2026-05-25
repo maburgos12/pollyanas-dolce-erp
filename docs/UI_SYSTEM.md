@@ -133,15 +133,16 @@ Usar componentes compartidos antes de crear HTML nuevo:
 - `templates/components/kpi_card.html`
 - `templates/components/status_badge.html`
 - `templates/components/empty_state.html`
-- clases `.pd-page-head`, `.pd-work-panel`, `.pd-kpi-strip`, `.pd-action-row`, `.pd-filter-row`
+- clases `.pd-page-gutters`, `.pd-page-head`, `.pd-work-panel`, `.pd-kpi-strip`, `.pd-action-row`, `.pd-filter-row`
 
 Si un modulo necesita un patron que se repetira, crear componente compartido.
 
 Regla de encabezado superior: pantallas operativas, dashboards internos y
-modulos nuevos deben iniciar con `.pd-page-head`, `.pd-eyebrow`,
+modulos nuevos deben envolver el contenido en `.pd-page-gutters` e iniciar con `.pd-page-head`, `.pd-eyebrow`,
 `.pd-page-title`, `.pd-page-copy` y `.pd-action-row`. No usar heroes grandes,
 fondos oscuros, gradientes, bloques full-width tipo landing ni encabezados por
-modulo que compitan con el shell del ERP.
+modulo que compitan con el shell del ERP. El contenido no debe quedar pegado a
+la barra lateral izquierda ni al borde derecho de la ventana.
 
 ## Reglas Obligatorias
 
