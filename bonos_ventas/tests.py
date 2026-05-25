@@ -119,6 +119,9 @@ class BonosVentasTests(TestCase):
         self.assertIn("Imprimir / PDF", content)
         self.assertIn("Permiso ${lastPermiso.folio} registrado", content)
         self.assertIn("Imprimir / guardar PDF", content)
+        self.assertIn("ReactDOM.createPortal", content)
+        self.assertIn("body > :not(.print-modal)", content)
+        self.assertIn("transform:none!important", content)
         self.assertIn("Firma empleado", content)
         self.assertNotIn("pd_logistica_access", content)
 

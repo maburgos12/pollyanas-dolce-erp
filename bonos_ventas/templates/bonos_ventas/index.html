@@ -203,9 +203,12 @@ tr:hover td{background:var(--bg)}
 @media(max-width:760px){.print-page{transform:scale(.56);transform-origin:top left;margin:0}.print-preview{max-height:70vh}.print-dialog{width:100%}}
 @media print{
   @page{size:letter;margin:0}
-  body *{visibility:hidden!important}
-  .print-page,.print-page *{visibility:visible!important}
-  .print-page{position:absolute;left:0;top:0;width:216mm;min-height:279mm;margin:0;box-shadow:none;padding:15mm 16mm}
+  html,body{width:216mm!important;height:279mm!important;margin:0!important;padding:0!important;background:#fff!important;overflow:hidden!important}
+  body > :not(.print-modal){display:none!important}
+  .print-modal{position:static!important;inset:auto!important;z-index:auto!important;background:#fff!important;display:block!important;width:216mm!important;height:279mm!important;margin:0!important;padding:0!important;overflow:visible!important}
+  .print-dialog,.print-preview{display:block!important;width:216mm!important;height:279mm!important;margin:0!important;padding:0!important;border:0!important;box-shadow:none!important;background:#fff!important;overflow:hidden!important}
+  .print-dialog-hdr{display:none!important}
+  .print-page{display:block!important;position:static!important;transform:none!important;width:216mm!important;height:279mm!important;min-height:0!important;max-height:279mm!important;margin:0!important;box-shadow:none!important;padding:15mm 16mm!important;overflow:hidden!important;break-after:avoid!important;page-break-after:avoid!important}
 }
 </style>
 </head>
@@ -321,7 +324,7 @@ function PermisoPrintPage({permiso,contextLabel}){
 function PermisoPrintModal({permiso,onClose,contextLabel}){
   if(!permiso)return null;
   const printNow=()=>setTimeout(()=>window.print(),50);
-  return h('div',{className:'print-modal'},
+  return ReactDOM.createPortal(h('div',{className:'print-modal'},
     h('div',{className:'print-dialog'},
       h('div',{className:'print-dialog-hdr'},
         h('div',{className:'print-dialog-title'},'Vista previa tamaño carta'),
@@ -332,7 +335,7 @@ function PermisoPrintModal({permiso,onClose,contextLabel}){
       ),
       h('div',{className:'print-preview'},h(PermisoPrintPage,{permiso,contextLabel}))
     )
-  );
+  ), document.body);
 }
 
 function App(){
