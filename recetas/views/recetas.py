@@ -4971,14 +4971,16 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         for relation in derived_by_receta_id.values()
         if relation.receta_padre_id
     )
-    total_cost_by_receta_id = get_total_cost_map(cost_recipe_ids)
+    cost_resolution_by_receta_id = resolve_recipe_cost_map(cost_recipe_ids, context=CostContext.CURRENT_LIVE)
     for receta in page.object_list:
         setattr(receta, "_effective_equivalence_cache", equivalence_by_receta_id.get(receta.id))
         setattr(receta, "_effective_derived_cache", derived_by_receta_id.get(receta.id))
-        receta.costo_efectivo = total_cost_by_receta_id.get(receta.id, Decimal("0"))
+        receta_cost = cost_resolution_by_receta_id.get(receta.id)
+        receta.costo_efectivo = receta_cost.total_cost if receta_cost is not None else Decimal("0")
         equivalence = equivalence_by_receta_id.get(receta.id)
         if (not receta.costo_efectivo or receta.costo_efectivo <= 0) and equivalence is not None:
-            parent_cost = total_cost_by_receta_id.get(equivalence.receta_padre_id, Decimal("0"))
+            parent_cost_resolution = cost_resolution_by_receta_id.get(equivalence.receta_padre_id)
+            parent_cost = parent_cost_resolution.total_cost if parent_cost_resolution is not None else Decimal("0")
             factor = Decimal(str(equivalence.factor_conversion or 1))
             if parent_cost > 0 and factor > 0:
                 receta.costo_efectivo = parent_cost / factor
