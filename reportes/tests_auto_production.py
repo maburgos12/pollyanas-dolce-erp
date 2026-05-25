@@ -536,6 +536,31 @@ class ProjectionSupplyContextTests(TestCase):
             (product_row["forecast_qty"] * Decimal("1.5")).quantize(Decimal("0.001")),
         )
 
+    def test_projection_supply_ignores_rejected_recipe_lines(self):
+        rejected_insumo = Insumo.objects.create(
+            codigo_point="OLD",
+            nombre="Insumo obsoleto",
+            nombre_normalizado="insumo obsoleto",
+            unidad_base=self.unit_kg,
+            proveedor_principal=self.provider,
+        )
+        LineaReceta.objects.create(
+            receta=self.recipe,
+            posicion=2,
+            insumo=rejected_insumo,
+            insumo_texto=rejected_insumo.nombre,
+            cantidad=Decimal("4"),
+            unidad_texto="kg",
+            unidad=self.unit_kg,
+            match_status=LineaReceta.STATUS_REJECTED,
+        )
+
+        context = build_projection_supply_context(target_date=self.target_date, top_n=10)
+
+        insumo_ids = {row["insumo_id"] for row in context["insumos"]}
+        self.assertIn(self.insumo.id, insumo_ids)
+        self.assertNotIn(rejected_insumo.id, insumo_ids)
+
     def test_projection_supply_calculates_estimated_spend_from_latest_cost(self):
         CostoInsumo.objects.create(
             insumo=self.insumo,
