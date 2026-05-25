@@ -109,6 +109,10 @@ tr:hover td{background:var(--bg)}
 .permission-reason{font-size:13px;color:var(--ink);background:var(--bg);border-radius:var(--r-sm);padding:8px}
 .permission-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
 .preview-note{font-size:12px;font-weight:700;color:var(--sub);background:var(--gold-light);border:1px solid rgba(201,168,76,.28);border-radius:var(--r-sm);padding:9px 10px}
+.print-success{display:grid;gap:8px;margin-top:10px;padding:10px;border:1px solid rgba(22,101,52,.22);background:var(--ok-bg);border-radius:var(--r-sm)}
+.print-success-title{font-size:12px;font-weight:900;color:var(--ok)}
+.print-success-text{font-size:12px;font-weight:700;color:var(--sub)}
+.print-success-actions{display:flex;gap:8px;flex-wrap:wrap}
 .print-modal{position:fixed;inset:0;z-index:80;background:rgba(28,21,32,.55);display:flex;align-items:flex-start;justify-content:center;padding:18px;overflow:auto}
 .print-dialog{background:var(--card);border-radius:var(--r);box-shadow:0 20px 50px rgba(28,21,32,.22);width:min(940px,100%);overflow:hidden}
 .print-dialog-hdr{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
@@ -411,6 +415,7 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
   const [motivo,setMotivo]=React.useState('');
   const [loading,setLoading]=React.useState(false);
   const [previewPermiso,setPreviewPermiso]=React.useState(null);
+  const [lastPermiso,setLastPermiso]=React.useState(null);
   const equipoBase=empleados;
   const equipoArea=equipoBase.filter(b=>b.area===area);
   const equipo=equipoArea.length?equipoArea:equipoBase;
@@ -449,7 +454,11 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
       fecha_fin:tipo==='permiso_dia'?null:`${fecha}T${hasta}:00`,
       goce_sueldo:goce,
       motivo,
-    })}).then(p=>{showStatus(`Permiso ${p.folio} creado`,'ok');setMotivo('');setPreviewPermiso(p);cargarPermisos();}).catch(err=>showStatus(err.message,'err'));
+    })}).then(p=>{showStatus(`Permiso ${p.folio} creado`,'ok');setMotivo('');setLastPermiso(p);setPreviewPermiso(p);cargarPermisos();}).catch(err=>showStatus(err.message,'err'));
+  }
+  function imprimirPermiso(p){
+    setPreviewPermiso(p);
+    setTimeout(()=>window.print(),160);
   }
   function accion(p,kind){
     api(`/api/bonos-produccion/permisos/${p.id}/${kind}/`,{method:'POST',body:'{}'})
@@ -479,6 +488,14 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
         h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},'Nueva solicitud')),
         h('div',{className:'card-body'},
           h('div',{className:'preview-note'},'El jefe preautoriza desde Bonos; RRHH conserva la aprobacion final en Capital Humano.'),
+          lastPermiso&&h('div',{className:'print-success'},
+            h('div',{className:'print-success-title'},`Permiso ${lastPermiso.folio} registrado`),
+            h('div',{className:'print-success-text'},'Ya puedes imprimirlo o guardarlo como PDF en hoja tamaño carta.'),
+            h('div',{className:'print-success-actions'},
+              h('button',{className:'btn btn-ghost btn-sm',type:'button',onClick:()=>setPreviewPermiso(lastPermiso)},'Vista carta'),
+              h('button',{className:'btn btn-wine btn-sm',type:'button',onClick:()=>imprimirPermiso(lastPermiso)},'Imprimir / guardar PDF')
+            )
+          ),
           h('div',{style:{height:12}}),
           h(EmployeeSearchList,{items:equipo,selected,onSelect:setSelected,placeholder:'Buscar empleado del area...',metaText:b=>AREA_LABELS[b.area]||b.area||'Produccion'}),
           h('div',{className:'div'}),
@@ -516,7 +533,7 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
               h('div',{className:'permission-reason'},p.motivo),
               h('div',{className:'permission-actions'},
                 h('button',{className:'btn btn-ghost btn-sm',onClick:()=>setPreviewPermiso(p)},'Vista carta'),
-                h('button',{className:'btn btn-ghost btn-sm',onClick:()=>{setPreviewPermiso(p);setTimeout(()=>window.print(),80);}},'Imprimir / PDF'),
+                h('button',{className:'btn btn-ghost btn-sm',onClick:()=>imprimirPermiso(p)},'Imprimir / PDF'),
                 p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-ghost btn-sm',onClick:()=>accion(p,'rechazar')},'Rechazar'),
                 p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-wine btn-sm',onClick:()=>accion(p,'preautorizar')},'Preautorizar')
               )

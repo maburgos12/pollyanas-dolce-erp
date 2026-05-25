@@ -233,6 +233,8 @@ class BonosProduccionTests(TestCase):
         self.assertIn("Teclea nombre o apellido", content)
         self.assertIn("Vista previa tamaño carta", content)
         self.assertIn("Imprimir / PDF", content)
+        self.assertIn("Permiso ${lastPermiso.folio} registrado", content)
+        self.assertIn("Imprimir / guardar PDF", content)
         self.assertIn("Firma empleado", content)
         self.assertIn("r.redirected", content)
         self.assertNotIn("pd_logistica_access", content)
