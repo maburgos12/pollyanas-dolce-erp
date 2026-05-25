@@ -5,10 +5,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}ERP - Pollyanas Dolce{% endblock %}</title>
+    <link rel="icon" href="{% static 'favicon.ico' %}?v=20260525-logo-v1" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="{% static 'favicon-32x32.png' %}?v=20260525-logo-v1">
+    <link rel="icon" type="image/png" sizes="192x192" href="{% static 'favicon-192x192.png' %}?v=20260525-logo-v1">
+    <link rel="apple-touch-icon" href="{% static 'apple-touch-icon.png' %}?v=20260525-logo-v1">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/styles.css?v=20260522-sidebar-mobile-v2">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260525-sidebar-rail-v1">
     <link rel="stylesheet" href="/static/css/pollyana_ops_ui.css?v=20260525-system-v3">
     {% block extra_css %}{% endblock %}
 </head>
@@ -17,10 +21,7 @@
         <aside class="sidebar">
             <div class="sidebar-header">
                 <div class="sidebar-logo" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M3.5 10.5 12 5l8.5 5.5L12 16 3.5 10.5Z"/>
-                        <path d="M3.5 14 12 19l8.5-5"/>
-                    </svg>
+                    <img src="{% static 'core/dolce-logo-pin-transparent.png' %}?v=20260525-logo-v1" alt="">
                 </div>
                 <div class="sidebar-brand">Pollyana's Dolce</div>
                 <div class="sidebar-tagline">Operación y control</div>
@@ -29,7 +30,7 @@
             <nav id="sidebar-nav">
                 {% if ui_nav_groups and not ui_access.branch_capture_only %}
                     {% for group in ui_nav_groups %}
-                    <button class="sidebar-group-toggle" data-group="{{ group.key }}" aria-expanded="{% if group.active or forloop.first %}true{% else %}false{% endif %}">
+                    <button class="sidebar-group-toggle" data-group="{{ group.key }}" aria-expanded="{% if group.active or forloop.first %}true{% else %}false{% endif %}" title="{{ group.label }}" aria-label="{{ group.label }}">
                         <span class="sidebar-group-title">
                             <span class="nav-icon" aria-hidden="true">
                                 {% if group.key == "mi_trabajo" %}
