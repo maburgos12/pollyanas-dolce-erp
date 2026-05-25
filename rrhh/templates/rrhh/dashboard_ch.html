@@ -6,7 +6,11 @@
 
 {% block extra_css %}
 <style>
-  .ch-page { display: grid; gap: 18px; }
+  .ch-page { display: grid; gap: 18px; width: min(100%, 1720px); margin-inline: auto; }
+  .ch-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: end; }
+  .ch-kicker { color: var(--pd-wine, var(--vino)); font-size: 12px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+  .ch-title { margin: 4px 0 0; font-size: clamp(1.45rem, 1.8vw, 2rem); line-height: 1.08; }
+  .ch-copy { color: var(--pd-muted, var(--texto-light)); margin: 6px 0 0; max-width: 68ch; }
   .ch-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
   .ch-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 18px; }
   .ch-value { color: var(--vino); font-size: 32px; font-weight: 800; line-height: 1; }
@@ -28,6 +32,14 @@
 </section>
 
 <section class="ch-page">
+  <header class="ch-head">
+    <div>
+      <div class="ch-kicker">Capital humano</div>
+      <h1 class="ch-title">Panel de asistencia y autorizaciones</h1>
+      <p class="ch-copy">Lectura operativa de asistencia, horas extra, permisos y cargas del checador.</p>
+    </div>
+  </header>
+
   <div class="ch-grid">
     <article class="ch-card">
       <div class="ch-value">{{ stats.asistencias_hoy }}</div>

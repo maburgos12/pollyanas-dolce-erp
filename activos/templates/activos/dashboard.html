@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% load static humanize %}
 
-{% block title %}Dashboard Ejecutivo — Pollyana's Dolce{% endblock %}
-{% block page_title %}Mantenimiento · Dashboard DG{% endblock %}
+{% block title %}Activos y mantenimiento · Dashboard DG{% endblock %}
+{% block page_title %}Activos y mantenimiento · Dashboard DG{% endblock %}
 {% block body_class %}page-activos-dashboard{% endblock %}
 
 {% block extra_css %}
@@ -10,13 +10,13 @@
 <style>
   .exec-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:22px}
   .exec-kpi,.exec-panel,.flota-card{background:#fff;border:1px solid rgba(139,34,82,.12);box-shadow:0 2px 8px rgba(39,18,29,.06)}
-  .exec-kpi{border-radius:12px;padding:18px 16px}
+  .exec-kpi{border-radius:10px;padding:18px 16px}
   .exec-kpi-label{font-size:12px;color:#6f3150;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
   .exec-kpi-value{font-size:2.25rem;font-weight:900;line-height:1;margin:6px 0 4px}
   .exec-kpi-sub{font-size:12px;color:#999}
   .color-wine{color:#8B2252}.color-danger{color:#dc2626}.color-gold{color:#C9A84C}.color-ok{color:#16a34a}
   .exec-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:20px}
-  .exec-panel{border-radius:12px;overflow:hidden}
+  .exec-panel{border-radius:10px;overflow:hidden}
   .exec-panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#8B2252;color:#fff;padding:12px 16px;font-size:13px;font-weight:900}
   .exec-panel-body{padding:12px 16px}
   .exec-bar-item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid #f0eaed;font-size:13px}
@@ -52,16 +52,16 @@
     <div class="bi-hero-side">
       <div class="bi-hero-status-grid">
         <article class="bi-status-card"><span class="bi-status-label">Fallas activas</span><strong id="kpi-fallas-activas">—</strong></article>
-        <article class="bi-status-card"><span class="bi-status-label">Críticas</span><strong id="kpi-fallas-criticas" style="color:#dc2626">—</strong></article>
+        <article class="bi-status-card"><span class="bi-status-label">Críticas</span><strong id="kpi-fallas-criticas" class="pd-critical">—</strong></article>
         <article class="bi-status-card"><span class="bi-status-label">Costo 30d</span><strong id="kpi-costo-mes">—</strong></article>
         <article class="bi-status-card"><span class="bi-status-label">Unidades activas</span><strong id="kpi-flota">—</strong></article>
       </div>
     </div>
   </section>
 
-  <div class="exec-alerta" id="alerta-sucursal" style="display:none">
+  <div class="exec-alerta pd-hidden" id="alerta-sucursal">
     <span id="alerta-sucursal-texto"></span>
-    <a href="/admin/activos/activo/" style="color:#92400e">Asignar desde admin</a>
+    <a href="/admin/activos/activo/" class="pd-warning-link">Asignar desde admin</a>
   </div>
 
   <div class="exec-kpis">

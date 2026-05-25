@@ -149,6 +149,13 @@ operativa y cards sin contenedores decorativos anidados. Si una pantalla se ve
 centrada con demasiado blanco en monitores amplios, aumentar el ancho util del
 modulo o compactar la composicion antes de agregar mas cards.
 
+Regla de prioridad Hallmark 2026-05: dashboards, reportes densos y centros de
+control usan ancho util de hasta 1720 px mediante `.module-shell` o `.container`.
+No crear shells locales de 1200-1320 px salvo formularios estrechos justificados.
+Los paneles de trabajo usan radio 8-10 px, fondo plano y sombra baja; las
+pastillas pueden seguir siendo redondas, pero las cards y KPIs no deben adoptar
+radios de 16-24 px ni gradientes decorativos.
+
 Regla de foco: todos los campos editables (`input`, `select`, `textarea`,
 `.form-control`, `.form-select`, `.input-field`) usan borde y halo dorado en
 focus. No usar foco vino, azul nativo ni anillos dobles por modulo.

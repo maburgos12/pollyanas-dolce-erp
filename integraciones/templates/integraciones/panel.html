@@ -30,7 +30,7 @@
         <div class="kpi-grid kpi-mini">
             <article class="kpi-card">
                 <div class="kpi-label">Responsable principal</div>
-                <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
+                <div class="pd-inline-strong">{{ erp_command_center.owner }}</div>
             </article>
             <article class="kpi-card">
                 <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
@@ -42,7 +42,7 @@
             </article>
             <article class="kpi-card">
                 <div class="kpi-label">Siguiente paso</div>
-                <div class="muted" style="margin:8px 0 10px;">{{ erp_command_center.next_step }}</div>
+                <div class="muted pd-inline-strong-spaced">{{ erp_command_center.next_step }}</div>
                 <a class="btn btn-secondary btn-sm" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
             </article>
         </div>
@@ -56,22 +56,22 @@
                 {% endfor %}
             </div>
         </div>
-        <div class="enterprise-focus-alert tone-{% if integration_monitor.executive_semaphore.tone == 'danger' %}danger{% elif integration_monitor.executive_semaphore.tone == 'warning' %}warning{% else %}success{% endif %}" style="margin-bottom:16px;">
+        <div class="enterprise-focus-alert tone-{% if integration_monitor.executive_semaphore.tone == 'danger' %}danger{% elif integration_monitor.executive_semaphore.tone == 'warning' %}warning{% else %}success{% endif %} pd-mb-4">
             <div>
                 <div class="enterprise-focus-title">Semáforo ejecutivo del corte · {{ integration_monitor.executive_semaphore.status_code }}</div>
                 <div class="enterprise-focus-text">{{ integration_monitor.executive_semaphore.title }} · {{ integration_monitor.executive_semaphore.summary }}</div>
-                <div class="muted" style="margin-top:8px;">
+                <div class="muted pd-mt-2">
                     Fecha objetivo {{ integration_monitor.executive_semaphore.target_cut_date|date:"Y-m-d" }}
                     · Dashboard {{ integration_monitor.executive_semaphore.dashboard_date|date:"Y-m-d"|default:"Sin fecha" }}
                     · Capa más atrasada {{ integration_monitor.executive_semaphore.blocking_layer }}
                 </div>
                 <div class="muted">{{ integration_monitor.executive_semaphore.detail_line }}</div>
             </div>
-            <div class="enterprise-focus-actions" style="align-items:flex-end;">
+            <div class="enterprise-focus-actions pd-align-end">
                 <span class="module-chip {% if integration_monitor.executive_semaphore.tone == 'danger' %}blocked{% elif integration_monitor.executive_semaphore.tone == 'warning' %}pending{% else %}manage{% endif %}">
                     {% if integration_monitor.executive_semaphore.cutover_reached %}Fuera de ventana{% else %}Ventana normal hasta {{ integration_monitor.executive_semaphore.cutoff_label }}{% endif %}
                 </span>
-                <div class="muted" style="text-align:right; max-width:260px;">
+                <div class="muted pd-text-right-narrow">
                     <strong>Acción sugerida:</strong> {{ integration_monitor.executive_semaphore.recommended_action.label }}<br>
                     {{ integration_monitor.executive_semaphore.recommended_action.detail }}
                 </div>
@@ -170,12 +170,12 @@
             </article>
             <article class="kpi-card">
                 <div class="kpi-label">Último corte visible en BI</div>
-                <div style="font-weight:700; margin-top:8px;">{{ integration_monitor.materialized_snapshot.date|default:"Sin fecha" }}</div>
+                <div class="pd-inline-strong">{{ integration_monitor.materialized_snapshot.date|default:"Sin fecha" }}</div>
                 <div class="muted">{{ integration_monitor.materialized_snapshot.source_label|default:"Sin snapshot" }}</div>
             </article>
             <article class="kpi-card">
                 <div class="kpi-label">Corte oficial diario</div>
-                <div style="font-weight:700; margin-top:8px;">{{ integration_monitor.latest_corte.corte_date|date:"Y-m-d"|default:"Sin corte" }}</div>
+                <div class="pd-inline-strong">{{ integration_monitor.latest_corte.corte_date|date:"Y-m-d"|default:"Sin corte" }}</div>
                 <div class="muted">
                     {% if integration_monitor.latest_corte %}
                     ${{ integration_monitor.latest_corte.total_amount|floatformat:2|intcomma }}
@@ -212,7 +212,7 @@
                                     <label class="form-label" for="id_lookback_days_analytics">Lookback días</label>
                                     <input id="id_lookback_days_analytics" class="input-field" type="number" min="1" max="30" name="lookback_days" value="7">
                                 </div>
-                                <div class="form-group" style="display:flex;align-items:flex-end;">
+                                <div class="form-group pd-form-submit-align">
                                     <button type="submit" class="btn btn-primary w-100">Encolar refresh analytics</button>
                                 </div>
                             </form>
@@ -243,7 +243,7 @@
                                         {% endfor %}
                                     </select>
                                 </div>
-                                <div class="form-group" style="display:flex;align-items:flex-end;">
+                                <div class="form-group pd-form-submit-align">
                                     <button type="submit" class="btn btn-primary w-100">Encolar ciclo operativo</button>
                                 </div>
                             </form>
@@ -697,9 +697,9 @@
             </article>
             <article class="kpi-card">
                 <div class="kpi-label">Siguiente prioridad</div>
-                <div style="font-weight:700; margin:8px 0 6px;">{{ integraciones_maturity_summary.next_priority_title }}</div>
+                <div class="pd-inline-strong-spaced">{{ integraciones_maturity_summary.next_priority_title }}</div>
                 <div class="muted">{{ integraciones_maturity_summary.next_priority_detail }}</div>
-                <div style="margin-top:10px;">
+                <div class="pd-mt-3">
                     <a class="btn btn-secondary btn-sm" href="{{ integraciones_maturity_summary.next_priority_url }}">{{ integraciones_maturity_summary.next_priority_cta }}</a>
                 </div>
             </article>
@@ -720,9 +720,9 @@
             <article class="enterprise-pill-card {% if row.open %}is-warning{% else %}is-active{% endif %}">
                 <div class="enterprise-pill-title">{{ row.label }}</div>
                 <div class="enterprise-pill-text">{{ row.detail }}</div>
-                <div class="kpi-number {% if row.open %}is-warning{% else %}is-success{% endif %}" style="margin-top:10px;">{{ row.closed }}</div>
+                <div class="kpi-number {% if row.open %}is-warning{% else %}is-success{% endif %} pd-mt-3">{{ row.closed }}</div>
                 <div class="muted">Abiertos: {{ row.open }}</div>
-                <div style="margin-top:10px;">
+                <div class="pd-mt-3">
                     <a class="btn btn-secondary btn-sm" href="{{ row.url }}">Abrir</a>
                 </div>
             </article>
@@ -737,9 +737,9 @@
             <article class="enterprise-pill-card {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
                 <div class="enterprise-pill-title">{{ item.label }}</div>
                 <div class="enterprise-pill-text">{{ item.detail }}</div>
-                <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="margin-top:10px;">{{ item.count }}</div>
+                <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %} pd-mt-3">{{ item.count }}</div>
                 <div class="muted">{{ item.status }}</div>
-                <div style="margin-top:10px;">
+                <div class="pd-mt-3">
                     <a class="btn btn-secondary btn-sm" href="{{ item.url }}">{{ item.cta }}</a>
                 </div>
             </article>
@@ -946,13 +946,13 @@
                         value="250"
                     >
                 </div>
-                <div class="form-group" style="display:flex;align-items:flex-end;">
-                    <label class="form-label" style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+                <div class="form-group pd-form-submit-align">
+                    <label class="form-label pd-check-label">
                         <input type="checkbox" name="create_aliases" checked>
                         Crear alias automáticamente
                     </label>
                 </div>
-                <div class="form-group" style="display:flex;align-items:flex-end;">
+                <div class="form-group pd-form-submit-align">
                     <button type="submit" class="btn btn-primary w-100">Aplicar resoluciones sugeridas</button>
                 </div>
             </form>
@@ -1071,7 +1071,7 @@
                 <label class="form-label" for="id_descripcion">Descripcion</label>
                 <input id="id_descripcion" name="descripcion" type="text" class="input-field" maxlength="255">
             </div>
-            <div class="form-group" style="display:flex;align-items:flex-end;">
+            <div class="form-group pd-form-submit-align">
                 <button type="submit" class="btn btn-primary w-100">Crear cliente</button>
             </div>
         </form>
@@ -1097,7 +1097,7 @@
                     <label class="form-label" for="id_idle_limit">Máximo clientes</label>
                     <input id="id_idle_limit" name="idle_limit" class="input-field" type="number" min="1" max="500" value="100">
                 </div>
-                <div class="form-group" style="display:flex;align-items:flex-end;">
+                <div class="form-group pd-form-submit-align">
                     <button class="btn btn-secondary w-100" type="submit">Desactivar clientes inactivos</button>
                 </div>
             </form>
@@ -1385,7 +1385,7 @@
                     <label class="form-label" for="id_max_delete">Máximo borrar por corrida</label>
                     <input id="id_max_delete" name="max_delete" class="input-field" type="number" min="1" max="50000" value="5000">
                 </div>
-                <div class="form-group" style="display:flex;align-items:flex-end;">
+                <div class="form-group pd-form-submit-align">
                     <button class="btn btn-danger w-100" type="submit">Limpiar logs antiguos</button>
                 </div>
             </form>
@@ -1430,7 +1430,7 @@
                 <label class="form-label" for="id_to">Hasta</label>
                 <input id="id_to" name="to" class="input-field" type="date" value="{{ filter_to }}">
             </div>
-            <div class="form-group" style="display:flex;align-items:flex-end;">
+            <div class="form-group pd-form-submit-align">
                 <button class="btn btn-primary w-100" type="submit">Aplicar filtros</button>
             </div>
         </form>
