@@ -12,6 +12,7 @@ from core.access import can_view_submodule
 from rrhh.models import Empleado, NominaPeriodo
 from rrhh.bonos_permisos import BasePermisosEquipoViewSet
 
+from .empleados import empleados_elegibles_bonos_ventas
 from .models import (
     BonoVentasEmpleado,
     ConfigBonoVentasPeriodo,
@@ -65,7 +66,7 @@ class ConfigBonoVentasPeriodoViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="inicializar-bonos")
     def inicializar_bonos(self, request, pk=None):
         periodo = self.get_object()
-        empleados = Empleado.objects.filter(activo=True, area="VENTAS")
+        empleados = empleados_elegibles_bonos_ventas()
         creados = 0
         sin_sucursal = []
         for empleado in empleados:
@@ -212,7 +213,7 @@ class PermisosVentasEquipoViewSet(BasePermisosEquipoViewSet):
     origen_solicitud = "bonos_ventas"
 
     def empleados_queryset(self):
-        qs = Empleado.objects.filter(area__iexact="VENTAS")
+        qs = empleados_elegibles_bonos_ventas()
         sucursal_id = self.request.query_params.get("sucursal")
         if sucursal_id:
             try:

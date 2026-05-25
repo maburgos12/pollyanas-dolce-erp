@@ -211,6 +211,7 @@ class BonosVentasTests(TestCase):
         self.assertEqual(linea.bonos, Decimal("275.00"))
 
     def test_inicializar_bonos_reporta_empleados_ventas_sin_sucursal(self):
+        Empleado.objects.all().delete()
         user = get_user_model().objects.create_user(username="bonos")
         user.groups.add(Group.objects.create(name=ROLE_VENTAS))
         user.groups.add(Group.objects.create(name=ROLE_RRHH))
@@ -218,30 +219,36 @@ class BonosVentasTests(TestCase):
         sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
         periodo = ConfigBonoVentasPeriodo.objects.create(mes=5, anio=2026)
         con_sucursal = Empleado.objects.create(nombre="Empleado Con Sucursal", area="VENTAS", sucursal="Payán")
+        repartidor = Empleado.objects.create(nombre="Repartidor Con Sucursal", area="REPARTIDOR", sucursal="Payán")
         sin_sucursal = Empleado.objects.create(nombre="Empleado Sin Sucursal", area="VENTAS", sucursal="")
+        Empleado.objects.create(nombre="Empleado Hornos", area="HORNOS", sucursal="Payán")
+        Empleado.objects.create(nombre="Empleado Inactivo", area="VENTAS", sucursal="Payán", activo=False)
 
         response = self.client.post(f"/api/bonos-ventas/periodos/{periodo.id}/inicializar-bonos/")
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["creados"], 1)
-        self.assertEqual(payload["total_ventas"], 2)
+        self.assertEqual(payload["creados"], 2)
+        self.assertEqual(payload["total_ventas"], 3)
         self.assertEqual(payload["sin_sucursal"], [sin_sucursal.nombre])
         self.assertTrue(BonoVentasEmpleado.objects.filter(periodo=periodo, empleado=con_sucursal, sucursal=sucursal).exists())
+        self.assertTrue(BonoVentasEmpleado.objects.filter(periodo=periodo, empleado=repartidor, sucursal=sucursal).exists())
 
     def test_permisos_equipo_ventas_crea_y_preautoriza(self):
+        Empleado.objects.all().delete()
         user = get_user_model().objects.create_user(username="jefe-ventas")
         user.groups.add(Group.objects.create(name=ROLE_VENTAS))
         user.groups.add(Group.objects.create(name=ROLE_RRHH))
         self.client.force_login(user)
         sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
         empleado = Empleado.objects.create(nombre="Empleado Ventas Permiso", area="VENTAS", sucursal="Payán")
+        repartidor = Empleado.objects.create(nombre="Empleado Repartidor Permiso", area="REPARTIDOR", sucursal="Payán")
         Empleado.objects.create(nombre="Empleado Produccion", area="HORNOS")
 
         listado = self.client.get(f"/api/bonos-ventas/permisos/?mes=5&anio=2026&sucursal={sucursal.id}")
 
         self.assertEqual(listado.status_code, 200)
-        self.assertEqual([row["id"] for row in listado.json()["empleados"]], [empleado.id])
+        self.assertEqual([row["id"] for row in listado.json()["empleados"]], [repartidor.id, empleado.id])
 
         creado = self.client.post(
             "/api/bonos-ventas/permisos/",
