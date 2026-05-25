@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -213,6 +214,145 @@ CURATED_ADDON_SPECS: dict[str, dict[str, object]] = {
             ("ETIQUETA CH", Decimal("1"), "pza"),
             ("Rebanada Triangular RP25", Decimal("1"), "pza"),
             ("Guayaba", Decimal("35"), "g"),
+        ],
+    },
+    "SFRESAPC": {
+        "base_code": "0101",
+        "name": "TOPPING FRESA C",
+        "reason": "Topping Fresa Chico a $0 en Point; complemento operativo de punto de venta.",
+        "lines": [
+            ("ETIQUETA G", Decimal("1"), "pza"),
+            ("Etiqueta Rectangular Aviso", Decimal("1"), "pza"),
+            ("Fresa Fresca", Decimal("130"), "g"),
+        ],
+    },
+    "SFRESAPG": {
+        "base_code": "0099",
+        "name": "TOPPING FRESA G",
+        "reason": "Topping Fresa Grande a $0 en Point; complemento operativo de punto de venta.",
+        "lines": [
+            ("CAJA G", Decimal("1"), "pza"),
+            ("Fresa Fresca", Decimal("400"), "g"),
+        ],
+    },
+    "SFRESAPM": {
+        "base_code": "0100",
+        "name": "TOPPING FRESA M",
+        "reason": "Topping Fresa Mediano a $0 en Point; complemento operativo de punto de venta.",
+        "lines": [
+            ("ETIQUETA G", Decimal("1"), "pza"),
+            ("Etiqueta Rectangular Aviso", Decimal("1"), "pza"),
+            ("Fresa Fresca", Decimal("200"), "g"),
+        ],
+    },
+    "SFRESAPMINI": {
+        "base_code": "PFCMINI",
+        "name": "TOPPING FRESA MINI",
+        "reason": "Topping Fresa Mini a $0 en Point; complemento operativo de punto de venta.",
+        "lines": [
+            ("ETIQUETA G", Decimal("1"), "pza"),
+            ("Etiqueta Rectangular Aviso", Decimal("1"), "pza"),
+            ("Fresa Fresca", Decimal("18"), "g"),
+        ],
+    },
+    "1412": {
+        "base_code": "0056",
+        "name": "TOPPING SNICKER CH",
+        "reason": "Topping Snicker Chico a $0 en Point; complemento operativo de punto de venta.",
+        "lines": [
+            ("ETIQUETA G", Decimal("1"), "pza"),
+            ("Etiqueta Rectangular Aviso", Decimal("1"), "pza"),
+            ("Snicker's", Decimal("90"), "g"),
+        ],
+    },
+    "21254": {
+        "base_code": "0054",
+        "name": "TOPPING SNICKER G",
+        "reason": "Topping Snicker Grande a $0 en Point; complemento operativo de punto de venta.",
+        "lines": [
+            ("CAJA G", Decimal("1"), "pza"),
+            ("Snicker's", Decimal("190"), "g"),
+        ],
+    },
+    "22145": {
+        "base_code": "0055",
+        "name": "TOPPING SNICKER M",
+        "reason": "Topping Snicker Mediano a $0 en Point; complemento operativo de punto de venta.",
+        "lines": [
+            ("ETIQUETA G", Decimal("1"), "pza"),
+            ("Etiqueta Rectangular Aviso", Decimal("1"), "pza"),
+            ("Snicker's", Decimal("130"), "g"),
+        ],
+    },
+    "214541": {
+        "base_code": "0061",
+        "name": "TOPPING CRUNCH C",
+        "reason": "Topping Crunch Chico a $0 en Point; complemento operativo de punto de venta.",
+        "lines": [
+            ("Crunch Rocks", Decimal("10"), "g"),
+            ("Cobertura Crunch", Decimal("80"), "g"),
+            ("ETIQUETA G", Decimal("1"), "pza"),
+            ("Etiqueta Rectangular Aviso", Decimal("1"), "pza"),
+        ],
+    },
+    "21455": {
+        "base_code": "0059",
+        "name": "TOPPING CRUNCH G",
+        "reason": "Topping Crunch Grande a $0 en Point; complemento operativo de punto de venta.",
+        "lines": [
+            ("CAJA G", Decimal("1"), "pza"),
+            ("Crunch Rocks", Decimal("25"), "g"),
+            ("Cobertura Crunch", Decimal("180"), "g"),
+        ],
+    },
+    "21125": {
+        "base_code": "0060",
+        "name": "TOPPING CRUNCH M",
+        "reason": "Topping Crunch Mediano a $0 en Point; complemento operativo de punto de venta.",
+        "lines": [
+            ("Crunch Rocks", Decimal("15"), "g"),
+            ("Cobertura Crunch", Decimal("140"), "g"),
+            ("ETIQUETA G", Decimal("1"), "pza"),
+            ("Etiqueta Rectangular Aviso", Decimal("1"), "pza"),
+        ],
+    },
+    "1254": {
+        "base_code": "0066",
+        "name": "TOPPING ZANAHORIA C",
+        "reason": "Topping Zanahoria Chico a $0 en Point; complemento operativo de punto de venta.",
+        "lines": [
+            ("Crumble Zanahoria", Decimal("20"), "g"),
+            ("ETIQUETA G", Decimal("1"), "pza"),
+            ("Etiqueta Rectangular Aviso", Decimal("1"), "pza"),
+        ],
+    },
+    "1125": {
+        "base_code": "0064",
+        "name": "TOPPING ZANAHORIA G",
+        "reason": "Topping Zanahoria Grande a $0 en Point; complemento operativo de punto de venta.",
+        "lines": [
+            ("CAJA G", Decimal("1"), "pza"),
+            ("Crumble Zanahoria", Decimal("50"), "g"),
+        ],
+    },
+    "21445": {
+        "base_code": "0065",
+        "name": "TOPPING ZANAHORIA M",
+        "reason": "Topping Zanahoria Mediano a $0 en Point; complemento operativo de punto de venta.",
+        "lines": [
+            ("Crumble Zanahoria", Decimal("35"), "g"),
+            ("ETIQUETA G", Decimal("1"), "pza"),
+            ("Etiqueta Rectangular Aviso", Decimal("1"), "pza"),
+        ],
+    },
+    "21245": {
+        "base_code": "0105",
+        "name": "TOPPING 3 LECHES",
+        "reason": "Topping 3 Leches a $0 en Point; complemento operativo de punto de venta.",
+        "lines": [
+            ("ETIQUETA G", Decimal("1"), "pza"),
+            ("Etiqueta Rectangular Aviso", Decimal("1"), "pza"),
+            ("Nuez Granillo", Decimal("30"), "g"),
         ],
     },
 }
@@ -499,11 +639,54 @@ def _sync_curated_recipe_lines(receta: Receta, line_specs: list[tuple[str, Decim
     return warnings
 
 
+def _get_curated_point_product(addon_code: str, addon_name: str):
+    from pos_bridge.models import PointProduct
+
+    products = PointProduct.objects.filter(sku__iexact=addon_code).order_by("id")
+    if addon_name:
+        exact = products.filter(name__iexact=addon_name).first()
+        if exact is not None:
+            return exact
+    return products.first()
+
+
+def _ensure_curated_addon_recipe(addon_code: str, spec: dict[str, object]) -> Receta | None:
+    addon_receta = _find_recipe_by_code(addon_code)
+    if addon_receta is not None:
+        return addon_receta
+
+    addon_name = str(spec.get("name") or "").strip()
+    if not addon_name:
+        return None
+
+    point_product = _get_curated_point_product(addon_code, addon_name)
+    recipe_defaults = {
+        "nombre": addon_name,
+        "codigo_point": addon_code,
+        "tipo": Receta.TIPO_PRODUCTO_FINAL,
+        "modo_costeo": Receta.MODO_COSTEO_SERVICIO,
+        "familia": "",
+        "categoria": "",
+        "sheet_name": "COMPLEMENTOS_POINT_CERO",
+        "pasa_modulo_produccion": False,
+    }
+    if point_product is not None:
+        recipe_defaults["familia"] = point_product.category or ""
+        recipe_defaults["categoria"] = point_product.category or ""
+
+    hash_seed = f"curated-addon:{addon_code}:{addon_name}"
+    addon_receta = Receta.objects.create(
+        **recipe_defaults,
+        hash_contenido=hashlib.sha256(hash_seed.encode("utf-8")).hexdigest(),
+    )
+    return addon_receta
+
+
 @transaction.atomic
 def ensure_curated_commercial_mappings() -> list[str]:
     warnings: list[str] = []
     for addon_code, spec in CURATED_ADDON_SPECS.items():
-        addon_receta = _find_recipe_by_code(addon_code)
+        addon_receta = _ensure_curated_addon_recipe(addon_code, spec)
         base_receta = _find_recipe_by_code(str(spec["base_code"]))
         if addon_receta is None:
             warnings.append(f"No se encontró la receta add-on {addon_code}.")
