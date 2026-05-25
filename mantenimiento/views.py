@@ -78,6 +78,24 @@ def _ensure_provider(nombre):
     return proveedor
 
 
+def _create_asset_from_followup(data, sucursal, proveedor_obj=None):
+    nombre = (data.get("activo_nombre_nuevo") or "").strip()
+    if not nombre:
+        return None
+    categoria = (data.get("activo_categoria_nueva") or "").strip() or "Mantenimiento"
+    ubicacion = (data.get("activo_ubicacion_nueva") or "").strip()
+    return Activo.objects.create(
+        nombre=nombre,
+        categoria=categoria,
+        ubicacion=ubicacion,
+        sucursal=sucursal,
+        proveedor_mantenimiento=proveedor_obj,
+        estado=Activo.ESTADO_OPERATIVO,
+        criticidad=Activo.CRITICIDAD_MEDIA,
+        activo=True,
+    )
+
+
 def _branch_statuses():
     return [ReporteFalla.ESTATUS_ABIERTO, ReporteFalla.ESTATUS_REVISION, ReporteFalla.ESTATUS_PROCESO]
 
@@ -473,12 +491,16 @@ def actualizar_item(request, tipo, pk):
         if estatus in (ReporteFalla.ESTATUS_CERRADO, ReporteFalla.ESTATUS_CANCELADO):
             reporte.fecha_cierre = now
             reporte.cerrado_por = request.user
+        proveedor_obj = _ensure_provider(proveedor) if proveedor else None
         if proveedor:
-            _ensure_provider(proveedor)
             reporte.proveedor_servicio = proveedor
         activo_id = request.data.get("activo_id")
         if activo_id:
             reporte.activo_relacionado = get_object_or_404(Activo, pk=activo_id, activo=True)
+        else:
+            nuevo_activo = _create_asset_from_followup(request.data, reporte.sucursal, proveedor_obj)
+            if nuevo_activo:
+                reporte.activo_relacionado = nuevo_activo
         if costo_estimado is not None:
             reporte.costo_estimado = costo_estimado
         if costo_real is not None:
@@ -503,8 +525,9 @@ def actualizar_item(request, tipo, pk):
         if proveedor:
             _ensure_provider(proveedor)
             reporte.proveedor_servicio = proveedor
-        if costo_estimado is not None:
-            reporte.costo_servicio = costo_estimado
+        costo_unidad = costo_real if costo_real is not None else costo_estimado
+        if costo_unidad is not None:
+            reporte.costo_servicio = costo_unidad
         if comentario:
             reporte.notas_compras = comentario
         reporte.save()

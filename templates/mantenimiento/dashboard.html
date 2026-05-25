@@ -17,6 +17,8 @@
   .mant-origin-count{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;border-radius:999px;background:rgba(139,34,82,.12);font-size:12px}
   .mant-origin-tab.active .mant-origin-count{background:rgba(255,255,255,.24);color:#fff}
   .mant-board{display:grid;grid-template-columns:repeat(auto-fit,minmax(245px,1fr));gap:12px;align-items:start}
+  .mant-board-tools{display:grid;grid-template-columns:minmax(260px,520px) auto;gap:10px;align-items:center;margin-bottom:12px}
+  .mant-board-help{color:#77656d;font-size:13px;font-weight:800}
   .mant-col{min-width:0;border:1px solid rgba(139,34,82,.12);border-radius:14px;background:#fff;padding:10px}
   .mant-col-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:6px 6px 10px;border-bottom:1px solid #f0e1e8;margin-bottom:10px}
   .mant-col-head strong{display:block;color:#3a2b30;font-size:16px}
@@ -26,6 +28,7 @@
   .mant-col-body::-webkit-scrollbar{width:8px}
   .mant-col-body::-webkit-scrollbar-thumb{background:#e3b9ca;border-radius:999px}
   .mant-ticket{display:grid;gap:10px;background:#fffafc;border:1px solid #f0c9d9;border-radius:12px;padding:12px}
+  .mant-ticket.is-hidden{display:none}
   .mant-ticket-title{color:#8B2252;font-weight:900;line-height:1.2}
   .mant-ticket-meta{color:#77656d;font-size:12px;line-height:1.45}
   .mant-ticket-tags{display:flex;gap:6px;flex-wrap:wrap}
@@ -60,8 +63,12 @@
   .mant-input{width:100%;min-height:42px;border:1px solid rgba(139,34,82,.22);border-radius:8px;padding:9px 10px;font:inherit;background:#fff;min-width:0}
   textarea.mant-input{min-height:116px;resize:vertical}
   .mant-field.full{grid-column:1/-1}
+  .mant-asset-create{grid-column:1/-1;display:grid;gap:10px;border:1px solid rgba(139,34,82,.14);border-radius:12px;background:#fffafc;padding:12px}
+  .mant-asset-create[hidden]{display:none}
+  .mant-asset-create-title{color:#8B2252;font-size:13px;font-weight:900}
+  .mant-asset-create-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
   @media(max-width:1180px){.mant-breakdown{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr 1fr}}
-  @media(max-width:760px){.mant-origin-tabs{display:grid}.mant-origin-tab{justify-content:space-between}.mant-form-grid{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr}}
+  @media(max-width:760px){.mant-origin-tabs{display:grid}.mant-origin-tab{justify-content:space-between}.mant-form-grid,.mant-asset-create-grid,.mant-board-tools{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr}}
 </style>
 {% endblock %}
 
@@ -164,6 +171,10 @@
       <article class="mant-flow-step"><span>Programado</span><strong>Visita agendada</strong><small>Fecha acordada para atención del servicio.</small></article>
       <article class="mant-flow-step"><span>En atención</span><strong>Trabajo activo</strong><small>El proveedor está atendiendo el caso.</small></article>
       <article class="mant-flow-step"><span>Validación</span><strong>Cierre y factura</strong><small>Se confirma resultado, costo final y folio.</small></article>
+    </div>
+    <div class="mant-board-tools" aria-label="Herramientas de seguimiento">
+      <input class="mant-input" id="mantBoardSearch" type="search" placeholder="Filtrar por unidad, sucursal, proveedor, activo o descripción">
+      <span class="mant-board-help">El filtro no duplica reportes; solo reduce las tarjetas visibles.</span>
     </div>
     <div class="mant-board">
       {% for column in kanban_columns %}
@@ -269,6 +280,20 @@
             {% endfor %}
           </select>
         </label>
+        <div class="mant-asset-create" id="mantDrawerAssetCreate">
+          <div class="mant-asset-create-title">Si no existe el activo, captúralo aquí y quedará ligado al reporte.</div>
+          <div class="mant-asset-create-grid">
+            <label class="mant-field">Nuevo activo
+              <input class="mant-input" name="activo_nombre_nuevo" id="mantDrawerNewAssetName" placeholder="Ej. Vitrina fría CEDIS">
+            </label>
+            <label class="mant-field">Categoría
+              <input class="mant-input" name="activo_categoria_nueva" id="mantDrawerNewAssetCategory" placeholder="Refrigeración, horno, equipo">
+            </label>
+            <label class="mant-field">Ubicación
+              <input class="mant-input" name="activo_ubicacion_nueva" id="mantDrawerNewAssetLocation" placeholder="Área o punto físico">
+            </label>
+          </div>
+        </div>
         <label class="mant-field">Cotización
           <input class="mant-input" name="costo_estimado" id="mantDrawerEstimated" type="number" min="0" step="0.01" placeholder="0.00">
         </label>
@@ -298,9 +323,20 @@
   const real = document.getElementById("mantDrawerReal");
   const asset = document.getElementById("mantDrawerAsset");
   const assetField = document.getElementById("mantDrawerAssetField");
+  const assetCreate = document.getElementById("mantDrawerAssetCreate");
+  const assetCreateInputs = assetCreate ? assetCreate.querySelectorAll("input") : [];
+  const boardSearch = document.getElementById("mantBoardSearch");
+
+  function filterBoard() {
+    const query = (boardSearch.value || "").trim().toLowerCase();
+    document.querySelectorAll(".mant-ticket").forEach((ticket) => {
+      ticket.classList.toggle("is-hidden", Boolean(query) && !ticket.textContent.toLowerCase().includes(query));
+    });
+  }
 
   function openDrawer(button) {
     const template = document.getElementById(`mant-status-${button.dataset.type}`);
+    const hideAssets = button.dataset.type === "unidad";
     form.action = button.dataset.action;
     title.textContent = button.dataset.title || "Seguimiento";
     meta.textContent = button.dataset.meta || "";
@@ -310,9 +346,17 @@
     estimated.value = button.dataset.estimated || "";
     real.value = button.dataset.real || "";
     asset.value = button.dataset.assetId || "";
-    assetField.hidden = button.dataset.type === "unidad";
+    assetField.hidden = hideAssets;
+    if (assetCreate) assetCreate.hidden = hideAssets;
+    asset.disabled = hideAssets;
+    assetCreateInputs.forEach((input) => {
+      input.disabled = hideAssets;
+      input.value = "";
+    });
     drawer.classList.add("is-open");
   }
+
+  if (boardSearch) boardSearch.addEventListener("input", filterBoard);
 
   document.querySelectorAll("[data-open-follow]").forEach((button) => {
     button.addEventListener("click", () => openDrawer(button));

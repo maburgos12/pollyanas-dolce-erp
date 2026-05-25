@@ -10,6 +10,7 @@ from core.models import Sucursal, UserModuleAccess
 from core.navigation import build_nav_groups
 from fallas.models import CategoriaFalla, ReporteFalla
 from logistica.models import Repartidor, ReporteUnidad, Unidad
+from maestros.models import Proveedor
 
 
 class MantenimientoUnifiedAccessTests(TestCase):
@@ -123,6 +124,7 @@ class MantenimientoUnifiedInboxTests(TestCase):
 
     def test_can_update_original_source_without_creating_duplicate_report(self):
         self.client.force_login(self.user)
+        report_count = ReporteFalla.objects.count()
 
         response = self.client.post(
             "/api/mantenimiento/bandeja/falla/%s/actualizar/" % self.falla.id,
@@ -138,4 +140,51 @@ class MantenimientoUnifiedInboxTests(TestCase):
         self.falla.refresh_from_db()
         self.assertEqual(self.falla.estatus, ReporteFalla.ESTATUS_PROCESO)
         self.assertEqual(str(self.falla.costo_estimado), "1250.50")
-        self.assertEqual(ReporteFalla.objects.count(), 1)
+        self.assertEqual(ReporteFalla.objects.count(), report_count)
+
+    def test_followup_can_create_provider_and_asset_without_duplicate_report(self):
+        self.client.force_login(self.user)
+        self.falla.activo_relacionado = None
+        self.falla.save(update_fields=["activo_relacionado"])
+        report_count = ReporteFalla.objects.count()
+
+        response = self.client.post(
+            "/api/mantenimiento/bandeja/falla/%s/actualizar/" % self.falla.id,
+            {
+                "estatus": ReporteFalla.ESTATUS_REVISION,
+                "proveedor_servicio": "Refrigeracion QA",
+                "activo_nombre_nuevo": "Vitrina fria CEDIS QA",
+                "activo_categoria_nueva": "Refrigeracion",
+                "activo_ubicacion_nueva": "Linea fria",
+                "comentario": "Se registra activo faltante para seguimiento.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.falla.refresh_from_db()
+        self.assertEqual(ReporteFalla.objects.count(), report_count)
+        self.assertEqual(self.falla.proveedor_servicio, "Refrigeracion QA")
+        self.assertTrue(Proveedor.objects.filter(nombre="Refrigeracion QA", activo=True).exists())
+        self.assertIsNotNone(self.falla.activo_relacionado)
+        self.assertEqual(self.falla.activo_relacionado.nombre, "Vitrina fria CEDIS QA")
+        self.assertEqual(self.falla.activo_relacionado.proveedor_mantenimiento.nombre, "Refrigeracion QA")
+
+    def test_logistics_followup_uses_final_cost_when_available(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            "/api/mantenimiento/bandeja/unidad/%s/actualizar/" % self.reporte_unidad.id,
+            {
+                "estatus": ReporteUnidad.ESTATUS_PROGRAMADO,
+                "costo_estimado": "800.00",
+                "costo_real": "975.25",
+                "proveedor_servicio": "Taller Logistica QA",
+                "comentario": "Factura recibida.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.reporte_unidad.refresh_from_db()
+        self.assertEqual(str(self.reporte_unidad.costo_servicio), "975.25")
+        self.assertEqual(self.reporte_unidad.proveedor_servicio, "Taller Logistica QA")
+        self.assertTrue(Proveedor.objects.filter(nombre="Taller Logistica QA", activo=True).exists())
