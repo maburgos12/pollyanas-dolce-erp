@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from core.models import Sucursal
 from core.access import can_view_submodule
 from rrhh.models import Empleado, NominaPeriodo
-from rrhh.bonos_permisos import BasePermisosEquipoViewSet
+from rrhh.bonos_permisos import BasePermisosEquipoViewSet, _empleado_payload, _permiso_payload
 
 from .empleados import empleados_elegibles_bonos_ventas
 from .models import (
@@ -212,7 +212,41 @@ class PermisosVentasEquipoViewSet(BasePermisosEquipoViewSet):
     permission_classes = [IsAuthenticated, CanAccessBonosVentas]
     origen_solicitud = "bonos_ventas"
 
+    def _bonos_periodo_queryset(self):
+        mes = self.request.query_params.get("mes")
+        anio = self.request.query_params.get("anio")
+        if not (mes and anio):
+            return None
+        qs = BonoVentasEmpleado.objects.filter(periodo__mes=mes, periodo__anio=anio).select_related("empleado", "sucursal")
+        sucursal_id = self.request.query_params.get("sucursal")
+        if sucursal_id:
+            qs = qs.filter(sucursal_id=sucursal_id)
+        return qs
+
+    def list(self, request):
+        bonos_periodo = self._bonos_periodo_queryset()
+        if bonos_periodo is None:
+            return super().list(request)
+        bonos = list(bonos_periodo.filter(empleado__activo=True).order_by("sucursal__nombre", "empleado__nombre"))
+        empleados = []
+        for bono in bonos:
+            payload = _empleado_payload(bono.empleado)
+            payload["sucursal"] = bono.sucursal_id
+            payload["sucursal_nombre"] = bono.sucursal.nombre
+            empleados.append(payload)
+        permisos = list(self._permisos())
+        return Response(
+            {
+                "empleados": empleados,
+                "permisos": [_permiso_payload(permiso) for permiso in permisos],
+            }
+        )
+
     def empleados_queryset(self):
+        bonos_periodo = self._bonos_periodo_queryset()
+        if bonos_periodo is not None:
+            empleados_periodo = bonos_periodo.values_list("empleado_id", flat=True)
+            return Empleado.objects.filter(id__in=empleados_periodo)
         qs = empleados_elegibles_bonos_ventas()
         sucursal_id = self.request.query_params.get("sucursal")
         if sucursal_id:

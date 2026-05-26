@@ -9,7 +9,7 @@ from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 
 from rrhh.models import Empleado, NominaPeriodo
-from rrhh.bonos_permisos import BasePermisosEquipoViewSet
+from rrhh.bonos_permisos import BasePermisosEquipoViewSet, _empleado_payload, _permiso_payload
 from core.access import can_view_submodule, is_bonos_produccion_capture_only
 
 from .models import (
@@ -186,6 +186,39 @@ class RegistroDiarioViewSet(viewsets.ModelViewSet):
 class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
     permission_classes = [IsAuthenticated, CanAccessBonosProduccion]
     origen_solicitud = "bonos_produccion"
+
+    def _bonos_periodo_queryset(self):
+        mes = self.request.query_params.get("mes")
+        anio = self.request.query_params.get("anio")
+        if not (mes and anio):
+            return None
+        qs = BonoProduccionEmpleado.objects.filter(periodo__mes=mes, periodo__anio=anio).select_related("empleado")
+        area = self.request.query_params.get("area")
+        if area:
+            area_normalizada = normalizar_area_produccion(area)
+            areas_validas = {code for code, _ in AREAS_PRODUCCION}
+            if area_normalizada not in areas_validas:
+                return BonoProduccionEmpleado.objects.none()
+            qs = qs.filter(area=area_normalizada)
+        return qs
+
+    def list(self, request):
+        bonos_periodo = self._bonos_periodo_queryset()
+        if bonos_periodo is None:
+            return super().list(request)
+        bonos = list(bonos_periodo.filter(empleado__activo=True).order_by("area", "empleado__nombre"))
+        empleados = []
+        for bono in bonos:
+            payload = _empleado_payload(bono.empleado)
+            payload["area"] = bono.area
+            empleados.append(payload)
+        permisos = list(self._permisos())
+        return Response(
+            {
+                "empleados": empleados,
+                "permisos": [_permiso_payload(permiso) for permiso in permisos],
+            }
+        )
 
     def empleados_queryset(self):
         areas_validas = {code for code, _ in AREAS_PRODUCCION}

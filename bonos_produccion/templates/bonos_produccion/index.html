@@ -426,9 +426,7 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
   const [loading,setLoading]=React.useState(false);
   const [previewPermiso,setPreviewPermiso]=React.useState(null);
   const [lastPermiso,setLastPermiso]=React.useState(null);
-  const equipoBase=empleados;
-  const equipoArea=area===AREA_TODAS?equipoBase:equipoBase.filter(b=>b.area===area);
-  const equipo=equipoArea.length?equipoArea:equipoBase;
+  const equipo=empleados;
   React.useEffect(()=>{cargarPermisos();},[mes,anio,area]);
   React.useEffect(()=>{if(!selected&&equipo.length)setSelected(equipo[0]);else if(selected&&!equipo.some(b=>b.id===selected.id))setSelected(equipo[0]||null);},[area,equipo.map(b=>b.id).join(','),selected?.id]);
   function cargarPermisos(){

@@ -394,14 +394,18 @@ class BonosProduccionTests(TestCase):
         user.groups.add(Group.objects.create(name=ROLE_RRHH))
         self.client.force_login(user)
         periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
-        empleado = Empleado.objects.create(nombre="Empleado Hornos Permiso", area="PRODUCCION")
+        empleado = Empleado.objects.create(nombre="Empleado Hornos A", area="PRODUCCION")
+        empleado_2 = Empleado.objects.create(nombre="Empleado Hornos B", area="PRODUCCION")
         BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado, area=AREA_HORNOS)
+        BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado_2, area=AREA_HORNOS)
         Empleado.objects.create(nombre="Empleado Ventas", area="VENTAS")
 
         listado = self.client.get("/api/bonos-produccion/permisos/?mes=5&anio=2026&area=HORNOS")
 
         self.assertEqual(listado.status_code, 200)
-        self.assertEqual([row["id"] for row in listado.json()["empleados"]], [empleado.id])
+        empleados_payload = listado.json()["empleados"]
+        self.assertEqual([row["id"] for row in empleados_payload], [empleado.id, empleado_2.id])
+        self.assertEqual({row["area"] for row in empleados_payload}, {AREA_HORNOS})
 
         creado = self.client.post(
             "/api/bonos-produccion/permisos/",
