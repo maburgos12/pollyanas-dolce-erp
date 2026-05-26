@@ -47,6 +47,7 @@ from reportes.views import (
     _bi_daily_sales_snapshot,
     _bi_branch_weekday_comparisons,
     _bi_product_weekday_comparisons,
+    _bi_production_summary,
     _sales_previous_dates,
     _sales_source_context,
     _ventas_historicas_bi_summary,
@@ -1677,6 +1678,31 @@ class ReportesBITests(TestCase):
         self.assertTrue(resp.context["supply_watchlist"])
         self.assertEqual(resp.context["supply_watchlist"]["plan_nombre"], "Plan BI Supply")
         self.assertEqual(resp.context["supply_watchlist"]["rows"][0]["insumo_nombre"], "Chocolate BI Supply")
+
+    def test_bi_production_summary_uses_bulk_recipe_cost_map(self):
+        target_date = timezone.localdate()
+        receta = Receta.objects.create(
+            nombre="Pastel BI Produccion",
+            hash_contenido="hash-bi-production-summary-001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+        )
+        plan = PlanProduccion.objects.create(nombre="Plan BI Produccion", fecha_produccion=target_date)
+        PlanProduccionItem.objects.create(plan=plan, receta=receta, cantidad=Decimal("3"))
+        VentaHistorica.objects.create(
+            receta=receta,
+            fecha=target_date,
+            cantidad=Decimal("2"),
+            monto_total=Decimal("200"),
+            fuente="BI_PRODUCTION_SUMMARY_TEST",
+        )
+
+        with patch("reportes.views.get_total_cost_map", return_value={receta.id: Decimal("12.50")}) as cost_map:
+            summary = _bi_production_summary(target_date, target_date)
+
+        cost_map.assert_called_once_with({receta.id})
+        self.assertEqual(summary["total_units"], Decimal("3"))
+        self.assertEqual(summary["total_cost"], Decimal("37.50"))
+        self.assertEqual(summary["top_products"][0]["cost"], Decimal("37.50"))
 
     def _create_sucursal(self, codigo: str, nombre: str):
         from core.models import Sucursal
