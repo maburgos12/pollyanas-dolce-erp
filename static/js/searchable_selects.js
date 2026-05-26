@@ -201,6 +201,7 @@
             currentOptions = options;
             list.innerHTML = "";
             activeIndex = options.length ? 0 : -1;
+            wrapper.classList.toggle("has-no-results", !options.length);
 
             if (!options.length) {
                 var empty = document.createElement("div");
@@ -291,6 +292,12 @@
                 setOpen(false);
             }, 120);
         });
+
+        document.addEventListener("mousedown", function (event) {
+            if (wrapper.contains(event.target)) return;
+            if (document.activeElement === input) validateTypedValue();
+            setOpen(false);
+        }, true);
 
         select.addEventListener("change", function () {
             input.value = selectedLabel(select);
