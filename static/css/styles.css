@@ -893,6 +893,125 @@ textarea:focus,
   outline: none;
 }
 
+.pd-select-native-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  clip-path: inset(50%) !important;
+}
+
+.pd-searchable-select {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.pd-searchable-select__input {
+  width: 100%;
+  padding-right: 42px;
+}
+
+.pd-searchable-select__input::placeholder {
+  color: var(--gris);
+}
+
+.pd-searchable-select__input[aria-expanded="true"],
+.pd-searchable-select.is-open .pd-searchable-select__input {
+  border-color: var(--dorado);
+  box-shadow: 0 0 0 3px rgba(201, 168, 76, 0.2);
+  outline: none;
+}
+
+.pd-searchable-select.is-invalid .pd-searchable-select__input {
+  border-color: #b42342;
+  box-shadow: 0 0 0 3px rgba(180, 35, 66, 0.14);
+}
+
+.pd-searchable-select__chevron {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--vino);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.pd-searchable-select__chevron::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+}
+
+.pd-searchable-select__list {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 2200;
+  display: none;
+  max-height: min(280px, 42vh);
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--rosa-deep);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  box-shadow: 0 16px 36px rgba(60, 34, 49, 0.16);
+}
+
+.pd-searchable-select.is-open .pd-searchable-select__list {
+  display: block;
+}
+
+.pd-searchable-select__option,
+.pd-searchable-select__empty {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.25;
+  text-align: left;
+}
+
+.pd-searchable-select__option {
+  border: 0;
+  background: transparent;
+  color: var(--texto);
+  cursor: pointer;
+}
+
+.pd-searchable-select__option:hover,
+.pd-searchable-select__option.is-active {
+  background: rgba(139, 34, 82, 0.08);
+  color: var(--vino);
+}
+
+.pd-searchable-select__option.is-selected {
+  background: rgba(201, 168, 76, 0.16);
+  color: #6f4b06;
+  font-weight: 800;
+}
+
+.pd-searchable-select__empty {
+  color: var(--gris);
+}
+
 .table-responsive {
   --table-min-width: 100%;
   width: 100%;

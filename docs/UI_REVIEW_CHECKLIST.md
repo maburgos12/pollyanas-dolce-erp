@@ -26,6 +26,8 @@ Usar en PRs que agreguen o modifiquen UI.
 
 - [ ] Botones con default, hover, focus-visible, active y disabled.
 - [ ] Inputs con foco visible sin cambiar ancho de borde.
+- [ ] Selects/listas largas o de entidades permiten teclear para filtrar.
+- [ ] Selects buscables envian el valor original y bloquean texto libre invalido.
 - [ ] Tablas con numeros tabulares.
 - [ ] Badges usan tonos del sistema.
 - [ ] Modales tienen accion primaria, cancelar y cierre accesible.
