@@ -189,8 +189,11 @@ la barra lateral izquierda ni al borde derecho de la ventana.
 9. Todo input mantiene el mismo border-width entre estados.
 10. Numeros monetarios, porcentajes y cantidades usan `--pd-font-number` con numeros tabulares.
 11. Botones, tabs y links de navegacion no se parten en dos lineas.
-12. Selects/listas de entidades o listas largas deben ser buscables por teclado y bloquear texto libre invalido.
-13. Validar mobile en 320, 375, 414 y 768 px cuando toque UI visible.
+12. Tablas y badges no parten palabras. Encabezados, fechas, codigos, estatus,
+    importes y acciones usan `nowrap`; columnas largas solo pueden envolver por
+    espacios con `.cell-wrap`, `.cell-long` o `data-cell-wrap="true"`.
+13. Selects/listas de entidades o listas largas deben ser buscables por teclado y bloquear texto libre invalido.
+14. Validar mobile en 320, 375, 414 y 768 px cuando toque UI visible.
 
 ## Navegacion
 

@@ -1075,11 +1075,43 @@ textarea:focus,
 .table-responsive > table td,
 .table-responsive > .table th,
 .table-responsive > .table td {
-  white-space: normal;
+  white-space: nowrap;
   overflow-wrap: normal;
-  word-break: normal;
+  word-break: keep-all;
   hyphens: manual;
   vertical-align: middle;
+}
+
+.table-responsive > table:has(thead th:nth-child(10)),
+.table-responsive > .table:has(thead th:nth-child(10)) {
+  --table-min-width: max(var(--table-min-width), 1320px);
+}
+
+.table-responsive > table:has(thead th:nth-child(12)),
+.table-responsive > .table:has(thead th:nth-child(12)) {
+  --table-min-width: max(var(--table-min-width), 1580px);
+}
+
+.table-responsive .cell-wrap,
+.table-responsive .cell-long,
+.table-responsive .table-cell-wrap,
+.table-responsive [data-cell-wrap="true"] {
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: keep-all;
+  hyphens: manual;
+}
+
+.table-responsive .cell-nowrap,
+.table-responsive .cell-date,
+.table-responsive .cell-money,
+.table-responsive .cell-number,
+.table-responsive .table-cell-nowrap,
+.table-responsive [data-cell-nowrap="true"] {
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: keep-all;
+  hyphens: manual;
 }
 
 .table-responsive > table th,
@@ -2113,7 +2145,7 @@ tr:hover,
   line-height: 1.15;
   white-space: nowrap;
   overflow-wrap: normal;
-  word-break: normal;
+  word-break: keep-all;
   hyphens: manual;
   vertical-align: middle;
 }
