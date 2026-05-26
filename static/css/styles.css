@@ -938,8 +938,8 @@ textarea:focus,
 
 .table-responsive > table,
 .table-responsive > .table {
-  width: max(100%, var(--table-min-width));
-  min-width: var(--table-min-width);
+  width: max-content;
+  min-width: max(100%, var(--table-min-width));
   margin: 0;
   border-radius: 0;
   overflow: hidden;
@@ -953,9 +953,16 @@ textarea:focus,
 .table-responsive > .table th,
 .table-responsive > .table td {
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
   word-break: normal;
+  hyphens: manual;
   vertical-align: middle;
+}
+
+.table-responsive > table th,
+.table-responsive > .table th {
+  min-width: 9ch;
+  text-wrap: balance;
 }
 
 .table-responsive > table th.text-end,
@@ -1235,7 +1242,9 @@ textarea:focus,
   font-size: clamp(20px, 2vw, 28px);
   line-height: 1.15;
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: manual;
 }
 
 .executive-kpi-note {
@@ -1918,7 +1927,9 @@ tr:hover,
 .recipe-lines-table .cell-stage,
 .recipe-lines-table .cell-ingredient {
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: manual;
   line-height: 1.3;
 }
 
@@ -1972,7 +1983,40 @@ tr:hover,
   border-radius: 20px;
   font-size: 12px;
   font-weight: 700;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: manual;
+  vertical-align: middle;
+}
+
+/* Hallmark · component: status chips + table labels · genre: utilitarian
+ * states: default · hover · focus · active · disabled · loading · error · success
+ * contrast: pass (46-50)
+ */
+.module-chip,
+.status-pill,
+.bi-pill,
+.ch-status,
+.cedis-badge,
+.fallas-badge,
+.executive-meta-pill,
+.header-context-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: manual;
+  vertical-align: middle;
 }
 
 .badge-verde,
@@ -2473,7 +2517,9 @@ tr:hover,
 .recipe-detail-shell .recipe-presentaciones-table .cell-pres-name,
 .recipe-detail-shell .recipe-presentaciones-table .cell-pres-derived {
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: manual;
   text-overflow: initial;
 }
 
@@ -5294,7 +5340,9 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   width: 170px;
   min-width: 170px;
   white-space: normal;
-  word-break: break-word;
+  word-break: normal;
+  overflow-wrap: normal;
+  hyphens: manual;
   line-height: 1.3;
 }
 .production-table-wrap td:nth-child(2),
@@ -5302,7 +5350,9 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   width: 90px;
   min-width: 90px;
   white-space: normal;
-  word-break: break-word;
+  word-break: normal;
+  overflow-wrap: normal;
+  hyphens: manual;
   line-height: 1.3;
 }
 .production-table-wrap td:nth-child(n+3),

@@ -430,6 +430,16 @@ select:focus {
 
 .badge,
 .status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: manual;
+  vertical-align: middle;
   box-shadow: none !important;
 }
 
@@ -627,12 +637,20 @@ select:focus {
   border-color: var(--pd-line) !important;
   text-transform: uppercase;
   letter-spacing: 0 !important;
+  min-width: 9ch;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: manual;
+  text-wrap: balance;
 }
 
 .table td,
 .fallas-table td {
   border-color: var(--pd-line) !important;
   color: var(--pd-ink) !important;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: manual;
 }
 
 .table-striped tbody tr:nth-of-type(odd),
@@ -668,6 +686,16 @@ tr.log-overdue td,
 .ops-chip,
 .badge,
 .fallas-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: manual;
+  vertical-align: middle;
   border-radius: 999px !important;
   box-shadow: none !important;
   letter-spacing: 0 !important;
