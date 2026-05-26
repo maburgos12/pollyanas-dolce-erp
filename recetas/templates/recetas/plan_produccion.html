@@ -4,7 +4,7 @@
 {% block page_title %}Recetas · Plan de Producción{% endblock %}
 {% block body_class %}page-plan-produccion{% endblock %}
 {% block content %}
-<div class="module-shell plan-produccion-shell">
+<div class="module-shell plan-produccion-shell pd-page-gutters">
 <div class="card" id="mrp-periodo">
   <div class="card-header">Plan de Producción</div>
   <p class="muted mb-3">Define qué productos vas a fabricar y el sistema calcula automáticamente insumos requeridos y costo total estimado.</p>
@@ -17,8 +17,8 @@
       <article class="kpi-card">
         <div class="kpi-number {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">#{{ forloop.counter }}</div>
         <div class="kpi-label">{{ row.title }}</div>
-        <div class="muted" style="margin-top:8px;">{{ row.detail }}</div>
-        <div style="margin-top:10px;">
+        <div class="muted pd-mt-2">{{ row.detail }}</div>
+        <div class="pd-mt-3">
           <a class="btn btn-secondary" href="{{ row.url }}">{{ row.cta }}</a>
         </div>
       </article>
@@ -156,7 +156,7 @@
     <div class="kpi-grid kpi-mini">
       <article class="kpi-card">
         <div class="kpi-label">Responsable troncal</div>
-        <div style="font-weight:700; margin-top:8px;">{{ trunk_handoff_summary.owner }}</div>
+        <div class="pd-owner">{{ trunk_handoff_summary.owner }}</div>
       </article>
       <article class="kpi-card">
         <div class="kpi-number {% if trunk_handoff_summary.tone == 'danger' %}is-danger{% elif trunk_handoff_summary.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ trunk_handoff_summary.status }}</div>
@@ -172,12 +172,12 @@
       </article>
       <article class="kpi-card">
         <div class="kpi-label">Prioridad actual</div>
-        <div class="muted" style="margin-top:8px;">{{ trunk_handoff_summary.priority_label }}</div>
+        <div class="muted pd-mt-2">{{ trunk_handoff_summary.priority_label }}</div>
       </article>
       <article class="kpi-card">
         <div class="kpi-label">Siguiente paso</div>
-        <div class="muted" style="margin-top:8px;">{{ trunk_handoff_summary.next_step }}</div>
-        <div style="margin-top:10px;">
+        <div class="muted pd-mt-2">{{ trunk_handoff_summary.next_step }}</div>
+        <div class="pd-mt-3">
           <a class="btn btn-secondary" href="{{ trunk_handoff_summary.url }}">{{ trunk_handoff_summary.cta }}</a>
         </div>
       </article>
@@ -191,7 +191,7 @@
       <article class="kpi-card">
         <div class="kpi-number {% if demand_gate_summary.tone == 'danger' %}is-danger{% elif demand_gate_summary.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ demand_gate_summary.status }}</div>
         <div class="kpi-label">Semáforo de demanda</div>
-        <div class="muted" style="margin-top:8px;">{{ demand_gate_summary.detail }}</div>
+        <div class="muted pd-mt-2">{{ demand_gate_summary.detail }}</div>
       </article>
       <article class="kpi-card">
         <div class="kpi-number">{{ demand_gate_summary.blockers }}</div>
@@ -199,8 +199,8 @@
       </article>
       <article class="kpi-card">
         <div class="kpi-label">Siguiente paso</div>
-        <div class="muted" style="margin-top:8px;">{{ demand_gate_summary.next_step }}</div>
-        <div style="margin-top:10px;">
+        <div class="muted pd-mt-2">{{ demand_gate_summary.next_step }}</div>
+        <div class="pd-mt-3">
           <a class="btn btn-secondary" href="{{ demand_gate_summary.action_url }}">{{ demand_gate_summary.action_label }}</a>
         </div>
       </article>
@@ -211,17 +211,17 @@
   <section class="card mb-3">
     <div class="card-header">Control de maestro crítico por demanda</div>
     {% if master_demand_gate_summary.tone == 'danger' %}
-    <div class="alert alert-danger" style="margin-bottom:16px;">
+    <div class="alert alert-danger pd-mb-4">
       <strong>Liberación del plan retenida:</strong>
       {{ master_demand_gate_summary.detail }}
-      <a class="btn btn-secondary btn-sm" href="{{ master_demand_gate_summary.action_url }}" style="margin-left:8px;">{{ master_demand_gate_summary.action_label }}</a>
+      <a class="btn btn-secondary btn-sm pd-ml-2" href="{{ master_demand_gate_summary.action_url }}">{{ master_demand_gate_summary.action_label }}</a>
     </div>
     {% endif %}
     <div class="kpi-grid kpi-mini">
       <article class="kpi-card">
         <div class="kpi-number {% if master_demand_gate_summary.tone == 'danger' %}is-danger{% elif master_demand_gate_summary.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ master_demand_gate_summary.status }}</div>
         <div class="kpi-label">Semáforo del maestro</div>
-        <div class="muted" style="margin-top:8px;">{{ master_demand_gate_summary.detail }}</div>
+        <div class="muted pd-mt-2">{{ master_demand_gate_summary.detail }}</div>
       </article>
       <article class="kpi-card">
         <div class="kpi-number">{{ master_demand_gate_summary.blockers }}</div>
@@ -229,14 +229,14 @@
       </article>
       <article class="kpi-card">
         <div class="kpi-label">Siguiente paso</div>
-        <div class="muted" style="margin-top:8px;">{{ master_demand_gate_summary.next_step }}</div>
-        <div style="margin-top:10px;">
+        <div class="muted pd-mt-2">{{ master_demand_gate_summary.next_step }}</div>
+        <div class="pd-mt-3">
           <a class="btn btn-secondary" href="{{ master_demand_gate_summary.action_url }}">{{ master_demand_gate_summary.action_label }}</a>
         </div>
       </article>
     </div>
     {% if critical_master_demand_rows %}
-    <div class="table-responsive" style="margin-top:16px;">
+    <div class="table-responsive pd-mt-4">
       <table class="table table-striped align-middle">
         <thead>
           <tr>
@@ -290,10 +290,8 @@
             <td>{{ row.owner }}</td>
             <td>{{ row.status }}</td>
             <td class="text-end">{{ row.blockers }}</td>
-            <td style="min-width: 160px;">
-              <div class="erp-progress">
-                <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% elif row.tone == 'primary' %}is-primary{% else %}is-success{% endif %}" style="width: {{ row.completion }}%;"></div>
-              </div>
+            <td class="pd-progress-cell-sm">
+              <progress class="pd-progress-meter {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% elif row.tone == 'primary' %}is-primary{% else %}is-success{% endif %}" value="{{ row.completion }}" max="100"></progress>
               <div class="muted mt-1">{{ row.completion }}%</div>
             </td>
             <td>{{ row.depends_on }}</td>
@@ -337,7 +335,7 @@
     Total: <strong>{{ pronosticos_periodo_total|floatformat:2|intcomma }}</strong>
   </p>
   {% if pronosticos_unavailable %}
-  <div class="alert alert-info" style="margin-bottom: 12px;">
+  <div class="alert alert-info pd-mb-3">
     No se pudo leer la tabla de pronósticos en este entorno. Ejecuta migraciones para habilitar este bloque.
   </div>
   {% endif %}
@@ -367,72 +365,72 @@
       <label class="form-label">Fuente</label>
       <input class="form-control" name="fuente" value="UI_PRONOSTICO" maxlength="40">
     </div>
-    <div class="form-group" style="align-self:end;">
+    <div class="form-group pd-align-self-end">
       <button class="btn btn-primary" type="submit">Importar pronósticos</button>
     </div>
   </form>
   <p class="muted mb-0">Columnas sugeridas: <code>receta</code>, <code>codigo_comercial</code>, <code>periodo</code> (YYYY-MM), <code>cantidad</code>.</p>
   <hr>
-  <div class="card-header" style="margin-top:8px;">Historial de Ventas (Base Estadística)</div>
+  <div class="card-header pd-mt-2">Historial de Ventas (Base Estadística)</div>
   <p class="muted mb-2">
     Registros: <strong>{{ ventas_historicas_count }}</strong> ·
     Cantidad acumulada: <strong>{{ ventas_historicas_total|floatformat:2|intcomma }}</strong> ·
     Última fecha: <strong>{% if ventas_hist_fecha_max %}{{ ventas_hist_fecha_max }}{% else %}-{% endif %}</strong>
   </p>
   {% if ventas_historicas_summary %}
-  <div class="kpi-grid kpi-mini" style="margin-bottom:12px;">
+  <div class="kpi-grid kpi-mini pd-mb-3">
     <article class="kpi-card">
       <div class="kpi-number {% if ventas_historicas_summary.tone == 'danger' %}is-danger{% elif ventas_historicas_summary.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">
         {{ ventas_historicas_summary.status }}
       </div>
       <div class="kpi-label">Cobertura de demanda</div>
-      <div class="muted" style="margin-top:8px;">{{ ventas_historicas_summary.detail }}</div>
+      <div class="muted pd-mt-2">{{ ventas_historicas_summary.detail }}</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number">{{ ventas_historicas_summary.branch_count }}</div>
       <div class="kpi-label">Sucursales con histórico</div>
-      <div class="muted" style="margin-top:8px;">{{ ventas_historicas_summary.recipe_count }} productos con demanda</div>
+      <div class="muted pd-mt-2">{{ ventas_historicas_summary.recipe_count }} productos con demanda</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number">{{ ventas_historicas_summary.total_units|floatformat:0|intcomma }}</div>
       <div class="kpi-label">Unidades históricas</div>
-      <div class="muted" style="margin-top:8px;">{{ ventas_historicas_summary.date_label }}</div>
+      <div class="muted pd-mt-2">{{ ventas_historicas_summary.date_label }}</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number">{{ ventas_historicas_summary.missing_days }}</div>
       <div class="kpi-label">Días faltantes</div>
-      <div class="muted" style="margin-top:8px;">{{ ventas_historicas_summary.active_days }}/{{ ventas_historicas_summary.expected_days }} días con datos</div>
+      <div class="muted pd-mt-2">{{ ventas_historicas_summary.active_days }}/{{ ventas_historicas_summary.expected_days }} días con datos</div>
     </article>
   </div>
-  <div class="kpi-grid kpi-mini" style="margin-bottom:12px;">
+  <div class="kpi-grid kpi-mini pd-mb-3">
     <article class="kpi-card">
       <div class="kpi-label">Sucursales líderes</div>
       {% if ventas_historicas_summary.top_branches %}
         {% for row in ventas_historicas_summary.top_branches %}
-        <div class="muted" style="margin-top:8px;">
+        <div class="muted pd-mt-2">
           <strong>{{ row.sucursal__codigo|default:"SIN-COD" }}</strong> · {{ row.sucursal__nombre|default:"Sucursal" }} · {{ row.total|floatformat:0|intcomma }}
         </div>
         {% endfor %}
       {% else %}
-        <div class="muted" style="margin-top:8px;">Sin sucursales con cobertura histórica.</div>
+        <div class="muted pd-mt-2">Sin sucursales con cobertura histórica.</div>
       {% endif %}
     </article>
     <article class="kpi-card">
       <div class="kpi-label">Productos líderes</div>
       {% if ventas_historicas_summary.top_recipes %}
         {% for row in ventas_historicas_summary.top_recipes %}
-        <div class="muted" style="margin-top:8px;">
+        <div class="muted pd-mt-2">
           <strong>{{ row.receta__nombre }}</strong> · {{ row.total|floatformat:0|intcomma }}
         </div>
         {% endfor %}
       {% else %}
-        <div class="muted" style="margin-top:8px;">Sin productos con cobertura histórica.</div>
+        <div class="muted pd-mt-2">Sin productos con cobertura histórica.</div>
       {% endif %}
     </article>
   </div>
   {% endif %}
   {% if ventas_historicas_unavailable %}
-  <div class="alert alert-info" style="margin-bottom: 12px;">
+  <div class="alert alert-info pd-mb-3">
     La tabla de historial de ventas no está disponible en este entorno; ejecuta migraciones para habilitarla.
   </div>
   {% endif %}
@@ -467,13 +465,13 @@
       <label class="form-label">Fuente</label>
       <input class="form-control" name="fuente" value="UI_VENTAS" maxlength="40">
     </div>
-    <div class="form-group" style="align-self:end;">
+    <div class="form-group pd-align-self-end">
       <button class="btn btn-primary" type="submit">Importar historial</button>
     </div>
   </form>
   <p class="muted mb-0">Columnas sugeridas: <code>receta</code>, <code>codigo_comercial</code>, <code>sucursal_codigo</code>, <code>fecha</code>, <code>cantidad</code>.</p>
   <hr>
-  <div class="card-header" style="margin-top:8px;">Solicitud de Ventas (por Sucursal)</div>
+  <div class="card-header pd-mt-2">Solicitud de Ventas (por Sucursal)</div>
   <p class="muted mb-2">
     Registros periodo {{ periodo_pronostico_default }}:
     <strong>{{ solicitudes_venta_count }}</strong> ·
@@ -481,7 +479,7 @@
     Última fecha: <strong>{% if solicitudes_venta_fecha_max %}{{ solicitudes_venta_fecha_max }}{% else %}-{% endif %}</strong>
   </p>
   {% if solicitudes_venta_unavailable %}
-  <div class="alert alert-info" style="margin-bottom: 12px;">
+  <div class="alert alert-info pd-mb-3">
     La tabla de solicitudes de ventas no está disponible en este entorno; ejecuta migraciones para habilitarla.
   </div>
   {% endif %}
@@ -534,7 +532,7 @@
       <label class="form-label">Fuente</label>
       <input class="form-control" name="fuente" value="UI_SOL_VENTAS" maxlength="40">
     </div>
-    <div class="form-group" style="align-self:end;">
+    <div class="form-group pd-align-self-end">
       <button class="btn btn-primary" type="submit">Guardar solicitud ventas</button>
     </div>
   </form>
@@ -581,7 +579,7 @@
       <label class="form-label">Fuente</label>
       <input class="form-control" name="fuente" value="UI_SOL_VENTAS" maxlength="40">
     </div>
-    <div class="form-group" style="align-self:end;">
+    <div class="form-group pd-align-self-end">
       <button class="btn btn-primary" type="submit">Importar solicitudes ventas</button>
     </div>
   </form>
@@ -589,7 +587,7 @@
     Columnas sugeridas: <code>receta</code>, <code>codigo_comercial</code>, <code>sucursal_codigo</code>, <code>alcance</code>, <code>periodo</code>, <code>fecha_inicio</code>, <code>fecha_fin</code>, <code>cantidad</code>.
   </p>
   <hr>
-  <div class="card-header" style="margin-top:8px;">Pronóstico Estadístico desde Historial</div>
+  <div class="card-header pd-mt-2">Pronóstico Estadístico desde Historial</div>
   <p class="muted mb-2">
     Calcula temporalidad por sucursal y recomienda si Ventas debe subir/bajar solicitud.
     Alcances soportados: mes, semana o fin de semana.
@@ -649,7 +647,7 @@
     </div>
     <div class="form-group">
       <label class="form-label">Alcance recetas</label>
-      <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+      <label class="btn btn-secondary pd-inline-control">
         <input type="checkbox" name="incluir_preparaciones" value="1">
         <span>Incluir preparaciones internas</span>
       </label>
@@ -665,7 +663,7 @@
     </div>
   </form>
   {% if forecast_preview %}
-  <div class="card" style="margin-top:12px;">
+  <div class="card pd-mt-3">
     <div class="card-header">Preview estadístico · {{ forecast_preview.alcance|upper }} · {{ forecast_preview.sucursal_nombre }}</div>
     <p class="muted mb-2">
       Rango: {{ forecast_preview.target_start }} a {{ forecast_preview.target_end }} ·
@@ -678,35 +676,35 @@
       Delta: {{ forecast_preview.totals.delta_total|floatformat:2|intcomma }}
     </p>
     {% if forecast_preview_summary %}
-    <div class="kpi-grid kpi-mini" style="margin-bottom:12px;">
+    <div class="kpi-grid kpi-mini pd-mb-3">
       <article class="kpi-card">
         <div class="kpi-number {% if forecast_preview_summary.tone == 'danger' %}is-danger{% elif forecast_preview_summary.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ forecast_preview_summary.status }}</div>
         <div class="kpi-label">Lectura operativa</div>
-        <div class="muted" style="margin-top:8px;">{{ forecast_preview_summary.detail }}</div>
+        <div class="muted pd-mt-2">{{ forecast_preview_summary.detail }}</div>
       </article>
       <article class="kpi-card">
         <div class="kpi-number">{{ forecast_preview_summary.rows_count }}</div>
         <div class="kpi-label">Recetas con forecast</div>
-        <div class="muted" style="margin-top:8px;">Ámbito {{ forecast_preview_summary.scope_label }}</div>
+        <div class="muted pd-mt-2">Ámbito {{ forecast_preview_summary.scope_label }}</div>
       </article>
       <article class="kpi-card">
         <div class="kpi-number">{{ forecast_preview_summary.avg_confidence|floatformat:1 }}%</div>
         <div class="kpi-label">Confianza promedio</div>
-        <div class="muted" style="margin-top:8px;">{{ forecast_preview_summary.with_history_count }} con base histórica útil</div>
+        <div class="muted pd-mt-2">{{ forecast_preview_summary.with_history_count }} con base histórica útil</div>
       </article>
       <article class="kpi-card">
         <div class="kpi-number">{{ forecast_preview_summary.years_observed }}</div>
         <div class="kpi-label">Años observados</div>
-        <div class="muted" style="margin-top:8px;">{{ forecast_preview_summary.comparable_years }} temporadas comparables · {{ forecast_preview_summary.days_observed }} días</div>
+        <div class="muted pd-mt-2">{{ forecast_preview_summary.comparable_years }} temporadas comparables · {{ forecast_preview_summary.days_observed }} días</div>
       </article>
       <article class="kpi-card">
         <div class="kpi-label">Productos líderes del forecast</div>
         {% for row in forecast_preview_summary.top_rows %}
-        <div class="muted" style="margin-top:8px;"><strong>{{ row.receta }}</strong> · {{ row.forecast_qty|floatformat:2|intcomma }}</div>
+        <div class="muted pd-mt-2"><strong>{{ row.receta }}</strong> · {{ row.forecast_qty|floatformat:2|intcomma }}</div>
         {% empty %}
-        <div class="muted" style="margin-top:8px;">Sin productos en forecast.</div>
+        <div class="muted pd-mt-2">Sin productos en forecast.</div>
         {% endfor %}
-        <div class="muted" style="margin-top:8px;">Serie histórica: {{ forecast_preview_summary.history_span_label }}</div>
+        <div class="muted pd-mt-2">Serie histórica: {{ forecast_preview_summary.history_span_label }}</div>
       </article>
     </div>
     {% endif %}
@@ -733,35 +731,35 @@
           href="{% url 'recetas:forecast_supply_export' %}?escenario={{ forecast_compare_escenario }}&periodo={{ periodo_pronostico_default }}{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}"
         >Exportar insumos XLSX</a>
       </div>
-      <div class="kpi-grid kpi-mini" style="margin-bottom:12px;">
+      <div class="kpi-grid kpi-mini pd-mb-3">
         <article class="kpi-card">
           <div class="kpi-number">${{ forecast_supply_context.summary.estimated_spend|floatformat:2|intcomma }}</div>
           <div class="kpi-label">Gasto estimado</div>
-          <div class="muted" style="margin-top:8px;">Materia prima y empaques hoja.</div>
+          <div class="muted pd-mt-2">Materia prima y empaques hoja.</div>
         </article>
         <article class="kpi-card">
           <div class="kpi-number">{{ forecast_supply_context.summary.projected_insumos }}</div>
           <div class="kpi-label">MP + empaques</div>
-          <div class="muted" style="margin-top:8px;">Consolidado por familia.</div>
+          <div class="muted pd-mt-2">Consolidado por familia.</div>
         </article>
         <article class="kpi-card">
           <div class="kpi-number">{{ forecast_supply_context.summary.prepared_insumos }}</div>
           <div class="kpi-label">Preparados a producir</div>
-          <div class="muted" style="margin-top:8px;">Betunes, panes base y subrecetas.</div>
+          <div class="muted pd-mt-2">Betunes, panes base y subrecetas.</div>
         </article>
         <article class="kpi-card">
           <div class="kpi-number">{{ forecast_supply_context.summary.forecast_units|floatformat:2|intcomma }}</div>
           <div class="kpi-label">Unidades forecast</div>
-          <div class="muted" style="margin-top:8px;">Base usada para explotar BOM.</div>
+          <div class="muted pd-mt-2">Base usada para explotar BOM.</div>
         </article>
         <article class="kpi-card">
           <div class="kpi-number {% if forecast_supply_context.summary.missing_cost_insumos > 0 %}is-warning{% else %}is-success{% endif %}">{{ forecast_supply_context.summary.missing_cost_insumos }}</div>
           <div class="kpi-label">Sin costo vigente</div>
-          <div class="muted" style="margin-top:8px;">Bloquean lectura financiera completa.</div>
+          <div class="muted pd-mt-2">Bloquean lectura financiera completa.</div>
         </article>
       </div>
       {% if forecast_supply_context.prepared_insumos %}
-      <h4 style="margin:12px 0 8px;">Preparados a producir</h4>
+      <h4 class="pd-subsection-spaced">Preparados a producir</h4>
       <div class="table-responsive">
         <table class="table align-middle">
           <thead>
@@ -788,7 +786,7 @@
       </div>
       {% endif %}
       {% if forecast_supply_context.insumos %}
-      <h4 style="margin:12px 0 8px;">Materia prima y empaques</h4>
+      <h4 class="pd-subsection-spaced">Materia prima y empaques</h4>
       <div class="table-responsive">
         <table class="table align-middle">
           <thead>
@@ -829,7 +827,7 @@
       <p class="muted mb-0">No hay BOM ligada al preview para calcular insumos requeridos.</p>
       {% endif %}
       {% if forecast_supply_context.issues %}
-      <h4 style="margin:12px 0 8px;">Faltantes por corregir</h4>
+      <h4 class="pd-subsection-spaced">Faltantes por corregir</h4>
       <div class="table-responsive">
         <table class="table align-middle">
           <thead>
@@ -900,7 +898,7 @@
   </div>
   {% endif %}
   {% if forecast_backtest %}
-  <div class="card" style="margin-top:12px;">
+  <div class="card pd-mt-3">
     <div class="card-header">Backtest estadístico · {{ forecast_backtest.scope.alcance|upper }} · {{ forecast_backtest.scope.sucursal_nombre }}</div>
     <p class="muted mb-2">
       Ventanas: {{ forecast_backtest.totals.windows_evaluated }} ·
@@ -913,16 +911,16 @@
       MAPE: {% if forecast_backtest.totals.mape_promedio is not None %}{{ forecast_backtest.totals.mape_promedio|floatformat:1 }}%{% else %}-{% endif %}
     </p>
     {% if forecast_backtest.history_meta %}
-    <div class="kpi-grid kpi-mini" style="margin-bottom:12px;">
+    <div class="kpi-grid kpi-mini pd-mb-3">
       <article class="kpi-card">
         <div class="kpi-number">{{ forecast_backtest.history_meta.years_observed }}</div>
         <div class="kpi-label">Años observados</div>
-        <div class="muted" style="margin-top:8px;">{{ forecast_backtest.history_meta.scope_label }}</div>
+        <div class="muted pd-mt-2">{{ forecast_backtest.history_meta.scope_label }}</div>
       </article>
       <article class="kpi-card">
         <div class="kpi-number">{{ forecast_backtest.history_meta.comparable_years }}</div>
         <div class="kpi-label">Temporadas comparables</div>
-        <div class="muted" style="margin-top:8px;">{{ forecast_backtest.history_meta.days_observed }} días históricos</div>
+        <div class="muted pd-mt-2">{{ forecast_backtest.history_meta.days_observed }} días históricos</div>
       </article>
     </div>
     {% endif %}
@@ -969,7 +967,7 @@
   </div>
   {% endif %}
   {% if forecast_vs_solicitud %}
-  <div class="card" style="margin-top:12px;">
+  <div class="card pd-mt-3">
     <div class="card-header">Pronóstico vs Solicitud de Ventas · {{ forecast_vs_solicitud.sucursal_nombre }}</div>
     <p class="muted mb-2">
       Rango: {{ forecast_vs_solicitud.target_start }} a {{ forecast_vs_solicitud.target_end }} ·
@@ -979,11 +977,11 @@
       Delta: {{ forecast_vs_solicitud.totals.delta_total|floatformat:2|intcomma }}
     </p>
     {% if forecast_vs_solicitud_summary %}
-    <div class="kpi-grid kpi-mini" style="margin-bottom:12px;">
+    <div class="kpi-grid kpi-mini pd-mb-3">
       <article class="kpi-card">
         <div class="kpi-number {% if forecast_vs_solicitud_summary.tone == 'danger' %}is-danger{% elif forecast_vs_solicitud_summary.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ forecast_vs_solicitud_summary.status }}</div>
         <div class="kpi-label">Lectura de alineación</div>
-        <div class="muted" style="margin-top:8px;">{{ forecast_vs_solicitud_summary.detail }}</div>
+        <div class="muted pd-mt-2">{{ forecast_vs_solicitud_summary.detail }}</div>
       </article>
       <article class="kpi-card">
         <div class="kpi-number">{{ forecast_vs_solicitud_summary.alignment_pct }}%</div>
@@ -996,9 +994,9 @@
       <article class="kpi-card">
         <div class="kpi-label">Desviaciones principales</div>
         {% for row in forecast_vs_solicitud_summary.top_rows %}
-        <div class="muted" style="margin-top:8px;"><strong>{{ row.receta }}</strong> · {{ row.delta_qty|floatformat:2|intcomma }}</div>
+        <div class="muted pd-mt-2"><strong>{{ row.receta }}</strong> · {{ row.delta_qty|floatformat:2|intcomma }}</div>
         {% empty %}
-        <div class="muted" style="margin-top:8px;">Sin desviaciones relevantes.</div>
+        <div class="muted pd-mt-2">Sin desviaciones relevantes.</div>
         {% endfor %}
       </article>
     </div>
@@ -1024,7 +1022,7 @@
           <option value="alto" {% if forecast_compare_escenario == "alto" %}selected{% endif %}>Alto</option>
         </select>
       </div>
-      <div class="form-group" style="align-self:end;">
+      <div class="form-group pd-align-self-end">
         <button class="btn btn-secondary" type="submit">Aplicar escenario</button>
       </div>
     </form>
@@ -1065,7 +1063,7 @@
         {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
         <input type="hidden" name="modo" value="desviadas">
         <input type="hidden" name="escenario" value="{{ forecast_compare_escenario }}">
-        <input class="form-control" type="number" step="0.1" min="0" name="max_variacion_pct" placeholder="Tope % (opc)" style="max-width:130px;">
+        <input class="form-control pd-input-narrow" type="number" step="0.1" min="0" name="max_variacion_pct" placeholder="Tope % (opc)">
         <button class="btn btn-secondary" type="submit">Ajustar desviadas (sobre+bajo)</button>
       </form>
       <form method="post" action="{% url 'recetas:solicitud_ventas_aplicar_desde_forecast' %}" class="inline-form">
@@ -1073,7 +1071,7 @@
         {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
         <input type="hidden" name="modo" value="sobre">
         <input type="hidden" name="escenario" value="{{ forecast_compare_escenario }}">
-        <input class="form-control" type="number" step="0.1" min="0" name="max_variacion_pct" placeholder="Tope % (opc)" style="max-width:130px;">
+        <input class="form-control pd-input-narrow" type="number" step="0.1" min="0" name="max_variacion_pct" placeholder="Tope % (opc)">
         <button class="btn btn-secondary" type="submit">Ajustar solo sobre-solicitud</button>
       </form>
       <form method="post" action="{% url 'recetas:solicitud_ventas_aplicar_desde_forecast' %}" class="inline-form">
@@ -1081,7 +1079,7 @@
         {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
         <input type="hidden" name="modo" value="bajo">
         <input type="hidden" name="escenario" value="{{ forecast_compare_escenario }}">
-        <input class="form-control" type="number" step="0.1" min="0" name="max_variacion_pct" placeholder="Tope % (opc)" style="max-width:130px;">
+        <input class="form-control pd-input-narrow" type="number" step="0.1" min="0" name="max_variacion_pct" placeholder="Tope % (opc)">
         <button class="btn btn-secondary" type="submit">Ajustar solo bajo-solicitud</button>
       </form>
     </div>
@@ -1152,7 +1150,7 @@
                 <input type="hidden" name="modo" value="receta">
                 <input type="hidden" name="receta_id" value="{{ row.receta_id }}">
                 <input type="hidden" name="escenario" value="{{ forecast_compare_escenario }}">
-                <input class="form-control" type="number" step="0.1" min="0" name="max_variacion_pct" placeholder="Tope %" style="max-width:95px;">
+                <input class="form-control pd-input-compact" type="number" step="0.1" min="0" name="max_variacion_pct" placeholder="Tope %">
                 <button class="btn btn-primary" type="submit">Ajustar a forecast</button>
               </form>
               {% else %}
@@ -1169,7 +1167,7 @@
   </div>
   {% endif %}
   <hr>
-  <div class="card-header" style="margin-top:8px;">Generar Plan desde Pronóstico</div>
+  <div class="card-header pd-mt-2">Generar Plan desde Pronóstico</div>
   <form class="form-grid-auto" method="post" action="{% url 'recetas:plan_produccion_generar_desde_pronostico' %}">
     {% csrf_token %}
     <div class="form-group">
@@ -1186,12 +1184,12 @@
     </div>
     <div class="form-group">
       <label class="form-label">Alcance de recetas</label>
-      <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+      <label class="btn btn-secondary pd-inline-control">
         <input type="checkbox" name="incluir_preparaciones" value="1">
         <span>Incluir preparaciones internas (además de producto final)</span>
       </label>
     </div>
-    <div class="form-group" style="align-self:end;">
+    <div class="form-group pd-align-self-end">
       <button class="btn btn-primary" type="submit">Generar plan automáticamente</button>
     </div>
   </form>
@@ -1214,7 +1212,7 @@
         <option value="q2" {% if mrp_periodo_tipo == "q2" %}selected{% endif %}>2da quincena (16-fin)</option>
       </select>
     </div>
-    <div class="form-group" style="align-self:end;">
+    <div class="form-group pd-align-self-end">
       <button class="btn btn-primary" type="submit">Calcular período</button>
     </div>
   </form>
@@ -1493,7 +1491,7 @@
     <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion_estado_dashboard_export' %}?format=csv&dg_start_date={{ dg_start_date }}&dg_end_date={{ dg_end_date }}&dg_group_by={{ dg_group_by }}">Exportar DG CSV</a>
     <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion_estado_dashboard_export' %}?format=xlsx&dg_start_date={{ dg_start_date }}&dg_end_date={{ dg_end_date }}&dg_group_by={{ dg_group_by }}">Exportar DG XLSX</a>
   </div>
-  <div class="kpi-grid kpi-mini" style="margin-bottom: 12px;">
+  <div class="kpi-grid kpi-mini pd-mb-3">
     <article class="kpi-card">
       <div class="kpi-number {% if plan_status_dashboard.tone == 'success' %}is-success{% else %}is-warning{% endif %}">{{ plan_status_dashboard.status }}</div>
       <div class="kpi-label">{{ plan_status_dashboard.detail }}</div>
@@ -1521,7 +1519,7 @@
     </article>
   </div>
   {% if plan_status_dashboard.rows %}
-  <div class="table-responsive" style="margin-bottom: 12px;">
+  <div class="table-responsive pd-mb-3">
     <table class="table align-middle">
       <thead>
         <tr>
@@ -1550,9 +1548,9 @@
   {% endif %}
   {% endif %}
   <div class="card-header">Planes recientes</div>
-  <div class="kpi-mini" style="margin-bottom: 12px;">
+  <div class="kpi-mini pd-mb-3">
     {% for card in plan_status_cards %}
-    <a class="kpi-card {% if selected_plan_status_filter == card.key %}is-active{% endif %}" href="{% url 'recetas:plan_produccion' %}?estado_plan={{ card.key }}{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}" style="text-decoration:none;">
+    <a class="kpi-card {% if selected_plan_status_filter == card.key %}is-active{% endif %} pd-link-plain" href="{% url 'recetas:plan_produccion' %}?estado_plan={{ card.key }}{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}">
       <div class="kpi-number {% if card.tone == 'success' %}is-success{% elif card.tone == 'warning' %}is-warning{% else %}is-primary{% endif %}">{{ card.count }}</div>
       <div class="kpi-label">{{ card.label }}</div>
     </a>
@@ -1612,23 +1610,23 @@
       <div class="muted">
         Fecha: {{ plan_actual.fecha_produccion }}{% if plan_actual.notas %} · {{ plan_actual.notas }}{% endif %}
         {% if plan_actual.estado == "CERRADO" %}
-          <span class="badge badge-verde" style="margin-left: 8px;">PLAN CERRADO</span>
+          <span class="badge badge-verde pd-ml-2">PLAN CERRADO</span>
           {% if plan_actual.cerrado_en %}
-            <span style="margin-left: 8px;">{{ plan_actual.cerrado_en|date:"Y-m-d H:i" }}</span>
+            <span class="pd-ml-2">{{ plan_actual.cerrado_en|date:"Y-m-d H:i" }}</span>
           {% endif %}
           {% if plan_actual.cerrado_por %}
-            <span style="margin-left: 8px;">· {{ plan_actual.cerrado_por }}</span>
+            <span class="pd-ml-2">· {{ plan_actual.cerrado_por }}</span>
           {% endif %}
         {% elif plan_actual.consumo_aplicado %}
-          <span class="badge badge-verde" style="margin-left: 8px;">CONSUMO APLICADO</span>
+          <span class="badge badge-verde pd-ml-2">CONSUMO APLICADO</span>
           {% if plan_actual.consumo_aplicado_en %}
-            <span style="margin-left: 8px;">{{ plan_actual.consumo_aplicado_en|date:"Y-m-d H:i" }}</span>
+            <span class="pd-ml-2">{{ plan_actual.consumo_aplicado_en|date:"Y-m-d H:i" }}</span>
           {% endif %}
           {% if plan_actual.consumo_aplicado_por %}
-            <span style="margin-left: 8px;">· {{ plan_actual.consumo_aplicado_por }}</span>
+            <span class="pd-ml-2">· {{ plan_actual.consumo_aplicado_por }}</span>
           {% endif %}
         {% else %}
-          <span class="badge badge-amarillo" style="margin-left: 8px;">SOLO SIMULACIÓN</span>
+          <span class="badge badge-amarillo pd-ml-2">SOLO SIMULACIÓN</span>
         {% endif %}
       </div>
     </div>
@@ -1657,11 +1655,11 @@
     {% if ui_access.can_manage_compras %}
     <form method="post" action="{% url 'recetas:plan_produccion_generar_solicitudes' plan_actual.id %}" class="inline-form" onsubmit="return confirm('Se generarán solicitudes de compra en borrador para materia prima de este plan. ¿Continuar?');">
       {% csrf_token %}
-      <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+      <label class="btn btn-secondary pd-inline-control">
         <input type="checkbox" name="replace_prev" value="1" checked>
         <span>Reemplazar borradores previos del plan</span>
       </label>
-      <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+      <label class="btn btn-secondary pd-inline-control">
         <input type="checkbox" name="auto_create_oc" value="1" checked>
         <span>Crear OC borrador por proveedor</span>
       </label>
@@ -1673,7 +1671,7 @@
   </div>
 
   {% if enterprise_board %}
-  <div class="card" style="margin-top: 16px;" id="plan-control-enterprise">
+  <div class="card pd-mt-4" id="plan-control-enterprise">
     <div class="card-header">Control del plan</div>
     <p class="muted mb-2">Lectura operativa del plan activo para corregir bloqueos, validar abastecimiento y habilitar compras sin ambigüedad.</p>
     <div class="kpi-grid kpi-mini mb-2">
@@ -1681,26 +1679,20 @@
         <div class="kpi-number {% if enterprise_board.release_tone == 'danger' %}is-danger{% elif enterprise_board.release_tone == 'success' %}is-success{% else %}is-warning{% endif %}">{{ enterprise_board.release_progress }}%</div>
         <div class="kpi-label">Cierre del plan</div>
         <div class="muted mt-2">{{ enterprise_board.release_label }} · {{ enterprise_board.release_detail }}</div>
-        <div class="erp-progress mt-2">
-          <div class="erp-progress-fill {% if enterprise_board.release_tone == 'danger' %}is-danger{% elif enterprise_board.release_tone == 'success' %}is-success{% else %}is-warning{% endif %}" style="width: {{ enterprise_board.release_progress }}%;"></div>
-        </div>
+        <progress class="pd-progress-meter mt-2 {% if enterprise_board.release_tone == 'danger' %}is-danger{% elif enterprise_board.release_tone == 'success' %}is-success{% else %}is-warning{% endif %}" value="{{ enterprise_board.release_progress }}" max="100"></progress>
       </article>
       {% if document_control %}
       <article class="kpi-card">
         <div class="kpi-number {% if document_control.closure_summary.tone == 'success' %}is-success{% elif document_control.closure_summary.tone == 'danger' %}is-danger{% else %}is-warning{% endif %}">{{ document_control.closure_summary.progress_pct }}%</div>
         <div class="kpi-label">Cierre documental</div>
         <div class="muted mt-2">Listos {{ document_control.closure_summary.ready_count }} · por validar {{ document_control.closure_summary.pending_count }}</div>
-        <div class="erp-progress mt-2">
-          <div class="erp-progress-fill {% if document_control.closure_summary.tone == 'success' %}is-success{% elif document_control.closure_summary.tone == 'danger' %}is-danger{% else %}is-warning{% endif %}" style="width: {{ document_control.closure_summary.progress_pct }}%;"></div>
-        </div>
+        <progress class="pd-progress-meter mt-2 {% if document_control.closure_summary.tone == 'success' %}is-success{% elif document_control.closure_summary.tone == 'danger' %}is-danger{% else %}is-warning{% endif %}" value="{{ document_control.closure_summary.progress_pct }}" max="100"></progress>
       </article>
       <article class="kpi-card">
         <div class="kpi-number {% if document_control.handoff_summary.tone == 'success' %}is-success{% elif document_control.handoff_summary.tone == 'danger' %}is-danger{% else %}is-warning{% endif %}">{{ document_control.handoff_summary.progress_pct }}%</div>
         <div class="kpi-label">Entregas entre etapas</div>
         <div class="muted mt-2">Listos {{ document_control.handoff_summary.ready_count }} · por validar {{ document_control.handoff_summary.pending_count }}</div>
-        <div class="erp-progress mt-2">
-          <div class="erp-progress-fill {% if document_control.handoff_summary.tone == 'success' %}is-success{% elif document_control.handoff_summary.tone == 'danger' %}is-danger{% else %}is-warning{% endif %}" style="width: {{ document_control.handoff_summary.progress_pct }}%;"></div>
-        </div>
+        <progress class="pd-progress-meter mt-2 {% if document_control.handoff_summary.tone == 'success' %}is-success{% elif document_control.handoff_summary.tone == 'danger' %}is-danger{% else %}is-warning{% endif %}" value="{{ document_control.handoff_summary.progress_pct }}" max="100"></progress>
       </article>
       {% endif %}
       <article class="kpi-card">
@@ -1736,7 +1728,7 @@
     </div>
 
     {% if enterprise_board.blocker_cards %}
-    <div class="card" style="margin-top: 12px;">
+    <div class="card pd-mt-3">
       <div class="card-header">Bloqueos operativos</div>
       <div class="kpi-mini">
         {% for card in enterprise_board.blocker_cards %}
@@ -1751,7 +1743,7 @@
     {% endif %}
 
     {% if enterprise_board.blocker_detail_rows %}
-    <div class="card" style="margin-top: 12px;">
+    <div class="card pd-mt-3">
       
 {% if executive_radar_rows %}
 <section class="card">
@@ -1822,7 +1814,7 @@
     {% endif %}
 
     {% if enterprise_board.master_blocker_class_cards %}
-    <div class="card" style="margin-top: 12px;">
+    <div class="card pd-mt-3">
       <div class="card-header">Bloqueos del maestro por clase</div>
       <p class="muted mb-2">Lectura de artículos incompletos que frenan compras, costeo o cierre del plan.</p>
       <div class="kpi-mini">
@@ -1842,7 +1834,7 @@
     {% endif %}
 
     {% if enterprise_board.master_blocker_detail_rows %}
-    <div class="card" style="margin-top: 12px;">
+    <div class="card pd-mt-3">
       <div class="card-header">Detalle del maestro bloqueando el plan</div>
       <div class="table-responsive">
         <table class="table align-middle">
@@ -1884,7 +1876,7 @@
     {% endif %}
 
     {% if enterprise_board.next_step_cards %}
-    <div class="card" style="margin-top: 12px;">
+    <div class="card pd-mt-3">
       <div class="card-header">Siguiente paso</div>
       <div class="kpi-mini">
         {% for card in enterprise_board.next_step_cards %}
@@ -1914,7 +1906,7 @@
   {% endif %}
 
   {% if document_control %}
-  <div class="card" style="margin-top: 16px;" id="plan-control-documental">
+  <div class="card pd-mt-4" id="plan-control-documental">
     <div class="card-header">Control Documental</div>
     <p class="muted mb-2"><strong>Salud ERP:</strong> estado real del plan dentro del flujo de compras, recepciones y abastecimiento.</p>
     <div class="kpi-mini">
@@ -1966,7 +1958,7 @@
           <span class="{% if step.semaphore_tone == 'danger' %}badge-rojo{% elif step.semaphore_tone == 'warning' %}badge-amarillo{% elif step.semaphore_tone == 'primary' %}badge badge-primary{% elif step.semaphore_tone == 'success' %}badge-verde{% else %}badge{% endif %}">
             {{ step.semaphore_label }}
           </span>
-          <span style="margin-left: 8px;">Cierre {{ step.progress_pct }}%</span>
+          <span class="pd-ml-2">Cierre {{ step.progress_pct }}%</span>
         </div>
         {% if step.action_detail %}
         <div class="muted mt-2">{{ step.action_detail }}</div>
@@ -1989,7 +1981,7 @@
     <div class="alert {% if document_control.stage_focus.tone == 'success' %}alert-success{% elif document_control.stage_focus.tone == 'warning' %}alert-warning{% elif document_control.stage_focus.tone == 'danger' %}alert-danger{% else %}alert-info{% endif %} mt-2">
       <strong>Etapa prioritaria:</strong>
       {{ document_control.stage_focus.summary }}
-      <a class="btn btn-secondary btn-sm" href="{{ document_control.stage_focus.action_url }}" style="margin-left: 8px;">{{ document_control.stage_focus.action_label }}</a>
+      <a class="btn btn-secondary btn-sm pd-ml-2" href="{{ document_control.stage_focus.action_url }}">{{ document_control.stage_focus.action_label }}</a>
       <div class="muted mt-2">{{ document_control.stage_focus.detail }}</div>
     </div>
     {% endif %}
@@ -2060,7 +2052,7 @@
     <div class="alert {% if document_control.closure_focus.tone == 'success' %}alert-success{% elif document_control.closure_focus.tone == 'warning' %}alert-warning{% else %}alert-danger{% endif %} mt-2">
       <strong>Criterio de cierre prioritario:</strong>
       {{ document_control.closure_focus.summary }}
-      <a class="btn btn-secondary btn-sm" href="{{ document_control.closure_focus.action_url }}" style="margin-left: 8px;">{{ document_control.closure_focus.action_label }}</a>
+      <a class="btn btn-secondary btn-sm pd-ml-2" href="{{ document_control.closure_focus.action_url }}">{{ document_control.closure_focus.action_label }}</a>
       <div class="muted mt-2">{{ document_control.closure_focus.action_detail }}</div>
     </div>
     {% endif %}
@@ -2093,7 +2085,7 @@
     </div>
     {% endif %}
     {% if document_control.handoff_checks %}
-    <div class="card-header" style="padding:16px 0 8px 0;border:0;">Entregas entre etapas</div>
+    <div class="card-header pd-inline-section-head">Entregas entre etapas</div>
     <div class="kpi-mini mt-2">
       <div class="kpi-card kpi-card-summary">
         <div class="kpi-number {% if document_control.handoff_summary.tone == 'success' %}is-success{% elif document_control.handoff_summary.tone == 'warning' %}is-warning{% else %}is-danger{% endif %}">{{ document_control.handoff_summary.progress_pct }}%</div>
@@ -2121,7 +2113,7 @@
     <div class="alert {% if document_control.handoff_focus.tone == 'success' %}alert-success{% elif document_control.handoff_focus.tone == 'warning' %}alert-warning{% else %}alert-danger{% endif %} mt-2">
       <strong>Entrega prioritaria:</strong>
       {{ document_control.handoff_focus.summary }}
-      <a class="btn btn-secondary btn-sm" href="{{ document_control.handoff_focus.action_url }}" style="margin-left: 8px;">{{ document_control.handoff_focus.action_label }}</a>
+      <a class="btn btn-secondary btn-sm pd-ml-2" href="{{ document_control.handoff_focus.action_url }}">{{ document_control.handoff_focus.action_label }}</a>
       <div class="muted mt-2">{{ document_control.handoff_focus.action_detail }}</div>
     </div>
     {% endif %}
@@ -2157,9 +2149,9 @@
     <div class="alert {% if document_control.master_focus.tone == 'success' %}alert-success{% elif document_control.master_focus.tone == 'warning' %}alert-warning{% else %}alert-danger{% endif %} mt-2">
       <strong>Bloqueo maestro prioritario:</strong>
       {{ document_control.master_focus.summary }}
-      <a class="btn btn-secondary btn-sm" href="{{ document_control.master_focus.action_url }}" style="margin-left: 8px;">{{ document_control.master_focus.action_label }}</a>
+      <a class="btn btn-secondary btn-sm pd-ml-2" href="{{ document_control.master_focus.action_url }}">{{ document_control.master_focus.action_label }}</a>
       {% if document_control.master_focus.edit_url %}
-      <a class="btn btn-secondary btn-sm" href="{{ document_control.master_focus.edit_url }}" style="margin-left: 8px;">Editar artículo</a>
+      <a class="btn btn-secondary btn-sm pd-ml-2" href="{{ document_control.master_focus.edit_url }}">Editar artículo</a>
       {% endif %}
       <div class="muted mt-2">{{ document_control.master_focus.action_detail }}</div>
     </div>
@@ -2168,7 +2160,7 @@
     <div class="alert alert-info mt-2">
       <strong>Vista enfocada:</strong>
       bloqueos del maestro para la clase seleccionada.
-      <a class="btn btn-secondary btn-sm" href="{% url 'recetas:plan_produccion' %}?plan_id={{ plan_actual.id }}" style="margin-left: 8px;">Quitar foco</a>
+      <a class="btn btn-secondary btn-sm pd-ml-2" href="{% url 'recetas:plan_produccion' %}?plan_id={{ plan_actual.id }}">Quitar foco</a>
     </div>
     {% endif %}
     {% if document_control.master_focus_rows %}
@@ -2210,7 +2202,7 @@
     </div>
     {% endif %}
     {% if document_control.master_blocker_class_cards %}
-    <div class="card-header" style="padding:16px 0 8px 0;border:0;">Bloqueos del maestro impactando el flujo</div>
+    <div class="card-header pd-inline-section-head">Bloqueos del maestro impactando el flujo</div>
     <p class="muted mb-2">
       <strong>Bloqueos del maestro en MRP:</strong> artículos incompletos ligados a solicitudes, órdenes y recepciones del plan.
       Total detectado: <strong>{{ document_control.master_blocker_total }}</strong>.
@@ -2233,7 +2225,7 @@
     </div>
     {% endif %}
     {% if document_control.master_blocker_missing_cards %}
-    <div class="card-header" style="padding:16px 0 8px 0;border:0;">Bloqueos del maestro por dato faltante</div>
+    <div class="card-header pd-inline-section-head">Bloqueos del maestro por dato faltante</div>
     <p class="muted mb-2">
       Identifica el dato del maestro que más está frenando solicitudes, órdenes y recepciones del plan.
     </p>
@@ -2329,7 +2321,7 @@
       <div class="erp-advanced-body">
     {% endif %}
     {% if critical_path_rows %}
-    <div class="card-header" style="padding:0 0 8px 0;border:0;">Prioridades de atención</div>
+    <div class="card-header pd-inline-section-head-compact">Prioridades de atención</div>
     <div class="table-responsive mt-2">
       <table class="table align-middle">
         <thead>
@@ -2353,10 +2345,8 @@
             <td>{{ row.owner }}</td>
             <td>{{ row.status }}</td>
             <td class="text-end">{{ row.count }}</td>
-            <td style="min-width: 160px;">
-              <div class="erp-progress">
-                <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% elif row.tone == 'primary' %}is-primary{% else %}is-success{% endif %}" style="width: {{ row.completion }}%;"></div>
-              </div>
+            <td class="pd-progress-cell-sm">
+              <progress class="pd-progress-meter {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% elif row.tone == 'primary' %}is-primary{% else %}is-success{% endif %}" value="{{ row.completion }}" max="100"></progress>
               <div class="muted mt-1">{{ row.completion }}%</div>
             </td>
             <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
@@ -2368,7 +2358,7 @@
       </table>
     </div>
     {% endif %}
-    <div class="card-header" style="padding:16px 0 8px 0;border:0;">Control por frente</div>
+    <div class="card-header pd-inline-section-head">Control por frente</div>
     <p class="muted mb-2">
       Vista ejecutiva del avance documental del plan. Resume frente, responsable, bloqueos vigentes, porcentaje de cierre y siguiente paso operativo.
     </p>
@@ -2391,10 +2381,8 @@
             <td><strong>{{ row.label }}</strong></td>
             <td>{{ row.owner|default:"Operación ERP" }}</td>
             <td class="text-end">{{ row.open_count }}</td>
-            <td style="min-width: 180px;">
-              <div class="erp-progress">
-                <div class="erp-progress-fill {% if row.semaphore_tone == 'danger' %}is-danger{% elif row.semaphore_tone == 'warning' %}is-warning{% elif row.semaphore_tone == 'primary' %}is-primary{% elif row.semaphore_tone == 'success' %}is-success{% endif %}" style="width: {{ row.progress_pct }}%;"></div>
-              </div>
+            <td class="pd-progress-cell">
+              <progress class="pd-progress-meter {% if row.semaphore_tone == 'danger' %}is-danger{% elif row.semaphore_tone == 'warning' %}is-warning{% elif row.semaphore_tone == 'primary' %}is-primary{% elif row.semaphore_tone == 'success' %}is-success{% endif %}" value="{{ row.progress_pct }}" max="100"></progress>
               <div class="muted mt-1">{{ row.progress_pct }}%</div>
             </td>
             <td>{{ row.detail }}</td>
@@ -2433,10 +2421,8 @@
               </span>
             </td>
             <td>{{ row.owner }}</td>
-            <td style="min-width: 180px;">
-              <div class="erp-progress">
-                <div class="erp-progress-fill {% if row.semaphore_tone == 'danger' %}is-danger{% elif row.semaphore_tone == 'warning' %}is-warning{% elif row.semaphore_tone == 'primary' %}is-primary{% elif row.semaphore_tone == 'success' %}is-success{% endif %}" style="width: {{ row.progress_pct }}%;"></div>
-              </div>
+            <td class="pd-progress-cell">
+              <progress class="pd-progress-meter {% if row.semaphore_tone == 'danger' %}is-danger{% elif row.semaphore_tone == 'warning' %}is-warning{% elif row.semaphore_tone == 'primary' %}is-primary{% elif row.semaphore_tone == 'success' %}is-success{% endif %}" value="{{ row.progress_pct }}" max="100"></progress>
               <div class="muted mt-1">Cierre {{ row.progress_pct }}% · {{ row.closed_count }}/{{ row.total_count|default:0 }}</div>
             </td>
             <td class="text-end">{{ row.open_count }}</td>
@@ -2530,7 +2516,7 @@
 <div class="card" id="plan-vs-pronostico">
   <div class="card-header">Plan vs Pronóstico ({{ plan_vs_pronostico.periodo }})</div>
   {% if plan_vs_pronostico.pronosticos_unavailable %}
-  <div class="alert alert-info" style="margin-bottom: 12px;">
+  <div class="alert alert-info pd-mb-3">
     Pronóstico no disponible temporalmente en este entorno; se muestra solo el plan actual.
   </div>
   {% endif %}
@@ -2732,7 +2718,7 @@
   <div class="card-header">Paso de Compras</div>
   <p class="muted mb-2">Cuando el plan ya no tiene bloqueos de datos, este es el punto para convertir faltantes en solicitudes y órdenes por proveedor.</p>
   {% if document_control.purchase_gate %}
-  <div class="alert {% if document_control.purchase_gate.tone == 'danger' %}alert-warning{% elif document_control.purchase_gate.tone == 'success' %}alert-info{% else %}alert-info{% endif %}" style="margin-bottom: 12px;">
+  <div class="alert {% if document_control.purchase_gate.tone == 'danger' %}alert-warning{% elif document_control.purchase_gate.tone == 'success' %}alert-info{% else %}alert-info{% endif %} pd-mb-3">
     <strong>{{ document_control.purchase_gate.label }}:</strong>
     {{ document_control.purchase_gate.detail }}
     <a href="{{ document_control.purchase_gate.cta_url }}">{{ document_control.purchase_gate.cta_label }}</a>

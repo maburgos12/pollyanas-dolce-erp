@@ -490,14 +490,144 @@ a.btn:active,
   margin-top: var(--pd-space-3);
 }
 
+.pd-mt-4 {
+  margin-top: var(--pd-space-4);
+}
+
+.pd-mb-3 {
+  margin-bottom: var(--pd-space-3);
+}
+
 .pd-mb-4 {
   margin-bottom: var(--pd-space-4);
+}
+
+.pd-ml-2 {
+  margin-left: var(--pd-space-2);
 }
 
 .pd-align-end,
 .pd-form-submit-align {
   display: flex;
   align-items: flex-end;
+}
+
+.pd-align-self-end {
+  align-self: end;
+}
+
+.pd-inline-control {
+  display: flex;
+  gap: var(--pd-space-2);
+  align-items: center;
+}
+
+.pd-link-plain {
+  color: inherit;
+  text-decoration: none;
+}
+
+.pd-input-narrow {
+  max-width: 130px;
+}
+
+.pd-input-compact {
+  max-width: 95px;
+}
+
+.pd-owner {
+  margin-top: var(--pd-space-2);
+  font-weight: 800;
+}
+
+.pd-inline-section-head {
+  padding: var(--pd-space-4) 0 var(--pd-space-2);
+  border: 0;
+}
+
+.pd-inline-section-head-compact {
+  padding: 0 0 var(--pd-space-2);
+  border: 0;
+}
+
+.pd-subsection-spaced {
+  margin: var(--pd-space-3) 0 var(--pd-space-2);
+}
+
+.pd-progress-cell {
+  min-width: 180px;
+}
+
+.pd-progress-cell-sm {
+  min-width: 160px;
+}
+
+.pd-progress-meter {
+  display: block;
+  width: 100%;
+  height: 9px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: var(--pd-border);
+  appearance: none;
+}
+
+.pd-progress-meter::-webkit-progress-bar {
+  border-radius: 999px;
+  background: var(--pd-border);
+}
+
+.pd-progress-meter::-webkit-progress-value {
+  border-radius: 999px;
+  background: var(--pd-success);
+}
+
+.pd-progress-meter::-moz-progress-bar {
+  border-radius: 999px;
+  background: var(--pd-success);
+}
+
+.pd-progress-meter.is-danger::-webkit-progress-value {
+  background: var(--pd-danger);
+}
+
+.pd-progress-meter.is-warning::-webkit-progress-value {
+  background: var(--pd-warning);
+}
+
+.pd-progress-meter.is-primary::-webkit-progress-value {
+  background: var(--pd-info);
+}
+
+.pd-progress-meter.is-success::-webkit-progress-value {
+  background: var(--pd-success);
+}
+
+.pd-progress-meter.is-danger::-moz-progress-bar {
+  background: var(--pd-danger);
+}
+
+.pd-progress-meter.is-warning::-moz-progress-bar {
+  background: var(--pd-warning);
+}
+
+.pd-progress-meter.is-primary::-moz-progress-bar {
+  background: var(--pd-info);
+}
+
+.pd-progress-meter.is-success::-moz-progress-bar {
+  background: var(--pd-success);
+}
+
+.plan-produccion-shell .card-header {
+  color: var(--pd-ink);
+  font-size: clamp(1.08rem, 1.2vw, 1.35rem);
+  line-height: 1.2;
+}
+
+.plan-produccion-shell .card .card-header + .card-header {
+  margin-top: var(--pd-space-3);
 }
 
 .pd-text-right-narrow {
