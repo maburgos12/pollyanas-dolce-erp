@@ -22,6 +22,7 @@
   --card-padding: 20px;
   --section-gap: 16px;
   --page-frame-gutter-x: clamp(18px, 2.2vw, 32px);
+  --sidebar-rail-width: 72px;
 }
 
 * {
@@ -3688,39 +3689,64 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
 
   .sidebar-actions {
     justify-content: center;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .sidebar:hover .sidebar-actions,
+  .sidebar:focus-within .sidebar-actions {
+    flex-direction: row;
+    gap: 0.5rem;
+  }
+
+  .sidebar-footer {
+    padding: 10px 8px calc(10px + env(safe-area-inset-bottom, 0px));
   }
 }
 
 @media (max-width: 720px) {
+  :root {
+    --sidebar-rail-width: 64px;
+  }
+
   .sidebar {
-    width: 100%;
-    position: static;
+    position: fixed;
+    width: var(--sidebar-rail-width);
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
   }
 
   .layout-wrapper {
     display: block;
-    background: transparent;
+    background:
+      linear-gradient(90deg, rgba(255, 255, 255, 0) 0, rgba(255, 255, 255, 0) var(--sidebar-rail-width), rgba(255, 255, 255, 0.35) var(--sidebar-rail-width), rgba(255, 255, 255, 0.35) 100%);
   }
 
   .sidebar:hover,
   .sidebar:focus-within {
-    width: 100%;
+    width: min(252px, calc(100vw - 12px));
     box-shadow: 8px 0 24px rgba(83, 15, 47, 0.22);
   }
 
-  .sidebar-header,
+  .sidebar-header {
+    display: grid;
+    justify-items: center;
+    padding: 14px 8px 12px;
+  }
+
   .sidebar:hover .sidebar-header,
   .sidebar:focus-within .sidebar-header {
     display: block;
-    padding: 22px 18px 18px;
+    padding: 18px 16px 16px;
   }
 
   .main-content {
-    margin-left: 0;
-    width: 100%;
-    max-width: 100vw;
+    margin-left: var(--sidebar-rail-width);
+    width: calc(100% - var(--sidebar-rail-width));
+    max-width: calc(100vw - var(--sidebar-rail-width));
     min-width: 0;
-    padding-inline: 14px;
+    padding-inline: 12px;
   }
 
   .sidebar-brand,
@@ -3730,29 +3756,71 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
   .sidebar-collapsible,
   .sidebar-nav a span:last-child,
   .logout-link {
-    display: inline;
+    display: none;
   }
 
   .sidebar-group-toggle .toggle-chevron {
-    display: inline-grid;
+    display: none;
   }
 
   .sidebar-collapsible {
-    display: block;
+    display: none;
   }
 
   .sidebar-user {
+    display: none;
+  }
+
+  .sidebar:hover .sidebar-brand,
+  .sidebar:hover .sidebar-tagline,
+  .sidebar:hover .sidebar-group-toggle .sidebar-section-label,
+  .sidebar:hover .sidebar-group-toggle .toggle-chevron,
+  .sidebar:hover .sidebar-collapsible:not(.sidebar-collapsed),
+  .sidebar:hover .sidebar-nav a span:last-child,
+  .sidebar:hover .logout-link,
+  .sidebar:focus-within .sidebar-brand,
+  .sidebar:focus-within .sidebar-tagline,
+  .sidebar:focus-within .sidebar-group-toggle .sidebar-section-label,
+  .sidebar:focus-within .sidebar-group-toggle .toggle-chevron,
+  .sidebar:focus-within .sidebar-collapsible:not(.sidebar-collapsed),
+  .sidebar:focus-within .sidebar-nav a span:last-child,
+  .sidebar:focus-within .logout-link {
+    display: revert;
+  }
+
+  .sidebar:hover .sidebar-user,
+  .sidebar:focus-within .sidebar-user,
+  .sidebar:hover .sidebar-actions,
+  .sidebar:focus-within .sidebar-actions,
+  .sidebar:hover .sidebar-group-title,
+  .sidebar:focus-within .sidebar-group-title {
     display: flex;
   }
 
-  .sidebar-group-toggle,
+  .sidebar > nav {
+    padding-bottom: 8px;
+  }
+
+  .sidebar-nav {
+    padding: 0 8px;
+  }
+
+  .sidebar-group-toggle {
+    justify-content: center;
+    padding: 11px 0;
+  }
+
   .sidebar:hover .sidebar-group-toggle,
   .sidebar:focus-within .sidebar-group-toggle {
     justify-content: space-between;
     padding: 10px 12px;
   }
 
-  .sidebar-group-title,
+  .sidebar-group-title {
+    justify-content: center;
+    width: 100%;
+  }
+
   .sidebar:hover .sidebar-group-title,
   .sidebar:focus-within .sidebar-group-title {
     justify-content: flex-start;
@@ -3760,8 +3828,18 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
   }
 
   .sidebar-nav a {
+    justify-content: center;
+    padding: 9px 0;
+  }
+
+  .sidebar:hover .sidebar-nav a,
+  .sidebar:focus-within .sidebar-nav a {
     justify-content: flex-start;
     padding: 8px 12px 8px 36px;
+  }
+
+  .sidebar-actions {
+    justify-content: center;
   }
 
   .header {
@@ -3778,6 +3856,131 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
 
   .container {
     padding: 16px;
+  }
+
+  .module-tabs,
+  .rrhh-tabs,
+  .mant-tabs {
+    flex-wrap: nowrap;
+    gap: 8px;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 5px;
+    border-radius: 12px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-gutter: auto;
+  }
+
+  .module-tab {
+    flex: 0 0 auto;
+    min-height: 40px;
+    padding: 9px 12px;
+    white-space: nowrap;
+  }
+
+  .card,
+  .section-panel,
+  .bi-panel,
+  .fallas-card,
+  .ch-card,
+  .ch-panel,
+  .cedis-card,
+  .cedis-panel,
+  .orch-card,
+  .orch-panel,
+  .ops-stat,
+  .rrhh-metric,
+  .users-kpi-card,
+  .users-compact-card,
+  .users-step {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .users-shell,
+  .users-shell > *,
+  .users-advanced-body,
+  .users-advanced-body > section,
+  .bi-shell,
+  .bi-shell > *,
+  #fallas-app,
+  #fallas-app > *,
+  #panel-reportes {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .bi-hero,
+  .bi-hero > *,
+  .bi-panel,
+  .module-tabs {
+    min-width: 0;
+  }
+
+  .fallas-table-wrap,
+  .cedis-table-wrap,
+  .table-responsive {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .ch-card,
+  .ch-panel,
+  .orch-card,
+  .orch-panel {
+    overflow-x: auto;
+  }
+
+  .ch-table,
+  .fallas-table,
+  .orch-table {
+    min-width: min(760px, calc(100vw - var(--sidebar-rail-width) - 24px));
+  }
+
+  .ops-topline,
+  .rrhh-summary,
+  .users-kpi-grid,
+  .users-compact-grid,
+  .users-workflow-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .fallas-toolbar,
+  .fallas-detail-grid,
+  .fallas-category-layout,
+  .kpi-charts,
+  .cedis-hero-grid,
+  .cedis-command-grid,
+  .cedis-story-grid,
+  .cedis-grid-4,
+  .cedis-grid-3,
+  .cedis-grid-2,
+  .cedis-chart-grid,
+  .cedis-quality-grid,
+  .cedis-filter {
+    grid-template-columns: 1fr !important;
+  }
+
+  .fallas-head,
+  .cedis-panel-head {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .cedis-hero-badges,
+  .cedis-actions,
+  .fallas-actions {
+    justify-content: flex-start;
+  }
+
+  .cedis-badge,
+  .fallas-head .btn-wine,
+  .fallas-toolbar .btn,
+  .ch-fields .btn {
+    width: 100%;
   }
 
   .recipes-filters {
@@ -3972,6 +4175,32 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
 
   .capture-sticky-actions .btn {
     flex: 1;
+  }
+}
+
+@media (max-width: 380px) {
+  :root {
+    --sidebar-rail-width: 58px;
+  }
+
+  .main-content {
+    padding-inline: 10px;
+  }
+
+  .sidebar .nav-icon,
+  .sidebar .nav-icon svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  .sidebar-logo {
+    width: 30px;
+    height: 30px;
+  }
+
+  .sidebar-logo img {
+    width: 27px;
+    height: 27px;
   }
 }
 

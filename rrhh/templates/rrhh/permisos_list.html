@@ -22,55 +22,57 @@
 </section>
 
 <section class="ch-card">
-  <table class="ch-table">
-    <thead>
-      <tr>
-        <th>Folio</th>
-        <th>Empleado</th>
-        <th>Tipo</th>
-        <th>Periodo</th>
-        <th>Origen</th>
-        <th>Goce</th>
-        <th>Preaut. jefe</th>
-        <th>Motivo</th>
-        <th>Estado</th>
-        <th>Acción</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for permiso in permisos %}
-      <tr>
-        <td>{{ permiso.folio }}</td>
-        <td>{{ permiso.empleado.nombre }}</td>
-        <td>{{ permiso.get_tipo_display }}</td>
-        <td>{{ permiso.fecha_inicio|date:"Y-m-d H:i" }}{% if permiso.fecha_fin %}<br>{{ permiso.fecha_fin|date:"Y-m-d H:i" }}{% endif %}</td>
-        <td>{{ permiso.get_origen_solicitud_display }}</td>
-        <td>{% if permiso.goce_sueldo %}Con goce{% else %}Sin goce{% endif %}</td>
-        <td>
-          <span class="ch-status">{{ permiso.get_estado_jefe_display }}</span>
-          {% if permiso.autorizado_jefe_por %}
-            <br><small>{{ permiso.autorizado_jefe_por }}</small>
-          {% endif %}
-        </td>
-        <td>{{ permiso.motivo }}</td>
-        <td><span class="ch-status">{{ permiso.get_estado_display }}</span></td>
-        <td>
-          {% if can_manage_rrhh and permiso.estado == "solicitado" %}
-          <form method="post" class="ch-actions">
-            {% csrf_token %}
-            <input type="hidden" name="permiso_id" value="{{ permiso.id }}">
-            <button class="btn btn-primary" type="submit" name="action" value="aprobar">Aprobar</button>
-            <button class="btn btn-secondary" type="submit" name="action" value="rechazar">Rechazar</button>
-          </form>
-          {% else %}
-            {{ permiso.autorizado_por|default:"-" }}
-          {% endif %}
-        </td>
-      </tr>
-      {% empty %}
-      <tr><td colspan="10">Sin permisos registrados.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="table-responsive">
+    <table class="ch-table">
+      <thead>
+        <tr>
+          <th>Folio</th>
+          <th>Empleado</th>
+          <th>Tipo</th>
+          <th>Periodo</th>
+          <th>Origen</th>
+          <th>Goce</th>
+          <th>Preaut. jefe</th>
+          <th>Motivo</th>
+          <th>Estado</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for permiso in permisos %}
+        <tr>
+          <td>{{ permiso.folio }}</td>
+          <td>{{ permiso.empleado.nombre }}</td>
+          <td>{{ permiso.get_tipo_display }}</td>
+          <td>{{ permiso.fecha_inicio|date:"Y-m-d H:i" }}{% if permiso.fecha_fin %}<br>{{ permiso.fecha_fin|date:"Y-m-d H:i" }}{% endif %}</td>
+          <td>{{ permiso.get_origen_solicitud_display }}</td>
+          <td>{% if permiso.goce_sueldo %}Con goce{% else %}Sin goce{% endif %}</td>
+          <td>
+            <span class="ch-status">{{ permiso.get_estado_jefe_display }}</span>
+            {% if permiso.autorizado_jefe_por %}
+              <br><small>{{ permiso.autorizado_jefe_por }}</small>
+            {% endif %}
+          </td>
+          <td>{{ permiso.motivo }}</td>
+          <td><span class="ch-status">{{ permiso.get_estado_display }}</span></td>
+          <td>
+            {% if can_manage_rrhh and permiso.estado == "solicitado" %}
+            <form method="post" class="ch-actions">
+              {% csrf_token %}
+              <input type="hidden" name="permiso_id" value="{{ permiso.id }}">
+              <button class="btn btn-primary" type="submit" name="action" value="aprobar">Aprobar</button>
+              <button class="btn btn-secondary" type="submit" name="action" value="rechazar">Rechazar</button>
+            </form>
+            {% else %}
+              {{ permiso.autorizado_por|default:"-" }}
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="10">Sin permisos registrados.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 {% endblock %}

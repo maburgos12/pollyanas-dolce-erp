@@ -5,7 +5,7 @@
 {% block body_class %}page-produccion-cedis-weekly-dashboard{% endblock %}
 {% block extra_css %}
 <style>
-  .cedis-shell { display: grid; gap: 18px; }
+  .cedis-shell { display: grid; gap: 18px; min-width: 0; }
   .cedis-hero {
     position: relative;
     overflow: visible;
@@ -85,6 +85,7 @@
   .cedis-story-grid {
     display: grid;
     gap: 16px;
+    min-width: 0;
   }
   .cedis-command-grid {
     grid-template-columns: 1.15fr .85fr;
@@ -95,11 +96,13 @@
   .cedis-grid-4, .cedis-grid-3, .cedis-grid-2 {
     display: grid;
     gap: 16px;
+    min-width: 0;
   }
   .cedis-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .cedis-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .cedis-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cedis-card, .cedis-panel {
+    min-width: 0;
     border-radius: 24px;
     border: 1px solid rgba(152, 116, 94, .12);
     background: linear-gradient(180deg, #fff 0%, #fff9f5 100%);
@@ -207,7 +210,9 @@
   .cedis-pill.is-warning { background: #fff4de; color: #8a5c18; }
   .cedis-pill.is-danger { background: #fff0ef; color: #9a2f2f; }
   .cedis-table-wrap {
+    max-width: 100%;
     overflow: auto;
+    -webkit-overflow-scrolling: touch;
     border-radius: 18px;
     border: 1px solid rgba(175, 126, 101, .12);
   }

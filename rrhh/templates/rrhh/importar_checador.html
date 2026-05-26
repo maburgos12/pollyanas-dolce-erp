@@ -12,6 +12,7 @@
   .ch-table th, .ch-table td { border-bottom: 1px solid var(--rosa); padding: 9px; text-align: left; }
   .ch-table th { color: var(--vino); font-size: 12px; text-transform: uppercase; }
   .ch-format { margin-top: 14px; }
+  .ch-history { margin-top: 18px; }
   @media (max-width: 900px) { .ch-layout { grid-template-columns: 1fr; } }
 </style>
 {% endblock %}
@@ -42,55 +43,59 @@
 
   <article class="ch-card">
     <h2>Formato esperado</h2>
-    <table class="ch-table ch-format">
-      <thead>
-        <tr>
-          <th>id_empleado</th>
-          <th>nombre</th>
-          <th>fecha</th>
-          <th>hora_entrada</th>
-          <th>hora_salida</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>EMP001</td>
-          <td>Juan Pérez</td>
-          <td>2025-06-01</td>
-          <td>2025-06-01 08:02</td>
-          <td>2025-06-01 16:45</td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="table-responsive ch-format">
+      <table class="ch-table">
+        <thead>
+          <tr>
+            <th>id_empleado</th>
+            <th>nombre</th>
+            <th>fecha</th>
+            <th>hora_entrada</th>
+            <th>hora_salida</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>EMP001</td>
+            <td>Juan Pérez</td>
+            <td>2025-06-01</td>
+            <td>2025-06-01 08:02</td>
+            <td>2025-06-01 16:45</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
     <p>Columnas mínimas requeridas: <strong>id_empleado</strong>, <strong>fecha</strong>, <strong>hora_entrada</strong>, <strong>hora_salida</strong>.</p>
   </article>
 </section>
 
-<section class="ch-card" style="margin-top:18px;">
+<section class="ch-card ch-history">
   <h2>Historial</h2>
-  <table class="ch-table">
-    <thead>
-      <tr>
-        <th>Fecha</th>
-        <th>Método</th>
-        <th>Procesados</th>
-        <th>Errores</th>
-        <th>Usuario</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for item in historial %}
-      <tr>
-        <td>{{ item.creado_en|date:"Y-m-d H:i" }}</td>
-        <td>{{ item.get_metodo_display }}</td>
-        <td>{{ item.registros_procesados }}</td>
-        <td>{{ item.errores }}</td>
-        <td>{{ item.creado_por|default:"-" }}</td>
-      </tr>
-      {% empty %}
-      <tr><td colspan="5">Sin importaciones registradas.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="table-responsive">
+    <table class="ch-table">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Método</th>
+          <th>Procesados</th>
+          <th>Errores</th>
+          <th>Usuario</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in historial %}
+        <tr>
+          <td>{{ item.creado_en|date:"Y-m-d H:i" }}</td>
+          <td>{{ item.get_metodo_display }}</td>
+          <td>{{ item.registros_procesados }}</td>
+          <td>{{ item.errores }}</td>
+          <td>{{ item.creado_por|default:"-" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5">Sin importaciones registradas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 {% endblock %}

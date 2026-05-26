@@ -38,31 +38,33 @@
     <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_importar' %}">Importar</a>
   </form>
 
-  <table class="ch-table">
-    <thead>
-      <tr>
-        <th>Fecha</th>
-        <th>Empleado</th>
-        <th>Entrada</th>
-        <th>Salida</th>
-        <th>Minutos</th>
-        <th>Fuente</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for asistencia in asistencias %}
-      <tr>
-        <td>{{ asistencia.fecha|date:"Y-m-d" }}</td>
-        <td>{{ asistencia.empleado.nombre }}</td>
-        <td>{{ asistencia.entrada|date:"H:i"|default:"-" }}</td>
-        <td>{{ asistencia.salida|date:"H:i"|default:"-" }}</td>
-        <td>{{ asistencia.minutos_trabajados }}</td>
-        <td>{{ asistencia.get_fuente_display }}</td>
-      </tr>
-      {% empty %}
-      <tr><td colspan="6">Sin asistencias para el filtro seleccionado.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="table-responsive">
+    <table class="ch-table">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Empleado</th>
+          <th>Entrada</th>
+          <th>Salida</th>
+          <th>Minutos</th>
+          <th>Fuente</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for asistencia in asistencias %}
+        <tr>
+          <td>{{ asistencia.fecha|date:"Y-m-d" }}</td>
+          <td>{{ asistencia.empleado.nombre }}</td>
+          <td>{{ asistencia.entrada|date:"H:i"|default:"-" }}</td>
+          <td>{{ asistencia.salida|date:"H:i"|default:"-" }}</td>
+          <td>{{ asistencia.minutos_trabajados }}</td>
+          <td>{{ asistencia.get_fuente_display }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6">Sin asistencias para el filtro seleccionado.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 {% endblock %}
