@@ -179,8 +179,10 @@ tr:hover td{background:var(--bg)}
 const h=React.createElement;
 const TODAY=new Date();
 const MESES=['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const AREA_TODAS='TODAS';
 const AREAS=['HORNOS','PRODUCCION','ARMADO','LOGISTICA','CRUCERO'];
-const AREA_LABELS={HORNOS:'Hornos',EMBETUNADO:'Embetunado',PRODUCCION:'Produccion',ARMADO:'Armado',LOGISTICA:'Logistica',CRUCERO:'Crucero'};
+const AREA_LABELS={TODAS:'Todas',HORNOS:'Hornos',EMBETUNADO:'Embetunado',PRODUCCION:'Produccion',ARMADO:'Armado',LOGISTICA:'Logistica',CRUCERO:'Crucero'};
+const FORCE_CAPTURE=new URLSearchParams(window.location.search).get('captura')==='1';
 function api(path,opts={}){
   const csrfMatch=document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
   const headers={'Content-Type':'application/json','X-CSRFToken':csrfMatch?decodeURIComponent(csrfMatch[1]):'',...(opts.headers||{})};
@@ -204,8 +206,9 @@ const IconFactory=()=>h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'#fff',str
 const IconCheck=()=>h('span',null,'✓');
 function Badge({ok}){return h('span',{className:`badge ${ok?'ok':'bad'}`},ok?'✓ Pasa':'✗ No pasa');}
 function AreaPill({area}){return h('span',{className:`badge area pill-${area}`,style:{fontSize:11}},AREA_LABELS[area]||area);}
-function AreaChips({area,setArea}){
-  return h('div',{className:'chips'},AREAS.map(a=>h('button',{key:a,className:`chip chip-area ${area===a?'on':''}`,onClick:()=>setArea(a)},AREA_LABELS[a])));
+function AreaChips({area,setArea,includeAll=false}){
+  const options=includeAll?[AREA_TODAS,...AREAS]:AREAS;
+  return h('div',{className:'chips'},options.map(a=>h('button',{key:a,className:`chip chip-area ${area===a?'on':''}`,onClick:()=>setArea(a)},AREA_LABELS[a])));
 }
 function normalizeText(v){
   return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
@@ -299,12 +302,12 @@ function PermisoPrintModal({permiso,onClose,contextLabel}){
   ), document.body);
 }
 function App(){
-  const [tab,setTab]=React.useState('config');
+  const [tab,setTab]=React.useState(FORCE_CAPTURE?'captura':'config');
   const [mes,setMes]=React.useState(TODAY.getMonth()+1);
   const [anio,setAnio]=React.useState(TODAY.getFullYear());
   const [periodo,setPeriodo]=React.useState(null);
   const [bonos,setBonos]=React.useState([]);
-  const [area,setArea]=React.useState('HORNOS');
+  const [area,setArea]=React.useState(FORCE_CAPTURE?AREA_TODAS:'HORNOS');
   const [selectedBono,setSelectedBono]=React.useState(null);
   const [registros,setRegistros]=React.useState([]);
   const [status,setStatus]=React.useState('');
@@ -345,10 +348,14 @@ function App(){
     api(`/api/bonos-produccion/bonos/${id}/`,{method:'PATCH',body:JSON.stringify(patch)}).then(()=>{showStatus('Guardado','ok');cargarTodo();}).catch(err=>showStatus(err.message,'err'));
   }
   function showStatus(msg,type='ok'){setStatus(msg);setStatusType(type);setTimeout(()=>setStatus(''),4000);}
-  const bonosArea=bonos.filter(b=>b.area===area);
+  const bonosArea=area===AREA_TODAS?bonos:bonos.filter(b=>b.area===area);
   const totalGlobal=bonos.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
   const pasan=bonos.filter(b=>b.pasa_asistencia&&b.pasa_uniforme&&b.pasa_puntualidad&&b.pasa_produccion).length;
   const showBonusContext=tab!=='permisos';
+  function selectTab(nextTab){
+    setTab(nextTab);
+    if(area===AREA_TODAS&&!['captura','permisos','revision'].includes(nextTab))setArea('HORNOS');
+  }
   return h('div',null,
     h('header',{className:'hdr'},
       h('div',{className:'hdr-brand'},
@@ -365,7 +372,7 @@ function App(){
     status&&h('div',{className:`status-bar ${statusType}`},status),
     h('div',{className:'tabs-wrap'},
       [['config','Configuracion'],['captura','Captura diaria'],['permisos','Permisos'],['resumen','Resumen mensual'],['ajustes','Ajustes'],['revision','Revision por area']].map(([id,lbl])=>
-        h('button',{key:id,className:`tab-btn ${tab===id?'on':''}`,onClick:()=>setTab(id)},lbl))
+        h('button',{key:id,className:`tab-btn ${tab===id?'on':''}`,onClick:()=>selectTab(id)},lbl))
     ),
     h('main',null,
       showBonusContext&&h('div',{className:'periodo-bar'},
@@ -420,13 +427,14 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
   const [previewPermiso,setPreviewPermiso]=React.useState(null);
   const [lastPermiso,setLastPermiso]=React.useState(null);
   const equipoBase=empleados;
-  const equipoArea=equipoBase.filter(b=>b.area===area);
+  const equipoArea=area===AREA_TODAS?equipoBase:equipoBase.filter(b=>b.area===area);
   const equipo=equipoArea.length?equipoArea:equipoBase;
   React.useEffect(()=>{cargarPermisos();},[mes,anio,area]);
   React.useEffect(()=>{if(!selected&&equipo.length)setSelected(equipo[0]);else if(selected&&!equipo.some(b=>b.id===selected.id))setSelected(equipo[0]||null);},[area,equipo.map(b=>b.id).join(','),selected?.id]);
   function cargarPermisos(){
     setLoading(true);
-    const qs=new URLSearchParams({mes:String(mes),anio:String(anio),area});
+    const qs=new URLSearchParams({mes:String(mes),anio:String(anio)});
+    if(area!==AREA_TODAS)qs.set('area',area);
     api(`/api/bonos-produccion/permisos/?${qs.toString()}`)
       .then(d=>{setEmpleados(d.empleados||[]);setPermisos(d.permisos||[]);setLoading(false);})
       .catch(err=>{showStatus(err.message,'err');setLoading(false);});
@@ -480,7 +488,7 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
     return `${fechaTxt} · ${p.tipo==='permiso_dia'?'Todo el dia':`${horaIni} - ${horaFin}`}`;
   }
   return h('div',null,
-    h(AreaChips,{area,setArea}),
+    h(AreaChips,{area,setArea,includeAll:true}),
     h('div',{className:'metrics'},
       h('div',{className:'metric-card'},h('div',{className:'lbl'},'Pendientes jefe'),h('div',{className:'val wine'},pendientes)),
       h('div',{className:'metric-card'},h('div',{className:'lbl'},'Preautorizados'),h('div',{className:'val'},preaut)),
@@ -553,6 +561,7 @@ function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registr
   const total=diasEnMes(+mes,+anio);
   const regActivos=registros.filter(r=>r.tiene_asistencia);
   const diaActual=selDia?registros.find(r=>+r.dia===selDia):null;
+  const selectedArea=selectedBono?.area||area;
   const bonosAreaIds=bonosArea.map(b=>b.id).join(',');
   React.useEffect(()=>{if(selectedBono&&!bonosArea.some(b=>b.id===selectedBono.id))setSelectedBono(null);},[bonosAreaIds,selectedBono?.id]);
   function togDia(dia){
@@ -561,12 +570,12 @@ function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registr
     else{guardarDia(dia,{tiene_asistencia:true,tiene_uniforme:true,tiene_puntualidad:true,tiene_produccion:true});setSelDia(dia);}
   }
   return h('div',null,
-    h(AreaChips,{area,setArea}),
+    h(AreaChips,{area,setArea,includeAll:true}),
     h('div',{className:'card'},
-      h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},AREA_LABELS[area]+' — Selecciona empleado')),
+      h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},(area===AREA_TODAS?'Todo produccion':AREA_LABELS[area])+' — Selecciona empleado')),
       h('div',{className:'card-body'},
         bonosArea.length===0?h('div',{className:'empty'},'Sin empleados en esta area para el periodo.'):
-        h(EmployeeSearchList,{items:bonosArea,selected:selectedBono,onSelect:setSelectedBono,placeholder:'Teclea nombre o apellido...',rightText:b=>money(b.total_a_pagar)})
+        h(EmployeeSearchList,{items:bonosArea,selected:selectedBono,onSelect:setSelectedBono,placeholder:'Teclea nombre o apellido...',metaText:b=>AREA_LABELS[b.area]||b.area||'Produccion',rightText:b=>money(b.total_a_pagar)})
       )
     ),
     selectedBono&&h('div',{className:'card'},
@@ -600,7 +609,7 @@ function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registr
                 h('span',{className:'concepto-lbl'},lbl),h(Badge,{ok:diaActual[k]})
               )
             ),
-            (['EMBETUNADO','PRODUCCION'].includes(area))&&h('div',{className:'emb-counter'},
+            (['EMBETUNADO','PRODUCCION'].includes(selectedArea))&&h('div',{className:'emb-counter'},
               h('label',null,'🎂 Pasteles embetunados'),
               h('input',{type:'number',min:0,value:diaActual.cantidad_embetunados||0,onChange:e=>guardarDia(selDia,{cantidad_embetunados:+e.target.value})})
             ),
@@ -667,18 +676,19 @@ function AjustesTab({bonosArea,area,setArea,actualizarBono}){
 function RevisionTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia}){
   const bonosAreaIds=bonosArea.map(b=>b.id).join(',');
   React.useEffect(()=>{if(selectedBono&&!bonosArea.some(b=>b.id===selectedBono.id))setSelectedBono(null);},[bonosAreaIds,selectedBono?.id]);
-  return h('div',null,h(AreaChips,{area,setArea}),
+  const selectedArea=selectedBono?.area||area;
+  return h('div',null,h(AreaChips,{area,setArea,includeAll:true}),
     h('div',{className:'card'},
-      h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},'Observaciones — '+AREA_LABELS[area])),
+      h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},'Observaciones — '+(area===AREA_TODAS?'Todo produccion':AREA_LABELS[area]))),
       h('div',{className:'card-body'},
         bonosArea.length===0?h('div',{className:'empty'},'Sin empleados en esta area.'):
-        h(EmployeeSearchList,{items:bonosArea,selected:selectedBono,onSelect:setSelectedBono,placeholder:'Buscar empleado para revisar...',rightText:b=>`${b.dias_trabajados||0} dias`}),
+        h(EmployeeSearchList,{items:bonosArea,selected:selectedBono,onSelect:setSelectedBono,placeholder:'Buscar empleado para revisar...',metaText:b=>AREA_LABELS[b.area]||b.area||'Produccion',rightText:b=>`${b.dias_trabajados||0} dias`}),
         selectedBono&&(registros.length===0?h('div',{className:'empty'},'Sin dias registrados.'):
           h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:10}},
             registros.filter(r=>r.tiene_asistencia).map(r=>h('div',{key:r.id,style:{background:'var(--bg)',border:'1px solid var(--line)',borderRadius:8,padding:10}},
               h('div',{style:{fontWeight:800,fontSize:12,color:'var(--sub)',marginBottom:6}},`Dia ${r.dia}`),
               h('div',{style:{display:'flex',gap:4,flexWrap:'wrap',marginBottom:8}},h(Badge,{ok:r.tiene_uniforme}),h(Badge,{ok:r.tiene_puntualidad}),h(Badge,{ok:r.tiene_produccion})),
-              (['EMBETUNADO','PRODUCCION'].includes(area))&&r.cantidad_embetunados>0&&h('div',{style:{fontSize:12,color:'var(--gold)',fontWeight:700,marginBottom:6}},`🎂 ${r.cantidad_embetunados} pasteles`),
+              (['EMBETUNADO','PRODUCCION'].includes(selectedArea))&&r.cantidad_embetunados>0&&h('div',{style:{fontSize:12,color:'var(--gold)',fontWeight:700,marginBottom:6}},`🎂 ${r.cantidad_embetunados} pasteles`),
               h('textarea',{className:'nota-input',rows:2,defaultValue:r.observacion||'',onBlur:e=>guardarDia(+r.dia,{observacion:e.target.value}),placeholder:'Observacion del dia…'})
             ))
           )

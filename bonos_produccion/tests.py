@@ -239,8 +239,13 @@ class BonosProduccionTests(TestCase):
         self.assertIn("body > :not(.print-modal)", content)
         self.assertIn("transform:none!important", content)
         self.assertIn("Firma empleado", content)
+        self.assertIn("const FORCE_CAPTURE=", content)
+        self.assertIn("React.useState(FORCE_CAPTURE?'captura':'config')", content)
+        self.assertIn("React.useState(FORCE_CAPTURE?AREA_TODAS:'HORNOS')", content)
+        self.assertIn("includeAll:true", content)
         self.assertIn("r.redirected", content)
         self.assertNotIn("pd_logistica_access", content)
+        self.assertIn("no-store", response["Cache-Control"])
 
     def test_app_de_produccion_redirige_a_dashboard_en_escritorio(self):
         user = get_user_model().objects.create_superuser(username="desktop-produccion")
