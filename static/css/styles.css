@@ -975,6 +975,10 @@ textarea:focus,
   display: block;
 }
 
+.pd-searchable-select.has-no-results .pd-searchable-select__list {
+  pointer-events: none;
+}
+
 .pd-searchable-select__option,
 .pd-searchable-select__empty {
   display: flex;
