@@ -29,7 +29,9 @@ Usar en PRs que agreguen o modifiquen UI.
 - [ ] Selects/listas largas o de entidades permiten teclear para filtrar.
 - [ ] Selects buscables envian el valor original y bloquean texto libre invalido.
 - [ ] Tablas con numeros tabulares.
+- [ ] Tablas no parten palabras en encabezados, fechas, codigos, estatus, importes ni acciones.
 - [ ] Badges usan tonos del sistema.
+- [ ] Badges centran su texto y no parten palabras.
 - [ ] Modales tienen accion primaria, cancelar y cierre accesible.
 
 ## Responsive
