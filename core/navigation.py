@@ -5,8 +5,11 @@ NAV_GROUPS = [
     {
         "key": "mi_trabajo",
         "label": "Mi trabajo",
+        "url": "/seguimiento/",
         "items": [
-            ("seguimiento", "mi_tablero", "Mis acuerdos", "/seguimiento/", ["/seguimiento/"]),
+            ("seguimiento", "minutas", "Minutas", "/seguimiento/minutas/", ["/seguimiento/minutas/"]),
+            ("seguimiento", "proyectos", "Proyectos", "/seguimiento/proyectos/", ["/seguimiento/proyectos/"]),
+            ("seguimiento", "compromisos", "Compromisos", "/seguimiento/compromisos/", ["/seguimiento/compromisos/"]),
         ],
     },
     {
@@ -183,12 +186,18 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                 }
             )
         if items:
+            group_url = group.get("url")
+            group_active = bool(
+                group_url
+                and current_path.rstrip("/") == group_url.rstrip("/")
+            )
             visible_groups.append(
                 {
                     "key": group["key"],
                     "label": group["label"],
+                    "url": group_url,
                     "items": items,
-                    "active": False,
+                    "active": group_active,
                 }
             )
     for group in visible_groups:
@@ -196,6 +205,6 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
         for item in group["items"]:
             item["active"] = bool(best_match_len and item.pop("_match_len") == best_match_len)
             active_group = active_group or item["active"]
-        group["active"] = active_group
+        group["active"] = group["active"] or active_group
         groups.append(group)
     return groups

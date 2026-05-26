@@ -30,7 +30,7 @@
             <nav id="sidebar-nav">
                 {% if ui_nav_groups and not ui_access.branch_capture_only %}
                     {% for group in ui_nav_groups %}
-                    <button class="sidebar-group-toggle" data-group="{{ group.key }}" aria-expanded="{% if group.active or forloop.first %}true{% else %}false{% endif %}" title="{{ group.label }}" aria-label="{{ group.label }}">
+                    <button class="sidebar-group-toggle" data-group="{{ group.key }}"{% if group.url %} data-dashboard-url="{{ group.url }}"{% endif %} aria-expanded="{% if group.active or forloop.first %}true{% else %}false{% endif %}" title="{{ group.label }}" aria-label="{{ group.label }}">
                         <span class="sidebar-group-title">
                             <span class="nav-icon" aria-hidden="true">
                                 {% if group.key == "mi_trabajo" %}
@@ -836,6 +836,10 @@
 
         buttons.forEach(function (btn) {
             btn.addEventListener('click', function () {
+                if (btn.dataset.dashboardUrl) {
+                    window.location.href = btn.dataset.dashboardUrl;
+                    return;
+                }
                 var expanded = btn.getAttribute('aria-expanded') === 'true';
                 var newState = !expanded;
                 if (newState) closeOtherGroups(btn);
