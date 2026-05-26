@@ -11,6 +11,7 @@
 </section>
 
 <section class="card">
+  <p><a class="btn btn-secondary" href="{% url 'rrhh:rrhh_prestamos_lista' %}">← Volver a préstamos</a></p>
   <form method="post" enctype="multipart/form-data">
     {% csrf_token %}
     <div class="form-grid">

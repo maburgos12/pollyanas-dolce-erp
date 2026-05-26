@@ -5,12 +5,47 @@
 
 {% block extra_css %}
 <style>
-  .ch-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 18px; }
-  .ch-table { width: 100%; border-collapse: collapse; }
-  .ch-table th, .ch-table td { border-bottom: 1px solid var(--rosa); padding: 10px; text-align: left; vertical-align: top; }
-  .ch-table th { color: var(--vino); font-size: 12px; text-transform: uppercase; }
-  .ch-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-  .ch-status { border-radius: 999px; background: var(--rosa); color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 800; padding: 4px 9px; }
+  .permisos-page { display: grid; gap: 16px; }
+  .permisos-head {
+    background: #fff;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    display: grid;
+    gap: 14px;
+    grid-template-columns: minmax(0, 1fr) minmax(360px, .7fr);
+    padding: 18px;
+  }
+  .permisos-title { color: var(--vino); font-family: "Playfair Display", serif; font-size: 25px; font-weight: 800; }
+  .permisos-copy { color: var(--texto-light); margin-top: 4px; max-width: 760px; }
+  .permisos-stats { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .permisos-stat { background: #fbf6f8; border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; }
+  .permisos-stat strong { color: var(--vino); display: block; font-size: 22px; line-height: 1; }
+  .permisos-stat span { color: var(--texto-light); font-size: 11px; font-weight: 900; text-transform: uppercase; }
+  .permisos-board { display: grid; gap: 14px; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: start; }
+  .permisos-col { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; min-height: 220px; padding: 12px; }
+  .permisos-col h2 { color: var(--vino); font-size: 16px; margin: 0 0 12px; }
+  .permiso-card { border: 1px solid var(--rosa); border-radius: 8px; display: grid; gap: 8px; margin-bottom: 10px; padding: 12px; }
+  .permiso-main { color: var(--texto); font-weight: 900; }
+  .permiso-meta { color: var(--texto-light); font-size: 13px; }
+  .permiso-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .permiso-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }
+  .permiso-badge.gold { background: rgba(201, 168, 76, .18); color: #6f5415; }
+  .permiso-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .permisos-table-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 16px; }
+  .permisos-table-card h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
+  .permisos-table { min-width: 1060px; width: 100%; border-collapse: collapse; }
+  .permisos-table th, .permisos-table td { border-bottom: 1px solid var(--rosa); padding: 10px; text-align: left; vertical-align: top; }
+  .permisos-table th { color: var(--vino); font-size: 12px; text-transform: uppercase; }
+  @media (max-width: 1280px) {
+    .permisos-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 900px) {
+    .permisos-head { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 680px) {
+    .permisos-board,
+    .permisos-stats { grid-template-columns: 1fr; }
+  }
 </style>
 {% endblock %}
 
@@ -21,58 +56,102 @@
   {% endfor %}
 </section>
 
-<section class="ch-card">
-  <div class="table-responsive">
-    <table class="ch-table">
-      <thead>
-        <tr>
-          <th>Folio</th>
-          <th>Empleado</th>
-          <th>Tipo</th>
-          <th>Periodo</th>
-          <th>Origen</th>
-          <th>Goce</th>
-          <th>Preaut. jefe</th>
-          <th>Motivo</th>
-          <th>Estado</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for permiso in permisos %}
-        <tr>
-          <td>{{ permiso.folio }}</td>
-          <td>{{ permiso.empleado.nombre }}</td>
-          <td>{{ permiso.get_tipo_display }}</td>
-          <td>{{ permiso.fecha_inicio|date:"Y-m-d H:i" }}{% if permiso.fecha_fin %}<br>{{ permiso.fecha_fin|date:"Y-m-d H:i" }}{% endif %}</td>
-          <td>{{ permiso.get_origen_solicitud_display }}</td>
-          <td>{% if permiso.goce_sueldo %}Con goce{% else %}Sin goce{% endif %}</td>
-          <td>
-            <span class="ch-status">{{ permiso.get_estado_jefe_display }}</span>
-            {% if permiso.autorizado_jefe_por %}
-              <br><small>{{ permiso.autorizado_jefe_por }}</small>
-            {% endif %}
-          </td>
-          <td>{{ permiso.motivo }}</td>
-          <td><span class="ch-status">{{ permiso.get_estado_display }}</span></td>
-          <td>
-            {% if can_manage_rrhh and permiso.estado == "solicitado" %}
-            <form method="post" class="ch-actions">
-              {% csrf_token %}
-              <input type="hidden" name="permiso_id" value="{{ permiso.id }}">
-              <button class="btn btn-primary" type="submit" name="action" value="aprobar">Aprobar</button>
-              <button class="btn btn-secondary" type="submit" name="action" value="rechazar">Rechazar</button>
-            </form>
-            {% else %}
-              {{ permiso.autorizado_por|default:"-" }}
-            {% endif %}
-          </td>
-        </tr>
-        {% empty %}
-        <tr><td colspan="10">Sin permisos registrados.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+<section class="permisos-page">
+  <div class="permisos-head">
+    <div>
+      <div class="permisos-title">Gestión de permisos</div>
+      <div class="permisos-copy">
+        Bandeja de escritorio para RRHH: recibe solicitudes desde Bonos, Producción y Capital Humano,
+        muestra el filtro del jefe directo y permite la validación final de RRHH.
+      </div>
+    </div>
+    <div class="permisos-stats">
+      <div class="permisos-stat"><strong>{{ stats.total }}</strong><span>Total</span></div>
+      <div class="permisos-stat"><strong>{{ stats.pendiente_jefe }}</strong><span>Jefe</span></div>
+      <div class="permisos-stat"><strong>{{ stats.validacion_rrhh }}</strong><span>RRHH</span></div>
+      <div class="permisos-stat"><strong>{{ stats.aprobados }}</strong><span>Aprobados</span></div>
+    </div>
   </div>
+
+  <section class="permisos-board">
+    {% for key, label, items in columnas %}
+    <article class="permisos-col">
+      <h2>{{ label }}</h2>
+      {% for permiso in items %}
+      <div class="permiso-card">
+        <div class="permiso-main">{{ permiso.empleado.nombre }}</div>
+        <div class="permiso-meta">{{ permiso.folio }} · {{ permiso.get_tipo_display }}</div>
+        <div class="permiso-meta">
+          {{ permiso.fecha_inicio|date:"Y-m-d H:i" }}{% if permiso.fecha_fin %} a {{ permiso.fecha_fin|date:"Y-m-d H:i" }}{% endif %}
+        </div>
+        <div class="permiso-row">
+          <span class="permiso-badge">{{ permiso.get_origen_solicitud_display }}</span>
+          <span class="permiso-badge {% if permiso.goce_sueldo %}gold{% endif %}">
+            {% if permiso.goce_sueldo %}Con goce{% else %}Sin goce{% endif %}
+          </span>
+        </div>
+        <div class="permiso-meta">{{ permiso.motivo|truncatechars:120 }}</div>
+        {% if permiso.autorizado_jefe_por %}
+          <div class="permiso-meta">Jefe: {{ permiso.autorizado_jefe_por }}</div>
+        {% endif %}
+        {% if can_manage_rrhh and permiso.estado == "solicitado" %}
+        <form method="post" class="permiso-actions">
+          {% csrf_token %}
+          <input type="hidden" name="permiso_id" value="{{ permiso.id }}">
+          <button class="btn btn-primary" type="submit" name="action" value="aprobar">Aprobar RRHH</button>
+          <button class="btn btn-secondary" type="submit" name="action" value="rechazar">Rechazar</button>
+        </form>
+        {% endif %}
+      </div>
+      {% empty %}
+      <div class="permiso-meta">Sin registros.</div>
+      {% endfor %}
+    </article>
+    {% endfor %}
+  </section>
+
+  <section class="permisos-table-card">
+    <h2>Historial reciente</h2>
+    <div class="table-responsive">
+      <table class="permisos-table">
+        <thead>
+          <tr>
+            <th>Folio</th>
+            <th>Empleado</th>
+            <th>Tipo</th>
+            <th>Periodo</th>
+            <th>Origen</th>
+            <th>Goce</th>
+            <th>Filtro jefe</th>
+            <th>Estado RRHH</th>
+            <th>Motivo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for permiso in permisos %}
+          <tr>
+            <td>{{ permiso.folio }}</td>
+            <td>{{ permiso.empleado.nombre }}</td>
+            <td>{{ permiso.get_tipo_display }}</td>
+            <td>{{ permiso.fecha_inicio|date:"Y-m-d H:i" }}{% if permiso.fecha_fin %}<br>{{ permiso.fecha_fin|date:"Y-m-d H:i" }}{% endif %}</td>
+            <td>{{ permiso.get_origen_solicitud_display }}</td>
+            <td>{% if permiso.goce_sueldo %}Con goce{% else %}Sin goce{% endif %}</td>
+            <td>
+              <span class="permiso-badge">{{ permiso.get_estado_jefe_display }}</span>
+              {% if permiso.autorizado_jefe_por %}<br><small>{{ permiso.autorizado_jefe_por }}</small>{% endif %}
+            </td>
+            <td>
+              <span class="permiso-badge">{{ permiso.get_estado_display }}</span>
+              {% if permiso.autorizado_por %}<br><small>{{ permiso.autorizado_por }}</small>{% endif %}
+            </td>
+            <td>{{ permiso.motivo }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="9">Sin permisos registrados.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
 </section>
 {% endblock %}

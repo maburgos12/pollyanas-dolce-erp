@@ -8,7 +8,20 @@ from pathlib import Path
 from rest_framework.test import APIClient
 from unittest import SkipTest
 
-from rrhh.models import AsistenciaEmpleado, Empleado, NominaConceptoLinea, NominaImportacion, NominaPeriodo, Turno
+from rrhh.models import (
+    AsistenciaEmpleado,
+    Empleado,
+    EmpleadoBaja,
+    NominaConceptoLinea,
+    NominaImportacion,
+    NominaLinea,
+    NominaPeriodo,
+    PlantillaAutorizada,
+    Prestamo,
+    PrestamoCuota,
+    Turno,
+    VacanteRRHH,
+)
 from rrhh.services.lista_raya import parse_lista_raya_xls
 
 
@@ -86,6 +99,69 @@ class CapitalHumanoServiceTests(TestCase):
         cuota.refresh_from_db()
         self.assertEqual(cuota.estado, PrestamoCuota.ESTADO_COBRADO)
         self.assertEqual(prestamo.saldo_actual, Decimal("500.00"))
+
+    def test_indicadores_capital_humano_renderiza_datos_reales_y_capturas(self):
+        from datetime import date
+
+        user = User.objects.create_user(username="paula", password="pass123")
+        user.groups.add(Group.objects.create(name="RRHH"))
+        empleado = Empleado.objects.create(
+            codigo="100",
+            nombre="Empleado Indicadores",
+            area="VENTAS",
+            fecha_ingreso=date(2026, 5, 1),
+            salario_diario=Decimal("400.00"),
+        )
+        periodo = NominaPeriodo.objects.create(
+            fecha_inicio=date(2026, 5, 1),
+            fecha_fin=date(2026, 5, 15),
+            total_bruto=Decimal("1000.00"),
+            total_descuentos=Decimal("100.00"),
+            total_neto=Decimal("900.00"),
+        )
+        linea = NominaLinea.objects.create(
+            periodo=periodo,
+            empleado=empleado,
+            dias_trabajados=Decimal("15.00"),
+            salario_base=Decimal("900.00"),
+            total_percepciones=Decimal("1000.00"),
+            descuentos=Decimal("100.00"),
+            neto_calculado=Decimal("900.00"),
+        )
+        NominaConceptoLinea.objects.create(
+            linea=linea,
+            tipo=NominaConceptoLinea.TIPO_PERCEPCION,
+            codigo_concepto="4",
+            nombre="Horas extras",
+            valor=Decimal("2.00"),
+            importe=Decimal("200.00"),
+        )
+        EmpleadoBaja.objects.create(
+            empleado=empleado,
+            nombre=empleado.nombre,
+            area=empleado.area,
+            fecha_ingreso=date(2026, 5, 1),
+            fecha_baja=date(2026, 5, 20),
+            motivo=EmpleadoBaja.MOTIVO_NO_APTO,
+            creado_por=user,
+        )
+        PlantillaAutorizada.objects.create(anio=2026, mes=5, area="VENTAS", cantidad=2, actualizado_por=user)
+        VacanteRRHH.objects.create(
+            area="VENTAS",
+            puesto="CAJERA",
+            fecha_solicitada=date(2026, 5, 2),
+            estado=VacanteRRHH.ESTADO_RECLUTAMIENTO,
+            creado_por=user,
+        )
+
+        self.client.force_login(user)
+        response = self.client.get(reverse("rrhh:rrhh_indicadores"), {"mes": "2026-05"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Capital Humano con fuente única ERP")
+        self.assertContains(response, "Empleado Indicadores")
+        self.assertContains(response, "CAJERA")
+        self.assertContains(response, "2.00")
 
 
 class CapitalHumanoAPITests(TestCase):
@@ -347,6 +423,299 @@ class RRHHViewsTests(TestCase):
         self.assertContains(resp, "Quitar foco")
         self.assertEqual(resp.context["enterprise_focus"], "SIN_AREA")
         self.assertIsNotNone(resp.context["focus_summary"])
+
+    def test_estructura_organizacional_inicial_actualiza_sin_duplicar_empleados(self):
+        from rrhh.services_organizacion import aplicar_estructura_organizacional_inicial
+
+        yesenia = Empleado.objects.create(nombre="SOTO INZUNZA YESENIA", area="ADMINISTRACION")
+        johana = Empleado.objects.create(nombre="LOPEZ PALOS JOHANA ADELIN", area="ADMINISTRACION")
+        carolina = Empleado.objects.create(nombre="CAYETANO VALENZUELA CAROLINA", area="ADMINISTRACION")
+        Empleado.objects.create(nombre="LUGO ESPINOZA PAULA ELIZABETH", area="ADMINISTRACION")
+        roxana = Empleado.objects.create(nombre="RIVAS SOLIS ROXANA", area="ADMINISTRACION")
+        julissa = Empleado.objects.create(nombre="ANGULO PARRA JULISSA", area="PRODUCCION")
+        jorge = Empleado.objects.create(nombre="PEREZ VALENZUELA JORGE ISAAC", area="ALMACEN")
+        limpieza = Empleado.objects.create(nombre="GARCIA HIGUERA BEATRIZ", area="AFANADORA")
+        repartidor = Empleado.objects.create(nombre="LOPEZ VILLALOBOS JORGE ALFONSO", area="REPARTIDOR")
+        hornos = Empleado.objects.create(nombre="COTA MEDINA MINERVA CECILIA", area="HORNOS", puesto="Hornos")
+        call_center = Empleado.objects.create(nombre="CALL CENTER DEMO", area="VENTAS", puesto="Call Center")
+        marketing = Empleado.objects.create(nombre="MARKETING EXTERNO DEMO", area="MARKETING")
+
+        total_antes = Empleado.objects.count()
+        resultado = aplicar_estructura_organizacional_inicial()
+
+        self.assertEqual(Empleado.objects.count(), total_antes)
+        self.assertGreaterEqual(resultado["actualizados"], 1)
+
+        yesenia.refresh_from_db()
+        johana.refresh_from_db()
+        carolina.refresh_from_db()
+        roxana.refresh_from_db()
+        julissa.refresh_from_db()
+        jorge.refresh_from_db()
+        limpieza.refresh_from_db()
+        repartidor.refresh_from_db()
+        hornos.refresh_from_db()
+        call_center.refresh_from_db()
+        marketing.refresh_from_db()
+
+        self.assertEqual(yesenia.departamento, "ADMINISTRACION")
+        self.assertEqual(yesenia.puesto, "Jefe de Administración")
+        self.assertEqual(johana.departamento, "VENTAS")
+        self.assertEqual(carolina.departamento, "PRODUCCION")
+        self.assertEqual(roxana.jefe_directo, carolina)
+        self.assertEqual(julissa.jefe_directo, carolina)
+        self.assertEqual(jorge.departamento, "MANTENIMIENTO")
+        self.assertEqual(jorge.jefe_directo, yesenia)
+        self.assertEqual(limpieza.departamento, "ADMINISTRACION")
+        self.assertEqual(limpieza.puesto_operativo, "LIMPIEZA")
+        self.assertEqual(limpieza.jefe_directo, yesenia)
+        self.assertEqual(repartidor.departamento, "VENTAS")
+        self.assertTrue(repartidor.participa_bonos_ventas)
+        self.assertEqual(repartidor.jefe_directo, johana)
+        self.assertEqual(hornos.departamento, "PRODUCCION")
+        self.assertEqual(hornos.puesto_operativo, "HORNOS")
+        self.assertTrue(hornos.participa_bonos_produccion)
+        self.assertEqual(call_center.tipo_personal, "POLLYANA")
+        self.assertEqual(marketing.tipo_personal, "EXTERNO")
+
+    def test_logistica_con_adscripcion_temporal_conserva_origen_y_bonos(self):
+        from rrhh.services_organizacion import aplicar_estructura_organizacional_inicial
+
+        johana = Empleado.objects.create(nombre="LOPEZ PALOS JOHANA ADELIN", area="VENTAS")
+        carolina = Empleado.objects.create(nombre="CAYETANO VALENZUELA CAROLINA", area="PRODUCCION")
+        repartidor = Empleado.objects.create(nombre="REPARTIDOR TEMPORAL", area="REPARTIDOR")
+        envio = Empleado.objects.create(nombre="ENVIO SUCURSAL TEMPORAL", area="LOGISTICA", puesto="Envío a sucursal")
+
+        aplicar_estructura_organizacional_inicial()
+
+        repartidor.refresh_from_db()
+        envio.refresh_from_db()
+        self.assertEqual(repartidor.departamento_origen, Empleado.DEP_LOGISTICA)
+        self.assertEqual(repartidor.departamento, Empleado.DEP_VENTAS)
+        self.assertEqual(repartidor.jefe_directo, johana)
+        self.assertTrue(repartidor.participa_bonos_ventas)
+        self.assertEqual(envio.departamento_origen, Empleado.DEP_LOGISTICA)
+        self.assertEqual(envio.departamento, Empleado.DEP_PRODUCCION)
+        self.assertEqual(envio.jefe_directo, carolina)
+        self.assertTrue(envio.participa_bonos_produccion)
+
+    def test_organizacion_capital_humano_renderiza_jerarquia(self):
+        jefe = Empleado.objects.create(
+            nombre="LOPEZ PALOS JOHANA ADELIN",
+            area="VENTAS",
+            departamento="VENTAS",
+            puesto="Jefe de Ventas",
+        )
+        Empleado.objects.create(
+            nombre="LOPEZ VILLALOBOS JORGE ALFONSO",
+            area="REPARTIDOR",
+            departamento="VENTAS",
+            puesto="Repartidor",
+            puesto_operativo="REPARTIDOR",
+            jefe_directo=jefe,
+            participa_bonos_ventas=True,
+        )
+
+        resp = self.client.get(reverse("rrhh:rrhh_organizacion"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Mapa organizacional")
+        self.assertContains(resp, "LOPEZ PALOS JOHANA ADELIN")
+        self.assertContains(resp, "LOPEZ VILLALOBOS JORGE ALFONSO")
+        self.assertContains(resp, "Jefe directo")
+
+    def test_empleados_expone_campos_de_organizacion(self):
+        Empleado.objects.create(nombre="LOPEZ PALOS JOHANA ADELIN", departamento="VENTAS", puesto="Jefe de Ventas")
+
+        resp = self.client.get(reverse("rrhh:empleados"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Departamento")
+        self.assertContains(resp, "Puesto operativo")
+        self.assertContains(resp, "Jefe directo")
+        self.assertContains(resp, "Participa en bonos ventas")
+        self.assertContains(resp, "Participa en bonos producción")
+        self.assertContains(resp, "Área / división")
+        self.assertContains(resp, "Hornos")
+        self.assertContains(resp, "Armado")
+        self.assertContains(resp, "Otro...")
+        self.assertContains(resp, "modal-catalogo-otro")
+
+    def test_empleados_guarda_area_y_puesto_operativo_otro_desde_modal(self):
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "nombre": "Empleado Catalogo Otro",
+                "departamento": Empleado.DEP_PRODUCCION,
+                "area": "__otro__",
+                "area_otro": "Decorado especial",
+                "puesto": "Auxiliar",
+                "puesto_operativo": "__otro__",
+                "puesto_operativo_otro": "DECORADO",
+                "salario_diario": "300.00",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        empleado = Empleado.objects.get(nombre="Empleado Catalogo Otro")
+        self.assertEqual(empleado.area, "DECORADO ESPECIAL")
+        self.assertEqual(empleado.puesto_operativo, "DECORADO")
+
+    def test_bonos_usan_campos_de_rrhh_sin_repetir_area_macro(self):
+        from bonos_produccion.models import AREA_LOGISTICA, area_bono_produccion_empleado
+        from bonos_ventas.empleados import empleados_elegibles_bonos_ventas
+
+        repartidor = Empleado.objects.create(
+            nombre="REPARTIDOR BONO RRHH",
+            area="REPARTIDORES",
+            departamento_origen=Empleado.DEP_LOGISTICA,
+            departamento=Empleado.DEP_VENTAS,
+            puesto_operativo="REPARTIDOR",
+            participa_bonos_ventas=True,
+        )
+        envio = Empleado.objects.create(
+            nombre="ENVIO BONO RRHH",
+            area="ENVIO A SUCURSAL",
+            departamento_origen=Empleado.DEP_LOGISTICA,
+            departamento=Empleado.DEP_PRODUCCION,
+            puesto_operativo="ENVIO_SUCURSAL",
+            participa_bonos_produccion=True,
+        )
+
+        self.assertIn(repartidor, empleados_elegibles_bonos_ventas())
+        self.assertEqual(area_bono_produccion_empleado(envio), AREA_LOGISTICA)
+
+    def test_rrhh_crea_prestamo_y_solo_direccion_aprueba(self):
+        from datetime import date
+
+        empleado = Empleado.objects.create(nombre="Empleado Préstamo Vista", salario_diario="400.00")
+        resp_nuevo = self.client.get(reverse("rrhh:rrhh_prestamo_nuevo"))
+        self.assertEqual(resp_nuevo.status_code, 200)
+        self.assertContains(resp_nuevo, "Nuevo préstamo")
+
+        prestamo = Prestamo.objects.create(
+            empleado=empleado,
+            concepto="Apoyo autorizado",
+            fecha_solicitud=date(2026, 5, 10),
+            fecha_deposito=date(2026, 5, 14),
+            importe=Decimal("1000.00"),
+            num_quincenas=2,
+            descuento_quincenal=Decimal("500.00"),
+            saldo_actual=Decimal("1000.00"),
+            estado=Prestamo.ESTADO_AUTORIZADO,
+            firma_jefe=True,
+            autorizado_jefe=self.user,
+            fecha_auth_jefe=timezone.now(),
+            creado_por=self.user,
+        )
+
+        resp_rrhh = self.client.post(reverse("rrhh:rrhh_prestamo_auth_dg", args=[prestamo.pk]))
+        self.assertEqual(resp_rrhh.status_code, 403)
+        self.assertEqual(PrestamoCuota.objects.filter(prestamo=prestamo).count(), 0)
+
+        director = User.objects.create_user(username="director", password="pass123")
+        dg_group, _ = Group.objects.get_or_create(name="DG")
+        director.groups.add(dg_group)
+        self.client.force_login(director)
+
+        resp_dg = self.client.post(reverse("rrhh:rrhh_prestamo_auth_dg", args=[prestamo.pk]), follow=True)
+        self.assertEqual(resp_dg.status_code, 200)
+        prestamo.refresh_from_db()
+        self.assertEqual(prestamo.estado, Prestamo.ESTADO_ACTIVO)
+        self.assertEqual(PrestamoCuota.objects.filter(prestamo=prestamo).count(), 2)
+
+    def test_prestamo_bloquea_nueva_solicitud_si_empleado_tiene_saldo_pendiente(self):
+        from datetime import date
+
+        empleado = Empleado.objects.create(nombre="Empleado con Deuda", salario_diario="400.00")
+        Prestamo.objects.create(
+            empleado=empleado,
+            concepto="Préstamo vigente",
+            fecha_solicitud=date(2026, 5, 1),
+            importe=Decimal("1200.00"),
+            num_quincenas=4,
+            descuento_quincenal=Decimal("300.00"),
+            saldo_actual=Decimal("600.00"),
+            estado=Prestamo.ESTADO_ACTIVO,
+            creado_por=self.user,
+        )
+
+        resp = self.client.post(
+            reverse("rrhh:rrhh_prestamo_nuevo"),
+            {
+                "empleado": str(empleado.id),
+                "concepto": "Segundo préstamo",
+                "metodo_pago": Prestamo.METODO_TRANSFERENCIA,
+                "fecha_solicitud": "2026-05-20",
+                "importe": "500.00",
+                "num_quincenas": "2",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "no puede solicitar un nuevo préstamo")
+        self.assertEqual(Prestamo.objects.filter(empleado=empleado).count(), 1)
+
+    def test_jefe_asignado_ve_y_autoriza_prestamo_en_su_bandeja(self):
+        from datetime import date
+
+        jefe = User.objects.create_user(username="johana", password="pass123")
+        jefe.groups.add(Group.objects.create(name="VENTAS"))
+        empleado = Empleado.objects.create(nombre="Empleado con Jefe", area="VENTAS", salario_diario="400.00")
+        prestamo = Prestamo.objects.create(
+            empleado=empleado,
+            concepto="Solicitud con jefe",
+            fecha_solicitud=date(2026, 5, 15),
+            importe=Decimal("800.00"),
+            num_quincenas=2,
+            descuento_quincenal=Decimal("400.00"),
+            saldo_actual=Decimal("800.00"),
+            estado=Prestamo.ESTADO_SOLICITADO,
+            jefe_directo=jefe,
+            creado_por=self.user,
+        )
+
+        self.client.force_login(jefe)
+        resp_lista = self.client.get(reverse("rrhh:rrhh_prestamos_lista"))
+        self.assertEqual(resp_lista.status_code, 200)
+        self.assertContains(resp_lista, "Préstamos por autorizar")
+        self.assertContains(resp_lista, "Por autorizar por mí")
+        self.assertContains(resp_lista, prestamo.folio)
+
+        resp_auth = self.client.post(reverse("rrhh:rrhh_prestamo_auth_jefe", args=[prestamo.pk]), follow=True)
+        self.assertEqual(resp_auth.status_code, 200)
+        prestamo.refresh_from_db()
+        self.assertEqual(prestamo.estado, Prestamo.ESTADO_AUTORIZADO)
+        self.assertEqual(prestamo.autorizado_jefe, jefe)
+
+    def test_prestamo_tiene_formato_imprimible_y_regresos_a_dashboard(self):
+        from datetime import date
+
+        empleado = Empleado.objects.create(nombre="Empleado Formato", salario_diario="400.00")
+        prestamo = Prestamo.objects.create(
+            empleado=empleado,
+            concepto="Formato papel",
+            fecha_solicitud=date(2026, 5, 18),
+            importe=Decimal("900.00"),
+            num_quincenas=3,
+            descuento_quincenal=Decimal("300.00"),
+            saldo_actual=Decimal("900.00"),
+            estado=Prestamo.ESTADO_SOLICITADO,
+            creado_por=self.user,
+        )
+
+        resp_print = self.client.get(reverse("rrhh:rrhh_prestamo_imprimir", args=[prestamo.pk]))
+        self.assertEqual(resp_print.status_code, 200)
+        self.assertContains(resp_print, "SOLICITUD Y AUTORIZACIÓN DE PRÉSTAMO")
+        self.assertContains(resp_print, "Firma del empleado")
+
+        resp_quincena = self.client.get(reverse("rrhh:rrhh_quincena_cobros"))
+        self.assertContains(resp_quincena, "Volver a préstamos")
+
+        resp_importar = self.client.get(reverse("rrhh:rrhh_importar_contpaq"))
+        self.assertContains(resp_importar, "Volver a préstamos")
 
     def test_nomina_create_and_line(self):
         self.client.post(

@@ -11,6 +11,7 @@
 </section>
 
 <section class="card">
+  <p><a class="btn btn-secondary" href="{% url 'rrhh:rrhh_prestamos_lista' %}">← Volver a préstamos</a></p>
   <form method="post">
     {% csrf_token %}
     <div class="form-grid">
@@ -26,6 +27,14 @@
         <select name="metodo_pago">
           {% for value, label in metodos %}
             <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Jefe directo / primer autorizador
+        <select name="jefe_directo">
+          <option value="">Seleccionar autorizador</option>
+          {% for user in autorizadores %}
+            <option value="{{ user.id }}">{{ user.get_full_name|default:user.username }}</option>
           {% endfor %}
         </select>
       </label>

@@ -274,6 +274,31 @@
     min-height: 38px;
   }
 
+  .rrhh-dialog {
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    box-shadow: 0 22px 70px rgba(87, 42, 66, 0.22);
+    max-width: 420px;
+    padding: 0;
+    width: calc(100% - 32px);
+  }
+
+  .rrhh-dialog::backdrop {
+    background: rgba(34, 20, 30, 0.42);
+  }
+
+  .rrhh-dialog-body {
+    display: grid;
+    gap: 12px;
+    padding: 18px;
+  }
+
+  .rrhh-dialog-title {
+    color: var(--vino);
+    font-size: 18px;
+    font-weight: 800;
+  }
+
   @media (max-width: 1180px) {
     .rrhh-layout,
     .rrhh-summary,
@@ -372,12 +397,68 @@
               <input id="nss" class="input-field" type="text" name="nss">
             </div>
             <div class="rrhh-field">
-              <label for="area">Área</label>
-              <input id="area" class="input-field" type="text" name="area">
+              <label for="area">Área / división</label>
+              <select id="area" class="input-field" name="area" data-catalog-select data-catalog-field="area">
+                <option value="">Sin definir</option>
+                {% for value,label,departamento_origen,departamento_actual,puesto_operativo in area_division_choices %}
+                  <option value="{{ value }}"
+                          data-departamento-origen="{{ departamento_origen }}"
+                          data-departamento-actual="{{ departamento_actual }}"
+                          data-puesto-operativo="{{ puesto_operativo }}">{{ label }}</option>
+                {% endfor %}
+                <option value="__otro__">Otro...</option>
+              </select>
+              <input type="hidden" name="area_otro" data-catalog-other="area">
             </div>
             <div class="rrhh-field">
               <label for="puesto">Puesto</label>
               <input id="puesto" class="input-field" type="text" name="puesto">
+            </div>
+            <div class="rrhh-field">
+              <label for="departamento_origen">Departamento origen</label>
+              <select id="departamento_origen" class="input-field" name="departamento_origen" data-departamento-origen-select>
+                <option value="">Sin definir</option>
+                {% for value,label in departamento_choices %}
+                  <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="rrhh-field">
+              <label for="departamento">Departamento actual / adscripción</label>
+              <select id="departamento" class="input-field" name="departamento">
+                <option value="">Sin definir</option>
+                {% for value,label in departamento_choices %}
+                  <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="rrhh-field">
+              <label for="puesto_operativo">Puesto operativo</label>
+              <select id="puesto_operativo" class="input-field" name="puesto_operativo" data-catalog-select data-catalog-field="puesto_operativo">
+                <option value="">Sin definir</option>
+                {% for value,label in puesto_operativo_choices %}
+                  <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+                <option value="__otro__">Otro...</option>
+              </select>
+              <input type="hidden" name="puesto_operativo_otro" data-catalog-other="puesto_operativo">
+            </div>
+            <div class="rrhh-field span-2">
+              <label for="jefe_directo">Jefe directo</label>
+              <select id="jefe_directo" class="input-field" name="jefe_directo">
+                <option value="">Sin jefe directo</option>
+                {% for jefe in empleados_jefes %}
+                  <option value="{{ jefe.id }}">{{ jefe.nombre }}{% if jefe.departamento %} · {{ jefe.get_departamento_display }}{% endif %}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="rrhh-field">
+              <label for="tipo_personal">Tipo de personal</label>
+              <select id="tipo_personal" class="input-field" name="tipo_personal">
+                {% for value,label in tipo_personal_choices %}
+                  <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+              </select>
             </div>
             <div class="rrhh-field">
               <label for="tipo_contrato">Contrato</label>
@@ -407,6 +488,14 @@
               <label for="sucursal">Sucursal</label>
               <input id="sucursal" class="input-field" type="text" name="sucursal">
             </div>
+            <label class="rrhh-checkline">
+              <input type="checkbox" name="participa_bonos_ventas">
+              Participa en bonos ventas
+            </label>
+            <label class="rrhh-checkline">
+              <input type="checkbox" name="participa_bonos_produccion">
+              Participa en bonos producción
+            </label>
           </div>
           <div class="rrhh-actions">
             <button class="btn btn-primary" type="submit">Guardar empleado</button>
@@ -447,6 +536,145 @@
     </article>
   </section>
 
+  {% if can_manage_rrhh %}
+  <section class="rrhh-layout">
+    <article class="rrhh-card">
+      <div class="rrhh-card-header">
+        <div>
+          <div class="rrhh-card-title">Baja de empleado</div>
+          <div class="rrhh-card-subtitle">Registro formal para permanencia, rotación e historial laboral.</div>
+        </div>
+      </div>
+      <div class="rrhh-card-body">
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="baja">
+          <div class="rrhh-form-grid">
+            <div class="rrhh-field span-2">
+              <label for="baja_empleado">Empleado existente</label>
+              <select id="baja_empleado" class="input-field" name="empleado">
+                <option value="">Captura manual</option>
+                {% for e in empleados %}
+                  <option value="{{ e.id }}">{{ e.nombre }}{% if e.codigo %} · {{ e.codigo }}{% endif %}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="rrhh-field span-2">
+              <label for="nombre_baja">Nombre si no existe en catálogo</label>
+              <input id="nombre_baja" class="input-field" type="text" name="nombre_baja">
+            </div>
+            <div class="rrhh-field">
+              <label for="area_baja">Área</label>
+              <input id="area_baja" class="input-field" type="text" name="area_baja">
+            </div>
+            <div class="rrhh-field">
+              <label for="puesto_baja">Puesto</label>
+              <input id="puesto_baja" class="input-field" type="text" name="puesto_baja">
+            </div>
+            <div class="rrhh-field">
+              <label for="fecha_ingreso_baja">Ingreso</label>
+              <input id="fecha_ingreso_baja" class="input-field" type="date" name="fecha_ingreso">
+            </div>
+            <div class="rrhh-field">
+              <label for="fecha_baja">Baja</label>
+              <input id="fecha_baja" class="input-field" type="date" name="fecha_baja" required>
+            </div>
+            <div class="rrhh-field">
+              <label for="tipo_contrato_baja">Contrato</label>
+              <select id="tipo_contrato_baja" class="input-field" name="tipo_contrato_baja">
+                {% for value,label in contrato_choices %}
+                  <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="rrhh-field">
+              <label for="motivo">Motivo</label>
+              <select id="motivo" class="input-field" name="motivo">
+                {% for value,label in motivo_baja_choices %}
+                  <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="rrhh-field span-2">
+              <label for="observacion_baja">Observación</label>
+              <textarea id="observacion_baja" class="input-field" name="observacion" rows="2"></textarea>
+            </div>
+            <label class="rrhh-checkline span-2">
+              <input type="checkbox" name="marcar_inactivo" checked>
+              Marcar empleado como inactivo
+            </label>
+          </div>
+          <div class="rrhh-actions">
+            <button class="btn btn-primary" type="submit">Registrar baja</button>
+          </div>
+        </form>
+      </div>
+    </article>
+
+    <article class="rrhh-card">
+      <div class="rrhh-card-header">
+        <div>
+          <div class="rrhh-card-title">Plantilla autorizada</div>
+          <div class="rrhh-card-subtitle">Base para brechas de personal, rotación y vacantes.</div>
+        </div>
+      </div>
+      <div class="rrhh-card-body">
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="plantilla">
+          <div class="rrhh-form-grid">
+            <div class="rrhh-field">
+              <label for="plantilla_anio">Año</label>
+              <input id="plantilla_anio" class="input-field" type="number" name="anio" min="2024" max="2035" value="{% now 'Y' %}" required>
+            </div>
+            <div class="rrhh-field">
+              <label for="mes_plantilla">Mes</label>
+              <select id="mes_plantilla" class="input-field" name="mes_plantilla">
+                <option value="">Base anual</option>
+                {% for month in months %}
+                  <option value="{{ month }}">{{ month }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="rrhh-field">
+              <label for="area_plantilla">Área</label>
+              <input id="area_plantilla" class="input-field" type="text" name="area_plantilla" required>
+            </div>
+            <div class="rrhh-field">
+              <label for="puesto_plantilla">Puesto</label>
+              <input id="puesto_plantilla" class="input-field" type="text" name="puesto_plantilla">
+            </div>
+            <div class="rrhh-field">
+              <label for="cantidad">Cantidad</label>
+              <input id="cantidad" class="input-field" type="number" name="cantidad" min="0" required>
+            </div>
+            <div class="rrhh-field">
+              <label for="notas">Notas</label>
+              <input id="notas" class="input-field" type="text" name="notas">
+            </div>
+          </div>
+          <div class="rrhh-actions">
+            <button class="btn btn-primary" type="submit">Guardar plantilla</button>
+          </div>
+        </form>
+
+        <div class="rrhh-focus-summary">
+          <div>
+            <strong>Últimas bajas</strong>
+            <div class="muted">
+              {% for baja in bajas_recientes %}
+                {{ baja.nombre }} · {{ baja.fecha_baja }}{% if not forloop.last %}<br>{% endif %}
+              {% empty %}
+                Sin bajas registradas.
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+  </section>
+  {% endif %}
+
   <section class="rrhh-card">
     <div class="rrhh-card-header">
       <div>
@@ -482,7 +710,11 @@
               <th>CURP</th>
               <th>NSS</th>
               <th>Área</th>
+              <th>Origen</th>
+              <th>Adscripción</th>
               <th>Puesto</th>
+              <th>Jefe directo</th>
+              <th>Bonos</th>
               <th>Ingreso</th>
               <th class="text-end">Salario</th>
               <th>Estatus</th>
@@ -500,7 +732,15 @@
               <td>{{ e.curp|default:"-" }}</td>
               <td>{{ e.nss|default:"-" }}</td>
               <td>{{ e.area|default:"-" }}</td>
+              <td>{{ e.get_departamento_origen_display|default:"-" }}</td>
+              <td>{{ e.get_departamento_display|default:"-" }}</td>
               <td>{{ e.puesto|default:"-" }}</td>
+              <td>{{ e.jefe_directo.nombre|default:"-" }}</td>
+              <td>
+                {% if e.participa_bonos_ventas %}<span class="rrhh-status active">Ventas</span>{% endif %}
+                {% if e.participa_bonos_produccion %}<span class="rrhh-status active">Producción</span>{% endif %}
+                {% if not e.participa_bonos_ventas and not e.participa_bonos_produccion %}<span class="muted">-</span>{% endif %}
+              </td>
               <td>{{ e.fecha_ingreso|date:"Y-m-d" }}</td>
               <td class="text-end">${{ e.salario_diario|floatformat:2|intcomma }}</td>
               <td>
@@ -520,7 +760,7 @@
             </tr>
             {% if can_manage_rrhh %}
             <tr class="rrhh-edit-row">
-              <td colspan="10">
+              <td colspan="14">
                 <details class="rrhh-edit-panel">
                   <summary>Editar {{ e.nombre }}</summary>
                   <form method="post" class="rrhh-edit-form">
@@ -545,12 +785,79 @@
                         <input id="edit_nss_{{ e.id }}" class="input-field" type="text" name="nss" value="{{ e.nss }}">
                       </div>
                       <div class="rrhh-field">
-                        <label for="edit_area_{{ e.id }}">Área</label>
-                        <input id="edit_area_{{ e.id }}" class="input-field" type="text" name="area" value="{{ e.area }}">
+                        <label for="edit_area_{{ e.id }}">Área / división</label>
+                        <select id="edit_area_{{ e.id }}" class="input-field" name="area" data-catalog-select data-catalog-field="area">
+                          <option value="">Sin definir</option>
+                          {% if e.area and e.area not in area_division_values %}
+                            <option value="{{ e.area }}" selected>{{ e.area }} (actual)</option>
+                          {% endif %}
+                          {% for value,label,departamento_origen,departamento_actual,puesto_operativo in area_division_choices %}
+                            <option value="{{ value }}"
+                                    data-departamento-origen="{{ departamento_origen }}"
+                                    data-departamento-actual="{{ departamento_actual }}"
+                                    data-puesto-operativo="{{ puesto_operativo }}"
+                                    {% if e.area == value %}selected{% endif %}>{{ label }}</option>
+                          {% endfor %}
+                          <option value="__otro__">Otro...</option>
+                        </select>
+                        <input type="hidden" name="area_otro" data-catalog-other="area">
                       </div>
                       <div class="rrhh-field">
                         <label for="edit_puesto_{{ e.id }}">Puesto</label>
                         <input id="edit_puesto_{{ e.id }}" class="input-field" type="text" name="puesto" value="{{ e.puesto }}">
+                      </div>
+                      <div class="rrhh-field">
+                        <label for="edit_departamento_origen_{{ e.id }}">Departamento origen</label>
+                        <select id="edit_departamento_origen_{{ e.id }}" class="input-field" name="departamento_origen" data-departamento-origen-select>
+                          <option value="">Sin definir</option>
+                          {% for value,label in departamento_choices %}
+                            <option value="{{ value }}" {% if e.departamento_origen == value %}selected{% endif %}>{{ label }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                      <div class="rrhh-field">
+                        <label for="edit_departamento_{{ e.id }}">Departamento actual / adscripción</label>
+                        <select id="edit_departamento_{{ e.id }}" class="input-field" name="departamento">
+                          <option value="">Sin definir</option>
+                          {% for value,label in departamento_choices %}
+                            <option value="{{ value }}" {% if e.departamento == value %}selected{% endif %}>{{ label }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                      <div class="rrhh-field">
+                        <label for="edit_puesto_operativo_{{ e.id }}">Puesto operativo</label>
+                        <select id="edit_puesto_operativo_{{ e.id }}" class="input-field" name="puesto_operativo" data-catalog-select data-catalog-field="puesto_operativo">
+                          <option value="">Sin definir</option>
+                          {% if e.puesto_operativo and e.puesto_operativo not in puesto_operativo_values %}
+                            <option value="{{ e.puesto_operativo }}" selected>{{ e.puesto_operativo }} (actual)</option>
+                          {% endif %}
+                          {% for value,label in puesto_operativo_choices %}
+                            <option value="{{ value }}" {% if e.puesto_operativo == value %}selected{% endif %}>{{ label }}</option>
+                          {% endfor %}
+                          <option value="__otro__">Otro...</option>
+                        </select>
+                        <input type="hidden" name="puesto_operativo_otro" data-catalog-other="puesto_operativo">
+                      </div>
+                      <div class="rrhh-field span-2">
+                        <label for="edit_jefe_directo_{{ e.id }}">Jefe directo</label>
+                        <select id="edit_jefe_directo_{{ e.id }}" class="input-field" name="jefe_directo">
+                          <option value="">Sin jefe directo</option>
+                          {% for jefe in empleados_jefes %}
+                            {% if jefe.id != e.id %}
+                              <option value="{{ jefe.id }}" {% if e.jefe_directo_id == jefe.id %}selected{% endif %}>
+                                {{ jefe.nombre }}{% if jefe.departamento %} · {{ jefe.get_departamento_display }}{% endif %}
+                              </option>
+                            {% endif %}
+                          {% endfor %}
+                        </select>
+                      </div>
+                      <div class="rrhh-field">
+                        <label for="edit_tipo_personal_{{ e.id }}">Tipo de personal</label>
+                        <select id="edit_tipo_personal_{{ e.id }}" class="input-field" name="tipo_personal">
+                          {% for value,label in tipo_personal_choices %}
+                            <option value="{{ value }}" {% if e.tipo_personal == value %}selected{% endif %}>{{ label }}</option>
+                          {% endfor %}
+                        </select>
                       </div>
                       <div class="rrhh-field">
                         <label for="edit_tipo_{{ e.id }}">Contrato</label>
@@ -584,6 +891,14 @@
                         <input type="checkbox" name="activo" {% if e.activo %}checked{% endif %}>
                         Activo
                       </label>
+                      <label class="rrhh-checkline">
+                        <input type="checkbox" name="participa_bonos_ventas" {% if e.participa_bonos_ventas %}checked{% endif %}>
+                        Participa en bonos ventas
+                      </label>
+                      <label class="rrhh-checkline">
+                        <input type="checkbox" name="participa_bonos_produccion" {% if e.participa_bonos_produccion %}checked{% endif %}>
+                        Participa en bonos producción
+                      </label>
                     </div>
                     <div class="rrhh-actions">
                       <button class="btn btn-primary btn-small" type="submit">Guardar cambios</button>
@@ -594,7 +909,7 @@
             </tr>
             {% endif %}
             {% empty %}
-            <tr><td colspan="10" class="muted">Sin empleados para este filtro.</td></tr>
+            <tr><td colspan="14" class="muted">Sin empleados para este filtro.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -602,4 +917,91 @@
     </div>
   </section>
 </div>
+
+<dialog id="modal-catalogo-otro" class="rrhh-dialog">
+  <div class="rrhh-dialog-body">
+    <div>
+      <div class="rrhh-dialog-title">Agregar otro valor</div>
+      <div class="muted" id="catalogo_otro_contexto">Catálogo de empleado</div>
+    </div>
+    <div class="rrhh-field">
+      <label for="catalogo_otro_valor">Valor requerido</label>
+      <input id="catalogo_otro_valor" class="input-field" type="text" autocomplete="off">
+    </div>
+    <div class="rrhh-actions">
+      <button class="btn btn-secondary" type="button" data-catalog-cancel>Cancelar</button>
+      <button class="btn btn-primary" type="button" data-catalog-apply>Aplicar</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+(() => {
+  const modal = document.getElementById('modal-catalogo-otro');
+  const input = document.getElementById('catalogo_otro_valor');
+  const context = document.getElementById('catalogo_otro_contexto');
+  let activeSelect = null;
+  let previousValue = '';
+
+  function openCatalogModal(select) {
+    activeSelect = select;
+    previousValue = Array.from(select.options).find(option => option.defaultSelected)?.value || '';
+    context.textContent = select.dataset.catalogField === 'area' ? 'Área / división' : 'Puesto operativo';
+    input.value = '';
+    modal.showModal();
+    input.focus();
+  }
+
+  function syncAreaDefaults(select) {
+    if (!select || select.dataset.catalogField !== 'area' || select.value === '__otro__') return;
+    const selected = select.selectedOptions[0];
+    const form = select.closest('form');
+    const origen = selected?.dataset.departamentoOrigen || '';
+    const actual = selected?.dataset.departamentoActual || '';
+    const puesto = selected?.dataset.puestoOperativo || '';
+    const origenSelect = form.querySelector('[data-departamento-origen-select]');
+    const actualSelect = form.querySelector('select[name="departamento"]');
+    const puestoSelect = form.querySelector('select[name="puesto_operativo"]');
+    const ventas = form.querySelector('input[name="participa_bonos_ventas"]');
+    const produccion = form.querySelector('input[name="participa_bonos_produccion"]');
+    if (origen && origenSelect) origenSelect.value = origen;
+    if (actual && actualSelect) actualSelect.value = actual;
+    if (puesto && puestoSelect && Array.from(puestoSelect.options).some(option => option.value === puesto)) {
+      puestoSelect.value = puesto;
+    }
+    if (ventas) ventas.checked = puesto === 'REPARTIDOR';
+    if (produccion) produccion.checked = ['HORNOS', 'PRODUCCION', 'ARMADO', 'CRUCERO', 'ENVIO_SUCURSAL'].includes(puesto);
+  }
+
+  document.addEventListener('change', (event) => {
+    const select = event.target.closest('[data-catalog-select]');
+    if (!select) return;
+    if (select.value === '__otro__') {
+      openCatalogModal(select);
+      return;
+    }
+    syncAreaDefaults(select);
+  });
+
+  modal.querySelector('[data-catalog-cancel]').addEventListener('click', () => {
+    if (activeSelect) activeSelect.value = previousValue;
+    modal.close();
+  });
+
+  modal.querySelector('[data-catalog-apply]').addEventListener('click', () => {
+    const value = input.value.trim().toUpperCase();
+    if (!value || !activeSelect) return;
+    const field = activeSelect.dataset.catalogField;
+    const form = activeSelect.closest('form');
+    const otherInput = form.querySelector(`[data-catalog-other="${field}"]`);
+    if (otherInput) otherInput.value = value;
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = `${value} (nuevo)`;
+    option.selected = true;
+    activeSelect.insertBefore(option, activeSelect.querySelector('option[value="__otro__"]'));
+    modal.close();
+  });
+})();
+</script>
 {% endblock %}

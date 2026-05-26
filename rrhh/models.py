@@ -19,6 +19,28 @@ class Empleado(models.Model):
         (CONTRATO_TEMPORAL, "Temporal"),
         (CONTRATO_HONORARIOS, "Honorarios"),
     ]
+    DEP_ADMINISTRACION = "ADMINISTRACION"
+    DEP_VENTAS = "VENTAS"
+    DEP_PRODUCCION = "PRODUCCION"
+    DEP_RRHH = "RRHH"
+    DEP_MANTENIMIENTO = "MANTENIMIENTO"
+    DEP_LOGISTICA = "LOGISTICA"
+    DEP_MARKETING = "MARKETING"
+    DEP_CHOICES = [
+        (DEP_ADMINISTRACION, "Administración"),
+        (DEP_VENTAS, "Ventas"),
+        (DEP_PRODUCCION, "Producción"),
+        (DEP_RRHH, "Recursos Humanos"),
+        (DEP_MANTENIMIENTO, "Mantenimiento"),
+        (DEP_LOGISTICA, "Logística"),
+        (DEP_MARKETING, "Marketing"),
+    ]
+    TIPO_POLLYANA = "POLLYANA"
+    TIPO_EXTERNO = "EXTERNO"
+    TIPO_PERSONAL_CHOICES = [
+        (TIPO_POLLYANA, "Pollyana's Dolce"),
+        (TIPO_EXTERNO, "Externo / apoyo"),
+    ]
 
     codigo = models.CharField(max_length=40, unique=True, blank=True)
     nombre = models.CharField(max_length=180)
@@ -34,6 +56,31 @@ class Empleado(models.Model):
     telefono = models.CharField(max_length=40, blank=True, default="")
     email = models.EmailField(blank=True, default="")
     sucursal = models.CharField(max_length=120, blank=True, default="")
+    departamento_origen = models.CharField(max_length=40, choices=DEP_CHOICES, blank=True, default="", db_index=True)
+    departamento = models.CharField(max_length=40, choices=DEP_CHOICES, blank=True, default="", db_index=True)
+    puesto_operativo = models.CharField(max_length=80, blank=True, default="", db_index=True)
+    jefe_directo = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="colaboradores_directos",
+    )
+    usuario_erp = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="empleado_rrhh",
+    )
+    tipo_personal = models.CharField(
+        max_length=20,
+        choices=TIPO_PERSONAL_CHOICES,
+        default=TIPO_POLLYANA,
+        db_index=True,
+    )
+    participa_bonos_ventas = models.BooleanField(default=False)
+    participa_bonos_produccion = models.BooleanField(default=False)
     activo = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -232,6 +279,140 @@ class NominaImportacion(models.Model):
 
     def __str__(self) -> str:
         return f"{self.archivo_nombre} · {self.estatus}"
+
+
+class EmpleadoBaja(models.Model):
+    MOTIVO_ABANDONO = "abandono"
+    MOTIVO_MEJOR_OPORTUNIDAD = "mejor_oportunidad"
+    MOTIVO_CAMBIO_DOMICILIO = "cambio_domicilio"
+    MOTIVO_AMBIENTE = "ambiente"
+    MOTIVO_REMUNERACION = "remuneracion"
+    MOTIVO_NO_APTO = "no_apto"
+    MOTIVO_OTRO = "otro"
+    MOTIVO_CHOICES = [
+        (MOTIVO_ABANDONO, "Abandono laboral"),
+        (MOTIVO_MEJOR_OPORTUNIDAD, "Mejor oportunidad de empleo"),
+        (MOTIVO_CAMBIO_DOMICILIO, "Cambio de domicilio"),
+        (MOTIVO_AMBIENTE, "Mal ambiente laboral"),
+        (MOTIVO_REMUNERACION, "Baja remuneración"),
+        (MOTIVO_NO_APTO, "No apto"),
+        (MOTIVO_OTRO, "Otro"),
+    ]
+
+    empleado = models.ForeignKey(
+        "rrhh.Empleado",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="bajas_rrhh",
+    )
+    nombre = models.CharField(max_length=180)
+    area = models.CharField(max_length=120, blank=True, default="")
+    puesto = models.CharField(max_length=120, blank=True, default="")
+    tipo_contrato = models.CharField(max_length=20, choices=Empleado.CONTRATO_CHOICES, default=Empleado.CONTRATO_FIJO)
+    fecha_ingreso = models.DateField()
+    fecha_baja = models.DateField()
+    motivo = models.CharField(max_length=32, choices=MOTIVO_CHOICES, default=MOTIVO_OTRO)
+    observacion = models.TextField(blank=True, default="")
+    creado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-fecha_baja", "nombre"]
+        verbose_name = "Baja de empleado"
+        verbose_name_plural = "Bajas de empleados"
+
+    @property
+    def antiguedad_meses(self) -> Decimal:
+        if not self.fecha_ingreso or not self.fecha_baja:
+            return Decimal("0")
+        dias = max((self.fecha_baja - self.fecha_ingreso).days, 0)
+        return (Decimal(dias) / (Decimal("365") / Decimal("12"))).quantize(Decimal("0.01"))
+
+    @property
+    def en_periodo_prueba(self) -> bool:
+        return self.antiguedad_meses <= Decimal("3")
+
+    def save(self, *args, **kwargs):
+        if self.empleado_id:
+            self.nombre = self.nombre or self.empleado.nombre
+            self.area = self.area or self.empleado.area
+            self.puesto = self.puesto or self.empleado.puesto
+            self.tipo_contrato = self.tipo_contrato or self.empleado.tipo_contrato
+            self.fecha_ingreso = self.fecha_ingreso or self.empleado.fecha_ingreso
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"{self.nombre} · {self.fecha_baja}"
+
+
+class PlantillaAutorizada(models.Model):
+    anio = models.PositiveSmallIntegerField()
+    mes = models.PositiveSmallIntegerField(null=True, blank=True, help_text="Vacío aplica como plantilla base anual")
+    area = models.CharField(max_length=120)
+    puesto = models.CharField(max_length=120, blank=True, default="")
+    cantidad = models.PositiveSmallIntegerField(default=0)
+    notas = models.CharField(max_length=200, blank=True, default="")
+    actualizado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("anio", "mes", "area", "puesto")]
+        ordering = ["-anio", "-mes", "area", "puesto"]
+        verbose_name = "Plantilla autorizada"
+        verbose_name_plural = "Plantillas autorizadas"
+
+    def __str__(self) -> str:
+        periodo = f"{self.anio}-{self.mes:02d}" if self.mes else str(self.anio)
+        puesto = f" · {self.puesto}" if self.puesto else ""
+        return f"{periodo} · {self.area}{puesto}: {self.cantidad}"
+
+
+class VacanteRRHH(models.Model):
+    ESTADO_SOLICITADA = "solicitada"
+    ESTADO_RECLUTAMIENTO = "reclutamiento"
+    ESTADO_CUBIERTA = "cubierta"
+    ESTADO_PAUSADA = "pausada"
+    ESTADO_CANCELADA = "cancelada"
+    ESTADO_CHOICES = [
+        (ESTADO_SOLICITADA, "Solicitada"),
+        (ESTADO_RECLUTAMIENTO, "En reclutamiento"),
+        (ESTADO_CUBIERTA, "Cubierta"),
+        (ESTADO_PAUSADA, "Pausada"),
+        (ESTADO_CANCELADA, "Cancelada"),
+    ]
+
+    area = models.CharField(max_length=120)
+    puesto = models.CharField(max_length=120)
+    fecha_solicitada = models.DateField()
+    estado = models.CharField(max_length=16, choices=ESTADO_CHOICES, default=ESTADO_SOLICITADA)
+    fecha_cubierta = models.DateField(null=True, blank=True)
+    empleado_cubrio = models.ForeignKey(
+        "rrhh.Empleado",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="vacantes_cubiertas",
+    )
+    motivo_no_cubierta = models.TextField(blank=True, default="")
+    sugerencias = models.TextField(blank=True, default="")
+    creado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-fecha_solicitada", "area", "puesto"]
+        verbose_name = "Vacante RRHH"
+        verbose_name_plural = "Vacantes RRHH"
+
+    @property
+    def dias_en_cubrir(self) -> int | None:
+        if not self.fecha_cubierta:
+            return None
+        return max((self.fecha_cubierta - self.fecha_solicitada).days, 0)
+
+    def __str__(self) -> str:
+        return f"{self.area} · {self.puesto} · {self.get_estado_display()}"
 
 
 class Turno(models.Model):
@@ -497,6 +678,14 @@ class Prestamo(models.Model):
         verbose_name="Saldo pendiente",
     )
     estado = models.CharField(max_length=12, choices=ESTADO_CHOICES, default=ESTADO_SOLICITADO)
+    jefe_directo = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="prestamos_por_autorizar",
+        verbose_name="Jefe directo / primer autorizador",
+    )
     firma_jefe = models.BooleanField(default=False)
     autorizado_jefe = models.ForeignKey(
         settings.AUTH_USER_MODEL,

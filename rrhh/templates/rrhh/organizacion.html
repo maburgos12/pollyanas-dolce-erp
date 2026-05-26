@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+
+{% block title %}RRHH · Organización{% endblock %}
+{% block page_title %}RRHH · Organización{% endblock %}
+
+{% block extra_css %}
+<style>
+  .org-page { display: grid; gap: 16px; }
+  .org-head {
+    background: #fff;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    display: grid;
+    gap: 14px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 18px;
+  }
+  .org-title { color: var(--vino); font-family: "Playfair Display", serif; font-size: 25px; font-weight: 800; }
+  .org-copy { color: var(--texto-light); margin-top: 4px; max-width: 780px; }
+  .org-stats { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(120px, 1fr)); }
+  .org-stat { background: #fbf6f8; border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; }
+  .org-stat strong { color: var(--vino); display: block; font-size: 22px; line-height: 1; }
+  .org-stat span { color: var(--texto-light); font-size: 11px; font-weight: 900; text-transform: uppercase; }
+  .org-grid { display: grid; gap: 16px; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); }
+  .org-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 16px; }
+  .org-card h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
+  .org-tree { display: grid; gap: 10px; }
+  .org-leader { border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; }
+  .org-leader-title { color: var(--vino); font-weight: 900; }
+  .org-leader-meta { color: var(--texto-light); font-size: 13px; margin-top: 2px; }
+  .org-children { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .org-chip { background: #f7edf2; border-radius: 999px; color: var(--texto); display: inline-flex; font-size: 12px; font-weight: 800; padding: 5px 9px; }
+  .org-table { min-width: 1120px; width: 100%; border-collapse: collapse; }
+  .org-table th, .org-table td { border-bottom: 1px solid var(--rosa); padding: 10px; text-align: left; vertical-align: top; }
+  .org-table th { color: var(--vino); font-size: 12px; text-transform: uppercase; }
+  .org-badge { background: rgba(201,168,76,.18); border-radius: 999px; color: #6f5415; display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }
+  .org-muted { color: var(--texto-light); font-size: 13px; }
+  @media (max-width: 1100px) {
+    .org-head,
+    .org-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 680px) { .org-stats { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="org-page">
+  <div class="org-head">
+    <div>
+      <div class="org-title">Mapa organizacional</div>
+      <div class="org-copy">
+        Revisión de la base única de personal: departamento, puesto operativo, jefe directo y reglas base de bonos.
+        Esta pantalla es el puente para permisos, préstamos, horas extra y bonos.
+      </div>
+    </div>
+    <div class="org-stats">
+      <div class="org-stat"><strong>{{ total_activos }}</strong><span>Activos</span></div>
+      <div class="org-stat"><strong>{{ jefes|length }}</strong><span>Jefes con equipo</span></div>
+      <div class="org-stat"><strong>{{ sin_jefe|length }}</strong><span>Sin jefe definido</span></div>
+    </div>
+  </div>
+
+  <div class="org-grid">
+    <section class="org-card">
+      <h2>Jefatura y equipos</h2>
+      <div class="org-tree">
+        {% for jefe in jefes %}
+          <article class="org-leader">
+            <div class="org-leader-title">{{ jefe.nombre }}</div>
+            <div class="org-leader-meta">{{ jefe.get_departamento_display|default:jefe.departamento }} · {{ jefe.puesto|default:"Sin puesto" }}</div>
+            <div class="org-children">
+              {% for empleado in jefe.colaboradores_directos.all %}
+                {% if empleado.activo %}<span class="org-chip">{{ empleado.nombre }}</span>{% endif %}
+              {% endfor %}
+            </div>
+          </article>
+        {% empty %}
+          <div class="org-muted">Sin jerarquías capturadas todavía.</div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="org-card">
+      <h2>Resumen por departamento</h2>
+      <div class="table-responsive">
+        <table class="org-table" style="min-width:680px;">
+          <thead><tr><th>Departamento</th><th>Activos</th><th>Bonos ventas</th><th>Bonos producción</th></tr></thead>
+          <tbody>
+            {% for row in departamentos %}
+              <tr>
+                <td>{{ row.departamento|default:"Sin clasificar" }}</td>
+                <td>{{ row.total }}</td>
+                <td>{{ row.bonos_ventas }}</td>
+                <td>{{ row.bonos_produccion }}</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="4">Sin empleados activos.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <section class="org-card">
+    <h2>Base maestra de personal</h2>
+    <div class="table-responsive">
+      <table class="org-table">
+        <thead>
+          <tr>
+            <th>Código</th>
+            <th>Empleado</th>
+            <th>Origen</th>
+            <th>Adscripción</th>
+            <th>Área / división</th>
+            <th>Puesto</th>
+            <th>Puesto operativo</th>
+            <th>Jefe directo</th>
+            <th>Sucursal</th>
+            <th>Tipo</th>
+            <th>Bonos</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for empleado in empleados %}
+          <tr>
+            <td>{{ empleado.codigo }}</td>
+            <td><strong>{{ empleado.nombre }}</strong></td>
+            <td>{{ empleado.get_departamento_origen_display|default:empleado.departamento_origen|default:"-" }}</td>
+            <td>{{ empleado.get_departamento_display|default:empleado.departamento|default:"-" }}</td>
+            <td>{{ empleado.area|default:"-" }}</td>
+            <td>{{ empleado.puesto|default:"-" }}</td>
+            <td>{{ empleado.puesto_operativo|default:"-" }}</td>
+            <td>{% if empleado.jefe_directo %}{{ empleado.jefe_directo.nombre }}{% else %}<span class="org-muted">Sin jefe directo</span>{% endif %}</td>
+            <td>{{ empleado.sucursal|default:"-" }}</td>
+            <td>{{ empleado.get_tipo_personal_display }}</td>
+            <td>
+              {% if empleado.participa_bonos_ventas %}<span class="org-badge">Ventas</span>{% endif %}
+              {% if empleado.participa_bonos_produccion %}<span class="org-badge">Producción</span>{% endif %}
+              {% if not empleado.participa_bonos_ventas and not empleado.participa_bonos_produccion %}<span class="org-muted">-</span>{% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="9">Sin empleados activos.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</section>
+{% endblock %}
