@@ -1131,6 +1131,248 @@ textarea:focus,
   white-space: nowrap;
 }
 
+.logi-bitacoras-page {
+  display: grid;
+  gap: clamp(14px, 1.5vw, 22px);
+  padding-top: clamp(14px, 1.6vw, 24px);
+}
+
+.logi-bitacoras-page .module-tabs {
+  margin-bottom: 0;
+}
+
+.logi-bitacoras-head {
+  align-items: start;
+  margin-bottom: 0;
+}
+
+.logi-bitacoras-filter-panel {
+  padding: clamp(14px, 1.35vw, 20px);
+}
+
+.logi-bitacoras-filter {
+  display: grid;
+  grid-template-columns:
+    minmax(180px, 1.05fr)
+    minmax(220px, 1.2fr)
+    minmax(150px, 0.78fr)
+    minmax(150px, 0.78fr)
+    minmax(150px, 0.78fr)
+    auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.logi-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.logi-field label {
+  margin: 0;
+  color: var(--pd-muted);
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.logi-field .input-field,
+.logi-field .pd-searchable-select__input {
+  min-height: var(--pd-control-height);
+}
+
+.logi-bitacoras-actions {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  justify-content: flex-end;
+}
+
+.logi-bitacoras-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--pd-control-height);
+  padding-inline: 18px;
+  white-space: nowrap;
+}
+
+.logi-bitacoras-results {
+  overflow: hidden;
+  padding: 0;
+}
+
+.logi-bitacoras-results-head {
+  align-items: center;
+  margin: 0;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--pd-border);
+}
+
+.logi-bitacoras-results-head h2 {
+  margin: 0;
+  color: var(--pd-wine);
+  font-family: var(--pd-font-body);
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.log-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.log-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  max-width: 100%;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.15;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.log-badge.ok {
+  background: var(--pd-success-soft);
+  color: var(--pd-success);
+}
+
+.log-badge.warn {
+  background: var(--pd-warning-soft);
+  color: var(--pd-warning);
+}
+
+.log-badge.danger {
+  background: var(--pd-danger-soft);
+  color: var(--pd-danger);
+}
+
+.logi-bitacoras-table-wrap {
+  --table-min-width: 1680px;
+  border: 0;
+  border-radius: 0;
+}
+
+.table-responsive > table.logi-bitacoras-table {
+  width: 100%;
+  min-width: 1680px;
+}
+
+.logi-bitacoras-table th,
+.logi-bitacoras-table td {
+  vertical-align: top;
+}
+
+.logi-bitacoras-table .logi-fuel-cell {
+  min-width: 220px;
+  max-width: 280px;
+}
+
+.logi-bitacoras-table .logi-photos-cell {
+  min-width: 142px;
+}
+
+.log-fuel {
+  display: grid;
+  gap: 3px;
+  min-width: 180px;
+  max-width: 260px;
+}
+
+.log-fuel + .log-fuel {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--pd-border);
+}
+
+.log-fuel strong {
+  color: var(--pd-wine);
+  font-variant-numeric: var(--pd-numeric-features);
+  line-height: 1.25;
+}
+
+.log-fuel a {
+  color: var(--pd-wine);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.log-fuel a:hover {
+  text-decoration: underline;
+}
+
+.log-muted {
+  color: var(--pd-muted);
+  font-size: 13px;
+}
+
+.log-thumb {
+  width: 64px;
+  height: 46px;
+  object-fit: cover;
+  border: 1px solid var(--pd-border-strong);
+  border-radius: var(--pd-radius-md);
+}
+
+tr.log-overdue td {
+  background: var(--pd-warning-soft);
+}
+
+.log-pager {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 14px 20px 18px;
+}
+
+@media (max-width: 1320px) {
+  .logi-bitacoras-filter {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .logi-bitacoras-actions {
+    justify-content: stretch;
+  }
+
+  .logi-bitacoras-actions .btn {
+    flex: 1 1 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .logi-bitacoras-head,
+  .logi-bitacoras-results-head {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .logi-bitacoras-filter {
+    grid-template-columns: 1fr;
+  }
+
+  .logi-bitacoras-actions,
+  .log-pager {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .logi-bitacoras-actions .btn,
+  .log-pager .btn {
+    width: 100%;
+    min-height: var(--pd-control-height-mobile);
+  }
+}
+
 .recipes-filters {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

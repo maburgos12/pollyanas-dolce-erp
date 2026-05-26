@@ -4,90 +4,90 @@
 {% block title %}Logística · Bitácoras{% endblock %}
 {% block page_title %}Logística · Bitácoras ERP{% endblock %}
 
-{% block extra_css %}
-<style>
-  .logs-shell { display: grid; gap: 18px; }
-  .logi-box { background: #fff; border: 1px solid rgba(139,34,82,.16); border-radius: 18px; padding: 24px; box-shadow: 0 18px 42px rgba(139,34,82,.08); }
-  .logi-box-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 18px; }
-  .logi-box-title { margin: 0; font-family: "Playfair Display", serif; font-size: 30px; line-height: 1.08; color: #3f2633; }
-  .logi-box-copy { margin: 6px 0 0; color: #77656d; line-height: 1.45; }
-  .logs-filter { display: grid; grid-template-columns: repeat(5, minmax(140px, 1fr)) minmax(190px, .8fr); gap: 14px; align-items: end; }
-  .logs-filter label { display: grid; gap: 7px; min-width: 0; color: #6f3150; font-weight: 800; }
-  .logi-filter-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: stretch; }
-  .logi-filter-actions .btn { width: 100%; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
-  .logi-table-box { padding: 0; overflow: hidden; }
-  .logi-table-head { display: flex; justify-content: space-between; gap: 14px; align-items: center; padding: 18px 24px; border-bottom: 1px solid rgba(139,34,82,.10); }
-  .logi-table-title { margin: 0; color: #6f3150; font-size: 16px; font-weight: 900; }
-  .logi-table-wrap { overflow: auto; }
-  .log-badge { display: inline-flex; border-radius: 999px; padding: 5px 10px; font-size: 12px; font-weight: 900; }
-  .log-badge.ok { background: #e5f5ee; color: #1f7554; }
-  .log-badge.warn { background: #fff4d8; color: #9a6a00; }
-  .log-badge.danger { background: #ffe8ec; color: #bc3b56; }
-  .log-thumb { width: 64px; height: 46px; object-fit: cover; border-radius: 8px; border: 1px solid #efc7d8; }
-  .log-fuel { display: grid; gap: 3px; min-width: 118px; }
-  .log-fuel strong { color: #6f3150; }
-  .log-fuel a { color: #8B2252; font-weight: 800; text-decoration: none; }
-  .log-summary { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  tr.log-overdue td { background: #fff8e6; }
-  .log-muted { color: #77656d; font-size: 13px; }
-  .log-pager { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
-  @media (max-width: 1180px) { .logs-filter { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-  @media (max-width: 980px) { .logs-filter { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @media (max-width: 620px) { .logi-box { padding: 18px; } .logi-box-head, .logi-table-head { display: grid; } .logs-filter, .logi-filter-actions, .log-pager { grid-template-columns: 1fr; flex-direction: column; align-items: stretch; } }
-</style>
-<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
-{% endblock %}
-
 {% block content %}
-<div class="logs-shell">
+<div class="pd-page-gutters logi-bitacoras-page">
   <section class="module-tabs" aria-label="Submódulos Logística">
     {% for tab in module_tabs %}
       <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
     {% endfor %}
   </section>
 
-  <section class="logi-box">
-    <div class="logi-box-head">
-      <div>
-        <h1 class="logi-box-title">Bitácoras salida/llegada</h1>
-        <p class="logi-box-copy">Registros de turno capturados desde celular, consultables dentro del ERP.</p>
-      </div>
+  <header class="pd-page-head logi-bitacoras-head">
+    <div>
+      <p class="pd-eyebrow">Logística · Bitácoras</p>
+      <h1 class="pd-page-title">Bitácoras salida/llegada</h1>
+      <p class="pd-page-copy">Registros de turno capturados desde celular, consultables dentro del ERP.</p>
     </div>
-    <form class="logs-filter" method="get">
-      <label>Unidad<select class="input-field" name="unidad"><option value="">Todas</option>{% for unidad in unidades %}<option value="{{ unidad.id }}" {% if filters.unidad == unidad.id|stringformat:"s" %}selected{% endif %}>{{ unidad.codigo }}</option>{% endfor %}</select></label>
-      <label>Repartidor<select class="input-field" name="repartidor"><option value="">Todos</option>{% for repartidor in repartidores %}<option value="{{ repartidor.id }}" {% if filters.repartidor == repartidor.id|stringformat:"s" %}selected{% endif %}>{{ repartidor }}</option>{% endfor %}</select></label>
-      <label>Estatus<select class="input-field" name="cerrada"><option value="">Todos</option><option value="0" {% if filters.cerrada == "0" %}selected{% endif %}>Abierta</option><option value="1" {% if filters.cerrada == "1" %}selected{% endif %}>Cerrada</option></select></label>
-      <label>Desde<input class="input-field" type="date" name="fecha_desde" value="{{ filters.fecha_desde }}"></label>
-      <label>Hasta<input class="input-field" type="date" name="fecha_hasta" value="{{ filters.fecha_hasta }}"></label>
-      <div class="logi-filter-actions"><button class="btn btn-primary" type="submit" style="background:#8B2252;border-color:#8B2252;">Filtrar</button><a class="btn btn-secondary" href="{% url 'logistica:bitacoras_lista' %}">Limpiar</a></div>
+  </header>
+
+  <section class="pd-work-panel logi-bitacoras-filter-panel" aria-label="Filtros de bitácoras">
+    <form class="logi-bitacoras-filter" method="get">
+      <div class="logi-field">
+        <label for="logi_unidad">Unidad</label>
+        <select class="input-field" id="logi_unidad" name="unidad" data-searchable-select="true">
+          <option value="">Todas</option>
+          {% for unidad in unidades %}
+          <option value="{{ unidad.id }}" {% if filters.unidad == unidad.id|stringformat:"s" %}selected{% endif %}>{{ unidad.codigo }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="logi-field">
+        <label for="logi_repartidor">Repartidor</label>
+        <select class="input-field" id="logi_repartidor" name="repartidor" data-searchable-select="true">
+          <option value="">Todos</option>
+          {% for repartidor in repartidores %}
+          <option value="{{ repartidor.id }}" {% if filters.repartidor == repartidor.id|stringformat:"s" %}selected{% endif %}>{{ repartidor }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="logi-field">
+        <label for="logi_cerrada">Estatus</label>
+        <select class="input-field" id="logi_cerrada" name="cerrada" data-searchable-select="true">
+          <option value="">Todos</option>
+          <option value="0" {% if filters.cerrada == "0" %}selected{% endif %}>Abierta</option>
+          <option value="1" {% if filters.cerrada == "1" %}selected{% endif %}>Cerrada</option>
+        </select>
+      </div>
+      <div class="logi-field">
+        <label for="logi_fecha_desde">Desde</label>
+        <input class="input-field" id="logi_fecha_desde" type="date" name="fecha_desde" value="{{ filters.fecha_desde }}">
+      </div>
+      <div class="logi-field">
+        <label for="logi_fecha_hasta">Hasta</label>
+        <input class="input-field" id="logi_fecha_hasta" type="date" name="fecha_hasta" value="{{ filters.fecha_hasta }}">
+      </div>
+      <div class="logi-bitacoras-actions">
+        <button class="btn btn-primary" type="submit">Filtrar</button>
+        <a class="btn btn-secondary" href="{% url 'logistica:bitacoras_lista' %}">Limpiar</a>
+      </div>
     </form>
   </section>
 
-  <section class="logi-box logi-table-box">
-    <div class="logi-table-head">
-      <h2 class="logi-table-title">Resultados</h2>
+  <section class="pd-work-panel logi-bitacoras-results">
+    <div class="pd-panel-head logi-bitacoras-results-head">
+      <h2>Resultados</h2>
       <div class="log-summary">
         <span class="muted">{{ bitacoras_page.paginator.count|intcomma }} bitácoras</span>
         <span class="log-badge warn">{{ cargas_combustible|intcomma }} cargas</span>
         <span class="log-badge ok">Combustible total ${{ combustible_total|floatformat:2|intcomma }}</span>
       </div>
     </div>
-    <div class="logi-table-wrap">
-      <table class="table table-striped">
+    <div class="table-responsive logi-bitacoras-table-wrap">
+      <table class="table table-striped logi-bitacoras-table">
         <thead><tr><th>Folio</th><th>Unidad</th><th>Repartidor</th><th>Hora salida</th><th>Hora llegada</th><th>KM salida</th><th>KM llegada</th><th>KM recorridos</th><th>Nivel gas</th><th>Combustible (importe total)</th><th>Estatus</th><th>Fotos</th></tr></thead>
         <tbody>
           {% for bitacora in bitacoras %}
           <tr class="{% if not bitacora.cerrada and bitacora.horas_abierta > 8 %}log-overdue{% endif %}">
-            <td><strong>{{ bitacora.folio }}</strong></td>
+            <td class="cell-nowrap"><strong>{{ bitacora.folio }}</strong></td>
             <td>{{ bitacora.unidad.codigo }}</td>
-            <td>{{ bitacora.repartidor }}</td>
-            <td>{{ bitacora.hora_salida|date:"d/m/Y H:i" }}</td>
-            <td>{{ bitacora.hora_llegada|date:"d/m/Y H:i"|default:"-" }}</td>
-            <td>{{ bitacora.km_salida|intcomma }}</td>
-            <td>{{ bitacora.km_llegada|default:"-"|intcomma }}</td>
-            <td>{{ bitacora.km_recorridos|default:"-"|intcomma }}</td>
+            <td class="cell-wrap">{{ bitacora.repartidor }}</td>
+            <td class="cell-date">{{ bitacora.hora_salida|date:"d/m/Y H:i" }}</td>
+            <td class="cell-date">{{ bitacora.hora_llegada|date:"d/m/Y H:i"|default:"-" }}</td>
+            <td class="cell-number">{{ bitacora.km_salida|intcomma }}</td>
+            <td class="cell-number">{{ bitacora.km_llegada|default:"-"|intcomma }}</td>
+            <td class="cell-number">{{ bitacora.km_recorridos|default:"-"|intcomma }}</td>
             <td>{{ bitacora.nivel_gas_salida }} → {{ bitacora.nivel_gas_llegada|default:"-" }}</td>
-            <td>
+            <td class="cell-wrap logi-fuel-cell">
               {% if bitacora.litros_cargados or bitacora.costo_combustible or bitacora.foto_ticket_combustible %}
                 <div class="log-fuel">
                   <strong>{{ bitacora.litros_cargados|default:"0" }} L · Total ${{ bitacora.costo_combustible|default:"0"|floatformat:2|intcomma }}</strong>
@@ -114,8 +114,8 @@
                 {% endif %}
               {% endfor %}
             </td>
-            <td>{% if bitacora.cerrada %}<span class="log-badge ok">Cerrada</span>{% else %}<span class="log-badge danger">ABIERTO</span>{% if bitacora.horas_abierta > 8 %}<br><span class="log-badge warn">{{ bitacora.horas_abierta }} h</span>{% endif %}{% endif %}</td>
-            <td>
+            <td class="cell-nowrap">{% if bitacora.cerrada %}<span class="log-badge ok">Cerrada</span>{% else %}<span class="log-badge danger">Abierto</span>{% if bitacora.horas_abierta > 8 %}<span class="log-badge warn">{{ bitacora.horas_abierta }} h</span>{% endif %}{% endif %}</td>
+            <td class="cell-nowrap logi-photos-cell">
               {% if bitacora.foto_tablero_salida %}<a href="{{ bitacora.foto_tablero_salida.url }}" target="_blank" rel="noopener"><img class="log-thumb" src="{{ bitacora.foto_tablero_salida.url }}" alt="Tablero salida"></a>{% endif %}
               {% if bitacora.foto_tablero_llegada %}<a href="{{ bitacora.foto_tablero_llegada.url }}" target="_blank" rel="noopener"><img class="log-thumb" src="{{ bitacora.foto_tablero_llegada.url }}" alt="Tablero llegada"></a>{% endif %}
             </td>
