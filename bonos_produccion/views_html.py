@@ -190,6 +190,7 @@ def bonos_produccion_dashboard(request):
 
 
 @login_required
+@never_cache
 @ensure_csrf_cookie
 def bonos_produccion_pwa(request):
     if not (is_bonos_produccion_capture_only(request.user) or can_view_submodule(request.user, "produccion", "bonos")):
