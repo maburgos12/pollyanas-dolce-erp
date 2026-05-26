@@ -246,14 +246,20 @@ class BonosVentasTests(TestCase):
         user.groups.add(Group.objects.create(name=ROLE_RRHH))
         self.client.force_login(user)
         sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
+        periodo = ConfigBonoVentasPeriodo.objects.create(mes=5, anio=2026)
         empleado = Empleado.objects.create(nombre="Empleado Ventas Permiso", area="VENTAS", sucursal="Payán")
         repartidor = Empleado.objects.create(nombre="Empleado Repartidor Permiso", area="REPARTIDOR", sucursal="Payán")
+        Empleado.objects.create(nombre="Empleado Ventas Fuera Periodo", area="VENTAS", sucursal="Payán")
         Empleado.objects.create(nombre="Empleado Produccion", area="HORNOS")
+        BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal)
+        BonoVentasEmpleado.objects.create(periodo=periodo, empleado=repartidor, sucursal=sucursal)
 
         listado = self.client.get(f"/api/bonos-ventas/permisos/?mes=5&anio=2026&sucursal={sucursal.id}")
 
         self.assertEqual(listado.status_code, 200)
-        self.assertEqual([row["id"] for row in listado.json()["empleados"]], [repartidor.id, empleado.id])
+        empleados_payload = listado.json()["empleados"]
+        self.assertEqual([row["id"] for row in empleados_payload], [repartidor.id, empleado.id])
+        self.assertEqual({row["sucursal_nombre"] for row in empleados_payload}, {"Payán"})
 
         creado = self.client.post(
             "/api/bonos-ventas/permisos/",
