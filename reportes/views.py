@@ -1578,6 +1578,7 @@ def _bi_production_summary(date_from, date_to) -> dict[str, object]:
     items = list(
         PlanProduccionItem.objects.filter(plan_id__in=plan_ids).select_related("receta", "plan").order_by("plan__fecha_produccion")
     )
+    recipe_cost_map = get_total_cost_map({int(item.receta_id) for item in items if item.receta_id})
     total_units = Decimal("0")
     total_cost = Decimal("0")
     final_units = Decimal("0")
@@ -1588,8 +1589,9 @@ def _bi_production_summary(date_from, date_to) -> dict[str, object]:
         qty = _to_decimal(item.cantidad)
         if qty <= 0:
             continue
+        item_cost = _to_decimal(recipe_cost_map.get(int(item.receta_id))) * qty
         total_units += qty
-        total_cost += _to_decimal(item.costo_total_estimado)
+        total_cost += item_cost
         bucket = produced_by_recipe.setdefault(
             int(item.receta_id),
             {
@@ -1599,7 +1601,7 @@ def _bi_production_summary(date_from, date_to) -> dict[str, object]:
             },
         )
         bucket["value"] = _to_decimal(bucket["value"]) + qty
-        bucket["cost"] = _to_decimal(bucket["cost"]) + _to_decimal(item.costo_total_estimado)
+        bucket["cost"] = _to_decimal(bucket["cost"]) + item_cost
         if item.receta.tipo == Receta.TIPO_PRODUCTO_FINAL:
             final_units += qty
             final_recipe_ids.add(int(item.receta_id))
