@@ -160,6 +160,15 @@ Regla de foco: todos los campos editables (`input`, `select`, `textarea`,
 `.form-control`, `.form-select`, `.input-field`) usan borde y halo dorado en
 focus. No usar foco vino, azul nativo ni anillos dobles por modulo.
 
+Regla de listas buscables: todo selector de productos, recetas, insumos,
+sucursales, proveedores, clientes, empleados, responsables, unidades o listas
+largas debe permitir teclear para filtrar. El `select` original sigue siendo la
+fuente de verdad para el POST; la capa visual solo facilita busqueda y seleccion.
+No permitir texto libre si el backend espera un id u opcion cerrada: el valor
+es valido solo si coincide con una opcion real. Los selects cortos de estatus o
+booleanos pueden permanecer nativos, salvo que el modulo marque
+`data-searchable-select="true"`.
+
 Regla de encabezado superior: pantallas operativas, dashboards internos y
 modulos nuevos deben envolver el contenido en `.pd-page-gutters` e iniciar con `.pd-page-head`, `.pd-eyebrow`,
 `.pd-page-title`, `.pd-page-copy` y `.pd-action-row`. No usar heroes grandes,
@@ -180,7 +189,8 @@ la barra lateral izquierda ni al borde derecho de la ventana.
 9. Todo input mantiene el mismo border-width entre estados.
 10. Numeros monetarios, porcentajes y cantidades usan `--pd-font-number` con numeros tabulares.
 11. Botones, tabs y links de navegacion no se parten en dos lineas.
-12. Validar mobile en 320, 375, 414 y 768 px cuando toque UI visible.
+12. Selects/listas de entidades o listas largas deben ser buscables por teclado y bloquear texto libre invalido.
+13. Validar mobile en 320, 375, 414 y 768 px cuando toque UI visible.
 
 ## Navegacion
 
