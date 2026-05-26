@@ -31,7 +31,7 @@ from .management.commands.importar_agente_dg_seguimiento import _status_agente_a
 @override_settings(SECURE_SSL_REDIRECT=False)
 class SeguimientoColaboradorTests(TestCase):
     def setUp(self):
-        self.group = Group.objects.create(name="PRODUCCION")
+        self.group, _ = Group.objects.get_or_create(name="PRODUCCION")
         self.user = get_user_model().objects.create_user(
             username="carolina.cayetano",
             email="carolina.cayetano@pollyanasdolce.com",
@@ -70,12 +70,13 @@ class SeguimientoColaboradorTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
-        self.assertIn("Mis minutas, proyectos y compromisos", content)
-        self.assertIn("Acuerdos acumulados", content)
+        self.assertIn("Resumen general", content)
+        self.assertIn("Trabajos acumulados", content)
         self.assertIn("Por vencer (24h)", content)
         self.assertIn("Compromisos", content)
         self.assertIn("Minutas", content)
         self.assertIn("Proyectos", content)
+        self.assertIn('data-dashboard-url="/seguimiento/"', content)
         self.assertIn("Validar inventarios en cuartos fríos", content)
         self.assertIn("Retroalimentación", content)
         self.assertIn("Solicitar más tiempo", content)
@@ -203,9 +204,37 @@ class SeguimientoColaboradorTests(TestCase):
         groups = build_nav_groups(self.user, "/seguimiento/")
         labels = [item["label"] for group in groups for item in group["items"]]
 
-        self.assertIn("Mis acuerdos", labels)
+        self.assertIn("Minutas", labels)
+        self.assertIn("Proyectos", labels)
+        self.assertIn("Compromisos", labels)
+        self.assertNotIn("Mis acuerdos", labels)
         self.assertIn("Bonos producción", labels)
         self.assertTrue(can_view_submodule(self.user, "produccion", "bonos"))
+
+    def test_mi_trabajo_filtra_por_pestana_de_tipo(self):
+        SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            titulo="Acuerdo de junta semanal",
+            responsable_empleado=self.empleado,
+            area="PRODUCCION",
+        )
+        SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_PROYECTO,
+            titulo="Proyecto producto mes",
+            responsable_empleado=self.empleado,
+            area="PRODUCCION",
+        )
+
+        response = self.client.get("/seguimiento/proyectos/")
+        content = response.content.decode()
+
+        self.assertContains(response, "Proyectos")
+        self.assertContains(response, "Proyecto producto mes")
+        self.assertNotContains(response, "Acuerdo de junta semanal")
+        self.assertNotContains(response, "Validar inventarios en cuartos fríos")
+        self.assertIn('href="/seguimiento/minutas/"', content)
+        self.assertIn('href="/seguimiento/proyectos/" class="module-tab active"', content)
+        self.assertIn('href="/seguimiento/compromisos/"', content)
 
     def test_accesos_directos_respetan_bonos_operativos_del_rol(self):
         response_prod = self.client.get("/bp/")
@@ -221,7 +250,7 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertEqual(api_ventas.status_code, 403)
 
     def test_proyecto_compartido_importado_aparece_a_participante_por_empleado(self):
-        ventas = Group.objects.create(name="VENTAS")
+        ventas, _ = Group.objects.get_or_create(name="VENTAS")
         johana = get_user_model().objects.create_user(
             username="johana.lopez",
             email="ventas.johanna@pollyanasdolce.com",

@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% load static humanize %}
 
-{% block title %}Mis acuerdos · ERP{% endblock %}
-{% block page_title %}Seguimiento · Mis acuerdos{% endblock %}
+{% block title %}Mi trabajo · ERP{% endblock %}
+{% block page_title %}Mi trabajo{% endblock %}
 {% block body_class %}page-seguimiento-dashboard{% endblock %}
 
 {% block extra_css %}
@@ -33,6 +33,10 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 12px;
     align-items: start;
+  }
+
+  .seguimiento-board.is-detail {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .seguimiento-column {
@@ -274,18 +278,20 @@
 
 {% block content %}
 <div class="module-shell bi-shell seguimiento-shell">
-  <nav class="module-tabs seguimiento-tabs" aria-label="Seguimiento">
-    <a class="module-tab active" href="{% url 'seguimiento:mi_seguimiento' %}">Mis acuerdos</a>
+  <nav class="module-tabs seguimiento-tabs" aria-label="Mi trabajo">
+    {% for tab in tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if active_tipo == tab.tipo %}active{% endif %}">{{ tab.label }}</a>
+    {% endfor %}
   </nav>
 
   <section class="bi-hero">
     <div class="bi-hero-main">
-      <div class="bi-kicker">Seguimiento DG</div>
-      <h1 class="bi-hero-title seguimiento-hero-title">Mis minutas, proyectos y compromisos</h1>
-      <p class="bi-copy seguimiento-copy">Acuerdos asignados, avances y evidencias.</p>
+      <div class="bi-kicker">Mi Trabajo</div>
+      <h1 class="bi-hero-title seguimiento-hero-title">{% if active_tipo %}{{ sections.0.title }}{% else %}Resumen general{% endif %}</h1>
+      <p class="bi-copy seguimiento-copy">{% if active_tipo %}Vista detallada de {{ sections.0.title|lower }} asignados a tu usuario.{% else %}Dashboard personal para minutas, proyectos y compromisos asignados.{% endif %}</p>
       <div class="bi-hero-highlights">
         <article class="bi-hero-highlight">
-          <div class="bi-hero-highlight-label">Acuerdos acumulados</div>
+          <div class="bi-hero-highlight-label">Trabajos acumulados</div>
           <div class="bi-hero-highlight-value">{{ metrics.total|intcomma }}</div>
           <div class="bi-hero-highlight-meta">{{ metrics.abiertos|intcomma }} abiertos · {{ metrics.completados|intcomma }} completados</div>
         </article>
@@ -336,7 +342,7 @@
   <section class="bi-kpi-grid seguimiento-kpi-grid" aria-label="Resumen">
     <article class="bi-kpi-card">
       <div class="bi-kpi-value">{{ metrics.total|intcomma }}</div>
-      <div class="bi-kpi-label">Acuerdos acumulados</div>
+      <div class="bi-kpi-label">Trabajos acumulados</div>
     </article>
     <article class="bi-kpi-card">
       <div class="bi-kpi-value {% if metrics.abiertos %}warning{% else %}success{% endif %}">{{ metrics.abiertos|intcomma }}</div>
@@ -356,7 +362,7 @@
     </article>
   </section>
 
-  <div class="seguimiento-board">
+  <div class="seguimiento-board {% if modo_detalle %}is-detail{% endif %}">
     {% for section in sections %}
     <section class="bi-panel seguimiento-column {{ section.tone }}">
       <div class="bi-panel-head">

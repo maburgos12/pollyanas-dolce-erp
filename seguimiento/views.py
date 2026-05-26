@@ -101,10 +101,27 @@ def _validar_archivo_evidencia(archivo) -> str | None:
 
 
 @login_required
-def mi_seguimiento(request):
+def mi_seguimiento(request, tipo: str | None = None):
     now = timezone.now()
     empleado = empleado_de_usuario(request.user)
     items = list(_items_del_usuario(request.user))
+    tabs = [
+        {
+            "label": "Minutas",
+            "url_name": "seguimiento:minutas",
+            "tipo": SeguimientoItem.TIPO_MINUTA,
+        },
+        {
+            "label": "Proyectos",
+            "url_name": "seguimiento:proyectos",
+            "tipo": SeguimientoItem.TIPO_PROYECTO,
+        },
+        {
+            "label": "Compromisos",
+            "url_name": "seguimiento:compromisos",
+            "tipo": SeguimientoItem.TIPO_COMPROMISO,
+        },
+    ]
 
     for item in items:
         checks = list(item.checklist.all())
@@ -169,7 +186,7 @@ def mi_seguimiento(request):
         {
             "tipo": SeguimientoItem.TIPO_COMPROMISO,
             "title": "Compromisos",
-            "subtitle": "Entregables puntuales y acuerdos con fecha",
+            "subtitle": "Desempeño",
             "tone": "commitment",
         },
         {
@@ -185,6 +202,8 @@ def mi_seguimiento(request):
             "tone": "project",
         },
     ]
+    if tipo:
+        section_config = [config for config in section_config if config["tipo"] == tipo]
     sections = []
     for config in section_config:
         section_items = [item for item in items if item.tipo == config["tipo"]]
@@ -212,8 +231,23 @@ def mi_seguimiento(request):
             "sections": sections,
             "metrics": metrics,
             "estatus_en_revision": SeguimientoItem.ESTATUS_EN_REVISION,
+            "tabs": tabs,
+            "active_tipo": tipo,
+            "modo_detalle": bool(tipo),
         },
     )
+
+
+def seguimiento_minutas(request):
+    return mi_seguimiento(request, SeguimientoItem.TIPO_MINUTA)
+
+
+def seguimiento_proyectos(request):
+    return mi_seguimiento(request, SeguimientoItem.TIPO_PROYECTO)
+
+
+def seguimiento_compromisos(request):
+    return mi_seguimiento(request, SeguimientoItem.TIPO_COMPROMISO)
 
 
 @login_required

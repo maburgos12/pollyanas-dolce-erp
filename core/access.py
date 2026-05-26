@@ -89,7 +89,9 @@ ACCESS_SUBMODULES = {
         ("app", "App mantenimiento"),
     ],
     "seguimiento": [
-        ("mi_tablero", "Mis minutas, proyectos y compromisos"),
+        ("minutas", "Minutas"),
+        ("proyectos", "Proyectos"),
+        ("compromisos", "Compromisos"),
     ],
     "logistica": [
         ("dashboard", "Dashboard"),
