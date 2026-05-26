@@ -16,27 +16,36 @@
 {% endblock %}
 
 {% block content %}
+{% if show_rrhh_tabs %}
 <section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
   {% for tab in module_tabs %}
     <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
   {% endfor %}
 </section>
+{% endif %}
 
 <div class="loan-head">
   <section class="card">
+    <p>
+      <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_prestamos_lista' %}">← Volver a préstamos</a>
+      <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_prestamo_imprimir' prestamo.pk %}">Imprimir formato</a>
+    </p>
     <h2>{{ prestamo.get_estado_display }}</h2>
     <p>{{ prestamo.concepto }}</p>
     <p><strong>Importe:</strong> ${{ prestamo.importe }} · <strong>Saldo:</strong> ${{ prestamo.saldo_actual }}</p>
+    <p><strong>Jefe directo:</strong> {% if prestamo.jefe_directo %}{{ prestamo.jefe_directo.get_full_name|default:prestamo.jefe_directo.username }}{% else %}Sin asignar{% endif %}</p>
     <div class="loan-progress"><span style="width: {{ progreso }}%;"></span></div>
   </section>
   <section class="card">
     <p><span class="badge">Jefe: {% if prestamo.firma_jefe %}Firmado{% else %}Pendiente{% endif %}</span></p>
     <p><span class="badge">Dirección: {% if prestamo.firma_direccion %}Firmado{% else %}Pendiente{% endif %}</span></p>
-    {% if prestamo.estado == "solicitado" %}
+    {% if can_authorize_jefe and prestamo.estado == "solicitado" %}
       <form method="post" action="{% url 'rrhh:rrhh_prestamo_auth_jefe' prestamo.pk %}">{% csrf_token %}<button class="btn btn-primary" type="submit">Autorizar jefe</button></form>
     {% endif %}
-    {% if prestamo.estado == "autorizado" %}
+    {% if can_approve_direccion and prestamo.estado == "autorizado" %}
       <form method="post" action="{% url 'rrhh:rrhh_prestamo_auth_dg' prestamo.pk %}">{% csrf_token %}<button class="btn btn-primary" type="submit">Aprobar dirección</button></form>
+    {% elif prestamo.estado == "autorizado" %}
+      <p class="muted">Pendiente de autorización de Dirección.</p>
     {% endif %}
   </section>
 </div>

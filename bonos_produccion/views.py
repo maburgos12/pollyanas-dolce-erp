@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.db import transaction
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -18,6 +19,7 @@ from .models import (
     BonoProduccionEmpleado,
     ConfigBonoPeriodo,
     RegistroDiarioProduccion,
+    area_bono_produccion_empleado,
     normalizar_area_produccion,
 )
 from .serializers import (
@@ -73,13 +75,13 @@ class ConfigBonoPeriodoViewSet(viewsets.ModelViewSet):
         periodo = self.get_object()
         areas_validas = {code for code, _ in AREAS_PRODUCCION}
         empleados = Empleado.objects.filter(
+            Q(participa_bonos_produccion=True) | Q(area__in=[*areas_validas, "PRODUCCION"]),
             activo=True,
-            area__in=[*areas_validas, "PRODUCCION"],
         )
         creados = 0
         considerados = 0
         for empleado in empleados:
-            area = normalizar_area_produccion(empleado.area)
+            area = area_bono_produccion_empleado(empleado)
             if area not in areas_validas:
                 area = AREA_PRODUCCION
             considerados += 1
@@ -201,11 +203,19 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
                     area=area_normalizada,
                 ).values_list("empleado_id", flat=True)
                 return Empleado.objects.filter(id__in=empleados_periodo)
-            return Empleado.objects.filter(area=area_normalizada)
+            empleados = Empleado.objects.filter(
+                Q(participa_bonos_produccion=True) | Q(area__in=[*areas_validas, "PRODUCCION"]),
+                activo=True,
+            )
+            ids = [empleado.id for empleado in empleados if area_bono_produccion_empleado(empleado) == area_normalizada]
+            return Empleado.objects.filter(id__in=ids)
         if mes and anio:
             empleados_periodo = BonoProduccionEmpleado.objects.filter(
                 periodo__mes=mes,
                 periodo__anio=anio,
             ).values_list("empleado_id", flat=True)
             return Empleado.objects.filter(id__in=empleados_periodo)
-        return Empleado.objects.filter(area__in=[*areas_validas, "PRODUCCION"])
+        return Empleado.objects.filter(
+            Q(participa_bonos_produccion=True) | Q(area__in=[*areas_validas, "PRODUCCION"]),
+            activo=True,
+        )

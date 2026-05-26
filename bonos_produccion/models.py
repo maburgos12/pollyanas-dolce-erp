@@ -43,6 +43,17 @@ def normalizar_area_produccion(value: str) -> str:
     return aliases.get(area, area)
 
 
+def area_bono_produccion_empleado(empleado: Empleado) -> str:
+    puesto_operativo = (empleado.puesto_operativo or "").strip().upper()
+    if puesto_operativo in {AREA_HORNOS, AREA_ARMADO, AREA_CRUCERO}:
+        return puesto_operativo
+    if puesto_operativo in {"PRODUCCION", "EMBETUNADO"}:
+        return AREA_PRODUCCION
+    if puesto_operativo == "ENVIO_SUCURSAL":
+        return AREA_LOGISTICA
+    return normalizar_area_produccion(empleado.area)
+
+
 def _money(value) -> Decimal:
     return Decimal(value or 0).quantize(Decimal("0.01"))
 

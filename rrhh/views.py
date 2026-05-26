@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from calendar import monthrange
 from datetime import date as dt_date
 from decimal import Decimal, InvalidOperation
 
@@ -7,7 +8,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.db.models import Avg, Count, Q
+from django.db.models import Avg, Count, Q, Sum
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -15,7 +16,63 @@ from django.utils import timezone
 from core.access import can_manage_rrhh, can_view_rrhh
 from core.audit import log_event
 
-from .models import AsistenciaEmpleado, Empleado, HoraExtra, ImportacionChecador, NominaLinea, NominaPeriodo, PermisoSalida
+from .models import (
+    AsistenciaEmpleado,
+    Empleado,
+    EmpleadoBaja,
+    HoraExtra,
+    ImportacionChecador,
+    NominaConceptoLinea,
+    NominaLinea,
+    NominaPeriodo,
+    PermisoSalida,
+    PlantillaAutorizada,
+    VacanteRRHH,
+)
+
+AREA_DIVISION_CHOICES = [
+    ("HORNOS", "Hornos", Empleado.DEP_PRODUCCION, Empleado.DEP_PRODUCCION, "HORNOS"),
+    ("ARMADO", "Armado", Empleado.DEP_PRODUCCION, Empleado.DEP_PRODUCCION, "ARMADO"),
+    ("EMBETUNADO", "Producción / Embetunado", Empleado.DEP_PRODUCCION, Empleado.DEP_PRODUCCION, "PRODUCCION"),
+    ("CRUCERO", "Crucero", Empleado.DEP_PRODUCCION, Empleado.DEP_PRODUCCION, "CRUCERO"),
+    ("ENVIO A SUCURSAL", "Envío a sucursal", Empleado.DEP_LOGISTICA, Empleado.DEP_PRODUCCION, "ENVIO_SUCURSAL"),
+    ("CAJAS", "Cajas", Empleado.DEP_VENTAS, Empleado.DEP_VENTAS, "CAJAS"),
+    ("AUXILIAR CAJAS", "Auxiliar cajas", Empleado.DEP_VENTAS, Empleado.DEP_VENTAS, "AUXILIAR_CAJAS"),
+    ("CALL CENTER", "Call center", Empleado.DEP_VENTAS, Empleado.DEP_VENTAS, "CALL_CENTER"),
+    ("REPARTIDORES", "Repartidores", Empleado.DEP_LOGISTICA, Empleado.DEP_VENTAS, "REPARTIDOR"),
+    ("COMPRAS", "Compras", Empleado.DEP_ADMINISTRACION, Empleado.DEP_ADMINISTRACION, "COMPRAS"),
+    ("ALMACEN", "Almacén", Empleado.DEP_ADMINISTRACION, Empleado.DEP_ADMINISTRACION, "ALMACEN"),
+    ("LIMPIEZA", "Limpieza / afanadoras", Empleado.DEP_ADMINISTRACION, Empleado.DEP_ADMINISTRACION, "LIMPIEZA"),
+    ("AUXILIAR CONTABLE", "Auxiliar contable", Empleado.DEP_ADMINISTRACION, Empleado.DEP_ADMINISTRACION, "AUXILIAR_CONTABLE"),
+    ("RRHH", "Recursos Humanos", Empleado.DEP_RRHH, Empleado.DEP_RRHH, "RRHH"),
+    ("MANTENIMIENTO", "Mantenimiento", Empleado.DEP_MANTENIMIENTO, Empleado.DEP_MANTENIMIENTO, "MANTENIMIENTO"),
+    ("MARKETING", "Marketing externo", Empleado.DEP_MARKETING, Empleado.DEP_MARKETING, "MARKETING"),
+]
+PUESTO_OPERATIVO_CHOICES = [
+    ("JEFATURA", "Jefatura"),
+    ("HORNOS", "Hornos"),
+    ("PRODUCCION", "Producción / Embetunado"),
+    ("ARMADO", "Armado"),
+    ("CRUCERO", "Crucero"),
+    ("ENVIO_SUCURSAL", "Envío a sucursal"),
+    ("REPARTIDOR", "Repartidor"),
+    ("CAJAS", "Cajas"),
+    ("AUXILIAR_CAJAS", "Auxiliar cajas"),
+    ("CALL_CENTER", "Call center"),
+    ("COMPRAS", "Compras"),
+    ("ALMACEN", "Almacén"),
+    ("LIMPIEZA", "Limpieza"),
+    ("MANTENIMIENTO", "Mantenimiento"),
+    ("RRHH", "Recursos Humanos"),
+]
+AREA_DIVISION_MAP = {
+    value: {
+        "departamento_origen": departamento_origen,
+        "departamento": departamento_actual,
+        "puesto_operativo": puesto_operativo,
+    }
+    for value, _label, departamento_origen, departamento_actual, puesto_operativo in AREA_DIVISION_CHOICES
+}
 
 
 def _parse_decimal(raw: str | None) -> Decimal:
@@ -35,15 +92,42 @@ def _parse_date(raw: str | None):
         return None
 
 
+def _catalogo_value(post_data, field_name: str) -> str:
+    value = (post_data.get(field_name) or "").strip()
+    if value == "__otro__":
+        value = (post_data.get(f"{field_name}_otro") or "").strip()
+        return value.upper()
+    return value
+
+
+def _organizacion_desde_post(post_data) -> dict:
+    area = _catalogo_value(post_data, "area")
+    defaults = AREA_DIVISION_MAP.get(area, {})
+    puesto_operativo = _catalogo_value(post_data, "puesto_operativo") or defaults.get("puesto_operativo", "")
+    departamento = (post_data.get("departamento") or defaults.get("departamento") or "").strip()
+    departamento_origen = (post_data.get("departamento_origen") or defaults.get("departamento_origen") or departamento).strip()
+    return {
+        "area": area,
+        "departamento": departamento,
+        "departamento_origen": departamento_origen,
+        "puesto_operativo": puesto_operativo,
+        "participa_bonos_ventas": post_data.get("participa_bonos_ventas") == "on"
+        or puesto_operativo == "REPARTIDOR",
+        "participa_bonos_produccion": post_data.get("participa_bonos_produccion") == "on"
+        or puesto_operativo in {"HORNOS", "PRODUCCION", "ARMADO", "CRUCERO", "ENVIO_SUCURSAL"},
+    }
+
+
 def _module_tabs(active: str) -> list[dict]:
     return [
-        {"label": "Capital Humano", "url_name": "rrhh:rrhh_dashboard", "active": active == "dashboard"},
-        {"label": "Asistencias", "url_name": "rrhh:rrhh_asistencias", "active": active == "asistencias"},
-        {"label": "Monitor checador", "url_name": "rrhh:rrhh_monitor_sync", "active": active == "monitor_sync"},
-        {"label": "Horas extra", "url_name": "rrhh:rrhh_he_list", "active": active == "horas_extra"},
-        {"label": "Permisos", "url_name": "rrhh:rrhh_permisos_list", "active": active == "permisos"},
-        {"label": "Préstamos", "url_name": "rrhh:rrhh_prestamos_lista", "active": active == "prestamos"},
+        {"label": "Indicadores", "url_name": "rrhh:rrhh_indicadores", "active": active == "dashboard"},
+        {"label": "Organización", "url_name": "rrhh:rrhh_organizacion", "active": active == "organizacion"},
         {"label": "Empleados", "url_name": "rrhh:empleados", "active": active == "empleados"},
+        {"label": "Permisos", "url_name": "rrhh:rrhh_permisos_list", "active": active == "permisos"},
+        {"label": "Horas extra", "url_name": "rrhh:rrhh_he_list", "active": active == "horas_extra"},
+        {"label": "Asistencias", "url_name": "rrhh:rrhh_asistencias", "active": active == "asistencias"},
+        {"label": "Vacantes", "url_name": "rrhh:rrhh_vacantes", "active": active == "vacantes"},
+        {"label": "Préstamos", "url_name": "rrhh:rrhh_prestamos_lista", "active": active == "prestamos"},
         {"label": "Nómina", "url_name": "rrhh:nomina", "active": active == "nomina"},
     ]
 
@@ -120,6 +204,30 @@ def _rrhh_enterprise_chain(
         else:
             item["dependency_status"] = "Punto de arranque del módulo"
     return chain
+
+
+def _month_bounds(raw_month: str | None):
+    today = timezone.localdate()
+    raw_month = (raw_month or today.strftime("%Y-%m")).strip()
+    try:
+        year, month = [int(part) for part in raw_month.split("-", 1)]
+        start = dt_date(year, month, 1)
+    except (TypeError, ValueError):
+        start = dt_date(today.year, today.month, 1)
+        raw_month = start.strftime("%Y-%m")
+    end = dt_date(start.year, start.month, monthrange(start.year, start.month)[1])
+    return raw_month, start, end
+
+
+def _area_key(value: str | None) -> str:
+    return (value or "SIN AREA").strip().upper() or "SIN AREA"
+
+
+def _pct(numerator: Decimal | int, denominator: Decimal | int) -> Decimal:
+    denominator = Decimal(str(denominator or "0"))
+    if denominator == 0:
+        return Decimal("0")
+    return (Decimal(str(numerator or "0")) / denominator * Decimal("100")).quantize(Decimal("0.01"))
 
 
 def _rrhh_document_stage_rows(
@@ -557,6 +665,47 @@ def empleados(request):
 
         action = (request.POST.get("action") or "create").strip()
         nombre = (request.POST.get("nombre") or "").strip()
+        if action == "baja":
+            empleado = None
+            empleado_id = (request.POST.get("empleado") or "").strip()
+            if empleado_id.isdigit():
+                empleado = Empleado.objects.filter(pk=int(empleado_id)).first()
+            fecha_baja = _parse_date(request.POST.get("fecha_baja")) or timezone.localdate()
+            fecha_ingreso = _parse_date(request.POST.get("fecha_ingreso"))
+            baja = EmpleadoBaja.objects.create(
+                empleado=empleado,
+                nombre=(request.POST.get("nombre_baja") or (empleado.nombre if empleado else "")).strip(),
+                area=_area_key(request.POST.get("area_baja") or (empleado.area if empleado else "")),
+                puesto=(request.POST.get("puesto_baja") or (empleado.puesto if empleado else "")).strip(),
+                tipo_contrato=(request.POST.get("tipo_contrato_baja") or (empleado.tipo_contrato if empleado else Empleado.CONTRATO_FIJO)).strip(),
+                fecha_ingreso=fecha_ingreso or (empleado.fecha_ingreso if empleado else fecha_baja),
+                fecha_baja=fecha_baja,
+                motivo=(request.POST.get("motivo") or EmpleadoBaja.MOTIVO_OTRO).strip(),
+                observacion=(request.POST.get("observacion") or "").strip(),
+                creado_por=request.user,
+            )
+            if empleado and request.POST.get("marcar_inactivo") == "on":
+                empleado.activo = False
+                empleado.save(update_fields=["activo", "updated_at"])
+            messages.success(request, f"Baja capturada para {baja.nombre}.")
+            return redirect("rrhh:empleados")
+        if action == "plantilla":
+            anio = int(request.POST.get("anio") or timezone.localdate().year)
+            mes_raw = (request.POST.get("mes_plantilla") or "").strip()
+            mes_val = int(mes_raw) if mes_raw.isdigit() else None
+            plantilla, _ = PlantillaAutorizada.objects.update_or_create(
+                anio=anio,
+                mes=mes_val,
+                area=_area_key(request.POST.get("area_plantilla")),
+                puesto=(request.POST.get("puesto_plantilla") or "").strip().upper(),
+                defaults={
+                    "cantidad": int(request.POST.get("cantidad") or 0),
+                    "notas": (request.POST.get("notas") or "").strip(),
+                    "actualizado_por": request.user,
+                },
+            )
+            messages.success(request, f"Plantilla autorizada actualizada: {plantilla}.")
+            return redirect("rrhh:empleados")
         if not nombre:
             messages.error(request, "Nombre del empleado es obligatorio.")
         elif action == "update":
@@ -565,12 +714,21 @@ def empleados(request):
             if not empleado:
                 messages.error(request, "Selecciona un empleado válido para editar.")
             else:
+                organizacion = _organizacion_desde_post(request.POST)
                 empleado.nombre = nombre
                 empleado.rfc = (request.POST.get("rfc") or "").strip()
                 empleado.curp = (request.POST.get("curp") or "").strip()
                 empleado.nss = (request.POST.get("nss") or "").strip()
-                empleado.area = (request.POST.get("area") or "").strip()
+                empleado.area = organizacion["area"]
                 empleado.puesto = (request.POST.get("puesto") or "").strip()
+                empleado.departamento_origen = organizacion["departamento_origen"]
+                empleado.departamento = organizacion["departamento"]
+                empleado.puesto_operativo = organizacion["puesto_operativo"]
+                jefe_id = (request.POST.get("jefe_directo") or "").strip()
+                empleado.jefe_directo_id = int(jefe_id) if jefe_id.isdigit() and int(jefe_id) != empleado.id else None
+                empleado.tipo_personal = (request.POST.get("tipo_personal") or Empleado.TIPO_POLLYANA).strip()
+                empleado.participa_bonos_ventas = organizacion["participa_bonos_ventas"]
+                empleado.participa_bonos_produccion = organizacion["participa_bonos_produccion"]
                 empleado.tipo_contrato = (request.POST.get("tipo_contrato") or Empleado.CONTRATO_FIJO).strip()
                 empleado.fecha_ingreso = _parse_date(request.POST.get("fecha_ingreso")) or empleado.fecha_ingreso
                 empleado.salario_diario = _parse_decimal(request.POST.get("salario_diario"))
@@ -593,13 +751,25 @@ def empleados(request):
                 messages.success(request, f"Empleado {empleado.nombre} actualizado.")
                 return redirect("rrhh:empleados")
         else:
+            organizacion = _organizacion_desde_post(request.POST)
             empleado = Empleado.objects.create(
                 nombre=nombre,
                 rfc=(request.POST.get("rfc") or "").strip(),
                 curp=(request.POST.get("curp") or "").strip(),
                 nss=(request.POST.get("nss") or "").strip(),
-                area=(request.POST.get("area") or "").strip(),
+                area=organizacion["area"],
                 puesto=(request.POST.get("puesto") or "").strip(),
+                departamento_origen=organizacion["departamento_origen"],
+                departamento=organizacion["departamento"],
+                puesto_operativo=organizacion["puesto_operativo"],
+                jefe_directo_id=(
+                    int(request.POST.get("jefe_directo"))
+                    if (request.POST.get("jefe_directo") or "").strip().isdigit()
+                    else None
+                ),
+                tipo_personal=(request.POST.get("tipo_personal") or Empleado.TIPO_POLLYANA).strip(),
+                participa_bonos_ventas=organizacion["participa_bonos_ventas"],
+                participa_bonos_produccion=organizacion["participa_bonos_produccion"],
                 tipo_contrato=(request.POST.get("tipo_contrato") or Empleado.CONTRATO_FIJO).strip(),
                 fecha_ingreso=request.POST.get("fecha_ingreso") or timezone.localdate(),
                 salario_diario=_parse_decimal(request.POST.get("salario_diario")),
@@ -635,6 +805,9 @@ def empleados(request):
             | Q(nss__icontains=q)
             | Q(area__icontains=q)
             | Q(puesto__icontains=q)
+            | Q(departamento__icontains=q)
+            | Q(puesto_operativo__icontains=q)
+            | Q(jefe_directo__nombre__icontains=q)
         )
     if estado == "activos":
         qs = qs.filter(activo=True)
@@ -703,6 +876,17 @@ def empleados(request):
         "total_inactivos": empleados_inactivos,
         "total_nominas": nominas_total,
         "contrato_choices": Empleado.CONTRATO_CHOICES,
+        "departamento_choices": Empleado.DEP_CHOICES,
+        "area_division_choices": AREA_DIVISION_CHOICES,
+        "area_division_values": {value for value, *_rest in AREA_DIVISION_CHOICES},
+        "puesto_operativo_choices": PUESTO_OPERATIVO_CHOICES,
+        "puesto_operativo_values": {value for value, _ in PUESTO_OPERATIVO_CHOICES},
+        "tipo_personal_choices": Empleado.TIPO_PERSONAL_CHOICES,
+        "empleados_jefes": Empleado.objects.filter(activo=True).order_by("nombre"),
+        "motivo_baja_choices": EmpleadoBaja.MOTIVO_CHOICES,
+        "months": range(1, 13),
+        "bajas_recientes": EmpleadoBaja.objects.select_related("empleado").order_by("-fecha_baja")[:8],
+        "plantillas": PlantillaAutorizada.objects.order_by("-anio", "-mes", "area")[:8],
         "enterprise_chain": enterprise_chain,
         "critical_path_rows": _rrhh_critical_path_rows(enterprise_chain),
         "document_stage_rows": document_stage_rows,
@@ -1123,6 +1307,284 @@ def nomina_status(request, pk: int, estatus: str):
 
 
 @login_required
+def indicadores_ch(request):
+    if not can_view_rrhh(request.user):
+        raise PermissionDenied("No tienes permisos para ver indicadores de Capital Humano")
+
+    mes, inicio, fin = _month_bounds(request.GET.get("mes") or request.POST.get("mes"))
+
+    if request.method == "POST":
+        if not can_manage_rrhh(request.user):
+            raise PermissionDenied("No tienes permisos para capturar indicadores de Capital Humano")
+        action = (request.POST.get("action") or "").strip()
+        if action == "baja":
+            empleado = None
+            empleado_id = (request.POST.get("empleado") or "").strip()
+            if empleado_id.isdigit():
+                empleado = Empleado.objects.filter(pk=int(empleado_id)).first()
+            fecha_baja = _parse_date(request.POST.get("fecha_baja")) or timezone.localdate()
+            fecha_ingreso = _parse_date(request.POST.get("fecha_ingreso"))
+            baja = EmpleadoBaja.objects.create(
+                empleado=empleado,
+                nombre=(request.POST.get("nombre") or (empleado.nombre if empleado else "")).strip(),
+                area=_area_key(request.POST.get("area") or (empleado.area if empleado else "")),
+                puesto=(request.POST.get("puesto") or (empleado.puesto if empleado else "")).strip(),
+                tipo_contrato=(request.POST.get("tipo_contrato") or (empleado.tipo_contrato if empleado else Empleado.CONTRATO_FIJO)).strip(),
+                fecha_ingreso=fecha_ingreso or (empleado.fecha_ingreso if empleado else fecha_baja),
+                fecha_baja=fecha_baja,
+                motivo=(request.POST.get("motivo") or EmpleadoBaja.MOTIVO_OTRO).strip(),
+                observacion=(request.POST.get("observacion") or "").strip(),
+                creado_por=request.user,
+            )
+            if empleado and request.POST.get("marcar_inactivo") == "on":
+                empleado.activo = False
+                empleado.save(update_fields=["activo", "updated_at"])
+            messages.success(request, f"Baja capturada para {baja.nombre}.")
+        elif action == "plantilla":
+            anio = int(request.POST.get("anio") or inicio.year)
+            mes_raw = (request.POST.get("mes_plantilla") or "").strip()
+            mes_val = int(mes_raw) if mes_raw.isdigit() else None
+            area = _area_key(request.POST.get("area"))
+            puesto = (request.POST.get("puesto") or "").strip().upper()
+            plantilla, _ = PlantillaAutorizada.objects.update_or_create(
+                anio=anio,
+                mes=mes_val,
+                area=area,
+                puesto=puesto,
+                defaults={
+                    "cantidad": int(request.POST.get("cantidad") or 0),
+                    "notas": (request.POST.get("notas") or "").strip(),
+                    "actualizado_por": request.user,
+                },
+            )
+            messages.success(request, f"Plantilla autorizada actualizada: {plantilla}.")
+        elif action == "vacante":
+            vacante = VacanteRRHH.objects.create(
+                area=_area_key(request.POST.get("area")),
+                puesto=(request.POST.get("puesto") or "").strip().upper(),
+                fecha_solicitada=_parse_date(request.POST.get("fecha_solicitada")) or timezone.localdate(),
+                estado=(request.POST.get("estado") or VacanteRRHH.ESTADO_SOLICITADA).strip(),
+                fecha_cubierta=_parse_date(request.POST.get("fecha_cubierta")),
+                motivo_no_cubierta=(request.POST.get("motivo_no_cubierta") or "").strip(),
+                sugerencias=(request.POST.get("sugerencias") or "").strip(),
+                creado_por=request.user,
+            )
+            messages.success(request, f"Vacante capturada: {vacante.area} · {vacante.puesto}.")
+        return redirect(f"{reverse('rrhh:rrhh_indicadores')}?mes={mes}")
+
+    periodos = NominaPeriodo.objects.filter(fecha_inicio__lte=fin, fecha_fin__gte=inicio).order_by("fecha_inicio")
+    periodo_ids = list(periodos.values_list("id", flat=True))
+    lineas = NominaLinea.objects.filter(periodo_id__in=periodo_ids).select_related("periodo", "empleado")
+    payroll = periodos.aggregate(bruto=Sum("total_bruto"), descuentos=Sum("total_descuentos"), neto=Sum("total_neto"))
+
+    first_period = periodos.first()
+    last_period = periodos.last()
+    plantilla_inicial = (
+        NominaLinea.objects.filter(periodo=first_period).values("empleado_id").distinct().count()
+        if first_period
+        else 0
+    )
+    plantilla_final = (
+        NominaLinea.objects.filter(periodo=last_period).values("empleado_id").distinct().count()
+        if last_period
+        else Empleado.objects.filter(activo=True).count()
+    )
+
+    altas = Empleado.objects.filter(fecha_ingreso__gte=inicio, fecha_ingreso__lte=fin).count()
+    bajas = EmpleadoBaja.objects.filter(fecha_baja__gte=inicio, fecha_baja__lte=fin)
+    bajas_count = bajas.count()
+    promedio_base = (Decimal(plantilla_inicial) + Decimal(plantilla_final)) / Decimal("2") if plantilla_inicial or plantilla_final else Decimal("0")
+    rotacion = _pct(bajas_count, promedio_base)
+
+    he_conceptos = NominaConceptoLinea.objects.filter(linea__periodo_id__in=periodo_ids).filter(
+        Q(codigo_concepto="4") | Q(nombre__icontains="Horas extras")
+    )
+    he_totales = he_conceptos.aggregate(horas=Sum("valor"), costo=Sum("importe"), registros=Count("id"))
+
+    bajas_antiguedades = [baja.antiguedad_meses for baja in bajas]
+    permanencia_promedio = (
+        sum(bajas_antiguedades, Decimal("0")) / Decimal(len(bajas_antiguedades))
+        if bajas_antiguedades
+        else Decimal("0")
+    ).quantize(Decimal("0.01"))
+    bajas_prueba = sum(1 for baja in bajas if baja.en_periodo_prueba)
+
+    plantilla_qs = PlantillaAutorizada.objects.filter(anio=inicio.year).filter(Q(mes=inicio.month) | Q(mes__isnull=True))
+    plantilla_autorizada = plantilla_qs.aggregate(total=Sum("cantidad"))["total"] or 0
+    vacantes = VacanteRRHH.objects.filter(fecha_solicitada__gte=inicio, fecha_solicitada__lte=fin)
+    vacantes_count = vacantes.count()
+    vacantes_cubiertas = vacantes.filter(estado=VacanteRRHH.ESTADO_CUBIERTA).count()
+    vacantes_pendientes = vacantes.exclude(estado__in=[VacanteRRHH.ESTADO_CUBIERTA, VacanteRRHH.ESTADO_CANCELADA]).count()
+    dias_cubiertas = [vacante.dias_en_cubrir for vacante in vacantes if vacante.dias_en_cubrir is not None]
+    promedio_cobertura = sum(dias_cubiertas) / len(dias_cubiertas) if dias_cubiertas else 0
+
+    areas = set()
+    lineas_area = {
+        _area_key(row["empleado__area"]): row
+        for row in lineas.values("empleado__area").annotate(empleados=Count("empleado_id", distinct=True), neto=Sum("neto_calculado"))
+    }
+    he_area = {
+        _area_key(row["linea__empleado__area"]): row
+        for row in he_conceptos.values("linea__empleado__area").annotate(horas=Sum("valor"), costo=Sum("importe"))
+    }
+    bajas_area = {_area_key(row["area"]): row["total"] for row in bajas.values("area").annotate(total=Count("id"))}
+    plantilla_area = {
+        _area_key(row["area"]): row["total"] for row in plantilla_qs.values("area").annotate(total=Sum("cantidad"))
+    }
+    vacantes_area = {_area_key(row["area"]): row["total"] for row in vacantes.values("area").annotate(total=Count("id"))}
+    for data in (lineas_area, he_area, bajas_area, plantilla_area, vacantes_area):
+        areas.update(data.keys())
+    area_rows = []
+    for area in sorted(areas):
+        line_data = lineas_area.get(area, {})
+        he_data = he_area.get(area, {})
+        autorizada = plantilla_area.get(area, 0)
+        actual = line_data.get("empleados", 0)
+        area_rows.append(
+            {
+                "area": area,
+                "plantilla_actual": actual,
+                "plantilla_autorizada": autorizada,
+                "brecha": int(autorizada or 0) - int(actual or 0),
+                "nomina_neta": line_data.get("neto") or Decimal("0"),
+                "he_horas": he_data.get("horas") or Decimal("0"),
+                "he_costo": he_data.get("costo") or Decimal("0"),
+                "bajas": bajas_area.get(area, 0),
+                "vacantes": vacantes_area.get(area, 0),
+            }
+        )
+
+    context = {
+        "module_tabs": _module_tabs("dashboard"),
+        "can_manage_rrhh": can_manage_rrhh(request.user),
+        "mes": mes,
+        "months": range(1, 13),
+        "empleados": Empleado.objects.all().order_by("nombre")[:1200],
+        "contrato_choices": Empleado.CONTRATO_CHOICES,
+        "motivo_choices": EmpleadoBaja.MOTIVO_CHOICES,
+        "vacante_estado_choices": VacanteRRHH.ESTADO_CHOICES,
+        "stats": {
+            "nomina_neta": payroll.get("neto") or Decimal("0"),
+            "nomina_bruta": payroll.get("bruto") or Decimal("0"),
+            "he_horas": he_totales.get("horas") or Decimal("0"),
+            "he_costo": he_totales.get("costo") or Decimal("0"),
+            "he_registros": he_totales.get("registros") or 0,
+            "plantilla_inicial": plantilla_inicial,
+            "plantilla_final": plantilla_final,
+            "plantilla_autorizada": plantilla_autorizada,
+            "altas": altas,
+            "bajas": bajas_count,
+            "rotacion": rotacion,
+            "permanencia_promedio": permanencia_promedio,
+            "bajas_prueba": bajas_prueba,
+            "vacantes": vacantes_count,
+            "vacantes_cubiertas": vacantes_cubiertas,
+            "vacantes_pendientes": vacantes_pendientes,
+            "promedio_cobertura": promedio_cobertura,
+        },
+        "area_rows": area_rows,
+        "bajas": bajas.select_related("empleado", "creado_por")[:20],
+        "vacantes": vacantes.select_related("empleado_cubrio", "creado_por")[:20],
+        "plantillas": plantilla_qs.select_related("actualizado_por")[:20],
+        "periodos": periodos,
+    }
+    return render(request, "rrhh/indicadores.html", context)
+
+
+@login_required
+def vacantes_ch(request):
+    if not can_view_rrhh(request.user):
+        raise PermissionDenied("No tienes permisos para ver vacantes de Capital Humano")
+
+    if request.method == "POST":
+        if not can_manage_rrhh(request.user):
+            raise PermissionDenied("No tienes permisos para gestionar vacantes")
+        vacante = VacanteRRHH.objects.create(
+            area=_area_key(request.POST.get("area")),
+            puesto=(request.POST.get("puesto") or "").strip().upper(),
+            fecha_solicitada=_parse_date(request.POST.get("fecha_solicitada")) or timezone.localdate(),
+            estado=(request.POST.get("estado") or VacanteRRHH.ESTADO_SOLICITADA).strip(),
+            fecha_cubierta=_parse_date(request.POST.get("fecha_cubierta")),
+            empleado_cubrio_id=(request.POST.get("empleado_cubrio") or None),
+            motivo_no_cubierta=(request.POST.get("motivo_no_cubierta") or "").strip(),
+            sugerencias=(request.POST.get("sugerencias") or "").strip(),
+            creado_por=request.user,
+        )
+        messages.success(request, f"Vacante capturada: {vacante.area} · {vacante.puesto}.")
+        return redirect("rrhh:rrhh_vacantes")
+
+    estado = (request.GET.get("estado") or "").strip()
+    area = (request.GET.get("area") or "").strip()
+    vacantes = VacanteRRHH.objects.select_related("empleado_cubrio", "creado_por").order_by("-fecha_solicitada")
+    if estado:
+        vacantes = vacantes.filter(estado=estado)
+    if area:
+        vacantes = vacantes.filter(area__icontains=area)
+
+    base_qs = VacanteRRHH.objects.all()
+    stats = {
+        "total": base_qs.count(),
+        "abiertas": base_qs.exclude(estado__in=[VacanteRRHH.ESTADO_CUBIERTA, VacanteRRHH.ESTADO_CANCELADA]).count(),
+        "cubiertas": base_qs.filter(estado=VacanteRRHH.ESTADO_CUBIERTA).count(),
+        "pausadas": base_qs.filter(estado=VacanteRRHH.ESTADO_PAUSADA).count(),
+    }
+    return render(
+        request,
+        "rrhh/vacantes.html",
+        {
+            "module_tabs": _module_tabs("vacantes"),
+            "can_manage_rrhh": can_manage_rrhh(request.user),
+            "vacantes": vacantes[:300],
+            "empleados": Empleado.objects.filter(activo=True).order_by("nombre")[:1200],
+            "estado_choices": VacanteRRHH.ESTADO_CHOICES,
+            "stats": stats,
+            "estado_actual": estado,
+            "area_actual": area,
+        },
+    )
+
+
+@login_required
+def organizacion_ch(request):
+    if not can_view_rrhh(request.user):
+        raise PermissionDenied("No tienes permisos para ver organización de Capital Humano")
+
+    empleados = (
+        Empleado.objects.select_related("jefe_directo", "usuario_erp")
+        .filter(activo=True)
+        .order_by("departamento_origen", "departamento", "jefe_directo__nombre", "nombre")
+    )
+    departamentos = (
+        empleados.values("departamento")
+        .annotate(
+            total=Count("id"),
+            bonos_ventas=Count("id", filter=Q(participa_bonos_ventas=True)),
+            bonos_produccion=Count("id", filter=Q(participa_bonos_produccion=True)),
+        )
+        .order_by("departamento")
+    )
+    jefes = (
+        Empleado.objects.filter(colaboradores_directos__isnull=False)
+        .distinct()
+        .order_by("departamento", "nombre")
+        .prefetch_related("colaboradores_directos")
+    )
+    sin_jefe = empleados.filter(jefe_directo__isnull=True).exclude(puesto_operativo="JEFATURA")
+    return render(
+        request,
+        "rrhh/organizacion.html",
+        {
+            "module_tabs": _module_tabs("organizacion"),
+            "empleados": empleados,
+            "departamentos": departamentos,
+            "jefes": jefes,
+            "sin_jefe": sin_jefe,
+            "total_activos": empleados.count(),
+        },
+    )
+
+
+@login_required
 def dashboard_ch(request):
     if not can_view_rrhh(request.user):
         raise PermissionDenied("No tienes permisos para ver Capital Humano")
@@ -1260,14 +1722,53 @@ def permisos_list(request):
             messages.success(request, f"Permiso {permiso.folio} rechazado.")
         return redirect("rrhh:rrhh_permisos_list")
 
-    permisos = (
+    permisos_qs = (
         PermisoSalida.objects.select_related("empleado", "autorizado_por", "autorizado_jefe_por")
-        .order_by("-creado_en")[:500]
+        .order_by("-creado_en")
     )
+    permisos = permisos_qs[:500]
+    columnas = [
+        (
+            "jefe",
+            "Pendiente jefe",
+            permisos_qs.filter(
+                estado=PermisoSalida.ESTADO_SOLICITADO,
+                estado_jefe=PermisoSalida.ESTADO_JEFE_PENDIENTE,
+            )[:120],
+        ),
+        (
+            "rrhh",
+            "Validación RRHH",
+            permisos_qs.filter(
+                estado=PermisoSalida.ESTADO_SOLICITADO,
+                estado_jefe=PermisoSalida.ESTADO_JEFE_PREAUTORIZADO,
+            )[:120],
+        ),
+        ("aprobado", "Aprobados", permisos_qs.filter(estado=PermisoSalida.ESTADO_APROBADO)[:120]),
+        ("rechazado", "Rechazados", permisos_qs.filter(estado=PermisoSalida.ESTADO_RECHAZADO)[:120]),
+    ]
+    stats = {
+        "total": permisos_qs.count(),
+        "pendiente_jefe": permisos_qs.filter(
+            estado=PermisoSalida.ESTADO_SOLICITADO,
+            estado_jefe=PermisoSalida.ESTADO_JEFE_PENDIENTE,
+        ).count(),
+        "validacion_rrhh": permisos_qs.filter(
+            estado=PermisoSalida.ESTADO_SOLICITADO,
+            estado_jefe=PermisoSalida.ESTADO_JEFE_PREAUTORIZADO,
+        ).count(),
+        "aprobados": permisos_qs.filter(estado=PermisoSalida.ESTADO_APROBADO).count(),
+    }
     return render(
         request,
         "rrhh/permisos_list.html",
-        {"module_tabs": _module_tabs("permisos"), "permisos": permisos, "can_manage_rrhh": can_manage_rrhh(request.user)},
+        {
+            "module_tabs": _module_tabs("permisos"),
+            "permisos": permisos,
+            "columnas": columnas,
+            "stats": stats,
+            "can_manage_rrhh": can_manage_rrhh(request.user),
+        },
     )
 
 

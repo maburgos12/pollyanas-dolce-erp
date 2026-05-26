@@ -120,6 +120,23 @@ NAV_GROUPS = [
         ],
     },
     {
+        "key": "capital_humano",
+        "label": "Capital Humano",
+        "items": [
+            ("rrhh", "dashboard", "Indicadores", "/rrhh/indicadores/", ["/rrhh/indicadores/"]),
+            ("rrhh", "organizacion", "Organización", "/rrhh/organizacion/", ["/rrhh/organizacion/"]),
+            ("rrhh", "empleados", "Empleados", "/rrhh/empleados/", ["/rrhh/empleados/"]),
+            ("rrhh", "permisos", "Permisos", "/rrhh/permisos/", ["/rrhh/permisos/"]),
+            ("rrhh", "horas_extra", "Horas extra", "/rrhh/horas-extra/", ["/rrhh/horas-extra/"]),
+            ("rrhh", "asistencias", "Asistencias", "/rrhh/asistencias/", ["/rrhh/asistencias/"]),
+            ("rrhh", "vacantes", "Vacantes", "/rrhh/vacantes/", ["/rrhh/vacantes/"]),
+            ("rrhh", "prestamos", "Préstamos", "/rrhh/prestamos/", ["/rrhh/prestamos/"]),
+            ("rrhh", "nomina", "Nómina", "/rrhh/nomina/", ["/rrhh/nomina/"]),
+            ("rrhh", "importar_checador", "Importar checador", "/rrhh/importar-checador/", ["/rrhh/importar-checador/"]),
+            ("rrhh", "asignacion_sucursal", "Asignación sucursal", "/rrhh/asignacion-sucursal/", ["/rrhh/asignacion-sucursal/"]),
+        ],
+    },
+    {
         "key": "administracion",
         "label": "Administración",
         "items": [
@@ -128,15 +145,6 @@ NAV_GROUPS = [
             ("activos", "planes", "Planes", "/activos/planes/", ["/activos/planes/"]),
             ("activos", "ordenes", "Órdenes activos", "/activos/ordenes/", ["/activos/ordenes/"]),
             ("activos", "reportes", "Reportes activos", "/activos/reportes/", ["/activos/reportes/"]),
-            ("rrhh", "dashboard", "Capital Humano", "/rrhh/dashboard/", ["/rrhh/dashboard/"]),
-            ("rrhh", "asistencias", "Asistencias", "/rrhh/asistencias/", ["/rrhh/asistencias/"]),
-            ("rrhh", "horas_extra", "Horas extra", "/rrhh/horas-extra/", ["/rrhh/horas-extra/"]),
-            ("rrhh", "permisos", "Permisos", "/rrhh/permisos/", ["/rrhh/permisos/"]),
-            ("rrhh", "prestamos", "Préstamos", "/rrhh/prestamos/", ["/rrhh/prestamos/"]),
-            ("rrhh", "importar_checador", "Importar checador", "/rrhh/importar-checador/", ["/rrhh/importar-checador/"]),
-            ("rrhh", "empleados", "Empleados", "/rrhh/empleados/", ["/rrhh/empleados/"]),
-            ("rrhh", "nomina", "Nómina", "/rrhh/nomina/", ["/rrhh/nomina/"]),
-            ("rrhh", "asignacion_sucursal", "Asignación sucursal", "/rrhh/asignacion-sucursal/", ["/rrhh/asignacion-sucursal/"]),
             ("control", "discrepancias", "Control", "/control/discrepancias/", ["/control/discrepancias/"]),
             ("control", "captura_movil", "Captura móvil", "/control/captura-movil/", ["/control/captura-movil/"]),
             ("auditoria", "bitacora", "Bitácora", "/auditoria/", ["/auditoria/"]),
@@ -198,6 +206,34 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                     "url": group_url,
                     "items": items,
                     "active": group_active,
+                }
+            )
+    if user and user.is_authenticated:
+        try:
+            from rrhh.models import Prestamo
+
+            tiene_prestamos_por_autorizar = Prestamo.objects.filter(
+                jefe_directo=user,
+                estado=Prestamo.ESTADO_SOLICITADO,
+            ).exists()
+        except Exception:
+            tiene_prestamos_por_autorizar = False
+        if tiene_prestamos_por_autorizar:
+            match_len = len("/rrhh/prestamos/") if current_path.startswith("/rrhh/prestamos/") else 0
+            best_match_len = max(best_match_len, match_len)
+            mi_trabajo = next((group for group in visible_groups if group["key"] == "mi_trabajo"), None)
+            if mi_trabajo is None:
+                mi_trabajo = {"key": "mi_trabajo", "label": "Mi trabajo", "items": [], "active": False}
+                visible_groups.insert(0, mi_trabajo)
+            mi_trabajo["items"].append(
+                {
+                    "label": "Préstamos por autorizar",
+                    "url": "/rrhh/prestamos/",
+                    "active": False,
+                    "_match_len": match_len,
+                    "module": "rrhh",
+                    "submodule": "prestamos",
+                    "initial": "P",
                 }
             )
     for group in visible_groups:

@@ -4,6 +4,7 @@ from django.utils import timezone
 from .models import (
     AsistenciaEmpleado,
     Empleado,
+    EmpleadoBaja,
     HoraExtra,
     ImportacionChecador,
     ImportacionNominaContpaq,
@@ -12,17 +13,55 @@ from .models import (
     NominaLinea,
     NominaPeriodo,
     PermisoSalida,
+    PlantillaAutorizada,
     Prestamo,
     PrestamoCuota,
     Turno,
+    VacanteRRHH,
 )
 
 
 @admin.register(Empleado)
 class EmpleadoAdmin(admin.ModelAdmin):
-    list_display = ("codigo", "nombre", "area", "puesto", "rfc", "curp", "nss", "salario_diario", "activo")
-    list_filter = ("activo", "tipo_contrato", "area")
-    search_fields = ("codigo", "nombre", "rfc", "curp", "nss", "telefono", "email")
+    list_display = (
+        "codigo",
+        "nombre",
+        "departamento_origen",
+        "departamento",
+        "area",
+        "puesto",
+        "puesto_operativo",
+        "jefe_directo",
+        "tipo_personal",
+        "participa_bonos_ventas",
+        "participa_bonos_produccion",
+        "salario_diario",
+        "activo",
+    )
+    list_filter = (
+        "activo",
+        "tipo_contrato",
+        "departamento_origen",
+        "departamento",
+        "puesto_operativo",
+        "tipo_personal",
+        "participa_bonos_ventas",
+        "participa_bonos_produccion",
+        "area",
+    )
+    search_fields = (
+        "codigo",
+        "nombre",
+        "rfc",
+        "curp",
+        "nss",
+        "telefono",
+        "email",
+        "area",
+        "puesto",
+        "puesto_operativo",
+        "jefe_directo__nombre",
+    )
 
 
 class NominaConceptoLineaInline(admin.TabularInline):
@@ -81,6 +120,27 @@ class NominaImportacionAdmin(admin.ModelAdmin):
     )
     list_filter = ("estatus", "created_at")
     search_fields = ("archivo_nombre", "archivo_hash", "periodo__folio")
+
+
+@admin.register(EmpleadoBaja)
+class EmpleadoBajaAdmin(admin.ModelAdmin):
+    list_display = ("fecha_baja", "nombre", "area", "motivo", "fecha_ingreso", "antiguedad_meses", "creado_por")
+    list_filter = ("motivo", "area", "fecha_baja")
+    search_fields = ("nombre", "empleado__codigo", "empleado__nombre", "observacion")
+
+
+@admin.register(PlantillaAutorizada)
+class PlantillaAutorizadaAdmin(admin.ModelAdmin):
+    list_display = ("anio", "mes", "area", "puesto", "cantidad", "actualizado_por", "actualizado_en")
+    list_filter = ("anio", "mes", "area")
+    search_fields = ("area", "puesto", "notas")
+
+
+@admin.register(VacanteRRHH)
+class VacanteRRHHAdmin(admin.ModelAdmin):
+    list_display = ("fecha_solicitada", "area", "puesto", "estado", "fecha_cubierta", "dias_en_cubrir", "creado_por")
+    list_filter = ("estado", "area", "fecha_solicitada")
+    search_fields = ("area", "puesto", "motivo_no_cubierta", "sugerencias")
 
 
 @admin.register(AsistenciaEmpleado)
@@ -151,7 +211,7 @@ class PrestamoCuotaInline(admin.TabularInline):
 
 @admin.register(Prestamo)
 class PrestamoAdmin(admin.ModelAdmin):
-    list_display = ("folio", "empleado", "importe", "saldo_actual", "num_quincenas", "estado", "fecha_solicitud")
+    list_display = ("folio", "empleado", "jefe_directo", "importe", "saldo_actual", "num_quincenas", "estado", "fecha_solicitud")
     list_filter = ("estado", "metodo_pago", "fecha_solicitud")
     search_fields = ("empleado__nombre", "empleado__codigo", "folio")
     readonly_fields = ("folio", "saldo_actual", "creado_en", "actualizado_en")

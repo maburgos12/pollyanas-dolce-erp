@@ -7,32 +7,59 @@
 <style>
   .loan-page { display: grid; gap: 16px; }
   .loan-actions { display: flex; gap: 10px; flex-wrap: wrap; }
-  .loan-board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .loan-board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
   .loan-col { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 14px; }
   .loan-col h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
   .loan-list { display: grid; gap: 10px; }
   .loan-card { border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; text-decoration: none; color: inherit; }
   .loan-card strong { color: var(--vino); }
+  .loan-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
   .muted { color: var(--texto-light); font-size: 13px; }
   @media (max-width: 900px) { .loan-board { grid-template-columns: 1fr; } }
 </style>
 {% endblock %}
 
 {% block content %}
+{% if show_rrhh_tabs %}
 <section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
   {% for tab in module_tabs %}
     <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
   {% endfor %}
 </section>
+{% endif %}
 
 <section class="loan-page">
   <div class="loan-actions">
+    {% if can_manage_rrhh %}
     <a class="btn btn-primary" href="{% url 'rrhh:rrhh_prestamo_nuevo' %}">Nuevo préstamo</a>
     <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_quincena_cobros' %}">Cobros quincena</a>
     <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_importar_contpaq' %}">Importar CONTPAQ</a>
+    {% endif %}
   </div>
 
   <div class="loan-board">
+    <section class="loan-col">
+      <h2>Por autorizar por mí</h2>
+      <div class="loan-list">
+        {% for prestamo in por_autorizar %}
+          <div class="loan-card">
+            <a href="{% url 'rrhh:rrhh_prestamo_detalle' prestamo.pk %}" style="text-decoration:none;color:inherit;">
+              <strong>{{ prestamo.folio }}</strong>
+              <div>{{ prestamo.empleado.nombre }}</div>
+              <div class="muted">${{ prestamo.importe }} · {{ prestamo.get_estado_display }}</div>
+            </a>
+            <form class="loan-card-actions" method="post" action="{% url 'rrhh:rrhh_prestamo_auth_jefe' prestamo.pk %}">
+              {% csrf_token %}
+              <button class="btn btn-primary btn-sm" type="submit">Autorizar</button>
+              <a class="btn btn-secondary btn-sm" href="{% url 'rrhh:rrhh_prestamo_imprimir' prestamo.pk %}">Imprimir</a>
+            </form>
+          </div>
+        {% empty %}
+          <div class="muted">Sin préstamos pendientes de tu autorización.</div>
+        {% endfor %}
+      </div>
+    </section>
+
     <section class="loan-col">
       <h2>Pendientes autorización</h2>
       <div class="loan-list">
@@ -41,6 +68,7 @@
             <strong>{{ prestamo.folio }}</strong>
             <div>{{ prestamo.empleado.nombre }}</div>
             <div class="muted">${{ prestamo.importe }} · {{ prestamo.get_estado_display }}</div>
+            {% if prestamo.jefe_directo %}<div class="muted">Jefe: {{ prestamo.jefe_directo.get_full_name|default:prestamo.jefe_directo.username }}</div>{% endif %}
           </a>
         {% empty %}
           <div class="muted">Sin préstamos pendientes.</div>
