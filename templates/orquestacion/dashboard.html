@@ -5,7 +5,7 @@
 
 {% block extra_css %}
 <style>
-  .orch-shell { display: grid; gap: 1.5rem; }
+  .orch-shell { display: grid; gap: 1.5rem; min-width: 0; }
   .orch-hero {
     background: linear-gradient(135deg, #15243b 0%, #223d63 55%, #c28b4a 100%);
     color: #fff;
@@ -13,7 +13,7 @@
     padding: 1.75rem 1.75rem 1.5rem;
     box-shadow: 0 24px 70px rgba(14, 23, 38, .18);
   }
-  .orch-hero h1 { margin: 0 0 .5rem; font-size: 2rem; }
+  .orch-hero h1 { margin: 0 0 .5rem; color: #fff; font-size: 2rem; }
   .orch-hero p { margin: 0; max-width: 65ch; color: rgba(255,255,255,.88); }
   .orch-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
   .orch-card, .orch-panel {
@@ -22,13 +22,13 @@
     border-radius: 20px;
     box-shadow: 0 16px 40px rgba(12, 20, 34, .08);
   }
-  .orch-card { padding: 1rem 1.1rem; }
+  .orch-card { padding: 1rem 1.1rem; min-width: 0; }
   .orch-card-label { font-size: .82rem; text-transform: uppercase; letter-spacing: .06em; color: #6d7785; margin-bottom: .45rem; }
   .orch-card-value { font-size: 1.95rem; font-weight: 800; color: #15243b; }
   .orch-card-note { color: #6d7785; font-size: .9rem; }
   .orch-panels { display: grid; gap: 1rem; grid-template-columns: 1.25fr 1fr; }
-  .orch-stack { display: grid; gap: 1rem; }
-  .orch-panel { padding: 1.15rem 1.15rem 1rem; }
+  .orch-stack { display: grid; gap: 1rem; min-width: 0; }
+  .orch-panel { padding: 1.15rem 1.15rem 1rem; min-width: 0; overflow-x: auto; }
   .orch-panel h2 { margin: 0 0 .9rem; font-size: 1.05rem; color: #15243b; }
   .orch-table { width: 100%; border-collapse: collapse; }
   .orch-table th, .orch-table td { text-align: left; padding: .7rem .55rem; border-top: 1px solid rgba(21, 36, 59, .08); vertical-align: top; }
@@ -110,6 +110,12 @@
   }
   @media (max-width: 1080px) {
     .orch-panels { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 720px) {
+    .orch-hero { border-radius: 14px; padding: 1rem; }
+    .orch-hero h1 { font-size: 1.45rem; }
+    .orch-grid { grid-template-columns: 1fr; }
+    .orch-table { min-width: 760px; }
   }
 </style>
 {% endblock %}
