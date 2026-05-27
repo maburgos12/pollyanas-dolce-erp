@@ -85,6 +85,38 @@
     word-break: keep-all;
     hyphens: manual;
   }
+  .table-responsive > .finance-table-pricing {
+    min-width: 1640px;
+    table-layout: auto;
+  }
+  .finance-table-pricing th,
+  .finance-table-pricing td {
+    vertical-align: middle;
+  }
+  .finance-table-pricing th:nth-child(1),
+  .finance-table-pricing td:nth-child(1) { width: 280px; min-width: 280px; }
+  .finance-table-pricing th:nth-child(2),
+  .finance-table-pricing td:nth-child(2) { width: 112px; min-width: 112px; }
+  .finance-table-pricing th:nth-child(3),
+  .finance-table-pricing td:nth-child(3) { width: 180px; min-width: 180px; }
+  .finance-table-pricing th:nth-child(4),
+  .finance-table-pricing td:nth-child(4),
+  .finance-table-pricing th:nth-child(8),
+  .finance-table-pricing td:nth-child(8),
+  .finance-table-pricing th:nth-child(12),
+  .finance-table-pricing td:nth-child(12) { width: 112px; min-width: 112px; }
+  .finance-table-pricing th:nth-child(5),
+  .finance-table-pricing td:nth-child(5),
+  .finance-table-pricing th:nth-child(7),
+  .finance-table-pricing td:nth-child(7),
+  .finance-table-pricing th:nth-child(10),
+  .finance-table-pricing td:nth-child(10),
+  .finance-table-pricing th:nth-child(11),
+  .finance-table-pricing td:nth-child(11) { width: 124px; min-width: 124px; }
+  .finance-table-pricing th:nth-child(6),
+  .finance-table-pricing td:nth-child(6) { width: 116px; min-width: 116px; }
+  .finance-table-pricing th:nth-child(9),
+  .finance-table-pricing td:nth-child(9) { width: 146px; min-width: 146px; }
   @media (max-width: 1200px) {
     .finance-alert-grid, .finance-split, .finance-hero-grid, .finance-signal-grid, .finance-action-summary-grid, .finance-definition-grid { grid-template-columns:1fr; }
   }
@@ -455,7 +487,7 @@
       {% endfor %}
     </div>
     <div class="table-responsive">
-      <table class="bi-table finance-table">
+      <table class="bi-table finance-table finance-table-pricing">
         <thead>
           <tr>
             <th>Producto</th>
