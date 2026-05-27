@@ -217,6 +217,14 @@
     min-width: 0;
   }
 
+  .rrhh-employee-table-shell {
+    --rrhh-table-scroll-left: 0px;
+    --rrhh-table-viewport: 100%;
+    overflow-x: auto;
+    position: relative;
+    scrollbar-gutter: stable;
+  }
+
   .rrhh-table th,
   .rrhh-table td {
     overflow-wrap: normal;
@@ -302,19 +310,38 @@
     background: #fffdfd;
     border: 1px solid var(--rosa);
     border-radius: 8px;
+    box-sizing: border-box;
+    max-width: calc(var(--rrhh-table-viewport, 100%) - 28px);
+    overflow: clip;
     padding: 14px;
+    transform: translateX(var(--rrhh-table-scroll-left, 0px));
+    width: calc(var(--rrhh-table-viewport, 100%) - 28px);
+    will-change: transform;
   }
 
-  .rrhh-edit-row td {
+  .rrhh-edit-row > td {
     background: #fffafb;
+    box-sizing: border-box;
+    left: 0;
+    max-width: var(--rrhh-table-viewport, 100%);
+    min-width: var(--rrhh-table-viewport, 100%);
     padding: 10px 14px 16px;
+    position: sticky;
+    white-space: normal !important;
+    width: var(--rrhh-table-viewport, 100%);
+    z-index: 4;
   }
 
   .rrhh-edit-panel summary {
+    align-items: center;
     color: var(--vino);
     cursor: pointer;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
     font-weight: 800;
     list-style: none;
+    min-width: 0;
   }
 
   .rrhh-edit-panel summary::-webkit-details-marker {
@@ -323,7 +350,7 @@
 
   .rrhh-edit-panel summary::after {
     content: "+";
-    float: right;
+    flex: 0 0 auto;
     font-weight: 800;
   }
 
@@ -342,6 +369,7 @@
     background: rgba(255, 253, 253, 0.96);
     border-bottom: 1px solid var(--rosa);
     display: flex;
+    flex-wrap: wrap;
     gap: 12px;
     justify-content: space-between;
     margin-bottom: 14px;
@@ -352,7 +380,16 @@
   }
 
   .rrhh-edit-form .rrhh-form-grid {
-    grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+    align-items: start;
+    grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  }
+
+  .rrhh-edit-form .rrhh-form-grid .span-2 {
+    grid-column: span 2;
+  }
+
+  .rrhh-edit-form .rrhh-help {
+    max-width: 34rem;
   }
 
   .rrhh-checkline {
@@ -396,6 +433,10 @@
   @media (max-width: 1180px) {
     .rrhh-focus {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .rrhh-edit-form .rrhh-form-grid .span-2 {
+      grid-column: 1 / -1;
     }
   }
 
@@ -850,7 +891,7 @@
         <a class="btn btn-secondary" href="{% url 'rrhh:empleados' %}">Limpiar</a>
       </form>
 
-      <div class="table-responsive" style="margin-top:16px;">
+      <div class="table-responsive rrhh-employee-table-shell" style="margin-top:16px;">
         <table class="table table-striped rrhh-table">
           <thead>
             <tr>
@@ -1151,6 +1192,23 @@
 
 <script>
 (() => {
+  const tableShells = Array.from(document.querySelectorAll('.rrhh-employee-table-shell'));
+  const syncTableShellWidth = (shell) => {
+    shell.style.setProperty('--rrhh-table-viewport', `${shell.clientWidth}px`);
+    shell.style.setProperty('--rrhh-table-scroll-left', `${shell.scrollLeft}px`);
+  };
+
+  tableShells.forEach((shell) => {
+    syncTableShellWidth(shell);
+    shell.addEventListener('scroll', () => syncTableShellWidth(shell), { passive: true });
+    if ('ResizeObserver' in window) {
+      new ResizeObserver(() => syncTableShellWidth(shell)).observe(shell);
+    }
+  });
+  window.addEventListener('resize', () => {
+    tableShells.forEach(syncTableShellWidth);
+  });
+
   const modal = document.getElementById('modal-catalogo-otro');
   const input = document.getElementById('catalogo_otro_valor');
   const context = document.getElementById('catalogo_otro_contexto');
