@@ -9,7 +9,7 @@ from rest_framework.test import APIClient
 from unittest import SkipTest
 from unittest.mock import patch
 
-from core.models import Notificacion
+from core.models import Notificacion, Sucursal
 from rrhh.models import (
     AsistenciaEmpleado,
     BonoEsquema,
@@ -826,6 +826,44 @@ class RRHHViewsTests(TestCase):
 
         self.assertIn(repartidor, empleados_elegibles_bonos_ventas())
         self.assertEqual(area_bono_produccion_empleado(envio), AREA_LOGISTICA)
+
+    def test_empleados_update_cajas_activa_bono_ventas_actual(self):
+        from datetime import date
+        from bonos_ventas.models import BonoVentasEmpleado, ConfigBonoVentasPeriodo
+
+        sucursal = Sucursal.objects.create(codigo="TUN", nombre="El Túnel")
+        periodo = ConfigBonoVentasPeriodo.objects.create(mes=5, anio=2026)
+        empleado = Empleado.objects.create(
+            nombre="Empleado Cajas Ventas",
+            area="ADMINISTRACION",
+            puesto_operativo="",
+            sucursal=sucursal.nombre,
+            salario_diario="300.00",
+        )
+
+        with patch("rrhh.services_bonos.timezone.localdate", return_value=date(2026, 5, 27)):
+            resp = self.client.post(
+                reverse("rrhh:empleados"),
+                {
+                    "action": "update",
+                    "empleado_id": str(empleado.id),
+                    "nombre": empleado.nombre,
+                    "area": "CAJAS",
+                    "departamento_origen": Empleado.DEP_VENTAS,
+                    "departamento": Empleado.DEP_VENTAS,
+                    "puesto_operativo": "CAJAS",
+                    "sucursal": sucursal.nombre,
+                    "salario_diario": "300.00",
+                    "activo": "on",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        empleado.refresh_from_db()
+        self.assertTrue(empleado.participa_bonos_ventas)
+        bono = BonoVentasEmpleado.objects.get(periodo=periodo, empleado=empleado)
+        self.assertEqual(bono.sucursal, sucursal)
 
     def test_empleados_update_retira_bono_produccion_actual_vacio(self):
         from datetime import date
