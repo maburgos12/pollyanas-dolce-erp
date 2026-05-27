@@ -1,9 +1,11 @@
 from datetime import timedelta
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
+from django.conf import settings
 from django.core.management import call_command
 from django.db import OperationalError
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.test.client import RequestFactory
 from django.urls import reverse
 from django.contrib.auth import get_user_model
@@ -34,6 +36,21 @@ from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointDaily
 from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, PoliticaStockSucursalProducto, Receta, VentaHistorica
 from reportes.models import CentroCosto
 from rrhh.models import Empleado, PermisoSalida, Prestamo
+
+
+class HallmarkGuardrailsStaticTests(SimpleTestCase):
+    def test_base_template_loads_guardrails_after_module_css(self):
+        base = Path(settings.BASE_DIR) / "templates" / "base.html"
+        html = base.read_text()
+        self.assertIn('data-hallmark-scope="erp"', html)
+        self.assertLess(html.index("{% block extra_css %}"), html.index("hallmark_guardrails.css"))
+
+    def test_guardrails_define_global_erp_scope(self):
+        css = (Path(settings.BASE_DIR) / "static" / "css" / "hallmark_guardrails.css").read_text()
+        self.assertIn('.main-content[data-hallmark-scope="erp"]', css)
+        self.assertIn("--erp-workspace-max", css)
+        self.assertIn("overflow-x: clip", css)
+        self.assertIn(".period-filter", css)
 
 
 class NavigationActiveStateTests(TestCase):

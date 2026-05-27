@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="/static/css/styles.css?v=20260526-receta-composition-modal-v2">
     <link rel="stylesheet" href="/static/css/pollyana_ops_ui.css?v=20260526-logistica-bitacoras-v1">
     {% block extra_css %}{% endblock %}
+    <link rel="stylesheet" href="/static/css/hallmark_guardrails.css?v=20260527-global-v1">
 </head>
 <body class="{% block body_class %}{% endblock %}">
     <div class="layout-wrapper">
@@ -785,7 +786,7 @@
             </div>
         </aside>
 
-        <main class="main-content">
+        <main class="main-content" data-hallmark-scope="erp">
             {% if messages %}
             <div class="messages-container">
                 {% for message in messages %}
