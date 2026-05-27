@@ -434,3 +434,34 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_RECHAZADO)
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_RECHAZADO)
         self.assertEqual(permiso.autorizado_jefe_por, user)
+
+    def test_permiso_produccion_se_crea_con_roster_del_periodo_aunque_rrhh_tenga_otra_area(self):
+        user = get_user_model().objects.create_user(username="julissa.angulo")
+        user.groups.add(Group.objects.create(name=ROLE_PRODUCCION))
+        self.client.force_login(user)
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
+        empleado = Empleado.objects.create(nombre="MEZA TABIZON JESUS ADRIAN", area="ADMINISTRACION", activo=True)
+        BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado, area=AREA_LOGISTICA)
+
+        response = self.client.post(
+            "/api/bonos-produccion/permisos/",
+            json.dumps(
+                {
+                    "empleado": empleado.id,
+                    "mes": 5,
+                    "anio": 2026,
+                    "area": AREA_LOGISTICA,
+                    "tipo": PermisoSalida.TIPO_PERMISO_HORA,
+                    "fecha_inicio": "2026-05-21T12:00:00",
+                    "fecha_fin": "2026-05-21T13:00:00",
+                    "goce_sueldo": True,
+                    "motivo": "Cita medica programada",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        permiso = PermisoSalida.objects.get(pk=response.json()["id"])
+        self.assertEqual(permiso.empleado, empleado)
+        self.assertEqual(permiso.origen_solicitud, PermisoSalida.ORIGEN_BONOS_PRODUCCION)

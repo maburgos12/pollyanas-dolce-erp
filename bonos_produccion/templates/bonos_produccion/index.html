@@ -455,8 +455,12 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
     if(!selected){showStatus('Selecciona un empleado.','err');return;}
     if(!motivo.trim()){showStatus('Captura el motivo del permiso.','err');return;}
     if(tipo==='permiso_hora'&&(!desde||!hasta)){showStatus('Captura hora desde y hasta para permiso parcial.','err');return;}
+    const areaPermiso=selected.area&&selected.area!==AREA_TODAS?selected.area:area;
     api('/api/bonos-produccion/permisos/',{method:'POST',body:JSON.stringify({
       empleado:selected.id,
+      mes,
+      anio,
+      area:areaPermiso,
       tipo,
       fecha_inicio:tipo==='permiso_dia'?`${fecha}T00:00:00`:`${fecha}T${desde}:00`,
       fecha_fin:tipo==='permiso_dia'?null:`${fecha}T${hasta}:00`,
