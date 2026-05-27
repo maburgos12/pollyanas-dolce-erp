@@ -527,6 +527,14 @@ class HoraExtra(models.Model):
     )
     monto_calculado = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     estado = models.CharField(max_length=12, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE)
+    jefe_directo = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="horas_extra_por_autorizar",
+        verbose_name="Jefe directo / autorizador",
+    )
     autorizado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -534,6 +542,7 @@ class HoraExtra(models.Model):
         on_delete=models.SET_NULL,
         related_name="horas_extra_autorizadas",
     )
+    fecha_autorizacion_jefe = models.DateTimeField(null=True, blank=True)
     notas = models.TextField(blank=True)
     creado_en = models.DateTimeField(auto_now_add=True)
 

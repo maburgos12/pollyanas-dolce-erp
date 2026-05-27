@@ -131,6 +131,21 @@ def notificar_permiso_solicitado(permiso, *, actor=None) -> int:
     )
 
 
+def notificar_hora_extra_solicitada(hora_extra, *, actor=None) -> int:
+    return crear_notificaciones(
+        [hora_extra.jefe_directo],
+        titulo=f"Hora extra pendiente: {hora_extra.empleado.nombre}",
+        mensaje=f"{hora_extra.fecha:%d/%m/%Y} · {hora_extra.horas} h · requiere autorización de jefe directo",
+        url="/rrhh/horas-extra/",
+        tipo=Notificacion.TIPO_HORA_EXTRA,
+        prioridad=Notificacion.PRIORIDAD_ALTA,
+        actor=actor,
+        objeto_tipo="rrhh.HoraExtra",
+        objeto_id=hora_extra.id,
+        excluir=actor,
+    )
+
+
 def notificar_prestamo_solicitado(prestamo, *, actor=None) -> int:
     return crear_notificaciones(
         [prestamo.jefe_directo],

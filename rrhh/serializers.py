@@ -26,6 +26,7 @@ class AsistenciaSerializer(serializers.ModelSerializer):
 
 class HoraExtraSerializer(serializers.ModelSerializer):
     empleado_nombre = serializers.CharField(source="empleado.nombre", read_only=True)
+    jefe_directo_nombre = serializers.SerializerMethodField()
 
     class Meta:
         model = HoraExtra
@@ -37,11 +38,28 @@ class HoraExtraSerializer(serializers.ModelSerializer):
             "horas",
             "monto_calculado",
             "estado",
+            "jefe_directo",
+            "jefe_directo_nombre",
+            "autorizado_por",
+            "fecha_autorizacion_jefe",
             "notas",
             "creado_en",
         ]
-        read_only_fields = ["monto_calculado", "estado", "creado_en"]
+        read_only_fields = [
+            "monto_calculado",
+            "estado",
+            "jefe_directo",
+            "jefe_directo_nombre",
+            "autorizado_por",
+            "fecha_autorizacion_jefe",
+            "creado_en",
+        ]
         extra_kwargs = {"empleado": {"required": False}}
+
+    def get_jefe_directo_nombre(self, obj):
+        if not obj.jefe_directo_id:
+            return ""
+        return obj.jefe_directo.get_full_name() or obj.jefe_directo.username
 
 
 class PermisoSalidaSerializer(serializers.ModelSerializer):

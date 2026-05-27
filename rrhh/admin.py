@@ -160,22 +160,9 @@ class AsistenciaAdmin(admin.ModelAdmin):
 
 @admin.register(HoraExtra)
 class HoraExtraAdmin(admin.ModelAdmin):
-    list_display = ("empleado", "fecha", "horas", "monto_calculado", "estado", "autorizado_por")
-    list_filter = ("estado", "fecha")
+    list_display = ("empleado", "fecha", "horas", "monto_calculado", "estado", "jefe_directo", "autorizado_por")
+    list_filter = ("estado", "fecha", "jefe_directo")
     search_fields = ("empleado__nombre", "empleado__codigo")
-    actions = ["autorizar_seleccionadas"]
-
-    def autorizar_seleccionadas(self, request, queryset):
-        from .services import calcular_monto_hora_extra
-
-        for he in queryset.filter(estado=HoraExtra.ESTADO_PENDIENTE):
-            he.estado = HoraExtra.ESTADO_AUTORIZADO
-            he.autorizado_por = request.user
-            calcular_monto_hora_extra(he)
-            he.save(update_fields=["estado", "autorizado_por"])
-        self.message_user(request, "Horas extra autorizadas.")
-
-    autorizar_seleccionadas.short_description = "Autorizar horas extra seleccionadas"
 
 
 @admin.register(PermisoSalida)

@@ -258,6 +258,30 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                     "initial": "P",
                 }
             )
+        try:
+            from rrhh.models import HoraExtra
+
+            horas_extra_por_autorizar = HoraExtra.objects.filter(
+                jefe_directo=user,
+                estado=HoraExtra.ESTADO_PENDIENTE,
+            ).count()
+        except Exception:
+            horas_extra_por_autorizar = 0
+        if horas_extra_por_autorizar:
+            match_len = len("/rrhh/horas-extra/") if current_path.startswith("/rrhh/horas-extra/") else 0
+            best_match_len = max(best_match_len, match_len)
+            mi_trabajo["items"].append(
+                {
+                    "label": "Horas extra por autorizar",
+                    "url": "/rrhh/horas-extra/",
+                    "active": False,
+                    "_match_len": match_len,
+                    "module": "rrhh",
+                    "submodule": "horas_extra",
+                    "initial": "H",
+                    "badge_count": horas_extra_por_autorizar,
+                }
+            )
     for group in visible_groups:
         active_group = False
         for item in group["items"]:

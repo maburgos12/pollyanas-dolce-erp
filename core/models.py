@@ -140,10 +140,12 @@ class AuditLog(models.Model):
 
 class Notificacion(models.Model):
     TIPO_PERMISO = "permiso"
+    TIPO_HORA_EXTRA = "hora_extra"
     TIPO_PRESTAMO = "prestamo"
     TIPO_SISTEMA = "sistema"
     TIPO_CHOICES = [
         (TIPO_PERMISO, "Permiso"),
+        (TIPO_HORA_EXTRA, "Hora extra"),
         (TIPO_PRESTAMO, "Préstamo"),
         (TIPO_SISTEMA, "Sistema"),
     ]
