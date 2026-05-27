@@ -110,6 +110,12 @@
     letter-spacing: 0;
   }
 
+  .rrhh-help {
+    color: var(--texto-light);
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
   .rrhh-actions {
     display: flex;
     flex-wrap: wrap;
@@ -249,8 +255,11 @@
     align-items: center;
     display: flex;
     gap: 10px;
-    justify-content: space-between;
     flex-wrap: wrap;
+  }
+
+  .rrhh-bonus-other .btn {
+    min-width: 210px;
   }
 
   .rrhh-edit-panel {
@@ -290,6 +299,20 @@
     border-top: 1px solid var(--rosa);
     margin-top: 12px;
     padding-top: 12px;
+  }
+
+  .rrhh-edit-toolbar {
+    align-items: center;
+    background: rgba(255, 253, 253, 0.96);
+    border-bottom: 1px solid var(--rosa);
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    margin-bottom: 14px;
+    padding: 0 0 12px;
+    position: sticky;
+    top: 0;
+    z-index: 3;
   }
 
   .rrhh-edit-form .rrhh-form-grid {
@@ -437,11 +460,13 @@
                 {% endfor %}
                 <option value="__otro__">Otro...</option>
               </select>
+              <div class="rrhh-help">Regla para bonos y permisos: Hornos, Armado, Repartidores, Envío a sucursal, etc.</div>
               <input type="hidden" name="area_otro" data-catalog-other="area">
             </div>
             <div class="rrhh-field">
-              <label for="puesto">Puesto</label>
+              <label for="puesto">Puesto descriptivo</label>
               <input id="puesto" class="input-field" type="text" name="puesto">
+              <div class="rrhh-help">Texto libre para expediente o nómina. No controla bonos.</div>
             </div>
             <div class="rrhh-field">
               <label for="departamento_origen">Departamento origen</label>
@@ -451,6 +476,7 @@
                   <option value="{{ value }}">{{ label }}</option>
                 {% endfor %}
               </select>
+              <div class="rrhh-help">De dónde viene naturalmente el puesto. Ej. Logística para repartidores o envíos.</div>
             </div>
             <div class="rrhh-field">
               <label for="departamento">Departamento actual / adscripción</label>
@@ -460,6 +486,7 @@
                   <option value="{{ value }}">{{ label }}</option>
                 {% endfor %}
               </select>
+              <div class="rrhh-help">Quién lo supervisa hoy y en qué estructura aparece actualmente.</div>
             </div>
             <div class="rrhh-field">
               <label for="puesto_operativo">Puesto operativo</label>
@@ -470,6 +497,7 @@
                 {% endfor %}
                 <option value="__otro__">Otro...</option>
               </select>
+              <div class="rrhh-help">Lista controlada para reglas internas. Normalmente se llena sola al elegir área/división.</div>
               <input type="hidden" name="puesto_operativo_otro" data-catalog-other="puesto_operativo">
             </div>
             <div class="rrhh-field span-2">
@@ -532,7 +560,7 @@
               </div>
               <div class="rrhh-bonus-other">
                 <span class="muted">¿Otro departamento o esquema?</span>
-                <button class="btn btn-secondary btn-small" type="button" data-bonus-other-open>Agregar esquema</button>
+                <button class="btn btn-secondary" type="button" data-bonus-other-open>Agregar esquema de bono</button>
               </div>
               <input type="hidden" name="bono_esquema_otro_nombre" data-bonus-other="nombre">
               <input type="hidden" name="bono_esquema_otro_departamento" data-bonus-other="departamento">
@@ -814,6 +842,10 @@
                     {% csrf_token %}
                     <input type="hidden" name="action" value="update">
                     <input type="hidden" name="empleado_id" value="{{ e.id }}">
+                    <div class="rrhh-edit-toolbar">
+                      <span class="muted">Editando expediente y reglas operativas</span>
+                      <button class="btn btn-primary btn-small" type="submit">Guardar cambios arriba</button>
+                    </div>
                     <div class="rrhh-form-grid">
                       <div class="rrhh-field span-2">
                         <label for="edit_nombre_{{ e.id }}">Nombre</label>
@@ -847,11 +879,13 @@
                           {% endfor %}
                           <option value="__otro__">Otro...</option>
                         </select>
+                        <div class="rrhh-help">Regla para bonos y permisos: Hornos, Armado, Repartidores, Envío a sucursal, etc.</div>
                         <input type="hidden" name="area_otro" data-catalog-other="area">
                       </div>
                       <div class="rrhh-field">
-                        <label for="edit_puesto_{{ e.id }}">Puesto</label>
+                        <label for="edit_puesto_{{ e.id }}">Puesto descriptivo</label>
                         <input id="edit_puesto_{{ e.id }}" class="input-field" type="text" name="puesto" value="{{ e.puesto }}">
+                        <div class="rrhh-help">Texto libre para expediente o nómina. No controla bonos.</div>
                       </div>
                       <div class="rrhh-field">
                         <label for="edit_departamento_origen_{{ e.id }}">Departamento origen</label>
@@ -861,6 +895,7 @@
                             <option value="{{ value }}" {% if e.departamento_origen == value %}selected{% endif %}>{{ label }}</option>
                           {% endfor %}
                         </select>
+                        <div class="rrhh-help">De dónde viene naturalmente el puesto. Ej. Logística para repartidores o envíos.</div>
                       </div>
                       <div class="rrhh-field">
                         <label for="edit_departamento_{{ e.id }}">Departamento actual / adscripción</label>
@@ -870,6 +905,7 @@
                             <option value="{{ value }}" {% if e.departamento == value %}selected{% endif %}>{{ label }}</option>
                           {% endfor %}
                         </select>
+                        <div class="rrhh-help">Quién lo supervisa hoy y en qué estructura aparece actualmente.</div>
                       </div>
                       <div class="rrhh-field">
                         <label for="edit_puesto_operativo_{{ e.id }}">Puesto operativo</label>
@@ -883,6 +919,7 @@
                           {% endfor %}
                           <option value="__otro__">Otro...</option>
                         </select>
+                        <div class="rrhh-help">Lista controlada para reglas internas. Normalmente se llena sola al elegir área/división.</div>
                         <input type="hidden" name="puesto_operativo_otro" data-catalog-other="puesto_operativo">
                       </div>
                       <div class="rrhh-field span-2">
@@ -957,7 +994,7 @@
                         </div>
                         <div class="rrhh-bonus-other">
                           <span class="muted">¿Otro departamento o esquema?</span>
-                          <button class="btn btn-secondary btn-small" type="button" data-bonus-other-open>Agregar esquema</button>
+                          <button class="btn btn-secondary" type="button" data-bonus-other-open>Agregar esquema de bono</button>
                         </div>
                         <input type="hidden" name="bono_esquema_otro_nombre" data-bonus-other="nombre">
                         <input type="hidden" name="bono_esquema_otro_departamento" data-bonus-other="departamento">
