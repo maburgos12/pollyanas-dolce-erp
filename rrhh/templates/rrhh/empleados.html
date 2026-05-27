@@ -224,6 +224,35 @@
     color: #a3313c;
   }
 
+  .rrhh-bonus-box {
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    display: grid;
+    gap: 10px;
+    grid-column: 1 / -1;
+    padding: 12px;
+  }
+
+  .rrhh-bonus-title {
+    color: var(--vino);
+    font-size: 13px;
+    font-weight: 900;
+  }
+
+  .rrhh-bonus-options {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .rrhh-bonus-other {
+    align-items: center;
+    display: flex;
+    gap: 10px;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
   .rrhh-edit-panel {
     background: #fffdfd;
     border: 1px solid var(--rosa);
@@ -488,14 +517,30 @@
               <label for="sucursal">Sucursal</label>
               <input id="sucursal" class="input-field" type="text" name="sucursal">
             </div>
-            <label class="rrhh-checkline">
-              <input type="checkbox" name="participa_bonos_ventas">
-              Participa en bonos ventas
-            </label>
-            <label class="rrhh-checkline">
-              <input type="checkbox" name="participa_bonos_produccion">
-              Participa en bonos producción
-            </label>
+            <div class="rrhh-bonus-box" data-bonus-scope>
+              <div>
+                <div class="rrhh-bonus-title">Esquemas de bono</div>
+                <div class="muted">Ventas y Producción alimentan los módulos actuales. Otros esquemas quedan listos en catálogo ERP.</div>
+              </div>
+              <div class="rrhh-bonus-options">
+                {% for esquema in bono_esquemas %}
+                <label class="rrhh-checkline">
+                  <input type="checkbox" name="bono_esquemas" value="{{ esquema.id }}" data-bonus-code="{{ esquema.codigo }}">
+                  {{ esquema.nombre }}
+                </label>
+                {% endfor %}
+              </div>
+              <div class="rrhh-bonus-other">
+                <span class="muted">¿Otro departamento o esquema?</span>
+                <button class="btn btn-secondary btn-small" type="button" data-bonus-other-open>Agregar esquema</button>
+              </div>
+              <input type="hidden" name="bono_esquema_otro_nombre" data-bonus-other="nombre">
+              <input type="hidden" name="bono_esquema_otro_departamento" data-bonus-other="departamento">
+              <input type="hidden" name="bono_esquema_otro_area" data-bonus-other="area">
+              <input type="hidden" name="bono_esquema_otro_descripcion" data-bonus-other="descripcion">
+            </div>
+            <input type="hidden" name="participa_bonos_ventas" data-legacy-bonus="VENTAS">
+            <input type="hidden" name="participa_bonos_produccion" data-legacy-bonus="PRODUCCION">
           </div>
           <div class="rrhh-actions">
             <button class="btn btn-primary" type="submit">Guardar empleado</button>
@@ -737,9 +782,11 @@
               <td>{{ e.puesto|default:"-" }}</td>
               <td>{{ e.jefe_directo.nombre|default:"-" }}</td>
               <td>
-                {% if e.participa_bonos_ventas %}<span class="rrhh-status active">Ventas</span>{% endif %}
-                {% if e.participa_bonos_produccion %}<span class="rrhh-status active">Producción</span>{% endif %}
-                {% if not e.participa_bonos_ventas and not e.participa_bonos_produccion %}<span class="muted">-</span>{% endif %}
+                {% for esquema in e.bonos_esquemas.all %}
+                  <span class="rrhh-status active">{{ esquema.nombre }}</span>
+                {% empty %}
+                  <span class="muted">-</span>
+                {% endfor %}
               </td>
               <td>{{ e.fecha_ingreso|date:"Y-m-d" }}</td>
               <td class="text-end">${{ e.salario_diario|floatformat:2|intcomma }}</td>
@@ -891,14 +938,32 @@
                         <input type="checkbox" name="activo" {% if e.activo %}checked{% endif %}>
                         Activo
                       </label>
-                      <label class="rrhh-checkline">
-                        <input type="checkbox" name="participa_bonos_ventas" {% if e.participa_bonos_ventas %}checked{% endif %}>
-                        Participa en bonos ventas
-                      </label>
-                      <label class="rrhh-checkline">
-                        <input type="checkbox" name="participa_bonos_produccion" {% if e.participa_bonos_produccion %}checked{% endif %}>
-                        Participa en bonos producción
-                      </label>
+                      <div class="rrhh-bonus-box" data-bonus-scope>
+                        <div>
+                          <div class="rrhh-bonus-title">Esquemas de bono</div>
+                          <div class="muted">Ventas y Producción alimentan los módulos actuales. Otros esquemas quedan listos en catálogo ERP.</div>
+                        </div>
+                        <div class="rrhh-bonus-options">
+                          {% for esquema in bono_esquemas %}
+                          <label class="rrhh-checkline">
+                            <input type="checkbox"
+                                   name="bono_esquemas"
+                                   value="{{ esquema.id }}"
+                                   data-bonus-code="{{ esquema.codigo }}"
+                                   {% if esquema.id in e.bono_esquema_ids %}checked{% endif %}>
+                            {{ esquema.nombre }}
+                          </label>
+                          {% endfor %}
+                        </div>
+                        <div class="rrhh-bonus-other">
+                          <span class="muted">¿Otro departamento o esquema?</span>
+                          <button class="btn btn-secondary btn-small" type="button" data-bonus-other-open>Agregar esquema</button>
+                        </div>
+                        <input type="hidden" name="bono_esquema_otro_nombre" data-bonus-other="nombre">
+                        <input type="hidden" name="bono_esquema_otro_departamento" data-bonus-other="departamento">
+                        <input type="hidden" name="bono_esquema_otro_area" data-bonus-other="area">
+                        <input type="hidden" name="bono_esquema_otro_descripcion" data-bonus-other="descripcion">
+                      </div>
                     </div>
                     <div class="rrhh-actions">
                       <button class="btn btn-primary btn-small" type="submit">Guardar cambios</button>
@@ -935,6 +1000,42 @@
   </div>
 </dialog>
 
+<dialog id="modal-bono-esquema-otro" class="rrhh-dialog">
+  <div class="rrhh-dialog-body">
+    <div>
+      <div class="rrhh-dialog-title">Agregar esquema de bono</div>
+      <div class="muted">El esquema queda guardado en el catálogo ERP para usarlo con más empleados.</div>
+    </div>
+    <div class="rrhh-form-grid">
+      <div class="rrhh-field span-2">
+        <label for="bono_otro_nombre">Nombre del esquema</label>
+        <input id="bono_otro_nombre" class="input-field" type="text" autocomplete="off" placeholder="Ej. Bono logística">
+      </div>
+      <div class="rrhh-field">
+        <label for="bono_otro_departamento">Departamento</label>
+        <select id="bono_otro_departamento" class="input-field">
+          <option value="">Sin definir</option>
+          {% for value,label in departamento_choices %}
+            <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="rrhh-field">
+        <label for="bono_otro_area">Área / división</label>
+        <input id="bono_otro_area" class="input-field" type="text" autocomplete="off" placeholder="Ej. Repartidores">
+      </div>
+      <div class="rrhh-field span-2">
+        <label for="bono_otro_descripcion">Descripción / regla inicial</label>
+        <textarea id="bono_otro_descripcion" class="input-field" rows="3" placeholder="Qué área lo usa y qué se revisará después."></textarea>
+      </div>
+    </div>
+    <div class="rrhh-actions">
+      <button class="btn btn-secondary" type="button" data-bonus-other-cancel>Cancelar</button>
+      <button class="btn btn-primary" type="button" data-bonus-other-apply>Aplicar esquema</button>
+    </div>
+  </div>
+</dialog>
+
 <script>
 (() => {
   const modal = document.getElementById('modal-catalogo-otro');
@@ -962,8 +1063,8 @@
     const origenSelect = form.querySelector('[data-departamento-origen-select]');
     const actualSelect = form.querySelector('select[name="departamento"]');
     const puestoSelect = form.querySelector('select[name="puesto_operativo"]');
-    const ventas = form.querySelector('input[name="participa_bonos_ventas"]');
-    const produccion = form.querySelector('input[name="participa_bonos_produccion"]');
+    const ventas = form.querySelector('input[data-bonus-code="VENTAS"]');
+    const produccion = form.querySelector('input[data-bonus-code="PRODUCCION"]');
     if (origen && origenSelect) origenSelect.value = origen;
     if (actual && actualSelect) actualSelect.value = actual;
     if (puesto && puestoSelect && Array.from(puestoSelect.options).some(option => option.value === puesto)) {
@@ -1000,6 +1101,59 @@
     option.textContent = `${value} (nuevo)`;
     option.selected = true;
     activeSelect.insertBefore(option, activeSelect.querySelector('option[value="__otro__"]'));
+    modal.close();
+  });
+})();
+
+(() => {
+  const modal = document.getElementById('modal-bono-esquema-otro');
+  const nombre = document.getElementById('bono_otro_nombre');
+  const departamento = document.getElementById('bono_otro_departamento');
+  const area = document.getElementById('bono_otro_area');
+  const descripcion = document.getElementById('bono_otro_descripcion');
+  let activeForm = null;
+
+  function openBonusModal(button) {
+    activeForm = button.closest('form');
+    nombre.value = '';
+    departamento.value = '';
+    area.value = '';
+    descripcion.value = '';
+    modal.showModal();
+    nombre.focus();
+  }
+
+  function writeHidden(field, value) {
+    const target = activeForm?.querySelector(`[data-bonus-other="${field}"]`);
+    if (target) target.value = value;
+  }
+
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-bonus-other-open]');
+    if (!button) return;
+    openBonusModal(button);
+  });
+
+  modal.querySelector('[data-bonus-other-cancel]').addEventListener('click', () => {
+    modal.close();
+  });
+
+  modal.querySelector('[data-bonus-other-apply]').addEventListener('click', () => {
+    const schemeName = nombre.value.trim();
+    if (!schemeName || !activeForm) return;
+    writeHidden('nombre', schemeName);
+    writeHidden('departamento', departamento.value);
+    writeHidden('area', area.value.trim());
+    writeHidden('descripcion', descripcion.value.trim());
+
+    const box = activeForm.querySelector('[data-bonus-scope]');
+    const options = box?.querySelector('.rrhh-bonus-options');
+    if (options) {
+      const label = document.createElement('span');
+      label.className = 'rrhh-status active';
+      label.textContent = `${schemeName} (nuevo)`;
+      options.appendChild(label);
+    }
     modal.close();
   });
 })();

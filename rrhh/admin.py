@@ -3,6 +3,7 @@ from django.utils import timezone
 
 from .models import (
     AsistenciaEmpleado,
+    BonoEsquema,
     Empleado,
     EmpleadoBaja,
     HoraExtra,
@@ -19,6 +20,13 @@ from .models import (
     Turno,
     VacanteRRHH,
 )
+
+
+@admin.register(BonoEsquema)
+class BonoEsquemaAdmin(admin.ModelAdmin):
+    list_display = ("codigo", "nombre", "departamento", "area", "activo", "actualizado_en")
+    list_filter = ("activo", "departamento", "area")
+    search_fields = ("codigo", "nombre", "area", "descripcion")
 
 
 @admin.register(Empleado)

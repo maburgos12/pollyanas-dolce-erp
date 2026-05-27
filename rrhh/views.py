@@ -18,6 +18,7 @@ from core.audit import log_event
 
 from .models import (
     AsistenciaEmpleado,
+    BonoEsquema,
     Empleado,
     EmpleadoBaja,
     HoraExtra,
@@ -29,6 +30,7 @@ from .models import (
     PlantillaAutorizada,
     VacanteRRHH,
 )
+from .services_bonos import asegurar_esquemas_base, sincronizar_esquemas_bono
 from .services_permisos import can_authorize_direccion
 
 AREA_DIVISION_CHOICES = [
@@ -738,6 +740,7 @@ def empleados(request):
                 empleado.sucursal = (request.POST.get("sucursal") or "").strip()
                 empleado.activo = request.POST.get("activo") == "on"
                 empleado.save()
+                sincronizar_esquemas_bono(empleado, request.POST, organizacion)
                 log_event(
                     request.user,
                     "UPDATE",
@@ -778,6 +781,7 @@ def empleados(request):
                 email=(request.POST.get("email") or "").strip(),
                 sucursal=(request.POST.get("sucursal") or "").strip(),
             )
+            sincronizar_esquemas_bono(empleado, request.POST, organizacion)
             log_event(
                 request.user,
                 "CREATE",
@@ -796,7 +800,8 @@ def empleados(request):
     estado = (request.GET.get("estado") or "activos").strip().lower()
     enterprise_focus = (request.GET.get("enterprise_focus") or "").strip().upper()
 
-    qs = Empleado.objects.all().annotate(total_lineas_nomina=Count("lineas_nomina"))
+    asegurar_esquemas_base()
+    qs = Empleado.objects.all().prefetch_related("bonos_esquemas").annotate(total_lineas_nomina=Count("lineas_nomina"))
     if q:
         qs = qs.filter(
             Q(nombre__icontains=q)
@@ -865,10 +870,14 @@ def empleados(request):
         default_url=reverse("rrhh:empleados"),
     )
 
+    empleados_page = list(qs.order_by("nombre")[:600])
+    for empleado in empleados_page:
+        empleado.bono_esquema_ids = {esquema.id for esquema in empleado.bonos_esquemas.all()}
+
     context = {
         "module_tabs": _module_tabs("empleados"),
         "can_manage_rrhh": can_manage_rrhh(request.user),
-        "empleados": qs.order_by("nombre")[:600],
+        "empleados": empleados_page,
         "q": q,
         "estado": estado,
         "enterprise_focus": enterprise_focus,
@@ -883,6 +892,7 @@ def empleados(request):
         "puesto_operativo_choices": PUESTO_OPERATIVO_CHOICES,
         "puesto_operativo_values": {value for value, _ in PUESTO_OPERATIVO_CHOICES},
         "tipo_personal_choices": Empleado.TIPO_PERSONAL_CHOICES,
+        "bono_esquemas": BonoEsquema.objects.filter(activo=True).order_by("nombre"),
         "empleados_jefes": Empleado.objects.filter(activo=True).order_by("nombre"),
         "motivo_baja_choices": EmpleadoBaja.MOTIVO_CHOICES,
         "months": range(1, 13),
