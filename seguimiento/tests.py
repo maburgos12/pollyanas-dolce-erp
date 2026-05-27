@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import json
 import os
 from datetime import timedelta
@@ -26,6 +28,12 @@ from .models import (
 from .services import empleado_de_usuario
 from .management.commands.importar_agente_dg_seguimiento import Command as ImportarAgenteDGCommand
 from .management.commands.importar_agente_dg_seguimiento import _status_agente_a_erp
+
+
+def _agente_dg_signature(payload: dict, secret: str) -> tuple[str, str]:
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    return body.decode(), f"sha256={signature}"
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -415,3 +423,65 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertEqual(task.interval.every, 15)
         self.assertEqual(task.interval.period, "minutes")
         self.assertEqual(json.loads(task.kwargs), {"limit": 25})
+
+    @override_settings(AGENTE_DG_WEBHOOK_SECRET="test-webhook-secret")
+    def test_webhook_agente_dg_firmado_crea_compromiso(self):
+        payload = {
+            "event_id": "evt-compromiso-1",
+            "source_table": "commitments",
+            "source_id": 42,
+            "action": "upsert",
+            "record": {
+                "id": 42,
+                "titulo": "Validar bitácora de producción",
+                "descripcion": "Revisión diaria generada desde Agente DG.",
+                "expected_deliverable": "Bitácora validada",
+                "status": "IN_PROGRESS",
+                "due_date": (timezone.localdate() + timedelta(days=2)).isoformat(),
+                "user_id": 7,
+                "user_email": self.user.email,
+                "user_name": self.user.get_full_name(),
+                "area_name": "PRODUCCION",
+            },
+        }
+        body, signature = _agente_dg_signature(payload, "test-webhook-secret")
+
+        response = self.client.post(
+            "/seguimiento/webhooks/agente-dg/",
+            data=body,
+            content_type="application/json",
+            HTTP_X_AGENTE_DG_SIGNATURE=signature,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["updated"], 0)
+        item = SeguimientoItem.objects.get(metadata__source_table="commitments", metadata__source_id=42)
+        self.assertEqual(item.tipo, SeguimientoItem.TIPO_COMPROMISO)
+        self.assertEqual(item.titulo, "Validar bitácora de producción")
+        self.assertEqual(item.responsable_user, self.user)
+        self.assertEqual(item.estatus, SeguimientoItem.ESTATUS_EN_PROCESO)
+        self.assertEqual(item.origen, "Agente DG")
+
+    @override_settings(AGENTE_DG_WEBHOOK_SECRET="test-webhook-secret")
+    def test_webhook_agente_dg_rechaza_firma_invalida(self):
+        payload = {
+            "source_table": "commitments",
+            "source_id": 43,
+            "action": "upsert",
+            "record": {
+                "id": 43,
+                "titulo": "No debe guardarse",
+                "status": "IN_PROGRESS",
+                "user_email": self.user.email,
+            },
+        }
+
+        response = self.client.post(
+            "/seguimiento/webhooks/agente-dg/",
+            data=json.dumps(payload),
+            content_type="application/json",
+            HTTP_X_AGENTE_DG_SIGNATURE="sha256=firma-invalida",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(SeguimientoItem.objects.filter(metadata__source_table="commitments", metadata__source_id=43).exists())
