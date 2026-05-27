@@ -3,7 +3,8 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.models import Sucursal
+from core.access import ACCESS_MANAGE
+from core.models import Sucursal, UserModuleAccess
 from crm.models import Cliente, PedidoCliente
 from logistica.models import EntregaRuta, Repartidor, RutaEntrega, Unidad
 
@@ -247,3 +248,14 @@ class LogisticaPwaApiTests(TestCase):
         response = self.client.get(reverse("api_logistica_auth_session_token"))
 
         self.assertEqual(response.status_code, 403)
+
+    def test_mantenimiento_user_can_open_logistica_pwa_without_logistica_module(self):
+        self.client.logout()
+        user = User.objects.create_user(username="mant.pwa", password="pass123")
+        UserModuleAccess.objects.create(user=user, module="mantenimiento", access=ACCESS_MANAGE)
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("logistica:pwa_app"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Logística")

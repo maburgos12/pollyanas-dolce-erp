@@ -5,7 +5,8 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from core.models import Sucursal
+from core.access import ACCESS_MANAGE
+from core.models import Sucursal, UserModuleAccess
 from logistica.models import LavadoUnidad, Repartidor, ReporteUnidad, Unidad
 
 
@@ -13,8 +14,8 @@ from logistica.models import LavadoUnidad, Repartidor, ReporteUnidad, Unidad
 class LogisticaReportesApiTests(TestCase):
     def setUp(self):
         self.client = APIClient()
-        self.grupo_repartidor = Group.objects.create(name="repartidor")
-        self.grupo_compras = Group.objects.create(name="compras_logistica")
+        self.grupo_repartidor, _ = Group.objects.get_or_create(name="repartidor")
+        self.grupo_compras, _ = Group.objects.get_or_create(name="compras_logistica")
 
         self.user_repartidor = User.objects.create_user(
             username="repartidor.api",
@@ -74,6 +75,26 @@ class LogisticaReportesApiTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(ReporteUnidad.objects.count(), 1)
         self.assertEqual(response.data["unidad_codigo"], self.unidad.codigo)
+
+    def test_mantenimiento_con_perfil_repartidor_crea_reporte_sin_grupo_logistica(self):
+        user = User.objects.create_user(username="mantenimiento.logistica", password="pass123")
+        UserModuleAccess.objects.create(user=user, module="mantenimiento", access=ACCESS_MANAGE)
+        Repartidor.objects.create(user=user, unidad_asignada=self.unidad, sucursal=self.sucursal)
+
+        self._auth(self._jwt_for("mantenimiento.logistica"))
+        response = self.client.post(
+            reverse("api_logistica_reportes"),
+            {
+                "unidad": self.unidad.id,
+                "tipo": ReporteUnidad.TIPO_MANTENIMIENTO,
+                "severidad": ReporteUnidad.SEVERIDAD_URGENTE,
+                "descripcion": "Reporte creado por mantenimiento desde PWA logística.",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["repartidor_nombre"], "mantenimiento.logistica")
 
     def test_crear_reporte_sin_autenticacion_devuelve_401(self):
         response = self.client.post(
