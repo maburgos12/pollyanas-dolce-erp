@@ -1084,12 +1084,12 @@ textarea:focus,
 
 .table-responsive > table:has(thead th:nth-child(10)),
 .table-responsive > .table:has(thead th:nth-child(10)) {
-  --table-min-width: max(var(--table-min-width), 1320px);
+  min-width: max(var(--table-min-width), 1320px);
 }
 
 .table-responsive > table:has(thead th:nth-child(12)),
 .table-responsive > .table:has(thead th:nth-child(12)) {
-  --table-min-width: max(var(--table-min-width), 1580px);
+  min-width: max(var(--table-min-width), 1580px);
 }
 
 .table-responsive .cell-wrap,
@@ -1100,6 +1100,47 @@ textarea:focus,
   overflow-wrap: normal;
   word-break: keep-all;
   hyphens: manual;
+}
+
+.table-responsive .cell-status,
+.table-responsive .cell-actions,
+.table-responsive .cell-action,
+.table-responsive .cell-button,
+.table-responsive .cell-badge,
+.table-responsive [data-cell-status="true"],
+.table-responsive [data-cell-actions="true"] {
+  text-align: center;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: keep-all;
+  hyphens: manual;
+}
+
+.table-responsive .cell-status .badge,
+.table-responsive .cell-status .bi-tone,
+.table-responsive .cell-status .bi-pill,
+.table-responsive .cell-status .bi-mix-pill,
+.table-responsive .cell-badge .badge,
+.table-responsive [data-cell-status="true"] .badge {
+  width: max-content;
+  max-width: none;
+  margin-inline: auto;
+}
+
+.table-responsive .cell-actions .quick-actions,
+.table-responsive .cell-action .quick-actions,
+.table-responsive [data-cell-actions="true"] .quick-actions {
+  justify-content: center;
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.table-responsive .cell-actions .btn,
+.table-responsive .cell-action .btn,
+.table-responsive .cell-button .btn,
+.table-responsive [data-cell-actions="true"] .btn {
+  white-space: nowrap;
+  min-width: max-content;
 }
 
 .table-responsive .cell-nowrap,
@@ -2433,6 +2474,61 @@ tr:hover,
 .bg-danger {
   background: #FFEBEE;
   color: #C62828;
+}
+
+.page-activos-catalogo .table-responsive > table,
+.page-activos-ordenes .table-responsive > table,
+.page-activos-planes .table-responsive > table,
+.page-activos-reportes .table-responsive > table,
+.page-activos-catalogo .table-responsive > .table,
+.page-activos-ordenes .table-responsive > .table,
+.page-activos-planes .table-responsive > .table,
+.page-activos-reportes .table-responsive > .table {
+  min-width: max(var(--table-min-width), 1160px);
+}
+
+.page-activos-catalogo .table-responsive > table:has(thead th:nth-child(10)),
+.page-activos-ordenes .table-responsive > table:has(thead th:nth-child(10)),
+.page-activos-planes .table-responsive > table:has(thead th:nth-child(10)),
+.page-activos-reportes .table-responsive > table:has(thead th:nth-child(9)),
+.page-activos-catalogo .table-responsive > .table:has(thead th:nth-child(10)),
+.page-activos-ordenes .table-responsive > .table:has(thead th:nth-child(10)),
+.page-activos-planes .table-responsive > .table:has(thead th:nth-child(10)),
+.page-activos-reportes .table-responsive > .table:has(thead th:nth-child(9)) {
+  min-width: 1420px;
+}
+
+.page-activos-catalogo .table-responsive th:last-child,
+.page-activos-catalogo .table-responsive td:last-child,
+.page-activos-ordenes .table-responsive th:last-child,
+.page-activos-ordenes .table-responsive td:last-child,
+.page-activos-planes .table-responsive th:last-child,
+.page-activos-planes .table-responsive td:last-child,
+.page-activos-reportes .table-responsive th:last-child,
+.page-activos-reportes .table-responsive td:last-child {
+  min-width: 132px;
+  text-align: center;
+}
+
+.page-activos-catalogo .table-responsive th:nth-last-child(2),
+.page-activos-catalogo .table-responsive td:nth-last-child(2),
+.page-activos-ordenes .table-responsive th:nth-last-child(2),
+.page-activos-ordenes .table-responsive td:nth-last-child(2),
+.page-activos-planes .table-responsive th:nth-last-child(2),
+.page-activos-planes .table-responsive td:nth-last-child(2),
+.page-activos-reportes .table-responsive th:nth-last-child(2),
+.page-activos-reportes .table-responsive td:nth-last-child(2) {
+  min-width: 220px;
+  white-space: normal;
+}
+
+.page-activos-catalogo .table-responsive .badge,
+.page-activos-ordenes .table-responsive .badge,
+.page-activos-planes .table-responsive .badge,
+.page-activos-reportes .table-responsive .badge {
+  width: max-content;
+  max-width: none;
+  margin-inline: auto;
 }
 
 .erp-progress {

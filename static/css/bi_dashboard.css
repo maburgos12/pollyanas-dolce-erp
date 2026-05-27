@@ -3,6 +3,7 @@
   gap: clamp(14px, 1.5vw, 22px);
   width: min(100%, 1720px);
   margin: 0 auto;
+  min-width: 0;
 }
 
 .bi-hero,
@@ -20,6 +21,7 @@
 .bi-kpi-card,
 .bi-filterbar {
   padding: 14px 16px;
+  min-width: 0;
 }
 
 .bi-hero {
@@ -431,6 +433,7 @@
 .bi-panel-stack {
   display: grid;
   gap: 8px;
+  min-width: 0;
 }
 
 .bi-chart-stage {
@@ -758,6 +761,7 @@
 .bi-mix-pill {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   padding: 6px 10px;
   border-radius: 999px;
@@ -765,6 +769,15 @@
   color: #6d5660;
   font-size: 0.82rem;
   font-weight: 700;
+  width: max-content;
+  max-width: 100%;
+  min-height: 30px;
+  line-height: 1.15;
+  text-align: center;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: keep-all;
+  hyphens: manual;
 }
 
 .bi-branch-card-foot {
@@ -1124,6 +1137,9 @@
 
 .bi-list-item strong {
   color: #42292e;
+  overflow-wrap: normal;
+  word-break: keep-all;
+  hyphens: manual;
 }
 
 .bi-inline-actions {
@@ -1157,11 +1173,20 @@
 .bi-tone {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   padding: 5px 10px;
   border-radius: 999px;
   font-size: 0.8rem;
   font-weight: 800;
+  width: max-content;
+  max-width: 100%;
+  line-height: 1.15;
+  text-align: center;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: keep-all;
+  hyphens: manual;
 }
 
 .bi-tone.success { background: rgba(35, 109, 83, 0.10); color: #236d53; }
@@ -1208,6 +1233,10 @@
   table-layout: auto;
 }
 
+.page-reportes-bi .bi-table-profitability {
+  min-width: 1180px;
+}
+
 .page-reportes-bi .bi-table-audit-branches {
   min-width: 1680px;
 }
@@ -1228,7 +1257,9 @@
 .page-reportes-bi .bi-table td:first-child {
   min-width: 160px;
   white-space: normal;
-  overflow-wrap: break-word;
+  overflow-wrap: normal;
+  word-break: keep-all;
+  hyphens: manual;
 }
 
 .page-reportes-bi .bi-table th {
@@ -1237,6 +1268,22 @@
   word-break: normal;
   hyphens: manual;
   text-wrap: balance;
+}
+
+.page-reportes-bi .bi-table td.cell-status,
+.page-reportes-bi .bi-table td.cell-actions {
+  min-width: 160px;
+  text-align: center;
+}
+
+.page-reportes-bi .bi-table .bi-tone,
+.page-reportes-bi .bi-table .bi-pill,
+.page-reportes-bi .bi-table .bi-mix-pill {
+  width: max-content;
+  margin-inline: auto;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: keep-all;
 }
 
 .bi-table th,

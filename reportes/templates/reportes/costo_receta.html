@@ -14,8 +14,8 @@
   .finance-alert-grid { display:grid; gap:18px; grid-template-columns:1.15fr .85fr; }
   .finance-compact-list { display:grid; gap:10px; margin-top:14px; }
   .finance-compact-item { display:grid; gap:8px; padding:12px 14px; border:1px solid rgba(131,24,67,.08); border-radius:16px; background:rgba(255,255,255,.92); }
-  .finance-compact-item-top { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
-  .finance-compact-item strong { display:block; font-size:.95rem; }
+  .finance-compact-item-top { display:grid; grid-template-columns:minmax(0,1fr) max-content; justify-content:space-between; gap:12px; align-items:center; }
+  .finance-compact-item strong { display:block; font-size:.95rem; overflow-wrap:normal; word-break:keep-all; hyphens:manual; }
   .finance-compact-meta { color:#6d5f67; font-size:.92rem; }
   .finance-bar-track { height:8px; border-radius:999px; background:#f5e9ee; overflow:hidden; }
   .finance-bar-fill { height:100%; border-radius:999px; background:linear-gradient(90deg,#8b274d 0%, #d3a13a 100%); }
@@ -61,9 +61,9 @@
   .finance-dashboard-chart-head span { display:block; color:#7b6871; font-size:.85rem; margin-top:3px; }
   .finance-dashboard-chart-stage { height:300px; position:relative; }
   .finance-dashboard-chart-status { color:#7b6871; font-size:.9rem; }
-  .finance-table {
-    width: max(100%, 860px);
-    min-width: 860px;
+  .table-responsive > .finance-table {
+    width: 100%;
+    min-width: 1180px;
     table-layout: fixed;
   }
   .finance-table td, .finance-table th { white-space: nowrap; }
@@ -72,7 +72,18 @@
     width: 42%;
     white-space: normal;
     word-break: normal;
-    overflow-wrap: break-word;
+    overflow-wrap: normal;
+    hyphens: manual;
+  }
+  .finance-table .bi-tone,
+  .finance-compact-item .bi-tone,
+  .finance-compact-item .bi-pill {
+    width: max-content;
+    max-width: none;
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: keep-all;
+    hyphens: manual;
   }
   @media (max-width: 1200px) {
     .finance-alert-grid, .finance-split, .finance-hero-grid, .finance-signal-grid, .finance-action-summary-grid, .finance-definition-grid { grid-template-columns:1fr; }

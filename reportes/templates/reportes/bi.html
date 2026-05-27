@@ -722,7 +722,7 @@
         <details class="bi-details">
           <summary>Ver ranking de productos de la sucursal</summary>
           <div class="bi-details-body table-responsive">
-            <table class="bi-table">
+            <table class="bi-table bi-table-pricing">
               <thead>
                 <tr>
                   <th>Producto</th>
@@ -737,13 +737,13 @@
               <tbody>
                 {% for row in branch_pricing_panel.rows %}
                 <tr>
-                  <td><strong>{{ row.label }}</strong><div class="bi-subtle">{{ row.categoria|default:row.familia }}</div></td>
-                  <td class="text-end">${{ row.sales_total|floatformat:2|intcomma }}</td>
-                  <td class="text-end">${{ row.cost_total|floatformat:2|intcomma }}</td>
-                  <td class="text-end">${{ row.commercial_total|floatformat:2|intcomma }}</td>
-                  <td class="text-end">${{ row.contribution_total|floatformat:2|intcomma }}</td>
-                  <td class="text-end">{% if row.contribution_pct is not None %}{{ row.contribution_pct|floatformat:1 }}%{% else %}N/D{% endif %}</td>
-                  <td>
+                  <td class="cell-wrap"><strong>{{ row.label }}</strong><div class="bi-subtle">{{ row.categoria|default:row.familia }}</div></td>
+                  <td class="text-end cell-money">${{ row.sales_total|floatformat:2|intcomma }}</td>
+                  <td class="text-end cell-money">${{ row.cost_total|floatformat:2|intcomma }}</td>
+                  <td class="text-end cell-money">${{ row.commercial_total|floatformat:2|intcomma }}</td>
+                  <td class="text-end cell-money">${{ row.contribution_total|floatformat:2|intcomma }}</td>
+                  <td class="text-end cell-number">{% if row.contribution_pct is not None %}{{ row.contribution_pct|floatformat:1 }}%{% else %}N/D{% endif %}</td>
+                  <td class="cell-status">
                     <span class="bi-tone {% if row.bucket == 'Defender' %}success{% elif row.bucket == 'Promover' %}warning{% elif row.bucket == 'Subir precio' or row.bucket == 'Corregir costo' or row.bucket == 'Reformular' %}danger{% else %}neutral{% endif %}">
                       {{ row.bucket }}
                     </span>
@@ -1059,7 +1059,7 @@
         <details class="bi-details">
           <summary>Ver detalle auditable del pronóstico</summary>
           <div class="bi-details-body table-responsive">
-            <table class="bi-table">
+            <table class="bi-table bi-table-forecast">
               <thead>
                 <tr>
                   <th>Semana</th>
@@ -1148,7 +1148,7 @@
         <details class="bi-details">
           <summary>Ver detalle auditable mensual</summary>
           <div class="bi-details-body table-responsive">
-            <table class="bi-table">
+            <table class="bi-table bi-table-profitability">
               <thead>
                 <tr>
                   <th>Mes</th>
@@ -1260,14 +1260,14 @@
               <tbody>
                 {% for row in profitability_panel.rows %}
                 <tr>
-                  <td><strong>{{ row.label }}</strong><div class="bi-subtle">{{ row.categoria|default:row.familia }}</div></td>
-                  <td class="text-end">${{ row.revenue|floatformat:2|intcomma }}</td>
-                  <td class="text-end">{{ row.quantity|floatformat:0|intcomma }}</td>
-                  <td class="text-end">${{ row.cost_total|floatformat:2|intcomma }}</td>
-                  <td class="text-end">{% if row.cost_pct is not None %}{{ row.cost_pct|floatformat:1 }}%{% else %}N/D{% endif %}</td>
-                  <td class="text-end">${{ row.margin|floatformat:2|intcomma }}</td>
-                  <td class="text-end">{% if row.margin_pct is not None %}{{ row.margin_pct|floatformat:1 }}%{% else %}N/D{% endif %}</td>
-                  <td>
+                  <td class="cell-wrap"><strong>{{ row.label }}</strong><div class="bi-subtle">{{ row.categoria|default:row.familia }}</div></td>
+                  <td class="text-end cell-money">${{ row.revenue|floatformat:2|intcomma }}</td>
+                  <td class="text-end cell-number">{{ row.quantity|floatformat:0|intcomma }}</td>
+                  <td class="text-end cell-money">${{ row.cost_total|floatformat:2|intcomma }}</td>
+                  <td class="text-end cell-number">{% if row.cost_pct is not None %}{{ row.cost_pct|floatformat:1 }}%{% else %}N/D{% endif %}</td>
+                  <td class="text-end cell-money">${{ row.margin|floatformat:2|intcomma }}</td>
+                  <td class="text-end cell-number">{% if row.margin_pct is not None %}{{ row.margin_pct|floatformat:1 }}%{% else %}N/D{% endif %}</td>
+                  <td class="cell-status">
                     <span class="bi-tone {% if row.bucket == 'Defender' %}success{% elif row.bucket == 'Promocionar' %}warning{% elif row.bucket == 'Ajustar margen' %}danger{% else %}neutral{% endif %}">
                       {{ row.bucket }}
                     </span>

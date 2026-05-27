@@ -304,7 +304,9 @@
     background: #fff;
     border: 1px solid var(--line);
     border-radius: 16px;
-    overflow: hidden;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
     box-shadow: 0 1px 4px rgba(17, 24, 39, 0.05);
   }
 
@@ -314,6 +316,7 @@
 
   .history-table {
     width: 100%;
+    min-width: 940px;
     border-collapse: collapse;
     font-size: 0.9rem;
   }
@@ -339,6 +342,9 @@
     padding: 0.72rem 0.95rem;
     border-bottom: 1px solid #F3F4F6;
     vertical-align: middle;
+    overflow-wrap: normal;
+    word-break: keep-all;
+    hyphens: manual;
   }
 
   .history-table td.num {
@@ -349,6 +355,7 @@
   .state-pill {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 0.35rem;
     padding: 0.28rem 0.68rem;
     border-radius: 999px;
@@ -356,6 +363,9 @@
     font-weight: 700;
     color: var(--vino);
     background: var(--vino-soft);
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: keep-all;
   }
 
   .state-pill.current {
