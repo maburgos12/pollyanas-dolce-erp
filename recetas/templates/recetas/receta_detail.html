@@ -2,22 +2,35 @@
 {% load humanize %}
 {% block title %}{{ receta.nombre }}{% endblock %}
 {% block body_class %}page-receta-detail{% endblock %}
-{% block page_title %}Recetas · {{ receta.nombre }}{% endblock %}
+{% block page_title %}Ficha de receta · {{ receta.nombre }}{% endblock %}
 {% block content %}
 <div class="module-shell recipe-detail recipe-detail-shell">
 <div class="card">
   <div class="d-flex justify-content-between align-items-center mb-3 recipe-head">
     <div>
+      <div class="composition-eyebrow">Ficha completa de receta</div>
       <h3 class="mb-0">{{ receta.nombre }}</h3>
-      <div class="text-muted">Hoja: {{ receta.sheet_name }}</div>
+      <div class="text-muted">Receta sincronizada desde Point. La base operativa es única y el ERP calcula costos vigentes.</div>
     </div>
     <div class="recipe-actions">
+      {% if receta.tipo == "PRODUCTO_FINAL" and receta.codigo_point %}
+      <form method="post" action="{% url 'recetas:receta_sync_point' receta.id %}" class="inline-form">
+        {% csrf_token %}
+        <button class="btn btn-primary" type="submit">Actualizar desde Point</button>
+      </form>
+      {% endif %}
       <a class="btn btn-secondary" href="{% url 'recetas:drivers_costeo' %}">Drivers costeo</a>
-      <a class="btn btn-primary" href="{% url 'recetas:linea_create' receta.id %}">Agregar línea</a>
       <a class="btn btn-outline-secondary" href="{% url 'recetas:recetas_list' %}">Volver</a>
     </div>
   </div>
 
+  <div class="alert alert-info mt-2">
+    Point manda componentes y cantidades. En el ERP esta ficha sirve para consultar composición, costo vigente,
+    trazabilidad de costo y alertas operativas. Los cambios normales de receta deben hacerse en Point y después sincronizarse.
+  </div>
+
+  <details class="recipe-technical-adjustment mb-3">
+    <summary>Ajuste técnico restringido</summary>
   <form method="post" action="{% url 'recetas:receta_update' receta.id %}" class="recipe-main-form mb-3">
     {% csrf_token %}
     <div class="recipe-main-grid">
@@ -49,9 +62,10 @@
         <input type="checkbox" name="usa_presentaciones" {% if receta.usa_presentaciones %}checked{% endif %}>
         <span>Aplica presentaciones/tamaños</span>
       </label>
-      <button class="btn btn-primary recipe-main-submit" type="submit">Guardar receta</button>
+      <button class="btn btn-primary recipe-main-submit" type="submit">Guardar ajuste técnico</button>
     </div>
   </form>
+  </details>
 
   {% if receta.tipo == "PREPARACION" and not receta.rendimiento_cantidad %}
   <div class="alert alert-info mt-2">
@@ -61,8 +75,7 @@
   {% endif %}
   {% if receta.tipo == "PRODUCTO_FINAL" %}
   <div class="alert alert-info mt-2">
-    Producto final: arma el costo como rompecabezas de componentes ligados (panes, rellenos, coberturas, empaques).
-    Cada línea usa la unidad fija del insumo/subinsumo seleccionado.
+    Producto final: el costo se calcula desde los componentes sincronizados y sus costos vigentes en la base operativa.
   </div>
   {% endif %}
 
@@ -74,7 +87,7 @@
         </div>
         <div class="kpi-body">
           <div class="kpi-number">{{ total_lineas }}</div>
-          <div class="kpi-label">Líneas</div>
+          <div class="kpi-label">Componentes</div>
         </div>
       </div>
     </article>
@@ -85,7 +98,7 @@
         </div>
         <div class="kpi-body">
           <div class="kpi-number is-success">{{ total_match }}</div>
-          <div class="kpi-label">Auto/OK</div>
+          <div class="kpi-label">Con costo</div>
         </div>
       </div>
     </article>
@@ -96,7 +109,7 @@
         </div>
         <div class="kpi-body">
           <div class="kpi-number {% if total_revision > 0 %}is-danger{% else %}is-success{% endif %}">{{ total_revision }}</div>
-          <div class="kpi-label">Por Revisar</div>
+          <div class="kpi-label">Por validar</div>
         </div>
       </div>
     </article>
@@ -107,7 +120,7 @@
         </div>
         <div class="kpi-body">
           <div class="kpi-number {% if total_sin_match > 0 %}is-danger{% else %}is-success{% endif %}">{{ total_sin_match }}</div>
-          <div class="kpi-label">Sin artículo</div>
+          <div class="kpi-label">No sincronizado</div>
         </div>
       </div>
     </article>
@@ -133,7 +146,7 @@
   </div>
   <div class="kpi-card">
     <div class="kpi-number">${{ total_costo_estimado|floatformat:2|intcomma }}</div>
-    <div class="kpi-label">Costo total del producto</div>
+    <div class="kpi-label">Costo total vigente</div>
   </div>
 </div>
 
@@ -385,7 +398,7 @@
             <td>{% if p.activo %}<span class="badge bg-success">Activa</span>{% else %}<span class="badge bg-danger">Inactiva</span>{% endif %}</td>
             <td class="cell-pres-actions">
               <div class="recipe-actions">
-                <a class="btn btn-secondary" href="{% url 'recetas:presentacion_edit' receta.id p.id %}">Editar</a>
+                <a class="btn btn-secondary" href="{% url 'recetas:presentacion_edit' receta.id p.id %}">Ajustar</a>
                 <form method="post" action="{% url 'recetas:presentacion_delete' receta.id p.id %}" class="inline-form" onsubmit="return confirm('¿Eliminar presentación?');">
                   {% csrf_token %}
                   <button class="btn btn-danger" type="submit">Eliminar</button>
@@ -419,11 +432,7 @@
     <table class="table align-middle recipe-lines-table">
     <colgroup>
       <col class="col-pos">
-      <col class="col-type">
-      <col class="col-stage">
       <col class="col-ingredient">
-      <col class="col-linked">
-      <col class="col-origin">
       <col class="col-qty">
       <col class="col-unit">
       <col class="col-cost">
@@ -433,66 +442,37 @@
     <thead>
       <tr>
         <th>#</th>
-        <th>Tipo</th>
-        <th>Etapa</th>
-        <th>Ingrediente (texto)</th>
-        <th>Insumo ligado</th>
-        <th>Origen</th>
+        <th>Componente</th>
         <th class="text-end">Cantidad</th>
         <th>Unidad</th>
-        <th class="text-end">Costo estimado</th>
-        <th>Match</th>
-        <th>Acciones</th>
+        <th class="text-end">Costo de línea</th>
+        <th>Estado de costo</th>
+        <th>Acciones técnicas</th>
       </tr>
     </thead>
     <tbody>
       {% for l in lineas %}
       <tr>
         <td class="text-end">{{ l.posicion }}</td>
-        <td>
-          {% if l.tipo_linea == "SUBSECCION" %}
-            <span class="badge bg-info text-dark">Subsección</span>
-          {% else %}
-            <span class="badge bg-secondary">Principal</span>
-          {% endif %}
-        </td>
-        <td class="cell-stage">{{ l.etapa|default:"-" }}</td>
-        <td class="cell-ingredient">{{ l.insumo_texto }}</td>
-        <td>
-          {% if l.insumo %}
-            {{ l.insumo.nombre }}
-          {% elif l.tipo_linea == "SUBSECCION" %}
-            <span class="badge bg-info text-dark">Subsección de {{ l.etapa|default:"componente" }}</span>
-          {% else %}
-            <span class="badge bg-danger">Sin match</span>
-          {% endif %}
-        </td>
-        <td class="cell-origin">
-          {% if l.insumo %}
-            {% if l.insumo.codigo|default:""|slice:":16" == "DERIVADO:RECETA:" %}
-              <span class="badge bg-success">Interno</span>
-            {% else %}
-              <span class="badge bg-secondary">Materia prima</span>
-            {% endif %}
-          {% else %}
-            -
+        <td class="cell-ingredient">
+          {{ l.insumo_texto }}
+          {% if l.insumo and l.insumo.nombre != l.insumo_texto %}
+            <div class="text-muted">{{ l.insumo.nombre }}</div>
           {% endif %}
         </td>
         <td class="text-end cell-qty">{% if l.cantidad is not None %}{{ l.cantidad|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
         <td class="cell-unit">{{ l.unidad_texto }}</td>
         <td class="text-end cell-cost">{% if l.costo_total_estimado %}${{ l.costo_total_estimado|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
         <td>
-          {% if l.match_status == "AUTO_APPROVED" %}
-            <span class="badge bg-success">{{ l.match_method }} {{ l.match_score|floatformat:0|intcomma }}</span>
-          {% elif l.match_status == "NEEDS_REVIEW" %}
-            <span class="badge bg-warning text-dark">{{ l.match_method }} {{ l.match_score|floatformat:0|intcomma }}</span>
+          {% if l.costo_total_estimado %}
+            <span class="badge bg-success">Costo vigente</span>
           {% else %}
-            <span class="badge bg-danger">NO_MATCH</span>
+            <span class="badge bg-warning text-dark">Sin costo vigente</span>
           {% endif %}
         </td>
         <td>
           <div class="recipe-actions recipe-actions-compact">
-            <a class="btn btn-secondary" href="{% url 'recetas:linea_edit' receta.id l.id %}">Editar</a>
+            <a class="btn btn-secondary" href="{% url 'recetas:linea_edit' receta.id l.id %}">Ajustar</a>
             <form method="post" action="{% url 'recetas:linea_delete' receta.id l.id %}" onsubmit="return confirm('¿Eliminar esta línea?');">
               {% csrf_token %}
               <button class="btn btn-danger" type="submit">Eliminar</button>
@@ -502,13 +482,13 @@
       </tr>
       {% empty %}
       <tr>
-        <td colspan="11" class="text-muted">Esta receta no tiene líneas.</td>
+        <td colspan="7" class="text-muted">Esta receta no tiene componentes sincronizados.</td>
       </tr>
       {% endfor %}
     </tbody>
     <tfoot>
       <tr>
-        <th colspan="8" class="text-end">Total</th>
+        <th colspan="4" class="text-end">Total vigente</th>
         <th class="text-end">${{ total_costo_estimado|floatformat:2|intcomma }}</th>
         <th colspan="2"></th>
       </tr>

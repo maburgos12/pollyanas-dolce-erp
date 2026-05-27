@@ -28,7 +28,7 @@
           </div>
           <div class="kpi-body">
             <div class="kpi-number is-warning">{{ total_pendientes }}</div>
-            <div class="kpi-label">Con Pendientes</div>
+            <div class="kpi-label">Por sincronizar</div>
           </div>
         </div>
       </article>
@@ -39,7 +39,7 @@
           </div>
           <div class="kpi-body">
             <div class="kpi-number">{{ total_lineas }}</div>
-            <div class="kpi-label">Líneas Totales</div>
+            <div class="kpi-label">Componentes</div>
           </div>
         </div>
       </article>
@@ -75,8 +75,8 @@
       </select>
       <select class="form-select" name="estado">
         <option value="" {% if not estado %}selected{% endif %}>Todos</option>
-        <option value="pendientes" {% if estado == "pendientes" %}selected{% endif %}>Con pendientes</option>
-        <option value="ok" {% if estado == "ok" %}selected{% endif %}>Sin pendientes</option>
+        <option value="pendientes" {% if estado == "pendientes" %}selected{% endif %}>Por sincronizar</option>
+        <option value="ok" {% if estado == "ok" %}selected{% endif %}>Sin alertas</option>
       </select>
       <button class="btn btn-primary" type="submit">Filtrar</button>
       <a class="btn btn-secondary" href="{% url 'recetas:recetas_list' %}?vista={{ vista }}">Limpiar</a>
@@ -97,37 +97,35 @@
           <th>Tipo</th>
           <th>Familia</th>
           <th>Categoría</th>
-          <th>Rendimiento</th>
-          <th>Fuente</th>
-          <th>Pendientes</th>
-          <th class="text-end">Líneas</th>
-          <th class="text-end">Costo total (estimado)</th>
+          <th>Fuente de costo</th>
+          <th class="text-end">Componentes</th>
+          <th class="text-end">Costo total vigente</th>
         </tr>
       </thead>
       <tbody>
         {% for r in page.object_list %}
         <tr>
-          <td><a href="{% url 'recetas:receta_detail' r.id %}">{{ r.nombre }}</a></td>
+          <td class="recipe-name-cell">
+            <button
+              type="button"
+              class="recipe-composition-trigger"
+              data-composition-url="{% url 'recetas:receta_composition_json' r.id %}"
+              aria-haspopup="dialog"
+            >
+              <span class="recipe-name-main">{{ r.nombre }}</span>
+              <span class="recipe-name-meta">Ver composición</span>
+            </button>
+          </td>
           <td>{% if r.tipo == "PRODUCTO_FINAL" %}<span class="badge bg-primary">Producto final</span>{% else %}<span class="badge bg-success">Preparación</span>{% endif %}</td>
           <td>{{ r.familia|default:"-" }}</td>
           <td>{{ r.categoria|default:"-" }}</td>
-          <td>{% if r.rendimiento_cantidad %}{{ r.rendimiento_cantidad|floatformat:2|intcomma }} {{ r.rendimiento_unidad.codigo|default:"" }}{% else %}-{% endif %}</td>
           <td>{{ r.fuente_display }}</td>
-          <td>
-            {% if r.bom_pending %}
-              <span class="badge bg-warning">Sin BOM</span>
-            {% elif r.pendientes_count > 0 %}
-              <span class="badge bg-warning">{{ r.pendientes_count }}</span>
-            {% else %}
-              <span class="badge bg-success">0</span>
-            {% endif %}
-          </td>
           <td class="text-end">{{ r.lineas_count }}</td>
           <td class="text-end">{% if r.costo_efectivo %}${{ r.costo_efectivo|floatformat:2|intcomma }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
         </tr>
         {% empty %}
         <tr>
-          <td colspan="9">
+          <td colspan="7">
             {% include "components/empty_state.html" with message="Sin recetas para los filtros aplicados" icon="search" %}
           </td>
         </tr>
@@ -155,4 +153,201 @@
   </nav>
 
 </div>
+
+<div class="recipe-composition-modal" id="recipeCompositionModal" aria-hidden="true">
+  <div class="recipe-composition-backdrop" data-composition-close></div>
+  <section class="recipe-composition-panel" role="dialog" aria-modal="true" aria-labelledby="recipeCompositionTitle">
+    <header class="recipe-composition-header">
+      <div>
+        <div class="composition-eyebrow">Receta</div>
+        <h2 id="recipeCompositionTitle">Composición del producto</h2>
+        <div class="composition-subtitle" id="recipeCompositionSubtitle">Receta sincronizada desde Point</div>
+      </div>
+      <button class="recipe-composition-close" type="button" data-composition-close aria-label="Cerrar composición">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </header>
+
+    <div class="composition-summary">
+      <div>
+        <span>Código Point</span>
+        <strong id="compositionPointCode">-</strong>
+      </div>
+      <div>
+        <span>Categoría</span>
+        <strong id="compositionCategory">-</strong>
+      </div>
+      <div>
+        <span>Componentes</span>
+        <strong id="compositionLines">0</strong>
+      </div>
+      <div>
+        <span>Costo total vigente</span>
+        <strong id="compositionTotalCost">$0.00</strong>
+      </div>
+    </div>
+
+    <div class="composition-search-row">
+      <label for="compositionSearch">Buscar en la tabla:</label>
+      <input id="compositionSearch" class="form-control" type="search" autocomplete="off">
+    </div>
+
+    <div class="composition-loading" id="compositionLoading">Cargando composición...</div>
+    <div class="composition-error" id="compositionError" hidden>No se pudo cargar la composición.</div>
+
+    <div class="table-responsive composition-table-wrap">
+      <table class="table align-middle composition-table">
+        <thead>
+          <tr>
+            <th>Código Point</th>
+            <th>Componente</th>
+            <th class="text-end">Cantidad</th>
+            <th>Unidad</th>
+            <th class="text-end">Costo unitario vigente</th>
+            <th class="text-end">Costo de línea</th>
+            <th>Fuente de costo</th>
+          </tr>
+        </thead>
+        <tbody id="compositionRows"></tbody>
+      </table>
+    </div>
+
+    <footer class="composition-footer">
+      <span id="compositionStatus">Costo vigente de la base operativa</span>
+      <a class="btn btn-secondary" id="compositionDetailLink" href="#">Ver ficha completa</a>
+    </footer>
+  </section>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+  (() => {
+    const modal = document.getElementById("recipeCompositionModal");
+    if (!modal) return;
+    document.body.appendChild(modal);
+
+    const title = document.getElementById("recipeCompositionTitle");
+    const subtitle = document.getElementById("recipeCompositionSubtitle");
+    const pointCode = document.getElementById("compositionPointCode");
+    const category = document.getElementById("compositionCategory");
+    const lines = document.getElementById("compositionLines");
+    const totalCost = document.getElementById("compositionTotalCost");
+    const rows = document.getElementById("compositionRows");
+    const loading = document.getElementById("compositionLoading");
+    const error = document.getElementById("compositionError");
+    const search = document.getElementById("compositionSearch");
+    const status = document.getElementById("compositionStatus");
+    const detailLink = document.getElementById("compositionDetailLink");
+    let activeRows = [];
+    let lastTrigger = null;
+
+    const money = (payload) => payload?.display || "$0.00";
+    const text = (value) => String(value ?? "");
+    const escapeHtml = (value) => text(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+
+    const renderRows = (filter = "") => {
+      const normalized = filter.trim().toLowerCase();
+      rows.innerHTML = "";
+      const visibleRows = activeRows.filter((row) => {
+        if (!normalized) return true;
+        return [row.code, row.name, row.quantity, row.unit, row.source]
+          .some((value) => text(value).toLowerCase().includes(normalized));
+      });
+
+      if (!visibleRows.length) {
+        rows.innerHTML = '<tr><td colspan="7" class="text-muted">Sin componentes para esta búsqueda.</td></tr>';
+        return;
+      }
+
+      const fragment = document.createDocumentFragment();
+      visibleRows.forEach((row) => {
+        const tr = document.createElement("tr");
+        if (row.is_unresolved) tr.classList.add("composition-row-warning");
+        tr.innerHTML = `
+          <td>${escapeHtml(row.code)}</td>
+          <td class="cell-wrap">
+            <strong>${escapeHtml(row.name)}</strong>
+            ${row.is_subsection ? '<span class="composition-chip">Subsección</span>' : ''}
+            ${row.is_unresolved ? '<span class="composition-chip is-warning">Por revisar</span>' : ''}
+          </td>
+          <td class="text-end">${escapeHtml(row.quantity)}</td>
+          <td>${escapeHtml(row.unit)}</td>
+          <td class="text-end">${money(row.unit_cost)}</td>
+          <td class="text-end"><strong>${money(row.line_cost)}</strong></td>
+          <td>${escapeHtml(row.source)}</td>
+        `;
+        fragment.appendChild(tr);
+      });
+      rows.appendChild(fragment);
+    };
+
+    const openModal = async (url, trigger) => {
+      lastTrigger = trigger;
+      if (document.scrollingElement) {
+        document.scrollingElement.scrollLeft = 0;
+      }
+      window.scrollTo(0, window.scrollY);
+      modal.classList.add("is-open");
+      modal.setAttribute("aria-hidden", "false");
+      document.body.classList.add("modal-open");
+      loading.hidden = false;
+      error.hidden = true;
+      activeRows = [];
+      rows.innerHTML = "";
+      search.value = "";
+      search.focus({ preventScroll: true });
+
+      try {
+        const response = await fetch(url, {
+          headers: { "X-Requested-With": "XMLHttpRequest" },
+          credentials: "same-origin",
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        title.textContent = data.recipe.name;
+        subtitle.textContent = `${data.recipe.type} · ${data.recipe.family}`;
+        pointCode.textContent = data.recipe.point_code;
+        category.textContent = data.recipe.category;
+        lines.textContent = `${data.summary.costed_count}/${data.summary.lines_count}`;
+        totalCost.textContent = money(data.summary.total_cost);
+        status.textContent = data.summary.unresolved_count
+          ? `${data.summary.unresolved_count} componente(s) sin costo vigente`
+          : "Costo vigente de la base operativa";
+        detailLink.href = data.recipe.detail_url;
+        activeRows = data.lines || [];
+        renderRows();
+      } catch (err) {
+        error.hidden = false;
+        status.textContent = "No se pudo cargar desde el ERP";
+      } finally {
+        loading.hidden = true;
+      }
+    };
+
+    const closeModal = () => {
+      modal.classList.remove("is-open");
+      modal.setAttribute("aria-hidden", "true");
+      document.body.classList.remove("modal-open");
+      if (lastTrigger) lastTrigger.focus({ preventScroll: true });
+    };
+
+    document.querySelectorAll(".recipe-composition-trigger").forEach((button) => {
+      button.addEventListener("click", () => openModal(button.dataset.compositionUrl, button));
+    });
+    modal.querySelectorAll("[data-composition-close]").forEach((button) => {
+      button.addEventListener("click", closeModal);
+    });
+    search.addEventListener("input", () => renderRows(search.value));
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && modal.classList.contains("is-open")) closeModal();
+    });
+  })();
+</script>
 {% endblock %}

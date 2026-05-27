@@ -77,7 +77,7 @@ from ..models import (
     SolicitudReabastoCedis,
     SolicitudReabastoCedisLinea,
 )
-from recetas.services.costing_contract import CostContext, resolve_recipe_cost_map
+from recetas.services.costing_contract import CostContext, resolve_line_cost, resolve_recipe_cost_map
 from ..utils.costeo_versionado import asegurar_version_costeo, calcular_costeo_receta, comparativo_versiones
 from ..utils.costeo_semanal import snapshot_weekly_costs, week_bounds
 from ..utils.costeo_snapshot import resolve_insumo_unit_cost, resolve_line_snapshot_cost
@@ -5946,6 +5946,103 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
             "total_cost": total_cost,
             "total_price": total_price,
         },
+    )
+
+
+def _composition_decimal_payload(value: Decimal | int | float | str | None) -> dict[str, str]:
+    amount = Decimal(str(value or 0)).quantize(Decimal("0.01"))
+    return {
+        "raw": str(amount),
+        "display": f"${amount:,.2f}",
+    }
+
+
+@login_required
+def receta_composition_json(request: HttpRequest, pk: int) -> JsonResponse:
+    receta = get_object_or_404(
+        Receta.objects.select_related("rendimiento_unidad"),
+        pk=pk,
+    )
+    lineas = list(
+        receta.lineas.select_related("insumo", "unidad").order_by("posicion", "id")
+    )
+    cost_map = resolve_recipe_cost_map([receta.id], context=CostContext.CURRENT_LIVE)
+    receta_cost = cost_map.get(receta.id)
+    total_cost = receta_cost.total_cost if receta_cost else Decimal("0")
+    rows: list[dict[str, object]] = []
+    costed_count = 0
+    unresolved_count = 0
+
+    for linea in lineas:
+        line_label = normalizar_nombre(linea.insumo_texto or "")
+        if linea.tipo_linea == LineaReceta.TIPO_SUBSECCION:
+            continue
+        if not linea.insumo_id and line_label in NONBLOCKING_PRODUCT_PLACEHOLDER_LABELS:
+            continue
+
+        resolution = resolve_line_cost(linea, context=CostContext.CURRENT_LIVE)
+        if resolution.unresolved:
+            unresolved_count += 1
+        elif resolution.total_cost > 0:
+            costed_count += 1
+
+        insumo = linea.insumo
+        item_name = (
+            _insumo_display_name(insumo)
+            if insumo
+            else (linea.insumo_texto or "Componente sin artículo")
+        )
+        item_code = ""
+        if insumo:
+            item_code = (insumo.codigo_point or "").strip()
+        unit_label = (linea.unidad_texto or getattr(linea.unidad, "codigo", "") or "").strip()
+        quantity = "" if linea.cantidad is None else f"{Decimal(str(linea.cantidad)).normalize():f}"
+
+        rows.append(
+            {
+                "id": linea.id,
+                "position": linea.posicion,
+                "code": item_code or "-",
+                "name": item_name,
+                "quantity": quantity or "-",
+                "unit": unit_label or "-",
+                "unit_cost": _composition_decimal_payload(resolution.unit_cost),
+                "line_cost": _composition_decimal_payload(resolution.total_cost),
+                "source": resolution.source,
+                "status": "Sin costo vigente" if resolution.unresolved else "Costeado",
+                "is_unresolved": resolution.unresolved,
+                "is_subsection": False,
+            }
+        )
+
+    rendimiento = "-"
+    if receta.rendimiento_cantidad and receta.rendimiento_unidad:
+        rendimiento = (
+            f"{Decimal(str(receta.rendimiento_cantidad)).normalize():f} "
+            f"{receta.rendimiento_unidad.codigo}"
+        )
+
+    return JsonResponse(
+        {
+            "recipe": {
+                "id": receta.id,
+                "name": receta.nombre,
+                "point_code": receta.codigo_point or "-",
+                "family": receta.familia or "-",
+                "category": receta.categoria or "-",
+                "type": "Producto final" if receta.tipo == Receta.TIPO_PRODUCTO_FINAL else "Preparación",
+                "yield": rendimiento,
+                "detail_url": reverse("recetas:receta_detail", args=[receta.id]),
+            },
+            "summary": {
+                "total_cost": _composition_decimal_payload(total_cost),
+                "lines_count": len(rows),
+                "costed_count": costed_count,
+                "unresolved_count": unresolved_count,
+                "source": receta_cost.source if receta_cost else "CURRENT_LIVE",
+            },
+            "lines": rows,
+        }
     )
 
 
