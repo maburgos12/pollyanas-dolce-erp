@@ -363,8 +363,8 @@ class BonosProduccionTests(TestCase):
 
     def test_inicializar_bonos_usa_area_produccion_sin_sucursal(self):
         user = get_user_model().objects.create_user(username="bonos")
-        user.groups.add(Group.objects.create(name=ROLE_PRODUCCION))
-        user.groups.add(Group.objects.create(name=ROLE_RRHH))
+        user.groups.add(Group.objects.get_or_create(name=ROLE_PRODUCCION)[0])
+        user.groups.add(Group.objects.get_or_create(name=ROLE_RRHH)[0])
         self.client.force_login(user)
         periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
         empleado = Empleado.objects.create(nombre="Empleado Produccion", area="PRODUCCION", sucursal="")
@@ -397,8 +397,8 @@ class BonosProduccionTests(TestCase):
 
     def test_permisos_equipo_produccion_crea_y_rechaza(self):
         user = get_user_model().objects.create_user(username="jefe-produccion")
-        user.groups.add(Group.objects.create(name=ROLE_PRODUCCION))
-        user.groups.add(Group.objects.create(name=ROLE_RRHH))
+        user.groups.add(Group.objects.get_or_create(name=ROLE_PRODUCCION)[0])
+        user.groups.add(Group.objects.get_or_create(name=ROLE_RRHH)[0])
         self.client.force_login(user)
         periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
         empleado = Empleado.objects.create(nombre="Empleado Hornos A", area="PRODUCCION")
@@ -444,7 +444,7 @@ class BonosProduccionTests(TestCase):
 
     def test_permiso_produccion_se_crea_con_roster_del_periodo_aunque_rrhh_tenga_otra_area(self):
         user = get_user_model().objects.create_user(username="julissa.angulo")
-        user.groups.add(Group.objects.create(name=ROLE_PRODUCCION))
+        user.groups.add(Group.objects.get_or_create(name=ROLE_PRODUCCION)[0])
         self.client.force_login(user)
         periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
         empleado = Empleado.objects.create(nombre="MEZA TABIZON JESUS ADRIAN", area="ADMINISTRACION", activo=True)
@@ -472,3 +472,60 @@ class BonosProduccionTests(TestCase):
         permiso = PermisoSalida.objects.get(pk=response.json()["id"])
         self.assertEqual(permiso.empleado, empleado)
         self.assertEqual(permiso.origen_solicitud, PermisoSalida.ORIGEN_BONOS_PRODUCCION)
+
+    def test_permisos_produccion_incluye_equipo_directo_sin_bono_periodo(self):
+        user = get_user_model().objects.create_user(
+            username="test.carolina.permisos",
+            first_name="Carolina",
+            last_name="Cayetano",
+        )
+        user.groups.add(Group.objects.get_or_create(name=ROLE_PRODUCCION)[0])
+        self.client.force_login(user)
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
+        carolina = Empleado.objects.create(
+            nombre="CAYETANO VALENZUELA CAROLINA",
+            departamento="PRODUCCION",
+            usuario_erp=user,
+        )
+        roxana = Empleado.objects.create(
+            nombre="RIVAS SOLIS ROXANA",
+            puesto="Supervisora de Producción",
+            jefe_directo=carolina,
+        )
+        julissa = Empleado.objects.create(
+            nombre="ANGULO PARRA JULISSA",
+            area="PRODUCCION",
+            departamento="PRODUCCION",
+            puesto="Encargada de Producción",
+            jefe_directo=carolina,
+        )
+        BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=julissa, area=AREA_PRODUCCION)
+
+        listado = self.client.get("/api/bonos-produccion/permisos/?mes=5&anio=2026&area=PRODUCCION")
+
+        self.assertEqual(listado.status_code, 200)
+        empleados_ids = {row["id"] for row in listado.json()["empleados"]}
+        self.assertIn(julissa.id, empleados_ids)
+        self.assertIn(roxana.id, empleados_ids)
+
+        creado = self.client.post(
+            "/api/bonos-produccion/permisos/",
+            json.dumps(
+                {
+                    "empleado": roxana.id,
+                    "mes": 5,
+                    "anio": 2026,
+                    "area": AREA_PRODUCCION,
+                    "tipo": PermisoSalida.TIPO_PERMISO_HORA,
+                    "fecha_inicio": "2026-05-21T12:00:00",
+                    "fecha_fin": "2026-05-21T13:00:00",
+                    "goce_sueldo": True,
+                    "motivo": "Permiso supervisora",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(creado.status_code, 201)
+        permiso = PermisoSalida.objects.get(pk=creado.json()["id"])
+        self.assertEqual(permiso.empleado, roxana)
