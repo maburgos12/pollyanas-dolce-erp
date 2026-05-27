@@ -99,6 +99,9 @@
                                 {% endif %}
                             </span>
                             <span class="sidebar-section-label">{{ group.label }}</span>
+                            {% if group.badge_count %}
+                            <span class="nav-badge nav-badge-alert" aria-label="{{ group.badge_count }} notificaciones pendientes">{{ group.badge_count }}</span>
+                            {% endif %}
                         </span>
                         <span class="toggle-chevron" aria-hidden="true">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -111,6 +114,9 @@
                         <li>
                             <a href="{{ item.url }}" class="{% if item.active %}active{% endif %}">
                                 <span>{{ item.label }}</span>
+                                {% if item.badge_count %}
+                                <span class="nav-badge nav-badge-alert" aria-label="{{ item.badge_count }} notificaciones pendientes">{{ item.badge_count }}</span>
+                                {% endif %}
                             </a>
                         </li>
                         {% endfor %}

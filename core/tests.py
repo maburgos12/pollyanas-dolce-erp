@@ -89,8 +89,12 @@ class NotificacionesTests(TestCase):
 
         groups = build_nav_groups(self.user, "/notificaciones/")
         labels = [item["label"] for group in groups for item in group["items"]]
+        mi_trabajo = next(group for group in groups if group["key"] == "mi_trabajo")
+        notificaciones = next(item for item in mi_trabajo["items"] if item["label"] == "Notificaciones")
 
-        self.assertIn("Notificaciones (2)", labels)
+        self.assertIn("Notificaciones", labels)
+        self.assertEqual(mi_trabajo["badge_count"], 2)
+        self.assertEqual(notificaciones["badge_count"], 2)
 
     def test_permiso_solicitado_notifica_jefe_directo_de_rrhh(self):
         jefe_empleado = Empleado.objects.create(nombre="Carolina Cayetano", usuario_erp=self.user)

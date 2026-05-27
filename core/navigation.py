@@ -221,19 +221,18 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
         if mi_trabajo is None:
             mi_trabajo = {"key": "mi_trabajo", "label": "Mi trabajo", "items": [], "active": False}
             visible_groups.insert(0, mi_trabajo)
-        label = "Notificaciones"
-        if notificaciones_pendientes:
-            label = f"Notificaciones ({notificaciones_pendientes})"
+        mi_trabajo["badge_count"] = notificaciones_pendientes
         mi_trabajo["items"].insert(
             0,
             {
-                "label": label,
+                "label": "Notificaciones",
                 "url": "/notificaciones/",
                 "active": False,
                 "_match_len": match_len,
                 "module": "core",
                 "submodule": "notificaciones",
                 "initial": "N",
+                "badge_count": notificaciones_pendientes,
             },
         )
         try:
