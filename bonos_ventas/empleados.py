@@ -5,7 +5,7 @@ from django.db.models import Q, QuerySet
 from rrhh.models import Empleado
 
 
-AREAS_BONOS_VENTAS = ("VENTAS", "REPARTIDOR")
+AREAS_BONOS_VENTAS = ("VENTAS", "REPARTIDOR", "CAJAS", "AUXILIAR CAJAS", "CALL CENTER")
 
 
 def empleados_elegibles_bonos_ventas() -> QuerySet[Empleado]:
