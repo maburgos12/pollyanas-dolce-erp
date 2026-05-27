@@ -136,3 +136,62 @@ class AuditLog(models.Model):
 
     def __str__(self) -> str:
         return f"{self.timestamp:%Y-%m-%d %H:%M} {self.action} {self.model} {self.object_id}"
+
+
+class Notificacion(models.Model):
+    TIPO_PERMISO = "permiso"
+    TIPO_PRESTAMO = "prestamo"
+    TIPO_SISTEMA = "sistema"
+    TIPO_CHOICES = [
+        (TIPO_PERMISO, "Permiso"),
+        (TIPO_PRESTAMO, "Préstamo"),
+        (TIPO_SISTEMA, "Sistema"),
+    ]
+
+    PRIORIDAD_NORMAL = "normal"
+    PRIORIDAD_ALTA = "alta"
+    PRIORIDAD_CHOICES = [
+        (PRIORIDAD_NORMAL, "Normal"),
+        (PRIORIDAD_ALTA, "Alta"),
+    ]
+
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="notificaciones",
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="notificaciones_generadas",
+    )
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default=TIPO_SISTEMA, db_index=True)
+    prioridad = models.CharField(max_length=10, choices=PRIORIDAD_CHOICES, default=PRIORIDAD_NORMAL, db_index=True)
+    titulo = models.CharField(max_length=160)
+    mensaje = models.TextField(blank=True, default="")
+    url = models.CharField(max_length=300, blank=True, default="")
+    objeto_tipo = models.CharField(max_length=80, blank=True, default="")
+    objeto_id = models.CharField(max_length=80, blank=True, default="")
+    leida = models.BooleanField(default=False, db_index=True)
+    creado_en = models.DateTimeField(auto_now_add=True, db_index=True)
+    leido_en = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["leida", "-creado_en"]
+        indexes = [
+            models.Index(fields=["usuario", "leida", "-creado_en"]),
+            models.Index(fields=["tipo", "objeto_tipo", "objeto_id"]),
+        ]
+        verbose_name = "Notificación"
+        verbose_name_plural = "Notificaciones"
+
+    def __str__(self) -> str:
+        return f"{self.usuario} · {self.titulo}"
+
+    def marcar_leida(self):
+        if not self.leida:
+            self.leida = True
+            self.leido_en = timezone.now()
+            self.save(update_fields=["leida", "leido_en"])

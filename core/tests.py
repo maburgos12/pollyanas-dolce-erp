@@ -24,14 +24,16 @@ from core.access import (
 )
 from core.branch_catalog import eligible_operational_branch_qs
 from core.middleware import CanonicalLocalHostMiddleware
-from core.models import Departamento, Sucursal, UserModuleAccess, UserProfile
+from core.models import Departamento, Notificacion, Sucursal, UserModuleAccess, UserProfile
 from core.navigation import build_nav_groups
+from core.notificaciones import notificar_permiso_solicitado, notificar_prestamo_solicitado
 from core.views import _build_dashboard_daily_sales_snapshot, _build_dashboard_sales_history_summary, _compute_budget_semaforo, _compute_plan_forecast_semaforo, _sales_previous_dates, _sales_source_context
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo, PointPendingMatch, UnidadMedida
 from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointDailySale, PointProduct, PointSalesDailyCategoryFact, PointSalesDailyProductFact
 from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, PoliticaStockSucursalProducto, Receta, VentaHistorica
 from reportes.models import CentroCosto
+from rrhh.models import Empleado, PermisoSalida, Prestamo
 
 
 class NavigationActiveStateTests(TestCase):
@@ -50,6 +52,84 @@ class NavigationActiveStateTests(TestCase):
 
     def test_recetas_catalog_does_not_capture_plan_routes(self):
         self.assertEqual(self._active_labels("/recetas/"), ["Recetas"])
+
+
+class NotificacionesTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(username="carolina.cayetano", password="test12345")
+        self.actor = User.objects.create_user(username="paula.lugo", password="test12345")
+        self.client.force_login(self.user)
+
+    def test_bandeja_marca_notificacion_como_leida_y_redirige(self):
+        notificacion = Notificacion.objects.create(
+            usuario=self.user,
+            actor=self.actor,
+            tipo=Notificacion.TIPO_PRESTAMO,
+            prioridad=Notificacion.PRIORIDAD_ALTA,
+            titulo="Préstamo pendiente",
+            mensaje="Revisar solicitud",
+            url="/rrhh/prestamos/",
+        )
+
+        response = self.client.get("/notificaciones/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Préstamo pendiente")
+
+        response = self.client.post(f"/notificaciones/{notificacion.id}/leer/")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/rrhh/prestamos/")
+        notificacion.refresh_from_db()
+        self.assertTrue(notificacion.leida)
+        self.assertIsNotNone(notificacion.leido_en)
+
+    def test_navegacion_muestra_notificaciones_pendientes(self):
+        Notificacion.objects.create(usuario=self.user, titulo="Pendiente 1")
+        Notificacion.objects.create(usuario=self.user, titulo="Pendiente 2")
+
+        groups = build_nav_groups(self.user, "/notificaciones/")
+        labels = [item["label"] for group in groups for item in group["items"]]
+
+        self.assertIn("Notificaciones (2)", labels)
+
+    def test_permiso_solicitado_notifica_jefe_directo_de_rrhh(self):
+        jefe_empleado = Empleado.objects.create(nombre="Carolina Cayetano", usuario_erp=self.user)
+        empleado = Empleado.objects.create(nombre="Carlos Medina", area="HORNOS", jefe_directo=jefe_empleado)
+        permiso = PermisoSalida.objects.create(
+            empleado=empleado,
+            tipo=PermisoSalida.TIPO_PERMISO_DIA,
+            fecha_inicio=timezone.now(),
+            motivo="Trámite familiar",
+            origen_solicitud=PermisoSalida.ORIGEN_BONOS_PRODUCCION,
+        )
+
+        creadas = notificar_permiso_solicitado(permiso, actor=self.actor)
+
+        self.assertEqual(creadas, 1)
+        notif = Notificacion.objects.get(usuario=self.user)
+        self.assertEqual(notif.tipo, Notificacion.TIPO_PERMISO)
+        self.assertEqual(notif.url, "/bonos-produccion/app/?tab=permisos")
+
+    def test_prestamo_solicitado_notifica_jefe_asignado(self):
+        empleado = Empleado.objects.create(nombre="Empleado Préstamo")
+        prestamo = Prestamo.objects.create(
+            empleado=empleado,
+            concepto="Prueba de préstamo",
+            fecha_solicitud=timezone.localdate(),
+            importe=Decimal("1000.00"),
+            num_quincenas=2,
+            descuento_quincenal=Decimal("500.00"),
+            saldo_actual=Decimal("1000.00"),
+            jefe_directo=self.user,
+            creado_por=self.actor,
+        )
+
+        creadas = notificar_prestamo_solicitado(prestamo, actor=self.actor)
+
+        self.assertEqual(creadas, 1)
+        notif = Notificacion.objects.get(usuario=self.user)
+        self.assertEqual(notif.tipo, Notificacion.TIPO_PRESTAMO)
+        self.assertEqual(notif.url, f"/rrhh/prestamos/{prestamo.id}/")
 
 
 class DashboardForecastRobustnessTests(TestCase):

@@ -17,11 +17,13 @@ from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, JsonRe
 from django.shortcuts import get_object_or_404, render, redirect
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout, get_user_model
+from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import Group
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.cache import never_cache
+from django.views.decorators.http import require_POST
 from core.access import (
     ROLE_ADMIN,
     ROLE_DG,
@@ -59,7 +61,7 @@ from maestros.utils.canonical_catalog import (
 from compras.models import PresupuestoCompraPeriodo, SolicitudCompra, OrdenCompra, RecepcionCompra
 from recetas.models import PlanProduccion, PlanProduccionItem, PronosticoVenta, Receta, LineaReceta, VentaHistorica, SolicitudVenta
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
-from core.models import AuditLog, Departamento, Sucursal, UserModuleAccess, UserProfile, sucursales_operativas
+from core.models import AuditLog, Departamento, Notificacion, Sucursal, UserModuleAccess, UserProfile, sucursales_operativas
 from core.audit import log_event
 from activos.models import Activo, OrdenMantenimiento, PlanMantenimiento
 from crm.models import PedidoCliente
@@ -4783,3 +4785,44 @@ def users_access_view(request: HttpRequest) -> HttpResponse:
         "erp_command_center": _users_command_center(enterprise_ready_summary, users_maturity_summary),
     }
     return render(request, "core/usuarios_accesos.html", context)
+
+
+@login_required
+def notificaciones_view(request):
+    estado = request.GET.get("estado", "pendientes")
+    qs = Notificacion.objects.filter(usuario=request.user).select_related("actor")
+    if estado == "leidas":
+        qs = qs.filter(leida=True)
+    elif estado == "todas":
+        pass
+    else:
+        estado = "pendientes"
+        qs = qs.filter(leida=False)
+    page = Paginator(qs, 30).get_page(request.GET.get("page"))
+    return render(
+        request,
+        "core/notificaciones.html",
+        {
+            "page": page,
+            "estado": estado,
+            "pendientes_count": Notificacion.objects.filter(usuario=request.user, leida=False).count(),
+            "leidas_count": Notificacion.objects.filter(usuario=request.user, leida=True).count(),
+        },
+    )
+
+
+@login_required
+@require_POST
+def notificacion_leer_view(request, pk):
+    notificacion = get_object_or_404(Notificacion, pk=pk, usuario=request.user)
+    notificacion.marcar_leida()
+    return redirect(notificacion.url or "notificaciones")
+
+
+@login_required
+@require_POST
+def notificaciones_marcar_todas_view(request):
+    now = timezone.now()
+    Notificacion.objects.filter(usuario=request.user, leida=False).update(leida=True, leido_en=now)
+    messages.success(request, "Notificaciones marcadas como leídas.")
+    return redirect("notificaciones")

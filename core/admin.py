@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Sucursal, Departamento, UserProfile, UserModuleAccess, AuditLog
+from .models import Sucursal, Departamento, UserProfile, UserModuleAccess, AuditLog, Notificacion
 from rentabilidad.admin_rentabilidad import SucursalRentabilidadAdmin
 from rentabilidad.models import SucursalRentabilidad
 
@@ -40,6 +40,14 @@ class AuditLogAdmin(admin.ModelAdmin):
     list_filter = ("action", "model")
     search_fields = ("model", "object_id", "user__username")
     readonly_fields = ("timestamp", "user", "action", "model", "object_id", "payload")
+
+
+@admin.register(Notificacion)
+class NotificacionAdmin(admin.ModelAdmin):
+    list_display = ("creado_en", "usuario", "tipo", "prioridad", "titulo", "leida")
+    list_filter = ("tipo", "prioridad", "leida", "creado_en")
+    search_fields = ("usuario__username", "usuario__email", "titulo", "mensaje", "objeto_id")
+    readonly_fields = ("creado_en", "leido_en")
 
 
 admin.site.register(SucursalRentabilidad, SucursalRentabilidadAdmin)

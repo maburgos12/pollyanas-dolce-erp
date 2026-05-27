@@ -306,7 +306,7 @@ function PermisoPrintPage({permiso,contextLabel}){
         h(PrintField,{label:'Tipo',value:permiso.tipo_label}),
         h(PrintField,{label:'Fecha',value:permisoDate(permiso)}),
         h(PrintField,{label:'Horario',value:permisoTime(permiso)}),
-        h(PrintField,{label:'Estado',value:permiso.estado_jefe==='preautorizado'?'Preautorizado por jefe':'Solicitado'})
+        h(PrintField,{label:'Estado',value:permiso.estado_jefe==='preautorizado'?'Autorizado por jefe':'Solicitado'})
       )
     ),
     h('div',{className:'print-section'},
@@ -315,10 +315,9 @@ function PermisoPrintPage({permiso,contextLabel}){
     ),
     h('div',{className:'signature-grid'},
       h('div',{className:'signature-line'},`Firma empleado · ${permiso.empleado_nombre||''}`),
-      h('div',{className:'signature-line'},'Preautoriza jefe directo'),
-      h('div',{className:'signature-line'},'Capital Humano')
+      h('div',{className:'signature-line'},'Firma jefe directo')
     ),
-    h('div',{className:'print-foot'},'Documento generado desde Bonos. La autorizacion final permanece en Capital Humano.')
+    h('div',{className:'print-foot'},'Documento generado desde Bonos. La autorizacion corresponde al jefe directo.')
   );
 }
 function PermisoPrintModal({permiso,onClose,contextLabel}){
@@ -680,7 +679,7 @@ function PermisosTab({bonos,sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatu
   const sinGoce = permisos.filter(p=>!p.goce_sueldo).length;
   function estadoLabel(p){
     if(p.estado==='aprobado') return 'Aprobado RRHH';
-    if(p.estado_jefe==='preautorizado') return 'Preautorizado';
+    if(p.estado_jefe==='preautorizado') return 'Autorizado jefe';
     if(p.estado_jefe==='rechazado') return 'Rechazado jefe';
     return 'Solicitado';
   }
@@ -709,7 +708,7 @@ function PermisosTab({bonos,sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatu
   }
   function accion(p,kind){
     api(`/api/bonos-ventas/permisos/${p.id}/${kind}/`,{method:'POST',body:'{}'})
-      .then(()=>{ showStatus(kind==='preautorizar'?'Permiso preautorizado':'Permiso rechazado','ok'); cargarPermisos(); })
+      .then(()=>{ showStatus(kind==='preautorizar'?'Permiso autorizado':'Permiso rechazado','ok'); cargarPermisos(); })
       .catch(err=>showStatus(err.message,'err'));
   }
   function contextoPermiso(p){
@@ -733,14 +732,14 @@ function PermisosTab({bonos,sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatu
     ),
     h('div',{className:'metrics'},
       h('div',{className:'metric-card'},h('div',{className:'lbl'},'Pendientes jefe'),h('div',{className:'val wine'},pendientes)),
-      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Preautorizados'),h('div',{className:'val'},preaut)),
+      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Autorizados'),h('div',{className:'val'},preaut)),
       h('div',{className:'metric-card'},h('div',{className:'lbl'},'Sin goce'),h('div',{className:'val gold'},sinGoce))
     ),
     h('div',{className:'perm-layout'},
       h('div',{className:'card'},
         h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},'Nueva solicitud')),
         h('div',{className:'card-body'},
-          h('div',{className:'preview-note'},'El jefe preautoriza desde Bonos; RRHH conserva la aprobacion final en Capital Humano.'),
+          h('div',{className:'preview-note'},'El jefe directo autoriza desde Bonos. Capital Humano solo conserva el respaldo operativo.'),
           lastPermiso&&h('div',{className:'print-success'},
             h('div',{className:'print-success-title'},`Permiso ${lastPermiso.folio} registrado`),
             h('div',{className:'print-success-text'},'Ya puedes imprimirlo o guardarlo como PDF en hoja tamaño carta.'),
@@ -768,7 +767,7 @@ function PermisosTab({bonos,sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatu
               [[true,'Con goce'],[false,'Sin goce']].map(([v,lbl])=>h('button',{key:lbl,type:'button',className:`segment ${goce===v?'on':''}`,onClick:()=>setGoce(v)},lbl))
             )),
             h('div',{className:'field'},h('label',null,'Motivo'),h('textarea',{className:'form-control',rows:3,value:motivo,onChange:e=>setMotivo(e.target.value),placeholder:'Motivo del permiso...'})),
-            h('button',{className:'btn btn-wine',onClick:submitPermiso},'Enviar a preautorizacion')
+            h('button',{className:'btn btn-wine',onClick:submitPermiso},'Enviar a autorizacion')
           )
         )
       ),
@@ -788,7 +787,7 @@ function PermisosTab({bonos,sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatu
                 h('button',{className:'btn btn-ghost btn-sm',onClick:()=>setPreviewPermiso(p)},'Vista carta'),
                 h('button',{className:'btn btn-ghost btn-sm',onClick:()=>imprimirPermiso(p)},'Imprimir / PDF'),
                 p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-ghost btn-sm',onClick:()=>accion(p,'rechazar')},'Rechazar'),
-                p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-wine btn-sm',onClick:()=>accion(p,'preautorizar')},'Preautorizar')
+                p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-wine btn-sm',onClick:()=>accion(p,'preautorizar')},'Autorizar')
               )
             ))
           ):h('div',{className:'empty'},'Sin permisos registrados para este equipo.')
