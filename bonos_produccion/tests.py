@@ -244,6 +244,8 @@ class BonosProduccionTests(TestCase):
         self.assertIn("React.useState(FORCE_CAPTURE?AREA_TODAS:'HORNOS')", content)
         self.assertIn("includeAll:true", content)
         self.assertIn("r.redirected", content)
+        self.assertNotIn("pointer-events:none", content)
+        self.assertNotIn("if(!dom)", content)
         self.assertNotIn("pd_logistica_access", content)
         self.assertIn("no-store", response["Cache-Control"])
 

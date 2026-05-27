@@ -102,7 +102,7 @@ tr:hover td{background:var(--bg)}
 .day-cell{aspect-ratio:1;border-radius:6px;border:1px solid var(--line);background:var(--bg);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--faint);transition:all .12s;position:relative}
 .day-cell:hover{border-color:var(--wine);color:var(--wine)}
 .day-cell.worked{background:var(--wine);border-color:var(--wine);color:#fff}
-.day-cell.dom{opacity:.35;cursor:default;pointer-events:none}
+.day-cell.dom{background:#FFF7ED;color:#9A3412;border-color:#FED7AA}
 .day-cell .dn{font-size:13px;font-weight:800}
 .day-cell .ds{font-size:9px;margin-top:1px}
 /* CONCEPTOS */
@@ -607,7 +607,7 @@ function CapturaTab({bonos,mes,anio,showStatus}){
             const worked = r?.tiene_asistencia;
             return h('div',{key:d,
               className:`day-cell ${dom?'dom':''} ${worked?'worked':''}`,
-              onClick:()=>{ if(!dom){togDia(d); setSelDia(d);} }
+              onClick:()=>{ togDia(d); setSelDia(d); }
             },
               h('span',{className:'dn'},d),
               h('span',{className:'ds'},worked?'✓':dom?'D':'')
