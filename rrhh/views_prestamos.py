@@ -12,6 +12,11 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
 from core.access import ROLE_ADMIN, ROLE_DG, can_manage_rrhh, can_view_rrhh, has_any_role
+from core.notificaciones import (
+    notificar_prestamo_aprobado,
+    notificar_prestamo_para_direccion,
+    notificar_prestamo_solicitado,
+)
 
 from .models import Empleado, ImportacionNominaContpaq, Prestamo, PrestamoCuota
 from .services_prestamos import aplicar_cobro_manual, generar_cuotas
@@ -164,6 +169,7 @@ def prestamo_nuevo(request):
             jefe_directo_id=request.POST.get("jefe_directo") or None,
             creado_por=request.user,
         )
+        notificar_prestamo_solicitado(prestamo, actor=request.user)
         destino = f" Pendiente de autorización por {prestamo.jefe_directo.get_full_name() or prestamo.jefe_directo.username}." if prestamo.jefe_directo else " Pendiente de asignar/autorización de jefe."
         messages.success(request, f"Préstamo {prestamo.folio} creado.{destino}")
         return redirect("rrhh:rrhh_prestamo_detalle", pk=prestamo.pk)
@@ -223,6 +229,7 @@ def prestamo_autorizar_jefe(request, pk):
         prestamo.fecha_auth_jefe = timezone.now()
         prestamo.estado = Prestamo.ESTADO_AUTORIZADO
         prestamo.save(update_fields=["firma_jefe", "autorizado_jefe", "fecha_auth_jefe", "estado", "actualizado_en"])
+        notificar_prestamo_para_direccion(prestamo, actor=request.user)
         messages.success(request, f"Préstamo {prestamo.folio} autorizado por jefe.")
     return redirect("rrhh:rrhh_prestamo_detalle", pk=pk)
 
@@ -256,6 +263,7 @@ def prestamo_autorizar_dg(request, pk):
             update_fields=["firma_direccion", "autorizado_dg", "fecha_auth_dg", "estado", "actualizado_en"]
         )
         generar_cuotas(prestamo)
+        notificar_prestamo_aprobado(prestamo, actor=request.user)
         messages.success(request, f"Préstamo {prestamo.folio} aprobado. Cuotas generadas automáticamente.")
     return redirect("rrhh:rrhh_prestamo_detalle", pk=pk)
 

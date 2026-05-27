@@ -210,6 +210,32 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
             )
     if user and user.is_authenticated:
         try:
+            from core.models import Notificacion
+
+            notificaciones_pendientes = Notificacion.objects.filter(usuario=user, leida=False).count()
+        except Exception:
+            notificaciones_pendientes = 0
+        match_len = len("/notificaciones/") if current_path.startswith("/notificaciones/") else 0
+        best_match_len = max(best_match_len, match_len)
+        mi_trabajo = next((group for group in visible_groups if group["key"] == "mi_trabajo"), None)
+        if mi_trabajo is None:
+            mi_trabajo = {"key": "mi_trabajo", "label": "Mi trabajo", "items": [], "active": False}
+            visible_groups.insert(0, mi_trabajo)
+        mi_trabajo["badge_count"] = notificaciones_pendientes
+        mi_trabajo["items"].insert(
+            0,
+            {
+                "label": "Notificaciones",
+                "url": "/notificaciones/",
+                "active": False,
+                "_match_len": match_len,
+                "module": "core",
+                "submodule": "notificaciones",
+                "initial": "N",
+                "badge_count": notificaciones_pendientes,
+            },
+        )
+        try:
             from rrhh.models import Prestamo
 
             tiene_prestamos_por_autorizar = Prestamo.objects.filter(
@@ -221,10 +247,6 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
         if tiene_prestamos_por_autorizar:
             match_len = len("/rrhh/prestamos/") if current_path.startswith("/rrhh/prestamos/") else 0
             best_match_len = max(best_match_len, match_len)
-            mi_trabajo = next((group for group in visible_groups if group["key"] == "mi_trabajo"), None)
-            if mi_trabajo is None:
-                mi_trabajo = {"key": "mi_trabajo", "label": "Mi trabajo", "items": [], "active": False}
-                visible_groups.insert(0, mi_trabajo)
             mi_trabajo["items"].append(
                 {
                     "label": "Préstamos por autorizar",

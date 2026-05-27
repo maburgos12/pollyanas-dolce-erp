@@ -8,6 +8,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from core.notificaciones import notificar_permiso_solicitado
 from rrhh.models import Empleado, PermisoSalida
 
 
@@ -140,6 +141,7 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
             goce_sueldo=_parse_bool(request.data.get("goce_sueldo"), default=True),
             origen_solicitud=self.origen_solicitud,
         )
+        notificar_permiso_solicitado(permiso, actor=request.user)
         return Response(_permiso_payload(permiso), status=status.HTTP_201_CREATED)
 
     def get_object(self):
