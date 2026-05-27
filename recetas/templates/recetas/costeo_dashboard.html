@@ -5,60 +5,151 @@
 {% block body_class %}page-costeo-dashboard{% endblock %}
 {% block content %}
 <style>
-  .costeo-shell { display: grid; gap: 18px; }
-  .costeo-hero { margin-bottom: 0; }
+  .costeo-shell {
+    --costeo-ink: #2f2229;
+    --costeo-muted: #74636d;
+    --costeo-line: rgba(131, 24, 67, 0.12);
+    --costeo-soft-line: rgba(131, 24, 67, 0.08);
+    --costeo-wine: #8b274d;
+    --costeo-wine-strong: #5a2132;
+    --costeo-rose: #f8eef2;
+    --costeo-rose-strong: #f2e2e8;
+    --costeo-gold: #d3a13a;
+    --costeo-green: #23704f;
+    --costeo-red: #b4334c;
+    --costeo-paper: #fff;
+    display: grid;
+    gap: 18px;
+    min-width: 0;
+  }
+  .costeo-hero { align-items: start; gap: 20px; margin-bottom: 0; }
+  .costeo-hero-main { min-width: 0; display: grid; gap: 12px; }
+  .costeo-hero .pd-page-copy { max-width: 78ch; }
+  .costeo-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(140px, max-content)) minmax(190px, max-content);
+    gap: 10px;
+    align-items: stretch;
+    justify-content: end;
+    min-width: min(100%, 520px);
+  }
+  .costeo-actions .btn,
+  .costeo-actions form,
+  .costeo-actions button { width: 100%; min-width: 0; }
+  .costeo-tabs { display: flex; gap: 8px; flex-wrap: wrap; min-width: 0; }
+  .costeo-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    padding: 0 16px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: var(--costeo-rose);
+    color: var(--costeo-wine);
+    text-decoration: none;
+    font-weight: 700;
+    white-space: nowrap;
+    word-break: keep-all;
+    transition: background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease;
+  }
+  .costeo-tab:hover { border-color: var(--costeo-line); transform: translateY(-1px); }
+  .costeo-tab.active { background: var(--costeo-wine); color: var(--costeo-paper); }
   .costeo-kpis { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .costeo-kpi { padding: 18px; border: 1px solid rgba(131, 24, 67, 0.08); border-radius: 18px; background: #fff; }
-  .costeo-kpi .eyebrow { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #7b6871; margin-bottom: 10px; }
-  .costeo-kpi .value { font-size: 2rem; font-weight: 700; color: #5a2132; line-height: 1.1; }
-  .costeo-kpi .note { color: #7a6870; margin-top: 8px; }
-  .costeo-filters { display: grid; gap: 12px; grid-template-columns: repeat(6, minmax(0, 1fr)); align-items: end; }
-  .costeo-grid { display: grid; gap: 18px; grid-template-columns: 1.2fr .8fr; }
-  .costeo-panel { padding: 20px; border-radius: 20px; background: #fff; border: 1px solid rgba(131, 24, 67, 0.08); }
-  .costeo-panel h3 { margin: 0 0 6px; font-size: 1.35rem; }
-  .costeo-panel p { margin: 0; color: #73656d; }
+  .costeo-kpi { min-width: 0; padding: 18px; border: 1px solid var(--costeo-soft-line); border-radius: 8px; background: var(--costeo-paper); }
+  .costeo-kpi .eyebrow { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--costeo-muted); margin-bottom: 10px; }
+  .costeo-kpi .value { font-size: clamp(1.65rem, 2.2vw, 2rem); font-weight: 800; color: var(--costeo-wine-strong); line-height: 1.08; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .costeo-kpi .value.is-label { font-size: clamp(1.3rem, 1.9vw, 1.75rem); line-height: 1.18; }
+  .costeo-kpi .note { color: var(--costeo-muted); margin-top: 8px; }
+  .costeo-filters {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: minmax(150px, .78fr) minmax(210px, 1.05fr) minmax(170px, .92fr) minmax(260px, 1.45fr) minmax(180px, max-content);
+    align-items: end;
+  }
+  .costeo-filter-field { min-width: 0; }
+  .costeo-filter-field .form-label { min-height: 18px; }
+  .costeo-filter-field .form-control,
+  .costeo-filter-field .form-select { width: 100%; min-width: 0; }
+  .costeo-filter-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(82px, max-content));
+    gap: 8px;
+    align-items: stretch;
+    justify-content: end;
+    min-width: 176px;
+  }
+  .costeo-filter-actions .btn { min-width: 82px; white-space: nowrap; }
+  .costeo-grid { display: grid; gap: 18px; grid-template-columns: minmax(0, 1.2fr) minmax(320px, .8fr); }
+  .costeo-panel { min-width: 0; padding: 20px; border-radius: 8px; background: var(--costeo-paper); border: 1px solid var(--costeo-soft-line); }
+  .costeo-panel h3 { margin: 0 0 6px; font-size: 1.22rem; line-height: 1.2; color: var(--costeo-ink); }
+  .costeo-panel p { margin: 0; color: var(--costeo-muted); }
   .costeo-table { width: 100%; margin-top: 16px; border-collapse: collapse; }
-  .costeo-table th, .costeo-table td { padding: 10px 12px; border-bottom: 1px solid rgba(131, 24, 67, 0.08); vertical-align: top; }
-  .costeo-table th { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #7b6871; }
-  .delta-up { color: #b4334c; font-weight: 700; }
-  .delta-down { color: #2e8b57; font-weight: 700; }
-  .delta-flat { color: #7b6871; font-weight: 700; }
+  .costeo-table th,
+  .costeo-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--costeo-soft-line);
+    vertical-align: middle;
+    white-space: nowrap;
+    word-break: keep-all;
+    overflow-wrap: normal;
+  }
+  .costeo-table th { background: var(--costeo-rose); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--costeo-wine); }
+  .costeo-table td:first-child,
+  .costeo-table .cell-wrap { white-space: normal; word-break: normal; overflow-wrap: normal; }
+  .costeo-table .cell-number { text-align: right; font-variant-numeric: tabular-nums; }
+  .costeo-table-main { min-width: 1040px; }
+  .costeo-table-compact { min-width: 620px; }
+  .costeo-link { color: var(--costeo-wine); font-weight: 700; text-decoration: none; }
+  .costeo-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .delta-up { color: var(--costeo-red); font-weight: 800; }
+  .delta-down { color: var(--costeo-green); font-weight: 800; }
+  .delta-flat { color: var(--costeo-muted); font-weight: 800; }
   .history-bars { display: grid; gap: 10px; margin-top: 18px; }
-  .history-row { display: grid; grid-template-columns: 96px 1fr 110px 100px; gap: 12px; align-items: center; }
-  .history-track { height: 12px; background: #f6ebef; border-radius: 999px; overflow: hidden; }
-  .history-fill { height: 100%; background: linear-gradient(90deg, #8b274d 0%, #d3a13a 100%); border-radius: 999px; }
-  .split-grid { display: grid; gap: 18px; grid-template-columns: 1fr 1fr; }
-  .scope-tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
-  .scope-tab { padding: 9px 14px; border-radius: 999px; background: #f7eef1; color: #7a3550; text-decoration: none; font-weight: 600; }
-  .scope-tab.active { background: #8b274d; color: #fff; }
+  .history-row { display: grid; grid-template-columns: 96px minmax(70px, 1fr) 110px 100px; gap: 12px; align-items: center; }
+  .history-row > div { min-width: 0; }
+  .history-row .history-value,
+  .history-row .history-delta { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+  .history-track { height: 12px; background: var(--costeo-rose-strong); border-radius: 999px; overflow: hidden; }
+  .history-fill { height: 100%; background: linear-gradient(90deg, var(--costeo-wine) 0%, var(--costeo-gold) 100%); border-radius: 999px; }
+  .split-grid { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   @media (max-width: 1200px) {
     .costeo-hero, .costeo-grid, .split-grid { grid-template-columns: 1fr; }
+    .costeo-actions { justify-content: start; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
     .costeo-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .costeo-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .costeo-filter-actions { justify-content: start; }
   }
   @media (max-width: 720px) {
     .costeo-kpis, .costeo-filters { grid-template-columns: 1fr; }
-    .history-row { grid-template-columns: 1fr; }
+    .costeo-tabs { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
+    .costeo-tab { flex: 0 0 auto; min-height: 38px; padding-inline: 14px; }
+    .costeo-actions { grid-template-columns: 1fr; }
+    .costeo-filter-actions { grid-template-columns: 1fr 1fr; justify-content: stretch; }
+    .costeo-filter-actions .btn { width: 100%; }
+    .history-row { grid-template-columns: 92px minmax(64px, 1fr) 92px; }
+    .history-row .history-delta { grid-column: 3; }
+    .costeo-panel { padding: 16px; }
   }
 </style>
 
 <div class="module-shell pd-page-gutters costeo-shell">
   <header class="pd-page-head costeo-hero">
-    <div>
+    <div class="costeo-hero-main">
       <div class="pd-eyebrow">Dirección General · Costeo</div>
       <h1 class="pd-page-title">Variación semanal de costo de producción</h1>
       <p class="pd-page-copy">
         Historial auditable de costo por receta y por agrupación base + add-on. La lectura principal es materia prima;
         mano de obra e indirectos siguen pendientes de capturar.
       </p>
-      <div class="scope-tabs">
-        <a class="scope-tab {% if scope == 'productos' %}active{% endif %}" href="?scope=productos{% if selected_week %}&week_start={{ selected_week|date:'Y-m-d' }}{% endif %}">Productos finales</a>
-        <a class="scope-tab {% if scope == 'bases' %}active{% endif %}" href="?scope=bases{% if selected_week %}&week_start={{ selected_week|date:'Y-m-d' }}{% endif %}">Bases internas</a>
-        <a class="scope-tab {% if scope == 'addons' %}active{% endif %}" href="?scope=addons{% if selected_week %}&week_start={{ selected_week|date:'Y-m-d' }}{% endif %}">Base + add-on</a>
-        <a class="scope-tab {% if scope == 'todo' %}active{% endif %}" href="?scope=todo{% if selected_week %}&week_start={{ selected_week|date:'Y-m-d' }}{% endif %}">Todo</a>
+      <div class="costeo-tabs" aria-label="Alcance de costeo">
+        <a class="costeo-tab {% if scope == 'productos' %}active{% endif %}" href="?scope=productos{% if selected_week %}&week_start={{ selected_week|date:'Y-m-d' }}{% endif %}">Productos finales</a>
+        <a class="costeo-tab {% if scope == 'bases' %}active{% endif %}" href="?scope=bases{% if selected_week %}&week_start={{ selected_week|date:'Y-m-d' }}{% endif %}">Bases internas</a>
+        <a class="costeo-tab {% if scope == 'addons' %}active{% endif %}" href="?scope=addons{% if selected_week %}&week_start={{ selected_week|date:'Y-m-d' }}{% endif %}">Base + add-on</a>
+        <a class="costeo-tab {% if scope == 'todo' %}active{% endif %}" href="?scope=todo{% if selected_week %}&week_start={{ selected_week|date:'Y-m-d' }}{% endif %}">Todo</a>
       </div>
     </div>
-    <div class="pd-action-row">
+    <div class="costeo-actions">
       <a class="btn btn-secondary" href="{% url 'recetas:recetas_list' %}">Abrir recetas</a>
       <a class="btn btn-secondary" href="{% url 'recetas:drivers_costeo' %}">Drivers de costeo</a>
       <form method="post" action="{% url 'recetas:costeo_dashboard_snapshot' %}">
@@ -71,7 +162,7 @@
 
   <section class="card costeo-panel">
     <form method="get" class="costeo-filters">
-      <div>
+      <div class="costeo-filter-field">
         <label class="form-label">Semana</label>
         <select class="form-select" name="week_start">
           {% for week in week_values %}
@@ -79,7 +170,7 @@
           {% endfor %}
         </select>
       </div>
-      <div>
+      <div class="costeo-filter-field">
         <label class="form-label">Familia</label>
         <select class="form-select" name="familia">
           <option value="">Todas</option>
@@ -88,7 +179,7 @@
           {% endfor %}
         </select>
       </div>
-      <div>
+      <div class="costeo-filter-field">
         <label class="form-label">Temporalidad</label>
         <select class="form-select" name="temporalidad">
           <option value="">Todas</option>
@@ -97,13 +188,13 @@
           <option value="FECHA_ESPECIAL" {% if temporalidad == 'FECHA_ESPECIAL' %}selected{% endif %}>Fecha especial</option>
         </select>
       </div>
-      <div>
+      <div class="costeo-filter-field">
         <label class="form-label">Buscar</label>
         <input class="form-control" name="q" value="{{ q }}" placeholder="Producto, receta o add-on">
       </div>
       <input type="hidden" name="scope" value="{{ scope }}">
       <input type="hidden" name="identity" value="{{ selected_identity }}">
-      <div class="d-flex gap-2">
+      <div class="costeo-filter-actions">
         <button class="btn btn-primary" type="submit">Aplicar</button>
         <a class="btn btn-secondary" href="{% url 'recetas:costeo_dashboard' %}?scope={{ scope }}">Limpiar</a>
       </div>
@@ -130,7 +221,7 @@
     </article>
     <article class="costeo-kpi">
       <div class="eyebrow">Foco ejecutivo</div>
-      <div class="value">{{ selected_row.label|default:"Sin selección" }}</div>
+      <div class="value is-label">{{ selected_row.label|default:"Sin selección" }}</div>
       <div class="note">{% if selected_row %}{{ selected_row.familia|default:"Sin familia" }} · {{ selected_row.categoria|default:"Sin categoría" }}{% else %}Selecciona un registro para ver historial{% endif %}</div>
     </article>
   </section>
@@ -141,16 +232,16 @@
       <p>El criterio principal es variación contra el corte semanal anterior del mismo producto o agrupación.</p>
       <div class="split-grid">
         <div>
-          <table class="costeo-table">
+          <table class="costeo-table costeo-table-compact">
             <thead>
               <tr><th colspan="3">Top alzas</th></tr>
             </thead>
             <tbody>
               {% for row in increase_rows %}
               <tr>
-                <td><a href="?scope={{ scope }}&week_start={{ selected_week|date:'Y-m-d' }}&identity={{ row.identity_key }}">{{ row.label }}</a></td>
-                <td class="delta-up">+${{ row.delta_total|floatformat:2|intcomma }}</td>
-                <td class="delta-up">{% if row.delta_pct is not None %}+{{ row.delta_pct|floatformat:2|intcomma }}%{% else %}N/D{% endif %}</td>
+                <td class="cell-wrap"><a class="costeo-link" href="?scope={{ scope }}&week_start={{ selected_week|date:'Y-m-d' }}&identity={{ row.identity_key }}">{{ row.label }}</a></td>
+                <td class="delta-up cell-number">+${{ row.delta_total|floatformat:2|intcomma }}</td>
+                <td class="delta-up cell-number">{% if row.delta_pct is not None %}+{{ row.delta_pct|floatformat:2|intcomma }}%{% else %}N/D{% endif %}</td>
               </tr>
               {% empty %}
               <tr><td colspan="3" class="text-muted">Sin alzas registradas.</td></tr>
@@ -159,16 +250,16 @@
           </table>
         </div>
         <div>
-          <table class="costeo-table">
+          <table class="costeo-table costeo-table-compact">
             <thead>
               <tr><th colspan="3">Top bajas</th></tr>
             </thead>
             <tbody>
               {% for row in decrease_rows %}
               <tr>
-                <td><a href="?scope={{ scope }}&week_start={{ selected_week|date:'Y-m-d' }}&identity={{ row.identity_key }}">{{ row.label }}</a></td>
-                <td class="delta-down">${{ row.delta_total|floatformat:2|intcomma }}</td>
-                <td class="delta-down">{% if row.delta_pct is not None %}{{ row.delta_pct|floatformat:2|intcomma }}%{% else %}N/D{% endif %}</td>
+                <td class="cell-wrap"><a class="costeo-link" href="?scope={{ scope }}&week_start={{ selected_week|date:'Y-m-d' }}&identity={{ row.identity_key }}">{{ row.label }}</a></td>
+                <td class="delta-down cell-number">${{ row.delta_total|floatformat:2|intcomma }}</td>
+                <td class="delta-down cell-number">{% if row.delta_pct is not None %}{{ row.delta_pct|floatformat:2|intcomma }}%{% else %}N/D{% endif %}</td>
               </tr>
               {% empty %}
               <tr><td colspan="3" class="text-muted">Sin bajas registradas.</td></tr>
@@ -189,8 +280,8 @@
           <div class="history-track">
             <div class="history-fill" style="width:{{ item.history_pct|floatformat:2 }}%"></div>
           </div>
-          <div>${{ item.costo_total|floatformat:2|intcomma }}</div>
-          <div class="{% if item.delta_total > 0 %}delta-up{% elif item.delta_total < 0 %}delta-down{% else %}delta-flat{% endif %}">
+          <div class="history-value">${{ item.costo_total|floatformat:2|intcomma }}</div>
+          <div class="history-delta {% if item.delta_total > 0 %}delta-up{% elif item.delta_total < 0 %}delta-down{% else %}delta-flat{% endif %}">
             {% if item.delta_total is None %}Base{% else %}{% if item.delta_total > 0 %}+{% endif %}${{ item.delta_total|floatformat:2|intcomma }}{% endif %}
           </div>
         </div>
@@ -205,7 +296,7 @@
     <h3>Registro semanal visible</h3>
     <p>Costo total de producción por producto/agrupación, con variación semanal y señalización temporal.</p>
     <div class="table-responsive">
-      <table class="costeo-table">
+      <table class="costeo-table costeo-table-main">
         <thead>
           <tr>
             <th>Producto</th>
@@ -221,21 +312,21 @@
         <tbody>
           {% for row in rows %}
           <tr>
-            <td>
-              <a href="?scope={{ scope }}&week_start={{ selected_week|date:'Y-m-d' }}&identity={{ row.identity_key }}">{{ row.label }}</a>
+            <td class="cell-wrap">
+              <a class="costeo-link" href="?scope={{ scope }}&week_start={{ selected_week|date:'Y-m-d' }}&identity={{ row.identity_key }}">{{ row.label }}</a>
               {% if row.scope_type == "GROUPED_ADDON" and row.addon_rule_id %}
               <div class="text-muted">Base + add-on zero revenue Point</div>
               {% endif %}
             </td>
             <td>{% if row.scope_type == "GROUPED_ADDON" %}Agrupado{% else %}Receta{% endif %}</td>
-            <td>{{ row.familia|default:"Sin familia" }}</td>
+            <td class="cell-wrap">{{ row.familia|default:"Sin familia" }}</td>
             <td>{{ row.get_temporalidad_display }}</td>
-            <td>${{ row.costo_mp|floatformat:2|intcomma }}</td>
-            <td>${{ row.costo_total|floatformat:2|intcomma }}</td>
-            <td class="{% if row.delta_total > 0 %}delta-up{% elif row.delta_total < 0 %}delta-down{% else %}delta-flat{% endif %}">
+            <td class="cell-number">${{ row.costo_mp|floatformat:2|intcomma }}</td>
+            <td class="cell-number">${{ row.costo_total|floatformat:2|intcomma }}</td>
+            <td class="cell-number {% if row.delta_total > 0 %}delta-up{% elif row.delta_total < 0 %}delta-down{% else %}delta-flat{% endif %}">
               {% if row.delta_total is None %}Base{% else %}{% if row.delta_total > 0 %}+{% endif %}${{ row.delta_total|floatformat:2|intcomma }}{% endif %}
             </td>
-            <td class="{% if row.delta_pct > 0 %}delta-up{% elif row.delta_pct < 0 %}delta-down{% else %}delta-flat{% endif %}">
+            <td class="cell-number {% if row.delta_pct > 0 %}delta-up{% elif row.delta_pct < 0 %}delta-down{% else %}delta-flat{% endif %}">
               {% if row.delta_pct is None %}N/D{% else %}{% if row.delta_pct > 0 %}+{% endif %}{{ row.delta_pct|floatformat:2|intcomma }}%{% endif %}
             </td>
           </tr>
