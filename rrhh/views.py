@@ -1770,6 +1770,9 @@ def permisos_list(request):
                 raise PermissionDenied("No tienes permisos para autorizar permisos")
 
         if action == "aprobar":
+            if permiso.estado_jefe != PermisoSalida.ESTADO_JEFE_PREAUTORIZADO:
+                messages.error(request, f"Permiso {permiso.folio} requiere preautorización del jefe antes de RRHH.")
+                return redirect("rrhh:rrhh_permisos_list")
             if (
                 permiso.requiere_direccion
                 and permiso.estado_direccion != PermisoSalida.ESTADO_DIRECCION_AUTORIZADO
