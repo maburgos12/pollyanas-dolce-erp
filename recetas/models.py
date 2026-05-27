@@ -347,6 +347,69 @@ class LineaReceta(models.Model):
         return f"{self.receta.nombre}: {self.insumo_texto}"
 
 
+class CosteoProductoDraft(models.Model):
+    ESTADO_BORRADOR = "BORRADOR"
+    ESTADO_CHOICES = [
+        (ESTADO_BORRADOR, "Borrador"),
+    ]
+
+    nombre = models.CharField(max_length=250)
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_BORRADOR, db_index=True)
+    target_margin_pct = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("55.00"))
+    costo_total_snapshot = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    costo_unitario_resultado_snapshot = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    precio_venta_sugerido = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    notas = models.TextField(blank=True, default="")
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="costeo_producto_drafts_creados",
+    )
+    actualizado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="costeo_producto_drafts_actualizados",
+    )
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Borrador de costeo de producto"
+        verbose_name_plural = "Borradores de costeo de productos"
+        ordering = ["-actualizado_en", "-id"]
+
+    def __str__(self) -> str:
+        return self.nombre
+
+
+class CosteoProductoDraftLinea(models.Model):
+    draft = models.ForeignKey(CosteoProductoDraft, related_name="lineas", on_delete=models.CASCADE)
+    posicion = models.PositiveIntegerField(default=1)
+    insumo = models.ForeignKey(Insumo, null=True, blank=True, on_delete=models.SET_NULL)
+    insumo_nombre_snapshot = models.CharField(max_length=250)
+    insumo_codigo_snapshot = models.CharField(max_length=80, blank=True, default="")
+    cantidad = models.DecimalField(max_digits=18, decimal_places=6)
+    unidad = models.ForeignKey(UnidadMedida, null=True, blank=True, on_delete=models.SET_NULL)
+    unidad_codigo_snapshot = models.CharField(max_length=20, blank=True, default="")
+    costo_unitario_snapshot = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    costo_total_snapshot = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    fuente_costo = models.CharField(max_length=60, blank=True, default="")
+    unresolved = models.BooleanField(default=False)
+    creado_en = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = "Línea de borrador de costeo"
+        verbose_name_plural = "Líneas de borrador de costeo"
+        ordering = ["draft", "posicion", "id"]
+
+    def __str__(self) -> str:
+        return f"{self.draft.nombre}: {self.insumo_nombre_snapshot}"
+
+
 class RecetaPresentacion(models.Model):
     receta = models.ForeignKey(Receta, related_name="presentaciones", on_delete=models.CASCADE)
     nombre = models.CharField(max_length=80)  # Mini, Chico, Mediano, etc.
