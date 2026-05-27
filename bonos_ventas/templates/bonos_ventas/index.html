@@ -542,11 +542,11 @@ function CapturaTab({bonos,mes,anio,showStatus}){
     if(!selBono) return;
     if(savingDia) return;
     const r = registros.find(x=>+x.dia===dia);
+    const nextWorked=!(r&&r.tiene_asistencia);
     setSavingDia(dia);
     if(r){
-      // Quitar asistencia = eliminar registro o marcar sin asistencia
-      api(`/api/bonos-ventas/registros-diarios/${r.id}/`,{method:'PATCH',body:JSON.stringify({tiene_asistencia:false})})
-        .then(()=>{ cargarReg(selBono.id); setSelDia(null); }).catch(err=>showStatus(err.message,'err')).finally(()=>setSavingDia(null));
+      api(`/api/bonos-ventas/registros-diarios/${r.id}/`,{method:'PATCH',body:JSON.stringify({tiene_asistencia:nextWorked,tiene_uniforme:nextWorked,tiene_puntualidad:nextWorked})})
+        .then(()=>{ cargarReg(selBono.id); setSelDia(nextWorked?dia:null); }).catch(err=>showStatus(err.message,'err')).finally(()=>setSavingDia(null));
     } else {
       api('/api/bonos-ventas/registros-diarios/',{method:'POST',body:JSON.stringify({
         bono:selBono.id,dia,tiene_uniforme:true,tiene_puntualidad:true,tiene_asistencia:true,puntos_de_vista:''
