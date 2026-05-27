@@ -3170,7 +3170,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=cierre-turno-fix").catch(() => {});
+          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=network-first-shell").catch(() => {});
         }
 
         try {
