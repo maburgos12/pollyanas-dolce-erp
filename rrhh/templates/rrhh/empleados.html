@@ -1241,8 +1241,8 @@
     if (puesto && puestoSelect && Array.from(puestoSelect.options).some(option => option.value === puesto)) {
       puestoSelect.value = puesto;
     }
-    if (ventas) ventas.checked = puesto === 'REPARTIDOR';
-    if (produccion) produccion.checked = ['HORNOS', 'PRODUCCION', 'ARMADO', 'CRUCERO', 'ENVIO_SUCURSAL'].includes(puesto);
+    if (ventas) ventas.checked = ventas.checked || puesto === 'REPARTIDOR';
+    if (produccion) produccion.checked = produccion.checked || ['HORNOS', 'PRODUCCION', 'ARMADO', 'CRUCERO', 'ENVIO_SUCURSAL'].includes(puesto);
   }
 
   document.addEventListener('change', (event) => {

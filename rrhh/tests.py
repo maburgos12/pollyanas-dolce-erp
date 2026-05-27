@@ -782,6 +782,40 @@ class RRHHViewsTests(TestCase):
         self.assertTrue(empleado.participa_bonos_produccion)
         self.assertEqual(set(empleado.bonos_esquemas.values_list("codigo", flat=True)), {"VENTAS", "PRODUCCION"})
 
+    def test_empleados_update_respeta_checkbox_manual_de_bono(self):
+        produccion, _ = BonoEsquema.objects.get_or_create(
+            codigo="PRODUCCION",
+            defaults={"nombre": "Producción", "departamento": Empleado.DEP_PRODUCCION},
+        )
+        empleado = Empleado.objects.create(
+            nombre="Empleado Checkbox Produccion",
+            departamento_origen=Empleado.DEP_LOGISTICA,
+            departamento=Empleado.DEP_PRODUCCION,
+            salario_diario="300.00",
+        )
+
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "update",
+                "empleado_id": str(empleado.id),
+                "nombre": empleado.nombre,
+                "area": "",
+                "departamento_origen": Empleado.DEP_LOGISTICA,
+                "departamento": Empleado.DEP_PRODUCCION,
+                "puesto_operativo": "",
+                "bono_esquemas": [str(produccion.id)],
+                "salario_diario": "300.00",
+                "activo": "on",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        empleado.refresh_from_db()
+        self.assertTrue(empleado.participa_bonos_produccion)
+        self.assertEqual(set(empleado.bonos_esquemas.values_list("codigo", flat=True)), {"PRODUCCION"})
+
     def test_empleados_guarda_area_y_puesto_operativo_otro_desde_modal(self):
         resp = self.client.post(
             reverse("rrhh:empleados"),
