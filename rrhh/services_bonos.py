@@ -75,10 +75,19 @@ def crear_esquema_otro_desde_post(post_data) -> BonoEsquema | None:
 def sincronizar_esquemas_bono(empleado: Empleado, post_data, organizacion: dict) -> None:
     ids = [int(value) for value in _post_list(post_data, "bono_esquemas") if value.isdigit()]
     esquemas = list(BonoEsquema.objects.filter(pk__in=ids, activo=True))
+    codigos_seleccionados = {esquema.codigo for esquema in esquemas}
 
-    if post_data.get("participa_bonos_ventas") == "on" or organizacion.get("participa_bonos_ventas"):
+    if (
+        post_data.get("participa_bonos_ventas") == "on"
+        or organizacion.get("participa_bonos_ventas")
+        or "VENTAS" in codigos_seleccionados
+    ):
         esquemas.append(obtener_o_crear_esquema_base("VENTAS"))
-    if post_data.get("participa_bonos_produccion") == "on" or organizacion.get("participa_bonos_produccion"):
+    if (
+        post_data.get("participa_bonos_produccion") == "on"
+        or organizacion.get("participa_bonos_produccion")
+        or "PRODUCCION" in codigos_seleccionados
+    ):
         esquemas.append(obtener_o_crear_esquema_base("PRODUCCION"))
 
     esquema_otro = crear_esquema_otro_desde_post(post_data)
