@@ -10,6 +10,7 @@ urlpatterns = [
     path("recetas/nueva/", views.receta_create, name="receta_create"),
     path("drivers/", views.drivers_costeo, name="drivers_costeo_legacy"),
     path("pronosticos/", views.plan_produccion, name="pronosticos_legacy"),
+    path("recetas/<int:pk>/composicion.json", views.receta_composition_json, name="receta_composition_json"),
     path("recetas/<int:pk>/", views.receta_detail, name="receta_detail"),
     path("recetas/<int:pk>/aprobar-sugeridos/", views.receta_aprobar_sugeridos, name="receta_aprobar_sugeridos"),
     path("recetas/<int:pk>/sync-point/", views.receta_sync_point, name="receta_sync_point"),
