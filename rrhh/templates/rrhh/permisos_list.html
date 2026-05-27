@@ -109,7 +109,7 @@
           <button class="btn btn-secondary" type="submit" name="action" value="rechazar_direccion">Rechazar</button>
         </form>
         {% endif %}
-        {% if can_manage_rrhh and permiso.estado == "solicitado" %}
+        {% if can_manage_rrhh and permiso.estado == "solicitado" and permiso.estado_jefe == "preautorizado" %}
         {% if not permiso.requiere_direccion or permiso.estado_direccion == "autorizado" %}
         <form method="post" class="permiso-actions">
           {% csrf_token %}

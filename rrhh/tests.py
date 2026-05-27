@@ -38,7 +38,8 @@ class CapitalHumanoServiceTests(TestCase):
         from zoneinfo import ZoneInfo
 
         rrhh_user = User.objects.create_user(username="paula")
-        rrhh_user.groups.add(Group.objects.create(name="RRHH"))
+        rrhh_group, _ = Group.objects.get_or_create(name="RRHH")
+        rrhh_user.groups.add(rrhh_group)
         dg_user = User.objects.create_user(username="mauricio")
         dg_user.groups.add(Group.objects.create(name="DG"))
         jefa_ventas = Empleado.objects.create(
@@ -92,7 +93,8 @@ class CapitalHumanoServiceTests(TestCase):
         from zoneinfo import ZoneInfo
 
         rrhh_user = User.objects.create_user(username="paula")
-        rrhh_user.groups.add(Group.objects.create(name="RRHH"))
+        rrhh_group, _ = Group.objects.get_or_create(name="RRHH")
+        rrhh_user.groups.add(rrhh_group)
         jefa_ventas = Empleado.objects.create(
             nombre="Johana Lopez",
             departamento=Empleado.DEP_VENTAS,
@@ -125,6 +127,38 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertEqual(response.status_code, 302)
         permiso.refresh_from_db()
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_APROBADO)
+
+    def test_rrhh_no_aprueba_permiso_sin_preautorizacion_de_jefe(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        rrhh_user = User.objects.create_user(username="paula")
+        rrhh_group, _ = Group.objects.get_or_create(name="RRHH")
+        rrhh_user.groups.add(rrhh_group)
+        empleado = Empleado.objects.create(nombre="Empleado Pendiente Jefe", departamento=Empleado.DEP_VENTAS)
+        permiso = PermisoSalida.objects.create(
+            empleado=empleado,
+            tipo=PermisoSalida.TIPO_PERMISO_HORA,
+            fecha_inicio=datetime(2026, 5, 26, 13, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            fecha_fin=datetime(2026, 5, 26, 15, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            motivo="Cita",
+            estado_jefe=PermisoSalida.ESTADO_JEFE_PENDIENTE,
+        )
+
+        self.client.force_login(rrhh_user)
+        response = self.client.get(reverse("rrhh:rrhh_permisos_list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Aprobar RRHH")
+
+        response = self.client.post(
+            reverse("rrhh:rrhh_permisos_list"),
+            {"permiso_id": permiso.id, "action": "aprobar"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        permiso.refresh_from_db()
+        self.assertEqual(permiso.estado, PermisoSalida.ESTADO_SOLICITADO)
+        self.assertIsNone(permiso.autorizado_por)
 
     def test_generar_horas_extra_desde_asistencia(self):
         from datetime import date, datetime, time
@@ -201,7 +235,8 @@ class CapitalHumanoServiceTests(TestCase):
         from datetime import date
 
         user = User.objects.create_user(username="paula", password="pass123")
-        user.groups.add(Group.objects.create(name="RRHH"))
+        rrhh_group, _ = Group.objects.get_or_create(name="RRHH")
+        user.groups.add(rrhh_group)
         empleado = Empleado.objects.create(
             codigo="100",
             nombre="Empleado Indicadores",
@@ -341,7 +376,8 @@ class CapitalHumanoAPITests(TestCase):
             jefe_directo=jefe_empleado,
         )
         rrhh_user = User.objects.create_user(username="rrhh.he", password="pass123")
-        rrhh_user.groups.add(Group.objects.create(name="RRHH"))
+        rrhh_group, _ = Group.objects.get_or_create(name="RRHH")
+        rrhh_user.groups.add(rrhh_group)
         self.client.force_authenticate(user=empleado_user)
 
         resp = self.client.post(
