@@ -6,4 +6,5 @@ class LogisticaConfig(AppConfig):
     name = "logistica"
 
     def ready(self):
+        import logistica.checks  # noqa: F401
         import logistica.signals  # noqa: F401
