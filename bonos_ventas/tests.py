@@ -125,6 +125,11 @@ class BonosVentasTests(TestCase):
         self.assertIn("Firma empleado", content)
         self.assertNotIn("pointer-events:none", content)
         self.assertNotIn("if(!dom)", content)
+        self.assertIn(".day-cell.dom.worked", content)
+        self.assertIn(".day-cell.saving", content)
+        self.assertIn("savingDia", content)
+        self.assertIn("onClick:()=>togDia(d)", content)
+        self.assertNotIn("togDia(d); setSelDia(d);", content)
         self.assertNotIn("pd_logistica_access", content)
 
     def test_manifest_y_service_worker_de_ventas_sirven_con_content_type_correcto(self):

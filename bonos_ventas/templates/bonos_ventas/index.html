@@ -103,6 +103,8 @@ tr:hover td{background:var(--bg)}
 .day-cell:hover{border-color:var(--wine);color:var(--wine)}
 .day-cell.worked{background:var(--wine);border-color:var(--wine);color:#fff}
 .day-cell.dom{background:#FFF7ED;color:#9A3412;border-color:#FED7AA}
+.day-cell.dom.worked{background:var(--wine);border-color:var(--wine);color:#fff}
+.day-cell.saving{opacity:.65;cursor:progress}
 .day-cell .dn{font-size:13px;font-weight:800}
 .day-cell .ds{font-size:9px;margin-top:1px}
 /* CONCEPTOS */
@@ -505,6 +507,7 @@ function CapturaTab({bonos,mes,anio,showStatus}){
   const [selBono, setSelBono] = React.useState(null);
   const [registros, setRegistros] = React.useState([]);
   const [selDia, setSelDia] = React.useState(null);
+  const [savingDia, setSavingDia] = React.useState(null);
   const [loadingReg, setLoadingReg] = React.useState(false);
 
   const sucursales = React.useMemo(()=>{
@@ -537,15 +540,17 @@ function CapturaTab({bonos,mes,anio,showStatus}){
 
   function togDia(dia){
     if(!selBono) return;
+    if(savingDia) return;
     const r = registros.find(x=>+x.dia===dia);
+    setSavingDia(dia);
     if(r){
       // Quitar asistencia = eliminar registro o marcar sin asistencia
       api(`/api/bonos-ventas/registros-diarios/${r.id}/`,{method:'PATCH',body:JSON.stringify({tiene_asistencia:false})})
-        .then(()=>cargarReg(selBono.id)).catch(err=>showStatus(err.message,'err'));
+        .then(()=>{ cargarReg(selBono.id); setSelDia(null); }).catch(err=>showStatus(err.message,'err')).finally(()=>setSavingDia(null));
     } else {
       api('/api/bonos-ventas/registros-diarios/',{method:'POST',body:JSON.stringify({
         bono:selBono.id,dia,tiene_uniforme:true,tiene_puntualidad:true,tiene_asistencia:true,puntos_de_vista:''
-      })}).then(()=>{ cargarReg(selBono.id); setSelDia(dia); }).catch(err=>showStatus(err.message,'err'));
+      })}).then(()=>{ cargarReg(selBono.id); setSelDia(dia); }).catch(err=>showStatus(err.message,'err')).finally(()=>setSavingDia(null));
     }
   }
 
@@ -606,8 +611,8 @@ function CapturaTab({bonos,mes,anio,showStatus}){
             const r = registros.find(x=>+x.dia===d);
             const worked = r?.tiene_asistencia;
             return h('div',{key:d,
-              className:`day-cell ${dom?'dom':''} ${worked?'worked':''}`,
-              onClick:()=>{ togDia(d); setSelDia(d); }
+              className:`day-cell ${dom?'dom':''} ${worked?'worked':''} ${savingDia===d?'saving':''}`,
+              onClick:()=>togDia(d)
             },
               h('span',{className:'dn'},d),
               h('span',{className:'ds'},worked?'✓':dom?'D':'')

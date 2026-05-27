@@ -140,6 +140,8 @@ tr:hover td{background:var(--bg)}
 .day-cell:hover{border-color:var(--wine);color:var(--wine)}
 .day-cell.worked{background:var(--wine);border-color:var(--wine);color:#fff}
 .day-cell.dom{background:#FFF7ED;color:#9A3412;border-color:#FED7AA}
+.day-cell.dom.worked{background:var(--wine);border-color:var(--wine);color:#fff}
+.day-cell.saving{opacity:.65;cursor:progress}
 .day-cell .dn{font-size:13px;font-weight:800}.day-cell .ds{font-size:9px;margin-top:1px}
 .concepto-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
 .concepto-row:last-child{border-bottom:none}
@@ -341,7 +343,7 @@ function App(){
     const ex=registros.find(r=>+r.dia===dia);
     const payload={bono:selectedBono.id,dia,tiene_uniforme:true,tiene_puntualidad:true,tiene_asistencia:true,tiene_produccion:true,cantidad_embetunados:0,observacion:'',...(ex||{}),...patch};
     const url=ex?`/api/bonos-produccion/registros-diarios/${ex.id}/`:'/api/bonos-produccion/registros-diarios/';
-    api(url,{method:ex?'PUT':'POST',body:JSON.stringify(payload)}).then(()=>{cargarRegistros(selectedBono.id);cargarTodo();}).catch(err=>showStatus(err.message,'err'));
+    return api(url,{method:ex?'PUT':'POST',body:JSON.stringify(payload)}).then(()=>{cargarRegistros(selectedBono.id);cargarTodo();}).catch(err=>{showStatus(err.message,'err');throw err;});
   }
   function actualizarBono(id,patch){
     api(`/api/bonos-produccion/bonos/${id}/`,{method:'PATCH',body:JSON.stringify(patch)}).then(()=>{showStatus('Guardado','ok');cargarTodo();}).catch(err=>showStatus(err.message,'err'));
@@ -559,6 +561,7 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
 }
 function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia,mes,anio}){
   const [selDia,setSelDia]=React.useState(null);
+  const [savingDia,setSavingDia]=React.useState(null);
   const total=diasEnMes(+mes,+anio);
   const regActivos=registros.filter(r=>r.tiene_asistencia);
   const diaActual=selDia?registros.find(r=>+r.dia===selDia):null;
@@ -566,9 +569,17 @@ function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registr
   const bonosAreaIds=bonosArea.map(b=>b.id).join(',');
   React.useEffect(()=>{if(selectedBono&&!bonosArea.some(b=>b.id===selectedBono.id))setSelectedBono(null);},[bonosAreaIds,selectedBono?.id]);
   function togDia(dia){
+    if(savingDia)return;
     const r=registros.find(x=>+x.dia===dia);
-    if(r&&r.tiene_asistencia){guardarDia(dia,{tiene_asistencia:false,tiene_uniforme:false,tiene_puntualidad:false,tiene_produccion:false});if(selDia===dia)setSelDia(null);}
-    else{guardarDia(dia,{tiene_asistencia:true,tiene_uniforme:true,tiene_puntualidad:true,tiene_produccion:true});setSelDia(dia);}
+    const nextWorked=!(r&&r.tiene_asistencia);
+    const patch=nextWorked
+      ? {tiene_asistencia:true,tiene_uniforme:true,tiene_puntualidad:true,tiene_produccion:true}
+      : {tiene_asistencia:false,tiene_uniforme:false,tiene_puntualidad:false,tiene_produccion:false};
+    setSavingDia(dia);
+    guardarDia(dia,patch)
+      .then(()=>setSelDia(nextWorked?dia:null))
+      .catch(()=>{})
+      .finally(()=>setSavingDia(null));
   }
   return h('div',null,
     h(AreaChips,{area,setArea,includeAll:true}),
@@ -596,7 +607,7 @@ function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registr
           const dom=esDom(d,+mes,+anio);
           const r=registros.find(x=>+x.dia===d);
           const worked=r?.tiene_asistencia;
-          return h('div',{key:d,className:`day-cell ${dom?'dom':''} ${worked?'worked':''}`,onClick:()=>{togDia(d);setSelDia(d);}},
+          return h('div',{key:d,className:`day-cell ${dom?'dom':''} ${worked?'worked':''} ${savingDia===d?'saving':''}`,onClick:()=>togDia(d)},
             h('span',{className:'dn'},d),h('span',{className:'ds'},worked?'✓':dom?'D':''));
         })),
         regActivos.length>0&&h('div',null,
