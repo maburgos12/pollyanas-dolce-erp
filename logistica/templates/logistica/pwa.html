@@ -2631,7 +2631,6 @@
 
       function requiereCargaCombustibleAntesDeCerrar(actual, draft) {
         if (!actual || !draft?.nivel_gas_llegada || tieneCargasCombustibleRuta(actual)) return false;
-        if (cierreCombustibleExcepcionUnica(actual)) return false;
         const salida = gasLevelRank(actual.nivel_gas_salida);
         const llegada = gasLevelRank(draft.nivel_gas_llegada);
         return salida !== null && llegada !== null && llegada > salida;
@@ -2808,7 +2807,6 @@
         } else {
           const cargasRuta = actual.cargas_combustible || [];
           const requiereCargaAntesDeCerrar = requiereCargaCombustibleAntesDeCerrar(actual, draft);
-          const cierreJorgePermitido = cierreCombustibleExcepcionUnica(actual);
           body = `
             <p class="unit-line">Turno activo · ${escapeHtml(actual.unidad_codigo)} · Folio: ${escapeHtml(actual.folio)}</p>
             <section class="card report-card">
@@ -2841,11 +2839,6 @@
               ${requiereCargaAntesDeCerrar ? `
                 <div class="daily-banner warning">
                   El nivel de gasolina de llegada es mayor al de salida. Registra la carga de gasolina antes de cerrar el turno.
-                </div>
-              ` : ""}
-              ${cierreJorgePermitido ? `
-                <div class="daily-banner warning">
-                  Aviso único para Jorge: puedes cerrar este turno actual. En el siguiente turno, toda carga de gasolina debe registrarse con litros, importe total y foto del ticket.
                 </div>
               ` : ""}
               <div class="field">
@@ -3177,7 +3170,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=bernardo-licencia").catch(() => {});
+          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=cierre-turno-fix").catch(() => {});
         }
 
         try {
