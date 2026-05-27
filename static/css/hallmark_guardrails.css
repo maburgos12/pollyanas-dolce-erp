@@ -1,0 +1,330 @@
+/* Hallmark ERP guardrails · pre-emit critique: P5 H4 E5 S5 R4 V4
+ * Scope: operational ERP containment, responsive grids, form controls and table chips.
+ * This file is intentionally loaded after module-level extra_css so local pages cannot
+ * accidentally opt out of the shared visual rules.
+ */
+
+:root {
+  --erp-sidebar-width: 252px;
+  --erp-frame-gutter-x: clamp(18px, 1.8vw, 34px);
+  --erp-frame-gutter-y: clamp(18px, 1.7vw, 30px);
+  --erp-workspace-max: 1760px;
+  --erp-section-gap: clamp(14px, 1.2vw, 22px);
+  --erp-card-radius: 8px;
+  --erp-control-radius: 7px;
+  --erp-control-min-height: 42px;
+  --erp-field-min: minmax(min(220px, 100%), 1fr);
+  --erp-field-wide-min: minmax(min(280px, 100%), 1fr);
+}
+
+html,
+body,
+.layout-wrapper,
+.main-content {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.main-content[data-hallmark-scope="erp"] {
+  display: grid;
+  align-content: start;
+  gap: var(--erp-section-gap);
+  min-width: 0;
+  padding: var(--erp-frame-gutter-y) var(--erp-frame-gutter-x) 44px;
+}
+
+.main-content[data-hallmark-scope="erp"] > * {
+  min-width: 0;
+}
+
+.main-content[data-hallmark-scope="erp"] > :is(
+  .container,
+  .module-shell,
+  .bonos-shell,
+  .bi-shell,
+  .exec-shell,
+  .ops-shell,
+  .fleet-shell,
+  .logs-shell,
+  .reports-shell,
+  .capture-shell,
+  .unit-shell,
+  .unit-detail-shell,
+  .unit-form-shell,
+  .rrhh-page,
+  .ch-page,
+  .dg-shell,
+  .costeo-shell,
+  .plan-shell,
+  .plan-produccion-shell,
+  .cedis-shell,
+  .mm-shell,
+  .reabasto-shell,
+  .inv-shell,
+  .mermas-page
+) {
+  width: 100% !important;
+  max-width: min(var(--erp-workspace-max), 100%) !important;
+  margin-left: 0 !important;
+  margin-right: auto !important;
+  min-width: 0 !important;
+}
+
+.main-content[data-hallmark-scope="erp"] > .container {
+  padding: 0 !important;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .card,
+  .bonos-card,
+  .kpi-card,
+  .bi-card,
+  .bi-hero,
+  .bi-hero-highlight,
+  .bi-status-card,
+  .exec-kpi,
+  .exec-empty,
+  .fleet-card,
+  .fleet-detail,
+  .logi-box,
+  .capture-kpi,
+  .unit-kpi,
+  .unit-check-card,
+  .ops-stat,
+  .ops-focus-card,
+  .ops-summary-card,
+  .metric-card,
+  .fallas-card
+) {
+  border-radius: var(--erp-card-radius) !important;
+  min-width: 0;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .bonos-hero,
+  .module-hero,
+  .dashboard-hero,
+  .executive-hero,
+  .bi-hero,
+  .costeo-hero,
+  .cedis-hero,
+  .mm-hero,
+  .plan-dg-hero
+) {
+  min-width: 0;
+  overflow: clip;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .bonos-hero,
+  .costeo-hero
+) {
+  grid-template-columns: minmax(0, 1fr) minmax(min(320px, 100%), 420px) !important;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .bonos-actions,
+  .rrhh-actions,
+  .recipes-hero-actions,
+  .plan-header__meta,
+  .header-actions,
+  .module-actions,
+  .quick-actions
+) {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .kpi-grid,
+  .branch-grid,
+  .config-grid,
+  .concept-grid,
+  .category-grid,
+  .adjust-grid,
+  .money-grid,
+  .rrhh-form-grid,
+  .rrhh-filters,
+  .recipes-filters,
+  .cedis-command-grid,
+  .costeo-grid,
+  .split-grid
+) {
+  min-width: 0;
+  grid-template-columns: repeat(auto-fit, var(--erp-field-min)) !important;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .period-filter,
+  .filter-bar,
+  .rrhh-filters,
+  .recipes-filters
+) {
+  align-items: end;
+}
+
+.main-content[data-hallmark-scope="erp"] .period-filter {
+  grid-template-columns: repeat(2, minmax(120px, 170px)) max-content !important;
+  justify-content: end;
+  min-width: 0;
+}
+
+.main-content[data-hallmark-scope="erp"] .filter-bar {
+  grid-template-columns: minmax(min(260px, 100%), 1fr) max-content !important;
+  min-width: 0;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  input,
+  select,
+  textarea,
+  .input-field,
+  .form-control,
+  .form-select,
+  .search-input,
+  .bonos-field input,
+  .bonos-field textarea,
+  .bonos-field select
+) {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  min-height: var(--erp-control-min-height);
+  border-radius: var(--erp-control-radius) !important;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  button,
+  .btn,
+  .btn-small,
+  .bonos-btn,
+  .plan-btn,
+  .module-tab
+) {
+  max-width: 100%;
+  min-height: var(--erp-control-min-height);
+  border-radius: var(--erp-control-radius) !important;
+  overflow-wrap: normal;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .table-responsive,
+  .category-table-wrap,
+  .plan-panel-tabla,
+  .cedis-table-wrap,
+  .production-table-wrap
+) {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .table-responsive > table,
+  .table-responsive > .table,
+  .category-table,
+  .plan-tabla,
+  .cedis-table
+) {
+  min-width: max(100%, var(--table-min-width, 0px));
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .badge,
+  .status-pill,
+  .bi-tone,
+  .bi-pill,
+  .bi-mix-pill,
+  .module-chip,
+  .header-context-pill,
+  .branch-filter button
+) {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  line-height: 1.15;
+  max-width: 100%;
+  min-width: max-content;
+  text-align: center;
+  white-space: nowrap;
+  word-break: keep-all;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .kpi-value,
+  .kpi-number,
+  .metric-value,
+  .bi-metric-value,
+  .pd-num,
+  .pd-money,
+  .pd-percent,
+  .pd-qty,
+  .money,
+  .amount,
+  .cell-money,
+  .cell-number,
+  td.text-end,
+  th.text-end
+) {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+@media (min-width: 1920px) {
+  :root {
+    --erp-workspace-max: 1840px;
+  }
+}
+
+@media (max-width: 900px) {
+  .main-content[data-hallmark-scope="erp"] {
+    padding: 16px 14px 34px;
+  }
+
+  .main-content[data-hallmark-scope="erp"] :is(
+    .bonos-hero,
+    .costeo-hero,
+    .bi-hero,
+    .dashboard-hero,
+    .executive-hero
+  ) {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .main-content[data-hallmark-scope="erp"] :is(
+    .kpi-grid,
+    .branch-grid,
+    .config-grid,
+    .concept-grid,
+    .category-grid,
+    .adjust-grid,
+    .money-grid,
+    .period-filter,
+    .filter-bar,
+    .rrhh-form-grid,
+    .rrhh-filters,
+    .recipes-filters
+  ) {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .main-content[data-hallmark-scope="erp"] {
+    padding-inline: 12px;
+  }
+
+  .main-content[data-hallmark-scope="erp"] :is(
+    button,
+    .btn,
+    .btn-small,
+    .bonos-btn,
+    .plan-btn
+  ) {
+    width: 100%;
+  }
+}
