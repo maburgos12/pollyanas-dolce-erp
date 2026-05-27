@@ -462,9 +462,9 @@
         </td>
         <td class="text-end cell-qty">{% if l.cantidad is not None %}{{ l.cantidad|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
         <td class="cell-unit">{{ l.unidad_texto }}</td>
-        <td class="text-end cell-cost">{% if l.costo_total_estimado %}${{ l.costo_total_estimado|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
+        <td class="text-end cell-cost">{% if l.costo_vigente_resuelto %}${{ l.costo_vigente_linea|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
         <td>
-          {% if l.costo_total_estimado %}
+          {% if l.costo_vigente_resuelto %}
             <span class="badge bg-success">Costo vigente</span>
           {% else %}
             <span class="badge bg-warning text-dark">Sin costo vigente</span>

@@ -6269,7 +6269,19 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "Histórico de versiones de costo no disponible en este entorno. Ejecuta migraciones para habilitarlo.",
         )
 
-    lineas = list(receta.lineas.select_related("insumo").order_by("posicion"))
+    lineas = list(receta.lineas.select_related("insumo", "unidad").order_by("posicion"))
+    line_costed_count = 0
+    line_unresolved_count = 0
+    for linea in lineas:
+        resolution = resolve_line_cost(linea, context=CostContext.CURRENT_LIVE)
+        linea.costo_vigente_linea = resolution.total_cost
+        linea.costo_vigente_unitario = resolution.unit_cost
+        linea.costo_vigente_fuente = resolution.source
+        linea.costo_vigente_resuelto = not resolution.unresolved and resolution.total_cost > 0
+        if linea.costo_vigente_resuelto:
+            line_costed_count += 1
+        elif linea.tipo_linea != LineaReceta.TIPO_SUBSECCION:
+            line_unresolved_count += 1
     presentaciones = sorted(list(receta.presentaciones.all()), key=lambda p: _presentacion_sort_key(p.nombre))
     costeo_unavailable = False
     try:
@@ -6318,8 +6330,8 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
         return "materia_prima"
 
     total_lineas = len(lineas)
-    total_match = sum(1 for l in lineas if l.match_status == LineaReceta.STATUS_AUTO)
-    total_revision = sum(1 for l in lineas if l.match_status == LineaReceta.STATUS_NEEDS_REVIEW)
+    total_match = line_costed_count
+    total_revision = line_unresolved_count
     total_sin_match = sum(1 for l in lineas if l.match_status == LineaReceta.STATUS_REJECTED)
     total_costo_directo = sum((l.costo_total_estimado or 0.0) for l in lineas)
     total_costo_estimado = float(receta.costo_total_estimado or 0.0)
