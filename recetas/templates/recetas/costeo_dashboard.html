@@ -19,7 +19,17 @@
     --costeo-red: #b4334c;
     --costeo-paper: #fff;
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 18px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: clip;
+  }
+  .costeo-shell > * {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
     min-width: 0;
   }
   .costeo-hero {
