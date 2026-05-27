@@ -52,6 +52,24 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn("overflow-x: clip", css)
         self.assertIn(".period-filter", css)
 
+    def test_guardrails_cover_capital_humano_family(self):
+        css = (Path(settings.BASE_DIR) / "static" / "css" / "hallmark_guardrails.css").read_text()
+        required_selectors = [
+            ".indicadores-page",
+            ".org-page",
+            ".vacantes-page",
+            ".permisos-page",
+            ".assign-page",
+            ".loan-page",
+            ".rrhh-edit-form",
+            ".permisos-board",
+            ".ch-kanban",
+            ".quota-table",
+        ]
+        for selector in required_selectors:
+            with self.subTest(selector=selector):
+                self.assertIn(selector, css)
+
 
 class NavigationActiveStateTests(TestCase):
     def _active_labels(self, path: str) -> list[str]:

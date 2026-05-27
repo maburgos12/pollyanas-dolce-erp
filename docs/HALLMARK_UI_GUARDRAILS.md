@@ -16,6 +16,15 @@ Estas reglas son obligatorias para vistas nuevas o existentes del ERP.
 - Tablas pueden tener scroll horizontal interno cuando el numero de columnas lo exige, pero no deben generar scroll horizontal de pagina.
 - Inputs, selects y textareas siempre deben tener `min-width: 0`, ancho maximo de su contenedor y altura minima consistente.
 
+## Capital Humano
+
+- Las vistas del grupo Capital Humano (`.rrhh-page`, `.ch-page`, `.indicadores-page`, `.org-page`, `.vacantes-page`, `.permisos-page`, `.assign-page`, `.loan-page`, `.monitor-page`) estan cubiertas por la hoja global.
+- Los tabs de submodulos deben usar `.module-tabs.rrhh-tabs` para heredar wrap, ancho operativo y separacion constante.
+- Los tableros de permisos, horas extra, prestamos, indicadores, vacantes y organizacion deben usar las familias existentes (`.permisos-board`, `.ch-kanban`, `.loan-board`, `.indicadores-kpis`, `.vacantes-stats`, `.org-stats`) para heredar columnas responsivas.
+- Los formularios de alta, edicion, importacion o detalle deben usar `.form-grid`, `.rrhh-form-grid`, `.indicador-form-grid`, `.vacantes-grid` o `.ch-fields`; no deben fijar anchos que obliguen scroll horizontal de pagina.
+- Las tablas de Capital Humano deben vivir dentro de `.table-responsive` o un contenedor equivalente; si requieren muchas columnas, el scroll es interno a la tabla.
+- Los estatus y chips (`.rrhh-status`, `.permiso-badge`, `.vacantes-badge`, `.org-badge`, `.org-chip`) siempre deben centrarse y conservar palabras completas dentro de la figura.
+
 ## Validacion minima
 
 Antes de publicar cambios visuales:

@@ -15,6 +15,7 @@
   --erp-control-min-height: 42px;
   --erp-field-min: minmax(min(220px, 100%), 1fr);
   --erp-field-wide-min: minmax(min(280px, 100%), 1fr);
+  --erp-field-compact-min: minmax(min(180px, 100%), 1fr);
 }
 
 html,
@@ -53,6 +54,13 @@ body,
   .unit-form-shell,
   .rrhh-page,
   .ch-page,
+  .indicadores-page,
+  .org-page,
+  .vacantes-page,
+  .permisos-page,
+  .assign-page,
+  .loan-page,
+  .monitor-page,
   .dg-shell,
   .costeo-shell,
   .plan-shell,
@@ -94,7 +102,40 @@ body,
   .ops-focus-card,
   .ops-summary-card,
   .metric-card,
-  .fallas-card
+  .fallas-card,
+  .rrhh-card,
+  .rrhh-metric,
+  .rrhh-focus-link,
+  .rrhh-bonus-box,
+  .indicadores-hero,
+  .indicador-kpi,
+  .indicador-card,
+  .indicador-form,
+  .indicador-mini-item,
+  .indicador-flow-item,
+  .org-card,
+  .org-stat,
+  .org-leader,
+  .org-chip,
+  .vacantes-card,
+  .vacantes-stat,
+  .permisos-stat,
+  .permisos-col,
+  .permiso-card,
+  .permisos-table-card,
+  .assign-card,
+  .assign-tab,
+  .assign-choice,
+  .employee-row,
+  .ch-card,
+  .ch-panel,
+  .ch-column,
+  .ch-item,
+  .monitor-card,
+  .monitor-section,
+  .loan-col,
+  .loan-card,
+  .quota-table
 ) {
   border-radius: var(--erp-card-radius) !important;
   min-width: 0;
@@ -109,7 +150,14 @@ body,
   .costeo-hero,
   .cedis-hero,
   .mm-hero,
-  .plan-dg-hero
+  .plan-dg-hero,
+  .indicadores-hero,
+  .org-head,
+  .vacantes-head,
+  .permisos-head,
+  .assign-header,
+  .loan-head,
+  .ch-head
 ) {
   min-width: 0;
   overflow: clip;
@@ -129,7 +177,18 @@ body,
   .plan-header__meta,
   .header-actions,
   .module-actions,
-  .quick-actions
+  .quick-actions,
+  .rrhh-tabs,
+  .assign-tabs,
+  .assign-choices,
+  .assign-card-header,
+  .assign-card-body,
+  .loan-actions,
+  .loan-card-actions,
+  .permiso-actions,
+  .vacantes-actions,
+  .indicador-actions,
+  .ch-actions
 ) {
   display: flex;
   flex-wrap: wrap;
@@ -149,7 +208,19 @@ body,
   .recipes-filters,
   .cedis-command-grid,
   .costeo-grid,
-  .split-grid
+  .split-grid,
+  .ch-grid,
+  .ch-actions,
+  .rrhh-summary,
+  .rrhh-focus,
+  .indicadores-kpis,
+  .indicador-form-grid,
+  .org-stats,
+  .vacantes-stats,
+  .vacantes-grid,
+  .permisos-stats,
+  .monitor-grid,
+  .loan-board
 ) {
   min-width: 0;
   grid-template-columns: repeat(auto-fit, var(--erp-field-min)) !important;
@@ -159,7 +230,11 @@ body,
   .period-filter,
   .filter-bar,
   .rrhh-filters,
-  .recipes-filters
+  .recipes-filters,
+  .ch-filters,
+  .indicadores-filter-row,
+  .vacantes-filters,
+  .assign-toolbar
 ) {
   align-items: end;
 }
@@ -175,6 +250,210 @@ body,
   min-width: 0;
 }
 
+/* Capital Humano · family guardrails
+ * These selectors map the real RRHH templates, so new CH views inherit the same
+ * containment rules instead of drifting into isolated card walls or wide forms.
+ */
+.main-content[data-hallmark-scope="erp"] > .module-tabs,
+.main-content[data-hallmark-scope="erp"] > .rrhh-tabs {
+  width: 100% !important;
+  max-width: min(var(--erp-workspace-max), 100%) !important;
+  margin-left: 0 !important;
+  margin-right: auto !important;
+}
+
+.main-content[data-hallmark-scope="erp"] .rrhh-tabs {
+  gap: 8px;
+  overflow-x: visible !important;
+}
+
+.main-content[data-hallmark-scope="erp"] .rrhh-tabs .module-tab {
+  flex: 0 1 auto;
+  min-width: max-content;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .rrhh-page,
+  .ch-page,
+  .indicadores-page,
+  .org-page,
+  .vacantes-page,
+  .permisos-page,
+  .assign-page,
+  .loan-page,
+  .monitor-page
+) {
+  display: grid;
+  gap: var(--erp-section-gap);
+  min-width: 0 !important;
+  width: 100% !important;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .indicadores-hero,
+  .indicador-grid,
+  .org-grid,
+  .vacantes-layout,
+  .permisos-head,
+  .loan-head,
+  .ch-layout
+) {
+  grid-template-columns: minmax(0, 1fr) minmax(min(360px, 100%), .78fr) !important;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .org-head,
+  .vacantes-head,
+  .ch-head
+) {
+  grid-template-columns: minmax(0, 1fr) minmax(min(340px, 100%), auto) !important;
+}
+
+.main-content[data-hallmark-scope="erp"] .assign-layout {
+  grid-template-columns: minmax(min(280px, 100%), 320px) minmax(0, 1fr) !important;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .permisos-board,
+  .ch-kanban
+) {
+  grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)) !important;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .rrhh-filters,
+  .ch-filters,
+  .indicadores-filter-row,
+  .vacantes-filters,
+  .assign-toolbar
+) {
+  grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)) !important;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .form-grid,
+  .rrhh-form-grid,
+  .indicador-form-grid,
+  .vacantes-grid,
+  .ch-fields
+) {
+  min-width: 0;
+  grid-template-columns: repeat(auto-fit, var(--erp-field-wide-min)) !important;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .form-grid,
+  .rrhh-form-grid,
+  .indicador-form-grid,
+  .vacantes-grid
+) :is(.span-2, .span-3) {
+  grid-column: 1 / -1;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .rrhh-card-header,
+  .assign-card-header,
+  .permisos-head,
+  .vacantes-head,
+  .org-head,
+  .loan-head,
+  .ch-head
+) {
+  gap: 12px;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .rrhh-edit-row > td
+) {
+  max-width: var(--rrhh-table-viewport, 100%) !important;
+  min-width: var(--rrhh-table-viewport, 100%) !important;
+  width: var(--rrhh-table-viewport, 100%) !important;
+}
+
+.main-content[data-hallmark-scope="erp"] .rrhh-edit-panel {
+  max-width: calc(var(--rrhh-table-viewport, 100%) - 28px) !important;
+  width: calc(var(--rrhh-table-viewport, 100%) - 28px) !important;
+}
+
+.main-content[data-hallmark-scope="erp"] .rrhh-edit-form {
+  max-height: min(72vh, 860px);
+  overflow-y: auto;
+  overflow-x: clip;
+  scrollbar-gutter: stable;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .rrhh-edit-toolbar,
+  .rrhh-actions,
+  .loan-actions,
+  .loan-card-actions,
+  .permiso-actions,
+  .vacantes-actions,
+  .indicador-actions
+) {
+  align-items: center;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .rrhh-card .table-responsive,
+  .org-card .table-responsive,
+  .vacantes-card .table-responsive,
+  .permisos-table-card .table-responsive,
+  .ch-card .table-responsive,
+  .ch-panel .table-responsive,
+  .monitor-section,
+  .card:has(.quota-table)
+) {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .rrhh-table,
+  .indicador-table,
+  .org-table,
+  .vacantes-table,
+  .permisos-table,
+  .ch-table,
+  .monitor-table,
+  .quota-table
+) {
+  width: max-content;
+  min-width: max(100%, var(--table-min-width, 860px)) !important;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .rrhh-table,
+  .indicador-table,
+  .org-table,
+  .vacantes-table,
+  .permisos-table,
+  .ch-table,
+  .monitor-table,
+  .quota-table
+) :is(th, td) {
+  overflow-wrap: normal;
+  vertical-align: middle;
+  white-space: nowrap;
+  word-break: keep-all;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .rrhh-table,
+  .indicador-table,
+  .org-table,
+  .vacantes-table,
+  .permisos-table,
+  .ch-table,
+  .monitor-table
+) :is(.cell-wrap, td:first-child) {
+  max-width: 32ch;
+  white-space: normal;
+}
+
 .main-content[data-hallmark-scope="erp"] :is(
   input,
   select,
@@ -183,6 +462,8 @@ body,
   .form-control,
   .form-select,
   .search-input,
+  .choices,
+  .select2-container,
   .bonos-field input,
   .bonos-field textarea,
   .bonos-field select
@@ -236,6 +517,12 @@ body,
 .main-content[data-hallmark-scope="erp"] :is(
   .badge,
   .status-pill,
+  .rrhh-status,
+  .permiso-badge,
+  .vacantes-badge,
+  .org-badge,
+  .org-chip,
+  .assign-choice,
   .bi-tone,
   .bi-pill,
   .bi-mix-pill,
@@ -265,6 +552,13 @@ body,
   .pd-qty,
   .money,
   .amount,
+  .rrhh-metric-value,
+  .ch-value,
+  .monitor-value,
+  .indicador-kpi strong,
+  .org-stat strong,
+  .vacantes-stat strong,
+  .permisos-stat strong,
   .cell-money,
   .cell-number,
   td.text-end,
@@ -290,7 +584,18 @@ body,
     .costeo-hero,
     .bi-hero,
     .dashboard-hero,
-    .executive-hero
+    .executive-hero,
+    .indicadores-hero,
+    .indicador-grid,
+    .org-head,
+    .org-grid,
+    .vacantes-head,
+    .vacantes-layout,
+    .permisos-head,
+    .assign-layout,
+    .loan-head,
+    .ch-head,
+    .ch-layout
   ) {
     grid-template-columns: minmax(0, 1fr) !important;
   }
@@ -307,7 +612,26 @@ body,
     .filter-bar,
     .rrhh-form-grid,
     .rrhh-filters,
-    .recipes-filters
+    .recipes-filters,
+    .ch-grid,
+    .ch-actions,
+    .ch-filters,
+    .ch-kanban,
+    .rrhh-summary,
+    .rrhh-focus,
+    .indicadores-kpis,
+    .indicador-form-grid,
+    .org-stats,
+    .vacantes-stats,
+    .vacantes-grid,
+    .permisos-stats,
+    .permisos-board,
+    .monitor-grid,
+    .loan-board,
+    .form-grid,
+    .assign-toolbar,
+    .indicadores-filter-row,
+    .vacantes-filters
   ) {
     grid-template-columns: minmax(0, 1fr) !important;
   }
@@ -323,8 +647,15 @@ body,
     .btn,
     .btn-small,
     .bonos-btn,
-    .plan-btn
+    .plan-btn,
+    .assign-action,
+    .ch-action
   ) {
     width: 100%;
+  }
+
+  .main-content[data-hallmark-scope="erp"] .rrhh-tabs .module-tab {
+    flex: 1 1 calc(50% - 8px);
+    min-width: 0;
   }
 }
