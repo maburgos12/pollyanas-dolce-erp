@@ -17,7 +17,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from core.access import can_manage_logistica, can_view_logistica
+from core.access import can_manage_logistica, can_view_logistica, can_view_module
 from core.audit import log_event
 from crm.models import PedidoCliente
 from logistica.models import (
@@ -86,6 +86,10 @@ def _has_group(user, group_name: str) -> bool:
 
 def _is_repartidor(user) -> bool:
     return _has_group(user, LOGISTICA_ROLE_REPARTIDOR)
+
+
+def _can_operate_pwa(user) -> bool:
+    return _is_repartidor(user) or can_view_module(user, "mantenimiento")
 
 
 def _is_compras_logistica(user) -> bool:
@@ -321,7 +325,7 @@ class LogisticaReporteCreateView(_LogisticaBaseView):
 
     def post(self, request):
         repartidor = _get_repartidor_for_user(request.user)
-        if not repartidor or not _is_repartidor(request.user):
+        if not repartidor or not _can_operate_pwa(request.user):
             return Response({"detail": "Solo repartidores registrados pueden levantar reportes."}, status=status.HTTP_403_FORBIDDEN)
 
         serializer = LogisticaReporteCreateSerializer(data=request.data, context={"repartidor": repartidor})
@@ -361,7 +365,7 @@ class LogisticaReporteReafirmarView(_LogisticaBaseView):
 
     def post(self, request, reporte_id: int):
         repartidor = _get_repartidor_for_user(request.user)
-        if not repartidor or not _is_repartidor(request.user):
+        if not repartidor or not _can_operate_pwa(request.user):
             return Response({"detail": "Solo repartidores registrados pueden reafirmar reportes."}, status=status.HTTP_403_FORBIDDEN)
         reporte = get_object_or_404(
             ReporteUnidad.objects.select_related("unidad", "repartidor__user", "asignado_a").exclude(estatus=ReporteUnidad.ESTATUS_CERRADO),
@@ -472,7 +476,7 @@ class LogisticaBitacoraView(_LogisticaBaseView):
 
     def post(self, request):
         repartidor = _get_repartidor_for_user(request.user)
-        if not repartidor or not _is_repartidor(request.user):
+        if not repartidor or not _can_operate_pwa(request.user):
             return Response({"detail": "Solo repartidores registrados pueden capturar bitácora."}, status=status.HTTP_403_FORBIDDEN)
 
         serializer = LogisticaBitacoraSerializer(data=request.data)
@@ -501,7 +505,7 @@ class LogisticaBitacoraSalidaView(_LogisticaBaseView):
 
     def post(self, request):
         repartidor = _get_repartidor_for_user(request.user)
-        if not repartidor or not _is_repartidor(request.user):
+        if not repartidor or not _can_operate_pwa(request.user):
             return Response({"detail": "Solo repartidores registrados pueden iniciar bitácora."}, status=status.HTTP_403_FORBIDDEN)
 
         licencia_bloqueo = _licencia_turno_bloqueo(repartidor)
@@ -539,7 +543,7 @@ class LogisticaCargaCombustibleView(_LogisticaBaseView):
 
     def post(self, request):
         repartidor = _get_repartidor_for_user(request.user)
-        if not repartidor or not _is_repartidor(request.user):
+        if not repartidor or not _can_operate_pwa(request.user):
             return Response({"detail": "Solo repartidores registrados pueden capturar combustible."}, status=status.HTTP_403_FORBIDDEN)
 
         bitacora = (
@@ -613,7 +617,7 @@ class LogisticaLavadoUnidadView(_LogisticaBaseView):
 
     def post(self, request):
         repartidor = _get_repartidor_for_user(request.user)
-        if not repartidor or not _is_repartidor(request.user):
+        if not repartidor or not _can_operate_pwa(request.user):
             return Response({"detail": "Solo repartidores registrados pueden capturar lavados."}, status=status.HTTP_403_FORBIDDEN)
 
         serializer = LogisticaLavadoUnidadCreateSerializer(data=request.data)
@@ -680,7 +684,7 @@ class LogisticaInspeccionView(_LogisticaBaseView):
 
     def post(self, request):
         repartidor = _get_repartidor_for_user(request.user)
-        if not repartidor or not _is_repartidor(request.user):
+        if not repartidor or not _can_operate_pwa(request.user):
             return Response({"detail": "Solo repartidores registrados pueden capturar inspección."}, status=status.HTTP_403_FORBIDDEN)
 
         serializer = LogisticaInspeccionVehiculoCreateSerializer(data=request.data, context={"repartidor": repartidor})
@@ -750,7 +754,7 @@ class InspeccionDiariaCreateView(generics.CreateAPIView):
 
     def create(self, request, *args, **kwargs):
         repartidor = _get_repartidor_for_user(request.user)
-        if not repartidor or not _is_repartidor(request.user):
+        if not repartidor or not _can_operate_pwa(request.user):
             return Response({"detail": "Solo repartidores registrados pueden capturar inspección diaria."}, status=status.HTTP_403_FORBIDDEN)
 
         serializer = self.get_serializer(data=request.data, context={"repartidor": repartidor})
