@@ -7,6 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 from rest_framework.test import APIClient
 from unittest import SkipTest
+from unittest.mock import patch
 
 from core.models import Notificacion
 from rrhh.models import (
@@ -825,6 +826,77 @@ class RRHHViewsTests(TestCase):
 
         self.assertIn(repartidor, empleados_elegibles_bonos_ventas())
         self.assertEqual(area_bono_produccion_empleado(envio), AREA_LOGISTICA)
+
+    def test_empleados_update_retira_bono_produccion_actual_vacio(self):
+        from datetime import date
+        from bonos_produccion.models import AREA_PRODUCCION, BonoProduccionEmpleado, ConfigBonoPeriodo
+
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
+        empleado = Empleado.objects.create(
+            nombre="Empleado Sale Produccion",
+            area="PRODUCCION",
+            puesto_operativo="PRODUCCION",
+            participa_bonos_produccion=True,
+            salario_diario="300.00",
+        )
+        BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado, area=AREA_PRODUCCION)
+
+        with patch("rrhh.services_bonos.timezone.localdate", return_value=date(2026, 5, 27)):
+            resp = self.client.post(
+                reverse("rrhh:empleados"),
+                {
+                    "action": "update",
+                    "empleado_id": str(empleado.id),
+                    "nombre": empleado.nombre,
+                    "area": "CAJAS",
+                    "departamento_origen": Empleado.DEP_VENTAS,
+                    "departamento": Empleado.DEP_VENTAS,
+                    "puesto_operativo": "CAJAS",
+                    "salario_diario": "300.00",
+                    "activo": "on",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        empleado.refresh_from_db()
+        self.assertFalse(empleado.participa_bonos_produccion)
+        self.assertFalse(BonoProduccionEmpleado.objects.filter(periodo=periodo, empleado=empleado).exists())
+
+    def test_empleados_update_crea_bono_produccion_actual_si_se_activa(self):
+        from datetime import date
+        from bonos_produccion.models import AREA_HORNOS, BonoProduccionEmpleado, ConfigBonoPeriodo
+
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
+        empleado = Empleado.objects.create(
+            nombre="Empleado Entra Produccion",
+            area="CAJAS",
+            puesto_operativo="CAJAS",
+            salario_diario="300.00",
+        )
+
+        with patch("rrhh.services_bonos.timezone.localdate", return_value=date(2026, 5, 27)):
+            resp = self.client.post(
+                reverse("rrhh:empleados"),
+                {
+                    "action": "update",
+                    "empleado_id": str(empleado.id),
+                    "nombre": empleado.nombre,
+                    "area": "HORNOS",
+                    "departamento_origen": Empleado.DEP_PRODUCCION,
+                    "departamento": Empleado.DEP_PRODUCCION,
+                    "puesto_operativo": "HORNOS",
+                    "salario_diario": "300.00",
+                    "activo": "on",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        empleado.refresh_from_db()
+        self.assertTrue(empleado.participa_bonos_produccion)
+        bono = BonoProduccionEmpleado.objects.get(periodo=periodo, empleado=empleado)
+        self.assertEqual(bono.area, AREA_HORNOS)
 
     def test_rrhh_crea_prestamo_y_solo_direccion_aprueba(self):
         from datetime import date
