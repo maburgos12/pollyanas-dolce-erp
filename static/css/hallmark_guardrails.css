@@ -317,7 +317,25 @@ body,
   .permisos-board,
   .ch-kanban
 ) {
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
   grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)) !important;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .permisos-board,
+  .ch-kanban,
+  .loan-board,
+  .indicadores-kpis,
+  .org-stats,
+  .vacantes-stats,
+  .rrhh-summary,
+  .rrhh-focus,
+  .monitor-grid
+) > * {
+  max-width: 100%;
+  min-width: 0;
 }
 
 .main-content[data-hallmark-scope="erp"] :is(
