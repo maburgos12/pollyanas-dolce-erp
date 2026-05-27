@@ -17,6 +17,7 @@ from rrhh.models import (
     NominaLinea,
     NominaPeriodo,
     PlantillaAutorizada,
+    PermisoSalida,
     Prestamo,
     PrestamoCuota,
     Turno,
@@ -29,6 +30,99 @@ LISTA_RAYA_SAMPLE = Path("/Users/mauricioburgos/Downloads/Lista de raya del 16 a
 
 
 class CapitalHumanoServiceTests(TestCase):
+    def test_permiso_de_jefatura_requiere_direccion_antes_de_rrhh(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        rrhh_user = User.objects.create_user(username="paula")
+        rrhh_user.groups.add(Group.objects.create(name="RRHH"))
+        dg_user = User.objects.create_user(username="mauricio")
+        dg_user.groups.add(Group.objects.create(name="DG"))
+        jefa_ventas = Empleado.objects.create(
+            nombre="Johana Lopez",
+            departamento=Empleado.DEP_VENTAS,
+            puesto="Jefe de Ventas",
+        )
+        permiso = PermisoSalida.objects.create(
+            empleado=jefa_ventas,
+            tipo=PermisoSalida.TIPO_PERMISO_DIA,
+            fecha_inicio=datetime(2026, 5, 26, 8, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            motivo="Permiso de jefatura",
+            estado_jefe=PermisoSalida.ESTADO_JEFE_PREAUTORIZADO,
+            autorizado_jefe_por=dg_user,
+        )
+
+        self.assertTrue(permiso.requiere_direccion)
+        self.assertEqual(permiso.estado_direccion, PermisoSalida.ESTADO_DIRECCION_PENDIENTE)
+
+        self.client.force_login(rrhh_user)
+        response = self.client.post(
+            reverse("rrhh:rrhh_permisos_list"),
+            {"permiso_id": permiso.id, "action": "aprobar"},
+        )
+        self.assertEqual(response.status_code, 302)
+        permiso.refresh_from_db()
+        self.assertEqual(permiso.estado, PermisoSalida.ESTADO_SOLICITADO)
+
+        self.client.force_login(dg_user)
+        response = self.client.post(
+            reverse("rrhh:rrhh_permisos_list"),
+            {"permiso_id": permiso.id, "action": "autorizar_direccion"},
+        )
+        self.assertEqual(response.status_code, 302)
+        permiso.refresh_from_db()
+        self.assertEqual(permiso.estado_direccion, PermisoSalida.ESTADO_DIRECCION_AUTORIZADO)
+        self.assertEqual(permiso.autorizado_direccion_por, dg_user)
+
+        self.client.force_login(rrhh_user)
+        response = self.client.post(
+            reverse("rrhh:rrhh_permisos_list"),
+            {"permiso_id": permiso.id, "action": "aprobar"},
+        )
+        self.assertEqual(response.status_code, 302)
+        permiso.refresh_from_db()
+        self.assertEqual(permiso.estado, PermisoSalida.ESTADO_APROBADO)
+        self.assertEqual(permiso.autorizado_por, rrhh_user)
+
+    def test_permiso_operativo_no_requiere_direccion(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        rrhh_user = User.objects.create_user(username="paula")
+        rrhh_user.groups.add(Group.objects.create(name="RRHH"))
+        jefa_ventas = Empleado.objects.create(
+            nombre="Johana Lopez",
+            departamento=Empleado.DEP_VENTAS,
+            puesto="Jefe de Ventas",
+        )
+        cajera = Empleado.objects.create(
+            nombre="Cajera Operativa",
+            departamento=Empleado.DEP_VENTAS,
+            area="VENTAS",
+            puesto="Cajera",
+            jefe_directo=jefa_ventas,
+        )
+        permiso = PermisoSalida.objects.create(
+            empleado=cajera,
+            tipo=PermisoSalida.TIPO_PERMISO_HORA,
+            fecha_inicio=datetime(2026, 5, 26, 13, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            fecha_fin=datetime(2026, 5, 26, 15, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            motivo="Cita",
+            estado_jefe=PermisoSalida.ESTADO_JEFE_PREAUTORIZADO,
+        )
+
+        self.assertFalse(permiso.requiere_direccion)
+        self.assertEqual(permiso.estado_direccion, PermisoSalida.ESTADO_DIRECCION_NO_REQUIERE)
+
+        self.client.force_login(rrhh_user)
+        response = self.client.post(
+            reverse("rrhh:rrhh_permisos_list"),
+            {"permiso_id": permiso.id, "action": "aprobar"},
+        )
+        self.assertEqual(response.status_code, 302)
+        permiso.refresh_from_db()
+        self.assertEqual(permiso.estado, PermisoSalida.ESTADO_APROBADO)
+
     def test_generar_horas_extra_desde_asistencia(self):
         from datetime import date, datetime, time
         from zoneinfo import ZoneInfo

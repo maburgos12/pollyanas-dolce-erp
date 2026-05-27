@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.db.models import Q
+from django.utils import timezone
 from rest_framework import permissions, status, viewsets
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.decorators import action, api_view, authentication_classes, permission_classes
@@ -13,6 +14,7 @@ from recetas.utils.normalizacion import normalizar_nombre
 from .models import AsistenciaEmpleado, Empleado, HoraExtra, PermisoSalida
 from .serializers import AsistenciaSerializer, HoraExtraSerializer, PermisoSalidaSerializer
 from .services import calcular_monto_hora_extra
+from .services_permisos import can_authorize_direccion
 
 
 AUTH_CLASSES = [JWTAuthentication, TokenAuthentication, SessionAuthentication]
@@ -157,10 +159,57 @@ class PermisoSalidaViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
     def aprobar(self, request, pk=None):
         self._require_manage()
         permiso = self.get_object()
+        if (
+            permiso.requiere_direccion
+            and permiso.estado_direccion != PermisoSalida.ESTADO_DIRECCION_AUTORIZADO
+        ):
+            raise ValidationError({"direccion": "Este permiso requiere autorización de Dirección antes de RRHH."})
         permiso.estado = PermisoSalida.ESTADO_APROBADO
         permiso.autorizado_por = request.user
         permiso.save(update_fields=["estado", "autorizado_por", "actualizado_en"])
         return Response({"ok": True, "folio": permiso.folio})
+
+    @action(detail=True, methods=["post"], url_path="autorizar-direccion")
+    def autorizar_direccion(self, request, pk=None):
+        if not can_authorize_direccion(request.user):
+            raise PermissionDenied("Solo Dirección General puede autorizar este permiso.")
+        permiso = self.get_object()
+        if not permiso.requiere_direccion:
+            raise ValidationError({"direccion": "Este permiso no requiere autorización de Dirección."})
+        permiso.estado_direccion = PermisoSalida.ESTADO_DIRECCION_AUTORIZADO
+        permiso.autorizado_direccion_por = request.user
+        permiso.fecha_autorizacion_direccion = timezone.now()
+        permiso.save(
+            update_fields=[
+                "estado_direccion",
+                "autorizado_direccion_por",
+                "fecha_autorizacion_direccion",
+                "actualizado_en",
+            ]
+        )
+        return Response({"ok": True, "folio": permiso.folio})
+
+    @action(detail=True, methods=["post"], url_path="rechazar-direccion")
+    def rechazar_direccion(self, request, pk=None):
+        if not can_authorize_direccion(request.user):
+            raise PermissionDenied("Solo Dirección General puede rechazar este permiso.")
+        permiso = self.get_object()
+        if not permiso.requiere_direccion:
+            raise ValidationError({"direccion": "Este permiso no requiere autorización de Dirección."})
+        permiso.estado_direccion = PermisoSalida.ESTADO_DIRECCION_RECHAZADO
+        permiso.autorizado_direccion_por = request.user
+        permiso.fecha_autorizacion_direccion = timezone.now()
+        permiso.estado = PermisoSalida.ESTADO_RECHAZADO
+        permiso.save(
+            update_fields=[
+                "estado_direccion",
+                "autorizado_direccion_por",
+                "fecha_autorizacion_direccion",
+                "estado",
+                "actualizado_en",
+            ]
+        )
+        return Response({"ok": True})
 
     @action(detail=True, methods=["post"])
     def rechazar(self, request, pk=None):
