@@ -240,6 +240,23 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
             return Empleado.objects.none()
         return Empleado.objects.filter(jefe_directo=jefe, activo=True)
 
+    def _prioridad_equipo_directo(self, empleado):
+        puesto_operativo = (empleado.puesto_operativo or "").upper()
+        puesto_texto = normalizar_nombre(f"{empleado.puesto or ''} {puesto_operativo}")
+        if puesto_operativo == "SUPERVISION_PRODUCCION" or "SUPERVIS" in puesto_texto:
+            return 0
+        if puesto_operativo == "ENCARGADA_PRODUCCION" or "ENCARGAD" in puesto_texto:
+            return 1
+        if puesto_operativo == "JEFATURA" or "JEFE" in puesto_texto:
+            return 2
+        return 10
+
+    def _equipo_directo_ordenado(self):
+        return sorted(
+            self._equipo_directo_queryset(),
+            key=lambda empleado: (self._prioridad_equipo_directo(empleado), empleado.nombre),
+        )
+
     def _con_equipo_directo(self, qs):
         return (qs | self._equipo_directo_queryset()).distinct()
 
@@ -258,7 +275,7 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
         bonos = list(bonos_periodo.filter(empleado__activo=True).order_by("area", "empleado__nombre"))
         empleados = []
         empleados_ids = set()
-        for empleado in self._equipo_directo_queryset().order_by("nombre"):
+        for empleado in self._equipo_directo_ordenado():
             payload = _empleado_payload(empleado)
             payload["area"] = area_bono_produccion_empleado(empleado) or empleado.departamento or AREA_PRODUCCION
             empleados.append(payload)
