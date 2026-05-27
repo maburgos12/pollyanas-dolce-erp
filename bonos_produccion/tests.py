@@ -490,6 +490,7 @@ class BonosProduccionTests(TestCase):
         roxana = Empleado.objects.create(
             nombre="RIVAS SOLIS ROXANA",
             puesto="Supervisora de Producción",
+            puesto_operativo="SUPERVISION_PRODUCCION",
             jefe_directo=carolina,
         )
         julissa = Empleado.objects.create(
@@ -497,6 +498,14 @@ class BonosProduccionTests(TestCase):
             area="PRODUCCION",
             departamento="PRODUCCION",
             puesto="Encargada de Producción",
+            puesto_operativo="ENCARGADA_PRODUCCION",
+            jefe_directo=carolina,
+        )
+        operativo = Empleado.objects.create(
+            nombre="ACOSTA FLORES MARTINA",
+            area="PRODUCCION",
+            departamento="PRODUCCION",
+            puesto="Producción",
             jefe_directo=carolina,
         )
         BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=julissa, area=AREA_PRODUCCION)
@@ -507,8 +516,9 @@ class BonosProduccionTests(TestCase):
         empleados_ids = {row["id"] for row in listado.json()["empleados"]}
         self.assertIn(julissa.id, empleados_ids)
         self.assertIn(roxana.id, empleados_ids)
+        self.assertIn(operativo.id, empleados_ids)
         primeros = [row["id"] for row in listado.json()["empleados"][:2]]
-        self.assertEqual(primeros, [julissa.id, roxana.id])
+        self.assertEqual(primeros, [roxana.id, julissa.id])
 
         creado = self.client.post(
             "/api/bonos-produccion/permisos/",
