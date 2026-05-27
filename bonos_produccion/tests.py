@@ -246,6 +246,11 @@ class BonosProduccionTests(TestCase):
         self.assertIn("r.redirected", content)
         self.assertNotIn("pointer-events:none", content)
         self.assertNotIn("if(!dom)", content)
+        self.assertIn(".day-cell.dom.worked", content)
+        self.assertIn(".day-cell.saving", content)
+        self.assertIn("savingDia", content)
+        self.assertIn("onClick:()=>togDia(d)", content)
+        self.assertNotIn("togDia(d);setSelDia(d);", content)
         self.assertNotIn("pd_logistica_access", content)
         self.assertIn("no-store", response["Cache-Control"])
 
