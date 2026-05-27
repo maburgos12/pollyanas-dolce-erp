@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-logistica-pwa-v6-cierre-turno-fix";
+const CACHE_NAME = "pollyanas-logistica-pwa-v7-network-first-shell";
 const SHELL_ASSETS = [
   "/logistica/app/",
   "/static/logistica/pwa/manifest.json",
@@ -27,6 +27,21 @@ self.addEventListener("fetch", (event) => {
       fetch(event.request)
         .then((response) => response)
         .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  if (event.request.mode === "navigate" || url.pathname === "/logistica/app/") {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (event.request.method === "GET" && response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request).then((cached) => cached || caches.match("/logistica/app/")))
     );
     return;
   }
