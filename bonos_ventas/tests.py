@@ -128,6 +128,8 @@ class BonosVentasTests(TestCase):
         self.assertIn(".day-cell.dom.worked", content)
         self.assertIn(".day-cell.saving", content)
         self.assertIn("savingDia", content)
+        self.assertIn("const nextWorked=!(r&&r.tiene_asistencia);", content)
+        self.assertIn("{tiene_asistencia:nextWorked,tiene_uniforme:nextWorked,tiene_puntualidad:nextWorked}", content)
         self.assertIn("onClick:()=>togDia(d)", content)
         self.assertNotIn("togDia(d); setSelDia(d);", content)
         self.assertNotIn("pd_logistica_access", content)
@@ -146,7 +148,7 @@ class BonosVentasTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-ventas-pwa-v2", sw_content)
+        self.assertIn("pollyanas-bonos-ventas-pwa-v3", sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-ventas/dashboard/")', sw_content)
 
     def test_api_ventas_acepta_post_con_sesion_y_csrf(self):
