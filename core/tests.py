@@ -20,6 +20,7 @@ from core.access import (
     ROLE_BONOS_PRODUCCION_CAPTURA,
     ROLE_COMPRAS,
     ROLE_PRODUCCION,
+    ROLE_RRHH,
     ROLE_VENTAS,
     can_view_compras,
     can_view_submodule,
@@ -312,15 +313,24 @@ class LoginViewAuthenticatedRedirectTests(TestCase):
         self.assertEqual(api.status_code, 200)
 
     def test_operational_leads_keep_monthly_bonus_submodule_access(self):
-        produccion = get_user_model().objects.create_user(username="carolina.cayetano")
-        ventas = get_user_model().objects.create_user(username="johana.lopez.operativa")
-        produccion.groups.add(Group.objects.create(name=ROLE_PRODUCCION))
-        ventas.groups.add(Group.objects.create(name=ROLE_VENTAS))
+        produccion = get_user_model().objects.create_user(username="test.carolina.bonos.access")
+        ventas = get_user_model().objects.create_user(username="test.johana.bonos.access")
+        produccion.groups.add(Group.objects.get_or_create(name=ROLE_PRODUCCION)[0])
+        ventas.groups.add(Group.objects.get_or_create(name=ROLE_VENTAS)[0])
 
         self.assertTrue(can_view_submodule(produccion, "produccion", "bonos"))
         self.assertTrue(can_view_submodule(ventas, "ventas", "bonos"))
         self.assertFalse(can_view_submodule(produccion, "ventas", "bonos"))
         self.assertFalse(can_view_submodule(ventas, "produccion", "bonos"))
+
+    def test_rrhh_user_does_not_inherit_operational_bonus_apps(self):
+        rrhh = get_user_model().objects.create_user(username="test.paula.rrhh.access")
+        rrhh.groups.add(Group.objects.get_or_create(name=ROLE_RRHH)[0])
+
+        self.assertTrue(can_view_submodule(rrhh, "rrhh", "empleados"))
+        self.assertTrue(can_view_submodule(rrhh, "seguimiento", "compromisos"))
+        self.assertFalse(can_view_submodule(rrhh, "produccion", "bonos"))
+        self.assertFalse(can_view_submodule(rrhh, "ventas", "bonos"))
 
 
 class DashboardHomologacionContextTests(TestCase):
