@@ -8,17 +8,37 @@
 <style>
   .rrhh-page {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 18px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: clip;
+  }
+
+  .rrhh-page > *,
+  .rrhh-card,
+  .rrhh-card-header,
+  .rrhh-card-body,
+  .rrhh-field,
+  .rrhh-form-grid,
+  .rrhh-layout,
+  .rrhh-summary {
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: 100%;
   }
 
   .rrhh-tabs {
     margin-bottom: 0;
+    max-width: 100%;
   }
 
   .rrhh-summary {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
     gap: 12px;
+    width: 100%;
   }
 
   .rrhh-metric {
@@ -50,9 +70,10 @@
 
   .rrhh-layout {
     display: grid;
-    grid-template-columns: minmax(320px, 0.95fr) minmax(0, 1.35fr);
+    grid-template-columns: minmax(0, 1fr);
     gap: 18px;
     align-items: start;
+    width: 100%;
   }
 
   .rrhh-card {
@@ -90,7 +111,7 @@
 
   .rrhh-form-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
     gap: 12px;
   }
 
@@ -120,9 +141,10 @@
 
   .rrhh-filters {
     display: grid;
-    grid-template-columns: minmax(220px, 1fr) 180px auto auto;
+    grid-template-columns: minmax(0, 1fr) minmax(150px, 180px) repeat(2, max-content);
     gap: 10px;
     align-items: end;
+    width: 100%;
   }
 
   .rrhh-focus {
@@ -171,8 +193,22 @@
   }
 
   .rrhh-table {
-    min-width: 1500px;
+    min-width: 1320px;
     table-layout: auto;
+  }
+
+  .rrhh-field .input-field,
+  .rrhh-field select,
+  .rrhh-field input,
+  .rrhh-field textarea {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .rrhh-card .table-responsive {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
   }
 
   .rrhh-table th,
@@ -293,7 +329,7 @@
   }
 
   .rrhh-edit-form .rrhh-form-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   }
 
   .rrhh-checkline {
@@ -328,19 +364,44 @@
     font-weight: 800;
   }
 
+  @media (min-width: 1560px) {
+    .rrhh-layout {
+      grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.75fr);
+    }
+  }
+
   @media (max-width: 1180px) {
-    .rrhh-layout,
-    .rrhh-summary,
     .rrhh-focus {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 
+  @media (max-width: 880px) {
+    .rrhh-filters {
+      grid-template-columns: minmax(0, 1fr) minmax(130px, 170px);
+    }
+
+    .rrhh-filters .btn {
+      width: 100%;
+    }
+  }
+
   @media (max-width: 760px) {
-    .rrhh-layout,
-    .rrhh-summary,
+    .main-content .rrhh-page .rrhh-tabs {
+      display: grid !important;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      overflow-x: visible !important;
+      flex-wrap: wrap !important;
+    }
+
+    .main-content .rrhh-page .rrhh-tabs .module-tab {
+      flex: 1 1 auto !important;
+      justify-content: center;
+      min-width: 0;
+      width: 100%;
+    }
+
     .rrhh-focus,
-    .rrhh-form-grid,
     .rrhh-filters {
       grid-template-columns: 1fr;
     }
@@ -769,35 +830,35 @@
           <tbody>
             {% for e in empleados %}
             <tr>
-              <td>
+              <td class="cell-wrap">
                 <div class="rrhh-employee-name">{{ e.nombre }}</div>
                 <div class="rrhh-employee-code">{{ e.codigo }}</div>
               </td>
-              <td>{{ e.rfc|default:"-" }}</td>
-              <td>{{ e.curp|default:"-" }}</td>
-              <td>{{ e.nss|default:"-" }}</td>
-              <td>{{ e.area|default:"-" }}</td>
-              <td>{{ e.get_departamento_origen_display|default:"-" }}</td>
-              <td>{{ e.get_departamento_display|default:"-" }}</td>
-              <td>{{ e.puesto|default:"-" }}</td>
-              <td>{{ e.jefe_directo.nombre|default:"-" }}</td>
-              <td>
+              <td class="cell-nowrap">{{ e.rfc|default:"-" }}</td>
+              <td class="cell-nowrap">{{ e.curp|default:"-" }}</td>
+              <td class="cell-nowrap">{{ e.nss|default:"-" }}</td>
+              <td class="cell-wrap">{{ e.area|default:"-" }}</td>
+              <td class="cell-wrap">{{ e.get_departamento_origen_display|default:"-" }}</td>
+              <td class="cell-wrap">{{ e.get_departamento_display|default:"-" }}</td>
+              <td class="cell-wrap">{{ e.puesto|default:"-" }}</td>
+              <td class="cell-wrap">{{ e.jefe_directo.nombre|default:"-" }}</td>
+              <td class="cell-status">
                 {% for esquema in e.bonos_esquemas.all %}
                   <span class="rrhh-status active">{{ esquema.nombre }}</span>
                 {% empty %}
                   <span class="muted">-</span>
                 {% endfor %}
               </td>
-              <td>{{ e.fecha_ingreso|date:"Y-m-d" }}</td>
-              <td class="text-end">${{ e.salario_diario|floatformat:2|intcomma }}</td>
-              <td>
+              <td class="cell-date">{{ e.fecha_ingreso|date:"Y-m-d" }}</td>
+              <td class="text-end cell-money">${{ e.salario_diario|floatformat:2|intcomma }}</td>
+              <td class="cell-status">
                 {% if e.activo %}
                   <span class="rrhh-status active">Activo</span>
                 {% else %}
                   <span class="rrhh-status inactive">Inactivo</span>
                 {% endif %}
               </td>
-              <td>
+              <td class="cell-actions">
                 {% if can_manage_rrhh %}
                   <span class="muted">Editar</span>
                 {% else %}
