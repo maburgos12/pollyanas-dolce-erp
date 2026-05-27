@@ -18,11 +18,13 @@
 {% endblock %}
 
 {% block content %}
+{% if can_view_rrhh %}
 <section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
   {% for tab in module_tabs %}
     <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
   {% endfor %}
 </section>
+{% endif %}
 
 <section class="ch-kanban">
   {% for key, label, items in columnas %}
@@ -32,8 +34,9 @@
     <div class="ch-item">
       <div class="ch-main">{{ he.empleado.nombre }}</div>
       <div class="ch-meta">{{ he.fecha|date:"Y-m-d" }} · {{ he.horas }} h · {{ he.monto_calculado|default:"Sin monto" }}</div>
+      <div class="ch-meta">Jefe directo: {% if he.jefe_directo %}{{ he.jefe_directo.get_full_name|default:he.jefe_directo.username }}{% else %}Sin asignar{% endif %}</div>
       {% if he.notas %}<div class="ch-meta">{{ he.notas }}</div>{% endif %}
-      {% if can_manage_rrhh and key == "pendiente" %}
+      {% if key == "pendiente" and he.jefe_directo_id == user_id %}
       <form method="post" class="ch-actions">
         {% csrf_token %}
         <input type="hidden" name="hora_extra_id" value="{{ he.id }}">

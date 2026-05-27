@@ -8,11 +8,13 @@ from pathlib import Path
 from rest_framework.test import APIClient
 from unittest import SkipTest
 
+from core.models import Notificacion
 from rrhh.models import (
     AsistenciaEmpleado,
     BonoEsquema,
     Empleado,
     EmpleadoBaja,
+    HoraExtra,
     NominaConceptoLinea,
     NominaImportacion,
     NominaLinea,
@@ -323,6 +325,51 @@ class CapitalHumanoAPITests(TestCase):
         self.assertEqual(resp.data["empleado"], empleado.id)
         self.assertEqual(resp.data["estado"], "pendiente")
         self.assertEqual(resp.data["notas"], "Cierre de sucursal")
+
+    def test_hora_extra_api_notifica_y_solo_jefe_directo_autoriza(self):
+        jefe_user = User.objects.create_user(username="johana.lopez", password="pass123")
+        jefe_empleado = Empleado.objects.create(nombre="Johana Lopez", usuario_erp=jefe_user)
+        empleado_user = User.objects.create_user(
+            username="empleado.he",
+            email="empleado.he@example.com",
+            password="pass123",
+        )
+        empleado = Empleado.objects.create(
+            nombre="Empleado Horas Extra",
+            email="empleado.he@example.com",
+            salario_diario="400.00",
+            jefe_directo=jefe_empleado,
+        )
+        rrhh_user = User.objects.create_user(username="rrhh.he", password="pass123")
+        rrhh_user.groups.add(Group.objects.create(name="RRHH"))
+        self.client.force_authenticate(user=empleado_user)
+
+        resp = self.client.post(
+            reverse("rrhh:hora-extra-list"),
+            {"fecha": "2026-05-20", "horas": "2.00", "notas": "Cierre operativo"},
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, 201)
+        hora_extra = HoraExtra.objects.get(pk=resp.data["id"])
+        self.assertEqual(hora_extra.empleado, empleado)
+        self.assertEqual(hora_extra.jefe_directo, jefe_user)
+        self.assertEqual(Notificacion.objects.filter(usuario=jefe_user, tipo=Notificacion.TIPO_HORA_EXTRA).count(), 1)
+
+        self.client.force_authenticate(user=rrhh_user)
+        resp_rrhh = self.client.post(reverse("rrhh:hora-extra-autorizar", args=[hora_extra.id]))
+        self.assertEqual(resp_rrhh.status_code, 403)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_PENDIENTE)
+
+        self.client.force_authenticate(user=jefe_user)
+        resp_jefe = self.client.post(reverse("rrhh:hora-extra-autorizar", args=[hora_extra.id]))
+        self.assertEqual(resp_jefe.status_code, 200)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_AUTORIZADO)
+        self.assertEqual(hora_extra.autorizado_por, jefe_user)
+        self.assertIsNotNone(hora_extra.fecha_autorizacion_jefe)
+        self.assertEqual(hora_extra.monto_calculado, Decimal("200.00"))
 
     def test_usuario_sin_empleado_no_se_vincula_a_otro_empleado(self):
         Empleado.objects.create(nombre="XANTECO MENA MARISOL", salario_diario="500.00")
@@ -841,6 +888,43 @@ class RRHHViewsTests(TestCase):
         prestamo.refresh_from_db()
         self.assertEqual(prestamo.estado, Prestamo.ESTADO_AUTORIZADO)
         self.assertEqual(prestamo.autorizado_jefe, jefe)
+
+    def test_jefe_asignado_ve_y_autoriza_horas_extra_en_su_bandeja(self):
+        from datetime import date
+
+        jefe_user = User.objects.create_user(username="carolina", password="pass123")
+        jefe_user.groups.add(Group.objects.create(name="PRODUCCION"))
+        jefe_empleado = Empleado.objects.create(nombre="Carolina Cayetano", usuario_erp=jefe_user)
+        empleado = Empleado.objects.create(
+            nombre="Empleado Produccion HE",
+            area="HORNOS",
+            salario_diario="400.00",
+            jefe_directo=jefe_empleado,
+        )
+        hora_extra = HoraExtra.objects.create(
+            empleado=empleado,
+            jefe_directo=jefe_user,
+            fecha=date(2026, 5, 20),
+            horas=Decimal("1.50"),
+            notas="Carga de producción",
+        )
+
+        self.client.force_login(jefe_user)
+        resp_lista = self.client.get(reverse("rrhh:rrhh_he_list"))
+        self.assertEqual(resp_lista.status_code, 200)
+        self.assertContains(resp_lista, "Empleado Produccion HE")
+        self.assertContains(resp_lista, "Autorizar")
+
+        resp_auth = self.client.post(
+            reverse("rrhh:rrhh_he_list"),
+            {"hora_extra_id": str(hora_extra.id), "action": "autorizar"},
+            follow=True,
+        )
+        self.assertEqual(resp_auth.status_code, 200)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_AUTORIZADO)
+        self.assertEqual(hora_extra.autorizado_por, jefe_user)
+        self.assertIsNotNone(hora_extra.fecha_autorizacion_jefe)
 
     def test_prestamo_tiene_formato_imprimible_y_regresos_a_dashboard(self):
         from datetime import date

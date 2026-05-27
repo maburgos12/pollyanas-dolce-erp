@@ -1674,30 +1674,38 @@ def importar_checador(request):
 
 @login_required
 def horas_extra_list(request):
-    if not can_view_rrhh(request.user):
+    tiene_asignadas = (
+        request.user.is_authenticated
+        and HoraExtra.objects.filter(jefe_directo=request.user).exists()
+    )
+    if not can_view_rrhh(request.user) and not tiene_asignadas:
         raise PermissionDenied("No tienes permisos para ver horas extra")
 
     if request.method == "POST":
-        if not can_manage_rrhh(request.user):
-            raise PermissionDenied("No tienes permisos para autorizar horas extra")
-        he = get_object_or_404(HoraExtra, pk=request.POST.get("hora_extra_id"))
+        he = get_object_or_404(HoraExtra.objects.select_related("empleado", "jefe_directo"), pk=request.POST.get("hora_extra_id"))
+        if he.jefe_directo_id != request.user.id:
+            raise PermissionDenied("Solo el jefe directo asignado puede autorizar horas extra.")
         action = (request.POST.get("action") or "").strip()
         if action == "autorizar":
             he.estado = HoraExtra.ESTADO_AUTORIZADO
             he.autorizado_por = request.user
+            he.fecha_autorizacion_jefe = timezone.now()
             from .services import calcular_monto_hora_extra
 
             calcular_monto_hora_extra(he)
-            he.save(update_fields=["estado", "autorizado_por"])
+            he.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion_jefe"])
             messages.success(request, f"Hora extra autorizada para {he.empleado.nombre}.")
         elif action == "rechazar":
             he.estado = HoraExtra.ESTADO_RECHAZADO
             he.autorizado_por = request.user
-            he.save(update_fields=["estado", "autorizado_por"])
+            he.fecha_autorizacion_jefe = timezone.now()
+            he.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion_jefe"])
             messages.success(request, f"Hora extra rechazada para {he.empleado.nombre}.")
         return redirect("rrhh:rrhh_he_list")
 
-    horas_extra = HoraExtra.objects.select_related("empleado", "autorizado_por").order_by("-fecha", "empleado__nombre")
+    horas_extra = HoraExtra.objects.select_related("empleado", "jefe_directo", "autorizado_por").order_by("-fecha", "empleado__nombre")
+    if not can_view_rrhh(request.user):
+        horas_extra = horas_extra.filter(jefe_directo=request.user)
     columnas = [
         ("pendiente", "Pendiente", horas_extra.filter(estado=HoraExtra.ESTADO_PENDIENTE)),
         ("autorizado", "Autorizado", horas_extra.filter(estado=HoraExtra.ESTADO_AUTORIZADO)),
@@ -1707,7 +1715,12 @@ def horas_extra_list(request):
     return render(
         request,
         "rrhh/horas_extra_list.html",
-        {"module_tabs": _module_tabs("horas_extra"), "columnas": columnas, "can_manage_rrhh": can_manage_rrhh(request.user)},
+        {
+            "module_tabs": _module_tabs("horas_extra"),
+            "columnas": columnas,
+            "can_view_rrhh": can_view_rrhh(request.user),
+            "user_id": request.user.id,
+        },
     )
 
 

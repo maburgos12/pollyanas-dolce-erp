@@ -473,7 +473,7 @@
         if (res.ok) {
           await cargarHistorialReciente();
           limpiarFormHE();
-          state.message = `Horas extra registradas (${payload.horas}h) - pendiente de autorización`;
+          state.message = `Horas extra registradas (${payload.horas}h) - pendiente de autorización del jefe directo`;
           state.error = "";
           render();
         } else {
@@ -650,7 +650,7 @@
         app.innerHTML = shell(`
           <section class="panel">
             <form id="form_horas_extra" onsubmit="enviarHorasExtra(event)">
-              <div class="talon-header">AUTORIZACIÓN DE HORAS EXTRAS</div>
+              <div class="talon-header">SOLICITUD DE HORAS EXTRAS</div>
               <div class="field-row">
                 <label>FECHA</label>
                 <input type="date" id="he_fecha" value="${today()}" required>
@@ -668,7 +668,7 @@
                 <input type="text" id="he_area" value="${perfilValue("area")}" readonly class="readonly-field">
               </div>
               <div class="field-row">
-                <label>CANTIDAD DE HORAS AUTORIZADAS</label>
+                <label>CANTIDAD DE HORAS SOLICITADAS</label>
                 <input type="number" id="he_horas" min="0.25" max="12" step="0.25" required placeholder="Ej: 1.5">
               </div>
               <div class="field-row-double">

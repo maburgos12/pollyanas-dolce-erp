@@ -8,6 +8,12 @@ from django.db import transaction
 from rrhh.models import AsistenciaEmpleado, HoraExtra, NominaLinea, NominaPeriodo
 
 
+def usuario_jefe_directo_de_empleado(empleado):
+    if not empleado or not empleado.jefe_directo_id:
+        return None
+    return getattr(empleado.jefe_directo, "usuario_erp", None)
+
+
 def calcular_horas_extra(asistencia: AsistenciaEmpleado) -> Decimal:
     """
     Calcula horas extra a partir de la asistencia diaria.
@@ -44,11 +50,14 @@ def generar_horas_extra_automatico(asistencia: AsistenciaEmpleado) -> HoraExtra 
             "empleado": asistencia.empleado,
             "fecha": asistencia.fecha,
             "horas": horas,
+            "jefe_directo": usuario_jefe_directo_de_empleado(asistencia.empleado),
         },
     )
     if not creado and he.estado == HoraExtra.ESTADO_PENDIENTE:
         he.horas = horas
-        he.save(update_fields=["horas"])
+        if not he.jefe_directo_id:
+            he.jefe_directo = usuario_jefe_directo_de_empleado(asistencia.empleado)
+        he.save(update_fields=["horas", "jefe_directo"])
     return he
 
 
