@@ -1620,10 +1620,8 @@
       function shouldShowCombustibleAlerta() {
         const alerta = state.combustibleAlerta;
         if (!alerta) return false;
-        if (alerta.pendiente) {
-          return !sessionStorage.getItem(combustiblePendienteKey(alerta));
-        }
-        return !localStorage.getItem(`pd_combustible_recordatorio_${localDateKey()}`);
+        if (!alerta.pendiente) return false;
+        return !sessionStorage.getItem(combustiblePendienteKey(alerta));
       }
 
       function dismissCombustibleAlerta() {
@@ -1631,8 +1629,6 @@
         if (!alerta) return;
         if (alerta.pendiente) {
           sessionStorage.setItem(combustiblePendienteKey(alerta), "true");
-        } else {
-          localStorage.setItem(`pd_combustible_recordatorio_${localDateKey()}`, "true");
         }
         renderDashboard();
       }
@@ -1640,103 +1636,24 @@
       function combustibleAlertaModal() {
         const alerta = state.combustibleAlerta;
         if (!shouldShowCombustibleAlerta()) return "";
-        const pendiente = Boolean(alerta?.pendiente);
         const pendientes = alerta?.pendientes || [];
         return `
           <section class="fuel-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="fuel-alert-title">
-            <article class="fuel-modal ${pendiente ? "pending" : ""}">
+            <article class="fuel-modal pending">
               <button class="fuel-close" type="button" onclick="dismissCombustibleAlerta()" aria-label="Cerrar aviso">×</button>
               <div class="fuel-icon">⛽</div>
-              <div class="fuel-label">${pendiente ? "Registro pendiente" : "Recordatorio"}</div>
-              <h2 id="fuel-alert-title">${pendiente ? "No registraste carga de combustible" : "Ya puedes registrar gasolina durante el turno"}</h2>
-              ${pendiente ? `
-                <p>Detectamos turno${Number(alerta.pendientes_count || 0) === 1 ? "" : "s"} cerrado${Number(alerta.pendientes_count || 0) === 1 ? "" : "s"} donde la unidad salió con poca gasolina y terminó con más gasolina, pero no capturaste litros, importe ni ticket.</p>
-                <div class="fuel-notice">
-                  Envía a <strong>jefa Johana</strong> los datos pendientes de gasolina: litros, importe total y foto del ticket.
-                  ${pendientes.length ? `
-                    <ul class="fuel-list">
-                      ${pendientes.map((item) => `<li>${escapeHtml(item.folio)} · ${escapeHtml(item.unidad_codigo)} · ${escapeHtml(item.nivel_gas_salida)} → ${escapeHtml(item.nivel_gas_llegada)}</li>`).join("")}
-                    </ul>
-                  ` : ""}
-                </div>
-              ` : `
-                <p>Ahora puedes registrar la carga de gasolina en el momento, sin esperar al cierre: abre tu turno activo en Bitácora y toca “Registrar gasolina”.</p>
-                <div class="fuel-notice">El registro correcto evita aclaraciones y mantiene actualizado el control de combustible.</div>
-              `}
+              <div class="fuel-label">Registro pendiente</div>
+              <h2 id="fuel-alert-title">No registraste carga de combustible</h2>
+              <p>Detectamos turno${Number(alerta.pendientes_count || 0) === 1 ? "" : "s"} cerrado${Number(alerta.pendientes_count || 0) === 1 ? "" : "s"} donde la unidad salió con poca gasolina y terminó con más gasolina, pero no capturaste litros, importe ni ticket.</p>
+              <div class="fuel-notice">
+                Envía a <strong>jefa Johana</strong> los datos pendientes de gasolina: litros, importe total y foto del ticket.
+                ${pendientes.length ? `
+                  <ul class="fuel-list">
+                    ${pendientes.map((item) => `<li>${escapeHtml(item.folio)} · ${escapeHtml(item.unidad_codigo)} · ${escapeHtml(item.nivel_gas_salida)} → ${escapeHtml(item.nivel_gas_llegada)}</li>`).join("")}
+                  </ul>
+                ` : ""}
+              </div>
               <button class="primary-btn" type="button" onclick="dismissCombustibleAlerta()">Entendido</button>
-            </article>
-          </section>
-        `;
-      }
-
-      function cierreCombustibleExcepcionUnica(actual = state.bitacoraSalida) {
-        return Boolean(
-          state.perfil?.username === "rep.jorge.lopez" &&
-          actual &&
-          (Number(actual.id) === 42 || actual.folio === "GS-PM1-0012") &&
-          !tieneCargasCombustibleRuta(actual)
-        );
-      }
-
-      function shouldShowCierreJorgeModal() {
-        const actual = state.bitacoraSalida;
-        if (!cierreCombustibleExcepcionUnica(actual)) return false;
-        return !sessionStorage.getItem(`pd_cierre_jorge_unico_${actual.id || actual.folio}`);
-      }
-
-      function dismissCierreJorgeModal() {
-        const actual = state.bitacoraSalida;
-        if (actual) sessionStorage.setItem(`pd_cierre_jorge_unico_${actual.id || actual.folio}`, "true");
-        renderDashboard();
-      }
-
-      function cierreJorgeModal() {
-        const actual = state.bitacoraSalida;
-        if (!shouldShowCierreJorgeModal()) return "";
-        return `
-          <section class="fuel-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="jorge-close-title">
-            <article class="fuel-modal">
-              <button class="fuel-close" type="button" onclick="dismissCierreJorgeModal()" aria-label="Cerrar aviso">×</button>
-              <div class="fuel-icon">⛽</div>
-              <div class="fuel-label">Aviso único</div>
-              <h2 id="jorge-close-title">Puedes cerrar tu turno actual</h2>
-              <p>Jorge, por única ocasión podrás cerrar el turno ${escapeHtml(actual.folio || "")} y abrir uno nuevo.</p>
-              <div class="fuel-notice">
-                A partir del siguiente turno, si cargas gasolina debes registrarla en Bitácora con litros, importe total y foto del ticket antes de cerrar.
-              </div>
-              <button class="primary-btn" type="button" onclick="dismissCierreJorgeModal()">Continuar</button>
-            </article>
-          </section>
-        `;
-      }
-
-      function shouldShowAvisoKmJorgeModal() {
-        const actual = state.bitacoraSalida;
-        if (state.perfil?.username !== "compras.jorge@pollyanasdolce.com") return false;
-        if (!actual?.id) return false;
-        return !sessionStorage.getItem("pd_aviso_km_jorge_gs_pm1_0019");
-      }
-
-      function dismissAvisoKmJorgeModal() {
-        sessionStorage.setItem("pd_aviso_km_jorge_gs_pm1_0019", "true");
-        renderDashboard();
-      }
-
-      function avisoKmJorgeModal() {
-        if (!shouldShowAvisoKmJorgeModal()) return "";
-        return `
-          <section class="fuel-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="jorge-km-title">
-            <article class="fuel-modal pending">
-              <button class="fuel-close" type="button" onclick="dismissAvisoKmJorgeModal()" aria-label="Cerrar aviso">×</button>
-              <div class="fuel-icon">📸</div>
-              <div class="fuel-label">Aviso operativo</div>
-              <h2 id="jorge-km-title">Revisa tu cierre de turno</h2>
-              <p>Se detectó que el día 21 de mayo de 2026 cerraste el folio GS-PM1-0019 con kilómetros que no correspondían al tablero.</p>
-              <div class="fuel-notice">
-                La imagen del cierre muestra el tablero apagado, por lo que no se puede corroborar gasolina ni kilometraje.
-                Favor de ejecutar correctamente las instrucciones para evitar contratiempos.
-              </div>
-              <button class="primary-btn" type="button" onclick="dismissAvisoKmJorgeModal()">Entendido</button>
             </article>
           </section>
         `;
@@ -1779,8 +1696,6 @@
         render(shell(`
           ${resumenSemanalCard()}
           ${combustibleAlertaModal()}
-          ${cierreJorgeModal()}
-          ${avisoKmJorgeModal()}
           <p class="unit-line">Selecciona la unidad al iniciar cada captura.</p>
           <button class="dashboard-help" onclick="showScreen('ayuda')" type="button">? Ayuda rápida</button>
           <div class="dash-grid">
