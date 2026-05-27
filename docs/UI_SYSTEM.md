@@ -142,6 +142,14 @@ lateral contra la barra izquierda y contra el borde derecho de la ventana. No
 compensar esto con margenes negativos ni contenedores full-bleed, salvo print,
 PWA dedicada o una excepcion documentada.
 
+Regla de contencion Hallmark: todo wrapper principal de modulo o pagina dentro
+de `.main-content` debe poder encogerse al ancho real del viewport. Si el
+wrapper usa `display: grid`, declarar `grid-template-columns: minmax(0, 1fr)`.
+Todos sus hijos directos deben tener `min-width: 0` y `max-width: 100%`. Una
+tabla ancha puede hacer scroll dentro de `.table-responsive`, pero nunca debe
+agrandar `.main-content`, cortar tarjetas vecinas ni ocultarse detras del borde
+derecho de la ventana.
+
 Regla de proporcion Hallmark: no combinar `main-content`, `.pd-page-gutters`,
 `.container` y padding propio del modulo para crear doble o triple marco. Cada
 pantalla debe tener un solo marco lateral, un ancho maximo acorde a su densidad

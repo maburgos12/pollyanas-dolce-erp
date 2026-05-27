@@ -2717,6 +2717,27 @@ tr:hover,
   min-width: 0;
 }
 
+/* Hallmark · ERP layout containment guard
+ * New module/page wrappers inside the ERP viewport must shrink to the real
+ * content frame. Wide tables may scroll inside .table-responsive, but they must
+ * not enlarge the whole screen behind the sidebar.
+ */
+.main-content > :where(.module-shell, .container, [class$="-page"], [class*="-page "]) {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.main-content > :where(.module-shell, [class$="-page"], [class*="-page "]) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.main-content > :where(.module-shell, .container, [class$="-page"], [class*="-page "]) > * {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .recipe-technical-adjustment {
   border: 1px solid rgba(139, 34, 82, 0.18);
   border-radius: 8px;
