@@ -17,11 +17,11 @@
   }
   .permisos-title { color: var(--vino); font-family: "Playfair Display", serif; font-size: 25px; font-weight: 800; }
   .permisos-copy { color: var(--texto-light); margin-top: 4px; max-width: 760px; }
-  .permisos-stats { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .permisos-stats { display: grid; gap: 10px; grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .permisos-stat { background: #fbf6f8; border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; }
   .permisos-stat strong { color: var(--vino); display: block; font-size: 22px; line-height: 1; }
   .permisos-stat span { color: var(--texto-light); font-size: 11px; font-weight: 900; text-transform: uppercase; }
-  .permisos-board { display: grid; gap: 14px; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: start; }
+  .permisos-board { display: grid; gap: 14px; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: start; }
   .permisos-col { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; min-height: 220px; padding: 12px; }
   .permisos-col h2 { color: var(--vino); font-size: 16px; margin: 0 0 12px; }
   .permiso-card { border: 1px solid var(--rosa); border-radius: 8px; display: grid; gap: 8px; margin-bottom: 10px; padding: 12px; }
@@ -68,6 +68,7 @@
     <div class="permisos-stats">
       <div class="permisos-stat"><strong>{{ stats.total }}</strong><span>Total</span></div>
       <div class="permisos-stat"><strong>{{ stats.pendiente_jefe }}</strong><span>Jefe</span></div>
+      <div class="permisos-stat"><strong>{{ stats.pendiente_direccion }}</strong><span>Dirección</span></div>
       <div class="permisos-stat"><strong>{{ stats.validacion_rrhh }}</strong><span>RRHH</span></div>
       <div class="permisos-stat"><strong>{{ stats.aprobados }}</strong><span>Aprobados</span></div>
     </div>
@@ -94,13 +95,29 @@
         {% if permiso.autorizado_jefe_por %}
           <div class="permiso-meta">Jefe: {{ permiso.autorizado_jefe_por }}</div>
         {% endif %}
+        {% if permiso.requiere_direccion %}
+          <div class="permiso-meta">
+            Dirección: {{ permiso.get_estado_direccion_display }}
+            {% if permiso.autorizado_direccion_por %}<br>{{ permiso.autorizado_direccion_por }}{% endif %}
+          </div>
+        {% endif %}
+        {% if can_authorize_direccion and permiso.estado == "solicitado" and permiso.requiere_direccion and permiso.estado_direccion == "pendiente" and permiso.estado_jefe == "preautorizado" %}
+        <form method="post" class="permiso-actions">
+          {% csrf_token %}
+          <input type="hidden" name="permiso_id" value="{{ permiso.id }}">
+          <button class="btn btn-primary" type="submit" name="action" value="autorizar_direccion">Autorizar Dirección</button>
+          <button class="btn btn-secondary" type="submit" name="action" value="rechazar_direccion">Rechazar</button>
+        </form>
+        {% endif %}
         {% if can_manage_rrhh and permiso.estado == "solicitado" %}
+        {% if not permiso.requiere_direccion or permiso.estado_direccion == "autorizado" %}
         <form method="post" class="permiso-actions">
           {% csrf_token %}
           <input type="hidden" name="permiso_id" value="{{ permiso.id }}">
           <button class="btn btn-primary" type="submit" name="action" value="aprobar">Aprobar RRHH</button>
           <button class="btn btn-secondary" type="submit" name="action" value="rechazar">Rechazar</button>
         </form>
+        {% endif %}
         {% endif %}
       </div>
       {% empty %}
@@ -123,6 +140,7 @@
             <th>Origen</th>
             <th>Goce</th>
             <th>Filtro jefe</th>
+            <th>Dirección</th>
             <th>Estado RRHH</th>
             <th>Motivo</th>
           </tr>
@@ -141,13 +159,17 @@
               {% if permiso.autorizado_jefe_por %}<br><small>{{ permiso.autorizado_jefe_por }}</small>{% endif %}
             </td>
             <td>
+              <span class="permiso-badge">{{ permiso.get_estado_direccion_display }}</span>
+              {% if permiso.autorizado_direccion_por %}<br><small>{{ permiso.autorizado_direccion_por }}</small>{% endif %}
+            </td>
+            <td>
               <span class="permiso-badge">{{ permiso.get_estado_display }}</span>
               {% if permiso.autorizado_por %}<br><small>{{ permiso.autorizado_por }}</small>{% endif %}
             </td>
             <td>{{ permiso.motivo }}</td>
           </tr>
           {% empty %}
-          <tr><td colspan="9">Sin permisos registrados.</td></tr>
+          <tr><td colspan="10">Sin permisos registrados.</td></tr>
           {% endfor %}
         </tbody>
       </table>

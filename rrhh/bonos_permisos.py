@@ -64,6 +64,8 @@ def _permiso_payload(permiso: PermisoSalida) -> dict:
         "motivo": permiso.motivo,
         "estado": permiso.estado,
         "estado_jefe": permiso.estado_jefe,
+        "requiere_direccion": permiso.requiere_direccion,
+        "estado_direccion": permiso.estado_direccion,
         "goce_sueldo": permiso.goce_sueldo,
         "goce_label": "Con goce" if permiso.goce_sueldo else "Sin goce",
         "origen_solicitud": permiso.origen_solicitud,

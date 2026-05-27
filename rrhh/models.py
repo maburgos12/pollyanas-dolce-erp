@@ -23,6 +23,7 @@ class Empleado(models.Model):
     DEP_VENTAS = "VENTAS"
     DEP_PRODUCCION = "PRODUCCION"
     DEP_RRHH = "RRHH"
+    DEP_COMPRAS = "COMPRAS"
     DEP_MANTENIMIENTO = "MANTENIMIENTO"
     DEP_LOGISTICA = "LOGISTICA"
     DEP_MARKETING = "MARKETING"
@@ -31,6 +32,7 @@ class Empleado(models.Model):
         (DEP_VENTAS, "Ventas"),
         (DEP_PRODUCCION, "Producción"),
         (DEP_RRHH, "Recursos Humanos"),
+        (DEP_COMPRAS, "Compras"),
         (DEP_MANTENIMIENTO, "Mantenimiento"),
         (DEP_LOGISTICA, "Logística"),
         (DEP_MARKETING, "Marketing"),
@@ -543,6 +545,16 @@ class PermisoSalida(models.Model):
         (ESTADO_JEFE_PREAUTORIZADO, "Preautorizado por jefe"),
         (ESTADO_JEFE_RECHAZADO, "Rechazado por jefe"),
     ]
+    ESTADO_DIRECCION_NO_REQUIERE = "no_requiere"
+    ESTADO_DIRECCION_PENDIENTE = "pendiente"
+    ESTADO_DIRECCION_AUTORIZADO = "autorizado"
+    ESTADO_DIRECCION_RECHAZADO = "rechazado"
+    ESTADO_DIRECCION_CHOICES = [
+        (ESTADO_DIRECCION_NO_REQUIERE, "No requiere Dirección"),
+        (ESTADO_DIRECCION_PENDIENTE, "Pendiente Dirección"),
+        (ESTADO_DIRECCION_AUTORIZADO, "Autorizado por Dirección"),
+        (ESTADO_DIRECCION_RECHAZADO, "Rechazado por Dirección"),
+    ]
     ORIGEN_RRHH = "rrhh"
     ORIGEN_BONOS_VENTAS = "bonos_ventas"
     ORIGEN_BONOS_PRODUCCION = "bonos_produccion"
@@ -559,6 +571,12 @@ class PermisoSalida(models.Model):
     motivo = models.TextField()
     estado = models.CharField(max_length=12, choices=ESTADO_CHOICES, default=ESTADO_SOLICITADO)
     estado_jefe = models.CharField(max_length=16, choices=ESTADO_JEFE_CHOICES, default=ESTADO_JEFE_PENDIENTE)
+    requiere_direccion = models.BooleanField(default=False, db_index=True)
+    estado_direccion = models.CharField(
+        max_length=16,
+        choices=ESTADO_DIRECCION_CHOICES,
+        default=ESTADO_DIRECCION_NO_REQUIERE,
+    )
     goce_sueldo = models.BooleanField(
         default=True,
         verbose_name="Con goce de sueldo",
@@ -572,6 +590,14 @@ class PermisoSalida(models.Model):
         related_name="permisos_preautorizados_jefe",
     )
     fecha_autorizacion_jefe = models.DateTimeField(null=True, blank=True)
+    autorizado_direccion_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="permisos_autorizados_direccion",
+    )
+    fecha_autorizacion_direccion = models.DateTimeField(null=True, blank=True)
     origen_solicitud = models.CharField(max_length=24, choices=ORIGEN_CHOICES, default=ORIGEN_RRHH)
     autorizado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -594,6 +620,15 @@ class PermisoSalida(models.Model):
         return f"{self.folio} · {self.empleado}"
 
     def save(self, *args, **kwargs):
+        if not self.pk and self.empleado_id:
+            from .services_permisos import permiso_requiere_autorizacion_direccion
+
+            self.requiere_direccion = permiso_requiere_autorizacion_direccion(self.empleado)
+            self.estado_direccion = (
+                self.ESTADO_DIRECCION_PENDIENTE
+                if self.requiere_direccion
+                else self.ESTADO_DIRECCION_NO_REQUIERE
+            )
         if not self.folio:
             import random
             import string

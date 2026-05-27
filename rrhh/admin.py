@@ -179,12 +179,24 @@ class PermisoAdmin(admin.ModelAdmin):
         "fecha_inicio",
         "origen_solicitud",
         "estado_jefe",
+        "requiere_direccion",
+        "estado_direccion",
         "estado",
         "goce_sueldo",
         "autorizado_jefe_por",
+        "autorizado_direccion_por",
         "autorizado_por",
     )
-    list_filter = ("tipo", "origen_solicitud", "estado_jefe", "estado", "goce_sueldo", "fecha_inicio")
+    list_filter = (
+        "tipo",
+        "origen_solicitud",
+        "estado_jefe",
+        "requiere_direccion",
+        "estado_direccion",
+        "estado",
+        "goce_sueldo",
+        "fecha_inicio",
+    )
     search_fields = ("folio", "empleado__nombre", "empleado__codigo", "motivo")
     readonly_fields = ("folio",)
 
