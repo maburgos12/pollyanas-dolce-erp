@@ -55,6 +55,48 @@
   }
   .costeo-tab:hover { border-color: var(--costeo-line); transform: translateY(-1px); }
   .costeo-tab.active { background: var(--costeo-wine); color: var(--costeo-paper); }
+  .costeo-view-tabs { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .costeo-view-tab {
+    border: 1px solid var(--costeo-line);
+    border-radius: 8px;
+    background: var(--costeo-paper);
+    color: var(--costeo-wine);
+    padding: 10px 14px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+  .costeo-view-tab.active {
+    background: var(--costeo-wine);
+    color: var(--costeo-paper);
+    border-color: var(--costeo-wine);
+    box-shadow: 0 8px 18px rgba(131, 24, 67, 0.12);
+  }
+  .costeo-tab-panel[hidden],
+  .costeo-sim-panel[hidden] { display: none !important; }
+  .costeo-sim-panel { display: grid; gap: 16px; }
+  .costeo-sim-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
+  .costeo-sim-head h3 { margin: 0 0 5px; font-size: 1.22rem; line-height: 1.2; color: var(--costeo-ink); }
+  .costeo-sim-head p { margin: 0; color: var(--costeo-muted); }
+  .costeo-sim-layout { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 18px; align-items: start; }
+  .costeo-sim-form { display: grid; gap: 12px; grid-template-columns: minmax(240px, 1fr) minmax(130px, 180px); align-items: end; }
+  .costeo-sim-search { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr) 120px 110px; align-items: end; margin-top: 14px; }
+  .costeo-sim-results { display: grid; gap: 8px; max-height: 220px; overflow: auto; margin-top: 8px; }
+  .costeo-sim-option { display: flex; justify-content: space-between; gap: 12px; width: 100%; border: 1px solid var(--costeo-line); border-radius: 8px; background: var(--costeo-paper); padding: 10px 12px; color: var(--costeo-ink); text-align: left; }
+  .costeo-sim-option:hover { border-color: var(--costeo-wine); }
+  .costeo-sim-option strong,
+  .costeo-sim-option span { display: block; }
+  .costeo-sim-option span { color: var(--costeo-muted); font-size: 12px; }
+  .costeo-sim-side { display: grid; gap: 10px; }
+  .costeo-sim-total { border: 1px solid var(--costeo-line); border-radius: 8px; background: var(--costeo-paper); padding: 12px; }
+  .costeo-sim-total span { display: block; color: var(--costeo-muted); font-size: 12px; font-weight: 800; text-transform: uppercase; }
+  .costeo-sim-total strong { display: block; color: var(--costeo-wine-strong); font-size: 1.35rem; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .costeo-sim-drafts { display: grid; gap: 8px; }
+  .costeo-sim-draft { display: flex; justify-content: space-between; gap: 10px; align-items: center; border: 1px solid var(--costeo-line); border-radius: 8px; background: var(--costeo-paper); padding: 9px 10px; }
+  .costeo-sim-draft button { white-space: nowrap; }
+  .costeo-sim-muted { color: var(--costeo-muted); font-size: 12px; }
+  .costeo-sim-status { min-height: 20px; color: var(--costeo-wine-strong); font-weight: 800; }
+  .costeo-sim-table input { max-width: 110px; }
+  .costeo-sim-table .line-warning { color: #9a6200; font-weight: 800; }
   .costeo-kpis { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .costeo-kpi { min-width: 0; padding: 18px; border: 1px solid var(--costeo-soft-line); border-radius: 8px; background: var(--costeo-paper); }
   .costeo-kpi .eyebrow { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--costeo-muted); margin-bottom: 10px; }
@@ -119,12 +161,18 @@
     .costeo-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .costeo-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .costeo-filter-actions { justify-content: start; }
+    .costeo-sim-layout { grid-template-columns: 1fr; }
+    .costeo-sim-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
   @media (max-width: 720px) {
     .costeo-kpis, .costeo-filters { grid-template-columns: 1fr; }
     .costeo-tabs { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
     .costeo-tab { flex: 0 0 auto; min-height: 38px; padding-inline: 14px; }
     .costeo-actions { grid-template-columns: 1fr; }
+    .costeo-view-tabs { display: grid; grid-template-columns: 1fr; }
+    .costeo-sim-head,
+    .costeo-sim-search,
+    .costeo-sim-form { grid-template-columns: 1fr; display: grid; }
     .costeo-filter-actions { grid-template-columns: 1fr 1fr; justify-content: stretch; }
     .costeo-filter-actions .btn { width: 100%; }
     .history-row { grid-template-columns: 92px minmax(64px, 1fr) 92px; }
@@ -160,6 +208,115 @@
     </div>
   </header>
 
+  <nav class="card costeo-view-tabs" aria-label="Vistas de costeo">
+    <button class="costeo-view-tab active" type="button" data-costeo-tab="historial">Historial semanal</button>
+    <button class="costeo-view-tab" type="button" data-costeo-tab="simulador">Simulador producto nuevo</button>
+  </nav>
+
+  <section
+    class="card costeo-panel costeo-sim-panel"
+    id="costeo-simulator"
+    data-costeo-tab-panel="simulador"
+    hidden
+    data-search-url="{% url 'recetas:costeo_simulador_insumos_search' %}"
+    data-save-url="{% url 'recetas:costeo_simulador_draft_save' %}"
+    data-draft-url-template="{% url 'recetas:costeo_simulador_draft_detail' 0 %}"
+  >
+    <input type="hidden" id="costeo_sim_csrf" value="{{ csrf_token }}">
+    <div class="costeo-sim-head">
+      <div>
+        <div class="pd-eyebrow">Producto nuevo · Borrador</div>
+        <h3>Simulador de costeo en vivo</h3>
+        <p>Busca insumos reales, captura cantidades y calcula costo + precio sugerido antes de convertirlo en receta oficial.</p>
+      </div>
+      <div class="costeo-actions">
+        <button class="btn btn-secondary" type="button" id="costeo_sim_clear">Limpiar</button>
+        <button class="btn btn-primary" type="button" id="costeo_sim_save">Guardar borrador</button>
+      </div>
+    </div>
+
+    <div class="costeo-sim-layout">
+      <div class="costeo-sim-main">
+        <div class="costeo-sim-form">
+          <div>
+            <label class="form-label" for="costeo_sim_name">Producto en prueba</label>
+            <input class="form-control" id="costeo_sim_name" placeholder="Ej. Pastel temporada mango">
+          </div>
+          <div>
+            <label class="form-label" for="costeo_sim_margin">Margen objetivo %</label>
+            <input class="form-control" id="costeo_sim_margin" type="number" min="1" max="90" step="0.01" value="55">
+          </div>
+        </div>
+
+        <div class="costeo-sim-search">
+          <div>
+            <label class="form-label" for="costeo_sim_query">Buscar insumo</label>
+            <input class="form-control" id="costeo_sim_query" autocomplete="off" placeholder="Harina, betún, domo, mezcla...">
+          </div>
+          <div>
+            <label class="form-label" for="costeo_sim_qty">Cantidad</label>
+            <input class="form-control" id="costeo_sim_qty" type="number" min="0" step="0.000001" value="1">
+          </div>
+          <button class="btn btn-primary" type="button" id="costeo_sim_add">Agregar</button>
+        </div>
+        <div class="costeo-sim-muted" id="costeo_sim_selected">Sin insumo seleccionado.</div>
+        <div class="costeo-sim-results" id="costeo_sim_results"></div>
+
+        <div class="table-responsive">
+          <table class="costeo-table costeo-table-main costeo-sim-table">
+            <thead>
+              <tr>
+                <th>Insumo</th>
+                <th>Cantidad</th>
+                <th>Unidad</th>
+                <th>Costo unitario</th>
+                <th>Subtotal</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="costeo_sim_lines">
+              <tr><td colspan="6" class="text-muted">Agrega insumos para iniciar la simulación.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <aside class="costeo-sim-side">
+        <div class="costeo-sim-total">
+          <span>Costo materia prima</span>
+          <strong id="costeo_sim_total">$0.00</strong>
+        </div>
+        <div class="costeo-sim-total">
+          <span>Costo base para precio</span>
+          <strong id="costeo_sim_unit_cost">$0.00</strong>
+        </div>
+        <div class="costeo-sim-total">
+          <span>Precio de venta sugerido</span>
+          <strong id="costeo_sim_price">$0.00</strong>
+          <div class="costeo-sim-muted">Redondeado hacia arriba a múltiplos de $5.</div>
+        </div>
+        <div class="costeo-sim-status" id="costeo_sim_status"></div>
+        <div>
+          <h3>Borradores recientes</h3>
+          <div class="costeo-sim-drafts" id="costeo_sim_drafts">
+            {% for draft in simulator_drafts %}
+            <div class="costeo-sim-draft" data-draft-id="{{ draft.id }}">
+              <div>
+                <strong>{{ draft.nombre }}</strong>
+                <div class="costeo-sim-muted">${{ draft.precio_venta_sugerido|floatformat:2 }} sugerido · {{ draft.actualizado_en|date:"Y-m-d H:i" }}</div>
+              </div>
+              <button class="btn btn-secondary btn-sm" type="button" data-load-draft="{{ draft.id }}">Abrir</button>
+            </div>
+            {% empty %}
+            <div class="text-muted">Todavía no hay borradores.</div>
+            {% endfor %}
+          </div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <div class="costeo-tab-panel" data-costeo-tab-panel="historial">
   <section class="card costeo-panel">
     <form method="get" class="costeo-filters">
       <div class="costeo-filter-field">
@@ -200,7 +357,9 @@
       </div>
     </form>
   </section>
+  </div>
 
+  <div class="costeo-tab-panel" data-costeo-tab-panel="historial">
   <section class="costeo-kpis">
     <article class="costeo-kpi">
       <div class="eyebrow">Semana analizada</div>
@@ -339,5 +498,282 @@
       </table>
     </div>
   </section>
+  </div>
 </div>
+<script>
+(() => {
+  const tabButtons = Array.from(document.querySelectorAll("[data-costeo-tab]"));
+  const tabPanels = Array.from(document.querySelectorAll("[data-costeo-tab-panel]"));
+  const activateTab = (tabName) => {
+    tabButtons.forEach((button) => button.classList.toggle("active", button.dataset.costeoTab === tabName));
+    tabPanels.forEach((panel) => {
+      panel.hidden = panel.dataset.costeoTabPanel !== tabName;
+    });
+    if (window.location.hash !== `#${tabName}`) {
+      window.history.replaceState(null, "", `#${tabName}`);
+    }
+  };
+  tabButtons.forEach((button) => {
+    button.addEventListener("click", () => activateTab(button.dataset.costeoTab));
+  });
+  activateTab(window.location.hash === "#simulador" ? "simulador" : "historial");
+
+  const root = document.getElementById("costeo-simulator");
+  if (!root) return;
+
+  const money = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
+  const els = {
+    name: document.getElementById("costeo_sim_name"),
+    margin: document.getElementById("costeo_sim_margin"),
+    query: document.getElementById("costeo_sim_query"),
+    qty: document.getElementById("costeo_sim_qty"),
+    add: document.getElementById("costeo_sim_add"),
+    clear: document.getElementById("costeo_sim_clear"),
+    save: document.getElementById("costeo_sim_save"),
+    selected: document.getElementById("costeo_sim_selected"),
+    results: document.getElementById("costeo_sim_results"),
+    lines: document.getElementById("costeo_sim_lines"),
+    total: document.getElementById("costeo_sim_total"),
+    unitCost: document.getElementById("costeo_sim_unit_cost"),
+    price: document.getElementById("costeo_sim_price"),
+    status: document.getElementById("costeo_sim_status"),
+    drafts: document.getElementById("costeo_sim_drafts"),
+    csrf: document.getElementById("costeo_sim_csrf"),
+  };
+
+  const state = {
+    draftId: null,
+    selected: null,
+    lines: [],
+    searchTimer: null,
+  };
+
+  const parseAmount = (value) => {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const roundPrice = (cost, marginPct) => {
+    const margin = Math.min(Math.max(parseAmount(marginPct), 1), 90);
+    if (cost <= 0) return 0;
+    return Math.ceil((cost / (1 - margin / 100)) / 5) * 5;
+  };
+  const setStatus = (message, tone = "") => {
+    els.status.textContent = message || "";
+    els.status.style.color = tone === "error" ? "#a73428" : "var(--costeo-wine-strong)";
+  };
+
+  function totals() {
+    const total = state.lines.reduce((sum, line) => sum + line.lineCost, 0);
+    const unitCost = total;
+    const price = roundPrice(unitCost, els.margin.value);
+    return { total, unitCost, price };
+  }
+
+  function renderTotals() {
+    const summary = totals();
+    els.total.textContent = money.format(summary.total);
+    els.unitCost.textContent = money.format(summary.unitCost);
+    els.price.textContent = money.format(summary.price);
+  }
+
+  function renderLines() {
+    if (!state.lines.length) {
+      els.lines.innerHTML = '<tr><td colspan="6" class="text-muted">Agrega insumos para iniciar la simulación.</td></tr>';
+      renderTotals();
+      return;
+    }
+    els.lines.innerHTML = state.lines.map((line, index) => `
+      <tr>
+        <td class="cell-wrap">
+          <strong>${line.name}</strong>
+          <div class="costeo-sim-muted">${line.code || "-"} · ${line.source || "Sin fuente"}${line.unresolved ? ' · <span class="line-warning">sin costo resuelto</span>' : ""}</div>
+        </td>
+        <td><input class="form-control form-control-sm" type="number" min="0" step="0.000001" value="${line.quantity}" data-line-qty="${index}"></td>
+        <td>${line.unit?.codigo || "-"}</td>
+        <td class="cell-number">${money.format(line.unitCost)}</td>
+        <td class="cell-number">${money.format(line.lineCost)}</td>
+        <td><button class="btn btn-secondary btn-sm" type="button" data-remove-line="${index}">Quitar</button></td>
+      </tr>
+    `).join("");
+    renderTotals();
+  }
+
+  function selectItem(item) {
+    state.selected = item;
+    els.selected.textContent = `${item.name} · ${item.unit?.codigo || "-"} · ${item.unit_cost?.display || "$0.00"}`;
+    els.results.innerHTML = "";
+  }
+
+  function addSelectedLine() {
+    if (!state.selected) {
+      setStatus("Selecciona un insumo del buscador.", "error");
+      return;
+    }
+    const quantity = parseAmount(els.qty.value);
+    if (quantity <= 0) {
+      setStatus("Captura una cantidad mayor a cero.", "error");
+      return;
+    }
+    const unitCost = parseAmount(state.selected.unit_cost?.raw);
+    state.lines.push({
+      insumoId: state.selected.id,
+      name: state.selected.name,
+      code: state.selected.code,
+      unit: state.selected.unit,
+      quantity,
+      unitCost,
+      lineCost: quantity * unitCost,
+      source: state.selected.source,
+      unresolved: Boolean(state.selected.unresolved),
+    });
+    state.selected = null;
+    els.query.value = "";
+    els.qty.value = "1";
+    els.selected.textContent = "Sin insumo seleccionado.";
+    setStatus("");
+    renderLines();
+  }
+
+  async function searchInsumos() {
+    const q = els.query.value.trim();
+    if (q.length < 2) {
+      els.results.innerHTML = "";
+      return;
+    }
+    const response = await fetch(`${root.dataset.searchUrl}?q=${encodeURIComponent(q)}&limit=10`);
+    const payload = await response.json();
+    if (!payload.results?.length) {
+      els.results.innerHTML = '<div class="text-muted">Sin resultados.</div>';
+      return;
+    }
+    els.results.innerHTML = payload.results.map((item, index) => `
+      <button class="costeo-sim-option" type="button" data-result-index="${index}">
+        <span><strong>${item.name}</strong><span>${item.code || "-"} · ${item.type || ""}</span></span>
+        <span><strong>${item.unit_cost?.display || "$0.00"}</strong><span>${item.unit?.codigo || "-"} · ${item.source || ""}</span></span>
+      </button>
+    `).join("");
+    els.results.querySelectorAll("[data-result-index]").forEach((button) => {
+      button.addEventListener("click", () => selectItem(payload.results[Number(button.dataset.resultIndex)]));
+    });
+  }
+
+  function showSavedDraft(draft) {
+    const empty = els.drafts.querySelector(".text-muted");
+    if (empty) empty.remove();
+    const existing = els.drafts.querySelector(`[data-draft-id="${draft.id}"]`);
+    if (existing) existing.remove();
+    const row = document.createElement("div");
+    row.className = "costeo-sim-draft";
+    row.dataset.draftId = draft.id;
+    row.innerHTML = `
+      <div>
+        <strong>${draft.nombre}</strong>
+        <div class="costeo-sim-muted">${draft.precio_venta_sugerido?.display || "$0.00"} sugerido · ${draft.actualizado_en || ""}</div>
+      </div>
+      <button class="btn btn-secondary btn-sm" type="button" data-load-draft="${draft.id}">Abrir</button>
+    `;
+    els.drafts.prepend(row);
+  }
+
+  async function saveDraft() {
+    const payload = {
+      draft_id: state.draftId,
+      nombre: els.name.value.trim(),
+      target_margin_pct: els.margin.value,
+      lines: state.lines.map((line) => ({
+        insumo_id: line.insumoId,
+        cantidad: line.quantity,
+        unidad_id: line.unit?.id || "",
+      })),
+    };
+    setStatus("Guardando borrador...");
+    const response = await fetch(root.dataset.saveUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken": els.csrf.value,
+      },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      setStatus(result.error || "No se pudo guardar el borrador.", "error");
+      return;
+    }
+    state.draftId = result.draft.id;
+    els.total.textContent = result.summary.total_cost.display;
+    els.unitCost.textContent = result.summary.unit_result_cost.display;
+    els.price.textContent = result.summary.suggested_price.display;
+    showSavedDraft(result.draft);
+    setStatus(`Borrador guardado: ${result.draft.nombre}`);
+  }
+
+  async function loadDraft(id) {
+    const url = root.dataset.draftUrlTemplate.replace("/0.json", `/${id}.json`);
+    const response = await fetch(url);
+    const payload = await response.json();
+    const draft = payload.draft;
+    state.draftId = draft.id;
+    els.name.value = draft.nombre;
+    els.margin.value = draft.target_margin_pct || "55.00";
+    state.lines = (draft.lines || []).map((line) => ({
+      insumoId: line.insumo_id,
+      name: line.name,
+      code: line.code,
+      unit: line.unit,
+      quantity: parseAmount(line.cantidad),
+      unitCost: parseAmount(line.unit_cost?.raw),
+      lineCost: parseAmount(line.line_cost?.raw),
+      source: line.source,
+      unresolved: Boolean(line.unresolved),
+    }));
+    renderLines();
+    setStatus(`Borrador abierto: ${draft.nombre}`);
+  }
+
+  function clearAll() {
+    state.draftId = null;
+    state.selected = null;
+    state.lines = [];
+    els.name.value = "";
+    els.margin.value = "55";
+    els.query.value = "";
+    els.qty.value = "1";
+    els.selected.textContent = "Sin insumo seleccionado.";
+    els.results.innerHTML = "";
+    setStatus("");
+    renderLines();
+  }
+
+  els.query.addEventListener("input", () => {
+    window.clearTimeout(state.searchTimer);
+    state.searchTimer = window.setTimeout(searchInsumos, 220);
+  });
+  els.add.addEventListener("click", addSelectedLine);
+  els.clear.addEventListener("click", clearAll);
+  els.save.addEventListener("click", saveDraft);
+  els.margin.addEventListener("input", renderTotals);
+  els.lines.addEventListener("input", (event) => {
+    const target = event.target.closest("[data-line-qty]");
+    if (!target) return;
+    const index = Number(target.dataset.lineQty);
+    const line = state.lines[index];
+    line.quantity = parseAmount(target.value);
+    line.lineCost = line.quantity * line.unitCost;
+    renderLines();
+  });
+  els.lines.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-remove-line]");
+    if (!target) return;
+    state.lines.splice(Number(target.dataset.removeLine), 1);
+    renderLines();
+  });
+  els.drafts.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-load-draft]");
+    if (!target) return;
+    loadDraft(target.dataset.loadDraft);
+  });
+  renderLines();
+})();
+</script>
 {% endblock %}

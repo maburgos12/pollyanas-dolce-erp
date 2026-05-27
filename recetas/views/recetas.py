@@ -1,5 +1,6 @@
 import csv
 import hashlib
+import json
 from io import BytesIO
 from math import exp, sqrt
 from datetime import date, datetime, timedelta
@@ -60,6 +61,8 @@ from ..models import (
     RecetaCodigoPointAlias,
     RecetaCostoSemanal,
     RecetaEquivalencia,
+    CosteoProductoDraft,
+    CosteoProductoDraftLinea,
     normalizar_codigo_point,
     LineaReceta,
     RecetaPresentacion,
@@ -78,6 +81,7 @@ from ..models import (
     SolicitudReabastoCedisLinea,
 )
 from recetas.services.costing_contract import CostContext, resolve_line_cost, resolve_recipe_cost_map
+from recetas.services.costeo_simulator import calculate_line_cost, q2, q6, suggest_sale_price
 from ..utils.costeo_versionado import asegurar_version_costeo, calcular_costeo_receta, comparativo_versiones
 from ..utils.costeo_semanal import snapshot_weekly_costs, week_bounds
 from ..utils.costeo_snapshot import resolve_insumo_unit_cost, resolve_line_snapshot_cost
@@ -5547,6 +5551,228 @@ def _costeo_scope_queryset(selected_week: date, *, scope: str, familia: str = ""
     return qs.order_by("label", "id")
 
 
+def _costeo_decimal_payload(value: Decimal | int | float | str | None, *, places: int = 2) -> dict[str, str]:
+    quant = Decimal("0.01") if places == 2 else Decimal("0.000001")
+    amount = Decimal(str(value or 0)).quantize(quant)
+    return {
+        "raw": str(amount),
+        "display": f"${amount:,.2f}" if places == 2 else f"{amount:f}",
+    }
+
+
+def _costeo_unit_payload(unit: UnidadMedida | None) -> dict[str, object] | None:
+    if unit is None:
+        return None
+    return {
+        "id": unit.id,
+        "codigo": unit.codigo,
+        "nombre": unit.nombre,
+        "tipo": unit.tipo,
+    }
+
+
+def _costeo_unit_by_payload_id(value: object) -> UnidadMedida | None:
+    try:
+        parsed_id = int(value or 0)
+    except (TypeError, ValueError):
+        return None
+    if parsed_id <= 0:
+        return None
+    return UnidadMedida.objects.filter(pk=parsed_id).first()
+
+
+def _costeo_draft_payload(draft: CosteoProductoDraft, *, include_lines: bool = False) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": draft.id,
+        "nombre": draft.nombre,
+        "target_margin_pct": str(q2(draft.target_margin_pct)),
+        "costo_total": _costeo_decimal_payload(draft.costo_total_snapshot),
+        "costo_unitario_resultado": _costeo_decimal_payload(draft.costo_unitario_resultado_snapshot),
+        "precio_venta_sugerido": _costeo_decimal_payload(draft.precio_venta_sugerido),
+        "actualizado_en": draft.actualizado_en.strftime("%Y-%m-%d %H:%M"),
+    }
+    if include_lines:
+        payload["lines"] = [
+            {
+                "id": line.id,
+                "insumo_id": line.insumo_id,
+                "name": line.insumo_nombre_snapshot,
+                "code": line.insumo_codigo_snapshot or "-",
+                "cantidad": f"{q6(line.cantidad):f}",
+                "unit": _costeo_unit_payload(line.unidad),
+                "unit_cost": _costeo_decimal_payload(line.costo_unitario_snapshot),
+                "line_cost": _costeo_decimal_payload(line.costo_total_snapshot),
+                "source": line.fuente_costo,
+                "unresolved": line.unresolved,
+            }
+            for line in draft.lineas.select_related("insumo", "unidad").order_by("posicion", "id")
+        ]
+    return payload
+
+
+@login_required
+@permission_required("recetas.view_receta", raise_exception=True)
+def costeo_simulador_insumos_search(request: HttpRequest) -> JsonResponse:
+    q = (request.GET.get("q") or "").strip()
+    if len(q) < 2:
+        return JsonResponse({"results": []})
+
+    limit = min(max(int(request.GET.get("limit") or 12), 1), 30)
+    qs = (
+        Insumo.objects.filter(activo=True)
+        .select_related("unidad_base")
+        .filter(
+            Q(nombre__icontains=q)
+            | Q(nombre_point__icontains=q)
+            | Q(codigo__icontains=q)
+            | Q(codigo_point__icontains=q)
+        )
+        .order_by("nombre", "id")[: limit * 2]
+    )
+
+    results: list[dict[str, object]] = []
+    seen: set[int] = set()
+    for raw_insumo in qs:
+        insumo = canonical_insumo(raw_insumo) or raw_insumo
+        if insumo.id in seen:
+            continue
+        seen.add(insumo.id)
+        line_cost = calculate_line_cost(insumo=insumo, cantidad=Decimal("1"), unidad=None)
+        unit = line_cost.unit or insumo.unidad_base
+        results.append(
+            {
+                "id": insumo.id,
+                "code": (insumo.codigo_point or insumo.codigo or "").strip() or "-",
+                "name": _insumo_display_name(insumo) or insumo.nombre,
+                "unit": _costeo_unit_payload(unit),
+                "unit_cost": _costeo_decimal_payload(line_cost.unit_cost),
+                "source": line_cost.source,
+                "unresolved": line_cost.unresolved,
+                "type": insumo.get_tipo_item_display(),
+            }
+        )
+        if len(results) >= limit:
+            break
+
+    return JsonResponse({"results": results})
+
+
+@login_required
+@permission_required("recetas.view_receta", raise_exception=True)
+def costeo_simulador_draft_detail(request: HttpRequest, draft_id: int) -> JsonResponse:
+    draft = get_object_or_404(
+        CosteoProductoDraft.objects.all(),
+        pk=draft_id,
+    )
+    return JsonResponse({"draft": _costeo_draft_payload(draft, include_lines=True)})
+
+
+@login_required
+@permission_required("recetas.change_receta", raise_exception=True)
+@require_POST
+def costeo_simulador_draft_save(request: HttpRequest) -> JsonResponse:
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "JSON inválido."}, status=400)
+
+    nombre = (payload.get("nombre") or "").strip()
+    if not nombre:
+        return JsonResponse({"error": "Captura el nombre del producto en prueba."}, status=400)
+
+    raw_lines = payload.get("lines") or []
+    if not isinstance(raw_lines, list) or not raw_lines:
+        return JsonResponse({"error": "Agrega por lo menos un insumo."}, status=400)
+
+    target_margin_pct = _to_decimal_or_none(str(payload.get("target_margin_pct") or "")) or Decimal("55")
+
+    draft_id = payload.get("draft_id")
+    with transaction.atomic():
+        if draft_id:
+            draft = get_object_or_404(CosteoProductoDraft, pk=draft_id)
+        else:
+            draft = CosteoProductoDraft(creado_por=request.user)
+        draft.nombre = nombre[:250]
+        draft.target_margin_pct = q2(target_margin_pct)
+        draft.notas = (payload.get("notas") or "").strip()
+        draft.actualizado_por = request.user
+        draft.save()
+        draft.lineas.all().delete()
+
+        total_cost = Decimal("0.000000")
+        response_lines: list[dict[str, object]] = []
+        for position, raw_line in enumerate(raw_lines, start=1):
+            if not isinstance(raw_line, dict):
+                continue
+            insumo = canonical_insumo_by_id(raw_line.get("insumo_id"))
+            if not insumo:
+                continue
+            cantidad = _to_decimal_or_none(str(raw_line.get("cantidad") or "")) or Decimal("0")
+            if cantidad <= 0:
+                continue
+            unidad = _costeo_unit_by_payload_id(raw_line.get("unidad_id")) or insumo.unidad_base
+            simulated = calculate_line_cost(insumo=insumo, cantidad=cantidad, unidad=unidad)
+            unit = simulated.unit or unidad
+            total_cost += simulated.line_cost
+            line = CosteoProductoDraftLinea.objects.create(
+                draft=draft,
+                posicion=position,
+                insumo=insumo,
+                insumo_nombre_snapshot=_insumo_display_name(insumo)[:250] or insumo.nombre[:250],
+                insumo_codigo_snapshot=(insumo.codigo_point or insumo.codigo or "")[:80],
+                cantidad=simulated.cantidad,
+                unidad=unit,
+                unidad_codigo_snapshot=(unit.codigo if unit else "")[:20],
+                costo_unitario_snapshot=simulated.unit_cost,
+                costo_total_snapshot=simulated.line_cost,
+                fuente_costo=simulated.source[:60],
+                unresolved=simulated.unresolved,
+            )
+            response_lines.append(
+                {
+                    "id": line.id,
+                    "insumo_id": line.insumo_id,
+                    "name": line.insumo_nombre_snapshot,
+                    "code": line.insumo_codigo_snapshot or "-",
+                    "cantidad": f"{q6(line.cantidad):f}",
+                    "unit": _costeo_unit_payload(unit),
+                    "unit_cost": _costeo_decimal_payload(line.costo_unitario_snapshot),
+                    "line_cost": _costeo_decimal_payload(line.costo_total_snapshot),
+                    "source": line.fuente_costo,
+                    "unresolved": line.unresolved,
+                }
+            )
+
+        if not response_lines:
+            transaction.set_rollback(True)
+            return JsonResponse({"error": "No se pudo guardar ninguna línea válida."}, status=400)
+
+        unit_result_cost = q6(total_cost)
+        price = suggest_sale_price(unit_cost=unit_result_cost, target_margin_pct=target_margin_pct)
+        draft.costo_total_snapshot = q6(total_cost)
+        draft.costo_unitario_resultado_snapshot = unit_result_cost
+        draft.precio_venta_sugerido = price.suggested_price
+        draft.save(update_fields=[
+            "costo_total_snapshot",
+            "costo_unitario_resultado_snapshot",
+            "precio_venta_sugerido",
+            "actualizado_en",
+        ])
+
+    return JsonResponse(
+        {
+            "draft": _costeo_draft_payload(draft),
+            "summary": {
+                "total_cost": _costeo_decimal_payload(draft.costo_total_snapshot),
+                "unit_result_cost": _costeo_decimal_payload(draft.costo_unitario_resultado_snapshot),
+                "suggested_price": _costeo_decimal_payload(draft.precio_venta_sugerido),
+                "target_margin_pct": str(q2(draft.target_margin_pct)),
+            },
+            "lines": response_lines,
+        }
+    )
+
+
 @login_required
 @permission_required("recetas.view_receta", raise_exception=True)
 def costeo_dashboard(request: HttpRequest) -> HttpResponse:
@@ -5607,6 +5833,11 @@ def costeo_dashboard(request: HttpRequest) -> HttpResponse:
         current_cost = Decimal(item.costo_total or 0)
         item.history_pct = float((current_cost / max_history_cost) * Decimal("100")) if max_history_cost > 0 else 0.0
     previous_week = week_values[1] if len(week_values) > 1 else None
+    simulator_drafts = (
+        CosteoProductoDraft.objects.select_related("creado_por")
+        .prefetch_related("lineas")
+        .order_by("-actualizado_en", "-id")[:8]
+    )
 
     return render(
         request,
@@ -5630,6 +5861,7 @@ def costeo_dashboard(request: HttpRequest) -> HttpResponse:
             "selected_row": selected_row,
             "history_rows": history_rows,
             "max_history_cost": max_history_cost,
+            "simulator_drafts": simulator_drafts,
         },
     )
 
