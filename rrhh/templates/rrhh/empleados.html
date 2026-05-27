@@ -444,6 +444,21 @@
     .rrhh-edit-form .rrhh-form-grid {
       grid-template-columns: 1fr;
     }
+
+    .rrhh-bonus-box,
+    .rrhh-bonus-box > *,
+    .rrhh-bonus-options,
+    .rrhh-bonus-other,
+    .rrhh-bonus-other .btn {
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    .rrhh-bonus-options,
+    .rrhh-bonus-other {
+      grid-template-columns: 1fr;
+    }
   }
 </style>
 {% endblock %}
