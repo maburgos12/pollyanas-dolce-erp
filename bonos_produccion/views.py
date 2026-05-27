@@ -187,13 +187,22 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
     permission_classes = [IsAuthenticated, CanAccessBonosProduccion]
     origen_solicitud = "bonos_produccion"
 
+    def _context_param(self, key):
+        value = self.request.query_params.get(key)
+        if value not in (None, ""):
+            return value
+        data = getattr(self.request, "data", {})
+        if hasattr(data, "get"):
+            return data.get(key)
+        return None
+
     def _bonos_periodo_queryset(self):
-        mes = self.request.query_params.get("mes")
-        anio = self.request.query_params.get("anio")
+        mes = self._context_param("mes")
+        anio = self._context_param("anio")
         if not (mes and anio):
             return None
         qs = BonoProduccionEmpleado.objects.filter(periodo__mes=mes, periodo__anio=anio).select_related("empleado")
-        area = self.request.query_params.get("area")
+        area = self._context_param("area")
         if area:
             area_normalizada = normalizar_area_produccion(area)
             areas_validas = {code for code, _ in AREAS_PRODUCCION}
@@ -222,9 +231,9 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
 
     def empleados_queryset(self):
         areas_validas = {code for code, _ in AREAS_PRODUCCION}
-        area = self.request.query_params.get("area")
-        mes = self.request.query_params.get("mes")
-        anio = self.request.query_params.get("anio")
+        area = self._context_param("area")
+        mes = self._context_param("mes")
+        anio = self._context_param("anio")
         if area:
             area_normalizada = normalizar_area_produccion(area)
             if area_normalizada not in areas_validas:
