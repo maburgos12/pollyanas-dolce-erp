@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rrhh.models import Empleado, NominaPeriodo
 from rrhh.bonos_permisos import BasePermisosEquipoViewSet, _empleado_payload, _permiso_payload
 from core.access import can_view_submodule, is_bonos_produccion_capture_only
+from recetas.utils.normalizacion import normalizar_nombre
 
 from .models import (
     AREA_HORNOS,
@@ -38,6 +39,28 @@ class CanAccessBonosProduccion(BasePermission):
             and user.is_authenticated
             and (is_bonos_produccion_capture_only(user) or can_view_submodule(user, "produccion", "bonos"))
         )
+
+
+def _empleado_de_usuario(user) -> Empleado | None:
+    if not user or not user.is_authenticated:
+        return None
+    empleado = Empleado.objects.filter(usuario_erp=user, activo=True).first()
+    if empleado:
+        return empleado
+    if user.email:
+        empleado = Empleado.objects.filter(email__iexact=user.email, activo=True).first()
+        if empleado:
+            return empleado
+
+    user_name = normalizar_nombre(user.get_full_name() or user.username or "")
+    user_tokens = set(user_name.split())
+    if not user_tokens:
+        return None
+    for empleado in Empleado.objects.filter(activo=True).only("id", "nombre", "nombre_normalizado"):
+        empleado_name = empleado.nombre_normalizado or normalizar_nombre(empleado.nombre)
+        if user_tokens.issubset(set(empleado_name.split())):
+            return empleado
+    return None
 
 
 def _recalcular_desde_registros(bono: BonoProduccionEmpleado) -> None:
@@ -211,16 +234,34 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
             qs = qs.filter(area=area_normalizada)
         return qs
 
+    def _equipo_directo_queryset(self):
+        jefe = _empleado_de_usuario(self.request.user)
+        if not jefe:
+            return Empleado.objects.none()
+        return Empleado.objects.filter(jefe_directo=jefe, activo=True)
+
+    def _con_equipo_directo(self, qs):
+        return (qs | self._equipo_directo_queryset()).distinct()
+
     def list(self, request):
         bonos_periodo = self._bonos_periodo_queryset()
         if bonos_periodo is None:
             return super().list(request)
         bonos = list(bonos_periodo.filter(empleado__activo=True).order_by("area", "empleado__nombre"))
         empleados = []
+        empleados_ids = set()
         for bono in bonos:
             payload = _empleado_payload(bono.empleado)
             payload["area"] = bono.area
             empleados.append(payload)
+            empleados_ids.add(bono.empleado_id)
+        for empleado in self._equipo_directo_queryset().order_by("nombre"):
+            if empleado.id in empleados_ids:
+                continue
+            payload = _empleado_payload(empleado)
+            payload["area"] = area_bono_produccion_empleado(empleado) or empleado.departamento or AREA_PRODUCCION
+            empleados.append(payload)
+            empleados_ids.add(empleado.id)
         permisos = list(self._permisos())
         return Response(
             {
@@ -244,20 +285,20 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
                     periodo__anio=anio,
                     area=area_normalizada,
                 ).values_list("empleado_id", flat=True)
-                return Empleado.objects.filter(id__in=empleados_periodo)
+                return self._con_equipo_directo(Empleado.objects.filter(id__in=empleados_periodo))
             empleados = Empleado.objects.filter(
                 Q(participa_bonos_produccion=True) | Q(area__in=[*areas_validas, "PRODUCCION"]),
                 activo=True,
             )
             ids = [empleado.id for empleado in empleados if area_bono_produccion_empleado(empleado) == area_normalizada]
-            return Empleado.objects.filter(id__in=ids)
+            return self._con_equipo_directo(Empleado.objects.filter(id__in=ids))
         if mes and anio:
             empleados_periodo = BonoProduccionEmpleado.objects.filter(
                 periodo__mes=mes,
                 periodo__anio=anio,
             ).values_list("empleado_id", flat=True)
-            return Empleado.objects.filter(id__in=empleados_periodo)
-        return Empleado.objects.filter(
+            return self._con_equipo_directo(Empleado.objects.filter(id__in=empleados_periodo))
+        return self._con_equipo_directo(Empleado.objects.filter(
             Q(participa_bonos_produccion=True) | Q(area__in=[*areas_validas, "PRODUCCION"]),
             activo=True,
-        )
+        ))
