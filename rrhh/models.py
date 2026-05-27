@@ -10,6 +10,37 @@ from django.utils import timezone
 from recetas.utils.normalizacion import normalizar_nombre
 
 
+class BonoEsquema(models.Model):
+    codigo = models.CharField(max_length=60, unique=True, db_index=True)
+    nombre = models.CharField(max_length=120)
+    departamento = models.CharField(max_length=40, blank=True, default="", db_index=True)
+    area = models.CharField(max_length=120, blank=True, default="", db_index=True)
+    descripcion = models.TextField(blank=True, default="")
+    activo = models.BooleanField(default=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["nombre"]
+        verbose_name = "Esquema de bono"
+        verbose_name_plural = "Esquemas de bono"
+
+    def __str__(self) -> str:
+        return self.nombre
+
+    def save(self, *args, **kwargs):
+        if not self.codigo:
+            import re
+
+            base = normalizar_nombre(self.nombre or "").upper()
+            self.codigo = re.sub(r"[^A-Z0-9]+", "_", base).strip("_")[:60] or "BONO"
+        self.codigo = self.codigo.upper().strip()
+        self.nombre = (self.nombre or "").strip()
+        self.departamento = (self.departamento or "").strip().upper()
+        self.area = (self.area or "").strip().upper()
+        super().save(*args, **kwargs)
+
+
 class Empleado(models.Model):
     CONTRATO_FIJO = "FIJO"
     CONTRATO_TEMPORAL = "TEMPORAL"
@@ -83,6 +114,7 @@ class Empleado(models.Model):
     )
     participa_bonos_ventas = models.BooleanField(default=False)
     participa_bonos_produccion = models.BooleanField(default=False)
+    bonos_esquemas = models.ManyToManyField(BonoEsquema, blank=True, related_name="empleados")
     activo = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

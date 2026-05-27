@@ -10,6 +10,7 @@ from unittest import SkipTest
 
 from rrhh.models import (
     AsistenciaEmpleado,
+    BonoEsquema,
     Empleado,
     EmpleadoBaja,
     NominaConceptoLinea,
@@ -620,6 +621,7 @@ class RRHHViewsTests(TestCase):
 
     def test_empleados_expone_campos_de_organizacion(self):
         Empleado.objects.create(nombre="LOPEZ PALOS JOHANA ADELIN", departamento="VENTAS", puesto="Jefe de Ventas")
+        BonoEsquema.objects.get_or_create(codigo="VENTAS", defaults={"nombre": "Ventas"})
 
         resp = self.client.get(reverse("rrhh:empleados"))
 
@@ -627,13 +629,69 @@ class RRHHViewsTests(TestCase):
         self.assertContains(resp, "Departamento")
         self.assertContains(resp, "Puesto operativo")
         self.assertContains(resp, "Jefe directo")
-        self.assertContains(resp, "Participa en bonos ventas")
-        self.assertContains(resp, "Participa en bonos producción")
+        self.assertContains(resp, "Esquemas de bono")
+        self.assertContains(resp, "Ventas")
+        self.assertContains(resp, "Producción")
         self.assertContains(resp, "Área / división")
         self.assertContains(resp, "Hornos")
         self.assertContains(resp, "Armado")
         self.assertContains(resp, "Otro...")
         self.assertContains(resp, "modal-catalogo-otro")
+        self.assertContains(resp, "modal-bono-esquema-otro")
+
+    def test_empleados_crea_esquema_bono_otro_y_lo_asigna(self):
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "nombre": "Empleado Bono Logistica",
+                "area": "REPARTIDORES",
+                "puesto": "Apoyo",
+                "departamento": Empleado.DEP_LOGISTICA,
+                "bono_esquema_otro_nombre": "Bono logística",
+                "bono_esquema_otro_departamento": Empleado.DEP_LOGISTICA,
+                "bono_esquema_otro_area": "Repartidores",
+                "bono_esquema_otro_descripcion": "Bono para logística temporal",
+                "salario_diario": "300.00",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        empleado = Empleado.objects.get(nombre="Empleado Bono Logistica")
+        esquema = BonoEsquema.objects.get(codigo="BONO_LOGISTICA")
+        self.assertEqual(esquema.departamento, Empleado.DEP_LOGISTICA)
+        self.assertEqual(esquema.area, "REPARTIDORES")
+        self.assertIn(esquema, empleado.bonos_esquemas.all())
+        self.assertTrue(empleado.participa_bonos_ventas)
+        self.assertFalse(empleado.participa_bonos_produccion)
+
+    def test_empleados_sincroniza_esquemas_base_con_banderas_legacy(self):
+        ventas, _ = BonoEsquema.objects.get_or_create(
+            codigo="VENTAS",
+            defaults={"nombre": "Ventas", "departamento": Empleado.DEP_VENTAS},
+        )
+        produccion, _ = BonoEsquema.objects.get_or_create(
+            codigo="PRODUCCION",
+            defaults={"nombre": "Producción", "departamento": Empleado.DEP_PRODUCCION},
+        )
+
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "nombre": "Empleado Bono Base",
+                "area": "CAJAS",
+                "puesto": "Cajas",
+                "bono_esquemas": [str(ventas.id), str(produccion.id)],
+                "salario_diario": "300.00",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        empleado = Empleado.objects.get(nombre="Empleado Bono Base")
+        self.assertTrue(empleado.participa_bonos_ventas)
+        self.assertTrue(empleado.participa_bonos_produccion)
+        self.assertEqual(set(empleado.bonos_esquemas.values_list("codigo", flat=True)), {"VENTAS", "PRODUCCION"})
 
     def test_empleados_guarda_area_y_puesto_operativo_otro_desde_modal(self):
         resp = self.client.post(
