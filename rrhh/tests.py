@@ -215,7 +215,11 @@ class CapitalHumanoServiceTests(TestCase):
         )
 
         self.client.force_login(rrhh_user)
-        response = self.client.get(reverse("rrhh:rrhh_permisos_list") + f"?edit={permiso.id}")
+        response = self.client.get(
+            reverse("rrhh:rrhh_permisos_list"),
+            {"edit": permiso.id},
+            follow=True,
+        )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Editar permiso pendiente")
         self.assertContains(response, f"?edit={permiso.id}")
@@ -258,7 +262,11 @@ class CapitalHumanoServiceTests(TestCase):
         )
 
         self.client.force_login(dg_user)
-        response = self.client.get(reverse("rrhh:rrhh_permisos_list") + f"?edit={permiso.id}")
+        response = self.client.get(
+            reverse("rrhh:rrhh_permisos_list"),
+            {"edit": permiso.id},
+            follow=True,
+        )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Editar permiso pendiente")
         self.assertContains(response, f"?edit={permiso.id}")
@@ -304,14 +312,14 @@ class CapitalHumanoServiceTests(TestCase):
             )
 
         self.client.force_login(rrhh_user)
-        response = self.client.get(reverse("rrhh:rrhh_permisos_list") + "?area=hornos")
+        response = self.client.get(reverse("rrhh:rrhh_permisos_list"), {"area": "hornos"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["stats"]["total"], 1)
         self.assertContains(response, "Luis Hornos")
         self.assertNotContains(response, "Ana Producción")
         self.assertNotContains(response, "Pedro Ventas")
 
-        response = self.client.get(reverse("rrhh:rrhh_permisos_list") + "?area=logística")
+        response = self.client.get(reverse("rrhh:rrhh_permisos_list"), {"area": "logística"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["stats"]["total"], 1)
         self.assertContains(response, "Marta Logística")
