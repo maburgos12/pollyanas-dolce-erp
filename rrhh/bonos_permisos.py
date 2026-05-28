@@ -93,6 +93,9 @@ def _puede_editar_permiso(user, permiso: PermisoSalida) -> bool:
     if permiso.estado != PermisoSalida.ESTADO_SOLICITADO or permiso.estado_jefe != PermisoSalida.ESTADO_JEFE_PENDIENTE:
         return False
 
+    if can_resolver_permiso_jefe(user, permiso):
+        return True
+
     if can_manage_rrhh(user):
         return True
 
