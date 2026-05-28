@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from calendar import monthrange
-from datetime import date as dt_date
+from datetime import date as dt_date, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
@@ -130,6 +130,7 @@ def _module_tabs(active: str) -> list[dict]:
         {"label": "Permisos", "url_name": "rrhh:rrhh_permisos_list", "active": active == "permisos"},
         {"label": "Horas extra", "url_name": "rrhh:rrhh_he_list", "active": active == "horas_extra"},
         {"label": "Asistencias", "url_name": "rrhh:rrhh_asistencias", "active": active == "asistencias"},
+        {"label": "Checador", "url_name": "rrhh:rrhh_importar", "active": active == "checador"},
         {"label": "Vacantes", "url_name": "rrhh:rrhh_vacantes", "active": active == "vacantes"},
         {"label": "Préstamos", "url_name": "rrhh:rrhh_prestamos_lista", "active": active == "prestamos"},
         {"label": "Nómina", "url_name": "rrhh:nomina", "active": active == "nomina"},
@@ -1665,11 +1666,31 @@ def importar_checador(request):
             )
         return redirect("rrhh:rrhh_importar")
 
+    hoy = timezone.localdate()
+    ayer = hoy - timedelta(days=1)
+    api_qs = AsistenciaEmpleado.objects.filter(fuente=AsistenciaEmpleado.FUENTE_HIKCONNECT_API)
+    ultimas_api = (
+        api_qs.select_related("empleado", "turno", "sucursal")
+        .order_by("-creado_en")[:12]
+    )
+    ultima_api = api_qs.order_by("-creado_en").first()
     historial = ImportacionChecador.objects.order_by("-creado_en")[:10]
     return render(
         request,
         "rrhh/importar_checador.html",
-        {"module_tabs": _module_tabs("asistencias"), "historial": historial},
+        {
+            "module_tabs": _module_tabs("checador"),
+            "historial": historial,
+            "ultimas_api": ultimas_api,
+            "ultima_api": ultima_api,
+            "hoy": hoy,
+            "ayer": ayer,
+            "resumen_checador": {
+                "asistencias_api": api_qs.count(),
+                "asistencias_hoy": AsistenciaEmpleado.objects.filter(fecha=hoy).count(),
+                "cargas_excel": ImportacionChecador.objects.count(),
+            },
+        },
     )
 
 
