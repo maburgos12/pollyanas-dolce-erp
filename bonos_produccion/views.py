@@ -23,6 +23,7 @@ from .models import (
     area_bono_produccion_empleado,
     normalizar_area_produccion,
 )
+from .empleados import bonos_produccion_elegibles_queryset, empleados_elegibles_bonos_produccion
 from .serializers import (
     BonoProduccionResumenSerializer,
     BonoProduccionSerializer,
@@ -97,10 +98,7 @@ class ConfigBonoPeriodoViewSet(viewsets.ModelViewSet):
     def inicializar_bonos(self, request, pk=None):
         periodo = self.get_object()
         areas_validas = {code for code, _ in AREAS_PRODUCCION}
-        empleados = Empleado.objects.filter(
-            Q(participa_bonos_produccion=True) | Q(area__in=[*areas_validas, "PRODUCCION"]),
-            activo=True,
-        )
+        empleados = empleados_elegibles_bonos_produccion()
         creados = 0
         considerados = 0
         for empleado in empleados:
@@ -134,7 +132,7 @@ class BonoProduccionViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, CanAccessBonosProduccion]
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = bonos_produccion_elegibles_queryset(super().get_queryset())
         mes = self.request.query_params.get("mes")
         anio = self.request.query_params.get("anio")
         area = self.request.query_params.get("area")
@@ -164,14 +162,18 @@ class BonoProduccionViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Se requieren mes y anio."}, status=status.HTTP_400_BAD_REQUEST)
 
         bonos = list(
-            BonoProduccionEmpleado.objects.filter(periodo__mes=mes, periodo__anio=anio).select_related("empleado", "periodo")
+            bonos_produccion_elegibles_queryset(
+                BonoProduccionEmpleado.objects.filter(periodo__mes=mes, periodo__anio=anio)
+            ).select_related("empleado", "periodo")
         )
         with transaction.atomic():
             periodo = ConfigBonoPeriodo.objects.filter(mes=mes, anio=anio).first()
             if periodo:
                 periodo.recalcular_todos()
                 bonos = list(
-                    BonoProduccionEmpleado.objects.filter(periodo=periodo).select_related("empleado", "periodo")
+                    bonos_produccion_elegibles_queryset(
+                        BonoProduccionEmpleado.objects.filter(periodo=periodo)
+                    ).select_related("empleado", "periodo")
                 )
 
         data = BonoProduccionResumenSerializer(bonos, many=True).data
@@ -224,7 +226,9 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
         anio = self._context_param("anio")
         if not (mes and anio):
             return None
-        qs = BonoProduccionEmpleado.objects.filter(periodo__mes=mes, periodo__anio=anio).select_related("empleado")
+        qs = bonos_produccion_elegibles_queryset(
+            BonoProduccionEmpleado.objects.filter(periodo__mes=mes, periodo__anio=anio)
+        ).select_related("empleado")
         area = self._context_param("area")
         if area:
             area_normalizada = normalizar_area_produccion(area)
@@ -302,10 +306,7 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
         return Empleado.objects.filter(Q(id__in=base_ids) | Q(id__in=autorizable_ids), activo=True)
 
     def _empleados_area_queryset(self, area_normalizada):
-        empleados = Empleado.objects.filter(
-            Q(participa_bonos_produccion=True) | Q(area__in=[*{code for code, _ in AREAS_PRODUCCION}, "PRODUCCION"]),
-            activo=True,
-        )
+        empleados = empleados_elegibles_bonos_produccion()
         ids = [empleado.id for empleado in empleados if area_bono_produccion_empleado(empleado) == area_normalizada]
         return Empleado.objects.filter(id__in=ids)
 
@@ -359,10 +360,12 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
             if area_normalizada not in areas_validas:
                 return Empleado.objects.none()
             if mes and anio:
-                empleados_periodo = BonoProduccionEmpleado.objects.filter(
-                    periodo__mes=mes,
-                    periodo__anio=anio,
-                    area=area_normalizada,
+                empleados_periodo = bonos_produccion_elegibles_queryset(
+                    BonoProduccionEmpleado.objects.filter(
+                        periodo__mes=mes,
+                        periodo__anio=anio,
+                        area=area_normalizada,
+                    )
                 ).values_list("empleado_id", flat=True)
                 return self._con_personal_autorizable(
                     Empleado.objects.filter(id__in=empleados_periodo) | self._empleados_area_queryset(area_normalizada),
@@ -370,12 +373,11 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
                 )
             return self._con_personal_autorizable(self._empleados_area_queryset(area_normalizada), area_normalizada)
         if mes and anio:
-            empleados_periodo = BonoProduccionEmpleado.objects.filter(
-                periodo__mes=mes,
-                periodo__anio=anio,
+            empleados_periodo = bonos_produccion_elegibles_queryset(
+                BonoProduccionEmpleado.objects.filter(
+                    periodo__mes=mes,
+                    periodo__anio=anio,
+                )
             ).values_list("empleado_id", flat=True)
             return self._con_personal_autorizable(Empleado.objects.filter(id__in=empleados_periodo))
-        return self._con_personal_autorizable(Empleado.objects.filter(
-            Q(participa_bonos_produccion=True) | Q(area__in=[*areas_validas, "PRODUCCION"]),
-            activo=True,
-        ))
+        return self._con_personal_autorizable(empleados_elegibles_bonos_produccion())

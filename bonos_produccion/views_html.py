@@ -16,6 +16,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 
 from core.access import can_manage_submodule, can_view_module, can_view_submodule, is_bonos_produccion_capture_only
 
+from .empleados import bonos_produccion_elegibles_queryset
 from .models import AREA_PRODUCCION, AREAS_PRODUCCION, BonoProduccionEmpleado, ConfigBonoArea, ConfigBonoPeriodo
 
 
@@ -127,7 +128,9 @@ def bonos_produccion_dashboard(request):
     if periodo:
         periodo.asegurar_reglas_area()
     bonos = list(
-        BonoProduccionEmpleado.objects.filter(periodo=periodo).select_related("empleado").order_by("area", "empleado__nombre")
+        bonos_produccion_elegibles_queryset(
+            BonoProduccionEmpleado.objects.filter(periodo=periodo)
+        ).select_related("empleado").order_by("area", "empleado__nombre")
         if periodo
         else []
     )
