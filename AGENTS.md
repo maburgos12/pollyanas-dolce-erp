@@ -15,6 +15,86 @@ ERP operativo de Pollyana's Dolce, cadena de pastelerías en Sinaloa, México.
 - Directorio: /opt/pastelerias-erp
 - Comando base: docker compose -f /opt/pastelerias-erp/docker-compose.yml
 
+## Protocolo obligatorio antes de crear, modificar, implementar, mejorar o cambiar
+
+Aplica para cualquier solicitud de Mauricio que implique tocar código, datos,
+configuración, UI, permisos, navegación, reportes, jobs, integraciones,
+prototipos o producción.
+
+### 1. Clasificar el tipo de trabajo antes de tocar archivos
+- **Consulta o diagnóstico:** solo leer, inspeccionar y reportar. No modificar
+  nada salvo que Mauricio lo pida explícitamente.
+- **Prototipo aislado:** mantenerlo separado del ERP real cuando sea posible. No
+  usar Docker ni producción si no hace falta para validar la idea.
+- **Prototipo dentro del ERP local:** usar rama limpia y Docker local solo como
+  entorno de prueba. No presentarlo como validación de producción.
+- **Implementación real:** trabajar en rama limpia, con checks, PR, deploy y
+  validación en el lugar real donde se usa.
+
+### 2. Auditar estado del repo antes de cualquier cambio
+Antes de editar archivos, ejecutar y revisar:
+```bash
+git status --short --branch
+git diff --stat
+```
+Si se va a subir, integrar o basar trabajo en `main`, revisar también:
+```bash
+git branch -vv
+git rev-list --left-right --count origin/main...HEAD
+```
+
+No continuar en esa rama si:
+- hay cambios sin commitear que no pertenecen a la tarea;
+- hay mezcla de módulos no relacionados;
+- la rama no tiene upstream y se pretende subir;
+- la rama está muy detrás de `origin/main` sin plan explícito de rebase/merge;
+- el objetivo real no corresponde al nombre o historial de la rama.
+
+En cualquiera de esos casos, detenerse, reportar el estado exacto y proponer
+rescate: respaldar parche, crear rama limpia desde `origin/main` o desde la
+rama correcta, y aplicar solo los cambios relacionados.
+
+### 3. Una tarea, una rama, un objetivo
+- No mezclar RRHH, recetas, ventas, reportes, CSS global, activos u otros módulos
+  si la solicitud no los necesita.
+- No hacer refactors oportunistas ni "aprovechar" para tocar archivos ajenos.
+- El nombre de la rama debe reflejar la tarea: `codex/rrhh-permisos-jefe`,
+  `codex/ventas-indicadores-prototipo`, etc.
+- Para cambios grandes o productivos, crear rama nueva desde una base limpia
+  antes de implementar.
+
+### 4. Docker local no equivale a producción
+- Docker Desktop puede usarse para prototipos o validación local del ERP.
+- Si Docker local falla, diagnosticar primero logs, variables de entorno y
+  `docker compose config`; no cambiar código ni producción por intuición.
+- No modificar `.env` de producción ni puertos de `docker-compose.yml` sin
+  confirmación explícita.
+- Una validación local en Docker no sustituye la validación final en VPS,
+  navegador real, reporte real, pantalla real o usuario real afectado.
+
+### 5. Higiene de cambios y commits
+- Revisar `git diff --stat` y `git diff` antes de commitear.
+- No incluir `outputs/`, screenshots, logs, archivos temporales ni artefactos
+  generados salvo que sean parte explícita del entregable.
+- Commitear solo archivos necesarios para la tarea.
+- Si aparecen cambios ajenos durante el trabajo, preservarlos y no revertirlos;
+  separar la implementación o pedir decisión si bloquean la tarea.
+
+### 6. Validación mínima antes de cerrar
+- Correr `python manage.py check` antes de cualquier commit.
+- Correr `python manage.py migrate --check` antes de deploy.
+- Ejecutar tests del módulo afectado cuando existan.
+- Para UI, permisos, navegación, PWA, formularios o flujos visibles, validar en
+  navegador real con consola y Network/XHR cuando aplique.
+- Para datos operativos, validar tabla/conteo/registros y luego confirmar que
+  aparecen en la pantalla, reporte, app o archivo donde se usan.
+
+### 7. Cierre responsable
+No declarar terminado un cambio si solo compila, si solo responde la API, o si
+solo la base de datos tiene datos. Termina hasta que el resultado esté validado
+en el flujo real. Si no se puede validar, reportar el bloqueo exacto, lo que sí
+quedó hecho y qué falta para confirmar.
+
 ## Reglas obligatorias antes de cualquier tarea
 
 ### NO hacer sin confirmación explícita de Mauricio:
