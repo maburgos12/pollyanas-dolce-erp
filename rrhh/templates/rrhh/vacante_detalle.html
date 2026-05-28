@@ -12,10 +12,26 @@
   .vacante-title { color: var(--vino); font-family: "Playfair Display", serif; font-size: 25px; font-weight: 800; }
   .vacante-subtitle { color: var(--texto-light); margin-top: 4px; }
   .vacante-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 6px 10px; }
+  .vacante-panel h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
+  .vacante-flow { display: grid; gap: 16px; }
+  .vacante-flow-steps { display: grid; gap: 8px; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .vacante-flow-step { align-items: center; border-top: 4px solid #ead4de; color: var(--texto-light); display: grid; gap: 6px; min-height: 58px; padding-top: 8px; }
+  .vacante-flow-step span { font-size: 12px; font-weight: 900; text-transform: uppercase; }
+  .vacante-flow-step strong { color: var(--texto); font-size: 13px; }
+  .vacante-flow-step.done { border-color: #7a9f5a; }
+  .vacante-flow-step.current { border-color: var(--vino); }
+  .vacante-flow-step.attention { border-color: #c9862c; }
+  .vacante-flow-step.blocked { border-color: #a13d4f; }
+  .vacante-flow-step.pending strong { color: var(--texto-light); }
+  .vacante-flow-summary { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .vacante-flow-summary .vacante-kv { background: #fffafb; }
   .vacante-grid { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .vacante-kv { border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; }
   .vacante-kv span { color: var(--texto-light); display: block; font-size: 12px; font-weight: 900; text-transform: uppercase; }
   .vacante-kv strong { color: var(--texto); display: block; margin-top: 5px; }
+  .vacante-action-block { border-top: 1px solid var(--rosa); display: grid; gap: 10px; padding-top: 12px; }
+  .vacante-action-block:first-child { border-top: 0; padding-top: 0; }
+  .vacante-action-block h3 { color: var(--texto); font-size: 14px; font-weight: 900; margin: 0; }
   .vacante-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
   .vacante-action-form { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
   .vacante-action-form input,
@@ -27,6 +43,8 @@
     .vacante-detail-head { grid-template-columns: 1fr; }
     .vacante-actions { justify-content: flex-start; }
     .vacante-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .vacante-flow-steps,
+    .vacante-flow-summary { grid-template-columns: 1fr; }
   }
   @media (max-width: 680px) {
     .vacante-grid { grid-template-columns: 1fr; }
@@ -51,6 +69,26 @@
   </div>
 
   <section class="vacante-panel">
+    <h2>Proceso</h2>
+    <div class="vacante-flow">
+      <div class="vacante-flow-steps">
+        {% for step in workflow.steps %}
+          <div class="vacante-flow-step {{ step.state }}">
+            <span>{{ forloop.counter|stringformat:"02d" }}</span>
+            <strong>{{ step.label }}</strong>
+          </div>
+        {% endfor %}
+      </div>
+      <div class="vacante-flow-summary">
+        <div class="vacante-kv"><span>Estado actual</span><strong>{{ vacante.get_estado_display }}</strong></div>
+        <div class="vacante-kv"><span>Responsable actual</span><strong>{{ workflow.responsable }}</strong></div>
+        <div class="vacante-kv"><span>Siguiente paso</span><strong>{{ workflow.siguiente }}</strong></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="vacante-panel">
+    <h2>Solicitud</h2>
     <div class="vacante-grid">
       <div class="vacante-kv"><span>Solicitada</span><strong>{{ vacante.fecha_solicitada|date:"Y-m-d" }}</strong></div>
       <div class="vacante-kv"><span>Necesaria</span><strong>{{ vacante.fecha_necesaria|date:"Y-m-d"|default:"-" }}</strong></div>
@@ -60,10 +98,18 @@
       <div class="vacante-kv"><span>Sucursal</span><strong>{% if vacante.sucursal %}{{ vacante.sucursal.nombre }}{% else %}-{% endif %}</strong></div>
       <div class="vacante-kv"><span>Solicitante</span><strong>{% if vacante.solicitado_por %}{{ vacante.solicitado_por.get_full_name|default:vacante.solicitado_por.username }}{% else %}-{% endif %}</strong></div>
       <div class="vacante-kv"><span>Capturó</span><strong>{% if vacante.creado_por %}{{ vacante.creado_por.get_full_name|default:vacante.creado_por.username }}{% else %}-{% endif %}</strong></div>
+    </div>
+  </section>
+
+  <section class="vacante-panel">
+    <h2>Autorización</h2>
+    <div class="vacante-grid">
+      <div class="vacante-kv"><span>Ruta</span><strong>{{ vacante.get_tipo_autorizacion_display }}</strong></div>
+      <div class="vacante-kv"><span>Responsable</span><strong>{{ workflow.autorizacion }}</strong></div>
+      <div class="vacante-kv"><span>Validó RRHH</span><strong>{% if vacante.validado_rrhh_por %}{{ vacante.validado_rrhh_por.get_full_name|default:vacante.validado_rrhh_por.username }}{% else %}-{% endif %}</strong></div>
       <div class="vacante-kv"><span>Autorizó</span><strong>{% if vacante.autorizado_por %}{{ vacante.autorizado_por.get_full_name|default:vacante.autorizado_por.username }}{% else %}-{% endif %}</strong></div>
-      <div class="vacante-kv"><span>Ruta de autorización</span><strong>{{ vacante.get_tipo_autorizacion_display }}</strong></div>
       <div class="vacante-kv">
-        <span>Autorizador</span>
+        <span>Asignado a</span>
         <strong>
           {% if vacante.requiere_direccion %}
             Dirección General
@@ -87,89 +133,117 @@
     {% endif %}
   </section>
 
-  {% if can_manage_vacantes or can_authorize_vacante or can_reenviar_revision %}
+  {% if show_rrhh_review_actions or show_reenviar_revision or show_authorize_actions or show_recruitment_action or show_cover_action or show_pause_action or show_cancel_action %}
   <section class="vacante-panel">
-    <h2>Acciones</h2>
-    <div class="vacante-actions">
-      {% if can_manage_vacantes and vacante.estado == "solicitada" or can_manage_vacantes and vacante.estado == "revision_rrhh" %}
-        <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-          {% csrf_token %}
-          <input type="hidden" name="action" value="enviar_autorizacion">
-          <input type="text" name="comentario" placeholder="Comentario">
-          <button class="btn btn-secondary" type="submit">Validar solicitud</button>
-        </form>
-        <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-          {% csrf_token %}
-          <input type="hidden" name="action" value="devolver_correccion">
-          <input type="text" name="comentario" placeholder="Qué falta corregir">
-          <button class="btn btn-secondary" type="submit">Devolver a corrección</button>
-        </form>
+    <h2>Acción requerida</h2>
+    <div class="vacante-history">
+      {% if show_rrhh_review_actions %}
+        <div class="vacante-action-block">
+          <h3>Revisión de Capital Humano</h3>
+          <div class="vacante-actions">
+            <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="enviar_autorizacion">
+              <input type="text" name="comentario" placeholder="Comentario">
+              <button class="btn btn-primary" type="submit">Validar solicitud</button>
+            </form>
+            <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="devolver_correccion">
+              <input type="text" name="comentario" placeholder="Qué falta corregir">
+              <button class="btn btn-secondary" type="submit">Devolver a corrección</button>
+            </form>
+          </div>
+        </div>
       {% endif %}
-      {% if can_reenviar_revision %}
-        <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-          {% csrf_token %}
-          <input type="hidden" name="action" value="reenviar_revision">
-          <input type="text" name="comentario" placeholder="Qué se corrigió">
-          <button class="btn btn-primary" type="submit">Reenviar a revisión</button>
-        </form>
+
+      {% if show_reenviar_revision %}
+        <div class="vacante-action-block">
+          <h3>Corrección de solicitud</h3>
+          <div class="vacante-actions">
+            <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="reenviar_revision">
+              <input type="text" name="comentario" placeholder="Qué se corrigió">
+              <button class="btn btn-primary" type="submit">Reenviar a revisión</button>
+            </form>
+          </div>
+        </div>
       {% endif %}
-      {% if can_manage_vacantes and vacante.estado == "autorizada" or can_manage_vacantes and vacante.estado == "pausada" %}
-        <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-          {% csrf_token %}
-          <input type="hidden" name="action" value="reclutamiento">
-          <input type="text" name="comentario" placeholder="Comentario">
-          <button class="btn btn-primary" type="submit">Iniciar reclutamiento</button>
-        </form>
+
+      {% if show_authorize_actions %}
+        <div class="vacante-action-block">
+          <h3>Autorización</h3>
+          <div class="vacante-actions">
+            <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="aprobar">
+              <input type="text" name="comentario" placeholder="Comentario">
+              <button class="btn btn-primary" type="submit">Aprobar</button>
+            </form>
+            <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="rechazar">
+              <input type="text" name="comentario" placeholder="Motivo">
+              <button class="btn btn-secondary" type="submit">Rechazar</button>
+            </form>
+          </div>
+        </div>
       {% endif %}
-      {% if can_manage_vacantes and vacante.estado == "autorizada" or can_manage_vacantes and vacante.estado == "reclutamiento" %}
-        <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-          {% csrf_token %}
-          <input type="hidden" name="action" value="cubrir">
-          <select name="empleado" required>
-            <option value="">Empleado que cubre</option>
-            {% for empleado in empleados %}
-              <option value="{{ empleado.id }}">{{ empleado.nombre }}</option>
-            {% endfor %}
-          </select>
-          <input type="date" name="fecha_cobertura">
-          <input type="text" name="comentario" placeholder="Nota">
-          <button class="btn btn-primary" type="submit">Registrar cobertura</button>
-        </form>
+
+      {% if show_recruitment_action or show_cover_action %}
+        <div class="vacante-action-block">
+          <h3>Reclutamiento y cobertura</h3>
+          <div class="vacante-actions">
+            {% if show_recruitment_action %}
+              <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="reclutamiento">
+                <input type="text" name="comentario" placeholder="Comentario">
+                <button class="btn btn-primary" type="submit">Iniciar reclutamiento</button>
+              </form>
+            {% endif %}
+            {% if show_cover_action %}
+              <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="cubrir">
+                <select name="empleado" required>
+                  <option value="">Empleado que cubre</option>
+                  {% for empleado in empleados %}
+                    <option value="{{ empleado.id }}">{{ empleado.nombre }}</option>
+                  {% endfor %}
+                </select>
+                <input type="date" name="fecha_cobertura">
+                <input type="text" name="comentario" placeholder="Nota">
+                <button class="btn btn-primary" type="submit">Registrar cobertura</button>
+              </form>
+            {% endif %}
+          </div>
+        </div>
       {% endif %}
-      {% if can_manage_vacantes and vacante.estado != "cubierta" and vacante.estado != "cancelada" and vacante.estado != "rechazada" %}
-        <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-          {% csrf_token %}
-          <input type="hidden" name="action" value="pausar">
-          <input type="text" name="comentario" placeholder="Motivo">
-          <button class="btn btn-secondary" type="submit">Pausar</button>
-        </form>
-      {% endif %}
-      {% if can_manage_vacantes and vacante.estado != "cubierta" and vacante.estado != "cancelada" %}
-        <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-          {% csrf_token %}
-          <input type="hidden" name="action" value="cancelar">
-          <input type="text" name="comentario" placeholder="Motivo">
-          <button class="btn btn-secondary" type="submit">Cancelar</button>
-        </form>
-      {% endif %}
-      {% if can_authorize_vacante and vacante.estado == "pendiente_direccion" %}
-        <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-          {% csrf_token %}
-          <input type="hidden" name="action" value="aprobar">
-          <input type="text" name="comentario" placeholder="Comentario">
-          <button class="btn btn-primary" type="submit">Aprobar</button>
-        </form>
-        <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-          {% csrf_token %}
-          <input type="hidden" name="action" value="rechazar">
-          <input type="text" name="comentario" placeholder="Motivo">
-          <button class="btn btn-secondary" type="submit">Rechazar</button>
-        </form>
-      {% endif %}
-      {% if vacante.estado == "cubierta" or vacante.estado == "rechazada" or vacante.estado == "cancelada" %}
-        <span class="vacante-muted">Solicitud cerrada, sin acciones pendientes.</span>
-      {% elif vacante.estado == "devuelta_correccion" %}
-        <span class="vacante-muted">Solicitud esperando corrección del solicitante o capturista.</span>
+
+      {% if show_pause_action or show_cancel_action %}
+        <div class="vacante-action-block">
+          <h3>Control</h3>
+          <div class="vacante-actions">
+            {% if show_pause_action %}
+              <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="pausar">
+                <input type="text" name="comentario" placeholder="Motivo">
+                <button class="btn btn-secondary" type="submit">Pausar</button>
+              </form>
+            {% endif %}
+            {% if show_cancel_action %}
+              <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="cancelar">
+                <input type="text" name="comentario" placeholder="Motivo">
+                <button class="btn btn-secondary" type="submit">Cancelar</button>
+              </form>
+            {% endif %}
+          </div>
+        </div>
       {% endif %}
     </div>
   </section>
@@ -177,7 +251,7 @@
 
   <section class="vacante-panel">
     <h2>Seguimiento de reclutamiento</h2>
-    {% if can_manage_vacantes and vacante.estado != "cubierta" and vacante.estado != "rechazada" and vacante.estado != "cancelada" %}
+    {% if show_tracking_form %}
       <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
         {% csrf_token %}
         <input type="hidden" name="action" value="seguimiento">
