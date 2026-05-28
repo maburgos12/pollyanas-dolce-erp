@@ -385,6 +385,33 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(bono.monto_premio_embetunado, Decimal("0.00"))
         self.assertEqual(bono.total_a_pagar, Decimal("0.00"))
 
+    def test_regla_cancelacion_personalizada_cancela_bono_con_una_falta(self):
+        empleado = Empleado.objects.create(nombre="Empleado Produccion", area="PRODUCCION")
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026, dias_laborables=23, monto_hornos=Decimal("800.00"))
+        periodo.asegurar_reglas_area()
+        regla = periodo.reglas_area.get(area=AREA_HORNOS)
+        regla.limite_asistencia = 2
+        regla.limite_puntualidad = 2
+        regla.cancela_por_asistencia = True
+        regla.limite_asistencia_cancelacion = 0
+        regla.save()
+        bono = BonoProduccionEmpleado.objects.create(
+            periodo=periodo,
+            empleado=empleado,
+            area=AREA_HORNOS,
+            dias_trabajados=22,
+            dias_uniforme=23,
+            dias_asistencia=22,
+            dias_puntualidad=23,
+            dias_produccion=23,
+        )
+
+        bono.recalcular()
+
+        self.assertTrue(bono.pasa_asistencia)
+        self.assertTrue(bono.pasa_puntualidad)
+        self.assertEqual(bono.total_a_pagar, Decimal("0.00"))
+
     def test_recalcular_no_deja_total_negativo_por_ajuste(self):
         empleado = Empleado.objects.create(nombre="Empleado Produccion", area="PRODUCCION")
         periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026, dias_laborables=10, monto_hornos=Decimal("800.00"))

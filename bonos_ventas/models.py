@@ -198,7 +198,14 @@ class BonoVentasEmpleado(models.Model):
         self.pasa_asistencia = (dias_laborables - dias_asistencia) <= cfg.limite_asistencia
         self.pasa_uniforme = (dias_base - int(self.dias_uniforme or 0)) <= cfg.limite_uniforme
         self.pasa_puntualidad = (dias_base - int(self.dias_puntualidad or 0)) <= cfg.limite_puntualidad
-        cancela_bono = not self.pasa_asistencia or not self.pasa_puntualidad
+        faltas = dias_laborables - int(self.dias_asistencia or 0)
+        retardos = dias_base - int(self.dias_puntualidad or 0)
+        cancela_bono = (not self.pasa_asistencia) or (not self.pasa_puntualidad)
+        if cfg.cancela_por_asistencia and (faltas > cfg.limite_asistencia_cancelacion):
+            cancela_bono = True
+        if cfg.cancela_por_puntualidad and (retardos > cfg.limite_retardos_cancelacion):
+            cancela_bono = True
+        self.cancela_bono = cancela_bono
         self.monto_uniforme = self._monto_concepto(base, cfg.pct_uniforme, self.pasa_uniforme and not cancela_bono)
         self.monto_asistencia = self._monto_concepto(base, cfg.pct_asistencia, self.pasa_asistencia and not cancela_bono)
         self.monto_puntualidad = self._monto_concepto(base, cfg.pct_puntualidad, self.pasa_puntualidad and not cancela_bono)

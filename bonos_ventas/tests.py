@@ -271,6 +271,39 @@ class BonosVentasTests(TestCase):
         self.assertEqual(bono.sub1, Decimal("0.00"))
         self.assertEqual(bono.total_a_pagar, Decimal("0.00"))
 
+    def test_regla_cancelacion_personalizada_cancela_bono_con_una_falta(self):
+        sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
+        empleado = Empleado.objects.create(nombre="Empleado Ventas", area="VENTAS")
+        periodo = ConfigBonoVentasPeriodo.objects.create(
+            mes=5,
+            anio=2026,
+            dias_laborables=23,
+            limite_asistencia=2,
+            limite_puntualidad=2,
+            pct_uniforme=Decimal("15.00"),
+            pct_asistencia=Decimal("45.00"),
+            pct_puntualidad=Decimal("40.00"),
+            cancela_por_asistencia=True,
+            limite_asistencia_cancelacion=0,
+        )
+        bono = BonoVentasEmpleado.objects.create(
+            periodo=periodo,
+            empleado=empleado,
+            sucursal=sucursal,
+            dias_trabajados=22,
+            dias_asistencia=22,
+            dias_uniforme=23,
+            dias_puntualidad=23,
+        )
+
+        bono.recalcular()
+
+        self.assertTrue(bono.pasa_asistencia)
+        self.assertTrue(bono.pasa_puntualidad)
+        self.assertTrue(bono.cancela_bono)
+        self.assertEqual(bono.sub1, Decimal("0.00"))
+        self.assertEqual(bono.total_a_pagar, Decimal("0.00"))
+
     def test_recalcular_desde_registros_cuenta_solo_asistencias_reales(self):
         user = get_user_model().objects.create_superuser(username="captura-ventas")
         self.client.force_login(user)
