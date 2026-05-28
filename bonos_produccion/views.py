@@ -15,7 +15,6 @@ from recetas.utils.normalizacion import normalizar_nombre
 
 from .models import (
     AREA_HORNOS,
-    AREA_EMBETUNADO,
     AREA_PRODUCCION,
     AREAS_PRODUCCION,
     BonoProduccionEmpleado,
@@ -213,33 +212,6 @@ class RegistroDiarioViewSet(viewsets.ModelViewSet):
 class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
     permission_classes = [IsAuthenticated, CanAccessBonosProduccion]
     origen_solicitud = "bonos_produccion"
-
-    def filter_permisos(self, qs):
-        qs = super().filter_permisos(qs)
-        area = self._context_param("area")
-        if not area:
-            return qs
-
-        area_normalizada = normalizar_area_produccion(area)
-        areas_validas = {code for code, _ in AREAS_PRODUCCION}
-        if area_normalizada not in areas_validas:
-            return qs
-
-        mes = self._context_param("mes")
-        anio = self._context_param("anio")
-        if not (mes and anio):
-            return qs
-
-        area_filtro_qs = [area_normalizada]
-        if area_normalizada == AREA_PRODUCCION:
-            area_filtro_qs.append(AREA_EMBETUNADO)
-
-        empleados_por_area = BonoProduccionEmpleado.objects.filter(
-            periodo__mes=mes,
-            periodo__anio=anio,
-            area__in=area_filtro_qs,
-        ).values_list("empleado_id", flat=True)
-        return qs.filter(empleado_id__in=empleados_por_area)
 
     def _context_param(self, key):
         value = self.request.query_params.get(key)

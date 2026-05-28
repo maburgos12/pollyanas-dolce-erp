@@ -117,8 +117,6 @@ def _normalize_area_filter_value(raw: str | None) -> str:
     value = _normalize_text(raw)
     if not value:
         return ""
-    if value in {"TODAS", "TODO", "ALL", "TODOS"}:
-        return ""
     if value in {"PRODUCCION", "PRODUC", "PROD", "PRODUCION"}:
         return "PRODUCCION"
     if value in {"EMBETUNADO", "EMBETUNADOS"}:
