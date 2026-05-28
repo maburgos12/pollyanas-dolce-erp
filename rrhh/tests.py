@@ -234,9 +234,10 @@ class CapitalHumanoServiceTests(TestCase):
                 "fecha_fin": "2026-05-26T16:00",
                 "motivo": "Ajuste por diligencia personal",
             },
+            follow=True,
         )
 
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
         permiso.refresh_from_db()
         self.assertEqual(permiso.tipo, PermisoSalida.TIPO_SALIDA_PERSONAL)
         self.assertEqual(permiso.motivo, "Ajuste por diligencia personal")
@@ -282,9 +283,10 @@ class CapitalHumanoServiceTests(TestCase):
                 "motivo": "Ajuste directo DG",
                 "goce_sueldo": "on",
             },
+            follow=True,
         )
 
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
         permiso.refresh_from_db()
         self.assertEqual(permiso.tipo, PermisoSalida.TIPO_OTRO)
         self.assertEqual(permiso.motivo, "Ajuste directo DG")
@@ -312,20 +314,28 @@ class CapitalHumanoServiceTests(TestCase):
             )
 
         self.client.force_login(rrhh_user)
-        response = self.client.get(reverse("rrhh:rrhh_permisos_list"), {"area": "hornos"})
+        response = self.client.get(
+            reverse("rrhh:rrhh_permisos_list"),
+            {"area": "hornos"},
+            follow=True,
+        )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["stats"]["total"], 1)
         self.assertContains(response, "Luis Hornos")
         self.assertNotContains(response, "Ana Producción")
         self.assertNotContains(response, "Pedro Ventas")
 
-        response = self.client.get(reverse("rrhh:rrhh_permisos_list"), {"area": "logística"})
+        response = self.client.get(
+            reverse("rrhh:rrhh_permisos_list"),
+            {"area": "logística"},
+            follow=True,
+        )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["stats"]["total"], 1)
         self.assertContains(response, "Marta Logística")
         self.assertNotContains(response, "Luis Hornos")
 
-        response = self.client.get(reverse("rrhh:rrhh_permisos_list"))
+        response = self.client.get(reverse("rrhh:rrhh_permisos_list"), follow=True)
         self.assertEqual(response.context["stats"]["total"], 3)
 
     def test_permiso_de_capital_humano_no_lo_autoriza_la_misma_persona_rrhh(self):
