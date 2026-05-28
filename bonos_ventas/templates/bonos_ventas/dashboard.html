@@ -209,7 +209,7 @@
         <div class="branch-filter" id="branch-filter">
           <button type="button" class="active" data-branch="ALL">Todas</button>
           {% for row in sucursal_rows %}{% if row.count %}<button type="button" data-branch="{{ row.id }}">{{ row.nombre }}</button>{% endif %}{% endfor %}
-          {% if repartidor_row %}<button type="button" data-branch="REPARTIDORES" style="border-color:#8b2252;color:#8b2252">🚚 Repartidores</button>{% endif %}
+          {% if repartidor_row %}<button type="button" data-branch="REPARTIDORES">🚚 Repartidores</button>{% endif %}
         </div>
       </div>
       <div class="employee-list" id="employee-list">
