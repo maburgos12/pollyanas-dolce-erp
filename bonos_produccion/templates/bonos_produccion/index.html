@@ -215,6 +215,18 @@ function AreaChips({area,setArea,includeAll=false}){
 function normalizeText(v){
   return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
 }
+function localDate(v){
+  const d = new Date(v);
+  const m = String(d.getMonth() + 1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  return `${d.getFullYear()}-${m}-${dd}`;
+}
+function localTime(v){
+  const d = new Date(v);
+  const hh = String(d.getHours()).padStart(2,'0');
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  return `${hh}:${mm}`;
+}
 function EmployeeSearchList({items,selected,onSelect,placeholder,emptyText,metaText,rightText}){
   const [query,setQuery]=React.useState('');
   const q=normalizeText(query);
@@ -429,6 +441,7 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
   const [loading,setLoading]=React.useState(false);
   const [previewPermiso,setPreviewPermiso]=React.useState(null);
   const [lastPermiso,setLastPermiso]=React.useState(null);
+  const [editPermiso,setEditPermiso]=React.useState(null);
   const equipo=empleados;
   React.useEffect(()=>{cargarPermisos();},[mes,anio,area]);
   React.useEffect(()=>{if(!selected&&equipo.length)setSelected(equipo[0]);else if(selected&&!equipo.some(b=>b.id===selected.id))setSelected(equipo[0]||null);},[area,equipo.map(b=>b.id).join(','),selected?.id]);
@@ -475,6 +488,52 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
   function imprimirPermiso(p){
     setPreviewPermiso(p);
     setTimeout(()=>window.print(),160);
+  }
+  function abrirEdicion(p){
+    setEditPermiso({
+      id:p.id,
+      tipo:p.tipo,
+      fecha:localDate(p.fecha_inicio),
+      desde:p.tipo==='permiso_hora'?localTime(p.fecha_inicio):'12:30',
+      hasta:p.tipo==='permiso_hora'?(p.fecha_fin?localTime(p.fecha_fin):'14:30'):'14:30',
+      motivo:p.motivo,
+      goce:!!p.goce_sueldo,
+    });
+  }
+  function cerrarEdicion(){
+    setEditPermiso(null);
+  }
+  function onEditarCampo(name,value){
+    setEditPermiso(prev=>prev?{...prev,[name]:value}:prev);
+  }
+  function guardarEdicion(){
+    if(!editPermiso){
+      return;
+    }
+    if(!editPermiso.motivo.trim()){
+      showStatus('Captura el motivo del permiso para guardar cambios.','err');
+      return;
+    }
+    if(editPermiso.tipo==='permiso_hora'&&(!editPermiso.desde||!editPermiso.hasta)){
+      showStatus('Captura hora desde y hasta para guardar cambios.','err');
+      return;
+    }
+    const payload={
+      tipo:editPermiso.tipo,
+      motivo:editPermiso.motivo,
+      goce_sueldo:editPermiso.goce,
+      fecha_inicio:editPermiso.tipo==='permiso_dia'
+        ?`${editPermiso.fecha}T00:00:00`
+        :`${editPermiso.fecha}T${editPermiso.desde}:00`,
+      fecha_fin:editPermiso.tipo==='permiso_dia'?null:`${editPermiso.fecha}T${editPermiso.hasta}:00`,
+    };
+    api(`/api/bonos-produccion/permisos/${editPermiso.id}/editar/`,{method:'POST',body:JSON.stringify(payload)})
+      .then(()=>{
+        showStatus('Permiso actualizado','ok');
+        cerrarEdicion();
+        cargarPermisos();
+      })
+      .catch(err=>showStatus(err.message,'err'));
   }
   function accion(p,kind){
     api(`/api/bonos-produccion/permisos/${p.id}/${kind}/`,{method:'POST',body:'{}'})
@@ -550,8 +609,33 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
               h('div',{className:'permission-actions'},
                 h('button',{className:'btn btn-ghost btn-sm',onClick:()=>setPreviewPermiso(p)},'Vista carta'),
                 h('button',{className:'btn btn-ghost btn-sm',onClick:()=>imprimirPermiso(p)},'Imprimir / PDF'),
+                p.puede_editar&&h('button',{className:'btn btn-ghost btn-sm',onClick:()=>abrirEdicion(p)},'Editar'),
                 p.puede_preautorizar&&p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-ghost btn-sm',onClick:()=>accion(p,'rechazar')},'Rechazar'),
                 p.puede_preautorizar&&p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-wine btn-sm',onClick:()=>accion(p,'preautorizar')},'Autorizar')
+              ),
+              editPermiso&&editPermiso.id===p.id&&h('div',{className:'permission-item',style:{background:'var(--bg)',marginTop:8,padding:12}},
+                h('div',{className:'form-grid'},
+                  h('div',{className:'field'},h('label',null,'Tipo de permiso'),
+                    h('div',{className:'segmented'},
+                      [['permiso_hora','Tiempo parcial'],['permiso_dia','Dia completo']].map(([v,lbl])=>h('button',{key:v,type:'button',className:`segment ${editPermiso.tipo===v?'on':''}`,onClick:()=>onEditarCampo('tipo',v)},lbl))
+                    )
+                  ),
+                  h('div',{className:'field'},h('label',null,'Fecha'),h('input',{className:'form-control',type:'date',value:editPermiso.fecha,onChange:e=>onEditarCampo('fecha',e.target.value)})),
+                  editPermiso.tipo==='permiso_hora' ? h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+                    h('div',{className:'field'},h('label',null,'Desde'),h('input',{className:'form-control',type:'time',value:editPermiso.desde,onChange:e=>onEditarCampo('desde',e.target.value)})),
+                    h('div',{className:'field'},h('label',null,'Hasta'),h('input',{className:'form-control',type:'time',value:editPermiso.hasta,onChange:e=>onEditarCampo('hasta',e.target.value)}))
+                  ) : h('div',{className:'preview-note'},'Dia completo: no requiere horarios.'),
+                  h('div',{className:'field'},h('label',null,'Goce de sueldo'),
+                    h('div',{className:'segmented'},
+                      [[true,'Con goce'],[false,'Sin goce']].map(([v,lbl])=>h('button',{key:lbl,type:'button',className:`segment ${editPermiso.goce===v?'on':''}`,onClick:()=>onEditarCampo('goce',v)},lbl))
+                    )
+                  ),
+                  h('div',{className:'field'},h('label',null,'Motivo'),h('textarea',{className:'form-control',rows:3,value:editPermiso.motivo,onChange:e=>onEditarCampo('motivo',e.target.value),placeholder:'Motivo del permiso...'})),
+                  h('div',{className:'permission-actions'},
+                    h('button',{className:'btn btn-ghost btn-sm',onClick:cerrarEdicion},'Cancelar'),
+                    h('button',{className:'btn btn-wine btn-sm',onClick:guardarEdicion},'Guardar')
+                  )
+                )
               )
             ))
           ):h('div',{className:'empty'},'Sin permisos registrados para esta area.')

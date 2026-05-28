@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import unicodedata
+
+from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -7,8 +10,10 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from django.db.models import Q
 
 from core.notificaciones import notificar_permiso_solicitado
+from core.access import can_manage_rrhh
 from rrhh.models import Empleado, PermisoSalida
 from rrhh.services_permisos import can_resolver_permiso_jefe, resolver_permiso_jefe
 
@@ -51,6 +56,10 @@ def _empleado_payload(empleado: Empleado) -> dict:
 
 
 def _permiso_payload(permiso: PermisoSalida, user=None) -> dict:
+    if user:
+        puede_editar = can_manage_rrhh(user) and permiso.estado == PermisoSalida.ESTADO_SOLICITADO and permiso.estado_jefe == PermisoSalida.ESTADO_JEFE_PENDIENTE
+    else:
+        puede_editar = False
     return {
         "id": permiso.id,
         "folio": permiso.folio,
@@ -72,8 +81,58 @@ def _permiso_payload(permiso: PermisoSalida, user=None) -> dict:
         "goce_label": "Con goce" if permiso.goce_sueldo else "Sin goce",
         "origen_solicitud": permiso.origen_solicitud,
         "puede_preautorizar": can_resolver_permiso_jefe(user, permiso) if user is not None else False,
+        "puede_editar": puede_editar,
         "creado_en": permiso.creado_en.isoformat(),
     }
+
+
+def _normalize_text(value: str | None) -> str:
+    normalized = unicodedata.normalize("NFD", (value or "").strip().upper())
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+
+def _normalize_area_filter_value(raw: str | None) -> str:
+    value = _normalize_text(raw)
+    if not value:
+        return ""
+    if value in {"PRODUCCION", "PRODUC", "PROD", "PRODUCION"}:
+        return "PRODUCCION"
+    if value in {"HORNOS", "HORNO"}:
+        return "HORNOS"
+    if value in {"LOGISTICA", "LOGISTICO", "LOGÍSTICA"}:
+        return "LOGISTICA"
+    return value
+
+
+def _permiso_area_filter_q(area_filter: str):
+    if not area_filter:
+        return Q()
+    logistica_area_terms = ("LOGISTICA", "LOGISTICO")
+    hornos_puestos = ("HORNOS", "HORNO")
+    produccion_puestos = ("PRODUCCION", "EMBETUNADO", "ARMADO", "CRUCERO")
+    logistica_puestos = ("REPARTIDOR", "ENVIO_SUCURSAL")
+    if area_filter == "PRODUCCION":
+        return (
+            Q(empleado__departamento=Empleado.DEP_PRODUCCION)
+            | Q(empleado__departamento_origen=Empleado.DEP_PRODUCCION)
+            | Q(empleado__puesto_operativo__in=produccion_puestos)
+            | Q(empleado__area__iregex="PRODUC(C|CIÓN)?")
+            | Q(empleado__puesto_operativo__iregex="PRODUC|EMBETUNADO|ARMADO|CRUCERO")
+        )
+    if area_filter == "HORNOS":
+        return (
+            Q(empleado__area__iregex="HORNOS|HORNO")
+            | Q(empleado__puesto_operativo__in=hornos_puestos)
+        )
+    if area_filter == "LOGISTICA":
+        return (
+            Q(empleado__departamento=Empleado.DEP_LOGISTICA)
+            | Q(empleado__departamento_origen=Empleado.DEP_LOGISTICA)
+            | Q(empleado__area__in=logistica_area_terms)
+            | Q(empleado__area__iregex="LOGÍSTICA|LOGISTICA")
+            | Q(empleado__puesto_operativo__in=logistica_puestos)
+        )
+    return Q(empleado__area__iexact=area_filter)
 
 
 class BasePermisosEquipoViewSet(viewsets.ViewSet):
@@ -84,6 +143,22 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
         return Empleado.objects.none()
 
     def filter_permisos(self, qs):
+        area_filter = self.request.query_params.get("area")
+        area_filter = _normalize_area_filter_value(area_filter)
+        if area_filter:
+            qs = qs.filter(_permiso_area_filter_q(area_filter))
+        sucursal_filter = self.request.query_params.get("sucursal")
+        if sucursal_filter:
+            sucursal_filter = sucursal_filter.strip()
+            from core.models import Sucursal
+
+            sucursal_obj = None
+            if sucursal_filter.isdigit():
+                sucursal_obj = Sucursal.objects.filter(pk=sucursal_filter).values_list("nombre", flat=True).first()
+            if sucursal_obj:
+                qs = qs.filter(empleado__sucursal__iexact=sucursal_obj)
+            else:
+                qs = qs.filter(empleado__sucursal__iexact=sucursal_filter)
         return qs
 
     def _empleados(self):
@@ -146,6 +221,52 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
         notificar_permiso_solicitado(permiso, actor=request.user)
         return Response(_permiso_payload(permiso, request.user), status=status.HTTP_201_CREATED)
 
+    def _coerce_edicion_payload(self, permiso: PermisoSalida, request):
+        data = request.data if request and hasattr(request, "data") else {}
+        errors = []
+        updates = {}
+
+        if "tipo" in data:
+            tipo = (data.get("tipo") or "").strip()
+            if tipo not in dict(PermisoSalida.TIPO_CHOICES):
+                errors.append("Tipo de permiso invalido.")
+            else:
+                updates["tipo"] = tipo
+
+        if "fecha_inicio" in data:
+            fecha_inicio = _parse_dt(data.get("fecha_inicio"))
+            if fecha_inicio is None:
+                errors.append("Fecha/hora de inicio invalida.")
+            else:
+                updates["fecha_inicio"] = fecha_inicio
+
+        if "fecha_fin" in data:
+            fecha_fin_raw = data.get("fecha_fin")
+            if (fecha_fin_raw is None) or (str(fecha_fin_raw).strip() == ""):
+                updates["fecha_fin"] = None
+            else:
+                fecha_fin = _parse_dt(fecha_fin_raw)
+                if fecha_fin is None:
+                    errors.append("Fecha/hora de fin invalida.")
+                else:
+                    updates["fecha_fin"] = fecha_fin
+
+        if "motivo" in data:
+            motivo = (data.get("motivo") or "").strip()
+            if not motivo:
+                errors.append("El motivo es obligatorio.")
+            else:
+                updates["motivo"] = motivo
+
+        if "goce_sueldo" in data:
+            updates["goce_sueldo"] = _parse_bool(data.get("goce_sueldo"), default=permiso.goce_sueldo)
+
+        fecha_inicio = updates.get("fecha_inicio", permiso.fecha_inicio)
+        fecha_fin = updates.get("fecha_fin", permiso.fecha_fin)
+        if fecha_inicio and fecha_fin and fecha_fin < fecha_inicio:
+            errors.append("La fecha final no puede ser anterior a la inicial.")
+        return errors, updates
+
     def get_object(self):
         return get_object_or_404(self._permisos(), pk=self.kwargs["pk"])
 
@@ -159,4 +280,27 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
     def rechazar(self, request, pk=None):
         permiso = self.get_object()
         resolver_permiso_jefe(permiso, request.user, aprobar=False)
+        return Response(_permiso_payload(permiso, request.user))
+
+    @action(detail=True, methods=["post"], url_path="editar")
+    def editar(self, request, pk=None):
+        permiso = get_object_or_404(PermisoSalida.objects.select_related("empleado"), pk=self.kwargs["pk"])
+        if not can_manage_rrhh(request.user):
+            raise PermissionDenied("Solo DG/ADMIN puede editar permisos de bonos.")
+        if permiso.estado != PermisoSalida.ESTADO_SOLICITADO or permiso.estado_jefe != PermisoSalida.ESTADO_JEFE_PENDIENTE:
+            return Response(
+                {"detail": "Solo se pueden editar permisos en estado pendiente."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        errors, updates = self._coerce_edicion_payload(permiso, request)
+        if errors:
+            return Response({"detail": errors[0]}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not updates:
+            return Response(_permiso_payload(permiso, request.user))
+
+        for key, value in updates.items():
+            setattr(permiso, key, value)
+        permiso.save(update_fields=list(updates.keys()) + ["actualizado_en"])
         return Response(_permiso_payload(permiso, request.user))
