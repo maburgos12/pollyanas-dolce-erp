@@ -113,7 +113,7 @@
     </form>
   </section>
 
-  <section class="kpi-grid" style="grid-template-columns:repeat(5,minmax(0,1fr))">
+  <section class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
     <article class="kpi-card"><div class="kpi-label">Total a pagar</div><div class="kpi-value gold">${{ total_bonos|floatformat:2|intcomma }}</div></article>
     <article class="kpi-card"><div class="kpi-label">Empleados</div><div class="kpi-value">{{ bonos|length|intcomma }}</div></article>
     <article class="kpi-card"><div class="kpi-label">Pasan asistencia</div><div class="kpi-value wine">{{ passing_asistencia|intcomma }}</div></article>
