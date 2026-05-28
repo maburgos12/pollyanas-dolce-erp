@@ -603,7 +603,7 @@ class RRHHViewsTests(TestCase):
         self.client.login(username="rrhh", password="pass123")
 
     def test_empleados_view_and_create(self):
-        resp = self.client.get(reverse("rrhh:empleados"))
+        resp = self.client.get(reverse("rrhh:empleados"), secure=True)
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "RRHH · Empleados")
         self.assertContains(resp, "Alta de empleado")
