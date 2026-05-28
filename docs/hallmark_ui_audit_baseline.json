@@ -1,0 +1,2910 @@
+{
+  "description": "Baseline de deuda visual Hallmark existente. No se debe ampliar salvo revision explicita; el test falla cuando aparecen issues nuevos.",
+  "accepted_issues": [
+    {
+      "key": "inline-fixed-width|activos/templates/activos/activos.html|<div class=\"erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %",
+      "rule": "inline-fixed-width",
+      "path": "activos/templates/activos/activos.html",
+      "snippet": "<div class=\"erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|activos/templates/activos/activos.html|<select name=\"estado\" style=\"min-width:150px;\">",
+      "rule": "inline-fixed-width",
+      "path": "activos/templates/activos/activos.html",
+      "snippet": "<select name=\"estado\" style=\"min-width:150px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|activos/templates/activos/activos.html|<td style=\"min-width:160px;\">",
+      "rule": "inline-fixed-width",
+      "path": "activos/templates/activos/activos.html",
+      "snippet": "<td style=\"min-width:160px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|activos/templates/activos/activos.html|<td style=\"width:28%;\"><strong>Documento</strong></td>",
+      "rule": "inline-fixed-width",
+      "path": "activos/templates/activos/activos.html",
+      "snippet": "<td style=\"width:28%;\"><strong>Documento</strong></td>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|activos/templates/activos/calendario.html|<div class=\"erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %",
+      "rule": "inline-fixed-width",
+      "path": "activos/templates/activos/calendario.html",
+      "snippet": "<div class=\"erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|activos/templates/activos/calendario.html|<td style=\"min-width:160px;\">",
+      "rule": "inline-fixed-width",
+      "path": "activos/templates/activos/calendario.html",
+      "snippet": "<td style=\"min-width:160px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|activos/templates/activos/calendario.html|<td style=\"width:28%;\"><strong>Documento</strong></td>",
+      "rule": "inline-fixed-width",
+      "path": "activos/templates/activos/calendario.html",
+      "snippet": "<td style=\"width:28%;\"><strong>Documento</strong></td>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|activos/templates/activos/ordenes.html|<div class=\"erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %",
+      "rule": "inline-fixed-width",
+      "path": "activos/templates/activos/ordenes.html",
+      "snippet": "<div class=\"erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|activos/templates/activos/ordenes.html|<td style=\"min-width:160px;\">",
+      "rule": "inline-fixed-width",
+      "path": "activos/templates/activos/ordenes.html",
+      "snippet": "<td style=\"min-width:160px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|activos/templates/activos/ordenes.html|<td style=\"width:28%;\"><strong>Documento</strong></td>",
+      "rule": "inline-fixed-width",
+      "path": "activos/templates/activos/ordenes.html",
+      "snippet": "<td style=\"width:28%;\"><strong>Documento</strong></td>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|activos/templates/activos/planes.html|<div class=\"erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %",
+      "rule": "inline-fixed-width",
+      "path": "activos/templates/activos/planes.html",
+      "snippet": "<div class=\"erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|activos/templates/activos/planes.html|<td style=\"min-width:160px;\">",
+      "rule": "inline-fixed-width",
+      "path": "activos/templates/activos/planes.html",
+      "snippet": "<td style=\"min-width:160px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|activos/templates/activos/planes.html|<td style=\"width:28%;\"><strong>Documento</strong></td>",
+      "rule": "inline-fixed-width",
+      "path": "activos/templates/activos/planes.html",
+      "snippet": "<td style=\"width:28%;\"><strong>Documento</strong></td>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|activos/templates/activos/reportes.html|<div class=\"erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %",
+      "rule": "inline-fixed-width",
+      "path": "activos/templates/activos/reportes.html",
+      "snippet": "<div class=\"erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|activos/templates/activos/reportes.html|<td style=\"min-width:160px;\">",
+      "rule": "inline-fixed-width",
+      "path": "activos/templates/activos/reportes.html",
+      "snippet": "<td style=\"min-width:160px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|activos/templates/activos/reportes.html|<td style=\"width:28%;\"><strong>Documento</strong></td>",
+      "rule": "inline-fixed-width",
+      "path": "activos/templates/activos/reportes.html",
+      "snippet": "<td style=\"width:28%;\"><strong>Documento</strong></td>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|core/templates/core/dashboard.html|<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:18px",
+      "rule": "inline-fixed-width",
+      "path": "core/templates/core/dashboard.html",
+      "snippet": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:18px",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|core/templates/core/dashboard.html|style=\"width:min({% widthratio budget_semaforo_mes.ejecutado budget_semaforo_mes.objetivo 100 %}%, 100%)\"></div>",
+      "rule": "inline-fixed-width",
+      "path": "core/templates/core/dashboard.html",
+      "snippet": "style=\"width:min({% widthratio budget_semaforo_mes.ejecutado budget_semaforo_mes.objetivo 100 %}%, 100%)\"></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|core/templates/core/dashboard.html|style=\"width:min({% widthratio budget_semaforo_quincena.ejecutado budget_semaforo_quincena.objetivo 100 %}%, 100%)\"></div>",
+      "rule": "inline-fixed-width",
+      "path": "core/templates/core/dashboard.html",
+      "snippet": "style=\"width:min({% widthratio budget_semaforo_quincena.ejecutado budget_semaforo_quincena.objetivo 100 %}%, 100%)\"></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|crm/templates/crm/cliente_detail.html|<td style=\"max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis\">{{ pedido.descripcion }}</td>",
+      "rule": "inline-fixed-width",
+      "path": "crm/templates/crm/cliente_detail.html",
+      "snippet": "<td style=\"max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis\">{{ pedido.descripcion }}</td>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|fallas/templates/fallas/dashboard.html|: `<input id=\"asignado-a\" type=\"number\" placeholder=\"ID de usuario\" style=\"min-height:36px;border:1px solid #e5dce1;border-radius:8px;paddin",
+      "rule": "inline-fixed-width",
+      "path": "fallas/templates/fallas/dashboard.html",
+      "snippet": ": `<input id=\"asignado-a\" type=\"number\" placeholder=\"ID de usuario\" style=\"min-height:36px;border:1px solid #e5dce1;border-radius:8px;paddin",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|fallas/templates/fallas/dashboard.html|<div class=\"bar-track\"><div class=\"bar-fill\" style=\"width:${Math.round((item.total / max) * 100)}%\"></div></div>",
+      "rule": "inline-fixed-width",
+      "path": "fallas/templates/fallas/dashboard.html",
+      "snippet": "<div class=\"bar-track\"><div class=\"bar-fill\" style=\"width:${Math.round((item.total / max) * 100)}%\"></div></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|fallas/templates/fallas/dashboard.html|<div class=\"fallas-modal\" style=\"max-width:460px\">",
+      "rule": "inline-fixed-width",
+      "path": "fallas/templates/fallas/dashboard.html",
+      "snippet": "<div class=\"fallas-modal\" style=\"max-width:460px\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|fallas/templates/fallas/dashboard.html|<input id=\"costo-est\" type=\"number\" step=\"0.01\" placeholder=\"0.00\" value=\"${rep.costo_estimado || \"\"}\" style=\"min-height:40px;border:1px sol",
+      "rule": "inline-fixed-width",
+      "path": "fallas/templates/fallas/dashboard.html",
+      "snippet": "<input id=\"costo-est\" type=\"number\" step=\"0.01\" placeholder=\"0.00\" value=\"${rep.costo_estimado || \"\"}\" style=\"min-height:40px;border:1px sol",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|fallas/templates/fallas/dashboard.html|<input id=\"costo-real\" type=\"number\" step=\"0.01\" placeholder=\"0.00\" value=\"${rep.costo_real || \"\"}\" style=\"min-height:40px;border:1px solid ",
+      "rule": "inline-fixed-width",
+      "path": "fallas/templates/fallas/dashboard.html",
+      "snippet": "<input id=\"costo-real\" type=\"number\" step=\"0.01\" placeholder=\"0.00\" value=\"${rep.costo_real || \"\"}\" style=\"min-height:40px;border:1px solid ",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|fallas/templates/fallas/dashboard.html|<input id=\"proveedor-servicio\" type=\"text\" placeholder=\"Nombre del proveedor o técnico\" value=\"${esc(rep.proveedor_servicio || \"\")}\" style=\"",
+      "rule": "inline-fixed-width",
+      "path": "fallas/templates/fallas/dashboard.html",
+      "snippet": "<input id=\"proveedor-servicio\" type=\"text\" placeholder=\"Nombre del proveedor o técnico\" value=\"${esc(rep.proveedor_servicio || \"\")}\" style=\"",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|fallas/templates/fallas/dashboard.html|<select id=\"nuevo-estatus\" style=\"min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%\">",
+      "rule": "inline-fixed-width",
+      "path": "fallas/templates/fallas/dashboard.html",
+      "snippet": "<select id=\"nuevo-estatus\" style=\"min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|fallas/templates/fallas/dashboard.html|<textarea id=\"comentario-estatus\" rows=\"3\" style=\"width:100%;min-height:80px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;fon",
+      "rule": "inline-fixed-width",
+      "path": "fallas/templates/fallas/dashboard.html",
+      "snippet": "<textarea id=\"comentario-estatus\" rows=\"3\" style=\"width:100%;min-height:80px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;fon",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|fallas/templates/fallas/dashboard.html|? `<a href=\"${rep.foto_evidencia}\" target=\"_blank\" rel=\"noopener\"><img src=\"${rep.foto_evidencia}\" alt=\"Evidencia\" style=\"width:100%;max-hei",
+      "rule": "inline-fixed-width",
+      "path": "fallas/templates/fallas/dashboard.html",
+      "snippet": "? `<a href=\"${rep.foto_evidencia}\" target=\"_blank\" rel=\"noopener\"><img src=\"${rep.foto_evidencia}\" alt=\"Evidencia\" style=\"width:100%;max-hei",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|fallas/templates/fallas/dashboard.html|? `<select id=\"asignado-a\" style=\"min-height:36px;border:1px solid #e5dce1;border-radius:8px;padding:6px 10px;font:inherit;width:100%\">",
+      "rule": "inline-fixed-width",
+      "path": "fallas/templates/fallas/dashboard.html",
+      "snippet": "? `<select id=\"asignado-a\" style=\"min-height:36px;border:1px solid #e5dce1;border-radius:8px;padding:6px 10px;font:inherit;width:100%\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|inventario/templates/inventario/ajustes.html|<input name=\"ajuste_id\" type=\"text\" class=\"form-control\" value=\"{{ selected_ajuste_id }}\" placeholder=\"ID ajuste (ej. 154)\" style=\"max-width",
+      "rule": "inline-fixed-width",
+      "path": "inventario/templates/inventario/ajustes.html",
+      "snippet": "<input name=\"ajuste_id\" type=\"text\" class=\"form-control\" value=\"{{ selected_ajuste_id }}\" placeholder=\"ID ajuste (ej. 154)\" style=\"max-width",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|inventario/templates/inventario/aliases_catalog.html|<th style=\"width:50%;\">Cierre del maestro</th>",
+      "rule": "inline-fixed-width",
+      "path": "inventario/templates/inventario/aliases_catalog.html",
+      "snippet": "<th style=\"width:50%;\">Cierre del maestro</th>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|inventario/templates/inventario/aliases_catalog.html|<th style=\"width:50%;\">Gobierno del catálogo</th>",
+      "rule": "inline-fixed-width",
+      "path": "inventario/templates/inventario/aliases_catalog.html",
+      "snippet": "<th style=\"width:50%;\">Gobierno del catálogo</th>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|inventario/templates/inventario/auditoria_inventario.html|<input type=\"date\" name=\"desde\" value=\"{{ desde }}\" class=\"form-control\" style=\"width:150px\">",
+      "rule": "inline-fixed-width",
+      "path": "inventario/templates/inventario/auditoria_inventario.html",
+      "snippet": "<input type=\"date\" name=\"desde\" value=\"{{ desde }}\" class=\"form-control\" style=\"width:150px\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|inventario/templates/inventario/auditoria_inventario.html|<input type=\"date\" name=\"hasta\" value=\"{{ hasta }}\" class=\"form-control\" style=\"width:150px\">",
+      "rule": "inline-fixed-width",
+      "path": "inventario/templates/inventario/auditoria_inventario.html",
+      "snippet": "<input type=\"date\" name=\"hasta\" value=\"{{ hasta }}\" class=\"form-control\" style=\"width:150px\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|inventario/templates/inventario/auditoria_inventario.html|style=\"width:200px\" placeholder=\"Buscar insumo...\">",
+      "rule": "inline-fixed-width",
+      "path": "inventario/templates/inventario/auditoria_inventario.html",
+      "snippet": "style=\"width:200px\" placeholder=\"Buscar insumo...\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|inventario/templates/inventario/captura_diaria.html|<select name=\"almacen\" class=\"form-control\" style=\"width:200px\">",
+      "rule": "inline-fixed-width",
+      "path": "inventario/templates/inventario/captura_diaria.html",
+      "snippet": "<select name=\"almacen\" class=\"form-control\" style=\"width:200px\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|inventario/templates/inventario/captura_diaria.html|<span class=\"{% if m.tipo == 'ENTRADA' %}mov-tipo-e{% else %}mov-tipo-s{% endif %}\" style=\"width:60px\">",
+      "rule": "inline-fixed-width",
+      "path": "inventario/templates/inventario/captura_diaria.html",
+      "snippet": "<span class=\"{% if m.tipo == 'ENTRADA' %}mov-tipo-e{% else %}mov-tipo-s{% endif %}\" style=\"width:60px\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|inventario/templates/inventario/captura_diaria.html|<span style=\"font-weight:700;min-width:60px;text-align:right\">{{ m.cantidad }} {{ m.insumo.unidad_base.codigo|default:'' }}</span>",
+      "rule": "inline-fixed-width",
+      "path": "inventario/templates/inventario/captura_diaria.html",
+      "snippet": "<span style=\"font-weight:700;min-width:60px;text-align:right\">{{ m.cantidad }} {{ m.insumo.unidad_base.codigo|default:'' }}</span>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|inventario/templates/inventario/captura_diaria.html|<span style=\"width:100px;font-size:11px;color:var(--texto-light)\">{{ m.fecha|date:\"d/m H:i\" }}</span>",
+      "rule": "inline-fixed-width",
+      "path": "inventario/templates/inventario/captura_diaria.html",
+      "snippet": "<span style=\"width:100px;font-size:11px;color:var(--texto-light)\">{{ m.fecha|date:\"d/m H:i\" }}</span>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|inventario/templates/inventario/captura_diaria.html|style=\"width:200px\" placeholder=\"Buscar insumo...\">",
+      "rule": "inline-fixed-width",
+      "path": "inventario/templates/inventario/captura_diaria.html",
+      "snippet": "style=\"width:200px\" placeholder=\"Buscar insumo...\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|inventario/templates/inventario/captura_diaria.html|{% if m.notas %}<span class=\"muted\" style=\"font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\">{{ m.no",
+      "rule": "inline-fixed-width",
+      "path": "inventario/templates/inventario/captura_diaria.html",
+      "snippet": "{% if m.notas %}<span class=\"muted\" style=\"font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\">{{ m.no",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|logistica/templates/logistica/emails/alerta_documento.html|<div style=\"max-width:720px; margin:0 auto; border:1px solid #eee;\">",
+      "rule": "inline-fixed-width",
+      "path": "logistica/templates/logistica/emails/alerta_documento.html",
+      "snippet": "<div style=\"max-width:720px; margin:0 auto; border:1px solid #eee;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|logistica/templates/logistica/emails/alerta_documento.html|<table style=\"width:100%; border-collapse:collapse; margin:0 0 22px;\">",
+      "rule": "inline-fixed-width",
+      "path": "logistica/templates/logistica/emails/alerta_documento.html",
+      "snippet": "<table style=\"width:100%; border-collapse:collapse; margin:0 0 22px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|logistica/templates/logistica/emails/alerta_lavado.html|<div style=\"max-width:720px; margin:0 auto; border:1px solid #eee;\">",
+      "rule": "inline-fixed-width",
+      "path": "logistica/templates/logistica/emails/alerta_lavado.html",
+      "snippet": "<div style=\"max-width:720px; margin:0 auto; border:1px solid #eee;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|logistica/templates/logistica/emails/alerta_lavado.html|<table style=\"width:100%; border-collapse:collapse; margin:0 0 22px;\">",
+      "rule": "inline-fixed-width",
+      "path": "logistica/templates/logistica/emails/alerta_lavado.html",
+      "snippet": "<table style=\"width:100%; border-collapse:collapse; margin:0 0 22px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|logistica/templates/logistica/emails/alerta_servicio.html|<div style=\"max-width:760px; margin:0 auto; border:1px solid #eee;\">",
+      "rule": "inline-fixed-width",
+      "path": "logistica/templates/logistica/emails/alerta_servicio.html",
+      "snippet": "<div style=\"max-width:760px; margin:0 auto; border:1px solid #eee;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|logistica/templates/logistica/emails/alerta_servicio.html|<table style=\"width:100%; border-collapse:collapse; margin:0 0 22px;\">",
+      "rule": "inline-fixed-width",
+      "path": "logistica/templates/logistica/emails/alerta_servicio.html",
+      "snippet": "<table style=\"width:100%; border-collapse:collapse; margin:0 0 22px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|logistica/templates/logistica/emails/escalado.html|<div style=\"max-width:760px; margin:0 auto; border:1px solid #eee;\">",
+      "rule": "inline-fixed-width",
+      "path": "logistica/templates/logistica/emails/escalado.html",
+      "snippet": "<div style=\"max-width:760px; margin:0 auto; border:1px solid #eee;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|logistica/templates/logistica/emails/escalado.html|<table style=\"width:100%; border-collapse:collapse;\">",
+      "rule": "inline-fixed-width",
+      "path": "logistica/templates/logistica/emails/escalado.html",
+      "snippet": "<table style=\"width:100%; border-collapse:collapse;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|logistica/templates/logistica/emails/reporte_nuevo.html|<div style=\"max-width:680px; margin:0 auto; border:1px solid #eee;\">",
+      "rule": "inline-fixed-width",
+      "path": "logistica/templates/logistica/emails/reporte_nuevo.html",
+      "snippet": "<div style=\"max-width:680px; margin:0 auto; border:1px solid #eee;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|logistica/templates/logistica/emails/reporte_nuevo.html|<table style=\"width:100%; border-collapse:collapse; margin:0 0 20px;\">",
+      "rule": "inline-fixed-width",
+      "path": "logistica/templates/logistica/emails/reporte_nuevo.html",
+      "snippet": "<table style=\"width:100%; border-collapse:collapse; margin:0 0 20px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|logistica/templates/logistica/ruta_detail.html|<select class=\"input-field\" name=\"estatus\" style=\"min-width:130px;\">",
+      "rule": "inline-fixed-width",
+      "path": "logistica/templates/logistica/ruta_detail.html",
+      "snippet": "<select class=\"input-field\" name=\"estatus\" style=\"min-width:130px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|maestros/templates/maestros/costos_adquisicion.html|<select name=\"periodo\" class=\"form-control\" style=\"width:150px\">",
+      "rule": "inline-fixed-width",
+      "path": "maestros/templates/maestros/costos_adquisicion.html",
+      "snippet": "<select name=\"periodo\" class=\"form-control\" style=\"width:150px\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|maestros/templates/maestros/costos_adquisicion.html|<select name=\"tipo\" class=\"form-control\" style=\"width:150px\">",
+      "rule": "inline-fixed-width",
+      "path": "maestros/templates/maestros/costos_adquisicion.html",
+      "snippet": "<select name=\"tipo\" class=\"form-control\" style=\"width:150px\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|maestros/templates/maestros/costos_adquisicion.html|<span id=\"margen-{{ r.id }}\" style=\"font-size:11px;white-space:nowrap;min-width:70px\"></span>",
+      "rule": "inline-fixed-width",
+      "path": "maestros/templates/maestros/costos_adquisicion.html",
+      "snippet": "<span id=\"margen-{{ r.id }}\" style=\"font-size:11px;white-space:nowrap;min-width:70px\"></span>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|maestros/templates/maestros/costos_adquisicion.html|step=\"0.0001\" min=\"0\" style=\"width:130px\" placeholder=\"Costo unitario\"",
+      "rule": "inline-fixed-width",
+      "path": "maestros/templates/maestros/costos_adquisicion.html",
+      "snippet": "step=\"0.0001\" min=\"0\" style=\"width:130px\" placeholder=\"Costo unitario\"",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|maestros/templates/maestros/costos_adquisicion.html|style=\"width:160px\" placeholder=\"Proveedor (opcional)\">",
+      "rule": "inline-fixed-width",
+      "path": "maestros/templates/maestros/costos_adquisicion.html",
+      "snippet": "style=\"width:160px\" placeholder=\"Proveedor (opcional)\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|maestros/templates/maestros/costos_adquisicion.html|style=\"width:200px\" placeholder=\"Buscar producto...\">",
+      "rule": "inline-fixed-width",
+      "path": "maestros/templates/maestros/costos_adquisicion.html",
+      "snippet": "style=\"width:200px\" placeholder=\"Buscar producto...\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|maestros/templates/maestros/point_pending_review.html|<input class=\"form-control\" type=\"number\" name=\"auto_score_min\" min=\"0\" max=\"100\" step=\"0.1\" value=\"90\" placeholder=\"Nivel auto\" style=\"max-",
+      "rule": "inline-fixed-width",
+      "path": "maestros/templates/maestros/point_pending_review.html",
+      "snippet": "<input class=\"form-control\" type=\"number\" name=\"auto_score_min\" min=\"0\" max=\"100\" step=\"0.1\" value=\"90\" placeholder=\"Nivel auto\" style=\"max-",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|recetas/templates/recetas/costeo_dashboard.html|<div class=\"history-fill\" style=\"width:{{ item.history_pct|floatformat:2 }}%\"></div>",
+      "rule": "inline-fixed-width",
+      "path": "recetas/templates/recetas/costeo_dashboard.html",
+      "snippet": "<div class=\"history-fill\" style=\"width:{{ item.history_pct|floatformat:2 }}%\"></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|recetas/templates/recetas/dg_operacion_dashboard.html|<span class=\"dg-meter-fill is-risk\" style=\"width:{% if row.tone == 'danger' %}100{% elif row.tone == 'warning' %}62{% else %}35{% endif %}%\"",
+      "rule": "inline-fixed-width",
+      "path": "recetas/templates/recetas/dg_operacion_dashboard.html",
+      "snippet": "<span class=\"dg-meter-fill is-risk\" style=\"width:{% if row.tone == 'danger' %}100{% elif row.tone == 'warning' %}62{% else %}35{% endif %}%\"",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|recetas/templates/recetas/dg_operacion_dashboard.html|<span class=\"dg-meter-fill is-sales\" style=\"width:{% widthratio row.total_amount point_exec_summary.latest_sales_amount 100 %}%\"></span>",
+      "rule": "inline-fixed-width",
+      "path": "recetas/templates/recetas/dg_operacion_dashboard.html",
+      "snippet": "<span class=\"dg-meter-fill is-sales\" style=\"width:{% widthratio row.total_amount point_exec_summary.latest_sales_amount 100 %}%\"></span>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|recetas/templates/recetas/dg_operacion_dashboard.html|<span class=\"dg-meter-fill is-waste\" style=\"width:{% widthratio row.total_qty point_waste_summary.total_qty 100 %}%\"></span>",
+      "rule": "inline-fixed-width",
+      "path": "recetas/templates/recetas/dg_operacion_dashboard.html",
+      "snippet": "<span class=\"dg-meter-fill is-waste\" style=\"width:{% widthratio row.total_qty point_waste_summary.total_qty 100 %}%\"></span>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|recetas/templates/recetas/monitor_margenes.html|<div class=\"mm-bar\"><div class=\"mm-bar-fill is-green\" style=\"width: {{ row.margin_bar_width }}%\"></div></div>",
+      "rule": "inline-fixed-width",
+      "path": "recetas/templates/recetas/monitor_margenes.html",
+      "snippet": "<div class=\"mm-bar\"><div class=\"mm-bar-fill is-green\" style=\"width: {{ row.margin_bar_width }}%\"></div></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|recetas/templates/recetas/monitor_margenes.html|<div class=\"mm-bar\"><div class=\"mm-bar-fill is-red\" style=\"width: {{ row.margin_bar_width }}%\"></div></div>",
+      "rule": "inline-fixed-width",
+      "path": "recetas/templates/recetas/monitor_margenes.html",
+      "snippet": "<div class=\"mm-bar\"><div class=\"mm-bar-fill is-red\" style=\"width: {{ row.margin_bar_width }}%\"></div></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|recetas/templates/recetas/monitor_margenes.html|<div class=\"mm-bar\"><div class=\"mm-bar-fill is-yellow\" style=\"width: {{ row.margin_bar_width }}%\"></div></div>",
+      "rule": "inline-fixed-width",
+      "path": "recetas/templates/recetas/monitor_margenes.html",
+      "snippet": "<div class=\"mm-bar\"><div class=\"mm-bar-fill is-yellow\" style=\"width: {{ row.margin_bar_width }}%\"></div></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|recetas/templates/recetas/mrp.html|<div class=\"erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% elif row.tone == 'primary' ",
+      "rule": "inline-fixed-width",
+      "path": "recetas/templates/recetas/mrp.html",
+      "snippet": "<div class=\"erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% elif row.tone == 'primary' ",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|recetas/templates/recetas/mrp.html|<div class=\"erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %",
+      "rule": "inline-fixed-width",
+      "path": "recetas/templates/recetas/mrp.html",
+      "snippet": "<div class=\"erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|recetas/templates/recetas/mrp.html|<td style=\"min-width: 160px;\">",
+      "rule": "inline-fixed-width",
+      "path": "recetas/templates/recetas/mrp.html",
+      "snippet": "<td style=\"min-width: 160px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|recetas/templates/recetas/mrp.html|<td style=\"min-width: 160px;\">",
+      "rule": "inline-fixed-width",
+      "path": "recetas/templates/recetas/mrp.html",
+      "snippet": "<td style=\"min-width: 160px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|recetas/templates/recetas/reabasto_cedis_captura.html|<div class=\"erp-progress-fill {% if row.semaphore_tone == 'danger' %}is-danger{% elif row.semaphore_tone == 'warning' %}is-warning{% elif ro",
+      "rule": "inline-fixed-width",
+      "path": "recetas/templates/recetas/reabasto_cedis_captura.html",
+      "snippet": "<div class=\"erp-progress-fill {% if row.semaphore_tone == 'danger' %}is-danger{% elif row.semaphore_tone == 'warning' %}is-warning{% elif ro",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|recetas/templates/recetas/reabasto_cedis_captura.html|<td style=\"min-width: 180px;\">",
+      "rule": "inline-fixed-width",
+      "path": "recetas/templates/recetas/reabasto_cedis_captura.html",
+      "snippet": "<td style=\"min-width: 180px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|rentabilidad/templates/rentabilidad/dashboard.html|<div class=\"bar-track\"><div class=\"bar-fill\" style=\"width:100%;\"></div></div>",
+      "rule": "inline-fixed-width",
+      "path": "rentabilidad/templates/rentabilidad/dashboard.html",
+      "snippet": "<div class=\"bar-track\"><div class=\"bar-fill\" style=\"width:100%;\"></div></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|rentabilidad/templates/rentabilidad/dashboard.html|<div class=\"bar-track\"><div class=\"bar-fill\" style=\"width:{{ r.porcentaje_avance_pe|floatformat:0 }}%;\"></div></div>",
+      "rule": "inline-fixed-width",
+      "path": "rentabilidad/templates/rentabilidad/dashboard.html",
+      "snippet": "<div class=\"bar-track\"><div class=\"bar-fill\" style=\"width:{{ r.porcentaje_avance_pe|floatformat:0 }}%;\"></div></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|rentabilidad/templates/rentabilidad/dashboard.html|<div class=\"bar-track\"><div class=\"bar-fill\" style=\"width:{{ totales.pct_costo_variable }}%; background:var(--rent-amber);\"></div></div>",
+      "rule": "inline-fixed-width",
+      "path": "rentabilidad/templates/rentabilidad/dashboard.html",
+      "snippet": "<div class=\"bar-track\"><div class=\"bar-fill\" style=\"width:{{ totales.pct_costo_variable }}%; background:var(--rent-amber);\"></div></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|rentabilidad/templates/rentabilidad/dashboard.html|<div class=\"bar-track\"><div class=\"bar-fill\" style=\"width:{{ totales.pct_gasto_fijo }}%; background:var(--rent-blue);\"></div></div>",
+      "rule": "inline-fixed-width",
+      "path": "rentabilidad/templates/rentabilidad/dashboard.html",
+      "snippet": "<div class=\"bar-track\"><div class=\"bar-fill\" style=\"width:{{ totales.pct_gasto_fijo }}%; background:var(--rent-blue);\"></div></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|rentabilidad/templates/rentabilidad/dashboard.html|<div class=\"bar-track\"><div class=\"bar-fill\" style=\"width:{{ totales.pct_utilidad }}%; background:var(--rent-green);\"></div></div>",
+      "rule": "inline-fixed-width",
+      "path": "rentabilidad/templates/rentabilidad/dashboard.html",
+      "snippet": "<div class=\"bar-track\"><div class=\"bar-fill\" style=\"width:{{ totales.pct_utilidad }}%; background:var(--rent-green);\"></div></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|rentabilidad/templates/rentabilidad/dashboard.html|<th class=\"num\" style=\"width:11%;\">Gasto fijo</th>",
+      "rule": "inline-fixed-width",
+      "path": "rentabilidad/templates/rentabilidad/dashboard.html",
+      "snippet": "<th class=\"num\" style=\"width:11%;\">Gasto fijo</th>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|rentabilidad/templates/rentabilidad/dashboard.html|<th class=\"num\" style=\"width:11%;\">Margen bruto</th>",
+      "rule": "inline-fixed-width",
+      "path": "rentabilidad/templates/rentabilidad/dashboard.html",
+      "snippet": "<th class=\"num\" style=\"width:11%;\">Margen bruto</th>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|rentabilidad/templates/rentabilidad/dashboard.html|<th class=\"num\" style=\"width:12%;\">Utilidad op.</th>",
+      "rule": "inline-fixed-width",
+      "path": "rentabilidad/templates/rentabilidad/dashboard.html",
+      "snippet": "<th class=\"num\" style=\"width:12%;\">Utilidad op.</th>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|rentabilidad/templates/rentabilidad/dashboard.html|<th class=\"num\" style=\"width:12%;\">Ventas</th>",
+      "rule": "inline-fixed-width",
+      "path": "rentabilidad/templates/rentabilidad/dashboard.html",
+      "snippet": "<th class=\"num\" style=\"width:12%;\">Ventas</th>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|rentabilidad/templates/rentabilidad/dashboard.html|<th class=\"num\" style=\"width:13%;\">Costo variable</th>",
+      "rule": "inline-fixed-width",
+      "path": "rentabilidad/templates/rentabilidad/dashboard.html",
+      "snippet": "<th class=\"num\" style=\"width:13%;\">Costo variable</th>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|reportes/templates/reportes/bi.html|<div class=\"bi-bar-fill ${row.tone || \"is-wine\"}\" style=\"width:${Math.max(4, Math.abs(asNumber(row.value)) / max * 100)}%\"></div>",
+      "rule": "inline-fixed-width",
+      "path": "reportes/templates/reportes/bi.html",
+      "snippet": "<div class=\"bi-bar-fill ${row.tone || \"is-wine\"}\" style=\"width:${Math.max(4, Math.abs(asNumber(row.value)) / max * 100)}%\"></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|reportes/templates/reportes/bi.html|<div class=\"bi-bar-track\"><div class=\"bi-bar-fill is-green\" style=\"width: {{ row.contribution_share_pct|default:0|floatformat:1 }}%;\"></div>",
+      "rule": "inline-fixed-width",
+      "path": "reportes/templates/reportes/bi.html",
+      "snippet": "<div class=\"bi-bar-track\"><div class=\"bi-bar-fill is-green\" style=\"width: {{ row.contribution_share_pct|default:0|floatformat:1 }}%;\"></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|reportes/templates/reportes/bi.html|<div class=\"bi-bar-track\"><div class=\"bi-bar-fill is-wine\" style=\"width: {{ row.sales_share_pct|default:0|floatformat:1 }}%;\"></div></div>",
+      "rule": "inline-fixed-width",
+      "path": "reportes/templates/reportes/bi.html",
+      "snippet": "<div class=\"bi-bar-track\"><div class=\"bi-bar-fill is-wine\" style=\"width: {{ row.sales_share_pct|default:0|floatformat:1 }}%;\"></div></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|reportes/templates/reportes/consumo.html|<div class=\"erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %",
+      "rule": "inline-fixed-width",
+      "path": "reportes/templates/reportes/consumo.html",
+      "snippet": "<div class=\"erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|reportes/templates/reportes/consumo.html|<td style=\"min-width:160px;\">",
+      "rule": "inline-fixed-width",
+      "path": "reportes/templates/reportes/consumo.html",
+      "snippet": "<td style=\"min-width:160px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|reportes/templates/reportes/costo_receta.html|<div class=\"finance-bar-track\"><div class=\"finance-bar-fill\" style=\"width:{% widthratio row.costo_total family_rows.0.costo_total 100 %}%\"><",
+      "rule": "inline-fixed-width",
+      "path": "reportes/templates/reportes/costo_receta.html",
+      "snippet": "<div class=\"finance-bar-track\"><div class=\"finance-bar-fill\" style=\"width:{% widthratio row.costo_total family_rows.0.costo_total 100 %}%\"><",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|reportes/templates/reportes/faltantes.html|<div class=\"erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %",
+      "rule": "inline-fixed-width",
+      "path": "reportes/templates/reportes/faltantes.html",
+      "snippet": "<div class=\"erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|reportes/templates/reportes/faltantes.html|<td style=\"min-width:160px;\">",
+      "rule": "inline-fixed-width",
+      "path": "reportes/templates/reportes/faltantes.html",
+      "snippet": "<td style=\"min-width:160px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|reportes/templates/reportes/gastos_operativos_importar.html|<select name=\"manual_periodo\" style=\"min-width:180px; padding:.5rem; border:1px solid #D1D5DB; border-radius:8px; margin-top:.3rem;\">",
+      "rule": "inline-fixed-width",
+      "path": "reportes/templates/reportes/gastos_operativos_importar.html",
+      "snippet": "<select name=\"manual_periodo\" style=\"min-width:180px; padding:.5rem; border:1px solid #D1D5DB; border-radius:8px; margin-top:.3rem;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|reportes/templates/reportes/inversiones_wizard.html|<col style=\"width:18%\"><col style=\"width:27%\"><col style=\"width:18%\"><col style=\"width:12%\"><col style=\"width:10%\"><col style=\"width:10%\"><c",
+      "rule": "inline-fixed-width",
+      "path": "reportes/templates/reportes/inversiones_wizard.html",
+      "snippet": "<col style=\"width:18%\"><col style=\"width:27%\"><col style=\"width:18%\"><col style=\"width:12%\"><col style=\"width:10%\"><col style=\"width:10%\"><c",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|reportes/templates/reportes/proyecto_inversion_detail.html|<div class=\"investment-progress-bar\" style=\"width: {{ kpis.recovery_progress_pct|floatformat:2 }}%;\"></div>",
+      "rule": "inline-fixed-width",
+      "path": "reportes/templates/reportes/proyecto_inversion_detail.html",
+      "snippet": "<div class=\"investment-progress-bar\" style=\"width: {{ kpis.recovery_progress_pct|floatformat:2 }}%;\"></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|reportes/templates/reportes/ventas.html|<div class=\"bi-bar-fill ${row.tone || \"is-wine\"}\" style=\"width:${Math.max(4, Math.abs(asNumber(row.value)) / max * 100)}%\"></div>",
+      "rule": "inline-fixed-width",
+      "path": "reportes/templates/reportes/ventas.html",
+      "snippet": "<div class=\"bi-bar-fill ${row.tone || \"is-wine\"}\" style=\"width:${Math.max(4, Math.abs(asNumber(row.value)) / max * 100)}%\"></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|rrhh/templates/rrhh/organizacion.html|<table class=\"org-table\" style=\"min-width:680px;\">",
+      "rule": "inline-fixed-width",
+      "path": "rrhh/templates/rrhh/organizacion.html",
+      "snippet": "<table class=\"org-table\" style=\"min-width:680px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|rrhh/templates/rrhh/prestamo_detalle.html|<div class=\"loan-progress\"><span style=\"width: {{ progreso }}%;\"></span></div>",
+      "rule": "inline-fixed-width",
+      "path": "rrhh/templates/rrhh/prestamo_detalle.html",
+      "snippet": "<div class=\"loan-progress\"><span style=\"width: {{ progreso }}%;\"></span></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|rrhh/templates/rrhh/prestamo_detalle.html|<input type=\"number\" name=\"monto_cobrado\" step=\"0.01\" min=\"0\" value=\"{{ cuota.monto_esperado }}\" style=\"max-width:120px;\">",
+      "rule": "inline-fixed-width",
+      "path": "rrhh/templates/rrhh/prestamo_detalle.html",
+      "snippet": "<input type=\"number\" name=\"monto_cobrado\" step=\"0.01\" min=\"0\" value=\"{{ cuota.monto_esperado }}\" style=\"max-width:120px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|rrhh/templates/rrhh/prestamo_detalle.html|<input type=\"text\" name=\"nota\" placeholder=\"Nota\" style=\"max-width:160px;\">",
+      "rule": "inline-fixed-width",
+      "path": "rrhh/templates/rrhh/prestamo_detalle.html",
+      "snippet": "<input type=\"text\" name=\"nota\" placeholder=\"Nota\" style=\"max-width:160px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|seguimiento/templates/seguimiento/mi_seguimiento.html|<span class=\"bi-progress-fill {% if item.esta_vencido %}is-danger{% elif item.progreso_pct >= 100 %}is-success{% else %}is-plum{% endif %}\" ",
+      "rule": "inline-fixed-width",
+      "path": "seguimiento/templates/seguimiento/mi_seguimiento.html",
+      "snippet": "<span class=\"bi-progress-fill {% if item.esta_vencido %}is-danger{% elif item.progreso_pct >= 100 %}is-success{% else %}is-plum{% endif %}\" ",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|templates/core/dashboard.html|<div class=\"executive-bar-fill is-accent\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "rule": "inline-fixed-width",
+      "path": "templates/core/dashboard.html",
+      "snippet": "<div class=\"executive-bar-fill is-accent\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|templates/core/dashboard.html|<div class=\"executive-bar-fill is-accent\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "rule": "inline-fixed-width",
+      "path": "templates/core/dashboard.html",
+      "snippet": "<div class=\"executive-bar-fill is-accent\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|templates/core/dashboard.html|<div class=\"executive-bar-fill is-danger\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "rule": "inline-fixed-width",
+      "path": "templates/core/dashboard.html",
+      "snippet": "<div class=\"executive-bar-fill is-danger\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|templates/core/dashboard.html|<div class=\"executive-bar-fill is-neutral\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "rule": "inline-fixed-width",
+      "path": "templates/core/dashboard.html",
+      "snippet": "<div class=\"executive-bar-fill is-neutral\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|templates/core/dashboard.html|<div class=\"executive-bar-fill is-warning\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "rule": "inline-fixed-width",
+      "path": "templates/core/dashboard.html",
+      "snippet": "<div class=\"executive-bar-fill is-warning\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|templates/core/dashboard.html|<div class=\"executive-bar-fill is-{{ row.tone }}\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "rule": "inline-fixed-width",
+      "path": "templates/core/dashboard.html",
+      "snippet": "<div class=\"executive-bar-fill is-{{ row.tone }}\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|templates/core/dashboard.html|<div class=\"executive-bar-fill is-{{ row.tone }}\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "rule": "inline-fixed-width",
+      "path": "templates/core/dashboard.html",
+      "snippet": "<div class=\"executive-bar-fill is-{{ row.tone }}\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|templates/core/dashboard.html|<div class=\"executive-bar-fill is-{{ row.tone }}\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "rule": "inline-fixed-width",
+      "path": "templates/core/dashboard.html",
+      "snippet": "<div class=\"executive-bar-fill is-{{ row.tone }}\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|templates/core/dashboard.html|<div class=\"executive-bar-fill is-{{ row.tone }}\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "rule": "inline-fixed-width",
+      "path": "templates/core/dashboard.html",
+      "snippet": "<div class=\"executive-bar-fill is-{{ row.tone }}\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|templates/core/dashboard.html|<div class=\"executive-bar-fill is-{{ row.tone|default:'warning' }}\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "rule": "inline-fixed-width",
+      "path": "templates/core/dashboard.html",
+      "snippet": "<div class=\"executive-bar-fill is-{{ row.tone|default:'warning' }}\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|templates/core/dashboard.html|<div class=\"executive-bar-fill\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "rule": "inline-fixed-width",
+      "path": "templates/core/dashboard.html",
+      "snippet": "<div class=\"executive-bar-fill\" style=\"width: {{ row.pct|floatformat:0 }}%;\"></div>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|templates/mantenimiento/pwa.html|<button class=\"secondary-btn\" style=\"width:100%\" onclick=\"startPuntoMantenible()\">No encuentro el equipo</button>",
+      "rule": "inline-fixed-width",
+      "path": "templates/mantenimiento/pwa.html",
+      "snippet": "<button class=\"secondary-btn\" style=\"width:100%\" onclick=\"startPuntoMantenible()\">No encuentro el equipo</button>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|templates/mantenimiento/pwa.html|<button class=\"secondary-btn\" style=\"width:100%\" onclick=\"startPuntoMantenible()\">Registrar punto mantenible</button>",
+      "rule": "inline-fixed-width",
+      "path": "templates/mantenimiento/pwa.html",
+      "snippet": "<button class=\"secondary-btn\" style=\"width:100%\" onclick=\"startPuntoMantenible()\">Registrar punto mantenible</button>",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|templates/mantenimiento/pwa.html|<button class=\"secondary-btn\" style=\"width:100%;display:flex;align-items:center;justify-content:center;gap:8px\" onclick=\"startEquipo()\">${ap",
+      "rule": "inline-fixed-width",
+      "path": "templates/mantenimiento/pwa.html",
+      "snippet": "<button class=\"secondary-btn\" style=\"width:100%;display:flex;align-items:center;justify-content:center;gap:8px\" onclick=\"startEquipo()\">${ap",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|templates/orquestacion/chat.html|<img src=\"{% static 'favicon.ico' %}\" alt=\"Pollyana's Dolce\" style=\"width:54px;height:54px;border-radius:16px;box-shadow:0 10px 24px rgba(13",
+      "rule": "inline-fixed-width",
+      "path": "templates/orquestacion/chat.html",
+      "snippet": "<img src=\"{% static 'favicon.ico' %}\" alt=\"Pollyana's Dolce\" style=\"width:54px;height:54px;border-radius:16px;box-shadow:0 10px 24px rgba(13",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/partials/pronostico_print_table.html|<col style=\"width:230px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/partials/pronostico_print_table.html",
+      "snippet": "<col style=\"width:230px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/partials/pronostico_print_table.html|<col style=\"width:34px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/partials/pronostico_print_table.html",
+      "snippet": "<col style=\"width:34px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/partials/pronostico_print_table.html|<col style=\"width:58px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/partials/pronostico_print_table.html",
+      "snippet": "<col style=\"width:58px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/partials/pronostico_print_table.html|<col style=\"width:78px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/partials/pronostico_print_table.html",
+      "snippet": "<col style=\"width:78px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/partials/pronostico_print_table.html|<col style=\"width:78px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/partials/pronostico_print_table.html",
+      "snippet": "<col style=\"width:78px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/partials/pronostico_print_table.html|<col style=\"width:80px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/partials/pronostico_print_table.html",
+      "snippet": "<col style=\"width:80px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/partials/pronostico_print_table.html|<col style=\"width:96px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/partials/pronostico_print_table.html",
+      "snippet": "<col style=\"width:96px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/pronostico.html|<col style=\"width:130px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/pronostico.html",
+      "snippet": "<col style=\"width:130px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/pronostico.html|<col style=\"width:130px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/pronostico.html",
+      "snippet": "<col style=\"width:130px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/pronostico.html|<col style=\"width:190px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/pronostico.html",
+      "snippet": "<col style=\"width:190px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/pronostico.html|<col style=\"width:190px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/pronostico.html",
+      "snippet": "<col style=\"width:190px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/pronostico.html|<col style=\"width:250px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/pronostico.html",
+      "snippet": "<col style=\"width:250px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/pronostico.html|<col style=\"width:250px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/pronostico.html",
+      "snippet": "<col style=\"width:250px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/pronostico.html|<col style=\"width:90px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/pronostico.html",
+      "snippet": "<col style=\"width:90px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/pronostico_lista.html|<col style=\"width:130px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/pronostico_lista.html",
+      "snippet": "<col style=\"width:130px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/pronostico_lista.html|<col style=\"width:130px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/pronostico_lista.html",
+      "snippet": "<col style=\"width:130px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/pronostico_lista.html|<col style=\"width:190px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/pronostico_lista.html",
+      "snippet": "<col style=\"width:190px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/pronostico_lista.html|<col style=\"width:190px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/pronostico_lista.html",
+      "snippet": "<col style=\"width:190px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/pronostico_lista.html|<col style=\"width:210px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/pronostico_lista.html",
+      "snippet": "<col style=\"width:210px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/pronostico_lista.html|<col style=\"width:250px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/pronostico_lista.html",
+      "snippet": "<col style=\"width:250px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/pronostico_lista.html|<col style=\"width:250px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/pronostico_lista.html",
+      "snippet": "<col style=\"width:250px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "inline-fixed-width|ventas/templates/ventas/pronostico_lista.html|<col style=\"width:90px;\">",
+      "rule": "inline-fixed-width",
+      "path": "ventas/templates/ventas/pronostico_lista.html",
+      "snippet": "<col style=\"width:90px;\">",
+      "message": "No fijes anchos inline en templates; usa clases cubiertas por guardrails."
+    },
+    {
+      "key": "local-nowrap|bonos_produccion/templates/bonos_produccion/dashboard.html|.status-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:.28rem .6rem;font-size:.72rem;font-we",
+      "rule": "local-nowrap",
+      "path": "bonos_produccion/templates/bonos_produccion/dashboard.html",
+      "snippet": ".status-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:.28rem .6rem;font-size:.72rem;font-we",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|bonos_produccion/templates/bonos_produccion/index.html|.employee-count{font-size:11px;font-weight:800;color:var(--wine);background:var(--wine-light);border-radius:999px;padding:3px 8px;white-spac",
+      "rule": "local-nowrap",
+      "path": "bonos_produccion/templates/bonos_produccion/index.html",
+      "snippet": ".employee-count{font-size:11px;font-weight:800;color:var(--wine);background:var(--wine-light);border-radius:999px;padding:3px 8px;white-spac",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|bonos_produccion/templates/bonos_produccion/index.html|.employee-row-right{font-size:12px;font-weight:800;color:var(--wine);white-space:nowrap}",
+      "rule": "local-nowrap",
+      "path": "bonos_produccion/templates/bonos_produccion/index.html",
+      "snippet": ".employee-row-right{font-size:12px;font-weight:800;color:var(--wine);white-space:nowrap}",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|bonos_produccion/templates/bonos_produccion/index.html|.tab-btn{padding:12px 16px;font:inherit;font-size:13px;font-weight:700;color:var(--sub);background:none;border:none;border-bottom:2px solid ",
+      "rule": "local-nowrap",
+      "path": "bonos_produccion/templates/bonos_produccion/index.html",
+      "snippet": ".tab-btn{padding:12px 16px;font:inherit;font-size:13px;font-weight:700;color:var(--sub);background:none;border:none;border-bottom:2px solid ",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|bonos_produccion/templates/bonos_produccion/index.html|th{padding:8px 12px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--sub);border-bot",
+      "rule": "local-nowrap",
+      "path": "bonos_produccion/templates/bonos_produccion/index.html",
+      "snippet": "th{padding:8px 12px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--sub);border-bot",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|bonos_ventas/templates/bonos_ventas/dashboard.html|.status-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:.28rem .6rem;font-size:.72rem;font-we",
+      "rule": "local-nowrap",
+      "path": "bonos_ventas/templates/bonos_ventas/dashboard.html",
+      "snippet": ".status-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:.28rem .6rem;font-size:.72rem;font-we",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|bonos_ventas/templates/bonos_ventas/index.html|.employee-count{font-size:11px;font-weight:800;color:var(--wine);background:var(--wine-light);border-radius:999px;padding:3px 8px;white-spac",
+      "rule": "local-nowrap",
+      "path": "bonos_ventas/templates/bonos_ventas/index.html",
+      "snippet": ".employee-count{font-size:11px;font-weight:800;color:var(--wine);background:var(--wine-light);border-radius:999px;padding:3px 8px;white-spac",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|bonos_ventas/templates/bonos_ventas/index.html|.employee-row-right{font-size:12px;font-weight:800;color:var(--wine);white-space:nowrap}",
+      "rule": "local-nowrap",
+      "path": "bonos_ventas/templates/bonos_ventas/index.html",
+      "snippet": ".employee-row-right{font-size:12px;font-weight:800;color:var(--wine);white-space:nowrap}",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|bonos_ventas/templates/bonos_ventas/index.html|.tab-btn{padding:12px 16px;font:inherit;font-size:13px;font-weight:700;color:var(--sub);background:none;border:none;border-bottom:2px solid ",
+      "rule": "local-nowrap",
+      "path": "bonos_ventas/templates/bonos_ventas/index.html",
+      "snippet": ".tab-btn{padding:12px 16px;font:inherit;font-size:13px;font-weight:700;color:var(--sub);background:none;border:none;border-bottom:2px solid ",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|bonos_ventas/templates/bonos_ventas/index.html|th{padding:8px 12px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--sub);border-bot",
+      "rule": "local-nowrap",
+      "path": "bonos_ventas/templates/bonos_ventas/index.html",
+      "snippet": "th{padding:8px 12px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--sub);border-bot",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|core/templates/core/dashboard_executive.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "core/templates/core/dashboard_executive.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|core/templates/core/usuarios_accesos.html|.module-chip { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; background: var(--gris-suave); color: var",
+      "rule": "local-nowrap",
+      "path": "core/templates/core/usuarios_accesos.html",
+      "snippet": ".module-chip { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; background: var(--gris-suave); color: var",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|crm/templates/crm/cliente_detail.html|.crm-badge{display:inline-flex;align-items:center;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}",
+      "rule": "local-nowrap",
+      "path": "crm/templates/crm/cliente_detail.html",
+      "snippet": ".crm-badge{display:inline-flex;align-items:center;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|crm/templates/crm/cliente_detail.html|<td style=\"font-size:12px;white-space:nowrap\">{{ pedido.created_at|date:\"d/m/y\" }}</td>",
+      "rule": "local-nowrap",
+      "path": "crm/templates/crm/cliente_detail.html",
+      "snippet": "<td style=\"font-size:12px;white-space:nowrap\">{{ pedido.created_at|date:\"d/m/y\" }}</td>",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|crm/templates/crm/cliente_detail.html|<td style=\"max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis\">{{ pedido.descripcion }}</td>",
+      "rule": "local-nowrap",
+      "path": "crm/templates/crm/cliente_detail.html",
+      "snippet": "<td style=\"max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis\">{{ pedido.descripcion }}</td>",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|fallas/templates/fallas/dashboard.html|.bar-label{font-size:12px;color:#444;min-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
+      "rule": "local-nowrap",
+      "path": "fallas/templates/fallas/dashboard.html",
+      "snippet": ".bar-label{font-size:12px;color:#444;min-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|fallas/templates/fallas/dashboard.html|<td style=\"font-size:12px;white-space:nowrap\">${fecha}</td>",
+      "rule": "local-nowrap",
+      "path": "fallas/templates/fallas/dashboard.html",
+      "snippet": "<td style=\"font-size:12px;white-space:nowrap\">${fecha}</td>",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|fallas/templates/fallas/pwa_reporte.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "fallas/templates/fallas/pwa_reporte.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|inventario/templates/inventario/auditoria_inventario.html|.audit-table th { white-space:nowrap; position:sticky; top:0; background:#fff; z-index:1; }",
+      "rule": "local-nowrap",
+      "path": "inventario/templates/inventario/auditoria_inventario.html",
+      "snippet": ".audit-table th { white-space:nowrap; position:sticky; top:0; background:#fff; z-index:1; }",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|inventario/templates/inventario/captura_diaria.html|.stock-table th { white-space: nowrap; }",
+      "rule": "local-nowrap",
+      "path": "inventario/templates/inventario/captura_diaria.html",
+      "snippet": ".stock-table th { white-space: nowrap; }",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|inventario/templates/inventario/captura_diaria.html|{% if m.notas %}<span class=\"muted\" style=\"font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\">{{ m.no",
+      "rule": "local-nowrap",
+      "path": "inventario/templates/inventario/captura_diaria.html",
+      "snippet": "{% if m.notas %}<span class=\"muted\" style=\"font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\">{{ m.no",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|logistica/templates/logistica/flota_resumen.html|.fleet-badge { display: inline-flex; border-radius: 999px; padding: 5px 10px; font-size: 12px; font-weight: 900; white-space: nowrap; }",
+      "rule": "local-nowrap",
+      "path": "logistica/templates/logistica/flota_resumen.html",
+      "snippet": ".fleet-badge { display: inline-flex; border-radius: 999px; padding: 5px 10px; font-size: 12px; font-weight: 900; white-space: nowrap; }",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|logistica/templates/logistica/pwa.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "logistica/templates/logistica/pwa.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|logistica/templates/logistica/reportes_lista.html|.logi-filter-actions .btn { width: 100%; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; white-space: ",
+      "rule": "local-nowrap",
+      "path": "logistica/templates/logistica/reportes_lista.html",
+      "snippet": ".logi-filter-actions .btn { width: 100%; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; white-space: ",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|maestros/templates/maestros/costos_adquisicion.html|.cost-table th { white-space:nowrap; position:sticky; top:0; background:#fff; z-index:1; }",
+      "rule": "local-nowrap",
+      "path": "maestros/templates/maestros/costos_adquisicion.html",
+      "snippet": ".cost-table th { white-space:nowrap; position:sticky; top:0; background:#fff; z-index:1; }",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|maestros/templates/maestros/costos_adquisicion.html|<span id=\"margen-{{ r.id }}\" style=\"font-size:11px;white-space:nowrap;min-width:70px\"></span>",
+      "rule": "local-nowrap",
+      "path": "maestros/templates/maestros/costos_adquisicion.html",
+      "snippet": "<span id=\"margen-{{ r.id }}\" style=\"font-size:11px;white-space:nowrap;min-width:70px\"></span>",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|maestros/templates/maestros/costos_adquisicion.html|<span id=\"pvta-{{ r.id }}\" style=\"font-size:11px;color:var(--texto-light);white-space:nowrap\"",
+      "rule": "local-nowrap",
+      "path": "maestros/templates/maestros/costos_adquisicion.html",
+      "snippet": "<span id=\"pvta-{{ r.id }}\" style=\"font-size:11px;color:var(--texto-light);white-space:nowrap\"",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|mermas/templates/mermas/app_recepcion.html|.badge { display: inline-flex; padding: 5px 9px; border-radius: 999px; background: #3d3218; color: #f6d77e; font-size: .78rem; font-weight: ",
+      "rule": "local-nowrap",
+      "path": "mermas/templates/mermas/app_recepcion.html",
+      "snippet": ".badge { display: inline-flex; padding: 5px 9px; border-radius: 999px; background: #3d3218; color: #f6d77e; font-size: .78rem; font-weight: ",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|mermas/templates/mermas/dashboard.html|.mermas-btn { display: inline-flex; align-items: center; justify-content: center; min-height: var(--pd-control-height); padding: 0 var(--pd-",
+      "rule": "local-nowrap",
+      "path": "mermas/templates/mermas/dashboard.html",
+      "snippet": ".mermas-btn { display: inline-flex; align-items: center; justify-content: center; min-height: var(--pd-control-height); padding: 0 var(--pd-",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|mermas/templates/mermas/detalle.html|.data-table td:nth-child(2), .data-table td:nth-child(3) { color: #f6d77e; white-space: nowrap; }",
+      "rule": "local-nowrap",
+      "path": "mermas/templates/mermas/detalle.html",
+      "snippet": ".data-table td:nth-child(2), .data-table td:nth-child(3) { color: #f6d77e; white-space: nowrap; }",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|mermas/templates/mermas/detalle.html|.status-pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 8px; background: #3d3218; color: #f6d77e; font-",
+      "rule": "local-nowrap",
+      "path": "mermas/templates/mermas/detalle.html",
+      "snippet": ".status-pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 8px; background: #3d3218; color: #f6d77e; font-",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|mermas/templates/mermas/form.html|.product-row .field label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); wh",
+      "rule": "local-nowrap",
+      "path": "mermas/templates/mermas/form.html",
+      "snippet": ".product-row .field label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); wh",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|recetas/templates/recetas/consolidado_cedis_revision.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "recetas/templates/recetas/consolidado_cedis_revision.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|recetas/templates/recetas/costeo_dashboard.html|.costeo-filter-actions .btn { min-width: 78px; white-space: nowrap; }",
+      "rule": "local-nowrap",
+      "path": "recetas/templates/recetas/costeo_dashboard.html",
+      "snippet": ".costeo-filter-actions .btn { min-width: 78px; white-space: nowrap; }",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|recetas/templates/recetas/costeo_dashboard.html|.costeo-sim-draft button { white-space: nowrap; }",
+      "rule": "local-nowrap",
+      "path": "recetas/templates/recetas/costeo_dashboard.html",
+      "snippet": ".costeo-sim-draft button { white-space: nowrap; }",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|recetas/templates/recetas/costeo_dashboard.html|.history-row .history-delta { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }",
+      "rule": "local-nowrap",
+      "path": "recetas/templates/recetas/costeo_dashboard.html",
+      "snippet": ".history-row .history-delta { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|recetas/templates/recetas/costeo_dashboard.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "recetas/templates/recetas/costeo_dashboard.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|recetas/templates/recetas/costeo_dashboard.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "recetas/templates/recetas/costeo_dashboard.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|recetas/templates/recetas/costeo_dashboard.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "recetas/templates/recetas/costeo_dashboard.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|recetas/templates/recetas/costeo_dashboard.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "recetas/templates/recetas/costeo_dashboard.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|recetas/templates/recetas/dg_operacion_dashboard.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "recetas/templates/recetas/dg_operacion_dashboard.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|recetas/templates/recetas/monitor_margenes.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "recetas/templates/recetas/monitor_margenes.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|recetas/templates/recetas/monitor_margenes.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "recetas/templates/recetas/monitor_margenes.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|rentabilidad/templates/rentabilidad/dashboard.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "rentabilidad/templates/rentabilidad/dashboard.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|rentabilidad/templates/rentabilidad/dashboard.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "rentabilidad/templates/rentabilidad/dashboard.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|rentabilidad/templates/rentabilidad/dashboard.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "rentabilidad/templates/rentabilidad/dashboard.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|rentabilidad/templates/rentabilidad/dashboard.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "rentabilidad/templates/rentabilidad/dashboard.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|rentabilidad/templates/rentabilidad/detalle.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "rentabilidad/templates/rentabilidad/detalle.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|rentabilidad/templates/rentabilidad/detalle.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "rentabilidad/templates/rentabilidad/detalle.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|reportes/templates/reportes/auditoria_insumos.html|white-space:nowrap;",
+      "rule": "local-nowrap",
+      "path": "reportes/templates/reportes/auditoria_insumos.html",
+      "snippet": "white-space:nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|reportes/templates/reportes/costo_receta.html|.finance-table td, .finance-table th { white-space: nowrap; }",
+      "rule": "local-nowrap",
+      "path": "reportes/templates/reportes/costo_receta.html",
+      "snippet": ".finance-table td, .finance-table th { white-space: nowrap; }",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|reportes/templates/reportes/costo_receta.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "reportes/templates/reportes/costo_receta.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|reportes/templates/reportes/mermas_devoluciones.html|white-space:nowrap;",
+      "rule": "local-nowrap",
+      "path": "reportes/templates/reportes/mermas_devoluciones.html",
+      "snippet": "white-space:nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|reportes/templates/reportes/presupuesto_maestro.html|white-space:nowrap;",
+      "rule": "local-nowrap",
+      "path": "reportes/templates/reportes/presupuesto_maestro.html",
+      "snippet": "white-space:nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|reportes/templates/reportes/proyeccion_produccion.html|white-space:nowrap;",
+      "rule": "local-nowrap",
+      "path": "reportes/templates/reportes/proyeccion_produccion.html",
+      "snippet": "white-space:nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|reportes/templates/reportes/proyecto_bamoa_wizard.html|#bamoa-partidas-table thead th { background:var(--bamoa-wine); color:#fff; font-family:'Nunito', sans-serif; font-size:.75rem; font-weight:7",
+      "rule": "local-nowrap",
+      "path": "reportes/templates/reportes/proyecto_bamoa_wizard.html",
+      "snippet": "#bamoa-partidas-table thead th { background:var(--bamoa-wine); color:#fff; font-family:'Nunito', sans-serif; font-size:.75rem; font-weight:7",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|reportes/templates/reportes/proyecto_bamoa_wizard.html|.bamoa-row-total { font-weight:700; color:var(--bamoa-wine); font-size:.9rem; white-space:nowrap; }",
+      "rule": "local-nowrap",
+      "path": "reportes/templates/reportes/proyecto_bamoa_wizard.html",
+      "snippet": ".bamoa-row-total { font-weight:700; color:var(--bamoa-wine); font-size:.9rem; white-space:nowrap; }",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|rrhh/templates/rrhh/empleados.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "rrhh/templates/rrhh/empleados.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|rrhh/templates/rrhh/empleados.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "rrhh/templates/rrhh/empleados.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|rrhh/templates/rrhh/pwa_capital_humano.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "rrhh/templates/rrhh/pwa_capital_humano.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/bi_dashboard.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/bi_dashboard.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/bi_dashboard.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/bi_dashboard.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/bi_dashboard.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/bi_dashboard.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/bi_dashboard.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/bi_dashboard.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/bi_dashboard.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/bi_dashboard.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/bi_dashboard.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/bi_dashboard.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/bi_dashboard.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/bi_dashboard.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/pollyana_ops_ui.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/pollyana_ops_ui.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/pollyana_ops_ui.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/pollyana_ops_ui.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/pollyana_ops_ui.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/pollyana_ops_ui.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|.plan-vista-tabs a{display:inline-flex;align-items:center;white-space:nowrap;padding:.38rem .72rem;border-radius:6px;color:#6f5f68;font-size",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": ".plan-vista-tabs a{display:inline-flex;align-items:center;white-space:nowrap;padding:.38rem .72rem;border-radius:6px;color:#6f5f68;font-size",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/css/styles.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/css/styles.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/operacion/app_theme.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/operacion/app_theme.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|static/operacion/app_theme.css|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "static/operacion/app_theme.css",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|templates/core/dashboard.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "templates/core/dashboard.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|templates/mantenimiento/dashboard.html|.mant-tabs .module-tab{white-space:nowrap}",
+      "rule": "local-nowrap",
+      "path": "templates/mantenimiento/dashboard.html",
+      "snippet": ".mant-tabs .module-tab{white-space:nowrap}",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|templates/operacion/app_home.html|white-space: nowrap;",
+      "rule": "local-nowrap",
+      "path": "templates/operacion/app_home.html",
+      "snippet": "white-space: nowrap;",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|ventas/templates/ventas/pronostico.html|.page-pronostico-ventas .forecast-product-option span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }",
+      "rule": "local-nowrap",
+      "path": "ventas/templates/ventas/pronostico.html",
+      "snippet": ".page-pronostico-ventas .forecast-product-option span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|ventas/templates/ventas/pronostico.html|.page-pronostico-ventas .forecast-trend { font-weight:800; white-space:nowrap; }",
+      "rule": "local-nowrap",
+      "path": "ventas/templates/ventas/pronostico.html",
+      "snippet": ".page-pronostico-ventas .forecast-trend { font-weight:800; white-space:nowrap; }",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|ventas/templates/ventas/pronostico.html|.page-pronostico-ventas .kpi-number.is-danger { color:#7b1a48; font-size:2rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; ",
+      "rule": "local-nowrap",
+      "path": "ventas/templates/ventas/pronostico.html",
+      "snippet": ".page-pronostico-ventas .kpi-number.is-danger { color:#7b1a48; font-size:2rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; ",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|ventas/templates/ventas/pronostico.html|.page-pronostico-ventas .saved-forecasts-table .forecast-date-cell { white-space:nowrap; overflow-wrap:normal; text-align:right; }",
+      "rule": "local-nowrap",
+      "path": "ventas/templates/ventas/pronostico.html",
+      "snippet": ".page-pronostico-ventas .saved-forecasts-table .forecast-date-cell { white-space:nowrap; overflow-wrap:normal; text-align:right; }",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|ventas/templates/ventas/pronostico.html|.page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table .forecast-actions-cell { width:280px; min-width:280px; white-spa",
+      "rule": "local-nowrap",
+      "path": "ventas/templates/ventas/pronostico.html",
+      "snippet": ".page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table .forecast-actions-cell { width:280px; min-width:280px; white-spa",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|ventas/templates/ventas/pronostico_detalle.html|.page-pronostico-ventas .forecast-trend { font-weight:800; white-space:nowrap; }",
+      "rule": "local-nowrap",
+      "path": "ventas/templates/ventas/pronostico_detalle.html",
+      "snippet": ".page-pronostico-ventas .forecast-trend { font-weight:800; white-space:nowrap; }",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|ventas/templates/ventas/pronostico_detalle.html|.page-pronostico-ventas .kpi-number.is-danger { color:#7b1a48; font-size:2rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; ",
+      "rule": "local-nowrap",
+      "path": "ventas/templates/ventas/pronostico_detalle.html",
+      "snippet": ".page-pronostico-ventas .kpi-number.is-danger { color:#7b1a48; font-size:2rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; ",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|ventas/templates/ventas/pronostico_lista.html|.page-pronostico-ventas .saved-forecasts-table .forecast-date-cell { white-space:nowrap; overflow-wrap:normal; text-align:right; }",
+      "rule": "local-nowrap",
+      "path": "ventas/templates/ventas/pronostico_lista.html",
+      "snippet": ".page-pronostico-ventas .saved-forecasts-table .forecast-date-cell { white-space:nowrap; overflow-wrap:normal; text-align:right; }",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|ventas/templates/ventas/pronostico_lista.html|.page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table .forecast-actions-cell { width:280px; min-width:280px; white-spa",
+      "rule": "local-nowrap",
+      "path": "ventas/templates/ventas/pronostico_lista.html",
+      "snippet": ".page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table .forecast-actions-cell { width:280px; min-width:280px; white-spa",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "local-nowrap|ventas/templates/ventas/pronostico_print.html|td.num, th.num { text-align: right; white-space: nowrap; }",
+      "rule": "local-nowrap",
+      "path": "ventas/templates/ventas/pronostico_print.html",
+      "snippet": "td.num, th.num { text-align: right; white-space: nowrap; }",
+      "message": "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|activos/templates/activos/activos.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "activos/templates/activos/activos.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|activos/templates/activos/calendario.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "activos/templates/activos/calendario.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|activos/templates/activos/dashboard.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "activos/templates/activos/dashboard.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|activos/templates/activos/ordenes.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "activos/templates/activos/ordenes.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|activos/templates/activos/planes.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "activos/templates/activos/planes.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|activos/templates/activos/reportes.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "activos/templates/activos/reportes.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|activos/templates/activos/seguimiento_compras.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "activos/templates/activos/seguimiento_compras.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|compras/templates/compras/dashboard.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "compras/templates/compras/dashboard.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|compras/templates/compras/ordenes.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "compras/templates/compras/ordenes.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|compras/templates/compras/recepciones.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "compras/templates/compras/recepciones.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|compras/templates/compras/solicitudes.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "compras/templates/compras/solicitudes.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|control/templates/control/captura_movil.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "control/templates/control/captura_movil.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|control/templates/control/discrepancias.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "control/templates/control/discrepancias.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|crm/templates/crm/cliente_detail.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "crm/templates/crm/cliente_detail.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|crm/templates/crm/clientes.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "crm/templates/crm/clientes.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|crm/templates/crm/dashboard.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "crm/templates/crm/dashboard.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|crm/templates/crm/pedido_detail.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "crm/templates/crm/pedido_detail.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|crm/templates/crm/pedidos.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "crm/templates/crm/pedidos.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|fallas/templates/fallas/dashboard.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "fallas/templates/fallas/dashboard.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|fallas/templates/fallas/mis_reportes.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "fallas/templates/fallas/mis_reportes.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|fallas/templates/fallas/reporte_form.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "fallas/templates/fallas/reporte_form.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|inventario/templates/inventario/ajustes.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "inventario/templates/inventario/ajustes.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|inventario/templates/inventario/alertas.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "inventario/templates/inventario/alertas.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|inventario/templates/inventario/aliases_catalog.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "inventario/templates/inventario/aliases_catalog.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|inventario/templates/inventario/conteo_fisico_detail.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "inventario/templates/inventario/conteo_fisico_detail.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|inventario/templates/inventario/conteo_fisico_list.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "inventario/templates/inventario/conteo_fisico_list.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|inventario/templates/inventario/dashboard.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "inventario/templates/inventario/dashboard.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|inventario/templates/inventario/existencias.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "inventario/templates/inventario/existencias.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|inventario/templates/inventario/importar_archivos.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "inventario/templates/inventario/importar_archivos.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|inventario/templates/inventario/movimientos.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "inventario/templates/inventario/movimientos.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|logistica/templates/logistica/bitacoras_lista.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "logistica/templates/logistica/bitacoras_lista.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|logistica/templates/logistica/capturas_pwa.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "logistica/templates/logistica/capturas_pwa.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|logistica/templates/logistica/dashboard.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "logistica/templates/logistica/dashboard.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|logistica/templates/logistica/dashboard_ejecutivo.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "logistica/templates/logistica/dashboard_ejecutivo.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|logistica/templates/logistica/flota_resumen.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "logistica/templates/logistica/flota_resumen.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|logistica/templates/logistica/reportes_lista.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "logistica/templates/logistica/reportes_lista.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|logistica/templates/logistica/ruta_detail.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "logistica/templates/logistica/ruta_detail.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|logistica/templates/logistica/rutas.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "logistica/templates/logistica/rutas.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|logistica/templates/logistica/tickets_kanban.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "logistica/templates/logistica/tickets_kanban.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|logistica/templates/logistica/unidad_detalle.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "logistica/templates/logistica/unidad_detalle.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|logistica/templates/logistica/unidad_form.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "logistica/templates/logistica/unidad_form.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|logistica/templates/logistica/unidades_list.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "logistica/templates/logistica/unidades_list.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|maestros/templates/maestros/insumo_form.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "maestros/templates/maestros/insumo_form.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|maestros/templates/maestros/insumo_list.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "maestros/templates/maestros/insumo_list.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|maestros/templates/maestros/point_pending_review.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "maestros/templates/maestros/point_pending_review.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|maestros/templates/maestros/proveedor_form.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "maestros/templates/maestros/proveedor_form.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|maestros/templates/maestros/proveedor_list.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "maestros/templates/maestros/proveedor_list.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|recetas/templates/recetas/recetas_list.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "recetas/templates/recetas/recetas_list.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/auditoria_insumos.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/auditoria_insumos.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/bi.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/bi.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/cierre_operativo_diario.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/cierre_operativo_diario.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/cierre_producto_point.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/cierre_producto_point.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/consumo.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/consumo.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/costo_receta.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/costo_receta.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/faltantes.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/faltantes.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/gastos_operativos_importar.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/gastos_operativos_importar.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/inversiones_detalle.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/inversiones_detalle.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/inversiones_portafolio.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/inversiones_portafolio.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/inversiones_wizard.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/inversiones_wizard.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/presupuesto_importar_por_area.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/presupuesto_importar_por_area.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/presupuesto_maestro.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/presupuesto_maestro.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/producido_vs_vendido.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/producido_vs_vendido.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/proyecto_bamoa_wizard.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/proyecto_bamoa_wizard.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/proyecto_inversion_detail.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/proyecto_inversion_detail.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/proyectos_inversion_calibracion.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/proyectos_inversion_calibracion.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/proyectos_inversion_comparativo.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/proyectos_inversion_comparativo.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/proyectos_inversion_expansion.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/proyectos_inversion_expansion.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/proyectos_inversion_list.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/proyectos_inversion_list.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/proyectos_inversion_simulador.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/proyectos_inversion_simulador.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/proyectos_inversion_sucursales.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/proyectos_inversion_sucursales.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|reportes/templates/reportes/ventas.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "reportes/templates/reportes/ventas.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|rrhh/templates/rrhh/nomina.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "rrhh/templates/rrhh/nomina.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|rrhh/templates/rrhh/nomina_detail.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "rrhh/templates/rrhh/nomina_detail.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|seguimiento/templates/seguimiento/mi_seguimiento.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "seguimiento/templates/seguimiento/mi_seguimiento.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "module-tabs-without-responsive-family|templates/mantenimiento/dashboard.html|module-tabs",
+      "rule": "module-tabs-without-responsive-family",
+      "path": "templates/mantenimiento/dashboard.html",
+      "snippet": "module-tabs",
+      "message": "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs."
+    },
+    {
+      "key": "overflow-hidden-x|recetas/templates/recetas/consolidado_cedis_revision.html|overflow-x: hidden;",
+      "rule": "overflow-hidden-x",
+      "path": "recetas/templates/recetas/consolidado_cedis_revision.html",
+      "snippet": "overflow-x: hidden;",
+      "message": "No ocultes overflow horizontal para tapar errores; usa contencion real o overflow-x: clip global."
+    },
+    {
+      "key": "overflow-hidden-x|rentabilidad/templates/rentabilidad/dashboard.html|overflow-x: hidden;",
+      "rule": "overflow-hidden-x",
+      "path": "rentabilidad/templates/rentabilidad/dashboard.html",
+      "snippet": "overflow-x: hidden;",
+      "message": "No ocultes overflow horizontal para tapar errores; usa contencion real o overflow-x: clip global."
+    },
+    {
+      "key": "overflow-hidden-x|static/css/styles.css|@media (max-width:720px){.page-plan-produccion .main-content{overflow-x:hidden}.plan-shell{width:100%;max-width:100%;padding:0 .75rem 2.5rem",
+      "rule": "overflow-hidden-x",
+      "path": "static/css/styles.css",
+      "snippet": "@media (max-width:720px){.page-plan-produccion .main-content{overflow-x:hidden}.plan-shell{width:100%;max-width:100%;padding:0 .75rem 2.5rem",
+      "message": "No ocultes overflow horizontal para tapar errores; usa contencion real o overflow-x: clip global."
+    },
+    {
+      "key": "overflow-hidden-x|static/css/styles.css|overflow-x: hidden;",
+      "rule": "overflow-hidden-x",
+      "path": "static/css/styles.css",
+      "snippet": "overflow-x: hidden;",
+      "message": "No ocultes overflow horizontal para tapar errores; usa contencion real o overflow-x: clip global."
+    },
+    {
+      "key": "overflow-hidden-x|static/css/styles.css|overflow-x: hidden;",
+      "rule": "overflow-hidden-x",
+      "path": "static/css/styles.css",
+      "snippet": "overflow-x: hidden;",
+      "message": "No ocultes overflow horizontal para tapar errores; usa contencion real o overflow-x: clip global."
+    },
+    {
+      "key": "overflow-hidden-x|static/css/styles.css|overflow-x: hidden;",
+      "rule": "overflow-hidden-x",
+      "path": "static/css/styles.css",
+      "snippet": "overflow-x: hidden;",
+      "message": "No ocultes overflow horizontal para tapar errores; usa contencion real o overflow-x: clip global."
+    },
+    {
+      "key": "overflow-hidden-x|static/css/styles.css|overflow-x: hidden;",
+      "rule": "overflow-hidden-x",
+      "path": "static/css/styles.css",
+      "snippet": "overflow-x: hidden;",
+      "message": "No ocultes overflow horizontal para tapar errores; usa contencion real o overflow-x: clip global."
+    },
+    {
+      "key": "overflow-hidden-x|static/css/styles.css|overflow-x: hidden;",
+      "rule": "overflow-hidden-x",
+      "path": "static/css/styles.css",
+      "snippet": "overflow-x: hidden;",
+      "message": "No ocultes overflow horizontal para tapar errores; usa contencion real o overflow-x: clip global."
+    },
+    {
+      "key": "overflow-hidden-x|static/css/styles.css|overflow-x: hidden;",
+      "rule": "overflow-hidden-x",
+      "path": "static/css/styles.css",
+      "snippet": "overflow-x: hidden;",
+      "message": "No ocultes overflow horizontal para tapar errores; usa contencion real o overflow-x: clip global."
+    },
+    {
+      "key": "overflow-hidden-x|static/css/styles.css|overflow-x: hidden;",
+      "rule": "overflow-hidden-x",
+      "path": "static/css/styles.css",
+      "snippet": "overflow-x: hidden;",
+      "message": "No ocultes overflow horizontal para tapar errores; usa contencion real o overflow-x: clip global."
+    },
+    {
+      "key": "overflow-hidden-x|static/css/styles.css|overflow-x: hidden;",
+      "rule": "overflow-hidden-x",
+      "path": "static/css/styles.css",
+      "snippet": "overflow-x: hidden;",
+      "message": "No ocultes overflow horizontal para tapar errores; usa contencion real o overflow-x: clip global."
+    },
+    {
+      "key": "overflow-hidden-x|static/css/styles.css|overflow-x: hidden;",
+      "rule": "overflow-hidden-x",
+      "path": "static/css/styles.css",
+      "snippet": "overflow-x: hidden;",
+      "message": "No ocultes overflow horizontal para tapar errores; usa contencion real o overflow-x: clip global."
+    },
+    {
+      "key": "overflow-hidden-x|static/css/styles.css|overflow-x: hidden;",
+      "rule": "overflow-hidden-x",
+      "path": "static/css/styles.css",
+      "snippet": "overflow-x: hidden;",
+      "message": "No ocultes overflow horizontal para tapar errores; usa contencion real o overflow-x: clip global."
+    },
+    {
+      "key": "overflow-hidden-x|static/css/styles.css|overflow-x: hidden;",
+      "rule": "overflow-hidden-x",
+      "path": "static/css/styles.css",
+      "snippet": "overflow-x: hidden;",
+      "message": "No ocultes overflow horizontal para tapar errores; usa contencion real o overflow-x: clip global."
+    },
+    {
+      "key": "overflow-hidden-x|static/css/styles.css|overflow-x: hidden;",
+      "rule": "overflow-hidden-x",
+      "path": "static/css/styles.css",
+      "snippet": "overflow-x: hidden;",
+      "message": "No ocultes overflow horizontal para tapar errores; usa contencion real o overflow-x: clip global."
+    },
+    {
+      "key": "overflow-hidden-x|templates/mantenimiento/dashboard.html|.page-mantenimiento-dashboard .container{width:100%;max-width:none;margin:0;padding:clamp(18px,1.8vw,32px);overflow-x:hidden}",
+      "rule": "overflow-hidden-x",
+      "path": "templates/mantenimiento/dashboard.html",
+      "snippet": ".page-mantenimiento-dashboard .container{width:100%;max-width:none;margin:0;padding:clamp(18px,1.8vw,32px);overflow-x:hidden}",
+      "message": "No ocultes overflow horizontal para tapar errores; usa contencion real o overflow-x: clip global."
+    },
+    {
+      "key": "rigid-wide-grid|activos/templates/activos/activos.html|<div class=\"row\" style=\"display:grid;grid-template-columns:repeat(6,minmax(160px,1fr));gap:10px;align-items:end;\">",
+      "rule": "rigid-wide-grid",
+      "path": "activos/templates/activos/activos.html",
+      "snippet": "<div class=\"row\" style=\"display:grid;grid-template-columns:repeat(6,minmax(160px,1fr));gap:10px;align-items:end;\">",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|activos/templates/activos/ordenes.html|<div class=\"row\" style=\"display:grid;grid-template-columns:repeat(5,minmax(160px,1fr));gap:10px;align-items:end;\">",
+      "rule": "rigid-wide-grid",
+      "path": "activos/templates/activos/ordenes.html",
+      "snippet": "<div class=\"row\" style=\"display:grid;grid-template-columns:repeat(5,minmax(160px,1fr));gap:10px;align-items:end;\">",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|activos/templates/activos/planes.html|<div class=\"row\" style=\"display:grid;grid-template-columns:repeat(5,minmax(160px,1fr));gap:10px;align-items:end;\">",
+      "rule": "rigid-wide-grid",
+      "path": "activos/templates/activos/planes.html",
+      "snippet": "<div class=\"row\" style=\"display:grid;grid-template-columns:repeat(5,minmax(160px,1fr));gap:10px;align-items:end;\">",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|activos/templates/activos/reportes.html|<div class=\"row\" style=\"display:grid;grid-template-columns:repeat(5,minmax(160px,1fr));gap:10px;align-items:end;\">",
+      "rule": "rigid-wide-grid",
+      "path": "activos/templates/activos/reportes.html",
+      "snippet": "<div class=\"row\" style=\"display:grid;grid-template-columns:repeat(5,minmax(160px,1fr));gap:10px;align-items:end;\">",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|bonos_produccion/templates/bonos_produccion/dashboard.html|.area-grid{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:.75rem}",
+      "rule": "rigid-wide-grid",
+      "path": "bonos_produccion/templates/bonos_produccion/dashboard.html",
+      "snippet": ".area-grid{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:.75rem}",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|bonos_produccion/templates/bonos_produccion/dashboard.html|.config-grid{display:grid;grid-template-columns:repeat(6,minmax(128px,1fr));gap:.75rem}",
+      "rule": "rigid-wide-grid",
+      "path": "bonos_produccion/templates/bonos_produccion/dashboard.html",
+      "snippet": ".config-grid{display:grid;grid-template-columns:repeat(6,minmax(128px,1fr));gap:.75rem}",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|bonos_produccion/templates/bonos_produccion/dashboard.html|.rule-selector{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:.6rem;margin-bottom:.85rem}",
+      "rule": "rigid-wide-grid",
+      "path": "bonos_produccion/templates/bonos_produccion/dashboard.html",
+      "snippet": ".rule-selector{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:.6rem;margin-bottom:.85rem}",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|bonos_produccion/templates/bonos_produccion/index.html|.days-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:16px}",
+      "rule": "rigid-wide-grid",
+      "path": "bonos_produccion/templates/bonos_produccion/index.html",
+      "snippet": ".days-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:16px}",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|bonos_ventas/templates/bonos_ventas/dashboard.html|.category-grid{display:grid;grid-template-columns:repeat(6,minmax(130px,1fr));gap:.75rem;margin-top:1rem}",
+      "rule": "rigid-wide-grid",
+      "path": "bonos_ventas/templates/bonos_ventas/dashboard.html",
+      "snippet": ".category-grid{display:grid;grid-template-columns:repeat(6,minmax(130px,1fr));gap:.75rem;margin-top:1rem}",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|bonos_ventas/templates/bonos_ventas/dashboard.html|.config-grid{display:grid;grid-template-columns:repeat(5,minmax(128px,1fr));gap:.75rem}",
+      "rule": "rigid-wide-grid",
+      "path": "bonos_ventas/templates/bonos_ventas/dashboard.html",
+      "snippet": ".config-grid{display:grid;grid-template-columns:repeat(5,minmax(128px,1fr));gap:.75rem}",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|bonos_ventas/templates/bonos_ventas/index.html|.days-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:16px}",
+      "rule": "rigid-wide-grid",
+      "path": "bonos_ventas/templates/bonos_ventas/index.html",
+      "snippet": ".days-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:16px}",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|crm/templates/crm/pedidos.html|.ops-topline { display:grid; gap:12px; grid-template-columns: repeat(5, minmax(0, 1fr)); }",
+      "rule": "rigid-wide-grid",
+      "path": "crm/templates/crm/pedidos.html",
+      "snippet": ".ops-topline { display:grid; gap:12px; grid-template-columns: repeat(5, minmax(0, 1fr)); }",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|fallas/templates/fallas/dashboard.html|.fallas-toolbar{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}",
+      "rule": "rigid-wide-grid",
+      "path": "fallas/templates/fallas/dashboard.html",
+      "snippet": ".fallas-toolbar{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|logistica/templates/logistica/reportes_lista.html|.reports-filter { display: grid; grid-template-columns: repeat(5, minmax(140px, 1fr)) minmax(190px, .8fr); gap: 14px; align-items: end; }",
+      "rule": "rigid-wide-grid",
+      "path": "logistica/templates/logistica/reportes_lista.html",
+      "snippet": ".reports-filter { display: grid; grid-template-columns: repeat(5, minmax(140px, 1fr)) minmax(190px, .8fr); gap: 14px; align-items: end; }",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|logistica/templates/logistica/rutas.html|.ops-topline { display:grid; gap:12px; grid-template-columns: repeat(5, minmax(0, 1fr)); }",
+      "rule": "rigid-wide-grid",
+      "path": "logistica/templates/logistica/rutas.html",
+      "snippet": ".ops-topline { display:grid; gap:12px; grid-template-columns: repeat(5, minmax(0, 1fr)); }",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|recetas/templates/recetas/dg_operacion_dashboard.html|grid-template-columns: repeat(5, minmax(0, 1fr));",
+      "rule": "rigid-wide-grid",
+      "path": "recetas/templates/recetas/dg_operacion_dashboard.html",
+      "snippet": "grid-template-columns: repeat(5, minmax(0, 1fr));",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|recetas/templates/recetas/dg_operacion_dashboard.html|grid-template-columns: repeat(6, minmax(0, 1fr));",
+      "rule": "rigid-wide-grid",
+      "path": "recetas/templates/recetas/dg_operacion_dashboard.html",
+      "snippet": "grid-template-columns: repeat(6, minmax(0, 1fr));",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|recetas/templates/recetas/monitor_margenes.html|grid-template-columns: repeat(5, minmax(0, 1fr));",
+      "rule": "rigid-wide-grid",
+      "path": "recetas/templates/recetas/monitor_margenes.html",
+      "snippet": "grid-template-columns: repeat(5, minmax(0, 1fr));",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|recetas/templates/recetas/plan_produccion_dg_dashboard.html|grid-template-columns: repeat(5, minmax(0, 1fr));",
+      "rule": "rigid-wide-grid",
+      "path": "recetas/templates/recetas/plan_produccion_dg_dashboard.html",
+      "snippet": "grid-template-columns: repeat(5, minmax(0, 1fr));",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|reportes/templates/reportes/costo_receta.html|.finance-action-summary-grid { display:grid; gap:12px; grid-template-columns:repeat(5,minmax(0,1fr)); margin-top:16px; }",
+      "rule": "rigid-wide-grid",
+      "path": "reportes/templates/reportes/costo_receta.html",
+      "snippet": ".finance-action-summary-grid { display:grid; gap:12px; grid-template-columns:repeat(5,minmax(0,1fr)); margin-top:16px; }",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|reportes/templates/reportes/inversiones_detalle.html|.inv-kpis { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:.75rem; }",
+      "rule": "rigid-wide-grid",
+      "path": "reportes/templates/reportes/inversiones_detalle.html",
+      "snippet": ".inv-kpis { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:.75rem; }",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|rrhh/templates/rrhh/dashboard_ch.html|.ch-actions { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }",
+      "rule": "rigid-wide-grid",
+      "path": "rrhh/templates/rrhh/dashboard_ch.html",
+      "snippet": ".ch-actions { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|rrhh/templates/rrhh/permisos_list.html|.permisos-board { display: grid; gap: 14px; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: start; }",
+      "rule": "rigid-wide-grid",
+      "path": "rrhh/templates/rrhh/permisos_list.html",
+      "snippet": ".permisos-board { display: grid; gap: 14px; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: start; }",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|rrhh/templates/rrhh/permisos_list.html|.permisos-stats { display: grid; gap: 10px; grid-template-columns: repeat(5, minmax(0, 1fr)); }",
+      "rule": "rigid-wide-grid",
+      "path": "rrhh/templates/rrhh/permisos_list.html",
+      "snippet": ".permisos-stats { display: grid; gap: 10px; grid-template-columns: repeat(5, minmax(0, 1fr)); }",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|seguimiento/templates/seguimiento/mi_seguimiento.html|grid-template-columns: repeat(5, minmax(0, 1fr));",
+      "rule": "rigid-wide-grid",
+      "path": "seguimiento/templates/seguimiento/mi_seguimiento.html",
+      "snippet": "grid-template-columns: repeat(5, minmax(0, 1fr));",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|static/css/bi_dashboard.css|grid-template-columns: repeat(5, minmax(0, 1fr));",
+      "rule": "rigid-wide-grid",
+      "path": "static/css/bi_dashboard.css",
+      "snippet": "grid-template-columns: repeat(5, minmax(0, 1fr));",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "rigid-wide-grid|static/css/styles.css|grid-template-columns: repeat(6, minmax(0, 1fr));",
+      "rule": "rigid-wide-grid",
+      "path": "static/css/styles.css",
+      "snippet": "grid-template-columns: repeat(6, minmax(0, 1fr));",
+      "message": "Evita repeat(5+) fijo; usa auto-fit/minmax para que los cards no se aplasten."
+    },
+    {
+      "key": "table-without-responsive-wrapper|activos/templates/activos/seguimiento_compras.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "activos/templates/activos/seguimiento_compras.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|bonos_ventas/templates/bonos_ventas/dashboard.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "bonos_ventas/templates/bonos_ventas/dashboard.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|core/templates/core/ui_system_preview.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "core/templates/core/ui_system_preview.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|crm/templates/crm/cliente_detail.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "crm/templates/crm/cliente_detail.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|fallas/templates/fallas/dashboard.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "fallas/templates/fallas/dashboard.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|fallas/templates/fallas/mis_reportes.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "fallas/templates/fallas/mis_reportes.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|inventario/templates/inventario/auditoria_inventario.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "inventario/templates/inventario/auditoria_inventario.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|inventario/templates/inventario/captura_diaria.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "inventario/templates/inventario/captura_diaria.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|logistica/templates/logistica/reportes_lista.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "logistica/templates/logistica/reportes_lista.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|maestros/templates/maestros/costos_adquisicion.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "maestros/templates/maestros/costos_adquisicion.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|mermas/templates/mermas/dashboard.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "mermas/templates/mermas/dashboard.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|mermas/templates/mermas/detalle.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "mermas/templates/mermas/detalle.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|recetas/templates/recetas/consolidado_cedis_revision.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "recetas/templates/recetas/consolidado_cedis_revision.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|recetas/templates/recetas/monitor_margenes.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "recetas/templates/recetas/monitor_margenes.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|recetas/templates/recetas/plan_produccion_dg_dashboard.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "recetas/templates/recetas/plan_produccion_dg_dashboard.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|recetas/templates/recetas/produccion_cedis_weekly_dashboard.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "recetas/templates/recetas/produccion_cedis_weekly_dashboard.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|rentabilidad/templates/rentabilidad/dashboard.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "rentabilidad/templates/rentabilidad/dashboard.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|rentabilidad/templates/rentabilidad/detalle.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "rentabilidad/templates/rentabilidad/detalle.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|reportes/templates/reportes/auditoria_insumos.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "reportes/templates/reportes/auditoria_insumos.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|reportes/templates/reportes/gastos_operativos_importar.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "reportes/templates/reportes/gastos_operativos_importar.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|reportes/templates/reportes/inversiones_wizard.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "reportes/templates/reportes/inversiones_wizard.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|reportes/templates/reportes/mermas_devoluciones.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "reportes/templates/reportes/mermas_devoluciones.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|reportes/templates/reportes/presupuesto_importar_por_area.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "reportes/templates/reportes/presupuesto_importar_por_area.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|reportes/templates/reportes/presupuesto_maestro.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "reportes/templates/reportes/presupuesto_maestro.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|reportes/templates/reportes/proyeccion_produccion.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "reportes/templates/reportes/proyeccion_produccion.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|reportes/templates/reportes/proyecto_inversion_detail.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "reportes/templates/reportes/proyecto_inversion_detail.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|reportes/templates/reportes/proyectos_inversion_calibracion.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "reportes/templates/reportes/proyectos_inversion_calibracion.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|reportes/templates/reportes/proyectos_inversion_comparativo.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "reportes/templates/reportes/proyectos_inversion_comparativo.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|reportes/templates/reportes/proyectos_inversion_expansion.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "reportes/templates/reportes/proyectos_inversion_expansion.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|reportes/templates/reportes/proyectos_inversion_simulador.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "reportes/templates/reportes/proyectos_inversion_simulador.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|rrhh/templates/rrhh/monitor_sincronizacion.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "rrhh/templates/rrhh/monitor_sincronizacion.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|rrhh/templates/rrhh/prestamo_detalle.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "rrhh/templates/rrhh/prestamo_detalle.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|rrhh/templates/rrhh/quincena_cobros.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "rrhh/templates/rrhh/quincena_cobros.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|templates/orquestacion/dashboard.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "templates/orquestacion/dashboard.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|templates/orquestacion/memory_proposals.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "templates/orquestacion/memory_proposals.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    },
+    {
+      "key": "table-without-responsive-wrapper|templates/orquestacion/quality_findings.html|<table",
+      "rule": "table-without-responsive-wrapper",
+      "path": "templates/orquestacion/quality_findings.html",
+      "snippet": "<table",
+      "message": "Las tablas de vistas ERP deben vivir dentro de .table-responsive para que el scroll sea interno."
+    }
+  ]
+}
