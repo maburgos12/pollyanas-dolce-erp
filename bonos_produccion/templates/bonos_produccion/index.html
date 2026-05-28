@@ -303,7 +303,9 @@ function PermisoPrintModal({permiso,onClose,contextLabel}){
   ), document.body);
 }
 function App(){
-  const [tab,setTab]=React.useState(FORCE_CAPTURE?'captura':'config');
+  const queryTab=new URLSearchParams(window.location.search).get('tab');
+  const initialTab=['config','captura','permisos','resumen','ajustes','revision'].includes(queryTab)?queryTab:(FORCE_CAPTURE?'captura':'config');
+  const [tab,setTab]=React.useState(initialTab);
   const [mes,setMes]=React.useState(TODAY.getMonth()+1);
   const [anio,setAnio]=React.useState(TODAY.getFullYear());
   const [periodo,setPeriodo]=React.useState(null);
