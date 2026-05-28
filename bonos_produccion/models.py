@@ -281,7 +281,7 @@ class BonoProduccionEmpleado(models.Model):
         self.monto_produccion = self._monto_concepto(base, regla.pct_produccion, self.pasa_produccion and regla.usa_produccion)
         self.monto_premio_embetunado = _money(cfg.premio_embetunado if self.gano_premio_embetunado else 0)
 
-        self.total_a_pagar = _money(
+        bruto = _money(
             self.monto_uniforme
             + self.monto_asistencia
             + self.monto_puntualidad
@@ -291,6 +291,7 @@ class BonoProduccionEmpleado(models.Model):
             + self.bono_extra
             - self.ajuste_negativo
         )
+        self.total_a_pagar = max(bruto, Decimal("0.00"))
 
     def save(self, *args, **kwargs):
         self.area = normalizar_area_produccion(self.area)
