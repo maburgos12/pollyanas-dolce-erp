@@ -7,22 +7,22 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 
-from core.access import can_view_submodule
 from core.models import Sucursal
 
 from .models import Empleado, VacanteRRHH
 from .services_vacantes import (
-    aprobar_vacante_direccion,
+    aprobar_vacante_autorizacion,
     cancelar_vacante,
-    can_aprobar_vacante_direccion,
+    can_autorizar_vacante,
     can_gestionar_vacantes,
     can_ver_vacante,
     cubrir_vacante,
     crear_solicitud_vacante,
-    enviar_vacante_direccion,
+    enviar_vacante_autorizacion,
+    filtrar_vacantes_para_usuario,
     iniciar_reclutamiento_vacante,
     pausar_vacante,
-    rechazar_vacante_direccion,
+    rechazar_vacante_autorizacion,
 )
 from .views import _module_tabs
 
@@ -45,21 +45,27 @@ def vacantes_lista(request):
     estado = (request.GET.get("estado") or "").strip()
     area = (request.GET.get("area") or "").strip()
     vacantes = (
-        VacanteRRHH.objects.select_related("sucursal", "solicitado_por", "autorizado_por", "empleado_cubrio")
+        VacanteRRHH.objects.select_related(
+            "sucursal",
+            "solicitado_por",
+            "autorizado_por",
+            "autorizador_asignado",
+            "empleado_cubrio",
+        )
         .prefetch_related("coberturas")
         .order_by("-fecha_solicitada", "-id")
     )
-    if not can_view_submodule(request.user, "rrhh", "vacantes") and not can_aprobar_vacante_direccion(request.user):
-        vacantes = vacantes.filter(solicitado_por=request.user)
+    vacantes = filtrar_vacantes_para_usuario(request.user, vacantes)
     if estado:
         vacantes = vacantes.filter(estado=estado)
     if area:
         vacantes = vacantes.filter(area__icontains=area)
 
-    base_qs = VacanteRRHH.objects.all()
+    base_qs = filtrar_vacantes_para_usuario(request.user, VacanteRRHH.objects.all())
     stats = {
         "total": base_qs.count(),
-        "pendientes_direccion": base_qs.filter(estado=VacanteRRHH.ESTADO_PENDIENTE_DIRECCION).count(),
+        "pendientes_autorizacion": base_qs.filter(estado=VacanteRRHH.ESTADO_PENDIENTE_DIRECCION).count(),
+        "jefaturas_direccion": base_qs.filter(requiere_direccion=True).count(),
         "reclutamiento": base_qs.filter(estado=VacanteRRHH.ESTADO_RECLUTAMIENTO).count(),
         "cubiertas": base_qs.filter(estado=VacanteRRHH.ESTADO_CUBIERTA).count(),
     }
@@ -69,7 +75,7 @@ def vacantes_lista(request):
         {
             "module_tabs": _module_tabs("vacantes"),
             "can_manage_vacantes": can_gestionar_vacantes(request.user),
-            "can_approve_direction": can_aprobar_vacante_direccion(request.user),
+            "can_authorize_vacante": can_autorizar_vacante(request.user),
             "vacantes": vacantes[:300],
             "estado_choices": VacanteRRHH.ESTADO_CHOICES,
             "stats": stats,
@@ -128,6 +134,7 @@ def vacante_detalle(request, pk: int):
             "creado_por",
             "validado_rrhh_por",
             "autorizado_por",
+            "autorizador_asignado",
             "rechazado_por",
             "empleado_cubrio",
         ).prefetch_related("movimientos__actor", "coberturas__empleado"),
@@ -143,7 +150,7 @@ def vacante_detalle(request, pk: int):
             "vacante": vacante,
             "empleados": Empleado.objects.filter(activo=True).order_by("nombre")[:1200],
             "can_manage_vacantes": can_gestionar_vacantes(request.user),
-            "can_approve_direction": can_aprobar_vacante_direccion(request.user, vacante),
+            "can_authorize_vacante": can_autorizar_vacante(request.user, vacante),
         },
     )
 
@@ -156,14 +163,14 @@ def vacante_accion(request, pk: int):
     action = (request.POST.get("action") or "").strip()
     comentario = (request.POST.get("comentario") or "").strip()
     try:
-        if action == "enviar_direccion":
-            enviar_vacante_direccion(vacante, request.user, comentario)
-            messages.success(request, f"Solicitud {vacante.folio} enviada a Dirección.")
+        if action in {"enviar_autorizacion", "enviar_direccion"}:
+            enviar_vacante_autorizacion(vacante, request.user, comentario)
+            messages.success(request, f"Solicitud {vacante.folio} enviada a autorización.")
         elif action == "aprobar":
-            aprobar_vacante_direccion(vacante, request.user, comentario)
+            aprobar_vacante_autorizacion(vacante, request.user, comentario)
             messages.success(request, f"Solicitud {vacante.folio} aprobada.")
         elif action == "rechazar":
-            rechazar_vacante_direccion(vacante, request.user, comentario)
+            rechazar_vacante_autorizacion(vacante, request.user, comentario)
             messages.success(request, f"Solicitud {vacante.folio} rechazada.")
         elif action == "reclutamiento":
             iniciar_reclutamiento_vacante(vacante, request.user, comentario)
@@ -192,6 +199,11 @@ def vacante_accion(request, pk: int):
 
 
 def _can_view_board(user) -> bool:
-    if can_view_submodule(user, "rrhh", "vacantes") or can_aprobar_vacante_direccion(user):
+    if can_gestionar_vacantes(user) or can_autorizar_vacante(user):
         return True
-    return VacanteRRHH.objects.filter(solicitado_por=user).exists() if getattr(user, "is_authenticated", False) else False
+    if not getattr(user, "is_authenticated", False):
+        return False
+    return (
+        VacanteRRHH.objects.filter(solicitado_por=user).exists()
+        or VacanteRRHH.objects.filter(creado_por=user).exists()
+    )

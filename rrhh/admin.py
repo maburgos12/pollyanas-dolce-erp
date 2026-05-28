@@ -155,11 +155,22 @@ class VacanteRRHHAdmin(admin.ModelAdmin):
         "cantidad_solicitada",
         "estado",
         "prioridad",
+        "tipo_autorizacion",
+        "autorizador_asignado",
         "fecha_cubierta",
         "dias_en_cubrir",
         "solicitado_por",
     )
-    list_filter = ("estado", "prioridad", "tipo_solicitud", "departamento", "area", "fecha_solicitada")
+    list_filter = (
+        "estado",
+        "prioridad",
+        "tipo_solicitud",
+        "tipo_autorizacion",
+        "requiere_direccion",
+        "departamento",
+        "area",
+        "fecha_solicitada",
+    )
     search_fields = ("folio", "area", "puesto", "motivo_solicitud", "motivo_no_cubierta", "sugerencias")
 
 

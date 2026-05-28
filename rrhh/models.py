@@ -415,7 +415,7 @@ class VacanteRRHH(models.Model):
     ESTADO_CHOICES = [
         (ESTADO_SOLICITADA, "Solicitada"),
         (ESTADO_REVISION_RRHH, "En revisión RRHH"),
-        (ESTADO_PENDIENTE_DIRECCION, "Pendiente Dirección"),
+        (ESTADO_PENDIENTE_DIRECCION, "Pendiente autorización"),
         (ESTADO_AUTORIZADA, "Autorizada"),
         (ESTADO_RECLUTAMIENTO, "En reclutamiento"),
         (ESTADO_CUBIERTA, "Cubierta"),
@@ -440,6 +440,13 @@ class VacanteRRHH(models.Model):
         (PRIORIDAD_NORMAL, "Normal"),
         (PRIORIDAD_ALTA, "Alta"),
         (PRIORIDAD_URGENTE, "Urgente"),
+    ]
+
+    AUTORIZACION_JEFE_DIRECTO = "jefe_directo"
+    AUTORIZACION_DIRECCION = "direccion_general"
+    AUTORIZACION_CHOICES = [
+        (AUTORIZACION_JEFE_DIRECTO, "Jefe directo"),
+        (AUTORIZACION_DIRECCION, "Dirección General"),
     ]
 
     folio = models.CharField(max_length=20, unique=True, blank=True, editable=False)
@@ -492,6 +499,20 @@ class VacanteRRHH(models.Model):
         on_delete=models.SET_NULL,
         related_name="vacantes_autorizadas",
     )
+    autorizador_asignado = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="vacantes_por_autorizar",
+    )
+    tipo_autorizacion = models.CharField(
+        max_length=24,
+        choices=AUTORIZACION_CHOICES,
+        default=AUTORIZACION_JEFE_DIRECTO,
+        db_index=True,
+    )
+    requiere_direccion = models.BooleanField(default=False, db_index=True)
     fecha_autorizacion = models.DateTimeField(null=True, blank=True)
     rechazado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
