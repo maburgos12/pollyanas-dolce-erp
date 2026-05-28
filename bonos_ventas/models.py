@@ -43,6 +43,10 @@ class ConfigBonoVentasPeriodo(models.Model):
     limite_uniforme = models.PositiveSmallIntegerField(default=1)
     limite_asistencia = models.PositiveSmallIntegerField(default=2)
     limite_puntualidad = models.PositiveSmallIntegerField(default=2)
+    cancela_por_asistencia = models.BooleanField(default=False)
+    limite_asistencia_cancelacion = models.PositiveSmallIntegerField(default=2)
+    cancela_por_puntualidad = models.BooleanField(default=False)
+    limite_retardos_cancelacion = models.PositiveSmallIntegerField(default=3)
     bono_ventas_adicional = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("300.00"))
     umbral_crecimiento_pct = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("5.00"))
     bono_repartidor_adicional = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("300.00"))
@@ -197,10 +201,20 @@ class BonoVentasEmpleado(models.Model):
         self.pasa_asistencia = (dias_base - dias_asistencia) <= cfg.limite_asistencia
         self.pasa_uniforme = (dias_base - int(self.dias_uniforme or 0)) <= cfg.limite_uniforme
         self.pasa_puntualidad = (dias_base - int(self.dias_puntualidad or 0)) <= cfg.limite_puntualidad
+        self.cancela_bono = bool(
+            (cfg.cancela_por_asistencia and (dias_base - int(self.dias_asistencia or 0) >= cfg.limite_asistencia_cancelacion))
+            or (cfg.cancela_por_puntualidad and (dias_base - int(self.dias_puntualidad or 0) >= cfg.limite_retardos_cancelacion))
+        )
         self.monto_uniforme = self._monto_concepto(base, cfg.pct_uniforme, self.pasa_uniforme)
         self.monto_asistencia = self._monto_concepto(base, cfg.pct_asistencia, self.pasa_asistencia)
         self.monto_puntualidad = self._monto_concepto(base, cfg.pct_puntualidad, self.pasa_puntualidad)
         self.sub1 = _money(self.monto_uniforme + self.monto_asistencia + self.monto_puntualidad)
+
+        if self.cancela_bono:
+            self.sub1 = Decimal("0.00")
+            self.monto_puntualidad = Decimal("0.00")
+            self.monto_asistencia = Decimal("0.00")
+            self.monto_uniforme = Decimal("0.00")
 
         if self._es_repartidor():
             self.pct_efectividad_entrega = (
@@ -227,6 +241,9 @@ class BonoVentasEmpleado(models.Model):
                     )
                 )
             )
+
+        if self.cancela_bono:
+            self.bono_ventas = Decimal("0.00")
 
         self.pasa_bono_ventas = self.bono_ventas > 0
         self.total_a_pagar = _money(

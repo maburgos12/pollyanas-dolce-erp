@@ -186,6 +186,52 @@ class BonosVentasTests(TestCase):
         self.assertTrue(bono.pasa_asistencia)
         self.assertEqual(bono.sub1, Decimal("225.00"))
 
+    def test_recalcular_cancela_bono_completo_por_falta(self):
+        sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
+        empleado = Empleado.objects.create(nombre="Empleado Ventas Falta", area="VENTAS", sucursal="Payán")
+        periodo = ConfigBonoVentasPeriodo.objects.create(mes=5, anio=2026, dias_laborables=23)
+        periodo.cancela_por_asistencia = True
+        periodo.limite_asistencia_cancelacion = 0
+        periodo.save(update_fields=["cancela_por_asistencia", "limite_asistencia_cancelacion"])
+
+        bono = BonoVentasEmpleado.objects.create(
+            periodo=periodo,
+            empleado=empleado,
+            sucursal=sucursal,
+            dias_trabajados=23,
+            dias_uniforme=23,
+            dias_asistencia=22,
+            dias_puntualidad=23,
+        )
+
+        bono.recalcular()
+
+        self.assertTrue(bono.cancela_bono)
+        self.assertEqual(bono.total_a_pagar, Decimal("0.00"))
+
+    def test_recalcular_cancela_bono_completo_por_retraso(self):
+        sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
+        empleado = Empleado.objects.create(nombre="Empleado Ventas Retardo", area="VENTAS", sucursal="Payán")
+        periodo = ConfigBonoVentasPeriodo.objects.create(mes=5, anio=2026, dias_laborables=23)
+        periodo.cancela_por_puntualidad = True
+        periodo.limite_retardos_cancelacion = 3
+        periodo.save(update_fields=["cancela_por_puntualidad", "limite_retardos_cancelacion"])
+
+        bono = BonoVentasEmpleado.objects.create(
+            periodo=periodo,
+            empleado=empleado,
+            sucursal=sucursal,
+            dias_trabajados=23,
+            dias_uniforme=23,
+            dias_asistencia=23,
+            dias_puntualidad=20,
+        )
+
+        bono.recalcular()
+
+        self.assertTrue(bono.cancela_bono)
+        self.assertEqual(bono.total_a_pagar, Decimal("0.00"))
+
     def test_recalcular_desde_registros_cuenta_solo_asistencias_reales(self):
         user = get_user_model().objects.create_superuser(username="captura-ventas")
         self.client.force_login(user)

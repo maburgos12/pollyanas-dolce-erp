@@ -164,6 +164,10 @@ class ConfigBonoArea(models.Model):
     limite_asistencia = models.PositiveSmallIntegerField(default=2)
     limite_puntualidad = models.PositiveSmallIntegerField(default=2)
     limite_produccion = models.PositiveSmallIntegerField(default=2)
+    cancela_por_asistencia = models.BooleanField(default=False)
+    limite_asistencia_cancelacion = models.PositiveSmallIntegerField(default=2)
+    cancela_por_puntualidad = models.BooleanField(default=False)
+    limite_retardos_cancelacion = models.PositiveSmallIntegerField(default=3)
     usa_produccion = models.BooleanField(default=True)
     actualizado_en = models.DateTimeField(auto_now=True)
 
@@ -188,6 +192,10 @@ class ConfigBonoArea(models.Model):
             "limite_asistencia": 2,
             "limite_puntualidad": 2,
             "limite_produccion": 2,
+            "cancela_por_asistencia": False,
+            "limite_asistencia_cancelacion": 2,
+            "cancela_por_puntualidad": False,
+            "limite_retardos_cancelacion": 3,
             "usa_produccion": True,
         }
         if area == AREA_LOGISTICA:
@@ -272,6 +280,16 @@ class BonoProduccionEmpleado(models.Model):
         self.pasa_asistencia = (dias_base - int(self.dias_asistencia or 0)) <= regla.limite_asistencia
         self.pasa_puntualidad = (dias_base - int(self.dias_puntualidad or 0)) <= regla.limite_puntualidad
         self.pasa_produccion = True
+        self.cancela_bono = (
+            bool(
+                regla.cancela_por_asistencia
+                and ((dias_base - int(self.dias_asistencia or 0)) >= regla.limite_asistencia_cancelacion)
+            )
+            or bool(
+                regla.cancela_por_puntualidad
+                and ((dias_base - int(self.dias_puntualidad or 0)) >= regla.limite_retardos_cancelacion)
+            )
+        )
         if regla.usa_produccion:
             self.pasa_produccion = (dias_base - int(self.dias_produccion or 0)) <= regla.limite_produccion
 
@@ -280,6 +298,13 @@ class BonoProduccionEmpleado(models.Model):
         self.monto_puntualidad = self._monto_concepto(base, regla.pct_puntualidad, self.pasa_puntualidad)
         self.monto_produccion = self._monto_concepto(base, regla.pct_produccion, self.pasa_produccion and regla.usa_produccion)
         self.monto_premio_embetunado = _money(cfg.premio_embetunado if self.gano_premio_embetunado else 0)
+
+        if self.cancela_bono:
+            self.monto_uniforme = Decimal("0.00")
+            self.monto_asistencia = Decimal("0.00")
+            self.monto_puntualidad = Decimal("0.00")
+            self.monto_produccion = Decimal("0.00")
+            self.monto_premio_embetunado = Decimal("0.00")
 
         self.total_a_pagar = _money(
             self.monto_uniforme
