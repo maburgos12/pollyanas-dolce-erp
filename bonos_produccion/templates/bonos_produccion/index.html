@@ -353,6 +353,7 @@ function GroupBy(items,keyFn,labelFn){
 function ProduccionReportPage({bonos,grupo,periodoLabel}){
   const total=bonos.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
   const pasan=bonos.filter(b=>b.pasa_uniforme&&b.pasa_asistencia&&b.pasa_puntualidad&&b.pasa_produccion).length;
+  const muestraBonoExtra=bonos.some(b=>Number(b.bono_extra||0)>0);
   return h('section',{className:'print-page'},
     h('div',{className:'print-head'},
       h('div',null,h('div',{className:'print-brand'},"Pollyana's Dolce"),h('div',{className:'print-foot'},'Bonos de Produccion · '+periodoLabel)),
@@ -360,21 +361,23 @@ function ProduccionReportPage({bonos,grupo,periodoLabel}){
     ),
     h('div',{className:'report-kpis'},h(ReportKpi,{label:'Colaboradores',value:bonos.length}),h(ReportKpi,{label:'Pasan todo',value:pasan}),h(ReportKpi,{label:'Total grupo',value:money(total)}),h(ReportKpi,{label:'Grupo',value:grupo})),
     h('table',{className:'report-table'},
-      h('thead',null,h('tr',null,['Empleado','Dias','Uni','Asis','Punt','Prod','Embet.','Premio','Ajustes','Total'].map(x=>h('th',{key:x},x)))),
+      h('thead',null,h('tr',null,['Empleado','Dias','Uni','Asis','Punt','Prod','Embet.','Premio',muestraBonoExtra?'Bono extra':null,'Total'].filter(Boolean).map(x=>h('th',{key:x},x)))),
       h('tbody',null,bonos.map(b=>{
-        const aj=Number(b.ajuste_positivo||0)+Number(b.bono_extra||0)-Number(b.ajuste_negativo||0);
-        return h('tr',{key:b.id},h('td',null,b.empleado_nombre),h('td',null,b.dias_trabajados||0),h('td',null,statusTxt(b.pasa_uniforme)),h('td',null,statusTxt(b.pasa_asistencia)),h('td',null,statusTxt(b.pasa_puntualidad)),h('td',null,statusTxt(b.pasa_produccion)),h('td',null,b.total_embetunados||0),h('td',null,money(b.monto_premio_embetunado||0)),h('td',null,money(aj)),h('td',null,money(b.total_a_pagar)));
+        return h('tr',{key:b.id},h('td',null,b.empleado_nombre),h('td',null,b.dias_trabajados||0),h('td',null,statusTxt(b.pasa_uniforme)),h('td',null,statusTxt(b.pasa_asistencia)),h('td',null,statusTxt(b.pasa_puntualidad)),h('td',null,statusTxt(b.pasa_produccion)),h('td',null,b.total_embetunados||0),h('td',null,money(b.monto_premio_embetunado||0)),muestraBonoExtra&&h('td',null,money(b.bono_extra||0)),h('td',null,money(b.total_a_pagar)));
       }))
     ),
     h('div',{className:'report-note'},'Regla: si asistencia o puntualidad no pasan el limite configurado, se cancela el bono calculado del periodo.')
   );
 }
 function ProduccionCollaboratorPage({bono,periodoLabel}){
-  const aj=Number(bono.ajuste_positivo||0)+Number(bono.bono_extra||0)-Number(bono.ajuste_negativo||0);
+  const bonoExtra=Number(bono.bono_extra||0);
+  const conceptos=[h(PrintField,{label:'Uniforme',value:`${statusTxt(bono.pasa_uniforme)} · ${money(bono.monto_uniforme||0)}`}),h(PrintField,{label:'Asistencia',value:`${statusTxt(bono.pasa_asistencia)} · ${money(bono.monto_asistencia||0)}`}),h(PrintField,{label:'Puntualidad',value:`${statusTxt(bono.pasa_puntualidad)} · ${money(bono.monto_puntualidad||0)}`}),h(PrintField,{label:'Produccion',value:`${statusTxt(bono.pasa_produccion)} · ${money(bono.monto_produccion||0)}`}),h(PrintField,{label:'Embetunados',value:String(bono.total_embetunados||0)}),h(PrintField,{label:'Premio',value:money(bono.monto_premio_embetunado||0)})];
+  if(bonoExtra>0)conceptos.push(h(PrintField,{label:'Bono extra',value:money(bonoExtra)}));
+  conceptos.push(h(PrintField,{label:'Estatus',value:(bono.pasa_uniforme&&bono.pasa_asistencia&&bono.pasa_puntualidad&&bono.pasa_produccion)?'Pasa':'Cancelado/Revisar'}));
   return h('section',{className:'print-page'},
     h('div',{className:'print-head'},h('div',null,h('div',{className:'print-brand'},"Pollyana's Dolce"),h('div',{className:'print-foot'},'Bonos de Produccion · '+periodoLabel)),h('div',null,h('div',{className:'print-doc-title'},'Resumen colaborador'),h('div',{className:'print-folio'},AREA_LABELS[bono.area]||bono.area))),
     h('div',{className:'print-section'},h('div',{className:'print-section-title'},'Datos'),h('div',{className:'print-grid'},h(PrintField,{label:'Colaborador',value:bono.empleado_nombre}),h(PrintField,{label:'Area',value:AREA_LABELS[bono.area]||bono.area}),h(PrintField,{label:'Dias trabajados',value:String(bono.dias_trabajados||0)}),h(PrintField,{label:'Total a pagar',value:money(bono.total_a_pagar)}))),
-    h('div',{className:'print-section'},h('div',{className:'print-section-title'},'Conceptos'),h('div',{className:'print-grid'},h(PrintField,{label:'Uniforme',value:`${statusTxt(bono.pasa_uniforme)} · ${money(bono.monto_uniforme||0)}`}),h(PrintField,{label:'Asistencia',value:`${statusTxt(bono.pasa_asistencia)} · ${money(bono.monto_asistencia||0)}`}),h(PrintField,{label:'Puntualidad',value:`${statusTxt(bono.pasa_puntualidad)} · ${money(bono.monto_puntualidad||0)}`}),h(PrintField,{label:'Produccion',value:`${statusTxt(bono.pasa_produccion)} · ${money(bono.monto_produccion||0)}`}),h(PrintField,{label:'Embetunados',value:String(bono.total_embetunados||0)}),h(PrintField,{label:'Premio',value:money(bono.monto_premio_embetunado||0)}),h(PrintField,{label:'Ajuste neto',value:money(aj)}),h(PrintField,{label:'Estatus',value:(bono.pasa_uniforme&&bono.pasa_asistencia&&bono.pasa_puntualidad&&bono.pasa_produccion)?'Pasa':'Cancelado/Revisar'}))),
+    h('div',{className:'print-section'},h('div',{className:'print-section-title'},'Conceptos'),h('div',{className:'print-grid'},conceptos)),
     h('div',{className:'signature-grid'},h('div',{className:'signature-line'},`Firma colaborador · ${bono.empleado_nombre||''}`),h('div',{className:'signature-line'},'Firma jefe directo'))
   );
 }
@@ -718,6 +721,7 @@ function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registr
 }
 function ResumenTab({bonos,area,setArea,mes,anio}){
   const [report,setReport]=React.useState(null);
+  const [selectedIds,setSelectedIds]=React.useState(new Set());
   if(!bonos.length)return h('div',{className:'empty'},'Sin datos. Crea el periodo e inicializa empleados.');
   const totalGlobal=bonos.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
   const embonos=bonos.filter(b=>['EMBETUNADO','PRODUCCION'].includes(b.area));
@@ -725,11 +729,24 @@ function ResumenTab({bonos,area,setArea,mes,anio}){
   const periodoLabel=`${MESES[+mes]||''} ${anio}`;
   const grupos=GroupBy(bonos,b=>b.area,b=>AREA_LABELS[b.area]||b.area);
   const selected=bonos.filter(b=>b.area===area);
+  const selectedBonos=selected.filter(b=>selectedIds.has(b.id));
+  const allVisibleSelected=selected.length>0&&selected.every(b=>selectedIds.has(b.id));
+  function toggleSelected(id){
+    setSelectedIds(prev=>{const next=new Set(prev); next.has(id)?next.delete(id):next.add(id); return next;});
+  }
+  function toggleVisible(){
+    setSelectedIds(prev=>{
+      const next=new Set(prev);
+      if(allVisibleSelected)selected.forEach(b=>next.delete(b.id));
+      else selected.forEach(b=>next.add(b.id));
+      return next;
+    });
+  }
   return h('div',null,
     h(AreaChips,{area,setArea}),
     h('div',{className:'report-tools',style:{marginBottom:12}},
       h('button',{className:'btn btn-wine btn-sm',onClick:()=>setReport({type:'all'})},'Imprimir reporte completo'),
-      h('button',{className:'btn btn-ghost btn-sm',disabled:selected.length!==1,onClick:()=>setReport({type:'one',bono:selected[0]})},'Imprimir colaborador')
+      h('button',{className:'btn btn-ghost btn-sm',disabled:selectedBonos.length===0,onClick:()=>setReport({type:'selected',bonos:selectedBonos})},`Imprimir seleccionados (${selectedBonos.length})`)
     ),
     h('div',{className:'metrics',style:{marginBottom:20}},
       h('div',{className:'metric-card'},h('div',{className:'lbl'},'Total global'),h('div',{className:'val gold'},money(totalGlobal))),
@@ -740,23 +757,25 @@ function ResumenTab({bonos,area,setArea,mes,anio}){
     h('div',{className:'card'},
       h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},AREA_LABELS[area]),h('div',{style:{fontWeight:800,color:'var(--gold)',fontSize:14}},money(selected.reduce((s,b)=>s+Number(b.total_a_pagar||0),0)))),
       h('div',{className:'tbl-wrap'},h('table',null,
-        h('thead',null,h('tr',null,[h('th',null,'Empleado'),h('th',null,'Dias'),h('th',null,'Uniforme'),h('th',null,'Asistencia'),h('th',null,'Puntualidad'),h('th',null,'Produccion'),(['EMBETUNADO','PRODUCCION'].includes(area))&&h('th',null,'Embet.'),(['EMBETUNADO','PRODUCCION'].includes(area))&&h('th',null,'Premio'),h('th',null,'Total'),h('th',null,'PDF')].filter(Boolean))),
+        h('thead',null,h('tr',null,[h('th',null,h('input',{type:'checkbox',checked:allVisibleSelected,onChange:toggleVisible,title:'Seleccionar area visible'})),h('th',null,'Empleado'),h('th',null,'Dias'),h('th',null,'Uniforme'),h('th',null,'Asistencia'),h('th',null,'Puntualidad'),h('th',null,'Produccion'),(['EMBETUNADO','PRODUCCION'].includes(area))&&h('th',null,'Embet.'),(['EMBETUNADO','PRODUCCION'].includes(area))&&h('th',null,'Premio'),h('th',null,'Total')].filter(Boolean))),
         h('tbody',null,selected.map(b=>{
           const esGanador=(['EMBETUNADO','PRODUCCION'].includes(area))&&maxEmb>0&&(b.total_embetunados||0)===maxEmb;
           return h('tr',{key:b.id},
+            h('td',null,h('input',{type:'checkbox',checked:selectedIds.has(b.id),onChange:()=>toggleSelected(b.id),title:'Seleccionar colaborador'})),
             h('td',null,h('div',{className:'persona-row'},h('div',{className:'av'},initials(b.empleado_nombre)),h('div',null,h('div',{className:'persona-name'},b.empleado_nombre+(esGanador?' *':'')),esGanador&&h('div',{className:'persona-sub',style:{color:'var(--gold)'}},'Mas embetunados')))),
             h('td',null,b.dias_trabajados||0),h('td',null,h(Badge,{ok:b.pasa_uniforme})),h('td',null,h(Badge,{ok:b.pasa_asistencia})),
             h('td',null,h(Badge,{ok:b.pasa_puntualidad})),h('td',null,h(Badge,{ok:b.pasa_produccion})),
             (['EMBETUNADO','PRODUCCION'].includes(area))&&h('td',null,b.total_embetunados||0),
             (['EMBETUNADO','PRODUCCION'].includes(area))&&h('td',null,money(b.monto_premio_embetunado||0)),
-            h('td',{style:{fontWeight:800,color:'var(--wine)'}},money(b.total_a_pagar)),
-            h('td',null,h('button',{className:'btn btn-ghost btn-sm',onClick:()=>setReport({type:'one',bono:b})},'Carta'))
+            h('td',{style:{fontWeight:800,color:'var(--wine)'}},money(b.total_a_pagar))
           );
         }))
       ))
     ),
     report&&h(ReportModal,{title:'Reporte de bonos produccion',onClose:()=>setReport(null)},
-      report.type==='all'?grupos.map(g=>h(ProduccionReportPage,{key:g.key,bonos:g.items,grupo:g.nombre,periodoLabel})):h(ProduccionCollaboratorPage,{bono:report.bono,periodoLabel})
+      report.type==='all'?grupos.map(g=>h(ProduccionReportPage,{key:g.key,bonos:g.items,grupo:g.nombre,periodoLabel})):
+      report.type==='selected'?report.bonos.map(b=>h(ProduccionCollaboratorPage,{key:b.id,bono:b,periodoLabel})):
+      h(ProduccionCollaboratorPage,{bono:report.bono,periodoLabel})
     )
   );
 }
