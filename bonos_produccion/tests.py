@@ -329,28 +329,33 @@ class BonosProduccionTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
 
-    def test_recalcular_usa_dias_trabajados_como_base_de_asistencia(self):
+    def test_recalcular_usa_dias_laborables_como_base_de_asistencia(self):
         empleado = Empleado.objects.create(nombre="Empleado Produccion", area="PRODUCCION")
-        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026, dias_laborables=23)
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026, dias_laborables=22, monto_hornos=Decimal("800.00"))
+        periodo.asegurar_reglas_area()
+        regla = periodo.reglas_area.get(area=AREA_HORNOS)
+        regla.limite_asistencia = 0
+        regla.save()
         bono = BonoProduccionEmpleado.objects.create(
             periodo=periodo,
             empleado=empleado,
-            area="HORNOS",
-            dias_trabajados=15,
-            dias_uniforme=15,
-            dias_asistencia=15,
-            dias_puntualidad=15,
-            dias_produccion=15,
+            area=AREA_HORNOS,
+            dias_trabajados=21,
+            dias_uniforme=21,
+            dias_asistencia=21,
+            dias_puntualidad=21,
+            dias_produccion=21,
         )
 
         bono.recalcular()
 
-        self.assertTrue(bono.pasa_asistencia)
-        self.assertEqual(bono.total_a_pagar, Decimal("1000.00"))
+        self.assertFalse(bono.pasa_asistencia)
+        self.assertEqual(bono.monto_asistencia, Decimal("0.00"))
+        self.assertEqual(bono.total_a_pagar, Decimal("680.00"))
 
     def test_recalcular_no_deja_total_negativo_por_ajuste(self):
         empleado = Empleado.objects.create(nombre="Empleado Produccion", area="PRODUCCION")
-        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026, dias_laborables=22, monto_hornos=Decimal("800.00"))
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026, dias_laborables=10, monto_hornos=Decimal("800.00"))
         bono = BonoProduccionEmpleado.objects.create(
             periodo=periodo,
             empleado=empleado,
