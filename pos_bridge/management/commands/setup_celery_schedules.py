@@ -66,6 +66,25 @@ class Command(BaseCommand):
             },
         )
 
+        attendance_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="*/30",
+            hour="6-23",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="pos_bridge: asistencias Point intradia",
+            defaults={
+                "task": "pos_bridge.attendance_sync",
+                "crontab": attendance_cron,
+                "interval": None,
+                "kwargs": json.dumps({"days": 2, "lag_days": 0}),
+                "enabled": True,
+            },
+        )
+
         intraday_profitability_cron, _ = CrontabSchedule.objects.get_or_create(
             minute="10",
             hour="8-22",

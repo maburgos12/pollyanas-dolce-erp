@@ -44,6 +44,7 @@ from reportes.models import (
     FactVentaDiaria,
     OperationsMetricSnapshot,
 )
+from rrhh.models import AsistenciaEmpleado
 from ventas.models import VentaAutoritativaPoint
 
 from .models import PublicApiAccessLog, PublicApiClient
@@ -294,6 +295,17 @@ def _build_pipeline_monitor_rows(*, reference_date: date) -> list[dict[str, obje
             "detail": "Transferencias entre sucursales.",
         },
         {
+            "label": "Asistencias Point",
+            "job_type": PointSyncJob.JOB_TYPE_ATTENDANCE,
+            "latest_data_date": (
+                AsistenciaEmpleado.objects.filter(fuente=AsistenciaEmpleado.FUENTE_POINT)
+                .order_by("-fecha")
+                .values_list("fecha", flat=True)
+                .first()
+            ),
+            "detail": "Entradas y salidas registradas por sucursal en Point.",
+        },
+        {
             "label": "Analytics",
             "job_type": "",
             "latest_data_date": analytics_latest.generated_at if analytics_latest else None,
@@ -353,6 +365,7 @@ def _build_schedule_rows() -> list[dict[str, object]]:
         ("waste", "Sync mermas Point", "pos_bridge.waste_sync"),
         ("production", "Sync producción Point", "pos_bridge.production_sync"),
         ("transfers", "Sync transferencias Point", "pos_bridge.transfer_sync"),
+        ("attendance", "Sync asistencias Point", "pos_bridge.attendance_sync"),
         ("analytics", "Refresh analytics operativo", "reportes.operations_automation_cycle"),
     ]
     if PeriodicTask is None:

@@ -24,7 +24,9 @@ def monitor_sincronizacion(request):
     emp_con_asistencia = set(asistencias_hoy.values_list("empleado_id", flat=True))
     emp_sin_asistencia = Empleado.objects.filter(activo=True).exclude(id__in=emp_con_asistencia).order_by("nombre")
     ultimas_por_api = (
-        AsistenciaEmpleado.objects.filter(fuente=AsistenciaEmpleado.FUENTE_HIKCONNECT_API)
+        AsistenciaEmpleado.objects.filter(
+            fuente__in=[AsistenciaEmpleado.FUENTE_HIKCONNECT_API, AsistenciaEmpleado.FUENTE_POINT]
+        )
         .select_related("empleado", "turno", "sucursal")
         .order_by("-creado_en")[:20]
     )

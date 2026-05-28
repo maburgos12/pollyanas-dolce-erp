@@ -10,6 +10,7 @@ from pos_bridge.api.pagination import StandardPagination
 from pos_bridge.api.permissions import IsPosAdminUser
 from pos_bridge.api.serializers.sync_jobs import PointSyncJobSerializer, TriggerSyncSerializer
 from pos_bridge.models import PointSyncJob
+from pos_bridge.tasks.run_attendance_sync import run_attendance_sync
 from pos_bridge.tasks.run_daily_sales_sync import run_daily_sales_sync
 from pos_bridge.tasks.run_inventory_sync import run_inventory_sync
 from pos_bridge.tasks.run_product_recipe_sync import run_product_recipe_sync
@@ -47,6 +48,15 @@ class SyncJobsViewSet(ReadOnlyModelViewSet):
             )
         elif job_type == PointSyncJob.JOB_TYPE_RECIPES:
             sync_job = run_product_recipe_sync(triggered_by=request.user, branch_hint=branch_filter)
+        elif job_type == PointSyncJob.JOB_TYPE_ATTENDANCE:
+            attendance_days = payload.get("days", 2) if "days" in request.data else 2
+            attendance_lag_days = payload.get("lag_days", 0) if "lag_days" in request.data else 0
+            sync_job = run_attendance_sync(
+                triggered_by=request.user,
+                branch_filter=branch_filter,
+                lookback_days=attendance_days,
+                lag_days=attendance_lag_days,
+            )
         else:
             return Response({"detail": "Tipo de job no soportado."}, status=status.HTTP_400_BAD_REQUEST)
 

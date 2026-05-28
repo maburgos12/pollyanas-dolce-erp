@@ -84,7 +84,7 @@
       <div class="ch-kicker">Capital Humano · Checador</div>
       <h1 class="ch-title">Carga y sincronización de asistencia</h1>
       <p class="ch-copy">
-        Consulta lo que ya está entrando por el agente Hikvision y carga archivos Excel cuando necesites recuperar
+        Consulta lo que ya está entrando por las sincronizaciones automáticas y carga archivos Excel cuando necesites recuperar
         asistencias manualmente.
       </p>
       <div class="ch-actions">
@@ -94,16 +94,16 @@
     </div>
     <div class="ch-status">
       <div class="ch-status-row">
-        <span>Última lectura API</span>
+        <span>Última lectura automática</span>
         <span>{% if ultima_api %}{{ ultima_api.creado_en|date:"Y-m-d H:i" }}{% else %}-{% endif %}</span>
       </div>
       <div class="ch-status-row">
         <span>Fuente automática</span>
-        <span>Hikvision API</span>
+        <span>Hikvision API / PointMeUp</span>
       </div>
       <div class="ch-status-row">
         <span>Receptor ERP</span>
-        <span>/rrhh/api/asistencia-hik/</span>
+        <span>/rrhh/api/asistencia-hik/ + pos_bridge.attendance_sync</span>
       </div>
     </div>
   </section>
@@ -111,7 +111,7 @@
   <section class="ch-kpis">
     <article class="ch-kpi">
       <div class="ch-kpi-value">{{ resumen_checador.asistencias_api }}</div>
-      <div class="ch-kpi-label">Registros API</div>
+      <div class="ch-kpi-label">Registros automáticos</div>
     </article>
     <article class="ch-kpi">
       <div class="ch-kpi-value">{{ resumen_checador.asistencias_hoy }}</div>

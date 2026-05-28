@@ -13,6 +13,7 @@ from pos_bridge.models import PointDailyBranchIndicator, PointSyncJob
 from pos_bridge.services.open_transfer_sync_service import OpenTransferSyncService
 from pos_bridge.services.realtime_inventory_service import deliver_ecommerce_webhook, run_realtime_inventory_sync
 from pos_bridge.tasks.retry_failed_jobs import retry_failed_jobs
+from pos_bridge.tasks.run_attendance_sync import run_attendance_sync
 from pos_bridge.tasks.run_daily_sales_sync import run_daily_sales_sync
 from pos_bridge.tasks.run_inventory_sync import run_inventory_sync
 from pos_bridge.tasks.run_monthly_product_closure import run_monthly_product_closure
@@ -120,6 +121,30 @@ def _record_visible_cut_audit(
 def task_daily_sales_sync(self, *, days: int = 3, lag_days: int = 1, branch_filter: str | None = None, triggered_by_id: int | None = None):
     return _run_with_optional_user(
         run_daily_sales_sync,
+        triggered_by_id=triggered_by_id,
+        branch_filter=branch_filter,
+        lookback_days=days,
+        lag_days=lag_days,
+    )
+
+
+@shared_task(
+    name="pos_bridge.attendance_sync",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=300,
+    acks_late=True,
+)
+def task_attendance_sync(
+    self,
+    *,
+    days: int = 2,
+    lag_days: int = 0,
+    branch_filter: str | None = None,
+    triggered_by_id: int | None = None,
+):
+    return _run_with_optional_user(
+        run_attendance_sync,
         triggered_by_id=triggered_by_id,
         branch_filter=branch_filter,
         lookback_days=days,

@@ -12,6 +12,7 @@ class PointSyncJob(models.Model):
     JOB_TYPE_WASTE = "waste"
     JOB_TYPE_PRODUCTION = "production"
     JOB_TYPE_TRANSFERS = "transfers"
+    JOB_TYPE_ATTENDANCE = "attendance"
     JOB_TYPE_CHOICES = [
         (JOB_TYPE_INVENTORY, "Inventory"),
         (JOB_TYPE_SALES, "Sales"),
@@ -19,6 +20,7 @@ class PointSyncJob(models.Model):
         (JOB_TYPE_WASTE, "Waste"),
         (JOB_TYPE_PRODUCTION, "Production"),
         (JOB_TYPE_TRANSFERS, "Transfers"),
+        (JOB_TYPE_ATTENDANCE, "Attendance"),
     ]
 
     STATUS_PENDING = "PENDING"

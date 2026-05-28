@@ -1668,7 +1668,9 @@ def importar_checador(request):
 
     hoy = timezone.localdate()
     ayer = hoy - timedelta(days=1)
-    api_qs = AsistenciaEmpleado.objects.filter(fuente=AsistenciaEmpleado.FUENTE_HIKCONNECT_API)
+    api_qs = AsistenciaEmpleado.objects.filter(
+        fuente__in=[AsistenciaEmpleado.FUENTE_HIKCONNECT_API, AsistenciaEmpleado.FUENTE_POINT]
+    )
     ultimas_api = (
         api_qs.select_related("empleado", "turno", "sucursal")
         .order_by("-creado_en")[:12]

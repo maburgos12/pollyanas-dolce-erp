@@ -29,6 +29,7 @@ class TriggerSyncSerializer(serializers.Serializer):
         (PointSyncJob.JOB_TYPE_INVENTORY, "Inventario"),
         (PointSyncJob.JOB_TYPE_SALES, "Ventas"),
         (PointSyncJob.JOB_TYPE_RECIPES, "Recetas"),
+        (PointSyncJob.JOB_TYPE_ATTENDANCE, "Asistencias"),
     ]
 
     job_type = serializers.ChoiceField(choices=JOB_CHOICES)
