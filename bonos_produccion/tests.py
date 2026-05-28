@@ -10,7 +10,15 @@ from core.access import ROLE_PRODUCCION, ROLE_RRHH
 from core.navigation import NAV_GROUPS
 from rrhh.models import Empleado, NominaLinea, NominaPeriodo, PermisoSalida
 
-from .models import AREA_HORNOS, AREA_LOGISTICA, AREA_PRODUCCION, BonoProduccionEmpleado, ConfigBonoPeriodo
+from .models import (
+    AREA_HORNOS,
+    AREA_LOGISTICA,
+    AREA_PRODUCCION,
+    BonoProduccionEmpleado,
+    ConfigBonoPeriodo,
+    RegistroDiarioProduccion,
+)
+from .views import _recalcular_desde_registros
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -339,6 +347,55 @@ class BonosProduccionTests(TestCase):
 
         self.assertTrue(bono.pasa_asistencia)
         self.assertEqual(bono.total_a_pagar, Decimal("1000.00"))
+
+    def test_recalcular_desde_registros_cuenta_solo_asistencias_reales(self):
+        user = get_user_model().objects.create_superuser(username="captura-produccion")
+        self.client.force_login(user)
+        empleado = Empleado.objects.create(nombre="Empleado Produccion", area="PRODUCCION")
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026, dias_laborables=23)
+        bono = BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado, area=AREA_HORNOS)
+        for dia in range(1, 24):
+            RegistroDiarioProduccion.objects.create(
+                bono=bono,
+                dia=dia,
+                tiene_asistencia=True,
+                tiene_uniforme=True,
+                tiene_puntualidad=True,
+                tiene_produccion=True,
+            )
+        for dia in range(24, 32):
+            RegistroDiarioProduccion.objects.create(
+                bono=bono,
+                dia=dia,
+                tiene_asistencia=False,
+                tiene_uniforme=True,
+                tiene_puntualidad=True,
+                tiene_produccion=True,
+            )
+
+        _recalcular_desde_registros(bono)
+
+        bono.refresh_from_db()
+        self.assertEqual(bono.dias_trabajados, 23)
+        self.assertEqual(bono.dias_uniforme, 23)
+        self.assertEqual(bono.dias_puntualidad, 23)
+        self.assertEqual(bono.dias_produccion, 23)
+        self.assertTrue(bono.pasa_asistencia)
+        self.assertEqual(bono.total_a_pagar, Decimal("1000.00"))
+
+    def test_recalcular_desde_registros_permite_dias_extra_trabajados(self):
+        user = get_user_model().objects.create_superuser(username="captura-produccion-extra")
+        self.client.force_login(user)
+        empleado = Empleado.objects.create(nombre="Empleado Produccion Extra", area="PRODUCCION")
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026, dias_laborables=23)
+        bono = BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado, area=AREA_HORNOS)
+        for dia in range(1, 25):
+            RegistroDiarioProduccion.objects.create(bono=bono, dia=dia, tiene_asistencia=True)
+
+        _recalcular_desde_registros(bono)
+
+        bono.refresh_from_db()
+        self.assertEqual(bono.dias_trabajados, 24)
 
     def test_aplicar_a_nomina_escribe_total_en_linea_bonos(self):
         empleado = Empleado.objects.create(nombre="Empleado Produccion", area="PRODUCCION")
