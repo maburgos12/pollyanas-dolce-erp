@@ -169,6 +169,9 @@ def permiso_requiere_autorizacion_direccion(empleado: Empleado | None) -> bool:
     if nombre in nombres_direccion or any(nombre.startswith(item) for item in nombres_direccion if len(item) > 5):
         return True
 
+    if empleado.jefe_directo_id:
+        return False
+
     departamento = (empleado.departamento or empleado.departamento_origen or "").strip().upper()
     if departamento not in DIRECCION_DEPARTAMENTOS:
         return False
