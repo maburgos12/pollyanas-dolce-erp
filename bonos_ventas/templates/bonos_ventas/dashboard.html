@@ -90,6 +90,13 @@
           <input type="hidden" name="anio" value="{{ anio }}">
           <button class="bonos-btn" type="submit" {% if not can_manage %}disabled{% endif %}>Sincronizar POS</button>
         </form>
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="sync_repartidores">
+          <input type="hidden" name="mes" value="{{ mes }}">
+          <input type="hidden" name="anio" value="{{ anio }}">
+          <button class="bonos-btn" type="submit" {% if not can_manage %}disabled{% endif %}>Sincronizar repartidores</button>
+        </form>
         {% endif %}
       </div>
     </div>
@@ -106,11 +113,12 @@
     </form>
   </section>
 
-  <section class="kpi-grid">
+  <section class="kpi-grid" style="grid-template-columns:repeat(5,minmax(0,1fr))">
     <article class="kpi-card"><div class="kpi-label">Total a pagar</div><div class="kpi-value gold">${{ total_bonos|floatformat:2|intcomma }}</div></article>
-    <article class="kpi-card"><div class="kpi-label">Empleadas</div><div class="kpi-value">{{ bonos|length|intcomma }}</div></article>
+    <article class="kpi-card"><div class="kpi-label">Empleados</div><div class="kpi-value">{{ bonos|length|intcomma }}</div></article>
     <article class="kpi-card"><div class="kpi-label">Pasan asistencia</div><div class="kpi-value wine">{{ passing_asistencia|intcomma }}</div></article>
     <article class="kpi-card"><div class="kpi-label">Con bono ventas</div><div class="kpi-value">{{ con_bono_ventas|intcomma }}</div></article>
+    <article class="kpi-card"><div class="kpi-label">Repartidores con bono</div><div class="kpi-value">{{ repartidores_con_bono|intcomma }}</div></article>
   </section>
 
   <section class="bonos-card">
@@ -129,6 +137,8 @@
           <div class="bonos-field"><label>Bono base</label><input name="bono_base" type="number" step="0.01" value="{% if periodo %}{{ periodo.bono_base }}{% else %}{{ defaults.bono_base }}{% endif %}"></div>
           <div class="bonos-field"><label>Bono ventas adicional</label><input name="bono_ventas_adicional" type="number" step="0.01" value="{% if periodo %}{{ periodo.bono_ventas_adicional }}{% else %}{{ defaults.bono_ventas_adicional }}{% endif %}"></div>
           <div class="bonos-field"><label>Umbral crecimiento %</label><input name="umbral_crecimiento_pct" type="number" step="0.01" value="{% if periodo %}{{ periodo.umbral_crecimiento_pct }}{% else %}{{ defaults.umbral_crecimiento_pct }}{% endif %}"></div>
+          <div class="bonos-field"><label>Bono repartidor adicional</label><input name="bono_repartidor_adicional" type="number" step="0.01" value="{% if periodo %}{{ periodo.bono_repartidor_adicional }}{% else %}{{ defaults.bono_repartidor_adicional }}{% endif %}"></div>
+          <div class="bonos-field"><label>Umbral efectividad repartidor %</label><input name="umbral_efectividad_pct" type="number" step="0.01" value="{% if periodo %}{{ periodo.umbral_efectividad_pct }}{% else %}{{ defaults.umbral_efectividad_pct }}{% endif %}"></div>
         </div>
 
         <div class="concept-grid">
@@ -214,6 +224,21 @@
             <input type="hidden" name="bono_id" value="{{ bono.id }}">
             <input type="hidden" name="mes" value="{{ mes }}">
             <input type="hidden" name="anio" value="{{ anio }}">
+            {% if bono.empleado.puesto_operativo == "REPARTIDOR" %}
+            <div class="money-grid" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+              <div class="kpi-card"><div class="kpi-label">Sub 1 (asist/puntual/unif)</div><div class="kpi-value">${{ bono.sub1|floatformat:2|intcomma }}</div></div>
+              <div class="kpi-card"><div class="kpi-label">Efectividad bitácora</div><div class="kpi-value {% if bono.pasa_bono_ventas %}gold{% else %}wine{% endif %}">{{ bono.pct_efectividad_entrega|floatformat:1 }}%</div></div>
+              <div class="kpi-card"><div class="kpi-label">Bono entregas</div><div class="kpi-value gold">${{ bono.monto_bono_entregas|floatformat:2|intcomma }}</div></div>
+              <div class="kpi-card"><div class="kpi-label">Total</div><div class="kpi-value wine">${{ bono.total_a_pagar|floatformat:2|intcomma }}</div></div>
+            </div>
+            <div class="adjust-grid">
+              <div class="bonos-field"><label>Días trabajados</label><input name="dias_trabajados" type="number" min="0" value="{{ bono.dias_trabajados }}"></div>
+              <div class="bonos-field"><label>Días uniforme</label><input name="dias_uniforme" type="number" min="0" value="{{ bono.dias_uniforme }}"></div>
+              <div class="bonos-field"><label>Días asistencia</label><input name="dias_asistencia" type="number" min="0" value="{{ bono.dias_asistencia }}"></div>
+              <div class="bonos-field"><label>Días puntualidad</label><input name="dias_puntualidad" type="number" min="0" value="{{ bono.dias_puntualidad }}"></div>
+              <div class="bonos-field"><label>Días con bitácora <small style="font-weight:400;color:#6b5f70">(auto · editable)</small></label><input name="dias_con_bitacora" type="number" min="0" value="{{ bono.dias_con_bitacora }}"></div>
+            </div>
+          {% else %}
             <div class="money-grid">
               <div class="kpi-card"><div class="kpi-label">Sub 1</div><div class="kpi-value">${{ bono.sub1|floatformat:2|intcomma }}</div></div>
               <div class="kpi-card"><div class="kpi-label">Bono ventas</div><div class="kpi-value gold">${{ bono.bono_ventas|floatformat:2|intcomma }}</div></div>
@@ -225,6 +250,7 @@
               <div class="bonos-field"><label>Días asistencia</label><input name="dias_asistencia" type="number" min="0" value="{{ bono.dias_asistencia }}"></div>
               <div class="bonos-field"><label>Días puntualidad</label><input name="dias_puntualidad" type="number" min="0" value="{{ bono.dias_puntualidad }}"></div>
             </div>
+          {% endif %}
             <div class="adjust-grid">
               <div class="bonos-field"><label>Ajuste positivo</label><input name="ajuste_positivo" type="number" step="0.01" value="{{ bono.ajuste_positivo }}"></div>
               <div class="bonos-field"><label>Ajuste negativo</label><input name="ajuste_negativo" type="number" step="0.01" value="{{ bono.ajuste_negativo }}"></div>

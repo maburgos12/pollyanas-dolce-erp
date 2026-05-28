@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from ventas.services.sales_read_service import get_point_sales_category_totals
 
-from .models import ConfigBonoVentasPeriodo, VentaCategoriaSucursal
+from .models import BonoVentasEmpleado, ConfigBonoVentasPeriodo, VentaCategoriaSucursal
 
 
 MAPEO_CATEGORIAS = {
@@ -60,3 +60,49 @@ def sync_ventas_categorias(periodo: ConfigBonoVentasPeriodo, sucursal_id: int | 
         )
         updated += 1
     return updated
+
+
+def sync_dias_repartidor(periodo: ConfigBonoVentasPeriodo) -> dict[str, int]:
+    """
+    Para cada BonoVentasEmpleado del periodo donde el empleado es REPARTIDOR,
+    cuenta los días con BitacoraRepartidor registrada ese mes y actualiza
+    dias_con_bitacora + recalcula el bono.
+
+    Requiere que el empleado tenga usuario_erp ligado al mismo User
+    que el Repartidor en logística (via Repartidor.user.empleado_rrhh).
+    """
+    from logistica.models import BitacoraRepartidor
+
+    bonos = (
+        BonoVentasEmpleado.objects
+        .filter(periodo=periodo)
+        .select_related("empleado__usuario_erp")
+    )
+
+    actualizados = 0
+    sin_repartidor = 0
+
+    for bono in bonos:
+        if (bono.empleado.puesto_operativo or "").strip().upper() != "REPARTIDOR":
+            continue
+        usuario_erp = bono.empleado.usuario_erp
+        if not usuario_erp:
+            sin_repartidor += 1
+            continue
+        try:
+            repartidor = usuario_erp.repartidor_logistica
+        except Exception:
+            sin_repartidor += 1
+            continue
+
+        dias = BitacoraRepartidor.objects.filter(
+            repartidor=repartidor,
+            fecha__year=periodo.anio,
+            fecha__month=periodo.mes,
+        ).count()
+        bono.dias_con_bitacora = dias
+        bono.recalcular()
+        bono.save(update_fields=["dias_con_bitacora", "pct_efectividad_entrega", "monto_bono_entregas", "bono_ventas", "pasa_bono_ventas", "total_a_pagar", "actualizado_en"])
+        actualizados += 1
+
+    return {"actualizados": actualizados, "sin_repartidor_vinculado": sin_repartidor}
