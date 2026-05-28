@@ -240,25 +240,66 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
             return Empleado.objects.none()
         return Empleado.objects.filter(jefe_directo=jefe, activo=True)
 
-    def _prioridad_equipo_directo(self, empleado):
+    def _ids_jerarquia_desde(self, jefe_ids):
+        pendientes = set(jefe_ids)
+        encontrados = set(jefe_ids)
+        while pendientes:
+            hijos = set(
+                Empleado.objects.filter(jefe_directo_id__in=pendientes, activo=True)
+                .values_list("id", flat=True)
+            )
+            nuevos = hijos - encontrados
+            encontrados.update(nuevos)
+            pendientes = nuevos
+        return encontrados
+
+    def _jerarquia_direccion_queryset(self, area_normalizada=None):
+        if not self.request.user.is_superuser:
+            return Empleado.objects.none()
+        jefaturas = Empleado.objects.filter(
+            activo=True,
+            departamento=AREA_PRODUCCION,
+            puesto_operativo="JEFATURA",
+        )
+        ids = self._ids_jerarquia_desde(jefaturas.values_list("id", flat=True))
+        empleados = list(Empleado.objects.filter(id__in=ids, activo=True))
+        if area_normalizada and area_normalizada != AREA_PRODUCCION:
+            ids = [
+                empleado.id
+                for empleado in empleados
+                if area_bono_produccion_empleado(empleado) == area_normalizada
+            ]
+        return Empleado.objects.filter(id__in=ids, activo=True)
+
+    def _personal_autorizable_queryset(self, area_normalizada=None):
+        equipo_ids = self._equipo_directo_queryset().values_list("id", flat=True)
+        jerarquia_ids = self._jerarquia_direccion_queryset(area_normalizada).values_list("id", flat=True)
+        return Empleado.objects.filter(Q(id__in=equipo_ids) | Q(id__in=jerarquia_ids), activo=True)
+
+    def _prioridad_permisos(self, empleado):
         puesto_operativo = (empleado.puesto_operativo or "").upper()
         puesto_texto = normalizar_nombre(f"{empleado.puesto or ''} {puesto_operativo}")
-        if puesto_operativo == "SUPERVISION_PRODUCCION" or "SUPERVIS" in puesto_texto:
-            return 0
-        if puesto_operativo == "ENCARGADA_PRODUCCION" or "ENCARGAD" in puesto_texto:
-            return 1
         if puesto_operativo == "JEFATURA" or "JEFE" in puesto_texto:
+            return 0
+        if puesto_operativo == "SUPERVISION_PRODUCCION" or "SUPERVIS" in puesto_texto:
+            return 1
+        if puesto_operativo == "ENCARGADA_PRODUCCION" or "ENCARGAD" in puesto_texto:
             return 2
         return 10
 
-    def _equipo_directo_ordenado(self):
+    def _personal_autorizable_ordenado(self, area_normalizada=None):
         return sorted(
-            self._equipo_directo_queryset(),
-            key=lambda empleado: (self._prioridad_equipo_directo(empleado), empleado.nombre),
+            self._personal_autorizable_queryset(area_normalizada),
+            key=lambda empleado: (self._prioridad_permisos(empleado), empleado.nombre),
         )
 
     def _con_equipo_directo(self, qs):
-        return (qs | self._equipo_directo_queryset()).distinct()
+        return self._con_personal_autorizable(qs)
+
+    def _con_personal_autorizable(self, qs, area_normalizada=None):
+        base_ids = qs.values_list("id", flat=True)
+        autorizable_ids = self._personal_autorizable_queryset(area_normalizada).values_list("id", flat=True)
+        return Empleado.objects.filter(Q(id__in=base_ids) | Q(id__in=autorizable_ids), activo=True)
 
     def _empleados_area_queryset(self, area_normalizada):
         empleados = Empleado.objects.filter(
@@ -272,10 +313,12 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
         bonos_periodo = self._bonos_periodo_queryset()
         if bonos_periodo is None:
             return super().list(request)
+        area = self._context_param("area")
+        area_normalizada = normalizar_area_produccion(area) if area else None
         bonos = list(bonos_periodo.filter(empleado__activo=True).order_by("area", "empleado__nombre"))
         empleados = []
         empleados_ids = set()
-        for empleado in self._equipo_directo_ordenado():
+        for empleado in self._personal_autorizable_ordenado(area_normalizada):
             payload = _empleado_payload(empleado)
             payload["area"] = area_bono_produccion_empleado(empleado) or empleado.departamento or AREA_PRODUCCION
             empleados.append(payload)
@@ -317,17 +360,18 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
                     periodo__anio=anio,
                     area=area_normalizada,
                 ).values_list("empleado_id", flat=True)
-                return self._con_equipo_directo(
-                    Empleado.objects.filter(id__in=empleados_periodo) | self._empleados_area_queryset(area_normalizada)
+                return self._con_personal_autorizable(
+                    Empleado.objects.filter(id__in=empleados_periodo) | self._empleados_area_queryset(area_normalizada),
+                    area_normalizada,
                 )
-            return self._con_equipo_directo(self._empleados_area_queryset(area_normalizada))
+            return self._con_personal_autorizable(self._empleados_area_queryset(area_normalizada), area_normalizada)
         if mes and anio:
             empleados_periodo = BonoProduccionEmpleado.objects.filter(
                 periodo__mes=mes,
                 periodo__anio=anio,
             ).values_list("empleado_id", flat=True)
-            return self._con_equipo_directo(Empleado.objects.filter(id__in=empleados_periodo))
-        return self._con_equipo_directo(Empleado.objects.filter(
+            return self._con_personal_autorizable(Empleado.objects.filter(id__in=empleados_periodo))
+        return self._con_personal_autorizable(Empleado.objects.filter(
             Q(participa_bonos_produccion=True) | Q(area__in=[*areas_validas, "PRODUCCION"]),
             activo=True,
         ))
