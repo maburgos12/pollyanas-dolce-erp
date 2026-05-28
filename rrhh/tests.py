@@ -34,9 +34,11 @@ LISTA_RAYA_SAMPLE = Path("/Users/mauricioburgos/Downloads/Lista de raya del 16 a
 
 
 class CapitalHumanoServiceTests(TestCase):
-    def test_permiso_de_jefatura_requiere_direccion_antes_de_rrhh(self):
+    def test_permiso_de_jefatura_lo_resuelve_direccion_no_rrhh(self):
         from datetime import datetime
         from zoneinfo import ZoneInfo
+
+        from rrhh.services_permisos import resolver_permiso_direccion
 
         rrhh_user = User.objects.create_user(username="paula")
         rrhh_group, _ = Group.objects.get_or_create(name="RRHH")
@@ -65,41 +67,33 @@ class CapitalHumanoServiceTests(TestCase):
             reverse("rrhh:rrhh_permisos_list"),
             {"permiso_id": permiso.id, "action": "aprobar"},
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 403)
         permiso.refresh_from_db()
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_SOLICITADO)
+        self.assertIsNone(permiso.autorizado_por)
 
-        self.client.force_login(dg_user)
-        response = self.client.post(
-            reverse("rrhh:rrhh_permisos_list"),
-            {"permiso_id": permiso.id, "action": "autorizar_direccion"},
-        )
-        self.assertEqual(response.status_code, 302)
+        resolver_permiso_direccion(permiso, dg_user, aprobar=True)
         permiso.refresh_from_db()
         self.assertEqual(permiso.estado_direccion, PermisoSalida.ESTADO_DIRECCION_AUTORIZADO)
         self.assertEqual(permiso.autorizado_direccion_por, dg_user)
-
-        self.client.force_login(rrhh_user)
-        response = self.client.post(
-            reverse("rrhh:rrhh_permisos_list"),
-            {"permiso_id": permiso.id, "action": "aprobar"},
-        )
-        self.assertEqual(response.status_code, 302)
-        permiso.refresh_from_db()
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_APROBADO)
-        self.assertEqual(permiso.autorizado_por, rrhh_user)
+        self.assertEqual(permiso.autorizado_por, dg_user)
 
-    def test_permiso_operativo_no_requiere_direccion(self):
+    def test_permiso_operativo_lo_resuelve_jefe_directo_no_rrhh(self):
         from datetime import datetime
         from zoneinfo import ZoneInfo
+
+        from rrhh.services_permisos import resolver_permiso_jefe
 
         rrhh_user = User.objects.create_user(username="paula")
         rrhh_group, _ = Group.objects.get_or_create(name="RRHH")
         rrhh_user.groups.add(rrhh_group)
+        jefe_user = User.objects.create_user(username="johana")
         jefa_ventas = Empleado.objects.create(
             nombre="Johana Lopez",
             departamento=Empleado.DEP_VENTAS,
             puesto="Jefe de Ventas",
+            usuario_erp=jefe_user,
         )
         cajera = Empleado.objects.create(
             nombre="Cajera Operativa",
@@ -114,7 +108,7 @@ class CapitalHumanoServiceTests(TestCase):
             fecha_inicio=datetime(2026, 5, 26, 13, 0, tzinfo=ZoneInfo("America/Mazatlan")),
             fecha_fin=datetime(2026, 5, 26, 15, 0, tzinfo=ZoneInfo("America/Mazatlan")),
             motivo="Cita",
-            estado_jefe=PermisoSalida.ESTADO_JEFE_PREAUTORIZADO,
+            estado_jefe=PermisoSalida.ESTADO_JEFE_PENDIENTE,
         )
 
         self.assertFalse(permiso.requiere_direccion)
@@ -125,9 +119,16 @@ class CapitalHumanoServiceTests(TestCase):
             reverse("rrhh:rrhh_permisos_list"),
             {"permiso_id": permiso.id, "action": "aprobar"},
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 403)
         permiso.refresh_from_db()
+        self.assertEqual(permiso.estado, PermisoSalida.ESTADO_SOLICITADO)
+        self.assertIsNone(permiso.autorizado_por)
+
+        resolver_permiso_jefe(permiso, jefe_user, aprobar=True)
+        permiso.refresh_from_db()
+        self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_PREAUTORIZADO)
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_APROBADO)
+        self.assertEqual(permiso.autorizado_por, jefe_user)
 
     def test_rrhh_no_aprueba_permiso_sin_preautorizacion_de_jefe(self):
         from datetime import datetime
@@ -156,7 +157,40 @@ class CapitalHumanoServiceTests(TestCase):
             {"permiso_id": permiso.id, "action": "aprobar"},
         )
 
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 403)
+        permiso.refresh_from_db()
+        self.assertEqual(permiso.estado, PermisoSalida.ESTADO_SOLICITADO)
+        self.assertIsNone(permiso.autorizado_por)
+
+    def test_permiso_de_capital_humano_no_lo_autoriza_la_misma_persona_rrhh(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        rrhh_user = User.objects.create_user(username="paula", first_name="Paula", last_name="Lugo")
+        rrhh_group, _ = Group.objects.get_or_create(name="RRHH")
+        rrhh_user.groups.add(rrhh_group)
+        paula = Empleado.objects.create(
+            nombre="LUGO ESPINOZA PAULA ELIZABETH",
+            departamento=Empleado.DEP_RRHH,
+            puesto="RRHH",
+            usuario_erp=rrhh_user,
+        )
+        permiso = PermisoSalida.objects.create(
+            empleado=paula,
+            tipo=PermisoSalida.TIPO_PERMISO_HORA,
+            fecha_inicio=datetime(2026, 5, 26, 13, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            fecha_fin=datetime(2026, 5, 26, 15, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            motivo="Permiso Capital Humano",
+        )
+
+        self.assertTrue(permiso.requiere_direccion)
+        self.client.force_login(rrhh_user)
+        response = self.client.post(
+            reverse("rrhh:rrhh_permisos_list"),
+            {"permiso_id": permiso.id, "action": "aprobar"},
+        )
+
+        self.assertEqual(response.status_code, 403)
         permiso.refresh_from_db()
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_SOLICITADO)
         self.assertIsNone(permiso.autorizado_por)
@@ -328,6 +362,26 @@ class CapitalHumanoAPITests(TestCase):
         self.assertEqual(resp.data["empleado"], self.empleado.id)
         self.assertTrue(resp.data["folio"].startswith("PS-"))
         self.assertEqual(resp.data["estado"], "solicitado")
+
+    def test_permiso_api_no_permite_aprobacion_rrhh(self):
+        rrhh_user = User.objects.create_user(username="rrhh.api", password="pass123")
+        rrhh_group, _ = Group.objects.get_or_create(name="RRHH")
+        rrhh_user.groups.add(rrhh_group)
+        permiso = PermisoSalida.objects.create(
+            empleado=self.empleado,
+            tipo=PermisoSalida.TIPO_PERMISO_HORA,
+            fecha_inicio=timezone.datetime(2026, 5, 14, 10, 0, tzinfo=timezone.get_current_timezone()),
+            motivo="Permiso operativo",
+            estado_jefe=PermisoSalida.ESTADO_JEFE_PREAUTORIZADO,
+        )
+        self.client.force_authenticate(user=rrhh_user)
+
+        resp = self.client.post(reverse("rrhh:permiso-aprobar", args=[permiso.id]))
+
+        self.assertEqual(resp.status_code, 403)
+        permiso.refresh_from_db()
+        self.assertEqual(permiso.estado, PermisoSalida.ESTADO_SOLICITADO)
+        self.assertIsNone(permiso.autorizado_por)
 
     def test_hora_extra_api_crea_para_empleado_actual_por_nombre_reordenado(self):
         user = User.objects.create_user(
@@ -1065,6 +1119,12 @@ class RRHHViewsTests(TestCase):
             creado_por=self.user,
         )
 
+        resp_rrhh = self.client.post(reverse("rrhh:rrhh_prestamo_auth_jefe", args=[prestamo.pk]))
+        self.assertEqual(resp_rrhh.status_code, 403)
+        prestamo.refresh_from_db()
+        self.assertEqual(prestamo.estado, Prestamo.ESTADO_SOLICITADO)
+        self.assertIsNone(prestamo.autorizado_jefe)
+
         self.client.force_login(jefe)
         resp_lista = self.client.get(reverse("rrhh:rrhh_prestamos_lista"))
         self.assertEqual(resp_lista.status_code, 200)
@@ -1077,6 +1137,45 @@ class RRHHViewsTests(TestCase):
         prestamo.refresh_from_db()
         self.assertEqual(prestamo.estado, Prestamo.ESTADO_AUTORIZADO)
         self.assertEqual(prestamo.autorizado_jefe, jefe)
+
+    def test_capital_humano_no_autoriza_su_propio_prestamo(self):
+        from datetime import date
+
+        paula_user = User.objects.create_user(username="paula.rrhh", password="pass123")
+        paula_user.groups.add(Group.objects.get_or_create(name="RRHH")[0])
+        director = User.objects.create_user(username="director.rrhh", password="pass123")
+        director.groups.add(Group.objects.get_or_create(name="DG")[0])
+        paula = Empleado.objects.create(
+            nombre="LUGO ESPINOZA PAULA ELIZABETH",
+            departamento=Empleado.DEP_RRHH,
+            usuario_erp=paula_user,
+        )
+        prestamo = Prestamo.objects.create(
+            empleado=paula,
+            concepto="Solicitud Capital Humano",
+            fecha_solicitud=date(2026, 5, 15),
+            importe=Decimal("800.00"),
+            num_quincenas=2,
+            descuento_quincenal=Decimal("400.00"),
+            saldo_actual=Decimal("800.00"),
+            estado=Prestamo.ESTADO_SOLICITADO,
+            jefe_directo=director,
+            creado_por=paula_user,
+        )
+
+        self.client.force_login(paula_user)
+        resp_paula = self.client.post(reverse("rrhh:rrhh_prestamo_auth_jefe", args=[prestamo.pk]))
+        self.assertEqual(resp_paula.status_code, 403)
+        prestamo.refresh_from_db()
+        self.assertEqual(prestamo.estado, Prestamo.ESTADO_SOLICITADO)
+        self.assertIsNone(prestamo.autorizado_jefe)
+
+        self.client.force_login(director)
+        resp_jefe = self.client.post(reverse("rrhh:rrhh_prestamo_auth_jefe", args=[prestamo.pk]), follow=True)
+        self.assertEqual(resp_jefe.status_code, 200)
+        prestamo.refresh_from_db()
+        self.assertEqual(prestamo.estado, Prestamo.ESTADO_AUTORIZADO)
+        self.assertEqual(prestamo.autorizado_jefe, director)
 
     def test_jefe_asignado_ve_y_autoriza_horas_extra_en_su_bandeja(self):
         from datetime import date

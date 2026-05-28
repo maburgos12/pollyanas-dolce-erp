@@ -404,8 +404,9 @@ class BonosProduccionTests(TestCase):
         user.groups.add(Group.objects.get_or_create(name=ROLE_RRHH)[0])
         self.client.force_login(user)
         periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
-        empleado = Empleado.objects.create(nombre="Empleado Hornos A", area="PRODUCCION")
-        empleado_2 = Empleado.objects.create(nombre="Empleado Hornos B", area="PRODUCCION")
+        jefe = Empleado.objects.create(nombre="Jefe Produccion", departamento=Empleado.DEP_PRODUCCION, usuario_erp=user)
+        empleado = Empleado.objects.create(nombre="Empleado Hornos A", area="PRODUCCION", jefe_directo=jefe)
+        empleado_2 = Empleado.objects.create(nombre="Empleado Hornos B", area="PRODUCCION", jefe_directo=jefe)
         BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado, area=AREA_HORNOS)
         BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado_2, area=AREA_HORNOS)
         Empleado.objects.create(nombre="Empleado Ventas", area="VENTAS")
@@ -436,6 +437,7 @@ class BonosProduccionTests(TestCase):
         permiso = PermisoSalida.objects.get(pk=creado.json()["id"])
         self.assertEqual(permiso.origen_solicitud, PermisoSalida.ORIGEN_BONOS_PRODUCCION)
         self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_PENDIENTE)
+        self.assertTrue(creado.json()["puede_preautorizar"])
 
         rechazado = self.client.post(f"/api/bonos-produccion/permisos/{permiso.id}/rechazar/")
 

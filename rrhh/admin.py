@@ -1,5 +1,4 @@
 from django.contrib import admin
-from django.utils import timezone
 
 from .models import (
     AsistenciaEmpleado,
@@ -193,7 +192,18 @@ class PermisoAdmin(admin.ModelAdmin):
         "fecha_inicio",
     )
     search_fields = ("folio", "empleado__nombre", "empleado__codigo", "motivo")
-    readonly_fields = ("folio",)
+    readonly_fields = (
+        "folio",
+        "estado",
+        "estado_jefe",
+        "requiere_direccion",
+        "estado_direccion",
+        "autorizado_jefe_por",
+        "fecha_autorizacion_jefe",
+        "autorizado_direccion_por",
+        "fecha_autorizacion_direccion",
+        "autorizado_por",
+    )
 
 
 @admin.register(Turno)
@@ -221,20 +231,20 @@ class PrestamoAdmin(admin.ModelAdmin):
     list_display = ("folio", "empleado", "jefe_directo", "importe", "saldo_actual", "num_quincenas", "estado", "fecha_solicitud")
     list_filter = ("estado", "metodo_pago", "fecha_solicitud")
     search_fields = ("empleado__nombre", "empleado__codigo", "folio")
-    readonly_fields = ("folio", "saldo_actual", "creado_en", "actualizado_en")
+    readonly_fields = (
+        "folio",
+        "saldo_actual",
+        "estado",
+        "firma_jefe",
+        "autorizado_jefe",
+        "fecha_auth_jefe",
+        "firma_direccion",
+        "autorizado_dg",
+        "fecha_auth_dg",
+        "creado_en",
+        "actualizado_en",
+    )
     inlines = [PrestamoCuotaInline]
-    actions = ["autorizar_jefe_bulk"]
-
-    def autorizar_jefe_bulk(self, request, queryset):
-        for prestamo in queryset.filter(estado=Prestamo.ESTADO_SOLICITADO):
-            prestamo.firma_jefe = True
-            prestamo.autorizado_jefe = request.user
-            prestamo.fecha_auth_jefe = timezone.now()
-            prestamo.estado = Prestamo.ESTADO_AUTORIZADO
-            prestamo.save(update_fields=["firma_jefe", "autorizado_jefe", "fecha_auth_jefe", "estado", "actualizado_en"])
-        self.message_user(request, "Préstamos autorizados por jefe.")
-
-    autorizar_jefe_bulk.short_description = "Autorizar como jefe inmediato"
 
 
 @admin.register(PrestamoCuota)

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from rest_framework import serializers
 
+from core.access import can_view_rrhh
+
 from .models import AsistenciaEmpleado, Empleado, HoraExtra, PermisoSalida
 
 
@@ -106,6 +108,8 @@ class PermisoSalidaSerializer(serializers.ModelSerializer):
 
     def validate_empleado(self, empleado: Empleado) -> Empleado:
         request = self.context.get("request")
+        if request and can_view_rrhh(request.user):
+            return empleado
         if request and not request.user.is_staff and empleado.email and request.user.email:
             if empleado.email.lower() != request.user.email.lower():
                 raise serializers.ValidationError("No puedes solicitar permisos para otro empleado.")

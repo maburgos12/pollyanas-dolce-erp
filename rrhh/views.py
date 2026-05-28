@@ -31,7 +31,7 @@ from .models import (
     VacanteRRHH,
 )
 from .services_bonos import asegurar_esquemas_base, sincronizar_esquemas_bono
-from .services_permisos import can_authorize_direccion
+from .services_permisos import can_authorize_direccion, resolver_permiso_direccion
 
 AREA_DIVISION_CHOICES = [
     ("HORNOS", "Hornos", Empleado.DEP_PRODUCCION, Empleado.DEP_PRODUCCION, "HORNOS"),
@@ -1755,61 +1755,11 @@ def permisos_list(request):
         permiso = get_object_or_404(PermisoSalida, pk=request.POST.get("permiso_id"))
         action = (request.POST.get("action") or "").strip()
         if action in {"autorizar_direccion", "rechazar_direccion"}:
-            if not can_authorize_direccion(request.user):
-                raise PermissionDenied("Solo Dirección General puede resolver esta etapa.")
-            if not permiso.requiere_direccion:
-                messages.info(request, f"Permiso {permiso.folio} no requiere autorización de Dirección.")
-            elif action == "autorizar_direccion":
-                permiso.estado_direccion = PermisoSalida.ESTADO_DIRECCION_AUTORIZADO
-                permiso.autorizado_direccion_por = request.user
-                permiso.fecha_autorizacion_direccion = timezone.now()
-                permiso.save(
-                    update_fields=[
-                        "estado_direccion",
-                        "autorizado_direccion_por",
-                        "fecha_autorizacion_direccion",
-                        "actualizado_en",
-                    ]
-                )
-                messages.success(request, f"Permiso {permiso.folio} autorizado por Dirección.")
-            else:
-                permiso.estado_direccion = PermisoSalida.ESTADO_DIRECCION_RECHAZADO
-                permiso.autorizado_direccion_por = request.user
-                permiso.fecha_autorizacion_direccion = timezone.now()
-                permiso.estado = PermisoSalida.ESTADO_RECHAZADO
-                permiso.save(
-                    update_fields=[
-                        "estado_direccion",
-                        "autorizado_direccion_por",
-                        "fecha_autorizacion_direccion",
-                        "estado",
-                        "actualizado_en",
-                    ]
-                )
-                messages.success(request, f"Permiso {permiso.folio} rechazado por Dirección.")
+            resolver_permiso_direccion(permiso, request.user, aprobar=action == "autorizar_direccion")
+            estado = "autorizado" if action == "autorizar_direccion" else "rechazado"
+            messages.success(request, f"Permiso {permiso.folio} {estado} por Dirección.")
         else:
-            if not can_manage_rrhh(request.user):
-                raise PermissionDenied("No tienes permisos para autorizar permisos")
-
-        if action == "aprobar":
-            if permiso.estado_jefe != PermisoSalida.ESTADO_JEFE_PREAUTORIZADO:
-                messages.error(request, f"Permiso {permiso.folio} requiere preautorización del jefe antes de RRHH.")
-                return redirect("rrhh:rrhh_permisos_list")
-            if (
-                permiso.requiere_direccion
-                and permiso.estado_direccion != PermisoSalida.ESTADO_DIRECCION_AUTORIZADO
-            ):
-                messages.error(request, f"Permiso {permiso.folio} requiere autorización de Dirección antes de RRHH.")
-                return redirect("rrhh:rrhh_permisos_list")
-            permiso.estado = PermisoSalida.ESTADO_APROBADO
-            permiso.autorizado_por = request.user
-            permiso.save(update_fields=["estado", "autorizado_por", "actualizado_en"])
-            messages.success(request, f"Permiso {permiso.folio} aprobado.")
-        elif action == "rechazar":
-            permiso.estado = PermisoSalida.ESTADO_RECHAZADO
-            permiso.autorizado_por = request.user
-            permiso.save(update_fields=["estado", "autorizado_por", "actualizado_en"])
-            messages.success(request, f"Permiso {permiso.folio} rechazado.")
+            raise PermissionDenied("Capital Humano captura, consulta y archiva permisos; no los autoriza.")
         return redirect("rrhh:rrhh_permisos_list")
 
     permisos_qs = (
@@ -1829,18 +1779,7 @@ def permisos_list(request):
             permisos_qs.filter(
                 estado=PermisoSalida.ESTADO_SOLICITADO,
                 estado_jefe=PermisoSalida.ESTADO_JEFE_PENDIENTE,
-            )[:120],
-        ),
-        (
-            "rrhh",
-            "Validación RRHH",
-            permisos_qs.filter(
-                estado=PermisoSalida.ESTADO_SOLICITADO,
-                estado_jefe=PermisoSalida.ESTADO_JEFE_PREAUTORIZADO,
-            )
-            .filter(
-                Q(requiere_direccion=False)
-                | Q(estado_direccion=PermisoSalida.ESTADO_DIRECCION_AUTORIZADO)
+                requiere_direccion=False,
             )[:120],
         ),
         (
@@ -1848,12 +1787,11 @@ def permisos_list(request):
             "Pendiente Dirección",
             permisos_qs.filter(
                 estado=PermisoSalida.ESTADO_SOLICITADO,
-                estado_jefe=PermisoSalida.ESTADO_JEFE_PREAUTORIZADO,
                 requiere_direccion=True,
                 estado_direccion=PermisoSalida.ESTADO_DIRECCION_PENDIENTE,
             )[:120],
         ),
-        ("aprobado", "Aprobados", permisos_qs.filter(estado=PermisoSalida.ESTADO_APROBADO)[:120]),
+        ("aprobado", "Autorizados / archivo", permisos_qs.filter(estado=PermisoSalida.ESTADO_APROBADO)[:120]),
         ("rechazado", "Rechazados", permisos_qs.filter(estado=PermisoSalida.ESTADO_RECHAZADO)[:120]),
     ]
     stats = {
@@ -1861,19 +1799,11 @@ def permisos_list(request):
         "pendiente_jefe": permisos_qs.filter(
             estado=PermisoSalida.ESTADO_SOLICITADO,
             estado_jefe=PermisoSalida.ESTADO_JEFE_PENDIENTE,
+            requiere_direccion=False,
         ).count(),
-        "validacion_rrhh": permisos_qs.filter(
-            estado=PermisoSalida.ESTADO_SOLICITADO,
-            estado_jefe=PermisoSalida.ESTADO_JEFE_PREAUTORIZADO,
-        )
-        .filter(
-            Q(requiere_direccion=False)
-            | Q(estado_direccion=PermisoSalida.ESTADO_DIRECCION_AUTORIZADO)
-        )
-        .count(),
+        "archivo_rrhh": permisos_qs.filter(estado=PermisoSalida.ESTADO_APROBADO).count(),
         "pendiente_direccion": permisos_qs.filter(
             estado=PermisoSalida.ESTADO_SOLICITADO,
-            estado_jefe=PermisoSalida.ESTADO_JEFE_PREAUTORIZADO,
             requiere_direccion=True,
             estado_direccion=PermisoSalida.ESTADO_DIRECCION_PENDIENTE,
         ).count(),

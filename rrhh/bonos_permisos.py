@@ -10,6 +10,7 @@ from rest_framework.response import Response
 
 from core.notificaciones import notificar_permiso_solicitado
 from rrhh.models import Empleado, PermisoSalida
+from rrhh.services_permisos import can_resolver_permiso_jefe, resolver_permiso_jefe
 
 
 TIPO_LABELS = {
@@ -49,7 +50,7 @@ def _empleado_payload(empleado: Empleado) -> dict:
     }
 
 
-def _permiso_payload(permiso: PermisoSalida) -> dict:
+def _permiso_payload(permiso: PermisoSalida, user=None) -> dict:
     return {
         "id": permiso.id,
         "folio": permiso.folio,
@@ -70,6 +71,7 @@ def _permiso_payload(permiso: PermisoSalida) -> dict:
         "goce_sueldo": permiso.goce_sueldo,
         "goce_label": "Con goce" if permiso.goce_sueldo else "Sin goce",
         "origen_solicitud": permiso.origen_solicitud,
+        "puede_preautorizar": can_resolver_permiso_jefe(user, permiso) if user is not None else False,
         "creado_en": permiso.creado_en.isoformat(),
     }
 
@@ -108,7 +110,7 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
         return Response(
             {
                 "empleados": [_empleado_payload(emp) for emp in empleados],
-                "permisos": [_permiso_payload(permiso) for permiso in permisos],
+                "permisos": [_permiso_payload(permiso, request.user) for permiso in permisos],
             }
         )
 
@@ -142,7 +144,7 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
             origen_solicitud=self.origen_solicitud,
         )
         notificar_permiso_solicitado(permiso, actor=request.user)
-        return Response(_permiso_payload(permiso), status=status.HTTP_201_CREATED)
+        return Response(_permiso_payload(permiso, request.user), status=status.HTTP_201_CREATED)
 
     def get_object(self):
         return get_object_or_404(self._permisos(), pk=self.kwargs["pk"])
@@ -150,26 +152,11 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
     @action(detail=True, methods=["post"])
     def preautorizar(self, request, pk=None):
         permiso = self.get_object()
-        permiso.estado_jefe = PermisoSalida.ESTADO_JEFE_PREAUTORIZADO
-        permiso.autorizado_jefe_por = request.user
-        permiso.fecha_autorizacion_jefe = timezone.now()
-        permiso.save(update_fields=["estado_jefe", "autorizado_jefe_por", "fecha_autorizacion_jefe", "actualizado_en"])
-        return Response(_permiso_payload(permiso))
+        resolver_permiso_jefe(permiso, request.user, aprobar=True)
+        return Response(_permiso_payload(permiso, request.user))
 
     @action(detail=True, methods=["post"])
     def rechazar(self, request, pk=None):
         permiso = self.get_object()
-        permiso.estado_jefe = PermisoSalida.ESTADO_JEFE_RECHAZADO
-        permiso.autorizado_jefe_por = request.user
-        permiso.fecha_autorizacion_jefe = timezone.now()
-        permiso.estado = PermisoSalida.ESTADO_RECHAZADO
-        permiso.save(
-            update_fields=[
-                "estado_jefe",
-                "autorizado_jefe_por",
-                "fecha_autorizacion_jefe",
-                "estado",
-                "actualizado_en",
-            ]
-        )
-        return Response(_permiso_payload(permiso))
+        resolver_permiso_jefe(permiso, request.user, aprobar=False)
+        return Response(_permiso_payload(permiso, request.user))
