@@ -13,7 +13,7 @@ from rest_framework.response import Response
 from django.db.models import Q
 
 from core.notificaciones import notificar_permiso_solicitado
-from core.access import can_manage_rrhh
+from core.access import can_manage_rrhh, can_manage_submodule
 from rrhh.models import Empleado, PermisoSalida
 from rrhh.services_permisos import can_resolver_permiso_jefe, resolver_permiso_jefe
 
@@ -56,10 +56,10 @@ def _empleado_payload(empleado: Empleado) -> dict:
 
 
 def _permiso_payload(permiso: PermisoSalida, user=None) -> dict:
-    if user:
-        puede_editar = can_manage_rrhh(user) and permiso.estado == PermisoSalida.ESTADO_SOLICITADO and permiso.estado_jefe == PermisoSalida.ESTADO_JEFE_PENDIENTE
-    else:
+    if user is None:
         puede_editar = False
+    else:
+        puede_editar = _puede_editar_permiso(user, permiso)
     return {
         "id": permiso.id,
         "folio": permiso.folio,
@@ -84,6 +84,22 @@ def _permiso_payload(permiso: PermisoSalida, user=None) -> dict:
         "puede_editar": puede_editar,
         "creado_en": permiso.creado_en.isoformat(),
     }
+
+
+def _puede_editar_permiso(user, permiso: PermisoSalida) -> bool:
+    if permiso.estado != PermisoSalida.ESTADO_SOLICITADO or permiso.estado_jefe != PermisoSalida.ESTADO_JEFE_PENDIENTE:
+        return False
+
+    if can_manage_rrhh(user):
+        return True
+
+    if permiso.origen_solicitud == PermisoSalida.ORIGEN_BONOS_VENTAS:
+        return can_manage_submodule(user, "ventas", "bonos")
+
+    if permiso.origen_solicitud == PermisoSalida.ORIGEN_BONOS_PRODUCCION:
+        return can_manage_submodule(user, "produccion", "bonos")
+
+    return False
 
 
 def _normalize_text(value: str | None) -> str:
@@ -285,8 +301,8 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
     @action(detail=True, methods=["post"], url_path="editar")
     def editar(self, request, pk=None):
         permiso = get_object_or_404(PermisoSalida.objects.select_related("empleado"), pk=self.kwargs["pk"])
-        if not can_manage_rrhh(request.user):
-            raise PermissionDenied("Solo DG/ADMIN puede editar permisos de bonos.")
+        if not _puede_editar_permiso(request.user, permiso):
+            raise PermissionDenied("No tienes permisos para editar este permiso.")
         if permiso.estado != PermisoSalida.ESTADO_SOLICITADO or permiso.estado_jefe != PermisoSalida.ESTADO_JEFE_PENDIENTE:
             return Response(
                 {"detail": "Solo se pueden editar permisos en estado pendiente."},

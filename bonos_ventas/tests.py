@@ -360,6 +360,7 @@ class BonosVentasTests(TestCase):
         self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_PENDIENTE)
         self.assertFalse(permiso.goce_sueldo)
         self.assertTrue(creado.json()["puede_preautorizar"])
+        self.assertTrue(creado.json()["puede_editar"])
 
         preautorizado = self.client.post(f"/api/bonos-ventas/permisos/{permiso.id}/preautorizar/")
 
@@ -368,3 +369,37 @@ class BonosVentasTests(TestCase):
         self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_PREAUTORIZADO)
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_APROBADO)
         self.assertEqual(permiso.autorizado_jefe_por, user)
+
+    def test_permisos_equipo_ventas_puede_editar_cuando_tiene_acceso_a_bonos(self):
+        user = get_user_model().objects.create_user(username="supervisor-ventas")
+        user.groups.add(Group.objects.create(name=ROLE_VENTAS))
+        self.client.force_login(user)
+        sucursal = Sucursal.objects.create(codigo="PZA", nombre="Paz")
+        periodo = ConfigBonoVentasPeriodo.objects.create(mes=5, anio=2026)
+        jefe = Empleado.objects.create(nombre="Jefe Ventas", departamento=Empleado.DEP_VENTAS, usuario_erp=user)
+        empleado = Empleado.objects.create(nombre="Empleado Con Permiso", area="VENTAS", sucursal="Paz", jefe_directo=jefe)
+        BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal)
+
+        creado = self.client.post(
+            "/api/bonos-ventas/permisos/",
+            json.dumps(
+                {
+                    "empleado": empleado.id,
+                    "tipo": PermisoSalida.TIPO_PERMISO_HORA,
+                    "fecha_inicio": "2026-05-20T13:00:00",
+                    "fecha_fin": "2026-05-20T15:00:00",
+                    "goce_sueldo": True,
+                    "motivo": "Cita seguimiento",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(creado.status_code, 201)
+        self.assertTrue(creado.json()["puede_editar"])
+
+        listado = self.client.get(f"/api/bonos-ventas/permisos/?mes=5&anio=2026")
+        self.assertEqual(listado.status_code, 200)
+        self.assertTrue(
+            any(item["id"] == creado.json()["id"] and item["puede_editar"] for item in listado.json()["permisos"])
+        )

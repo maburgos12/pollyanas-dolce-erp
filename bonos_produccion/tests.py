@@ -537,6 +537,7 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(permiso.origen_solicitud, PermisoSalida.ORIGEN_BONOS_PRODUCCION)
         self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_PENDIENTE)
         self.assertTrue(creado.json()["puede_preautorizar"])
+        self.assertTrue(creado.json()["puede_editar"])
 
         rechazado = self.client.post(f"/api/bonos-produccion/permisos/{permiso.id}/rechazar/")
 
