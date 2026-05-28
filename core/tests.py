@@ -30,6 +30,7 @@ from core.middleware import CanonicalLocalHostMiddleware
 from core.models import Departamento, Notificacion, Sucursal, UserModuleAccess, UserProfile
 from core.navigation import build_nav_groups
 from core.notificaciones import notificar_permiso_solicitado, notificar_prestamo_solicitado
+from core.hallmark_ui_audit import new_issues_against_baseline
 from core.views import _build_dashboard_daily_sales_snapshot, _build_dashboard_sales_history_summary, _compute_budget_semaforo, _compute_plan_forecast_semaforo, _sales_previous_dates, _sales_source_context
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo, PointPendingMatch, UnidadMedida
@@ -63,6 +64,8 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
             ".assign-page",
             ".loan-page",
             ".rrhh-edit-form",
+            "--erp-tab-min",
+            ".rrhh-tabs",
             ".permisos-board",
             ".ch-kanban",
             ".rule-selector",
@@ -72,6 +75,13 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         for selector in required_selectors:
             with self.subTest(selector=selector):
                 self.assertIn(selector, css)
+
+    def test_hallmark_ui_has_no_unapproved_regressions(self):
+        issues = new_issues_against_baseline(Path(settings.BASE_DIR))
+        details = "\n".join(
+            f"{issue.rule}: {issue.path} :: {issue.snippet}" for issue in issues[:20]
+        )
+        self.assertEqual(issues, [], details)
 
 
 class NavigationActiveStateTests(TestCase):

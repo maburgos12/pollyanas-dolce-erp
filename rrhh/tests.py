@@ -130,6 +130,41 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_APROBADO)
         self.assertEqual(permiso.autorizado_por, jefe_user)
 
+    def test_supervisora_y_encargada_produccion_las_resuelve_jefe_directo(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        carolina_user = User.objects.create_user(username="carolina.cayetano")
+        carolina = Empleado.objects.create(
+            nombre="CAYETANO VALENZUELA CAROLINA",
+            departamento=Empleado.DEP_PRODUCCION,
+            puesto="Jefe de Produccion",
+            usuario_erp=carolina_user,
+        )
+        roxana = Empleado.objects.create(
+            nombre="RIVAS SOLIS ROXANA",
+            departamento=Empleado.DEP_PRODUCCION,
+            puesto_operativo="Supervisora de Produccion",
+            jefe_directo=carolina,
+        )
+        julissa = Empleado.objects.create(
+            nombre="ANGULO PARRA JULISSA",
+            departamento=Empleado.DEP_PRODUCCION,
+            puesto_operativo="Encargada de Produccion",
+            jefe_directo=carolina,
+        )
+
+        for empleado in (roxana, julissa):
+            permiso = PermisoSalida.objects.create(
+                empleado=empleado,
+                tipo=PermisoSalida.TIPO_PERMISO_HORA,
+                fecha_inicio=datetime(2026, 5, 27, 15, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+                fecha_fin=datetime(2026, 5, 27, 16, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+                motivo="Salida temprano",
+            )
+            self.assertFalse(permiso.requiere_direccion, empleado.nombre)
+            self.assertEqual(permiso.estado_direccion, PermisoSalida.ESTADO_DIRECCION_NO_REQUIERE)
+
     def test_rrhh_no_aprueba_permiso_sin_preautorizacion_de_jefe(self):
         from datetime import datetime
         from zoneinfo import ZoneInfo

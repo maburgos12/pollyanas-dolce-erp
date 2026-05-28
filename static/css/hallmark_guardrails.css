@@ -16,6 +16,7 @@
   --erp-field-min: minmax(min(220px, 100%), 1fr);
   --erp-field-wide-min: minmax(min(280px, 100%), 1fr);
   --erp-field-compact-min: minmax(min(180px, 100%), 1fr);
+  --erp-tab-min: minmax(min(132px, 100%), 1fr);
 }
 
 html,
@@ -266,13 +267,19 @@ body,
 }
 
 .main-content[data-hallmark-scope="erp"] .rrhh-tabs {
+  display: grid !important;
   gap: 8px;
-  overflow-x: visible !important;
+  grid-template-columns: repeat(auto-fit, var(--erp-tab-min)) !important;
+  min-width: 0;
+  overflow: visible !important;
 }
 
 .main-content[data-hallmark-scope="erp"] .rrhh-tabs .module-tab {
-  flex: 0 1 auto;
-  min-width: max-content;
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .main-content[data-hallmark-scope="erp"] :is(
@@ -707,7 +714,6 @@ body,
   }
 
   .main-content[data-hallmark-scope="erp"] .rrhh-tabs .module-tab {
-    flex: 1 1 calc(50% - 8px);
     min-width: 0;
   }
 }
