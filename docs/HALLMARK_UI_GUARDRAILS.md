@@ -35,3 +35,10 @@ Antes de publicar cambios visuales:
 - Confirmar que `hallmark_guardrails.css` esta cargado.
 - Revisar que botones y chips no tengan `scrollWidth > clientWidth`.
 - Para tablas, validar que el scroll sea interno al `.table-responsive`, no de toda la pagina.
+
+## Gate obligatorio
+
+- `python manage.py check` ejecuta el check `hallmark.E002` y falla si aparece una regresion visual nueva contra `docs/hallmark_ui_audit_baseline.json`.
+- `python manage.py check_hallmark_ui` muestra el detalle de cada regresion nueva: tablas sin wrapper, tabs sin familia responsive, grids rigidos, anchos inline, `overflow-x:hidden` y `nowrap` local.
+- La baseline solo representa deuda existente; no debe actualizarse para aceptar codigo nuevo salvo revision explicita del cambio visual.
+- Para una vista nueva, usar clases cubiertas por guardrails desde el inicio: `.module-tabs.rrhh-tabs`, `.table-responsive`, `.kpi-grid`, `.form-grid`, `.status-pill`, `.badge`, `.rule-selector`, `.rule-tab`, `.area-grid` y `.area-chip`.
