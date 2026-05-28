@@ -267,9 +267,10 @@ class BonoProduccionEmpleado(models.Model):
         regla = cfg.get_regla_area(self.area)
         base = _money(cfg.get_monto_area(self.area))
         dias_base = self._base_dias()
+        dias_laborables = int(cfg.dias_laborables or dias_base or 0)
 
         self.pasa_uniforme = (dias_base - int(self.dias_uniforme or 0)) <= regla.limite_uniforme
-        self.pasa_asistencia = (dias_base - int(self.dias_asistencia or 0)) <= regla.limite_asistencia
+        self.pasa_asistencia = (dias_laborables - int(self.dias_asistencia or 0)) <= regla.limite_asistencia
         self.pasa_puntualidad = (dias_base - int(self.dias_puntualidad or 0)) <= regla.limite_puntualidad
         self.pasa_produccion = True
         if regla.usa_produccion:
