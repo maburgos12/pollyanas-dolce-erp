@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block title %}RRHH · Nueva vacante{% endblock %}
+{% block page_title %}RRHH · Nueva vacante{% endblock %}
+
+{% block extra_css %}
+<style>
+  .vacante-form-page { display: grid; gap: 16px; }
+  .vacante-form-head,
+  .vacante-form-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 18px; }
+  .vacante-form-title { color: var(--vino); font-family: "Playfair Display", serif; font-size: 25px; font-weight: 800; }
+  .vacante-form-copy { color: var(--texto-light); margin-top: 4px; max-width: 760px; }
+  .vacante-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vacante-field { display: grid; gap: 5px; }
+  .vacante-field.span-2 { grid-column: 1 / -1; }
+  .vacante-field label { color: var(--texto); font-size: 12px; font-weight: 900; }
+  .vacante-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+  @media (max-width: 760px) {
+    .vacante-grid { grid-template-columns: 1fr; }
+    .vacante-actions { justify-content: flex-start; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="vacante-form-page">
+  <div class="vacante-form-head">
+    <div class="vacante-form-title">Nueva solicitud de vacante</div>
+    <div class="vacante-form-copy">Registra la necesidad operativa para que Capital Humano la valide y la lleve a autorización o reclutamiento.</div>
+  </div>
+
+  <form class="vacante-form-card" method="post">
+    {% csrf_token %}
+    <div class="vacante-grid">
+      <div class="vacante-field">
+        <label>Área</label>
+        <input type="text" name="area" required placeholder="VENTAS">
+      </div>
+      <div class="vacante-field">
+        <label>Puesto</label>
+        <input type="text" name="puesto" required placeholder="Cajera">
+      </div>
+      <div class="vacante-field">
+        <label>Departamento</label>
+        <select name="departamento">
+          <option value="">Sin departamento</option>
+          {% for value, label in departamento_choices %}
+            <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="vacante-field">
+        <label>Sucursal</label>
+        <select name="sucursal">
+          <option value="">CEDIS / General</option>
+          {% for sucursal in sucursales %}
+            <option value="{{ sucursal.id }}">{{ sucursal.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="vacante-field">
+        <label>Fecha solicitada</label>
+        <input type="date" name="fecha_solicitada" required>
+      </div>
+      <div class="vacante-field">
+        <label>Fecha necesaria</label>
+        <input type="date" name="fecha_necesaria">
+      </div>
+      <div class="vacante-field">
+        <label>Plazas</label>
+        <input type="number" name="cantidad_solicitada" min="1" value="1">
+      </div>
+      <div class="vacante-field">
+        <label>Tipo</label>
+        <select name="tipo_solicitud">
+          {% for value, label in tipo_choices %}
+            <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="vacante-field">
+        <label>Prioridad</label>
+        <select name="prioridad">
+          {% for value, label in prioridad_choices %}
+            <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="vacante-field span-2">
+        <label>Justificación</label>
+        <textarea name="motivo_solicitud" rows="4" required></textarea>
+      </div>
+      <div class="vacante-field span-2">
+        <label>Siguiente acción sugerida</label>
+        <textarea name="sugerencias" rows="3"></textarea>
+      </div>
+    </div>
+    <div class="vacante-actions">
+      <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_vacantes' %}">Cancelar</a>
+      <button class="btn btn-primary" type="submit">Crear solicitud</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

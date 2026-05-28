@@ -32,6 +32,7 @@ from .models import (
 )
 from .services_bonos import asegurar_esquemas_base, sincronizar_esquemas_bono
 from .services_permisos import can_authorize_direccion, resolver_permiso_direccion
+from .services_vacantes import crear_solicitud_vacante
 
 AREA_DIVISION_CHOICES = [
     ("HORNOS", "Hornos", Empleado.DEP_PRODUCCION, Empleado.DEP_PRODUCCION, "HORNOS"),
@@ -1372,14 +1373,13 @@ def indicadores_ch(request):
             )
             messages.success(request, f"Plantilla autorizada actualizada: {plantilla}.")
         elif action == "vacante":
-            vacante = VacanteRRHH.objects.create(
+            vacante = crear_solicitud_vacante(
                 area=_area_key(request.POST.get("area")),
                 puesto=(request.POST.get("puesto") or "").strip().upper(),
                 fecha_solicitada=_parse_date(request.POST.get("fecha_solicitada")) or timezone.localdate(),
-                estado=(request.POST.get("estado") or VacanteRRHH.ESTADO_SOLICITADA).strip(),
-                fecha_cubierta=_parse_date(request.POST.get("fecha_cubierta")),
-                motivo_no_cubierta=(request.POST.get("motivo_no_cubierta") or "").strip(),
+                motivo_solicitud=(request.POST.get("motivo_no_cubierta") or "").strip(),
                 sugerencias=(request.POST.get("sugerencias") or "").strip(),
+                solicitado_por=request.user,
                 creado_por=request.user,
             )
             messages.success(request, f"Vacante capturada: {vacante.area} · {vacante.puesto}.")

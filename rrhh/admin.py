@@ -17,6 +17,8 @@ from .models import (
     Prestamo,
     PrestamoCuota,
     Turno,
+    VacanteCobertura,
+    VacanteMovimiento,
     VacanteRRHH,
 )
 
@@ -145,9 +147,34 @@ class PlantillaAutorizadaAdmin(admin.ModelAdmin):
 
 @admin.register(VacanteRRHH)
 class VacanteRRHHAdmin(admin.ModelAdmin):
-    list_display = ("fecha_solicitada", "area", "puesto", "estado", "fecha_cubierta", "dias_en_cubrir", "creado_por")
-    list_filter = ("estado", "area", "fecha_solicitada")
-    search_fields = ("area", "puesto", "motivo_no_cubierta", "sugerencias")
+    list_display = (
+        "folio",
+        "fecha_solicitada",
+        "area",
+        "puesto",
+        "cantidad_solicitada",
+        "estado",
+        "prioridad",
+        "fecha_cubierta",
+        "dias_en_cubrir",
+        "solicitado_por",
+    )
+    list_filter = ("estado", "prioridad", "tipo_solicitud", "departamento", "area", "fecha_solicitada")
+    search_fields = ("folio", "area", "puesto", "motivo_solicitud", "motivo_no_cubierta", "sugerencias")
+
+
+@admin.register(VacanteMovimiento)
+class VacanteMovimientoAdmin(admin.ModelAdmin):
+    list_display = ("vacante", "estado_anterior", "estado_nuevo", "actor", "creado_en")
+    list_filter = ("estado_nuevo", "creado_en")
+    search_fields = ("vacante__folio", "vacante__area", "vacante__puesto", "comentario")
+
+
+@admin.register(VacanteCobertura)
+class VacanteCoberturaAdmin(admin.ModelAdmin):
+    list_display = ("vacante", "empleado", "fecha_cobertura", "creado_por")
+    list_filter = ("fecha_cobertura",)
+    search_fields = ("vacante__folio", "empleado__nombre", "nota")
 
 
 @admin.register(AsistenciaEmpleado)

@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from . import api_receptor, api_views, views, views_asistencia, views_prestamos
+from . import api_receptor, api_views, views, views_asistencia, views_prestamos, views_vacantes
 from .views_html import asignacion_sucursal_view, asignacion_sucursales_api
 
 app_name = "rrhh"
@@ -29,7 +29,10 @@ urlpatterns = [
     path("dashboard/", views.dashboard_ch, name="rrhh_dashboard"),
     path("indicadores/", views.indicadores_ch, name="rrhh_indicadores"),
     path("organizacion/", views.organizacion_ch, name="rrhh_organizacion"),
-    path("vacantes/", views.vacantes_ch, name="rrhh_vacantes"),
+    path("vacantes/", views_vacantes.vacantes_lista, name="rrhh_vacantes"),
+    path("vacantes/nueva/", views_vacantes.vacante_nueva, name="rrhh_vacante_nueva"),
+    path("vacantes/<int:pk>/", views_vacantes.vacante_detalle, name="rrhh_vacante_detalle"),
+    path("vacantes/<int:pk>/accion/", views_vacantes.vacante_accion, name="rrhh_vacante_accion"),
     path("asistencias/", views.asistencias_view, name="rrhh_asistencias"),
     path("asistencias/monitor/", views_asistencia.monitor_sincronizacion, name="rrhh_monitor_sync"),
     path("importar-checador/", views.importar_checador, name="rrhh_importar"),

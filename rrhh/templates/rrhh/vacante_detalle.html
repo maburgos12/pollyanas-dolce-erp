@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+
+{% block title %}RRHH · {{ vacante.folio }}{% endblock %}
+{% block page_title %}RRHH · {{ vacante.folio }}{% endblock %}
+
+{% block extra_css %}
+<style>
+  .vacante-detail { display: grid; gap: 16px; }
+  .vacante-detail-head,
+  .vacante-panel { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 18px; }
+  .vacante-detail-head { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr) auto; }
+  .vacante-title { color: var(--vino); font-family: "Playfair Display", serif; font-size: 25px; font-weight: 800; }
+  .vacante-subtitle { color: var(--texto-light); margin-top: 4px; }
+  .vacante-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 6px 10px; }
+  .vacante-grid { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .vacante-kv { border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; }
+  .vacante-kv span { color: var(--texto-light); display: block; font-size: 12px; font-weight: 900; text-transform: uppercase; }
+  .vacante-kv strong { color: var(--texto); display: block; margin-top: 5px; }
+  .vacante-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+  .vacante-action-form { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+  .vacante-action-form input,
+  .vacante-action-form select { min-width: 180px; }
+  .vacante-history { display: grid; gap: 10px; }
+  .vacante-history-item { border-bottom: 1px solid var(--rosa); display: grid; gap: 3px; padding: 10px 0; }
+  .vacante-muted { color: var(--texto-light); font-size: 13px; }
+  @media (max-width: 1100px) {
+    .vacante-detail-head { grid-template-columns: 1fr; }
+    .vacante-actions { justify-content: flex-start; }
+    .vacante-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 680px) {
+    .vacante-grid { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="vacante-detail">
+  <div class="vacante-detail-head">
+    <div>
+      <div class="vacante-title">{{ vacante.area }} · {{ vacante.puesto }}</div>
+      <div class="vacante-subtitle">{{ vacante.folio }} · {{ vacante.get_tipo_solicitud_display }} · {{ vacante.cantidad_solicitada }} plaza(s)</div>
+    </div>
+    <div><span class="vacante-badge">{{ vacante.get_estado_display }}</span></div>
+  </div>
+
+  <section class="vacante-panel">
+    <div class="vacante-grid">
+      <div class="vacante-kv"><span>Solicitada</span><strong>{{ vacante.fecha_solicitada|date:"Y-m-d" }}</strong></div>
+      <div class="vacante-kv"><span>Necesaria</span><strong>{{ vacante.fecha_necesaria|date:"Y-m-d"|default:"-" }}</strong></div>
+      <div class="vacante-kv"><span>Prioridad</span><strong>{{ vacante.get_prioridad_display }}</strong></div>
+      <div class="vacante-kv"><span>Cobertura</span><strong>{{ vacante.coberturas.count }} / {{ vacante.cantidad_solicitada }}</strong></div>
+      <div class="vacante-kv"><span>Departamento</span><strong>{{ vacante.get_departamento_display|default:"-" }}</strong></div>
+      <div class="vacante-kv"><span>Sucursal</span><strong>{% if vacante.sucursal %}{{ vacante.sucursal.nombre }}{% else %}-{% endif %}</strong></div>
+      <div class="vacante-kv"><span>Solicitante</span><strong>{% if vacante.solicitado_por %}{{ vacante.solicitado_por.get_full_name|default:vacante.solicitado_por.username }}{% else %}-{% endif %}</strong></div>
+      <div class="vacante-kv"><span>Autorizó</span><strong>{% if vacante.autorizado_por %}{{ vacante.autorizado_por.get_full_name|default:vacante.autorizado_por.username }}{% else %}-{% endif %}</strong></div>
+    </div>
+  </section>
+
+  <section class="vacante-panel">
+    <h2>Justificación</h2>
+    <p>{{ vacante.motivo_solicitud|default:"Sin justificación capturada." }}</p>
+    {% if vacante.sugerencias %}
+      <p class="vacante-muted">{{ vacante.sugerencias }}</p>
+    {% endif %}
+  </section>
+
+  {% if can_manage_vacantes or can_approve_direction %}
+  <section class="vacante-panel">
+    <h2>Acciones</h2>
+    <div class="vacante-actions">
+      {% if can_manage_vacantes %}
+        <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="enviar_direccion">
+          <input type="text" name="comentario" placeholder="Comentario">
+          <button class="btn btn-secondary" type="submit">Enviar a Dirección</button>
+        </form>
+        <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="reclutamiento">
+          <input type="text" name="comentario" placeholder="Comentario">
+          <button class="btn btn-primary" type="submit">Iniciar reclutamiento</button>
+        </form>
+        <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="cubrir">
+          <select name="empleado" required>
+            <option value="">Empleado que cubre</option>
+            {% for empleado in empleados %}
+              <option value="{{ empleado.id }}">{{ empleado.nombre }}</option>
+            {% endfor %}
+          </select>
+          <input type="date" name="fecha_cobertura">
+          <input type="text" name="comentario" placeholder="Nota">
+          <button class="btn btn-primary" type="submit">Registrar cobertura</button>
+        </form>
+        <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="pausar">
+          <input type="text" name="comentario" placeholder="Motivo">
+          <button class="btn btn-secondary" type="submit">Pausar</button>
+        </form>
+        <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="cancelar">
+          <input type="text" name="comentario" placeholder="Motivo">
+          <button class="btn btn-secondary" type="submit">Cancelar</button>
+        </form>
+      {% endif %}
+      {% if can_approve_direction %}
+        <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="aprobar">
+          <input type="text" name="comentario" placeholder="Comentario">
+          <button class="btn btn-primary" type="submit">Aprobar</button>
+        </form>
+        <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="rechazar">
+          <input type="text" name="comentario" placeholder="Motivo">
+          <button class="btn btn-secondary" type="submit">Rechazar</button>
+        </form>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="vacante-panel">
+    <h2>Coberturas</h2>
+    <div class="vacante-history">
+      {% for cobertura in vacante.coberturas.all %}
+        <div class="vacante-history-item">
+          <strong>{{ cobertura.empleado.nombre }} · {{ cobertura.fecha_cobertura|date:"Y-m-d" }}</strong>
+          {% if cobertura.nota %}<span class="vacante-muted">{{ cobertura.nota }}</span>{% endif %}
+        </div>
+      {% empty %}
+        <div class="vacante-muted">Aún no hay empleados vinculados a esta solicitud.</div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="vacante-panel">
+    <h2>Historial</h2>
+    <div class="vacante-history">
+      {% for movimiento in vacante.movimientos.all %}
+        <div class="vacante-history-item">
+          <strong>{{ movimiento.get_estado_nuevo_display }} · {{ movimiento.creado_en|date:"Y-m-d H:i" }}</strong>
+          <span class="vacante-muted">
+            {% if movimiento.actor %}{{ movimiento.actor.get_full_name|default:movimiento.actor.username }}{% else %}Sistema{% endif %}
+            {% if movimiento.comentario %} · {{ movimiento.comentario }}{% endif %}
+          </span>
+        </div>
+      {% empty %}
+        <div class="vacante-muted">Sin movimientos registrados.</div>
+      {% endfor %}
+    </div>
+  </section>
+</section>
+{% endblock %}
