@@ -117,6 +117,16 @@ def bonos_ventas_dashboard(request):
             periodo.limite_uniforme = _parse_int(request.POST.get("limite_uniforme"), periodo.limite_uniforme)
             periodo.limite_asistencia = _parse_int(request.POST.get("limite_asistencia"), periodo.limite_asistencia)
             periodo.limite_puntualidad = _parse_int(request.POST.get("limite_puntualidad"), periodo.limite_puntualidad)
+            periodo.cancela_por_asistencia = request.POST.get("cancela_por_asistencia") == "on"
+            periodo.limite_asistencia_cancelacion = _parse_int(
+                request.POST.get("limite_asistencia_cancelacion"),
+                periodo.limite_asistencia_cancelacion,
+            )
+            periodo.cancela_por_puntualidad = request.POST.get("cancela_por_puntualidad") == "on"
+            periodo.limite_retardos_cancelacion = _parse_int(
+                request.POST.get("limite_retardos_cancelacion"),
+                periodo.limite_retardos_cancelacion,
+            )
             periodo.bono_ventas_adicional = _parse_decimal(request.POST.get("bono_ventas_adicional"))
             periodo.umbral_crecimiento_pct = _parse_decimal(request.POST.get("umbral_crecimiento_pct"))
             periodo.bono_repartidor_adicional = _parse_decimal(request.POST.get("bono_repartidor_adicional"))
@@ -243,6 +253,10 @@ def bonos_ventas_dashboard(request):
         "limite_uniforme": 1,
         "limite_asistencia": 2,
         "limite_puntualidad": 2,
+        "cancela_por_asistencia": False,
+        "limite_asistencia_cancelacion": 2,
+        "cancela_por_puntualidad": False,
+        "limite_retardos_cancelacion": 3,
         "bono_ventas_adicional": Decimal("300.00"),
         "umbral_crecimiento_pct": Decimal("5.00"),
         "bono_repartidor_adicional": Decimal("300.00"),

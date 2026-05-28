@@ -92,6 +92,16 @@ def bonos_produccion_dashboard(request):
                 regla.limite_asistencia = _parse_int(request.POST.get(f"{prefix}_limite_asistencia"), regla.limite_asistencia)
                 regla.limite_puntualidad = _parse_int(request.POST.get(f"{prefix}_limite_puntualidad"), regla.limite_puntualidad)
                 regla.limite_uniforme = _parse_int(request.POST.get(f"{prefix}_limite_uniforme"), regla.limite_uniforme)
+                regla.cancela_por_asistencia = request.POST.get(f"{prefix}_cancela_por_asistencia") == "on"
+                regla.limite_asistencia_cancelacion = _parse_int(
+                    request.POST.get(f"{prefix}_limite_asistencia_cancelacion"),
+                    regla.limite_asistencia_cancelacion,
+                )
+                regla.cancela_por_puntualidad = request.POST.get(f"{prefix}_cancela_por_puntualidad") == "on"
+                regla.limite_retardos_cancelacion = _parse_int(
+                    request.POST.get(f"{prefix}_limite_retardos_cancelacion"),
+                    regla.limite_retardos_cancelacion,
+                )
                 regla.save()
             periodo.recalcular_todos()
             messages.success(request, "Configuración de bonos producción guardada.")
@@ -148,6 +158,10 @@ def bonos_produccion_dashboard(request):
             "limite_asistencia": regla.limite_asistencia,
             "limite_puntualidad": regla.limite_puntualidad,
             "limite_uniforme": regla.limite_uniforme,
+            "cancela_por_asistencia": regla.cancela_por_asistencia,
+            "limite_asistencia_cancelacion": regla.limite_asistencia_cancelacion,
+            "cancela_por_puntualidad": regla.cancela_por_puntualidad,
+            "limite_retardos_cancelacion": regla.limite_retardos_cancelacion,
             "usa_produccion": regla.usa_produccion,
         } if regla else ConfigBonoArea.defaults_for_area(area)
         area_rows.append(

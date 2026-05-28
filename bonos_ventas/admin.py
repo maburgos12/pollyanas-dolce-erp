@@ -11,7 +11,16 @@ class RegistroVentasInline(admin.TabularInline):
 
 @admin.register(ConfigBonoVentasPeriodo)
 class ConfigBonoVentasPeriodoAdmin(admin.ModelAdmin):
-    list_display = ["mes", "anio", "dias_laborables", "bono_base", "bono_ventas_adicional", "umbral_crecimiento_pct"]
+    list_display = [
+        "mes",
+        "anio",
+        "dias_laborables",
+        "bono_base",
+        "bono_ventas_adicional",
+        "umbral_crecimiento_pct",
+        "cancela_por_asistencia",
+        "cancela_por_puntualidad",
+    ]
     list_filter = ["anio", "mes"]
 
 
