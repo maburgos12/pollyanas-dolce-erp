@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 from calendar import monthrange
 from datetime import date as dt_date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -11,11 +12,12 @@ from django.db import transaction
 from django.db.models import Avg, Count, Q, Sum
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 
 from django.contrib.auth import get_user_model
 
-from core.access import can_manage_rrhh, can_view_rrhh
+from core.access import ROLE_ADMIN, ROLE_DG, can_manage_rrhh, can_view_rrhh
 from core.audit import log_event
 
 from .models import (
@@ -71,6 +73,12 @@ PUESTO_OPERATIVO_CHOICES = [
     ("MANTENIMIENTO", "Mantenimiento"),
     ("RRHH", "Recursos Humanos"),
 ]
+PERMISO_AREA_FILTER_OPTIONS = [
+    ("", "Todas"),
+    ("PRODUCCION", "Producción"),
+    ("HORNOS", "Hornos"),
+    ("LOGISTICA", "Logística"),
+]
 AREA_DIVISION_MAP = {
     value: {
         "departamento_origen": departamento_origen,
@@ -96,6 +104,34 @@ def _parse_date(raw: str | None):
         return dt_date.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _parse_datetime_local(raw: str | None):
+    value = (raw or "").strip()
+    if not value:
+        return None
+    parsed = parse_datetime(value)
+    if parsed is None:
+        return None
+    if timezone.is_naive(parsed):
+        return timezone.make_aware(parsed, timezone.get_current_timezone())
+    return parsed
+
+
+def _has_explicit_role(user, *roles: str) -> bool:
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_superuser:
+        return True
+    requested = {role.upper() for role in roles}
+    for name in user.groups.values_list("name", flat=True):
+        if (name or "").strip().upper() in requested:
+            return True
+    return False
+
+
+def _can_edit_permiso_pendiente(user) -> bool:
+    return _has_explicit_role(user, ROLE_DG, ROLE_ADMIN) or can_manage_rrhh(user)
 
 
 def _catalogo_value(post_data, field_name: str) -> str:
@@ -226,6 +262,53 @@ def _month_bounds(raw_month: str | None):
 
 def _area_key(value: str | None) -> str:
     return (value or "SIN AREA").strip().upper() or "SIN AREA"
+
+
+def _normalize_text(value: str | None) -> str:
+    normalized = unicodedata.normalize("NFD", (value or "").strip().upper())
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+
+def _normalize_area_filter_value(raw: str | None) -> str:
+    value = _normalize_text(raw)
+    if not value:
+        return ""
+    if value in {"PRODUCCION", "PRODUC", "PROD", "PRODUCION"}:
+        return "PRODUCCION"
+    if value in {"HORNOS", "HORNO"}:
+        return "HORNOS"
+    if value in {"LOGISTICA", "LOGISTICO"}:
+        return "LOGISTICA"
+    return value
+
+
+def _permiso_area_filter_q(area_filter: str):
+    logistica_area_terms = ("LOGISTICA", "LOGÍSTICA")
+    hornos_puestos = ("HORNOS", "HORNO")
+    produccion_puestos = ("PRODUCCION", "EMBETUNADO", "ARMADO", "CRUCERO")
+    logistica_puestos = ("REPARTIDOR", "ENVIO_SUCURSAL")
+    if area_filter == "PRODUCCION":
+        return (
+            Q(empleado__departamento=Empleado.DEP_PRODUCCION)
+            | Q(empleado__departamento_origen=Empleado.DEP_PRODUCCION)
+            | Q(empleado__puesto_operativo__in=produccion_puestos)
+            | Q(empleado__area__iregex="PRODUC(C|CIÓN)?")
+            | Q(empleado__puesto_operativo__iregex="PRODUC|EMBETUNADO|ARMADO|CRUCERO")
+        )
+    if area_filter == "HORNOS":
+        return (
+            Q(empleado__area__iregex="HORNOS|HORNO")
+            | Q(empleado__puesto_operativo__in=hornos_puestos)
+        )
+    if area_filter == "LOGISTICA":
+        return (
+            Q(empleado__departamento=Empleado.DEP_LOGISTICA)
+            | Q(empleado__departamento_origen=Empleado.DEP_LOGISTICA)
+            | Q(empleado__area__in=logistica_area_terms)
+            | Q(empleado__area__iregex="LOGÍSTICA|LOGISTICA")
+            | Q(empleado__puesto_operativo__in=logistica_puestos)
+        )
+    return Q()
 
 
 def _pct(numerator: Decimal | int, denominator: Decimal | int) -> Decimal:
@@ -1770,6 +1853,12 @@ def permisos_list(request):
     if not can_view_rrhh(request.user):
         raise PermissionDenied("No tienes permisos para ver permisos")
 
+    edit_choices = PermisoSalida.TIPO_CHOICES
+    edit_tipo_values = {value for value, _label in edit_choices}
+    editing_permiso = None
+    edit_form_data = None
+    can_edit_permiso = _can_edit_permiso_pendiente(request.user)
+
     if request.method == "POST":
         permiso = get_object_or_404(PermisoSalida, pk=request.POST.get("permiso_id"))
         action = (request.POST.get("action") or "").strip()
@@ -1777,9 +1866,68 @@ def permisos_list(request):
             resolver_permiso_direccion(permiso, request.user, aprobar=action == "autorizar_direccion")
             estado = "autorizado" if action == "autorizar_direccion" else "rechazado"
             messages.success(request, f"Permiso {permiso.folio} {estado} por Dirección.")
+        elif action == "editar_permiso":
+            if not can_edit_permiso:
+                raise PermissionDenied("No tienes permisos para editar permisos.")
+            if permiso.estado != PermisoSalida.ESTADO_SOLICITADO:
+                messages.error(request, f"El permiso {permiso.folio} ya no se puede editar.")
+                return redirect("rrhh:rrhh_permisos_list")
+
+            tipo = (request.POST.get("tipo") or "").strip()
+            fecha_inicio = _parse_datetime_local(request.POST.get("fecha_inicio"))
+            fecha_fin = _parse_datetime_local(request.POST.get("fecha_fin"))
+            motivo = (request.POST.get("motivo") or "").strip()
+            goce_sueldo = request.POST.get("goce_sueldo") == "on"
+            errors = []
+
+            if tipo not in edit_tipo_values:
+                errors.append("Selecciona un tipo de permiso válido.")
+            if fecha_inicio is None:
+                errors.append("Captura una fecha inicial válida.")
+            if request.POST.get("fecha_fin") and fecha_fin is None:
+                errors.append("Captura una fecha final válida.")
+            if fecha_inicio and fecha_fin and fecha_fin < fecha_inicio:
+                errors.append("La fecha final no puede ser anterior a la inicial.")
+            if not motivo:
+                errors.append("El motivo es obligatorio.")
+
+            if errors:
+                editing_permiso = permiso
+                edit_form_data = {
+                    "tipo": tipo,
+                    "fecha_inicio": (request.POST.get("fecha_inicio") or "").strip(),
+                    "fecha_fin": (request.POST.get("fecha_fin") or "").strip(),
+                    "motivo": motivo,
+                    "goce_sueldo": goce_sueldo,
+                }
+                for error in errors:
+                    messages.error(request, error)
+            else:
+                permiso.tipo = tipo
+                permiso.fecha_inicio = fecha_inicio
+                permiso.fecha_fin = fecha_fin
+                permiso.motivo = motivo
+                permiso.goce_sueldo = goce_sueldo
+                permiso.save(update_fields=["tipo", "fecha_inicio", "fecha_fin", "motivo", "goce_sueldo", "actualizado_en"])
+                log_event(
+                    request.user,
+                    "UPDATE",
+                    "rrhh.PermisoSalida",
+                    str(permiso.id),
+                    {
+                        "folio": permiso.folio,
+                        "tipo": permiso.tipo,
+                        "fecha_inicio": permiso.fecha_inicio.isoformat(),
+                        "fecha_fin": permiso.fecha_fin.isoformat() if permiso.fecha_fin else "",
+                        "goce_sueldo": permiso.goce_sueldo,
+                    },
+                )
+                messages.success(request, f"Permiso {permiso.folio} actualizado.")
+                return redirect("rrhh:rrhh_permisos_list")
         else:
             raise PermissionDenied("Capital Humano captura, consulta y archiva permisos; no los autoriza.")
-        return redirect("rrhh:rrhh_permisos_list")
+        if editing_permiso is None:
+            return redirect("rrhh:rrhh_permisos_list")
 
     permisos_qs = (
         PermisoSalida.objects.select_related(
@@ -1790,6 +1938,9 @@ def permisos_list(request):
         )
         .order_by("-creado_en")
     )
+    area_filter = _normalize_area_filter_value(request.GET.get("area"))
+    if area_filter:
+        permisos_qs = permisos_qs.filter(_permiso_area_filter_q(area_filter))
     permisos = permisos_qs[:500]
     columnas = [
         (
@@ -1828,6 +1979,12 @@ def permisos_list(request):
         ).count(),
         "aprobados": permisos_qs.filter(estado=PermisoSalida.ESTADO_APROBADO).count(),
     }
+    edit_id = (request.GET.get("edit") or "").strip()
+    if editing_permiso is None and can_edit_permiso and edit_id.isdigit():
+        editing_permiso = permisos_qs.filter(
+            pk=int(edit_id),
+            estado=PermisoSalida.ESTADO_SOLICITADO,
+        ).first()
     return render(
         request,
         "rrhh/permisos_list.html",
@@ -1838,6 +1995,12 @@ def permisos_list(request):
             "stats": stats,
             "can_manage_rrhh": can_manage_rrhh(request.user),
             "can_authorize_direccion": can_authorize_direccion(request.user),
+            "can_edit_permiso": can_edit_permiso,
+            "editing_permiso": editing_permiso,
+            "area_filter": area_filter,
+            "area_filter_options": PERMISO_AREA_FILTER_OPTIONS,
+            "edit_form_data": edit_form_data,
+            "permiso_tipo_choices": edit_choices,
         },
     )
 

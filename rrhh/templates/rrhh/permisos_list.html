@@ -17,6 +17,9 @@
   }
   .permisos-title { color: var(--vino); font-family: "Playfair Display", serif; font-size: 25px; font-weight: 800; }
   .permisos-copy { color: var(--texto-light); margin-top: 4px; max-width: 760px; }
+  .permisos-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .permisos-filter-btn { border-radius: 999px; border: 1px solid var(--rosa); color: var(--vino); font-size: 12px; font-weight: 900; padding: 6px 12px; text-decoration: none; text-transform: uppercase; }
+  .permisos-filter-btn.active { background: var(--vino); border-color: var(--vino); color: #fff; }
   .permisos-stats { display: grid; gap: 10px; grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .permisos-stat { background: #fbf6f8; border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; }
   .permisos-stat strong { color: var(--vino); display: block; font-size: 22px; line-height: 1; }
@@ -31,6 +34,23 @@
   .permiso-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }
   .permiso-badge.gold { background: rgba(201, 168, 76, .18); color: #6f5415; }
   .permiso-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .permiso-edit-card { background: #fff8fb; border: 1px solid var(--rosa); border-radius: 8px; padding: 16px; }
+  .permiso-edit-card h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
+  .permiso-edit-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .permiso-edit-field { display: grid; gap: 6px; }
+  .permiso-edit-field label { color: var(--vino); font-size: 12px; font-weight: 900; text-transform: uppercase; }
+  .permiso-edit-field input,
+  .permiso-edit-field select,
+  .permiso-edit-field textarea {
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    font: inherit;
+    padding: 10px 12px;
+    width: 100%;
+  }
+  .permiso-edit-field textarea { min-height: 110px; resize: vertical; }
+  .permiso-edit-field.full { grid-column: 1 / -1; }
+  .permiso-edit-check { align-items: center; display: flex; gap: 8px; }
   .permisos-table-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 16px; }
   .permisos-table-card h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
   .permisos-table { min-width: 1060px; width: 100%; border-collapse: collapse; }
@@ -41,11 +61,13 @@
   }
   @media (max-width: 900px) {
     .permisos-head { grid-template-columns: 1fr; }
+    .permiso-edit-grid { grid-template-columns: 1fr; }
   }
   @media (max-width: 680px) {
-    .permisos-board,
-    .permisos-stats { grid-template-columns: 1fr; }
-  }
+  .permisos-board,
+  .permisos-stats { grid-template-columns: 1fr; }
+  .permisos-filter-btn { font-size: 11px; }
+}
 </style>
 {% endblock %}
 
@@ -64,6 +86,13 @@
         Bandeja de escritorio para RRHH: recibe solicitudes desde Bonos, Producción y Capital Humano,
         conserva el expediente y muestra la autorización del jefe directo o Dirección.
       </div>
+      <div class="permisos-filters">
+        {% for value, label in area_filter_options %}
+          <a class="permisos-filter-btn {% if area_filter == value %}active{% endif %}" href="{% if value %}{% url 'rrhh:rrhh_permisos_list' %}?area={{ value }}{% else %}{% url 'rrhh:rrhh_permisos_list' %}{% endif %}">
+            {{ label }}
+          </a>
+        {% endfor %}
+      </div>
     </div>
     <div class="permisos-stats">
       <div class="permisos-stat"><strong>{{ stats.total }}</strong><span>Total</span></div>
@@ -73,6 +102,47 @@
       <div class="permisos-stat"><strong>{{ stats.aprobados }}</strong><span>Aprobados</span></div>
     </div>
   </div>
+
+  {% if editing_permiso %}
+  <section class="permiso-edit-card">
+    <h2>Editar permiso pendiente</h2>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="permiso_id" value="{{ editing_permiso.id }}">
+      <input type="hidden" name="action" value="editar_permiso">
+      <div class="permiso-edit-grid">
+        <div class="permiso-edit-field">
+          <label for="permiso-tipo">Tipo</label>
+          <select id="permiso-tipo" name="tipo" required>
+            {% for value, label in permiso_tipo_choices %}
+            <option value="{{ value }}" {% if edit_form_data.tipo == value or not edit_form_data and editing_permiso.tipo == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="permiso-edit-field permiso-edit-check">
+          <input id="permiso-goce" type="checkbox" name="goce_sueldo" {% if edit_form_data.goce_sueldo or not edit_form_data and editing_permiso.goce_sueldo %}checked{% endif %}>
+          <label for="permiso-goce">Con goce de sueldo</label>
+        </div>
+        <div class="permiso-edit-field">
+          <label for="permiso-inicio">Fecha inicio</label>
+          <input id="permiso-inicio" type="datetime-local" name="fecha_inicio" required value="{% if edit_form_data %}{{ edit_form_data.fecha_inicio }}{% else %}{{ editing_permiso.fecha_inicio|date:'Y-m-d\\TH:i' }}{% endif %}">
+        </div>
+        <div class="permiso-edit-field">
+          <label for="permiso-fin">Fecha fin</label>
+          <input id="permiso-fin" type="datetime-local" name="fecha_fin" value="{% if edit_form_data %}{{ edit_form_data.fecha_fin }}{% else %}{{ editing_permiso.fecha_fin|date:'Y-m-d\\TH:i' }}{% endif %}">
+        </div>
+        <div class="permiso-edit-field full">
+          <label for="permiso-motivo">Motivo</label>
+          <textarea id="permiso-motivo" name="motivo" required>{% if edit_form_data %}{{ edit_form_data.motivo }}{% else %}{{ editing_permiso.motivo }}{% endif %}</textarea>
+        </div>
+      </div>
+      <div class="permiso-actions" style="margin-top: 12px;">
+        <button class="btn btn-primary" type="submit">Guardar cambios</button>
+        <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_permisos_list' %}{% if area_filter %}?area={{ area_filter }}{% endif %}">Cancelar</a>
+      </div>
+    </form>
+  </section>
+  {% endif %}
 
   <section class="permisos-board">
     {% for key, label, items in columnas %}
@@ -108,6 +178,11 @@
           <button class="btn btn-primary" type="submit" name="action" value="autorizar_direccion">Autorizar Dirección</button>
           <button class="btn btn-secondary" type="submit" name="action" value="rechazar_direccion">Rechazar</button>
         </form>
+        {% endif %}
+        {% if can_edit_permiso and permiso.estado == "solicitado" %}
+        <div class="permiso-actions">
+          <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_permisos_list' %}{% if area_filter %}?area={{ area_filter }}&{% else %}?{% endif %}edit={{ permiso.id }}">Editar</a>
+        </div>
         {% endif %}
       </div>
       {% empty %}

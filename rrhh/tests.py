@@ -9,7 +9,7 @@ from rest_framework.test import APIClient
 from unittest import SkipTest
 from unittest.mock import patch
 
-from core.models import Notificacion, Sucursal
+from core.models import Notificacion, Sucursal, UserModuleAccess
 from rrhh.models import (
     AsistenciaEmpleado,
     BonoEsquema,
@@ -196,6 +196,129 @@ class CapitalHumanoServiceTests(TestCase):
         permiso.refresh_from_db()
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_SOLICITADO)
         self.assertIsNone(permiso.autorizado_por)
+
+    def test_rrhh_puede_editar_permiso_pendiente_desde_bandeja(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        rrhh_user = User.objects.create_user(username="paula")
+        rrhh_group, _ = Group.objects.get_or_create(name="RRHH")
+        rrhh_user.groups.add(rrhh_group)
+        empleado = Empleado.objects.create(nombre="Empleado Editable", departamento=Empleado.DEP_VENTAS)
+        permiso = PermisoSalida.objects.create(
+            empleado=empleado,
+            tipo=PermisoSalida.TIPO_PERMISO_HORA,
+            fecha_inicio=datetime(2026, 5, 26, 13, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            fecha_fin=datetime(2026, 5, 26, 15, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            motivo="Cita original",
+            goce_sueldo=True,
+        )
+
+        self.client.force_login(rrhh_user)
+        response = self.client.get(reverse("rrhh:rrhh_permisos_list") + f"?edit={permiso.id}")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Editar permiso pendiente")
+        self.assertContains(response, f"?edit={permiso.id}")
+
+        response = self.client.post(
+            reverse("rrhh:rrhh_permisos_list"),
+            {
+                "permiso_id": permiso.id,
+                "action": "editar_permiso",
+                "tipo": PermisoSalida.TIPO_SALIDA_PERSONAL,
+                "fecha_inicio": "2026-05-26T14:30",
+                "fecha_fin": "2026-05-26T16:00",
+                "motivo": "Ajuste por diligencia personal",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        permiso.refresh_from_db()
+        self.assertEqual(permiso.tipo, PermisoSalida.TIPO_SALIDA_PERSONAL)
+        self.assertEqual(permiso.motivo, "Ajuste por diligencia personal")
+        self.assertEqual(timezone.localtime(permiso.fecha_inicio).strftime("%Y-%m-%dT%H:%M"), "2026-05-26T14:30")
+        self.assertEqual(timezone.localtime(permiso.fecha_fin).strftime("%Y-%m-%dT%H:%M"), "2026-05-26T16:00")
+        self.assertFalse(permiso.goce_sueldo)
+
+    def test_dg_puede_ver_y_editar_permiso_aunque_rrhh_este_en_view(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        dg_user = User.objects.create_user(username="mauricio.dg")
+        dg_user.groups.add(Group.objects.get_or_create(name="dg")[0])
+        UserModuleAccess.objects.create(user=dg_user, module="rrhh", access=UserModuleAccess.ACCESS_VIEW)
+        empleado = Empleado.objects.create(nombre="Empleado DG Editable", departamento=Empleado.DEP_VENTAS)
+        permiso = PermisoSalida.objects.create(
+            empleado=empleado,
+            tipo=PermisoSalida.TIPO_PERMISO_HORA,
+            fecha_inicio=datetime(2026, 5, 26, 13, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            fecha_fin=datetime(2026, 5, 26, 15, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            motivo="Cita original",
+            goce_sueldo=True,
+        )
+
+        self.client.force_login(dg_user)
+        response = self.client.get(reverse("rrhh:rrhh_permisos_list") + f"?edit={permiso.id}")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Editar permiso pendiente")
+        self.assertContains(response, f"?edit={permiso.id}")
+
+        response = self.client.post(
+            reverse("rrhh:rrhh_permisos_list"),
+            {
+                "permiso_id": permiso.id,
+                "action": "editar_permiso",
+                "tipo": PermisoSalida.TIPO_OTRO,
+                "fecha_inicio": "2026-05-26T17:00",
+                "fecha_fin": "2026-05-26T18:00",
+                "motivo": "Ajuste directo DG",
+                "goce_sueldo": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        permiso.refresh_from_db()
+        self.assertEqual(permiso.tipo, PermisoSalida.TIPO_OTRO)
+        self.assertEqual(permiso.motivo, "Ajuste directo DG")
+        self.assertTrue(permiso.goce_sueldo)
+
+    def test_permisos_list_resumen_filtra_por_area(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        rrhh_user = User.objects.create_user(username="paula")
+        rrhh_group, _ = Group.objects.get_or_create(name="RRHH")
+        rrhh_user.groups.add(rrhh_group)
+        produccion = Empleado.objects.create(nombre="Ana Producción", departamento=Empleado.DEP_PRODUCCION, puesto_operativo="PRODUCCION")
+        hornos = Empleado.objects.create(nombre="Luis Hornos", departamento=Empleado.DEP_PRODUCCION, area="HORNOS", puesto_operativo="HORNOS")
+        logistica = Empleado.objects.create(nombre="Marta Logística", departamento=Empleado.DEP_LOGISTICA, area="LOGÍSTICA", puesto_operativo="REPARTIDOR")
+        Empleado.objects.create(nombre="Pedro Ventas", departamento=Empleado.DEP_VENTAS)
+
+        for empleado in (produccion, hornos, logistica):
+            PermisoSalida.objects.create(
+                empleado=empleado,
+                tipo=PermisoSalida.TIPO_PERMISO_HORA,
+                fecha_inicio=datetime(2026, 5, 26, 9, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+                fecha_fin=datetime(2026, 5, 26, 10, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+                motivo=f"Permiso de {empleado.nombre}",
+            )
+
+        self.client.force_login(rrhh_user)
+        response = self.client.get(reverse("rrhh:rrhh_permisos_list") + "?area=hornos")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["stats"]["total"], 1)
+        self.assertContains(response, "Luis Hornos")
+        self.assertNotContains(response, "Ana Producción")
+        self.assertNotContains(response, "Pedro Ventas")
+
+        response = self.client.get(reverse("rrhh:rrhh_permisos_list") + "?area=logística")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["stats"]["total"], 1)
+        self.assertContains(response, "Marta Logística")
+        self.assertNotContains(response, "Luis Hornos")
+
+        response = self.client.get(reverse("rrhh:rrhh_permisos_list"))
+        self.assertEqual(response.context["stats"]["total"], 3)
 
     def test_permiso_de_capital_humano_no_lo_autoriza_la_misma_persona_rrhh(self):
         from datetime import datetime
