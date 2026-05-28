@@ -215,3 +215,59 @@ class PointAttendanceSyncServiceTests(TestCase):
         self.assertEqual(Empleado.objects.count(), 1)
         self.assertEqual(AsistenciaEmpleado.objects.filter(empleado=empleado).count(), 1)
         self.assertEqual(job.result_summary["missing_employee"], 1)
+
+    def test_run_sync_can_link_by_unique_erp_name_without_creating_employee(self):
+        empleado = Empleado.objects.create(codigo="ERP-001", nombre="Laura Torres")
+        session = FakeSession(
+            attendance_rows=[
+                {
+                    "Codigo": "2543",
+                    "Empleado": "  laura   torres ",
+                    "Entrada": "2026-05-27T08:00:00",
+                    "Salida": "2026-05-27T16:00:00",
+                    "IDX": 5,
+                }
+            ]
+        )
+        service = PointAttendanceSyncService(
+            bridge_settings=FakeSettings(),
+            http_session_service=FakeHttpSessionService(session),
+        )
+
+        job = service.run_sync(start_date=date(2026, 5, 27), end_date=date(2026, 5, 27), branch_filter="Crucero")
+
+        self.assertEqual(job.status, PointSyncJob.STATUS_SUCCESS)
+        empleado.refresh_from_db()
+        self.assertEqual(empleado.codigo, "ERP-001")
+        self.assertEqual(empleado.nombre, "Laura Torres")
+        self.assertEqual(Empleado.objects.count(), 1)
+        asistencia = AsistenciaEmpleado.objects.get(empleado=empleado, fecha=date(2026, 5, 27))
+        self.assertIn("match=name", asistencia.observacion)
+        self.assertIn("codigo_point=2543", asistencia.observacion)
+        self.assertEqual(job.result_summary["attendance_matched_by_name"], 1)
+
+    def test_run_sync_skips_ambiguous_erp_name(self):
+        Empleado.objects.create(codigo="ERP-001", nombre="Laura Torres")
+        Empleado.objects.create(codigo="ERP-002", nombre="Laura Torres")
+        session = FakeSession(
+            attendance_rows=[
+                {
+                    "Codigo": "2543",
+                    "Empleado": "Laura Torres",
+                    "Entrada": "2026-05-27T08:00:00",
+                    "Salida": "2026-05-27T16:00:00",
+                    "IDX": 6,
+                }
+            ]
+        )
+        service = PointAttendanceSyncService(
+            bridge_settings=FakeSettings(),
+            http_session_service=FakeHttpSessionService(session),
+        )
+
+        job = service.run_sync(start_date=date(2026, 5, 27), end_date=date(2026, 5, 27), branch_filter="Crucero")
+
+        self.assertEqual(job.status, PointSyncJob.STATUS_PARTIAL)
+        self.assertEqual(Empleado.objects.count(), 2)
+        self.assertEqual(AsistenciaEmpleado.objects.count(), 0)
+        self.assertEqual(job.result_summary["ambiguous_employee"], 1)

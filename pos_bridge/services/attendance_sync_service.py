@@ -379,11 +379,24 @@ class PointAttendanceSyncService:
 
     @transaction.atomic
     def persist_payload(self, payload: PointAttendancePayload) -> tuple[AsistenciaEmpleado | None, str]:
-        if not payload.employee_code:
-            return None, "missing_code"
-        empleado = Empleado.objects.filter(codigo=payload.employee_code).first()
+        empleado = None
+        match_method = "code"
+        if payload.employee_code:
+            empleado = Empleado.objects.filter(codigo=payload.employee_code).first()
+        else:
+            match_method = "name"
+
         if empleado is None:
-            return None, "missing_employee"
+            match_method = "name"
+            name_key = normalize_text(payload.employee_name)
+            if not name_key:
+                return None, "missing_code"
+            candidates = list(Empleado.objects.filter(activo=True, nombre_normalizado=name_key).order_by("id")[:2])
+            if len(candidates) > 1:
+                return None, "ambiguous_employee"
+            if not candidates:
+                return None, "missing_employee"
+            empleado = candidates[0]
 
         asistencia, created = AsistenciaEmpleado.objects.get_or_create(
             empleado=empleado,
@@ -411,6 +424,8 @@ class PointAttendanceSyncService:
             asistencia.observacion,
             (
                 f"{self.OBSERVATION_PREFIX} IDX={payload.point_row_id or '-'}; "
+                f"match={match_method}; "
+                f"codigo_point={payload.employee_code or '-'}; "
                 f"sucursal={payload.branch.name}; puesto={payload.position or '-'}; "
                 f"retardo={payload.is_late}; falta={payload.is_absence}; "
                 f"fuera_rango={payload.is_out_of_range}; "
@@ -420,6 +435,8 @@ class PointAttendanceSyncService:
         asistencia.save()
         if asistencia.salida and asistencia.turno_id:
             generar_horas_extra_automatico(asistencia)
+        if match_method == "name":
+            return asistencia, "created_by_name" if created else "updated_by_name"
         return asistencia, "created" if created else "updated"
 
     def run_sync(
@@ -454,9 +471,12 @@ class PointAttendanceSyncService:
                 "attendance_rows_seen": 0,
                 "attendance_created": 0,
                 "attendance_updated": 0,
+                "attendance_matched_by_code": 0,
+                "attendance_matched_by_name": 0,
                 "absences_seen": 0,
                 "missing_employee": 0,
                 "missing_code": 0,
+                "ambiguous_employee": 0,
                 "unresolved_samples": [],
             }
             current = start_date
@@ -479,9 +499,17 @@ class PointAttendanceSyncService:
                         _, result = self.persist_payload(payload)
                         if result == "created":
                             summary["attendance_created"] += 1
+                            summary["attendance_matched_by_code"] += 1
                         elif result == "updated":
                             summary["attendance_updated"] += 1
-                        elif result in {"missing_employee", "missing_code"}:
+                            summary["attendance_matched_by_code"] += 1
+                        elif result == "created_by_name":
+                            summary["attendance_created"] += 1
+                            summary["attendance_matched_by_name"] += 1
+                        elif result == "updated_by_name":
+                            summary["attendance_updated"] += 1
+                            summary["attendance_matched_by_name"] += 1
+                        elif result in {"missing_employee", "missing_code", "ambiguous_employee"}:
                             summary[result] += 1
                             if len(summary["unresolved_samples"]) < 15:
                                 summary["unresolved_samples"].append(
@@ -503,7 +531,7 @@ class PointAttendanceSyncService:
 
             summary["days_processed"] = len(seen_days)
             summary["branches_processed"] = len(seen_branches)
-            unresolved = summary["missing_employee"] + summary["missing_code"]
+            unresolved = summary["missing_employee"] + summary["missing_code"] + summary["ambiguous_employee"]
             if unresolved:
                 return self.mark_partial(
                     sync_job,
