@@ -37,10 +37,11 @@ class CanAccessBonosVentas(BasePermission):
 
 def _recalcular_desde_registros(bono: BonoVentasEmpleado) -> None:
     registros = bono.registros.all()
-    bono.dias_trabajados = registros.count()
-    bono.dias_asistencia = registros.filter(tiene_asistencia=True).count()
-    bono.dias_uniforme = registros.filter(tiene_uniforme=True).count()
-    bono.dias_puntualidad = registros.filter(tiene_puntualidad=True).count()
+    asistencias = registros.filter(tiene_asistencia=True)
+    bono.dias_trabajados = asistencias.count()
+    bono.dias_asistencia = bono.dias_trabajados
+    bono.dias_uniforme = asistencias.filter(tiene_uniforme=True).count()
+    bono.dias_puntualidad = asistencias.filter(tiene_puntualidad=True).count()
     bono.recalcular()
     bono.save()
 

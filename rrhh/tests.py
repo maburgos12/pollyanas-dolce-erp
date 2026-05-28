@@ -844,7 +844,7 @@ class RRHHViewsTests(TestCase):
         self.assertEqual(esquema.departamento, Empleado.DEP_LOGISTICA)
         self.assertEqual(esquema.area, "REPARTIDORES")
         self.assertIn(esquema, empleado.bonos_esquemas.all())
-        self.assertTrue(empleado.participa_bonos_ventas)
+        self.assertFalse(empleado.participa_bonos_ventas)
         self.assertFalse(empleado.participa_bonos_produccion)
 
     def test_empleados_sincroniza_esquemas_base_con_banderas_legacy(self):
@@ -958,6 +958,10 @@ class RRHHViewsTests(TestCase):
         from datetime import date
         from bonos_ventas.models import BonoVentasEmpleado, ConfigBonoVentasPeriodo
 
+        ventas, _ = BonoEsquema.objects.get_or_create(
+            codigo="VENTAS",
+            defaults={"nombre": "Ventas", "departamento": Empleado.DEP_VENTAS},
+        )
         sucursal = Sucursal.objects.create(codigo="TUN", nombre="El Túnel")
         periodo = ConfigBonoVentasPeriodo.objects.create(mes=5, anio=2026)
         empleado = Empleado.objects.create(
@@ -979,10 +983,12 @@ class RRHHViewsTests(TestCase):
                     "departamento_origen": Empleado.DEP_VENTAS,
                     "departamento": Empleado.DEP_VENTAS,
                     "puesto_operativo": "CAJAS",
+                    "bono_esquemas": [str(ventas.id)],
                     "sucursal": sucursal.nombre,
                     "salario_diario": "300.00",
                     "activo": "on",
                 },
+                secure=True,
                 follow=True,
             )
 
@@ -1020,6 +1026,7 @@ class RRHHViewsTests(TestCase):
                     "salario_diario": "300.00",
                     "activo": "on",
                 },
+                secure=True,
                 follow=True,
             )
 
@@ -1069,6 +1076,7 @@ class RRHHViewsTests(TestCase):
                     "salario_diario": "300.00",
                     "activo": "on",
                 },
+                secure=True,
                 follow=True,
             )
 
@@ -1081,6 +1089,10 @@ class RRHHViewsTests(TestCase):
         from datetime import date
         from bonos_produccion.models import AREA_HORNOS, BonoProduccionEmpleado, ConfigBonoPeriodo
 
+        produccion, _ = BonoEsquema.objects.get_or_create(
+            codigo="PRODUCCION",
+            defaults={"nombre": "Producción", "departamento": Empleado.DEP_PRODUCCION},
+        )
         periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
         empleado = Empleado.objects.create(
             nombre="Empleado Entra Produccion",
@@ -1100,9 +1112,11 @@ class RRHHViewsTests(TestCase):
                     "departamento_origen": Empleado.DEP_PRODUCCION,
                     "departamento": Empleado.DEP_PRODUCCION,
                     "puesto_operativo": "HORNOS",
+                    "bono_esquemas": [str(produccion.id)],
                     "salario_diario": "300.00",
                     "activo": "on",
                 },
+                secure=True,
                 follow=True,
             )
 

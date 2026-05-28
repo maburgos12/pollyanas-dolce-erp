@@ -12,8 +12,9 @@ from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointDailySale, PointProduct
 from rrhh.models import Empleado, NominaLinea, NominaPeriodo, PermisoSalida
 
-from .models import BonoVentasEmpleado, ConfigBonoVentasPeriodo, VentaCategoriaSucursal
+from .models import BonoVentasEmpleado, ConfigBonoVentasPeriodo, RegistroDiarioVentas, VentaCategoriaSucursal
 from .services import sync_ventas_categorias
+from .views import _recalcular_desde_registros
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -184,6 +185,61 @@ class BonosVentasTests(TestCase):
 
         self.assertTrue(bono.pasa_asistencia)
         self.assertEqual(bono.sub1, Decimal("225.00"))
+
+    def test_recalcular_desde_registros_cuenta_solo_asistencias_reales(self):
+        user = get_user_model().objects.create_superuser(username="captura-ventas")
+        self.client.force_login(user)
+        sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
+        empleado = Empleado.objects.create(nombre="Empleado Ventas", area="VENTAS", sucursal="Payán")
+        periodo = ConfigBonoVentasPeriodo.objects.create(
+            mes=5,
+            anio=2026,
+            dias_laborables=23,
+            pct_uniforme=Decimal("15.00"),
+            pct_asistencia=Decimal("45.00"),
+            pct_puntualidad=Decimal("40.00"),
+        )
+        bono = BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal)
+        for dia in range(1, 24):
+            RegistroDiarioVentas.objects.create(
+                bono=bono,
+                dia=dia,
+                tiene_asistencia=True,
+                tiene_uniforme=True,
+                tiene_puntualidad=True,
+            )
+        for dia in range(24, 32):
+            RegistroDiarioVentas.objects.create(
+                bono=bono,
+                dia=dia,
+                tiene_asistencia=False,
+                tiene_uniforme=True,
+                tiene_puntualidad=True,
+            )
+
+        _recalcular_desde_registros(bono)
+
+        bono.refresh_from_db()
+        self.assertEqual(bono.dias_trabajados, 23)
+        self.assertEqual(bono.dias_uniforme, 23)
+        self.assertEqual(bono.dias_puntualidad, 23)
+        self.assertTrue(bono.pasa_asistencia)
+        self.assertEqual(bono.total_a_pagar, Decimal("300.00"))
+
+    def test_recalcular_desde_registros_permite_dias_extra_trabajados(self):
+        user = get_user_model().objects.create_superuser(username="captura-ventas-extra")
+        self.client.force_login(user)
+        sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
+        empleado = Empleado.objects.create(nombre="Empleado Ventas Extra", area="VENTAS", sucursal="Payán")
+        periodo = ConfigBonoVentasPeriodo.objects.create(mes=5, anio=2026, dias_laborables=23)
+        bono = BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal)
+        for dia in range(1, 25):
+            RegistroDiarioVentas.objects.create(bono=bono, dia=dia, tiene_asistencia=True)
+
+        _recalcular_desde_registros(bono)
+
+        bono.refresh_from_db()
+        self.assertEqual(bono.dias_trabajados, 24)
 
     def test_sync_pos_bridge_agrupa_por_branch_erp_y_categoria_producto(self):
         sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)

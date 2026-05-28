@@ -112,16 +112,13 @@ def _organizacion_desde_post(post_data) -> dict:
     puesto_operativo = _catalogo_value(post_data, "puesto_operativo") or defaults.get("puesto_operativo", "")
     departamento = (post_data.get("departamento") or defaults.get("departamento") or "").strip()
     departamento_origen = (post_data.get("departamento_origen") or defaults.get("departamento_origen") or departamento).strip()
-    puestos_bono_ventas = {"CAJAS", "AUXILIAR_CAJAS", "CALL_CENTER", "REPARTIDOR"}
     return {
         "area": area,
         "departamento": departamento,
         "departamento_origen": departamento_origen,
         "puesto_operativo": puesto_operativo,
-        "participa_bonos_ventas": post_data.get("participa_bonos_ventas") == "on"
-        or puesto_operativo in puestos_bono_ventas,
-        "participa_bonos_produccion": post_data.get("participa_bonos_produccion") == "on"
-        or puesto_operativo in {"HORNOS", "PRODUCCION", "ARMADO", "CRUCERO", "ENVIO_SUCURSAL"},
+        "participa_bonos_ventas": post_data.get("participa_bonos_ventas") == "on",
+        "participa_bonos_produccion": post_data.get("participa_bonos_produccion") == "on",
     }
 
 

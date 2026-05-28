@@ -1260,8 +1260,6 @@
     const origenSelect = form.querySelector('[data-departamento-origen-select]');
     const actualSelect = form.querySelector('select[name="departamento"]');
     const puestoSelect = form.querySelector('select[name="puesto_operativo"]');
-    const ventas = form.querySelector('input[data-bonus-code="VENTAS"]');
-    const produccion = form.querySelector('input[data-bonus-code="PRODUCCION"]');
     if (origen && origenSelect) origenSelect.value = origen;
     if (actual && actualSelect) actualSelect.value = actual;
     if (puesto && puestoSelect && Array.from(puestoSelect.options).some(option => option.value === puesto)) {
