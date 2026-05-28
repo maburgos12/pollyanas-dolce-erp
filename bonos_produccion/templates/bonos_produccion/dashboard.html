@@ -174,11 +174,21 @@
                   <span class="status-pill neutral">Asistencia</span>
                   <div class="bonos-field"><label>% asistencia</label><input name="{{ row.prefix }}_pct_asistencia" type="number" step="0.01" value="{{ row.pct_asistencia }}"></div>
                   <div class="bonos-field"><label>Límite</label><input name="{{ row.prefix }}_limite_asistencia" type="number" min="0" value="{{ row.limite_asistencia }}"></div>
+                  <label class="check-row" style="grid-column: span 2; margin-top:4px;">
+                    <input type="checkbox" name="{{ row.prefix }}_cancela_por_asistencia" {% if row.cancela_por_asistencia %}checked{% endif %}>
+                    Cancela bono con X faltas
+                  </label>
+                  <div class="bonos-field"><label>Límite faltas para cancelar</label><input name="{{ row.prefix }}_limite_asistencia_cancelacion" type="number" min="0" value="{{ row.limite_asistencia_cancelacion }}"></div>
                 </div>
                 <div class="rule-row">
                   <span class="status-pill neutral">Puntualidad</span>
                   <div class="bonos-field"><label>% puntualidad</label><input name="{{ row.prefix }}_pct_puntualidad" type="number" step="0.01" value="{{ row.pct_puntualidad }}"></div>
                   <div class="bonos-field"><label>Límite</label><input name="{{ row.prefix }}_limite_puntualidad" type="number" min="0" value="{{ row.limite_puntualidad }}"></div>
+                  <label class="check-row" style="grid-column: span 2; margin-top:4px;">
+                    <input type="checkbox" name="{{ row.prefix }}_cancela_por_puntualidad" {% if row.cancela_por_puntualidad %}checked{% endif %}>
+                    Cancela bono con retardos
+                  </label>
+                  <div class="bonos-field"><label>Límite retardos para cancelar</label><input name="{{ row.prefix }}_limite_retardos_cancelacion" type="number" min="0" value="{{ row.limite_retardos_cancelacion }}"></div>
                 </div>
                 <div class="rule-row">
                   <span class="status-pill neutral">Uniforme</span>

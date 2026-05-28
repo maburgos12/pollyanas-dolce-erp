@@ -31,6 +31,10 @@ class ConfigBonoAreaInline(admin.TabularInline):
         "limite_asistencia",
         "limite_puntualidad",
         "limite_uniforme",
+        "cancela_por_asistencia",
+        "limite_asistencia_cancelacion",
+        "cancela_por_puntualidad",
+        "limite_retardos_cancelacion",
     ]
 
 

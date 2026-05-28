@@ -171,6 +171,10 @@ class ConfigBonoArea(models.Model):
     limite_asistencia = models.PositiveSmallIntegerField(default=2)
     limite_puntualidad = models.PositiveSmallIntegerField(default=2)
     limite_produccion = models.PositiveSmallIntegerField(default=2)
+    cancela_por_asistencia = models.BooleanField(default=False)
+    limite_asistencia_cancelacion = models.PositiveSmallIntegerField(default=0)
+    cancela_por_puntualidad = models.BooleanField(default=False)
+    limite_retardos_cancelacion = models.PositiveSmallIntegerField(default=0)
     usa_produccion = models.BooleanField(default=True)
     actualizado_en = models.DateTimeField(auto_now=True)
 
@@ -191,6 +195,10 @@ class ConfigBonoArea(models.Model):
             "pct_asistencia": Decimal("15.00"),
             "pct_puntualidad": Decimal("15.00"),
             "pct_uniforme": Decimal("5.00"),
+            "cancela_por_asistencia": False,
+            "limite_asistencia_cancelacion": 0,
+            "cancela_por_puntualidad": False,
+            "limite_retardos_cancelacion": 0,
             "limite_uniforme": 1,
             "limite_asistencia": 2,
             "limite_puntualidad": 2,
@@ -205,6 +213,10 @@ class ConfigBonoArea(models.Model):
                     "pct_puntualidad": Decimal("30.00"),
                     "pct_uniforme": Decimal("20.00"),
                     "limite_produccion": 0,
+                    "limite_asistencia_cancelacion": 0,
+                    "limite_retardos_cancelacion": 0,
+                    "cancela_por_asistencia": False,
+                    "cancela_por_puntualidad": False,
                     "usa_produccion": False,
                 }
             )
