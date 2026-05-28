@@ -186,6 +186,9 @@
         {% for row in sucursal_rows %}
         <article class="branch-chip"><span>{{ row.nombre }}</span><strong>{{ row.count }} empleadas</strong><small>${{ row.total|floatformat:2|intcomma }} · {{ row.categorias_activas }} categorías activas</small></article>
         {% endfor %}
+        {% if repartidor_row %}
+        <article class="branch-chip" style="border-color:#8b2252;background:#fdf4f8"><span style="color:#8b2252">🚚 Repartidores</span><strong>{{ repartidor_row.count }} repartidores</strong><small>${{ repartidor_row.total|floatformat:2|intcomma }}</small></article>
+        {% endif %}
       </div>
     </div>
   </section>
@@ -206,14 +209,22 @@
         <div class="branch-filter" id="branch-filter">
           <button type="button" class="active" data-branch="ALL">Todas</button>
           {% for row in sucursal_rows %}{% if row.count %}<button type="button" data-branch="{{ row.id }}">{{ row.nombre }}</button>{% endif %}{% endfor %}
+          {% if repartidor_row %}<button type="button" data-branch="REPARTIDORES" style="border-color:#8b2252;color:#8b2252">🚚 Repartidores</button>{% endif %}
         </div>
       </div>
       <div class="employee-list" id="employee-list">
         {% for bono in bonos %}
-        <details class="employee-card" data-branch="{{ bono.sucursal_id }}" data-search="{{ bono.empleado.nombre|lower }} {{ bono.empleado.codigo|default:''|lower }} {{ bono.sucursal.nombre|lower }}">
+        <details class="employee-card" data-branch="{% if bono.empleado.puesto_operativo == 'REPARTIDOR' %}REPARTIDORES{% else %}{{ bono.sucursal_id }}{% endif %}" data-search="{{ bono.empleado.nombre|lower }} {{ bono.empleado.codigo|default:''|lower }} {% if bono.empleado.puesto_operativo == 'REPARTIDOR' %}repartidor{% else %}{{ bono.sucursal.nombre|lower }}{% endif %}">
           <summary>
-            <div><div class="employee-name">{{ bono.empleado.nombre }}</div><div class="employee-meta">{{ bono.sucursal.nombre }} · {{ bono.empleado.codigo|default:"Sin código" }}</div></div>
+            <div>
+              <div class="employee-name">{{ bono.empleado.nombre }}</div>
+              <div class="employee-meta">{% if bono.empleado.puesto_operativo == "REPARTIDOR" %}🚚 Repartidor{% else %}{{ bono.sucursal.nombre }}{% endif %} · {{ bono.empleado.codigo|default:"Sin código" }}</div>
+            </div>
+            {% if bono.empleado.puesto_operativo == "REPARTIDOR" %}
+            <span class="status-pill" style="background:#fdf4f8;color:#8b2252;border:1px solid #e8c4d4">Repartidor</span>
+            {% else %}
             <span class="status-pill neutral">{{ bono.sucursal.nombre }}</span>
+            {% endif %}
             <span>{{ bono.dias_trabajados }} días</span>
             <span class="status-pill {% if bono.pasa_asistencia %}ok{% else %}bad{% endif %}">{% if bono.pasa_asistencia %}Asistencia{% else %}No asistencia{% endif %}</span>
             <span class="employee-total">${{ bono.total_a_pagar|floatformat:2|intcomma }}</span>
@@ -225,7 +236,7 @@
             <input type="hidden" name="mes" value="{{ mes }}">
             <input type="hidden" name="anio" value="{{ anio }}">
             {% if bono.empleado.puesto_operativo == "REPARTIDOR" %}
-            <div class="money-grid" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+            <div class="money-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
               <div class="kpi-card"><div class="kpi-label">Sub 1 (asist/puntual/unif)</div><div class="kpi-value">${{ bono.sub1|floatformat:2|intcomma }}</div></div>
               <div class="kpi-card"><div class="kpi-label">Efectividad bitácora</div><div class="kpi-value {% if bono.pasa_bono_ventas %}gold{% else %}wine{% endif %}">{{ bono.pct_efectividad_entrega|floatformat:1 }}%</div></div>
               <div class="kpi-card"><div class="kpi-label">Bono entregas</div><div class="kpi-value gold">${{ bono.monto_bono_entregas|floatformat:2|intcomma }}</div></div>

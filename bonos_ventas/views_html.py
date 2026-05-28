@@ -179,11 +179,15 @@ def bonos_ventas_dashboard(request):
             return _dashboard_redirect(mes, anio)
 
     periodo = ConfigBonoVentasPeriodo.objects.filter(mes=mes, anio=anio).first()
-    bonos = list(
+    bonos_qs = list(
         BonoVentasEmpleado.objects.filter(periodo=periodo).select_related("empleado", "sucursal").order_by("sucursal__nombre", "empleado__nombre")
         if periodo
         else []
     )
+    # Separar repartidores del resto para mostrarlos como grupo propio
+    bonos_repartidores = [b for b in bonos_qs if b._es_repartidor()]
+    bonos = [b for b in bonos_qs if not b._es_repartidor()] + bonos_repartidores
+
     ventas_categoria = list(
         VentaCategoriaSucursal.objects.filter(periodo=periodo).select_related("sucursal").order_by("sucursal__nombre", "categoria")
         if periodo
@@ -196,10 +200,15 @@ def bonos_ventas_dashboard(request):
     for venta in ventas_categoria:
         sucursales_por_id.setdefault(venta.sucursal_id, venta.sucursal)
 
+    # Ids de sucursal usados por repartidores (para excluirlos del conteo sucursal normal si todos son repartidores)
+    ids_con_repartidores = {b.sucursal_id for b in bonos_repartidores}
+
     sucursal_rows = []
     for sucursal in sorted(sucursales_por_id.values(), key=lambda item: item.nombre):
-        rows = [bono for bono in bonos if bono.sucursal_id == sucursal.id]
+        rows = [bono for bono in bonos if bono.sucursal_id == sucursal.id and not bono._es_repartidor()]
         cats = [venta for venta in ventas_categoria if venta.sucursal_id == sucursal.id]
+        if not rows:
+            continue
         sucursal_rows.append(
             {
                 "id": sucursal.id,
@@ -210,6 +219,16 @@ def bonos_ventas_dashboard(request):
                 "categorias_activas": sum(1 for venta in cats if venta.activo_bono),
             }
         )
+
+    # Fila especial de repartidores
+    repartidor_row = None
+    if bonos_repartidores:
+        repartidor_row = {
+            "id": "REPARTIDORES",
+            "nombre": "Repartidores",
+            "count": len(bonos_repartidores),
+            "total": sum((b.total_a_pagar for b in bonos_repartidores), Decimal("0")),
+        }
 
     total_bonos = sum((bono.total_a_pagar for bono in bonos), Decimal("0"))
     passing_asistencia = sum(1 for bono in bonos if bono.pasa_asistencia)
@@ -262,6 +281,8 @@ def bonos_ventas_dashboard(request):
             "passing_asistencia": passing_asistencia,
             "con_bono_ventas": con_bono_ventas,
             "repartidores_con_bono": repartidores_con_bono,
+            "repartidor_row": repartidor_row,
+            "bonos_repartidores": bonos_repartidores,
             "can_manage": can_manage,
             "defaults": defaults,
         },
