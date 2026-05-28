@@ -32,6 +32,13 @@ def _money(value) -> Decimal:
     return Decimal(value or 0).quantize(Decimal("0.01"))
 
 
+def _to_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 class ConfigBonoVentasPeriodo(models.Model):
     mes = models.PositiveSmallIntegerField()
     anio = models.PositiveSmallIntegerField()
@@ -202,11 +209,11 @@ class BonoVentasEmpleado(models.Model):
         retardos = dias_base - int(self.dias_puntualidad or 0)
         cancela_bono = (not self.pasa_asistencia) or (not self.pasa_puntualidad)
         cancel_por_asistencia = getattr(cfg, "cancela_por_asistencia", False)
-        limite_cancel_asistencia = int(getattr(cfg, "limite_asistencia_cancelacion", cfg.limite_asistencia))
+        limite_cancel_asistencia = _to_int(getattr(cfg, "limite_asistencia_cancelacion", None), cfg.limite_asistencia)
         if cancel_por_asistencia and (faltas > limite_cancel_asistencia):
             cancela_bono = True
         cancel_por_puntualidad = getattr(cfg, "cancela_por_puntualidad", False)
-        limite_cancel_retardos = int(getattr(cfg, "limite_retardos_cancelacion", cfg.limite_puntualidad))
+        limite_cancel_retardos = _to_int(getattr(cfg, "limite_retardos_cancelacion", None), cfg.limite_puntualidad)
         if cancel_por_puntualidad and (retardos > limite_cancel_retardos):
             cancela_bono = True
         self.cancela_bono = cancela_bono
