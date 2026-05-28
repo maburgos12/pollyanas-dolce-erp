@@ -13,7 +13,7 @@ from rest_framework.response import Response
 from django.db.models import Q
 
 from core.notificaciones import notificar_permiso_solicitado
-from core.access import can_manage_rrhh, can_manage_submodule
+from core.access import ROLE_ADMIN, ROLE_DG, can_manage_rrhh, can_manage_submodule, has_any_role
 from rrhh.models import Empleado, PermisoSalida
 from rrhh.services_permisos import can_resolver_permiso_jefe, resolver_permiso_jefe
 
@@ -87,6 +87,9 @@ def _permiso_payload(permiso: PermisoSalida, user=None) -> dict:
 
 
 def _puede_editar_permiso(user, permiso: PermisoSalida) -> bool:
+    if has_any_role(user, ROLE_DG, ROLE_ADMIN):
+        return True
+
     if permiso.estado != PermisoSalida.ESTADO_SOLICITADO or permiso.estado_jefe != PermisoSalida.ESTADO_JEFE_PENDIENTE:
         return False
 
@@ -113,6 +116,8 @@ def _normalize_area_filter_value(raw: str | None) -> str:
         return ""
     if value in {"PRODUCCION", "PRODUC", "PROD", "PRODUCION"}:
         return "PRODUCCION"
+    if value in {"EMBETUNADO", "EMBETUNADOS"}:
+        return "PRODUCCION"
     if value in {"HORNOS", "HORNO"}:
         return "HORNOS"
     if value in {"LOGISTICA", "LOGISTICO", "LOGÍSTICA"}:
@@ -123,14 +128,15 @@ def _normalize_area_filter_value(raw: str | None) -> str:
 def _permiso_area_filter_q(area_filter: str):
     if not area_filter:
         return Q()
-    logistica_area_terms = ("LOGISTICA", "LOGISTICO")
     hornos_puestos = ("HORNOS", "HORNO")
     produccion_puestos = ("PRODUCCION", "EMBETUNADO")
     logistica_puestos = ("REPARTIDOR", "ENVIO_SUCURSAL")
+    logistica_area_terms = "LOGÍSTICA|LOGISTICA|ENVIO|SUCURSAL"
     if area_filter == "PRODUCCION":
         return (
             Q(empleado__puesto_operativo__in=produccion_puestos)
             | Q(empleado__area__iexact="PRODUCCION")
+            | Q(empleado__area__iexact="EMBETUNADO")
         )
     if area_filter == "HORNOS":
         return (
@@ -141,8 +147,7 @@ def _permiso_area_filter_q(area_filter: str):
         return (
             Q(empleado__departamento=Empleado.DEP_LOGISTICA)
             | Q(empleado__departamento_origen=Empleado.DEP_LOGISTICA)
-            | Q(empleado__area__in=logistica_area_terms)
-            | Q(empleado__area__iregex="LOGÍSTICA|LOGISTICA")
+            | Q(empleado__area__iregex=logistica_area_terms)
             | Q(empleado__puesto_operativo__in=logistica_puestos)
         )
     return Q(empleado__area__iexact=area_filter)
@@ -300,7 +305,13 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
         permiso = get_object_or_404(PermisoSalida.objects.select_related("empleado"), pk=self.kwargs["pk"])
         if not _puede_editar_permiso(request.user, permiso):
             raise PermissionDenied("No tienes permisos para editar este permiso.")
-        if permiso.estado != PermisoSalida.ESTADO_SOLICITADO or permiso.estado_jefe != PermisoSalida.ESTADO_JEFE_PENDIENTE:
+        if (
+            not has_any_role(request.user, ROLE_DG, ROLE_ADMIN)
+            and (
+                permiso.estado != PermisoSalida.ESTADO_SOLICITADO
+                or permiso.estado_jefe != PermisoSalida.ESTADO_JEFE_PENDIENTE
+            )
+        ):
             return Response(
                 {"detail": "Solo se pueden editar permisos en estado pendiente."},
                 status=status.HTTP_400_BAD_REQUEST,

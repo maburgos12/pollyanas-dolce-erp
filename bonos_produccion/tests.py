@@ -1,6 +1,7 @@
 import json
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -546,6 +547,91 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_RECHAZADO)
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_RECHAZADO)
         self.assertEqual(permiso.autorizado_jefe_por, user)
+
+    def test_dg_puede_editar_permiso_de_produccion_independiente_del_estado(self):
+        user = get_user_model().objects.create_superuser(username="dg.permisos.produccion", password="x")
+        self.client.force_login(user)
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
+        jefe = Empleado.objects.create(nombre="Jefe Produccion", departamento=Empleado.DEP_PRODUCCION, usuario_erp=user)
+        empleado = Empleado.objects.create(nombre="Empleado Empleado", area="PRODUCCION", jefe_directo=jefe)
+        BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado, area=AREA_PRODUCCION)
+
+        permiso = PermisoSalida.objects.create(
+            empleado=empleado,
+            tipo=PermisoSalida.TIPO_PERMISO_HORA,
+            fecha_inicio=datetime(2026, 5, 21, 8, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            fecha_fin=datetime(2026, 5, 21, 12, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            motivo="Permiso aprobado",
+            estado=PermisoSalida.ESTADO_APROBADO,
+            estado_jefe=PermisoSalida.ESTADO_JEFE_PREAUTORIZADO,
+        )
+
+        listado = self.client.get("/api/bonos-produccion/permisos/?mes=5&anio=2026")
+        self.assertEqual(listado.status_code, 200)
+        self.assertTrue(
+            any(
+                row["id"] == permiso.id and row["puede_editar"]
+                for row in listado.json()["permisos"]
+            )
+        )
+
+        actualizado = self.client.post(
+            f"/api/bonos-produccion/permisos/{permiso.id}/editar/",
+            json.dumps({"motivo": "Corrección DG"}),
+            content_type="application/json",
+        )
+        self.assertEqual(actualizado.status_code, 200)
+        permiso.refresh_from_db()
+        self.assertEqual(permiso.motivo, "Corrección DG")
+
+    def test_permiso_area_produccion_filtro_incluye_area_embetunada(self):
+        user = get_user_model().objects.create_superuser(username="dg.filtro.produccion", password="x")
+        self.client.force_login(user)
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
+        jefe = Empleado.objects.create(nombre="Jefe Produccion", departamento=Empleado.DEP_PRODUCCION, usuario_erp=user)
+        embetunado = Empleado.objects.create(
+            nombre="Operario Embetunado",
+            area="EMBETUNADO",
+            departamento=Empleado.DEP_PRODUCCION,
+            puesto="Producción",
+            jefe_directo=jefe,
+        )
+        logistica_envio = Empleado.objects.create(
+            nombre="Envío a sucursal",
+            area="ENVIO A SUCURSAL",
+            departamento=Empleado.DEP_PRODUCCION,
+            puesto="Encargado de envíos",
+            jefe_directo=jefe,
+        )
+        BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=embetunado, area=AREA_PRODUCCION)
+        BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=logistica_envio, area=AREA_LOGISTICA)
+
+        permiso_embetunado = PermisoSalida.objects.create(
+            empleado=embetunado,
+            tipo=PermisoSalida.TIPO_PERMISO_HORA,
+            fecha_inicio=datetime(2026, 5, 21, 8, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            fecha_fin=datetime(2026, 5, 21, 12, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            motivo="Permiso embetunado",
+        )
+        permiso_logistica = PermisoSalida.objects.create(
+            empleado=logistica_envio,
+            tipo=PermisoSalida.TIPO_PERMISO_HORA,
+            fecha_inicio=datetime(2026, 5, 21, 8, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            fecha_fin=datetime(2026, 5, 21, 12, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            motivo="Permiso logistica",
+            estado=PermisoSalida.ESTADO_APROBADO,
+            estado_jefe=PermisoSalida.ESTADO_JEFE_PREAUTORIZADO,
+        )
+
+        response = self.client.get("/api/bonos-produccion/permisos/?mes=5&anio=2026&area=PRODUCCION")
+        self.assertEqual(response.status_code, 200)
+        permiso_ids = {row["id"] for row in response.json()["permisos"]}
+        self.assertIn(permiso_embetunado.id, permiso_ids)
+
+        response_logistica = self.client.get("/api/bonos-produccion/permisos/?mes=5&anio=2026&area=LOGISTICA")
+        self.assertEqual(response_logistica.status_code, 200)
+        permiso_ids_log = {row["id"] for row in response_logistica.json()["permisos"]}
+        self.assertIn(permiso_logistica.id, permiso_ids_log)
 
     def test_permisos_equipo_produccion_filtro_por_area_produccion(self):
         from datetime import datetime
