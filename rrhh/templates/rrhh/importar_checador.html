@@ -81,51 +81,51 @@
 <section class="ch-page">
   <section class="ch-hero">
     <div>
-      <div class="ch-kicker">Capital Humano · Checador</div>
-      <h1 class="ch-title">Carga y sincronización de asistencia</h1>
+      <div class="ch-kicker">Capital Humano · Hik-Connect</div>
+      <h1 class="ch-title">Importación de asistencia desde el portal</h1>
       <p class="ch-copy">
-        Consulta lo que ya está entrando por el agente Hikvision y carga archivos Excel cuando necesites recuperar
-        asistencias manualmente.
+        Entra al portal Hik-Connect con el usuario autorizado, exporta Attendance en Excel o CSV y carga el archivo
+        aquí para actualizar asistencias, minutos trabajados y horas extra.
       </p>
       <div class="ch-actions">
-        <a class="btn btn-primary" href="{% url 'rrhh:rrhh_monitor_sync' %}">Monitor checador</a>
+        <a class="btn btn-primary" href="https://www.hik-connect.com/views/login/index.html#/portal" target="_blank" rel="noopener">Abrir portal Hik-Connect</a>
         <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_asistencias' %}">Ver asistencias</a>
       </div>
     </div>
     <div class="ch-status">
       <div class="ch-status-row">
-        <span>Última lectura API</span>
-        <span>{% if ultima_api %}{{ ultima_api.creado_en|date:"Y-m-d H:i" }}{% else %}-{% endif %}</span>
+        <span>Última carga del portal</span>
+        <span>{% if ultima_carga %}{{ ultima_carga.creado_en|date:"Y-m-d H:i" }}{% else %}-{% endif %}</span>
       </div>
       <div class="ch-status-row">
-        <span>Fuente automática</span>
-        <span>Hikvision API</span>
+        <span>Origen operativo</span>
+        <span>Hik-Connect Attendance</span>
       </div>
       <div class="ch-status-row">
-        <span>Receptor ERP</span>
-        <span>/rrhh/api/asistencia-hik/</span>
+        <span>Modo de carga</span>
+        <span>Excel / CSV exportado</span>
       </div>
     </div>
   </section>
 
   <section class="ch-kpis">
     <article class="ch-kpi">
-      <div class="ch-kpi-value">{{ resumen_checador.asistencias_api }}</div>
-      <div class="ch-kpi-label">Registros API</div>
+      <div class="ch-kpi-value">{{ resumen_checador.asistencias_portal }}</div>
+      <div class="ch-kpi-label">Registros del portal</div>
     </article>
     <article class="ch-kpi">
       <div class="ch-kpi-value">{{ resumen_checador.asistencias_hoy }}</div>
       <div class="ch-kpi-label">Asistencias hoy</div>
     </article>
     <article class="ch-kpi">
-      <div class="ch-kpi-value">{{ resumen_checador.cargas_excel }}</div>
-      <div class="ch-kpi-label">Cargas Excel</div>
+      <div class="ch-kpi-value">{{ resumen_checador.cargas_portal }}</div>
+      <div class="ch-kpi-label">Cargas al ERP</div>
     </article>
   </section>
 
   <section class="ch-layout">
     <article class="ch-card">
-      <h2>Cargar Excel manual</h2>
+      <h2>Cargar exportación del portal</h2>
       <form method="post" enctype="multipart/form-data" class="ch-fields">
         {% csrf_token %}
         <label class="ch-field">Fecha inicio
@@ -134,8 +134,8 @@
         <label class="ch-field">Fecha fin
           <input type="date" name="fecha_fin" value="{{ hoy|date:'Y-m-d' }}" required>
         </label>
-        <label class="ch-field ch-file">Archivo Excel exportado del checador
-          <input type="file" name="archivo" accept=".xlsx,.xls" required>
+        <label class="ch-field ch-file">Archivo Excel/CSV exportado desde Hik-Connect Attendance
+          <input type="file" name="archivo" accept=".xlsx,.xls,.csv" required>
         </label>
         <button class="btn btn-primary" type="submit">Cargar archivo al ERP</button>
       </form>
@@ -165,12 +165,12 @@
           </tbody>
         </table>
       </div>
-      <p>Columnas mínimas requeridas: <strong>id_empleado</strong>, <strong>fecha</strong>, <strong>hora_entrada</strong>, <strong>hora_salida</strong>.</p>
+      <p>Columnas mínimas requeridas: <strong>id_empleado</strong>, <strong>fecha</strong>, <strong>hora_entrada</strong>, <strong>hora_salida</strong>. También se aceptan columnas equivalentes en inglés como <strong>employee_id</strong>, <strong>date</strong>, <strong>check_in</strong> y <strong>check_out</strong>.</p>
     </article>
   </section>
 
   <section class="ch-card ch-history">
-    <h2>Últimas lecturas automáticas</h2>
+    <h2>Últimas asistencias importadas del portal</h2>
     <div class="table-responsive">
       <table class="ch-table">
         <thead>
@@ -184,7 +184,7 @@
           </tr>
         </thead>
         <tbody>
-          {% for item in ultimas_api %}
+          {% for item in ultimas_portal %}
           <tr>
             <td>{{ item.creado_en|date:"Y-m-d H:i" }}</td>
             <td>{{ item.empleado.nombre }}</td>
@@ -194,7 +194,7 @@
             <td><span class="ch-badge">{{ item.fuente }}</span></td>
           </tr>
           {% empty %}
-          <tr><td colspan="6">Sin lecturas automáticas registradas.</td></tr>
+          <tr><td colspan="6">Sin asistencias importadas desde el portal.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -202,7 +202,7 @@
   </section>
 
   <section class="ch-card ch-history">
-    <h2>Cargas manuales Excel</h2>
+    <h2>Historial de cargas al ERP</h2>
     <div class="table-responsive">
       <table class="ch-table">
         <thead>
