@@ -68,18 +68,23 @@ class ConfigBonoVentasPeriodoViewSet(viewsets.ModelViewSet):
     def inicializar_bonos(self, request, pk=None):
         periodo = self.get_object()
         empleados = empleados_elegibles_bonos_ventas()
+        sucursal_matriz = Sucursal.objects.filter(nombre__iexact="matriz", activa=True).first()
         creados = 0
         sin_sucursal = []
         for empleado in empleados:
             sucursal_nombre = (empleado.sucursal or "").strip()
             if not sucursal_nombre:
-                sin_sucursal.append(empleado.nombre)
-                continue
-            try:
-                sucursal_obj = Sucursal.objects.get(nombre__iexact=sucursal_nombre, activa=True)
-            except Sucursal.DoesNotExist:
-                sin_sucursal.append(f"{empleado.nombre} (sucursal desconocida: {sucursal_nombre!r})")
-                continue
+                if sucursal_matriz and (empleado.puesto_operativo or "").strip().upper() == "REPARTIDOR":
+                    sucursal_obj = sucursal_matriz
+                else:
+                    sin_sucursal.append(empleado.nombre)
+                    continue
+            else:
+                try:
+                    sucursal_obj = Sucursal.objects.get(nombre__iexact=sucursal_nombre, activa=True)
+                except Sucursal.DoesNotExist:
+                    sin_sucursal.append(f"{empleado.nombre} (sucursal desconocida: {sucursal_nombre!r})")
+                    continue
             _, created = BonoVentasEmpleado.objects.get_or_create(
                 periodo=periodo,
                 empleado=empleado,
