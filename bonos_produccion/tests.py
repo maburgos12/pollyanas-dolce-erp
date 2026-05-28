@@ -364,20 +364,62 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(linea.dias_trabajados, Decimal("15"))
         self.assertEqual(linea.bonos, Decimal("1000.00"))
 
-    def test_inicializar_bonos_usa_area_produccion_sin_sucursal(self):
+    def test_inicializar_bonos_respeta_elegibilidad_rrhh_no_solo_area(self):
         user = get_user_model().objects.create_user(username="bonos")
         user.groups.add(Group.objects.get_or_create(name=ROLE_PRODUCCION)[0])
         user.groups.add(Group.objects.get_or_create(name=ROLE_RRHH)[0])
         self.client.force_login(user)
         periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
-        empleado = Empleado.objects.create(nombre="Empleado Produccion", area="PRODUCCION", sucursal="")
+        elegible = Empleado.objects.create(
+            nombre="Empleado Produccion Elegible",
+            area="PRODUCCION",
+            sucursal="",
+            participa_bonos_produccion=True,
+        )
+        no_elegible = Empleado.objects.create(
+            nombre="ANGULO PARRA JULISSA",
+            area="PRODUCCION",
+            departamento="PRODUCCION",
+            puesto="Encargada de Producción",
+            puesto_operativo="ENCARGADA_PRODUCCION",
+            participa_bonos_produccion=False,
+        )
 
         response = self.client.post(f"/api/bonos-produccion/periodos/{periodo.id}/inicializar-bonos/")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["creados"], 1)
-        bono = BonoProduccionEmpleado.objects.get(periodo=periodo, empleado=empleado)
+        self.assertEqual(response.json()["total"], 1)
+        bono = BonoProduccionEmpleado.objects.get(periodo=periodo, empleado=elegible)
         self.assertEqual(bono.area, AREA_PRODUCCION)
+        self.assertFalse(BonoProduccionEmpleado.objects.filter(periodo=periodo, empleado=no_elegible).exists())
+
+    def test_api_bonos_no_expone_borrador_no_elegible_por_rrhh(self):
+        user = get_user_model().objects.create_user(username="bonos-api")
+        user.groups.add(Group.objects.get_or_create(name=ROLE_PRODUCCION)[0])
+        user.groups.add(Group.objects.get_or_create(name=ROLE_RRHH)[0])
+        self.client.force_login(user)
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
+        elegible = Empleado.objects.create(
+            nombre="Empleado Produccion Visible",
+            area="PRODUCCION",
+            participa_bonos_produccion=True,
+        )
+        no_elegible = Empleado.objects.create(
+            nombre="ANGULO PARRA JULISSA",
+            area="PRODUCCION",
+            puesto_operativo="ENCARGADA_PRODUCCION",
+            participa_bonos_produccion=False,
+        )
+        BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=elegible, area=AREA_PRODUCCION)
+        BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=no_elegible, area=AREA_PRODUCCION)
+
+        response = self.client.get("/api/bonos-produccion/bonos/?mes=5&anio=2026")
+
+        self.assertEqual(response.status_code, 200)
+        contenido = response.content.decode()
+        self.assertIn(elegible.nombre, contenido)
+        self.assertNotIn(no_elegible.nombre, contenido)
 
     def test_logistica_es_area_valida_de_bonos_produccion(self):
         periodo = ConfigBonoPeriodo.objects.create(mes=6, anio=2026)

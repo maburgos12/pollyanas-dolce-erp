@@ -115,8 +115,10 @@ class ConfigBonoPeriodo(models.Model):
 
     @transaction.atomic
     def recalcular_todos(self) -> int:
+        from .empleados import bonos_produccion_elegibles_queryset
+
         self.asegurar_reglas_area()
-        bonos = list(self.bonos.select_related("empleado"))
+        bonos = list(bonos_produccion_elegibles_queryset(self.bonos.all()).select_related("empleado"))
         max_embetunados = max(
             (bono.total_embetunados or 0 for bono in bonos if bono.area == AREA_PRODUCCION),
             default=0,
@@ -133,9 +135,14 @@ class ConfigBonoPeriodo(models.Model):
 
     @transaction.atomic
     def aplicar_a_nomina(self, nomina: NominaPeriodo) -> int:
+        from .empleados import bonos_produccion_elegibles_queryset
+
         self.recalcular_todos()
         updated = 0
-        for bono in self.bonos.select_related("empleado").filter(estatus__in=["BORRADOR", "CERRADO"]):
+        bonos = bonos_produccion_elegibles_queryset(
+            self.bonos.select_related("empleado").filter(estatus__in=["BORRADOR", "CERRADO"])
+        )
+        for bono in bonos:
             linea, _ = NominaLinea.objects.get_or_create(periodo=nomina, empleado=bono.empleado)
             linea.dias_trabajados = Decimal(bono.dias_trabajados)
             linea.bonos = bono.total_a_pagar

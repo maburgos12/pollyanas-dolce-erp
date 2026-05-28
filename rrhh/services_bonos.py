@@ -151,7 +151,8 @@ def _bono_ventas_tiene_captura(bono) -> bool:
 def sincronizar_bonos_operativos_periodo_actual(empleado: Empleado) -> None:
     """
     Mantiene alineado el catálogo RRHH con las tablas mensuales de bonos.
-    Solo toca el periodo actual y solo elimina filas vacías en borrador.
+    Solo toca el periodo actual. Si un empleado pierde un esquema de bono,
+    elimina filas BORRADOR para que RRHH sea la fuente de verdad.
     """
     hoy = timezone.localdate()
 
@@ -183,7 +184,7 @@ def sincronizar_bonos_operativos_periodo_actual(empleado: Empleado) -> None:
                 bono.save(update_fields=["area", "actualizado_en"])
         else:
             for bono in bonos:
-                if not _bono_produccion_tiene_captura(bono):
+                if bono.estatus == BonoProduccionEmpleado.ESTATUS_BORRADOR:
                     bono.delete()
 
     periodo_ventas = ConfigBonoVentasPeriodo.objects.filter(mes=hoy.month, anio=hoy.year).first()
