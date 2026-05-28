@@ -348,6 +348,29 @@ class BonosProduccionTests(TestCase):
         self.assertTrue(bono.pasa_asistencia)
         self.assertEqual(bono.total_a_pagar, Decimal("1000.00"))
 
+    def test_recalcular_no_deja_total_negativo_por_ajuste(self):
+        empleado = Empleado.objects.create(nombre="Empleado Produccion", area="PRODUCCION")
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026, dias_laborables=22, monto_hornos=Decimal("800.00"))
+        bono = BonoProduccionEmpleado.objects.create(
+            periodo=periodo,
+            empleado=empleado,
+            area=AREA_HORNOS,
+            dias_trabajados=10,
+            dias_uniforme=9,
+            dias_asistencia=9,
+            dias_puntualidad=7,
+            dias_produccion=9,
+            ajuste_negativo=Decimal("680.00"),
+        )
+
+        bono.recalcular()
+
+        self.assertEqual(bono.monto_uniforme, Decimal("40.00"))
+        self.assertEqual(bono.monto_asistencia, Decimal("120.00"))
+        self.assertEqual(bono.monto_puntualidad, Decimal("0.00"))
+        self.assertEqual(bono.monto_produccion, Decimal("520.00"))
+        self.assertEqual(bono.total_a_pagar, Decimal("0.00"))
+
     def test_recalcular_desde_registros_cuenta_solo_asistencias_reales(self):
         user = get_user_model().objects.create_superuser(username="captura-produccion")
         self.client.force_login(user)

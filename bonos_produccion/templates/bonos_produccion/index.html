@@ -208,6 +208,17 @@ const IconFactory=()=>h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'#fff',str
 const IconCheck=()=>h('span',null,'✓');
 function Badge({ok}){return h('span',{className:`badge ${ok?'ok':'bad'}`},ok?'✓ Pasa':'✗ No pasa');}
 function AreaPill({area}){return h('span',{className:`badge area pill-${area}`,style:{fontSize:11}},AREA_LABELS[area]||area);}
+function BonusRight({bono}){
+  const extras=[];
+  if(Number(bono.monto_premio_embetunado||0)>0)extras.push(`Premio ${money(bono.monto_premio_embetunado)}`);
+  if(Number(bono.ajuste_positivo||0)>0)extras.push(`Ajuste +${money(bono.ajuste_positivo)}`);
+  if(Number(bono.bono_extra||0)>0)extras.push(`Extra ${money(bono.bono_extra)}`);
+  if(Number(bono.ajuste_negativo||0)>0)extras.push(`Desc. ${money(bono.ajuste_negativo)}`);
+  return h('div',{style:{textAlign:'right'}},
+    h('div',null,money(bono.total_a_pagar)),
+    extras.length?h('div',{style:{fontSize:11,color:'var(--sub)',fontWeight:700,marginTop:2}},extras.join(' · ')):null
+  );
+}
 function AreaChips({area,setArea,includeAll=false}){
   const options=includeAll?[AREA_TODAS,...AREAS]:AREAS;
   return h('div',{className:'chips'},options.map(a=>h('button',{key:a,className:`chip chip-area ${area===a?'on':''}`,onClick:()=>setArea(a)},AREA_LABELS[a])));
@@ -589,7 +600,7 @@ function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registr
       h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},(area===AREA_TODAS?'Todo produccion':AREA_LABELS[area])+' — Selecciona empleado')),
       h('div',{className:'card-body'},
         bonosArea.length===0?h('div',{className:'empty'},'Sin empleados en esta area para el periodo.'):
-        h(EmployeeSearchList,{items:bonosArea,selected:selectedBono,onSelect:setSelectedBono,placeholder:'Teclea nombre o apellido...',metaText:b=>AREA_LABELS[b.area]||b.area||'Produccion',rightText:b=>money(b.total_a_pagar)})
+        h(EmployeeSearchList,{items:bonosArea,selected:selectedBono,onSelect:setSelectedBono,placeholder:'Teclea nombre o apellido...',metaText:b=>AREA_LABELS[b.area]||b.area||'Produccion',rightText:b=>h(BonusRight,{bono:b})})
       )
     ),
     selectedBono&&h('div',{className:'card'},
@@ -600,6 +611,8 @@ function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registr
         ),
         h('div',{style:{display:'flex',gap:6,flexWrap:'wrap'}},
           h(Badge,{ok:selectedBono.pasa_asistencia}),h(Badge,{ok:selectedBono.pasa_uniforme}),h(Badge,{ok:selectedBono.pasa_produccion}),
+          Number(selectedBono.monto_premio_embetunado||0)>0&&h('span',{className:'badge ok'},`Premio ${money(selectedBono.monto_premio_embetunado)}`),
+          Number(selectedBono.ajuste_negativo||0)>0&&h('span',{className:'badge bad'},`Desc. ${money(selectedBono.ajuste_negativo)}`),
           h('span',{style:{fontWeight:800,color:'var(--wine)',fontSize:14}},money(selectedBono.total_a_pagar))
         )
       ),
