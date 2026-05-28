@@ -132,7 +132,7 @@ NAV_GROUPS = [
             ("rrhh", "vacantes", "Vacantes", "/rrhh/vacantes/", ["/rrhh/vacantes/"]),
             ("rrhh", "prestamos", "Préstamos", "/rrhh/prestamos/", ["/rrhh/prestamos/"]),
             ("rrhh", "nomina", "Nómina", "/rrhh/nomina/", ["/rrhh/nomina/"]),
-            ("rrhh", "importar_checador", "Importar checador", "/rrhh/importar-checador/", ["/rrhh/importar-checador/"]),
+            ("rrhh", "importar_checador", "Checador", "/rrhh/importar-checador/", ["/rrhh/importar-checador/"]),
             ("rrhh", "asignacion_sucursal", "Asignación sucursal", "/rrhh/asignacion-sucursal/", ["/rrhh/asignacion-sucursal/"]),
         ],
     },

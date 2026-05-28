@@ -440,9 +440,13 @@ class CapitalHumanoAPITests(TestCase):
         self.user.groups.add(rrhh_group)
         self.client.force_login(self.user)
 
-        for url_name in ["rrhh_dashboard", "rrhh_prestamos_lista", "rrhh_monitor_sync"]:
+        for url_name in ["rrhh_dashboard", "rrhh_prestamos_lista", "rrhh_monitor_sync", "rrhh_importar"]:
             resp = self.client.get(reverse(f"rrhh:{url_name}"))
             self.assertEqual(resp.status_code, 200)
+        resp_importar = self.client.get(reverse("rrhh:rrhh_importar"))
+        self.assertContains(resp_importar, "Carga y sincronización de asistencia")
+        self.assertContains(resp_importar, "Cargar archivo al ERP")
+        self.assertContains(resp_importar, "Últimas lecturas automáticas")
         resp = self.client.get(reverse("rrhh:rrhh_pwa"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Registrar horas extra")

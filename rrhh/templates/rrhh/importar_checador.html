@@ -1,19 +1,73 @@
 {% extends "base.html" %}
 
-{% block title %}RRHH · Importar checador{% endblock %}
-{% block page_title %}Importar checador{% endblock %}
+{% block title %}RRHH · Checador{% endblock %}
+{% block page_title %}Checador{% endblock %}
 
 {% block extra_css %}
 <style>
+  .ch-page { display: grid; gap: 18px; }
+  .ch-hero {
+    background: #fff;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    padding: 20px;
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(260px, .8fr);
+    gap: 18px;
+    align-items: start;
+  }
+  .ch-kicker {
+    color: var(--vino);
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .ch-title { color: var(--texto); font-family: "Playfair Display", serif; font-size: 28px; margin: 3px 0 6px; }
+  .ch-copy { color: var(--texto-suave); margin: 0; max-width: 760px; }
+  .ch-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
   .ch-layout { display: grid; grid-template-columns: minmax(320px, .8fr) minmax(0, 1.2fr); gap: 18px; align-items: start; }
   .ch-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 18px; }
+  .ch-card h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
   .ch-fields { display: grid; gap: 12px; }
+  .ch-field { display: grid; gap: 6px; font-weight: 800; }
+  .ch-field input { font-weight: 600; }
+  .ch-file {
+    background: rgba(139, 34, 82, .04);
+    border: 1px dashed var(--vino);
+    border-radius: 8px;
+    padding: 14px;
+  }
+  .ch-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .ch-kpi { background: rgba(139, 34, 82, .04); border: 1px solid var(--rosa); border-radius: 8px; padding: 14px; }
+  .ch-kpi-value { color: var(--vino); font-size: 28px; font-weight: 900; line-height: 1; }
+  .ch-kpi-label { color: var(--texto-suave); font-size: 12px; font-weight: 900; margin-top: 6px; text-transform: uppercase; }
   .ch-table { width: 100%; border-collapse: collapse; }
-  .ch-table th, .ch-table td { border-bottom: 1px solid var(--rosa); padding: 9px; text-align: left; }
+  .ch-table th, .ch-table td { border-bottom: 1px solid var(--rosa); padding: 9px; text-align: left; vertical-align: top; }
   .ch-table th { color: var(--vino); font-size: 12px; text-transform: uppercase; }
+  .ch-table tr:last-child td { border-bottom: 0; }
   .ch-format { margin-top: 14px; }
-  .ch-history { margin-top: 18px; }
-  @media (max-width: 900px) { .ch-layout { grid-template-columns: 1fr; } }
+  .ch-history { margin-top: 0; }
+  .ch-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    background: rgba(201, 168, 76, .18);
+    color: #8a6b10;
+    font-size: 11px;
+    font-weight: 900;
+    padding: 4px 9px;
+    text-transform: uppercase;
+  }
+  .ch-status { display: grid; gap: 8px; }
+  .ch-status-row { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--rosa); padding: 8px 0; }
+  .ch-status-row:last-child { border-bottom: 0; }
+  .ch-status-row span:first-child { color: var(--texto-suave); font-weight: 800; }
+  .ch-status-row span:last-child { color: var(--texto); font-weight: 900; text-align: right; }
+  @media (max-width: 1050px) {
+    .ch-hero, .ch-layout { grid-template-columns: 1fr; }
+    .ch-kpis { grid-template-columns: 1fr; }
+  }
 </style>
 {% endblock %}
 
@@ -24,78 +78,157 @@
   {% endfor %}
 </section>
 
-<section class="ch-layout">
-  <article class="ch-card">
-    <form method="post" enctype="multipart/form-data" class="ch-fields">
-      {% csrf_token %}
-      <label>Fecha inicio
-        <input type="date" name="fecha_inicio" required>
-      </label>
-      <label>Fecha fin
-        <input type="date" name="fecha_fin" required>
-      </label>
-      <label>Archivo Excel
-        <input type="file" name="archivo" accept=".xlsx,.xls" required>
-      </label>
-      <button class="btn btn-primary" type="submit">Importar asistencias</button>
-    </form>
-  </article>
+<section class="ch-page">
+  <section class="ch-hero">
+    <div>
+      <div class="ch-kicker">Capital Humano · Checador</div>
+      <h1 class="ch-title">Carga y sincronización de asistencia</h1>
+      <p class="ch-copy">
+        Consulta lo que ya está entrando por el agente Hikvision y carga archivos Excel cuando necesites recuperar
+        asistencias manualmente.
+      </p>
+      <div class="ch-actions">
+        <a class="btn btn-primary" href="{% url 'rrhh:rrhh_monitor_sync' %}">Monitor checador</a>
+        <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_asistencias' %}">Ver asistencias</a>
+      </div>
+    </div>
+    <div class="ch-status">
+      <div class="ch-status-row">
+        <span>Última lectura API</span>
+        <span>{% if ultima_api %}{{ ultima_api.creado_en|date:"Y-m-d H:i" }}{% else %}-{% endif %}</span>
+      </div>
+      <div class="ch-status-row">
+        <span>Fuente automática</span>
+        <span>Hikvision API</span>
+      </div>
+      <div class="ch-status-row">
+        <span>Receptor ERP</span>
+        <span>/rrhh/api/asistencia-hik/</span>
+      </div>
+    </div>
+  </section>
 
-  <article class="ch-card">
-    <h2>Formato esperado</h2>
-    <div class="table-responsive ch-format">
+  <section class="ch-kpis">
+    <article class="ch-kpi">
+      <div class="ch-kpi-value">{{ resumen_checador.asistencias_api }}</div>
+      <div class="ch-kpi-label">Registros API</div>
+    </article>
+    <article class="ch-kpi">
+      <div class="ch-kpi-value">{{ resumen_checador.asistencias_hoy }}</div>
+      <div class="ch-kpi-label">Asistencias hoy</div>
+    </article>
+    <article class="ch-kpi">
+      <div class="ch-kpi-value">{{ resumen_checador.cargas_excel }}</div>
+      <div class="ch-kpi-label">Cargas Excel</div>
+    </article>
+  </section>
+
+  <section class="ch-layout">
+    <article class="ch-card">
+      <h2>Cargar Excel manual</h2>
+      <form method="post" enctype="multipart/form-data" class="ch-fields">
+        {% csrf_token %}
+        <label class="ch-field">Fecha inicio
+          <input type="date" name="fecha_inicio" value="{{ ayer|date:'Y-m-d' }}" required>
+        </label>
+        <label class="ch-field">Fecha fin
+          <input type="date" name="fecha_fin" value="{{ hoy|date:'Y-m-d' }}" required>
+        </label>
+        <label class="ch-field ch-file">Archivo Excel exportado del checador
+          <input type="file" name="archivo" accept=".xlsx,.xls" required>
+        </label>
+        <button class="btn btn-primary" type="submit">Cargar archivo al ERP</button>
+      </form>
+    </article>
+
+    <article class="ch-card">
+      <h2>Formato esperado</h2>
+      <div class="table-responsive ch-format">
+        <table class="ch-table">
+          <thead>
+            <tr>
+              <th>id_empleado</th>
+              <th>nombre</th>
+              <th>fecha</th>
+              <th>hora_entrada</th>
+              <th>hora_salida</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>EMP001</td>
+              <td>Juan Pérez</td>
+              <td>2026-06-01</td>
+              <td>2026-06-01 08:02</td>
+              <td>2026-06-01 16:45</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Columnas mínimas requeridas: <strong>id_empleado</strong>, <strong>fecha</strong>, <strong>hora_entrada</strong>, <strong>hora_salida</strong>.</p>
+    </article>
+  </section>
+
+  <section class="ch-card ch-history">
+    <h2>Últimas lecturas automáticas</h2>
+    <div class="table-responsive">
       <table class="ch-table">
         <thead>
           <tr>
-            <th>id_empleado</th>
-            <th>nombre</th>
-            <th>fecha</th>
-            <th>hora_entrada</th>
-            <th>hora_salida</th>
+            <th>Registro</th>
+            <th>Empleado</th>
+            <th>Fecha</th>
+            <th>Entrada</th>
+            <th>Salida</th>
+            <th>Fuente</th>
           </tr>
         </thead>
         <tbody>
+          {% for item in ultimas_api %}
           <tr>
-            <td>EMP001</td>
-            <td>Juan Pérez</td>
-            <td>2025-06-01</td>
-            <td>2025-06-01 08:02</td>
-            <td>2025-06-01 16:45</td>
+            <td>{{ item.creado_en|date:"Y-m-d H:i" }}</td>
+            <td>{{ item.empleado.nombre }}</td>
+            <td>{{ item.fecha|date:"Y-m-d" }}</td>
+            <td>{{ item.entrada|date:"H:i"|default:"-" }}</td>
+            <td>{{ item.salida|date:"H:i"|default:"-" }}</td>
+            <td><span class="ch-badge">{{ item.fuente }}</span></td>
           </tr>
+          {% empty %}
+          <tr><td colspan="6">Sin lecturas automáticas registradas.</td></tr>
+          {% endfor %}
         </tbody>
       </table>
     </div>
-    <p>Columnas mínimas requeridas: <strong>id_empleado</strong>, <strong>fecha</strong>, <strong>hora_entrada</strong>, <strong>hora_salida</strong>.</p>
-  </article>
-</section>
+  </section>
 
-<section class="ch-card ch-history">
-  <h2>Historial</h2>
-  <div class="table-responsive">
-    <table class="ch-table">
-      <thead>
-        <tr>
-          <th>Fecha</th>
-          <th>Método</th>
-          <th>Procesados</th>
-          <th>Errores</th>
-          <th>Usuario</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in historial %}
-        <tr>
-          <td>{{ item.creado_en|date:"Y-m-d H:i" }}</td>
-          <td>{{ item.get_metodo_display }}</td>
-          <td>{{ item.registros_procesados }}</td>
-          <td>{{ item.errores }}</td>
-          <td>{{ item.creado_por|default:"-" }}</td>
-        </tr>
-        {% empty %}
-        <tr><td colspan="5">Sin importaciones registradas.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  <section class="ch-card ch-history">
+    <h2>Cargas manuales Excel</h2>
+    <div class="table-responsive">
+      <table class="ch-table">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Método</th>
+            <th>Procesados</th>
+            <th>Errores</th>
+            <th>Usuario</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in historial %}
+          <tr>
+            <td>{{ item.creado_en|date:"Y-m-d H:i" }}</td>
+            <td>{{ item.get_metodo_display }}</td>
+            <td>{{ item.registros_procesados }}</td>
+            <td>{{ item.errores }}</td>
+            <td>{{ item.creado_por|default:"-" }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="5">Sin cargas manuales registradas.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
 </section>
 {% endblock %}
