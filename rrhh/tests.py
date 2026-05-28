@@ -988,6 +988,7 @@ class RRHHViewsTests(TestCase):
                     "salario_diario": "300.00",
                     "activo": "on",
                 },
+                secure=True,
                 follow=True,
             )
 
@@ -1025,6 +1026,7 @@ class RRHHViewsTests(TestCase):
                     "salario_diario": "300.00",
                     "activo": "on",
                 },
+                secure=True,
                 follow=True,
             )
 
@@ -1074,6 +1076,7 @@ class RRHHViewsTests(TestCase):
                     "salario_diario": "300.00",
                     "activo": "on",
                 },
+                secure=True,
                 follow=True,
             )
 
@@ -1113,6 +1116,7 @@ class RRHHViewsTests(TestCase):
                     "salario_diario": "300.00",
                     "activo": "on",
                 },
+                secure=True,
                 follow=True,
             )
 
