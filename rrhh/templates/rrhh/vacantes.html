@@ -7,6 +7,7 @@
 <style>
   .vacantes-page { display: grid; gap: 16px; }
   .vacantes-head {
+    align-items: start;
     background: #fff;
     border: 1px solid var(--rosa);
     border-radius: 8px;
@@ -16,32 +17,27 @@
     padding: 18px;
   }
   .vacantes-title { color: var(--vino); font-family: "Playfair Display", serif; font-size: 25px; font-weight: 800; }
-  .vacantes-copy { color: var(--texto-light); margin-top: 4px; max-width: 720px; }
-  .vacantes-stats { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(110px, 1fr)); }
+  .vacantes-copy { color: var(--texto-light); margin-top: 4px; max-width: 760px; }
+  .vacantes-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+  .vacantes-stats { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(120px, 1fr)); }
   .vacantes-stat { background: #fbf6f8; border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; }
   .vacantes-stat strong { color: var(--vino); display: block; font-size: 22px; line-height: 1; }
   .vacantes-stat span { color: var(--texto-light); font-size: 12px; font-weight: 800; text-transform: uppercase; }
-  .vacantes-layout { display: grid; gap: 16px; grid-template-columns: minmax(320px, .78fr) minmax(0, 1.22fr); }
   .vacantes-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 16px; }
   .vacantes-card h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
-  .vacantes-form { display: grid; gap: 10px; }
-  .vacantes-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .vacantes-field { display: grid; gap: 5px; }
-  .vacantes-field.span-2 { grid-column: 1 / -1; }
-  .vacantes-field label { color: var(--texto); font-size: 12px; font-weight: 900; }
-  .vacantes-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px; }
   .vacantes-filters { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
-  .vacantes-table { min-width: 900px; width: 100%; border-collapse: collapse; }
+  .vacantes-table { min-width: 1080px; width: 100%; border-collapse: collapse; }
   .vacantes-table th, .vacantes-table td { border-bottom: 1px solid var(--rosa); padding: 10px; text-align: left; vertical-align: top; }
   .vacantes-table th { color: var(--vino); font-size: 12px; text-transform: uppercase; }
   .vacantes-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }
   .vacantes-muted { color: var(--texto-light); font-size: 13px; }
+  .vacantes-link { color: var(--vino); font-weight: 900; text-decoration: none; }
   @media (max-width: 1100px) {
-    .vacantes-head,
-    .vacantes-layout { grid-template-columns: 1fr; }
+    .vacantes-head { grid-template-columns: 1fr; }
+    .vacantes-actions { justify-content: flex-start; }
+    .vacantes-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
   @media (max-width: 680px) {
-    .vacantes-grid,
     .vacantes-stats { grid-template-columns: 1fr; }
   }
 </style>
@@ -57,124 +53,105 @@
 <section class="vacantes-page">
   <div class="vacantes-head">
     <div>
-      <div class="vacantes-title">Control de vacantes</div>
+      <div class="vacantes-title">Solicitudes de vacantes</div>
       <div class="vacantes-copy">
-        Registro operativo de posiciones abiertas, seguimiento de cobertura y causa cuando una vacante sigue pendiente.
+        Flujo operativo para solicitar, validar con Capital Humano, autorizar con jefe directo o Dirección, reclutar y cerrar posiciones.
       </div>
     </div>
-    <div class="vacantes-stats">
-      <div class="vacantes-stat"><strong>{{ stats.total }}</strong><span>Total</span></div>
-      <div class="vacantes-stat"><strong>{{ stats.abiertas }}</strong><span>Abiertas</span></div>
-      <div class="vacantes-stat"><strong>{{ stats.cubiertas }}</strong><span>Cubiertas</span></div>
-    </div>
-  </div>
-
-  <div class="vacantes-layout">
-    <aside class="vacantes-card">
-      <h2>Nueva vacante</h2>
-      {% if can_manage_rrhh %}
-      <form class="vacantes-form" method="post">
-        {% csrf_token %}
-        <div class="vacantes-grid">
-          <div class="vacantes-field">
-            <label>Área</label>
-            <input type="text" name="area" required placeholder="VENTAS">
-          </div>
-          <div class="vacantes-field">
-            <label>Puesto</label>
-            <input type="text" name="puesto" required placeholder="Cajera">
-          </div>
-          <div class="vacantes-field">
-            <label>Fecha solicitada</label>
-            <input type="date" name="fecha_solicitada" required>
-          </div>
-          <div class="vacantes-field">
-            <label>Estatus</label>
-            <select name="estado">
-              {% for value, label in estado_choices %}
-                <option value="{{ value }}">{{ label }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="vacantes-field">
-            <label>Fecha cubierta</label>
-            <input type="date" name="fecha_cubierta">
-          </div>
-          <div class="vacantes-field">
-            <label>Empleado que cubrió</label>
-            <select name="empleado_cubrio">
-              <option value="">Pendiente</option>
-              {% for empleado in empleados %}
-                <option value="{{ empleado.id }}">{{ empleado.nombre }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="vacantes-field span-2">
-            <label>Motivo si sigue sin cubrir</label>
-            <input type="text" name="motivo_no_cubierta" placeholder="Falta de candidatos, perfil especializado, etc.">
-          </div>
-          <div class="vacantes-field span-2">
-            <label>Sugerencias / siguiente acción</label>
-            <textarea name="sugerencias" rows="3"></textarea>
-          </div>
-        </div>
-        <div class="vacantes-actions">
-          <button class="btn btn-primary" type="submit">Guardar vacante</button>
-        </div>
-      </form>
-      {% else %}
-        <div class="vacantes-muted">Tu usuario puede consultar vacantes, pero no crear ni editar registros.</div>
+    <div class="vacantes-actions">
+      {% if can_create_vacante_request %}
+        <a class="btn btn-primary" href="{% url 'rrhh:rrhh_vacante_nueva' %}">Nueva solicitud</a>
       {% endif %}
-    </aside>
-
-    <section class="vacantes-card">
-      <h2>Seguimiento</h2>
-      <form class="vacantes-filters" method="get">
-        <select name="estado">
-          <option value="">Todos los estatus</option>
-          {% for value, label in estado_choices %}
-            <option value="{{ value }}" {% if estado_actual == value %}selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
-        <input type="text" name="area" value="{{ area_actual }}" placeholder="Filtrar área">
-        <button class="btn btn-secondary" type="submit">Filtrar</button>
-      </form>
-      <div class="table-responsive">
-        <table class="vacantes-table">
-          <thead>
-            <tr>
-              <th>Área / puesto</th>
-              <th>Solicitada</th>
-              <th>Estatus</th>
-              <th>Cobertura</th>
-              <th>Motivo pendiente</th>
-              <th>Siguiente acción</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for vacante in vacantes %}
-            <tr>
-              <td><strong>{{ vacante.area }}</strong><br><span class="vacantes-muted">{{ vacante.puesto }}</span></td>
-              <td>{{ vacante.fecha_solicitada|date:"Y-m-d" }}</td>
-              <td><span class="vacantes-badge">{{ vacante.get_estado_display }}</span></td>
-              <td>
-                {% if vacante.fecha_cubierta %}
-                  {{ vacante.fecha_cubierta|date:"Y-m-d" }}
-                  {% if vacante.empleado_cubrio %}<br><span class="vacantes-muted">{{ vacante.empleado_cubrio.nombre }}</span>{% endif %}
-                {% else %}
-                  <span class="vacantes-muted">Pendiente</span>
-                {% endif %}
-              </td>
-              <td>{{ vacante.motivo_no_cubierta|default:"-" }}</td>
-              <td>{{ vacante.sugerencias|default:"-" }}</td>
-            </tr>
-            {% empty %}
-            <tr><td colspan="6">Sin vacantes registradas con estos filtros.</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </section>
+    </div>
   </div>
+
+  <div class="vacantes-stats">
+    <div class="vacantes-stat"><strong>{{ stats.total }}</strong><span>Total</span></div>
+    <div class="vacantes-stat"><strong>{{ stats.pendientes_autorizacion }}</strong><span>Pendiente autorización</span></div>
+    <div class="vacantes-stat"><strong>{{ stats.jefaturas_direccion }}</strong><span>Jefaturas DG</span></div>
+    <div class="vacantes-stat"><strong>{{ stats.reclutamiento }}</strong><span>Reclutamiento</span></div>
+  </div>
+
+  <section class="vacantes-card">
+    <h2>Bandeja de seguimiento</h2>
+    <form class="vacantes-filters" method="get">
+      <select name="estado">
+        <option value="">Todos los estatus</option>
+        {% for value, label in estado_choices %}
+          <option value="{{ value }}" {% if estado_actual == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <input type="text" name="area" value="{{ area_actual }}" placeholder="Filtrar área">
+      <button class="btn btn-secondary" type="submit">Filtrar</button>
+    </form>
+    <div class="table-responsive">
+      <table class="vacantes-table">
+        <thead>
+          <tr>
+            <th>Solicitud</th>
+            <th>Área / puesto</th>
+            <th>Plazas</th>
+            <th>Fechas</th>
+            <th>Estatus</th>
+            <th>Autorizador</th>
+            <th>Solicitante</th>
+            <th>Capturó</th>
+            <th>Cobertura</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for vacante in vacantes %}
+          <tr>
+            <td><strong>{{ vacante.folio }}</strong><br><span class="vacantes-muted">{{ vacante.get_tipo_solicitud_display }}</span></td>
+            <td><strong>{{ vacante.area }}</strong><br><span class="vacantes-muted">{{ vacante.puesto }}{% if vacante.sucursal %} · {{ vacante.sucursal.nombre }}{% endif %}</span></td>
+            <td>{{ vacante.coberturas.count }} / {{ vacante.cantidad_solicitada }}</td>
+            <td>
+              {{ vacante.fecha_solicitada|date:"Y-m-d" }}
+              {% if vacante.fecha_necesaria %}<br><span class="vacantes-muted">Necesaria {{ vacante.fecha_necesaria|date:"Y-m-d" }}</span>{% endif %}
+            </td>
+            <td><span class="vacantes-badge">{{ vacante.get_estado_display }}</span></td>
+            <td>
+              {% if vacante.requiere_direccion %}
+                Dirección General
+              {% elif vacante.autorizador_asignado %}
+                {{ vacante.autorizador_asignado.get_full_name|default:vacante.autorizador_asignado.username }}
+              {% elif vacante.autorizado_por %}
+                {{ vacante.autorizado_por.get_full_name|default:vacante.autorizado_por.username }}
+              {% else %}
+                <span class="vacantes-muted">Pendiente</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if vacante.solicitado_por %}
+                {{ vacante.solicitado_por.get_full_name|default:vacante.solicitado_por.username }}
+              {% else %}
+                <span class="vacantes-muted">Sin usuario</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if vacante.creado_por %}
+                {{ vacante.creado_por.get_full_name|default:vacante.creado_por.username }}
+              {% else %}
+                <span class="vacantes-muted">-</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if vacante.fecha_cubierta %}
+                {{ vacante.fecha_cubierta|date:"Y-m-d" }}
+                {% if vacante.empleado_cubrio %}<br><span class="vacantes-muted">{{ vacante.empleado_cubrio.nombre }}</span>{% endif %}
+              {% else %}
+                <span class="vacantes-muted">{{ vacante.pendientes_count }} pendiente(s)</span>
+              {% endif %}
+            </td>
+            <td><a class="vacantes-link" href="{% url 'rrhh:rrhh_vacante_detalle' vacante.id %}">Abrir</a></td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="10">Sin solicitudes registradas con estos filtros.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
 </section>
 {% endblock %}

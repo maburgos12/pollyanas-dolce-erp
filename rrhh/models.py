@@ -404,22 +404,70 @@ class PlantillaAutorizada(models.Model):
 
 class VacanteRRHH(models.Model):
     ESTADO_SOLICITADA = "solicitada"
+    ESTADO_REVISION_RRHH = "revision_rrhh"
+    ESTADO_PENDIENTE_DIRECCION = "pendiente_direccion"
+    ESTADO_AUTORIZADA = "autorizada"
     ESTADO_RECLUTAMIENTO = "reclutamiento"
     ESTADO_CUBIERTA = "cubierta"
     ESTADO_PAUSADA = "pausada"
+    ESTADO_DEVUELTA_CORRECCION = "devuelta_correccion"
+    ESTADO_RECHAZADA = "rechazada"
     ESTADO_CANCELADA = "cancelada"
     ESTADO_CHOICES = [
         (ESTADO_SOLICITADA, "Solicitada"),
+        (ESTADO_REVISION_RRHH, "En revisión RRHH"),
+        (ESTADO_PENDIENTE_DIRECCION, "Pendiente autorización"),
+        (ESTADO_AUTORIZADA, "Autorizada"),
         (ESTADO_RECLUTAMIENTO, "En reclutamiento"),
         (ESTADO_CUBIERTA, "Cubierta"),
         (ESTADO_PAUSADA, "Pausada"),
+        (ESTADO_DEVUELTA_CORRECCION, "Devuelta a corrección"),
+        (ESTADO_RECHAZADA, "Rechazada"),
         (ESTADO_CANCELADA, "Cancelada"),
     ]
 
+    TIPO_REEMPLAZO = "reemplazo"
+    TIPO_NUEVA_POSICION = "nueva_posicion"
+    TIPO_TEMPORAL = "temporal"
+    TIPO_CHOICES = [
+        (TIPO_REEMPLAZO, "Reemplazo"),
+        (TIPO_NUEVA_POSICION, "Nueva posición"),
+        (TIPO_TEMPORAL, "Temporal"),
+    ]
+
+    PRIORIDAD_NORMAL = "normal"
+    PRIORIDAD_ALTA = "alta"
+    PRIORIDAD_URGENTE = "urgente"
+    PRIORIDAD_CHOICES = [
+        (PRIORIDAD_NORMAL, "Normal"),
+        (PRIORIDAD_ALTA, "Alta"),
+        (PRIORIDAD_URGENTE, "Urgente"),
+    ]
+
+    AUTORIZACION_JEFE_DIRECTO = "jefe_directo"
+    AUTORIZACION_DIRECCION = "direccion_general"
+    AUTORIZACION_CHOICES = [
+        (AUTORIZACION_JEFE_DIRECTO, "Jefe directo"),
+        (AUTORIZACION_DIRECCION, "Dirección General"),
+    ]
+
+    folio = models.CharField(max_length=20, unique=True, blank=True, editable=False)
+    sucursal = models.ForeignKey(
+        "core.Sucursal",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="vacantes_rrhh",
+    )
+    departamento = models.CharField(max_length=40, choices=Empleado.DEP_CHOICES, blank=True, default="")
     area = models.CharField(max_length=120)
     puesto = models.CharField(max_length=120)
+    cantidad_solicitada = models.PositiveSmallIntegerField(default=1)
+    tipo_solicitud = models.CharField(max_length=20, choices=TIPO_CHOICES, default=TIPO_REEMPLAZO)
+    prioridad = models.CharField(max_length=12, choices=PRIORIDAD_CHOICES, default=PRIORIDAD_NORMAL)
     fecha_solicitada = models.DateField()
-    estado = models.CharField(max_length=16, choices=ESTADO_CHOICES, default=ESTADO_SOLICITADA)
+    fecha_necesaria = models.DateField(null=True, blank=True)
+    estado = models.CharField(max_length=24, choices=ESTADO_CHOICES, default=ESTADO_SOLICITADA)
     fecha_cubierta = models.DateField(null=True, blank=True)
     empleado_cubrio = models.ForeignKey(
         "rrhh.Empleado",
@@ -429,7 +477,54 @@ class VacanteRRHH(models.Model):
         related_name="vacantes_cubiertas",
     )
     motivo_no_cubierta = models.TextField(blank=True, default="")
+    motivo_solicitud = models.TextField(blank=True, default="")
     sugerencias = models.TextField(blank=True, default="")
+    solicitado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="vacantes_solicitadas",
+    )
+    validado_rrhh_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="vacantes_validadas_rrhh",
+    )
+    fecha_validacion_rrhh = models.DateTimeField(null=True, blank=True)
+    autorizado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="vacantes_autorizadas",
+    )
+    autorizador_asignado = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="vacantes_por_autorizar",
+    )
+    tipo_autorizacion = models.CharField(
+        max_length=24,
+        choices=AUTORIZACION_CHOICES,
+        default=AUTORIZACION_JEFE_DIRECTO,
+        db_index=True,
+    )
+    requiere_direccion = models.BooleanField(default=False, db_index=True)
+    fecha_autorizacion = models.DateTimeField(null=True, blank=True)
+    rechazado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="vacantes_rechazadas",
+    )
+    fecha_rechazo = models.DateTimeField(null=True, blank=True)
+    motivo_rechazo = models.TextField(blank=True, default="")
     creado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
     creado_en = models.DateTimeField(auto_now_add=True)
     actualizado_en = models.DateTimeField(auto_now=True)
@@ -440,13 +535,116 @@ class VacanteRRHH(models.Model):
         verbose_name_plural = "Vacantes RRHH"
 
     @property
+    def cubiertas_count(self) -> int:
+        if not self.pk:
+            return 0
+        return self.coberturas.count()
+
+    @property
+    def pendientes_count(self) -> int:
+        return max(int(self.cantidad_solicitada or 1) - self.cubiertas_count, 0)
+
+    @property
+    def esta_completa(self) -> bool:
+        return self.pendientes_count == 0
+
+    @property
     def dias_en_cubrir(self) -> int | None:
         if not self.fecha_cubierta:
             return None
         return max((self.fecha_cubierta - self.fecha_solicitada).days, 0)
 
+    def save(self, *args, **kwargs):
+        if not self.folio:
+            import random
+            import string
+
+            today = timezone.localdate()
+            while True:
+                sufijo = "".join(random.choices(string.digits, k=4))
+                folio = f"VAC-{today.strftime('%y%m')}-{sufijo}"
+                if not VacanteRRHH.objects.filter(folio=folio).exists():
+                    self.folio = folio
+                    break
+        self.area = (self.area or "").strip().upper()
+        self.puesto = (self.puesto or "").strip().upper()
+        self.departamento = (self.departamento or "").strip().upper()
+        super().save(*args, **kwargs)
+
     def __str__(self) -> str:
-        return f"{self.area} · {self.puesto} · {self.get_estado_display()}"
+        return f"{self.folio} · {self.area} · {self.puesto} · {self.get_estado_display()}"
+
+
+class VacanteMovimiento(models.Model):
+    vacante = models.ForeignKey("rrhh.VacanteRRHH", on_delete=models.CASCADE, related_name="movimientos")
+    estado_anterior = models.CharField(max_length=24, blank=True, default="")
+    estado_nuevo = models.CharField(max_length=24, choices=VacanteRRHH.ESTADO_CHOICES)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    comentario = models.TextField(blank=True, default="")
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["creado_en", "id"]
+        verbose_name = "Movimiento de vacante"
+        verbose_name_plural = "Movimientos de vacante"
+
+    def __str__(self) -> str:
+        return f"{self.vacante.folio} · {self.estado_anterior or '-'} -> {self.estado_nuevo}"
+
+
+class VacanteCobertura(models.Model):
+    vacante = models.ForeignKey("rrhh.VacanteRRHH", on_delete=models.CASCADE, related_name="coberturas")
+    empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.PROTECT, related_name="vacantes_cobertura")
+    fecha_cobertura = models.DateField(default=timezone.localdate)
+    nota = models.TextField(blank=True, default="")
+    creado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["fecha_cobertura", "id"]
+        unique_together = [("vacante", "empleado")]
+        verbose_name = "Cobertura de vacante"
+        verbose_name_plural = "Coberturas de vacante"
+
+    def __str__(self) -> str:
+        return f"{self.vacante.folio} · {self.empleado.nombre}"
+
+
+class VacanteSeguimiento(models.Model):
+    ETAPA_COMENTARIO = "comentario"
+    ETAPA_BUSQUEDA = "busqueda"
+    ETAPA_CONTACTO = "contacto"
+    ETAPA_ENTREVISTA = "entrevista"
+    ETAPA_PRUEBA = "prueba"
+    ETAPA_OFERTA = "oferta"
+    ETAPA_CONTRATADO = "contratado"
+    ETAPA_DESCARTADO = "descartado"
+    ETAPA_CHOICES = [
+        (ETAPA_COMENTARIO, "Comentario"),
+        (ETAPA_BUSQUEDA, "Búsqueda"),
+        (ETAPA_CONTACTO, "Contacto"),
+        (ETAPA_ENTREVISTA, "Entrevista"),
+        (ETAPA_PRUEBA, "Prueba"),
+        (ETAPA_OFERTA, "Oferta"),
+        (ETAPA_CONTRATADO, "Contratado"),
+        (ETAPA_DESCARTADO, "Descartado"),
+    ]
+
+    vacante = models.ForeignKey("rrhh.VacanteRRHH", on_delete=models.CASCADE, related_name="seguimientos")
+    etapa = models.CharField(max_length=20, choices=ETAPA_CHOICES, default=ETAPA_COMENTARIO)
+    candidato = models.CharField(max_length=180, blank=True, default="")
+    comentario = models.TextField()
+    fecha = models.DateField(default=timezone.localdate)
+    creado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-fecha", "-creado_en", "-id"]
+        verbose_name = "Seguimiento de vacante"
+        verbose_name_plural = "Seguimientos de vacante"
+
+    def __str__(self) -> str:
+        return f"{self.vacante.folio} · {self.get_etapa_display()} · {self.fecha}"
 
 
 class Turno(models.Model):
