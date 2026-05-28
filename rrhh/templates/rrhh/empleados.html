@@ -757,7 +757,14 @@
               <select id="baja_empleado" class="input-field" name="empleado">
                 <option value="">Captura manual</option>
                 {% for e in empleados %}
-                  <option value="{{ e.id }}">{{ e.nombre }}{% if e.codigo %} · {{ e.codigo }}{% endif %}</option>
+                  <option
+                    value="{{ e.id }}"
+                    data-nombre="{{ e.nombre }}"
+                    data-area="{{ e.area|default_if_none:'' }}"
+                    data-puesto="{{ e.puesto|default_if_none:'' }}"
+                    data-fecha-ingreso="{{ e.fecha_ingreso|date:'Y-m-d' }}"
+                    data-tipo-contrato="{{ e.tipo_contrato }}"
+                  >{{ e.nombre }}{% if e.codigo %} · {{ e.codigo }}{% endif %}</option>
                 {% endfor %}
               </select>
             </div>
@@ -1265,9 +1272,29 @@
     if (puesto && puestoSelect && Array.from(puestoSelect.options).some(option => option.value === puesto)) {
       puestoSelect.value = puesto;
     }
-    if (ventas) ventas.checked = ventas.checked || puesto === 'REPARTIDOR';
-    if (produccion) produccion.checked = produccion.checked || ['HORNOS', 'PRODUCCION', 'ARMADO', 'CRUCERO', 'ENVIO_SUCURSAL'].includes(puesto);
     _toggleUsuarioErpField(form, puesto);
+  }
+
+  const bajaEmpleado = document.getElementById('baja_empleado');
+  if (bajaEmpleado) {
+    const bajaFields = {
+      nombre: document.getElementById('nombre_baja'),
+      area: document.getElementById('area_baja'),
+      puesto: document.getElementById('puesto_baja'),
+      fechaIngreso: document.getElementById('fecha_ingreso_baja'),
+      contrato: document.getElementById('tipo_contrato_baja'),
+    };
+    bajaEmpleado.addEventListener('change', () => {
+      const selected = bajaEmpleado.selectedOptions[0];
+      const hasEmpleado = Boolean(bajaEmpleado.value && selected);
+      bajaFields.nombre.value = hasEmpleado ? (selected.dataset.nombre || '') : '';
+      bajaFields.area.value = hasEmpleado ? (selected.dataset.area || '') : '';
+      bajaFields.puesto.value = hasEmpleado ? (selected.dataset.puesto || '') : '';
+      bajaFields.fechaIngreso.value = hasEmpleado ? (selected.dataset.fechaIngreso || '') : '';
+      if (hasEmpleado && selected.dataset.tipoContrato && bajaFields.contrato) {
+        bajaFields.contrato.value = selected.dataset.tipoContrato;
+      }
+    });
   }
 
   function _toggleUsuarioErpField(form, puesto) {
