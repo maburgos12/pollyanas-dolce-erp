@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, time
+from pathlib import Path
 
 import pandas as pd
 from django.db.models import Q
@@ -64,12 +65,25 @@ def _sucursal_de_empleado(empleado: Empleado):
     return Sucursal.objects.filter(Q(nombre__iexact=sucursal_texto) | Q(codigo__iexact=sucursal_texto)).first()
 
 
+def _leer_export_hikconnect(archivo) -> pd.DataFrame:
+    nombre = getattr(archivo, "name", "") or ""
+    extension = Path(nombre).suffix.lower()
+    if extension == ".csv":
+        try:
+            return pd.read_csv(archivo, sep=None, engine="python", encoding="utf-8-sig")
+        except UnicodeDecodeError:
+            if hasattr(archivo, "seek"):
+                archivo.seek(0)
+            return pd.read_csv(archivo, sep=None, engine="python", encoding="latin1")
+    return pd.read_excel(archivo)
+
+
 def importar_excel_hikconnect(archivo, user, fecha_inicio, fecha_fin):
     """
-    Lee un Excel exportado desde Hik-Connect y crea/actualiza AsistenciaEmpleado.
+    Lee un Excel/CSV exportado desde Hik-Connect y crea/actualiza AsistenciaEmpleado.
     Retorna dict con contadores.
     """
-    df = _normalizar_columnas(pd.read_excel(archivo))
+    df = _normalizar_columnas(_leer_export_hikconnect(archivo))
 
     procesados = 0
     errores = 0

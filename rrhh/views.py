@@ -1668,27 +1668,27 @@ def importar_checador(request):
 
     hoy = timezone.localdate()
     ayer = hoy - timedelta(days=1)
-    api_qs = AsistenciaEmpleado.objects.filter(fuente=AsistenciaEmpleado.FUENTE_HIKCONNECT_API)
-    ultimas_api = (
-        api_qs.select_related("empleado", "turno", "sucursal")
+    portal_qs = AsistenciaEmpleado.objects.filter(fuente=AsistenciaEmpleado.FUENTE_HIKCONNECT_EXCEL)
+    ultimas_portal = (
+        portal_qs.select_related("empleado", "turno", "sucursal")
         .order_by("-creado_en")[:12]
     )
-    ultima_api = api_qs.order_by("-creado_en").first()
     historial = ImportacionChecador.objects.order_by("-creado_en")[:10]
+    ultima_carga = historial.first()
     return render(
         request,
         "rrhh/importar_checador.html",
         {
             "module_tabs": _module_tabs("checador"),
             "historial": historial,
-            "ultimas_api": ultimas_api,
-            "ultima_api": ultima_api,
+            "ultimas_portal": ultimas_portal,
+            "ultima_carga": ultima_carga,
             "hoy": hoy,
             "ayer": ayer,
             "resumen_checador": {
-                "asistencias_api": api_qs.count(),
+                "asistencias_portal": portal_qs.count(),
                 "asistencias_hoy": AsistenciaEmpleado.objects.filter(fecha=hoy).count(),
-                "cargas_excel": ImportacionChecador.objects.count(),
+                "cargas_portal": ImportacionChecador.objects.count(),
             },
         },
     )
