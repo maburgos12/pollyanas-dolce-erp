@@ -61,18 +61,24 @@ def _recalcular_periodo(periodo: ConfigBonoVentasPeriodo) -> int:
 
 def _inicializar_bonos(periodo: ConfigBonoVentasPeriodo) -> dict[str, object]:
     empleados = empleados_elegibles_bonos_ventas()
+    sucursal_matriz = Sucursal.objects.filter(nombre__iexact="matriz", activa=True).first()
     creados = 0
     sin_sucursal = []
     for empleado in empleados:
         sucursal_nombre = (empleado.sucursal or "").strip()
         if not sucursal_nombre:
-            sin_sucursal.append(empleado.nombre)
-            continue
-        try:
-            sucursal = Sucursal.objects.get(nombre__iexact=sucursal_nombre, activa=True)
-        except Sucursal.DoesNotExist:
-            sin_sucursal.append(f"{empleado.nombre} (sucursal desconocida: {sucursal_nombre!r})")
-            continue
+            # Repartidores (y otros sin sucursal) van a Matriz por defecto
+            if sucursal_matriz and (empleado.puesto_operativo or "").strip().upper() == "REPARTIDOR":
+                sucursal = sucursal_matriz
+            else:
+                sin_sucursal.append(empleado.nombre)
+                continue
+        else:
+            try:
+                sucursal = Sucursal.objects.get(nombre__iexact=sucursal_nombre, activa=True)
+            except Sucursal.DoesNotExist:
+                sin_sucursal.append(f"{empleado.nombre} (sucursal desconocida: {sucursal_nombre!r})")
+                continue
         _, created = BonoVentasEmpleado.objects.get_or_create(
             periodo=periodo,
             empleado=empleado,
