@@ -66,12 +66,13 @@ def _empleado_de_usuario(user) -> Empleado | None:
 
 def _recalcular_desde_registros(bono: BonoProduccionEmpleado) -> None:
     registros = bono.registros.all()
-    bono.dias_trabajados = registros.count()
-    bono.dias_uniforme = registros.filter(tiene_uniforme=True).count()
-    bono.dias_puntualidad = registros.filter(tiene_puntualidad=True).count()
-    bono.dias_asistencia = registros.filter(tiene_asistencia=True).count()
-    bono.dias_produccion = registros.filter(tiene_produccion=True).count()
-    bono.total_embetunados = sum(r.cantidad_embetunados for r in registros)
+    asistencias = registros.filter(tiene_asistencia=True)
+    bono.dias_trabajados = asistencias.count()
+    bono.dias_uniforme = asistencias.filter(tiene_uniforme=True).count()
+    bono.dias_puntualidad = asistencias.filter(tiene_puntualidad=True).count()
+    bono.dias_asistencia = bono.dias_trabajados
+    bono.dias_produccion = asistencias.filter(tiene_produccion=True).count()
+    bono.total_embetunados = sum(r.cantidad_embetunados for r in asistencias)
     bono.recalcular()
     bono.save()
 
