@@ -547,6 +547,73 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_RECHAZADO)
         self.assertEqual(permiso.autorizado_jefe_por, user)
 
+    def test_permisos_equipo_produccion_filtro_por_area_produccion(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        user = get_user_model().objects.create_user(username="jefe-produccion-filtro")
+        user.groups.add(Group.objects.get_or_create(name=ROLE_PRODUCCION)[0])
+        self.client.force_login(user)
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
+        jefe = Empleado.objects.create(nombre="Jefe Produccion", departamento=Empleado.DEP_PRODUCCION, usuario_erp=user)
+        empleado_produccion = Empleado.objects.create(
+            nombre="Empleado Produccion",
+            area="PRODUCCION",
+            departamento="PRODUCCION",
+            jefe_directo=jefe,
+        )
+        empleado_hornos = Empleado.objects.create(
+            nombre="Empleado Hornos",
+            area="HORNOS",
+            departamento="PRODUCCION",
+            jefe_directo=jefe,
+        )
+        empleado_logistica = Empleado.objects.create(
+            nombre="Empleado Logistica",
+            area="LOGISTICA",
+            departamento="LOGISTICA",
+            jefe_directo=jefe,
+        )
+        BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado_produccion, area=AREA_PRODUCCION)
+        BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado_hornos, area=AREA_HORNOS)
+        BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado_logistica, area=AREA_LOGISTICA)
+
+        permiso_produccion = PermisoSalida.objects.create(
+            empleado=empleado_produccion,
+            tipo=PermisoSalida.TIPO_PERMISO_HORA,
+            fecha_inicio=datetime(2026, 5, 21, 8, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            fecha_fin=datetime(2026, 5, 21, 12, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            motivo="Permiso produccion",
+        )
+        permiso_hornos = PermisoSalida.objects.create(
+            empleado=empleado_hornos,
+            tipo=PermisoSalida.TIPO_PERMISO_HORA,
+            fecha_inicio=datetime(2026, 5, 21, 8, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            fecha_fin=datetime(2026, 5, 21, 12, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            motivo="Permiso hornos",
+        )
+        permiso_logistica = PermisoSalida.objects.create(
+            empleado=empleado_logistica,
+            tipo=PermisoSalida.TIPO_PERMISO_HORA,
+            fecha_inicio=datetime(2026, 5, 21, 8, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            fecha_fin=datetime(2026, 5, 21, 12, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            motivo="Permiso logistica",
+        )
+
+        response = self.client.get("/api/bonos-produccion/permisos/?mes=5&anio=2026&area=PRODUCCION")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        permiso_ids = {row["id"] for row in payload["permisos"]}
+        self.assertEqual({permiso_produccion.id}, permiso_ids)
+        self.assertNotIn(permiso_hornos.id, permiso_ids)
+        self.assertNotIn(permiso_logistica.id, permiso_ids)
+
+        empleado_ids = {row["id"] for row in payload["empleados"]}
+        self.assertIn(empleado_produccion.id, empleado_ids)
+        self.assertNotIn(empleado_hornos.id, empleado_ids)
+        self.assertNotIn(empleado_logistica.id, empleado_ids)
+
     def test_permiso_produccion_se_crea_con_roster_del_periodo_aunque_rrhh_tenga_otra_area(self):
         user = get_user_model().objects.create_user(username="julissa.angulo")
         user.groups.add(Group.objects.get_or_create(name=ROLE_PRODUCCION)[0])

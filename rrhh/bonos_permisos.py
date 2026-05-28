@@ -125,15 +125,12 @@ def _permiso_area_filter_q(area_filter: str):
         return Q()
     logistica_area_terms = ("LOGISTICA", "LOGISTICO")
     hornos_puestos = ("HORNOS", "HORNO")
-    produccion_puestos = ("PRODUCCION", "EMBETUNADO", "ARMADO", "CRUCERO")
+    produccion_puestos = ("PRODUCCION", "EMBETUNADO")
     logistica_puestos = ("REPARTIDOR", "ENVIO_SUCURSAL")
     if area_filter == "PRODUCCION":
         return (
-            Q(empleado__departamento=Empleado.DEP_PRODUCCION)
-            | Q(empleado__departamento_origen=Empleado.DEP_PRODUCCION)
-            | Q(empleado__puesto_operativo__in=produccion_puestos)
-            | Q(empleado__area__iregex="PRODUC(C|CIÓN)?")
-            | Q(empleado__puesto_operativo__iregex="PRODUC|EMBETUNADO|ARMADO|CRUCERO")
+            Q(empleado__puesto_operativo__in=produccion_puestos)
+            | Q(empleado__area__iexact="PRODUCCION")
         )
     if area_filter == "HORNOS":
         return (

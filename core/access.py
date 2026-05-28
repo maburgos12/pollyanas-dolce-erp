@@ -227,7 +227,9 @@ def has_any_role(user: AbstractBaseUser, *roles: str) -> bool:
         return False
     if user.is_superuser:
         return True
-    return bool(_group_names(user).intersection(set(roles)))
+    user_roles = {str(name or "").strip().upper() for name in _group_names(user)}
+    requested_roles = {str(role or "").strip().upper() for role in roles}
+    return bool(user_roles.intersection(requested_roles))
 
 
 def _is_locked(user: AbstractBaseUser, lock_field: str) -> bool:

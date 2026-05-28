@@ -341,6 +341,18 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertContains(response, "Marta Logística")
         self.assertNotContains(response, "Luis Hornos")
 
+        response = self.client.get(
+            reverse("rrhh:rrhh_permisos_list"),
+            {"area": "producción"},
+            follow=True,
+            secure=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["stats"]["total"], 1)
+        self.assertContains(response, "Ana Producción")
+        self.assertNotContains(response, "Marta Logística")
+        self.assertNotContains(response, "Luis Hornos")
+
         response = self.client.get(reverse("rrhh:rrhh_permisos_list"), follow=True, secure=True)
         self.assertEqual(response.context["stats"]["total"], 3)
 

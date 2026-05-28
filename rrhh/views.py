@@ -123,9 +123,9 @@ def _has_explicit_role(user, *roles: str) -> bool:
         return False
     if user.is_superuser:
         return True
-    requested = {role.upper() for role in roles}
+    requested = {str(role or "").strip().upper() for role in roles}
     for name in user.groups.values_list("name", flat=True):
-        if (name or "").strip().upper() in requested:
+        if str(name or "").strip().upper() in requested:
             return True
     return False
 
@@ -285,15 +285,12 @@ def _normalize_area_filter_value(raw: str | None) -> str:
 def _permiso_area_filter_q(area_filter: str):
     logistica_area_terms = ("LOGISTICA", "LOGÍSTICA")
     hornos_puestos = ("HORNOS", "HORNO")
-    produccion_puestos = ("PRODUCCION", "EMBETUNADO", "ARMADO", "CRUCERO")
+    produccion_puestos = ("PRODUCCION", "EMBETUNADO")
     logistica_puestos = ("REPARTIDOR", "ENVIO_SUCURSAL")
     if area_filter == "PRODUCCION":
         return (
-            Q(empleado__departamento=Empleado.DEP_PRODUCCION)
-            | Q(empleado__departamento_origen=Empleado.DEP_PRODUCCION)
-            | Q(empleado__puesto_operativo__in=produccion_puestos)
-            | Q(empleado__area__iregex="PRODUC(C|CIÓN)?")
-            | Q(empleado__puesto_operativo__iregex="PRODUC|EMBETUNADO|ARMADO|CRUCERO")
+            Q(empleado__puesto_operativo__in=produccion_puestos)
+            | Q(empleado__area__iexact="PRODUCCION")
         )
     if area_filter == "HORNOS":
         return (
