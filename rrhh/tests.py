@@ -683,7 +683,7 @@ class RRHHViewsTests(TestCase):
             salario_diario="450.00",
         )
 
-        resp = self.client.get(reverse("rrhh:empleados"))
+        resp = self.client.get(reverse("rrhh:empleados"), secure=True)
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, f'value="{empleado.id}"')
