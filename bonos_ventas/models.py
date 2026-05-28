@@ -193,8 +193,9 @@ class BonoVentasEmpleado(models.Model):
         cfg = self.periodo
         base = _money(cfg.bono_base)
         dias_base = self._dias_base()
+        dias_laborables = int(cfg.dias_laborables or dias_base or 0)
         dias_asistencia = int(self.dias_asistencia or self.dias_trabajados or 0)
-        self.pasa_asistencia = (dias_base - dias_asistencia) <= cfg.limite_asistencia
+        self.pasa_asistencia = (dias_laborables - dias_asistencia) <= cfg.limite_asistencia
         self.pasa_uniforme = (dias_base - int(self.dias_uniforme or 0)) <= cfg.limite_uniforme
         self.pasa_puntualidad = (dias_base - int(self.dias_puntualidad or 0)) <= cfg.limite_puntualidad
         cancela_bono = not self.pasa_asistencia or not self.pasa_puntualidad

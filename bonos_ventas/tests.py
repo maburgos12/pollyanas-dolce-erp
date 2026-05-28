@@ -168,7 +168,7 @@ class BonosVentasTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
 
-    def test_recalcular_presentacion_usa_dias_trabajados_como_base(self):
+    def test_recalcular_presentacion_usa_dias_laborables_como_base_de_asistencia(self):
         sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
         empleado = Empleado.objects.create(nombre="Empleado Ventas", area="VENTAS")
         periodo = ConfigBonoVentasPeriodo.objects.create(mes=5, anio=2026, dias_laborables=23)
@@ -177,14 +177,43 @@ class BonosVentasTests(TestCase):
             empleado=empleado,
             sucursal=sucursal,
             dias_trabajados=15,
+            dias_asistencia=15,
             dias_uniforme=15,
             dias_puntualidad=15,
         )
 
         bono.recalcular()
 
-        self.assertTrue(bono.pasa_asistencia)
-        self.assertEqual(bono.sub1, Decimal("225.00"))
+        self.assertFalse(bono.pasa_asistencia)
+        self.assertEqual(bono.sub1, Decimal("0.00"))
+
+    def test_una_falta_cancela_bono_ventas_con_limite_cero(self):
+        sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
+        empleado = Empleado.objects.create(nombre="Empleado Ventas", area="VENTAS")
+        periodo = ConfigBonoVentasPeriodo.objects.create(
+            mes=5,
+            anio=2026,
+            dias_laborables=23,
+            limite_asistencia=0,
+            pct_uniforme=Decimal("15.00"),
+            pct_asistencia=Decimal("45.00"),
+            pct_puntualidad=Decimal("40.00"),
+        )
+        bono = BonoVentasEmpleado.objects.create(
+            periodo=periodo,
+            empleado=empleado,
+            sucursal=sucursal,
+            dias_trabajados=22,
+            dias_asistencia=22,
+            dias_uniforme=22,
+            dias_puntualidad=22,
+        )
+
+        bono.recalcular()
+
+        self.assertFalse(bono.pasa_asistencia)
+        self.assertEqual(bono.sub1, Decimal("0.00"))
+        self.assertEqual(bono.total_a_pagar, Decimal("0.00"))
 
     def test_falta_superior_al_limite_cancela_bono_ventas_completo(self):
         sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
