@@ -672,6 +672,27 @@ class RRHHViewsTests(TestCase):
         self.assertEqual(empleado.rfc, "DEMO-010101-AA1")
         self.assertEqual(empleado.area, "Administración")
 
+    def test_empleados_baja_expone_datos_para_autollenado(self):
+        empleado = Empleado.objects.create(
+            nombre="Empleado Baja Autollenado",
+            codigo="BAJA-001",
+            area="Producción",
+            puesto="Pastelero",
+            fecha_ingreso="2026-01-15",
+            tipo_contrato=Empleado.CONTRATO_FIJO,
+            salario_diario="450.00",
+        )
+
+        resp = self.client.get(reverse("rrhh:empleados"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, f'value="{empleado.id}"')
+        self.assertContains(resp, 'data-nombre="Empleado Baja Autollenado"')
+        self.assertContains(resp, 'data-area="Producción"')
+        self.assertContains(resp, 'data-puesto="Pastelero"')
+        self.assertContains(resp, 'data-fecha-ingreso="2026-01-15"')
+        self.assertContains(resp, f'data-tipo-contrato="{Empleado.CONTRATO_FIJO}"')
+
     def test_rrhh_root_requires_rrhh_access(self):
         user = User.objects.create_user(username="solo.mantenimiento", password="pass123")
         self.client.force_login(user)
