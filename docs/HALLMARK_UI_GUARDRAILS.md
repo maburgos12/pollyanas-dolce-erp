@@ -19,7 +19,7 @@ Estas reglas son obligatorias para vistas nuevas o existentes del ERP.
 ## Capital Humano
 
 - Las vistas del grupo Capital Humano (`.rrhh-page`, `.ch-page`, `.indicadores-page`, `.org-page`, `.vacantes-page`, `.permisos-page`, `.assign-page`, `.loan-page`, `.monitor-page`) estan cubiertas por la hoja global.
-- Los tabs de submodulos deben usar `.module-tabs.rrhh-tabs` para heredar wrap, ancho operativo y separacion constante.
+- Los tabs de submodulos deben usar `.module-tabs.rrhh-tabs`; la regla global los renderiza como grid responsivo, no como una tira flexible que se aplasta o depende de scroll horizontal.
 - Los tableros de permisos, horas extra, prestamos, indicadores, vacantes y organizacion deben usar las familias existentes (`.permisos-board`, `.ch-kanban`, `.loan-board`, `.indicadores-kpis`, `.vacantes-stats`, `.org-stats`) para heredar columnas responsivas.
 - Los selectores operativos por area (`.rule-selector`, `.rule-tab`, `.area-grid`, `.area-chip`) deben permitir salto de linea interno; ningun titulo, conteo o importe debe quedar cortado por una tarjeta rigida.
 - Los formularios de alta, edicion, importacion o detalle deben usar `.form-grid`, `.rrhh-form-grid`, `.indicador-form-grid`, `.vacantes-grid` o `.ch-fields`; no deben fijar anchos que obliguen scroll horizontal de pagina.
