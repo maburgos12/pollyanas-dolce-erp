@@ -276,11 +276,18 @@ class BonoProduccionEmpleado(models.Model):
         if regla.usa_produccion:
             self.pasa_produccion = (dias_base - int(self.dias_produccion or 0)) <= regla.limite_produccion
 
-        self.monto_uniforme = self._monto_concepto(base, regla.pct_uniforme, self.pasa_uniforme)
-        self.monto_asistencia = self._monto_concepto(base, regla.pct_asistencia, self.pasa_asistencia)
-        self.monto_puntualidad = self._monto_concepto(base, regla.pct_puntualidad, self.pasa_puntualidad)
-        self.monto_produccion = self._monto_concepto(base, regla.pct_produccion, self.pasa_produccion and regla.usa_produccion)
-        self.monto_premio_embetunado = _money(cfg.premio_embetunado if self.gano_premio_embetunado else 0)
+        cancela_bono = not self.pasa_asistencia or not self.pasa_puntualidad
+        self.monto_uniforme = self._monto_concepto(base, regla.pct_uniforme, self.pasa_uniforme and not cancela_bono)
+        self.monto_asistencia = self._monto_concepto(base, regla.pct_asistencia, self.pasa_asistencia and not cancela_bono)
+        self.monto_puntualidad = self._monto_concepto(base, regla.pct_puntualidad, self.pasa_puntualidad and not cancela_bono)
+        self.monto_produccion = self._monto_concepto(
+            base,
+            regla.pct_produccion,
+            self.pasa_produccion and regla.usa_produccion and not cancela_bono,
+        )
+        self.monto_premio_embetunado = _money(
+            cfg.premio_embetunado if self.gano_premio_embetunado and not cancela_bono else 0
+        )
 
         bruto = _money(
             self.monto_uniforme

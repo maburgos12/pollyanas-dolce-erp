@@ -197,9 +197,10 @@ class BonoVentasEmpleado(models.Model):
         self.pasa_asistencia = (dias_base - dias_asistencia) <= cfg.limite_asistencia
         self.pasa_uniforme = (dias_base - int(self.dias_uniforme or 0)) <= cfg.limite_uniforme
         self.pasa_puntualidad = (dias_base - int(self.dias_puntualidad or 0)) <= cfg.limite_puntualidad
-        self.monto_uniforme = self._monto_concepto(base, cfg.pct_uniforme, self.pasa_uniforme)
-        self.monto_asistencia = self._monto_concepto(base, cfg.pct_asistencia, self.pasa_asistencia)
-        self.monto_puntualidad = self._monto_concepto(base, cfg.pct_puntualidad, self.pasa_puntualidad)
+        cancela_bono = not self.pasa_asistencia or not self.pasa_puntualidad
+        self.monto_uniforme = self._monto_concepto(base, cfg.pct_uniforme, self.pasa_uniforme and not cancela_bono)
+        self.monto_asistencia = self._monto_concepto(base, cfg.pct_asistencia, self.pasa_asistencia and not cancela_bono)
+        self.monto_puntualidad = self._monto_concepto(base, cfg.pct_puntualidad, self.pasa_puntualidad and not cancela_bono)
         self.sub1 = _money(self.monto_uniforme + self.monto_asistencia + self.monto_puntualidad)
 
         if self._es_repartidor():
@@ -210,7 +211,7 @@ class BonoVentasEmpleado(models.Model):
             )
             self.monto_bono_entregas = (
                 _money(cfg.bono_repartidor_adicional)
-                if self.pct_efectividad_entrega >= cfg.umbral_efectividad_pct
+                if self.pct_efectividad_entrega >= cfg.umbral_efectividad_pct and not cancela_bono
                 else Decimal("0.00")
             )
             self.bono_ventas = self.monto_bono_entregas
@@ -226,7 +227,7 @@ class BonoVentasEmpleado(models.Model):
                         activo_bono=True,
                     )
                 )
-            )
+            ) if not cancela_bono else Decimal("0.00")
 
         self.pasa_bono_ventas = self.bono_ventas > 0
         self.total_a_pagar = _money(

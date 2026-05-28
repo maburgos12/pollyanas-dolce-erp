@@ -351,11 +351,47 @@ class BonosProduccionTests(TestCase):
 
         self.assertFalse(bono.pasa_asistencia)
         self.assertEqual(bono.monto_asistencia, Decimal("0.00"))
-        self.assertEqual(bono.total_a_pagar, Decimal("680.00"))
+        self.assertEqual(bono.monto_uniforme, Decimal("0.00"))
+        self.assertEqual(bono.monto_puntualidad, Decimal("0.00"))
+        self.assertEqual(bono.monto_produccion, Decimal("0.00"))
+        self.assertEqual(bono.total_a_pagar, Decimal("0.00"))
+
+    def test_tres_retardos_cancelan_bono_produccion_completo(self):
+        empleado = Empleado.objects.create(nombre="Empleado Produccion", area="PRODUCCION")
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026, dias_laborables=22, monto_hornos=Decimal("800.00"))
+        periodo.asegurar_reglas_area()
+        regla = periodo.reglas_area.get(area=AREA_HORNOS)
+        regla.limite_puntualidad = 2
+        regla.save()
+        bono = BonoProduccionEmpleado.objects.create(
+            periodo=periodo,
+            empleado=empleado,
+            area=AREA_HORNOS,
+            dias_trabajados=22,
+            dias_uniforme=22,
+            dias_asistencia=22,
+            dias_puntualidad=19,
+            dias_produccion=22,
+            gano_premio_embetunado=True,
+        )
+
+        bono.recalcular()
+
+        self.assertFalse(bono.pasa_puntualidad)
+        self.assertEqual(bono.monto_uniforme, Decimal("0.00"))
+        self.assertEqual(bono.monto_asistencia, Decimal("0.00"))
+        self.assertEqual(bono.monto_puntualidad, Decimal("0.00"))
+        self.assertEqual(bono.monto_produccion, Decimal("0.00"))
+        self.assertEqual(bono.monto_premio_embetunado, Decimal("0.00"))
+        self.assertEqual(bono.total_a_pagar, Decimal("0.00"))
 
     def test_recalcular_no_deja_total_negativo_por_ajuste(self):
         empleado = Empleado.objects.create(nombre="Empleado Produccion", area="PRODUCCION")
         periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026, dias_laborables=10, monto_hornos=Decimal("800.00"))
+        periodo.asegurar_reglas_area()
+        regla = periodo.reglas_area.get(area=AREA_HORNOS)
+        regla.limite_puntualidad = 3
+        regla.save()
         bono = BonoProduccionEmpleado.objects.create(
             periodo=periodo,
             empleado=empleado,
@@ -365,14 +401,14 @@ class BonosProduccionTests(TestCase):
             dias_asistencia=9,
             dias_puntualidad=7,
             dias_produccion=9,
-            ajuste_negativo=Decimal("680.00"),
+            ajuste_negativo=Decimal("1000.00"),
         )
 
         bono.recalcular()
 
         self.assertEqual(bono.monto_uniforme, Decimal("40.00"))
         self.assertEqual(bono.monto_asistencia, Decimal("120.00"))
-        self.assertEqual(bono.monto_puntualidad, Decimal("0.00"))
+        self.assertEqual(bono.monto_puntualidad, Decimal("120.00"))
         self.assertEqual(bono.monto_produccion, Decimal("520.00"))
         self.assertEqual(bono.total_a_pagar, Decimal("0.00"))
 
