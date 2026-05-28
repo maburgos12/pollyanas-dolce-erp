@@ -283,9 +283,9 @@ class BonosVentasTests(TestCase):
             pct_uniforme=Decimal("15.00"),
             pct_asistencia=Decimal("45.00"),
             pct_puntualidad=Decimal("40.00"),
-            cancela_por_asistencia=True,
-            limite_asistencia_cancelacion=0,
         )
+        periodo.cancela_por_asistencia = True
+        periodo.limite_asistencia_cancelacion = 0
         bono = BonoVentasEmpleado.objects.create(
             periodo=periodo,
             empleado=empleado,

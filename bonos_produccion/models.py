@@ -279,9 +279,13 @@ class BonoProduccionEmpleado(models.Model):
         faltas = dias_laborables - int(self.dias_asistencia or 0)
         retardos = dias_base - int(self.dias_puntualidad or 0)
         cancela_bono = (not self.pasa_asistencia) or (not self.pasa_puntualidad)
-        if regla.cancela_por_asistencia and (faltas > regla.limite_asistencia_cancelacion):
+        cancel_por_asistencia = getattr(regla, "cancela_por_asistencia", False)
+        limite_cancel_asistencia = int(getattr(regla, "limite_asistencia_cancelacion", regla.limite_asistencia))
+        if cancel_por_asistencia and (faltas > limite_cancel_asistencia):
             cancela_bono = True
-        if regla.cancela_por_puntualidad and (retardos > regla.limite_retardos_cancelacion):
+        cancel_por_puntualidad = getattr(regla, "cancela_por_puntualidad", False)
+        limite_cancel_retardos = int(getattr(regla, "limite_retardos_cancelacion", regla.limite_puntualidad))
+        if cancel_por_puntualidad and (retardos > limite_cancel_retardos):
             cancela_bono = True
         self.monto_uniforme = self._monto_concepto(base, regla.pct_uniforme, self.pasa_uniforme and not cancela_bono)
         self.monto_asistencia = self._monto_concepto(base, regla.pct_asistencia, self.pasa_asistencia and not cancela_bono)
