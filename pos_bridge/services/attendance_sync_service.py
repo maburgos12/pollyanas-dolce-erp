@@ -195,6 +195,41 @@ class PointAttendanceSyncService:
         lines.append(point_observation)
         return "\n".join(line for line in lines if line).strip()
 
+    @staticmethod
+    def _name_tokens(value: str) -> set[str]:
+        return {token for token in normalize_text(value).split() if len(token) > 1}
+
+    def _resolve_employee(self, payload: PointAttendancePayload) -> tuple[Empleado | None, str, str]:
+        if payload.employee_code:
+            empleado = Empleado.objects.filter(codigo=payload.employee_code).first()
+            if empleado is not None:
+                return empleado, "code", ""
+
+        name_key = normalize_text(payload.employee_name)
+        if not name_key:
+            return None, "", "missing_code" if not payload.employee_code else "missing_employee"
+
+        exact_matches = list(Empleado.objects.filter(activo=True, nombre_normalizado=name_key).order_by("id")[:2])
+        if len(exact_matches) == 1:
+            return exact_matches[0], "name", ""
+        if len(exact_matches) > 1:
+            return None, "", "ambiguous_employee"
+
+        point_tokens = self._name_tokens(payload.employee_name)
+        if len(point_tokens) < 2:
+            return None, "", "missing_employee"
+
+        token_matches = []
+        for candidato in Empleado.objects.filter(activo=True).only("id", "nombre", "nombre_normalizado").order_by("id"):
+            erp_tokens = self._name_tokens(candidato.nombre_normalizado or candidato.nombre)
+            if point_tokens.issubset(erp_tokens):
+                token_matches.append(candidato)
+                if len(token_matches) > 1:
+                    return None, "", "ambiguous_employee"
+        if len(token_matches) == 1:
+            return token_matches[0], "name_tokens", ""
+        return None, "", "missing_employee"
+
     def create_job(
         self,
         *,
@@ -379,24 +414,9 @@ class PointAttendanceSyncService:
 
     @transaction.atomic
     def persist_payload(self, payload: PointAttendancePayload) -> tuple[AsistenciaEmpleado | None, str]:
-        empleado = None
-        match_method = "code"
-        if payload.employee_code:
-            empleado = Empleado.objects.filter(codigo=payload.employee_code).first()
-        else:
-            match_method = "name"
-
+        empleado, match_method, unresolved_reason = self._resolve_employee(payload)
         if empleado is None:
-            match_method = "name"
-            name_key = normalize_text(payload.employee_name)
-            if not name_key:
-                return None, "missing_code"
-            candidates = list(Empleado.objects.filter(activo=True, nombre_normalizado=name_key).order_by("id")[:2])
-            if len(candidates) > 1:
-                return None, "ambiguous_employee"
-            if not candidates:
-                return None, "missing_employee"
-            empleado = candidates[0]
+            return None, unresolved_reason
 
         asistencia, created = AsistenciaEmpleado.objects.get_or_create(
             empleado=empleado,
@@ -435,7 +455,7 @@ class PointAttendanceSyncService:
         asistencia.save()
         if asistencia.salida and asistencia.turno_id:
             generar_horas_extra_automatico(asistencia)
-        if match_method == "name":
+        if match_method in {"name", "name_tokens"}:
             return asistencia, "created_by_name" if created else "updated_by_name"
         return asistencia, "created" if created else "updated"
 

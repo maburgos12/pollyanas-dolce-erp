@@ -246,6 +246,32 @@ class PointAttendanceSyncServiceTests(TestCase):
         self.assertIn("codigo_point=2543", asistencia.observacion)
         self.assertEqual(job.result_summary["attendance_matched_by_name"], 1)
 
+    def test_run_sync_can_link_short_point_name_to_unique_full_erp_name(self):
+        empleado = Empleado.objects.create(codigo="ERP-001", nombre="TORRES BURGUEÑO LAURA ELENA")
+        session = FakeSession(
+            attendance_rows=[
+                {
+                    "Codigo": "2543",
+                    "Empleado": "Laura Torres",
+                    "Entrada": "2026-05-27T08:00:00",
+                    "Salida": "2026-05-27T16:00:00",
+                    "IDX": 7,
+                }
+            ]
+        )
+        service = PointAttendanceSyncService(
+            bridge_settings=FakeSettings(),
+            http_session_service=FakeHttpSessionService(session),
+        )
+
+        job = service.run_sync(start_date=date(2026, 5, 27), end_date=date(2026, 5, 27), branch_filter="Crucero")
+
+        self.assertEqual(job.status, PointSyncJob.STATUS_SUCCESS)
+        self.assertEqual(Empleado.objects.count(), 1)
+        asistencia = AsistenciaEmpleado.objects.get(empleado=empleado, fecha=date(2026, 5, 27))
+        self.assertIn("match=name_tokens", asistencia.observacion)
+        self.assertEqual(job.result_summary["attendance_matched_by_name"], 1)
+
     def test_run_sync_skips_ambiguous_erp_name(self):
         Empleado.objects.create(codigo="ERP-001", nombre="Laura Torres")
         Empleado.objects.create(codigo="ERP-002", nombre="Laura Torres")
