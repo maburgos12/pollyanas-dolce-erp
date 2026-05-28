@@ -546,12 +546,20 @@ class BonosProduccionTests(TestCase):
         user = get_user_model().objects.create_superuser(username="test.dg.permisos", password="x")
         self.client.force_login(user)
         periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
+        carolina = Empleado.objects.create(
+            nombre="CAYETANO VALENZUELA CAROLINA",
+            area="ADMINISTRACION",
+            departamento="PRODUCCION",
+            puesto="Jefe de Producción",
+            puesto_operativo="JEFATURA",
+        )
         roxana = Empleado.objects.create(
             nombre="RIVAS SOLIS ROXANA",
             area="PRODUCCION",
             departamento="PRODUCCION",
             puesto="Supervisora de Producción",
             puesto_operativo="SUPERVISION_PRODUCCION",
+            jefe_directo=carolina,
         )
         julissa = Empleado.objects.create(
             nombre="ANGULO PARRA JULISSA",
@@ -559,29 +567,43 @@ class BonosProduccionTests(TestCase):
             departamento="PRODUCCION",
             puesto="Encargada de Producción",
             puesto_operativo="ENCARGADA_PRODUCCION",
+            jefe_directo=carolina,
+        )
+        envio = Empleado.objects.create(
+            nombre="MEZA TABIZON JESUS ADRIAN",
+            area="ENVIO A SUCURSAL",
+            departamento="PRODUCCION",
+            departamento_origen="LOGISTICA",
+            puesto="Envio a sucursales",
+            puesto_operativo="ENVIO_SUCURSAL",
+            jefe_directo=carolina,
         )
         BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=julissa, area=AREA_PRODUCCION)
 
-        listado = self.client.get("/api/bonos-produccion/permisos/?mes=5&anio=2026&area=PRODUCCION")
+        listado = self.client.get("/api/bonos-produccion/permisos/?mes=5&anio=2026")
 
         self.assertEqual(listado.status_code, 200)
         empleados_ids = {row["id"] for row in listado.json()["empleados"]}
+        self.assertIn(carolina.id, empleados_ids)
         self.assertIn(julissa.id, empleados_ids)
         self.assertIn(roxana.id, empleados_ids)
+        self.assertIn(envio.id, empleados_ids)
+        primeros = [row["id"] for row in listado.json()["empleados"][:3]]
+        self.assertEqual(primeros, [carolina.id, roxana.id, julissa.id])
 
         creado = self.client.post(
             "/api/bonos-produccion/permisos/",
             json.dumps(
                 {
-                    "empleado": roxana.id,
+                    "empleado": envio.id,
                     "mes": 5,
                     "anio": 2026,
-                    "area": AREA_PRODUCCION,
+                    "area": AREA_LOGISTICA,
                     "tipo": PermisoSalida.TIPO_PERMISO_HORA,
                     "fecha_inicio": "2026-05-22T12:00:00",
                     "fecha_fin": "2026-05-22T13:00:00",
                     "goce_sueldo": True,
-                    "motivo": "Permiso supervisora desde DG",
+                    "motivo": "Permiso equipo de produccion desde DG",
                 }
             ),
             content_type="application/json",
@@ -589,4 +611,4 @@ class BonosProduccionTests(TestCase):
 
         self.assertEqual(creado.status_code, 201)
         permiso = PermisoSalida.objects.get(pk=creado.json()["id"])
-        self.assertEqual(permiso.empleado, roxana)
+        self.assertEqual(permiso.empleado, envio)
