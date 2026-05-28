@@ -3,25 +3,31 @@ from __future__ import annotations
 from datetime import date
 
 from django.contrib import messages
+from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 
 from core.models import Sucursal
 
-from .models import Empleado, VacanteRRHH
+from .models import Empleado, VacanteRRHH, VacanteSeguimiento
 from .services_vacantes import (
+    agregar_seguimiento_vacante,
     aprobar_vacante_autorizacion,
     cancelar_vacante,
     can_autorizar_vacante,
     can_gestionar_vacantes,
+    can_solicitar_vacantes,
     can_ver_vacante,
     cubrir_vacante,
     crear_solicitud_vacante,
+    devolver_vacante_correccion,
     enviar_vacante_autorizacion,
     filtrar_vacantes_para_usuario,
     iniciar_reclutamiento_vacante,
     pausar_vacante,
+    reenviar_vacante_revision,
     rechazar_vacante_autorizacion,
 )
 from .views import _module_tabs
@@ -75,6 +81,7 @@ def vacantes_lista(request):
         {
             "module_tabs": _module_tabs("vacantes"),
             "can_manage_vacantes": can_gestionar_vacantes(request.user),
+            "can_create_vacante_request": can_solicitar_vacantes(request.user),
             "can_authorize_vacante": can_autorizar_vacante(request.user),
             "vacantes": vacantes[:300],
             "estado_choices": VacanteRRHH.ESTADO_CHOICES,
@@ -87,19 +94,25 @@ def vacantes_lista(request):
 
 @login_required
 def vacante_nueva(request):
-    if not can_gestionar_vacantes(request.user):
+    can_manage = can_gestionar_vacantes(request.user)
+    if not can_solicitar_vacantes(request.user):
         raise PermissionDenied("No tienes permisos para crear solicitudes de vacantes")
     if request.method == "POST":
         sucursal = None
         sucursal_id = (request.POST.get("sucursal") or "").strip()
         if sucursal_id:
             sucursal = get_object_or_404(Sucursal, pk=sucursal_id)
+        solicitado_por = request.user
+        if can_manage:
+            solicitado_por_id = (request.POST.get("solicitado_por") or "").strip()
+            if solicitado_por_id:
+                solicitado_por = get_object_or_404(get_user_model(), pk=solicitado_por_id, is_active=True)
         vacante = crear_solicitud_vacante(
             area=request.POST.get("area"),
             puesto=request.POST.get("puesto"),
             fecha_solicitada=_parse_date(request.POST.get("fecha_solicitada")),
             fecha_necesaria=_parse_date(request.POST.get("fecha_necesaria")),
-            solicitado_por=request.user,
+            solicitado_por=solicitado_por,
             creado_por=request.user,
             sucursal=sucursal,
             departamento=request.POST.get("departamento") or "",
@@ -108,6 +121,7 @@ def vacante_nueva(request):
             prioridad=request.POST.get("prioridad") or VacanteRRHH.PRIORIDAD_NORMAL,
             motivo_solicitud=request.POST.get("motivo_solicitud") or "",
             sugerencias=request.POST.get("sugerencias") or "",
+            estado_inicial=VacanteRRHH.ESTADO_SOLICITADA if can_manage else VacanteRRHH.ESTADO_REVISION_RRHH,
         )
         messages.success(request, f"Solicitud {vacante.folio} creada.")
         return redirect("rrhh:rrhh_vacante_detalle", pk=vacante.pk)
@@ -118,6 +132,8 @@ def vacante_nueva(request):
         {
             "module_tabs": _module_tabs("vacantes"),
             "sucursales": Sucursal.objects.filter(activa=True).order_by("nombre"),
+            "can_manage_vacantes": can_manage,
+            "solicitantes": _usuarios_solicitantes_vacantes(),
             "departamento_choices": Empleado.DEP_CHOICES,
             "tipo_choices": VacanteRRHH.TIPO_CHOICES,
             "prioridad_choices": VacanteRRHH.PRIORIDAD_CHOICES,
@@ -137,7 +153,7 @@ def vacante_detalle(request, pk: int):
             "autorizador_asignado",
             "rechazado_por",
             "empleado_cubrio",
-        ).prefetch_related("movimientos__actor", "coberturas__empleado"),
+        ).prefetch_related("movimientos__actor", "coberturas__empleado", "seguimientos__creado_por"),
         pk=pk,
     )
     if not can_ver_vacante(request.user, vacante):
@@ -150,7 +166,17 @@ def vacante_detalle(request, pk: int):
             "vacante": vacante,
             "empleados": Empleado.objects.filter(activo=True).order_by("nombre")[:1200],
             "can_manage_vacantes": can_gestionar_vacantes(request.user),
+            "can_create_vacante_request": can_solicitar_vacantes(request.user),
             "can_authorize_vacante": can_autorizar_vacante(request.user, vacante),
+            "can_reenviar_revision": (
+                vacante.estado == VacanteRRHH.ESTADO_DEVUELTA_CORRECCION
+                and (
+                    can_gestionar_vacantes(request.user)
+                    or vacante.solicitado_por_id == request.user.id
+                    or vacante.creado_por_id == request.user.id
+                )
+            ),
+            "seguimiento_etapas": VacanteSeguimiento.ETAPA_CHOICES,
         },
     )
 
@@ -181,6 +207,22 @@ def vacante_accion(request, pk: int):
         elif action == "cancelar":
             cancelar_vacante(vacante, request.user, comentario)
             messages.success(request, f"Solicitud {vacante.folio} cancelada.")
+        elif action == "devolver_correccion":
+            devolver_vacante_correccion(vacante, request.user, comentario)
+            messages.success(request, f"Solicitud {vacante.folio} devuelta a corrección.")
+        elif action == "reenviar_revision":
+            reenviar_vacante_revision(vacante, request.user, comentario)
+            messages.success(request, f"Solicitud {vacante.folio} reenviada a revisión.")
+        elif action == "seguimiento":
+            agregar_seguimiento_vacante(
+                vacante,
+                request.user,
+                etapa=request.POST.get("etapa") or VacanteSeguimiento.ETAPA_COMENTARIO,
+                candidato=request.POST.get("candidato") or "",
+                comentario=comentario,
+                fecha=_parse_date(request.POST.get("fecha")),
+            )
+            messages.success(request, f"Seguimiento registrado para {vacante.folio}.")
         elif action == "cubrir":
             empleado = get_object_or_404(Empleado, pk=request.POST.get("empleado"))
             cubrir_vacante(
@@ -199,7 +241,7 @@ def vacante_accion(request, pk: int):
 
 
 def _can_view_board(user) -> bool:
-    if can_ver_vacante(user) or can_gestionar_vacantes(user) or can_autorizar_vacante(user):
+    if can_ver_vacante(user) or can_gestionar_vacantes(user) or can_autorizar_vacante(user) or can_solicitar_vacantes(user):
         return True
     if not getattr(user, "is_authenticated", False):
         return False
@@ -207,3 +249,26 @@ def _can_view_board(user) -> bool:
         VacanteRRHH.objects.filter(solicitado_por=user).exists()
         or VacanteRRHH.objects.filter(creado_por=user).exists()
     )
+
+
+def _usuarios_solicitantes_vacantes():
+    User = get_user_model()
+    ids = set(
+        Empleado.objects.filter(activo=True, usuario_erp__isnull=False)
+        .filter(
+            Q(puesto_operativo="JEFATURA")
+            | Q(puesto__icontains="jefe")
+            | Q(puesto__icontains="encarg")
+            | Q(colaboradores_directos__isnull=False)
+        )
+        .distinct()
+        .values_list("usuario_erp_id", flat=True)
+    )
+    ids.update(
+        User.objects.filter(
+            is_active=True,
+        )
+        .filter(Q(is_superuser=True) | Q(groups__name__iexact="DG"))
+        .values_list("id", flat=True)
+    )
+    return User.objects.filter(id__in=ids, is_active=True).order_by("first_name", "last_name", "username")

@@ -10,19 +10,15 @@ from django.utils import timezone
 
 from core.access import (
     ROLE_ADMIN,
-    ROLE_COMPRAS,
     ROLE_DG,
-    ROLE_LOGISTICA,
-    ROLE_PRODUCCION,
     ROLE_RRHH,
-    ROLE_VENTAS,
     can_manage_submodule,
     has_any_role,
 )
 from core.models import Notificacion
 from core.notificaciones import crear_notificaciones, usuarios_direccion_general, usuarios_por_grupo
 
-from .models import Empleado, VacanteCobertura, VacanteMovimiento, VacanteRRHH
+from .models import Empleado, VacanteCobertura, VacanteMovimiento, VacanteRRHH, VacanteSeguimiento
 
 
 def _normalizar_texto(value: str | None) -> str:
@@ -59,22 +55,20 @@ DIRECCION_PUESTO_KEYWORDS = (
     "DIRECCIÓN",
 )
 
-DEPARTAMENTO_ROLES = {
-    Empleado.DEP_VENTAS: (ROLE_VENTAS,),
-    Empleado.DEP_PRODUCCION: (ROLE_PRODUCCION,),
-    Empleado.DEP_RRHH: (ROLE_RRHH,),
-    Empleado.DEP_COMPRAS: (ROLE_COMPRAS,),
-    Empleado.DEP_LOGISTICA: (ROLE_LOGISTICA, ROLE_VENTAS, ROLE_PRODUCCION),
-    Empleado.DEP_ADMINISTRACION: (ROLE_ADMIN,),
-}
-
-
 def can_gestionar_vacantes(user) -> bool:
     if not user or not user.is_authenticated:
         return False
     if user.is_superuser:
         return True
     return bool(has_any_role(user, ROLE_RRHH) and can_manage_submodule(user, "rrhh", "vacantes"))
+
+
+def can_solicitar_vacantes(user) -> bool:
+    if not user or not user.is_authenticated:
+        return False
+    if can_gestionar_vacantes(user) or _es_direccion(user):
+        return True
+    return _usuario_tiene_jefatura(user)
 
 
 def can_ver_vacante(user, vacante: VacanteRRHH | None = None) -> bool:
@@ -156,6 +150,7 @@ def crear_solicitud_vacante(
     fecha_necesaria: date | None = None,
     motivo_solicitud: str = "",
     sugerencias: str = "",
+    estado_inicial: str = VacanteRRHH.ESTADO_SOLICITADA,
 ) -> VacanteRRHH:
     with transaction.atomic():
         vacante = VacanteRRHH.objects.create(
@@ -168,13 +163,13 @@ def crear_solicitud_vacante(
             prioridad=prioridad or VacanteRRHH.PRIORIDAD_NORMAL,
             fecha_solicitada=fecha_solicitada or timezone.localdate(),
             fecha_necesaria=fecha_necesaria,
-            estado=VacanteRRHH.ESTADO_SOLICITADA,
+            estado=estado_inicial or VacanteRRHH.ESTADO_SOLICITADA,
             motivo_solicitud=(motivo_solicitud or "").strip(),
             sugerencias=(sugerencias or "").strip(),
             solicitado_por=solicitado_por,
             creado_por=creado_por or solicitado_por,
         )
-        _registrar_movimiento(vacante, "", VacanteRRHH.ESTADO_SOLICITADA, creado_por or solicitado_por, "Solicitud creada")
+        _registrar_movimiento(vacante, "", vacante.estado, creado_por or solicitado_por, "Solicitud creada")
     notificar_vacante_solicitada(vacante, actor=creado_por or solicitado_por)
     return vacante
 
@@ -187,25 +182,41 @@ def enviar_vacante_autorizacion(vacante: VacanteRRHH, user, comentario: str = ""
     }:
         raise ValidationError("La vacante no está en un estado válido para enviarse a autorización.")
     requiere_direccion = vacante_requiere_autorizacion_direccion(vacante)
-    autorizador = None if requiere_direccion else resolver_autorizador_vacante(vacante, exclude_user=user)
+    autorizador = None if requiere_direccion else resolver_autorizador_vacante(vacante)
     if not requiere_direccion and not autorizador:
         raise ValidationError("No hay jefe directo asignado para autorizar esta vacante. Revisa Organización de Capital Humano.")
+    extra_updates = {
+        "validado_rrhh_por": user,
+        "fecha_validacion_rrhh": timezone.now(),
+        "requiere_direccion": requiere_direccion,
+        "tipo_autorizacion": (
+            VacanteRRHH.AUTORIZACION_DIRECCION
+            if requiere_direccion
+            else VacanteRRHH.AUTORIZACION_JEFE_DIRECTO
+        ),
+        "autorizador_asignado": autorizador,
+    }
+    if autorizador and autorizador.id == vacante.solicitado_por_id:
+        extra_updates.update(
+            {
+                "autorizado_por": autorizador,
+                "fecha_autorizacion": timezone.now(),
+            }
+        )
+        return _transition(
+            vacante,
+            VacanteRRHH.ESTADO_AUTORIZADA,
+            user,
+            comentario or "Validada por Capital Humano; solicitud autorizada por la jefatura solicitante.",
+            extra_updates=extra_updates,
+            notify=lambda updated: notificar_vacante_aprobada(updated, actor=user),
+        )
     return _transition(
         vacante,
         VacanteRRHH.ESTADO_PENDIENTE_DIRECCION,
         user,
         comentario or "Validada por Capital Humano y enviada a autorización.",
-        extra_updates={
-            "validado_rrhh_por": user,
-            "fecha_validacion_rrhh": timezone.now(),
-            "requiere_direccion": requiere_direccion,
-            "tipo_autorizacion": (
-                VacanteRRHH.AUTORIZACION_DIRECCION
-                if requiere_direccion
-                else VacanteRRHH.AUTORIZACION_JEFE_DIRECTO
-            ),
-            "autorizador_asignado": autorizador,
-        },
+        extra_updates=extra_updates,
         notify=lambda updated: notificar_vacante_para_autorizacion(updated, actor=user),
     )
 
@@ -331,6 +342,55 @@ def cubrir_vacante(
     return cobertura
 
 
+def devolver_vacante_correccion(vacante: VacanteRRHH, user, comentario: str = "") -> VacanteRRHH:
+    _require_rrhh(user)
+    if vacante.estado in {VacanteRRHH.ESTADO_CUBIERTA, VacanteRRHH.ESTADO_CANCELADA}:
+        raise ValidationError("Una vacante cerrada no puede devolverse a corrección.")
+    return _transition(
+        vacante,
+        VacanteRRHH.ESTADO_DEVUELTA_CORRECCION,
+        user,
+        comentario or "Solicitud devuelta a corrección.",
+    )
+
+
+def reenviar_vacante_revision(vacante: VacanteRRHH, user, comentario: str = "") -> VacanteRRHH:
+    if vacante.estado != VacanteRRHH.ESTADO_DEVUELTA_CORRECCION:
+        raise ValidationError("La vacante no está devuelta a corrección.")
+    if not (can_gestionar_vacantes(user) or vacante.solicitado_por_id == user.id or vacante.creado_por_id == user.id):
+        raise PermissionDenied("Solo el solicitante, capturista o Capital Humano puede reenviar esta vacante.")
+    return _transition(
+        vacante,
+        VacanteRRHH.ESTADO_REVISION_RRHH,
+        user,
+        comentario or "Solicitud corregida y reenviada a revisión de Capital Humano.",
+    )
+
+
+def agregar_seguimiento_vacante(
+    vacante: VacanteRRHH,
+    user,
+    *,
+    etapa: str = VacanteSeguimiento.ETAPA_COMENTARIO,
+    candidato: str = "",
+    comentario: str = "",
+    fecha: date | None = None,
+) -> VacanteSeguimiento:
+    _require_rrhh(user)
+    if vacante.estado in {VacanteRRHH.ESTADO_CANCELADA, VacanteRRHH.ESTADO_RECHAZADA, VacanteRRHH.ESTADO_CUBIERTA}:
+        raise ValidationError("No se puede agregar seguimiento a una vacante cerrada.")
+    if not (comentario or "").strip():
+        raise ValidationError("El seguimiento requiere comentario.")
+    return VacanteSeguimiento.objects.create(
+        vacante=vacante,
+        etapa=etapa or VacanteSeguimiento.ETAPA_COMENTARIO,
+        candidato=(candidato or "").strip(),
+        comentario=(comentario or "").strip(),
+        fecha=fecha or timezone.localdate(),
+        creado_por=user,
+    )
+
+
 def vacante_requiere_autorizacion_direccion(vacante: VacanteRRHH) -> bool:
     """
     Replica el criterio operativo de permisos: Dirección solo interviene en jefaturas.
@@ -347,9 +407,11 @@ def resolver_autorizador_vacante(vacante: VacanteRRHH, *, exclude_user=None):
     if vacante_requiere_autorizacion_direccion(vacante):
         return None
 
-    exclude_ids = {getattr(exclude_user, "id", None), vacante.solicitado_por_id, vacante.creado_por_id}
+    exclude_ids = {getattr(exclude_user, "id", None)}
     exclude_ids = {user_id for user_id in exclude_ids if user_id}
     departamento = _inferir_departamento_vacante(vacante)
+    if _usuario_es_jefatura_departamento(vacante.solicitado_por, departamento):
+        return vacante.solicitado_por
 
     jefe = (
         Empleado.objects.select_related("usuario_erp")
@@ -362,17 +424,33 @@ def resolver_autorizador_vacante(vacante: VacanteRRHH, *, exclude_user=None):
     if jefe and jefe.usuario_erp_id:
         return jefe.usuario_erp
 
-    for role in DEPARTAMENTO_ROLES.get(departamento, ()):
-        user = (
-            get_user_model()
-            .objects.filter(is_active=True, groups__name__iexact=role)
-            .exclude(id__in=exclude_ids)
-            .order_by("id")
-            .first()
-        )
-        if user:
-            return user
     return None
+
+
+def _usuario_es_jefatura_departamento(user, departamento: str) -> bool:
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    departamento = _normalizar_texto(departamento)
+    empleado = getattr(user, "empleado_rrhh", None)
+    if empleado:
+        empleado_departamento = _normalizar_texto(empleado.departamento)
+        puesto = f"{empleado.puesto_operativo or ''} {empleado.puesto or ''}".upper()
+        if empleado_departamento == departamento and ("JEFATURA" in puesto or "JEFE" in puesto or "ENCARG" in puesto):
+            return True
+    return False
+
+
+def _usuario_tiene_jefatura(user) -> bool:
+    empleado = getattr(user, "empleado_rrhh", None)
+    if not empleado:
+        return False
+    puesto = f"{empleado.puesto_operativo or ''} {empleado.puesto or ''}".upper()
+    return (
+        "JEFATURA" in puesto
+        or "JEFE" in puesto
+        or "ENCARG" in puesto
+        or empleado.colaboradores_directos.exists()
+    )
 
 
 def usuarios_autorizadores_vacante(vacante: VacanteRRHH) -> list:

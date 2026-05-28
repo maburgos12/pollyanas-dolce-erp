@@ -6,15 +6,19 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.models import Notificacion, Sucursal
-from rrhh.models import Empleado, VacanteCobertura, VacanteMovimiento, VacanteRRHH
+from rrhh.models import Empleado, VacanteCobertura, VacanteMovimiento, VacanteRRHH, VacanteSeguimiento
 from rrhh.services_vacantes import (
+    agregar_seguimiento_vacante,
     aprobar_vacante_autorizacion,
     can_autorizar_vacante,
+    can_solicitar_vacantes,
     can_ver_vacante,
     cubrir_vacante,
     crear_solicitud_vacante,
+    devolver_vacante_correccion,
     enviar_vacante_autorizacion,
     iniciar_reclutamiento_vacante,
+    reenviar_vacante_revision,
 )
 
 
@@ -144,6 +148,87 @@ class VacantesSolicitudServiceTests(TestCase):
         with self.assertRaises(ValidationError):
             iniciar_reclutamiento_vacante(vacante, self.rrhh_user)
 
+    def test_rrhh_captura_a_nombre_de_jefe_y_validacion_autoriza_operativa(self):
+        vacante = crear_solicitud_vacante(
+            area="ventas",
+            puesto="cajera",
+            fecha_solicitada=date(2026, 5, 28),
+            solicitado_por=self.jefe_ventas,
+            creado_por=self.rrhh_user,
+            departamento=Empleado.DEP_VENTAS,
+        )
+
+        enviar_vacante_autorizacion(vacante, self.rrhh_user, "Validada por CH")
+        vacante.refresh_from_db()
+
+        self.assertEqual(vacante.estado, VacanteRRHH.ESTADO_AUTORIZADA)
+        self.assertEqual(vacante.creado_por, self.rrhh_user)
+        self.assertEqual(vacante.solicitado_por, self.jefe_ventas)
+        self.assertEqual(vacante.autorizador_asignado, self.jefe_ventas)
+        self.assertEqual(vacante.autorizado_por, self.jefe_ventas)
+        self.assertEqual(VacanteMovimiento.objects.filter(vacante=vacante).count(), 2)
+
+    def test_grupo_area_sin_jefatura_en_organizacion_no_autoriza(self):
+        usuario_compras = User.objects.create_user(username="compras.operador", password="pass123")
+        usuario_compras.groups.add(Group.objects.get_or_create(name="COMPRAS")[0])
+        self.assertFalse(can_solicitar_vacantes(usuario_compras))
+        vacante = crear_solicitud_vacante(
+            area="compras",
+            puesto="auxiliar administrativo",
+            fecha_solicitada=date(2026, 5, 28),
+            solicitado_por=usuario_compras,
+            creado_por=self.rrhh_user,
+            departamento=Empleado.DEP_COMPRAS,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "No hay jefe directo asignado"):
+            enviar_vacante_autorizacion(vacante, self.rrhh_user, "Validada por CH")
+
+    def test_correccion_y_reenvio_regresan_a_revision_sin_borrar_historial(self):
+        vacante = crear_solicitud_vacante(
+            area="ventas",
+            puesto="cajera",
+            fecha_solicitada=date(2026, 5, 28),
+            solicitado_por=self.jefe_ventas,
+            creado_por=self.jefe_ventas,
+            departamento=Empleado.DEP_VENTAS,
+        )
+
+        devolver_vacante_correccion(vacante, self.rrhh_user, "Falta fecha necesaria")
+        vacante.refresh_from_db()
+        self.assertEqual(vacante.estado, VacanteRRHH.ESTADO_DEVUELTA_CORRECCION)
+
+        reenviar_vacante_revision(vacante, self.jefe_ventas, "Fecha corregida")
+        vacante.refresh_from_db()
+        self.assertEqual(vacante.estado, VacanteRRHH.ESTADO_REVISION_RRHH)
+        self.assertEqual(VacanteMovimiento.objects.filter(vacante=vacante).count(), 3)
+
+    def test_rrhh_agrega_seguimiento_sin_cambiar_estado(self):
+        vacante = crear_solicitud_vacante(
+            area="ventas",
+            puesto="cajera",
+            fecha_solicitada=date(2026, 5, 28),
+            solicitado_por=self.jefe_ventas,
+            creado_por=self.rrhh_user,
+            departamento=Empleado.DEP_VENTAS,
+        )
+        vacante = enviar_vacante_autorizacion(vacante, self.rrhh_user)
+        vacante = iniciar_reclutamiento_vacante(vacante, self.rrhh_user)
+        vacante.refresh_from_db()
+
+        seguimiento = agregar_seguimiento_vacante(
+            vacante,
+            self.rrhh_user,
+            etapa=VacanteSeguimiento.ETAPA_ENTREVISTA,
+            candidato="Candidata Local",
+            comentario="Entrevista agendada",
+        )
+        vacante.refresh_from_db()
+
+        self.assertEqual(seguimiento.vacante, vacante)
+        self.assertEqual(seguimiento.creado_por, self.rrhh_user)
+        self.assertEqual(vacante.estado, VacanteRRHH.ESTADO_RECLUTAMIENTO)
+
 
 class VacantesSolicitudViewTests(TestCase):
     def setUp(self):
@@ -243,3 +328,30 @@ class VacantesSolicitudViewTests(TestCase):
         self.assertContains(response, vacante.folio)
         self.assertContains(response, "Jefe directo")
         self.assertNotContains(response, "Aprobar")
+
+    def test_jefatura_puede_crear_solicitud_para_revision_rrhh(self):
+        self.assertTrue(can_solicitar_vacantes(self.jefe_ventas))
+        self.client.force_login(self.jefe_ventas)
+        response = self.client.get(reverse("rrhh:rrhh_vacantes"))
+        self.assertContains(response, "Nueva solicitud")
+
+        response = self.client.post(
+            reverse("rrhh:rrhh_vacante_nueva"),
+            {
+                "area": "ventas",
+                "puesto": "cajera",
+                "departamento": Empleado.DEP_VENTAS,
+                "fecha_solicitada": "2026-05-28",
+                "fecha_necesaria": "2026-06-05",
+                "cantidad_solicitada": "1",
+                "tipo_solicitud": VacanteRRHH.TIPO_REEMPLAZO,
+                "prioridad": VacanteRRHH.PRIORIDAD_NORMAL,
+                "motivo_solicitud": "Reposición de caja.",
+            },
+        )
+
+        vacante = VacanteRRHH.objects.get(area="VENTAS", puesto="CAJERA")
+        self.assertRedirects(response, reverse("rrhh:rrhh_vacante_detalle", kwargs={"pk": vacante.pk}))
+        self.assertEqual(vacante.estado, VacanteRRHH.ESTADO_REVISION_RRHH)
+        self.assertEqual(vacante.creado_por, self.jefe_ventas)
+        self.assertEqual(vacante.solicitado_por, self.jefe_ventas)

@@ -20,6 +20,7 @@ from .models import (
     VacanteCobertura,
     VacanteMovimiento,
     VacanteRRHH,
+    VacanteSeguimiento,
 )
 
 
@@ -186,6 +187,13 @@ class VacanteCoberturaAdmin(admin.ModelAdmin):
     list_display = ("vacante", "empleado", "fecha_cobertura", "creado_por")
     list_filter = ("fecha_cobertura",)
     search_fields = ("vacante__folio", "empleado__nombre", "nota")
+
+
+@admin.register(VacanteSeguimiento)
+class VacanteSeguimientoAdmin(admin.ModelAdmin):
+    list_display = ("vacante", "etapa", "candidato", "fecha", "creado_por", "creado_en")
+    list_filter = ("etapa", "fecha", "creado_en")
+    search_fields = ("vacante__folio", "vacante__area", "vacante__puesto", "candidato", "comentario")
 
 
 @admin.register(AsistenciaEmpleado)

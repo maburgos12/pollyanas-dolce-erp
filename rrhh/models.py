@@ -410,6 +410,7 @@ class VacanteRRHH(models.Model):
     ESTADO_RECLUTAMIENTO = "reclutamiento"
     ESTADO_CUBIERTA = "cubierta"
     ESTADO_PAUSADA = "pausada"
+    ESTADO_DEVUELTA_CORRECCION = "devuelta_correccion"
     ESTADO_RECHAZADA = "rechazada"
     ESTADO_CANCELADA = "cancelada"
     ESTADO_CHOICES = [
@@ -420,6 +421,7 @@ class VacanteRRHH(models.Model):
         (ESTADO_RECLUTAMIENTO, "En reclutamiento"),
         (ESTADO_CUBIERTA, "Cubierta"),
         (ESTADO_PAUSADA, "Pausada"),
+        (ESTADO_DEVUELTA_CORRECCION, "Devuelta a corrección"),
         (ESTADO_RECHAZADA, "Rechazada"),
         (ESTADO_CANCELADA, "Cancelada"),
     ]
@@ -606,6 +608,43 @@ class VacanteCobertura(models.Model):
 
     def __str__(self) -> str:
         return f"{self.vacante.folio} · {self.empleado.nombre}"
+
+
+class VacanteSeguimiento(models.Model):
+    ETAPA_COMENTARIO = "comentario"
+    ETAPA_BUSQUEDA = "busqueda"
+    ETAPA_CONTACTO = "contacto"
+    ETAPA_ENTREVISTA = "entrevista"
+    ETAPA_PRUEBA = "prueba"
+    ETAPA_OFERTA = "oferta"
+    ETAPA_CONTRATADO = "contratado"
+    ETAPA_DESCARTADO = "descartado"
+    ETAPA_CHOICES = [
+        (ETAPA_COMENTARIO, "Comentario"),
+        (ETAPA_BUSQUEDA, "Búsqueda"),
+        (ETAPA_CONTACTO, "Contacto"),
+        (ETAPA_ENTREVISTA, "Entrevista"),
+        (ETAPA_PRUEBA, "Prueba"),
+        (ETAPA_OFERTA, "Oferta"),
+        (ETAPA_CONTRATADO, "Contratado"),
+        (ETAPA_DESCARTADO, "Descartado"),
+    ]
+
+    vacante = models.ForeignKey("rrhh.VacanteRRHH", on_delete=models.CASCADE, related_name="seguimientos")
+    etapa = models.CharField(max_length=20, choices=ETAPA_CHOICES, default=ETAPA_COMENTARIO)
+    candidato = models.CharField(max_length=180, blank=True, default="")
+    comentario = models.TextField()
+    fecha = models.DateField(default=timezone.localdate)
+    creado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-fecha", "-creado_en", "-id"]
+        verbose_name = "Seguimiento de vacante"
+        verbose_name_plural = "Seguimientos de vacante"
+
+    def __str__(self) -> str:
+        return f"{self.vacante.folio} · {self.get_etapa_display()} · {self.fecha}"
 
 
 class Turno(models.Model):

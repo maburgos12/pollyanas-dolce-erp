@@ -59,6 +59,7 @@
       <div class="vacante-kv"><span>Departamento</span><strong>{{ vacante.get_departamento_display|default:"-" }}</strong></div>
       <div class="vacante-kv"><span>Sucursal</span><strong>{% if vacante.sucursal %}{{ vacante.sucursal.nombre }}{% else %}-{% endif %}</strong></div>
       <div class="vacante-kv"><span>Solicitante</span><strong>{% if vacante.solicitado_por %}{{ vacante.solicitado_por.get_full_name|default:vacante.solicitado_por.username }}{% else %}-{% endif %}</strong></div>
+      <div class="vacante-kv"><span>Capturó</span><strong>{% if vacante.creado_por %}{{ vacante.creado_por.get_full_name|default:vacante.creado_por.username }}{% else %}-{% endif %}</strong></div>
       <div class="vacante-kv"><span>Autorizó</span><strong>{% if vacante.autorizado_por %}{{ vacante.autorizado_por.get_full_name|default:vacante.autorizado_por.username }}{% else %}-{% endif %}</strong></div>
       <div class="vacante-kv"><span>Ruta de autorización</span><strong>{{ vacante.get_tipo_autorizacion_display }}</strong></div>
       <div class="vacante-kv">
@@ -86,7 +87,7 @@
     {% endif %}
   </section>
 
-  {% if can_manage_vacantes or can_authorize_vacante %}
+  {% if can_manage_vacantes or can_authorize_vacante or can_reenviar_revision %}
   <section class="vacante-panel">
     <h2>Acciones</h2>
     <div class="vacante-actions">
@@ -95,7 +96,21 @@
           {% csrf_token %}
           <input type="hidden" name="action" value="enviar_autorizacion">
           <input type="text" name="comentario" placeholder="Comentario">
-          <button class="btn btn-secondary" type="submit">Enviar a autorización</button>
+          <button class="btn btn-secondary" type="submit">Validar solicitud</button>
+        </form>
+        <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="devolver_correccion">
+          <input type="text" name="comentario" placeholder="Qué falta corregir">
+          <button class="btn btn-secondary" type="submit">Devolver a corrección</button>
+        </form>
+      {% endif %}
+      {% if can_reenviar_revision %}
+        <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="reenviar_revision">
+          <input type="text" name="comentario" placeholder="Qué se corrigió">
+          <button class="btn btn-primary" type="submit">Reenviar a revisión</button>
         </form>
       {% endif %}
       {% if can_manage_vacantes and vacante.estado == "autorizada" or can_manage_vacantes and vacante.estado == "pausada" %}
@@ -153,10 +168,45 @@
       {% endif %}
       {% if vacante.estado == "cubierta" or vacante.estado == "rechazada" or vacante.estado == "cancelada" %}
         <span class="vacante-muted">Solicitud cerrada, sin acciones pendientes.</span>
+      {% elif vacante.estado == "devuelta_correccion" %}
+        <span class="vacante-muted">Solicitud esperando corrección del solicitante o capturista.</span>
       {% endif %}
     </div>
   </section>
   {% endif %}
+
+  <section class="vacante-panel">
+    <h2>Seguimiento de reclutamiento</h2>
+    {% if can_manage_vacantes and vacante.estado != "cubierta" and vacante.estado != "rechazada" and vacante.estado != "cancelada" %}
+      <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="seguimiento">
+        <select name="etapa">
+          {% for value, label in seguimiento_etapas %}
+            <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+        <input type="date" name="fecha">
+        <input type="text" name="candidato" placeholder="Candidato">
+        <input type="text" name="comentario" placeholder="Comentario de seguimiento" required>
+        <button class="btn btn-primary" type="submit">Agregar seguimiento</button>
+      </form>
+    {% endif %}
+    <div class="vacante-history">
+      {% for seguimiento in vacante.seguimientos.all %}
+        <div class="vacante-history-item">
+          <strong>{{ seguimiento.get_etapa_display }} · {{ seguimiento.fecha|date:"Y-m-d" }}</strong>
+          <span class="vacante-muted">
+            {% if seguimiento.candidato %}{{ seguimiento.candidato }} · {% endif %}
+            {{ seguimiento.comentario }}
+            {% if seguimiento.creado_por %} · {{ seguimiento.creado_por.get_full_name|default:seguimiento.creado_por.username }}{% endif %}
+          </span>
+        </div>
+      {% empty %}
+        <div class="vacante-muted">Sin seguimiento registrado.</div>
+      {% endfor %}
+    </div>
+  </section>
 
   <section class="vacante-panel">
     <h2>Coberturas</h2>

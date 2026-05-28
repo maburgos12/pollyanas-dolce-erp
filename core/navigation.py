@@ -236,6 +236,26 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
             },
         )
         try:
+            from rrhh.services_vacantes import can_solicitar_vacantes
+
+            puede_solicitar_vacantes = can_solicitar_vacantes(user)
+        except Exception:
+            puede_solicitar_vacantes = False
+        if puede_solicitar_vacantes:
+            match_len = len("/rrhh/vacantes/") if current_path.startswith("/rrhh/vacantes/") else 0
+            best_match_len = max(best_match_len, match_len)
+            mi_trabajo["items"].append(
+                {
+                    "label": "Solicitar vacante",
+                    "url": "/rrhh/vacantes/nueva/",
+                    "active": False,
+                    "_match_len": match_len,
+                    "module": "rrhh",
+                    "submodule": "vacantes",
+                    "initial": "V",
+                }
+            )
+        try:
             from rrhh.models import Prestamo
 
             tiene_prestamos_por_autorizar = Prestamo.objects.filter(

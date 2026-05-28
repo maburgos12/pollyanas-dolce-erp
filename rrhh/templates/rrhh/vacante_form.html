@@ -32,7 +32,7 @@
 <section class="vacante-form-page">
   <div class="vacante-form-head">
     <div class="vacante-form-title">Nueva solicitud de vacante</div>
-    <div class="vacante-form-copy">Registra la necesidad operativa para que Capital Humano la valide y la lleve a autorización o reclutamiento.</div>
+    <div class="vacante-form-copy">Registra la necesidad operativa; Capital Humano valida datos, define la ruta de autorización y da seguimiento al reclutamiento.</div>
   </div>
 
   <form class="vacante-form-card" method="post">
@@ -46,6 +46,17 @@
         <label>Puesto</label>
         <input type="text" name="puesto" required placeholder="Cajera">
       </div>
+      {% if can_manage_vacantes %}
+        <div class="vacante-field span-2">
+          <label>Solicitante / jefatura que pide la vacante</label>
+          <select name="solicitado_por">
+            <option value="">Capturada por Capital Humano</option>
+            {% for solicitante in solicitantes %}
+              <option value="{{ solicitante.id }}">{{ solicitante.get_full_name|default:solicitante.username }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      {% endif %}
       <div class="vacante-field">
         <label>Departamento</label>
         <select name="departamento">
