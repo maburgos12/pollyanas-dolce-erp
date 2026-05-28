@@ -9,6 +9,8 @@ from core.models import Notificacion, Sucursal
 from rrhh.models import Empleado, VacanteCobertura, VacanteMovimiento, VacanteRRHH
 from rrhh.services_vacantes import (
     aprobar_vacante_autorizacion,
+    can_autorizar_vacante,
+    can_ver_vacante,
     cubrir_vacante,
     crear_solicitud_vacante,
     enviar_vacante_autorizacion,
@@ -83,6 +85,8 @@ class VacantesSolicitudServiceTests(TestCase):
         self.assertEqual(vacante.autorizador_asignado, self.jefe_ventas)
         self.assertTrue(Notificacion.objects.filter(usuario=self.jefe_ventas, objeto_id=str(vacante.id)).exists())
         self.assertFalse(Notificacion.objects.filter(usuario=self.dg_user, objeto_id=str(vacante.id)).exists())
+        self.assertTrue(can_ver_vacante(self.dg_user, vacante))
+        self.assertFalse(can_autorizar_vacante(self.dg_user, vacante))
 
         with self.assertRaises(PermissionDenied):
             aprobar_vacante_autorizacion(vacante, self.dg_user, "Dirección no autoriza operativas")
@@ -218,3 +222,24 @@ class VacantesSolicitudViewTests(TestCase):
         self.assertRedirects(response, reverse("rrhh:rrhh_vacante_detalle", kwargs={"pk": vacante.pk}))
         vacante.refresh_from_db()
         self.assertEqual(vacante.estado, VacanteRRHH.ESTADO_AUTORIZADA)
+
+    def test_direccion_general_ve_vacante_operativa_sin_autorizarla(self):
+        vacante = crear_solicitud_vacante(
+            area="ventas",
+            puesto="cajera",
+            fecha_solicitada=date(2026, 5, 28),
+            solicitado_por=self.rrhh_user,
+            creado_por=self.rrhh_user,
+            departamento=Empleado.DEP_VENTAS,
+        )
+        enviar_vacante_autorizacion(vacante, self.rrhh_user)
+        vacante.refresh_from_db()
+
+        self.client.force_login(self.dg_user)
+        response = self.client.get(reverse("rrhh:rrhh_vacantes"))
+        self.assertContains(response, vacante.folio)
+
+        response = self.client.get(reverse("rrhh:rrhh_vacante_detalle", kwargs={"pk": vacante.pk}))
+        self.assertContains(response, vacante.folio)
+        self.assertContains(response, "Jefe directo")
+        self.assertNotContains(response, "Aprobar")

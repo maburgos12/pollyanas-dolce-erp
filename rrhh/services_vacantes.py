@@ -82,13 +82,13 @@ def can_ver_vacante(user, vacante: VacanteRRHH | None = None) -> bool:
         return False
     if can_gestionar_vacantes(user):
         return True
+    if _es_direccion(user):
+        return True
     if vacante and vacante.solicitado_por_id == user.id:
         return True
     if vacante and vacante.creado_por_id == user.id:
         return True
     if vacante and (vacante.autorizador_asignado_id == user.id or vacante.autorizado_por_id == user.id):
-        return True
-    if vacante and vacante.requiere_direccion and _es_direccion(user):
         return True
     return False
 
@@ -117,7 +117,7 @@ def can_aprobar_vacante_direccion(user, vacante: VacanteRRHH | None = None) -> b
 
 def filtrar_vacantes_para_usuario(user, qs=None):
     qs = qs if qs is not None else VacanteRRHH.objects.all()
-    if can_gestionar_vacantes(user):
+    if can_gestionar_vacantes(user) or _es_direccion(user):
         return qs
     if not user or not user.is_authenticated:
         return qs.none()
@@ -128,8 +128,6 @@ def filtrar_vacantes_para_usuario(user, qs=None):
         | Q(autorizador_asignado=user)
         | Q(autorizado_por=user)
     )
-    if _es_direccion(user):
-        filtros |= Q(requiere_direccion=True)
     return qs.filter(filtros).distinct()
 
 
@@ -141,6 +139,7 @@ def vacantes_por_autorizar_count(user) -> int:
     if _es_direccion(user):
         filtros |= Q(requiere_direccion=True)
     return qs.filter(filtros).exclude(Q(solicitado_por=user) | Q(creado_por=user)).distinct().count()
+
 
 def crear_solicitud_vacante(
     *,

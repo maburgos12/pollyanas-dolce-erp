@@ -199,7 +199,7 @@ def vacante_accion(request, pk: int):
 
 
 def _can_view_board(user) -> bool:
-    if can_gestionar_vacantes(user) or can_autorizar_vacante(user):
+    if can_ver_vacante(user) or can_gestionar_vacantes(user) or can_autorizar_vacante(user):
         return True
     if not getattr(user, "is_authenticated", False):
         return False
