@@ -63,6 +63,8 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
             ".assign-page",
             ".loan-page",
             ".rrhh-edit-form",
+            "--erp-tab-min",
+            ".rrhh-tabs",
             ".permisos-board",
             ".ch-kanban",
             ".rule-selector",
