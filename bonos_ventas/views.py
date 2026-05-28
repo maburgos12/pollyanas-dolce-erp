@@ -26,7 +26,7 @@ from .serializers import (
     RegistroDiarioVentasSerializer,
     VentaCategoriaSucursalSerializer,
 )
-from .services import sync_ventas_categorias
+from .services import sync_dias_repartidor, sync_ventas_categorias
 
 
 class CanAccessBonosVentas(BasePermission):
@@ -134,6 +134,15 @@ class VentaCategoriaSucursalViewSet(viewsets.ModelViewSet):
         sucursal_id = request.data.get("sucursal")
         updated = sync_ventas_categorias(periodo, sucursal_id=sucursal_id)
         return Response({"actualizados": updated}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="sync-repartidores")
+    def sync_repartidores(self, request):
+        periodo_id = request.data.get("periodo")
+        if not periodo_id:
+            return Response({"detail": "Se requiere periodo."}, status=status.HTTP_400_BAD_REQUEST)
+        periodo = get_object_or_404(ConfigBonoVentasPeriodo, pk=periodo_id)
+        resultado = sync_dias_repartidor(periodo)
+        return Response(resultado, status=status.HTTP_200_OK)
 
 
 class BonoVentasEmpleadoViewSet(viewsets.ModelViewSet):

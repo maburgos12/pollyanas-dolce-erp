@@ -662,6 +662,18 @@
               <label for="sucursal">Sucursal</label>
               <input id="sucursal" class="input-field" type="text" name="sucursal">
             </div>
+            <div class="rrhh-field span-2" id="campo-usuario-erp" style="display:none">
+              <label for="usuario_erp">Usuario ERP (acceso al sistema)</label>
+              <select id="usuario_erp" class="input-field" name="usuario_erp">
+                <option value="">— Sin usuario ERP vinculado —</option>
+                {% for u in usuarios_erp %}
+                  {% if not u.empleado_rrhh %}
+                  <option value="{{ u.id }}">{{ u.username }}{% if u.get_full_name %} · {{ u.get_full_name }}{% endif %}</option>
+                  {% endif %}
+                {% endfor %}
+              </select>
+              <div class="rrhh-help">Requerido para repartidores: vincula el perfil de logística con el registro de nómina.</div>
+            </div>
             <div class="rrhh-bonus-box" data-bonus-scope>
               <div>
                 <div class="rrhh-bonus-title">Esquemas de bono</div>
@@ -1088,6 +1100,20 @@
                         <label for="edit_sucursal_{{ e.id }}">Sucursal</label>
                         <input id="edit_sucursal_{{ e.id }}" class="input-field" type="text" name="sucursal" value="{{ e.sucursal }}">
                       </div>
+                      <div class="rrhh-field span-2" data-usuario-erp-field style="{% if e.puesto_operativo != 'REPARTIDOR' %}display:none{% endif %}">
+                        <label for="edit_usuario_erp_{{ e.id }}">Usuario ERP (acceso al sistema)</label>
+                        <select id="edit_usuario_erp_{{ e.id }}" class="input-field" name="usuario_erp">
+                          <option value="">— Sin usuario ERP vinculado —</option>
+                          {% for u in usuarios_erp %}
+                            {% if not u.empleado_rrhh or u.empleado_rrhh.pk == e.pk %}
+                            <option value="{{ u.id }}" {% if e.usuario_erp_id == u.id %}selected{% endif %}>
+                              {{ u.username }}{% if u.get_full_name %} · {{ u.get_full_name }}{% endif %}
+                            </option>
+                            {% endif %}
+                          {% endfor %}
+                        </select>
+                        <div class="rrhh-help">Vincula el perfil de logística con el registro de nómina para cálculo de bonos.</div>
+                      </div>
                       <label class="rrhh-checkline">
                         <input type="checkbox" name="activo" {% if e.activo %}checked{% endif %}>
                         Activo
@@ -1239,6 +1265,15 @@
     if (puesto && puestoSelect && Array.from(puestoSelect.options).some(option => option.value === puesto)) {
       puestoSelect.value = puesto;
     }
+    if (ventas) ventas.checked = ventas.checked || puesto === 'REPARTIDOR';
+    if (produccion) produccion.checked = produccion.checked || ['HORNOS', 'PRODUCCION', 'ARMADO', 'CRUCERO', 'ENVIO_SUCURSAL'].includes(puesto);
+    _toggleUsuarioErpField(form, puesto);
+  }
+
+  function _toggleUsuarioErpField(form, puesto) {
+    const campo = form.querySelector('#campo-usuario-erp, [data-usuario-erp-field]');
+    if (!campo) return;
+    campo.style.display = puesto === 'REPARTIDOR' ? '' : 'none';
   }
 
   document.addEventListener('change', (event) => {
@@ -1249,6 +1284,10 @@
       return;
     }
     syncAreaDefaults(select);
+    // también reaccionar al cambio directo de puesto_operativo en edición inline
+    if (select.name === 'puesto_operativo') {
+      _toggleUsuarioErpField(select.closest('form'), select.value);
+    }
   });
 
   modal.querySelector('[data-catalog-cancel]').addEventListener('click', () => {

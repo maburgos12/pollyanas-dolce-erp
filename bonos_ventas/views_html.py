@@ -19,7 +19,7 @@ from core.models import Sucursal
 
 from .empleados import empleados_elegibles_bonos_ventas
 from .models import BonoVentasEmpleado, CATEGORIAS_PRODUCTO, ConfigBonoVentasPeriodo, VentaCategoriaSucursal
-from .services import sync_ventas_categorias
+from .services import sync_dias_repartidor, sync_ventas_categorias
 
 
 CATEGORY_WEIGHT_FIELDS = {
@@ -113,6 +113,8 @@ def bonos_ventas_dashboard(request):
             periodo.limite_puntualidad = _parse_int(request.POST.get("limite_puntualidad"), periodo.limite_puntualidad)
             periodo.bono_ventas_adicional = _parse_decimal(request.POST.get("bono_ventas_adicional"))
             periodo.umbral_crecimiento_pct = _parse_decimal(request.POST.get("umbral_crecimiento_pct"))
+            periodo.bono_repartidor_adicional = _parse_decimal(request.POST.get("bono_repartidor_adicional"))
+            periodo.umbral_efectividad_pct = _parse_decimal(request.POST.get("umbral_efectividad_pct"))
             for category, field in CATEGORY_WEIGHT_FIELDS.items():
                 setattr(periodo, field, _parse_decimal(request.POST.get(field)))
             periodo.creado_por = periodo.creado_por or request.user
@@ -136,6 +138,15 @@ def bonos_ventas_dashboard(request):
             messages.success(request, f"Ventas por categoría sincronizadas: {updated}.")
             return _dashboard_redirect(mes, anio)
 
+        if action == "sync_repartidores":
+            resultado = sync_dias_repartidor(periodo)
+            messages.success(
+                request,
+                f"Repartidores sincronizados: {resultado['actualizados']}."
+                + (f" Sin vínculo ERP: {resultado['sin_repartidor_vinculado']}." if resultado["sin_repartidor_vinculado"] else ""),
+            )
+            return _dashboard_redirect(mes, anio)
+
         if action == "recalcular":
             total = _recalcular_periodo(periodo)
             messages.success(request, f"Bonos recalculados: {total}.")
@@ -147,6 +158,8 @@ def bonos_ventas_dashboard(request):
             bono.dias_uniforme = _parse_int(request.POST.get("dias_uniforme"), bono.dias_uniforme)
             bono.dias_asistencia = _parse_int(request.POST.get("dias_asistencia"), bono.dias_asistencia)
             bono.dias_puntualidad = _parse_int(request.POST.get("dias_puntualidad"), bono.dias_puntualidad)
+            if "dias_con_bitacora" in request.POST:
+                bono.dias_con_bitacora = _parse_int(request.POST.get("dias_con_bitacora"), bono.dias_con_bitacora)
             bono.ajuste_positivo = _parse_decimal(request.POST.get("ajuste_positivo"))
             bono.ajuste_negativo = _parse_decimal(request.POST.get("ajuste_negativo"))
             bono.bono_extra = _parse_decimal(request.POST.get("bono_extra"))
@@ -194,7 +207,8 @@ def bonos_ventas_dashboard(request):
 
     total_bonos = sum((bono.total_a_pagar for bono in bonos), Decimal("0"))
     passing_asistencia = sum(1 for bono in bonos if bono.pasa_asistencia)
-    con_bono_ventas = sum(1 for bono in bonos if bono.pasa_bono_ventas)
+    con_bono_ventas = sum(1 for bono in bonos if bono.pasa_bono_ventas and not bono._es_repartidor())
+    repartidores_con_bono = sum(1 for bono in bonos if bono._es_repartidor() and bono.pasa_bono_ventas)
     defaults = {
         "dias_laborables": 23,
         "bono_base": Decimal("300.00"),
@@ -206,6 +220,8 @@ def bonos_ventas_dashboard(request):
         "limite_puntualidad": 2,
         "bono_ventas_adicional": Decimal("300.00"),
         "umbral_crecimiento_pct": Decimal("5.00"),
+        "bono_repartidor_adicional": Decimal("300.00"),
+        "umbral_efectividad_pct": Decimal("85.00"),
         "peso_grande": Decimal("15.00"),
         "peso_mediano": Decimal("35.00"),
         "peso_chico": Decimal("20.00"),
@@ -239,6 +255,7 @@ def bonos_ventas_dashboard(request):
             "total_bonos": total_bonos,
             "passing_asistencia": passing_asistencia,
             "con_bono_ventas": con_bono_ventas,
+            "repartidores_con_bono": repartidores_con_bono,
             "can_manage": can_manage,
             "defaults": defaults,
         },

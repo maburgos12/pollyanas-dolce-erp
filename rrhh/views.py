@@ -13,6 +13,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 
+from django.contrib.auth import get_user_model
+
 from core.access import can_manage_rrhh, can_view_rrhh
 from core.audit import log_event
 
@@ -739,6 +741,16 @@ def empleados(request):
                 empleado.email = (request.POST.get("email") or "").strip()
                 empleado.sucursal = (request.POST.get("sucursal") or "").strip()
                 empleado.activo = request.POST.get("activo") == "on"
+                usuario_erp_id = (request.POST.get("usuario_erp") or "").strip()
+                if usuario_erp_id.isdigit():
+                    User = get_user_model()
+                    nuevo_user = User.objects.filter(pk=int(usuario_erp_id)).first()
+                    if nuevo_user and (not hasattr(nuevo_user, "empleado_rrhh") or nuevo_user.empleado_rrhh is None or nuevo_user.empleado_rrhh.pk == empleado.pk):
+                        empleado.usuario_erp = nuevo_user
+                    elif not nuevo_user:
+                        empleado.usuario_erp = None
+                elif usuario_erp_id == "":
+                    empleado.usuario_erp = None
                 empleado.save()
                 sincronizar_esquemas_bono(empleado, request.POST, organizacion)
                 log_event(
@@ -781,6 +793,13 @@ def empleados(request):
                 email=(request.POST.get("email") or "").strip(),
                 sucursal=(request.POST.get("sucursal") or "").strip(),
             )
+            usuario_erp_id = (request.POST.get("usuario_erp") or "").strip()
+            if usuario_erp_id.isdigit():
+                User = get_user_model()
+                nuevo_user = User.objects.filter(pk=int(usuario_erp_id)).first()
+                if nuevo_user and (not hasattr(nuevo_user, "empleado_rrhh") or nuevo_user.empleado_rrhh is None):
+                    empleado.usuario_erp = nuevo_user
+                    empleado.save(update_fields=["usuario_erp"])
             sincronizar_esquemas_bono(empleado, request.POST, organizacion)
             log_event(
                 request.user,
@@ -894,6 +913,7 @@ def empleados(request):
         "tipo_personal_choices": Empleado.TIPO_PERSONAL_CHOICES,
         "bono_esquemas": BonoEsquema.objects.filter(activo=True).order_by("nombre"),
         "empleados_jefes": Empleado.objects.filter(activo=True).order_by("nombre"),
+        "usuarios_erp": get_user_model().objects.filter(is_active=True).order_by("username"),
         "motivo_baja_choices": EmpleadoBaja.MOTIVO_CHOICES,
         "months": range(1, 13),
         "bajas_recientes": EmpleadoBaja.objects.select_related("empleado").order_by("-fecha_baja")[:8],

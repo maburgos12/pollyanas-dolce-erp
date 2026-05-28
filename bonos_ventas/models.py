@@ -45,6 +45,8 @@ class ConfigBonoVentasPeriodo(models.Model):
     limite_puntualidad = models.PositiveSmallIntegerField(default=2)
     bono_ventas_adicional = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("300.00"))
     umbral_crecimiento_pct = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("5.00"))
+    bono_repartidor_adicional = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("300.00"))
+    umbral_efectividad_pct = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("85.00"))
     peso_grande = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("15.00"))
     peso_mediano = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("35.00"))
     peso_chico = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("20.00"))
@@ -152,6 +154,9 @@ class BonoVentasEmpleado(models.Model):
     monto_asistencia = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
     monto_puntualidad = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
     sub1 = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
+    dias_con_bitacora = models.PositiveSmallIntegerField(default=0)
+    pct_efectividad_entrega = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0.00"))
+    monto_bono_entregas = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
     bono_ventas = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
     pasa_bono_ventas = models.BooleanField(default=False)
     ajuste_positivo = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
@@ -181,6 +186,9 @@ class BonoVentasEmpleado(models.Model):
     def _monto_concepto(self, base: Decimal, pct: Decimal, pasa: bool) -> Decimal:
         return _money(base * pct / Decimal("100")) if pasa else Decimal("0.00")
 
+    def _es_repartidor(self) -> bool:
+        return (self.empleado.puesto_operativo or "").strip().upper() == "REPARTIDOR"
+
     def recalcular(self) -> None:
         cfg = self.periodo
         base = _money(cfg.bono_base)
@@ -193,16 +201,33 @@ class BonoVentasEmpleado(models.Model):
         self.monto_asistencia = self._monto_concepto(base, cfg.pct_asistencia, self.pasa_asistencia)
         self.monto_puntualidad = self._monto_concepto(base, cfg.pct_puntualidad, self.pasa_puntualidad)
         self.sub1 = _money(self.monto_uniforme + self.monto_asistencia + self.monto_puntualidad)
-        self.bono_ventas = _money(
-            sum(
-                venta.monto_bono_categoria
-                for venta in VentaCategoriaSucursal.objects.filter(
-                    periodo=self.periodo,
-                    sucursal=self.sucursal,
-                    activo_bono=True,
+
+        if self._es_repartidor():
+            self.pct_efectividad_entrega = (
+                _money(Decimal(self.dias_con_bitacora) / Decimal(dias_base) * Decimal("100"))
+                if dias_base > 0
+                else Decimal("0.00")
+            )
+            self.monto_bono_entregas = (
+                _money(cfg.bono_repartidor_adicional)
+                if self.pct_efectividad_entrega >= cfg.umbral_efectividad_pct
+                else Decimal("0.00")
+            )
+            self.bono_ventas = self.monto_bono_entregas
+        else:
+            self.pct_efectividad_entrega = Decimal("0.00")
+            self.monto_bono_entregas = Decimal("0.00")
+            self.bono_ventas = _money(
+                sum(
+                    venta.monto_bono_categoria
+                    for venta in VentaCategoriaSucursal.objects.filter(
+                        periodo=self.periodo,
+                        sucursal=self.sucursal,
+                        activo_bono=True,
+                    )
                 )
             )
-        )
+
         self.pasa_bono_ventas = self.bono_ventas > 0
         self.total_a_pagar = _money(
             self.sub1 + self.bono_ventas + self.ajuste_positivo + self.bono_extra - self.ajuste_negativo
