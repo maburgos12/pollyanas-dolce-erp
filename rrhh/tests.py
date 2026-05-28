@@ -219,6 +219,7 @@ class CapitalHumanoServiceTests(TestCase):
             reverse("rrhh:rrhh_permisos_list"),
             {"edit": permiso.id},
             follow=True,
+            secure=True,
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Editar permiso pendiente")
@@ -235,6 +236,7 @@ class CapitalHumanoServiceTests(TestCase):
                 "motivo": "Ajuste por diligencia personal",
             },
             follow=True,
+            secure=True,
         )
 
         self.assertEqual(response.status_code, 200)
@@ -267,6 +269,7 @@ class CapitalHumanoServiceTests(TestCase):
             reverse("rrhh:rrhh_permisos_list"),
             {"edit": permiso.id},
             follow=True,
+            secure=True,
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Editar permiso pendiente")
@@ -284,6 +287,7 @@ class CapitalHumanoServiceTests(TestCase):
                 "goce_sueldo": "on",
             },
             follow=True,
+            secure=True,
         )
 
         self.assertEqual(response.status_code, 200)
@@ -318,6 +322,7 @@ class CapitalHumanoServiceTests(TestCase):
             reverse("rrhh:rrhh_permisos_list"),
             {"area": "hornos"},
             follow=True,
+            secure=True,
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["stats"]["total"], 1)
@@ -329,13 +334,14 @@ class CapitalHumanoServiceTests(TestCase):
             reverse("rrhh:rrhh_permisos_list"),
             {"area": "logística"},
             follow=True,
+            secure=True,
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["stats"]["total"], 1)
         self.assertContains(response, "Marta Logística")
         self.assertNotContains(response, "Luis Hornos")
 
-        response = self.client.get(reverse("rrhh:rrhh_permisos_list"), follow=True)
+        response = self.client.get(reverse("rrhh:rrhh_permisos_list"), follow=True, secure=True)
         self.assertEqual(response.context["stats"]["total"], 3)
 
     def test_permiso_de_capital_humano_no_lo_autoriza_la_misma_persona_rrhh(self):
