@@ -65,6 +65,8 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
             ".rrhh-edit-form",
             ".permisos-board",
             ".ch-kanban",
+            ".rule-selector",
+            ".rule-tab",
             ".quota-table",
         ]
         for selector in required_selectors:

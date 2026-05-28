@@ -107,6 +107,8 @@ body,
   .rrhh-metric,
   .rrhh-focus-link,
   .rrhh-bonus-box,
+  .rule-tab,
+  .area-chip,
   .indicadores-hero,
   .indicador-kpi,
   .indicador-card,
@@ -213,6 +215,7 @@ body,
   .ch-actions,
   .rrhh-summary,
   .rrhh-focus,
+  .rule-selector,
   .indicadores-kpis,
   .indicador-form-grid,
   .org-stats,
@@ -336,6 +339,37 @@ body,
 ) > * {
   max-width: 100%;
   min-width: 0;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .rule-selector,
+  .area-grid
+) {
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)) !important;
+}
+
+.main-content[data-hallmark-scope="erp"] .rule-tab {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: center;
+  min-width: 0 !important;
+  overflow: visible;
+  text-align: left;
+  white-space: normal;
+}
+
+.main-content[data-hallmark-scope="erp"] .rule-tab :is(strong, span),
+.main-content[data-hallmark-scope="erp"] .area-chip :is(strong, small, span) {
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: normal;
+  text-align: left !important;
+  white-space: normal;
+  word-break: keep-all;
 }
 
 .main-content[data-hallmark-scope="erp"] :is(
