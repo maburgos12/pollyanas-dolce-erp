@@ -256,8 +256,19 @@ class BonosVentasTests(TestCase):
         self.client.force_login(user)
         sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
         periodo = ConfigBonoVentasPeriodo.objects.create(mes=5, anio=2026)
-        empleado = Empleado.objects.create(nombre="Empleado Ventas Permiso", area="VENTAS", sucursal="Payán")
-        repartidor = Empleado.objects.create(nombre="Empleado Repartidor Permiso", area="REPARTIDOR", sucursal="Payán")
+        jefe = Empleado.objects.create(nombre="Jefe Ventas", departamento=Empleado.DEP_VENTAS, usuario_erp=user)
+        empleado = Empleado.objects.create(
+            nombre="Empleado Ventas Permiso",
+            area="VENTAS",
+            sucursal="Payán",
+            jefe_directo=jefe,
+        )
+        repartidor = Empleado.objects.create(
+            nombre="Empleado Repartidor Permiso",
+            area="REPARTIDOR",
+            sucursal="Payán",
+            jefe_directo=jefe,
+        )
         Empleado.objects.create(nombre="Empleado Ventas Fuera Periodo", area="VENTAS", sucursal="Payán")
         Empleado.objects.create(nombre="Empleado Produccion", area="HORNOS")
         BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal)
@@ -290,10 +301,12 @@ class BonosVentasTests(TestCase):
         self.assertEqual(permiso.origen_solicitud, PermisoSalida.ORIGEN_BONOS_VENTAS)
         self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_PENDIENTE)
         self.assertFalse(permiso.goce_sueldo)
+        self.assertTrue(creado.json()["puede_preautorizar"])
 
         preautorizado = self.client.post(f"/api/bonos-ventas/permisos/{permiso.id}/preautorizar/")
 
         self.assertEqual(preautorizado.status_code, 200)
         permiso.refresh_from_db()
         self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_PREAUTORIZADO)
+        self.assertEqual(permiso.estado, PermisoSalida.ESTADO_APROBADO)
         self.assertEqual(permiso.autorizado_jefe_por, user)

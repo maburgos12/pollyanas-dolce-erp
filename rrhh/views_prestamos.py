@@ -9,9 +9,8 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils import timezone
 
-from core.access import ROLE_ADMIN, ROLE_DG, can_manage_rrhh, can_view_rrhh, has_any_role
+from core.access import can_manage_rrhh, can_view_rrhh
 from core.notificaciones import (
     notificar_prestamo_aprobado,
     notificar_prestamo_para_direccion,
@@ -19,7 +18,13 @@ from core.notificaciones import (
 )
 
 from .models import Empleado, ImportacionNominaContpaq, Prestamo, PrestamoCuota
-from .services_prestamos import aplicar_cobro_manual, generar_cuotas
+from .services_prestamos import (
+    aplicar_cobro_manual,
+    aprobar_prestamo_direccion,
+    autorizar_prestamo_jefe,
+    can_autorizar_prestamo_direccion,
+    can_autorizar_prestamo_jefe,
+)
 from .views import _module_tabs
 
 
@@ -61,7 +66,7 @@ def _require_rrhh_manage(user):
 
 
 def _can_approve_direccion(user) -> bool:
-    return bool(user and user.is_authenticated and (user.is_superuser or has_any_role(user, ROLE_DG, ROLE_ADMIN)))
+    return can_autorizar_prestamo_direccion(user)
 
 
 def _require_direccion(user):
@@ -78,7 +83,7 @@ def _can_view_prestamo(user, prestamo: Prestamo) -> bool:
 
 
 def _can_authorize_jefe(user, prestamo: Prestamo) -> bool:
-    return bool(can_manage_rrhh(user) or _is_jefe_asignado(user, prestamo))
+    return can_autorizar_prestamo_jefe(user, prestamo)
 
 
 def _deuda_vigente(empleado_id: str | int | None):
@@ -220,15 +225,11 @@ def prestamo_detalle(request, pk):
 
 @login_required
 def prestamo_autorizar_jefe(request, pk):
-    prestamo = get_object_or_404(Prestamo.objects.select_related("jefe_directo"), pk=pk)
+    prestamo = get_object_or_404(Prestamo.objects.select_related("empleado", "jefe_directo"), pk=pk)
     if not _can_authorize_jefe(request.user, prestamo):
-        raise PermissionDenied("Solo el jefe asignado o RRHH puede autorizar este préstamo.")
+        raise PermissionDenied("Solo el jefe directo asignado puede autorizar este préstamo.")
     if request.method == "POST":
-        prestamo.firma_jefe = True
-        prestamo.autorizado_jefe = request.user
-        prestamo.fecha_auth_jefe = timezone.now()
-        prestamo.estado = Prestamo.ESTADO_AUTORIZADO
-        prestamo.save(update_fields=["firma_jefe", "autorizado_jefe", "fecha_auth_jefe", "estado", "actualizado_en"])
+        autorizar_prestamo_jefe(prestamo, request.user)
         notificar_prestamo_para_direccion(prestamo, actor=request.user)
         messages.success(request, f"Préstamo {prestamo.folio} autorizado por jefe.")
     return redirect("rrhh:rrhh_prestamo_detalle", pk=pk)
@@ -253,16 +254,9 @@ def prestamo_imprimir(request, pk):
 @login_required
 def prestamo_autorizar_dg(request, pk):
     _require_direccion(request.user)
-    prestamo = get_object_or_404(Prestamo, pk=pk)
+    prestamo = get_object_or_404(Prestamo.objects.select_related("empleado"), pk=pk)
     if request.method == "POST" and prestamo.estado == Prestamo.ESTADO_AUTORIZADO:
-        prestamo.firma_direccion = True
-        prestamo.autorizado_dg = request.user
-        prestamo.fecha_auth_dg = timezone.now()
-        prestamo.estado = Prestamo.ESTADO_ACTIVO
-        prestamo.save(
-            update_fields=["firma_direccion", "autorizado_dg", "fecha_auth_dg", "estado", "actualizado_en"]
-        )
-        generar_cuotas(prestamo)
+        aprobar_prestamo_direccion(prestamo, request.user)
         notificar_prestamo_aprobado(prestamo, actor=request.user)
         messages.success(request, f"Préstamo {prestamo.folio} aprobado. Cuotas generadas automáticamente.")
     return redirect("rrhh:rrhh_prestamo_detalle", pk=pk)

@@ -4,6 +4,11 @@ import calendar
 from datetime import date
 from decimal import Decimal
 
+from django.core.exceptions import PermissionDenied
+from django.utils import timezone
+
+from core.access import ROLE_ADMIN, ROLE_DG, has_any_role
+
 from .models import Prestamo, PrestamoCuota
 
 
@@ -38,6 +43,51 @@ def generar_cuotas(prestamo: Prestamo) -> list[PrestamoCuota]:
 
     PrestamoCuota.objects.bulk_create(cuotas, ignore_conflicts=True)
     return cuotas
+
+
+def can_autorizar_prestamo_jefe(user, prestamo: Prestamo) -> bool:
+    if not user or not user.is_authenticated or not prestamo:
+        return False
+    if prestamo.estado != Prestamo.ESTADO_SOLICITADO:
+        return False
+    if prestamo.jefe_directo_id != user.id:
+        return False
+    return getattr(prestamo.empleado, "usuario_erp_id", None) != user.id
+
+
+def autorizar_prestamo_jefe(prestamo: Prestamo, user) -> Prestamo:
+    if not can_autorizar_prestamo_jefe(user, prestamo):
+        raise PermissionDenied("Solo el jefe directo asignado puede autorizar este préstamo.")
+    prestamo.firma_jefe = True
+    prestamo.autorizado_jefe = user
+    prestamo.fecha_auth_jefe = timezone.now()
+    prestamo.estado = Prestamo.ESTADO_AUTORIZADO
+    prestamo.save(update_fields=["firma_jefe", "autorizado_jefe", "fecha_auth_jefe", "estado", "actualizado_en"])
+    return prestamo
+
+
+def can_autorizar_prestamo_direccion(user, prestamo: Prestamo | None = None) -> bool:
+    if not user or not user.is_authenticated:
+        return False
+    if not (user.is_superuser or has_any_role(user, ROLE_DG, ROLE_ADMIN)):
+        return False
+    if prestamo and getattr(prestamo.empleado, "usuario_erp_id", None) == user.id:
+        return False
+    return True
+
+
+def aprobar_prestamo_direccion(prestamo: Prestamo, user) -> Prestamo:
+    if not can_autorizar_prestamo_direccion(user, prestamo):
+        raise PermissionDenied("Solo Dirección puede aprobar préstamos y generar cuotas.")
+    if prestamo.estado != Prestamo.ESTADO_AUTORIZADO:
+        raise PermissionDenied("El préstamo requiere autorización previa del jefe directo.")
+    prestamo.firma_direccion = True
+    prestamo.autorizado_dg = user
+    prestamo.fecha_auth_dg = timezone.now()
+    prestamo.estado = Prestamo.ESTADO_ACTIVO
+    prestamo.save(update_fields=["firma_direccion", "autorizado_dg", "fecha_auth_dg", "estado", "actualizado_en"])
+    generar_cuotas(prestamo)
+    return prestamo
 
 
 def aplicar_cobro_manual(

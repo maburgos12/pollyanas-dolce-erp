@@ -62,14 +62,14 @@
       <div class="permisos-title">Gestión de permisos</div>
       <div class="permisos-copy">
         Bandeja de escritorio para RRHH: recibe solicitudes desde Bonos, Producción y Capital Humano,
-        muestra el filtro del jefe directo y permite la validación final de RRHH.
+        conserva el expediente y muestra la autorización del jefe directo o Dirección.
       </div>
     </div>
     <div class="permisos-stats">
       <div class="permisos-stat"><strong>{{ stats.total }}</strong><span>Total</span></div>
       <div class="permisos-stat"><strong>{{ stats.pendiente_jefe }}</strong><span>Jefe</span></div>
       <div class="permisos-stat"><strong>{{ stats.pendiente_direccion }}</strong><span>Dirección</span></div>
-      <div class="permisos-stat"><strong>{{ stats.validacion_rrhh }}</strong><span>RRHH</span></div>
+      <div class="permisos-stat"><strong>{{ stats.archivo_rrhh }}</strong><span>Archivo</span></div>
       <div class="permisos-stat"><strong>{{ stats.aprobados }}</strong><span>Aprobados</span></div>
     </div>
   </div>
@@ -101,23 +101,13 @@
             {% if permiso.autorizado_direccion_por %}<br>{{ permiso.autorizado_direccion_por }}{% endif %}
           </div>
         {% endif %}
-        {% if can_authorize_direccion and permiso.estado == "solicitado" and permiso.requiere_direccion and permiso.estado_direccion == "pendiente" and permiso.estado_jefe == "preautorizado" %}
+        {% if can_authorize_direccion and permiso.estado == "solicitado" and permiso.requiere_direccion and permiso.estado_direccion == "pendiente" %}
         <form method="post" class="permiso-actions">
           {% csrf_token %}
           <input type="hidden" name="permiso_id" value="{{ permiso.id }}">
           <button class="btn btn-primary" type="submit" name="action" value="autorizar_direccion">Autorizar Dirección</button>
           <button class="btn btn-secondary" type="submit" name="action" value="rechazar_direccion">Rechazar</button>
         </form>
-        {% endif %}
-        {% if can_manage_rrhh and permiso.estado == "solicitado" and permiso.estado_jefe == "preautorizado" %}
-        {% if not permiso.requiere_direccion or permiso.estado_direccion == "autorizado" %}
-        <form method="post" class="permiso-actions">
-          {% csrf_token %}
-          <input type="hidden" name="permiso_id" value="{{ permiso.id }}">
-          <button class="btn btn-primary" type="submit" name="action" value="aprobar">Aprobar RRHH</button>
-          <button class="btn btn-secondary" type="submit" name="action" value="rechazar">Rechazar</button>
-        </form>
-        {% endif %}
         {% endif %}
       </div>
       {% empty %}
@@ -141,7 +131,7 @@
             <th>Goce</th>
             <th>Filtro jefe</th>
             <th>Dirección</th>
-            <th>Estado RRHH</th>
+            <th>Estado final</th>
             <th>Motivo</th>
           </tr>
         </thead>

@@ -238,7 +238,7 @@ class PermisosVentasEquipoViewSet(BasePermisosEquipoViewSet):
         return Response(
             {
                 "empleados": empleados,
-                "permisos": [_permiso_payload(permiso) for permiso in permisos],
+                "permisos": [_permiso_payload(permiso, request.user) for permiso in permisos],
             }
         )
 

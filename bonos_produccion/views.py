@@ -316,11 +316,15 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
         area = self._context_param("area")
         area_normalizada = normalizar_area_produccion(area) if area else None
         bonos = list(bonos_periodo.filter(empleado__activo=True).order_by("area", "empleado__nombre"))
+        area_bono_por_empleado = {bono.empleado_id: bono.area for bono in bonos}
         empleados = []
         empleados_ids = set()
         for empleado in self._personal_autorizable_ordenado(area_normalizada):
             payload = _empleado_payload(empleado)
-            payload["area"] = area_bono_produccion_empleado(empleado) or empleado.departamento or AREA_PRODUCCION
+            payload["area"] = area_bono_por_empleado.get(
+                empleado.id,
+                area_bono_produccion_empleado(empleado) or empleado.departamento or AREA_PRODUCCION,
+            )
             empleados.append(payload)
             empleados_ids.add(empleado.id)
         for bono in bonos:
@@ -341,7 +345,7 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
         return Response(
             {
                 "empleados": empleados,
-                "permisos": [_permiso_payload(permiso) for permiso in permisos],
+                "permisos": [_permiso_payload(permiso, request.user) for permiso in permisos],
             }
         )
 

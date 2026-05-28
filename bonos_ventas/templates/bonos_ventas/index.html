@@ -683,7 +683,7 @@ function PermisosTab({bonos,sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatu
   const preaut = permisos.filter(p=>p.estado_jefe==='preautorizado').length;
   const sinGoce = permisos.filter(p=>!p.goce_sueldo).length;
   function estadoLabel(p){
-    if(p.estado==='aprobado') return 'Aprobado RRHH';
+    if(p.estado==='aprobado') return 'Aprobado';
     if(p.estado_jefe==='preautorizado') return 'Autorizado jefe';
     if(p.estado_jefe==='rechazado') return 'Rechazado jefe';
     return 'Solicitado';
@@ -791,8 +791,8 @@ function PermisosTab({bonos,sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatu
               h('div',{className:'permission-actions'},
                 h('button',{className:'btn btn-ghost btn-sm',onClick:()=>setPreviewPermiso(p)},'Vista carta'),
                 h('button',{className:'btn btn-ghost btn-sm',onClick:()=>imprimirPermiso(p)},'Imprimir / PDF'),
-                p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-ghost btn-sm',onClick:()=>accion(p,'rechazar')},'Rechazar'),
-                p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-wine btn-sm',onClick:()=>accion(p,'preautorizar')},'Autorizar')
+                p.puede_preautorizar&&p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-ghost btn-sm',onClick:()=>accion(p,'rechazar')},'Rechazar'),
+                p.puede_preautorizar&&p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-wine btn-sm',onClick:()=>accion(p,'preautorizar')},'Autorizar')
               )
             ))
           ):h('div',{className:'empty'},'Sin permisos registrados para este equipo.')
