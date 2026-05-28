@@ -252,6 +252,13 @@ function permisoDate(p){
   const ini=new Date(p.fecha_inicio);
   return ini.toLocaleDateString('es-MX',{day:'2-digit',month:'long',year:'numeric'});
 }
+function permisoArea(p){
+  const area = String(p.area || '').trim().toUpperCase();
+  if(['EMBETUNADO','EMBETUNADOS'].includes(area)){
+    return 'PRODUCCION';
+  }
+  return area;
+}
 function permisoTime(p){
   if(p.tipo==='permiso_dia')return 'Todo el dia';
   const ini=new Date(p.fecha_inicio);
@@ -453,9 +460,6 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
       .then(d=>{setEmpleados(d.empleados||[]);setPermisos(d.permisos||[]);setLoading(false);})
       .catch(err=>{showStatus(err.message,'err');setLoading(false);});
   }
-  const pendientes=permisos.filter(p=>p.estado_jefe==='pendiente'&&p.estado==='solicitado').length;
-  const preaut=permisos.filter(p=>p.estado_jefe==='preautorizado').length;
-  const sinGoce=permisos.filter(p=>!p.goce_sueldo).length;
   function estadoLabel(p){
     if(p.estado==='aprobado')return'Aprobado';
     if(p.estado_jefe==='preautorizado')return'Autorizado jefe';
@@ -543,6 +547,15 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
   function contextoPermiso(p){
     return AREA_LABELS[p.area]||p.area||'Produccion';
   }
+  const permisosPorArea = React.useMemo(()=>{
+    if(area===AREA_TODAS){
+      return permisos;
+    }
+    return permisos.filter(p=>permisoArea(p)===area);
+  },[permisos,area]);
+  const pendientes = permisosPorArea.filter(p=>p.estado_jefe==='pendiente'&&p.estado==='solicitado').length;
+  const preaut = permisosPorArea.filter(p=>p.estado_jefe==='preautorizado').length;
+  const sinGoce = permisosPorArea.filter(p=>!p.goce_sueldo).length;
   function fmtFecha(p){
     const ini=new Date(p.fecha_inicio);
     const fin=p.fecha_fin?new Date(p.fecha_fin):null;
@@ -596,22 +609,22 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
       ),
       h('div',{className:'card'},
         h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},'Permisos de mi equipo'),h(AreaPill,{area})),
-        h('div',{className:'card-body'},
-          loading?h('div',{className:'empty'},'Cargando permisos...'):
-          permisos.length?h('div',{className:'permission-list'},
-            permisos.map(p=>h('div',{key:p.id,className:'permission-item'},
-              h('div',{className:'permission-top'},
-                h('div',null,h('div',{className:'permission-title'},p.empleado_nombre),h('div',{className:'permission-meta'},`${AREA_LABELS[p.area]||p.area} · ${fmtFecha(p)}`)),
-                h('span',{className:`badge ${badgeClass(p)}`},estadoLabel(p))
-              ),
-              h('div',{className:'permission-meta'},`${p.tipo_label} · ${p.goce_label} · ${p.folio}`),
-              h('div',{className:'permission-reason'},p.motivo),
-              h('div',{className:'permission-actions'},
-                h('button',{className:'btn btn-ghost btn-sm',onClick:()=>setPreviewPermiso(p)},'Vista carta'),
-                h('button',{className:'btn btn-ghost btn-sm',onClick:()=>imprimirPermiso(p)},'Imprimir / PDF'),
-                p.puede_editar&&h('button',{className:'btn btn-ghost btn-sm',onClick:()=>abrirEdicion(p)},'Editar'),
-                p.puede_preautorizar&&p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-ghost btn-sm',onClick:()=>accion(p,'rechazar')},'Rechazar'),
-                p.puede_preautorizar&&p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-wine btn-sm',onClick:()=>accion(p,'preautorizar')},'Autorizar')
+    h('div',{className:'card-body'},
+      loading?h('div',{className:'empty'},'Cargando permisos...'):
+      permisosPorArea.length?h('div',{className:'permission-list'},
+        permisosPorArea.map(p=>h('div',{key:p.id,className:'permission-item'},
+          h('div',{className:'permission-top'},
+            h('div',null,h('div',{className:'permission-title'},p.empleado_nombre),h('div',{className:'permission-meta'},`${AREA_LABELS[p.area]||p.area} · ${fmtFecha(p)}`)),
+            h('span',{className:`badge ${badgeClass(p)}`},estadoLabel(p))
+          ),
+          h('div',{className:'permission-meta'},`${p.tipo_label} · ${p.goce_label} · ${p.folio}`),
+          h('div',{className:'permission-reason'},p.motivo),
+          h('div',{className:'permission-actions'},
+            h('button',{className:'btn btn-ghost btn-sm',onClick:()=>setPreviewPermiso(p)},'Vista carta'),
+            h('button',{className:'btn btn-ghost btn-sm',onClick:()=>imprimirPermiso(p)},'Imprimir / PDF'),
+            p.puede_editar&&h('button',{className:'btn btn-ghost btn-sm',onClick:()=>abrirEdicion(p)},'Editar'),
+            p.puede_preautorizar&&p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-ghost btn-sm',onClick:()=>accion(p,'rechazar')},'Rechazar'),
+            p.puede_preautorizar&&p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-wine btn-sm',onClick:()=>accion(p,'preautorizar')},'Autorizar')
               ),
               editPermiso&&editPermiso.id===p.id&&h('div',{className:'permission-item',style:{background:'var(--bg)',marginTop:8,padding:12}},
                 h('div',{className:'form-grid'},

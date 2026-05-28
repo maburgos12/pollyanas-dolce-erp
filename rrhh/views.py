@@ -37,6 +37,7 @@ from .models import (
 from .services_bonos import asegurar_esquemas_base, sincronizar_esquemas_bono
 from .services_permisos import can_authorize_direccion, resolver_permiso_direccion
 from .services_vacantes import crear_solicitud_vacante
+from .bonos_permisos import _puede_editar_permiso as _puede_editar_permiso_bonos
 
 AREA_DIVISION_CHOICES = [
     ("HORNOS", "Hornos", Empleado.DEP_PRODUCCION, Empleado.DEP_PRODUCCION, "HORNOS"),
@@ -132,6 +133,12 @@ def _has_explicit_role(user, *roles: str) -> bool:
 
 def _can_edit_permiso_pendiente(user) -> bool:
     return _has_explicit_role(user, ROLE_DG, ROLE_ADMIN) or can_manage_rrhh(user)
+
+
+def _anotar_permiso_edicion(permisos, user):
+    for permiso in permisos:
+        permiso.puede_editar = _puede_editar_permiso_bonos(user, permiso)
+    return permisos
 
 
 def _catalogo_value(post_data, field_name: str) -> str:
@@ -1864,7 +1871,7 @@ def permisos_list(request):
             estado = "autorizado" if action == "autorizar_direccion" else "rechazado"
             messages.success(request, f"Permiso {permiso.folio} {estado} por Dirección.")
         elif action == "editar_permiso":
-            if not can_edit_permiso:
+            if not _puede_editar_permiso_bonos(request.user, permiso):
                 raise PermissionDenied("No tienes permisos para editar permisos.")
             if permiso.estado != PermisoSalida.ESTADO_SOLICITADO:
                 messages.error(request, f"El permiso {permiso.folio} ya no se puede editar.")
@@ -1938,28 +1945,38 @@ def permisos_list(request):
     area_filter = _normalize_area_filter_value(request.GET.get("area"))
     if area_filter:
         permisos_qs = permisos_qs.filter(_permiso_area_filter_q(area_filter))
-    permisos = permisos_qs[:500]
+    permisos = _anotar_permiso_edicion(list(permisos_qs[:500]), request.user)
     columnas = [
         (
             "jefe",
             "Pendiente jefe",
-            permisos_qs.filter(
-                estado=PermisoSalida.ESTADO_SOLICITADO,
-                estado_jefe=PermisoSalida.ESTADO_JEFE_PENDIENTE,
-                requiere_direccion=False,
-            )[:120],
+            _anotar_permiso_edicion(
+                list(
+                    permisos_qs.filter(
+                        estado=PermisoSalida.ESTADO_SOLICITADO,
+                        estado_jefe=PermisoSalida.ESTADO_JEFE_PENDIENTE,
+                        requiere_direccion=False,
+                    )[:120]
+                ),
+                request.user,
+            ),
         ),
         (
             "direccion",
             "Pendiente Dirección",
-            permisos_qs.filter(
-                estado=PermisoSalida.ESTADO_SOLICITADO,
-                requiere_direccion=True,
-                estado_direccion=PermisoSalida.ESTADO_DIRECCION_PENDIENTE,
-            )[:120],
+            _anotar_permiso_edicion(
+                list(
+                    permisos_qs.filter(
+                        estado=PermisoSalida.ESTADO_SOLICITADO,
+                        requiere_direccion=True,
+                        estado_direccion=PermisoSalida.ESTADO_DIRECCION_PENDIENTE,
+                    )[:120]
+                ),
+                request.user,
+            ),
         ),
-        ("aprobado", "Autorizados / archivo", permisos_qs.filter(estado=PermisoSalida.ESTADO_APROBADO)[:120]),
-        ("rechazado", "Rechazados", permisos_qs.filter(estado=PermisoSalida.ESTADO_RECHAZADO)[:120]),
+        ("aprobado", "Autorizados / archivo", _anotar_permiso_edicion(list(permisos_qs.filter(estado=PermisoSalida.ESTADO_APROBADO)[:120]), request.user)),
+        ("rechazado", "Rechazados", _anotar_permiso_edicion(list(permisos_qs.filter(estado=PermisoSalida.ESTADO_RECHAZADO)[:120]), request.user)),
     ]
     stats = {
         "total": permisos_qs.count(),
@@ -1977,11 +1994,13 @@ def permisos_list(request):
         "aprobados": permisos_qs.filter(estado=PermisoSalida.ESTADO_APROBADO).count(),
     }
     edit_id = (request.GET.get("edit") or "").strip()
-    if editing_permiso is None and can_edit_permiso and edit_id.isdigit():
-        editing_permiso = permisos_qs.filter(
+    if edit_id.isdigit():
+        permiso_edicion = permisos_qs.filter(
             pk=int(edit_id),
             estado=PermisoSalida.ESTADO_SOLICITADO,
         ).first()
+        if permiso_edicion and _puede_editar_permiso_bonos(request.user, permiso_edicion):
+            editing_permiso = permiso_edicion
     return render(
         request,
         "rrhh/permisos_list.html",

@@ -179,7 +179,7 @@
           <button class="btn btn-secondary" type="submit" name="action" value="rechazar_direccion">Rechazar</button>
         </form>
         {% endif %}
-        {% if can_edit_permiso and permiso.estado == "solicitado" %}
+        {% if permiso.puede_editar and permiso.estado == "solicitado" %}
         <div class="permiso-actions">
           <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_permisos_list' %}{% if area_filter %}?area={{ area_filter }}&{% else %}?{% endif %}edit={{ permiso.id }}">Editar</a>
         </div>
