@@ -135,6 +135,13 @@ tr:hover td{background:var(--bg)}
 .signature-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:24px}
 .signature-line{border-top:1px solid #17121a;text-align:center;padding-top:6px;font-size:10px;font-weight:700;min-height:34px}
 .print-foot{margin-top:14px;font-size:10px;color:#6B5F70}
+.print-toolbar{display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px}
+.print-subtitle{font-size:11px;font-weight:800;color:var(--sub);margin-bottom:6px;letter-spacing:.05em;text-transform:uppercase}
+.print-table{width:100%;border-collapse:collapse;font-size:11px;line-height:1.35}
+.print-table th,.print-table td{padding:5px 6px;border-bottom:1px solid #E6DCEB;text-align:left;vertical-align:middle}
+.print-table th{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#6B5F70}
+.print-table tr:nth-child(even) td{background:#f9f7fb}
+.print-table .mono{font-family:monospace;font-size:11px}
 .days-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:16px}
 .day-cell{aspect-ratio:1;border-radius:6px;border:1px solid var(--line);background:var(--bg);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--faint);transition:all .12s}
 .day-cell:hover{border-color:var(--wine);color:var(--wine)}
@@ -314,6 +321,73 @@ function PermisoPrintModal({permiso,onClose,contextLabel}){
     )
   ), document.body);
 }
+function BonoResumenPrintPage({periodo,periodoLabel,bonos,groupBy='area',groupLabel='Area',titulo}){
+  const rows = bonos || [];
+  const totalGlobal = rows.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
+  const totalDias = rows.reduce((s,b)=>s+Number(b.dias_trabajados||0),0);
+  const grupos = new Map();
+  rows.forEach(b=>{
+    const g = b[groupBy] || 'Sin grupo';
+    if(!grupos.has(g)) grupos.set(g,[]);
+    grupos.get(g).push(b);
+  });
+  return h('section',{className:'print-page'},
+    h('div',{className:'print-head'},
+      h('div',null,h('div',{className:'print-brand'},"Pollyana's Dolce"),h('div',{className:'print-foot'},'Resumen mensual de bonos')),
+      h('div',null,h('div',{className:'print-doc-title'},titulo||'Resumen'),h('div',{className:'print-folio'},periodoLabel||''))
+    ),
+    h('div',{className:'print-section'},
+      h('div',{className:'print-section-title'},'Resumen global'),
+      h('div',{className:'print-grid'},
+        h(PrintField,{label:'Colaboradores',value:String(rows.length)}),
+        h(PrintField,{label:'Días acumulados',value:String(totalDias)}),
+        h(PrintField,{label:'Total',value:money(totalGlobal)}),
+        h(PrintField,{label:'Periodo',value:periodo?`ID ${periodo.id} · ${periodo.dias_laborables} días laborables`:periodoLabel||'—'})
+      )
+    ),
+    Array.from(grupos.entries()).map(([grupo,items])=>{
+      const totalGrupo = items.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
+      const totalDiasGrupo = items.reduce((s,b)=>s+Number(b.dias_trabajados||0),0);
+      return h('div',{key:grupo,className:'print-section'},
+        h('div',{className:'print-section-title'},`${groupLabel}: ${grupo}`),
+        h('div',{className:'print-subtitle'},`${items.length} colaboradores · ${totalDiasGrupo} días · total ${money(totalGrupo)}`),
+        h('table',{className:'print-table'},
+          h('thead',null,h('tr',null,
+            h('th',null,'Colaborador'),h('th',null,'Días'),h('th',null,'Uniforme'),h('th',null,'Asistencia'),h('th',null,'Puntualidad'),h('th',null,'Producción'),h('th',null,'Ajuste'),h('th',null,'Total')
+          )),
+          h('tbody',null,
+            items.map(b=>h('tr',{key:b.id},
+              h('td',{className:'mono'},b.empleado_nombre||'—'),
+              h('td',null,b.dias_trabajados||0),
+              h('td',null,b.pasa_uniforme?'Sí':'No'),
+              h('td',null,b.pasa_asistencia?'Sí':'No'),
+              h('td',null,b.pasa_puntualidad?'Sí':'No'),
+              h('td',null,b.pasa_produccion?'Sí':'No'),
+              h('td',null,money(Number(b.ajuste_positivo||0)+Number(b.bono_extra||0)-Number(b.ajuste_negativo||0))),
+              h('td',null,money(b.total_a_pagar||0))
+            ))
+          )
+        )
+      );
+    })
+  );
+}
+function BonoPrintModal({titulo,onClose,children}){
+  if(!children) return null;
+  const printNow=()=>setTimeout(()=>window.print(),50);
+  return ReactDOM.createPortal(h('div',{className:'print-modal'},
+    h('div',{className:'print-dialog'},
+      h('div',{className:'print-dialog-hdr'},
+        h('div',{className:'print-dialog-title'},'Vista previa tamaño carta'),
+        h('div',{className:'print-actions'},
+          h('button',{className:'btn btn-ghost btn-sm',onClick:onClose},'Cerrar'),
+          h('button',{className:'btn btn-wine btn-sm',onClick:printNow},'Imprimir / PDF')
+        )
+      ),
+      h('div',{className:'print-preview'},h('div',null,h('div',{className:'print-actions',style:{display:'none'}},titulo),children))
+    )
+  ), document.body);
+}
 function App(){
   const queryTab=new URLSearchParams(window.location.search).get('tab');
   const initialTab=['config','captura','permisos','resumen','ajustes','revision'].includes(queryTab)?queryTab:(FORCE_CAPTURE?'captura':'config');
@@ -328,6 +402,7 @@ function App(){
   const [status,setStatus]=React.useState('');
   const [statusType,setStatusType]=React.useState('ok');
   const [loading,setLoading]=React.useState(false);
+  const [printResumen,setPrintResumen]=React.useState(null);
   React.useEffect(()=>{cargarTodo();},[mes,anio]);
   React.useEffect(()=>{if(selectedBono)cargarRegistros(selectedBono.id);else setRegistros([]);},[selectedBono?.id]);
   function cargarTodo(){
@@ -363,6 +438,11 @@ function App(){
     api(`/api/bonos-produccion/bonos/${id}/`,{method:'PATCH',body:JSON.stringify(patch)}).then(()=>{showStatus('Guardado','ok');cargarTodo();}).catch(err=>showStatus(err.message,'err'));
   }
   function showStatus(msg,type='ok'){setStatus(msg);setStatusType(type);setTimeout(()=>setStatus(''),4000);}
+  function abrirResumenImpresion({bonosObjetivo,titulo}){
+    if(!periodo){showStatus('Selecciona un periodo para imprimir','err');return;}
+    if(!bonosObjetivo.length){showStatus('No hay registros para imprimir','err');return;}
+    setPrintResumen({bonos:bonosObjetivo,titulo:titulo||'Resumen mensual de bonos'});
+  }
   const bonosArea=area===AREA_TODAS?bonos:bonos.filter(b=>b.area===area);
   const totalGlobal=bonos.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
   const pasan=bonos.filter(b=>b.pasa_asistencia&&b.pasa_uniforme&&b.pasa_puntualidad&&b.pasa_produccion).length;
@@ -405,9 +485,17 @@ function App(){
       tab==='config'&&h(ConfigTab,{bonos,area,setArea}),
       tab==='captura'&&h(CapturaTab,{bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia,mes,anio}),
       tab==='permisos'&&h(PermisosTab,{bonos,area,setArea,mes,anio,showStatus}),
-      tab==='resumen'&&h(ResumenTab,{bonos,area,setArea}),
+      tab==='resumen'&&h(ResumenTab,{
+        bonos:bonosArea,
+        area,
+        setArea,
+        imprimirResumen:()=>abrirResumenImpresion({bonosObjetivo:bonosArea,titulo:'Resumen mensual por área'}),
+        imprimirSeleccionados:(rows)=>abrirResumenImpresion({bonosObjetivo:rows,titulo:'Resumen por colaborador'})
+      }),
       tab==='ajustes'&&h(AjustesTab,{bonosArea,area,setArea,actualizarBono}),
       tab==='revision'&&h(RevisionTab,{bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia})
+      ,
+    printResumen&&h(BonoPrintModal,{titulo:printResumen.titulo,onClose:()=>setPrintResumen(null),children:h(BonoResumenPrintPage,{periodo,periodoLabel:periodo?`ID ${periodo.id} · ${periodo.dias_laborables} días laborables`:'',bonos:printResumen.bonos,groupBy:'area',groupLabel:'Area',titulo:printResumen.titulo})})
     )
   );
 }
@@ -721,11 +809,30 @@ function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registr
     )
   );
 }
-function ResumenTab({bonos,area,setArea}){
+function ResumenTab({bonos,area,setArea,imprimirResumen,imprimirSeleccionados}){
   if(!bonos.length)return h('div',{className:'empty'},'Sin datos. Crea el periodo e inicializa empleados.');
   const totalGlobal=bonos.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
   const embonos=bonos.filter(b=>['EMBETUNADO','PRODUCCION'].includes(b.area));
   const maxEmb=embonos.reduce((m,b)=>Math.max(m,b.total_embetunados||0),0);
+  const [seleccionados,setSeleccionados]=React.useState([]);
+  const visiblesIds=bonos.map(b=>b.id);
+  const seleccionadosVisibles=seleccionados.filter(id=>visiblesIds.includes(id));
+  const allVisible=seleccionadosVisibles.length===visiblesIds.length&&visiblesIds.length>0;
+  React.useEffect(()=>{setSeleccionados([]);},[area,bonos.map(b=>b.id).join(',')]);
+  function toggle(id){
+    setSeleccionados(prev=>prev.includes(id)?prev.filter(x=>x!==id):[...prev,id]);
+  }
+  function toggleTodo(){
+    if(allVisible){
+      setSeleccionados([]);
+    } else {
+      setSeleccionados(visiblesIds);
+    }
+  }
+  function imprimirPorSeleccion(){
+    const rows=bonos.filter(b=>seleccionados.includes(b.id));
+    imprimirSeleccionados(rows);
+  }
   return h('div',null,
     h(AreaChips,{area,setArea}),
     h('div',{className:'metrics',style:{marginBottom:20}},
@@ -734,13 +841,18 @@ function ResumenTab({bonos,area,setArea}){
       h('div',{className:'metric-card'},h('div',{className:'lbl'},'Pasan todo'),h('div',{className:'val wine'},bonos.filter(b=>b.pasa_asistencia&&b.pasa_uniforme&&b.pasa_puntualidad&&b.pasa_produccion).length)),
       h('div',{className:'metric-card'},h('div',{className:'lbl'},'Area'),h('div',{className:'val',style:{fontSize:14}},AREA_LABELS[area]))
     ),
+    h('div',{className:'print-toolbar'},
+      h('button',{className:'btn btn-wine btn-sm',onClick:imprimirResumen},'Imprimir resumen'),
+      h('button',{className:'btn btn-ghost btn-sm',onClick:imprimirPorSeleccion,disabled:!seleccionadosVisibles.length},`Imprimir seleccionados (${seleccionadosVisibles.length})`)
+    ),
     h('div',{className:'card'},
-      h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},AREA_LABELS[area]),h('div',{style:{fontWeight:800,color:'var(--gold)',fontSize:14}},money(bonos.filter(b=>b.area===area).reduce((s,b)=>s+Number(b.total_a_pagar||0),0)))),
+      h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},AREA_LABELS[area]),h('div',{style:{fontWeight:800,color:'var(--gold)',fontSize:14}},money(bonos.reduce((s,b)=>s+Number(b.total_a_pagar||0),0)))),
       h('div',{className:'tbl-wrap'},h('table',null,
-        h('thead',null,h('tr',null,[h('th',null,'Empleado'),h('th',null,'Dias'),h('th',null,'Uniforme'),h('th',null,'Asistencia'),h('th',null,'Puntualidad'),h('th',null,'Produccion'),(['EMBETUNADO','PRODUCCION'].includes(area))&&h('th',null,'Embet.'),(['EMBETUNADO','PRODUCCION'].includes(area))&&h('th',null,'Premio'),h('th',null,'Total')].filter(Boolean))),
-        h('tbody',null,bonos.filter(b=>b.area===area).map(b=>{
+        h('thead',null,h('tr',null,[h('th',null,h('input',{type:'checkbox',checked:allVisible,onChange:toggleTodo})),h('th',null,'Empleado'),h('th',null,'Dias'),h('th',null,'Uniforme'),h('th',null,'Asistencia'),h('th',null,'Puntualidad'),h('th',null,'Produccion'),(['EMBETUNADO','PRODUCCION'].includes(area))&&h('th',null,'Embet.'),(['EMBETUNADO','PRODUCCION'].includes(area))&&h('th',null,'Premio'),h('th',null,'Total')].filter(Boolean))),
+        h('tbody',null,bonos.map(b=>{
           const esGanador=(['EMBETUNADO','PRODUCCION'].includes(area))&&maxEmb>0&&(b.total_embetunados||0)===maxEmb;
           return h('tr',{key:b.id},
+            h('td',null,h('input',{type:'checkbox',checked:seleccionados.includes(b.id),onChange:()=>toggle(b.id)})),
             h('td',null,h('div',{className:'persona-row'},h('div',{className:'av'},initials(b.empleado_nombre)),h('div',null,h('div',{className:'persona-name'},b.empleado_nombre+(esGanador?' ⭐':'')),esGanador&&h('div',{className:'persona-sub',style:{color:'var(--gold)'}},'Mas embetunados')))),
             h('td',null,b.dias_trabajados||0),h('td',null,h(Badge,{ok:b.pasa_uniforme})),h('td',null,h(Badge,{ok:b.pasa_asistencia})),
             h('td',null,h(Badge,{ok:b.pasa_puntualidad})),h('td',null,h(Badge,{ok:b.pasa_produccion})),
