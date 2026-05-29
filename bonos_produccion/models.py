@@ -297,7 +297,7 @@ class BonoProduccionEmpleado(models.Model):
 
         faltas = dias_laborables - int(self.dias_asistencia or 0)
         retardos = dias_base - int(self.dias_puntualidad or 0)
-        cancela_bono = (not self.pasa_asistencia) or (not self.pasa_puntualidad)
+        cancela_bono = False
         cancel_por_asistencia = getattr(regla, "cancela_por_asistencia", False)
         limite_cancel_asistencia = _to_int(getattr(regla, "limite_asistencia_cancelacion", None), regla.limite_asistencia)
         if cancel_por_asistencia and (faltas > limite_cancel_asistencia):
