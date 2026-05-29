@@ -152,10 +152,20 @@ por las jefas. Un borrado accidental es crítico.
   WHERE cp.mes=X AND cp.anio=Y AND (bono_extra>0 OR ajuste_positivo>0);
   ```
 
-### Service Worker — caché PWA bonos
-Después de deploy que cambia templates de bonos, los usuarios necesitan limpiar caché:
-- Mac: Cmd+Shift+R · PC/Android: Ctrl+Shift+R
-- No asumir que el deploy llegó al usuario sin confirmarlo
+### Service Worker — caché PWA
+Todo módulo que tenga un `sw.js` (actualmente: bonos_ventas, bonos_produccion) mantiene
+un caché en el navegador del cliente. Cuando un deploy cambia HTML, CSS o JS visible
+en esos módulos, el cliente **no verá el cambio** aunque el servidor ya lo tenga,
+porque el SW sigue sirviendo la versión anterior.
+
+Regla: **cualquier commit que modifique templates o estáticos de un módulo con SW debe
+incluir en ese mismo commit un bump de la constante `CACHE_NAME` en su `sw.js`.**
+
+- Cmd+Shift+R (hard-refresh) no bypasea el Service Worker — no es suficiente
+- El bump de versión es la única garantía de que todos los clientes reciben la versión nueva
+- Los archivos SW están en: `bonos_ventas/static/bonos_ventas/sw.js` y
+  `bonos_produccion/static/bonos_produccion/sw.js`
+- Después del deploy correr `collectstatic` para que el SW nuevo llegue a WhiteNoise
 
 ### Ramas desincronizadas
 Si una rama local divergió: `git reset --hard origin/<rama>`
