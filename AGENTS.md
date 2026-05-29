@@ -72,15 +72,43 @@ rama correcta, y aplicar solo los cambios relacionados.
 - Una validación local en Docker no sustituye la validación final en VPS,
   navegador real, reporte real, pantalla real o usuario real afectado.
 
-### 5. Higiene de cambios y commits
-- Revisar `git diff --stat` y `git diff` antes de commitear.
-- No incluir `outputs/`, screenshots, logs, archivos temporales ni artefactos
-  generados salvo que sean parte explícita del entregable.
-- Commitear solo archivos necesarios para la tarea.
-- Si aparecen cambios ajenos durante el trabajo, preservarlos y no revertirlos;
-  separar la implementación o pedir decisión si bloquean la tarea.
+### 5. Higiene de commits — quirúrgico y descriptivo
+Antes de cualquier commit:
+```bash
+git status --short --branch
+git log --oneline --decorate -5
+git worktree list
+```
+- Confirmar **solo archivos relacionados con la tarea**. Si hay cambios ajenos,
+  no mezclarlos: reportarlos y usar stash o rama separada.
+- Nunca commitear:
+  - `.DS_Store`, `.playwright-mcp/`, `.claude/`, `outputs/`, `output/`
+  - `*.png`, `*.jpg`, `*.gif` fuera de `static/`
+  - `storage/dg_reports/*.json`, `storage/dg_reports/*.md`
+  - `storage/dg_reports/logs/*.log`
+  - Logs, capturas, CSVs temporales, artefactos de runtime
+- Mensaje de commit: descriptivo, en español o inglés técnico, que explique
+  **qué** y **por qué**, no solo "fix".
+- Si hay cambios ajenos sin commitear que no pertenecen a la tarea:
+  ```bash
+  git stash push -u -m "resguardo-<tarea>-<fecha>"
+  ```
 
-### 6. Validación mínima antes de cerrar
+### 6. Pull requests — una tarea, un PR
+Antes de crear cualquier PR:
+```bash
+git status --short --branch
+git log --oneline --decorate -5
+git worktree list
+git diff origin/main..HEAD --stat
+```
+- Verificar que la rama **no mezcle tareas distintas**.
+- Verificar que no haya pendientes sin confirmar en la rama.
+- El título del PR debe reflejar exactamente qué cambia.
+- No abrir PR si `python manage.py check` da errores.
+- No abrir PR si hay migraciones sin verificar en producción.
+
+### 7. Validación mínima antes de cerrar
 - Correr `python manage.py check` antes de cualquier commit.
 - Correr `python manage.py migrate --check` antes de deploy.
 - Ejecutar tests del módulo afectado cuando existan.
@@ -89,11 +117,65 @@ rama correcta, y aplicar solo los cambios relacionados.
 - Para datos operativos, validar tabla/conteo/registros y luego confirmar que
   aparecen en la pantalla, reporte, app o archivo donde se usan.
 
-### 7. Cierre responsable
+### 8. Cierre responsable
 No declarar terminado un cambio si solo compila, si solo responde la API, o si
 solo la base de datos tiene datos. Termina hasta que el resultado esté validado
 en el flujo real. Si no se puede validar, reportar el bloqueo exacto, lo que sí
 quedó hecho y qué falta para confirmar.
+
+## Lecciones críticas aprendidas en producción (NO ignorar)
+
+### Migraciones — regla de oro
+- Antes de cualquier PR que toque modelos, correr:
+  ```bash
+  python manage.py migrate --check
+  python manage.py showmigrations bonos_produccion bonos_ventas rrhh
+  ```
+- Si los campos ya existen en producción pero la migración no está registrada,
+  usar `--fake` para marcarla sin correrla. NUNCA borrar la migración.
+- Un `AttributeError: object has no attribute 'campo'` en producción = migración
+  no aplicada. Solución: `migrate --fake` + restart. No tocar código.
+
+### Deploy — no es automático
+El deploy NO se activa solo al mergear. Pasos obligatorios tras merge a main:
+```bash
+cd /opt/pastelerias-erp
+git pull origin main
+docker compose -f /opt/pastelerias-erp/docker-compose.yml exec -T web python manage.py migrate --noinput
+docker compose -f /opt/pastelerias-erp/docker-compose.yml restart web
+```
+Si migrate falla por columna duplicada: usar `--fake` en la migración específica.
+
+### Service worker — caché en PWA
+Después de deploy que cambia templates de bonos (producción/ventas), los usuarios
+necesitan hacer Cmd+Shift+R (Mac) o Ctrl+Shift+R (PC/Android) para limpiar caché.
+No asumir que el deploy llegó al usuario sin confirmarlo.
+
+### Datos de usuarios — NUNCA pisar
+- `bono_extra`, `ajuste_positivo`, `ajuste_negativo` son datos capturados por el
+  equipo operativo. NUNCA resetearlos, sobreescribirlos ni incluirlos en seeds.
+- `recalcular()` y `recalcular_todos()` NO deben tocar esos campos. Verificarlo
+  antes de cualquier cambio en models.py de bonos.
+- Si un endpoint llama `recalcular_todos()` automáticamente (ej: resumen), revisar
+  que no pise datos manuales capturados por las jefas.
+
+### Ramas — control de desorden
+- Una rama = una tarea = un módulo. Si la tarea crece, abrir rama nueva.
+- Nunca dejar commits de fix+revert en la misma rama sin squashearlos.
+- Antes de trabajar, confirmar con `git branch --show-current` que estás en la
+  rama correcta. No asumir.
+- Si una rama local está desincronizada de su origin: `git reset --hard origin/<rama>`.
+
+### Permisos y datos operativos — contexto real
+- Carolina Cayetano: jefa de producción. Captura datos en bonos producción.
+- Johana López: jefa de ventas. Captura datos en bonos ventas.
+- Sus capturas son datos reales de nómina. Un borrado accidental es crítico.
+- Siempre verificar en producción que los datos existen antes y después de cualquier
+  cambio que toque esos modelos:
+  ```sql
+  SELECT COUNT(*), SUM(bono_extra) FROM bonos_produccion_bonoproduccionempleado
+  WHERE periodo_id IN (SELECT id FROM bonos_produccion_configbonoperiodo WHERE mes=X AND anio=Y);
+  ```
 
 ## Reglas obligatorias antes de cualquier tarea
 

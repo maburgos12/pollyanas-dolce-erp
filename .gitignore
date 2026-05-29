@@ -28,8 +28,11 @@ logs/*.tsv
 logs/*.tmp
 logs/bloque1_dato_maestro_*/
 
-# Local automation/smoke artifacts
+# Agentes / herramientas locales (no commitear nunca)
 .playwright-cli/
+.playwright-mcp/
+.claude/
+outputs/
 output/
 storage/pos_bridge/logs/*
 storage/pos_bridge/raw_exports/*
@@ -73,3 +76,16 @@ test-results/
 # Archivos operativos de jobs puntuales
 job588_*.csv
 job588_*.tsv
+
+# Reportes y logs de agente DG (generados en runtime, nunca al repo)
+storage/dg_reports/*.json
+storage/dg_reports/*.md
+storage/dg_reports/logs/*.log
+
+# Screenshots y artefactos de agentes
+*.png
+*.jpg
+*.gif
+!static/**/*.png
+!static/**/*.jpg
+!static/**/*.gif
