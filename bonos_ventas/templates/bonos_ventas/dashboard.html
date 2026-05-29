@@ -20,7 +20,7 @@
   .bonos-field{display:grid;gap:.3rem}
   .bonos-field label{font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#6b5f70}
   .bonos-field input,.bonos-field textarea,.bonos-field select{width:100%;border:1px solid #e7ddeb;border-radius:8px;padding:.58rem .65rem;font:inherit;background:#fbf8fb}
-  .kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem}
+  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.75rem}
   .kpi-card,.bonos-card{background:#fff;border:1px solid #ede6f0;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
   .kpi-card{padding:.95rem 1rem}
   .kpi-label{font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:#6b5f70;font-weight:800}
@@ -29,18 +29,18 @@
   .bonos-card-h{padding:.9rem 1rem;border-bottom:1px solid #ede6f0;display:flex;justify-content:space-between;gap:1rem;align-items:center;flex-wrap:wrap}
   .bonos-card-title{font-weight:900;text-transform:uppercase;letter-spacing:.06em}
   .bonos-card-body{padding:1rem}
-  .config-grid{display:grid;grid-template-columns:repeat(5,minmax(128px,1fr));gap:.75rem}
-  .concept-grid{display:grid;grid-template-columns:repeat(3,minmax(220px,1fr));gap:.75rem;margin-top:1rem}
+  .config-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:.75rem}
+  .concept-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.75rem;margin-top:1rem}
   .concept-card{border:1px solid #ede6f0;border-radius:10px;background:#fbf8fb;padding:.85rem;display:grid;grid-template-columns:1fr 1fr;gap:.65rem;align-items:end}
   .concept-card strong{grid-column:1 / -1;font-size:.8rem;text-transform:uppercase;letter-spacing:.06em}
-  .category-grid{display:grid;grid-template-columns:repeat(6,minmax(130px,1fr));gap:.75rem;margin-top:1rem}
+  .category-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.75rem;margin-top:1rem}
   .branch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.75rem}
   .branch-chip{padding:.85rem;border:1px solid #ede6f0;border-radius:10px;background:#fbf8fb}
   .branch-chip span{display:block;color:#6b5f70;font-size:.72rem;font-weight:800;text-transform:uppercase}
   .branch-chip strong{display:block;font-size:1.05rem;margin-top:.15rem}
-  .branch-chip.chip-repartidores{border-color:#c9a0bb;background:#fdf5f9}
-  .branch-chip.chip-repartidores span{color:#8b2252}
-  .status-pill.pill-repartidor{background:#fdf5f9;color:#8b2252;border:1px solid #c9a0bb}
+  .branch-chip.chip-repartidores{border-color:#ede6f0;background:#fbf8fb}
+  .branch-chip.chip-repartidores span{color:#6b5f70}
+  .status-pill.pill-repartidor{background:#f4edf4;color:#8b2252;border:1px solid #ede6f0}
   .filter-bar{display:grid;grid-template-columns:minmax(240px,1fr) auto;gap:.75rem;align-items:center}
   .branch-filter{display:flex;gap:.45rem;flex-wrap:wrap}
   .branch-filter button{border:1px solid #e7ddeb;background:#fff;border-radius:999px;padding:.45rem .75rem;font:inherit;font-weight:800;color:#6b5f70;cursor:pointer}
@@ -54,8 +54,8 @@
   .employee-name{font-weight:900}.employee-meta{font-size:.78rem;color:#6b5f70}
   .employee-total{font-weight:900;color:#8b2252;text-align:right}
   .employee-body{border-top:1px solid #ede6f0;padding:1rem;display:grid;gap:.8rem}
-  .adjust-grid{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:.75rem}
-  .money-grid{display:grid;grid-template-columns:repeat(3,minmax(130px,1fr));gap:.75rem}
+  .adjust-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.75rem}
+  .money-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.75rem}
   .status-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:.28rem .6rem;font-size:.72rem;font-weight:900;white-space:nowrap}
   .status-pill.ok{background:#dcfce7;color:#166534}.status-pill.bad{background:#fee2e2;color:#991b1b}.status-pill.neutral{background:#f4edf4;color:#8b2252}
   .category-table-wrap{overflow-x:auto}
@@ -63,7 +63,7 @@
   .category-table th{padding:.7rem .8rem;text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:#6b5f70;border-bottom:1px solid #ede6f0}
   .category-table td{padding:.7rem .8rem;border-bottom:1px solid #ede6f0}
   .empty-state{padding:1rem;border:1px dashed #e7ddeb;border-radius:10px;color:#6b5f70;background:#fbf8fb}
-  @media(max-width:1180px){.config-grid,.category-grid{grid-template-columns:repeat(3,1fr)}.concept-grid{grid-template-columns:1fr}.employee-card summary{grid-template-columns:1fr 120px 100px}}
+  @media(max-width:1180px){.config-grid,.category-grid{grid-template-columns:repeat(auto-fit,minmax(128px,1fr))}.concept-grid{grid-template-columns:1fr}.employee-card summary{grid-template-columns:1fr 120px 100px}}
   @media(max-width:900px){.bonos-hero{grid-template-columns:1fr}.kpi-grid,.branch-grid{grid-template-columns:repeat(2,1fr)}.filter-bar{grid-template-columns:1fr}.adjust-grid,.money-grid{grid-template-columns:repeat(2,1fr)}}
   @media(max-width:620px){.period-filter,.kpi-grid,.branch-grid,.config-grid,.category-grid,.adjust-grid,.money-grid{grid-template-columns:1fr}.employee-card summary{grid-template-columns:1fr}.employee-total{text-align:left}}
 </style>
@@ -116,7 +116,7 @@
     </form>
   </section>
 
-  <section class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
+  <section class="kpi-grid">
     <article class="kpi-card"><div class="kpi-label">Total a pagar</div><div class="kpi-value gold">${{ total_bonos|floatformat:2|intcomma }}</div></article>
     <article class="kpi-card"><div class="kpi-label">Empleados</div><div class="kpi-value">{{ bonos|length|intcomma }}</div></article>
     <article class="kpi-card"><div class="kpi-label">Pasan asistencia</div><div class="kpi-value wine">{{ passing_asistencia|intcomma }}</div></article>
@@ -239,7 +239,7 @@
             <input type="hidden" name="mes" value="{{ mes }}">
             <input type="hidden" name="anio" value="{{ anio }}">
             {% if bono.empleado.puesto_operativo == "REPARTIDOR" %}
-            <div class="money-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+            <div class="money-grid">
               <div class="kpi-card"><div class="kpi-label">Sub 1 (asist/puntual/unif)</div><div class="kpi-value">${{ bono.sub1|floatformat:2|intcomma }}</div></div>
               <div class="kpi-card"><div class="kpi-label">Efectividad bitácora</div><div class="kpi-value {% if bono.pasa_bono_ventas %}gold{% else %}wine{% endif %}">{{ bono.pct_efectividad_entrega|floatformat:1 }}%</div></div>
               <div class="kpi-card"><div class="kpi-label">Bono entregas</div><div class="kpi-value gold">${{ bono.monto_bono_entregas|floatformat:2|intcomma }}</div></div>
