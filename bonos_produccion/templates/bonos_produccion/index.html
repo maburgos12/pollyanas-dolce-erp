@@ -509,6 +509,7 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
   const [loading,setLoading]=React.useState(false);
   const [previewPermiso,setPreviewPermiso]=React.useState(null);
   const [lastPermiso,setLastPermiso]=React.useState(null);
+  const [editPermiso,setEditPermiso]=React.useState(null);
   const equipo=empleados;
   React.useEffect(()=>{cargarPermisos();},[mes,anio,area]);
   React.useEffect(()=>{if(!selected&&equipo.length)setSelected(equipo[0]);else if(selected&&!equipo.some(b=>b.id===selected.id))setSelected(equipo[0]||null);},[area,equipo.map(b=>b.id).join(','),selected?.id]);
@@ -559,6 +560,29 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
   function accion(p,kind){
     api(`/api/bonos-produccion/permisos/${p.id}/${kind}/`,{method:'POST',body:'{}'})
       .then(()=>{showStatus(kind==='preautorizar'?'Permiso autorizado':'Permiso rechazado','ok');cargarPermisos();})
+      .catch(err=>showStatus(err.message,'err'));
+  }
+  function abrirEdicion(p){
+    const ini=new Date(p.fecha_inicio);
+    const fin=p.fecha_fin?new Date(p.fecha_fin):null;
+    const fechaStr=ini.toISOString().slice(0,10);
+    const desdeStr=ini.toTimeString().slice(0,5);
+    const hastaStr=fin?fin.toTimeString().slice(0,5):'';
+    setEditPermiso({id:p.id,tipo:p.tipo,fecha:fechaStr,desde:desdeStr,hasta:hastaStr,motivo:p.motivo,goce:p.goce_sueldo});
+  }
+  function guardarEdicion(){
+    if(!editPermiso)return;
+    if(!editPermiso.motivo.trim()){showStatus('El motivo es obligatorio.','err');return;}
+    if(editPermiso.tipo==='permiso_hora'&&(!editPermiso.desde||!editPermiso.hasta)){showStatus('Captura hora desde y hasta.','err');return;}
+    const payload={
+      tipo:editPermiso.tipo,
+      motivo:editPermiso.motivo,
+      goce_sueldo:editPermiso.goce,
+      fecha_inicio:editPermiso.tipo==='permiso_dia'?`${editPermiso.fecha}T00:00:00`:`${editPermiso.fecha}T${editPermiso.desde}:00`,
+      fecha_fin:editPermiso.tipo==='permiso_dia'?null:`${editPermiso.fecha}T${editPermiso.hasta}:00`,
+    };
+    api(`/api/bonos-produccion/permisos/${editPermiso.id}/editar/`,{method:'POST',body:JSON.stringify(payload)})
+      .then(()=>{showStatus('Permiso actualizado','ok');setEditPermiso(null);cargarPermisos();})
       .catch(err=>showStatus(err.message,'err'));
   }
   function contextoPermiso(p){
@@ -630,8 +654,26 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
               h('div',{className:'permission-actions'},
                 h('button',{className:'btn btn-ghost btn-sm',onClick:()=>setPreviewPermiso(p)},'Vista carta'),
                 h('button',{className:'btn btn-ghost btn-sm',onClick:()=>imprimirPermiso(p)},'Imprimir / PDF'),
+                p.puede_editar&&h('button',{className:'btn btn-ghost btn-sm',onClick:()=>editPermiso&&editPermiso.id===p.id?setEditPermiso(null):abrirEdicion(p)},editPermiso&&editPermiso.id===p.id?'Cancelar':'Editar'),
                 p.puede_preautorizar&&p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-ghost btn-sm',onClick:()=>accion(p,'rechazar')},'Rechazar'),
                 p.puede_preautorizar&&p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-wine btn-sm',onClick:()=>accion(p,'preautorizar')},'Autorizar')
+              ),
+              editPermiso&&editPermiso.id===p.id&&h('div',{className:'form-grid',style:{marginTop:10,padding:12,background:'var(--rosa)',borderRadius:8}},
+                h('div',{className:'field'},h('label',null,'Tipo'),h('div',{className:'segmented'},
+                  [['permiso_hora','Tiempo parcial'],['permiso_dia','Dia completo']].map(([v,lbl])=>h('button',{key:v,type:'button',className:`segment ${editPermiso.tipo===v?'on':''}`,onClick:()=>setEditPermiso(prev=>({...prev,tipo:v}))},lbl))
+                )),
+                h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+                  h('div',{className:'field'},h('label',null,'Fecha'),h('input',{className:'form-control',type:'date',value:editPermiso.fecha,onChange:e=>setEditPermiso(prev=>({...prev,fecha:e.target.value}))})),
+                  editPermiso.tipo==='permiso_hora'&&h('div',{style:{display:'contents'}},
+                    h('div',{className:'field'},h('label',null,'Desde'),h('input',{className:'form-control',type:'time',value:editPermiso.desde,onChange:e=>setEditPermiso(prev=>({...prev,desde:e.target.value}))})),
+                    h('div',{className:'field'},h('label',null,'Hasta'),h('input',{className:'form-control',type:'time',value:editPermiso.hasta,onChange:e=>setEditPermiso(prev=>({...prev,hasta:e.target.value}))}))
+                  )
+                ),
+                h('div',{className:'field'},h('label',null,'Goce de sueldo'),h('div',{className:'segmented'},
+                  [[true,'Con goce'],[false,'Sin goce']].map(([v,lbl])=>h('button',{key:lbl,type:'button',className:`segment ${editPermiso.goce===v?'on':''}`,onClick:()=>setEditPermiso(prev=>({...prev,goce:v}))},lbl))
+                )),
+                h('div',{className:'field'},h('label',null,'Motivo'),h('textarea',{className:'form-control',rows:2,value:editPermiso.motivo,onChange:e=>setEditPermiso(prev=>({...prev,motivo:e.target.value}))})),
+                h('button',{className:'btn btn-wine btn-sm',onClick:guardarEdicion},'Guardar cambios')
               )
             ))
           ):h('div',{className:'empty'},'Sin permisos registrados para esta area.')

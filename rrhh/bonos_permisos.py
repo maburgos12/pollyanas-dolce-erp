@@ -8,9 +8,22 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from core.access import has_any_role, ROLE_DG, ROLE_ADMIN
 from core.notificaciones import notificar_permiso_solicitado
 from rrhh.models import Empleado, PermisoSalida
 from rrhh.services_permisos import can_resolver_permiso_jefe, resolver_permiso_jefe
+
+ESTADOS_EDITABLES = {PermisoSalida.ESTADO_SOLICITADO, PermisoSalida.ESTADO_APROBADO}
+
+
+def can_editar_permiso(user, permiso: PermisoSalida) -> bool:
+    if user is None or not user.is_authenticated:
+        return False
+    if permiso.estado not in ESTADOS_EDITABLES:
+        return False
+    if user.is_superuser or has_any_role(user, ROLE_DG, ROLE_ADMIN):
+        return True
+    return can_resolver_permiso_jefe(user, permiso)
 
 
 TIPO_LABELS = {
@@ -72,6 +85,7 @@ def _permiso_payload(permiso: PermisoSalida, user=None) -> dict:
         "goce_label": "Con goce" if permiso.goce_sueldo else "Sin goce",
         "origen_solicitud": permiso.origen_solicitud,
         "puede_preautorizar": can_resolver_permiso_jefe(user, permiso) if user is not None else False,
+        "puede_editar": can_editar_permiso(user, permiso) if user is not None else False,
         "creado_en": permiso.creado_en.isoformat(),
     }
 
@@ -148,6 +162,35 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
 
     def get_object(self):
         return get_object_or_404(self._permisos(), pk=self.kwargs["pk"])
+
+    @action(detail=True, methods=["post"])
+    def editar(self, request, pk=None):
+        permiso = self.get_object()
+        if not can_editar_permiso(request.user, permiso):
+            return Response({"detail": "No tienes permiso para editar este registro."}, status=status.HTTP_403_FORBIDDEN)
+
+        tipo = request.data.get("tipo")
+        if tipo and tipo not in dict(PermisoSalida.TIPO_CHOICES):
+            return Response({"tipo": "Tipo de permiso invalido."}, status=status.HTTP_400_BAD_REQUEST)
+
+        fecha_inicio = _parse_dt(request.data.get("fecha_inicio"))
+        if not fecha_inicio:
+            return Response({"fecha_inicio": "Fecha/hora de inicio invalida."}, status=status.HTTP_400_BAD_REQUEST)
+
+        motivo = (request.data.get("motivo") or "").strip()
+        if not motivo:
+            return Response({"motivo": "El motivo es obligatorio."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if tipo:
+            permiso.tipo = tipo
+        permiso.fecha_inicio = fecha_inicio
+        permiso.fecha_fin = _parse_dt(request.data.get("fecha_fin"))
+        permiso.motivo = motivo
+        goce = request.data.get("goce_sueldo")
+        if goce is not None:
+            permiso.goce_sueldo = _parse_bool(goce)
+        permiso.save()
+        return Response(_permiso_payload(permiso, request.user))
 
     @action(detail=True, methods=["post"])
     def preautorizar(self, request, pk=None):
