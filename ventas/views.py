@@ -27,6 +27,7 @@ from ventas.services.pronostico_engine import (
     ORDEN_CATEGORIAS,
     WEEKDAYS_ES,
 )
+from ventas.services.pronostico_engine import calcular_pronostico
 from ventas.services.sales_freshness import (
     get_forecast_sales_freshness,
     queue_forecast_sales_refresh_if_needed,
@@ -622,6 +623,23 @@ def _build_pronostico_detail_context(pronostico: PronosticoGuardado) -> dict:
     }
 
 
+def _calcular_y_guardar_sync(*, nombre, fecha_inicio, fecha_fin, sucursal_ids, usuario, skus_incluidos=None):
+    resultado = calcular_pronostico(fecha_inicio, fecha_fin, set(sucursal_ids), skus_incluidos=skus_incluidos or None)
+    resumen = resultado.get("resumen") or {}
+    pronostico = PronosticoGuardado.objects.create(
+        nombre=nombre,
+        fecha_inicio=fecha_inicio,
+        fecha_fin=fecha_fin,
+        resultado_json=_json_ready(resultado),
+        total_piezas=resumen.get("total_piezas") or 0,
+        total_ingreso=resumen.get("total_ingreso") or 0,
+        creado_por=usuario,
+    )
+    if sucursal_ids:
+        pronostico.sucursales.set(Sucursal.objects.filter(id__in=sucursal_ids))
+    return pronostico
+
+
 def _warn_stale_sales_forecast(request) -> None:
     freshness = queue_forecast_sales_refresh_if_needed(triggered_by_id=request.user.id)
     if freshness.is_fresh:
@@ -664,16 +682,15 @@ def PronosticoVentasView(request):
         if not form_errors and fecha_inicio and fecha_fin:
             _warn_stale_sales_forecast(request)
             nombre = f"Pronóstico {fecha_inicio.isoformat()} a {fecha_fin.isoformat()}"
-            task = calcular_y_guardar_pronostico.delay(
-                nombre,
-                fecha_inicio.isoformat(),
-                fecha_fin.isoformat(),
-                sorted(selected_branch_ids),
-                request.user.id,
-                selected_product_skus,
+            pronostico = _calcular_y_guardar_sync(
+                nombre=nombre,
+                fecha_inicio=fecha_inicio,
+                fecha_fin=fecha_fin,
+                sucursal_ids=sorted(selected_branch_ids),
+                usuario=request.user,
+                skus_incluidos=selected_product_skus,
             )
-            request.session["pronostico_task"] = task.id
-            return redirect("ventas:pronostico_esperando", task_id=task.id)
+            return redirect("ventas:pronostico_detalle", pk=pronostico.id)
         for error in form_errors:
             messages.error(request, error)
 
@@ -737,16 +754,15 @@ def PronosticoGuardarView(request):
 
     _warn_stale_sales_forecast(request)
 
-    task = calcular_y_guardar_pronostico.delay(
+    pronostico = _calcular_y_guardar_sync(
         nombre=nombre,
-        fecha_inicio_str=fecha_inicio.isoformat(),
-        fecha_fin_str=fecha_fin.isoformat(),
+        fecha_inicio=fecha_inicio,
+        fecha_fin=fecha_fin,
         sucursal_ids=sorted(selected_branch_ids),
-        usuario_id=request.user.id,
+        usuario=request.user,
         skus_incluidos=selected_product_skus or None,
     )
-    request.session["pronostico_task"] = task.id
-    return redirect("ventas:pronostico_esperando", task_id=task.id)
+    return redirect("ventas:pronostico_detalle", pk=pronostico.id)
 
 
 @login_required
