@@ -131,8 +131,8 @@
       {% endif %}
       {% if sales_freshness and not sales_freshness.is_fresh %}
       <div class="forecast-special-banner">
-        Ventas Point atrasadas: ultimo dia cargado {{ sales_freshness.latest_label }}; requerido {{ sales_freshness.target_label }}.
-        Al calcular se actualizara solo ventas por {{ sales_freshness.refresh_days }} dias antes de permitir el pronostico.
+        ⚠️ Ventas Point atrasadas: ultimo dia cargado {{ sales_freshness.latest_label }}; requerido {{ sales_freshness.target_label }}.
+        El pronostico se calculara con los datos disponibles. Se lanzara actualizacion de ventas en paralelo.
       </div>
       {% endif %}
       <form method="post" id="forecast-form">
