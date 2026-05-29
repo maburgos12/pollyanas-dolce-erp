@@ -33,9 +33,10 @@
   .concept-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.75rem;margin-top:1rem}
   .concept-card{border:1px solid #ede6f0;border-radius:10px;background:#fbf8fb;padding:.8rem;display:grid;grid-template-columns:1fr 1fr;gap:.65rem;align-items:end}
   .concept-card .status-pill{grid-column:1 / -1}
-  .cancel-divider{grid-column:1 / -1;border:none;border-top:1px dashed #e0d4e8;margin:.4rem 0 .1rem}
-  .cancel-check{grid-column:1 / -1;display:flex;align-items:center;gap:.45rem;font-size:.78rem;font-weight:800;color:#6b5f70}
-  .cancel-field{grid-column:1 / -1}
+  .cancel-rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.75rem;margin-top:.75rem;padding:.85rem;border:1px solid #e0d4e8;border-radius:10px;background:#fdf8fb}
+  .cancel-rules-title{grid-column:1 / -1;font-size:.72rem;font-weight:900;text-transform:uppercase;letter-spacing:.06em;color:#8b2252;margin-bottom:.1rem}
+  .cancel-rule{display:grid;gap:.5rem}
+  .cancel-check{display:flex;align-items:center;gap:.45rem;font-size:.82rem;font-weight:800;color:#6b5f70;cursor:pointer}
   .category-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.75rem;margin-top:1rem}
   .branch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.75rem}
   .branch-chip{padding:.85rem;border:1px solid #ede6f0;border-radius:10px;background:#fbf8fb}
@@ -157,23 +158,28 @@
             <span class="status-pill neutral">Asistencia</span>
             <div class="bonos-field"><label>% asistencia</label><input name="pct_asistencia" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_asistencia }}{% else %}{{ defaults.pct_asistencia }}{% endif %}"></div>
             <div class="bonos-field"><label>Límite</label><input name="limite_asistencia" type="number" min="0" value="{% if periodo %}{{ periodo.limite_asistencia }}{% else %}{{ defaults.limite_asistencia }}{% endif %}"></div>
-            <hr class="cancel-divider">
-            <label class="cancel-check">
-              <input type="checkbox" name="cancela_por_asistencia" {% if periodo and periodo.cancela_por_asistencia %}checked{% endif %}>
-              Cancela bono con X faltas
-            </label>
-            <div class="bonos-field cancel-field"><label>Límite faltas para cancelar</label><input name="limite_asistencia_cancelacion" type="number" min="0" value="{% if periodo %}{{ periodo.limite_asistencia_cancelacion }}{% else %}{{ defaults.limite_asistencia_cancelacion }}{% endif %}"></div>
           </div>
           <div class="concept-card">
             <span class="status-pill neutral">Puntualidad</span>
             <div class="bonos-field"><label>% puntualidad</label><input name="pct_puntualidad" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_puntualidad }}{% else %}{{ defaults.pct_puntualidad }}{% endif %}"></div>
             <div class="bonos-field"><label>Límite</label><input name="limite_puntualidad" type="number" min="0" value="{% if periodo %}{{ periodo.limite_puntualidad }}{% else %}{{ defaults.limite_puntualidad }}{% endif %}"></div>
-            <hr class="cancel-divider">
+          </div>
+        </div>
+        <div class="cancel-rules">
+          <div class="cancel-rules-title">Reglas de cancelación del bono completo</div>
+          <div class="cancel-rule">
+            <label class="cancel-check">
+              <input type="checkbox" name="cancela_por_asistencia" {% if periodo and periodo.cancela_por_asistencia %}checked{% endif %}>
+              Cancela bono con X faltas
+            </label>
+            <div class="bonos-field"><label>Límite faltas para cancelar</label><input name="limite_asistencia_cancelacion" type="number" min="0" value="{% if periodo %}{{ periodo.limite_asistencia_cancelacion }}{% else %}{{ defaults.limite_asistencia_cancelacion }}{% endif %}"></div>
+          </div>
+          <div class="cancel-rule">
             <label class="cancel-check">
               <input type="checkbox" name="cancela_por_puntualidad" {% if periodo and periodo.cancela_por_puntualidad %}checked{% endif %}>
               Cancela bono con retardos
             </label>
-            <div class="bonos-field cancel-field"><label>Límite retardos para cancelar</label><input name="limite_retardos_cancelacion" type="number" min="0" value="{% if periodo %}{{ periodo.limite_retardos_cancelacion }}{% else %}{{ defaults.limite_retardos_cancelacion }}{% endif %}"></div>
+            <div class="bonos-field"><label>Límite retardos para cancelar</label><input name="limite_retardos_cancelacion" type="number" min="0" value="{% if periodo %}{{ periodo.limite_retardos_cancelacion }}{% else %}{{ defaults.limite_retardos_cancelacion }}{% endif %}"></div>
           </div>
         </div>
 
