@@ -2,12 +2,17 @@ from __future__ import annotations
 
 from datetime import date
 
+import logging
+
 from core.audit import log_event
+from pos_bridge.management.commands.sync_product_facts_from_daily_sales import sync_product_facts_for_range
 from pos_bridge.models import PointSyncJob
 from reportes.analytics_service import refresh_incremental
 from reportes.sales_dashboard_freshness import ensure_sales_dashboard_freshness
 from pos_bridge.tasks.run_sales_history_sync import run_sales_history_sync
 from pos_bridge.utils.dates import resolve_incremental_window
+
+logger = logging.getLogger(__name__)
 
 
 def _analytics_lookback_for_window(*, start_date: date, end_date: date) -> int:
@@ -40,6 +45,13 @@ def run_daily_sales_sync(
         source_mode=source_mode,
         credito_scopes=credito_scopes,
     )
+    if sync_job.status in {PointSyncJob.STATUS_SUCCESS, PointSyncJob.STATUS_PARTIAL}:
+        try:
+            facts_created = sync_product_facts_for_range(start_date, end_date)
+            logger.info("sync_product_facts_for_range: %d facts creados (%s → %s)", facts_created, start_date, end_date)
+        except Exception as exc:
+            logger.warning("sync_product_facts_for_range falló (no crítico): %s", exc)
+
     if publish_analytics and sync_job.status in {PointSyncJob.STATUS_SUCCESS, PointSyncJob.STATUS_PARTIAL}:
         analytics_lookback_days = _analytics_lookback_for_window(start_date=start_date, end_date=end_date)
         payload = {
