@@ -30,9 +30,9 @@
   .bonos-card-title{font-weight:900;text-transform:uppercase;letter-spacing:.06em}
   .bonos-card-body{padding:1rem}
   .config-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:.75rem}
-  .concept-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.75rem;margin-top:1rem}
-  .concept-card{border:1px solid #ede6f0;border-radius:10px;background:#fdf5f9;padding:.85rem;display:grid;grid-template-columns:1fr 1fr;gap:.65rem;align-items:end}
-  .concept-card strong{grid-column:1 / -1;font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:#8b2252;font-weight:900}
+  .concept-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.75rem;margin-top:1rem}
+  .concept-card{border:1px solid #ede6f0;border-radius:10px;background:#fbf8fb;padding:.8rem;display:grid;grid-template-columns:1fr 1fr;gap:.65rem;align-items:end}
+  .concept-card .status-pill{grid-column:1 / -1}
   .category-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.75rem;margin-top:1rem}
   .branch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.75rem}
   .branch-chip{padding:.85rem;border:1px solid #ede6f0;border-radius:10px;background:#fbf8fb}
@@ -146,18 +146,18 @@
 
         <div class="concept-grid">
           <div class="concept-card">
-            <strong>Uniforme</strong>
-            <div class="bonos-field"><label>% Uniforme</label><input name="pct_uniforme" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_uniforme }}{% else %}{{ defaults.pct_uniforme }}{% endif %}"></div>
+            <span class="status-pill neutral">Uniforme</span>
+            <div class="bonos-field"><label>% uniforme</label><input name="pct_uniforme" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_uniforme }}{% else %}{{ defaults.pct_uniforme }}{% endif %}"></div>
             <div class="bonos-field"><label>Límite</label><input name="limite_uniforme" type="number" min="0" value="{% if periodo %}{{ periodo.limite_uniforme }}{% else %}{{ defaults.limite_uniforme }}{% endif %}"></div>
           </div>
           <div class="concept-card">
-            <strong>Asistencia</strong>
-            <div class="bonos-field"><label>% Asistencia</label><input name="pct_asistencia" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_asistencia }}{% else %}{{ defaults.pct_asistencia }}{% endif %}"></div>
+            <span class="status-pill neutral">Asistencia</span>
+            <div class="bonos-field"><label>% asistencia</label><input name="pct_asistencia" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_asistencia }}{% else %}{{ defaults.pct_asistencia }}{% endif %}"></div>
             <div class="bonos-field"><label>Límite</label><input name="limite_asistencia" type="number" min="0" value="{% if periodo %}{{ periodo.limite_asistencia }}{% else %}{{ defaults.limite_asistencia }}{% endif %}"></div>
           </div>
           <div class="concept-card">
-            <strong>Puntualidad</strong>
-            <div class="bonos-field"><label>% Puntualidad</label><input name="pct_puntualidad" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_puntualidad }}{% else %}{{ defaults.pct_puntualidad }}{% endif %}"></div>
+            <span class="status-pill neutral">Puntualidad</span>
+            <div class="bonos-field"><label>% puntualidad</label><input name="pct_puntualidad" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_puntualidad }}{% else %}{{ defaults.pct_puntualidad }}{% endif %}"></div>
             <div class="bonos-field"><label>Límite</label><input name="limite_puntualidad" type="number" min="0" value="{% if periodo %}{{ periodo.limite_puntualidad }}{% else %}{{ defaults.limite_puntualidad }}{% endif %}"></div>
           </div>
         </div>
