@@ -95,6 +95,60 @@ solo la base de datos tiene datos. Termina hasta que el resultado esté validado
 en el flujo real. Si no se puede validar, reportar el bloqueo exacto, lo que sí
 quedó hecho y qué falta para confirmar.
 
+## Lecciones críticas aprendidas en producción (NO ignorar)
+
+### Migraciones — regla de oro
+- Antes de cualquier PR que toque modelos, correr:
+  ```bash
+  python manage.py migrate --check
+  python manage.py showmigrations bonos_produccion bonos_ventas rrhh
+  ```
+- Si los campos ya existen en producción pero la migración no está registrada,
+  usar `--fake` para marcarla sin correrla. NUNCA borrar la migración.
+- Un `AttributeError: object has no attribute 'campo'` en producción = migración
+  no aplicada. Solución: `migrate --fake` + restart. No tocar código.
+
+### Deploy — no es automático
+El deploy NO se activa solo al mergear. Pasos obligatorios tras merge a main:
+```bash
+cd /opt/pastelerias-erp
+git pull origin main
+docker compose -f /opt/pastelerias-erp/docker-compose.yml exec -T web python manage.py migrate --noinput
+docker compose -f /opt/pastelerias-erp/docker-compose.yml restart web
+```
+Si migrate falla por columna duplicada: usar `--fake` en la migración específica.
+
+### Service worker — caché en PWA
+Después de deploy que cambia templates de bonos (producción/ventas), los usuarios
+necesitan hacer Cmd+Shift+R (Mac) o Ctrl+Shift+R (PC/Android) para limpiar caché.
+No asumir que el deploy llegó al usuario sin confirmarlo.
+
+### Datos de usuarios — NUNCA pisar
+- `bono_extra`, `ajuste_positivo`, `ajuste_negativo` son datos capturados por el
+  equipo operativo. NUNCA resetearlos, sobreescribirlos ni incluirlos en seeds.
+- `recalcular()` y `recalcular_todos()` NO deben tocar esos campos. Verificarlo
+  antes de cualquier cambio en models.py de bonos.
+- Si un endpoint llama `recalcular_todos()` automáticamente (ej: resumen), revisar
+  que no pise datos manuales capturados por las jefas.
+
+### Ramas — control de desorden
+- Una rama = una tarea = un módulo. Si la tarea crece, abrir rama nueva.
+- Nunca dejar commits de fix+revert en la misma rama sin squashearlos.
+- Antes de trabajar, confirmar con `git branch --show-current` que estás en la
+  rama correcta. No asumir.
+- Si una rama local está desincronizada de su origin: `git reset --hard origin/<rama>`.
+
+### Permisos y datos operativos — contexto real
+- Carolina Cayetano: jefa de producción. Captura datos en bonos producción.
+- Johana López: jefa de ventas. Captura datos en bonos ventas.
+- Sus capturas son datos reales de nómina. Un borrado accidental es crítico.
+- Siempre verificar en producción que los datos existen antes y después de cualquier
+  cambio que toque esos modelos:
+  ```sql
+  SELECT COUNT(*), SUM(bono_extra) FROM bonos_produccion_bonoproduccionempleado
+  WHERE periodo_id IN (SELECT id FROM bonos_produccion_configbonoperiodo WHERE mes=X AND anio=Y);
+  ```
+
 ## Reglas obligatorias antes de cualquier tarea
 
 ### NO hacer sin confirmación explícita de Mauricio:
