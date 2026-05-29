@@ -154,11 +154,21 @@
             <span class="status-pill neutral">Asistencia</span>
             <div class="bonos-field"><label>% asistencia</label><input name="pct_asistencia" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_asistencia }}{% else %}{{ defaults.pct_asistencia }}{% endif %}"></div>
             <div class="bonos-field"><label>Límite</label><input name="limite_asistencia" type="number" min="0" value="{% if periodo %}{{ periodo.limite_asistencia }}{% else %}{{ defaults.limite_asistencia }}{% endif %}"></div>
+            <label class="check-row" style="display:flex;align-items:center;gap:8px;justify-content:flex-start;margin-top:8px;">
+              <input type="checkbox" name="cancela_por_asistencia" {% if periodo and periodo.cancela_por_asistencia %}checked{% endif %}>
+              Cancela bono con X faltas
+            </label>
+            <div class="bonos-field"><label>Límite faltas para cancelar</label><input name="limite_asistencia_cancelacion" type="number" min="0" value="{% if periodo %}{{ periodo.limite_asistencia_cancelacion }}{% else %}{{ defaults.limite_asistencia_cancelacion }}{% endif %}"></div>
           </div>
           <div class="concept-card">
             <span class="status-pill neutral">Puntualidad</span>
             <div class="bonos-field"><label>% puntualidad</label><input name="pct_puntualidad" type="number" step="0.01" value="{% if periodo %}{{ periodo.pct_puntualidad }}{% else %}{{ defaults.pct_puntualidad }}{% endif %}"></div>
             <div class="bonos-field"><label>Límite</label><input name="limite_puntualidad" type="number" min="0" value="{% if periodo %}{{ periodo.limite_puntualidad }}{% else %}{{ defaults.limite_puntualidad }}{% endif %}"></div>
+            <label class="check-row" style="display:flex;align-items:center;gap:8px;justify-content:flex-start;margin-top:8px;">
+              <input type="checkbox" name="cancela_por_puntualidad" {% if periodo and periodo.cancela_por_puntualidad %}checked{% endif %}>
+              Cancela bono con retardos
+            </label>
+            <div class="bonos-field"><label>Límite retardos para cancelar</label><input name="limite_retardos_cancelacion" type="number" min="0" value="{% if periodo %}{{ periodo.limite_retardos_cancelacion }}{% else %}{{ defaults.limite_retardos_cancelacion }}{% endif %}"></div>
           </div>
         </div>
 

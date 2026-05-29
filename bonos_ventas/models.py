@@ -32,6 +32,13 @@ def _money(value) -> Decimal:
     return Decimal(value or 0).quantize(Decimal("0.01"))
 
 
+def _to_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 class ConfigBonoVentasPeriodo(models.Model):
     mes = models.PositiveSmallIntegerField()
     anio = models.PositiveSmallIntegerField()
@@ -43,6 +50,10 @@ class ConfigBonoVentasPeriodo(models.Model):
     limite_uniforme = models.PositiveSmallIntegerField(default=1)
     limite_asistencia = models.PositiveSmallIntegerField(default=2)
     limite_puntualidad = models.PositiveSmallIntegerField(default=2)
+    cancela_por_asistencia = models.BooleanField(default=False)
+    limite_asistencia_cancelacion = models.PositiveSmallIntegerField(default=0)
+    cancela_por_puntualidad = models.BooleanField(default=False)
+    limite_retardos_cancelacion = models.PositiveSmallIntegerField(default=0)
     bono_ventas_adicional = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("300.00"))
     umbral_crecimiento_pct = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("5.00"))
     bono_repartidor_adicional = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("300.00"))
@@ -201,9 +212,13 @@ class BonoVentasEmpleado(models.Model):
         faltas = dias_laborables - int(self.dias_asistencia or 0)
         retardos = dias_base - int(self.dias_puntualidad or 0)
         cancela_bono = (not self.pasa_asistencia) or (not self.pasa_puntualidad)
-        if cfg.cancela_por_asistencia and (faltas > cfg.limite_asistencia_cancelacion):
+        cancel_por_asistencia = getattr(cfg, "cancela_por_asistencia", False)
+        limite_cancel_asistencia = _to_int(getattr(cfg, "limite_asistencia_cancelacion", None), cfg.limite_asistencia)
+        if cancel_por_asistencia and (faltas > limite_cancel_asistencia):
             cancela_bono = True
-        if cfg.cancela_por_puntualidad and (retardos > cfg.limite_retardos_cancelacion):
+        cancel_por_puntualidad = getattr(cfg, "cancela_por_puntualidad", False)
+        limite_cancel_retardos = _to_int(getattr(cfg, "limite_retardos_cancelacion", None), cfg.limite_puntualidad)
+        if cancel_por_puntualidad and (retardos > limite_cancel_retardos):
             cancela_bono = True
         self.cancela_bono = cancela_bono
         self.monto_uniforme = self._monto_concepto(base, cfg.pct_uniforme, self.pasa_uniforme and not cancela_bono)

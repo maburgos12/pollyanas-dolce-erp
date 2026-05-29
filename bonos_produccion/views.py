@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rrhh.models import Empleado, NominaPeriodo
 from rrhh.bonos_permisos import BasePermisosEquipoViewSet, _empleado_payload, _permiso_payload
 from core.access import can_view_submodule, is_bonos_produccion_capture_only
+from core.audit import log_event
 from recetas.utils.normalizacion import normalizar_nombre
 
 from .models import (
@@ -151,9 +152,18 @@ class BonoProduccionViewSet(viewsets.ModelViewSet):
         bono.save()
 
     def perform_update(self, serializer):
+        campos_auditados = ["bono_extra", "ajuste_positivo", "ajuste_negativo"]
+        antes = {c: str(getattr(serializer.instance, c, 0)) for c in campos_auditados}
         bono = serializer.save()
         bono.recalcular()
         bono.save()
+        despues = {c: str(getattr(bono, c, 0)) for c in campos_auditados}
+        cambios = {c: {"antes": antes[c], "despues": despues[c]} for c in campos_auditados if antes[c] != despues[c]}
+        if cambios:
+            log_event(
+                self.request.user, "update", "bonos_produccion.BonoProduccionEmpleado",
+                bono.id, {"empleado": bono.empleado.nombre, "periodo": f"{bono.periodo.mes}/{bono.periodo.anio}", **cambios},
+            )
 
     @action(detail=False, methods=["get"], url_path="resumen")
     def resumen(self, request):
