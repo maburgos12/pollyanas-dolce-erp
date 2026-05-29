@@ -146,10 +146,17 @@ docker compose -f /opt/pastelerias-erp/docker-compose.yml restart web
 ```
 Si migrate falla por columna duplicada: usar `--fake` en la migración específica.
 
-### Service worker — caché en PWA
-Después de deploy que cambia templates de bonos (producción/ventas), los usuarios
-necesitan hacer Cmd+Shift+R (Mac) o Ctrl+Shift+R (PC/Android) para limpiar caché.
-No asumir que el deploy llegó al usuario sin confirmarlo.
+### Service Worker — caché en módulos PWA
+Cualquier módulo que registre un `sw.js` mantiene un caché activo en el navegador del
+cliente. El cliente no recibe el cambio aunque el servidor ya lo tenga desplegado.
+Cmd+Shift+R no bypasea el SW — no es suficiente.
+
+**Regla general:** si un commit toca HTML, CSS o JS de un módulo que tiene `sw.js`,
+ese mismo commit debe hacer bump del número de versión en `CACHE_NAME` dentro del SW.
+Después del deploy correr `collectstatic` para que el archivo SW actualizado llegue al
+servidor de estáticos (WhiteNoise).
+
+Esto aplica a cualquier módulo con PWA hoy o en el futuro — no es exclusivo de bonos.
 
 ### Datos de usuarios — NUNCA pisar
 - `bono_extra`, `ajuste_positivo`, `ajuste_negativo` son datos capturados por el
