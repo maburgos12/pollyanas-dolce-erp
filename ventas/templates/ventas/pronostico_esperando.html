@@ -117,6 +117,8 @@
     const detailUrlTemplate = "{% url 'ventas:pronostico_detalle' 0 %}";
     const errorBox = document.getElementById('forecast-error');
     const errorText = document.getElementById('forecast-error-text');
+    const TIMEOUT_MS = 3 * 60 * 1000;
+    const startedAt = Date.now();
 
     function showError(message) {
       if (errorText && message) errorText.textContent = message;
@@ -124,6 +126,10 @@
     }
 
     async function poll() {
+      if (Date.now() - startedAt > TIMEOUT_MS) {
+        showError('El cálculo tardó demasiado. Verifica que el servidor esté disponible e intenta de nuevo.');
+        return;
+      }
       try {
         const response = await fetch(statusUrl, { headers: { 'Accept': 'application/json' } });
         if (!response.ok) throw new Error('No se pudo consultar el estado del cálculo.');

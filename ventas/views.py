@@ -213,7 +213,21 @@ def _catalogo_productos_por_categoria() -> OrderedDict[str, list[dict]]:
         .exclude(point_product__name__icontains="media plancha")
         .values_list("point_product__sku", flat=True)
         .distinct()
-    )
+        )
+
+    if not skus_vigentes:
+        # Si no hay ventas recientes, mostramos el catálogo activo completo para no bloquear el pronóstico.
+        skus_vigentes = set(
+            PointProduct.objects.filter(active=True, sku__gt="")
+            .exclude(name__istartswith="TOPPING")
+            .exclude(name__icontains="topping")
+            .exclude(name__icontains="tarjeta de regalo")
+            .exclude(name__icontains="servicio domicilio")
+            .exclude(name__icontains="extra 100")
+            .exclude(name__icontains="media plancha")
+            .values_list("sku", flat=True)
+            .distinct()
+        )
     pay_durazno_skus = set(
         PointSalesDailyProductFact.objects.filter(
             sale_date__gte=timezone.localdate() - timedelta(days=90),
@@ -608,21 +622,20 @@ def _build_pronostico_detail_context(pronostico: PronosticoGuardado) -> dict:
     }
 
 
-def _block_stale_sales_forecast(request) -> bool:
+def _warn_stale_sales_forecast(request) -> None:
     freshness = queue_forecast_sales_refresh_if_needed(triggered_by_id=request.user.id)
     if freshness.is_fresh:
-        return False
+        return
 
     messages.warning(
         request,
         (
             "Ventas Point atrasadas: ultimo dia cargado "
             f"{freshness.latest_label}; requerido {freshness.target_label}. "
-            f"Se lanzo actualizacion solo de ventas ({freshness.refresh_days} dias). "
-            "Vuelve a generar el pronostico cuando termine."
+            f"Se lanzo actualizacion de ventas ({freshness.refresh_days} dias) en paralelo — "
+            "el pronostico se calcula con los datos actuales."
         ),
     )
-    return True
 
 
 @login_required
@@ -649,8 +662,7 @@ def PronosticoVentasView(request):
         if not selected_product_skus:
             form_errors.append("Selecciona al menos un producto para incluir en el pronostico.")
         if not form_errors and fecha_inicio and fecha_fin:
-            if _block_stale_sales_forecast(request):
-                return redirect("ventas:pronostico")
+            _warn_stale_sales_forecast(request)
             nombre = f"Pronóstico {fecha_inicio.isoformat()} a {fecha_fin.isoformat()}"
             task = calcular_y_guardar_pronostico.delay(
                 nombre,
@@ -723,8 +735,7 @@ def PronosticoGuardarView(request):
     if not nombre:
         nombre = f"Pronóstico {fecha_inicio} a {fecha_fin}"
 
-    if _block_stale_sales_forecast(request):
-        return redirect("ventas:pronostico")
+    _warn_stale_sales_forecast(request)
 
     task = calcular_y_guardar_pronostico.delay(
         nombre=nombre,
