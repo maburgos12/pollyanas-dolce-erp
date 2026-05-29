@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from django.db.models import Max
 from django.utils import timezone
 
-from pos_bridge.models import PointSalesDailyProductFact
+from pos_bridge.models import PointDailySale
 from pos_bridge.tasks.celery_tasks import task_daily_sales_sync
 
 
@@ -35,7 +35,7 @@ class ForecastSalesFreshness:
 
 
 def latest_sales_fact_date() -> date | None:
-    return PointSalesDailyProductFact.objects.aggregate(latest=Max("sale_date"))["latest"]
+    return PointDailySale.objects.aggregate(latest=Max("sale_date"))["latest"]
 
 
 def build_forecast_sales_freshness(
