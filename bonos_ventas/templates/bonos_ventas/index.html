@@ -256,6 +256,26 @@ function money(v){ return Number(v||0).toLocaleString('es-MX',{style:'currency',
 function initials(n){ return (n||'').split(' ').filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase(); }
 function esDom(d,m,a){ return new Date(a,m-1,d).getDay()===0; }
 function diasEnMes(m,a){ return new Date(a,m,0).getDate(); }
+const MESES_CORTO_BV=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+function buildDiasCal(periodo,mes,anio){
+  // Si el período tiene fecha_inicio/fin, construir el rango real.
+  // Devuelve array de {dia:N, date:Date|null, label:string, showMes:bool}
+  if(periodo&&periodo.fecha_inicio){
+    const ini=new Date(periodo.fecha_inicio+'T12:00:00');
+    const fin=periodo.fecha_fin?new Date(periodo.fecha_fin+'T12:00:00'):new Date(anio,mes,0);
+    const days=[];let cur=new Date(ini);let prevM=-1;let idx=1;
+    while(cur<=fin){
+      const showMes=cur.getMonth()!==prevM;
+      if(showMes)prevM=cur.getMonth();
+      days.push({dia:idx,date:new Date(cur),label:String(cur.getDate()),mes:MESES_CORTO_BV[cur.getMonth()],showMes});
+      cur.setDate(cur.getDate()+1);idx++;
+    }
+    return days;
+  }
+  // Sin rango: comportamiento original (día = número de día del mes)
+  const total=diasEnMes(mes,anio);
+  return Array.from({length:total},(_,i)=>({dia:i+1,date:null,label:String(i+1),mes:null,showMes:false}));
+}
 function normalizeText(v){ return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim(); }
 
 // SVG icons inline
@@ -522,7 +542,7 @@ function App(){
       ),
 
       tab==='config' && h(ConfigTab,{bonos:bonosFiltrados,sucursales,filtroSuc,setFiltroSuc}),
-      tab==='captura' && h(CapturaTab,{bonos:bonosFiltrados,mes,anio,showStatus}),
+      tab==='captura' && h(CapturaTab,{bonos:bonosFiltrados,mes,anio,periodo,showStatus}),
       tab==='permisos' && h(PermisosTab,{bonos,sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatus}),
       tab==='ventas' && h(VentasTab,{ventas,periodo,syncPos,cargar,showStatus}),
       tab==='resumen' && h(ResumenTab,{bonos:bonosFiltrados,sucursales,mes,anio}),
@@ -571,7 +591,7 @@ function ConfigTab({bonos,sucursales,filtroSuc,setFiltroSuc}){
 }
 
 // ── CAPTURA TAB ───────────────────────────────────────────────────────────────
-function CapturaTab({bonos,mes,anio,showStatus}){
+function CapturaTab({bonos,mes,anio,periodo,showStatus}){
   const [selSuc, setSelSuc] = React.useState('');
   const [selBono, setSelBono] = React.useState(null);
   const [registros, setRegistros] = React.useState([]);
@@ -636,9 +656,12 @@ function CapturaTab({bonos,mes,anio,showStatus}){
     api(`/api/bonos-ventas/registros-diarios/${r.id}/`,{method:'PATCH',body:JSON.stringify({puntos_de_vista:val})}).catch(()=>{});
   }
 
-  const total = diasEnMes(mes,anio);
+  const diasCal = buildDiasCal(periodo,mes,anio);
   const regActivos = registros.filter(r=>r.tiene_asistencia);
   const diaActual = selDia && registros.find(x=>+x.dia===selDia);
+  const rangoLabel = (periodo&&periodo.fecha_inicio)
+    ? `${new Date(periodo.fecha_inicio+'T12:00:00').toLocaleDateString('es-MX',{day:'2-digit',month:'short'})} → ${periodo.fecha_fin?new Date(periodo.fecha_fin+'T12:00:00').toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'numeric'}):''}`
+    : null;
 
   return h('div',null,
     // Sucursales
@@ -663,7 +686,7 @@ function CapturaTab({bonos,mes,anio,showStatus}){
           h('div',{className:'av'},initials(selBono.empleado_nombre)),
           h('div',null,
             h('div',{className:'persona-name'},selBono.empleado_nombre),
-            h('div',{className:'persona-sub'},`${regActivos.length} días trabajados este mes`)
+            h('div',{className:'persona-sub'},`${regActivos.length} días trabajados${rangoLabel?' en el período':' este mes'}`)
           )
         ),
         h('div',{style:{display:'flex',gap:6}},
@@ -673,18 +696,18 @@ function CapturaTab({bonos,mes,anio,showStatus}){
         )
       ),
       h('div',{className:'card-body'},
+        rangoLabel&&h('div',{className:'sec-title',style:{marginBottom:6}},`📅 ${rangoLabel} · ${diasCal.length} días`),
         h('div',{className:'sec-title'},'Clic en el día para registrar asistencia'),
         h('div',{className:'days-grid'},
-          Array.from({length:total},(_,i)=>i+1).map(d=>{
-            const dom = esDom(d,mes,anio);
-            const r = registros.find(x=>+x.dia===d);
+          diasCal.map(({dia,label,mes:dMes,showMes})=>{
+            const r = registros.find(x=>+x.dia===dia);
             const worked = r?.tiene_asistencia;
-            return h('div',{key:d,
-              className:`day-cell ${dom?'dom':''} ${worked?'worked':''} ${savingDia===d?'saving':''}`,
-              onClick:()=>togDia(d)
+            return h('div',{key:dia,
+              className:`day-cell ${worked?'worked':''} ${savingDia===dia?'saving':''}`,
+              onClick:()=>togDia(dia)
             },
-              h('span',{className:'dn'},d),
-              h('span',{className:'ds'},worked?'✓':dom?'D':'')
+              h('span',{className:'dn'},label),
+              showMes&&dMes?h('span',{className:'ds',style:{fontSize:9,opacity:.8}},dMes):h('span',{className:'ds'},worked?'✓':'')
             );
           })
         ),

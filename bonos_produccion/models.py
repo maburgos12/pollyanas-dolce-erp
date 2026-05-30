@@ -84,6 +84,8 @@ class ConfigBonoPeriodo(models.Model):
     limite_asistencia = models.PositiveSmallIntegerField(default=2)
     limite_puntualidad = models.PositiveSmallIntegerField(default=2)
     limite_produccion = models.PositiveSmallIntegerField(default=2)
+    fecha_inicio = models.DateField(null=True, blank=True)
+    fecha_fin = models.DateField(null=True, blank=True)
     creado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
     creado_en = models.DateTimeField(auto_now_add=True)
     actualizado_en = models.DateTimeField(auto_now=True)
