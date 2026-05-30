@@ -384,26 +384,15 @@ def solicitar_prorroga(request, pk):
     return redirect("seguimiento:mi_seguimiento")
 
 
-@login_required
-@require_POST
-def entregar_para_revision(request, pk):
-    item = _get_item_para_usuario(request.user, pk)
-    if item.esta_cerrado:
-        messages.error(request, "Este acuerdo ya está cerrado.")
-        return redirect("seguimiento:detalle", pk=pk)
-
+def _registrar_cierre_opcional(request, item, prefijo: str) -> bool:
+    """Guarda comentario y/o evidencia opcionales. Devuelve False si el archivo falla."""
     comentario_texto = (request.POST.get("comentario") or "").strip()
     archivo = request.FILES.get("archivo")
-
-    if not comentario_texto and not archivo:
-        messages.error(request, "Escribe un comentario o adjunta evidencia para marcar como listo.")
-        return redirect("seguimiento:detalle", pk=pk)
-
     if archivo:
         error_archivo = _validar_archivo_evidencia(archivo)
         if error_archivo:
             messages.error(request, error_archivo)
-            return redirect("seguimiento:detalle", pk=pk)
+            return False
         SeguimientoEvidencia.objects.create(
             seguimiento=item,
             usuario=request.user,
@@ -411,21 +400,62 @@ def entregar_para_revision(request, pk):
             nombre_original=archivo.name,
             comentario=comentario_texto,
         )
-
     if comentario_texto:
         SeguimientoComentario.objects.create(
             seguimiento=item,
             usuario=request.user,
             tipo=SeguimientoComentario.TIPO_FEEDBACK,
-            comentario=f"[ENTREGA] {comentario_texto}",
+            comentario=f"[{prefijo}] {comentario_texto}" if comentario_texto else comentario_texto,
         )
+    return True
+
+
+@login_required
+@require_POST
+def entregar_para_revision(request, pk):
+    """Flujo para acuerdos que sí requieren aprobación del DG."""
+    item = _get_item_para_usuario(request.user, pk)
+    if item.esta_cerrado:
+        messages.error(request, "Este acuerdo ya está cerrado.")
+        return redirect("seguimiento:detalle", pk=pk)
+
+    if not _registrar_cierre_opcional(request, item, "ENTREGA"):
+        return redirect("seguimiento:detalle", pk=pk)
 
     item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
     item.save(update_fields=["estatus", "updated_at"])
     log_event(request.user, "seguimiento.entrega", "SeguimientoItem", item.pk, {"entrega": True})
     nombre_usuario = request.user.get_full_name() or request.user.username
     _notificar_dg_revision(item, "Entregado para revisión", nombre_usuario)
-    messages.success(request, "Acuerdo marcado como listo. El Director General será notificado.")
+    messages.success(request, "Acuerdo enviado a revisión. El Director General será notificado.")
+    return redirect("seguimiento:detalle", pk=pk)
+
+
+@login_required
+@require_POST
+def completar_directamente(request, pk):
+    """Cierre directo para acuerdos sin aprobación requerida o con checklist 100%."""
+    item = _get_item_para_usuario(request.user, pk)
+    if item.esta_cerrado:
+        messages.error(request, "Este acuerdo ya está cerrado.")
+        return redirect("seguimiento:detalle", pk=pk)
+
+    checks = list(item.checklist.all())
+    checklist_completo = checks and all(c.completado for c in checks)
+    puede_cerrar_directo = not item.requiere_aprobacion or checklist_completo
+
+    if not puede_cerrar_directo:
+        messages.error(request, "Este acuerdo requiere aprobación del Director General.")
+        return redirect("seguimiento:detalle", pk=pk)
+
+    if not _registrar_cierre_opcional(request, item, "COMPLETADO"):
+        return redirect("seguimiento:detalle", pk=pk)
+
+    item.estatus = SeguimientoItem.ESTATUS_COMPLETADO
+    item.aprobado_at = timezone.now()
+    item.save(update_fields=["estatus", "aprobado_at", "updated_at"])
+    log_event(request.user, "seguimiento.completar", "SeguimientoItem", item.pk, {"directo": True})
+    messages.success(request, "Acuerdo marcado como completado.")
     return redirect("seguimiento:detalle", pk=pk)
 
 
@@ -449,6 +479,10 @@ def detalle_item(request, pk):
     comentarios = item.comentarios.select_related("usuario").order_by("created_at")
     evidencias = item.evidencias.select_related("usuario", "revisado_por").order_by("created_at")
 
+    checklist_completo = bool(checks) and all(c.completado for c in checks)
+    puede_cerrar_directo = not item.requiere_aprobacion or checklist_completo
+    puede_entregar = not item.esta_cerrado and item.requiere_aprobacion and not checklist_completo
+
     return render(
         request,
         "seguimiento/detalle_item.html",
@@ -463,7 +497,9 @@ def detalle_item(request, pk):
             "prorroga_pendiente": prorroga_pendiente,
             "comentarios": comentarios,
             "evidencias": evidencias,
-            "puede_entregar": not item.esta_cerrado,
+            "puede_cerrar_directo": puede_cerrar_directo and not item.esta_cerrado,
+            "puede_entregar": puede_entregar,
+            "checklist_completo": checklist_completo,
             "estatus_en_revision": SeguimientoItem.ESTATUS_EN_REVISION,
         },
     )

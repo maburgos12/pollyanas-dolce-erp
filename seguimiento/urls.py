@@ -18,6 +18,7 @@ urlpatterns = [
     path("<int:pk>/evidencias/", views.subir_evidencia, name="subir_evidencia"),
     path("<int:pk>/prorroga/", views.solicitar_prorroga, name="solicitar_prorroga"),
     path("<int:pk>/entregar/", views.entregar_para_revision, name="entregar"),
+    path("<int:pk>/completar/", views.completar_directamente, name="completar"),
     path("<int:pk>/resolver/", views.resolver_revision, name="resolver_revision"),
     path("<int:pk>/prorroga/<int:prorroga_id>/resolver/", views.resolver_prorroga, name="resolver_prorroga"),
 ]

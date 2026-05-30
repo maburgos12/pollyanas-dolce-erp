@@ -245,23 +245,55 @@
   </div>
   {% endif %}
 
-  <!-- Entregar para revisión -->
-  {% if puede_entregar %}
+  <!-- Cierre directo (sin aprobación requerida o checklist 100%) -->
+  {% if puede_cerrar_directo %}
   <div class="bi-panel" style="margin-bottom:16px;">
-    <p class="seg-section-title">Marcar como listo</p>
+    <p class="seg-section-title">
+      {% if checklist_completo %}Checklist completo — cerrar acuerdo{% else %}Marcar como completado{% endif %}
+    </p>
     <div class="seg-entregar-box">
       <p style="margin:0; color:var(--texto-light); font-size:.9rem;">
-        Cuando termines, usa este formulario para notificar al Director General que el acuerdo está listo para su revisión.
-        Puedes adjuntar evidencia (foto, documento, reporte).
+        {% if checklist_completo %}
+          Todos los pasos del checklist están marcados. Puedes cerrar el acuerdo ahora.
+        {% else %}
+          Este acuerdo no requiere aprobación. Márcalo como completado cuando hayas terminado.
+        {% endif %}
+        Puedes agregar una observación o adjuntar un documento (opcional).
+      </p>
+      <form method="post" action="{% url 'seguimiento:completar' item.pk %}" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div style="display:grid; gap:10px;">
+          <textarea name="comentario" placeholder="Observación o resultado final (opcional)"></textarea>
+          <input type="file" name="archivo"
+            accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf">
+          <div class="seg-entregar-actions">
+            <button class="btn btn-primary" type="submit">
+              {% if checklist_completo %}✓ Cerrar acuerdo{% else %}✓ Marcar como completado{% endif %}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Entregar para revisión DG (requiere aprobación y checklist incompleto o sin checklist) -->
+  {% if puede_entregar %}
+  <div class="bi-panel" style="margin-bottom:16px;">
+    <p class="seg-section-title">Enviar a revisión del Director General</p>
+    <div class="seg-entregar-box">
+      <p style="margin:0; color:var(--texto-light); font-size:.9rem;">
+        Cuando termines, notifica al Director General para que revise y apruebe este acuerdo.
+        Puedes agregar una observación o adjuntar evidencia (opcional).
       </p>
       <form method="post" action="{% url 'seguimiento:entregar' item.pk %}" enctype="multipart/form-data">
         {% csrf_token %}
         <div style="display:grid; gap:10px;">
-          <textarea name="comentario" placeholder="Describe qué se hizo o cuál es el resultado final (recomendado)"></textarea>
+          <textarea name="comentario" placeholder="¿Qué se hizo? ¿Cuál es el resultado? (opcional)"></textarea>
           <input type="file" name="archivo"
             accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf">
           <div class="seg-entregar-actions">
-            <button class="btn btn-primary" type="submit">Listo — entregar para revisión</button>
+            <button class="btn btn-primary" type="submit">Listo — enviar a revisión</button>
           </div>
         </div>
       </form>
