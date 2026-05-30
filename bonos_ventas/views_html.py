@@ -11,6 +11,7 @@ from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import ensure_csrf_cookie
 
@@ -131,6 +132,12 @@ def bonos_ventas_dashboard(request):
             periodo.umbral_efectividad_pct = _parse_decimal(request.POST.get("umbral_efectividad_pct"))
             for category, field in CATEGORY_WEIGHT_FIELDS.items():
                 setattr(periodo, field, _parse_decimal(request.POST.get(field)))
+            fecha_inicio = parse_date(request.POST.get("fecha_inicio") or "")
+            if fecha_inicio is not None:
+                periodo.fecha_inicio = fecha_inicio
+            fecha_fin = parse_date(request.POST.get("fecha_fin") or "")
+            if fecha_fin is not None:
+                periodo.fecha_fin = fecha_fin
             periodo.creado_por = periodo.creado_por or request.user
             periodo.save()
             _recalcular_periodo(periodo)

@@ -54,6 +54,8 @@ class ConfigBonoVentasPeriodo(models.Model):
     limite_asistencia_cancelacion = models.PositiveSmallIntegerField(default=0)
     cancela_por_puntualidad = models.BooleanField(default=False)
     limite_retardos_cancelacion = models.PositiveSmallIntegerField(default=0)
+    fecha_inicio = models.DateField(null=True, blank=True)
+    fecha_fin = models.DateField(null=True, blank=True)
     bono_ventas_adicional = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("300.00"))
     umbral_crecimiento_pct = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("5.00"))
     bono_repartidor_adicional = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("300.00"))

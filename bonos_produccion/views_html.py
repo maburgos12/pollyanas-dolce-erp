@@ -11,6 +11,7 @@ from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import ensure_csrf_cookie
 
@@ -71,6 +72,12 @@ def bonos_produccion_dashboard(request):
             for area, amount_field in AREA_AMOUNT_FIELDS.items():
                 setattr(periodo, amount_field, _parse_decimal(request.POST.get(amount_field)))
             periodo.premio_embetunado = _parse_decimal(request.POST.get("premio_embetunado"))
+            fecha_inicio = parse_date(request.POST.get("fecha_inicio") or "")
+            if fecha_inicio is not None:
+                periodo.fecha_inicio = fecha_inicio
+            fecha_fin = parse_date(request.POST.get("fecha_fin") or "")
+            if fecha_fin is not None:
+                periodo.fecha_fin = fecha_fin
             periodo.creado_por = periodo.creado_por or request.user
             periodo.save()
 
