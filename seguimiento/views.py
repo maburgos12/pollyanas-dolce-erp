@@ -15,6 +15,12 @@ from django.views.decorators.http import require_POST
 
 from core.access import ROLE_DG, ROLE_ADMIN, has_any_role
 from core.audit import log_event
+from core.notificaciones import (
+    notificar_seguimiento_avance,
+    notificar_seguimiento_completado,
+    notificar_seguimiento_entrega,
+    notificar_seguimiento_prorroga,
+)
 
 from .models import (
     SeguimientoChecklistItem,
@@ -291,8 +297,9 @@ def toggle_checklist(request, pk, check_id):
         check.completado_at = None
     check.save(update_fields=["completado", "completado_por", "completado_at", "updated_at"])
     log_event(request.user, "seguimiento.checklist", "SeguimientoChecklistItem", check.pk, {"seguimiento_id": item.pk})
+    notificar_seguimiento_avance(item, actor=request.user, mensaje_extra=f"Check: {'✓ ' if check.completado else '○ '}{check.titulo}")
     messages.success(request, "Checklist actualizado.")
-    return redirect("seguimiento:mi_seguimiento")
+    return redirect("seguimiento:detalle", pk=item.pk)
 
 
 @login_required
@@ -313,8 +320,9 @@ def registrar_feedback(request, pk):
         item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
         item.save(update_fields=["estatus", "updated_at"])
     log_event(request.user, "seguimiento.retroalimentacion", "SeguimientoItem", item.pk, {"comentario": True})
-    messages.success(request, "Retroalimentación enviada para revisión.")
-    return redirect("seguimiento:mi_seguimiento")
+    notificar_seguimiento_avance(item, actor=request.user, mensaje_extra=comentario[:160])
+    messages.success(request, "Retroalimentación enviada.")
+    return redirect("seguimiento:detalle", pk=item.pk)
 
 
 @login_required
@@ -340,8 +348,9 @@ def subir_evidencia(request, pk):
         item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
         item.save(update_fields=["estatus", "updated_at"])
     log_event(request.user, "seguimiento.evidencia", "SeguimientoItem", item.pk, {"archivo": archivo.name})
-    messages.success(request, "Evidencia enviada para revisión.")
-    return redirect("seguimiento:mi_seguimiento")
+    notificar_seguimiento_avance(item, actor=request.user, mensaje_extra=f"Archivo: {archivo.name}")
+    messages.success(request, "Evidencia subida.")
+    return redirect("seguimiento:detalle", pk=item.pk)
 
 
 @login_required
@@ -380,8 +389,9 @@ def solicitar_prorroga(request, pk):
         item.pk,
         {"fecha_solicitada": fecha_solicitada.isoformat()},
     )
-    messages.success(request, "Solicitud de más tiempo enviada para revisión.")
-    return redirect("seguimiento:mi_seguimiento")
+    notificar_seguimiento_prorroga(item, fecha_solicitada, motivo, actor=request.user)
+    messages.success(request, "Solicitud de prórroga enviada.")
+    return redirect("seguimiento:detalle", pk=item.pk)
 
 
 def _registrar_cierre_opcional(request, item, prefijo: str) -> bool:
@@ -425,6 +435,7 @@ def entregar_para_revision(request, pk):
     item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
     item.save(update_fields=["estatus", "updated_at"])
     log_event(request.user, "seguimiento.entrega", "SeguimientoItem", item.pk, {"entrega": True})
+    notificar_seguimiento_entrega(item, actor=request.user)
     nombre_usuario = request.user.get_full_name() or request.user.username
     _notificar_dg_revision(item, "Entregado para revisión", nombre_usuario)
     messages.success(request, "Acuerdo enviado a revisión. El Director General será notificado.")
@@ -455,6 +466,7 @@ def completar_directamente(request, pk):
     item.aprobado_at = timezone.now()
     item.save(update_fields=["estatus", "aprobado_at", "updated_at"])
     log_event(request.user, "seguimiento.completar", "SeguimientoItem", item.pk, {"directo": True})
+    notificar_seguimiento_completado(item, actor=request.user)
     messages.success(request, "Acuerdo marcado como completado.")
     return redirect("seguimiento:detalle", pk=pk)
 
