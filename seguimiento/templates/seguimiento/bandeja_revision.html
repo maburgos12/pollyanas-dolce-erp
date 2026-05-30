@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Bandeja de revisión · Seguimiento{% endblock %}
+{% block page_title %}Seguimiento · Revisión DG{% endblock %}
+{% block body_class %}page-seguimiento-revision{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
+<style>
+  .seg-rev-shell { width: min(100%, 1200px); }
+
+  .seg-rev-item {
+    background: rgba(255,255,255,.88);
+    border: 1px solid rgba(201,168,76,.22);
+    border-radius: 16px;
+    padding: 18px 20px;
+    display: grid;
+    gap: 14px;
+  }
+
+  .seg-rev-item-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .seg-rev-title { margin: 0; font-size: 1.05rem; color: var(--texto); }
+
+  .seg-rev-meta { font-size: .82rem; color: var(--texto-light); margin-top: 4px; }
+
+  .seg-rev-actividad {
+    background: rgba(250,246,248,.94);
+    border: 1px solid rgba(139,34,82,.08);
+    border-radius: 12px;
+    padding: 12px;
+    display: grid;
+    gap: 8px;
+    font-size: .9rem;
+  }
+
+  .seg-rev-evidencia-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(35,109,83,.10);
+    color: #236d53;
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: .85rem;
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .seg-rev-evidencia-link:hover { background: rgba(35,109,83,.18); }
+
+  .seg-rev-actions {
+    display: grid;
+    gap: 10px;
+  }
+
+  .seg-rev-actions form {
+    display: grid;
+    gap: 8px;
+  }
+
+  .seg-rev-actions textarea {
+    width: 100%;
+    border: 1px solid rgba(139,34,82,.14);
+    border-radius: 10px;
+    padding: 9px 10px;
+    font: inherit;
+    color: var(--texto);
+    background: rgba(255,255,255,.96);
+    resize: vertical;
+    min-height: 60px;
+    box-sizing: border-box;
+  }
+
+  .seg-rev-action-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .seg-prorroga-box {
+    background: rgba(255,193,7,.10);
+    border: 1px solid rgba(255,193,7,.30);
+    border-radius: 12px;
+    padding: 12px;
+    font-size: .88rem;
+  }
+
+  .seg-empty {
+    text-align: center;
+    padding: 48px 24px;
+    color: var(--texto-light);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-shell bi-shell seg-rev-shell">
+
+  <section class="bi-hero" style="margin-bottom:20px;">
+    <div class="bi-hero-main">
+      <div class="bi-kicker">Director General</div>
+      <h1 class="bi-hero-title" style="font-size:1.8rem;">Bandeja de revisión</h1>
+      <p class="bi-copy">Acuerdos entregados por colaboradores que esperan tu aprobación o devolución.</p>
+    </div>
+    <div class="bi-hero-side">
+      <div class="bi-hero-status-grid">
+        <article class="bi-status-card">
+          <span class="bi-status-label">Pendientes</span>
+          <strong class="{% if total %}is-warning{% else %}is-success{% endif %}">{{ total|intcomma }}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Vista</span>
+          <strong>Mi trabajo</strong>
+        </article>
+      </div>
+      <div style="margin-top:10px;">
+        <a href="{% url 'seguimiento:mi_seguimiento' %}" class="btn btn-secondary btn-sm">← Mi trabajo</a>
+      </div>
+    </div>
+  </section>
+
+  {% if messages %}
+  {% for message in messages %}
+  <div class="alert alert-{% if message.tags == 'error' %}danger{% elif message.tags == 'warning' %}warning{% else %}success{% endif %}" style="margin-bottom:12px;">
+    {{ message }}
+  </div>
+  {% endfor %}
+  {% endif %}
+
+  {% if not items %}
+  <div class="bi-panel seg-empty">
+    <p style="font-size:2rem; margin:0;">✅</p>
+    <p style="margin:8px 0 0; font-weight:700;">Sin acuerdos pendientes de revisión.</p>
+    <p class="muted" style="font-size:.9rem;">Cuando un colaborador marque un acuerdo como listo aparecerá aquí.</p>
+  </div>
+  {% else %}
+  <div style="display:grid; gap:14px;">
+    {% for item in items %}
+    <div class="seg-rev-item">
+      <div class="seg-rev-item-head">
+        <div>
+          <span class="bi-pill" style="margin-bottom:6px;">{{ item.get_tipo_display }}</span>
+          <h2 class="seg-rev-title">{{ item.titulo }}</h2>
+          <p class="seg-rev-meta">
+            Responsable:
+            <strong>
+              {% if item.responsable_user %}{{ item.responsable_user.get_full_name|default:item.responsable_user.username }}
+              {% elif item.responsable_empleado %}{{ item.responsable_empleado.nombre }}
+              {% else %}Sin asignar{% endif %}
+            </strong>
+            · Área: {{ item.area|default:"—" }}
+            · Fecha límite:
+            <strong {% if item.esta_vencido %}style="color:var(--rojo)"{% endif %}>
+              {% if item.fecha_limite %}{{ item.fecha_limite|date:"d/m/Y" }}{% else %}Sin fecha{% endif %}
+            </strong>
+          </p>
+        </div>
+        <div style="display:flex; gap:8px; flex-shrink:0; align-items:center;">
+          <span style="font-size:.8rem; color:var(--texto-light);">{{ item.updated_at|timesince }} atrás</span>
+          <a href="{% url 'seguimiento:detalle' item.pk %}" class="btn btn-secondary btn-sm">Ver detalle</a>
+        </div>
+      </div>
+
+      {% if item.entregable_esperado %}
+      <p style="margin:0; font-size:.88rem; font-weight:700; color:#4f4249;">
+        Entregable esperado: {{ item.entregable_esperado }}
+      </p>
+      {% endif %}
+
+      <!-- Última actividad del colaborador -->
+      <div class="seg-rev-actividad">
+        {% if item.ultima_evidencia %}
+        <div>
+          <span style="font-weight:700;">Evidencia adjunta:</span>
+          <a href="{{ item.ultima_evidencia.archivo.url }}" target="_blank" rel="noopener" class="seg-rev-evidencia-link">
+            📎 {{ item.ultima_evidencia.nombre_original }}
+          </a>
+          {% if item.ultima_evidencia.comentario %}
+          <span class="muted" style="font-size:.85rem;"> — {{ item.ultima_evidencia.comentario|truncatechars:120 }}</span>
+          {% endif %}
+        </div>
+        {% endif %}
+        {% if item.ultimo_comentario %}
+        <div>
+          <span style="font-weight:700;">Último mensaje:</span>
+          "{{ item.ultimo_comentario.comentario|truncatechars:200 }}"
+          <span class="muted" style="font-size:.82rem;">— {{ item.ultimo_comentario.usuario.get_full_name|default:item.ultimo_comentario.usuario.username }}, {{ item.ultimo_comentario.created_at|date:"d/m/Y H:i" }}</span>
+        </div>
+        {% endif %}
+        {% if not item.ultima_evidencia and not item.ultimo_comentario %}
+        <span class="muted">Sin actividad registrada.</span>
+        {% endif %}
+        <div class="bi-subtle">Checks: {{ item.checklist_done }}/{{ item.checklist_total }} · {{ item.progreso_pct }}%</div>
+      </div>
+
+      <!-- Prórroga pendiente -->
+      {% if item.prorroga_pendiente %}
+      <div class="seg-prorroga-box">
+        <strong>⏳ Solicitud de prórroga:</strong>
+        hasta {{ item.prorroga_pendiente.fecha_solicitada|date:"d/m/Y" }} —
+        {{ item.prorroga_pendiente.motivo|truncatechars:160 }}
+        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+          <form method="post" action="{% url 'seguimiento:resolver_prorroga' item.pk item.prorroga_pendiente.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="accion" value="aprobar">
+            <button class="btn btn-primary btn-sm" type="submit">Aprobar prórroga</button>
+          </form>
+          <form method="post" action="{% url 'seguimiento:resolver_prorroga' item.pk item.prorroga_pendiente.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="accion" value="rechazar">
+            <button class="btn btn-secondary btn-sm" type="submit">Rechazar prórroga</button>
+          </form>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Aprobar / Devolver -->
+      <div class="seg-rev-actions">
+        <p style="margin:0; font-size:.82rem; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--texto-light);">Tu decisión</p>
+        <form method="post" action="{% url 'seguimiento:resolver_revision' item.pk %}">
+          {% csrf_token %}
+          <input type="hidden" name="accion" value="aprobar">
+          <textarea name="comentario" placeholder="Comentario de aprobación (opcional)"></textarea>
+          <div class="seg-rev-action-row">
+            <button class="btn btn-primary" type="submit">✓ Aprobar — marcar completado</button>
+          </div>
+        </form>
+        <form method="post" action="{% url 'seguimiento:resolver_revision' item.pk %}">
+          {% csrf_token %}
+          <input type="hidden" name="accion" value="devolver">
+          <textarea name="comentario" placeholder="Motivo de devolución (obligatorio)" required></textarea>
+          <div class="seg-rev-action-row">
+            <button class="btn btn-secondary" type="submit">↩ Devolver para corrección</button>
+          </div>
+        </form>
+      </div>
+
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

@@ -1,0 +1,343 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}{{ item.titulo|truncatechars:60 }} · Mi trabajo{% endblock %}
+{% block page_title %}Mi trabajo · Detalle{% endblock %}
+{% block body_class %}page-seguimiento-detalle{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
+<style>
+  .seg-detalle-shell { width: min(100%, 900px); }
+
+  .seg-detalle-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+
+  .seg-detalle-title {
+    margin: 0;
+    font-size: 1.5rem;
+    color: var(--texto);
+  }
+
+  .seg-section-title {
+    font-size: 0.85rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--texto-light);
+    margin: 0 0 10px;
+  }
+
+  .seg-timeline {
+    display: grid;
+    gap: 10px;
+  }
+
+  .seg-timeline-item {
+    display: grid;
+    grid-template-columns: 36px 1fr;
+    gap: 10px;
+    align-items: start;
+  }
+
+  .seg-timeline-dot {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: rgba(139, 34, 82, 0.10);
+    color: var(--vino);
+    font-size: 1.1rem;
+    flex-shrink: 0;
+  }
+
+  .seg-timeline-dot.is-dg {
+    background: rgba(201, 168, 76, 0.15);
+    color: #8b6b1c;
+  }
+
+  .seg-timeline-dot.is-evidencia {
+    background: rgba(35, 109, 83, 0.12);
+    color: #236d53;
+  }
+
+  .seg-timeline-body {
+    background: rgba(255, 255, 255, 0.86);
+    border: 1px solid rgba(139, 34, 82, 0.08);
+    border-radius: 12px;
+    padding: 10px 14px;
+  }
+
+  .seg-timeline-body.is-dg {
+    border-color: rgba(201, 168, 76, 0.20);
+    background: rgba(255, 252, 240, 0.92);
+  }
+
+  .seg-timeline-meta {
+    font-size: 0.8rem;
+    color: var(--texto-light);
+    margin-top: 4px;
+  }
+
+  .seg-entregar-box {
+    background: linear-gradient(135deg, rgba(139,34,82,.06), rgba(201,168,76,.06));
+    border: 1px solid rgba(139, 34, 82, 0.14);
+    border-radius: 16px;
+    padding: 20px;
+    display: grid;
+    gap: 12px;
+  }
+
+  .seg-entregar-box textarea,
+  .seg-entregar-box input[type="file"] {
+    width: 100%;
+    border: 1px solid rgba(139, 34, 82, 0.14);
+    border-radius: 12px;
+    padding: 10px 12px;
+    font: inherit;
+    color: var(--texto);
+    background: rgba(255, 255, 255, 0.96);
+    resize: vertical;
+    min-height: 80px;
+    box-sizing: border-box;
+  }
+
+  .seg-entregar-box input[type="file"] { min-height: auto; }
+
+  .seg-entregar-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .seg-badge-status {
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 800;
+  }
+
+  .seg-badge-status.pendiente { background: rgba(255,193,7,.18); color: #7a5c00; }
+  .seg-badge-status.en_proceso { background: rgba(47,108,119,.14); color: #2f6c77; }
+  .seg-badge-status.en_revision { background: rgba(201,168,76,.20); color: #8b6b1c; }
+  .seg-badge-status.completado { background: rgba(76,175,80,.16); color: #236d53; }
+  .seg-badge-status.bloqueado,
+  .seg-badge-status.cancelado { background: rgba(229,57,53,.14); color: #b71c1c; }
+
+  .seg-form-textarea {
+    width: 100%;
+    border: 1px solid rgba(139,34,82,.14);
+    border-radius: 12px;
+    padding: 10px;
+    font: inherit;
+    color: var(--texto);
+    background: rgba(255,255,255,.96);
+    min-height: 64px;
+    resize: vertical;
+    box-sizing: border-box;
+  }
+
+  .seg-progress-fill {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    transition: width .4s ease;
+    width: var(--seg-pct, 0%);
+  }
+  .seg-progress-fill.is-danger { background: var(--rojo); }
+  .seg-progress-fill.is-success { background: var(--verde); }
+  .seg-progress-fill.is-plum { background: var(--vino); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-shell bi-shell seg-detalle-shell">
+
+  <div style="margin-bottom:14px;">
+    <a href="{% url 'seguimiento:mi_seguimiento' %}" class="btn btn-secondary btn-sm">← Mi trabajo</a>
+  </div>
+
+  <div class="seg-detalle-header">
+    <div>
+      <div class="bi-kicker">{{ item.get_tipo_display }}</div>
+      <h1 class="seg-detalle-title">{{ item.titulo }}</h1>
+    </div>
+    <span class="seg-badge-status {{ item.estatus|lower }}">{{ item.get_estatus_display }}</span>
+  </div>
+
+  {% if messages %}
+  {% for message in messages %}
+  <div class="alert alert-{% if message.tags == 'error' %}danger{% elif message.tags == 'warning' %}warning{% else %}success{% endif %}" style="margin-bottom:16px;">
+    {{ message }}
+  </div>
+  {% endfor %}
+  {% endif %}
+
+  <!-- Metadata -->
+  <div class="bi-panel" style="margin-bottom:16px;">
+    <div class="bi-metric-strip" style="flex-wrap:wrap;">
+      <div class="bi-metric">
+        <div class="bi-metric-label">Fecha límite</div>
+        <div class="bi-metric-value {% if item.esta_vencido %}danger{% endif %}">
+          {% if item.fecha_limite %}{{ item.fecha_limite|date:"d/m/Y H:i" }}{% else %}Sin fecha{% endif %}
+        </div>
+      </div>
+      <div class="bi-metric">
+        <div class="bi-metric-label">Área</div>
+        <div class="bi-metric-value">{{ item.area|default:"—" }}</div>
+      </div>
+      <div class="bi-metric">
+        <div class="bi-metric-label">Origen</div>
+        <div class="bi-metric-value">{{ item.origen|default:"ERP" }}</div>
+      </div>
+      <div class="bi-metric">
+        <div class="bi-metric-label">Checks</div>
+        <div class="bi-metric-value">{{ checklist_done }}/{{ checklist_total }} · {{ progreso_pct }}%</div>
+      </div>
+    </div>
+
+    {% if item.descripcion %}
+    <p style="margin:12px 0 0; color:var(--texto-light); font-size:.92rem;">{{ item.descripcion }}</p>
+    {% endif %}
+    {% if item.entregable_esperado %}
+    <p style="margin:10px 0 0; font-weight:800; font-size:.92rem; color:#4f4249;">
+      Entregable esperado: {{ item.entregable_esperado }}
+    </p>
+    {% endif %}
+
+    {% if checklist_total %}
+    <div class="bi-progress-track" style="margin-top:14px;" aria-label="Avance">
+      <span class="seg-progress-fill {% if item.esta_vencido %}is-danger{% elif progreso_pct >= 100 %}is-success{% else %}is-plum{% endif %}" style="--seg-pct:{{ progreso_pct }}%"></span>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Checklist -->
+  {% if checks %}
+  <div class="bi-panel" style="margin-bottom:16px;">
+    <p class="seg-section-title">Checklist</p>
+    <div style="display:flex; flex-wrap:wrap; gap:8px;">
+      {% for check in checks %}
+      <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk check.pk %}">
+        {% csrf_token %}
+        <button class="btn btn-sm {% if check.completado %}btn-primary{% else %}btn-secondary{% endif %}" type="submit">
+          {% if check.completado %}✓{% else %}○{% endif %} {{ check.titulo }}
+        </button>
+      </form>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Prórroga pendiente -->
+  {% if prorroga_pendiente %}
+  <div class="alert alert-info" style="margin-bottom:16px;">
+    <strong>Más tiempo solicitado:</strong> hasta {{ prorroga_pendiente.fecha_solicitada|date:"d/m/Y" }} —
+    {{ prorroga_pendiente.motivo|truncatechars:140 }}
+    <span class="badge bg-warning" style="margin-left:8px;">Pendiente de aprobación</span>
+  </div>
+  {% endif %}
+
+  <!-- Entregar para revisión -->
+  {% if puede_entregar %}
+  <div class="bi-panel" style="margin-bottom:16px;">
+    <p class="seg-section-title">Marcar como listo</p>
+    <div class="seg-entregar-box">
+      <p style="margin:0; color:var(--texto-light); font-size:.9rem;">
+        Cuando termines, usa este formulario para notificar al Director General que el acuerdo está listo para su revisión.
+        Puedes adjuntar evidencia (foto, documento, reporte).
+      </p>
+      <form method="post" action="{% url 'seguimiento:entregar' item.pk %}" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div style="display:grid; gap:10px;">
+          <textarea name="comentario" placeholder="Describe qué se hizo o cuál es el resultado final (recomendado)"></textarea>
+          <input type="file" name="archivo"
+            accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf">
+          <div class="seg-entregar-actions">
+            <button class="btn btn-primary" type="submit">Listo — entregar para revisión</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Historial de actividad -->
+  <div class="bi-panel" style="margin-bottom:16px;">
+    <p class="seg-section-title">Historial de actividad</p>
+
+    {% if not comentarios and not evidencias %}
+    <p class="muted" style="font-size:.9rem;">Sin actividad registrada todavía.</p>
+    {% else %}
+    <div class="seg-timeline">
+
+      {% for ev in evidencias %}
+      <div class="seg-timeline-item">
+        <div class="seg-timeline-dot is-evidencia">📎</div>
+        <div class="seg-timeline-body is-evidencia">
+          <strong>{{ ev.usuario.get_full_name|default:ev.usuario.username }}</strong> subió evidencia:
+          <a href="{{ ev.archivo.url }}" target="_blank" rel="noopener">{{ ev.nombre_original }}</a>
+          {% if ev.comentario %}<p style="margin:4px 0 0; font-size:.88rem; color:var(--texto-light);">{{ ev.comentario }}</p>{% endif %}
+          <p class="seg-timeline-meta">{{ ev.created_at|date:"d/m/Y H:i" }}
+            · <span class="badge {% if ev.estatus == 'APROBADA' %}bg-success{% elif ev.estatus == 'RECHAZADA' %}bg-danger{% else %}bg-warning{% endif %}">{{ ev.get_estatus_display }}</span>
+          </p>
+        </div>
+      </div>
+      {% endfor %}
+
+      {% for com in comentarios %}
+      <div class="seg-timeline-item">
+        <div class="seg-timeline-dot {% if com.tipo == 'REVISION_DG' %}is-dg{% endif %}">
+          {% if com.tipo == 'REVISION_DG' %}⭐{% else %}💬{% endif %}
+        </div>
+        <div class="seg-timeline-body {% if com.tipo == 'REVISION_DG' %}is-dg{% endif %}">
+          <strong>{{ com.usuario.get_full_name|default:com.usuario.username }}</strong>
+          <span class="muted" style="font-size:.82rem;"> · {{ com.get_tipo_display }}</span>
+          <p style="margin:6px 0 0;">{{ com.comentario }}</p>
+          <p class="seg-timeline-meta">{{ com.created_at|date:"d/m/Y H:i" }}</p>
+        </div>
+      </div>
+      {% endfor %}
+
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Acciones secundarias (feedback / prórroga) -->
+  {% if puede_entregar %}
+  <div class="bi-panel">
+    <p class="seg-section-title">Otras acciones</p>
+    <div style="display:grid; gap:12px;">
+
+      <details>
+        <summary class="btn btn-secondary btn-sm" style="cursor:pointer; list-style:none;">Enviar retroalimentación / avance parcial</summary>
+        <form method="post" action="{% url 'seguimiento:registrar_feedback' item.pk %}" style="margin-top:10px; display:grid; gap:8px;">
+          {% csrf_token %}
+          <textarea name="comentario" class="seg-form-textarea" placeholder="Avance, bloqueo u observación" required></textarea>
+          <button class="btn btn-secondary btn-sm" type="submit">Enviar retroalimentación</button>
+        </form>
+      </details>
+
+      <details>
+        <summary class="btn btn-secondary btn-sm" style="cursor:pointer; list-style:none;">Solicitar más tiempo</summary>
+        <form method="post" action="{% url 'seguimiento:solicitar_prorroga' item.pk %}" style="margin-top:10px; display:grid; gap:8px;">
+          {% csrf_token %}
+          <input type="date" name="fecha_solicitada" required style="border:1px solid rgba(139,34,82,.14); border-radius:12px; padding:10px; font:inherit;">
+          <textarea name="motivo" class="seg-form-textarea" placeholder="¿Por qué necesitas más tiempo?" required></textarea>
+          <button class="btn btn-secondary btn-sm" type="submit">Solicitar prórroga</button>
+        </form>
+      </details>
+
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}
