@@ -719,6 +719,13 @@ body,
 }
 
 /* Panel DG · seguimiento — celdas de tabla con truncado controlado */
+.panel-dg-cell-trunc,
+.panel-dg-colab-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .panel-dg-table th,
 .panel-dg-td-nowrap,
 .panel-dg-td-muted,
@@ -735,6 +742,8 @@ body,
 }
 
 @media (max-width: 760px) {
+  .panel-dg-cell-trunc,
+  .panel-dg-colab-item-label,
   .panel-dg-table th,
   .panel-dg-td-nowrap,
   .panel-dg-td-muted,
