@@ -633,15 +633,28 @@ def panel_dg(request):
 
     items = list(qs)
 
+    _ESTATUS_PROGRESO = {
+        SeguimientoItem.ESTATUS_COMPLETADO: 100,
+        SeguimientoItem.ESTATUS_EN_REVISION: 80,
+        SeguimientoItem.ESTATUS_EN_PROCESO: 50,
+        SeguimientoItem.ESTATUS_BLOQUEADO: 30,
+        SeguimientoItem.ESTATUS_PENDIENTE: 10,
+        SeguimientoItem.ESTATUS_CANCELADO: 0,
+    }
+
     for item in items:
         checks = list(item.checklist.all())
         item.checklist_total = len(checks)
         item.checklist_done = sum(1 for c in checks if c.completado)
-        item.progreso_pct = round((item.checklist_done / item.checklist_total) * 100) if item.checklist_total else 0
+        if item.checklist_total:
+            item.progreso_pct = round((item.checklist_done / item.checklist_total) * 100)
+        else:
+            # Sin checklist: progreso inferido del estatus
+            item.progreso_pct = _ESTATUS_PROGRESO.get(item.estatus, 0)
         item.prorroga_pendiente = next(
             (p for p in item.prorrogas.all() if p.estatus == SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE), None
         )
-        item.actividad_count = item.comentarios.count() + item.evidencias.count()
+        item.ultima_actualizacion = item.updated_at
         item.responsable_nombre = (
             item.responsable_user.get_full_name() or item.responsable_user.username
             if item.responsable_user

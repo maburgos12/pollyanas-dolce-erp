@@ -294,7 +294,7 @@
           <th>Estatus</th>
           <th>Fecha límite</th>
           <th>Avance</th>
-          <th>Act.</th>
+          <th>Actualizado</th>
           <th></th>
         </tr>
       </thead>
@@ -318,7 +318,7 @@
             </div>
             <span class="muted" style="font-size:.75rem;">{{ item.progreso_pct }}%</span>
           </td>
-          <td class="muted" style="font-size:.8rem;">{{ item.actividad_count }}</td>
+          <td class="muted" style="font-size:.8rem;" title="{{ item.ultima_actualizacion|date:'d/m/Y H:i' }}">{{ item.ultima_actualizacion|timesince }}</td>
           <td><a href="{% url 'seguimiento:detalle_dg' item.pk %}" class="btn btn-secondary btn-sm">Ver</a></td>
         </tr>
         {% endfor %}
