@@ -324,11 +324,6 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                 }
             )
         if user.is_staff or user.is_superuser or has_any_role(user, ROLE_DG, ROLE_ADMIN):
-            try:
-                from seguimiento.models import SeguimientoItem
-                panel_en_revision = SeguimientoItem.objects.filter(estatus=SeguimientoItem.ESTATUS_EN_REVISION).count()
-            except Exception:
-                panel_en_revision = 0
             match_len = len("/seguimiento/panel/") if current_path.startswith("/seguimiento/panel/") else 0
             best_match_len = max(best_match_len, match_len)
             mi_trabajo["items"].append(
@@ -340,7 +335,6 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                     "module": "seguimiento",
                     "submodule": "panel_dg",
                     "initial": "P",
-                    "badge_count": panel_en_revision or 0,
                 }
             )
     for group in visible_groups:
