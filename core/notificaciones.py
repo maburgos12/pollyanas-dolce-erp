@@ -190,6 +190,86 @@ def notificar_prestamo_aprobado(prestamo, *, actor=None) -> int:
     )
 
 
+def notificar_seguimiento_avance(item, *, actor=None, mensaje_extra: str = "") -> int:
+    destinatarios = usuarios_direccion_general()
+    titulo = item.titulo[:80]
+    responsable = ""
+    if actor:
+        responsable = f"{actor.get_full_name() or actor.username} · "
+    return crear_notificaciones(
+        destinatarios,
+        titulo=f"Avance: {titulo}",
+        mensaje=f"{responsable}{item.get_tipo_display()} · {item.area or 'Sin área'}" + (f"\n{mensaje_extra}" if mensaje_extra else ""),
+        url=f"/seguimiento/{item.pk}/",
+        tipo=Notificacion.TIPO_SEGUIMIENTO,
+        prioridad=Notificacion.PRIORIDAD_NORMAL,
+        actor=actor,
+        objeto_tipo="seguimiento.SeguimientoItem",
+        objeto_id=item.pk,
+        excluir=actor,
+    )
+
+
+def notificar_seguimiento_prorroga(item, fecha_solicitada, motivo: str = "", *, actor=None) -> int:
+    destinatarios = usuarios_direccion_general()
+    titulo = item.titulo[:80]
+    actor_nombre = ""
+    if actor:
+        actor_nombre = f"{actor.get_full_name() or actor.username} · "
+    return crear_notificaciones(
+        destinatarios,
+        titulo=f"Prórroga solicitada: {titulo}",
+        mensaje=f"{actor_nombre}Nueva fecha: {fecha_solicitada:%d/%m/%Y}" + (f"\nMotivo: {motivo[:120]}" if motivo else ""),
+        url=f"/seguimiento/revision/",
+        tipo=Notificacion.TIPO_SEGUIMIENTO,
+        prioridad=Notificacion.PRIORIDAD_ALTA,
+        actor=actor,
+        objeto_tipo="seguimiento.SeguimientoItem",
+        objeto_id=item.pk,
+        excluir=actor,
+    )
+
+
+def notificar_seguimiento_entrega(item, *, actor=None) -> int:
+    destinatarios = usuarios_direccion_general()
+    titulo = item.titulo[:80]
+    actor_nombre = ""
+    if actor:
+        actor_nombre = f"{actor.get_full_name() or actor.username} · "
+    return crear_notificaciones(
+        destinatarios,
+        titulo=f"Listo para revisión: {titulo}",
+        mensaje=f"{actor_nombre}{item.get_tipo_display()} enviado a revisión.",
+        url=f"/seguimiento/revision/",
+        tipo=Notificacion.TIPO_SEGUIMIENTO,
+        prioridad=Notificacion.PRIORIDAD_ALTA,
+        actor=actor,
+        objeto_tipo="seguimiento.SeguimientoItem",
+        objeto_id=item.pk,
+        excluir=actor,
+    )
+
+
+def notificar_seguimiento_completado(item, *, actor=None) -> int:
+    destinatarios = usuarios_direccion_general()
+    titulo = item.titulo[:80]
+    actor_nombre = ""
+    if actor:
+        actor_nombre = f"{actor.get_full_name() or actor.username} · "
+    return crear_notificaciones(
+        destinatarios,
+        titulo=f"Completado: {titulo}",
+        mensaje=f"{actor_nombre}{item.get_tipo_display()} marcado como completado.",
+        url=f"/seguimiento/{item.pk}/",
+        tipo=Notificacion.TIPO_SEGUIMIENTO,
+        prioridad=Notificacion.PRIORIDAD_NORMAL,
+        actor=actor,
+        objeto_tipo="seguimiento.SeguimientoItem",
+        objeto_id=item.pk,
+        excluir=actor,
+    )
+
+
 def _url_permiso_por_origen(permiso) -> str:
     if permiso.origen_solicitud == permiso.ORIGEN_BONOS_PRODUCCION:
         return "/bonos-produccion/app/?tab=permisos"
