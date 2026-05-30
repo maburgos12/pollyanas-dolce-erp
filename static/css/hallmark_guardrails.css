@@ -717,3 +717,31 @@ body,
     min-width: 0;
   }
 }
+
+/* Panel DG · seguimiento — celdas de tabla con truncado controlado */
+.panel-dg-table th,
+.panel-dg-td-nowrap,
+.panel-dg-td-muted,
+.panel-dg-td-area,
+.panel-dg-td-fecha-ok,
+.panel-dg-td-fecha-warn,
+.panel-dg-td-fecha-danger { white-space: nowrap; }
+
+.panel-dg-td-titulo-inner,
+.panel-dg-colab-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .panel-dg-table th,
+  .panel-dg-td-nowrap,
+  .panel-dg-td-muted,
+  .panel-dg-td-area,
+  .panel-dg-td-fecha-ok,
+  .panel-dg-td-fecha-warn,
+  .panel-dg-td-fecha-danger,
+  .panel-dg-td-titulo-inner,
+  .panel-dg-colab-item-label { white-space: normal; }
+}

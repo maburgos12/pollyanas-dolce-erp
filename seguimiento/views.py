@@ -7,7 +7,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.mail import send_mail
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.dateparse import parse_date
 from django.utils import timezone
@@ -428,6 +428,246 @@ def entregar_para_revision(request, pk):
     if item.esta_cerrado:
         messages.error(request, "Este acuerdo ya está cerrado.")
         return redirect("seguimiento:detalle", pk=pk)
+    if not _registrar_cierre_opcional(request, item, "ENTREGA"):
+        return redirect("seguimiento:detalle", pk=pk)
+    item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
+    item.save(update_fields=["estatus", "updated_at"])
+    log_event(request.user, "seguimiento.entrega", "SeguimientoItem", item.pk, {"entrega": True})
+    notificar_seguimiento_entrega(item, actor=request.user)
+    nombre_usuario = request.user.get_full_name() or request.user.username
+    _notificar_dg_revision(item, "Entregado para revisión", nombre_usuario)
+    messages.success(request, "Acuerdo enviado a revisión. El Director General será notificado.")
+    return redirect("seguimiento:detalle", pk=pk)
+
+
+@login_required
+@require_POST
+def completar_directamente(request, pk):
+    """Cierre directo para acuerdos sin aprobación requerida o con checklist 100%."""
+    item = _get_item_para_usuario(request.user, pk)
+    if item.esta_cerrado:
+        messages.error(request, "Este acuerdo ya está cerrado.")
+        return redirect("seguimiento:detalle", pk=pk)
+    checks = list(item.checklist.all())
+    checklist_completo = checks and all(c.completado for c in checks)
+    puede_cerrar_directo = not item.requiere_aprobacion or checklist_completo
+    if not puede_cerrar_directo:
+        messages.error(request, "Este acuerdo requiere aprobación del Director General.")
+        return redirect("seguimiento:detalle", pk=pk)
+    if not _registrar_cierre_opcional(request, item, "COMPLETADO"):
+        return redirect("seguimiento:detalle", pk=pk)
+    item.estatus = SeguimientoItem.ESTATUS_COMPLETADO
+    item.aprobado_at = timezone.now()
+    item.save(update_fields=["estatus", "aprobado_at", "updated_at"])
+    log_event(request.user, "seguimiento.completar", "SeguimientoItem", item.pk, {"directo": True})
+    notificar_seguimiento_completado(item, actor=request.user)
+    messages.success(request, "Acuerdo marcado como completado.")
+    return redirect("seguimiento:detalle", pk=pk)
+
+
+@login_required
+def detalle_item(request, pk):
+    item = _get_item_para_usuario(request.user, pk)
+    checks = list(item.checklist.all())
+    checklist_total = len(checks)
+    checklist_done = sum(1 for c in checks if c.completado)
+    progreso_pct = round((checklist_done / checklist_total) * 100) if checklist_total else 0
+    now = timezone.now()
+    if item.esta_vencido:
+        prioridad_label, prioridad_tone = "Vencido", "danger"
+    elif item.fecha_limite and item.fecha_limite <= now + timedelta(days=2) and not item.esta_cerrado:
+        prioridad_label, prioridad_tone = "Alta", "warn"
+    else:
+        prioridad_label, prioridad_tone = "Normal", ""
+    prorroga_pendiente = item.prorrogas.filter(estatus=SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE).first()
+    comentarios = item.comentarios.select_related("usuario").order_by("created_at")
+    evidencias = item.evidencias.select_related("usuario", "revisado_por").order_by("created_at")
+    checklist_completo = bool(checks) and all(c.completado for c in checks)
+    puede_cerrar_directo = not item.requiere_aprobacion or checklist_completo
+    puede_entregar = not item.esta_cerrado and item.requiere_aprobacion and not checklist_completo
+    return render(request, "seguimiento/detalle_item.html", {
+        "item": item,
+        "checks": checks,
+        "checklist_total": checklist_total,
+        "checklist_done": checklist_done,
+        "progreso_pct": progreso_pct,
+        "prioridad_label": prioridad_label,
+        "prioridad_tone": prioridad_tone,
+        "prorroga_pendiente": prorroga_pendiente,
+        "comentarios": comentarios,
+        "evidencias": evidencias,
+        "puede_cerrar_directo": puede_cerrar_directo and not item.esta_cerrado,
+        "puede_entregar": puede_entregar,
+        "checklist_completo": checklist_completo,
+        "estatus_en_revision": SeguimientoItem.ESTATUS_EN_REVISION,
+    })
+
+
+@login_required
+def bandeja_revision(request):
+    if not (request.user.is_staff or request.user.is_superuser or has_any_role(request.user, ROLE_DG, ROLE_ADMIN)):
+        messages.error(request, "No tienes acceso a la bandeja de revisión.")
+        return redirect("seguimiento:mi_seguimiento")
+    items = (
+        SeguimientoItem.objects.filter(estatus=SeguimientoItem.ESTATUS_EN_REVISION)
+        .select_related("responsable_user", "responsable_empleado")
+        .prefetch_related("comentarios", "evidencias__usuario", "prorrogas", "checklist")
+        .order_by("fecha_limite", "-updated_at")
+    )
+    for item in items:
+        checks = list(item.checklist.all())
+        item.checklist_total = len(checks)
+        item.checklist_done = sum(1 for c in checks if c.completado)
+        item.progreso_pct = round((item.checklist_done / item.checklist_total) * 100) if item.checklist_total else 0
+        item.ultima_evidencia = item.evidencias.order_by("-created_at").first()
+        item.ultimo_comentario = item.comentarios.order_by("-created_at").first()
+        item.prorroga_pendiente = item.prorrogas.filter(estatus=SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE).first()
+    return render(request, "seguimiento/bandeja_revision.html", {"items": items, "total": items.count()})
+
+
+@login_required
+@require_POST
+def resolver_revision(request, pk):
+    if not (request.user.is_staff or request.user.is_superuser or has_any_role(request.user, ROLE_DG, ROLE_ADMIN)):
+        messages.error(request, "No tienes permiso para resolver revisiones.")
+        return redirect("seguimiento:bandeja_revision")
+    item = get_object_or_404(SeguimientoItem, pk=pk)
+    accion = (request.POST.get("accion") or "").strip()
+    comentario_texto = (request.POST.get("comentario") or "").strip()
+    if accion == "aprobar":
+        item.estatus = SeguimientoItem.ESTATUS_COMPLETADO
+        item.aprobado_por = request.user
+        item.aprobado_at = timezone.now()
+        item.save(update_fields=["estatus", "aprobado_por", "aprobado_at", "updated_at"])
+        if comentario_texto:
+            SeguimientoComentario.objects.create(
+                seguimiento=item, usuario=request.user,
+                tipo=SeguimientoComentario.TIPO_REVISION_DG,
+                comentario=f"[APROBADO] {comentario_texto}",
+            )
+        log_event(request.user, "seguimiento.aprobar", "SeguimientoItem", item.pk, {})
+        messages.success(request, f"'{item.titulo[:60]}' marcado como completado.")
+    elif accion == "devolver":
+        if not comentario_texto:
+            messages.error(request, "Escribe el motivo para devolver el acuerdo.")
+            return redirect("seguimiento:detalle", pk=pk)
+        item.estatus = SeguimientoItem.ESTATUS_EN_PROCESO
+        item.save(update_fields=["estatus", "updated_at"])
+        SeguimientoComentario.objects.create(
+            seguimiento=item, usuario=request.user,
+            tipo=SeguimientoComentario.TIPO_REVISION_DG,
+            comentario=f"[DEVUELTO] {comentario_texto}",
+        )
+        log_event(request.user, "seguimiento.devolver", "SeguimientoItem", item.pk, {})
+        messages.warning(request, f"'{item.titulo[:60]}' devuelto para corrección.")
+    else:
+        messages.error(request, "Acción no reconocida.")
+    return redirect("seguimiento:bandeja_revision")
+
+
+@login_required
+@require_POST
+def resolver_prorroga(request, pk, prorroga_id):
+    if not (request.user.is_staff or request.user.is_superuser or has_any_role(request.user, ROLE_DG, ROLE_ADMIN)):
+        messages.error(request, "No tienes permiso para resolver solicitudes de prórroga.")
+        return redirect("seguimiento:bandeja_revision")
+    prorroga = get_object_or_404(SeguimientoProrrogaSolicitud, pk=prorroga_id, seguimiento_id=pk)
+    accion = (request.POST.get("accion") or "").strip()
+    if accion == "aprobar":
+        item = prorroga.seguimiento
+        item.fecha_limite = timezone.make_aware(
+            timezone.datetime.combine(prorroga.fecha_solicitada, timezone.datetime.min.time().replace(hour=18)),
+            timezone.get_current_timezone(),
+        )
+        item.estatus = SeguimientoItem.ESTATUS_EN_PROCESO
+        item.save(update_fields=["fecha_limite", "estatus", "updated_at"])
+        prorroga.estatus = SeguimientoProrrogaSolicitud.ESTATUS_APROBADA
+        prorroga.resuelto_por = request.user
+        prorroga.resuelto_at = timezone.now()
+        prorroga.save()
+        log_event(request.user, "seguimiento.prorroga.aprobar", "SeguimientoProrrogaSolicitud", prorroga.pk, {})
+        messages.success(request, f"Prórroga aprobada hasta {prorroga.fecha_solicitada.strftime('%d/%m/%Y')}.")
+    elif accion == "rechazar":
+        prorroga.estatus = SeguimientoProrrogaSolicitud.ESTATUS_RECHAZADA
+        prorroga.resuelto_por = request.user
+        prorroga.resuelto_at = timezone.now()
+        prorroga.save()
+        log_event(request.user, "seguimiento.prorroga.rechazar", "SeguimientoProrrogaSolicitud", prorroga.pk, {})
+        messages.warning(request, "Solicitud de prórroga rechazada.")
+    return redirect("seguimiento:bandeja_revision")
+
+
+@login_required
+def panel_dg(request):
+    if not (request.user.is_staff or request.user.is_superuser or has_any_role(request.user, ROLE_DG, ROLE_ADMIN)):
+        messages.error(request, "Acceso restringido a Dirección General.")
+        return redirect("seguimiento:mi_seguimiento")
+
+    now = timezone.now()
+
+    # Filtros desde GET
+    filtro_tipo = (request.GET.get("tipo") or "").strip().upper()
+    filtro_estatus = (request.GET.get("estatus") or "").strip().upper()
+    filtro_colaborador = (request.GET.get("colaborador") or "").strip()
+    filtro_vencidos = request.GET.get("vencidos") == "1"
+
+    qs = (
+        SeguimientoItem.objects.select_related("responsable_user", "responsable_empleado", "aprobado_por")
+        .prefetch_related("checklist", "prorrogas", "comentarios", "evidencias")
+        .order_by("estatus", "fecha_limite", "-updated_at")
+    )
+
+    if filtro_tipo and filtro_tipo in dict(SeguimientoItem.TIPO_CHOICES):
+        qs = qs.filter(tipo=filtro_tipo)
+    if filtro_estatus and filtro_estatus in dict(SeguimientoItem.ESTATUS_CHOICES):
+        qs = qs.filter(estatus=filtro_estatus)
+    if filtro_colaborador:
+        qs = qs.filter(
+            Q(responsable_user__first_name__icontains=filtro_colaborador)
+            | Q(responsable_user__last_name__icontains=filtro_colaborador)
+            | Q(responsable_user__username__icontains=filtro_colaborador)
+            | Q(responsable_empleado__nombre__icontains=filtro_colaborador)
+        )
+    if filtro_vencidos:
+        qs = qs.filter(fecha_limite__lt=now).exclude(estatus__in=[SeguimientoItem.ESTATUS_COMPLETADO, SeguimientoItem.ESTATUS_CANCELADO])
+
+    items = list(qs)
+
+
+def _registrar_cierre_opcional(request, item, prefijo: str) -> bool:
+    """Guarda comentario y/o evidencia opcionales. Devuelve False si el archivo falla."""
+    comentario_texto = (request.POST.get("comentario") or "").strip()
+    archivo = request.FILES.get("archivo")
+    if archivo:
+        error_archivo = _validar_archivo_evidencia(archivo)
+        if error_archivo:
+            messages.error(request, error_archivo)
+            return False
+        SeguimientoEvidencia.objects.create(
+            seguimiento=item,
+            usuario=request.user,
+            archivo=archivo,
+            nombre_original=archivo.name,
+            comentario=comentario_texto,
+        )
+    if comentario_texto:
+        SeguimientoComentario.objects.create(
+            seguimiento=item,
+            usuario=request.user,
+            tipo=SeguimientoComentario.TIPO_FEEDBACK,
+            comentario=f"[{prefijo}] {comentario_texto}" if comentario_texto else comentario_texto,
+        )
+    return True
+
+
+@login_required
+@require_POST
+def entregar_para_revision(request, pk):
+    """Flujo para acuerdos que sí requieren aprobación del DG."""
+    item = _get_item_para_usuario(request.user, pk)
+    if item.esta_cerrado:
+        messages.error(request, "Este acuerdo ya está cerrado.")
+        return redirect("seguimiento:detalle", pk=pk)
 
     if not _registrar_cierre_opcional(request, item, "ENTREGA"):
         return redirect("seguimiento:detalle", pk=pk)
@@ -535,95 +775,73 @@ def bandeja_revision(request):
         item.checklist_total = len(checks)
         item.checklist_done = sum(1 for c in checks if c.completado)
         item.progreso_pct = round((item.checklist_done / item.checklist_total) * 100) if item.checklist_total else 0
-        item.ultima_evidencia = item.evidencias.order_by("-created_at").first()
-        item.ultimo_comentario = item.comentarios.order_by("-created_at").first()
-        item.prorroga_pendiente = item.prorrogas.filter(estatus=SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE).first()
+        item.prorroga_pendiente = next(
+            (p for p in item.prorrogas.all() if p.estatus == SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE), None
+        )
+        item.actividad_count = item.comentarios.count() + item.evidencias.count()
+        item.responsable_nombre = (
+            item.responsable_user.get_full_name() or item.responsable_user.username
+            if item.responsable_user
+            else (item.responsable_empleado.nombre if item.responsable_empleado else "Sin asignar")
+        )
+        if item.esta_vencido:
+            item.urgencia = "danger"
+        elif item.fecha_limite and item.fecha_limite <= now + timedelta(days=2) and not item.esta_cerrado:
+            item.urgencia = "warn"
+        else:
+            item.urgencia = ""
 
-    return render(
-        request,
-        "seguimiento/bandeja_revision.html",
-        {"items": items, "total": items.count()},
+    # KPIs globales
+    total = len(items)
+    abiertos = sum(1 for i in items if not i.esta_cerrado)
+    vencidos = sum(1 for i in items if i.esta_vencido)
+    en_revision = sum(1 for i in items if i.estatus == SeguimientoItem.ESTATUS_EN_REVISION)
+    completados = sum(1 for i in items if i.estatus == SeguimientoItem.ESTATUS_COMPLETADO)
+    prorrogas_pendientes = sum(1 for i in items if i.prorroga_pendiente)
+    por_vencer_24h = sum(
+        1 for i in items
+        if i.fecha_limite and now <= i.fecha_limite <= now + timedelta(hours=24) and not i.esta_cerrado
     )
 
+    from collections import defaultdict
+    por_colaborador = defaultdict(lambda: {"items": [], "nombre": "", "abiertos": 0, "vencidos": 0, "en_revision": 0, "completados": 0})
+    for item in items:
+        key = item.responsable_nombre
+        por_colaborador[key]["nombre"] = key
+        por_colaborador[key]["items"].append(item)
+        if not item.esta_cerrado:
+            por_colaborador[key]["abiertos"] += 1
+        if item.esta_vencido:
+            por_colaborador[key]["vencidos"] += 1
+        if item.estatus == SeguimientoItem.ESTATUS_EN_REVISION:
+            por_colaborador[key]["en_revision"] += 1
+        if item.estatus == SeguimientoItem.ESTATUS_COMPLETADO:
+            por_colaborador[key]["completados"] += 1
 
-@login_required
-@require_POST
-def resolver_revision(request, pk):
-    if not (request.user.is_staff or request.user.is_superuser or has_any_role(request.user, ROLE_DG, ROLE_ADMIN)):
-        messages.error(request, "No tienes permiso para resolver revisiones.")
-        return redirect("seguimiento:bandeja_revision")
+    colaboradores_resumen = sorted(
+        por_colaborador.values(),
+        key=lambda c: (-c["vencidos"], -c["en_revision"], -c["abiertos"]),
+    )
 
-    item = get_object_or_404(SeguimientoItem, pk=pk)
-    accion = (request.POST.get("accion") or "").strip()
-    comentario_texto = (request.POST.get("comentario") or "").strip()
+    vista = request.GET.get("vista", "tabla")
 
-    if accion == "aprobar":
-        item.estatus = SeguimientoItem.ESTATUS_COMPLETADO
-        item.aprobado_por = request.user
-        item.aprobado_at = timezone.now()
-        item.save(update_fields=["estatus", "aprobado_por", "aprobado_at", "updated_at"])
-        if comentario_texto:
-            SeguimientoComentario.objects.create(
-                seguimiento=item,
-                usuario=request.user,
-                tipo=SeguimientoComentario.TIPO_REVISION_DG,
-                comentario=f"[APROBADO] {comentario_texto}",
-            )
-        log_event(request.user, "seguimiento.aprobar", "SeguimientoItem", item.pk, {})
-        messages.success(request, f"'{item.titulo[:60]}' marcado como completado.")
-
-    elif accion == "devolver":
-        if not comentario_texto:
-            messages.error(request, "Escribe el motivo para devolver el acuerdo.")
-            return redirect("seguimiento:detalle", pk=pk)
-        item.estatus = SeguimientoItem.ESTATUS_EN_PROCESO
-        item.save(update_fields=["estatus", "updated_at"])
-        SeguimientoComentario.objects.create(
-            seguimiento=item,
-            usuario=request.user,
-            tipo=SeguimientoComentario.TIPO_REVISION_DG,
-            comentario=f"[DEVUELTO] {comentario_texto}",
-        )
-        log_event(request.user, "seguimiento.devolver", "SeguimientoItem", item.pk, {})
-        messages.warning(request, f"'{item.titulo[:60]}' devuelto para corrección.")
-
-    else:
-        messages.error(request, "Acción no reconocida.")
-
-    return redirect("seguimiento:bandeja_revision")
-
-
-@login_required
-@require_POST
-def resolver_prorroga(request, pk, prorroga_id):
-    if not (request.user.is_staff or request.user.is_superuser or has_any_role(request.user, ROLE_DG, ROLE_ADMIN)):
-        messages.error(request, "No tienes permiso para resolver solicitudes de prórroga.")
-        return redirect("seguimiento:bandeja_revision")
-
-    prorroga = get_object_or_404(SeguimientoProrrogaSolicitud, pk=prorroga_id, seguimiento_id=pk)
-    accion = (request.POST.get("accion") or "").strip()
-
-    if accion == "aprobar":
-        item = prorroga.seguimiento
-        item.fecha_limite = timezone.make_aware(
-            timezone.datetime.combine(prorroga.fecha_solicitada, timezone.datetime.min.time().replace(hour=18)),
-            timezone.get_current_timezone(),
-        )
-        item.estatus = SeguimientoItem.ESTATUS_EN_PROCESO
-        item.save(update_fields=["fecha_limite", "estatus", "updated_at"])
-        prorroga.estatus = SeguimientoProrrogaSolicitud.ESTATUS_APROBADA
-        prorroga.resuelto_por = request.user
-        prorroga.resuelto_at = timezone.now()
-        prorroga.save()
-        log_event(request.user, "seguimiento.prorroga.aprobar", "SeguimientoProrrogaSolicitud", prorroga.pk, {})
-        messages.success(request, f"Prórroga aprobada hasta {prorroga.fecha_solicitada.strftime('%d/%m/%Y')}.")
-
-    elif accion == "rechazar":
-        prorroga.estatus = SeguimientoProrrogaSolicitud.ESTATUS_RECHAZADA
-        prorroga.resuelto_por = request.user
-        prorroga.resuelto_at = timezone.now()
-        prorroga.save()
-        log_event(request.user, "seguimiento.prorroga.rechazar", "SeguimientoProrrogaSolicitud", prorroga.pk, {})
-        messages.warning(request, "Solicitud de prórroga rechazada.")
-
-    return redirect("seguimiento:bandeja_revision")
+    return render(request, "seguimiento/panel_dg.html", {
+        "items": items,
+        "colaboradores_resumen": colaboradores_resumen,
+        "vista": vista,
+        "total": total,
+        "abiertos": abiertos,
+        "vencidos": vencidos,
+        "en_revision": en_revision,
+        "completados": completados,
+        "prorrogas_pendientes": prorrogas_pendientes,
+        "por_vencer_24h": por_vencer_24h,
+        "filtro_tipo": filtro_tipo,
+        "filtro_estatus": filtro_estatus,
+        "filtro_colaborador": filtro_colaborador,
+        "filtro_vencidos": filtro_vencidos,
+        "tipo_choices": SeguimientoItem.TIPO_CHOICES,
+        "estatus_choices": SeguimientoItem.ESTATUS_CHOICES,
+        "ESTATUS_EN_REVISION": SeguimientoItem.ESTATUS_EN_REVISION,
+        "ESTATUS_COMPLETADO": SeguimientoItem.ESTATUS_COMPLETADO,
+    })

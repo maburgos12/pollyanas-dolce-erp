@@ -7,6 +7,7 @@ app_name = "seguimiento"
 
 urlpatterns = [
     path("", views.mi_seguimiento, name="mi_seguimiento"),
+    path("panel/", views.panel_dg, name="panel_dg"),
     path("revision/", views.bandeja_revision, name="bandeja_revision"),
     path("webhooks/agente-dg/", webhooks.agente_dg_webhook, name="webhook_agente_dg"),
     path("minutas/", views.seguimiento_minutas, name="minutas"),
