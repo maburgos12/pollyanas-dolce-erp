@@ -6,12 +6,13 @@ from pathlib import Path
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.dateparse import parse_date
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from core.access import ROLE_DG, ROLE_ADMIN, has_any_role
 from core.audit import log_event
 
 from .models import (
@@ -358,3 +359,117 @@ def solicitar_prorroga(request, pk):
     )
     messages.success(request, "Solicitud de más tiempo enviada para revisión.")
     return redirect("seguimiento:mi_seguimiento")
+
+
+@login_required
+def panel_dg(request):
+    if not (request.user.is_staff or request.user.is_superuser or has_any_role(request.user, ROLE_DG, ROLE_ADMIN)):
+        messages.error(request, "Acceso restringido a Dirección General.")
+        return redirect("seguimiento:mi_seguimiento")
+
+    now = timezone.now()
+
+    # Filtros desde GET
+    filtro_tipo = (request.GET.get("tipo") or "").strip().upper()
+    filtro_estatus = (request.GET.get("estatus") or "").strip().upper()
+    filtro_colaborador = (request.GET.get("colaborador") or "").strip()
+    filtro_vencidos = request.GET.get("vencidos") == "1"
+
+    qs = (
+        SeguimientoItem.objects.select_related("responsable_user", "responsable_empleado", "aprobado_por")
+        .prefetch_related("checklist", "prorrogas", "comentarios", "evidencias")
+        .order_by("estatus", "fecha_limite", "-updated_at")
+    )
+
+    if filtro_tipo and filtro_tipo in dict(SeguimientoItem.TIPO_CHOICES):
+        qs = qs.filter(tipo=filtro_tipo)
+    if filtro_estatus and filtro_estatus in dict(SeguimientoItem.ESTATUS_CHOICES):
+        qs = qs.filter(estatus=filtro_estatus)
+    if filtro_colaborador:
+        qs = qs.filter(
+            Q(responsable_user__first_name__icontains=filtro_colaborador)
+            | Q(responsable_user__last_name__icontains=filtro_colaborador)
+            | Q(responsable_user__username__icontains=filtro_colaborador)
+            | Q(responsable_empleado__nombre__icontains=filtro_colaborador)
+        )
+    if filtro_vencidos:
+        qs = qs.filter(fecha_limite__lt=now).exclude(estatus__in=[SeguimientoItem.ESTATUS_COMPLETADO, SeguimientoItem.ESTATUS_CANCELADO])
+
+    items = list(qs)
+
+    for item in items:
+        checks = list(item.checklist.all())
+        item.checklist_total = len(checks)
+        item.checklist_done = sum(1 for c in checks if c.completado)
+        item.progreso_pct = round((item.checklist_done / item.checklist_total) * 100) if item.checklist_total else 0
+        item.prorroga_pendiente = next(
+            (p for p in item.prorrogas.all() if p.estatus == SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE), None
+        )
+        item.actividad_count = item.comentarios.count() + item.evidencias.count()
+        item.responsable_nombre = (
+            item.responsable_user.get_full_name() or item.responsable_user.username
+            if item.responsable_user
+            else (item.responsable_empleado.nombre if item.responsable_empleado else "Sin asignar")
+        )
+        if item.esta_vencido:
+            item.urgencia = "danger"
+        elif item.fecha_limite and item.fecha_limite <= now + timedelta(days=2) and not item.esta_cerrado:
+            item.urgencia = "warn"
+        else:
+            item.urgencia = ""
+
+    # KPIs globales
+    total = len(items)
+    abiertos = sum(1 for i in items if not i.esta_cerrado)
+    vencidos = sum(1 for i in items if i.esta_vencido)
+    en_revision = sum(1 for i in items if i.estatus == SeguimientoItem.ESTATUS_EN_REVISION)
+    completados = sum(1 for i in items if i.estatus == SeguimientoItem.ESTATUS_COMPLETADO)
+    prorrogas_pendientes = sum(1 for i in items if i.prorroga_pendiente)
+    por_vencer_24h = sum(
+        1 for i in items
+        if i.fecha_limite and now <= i.fecha_limite <= now + timedelta(hours=24) and not i.esta_cerrado
+    )
+
+    # Agrupado por colaborador para la vista resumen
+    from collections import defaultdict
+    por_colaborador = defaultdict(lambda: {"items": [], "nombre": "", "abiertos": 0, "vencidos": 0, "en_revision": 0, "completados": 0})
+    for item in items:
+        key = item.responsable_nombre
+        por_colaborador[key]["nombre"] = key
+        por_colaborador[key]["items"].append(item)
+        if not item.esta_cerrado:
+            por_colaborador[key]["abiertos"] += 1
+        if item.esta_vencido:
+            por_colaborador[key]["vencidos"] += 1
+        if item.estatus == SeguimientoItem.ESTATUS_EN_REVISION:
+            por_colaborador[key]["en_revision"] += 1
+        if item.estatus == SeguimientoItem.ESTATUS_COMPLETADO:
+            por_colaborador[key]["completados"] += 1
+
+    colaboradores_resumen = sorted(
+        por_colaborador.values(),
+        key=lambda c: (-c["vencidos"], -c["en_revision"], -c["abiertos"]),
+    )
+
+    vista = request.GET.get("vista", "tabla")  # "tabla" | "colaborador"
+
+    return render(request, "seguimiento/panel_dg.html", {
+        "items": items,
+        "colaboradores_resumen": colaboradores_resumen,
+        "vista": vista,
+        "total": total,
+        "abiertos": abiertos,
+        "vencidos": vencidos,
+        "en_revision": en_revision,
+        "completados": completados,
+        "prorrogas_pendientes": prorrogas_pendientes,
+        "por_vencer_24h": por_vencer_24h,
+        "filtro_tipo": filtro_tipo,
+        "filtro_estatus": filtro_estatus,
+        "filtro_colaborador": filtro_colaborador,
+        "filtro_vencidos": filtro_vencidos,
+        "tipo_choices": SeguimientoItem.TIPO_CHOICES,
+        "estatus_choices": SeguimientoItem.ESTATUS_CHOICES,
+        "ESTATUS_EN_REVISION": SeguimientoItem.ESTATUS_EN_REVISION,
+        "ESTATUS_COMPLETADO": SeguimientoItem.ESTATUS_COMPLETADO,
+    })
