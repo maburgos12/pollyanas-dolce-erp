@@ -633,6 +633,81 @@ def panel_dg(request):
 
     items = list(qs)
 
+    for item in items:
+        checks = list(item.checklist.all())
+        item.checklist_total = len(checks)
+        item.checklist_done = sum(1 for c in checks if c.completado)
+        item.progreso_pct = round((item.checklist_done / item.checklist_total) * 100) if item.checklist_total else 0
+        item.prorroga_pendiente = next(
+            (p for p in item.prorrogas.all() if p.estatus == SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE), None
+        )
+        item.actividad_count = item.comentarios.count() + item.evidencias.count()
+        item.responsable_nombre = (
+            item.responsable_user.get_full_name() or item.responsable_user.username
+            if item.responsable_user
+            else (item.responsable_empleado.nombre if item.responsable_empleado else "Sin asignar")
+        )
+        if item.esta_vencido:
+            item.urgencia = "danger"
+        elif item.fecha_limite and item.fecha_limite <= now + timedelta(days=2) and not item.esta_cerrado:
+            item.urgencia = "warn"
+        else:
+            item.urgencia = ""
+
+    total = len(items)
+    abiertos = sum(1 for i in items if not i.esta_cerrado)
+    vencidos = sum(1 for i in items if i.esta_vencido)
+    en_revision = sum(1 for i in items if i.estatus == SeguimientoItem.ESTATUS_EN_REVISION)
+    completados = sum(1 for i in items if i.estatus == SeguimientoItem.ESTATUS_COMPLETADO)
+    prorrogas_pendientes = sum(1 for i in items if i.prorroga_pendiente)
+    por_vencer_24h = sum(
+        1 for i in items
+        if i.fecha_limite and now <= i.fecha_limite <= now + timedelta(hours=24) and not i.esta_cerrado
+    )
+
+    from collections import defaultdict
+    por_colaborador = defaultdict(lambda: {"items": [], "nombre": "", "abiertos": 0, "vencidos": 0, "en_revision": 0, "completados": 0})
+    for item in items:
+        key = item.responsable_nombre
+        por_colaborador[key]["nombre"] = key
+        por_colaborador[key]["items"].append(item)
+        if not item.esta_cerrado:
+            por_colaborador[key]["abiertos"] += 1
+        if item.esta_vencido:
+            por_colaborador[key]["vencidos"] += 1
+        if item.estatus == SeguimientoItem.ESTATUS_EN_REVISION:
+            por_colaborador[key]["en_revision"] += 1
+        if item.estatus == SeguimientoItem.ESTATUS_COMPLETADO:
+            por_colaborador[key]["completados"] += 1
+
+    colaboradores_resumen = sorted(
+        por_colaborador.values(),
+        key=lambda c: (-c["vencidos"], -c["en_revision"], -c["abiertos"]),
+    )
+
+    vista = request.GET.get("vista", "tabla")
+
+    return render(request, "seguimiento/panel_dg.html", {
+        "items": items,
+        "colaboradores_resumen": colaboradores_resumen,
+        "vista": vista,
+        "total": total,
+        "abiertos": abiertos,
+        "vencidos": vencidos,
+        "en_revision": en_revision,
+        "completados": completados,
+        "prorrogas_pendientes": prorrogas_pendientes,
+        "por_vencer_24h": por_vencer_24h,
+        "filtro_tipo": filtro_tipo,
+        "filtro_estatus": filtro_estatus,
+        "filtro_colaborador": filtro_colaborador,
+        "filtro_vencidos": filtro_vencidos,
+        "tipo_choices": SeguimientoItem.TIPO_CHOICES,
+        "estatus_choices": SeguimientoItem.ESTATUS_CHOICES,
+        "ESTATUS_EN_REVISION": SeguimientoItem.ESTATUS_EN_REVISION,
+        "ESTATUS_COMPLETADO": SeguimientoItem.ESTATUS_COMPLETADO,
+    })
+
 
 def _registrar_cierre_opcional(request, item, prefijo: str) -> bool:
     """Guarda comentario y/o evidencia opcionales. Devuelve False si el archivo falla."""
