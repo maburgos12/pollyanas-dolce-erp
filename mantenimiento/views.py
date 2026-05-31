@@ -16,7 +16,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento
 from core.access import can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
 from core.models import sucursales_operativas
-from fallas.models import BitacoraFalla, ReporteFalla
+from fallas.models import BitacoraFalla, CategoriaFalla, ReporteFalla
 from logistica.models import ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
 from maestros.models import Proveedor
 
@@ -508,6 +508,13 @@ def actualizar_item(request, tipo, pk):
         if costo_real is not None:
             reporte.costo_real = costo_real
         reporte.save()
+        # Si la falla se cierra, restaurar el activo vinculado a OPERATIVO
+        if estatus in (ReporteFalla.ESTATUS_CERRADO, ReporteFalla.ESTATUS_RESUELTO):
+            if reporte.activo_relacionado_id:
+                activo_vinculado = reporte.activo_relacionado
+                if activo_vinculado.estado == Activo.ESTADO_MANTENIMIENTO:
+                    activo_vinculado.estado = Activo.ESTADO_OPERATIVO
+                    activo_vinculado.save(update_fields=["estado", "actualizado_en"])
         BitacoraFalla.objects.create(
             reporte=reporte,
             usuario=request.user,
@@ -564,6 +571,73 @@ def actualizar_item(request, tipo, pk):
 
 
 @login_required
+def crear_falla(request):
+    """Crea un ReporteFalla directamente desde el panel de mantenimiento (sin PWA)."""
+    _require_mantenimiento(request.user)
+    if request.method != "POST":
+        return redirect("mantenimiento:dashboard")
+
+    sucursal_id = request.POST.get("sucursal") or ""
+    categoria_id = request.POST.get("categoria") or ""
+    titulo = (request.POST.get("titulo") or "").strip()
+    descripcion = (request.POST.get("descripcion") or "").strip()
+    area = (request.POST.get("area") or ReporteFalla.AREA_GENERAL).strip()
+    prioridad = (request.POST.get("prioridad") or ReporteFalla.PRIORIDAD_MEDIA).strip()
+    activo_id = (request.POST.get("activo_id") or "").strip()
+
+    errores = []
+    if not sucursal_id:
+        errores.append("Selecciona una sucursal.")
+    if not categoria_id:
+        errores.append("Selecciona una categoría.")
+    if not titulo:
+        errores.append("El título es obligatorio.")
+    if not descripcion:
+        errores.append("La descripción es obligatoria.")
+
+    from django.contrib import messages as msg
+    if errores:
+        for e in errores:
+            msg.error(request, e)
+        return redirect("mantenimiento:dashboard")
+
+    from core.models import Sucursal
+    sucursal = Sucursal.objects.filter(pk=sucursal_id).first()
+    categoria = CategoriaFalla.objects.filter(pk=categoria_id, activo=True).first()
+    if not sucursal or not categoria:
+        msg.error(request, "Sucursal o categoría no válida.")
+        return redirect("mantenimiento:dashboard")
+
+    activo_obj = Activo.objects.filter(pk=activo_id, activo=True).first() if activo_id else None
+
+    foto = request.FILES.get("foto_evidencia")
+    reporte = ReporteFalla(
+        sucursal=sucursal,
+        categoria=categoria,
+        area=area,
+        titulo=titulo,
+        descripcion=descripcion,
+        prioridad=prioridad,
+        activo_relacionado=activo_obj,
+        reportado_por=request.user,
+        estatus=ReporteFalla.ESTATUS_ABIERTO,
+    )
+    if foto:
+        reporte.foto_evidencia = foto
+    reporte.save()
+
+    BitacoraFalla.objects.create(
+        reporte=reporte,
+        usuario=request.user,
+        estatus_anterior="",
+        estatus_nuevo=ReporteFalla.ESTATUS_ABIERTO,
+        comentario="Reporte creado desde panel de Mantenimiento.",
+    )
+    msg.success(request, f"Falla #{reporte.id} creada: {titulo}")
+    return redirect("mantenimiento:dashboard")
+
+
+@login_required
 def dashboard(request):
     _require_mantenimiento(request.user)
     origen = (request.GET.get("origen") or "").strip().lower()
@@ -575,6 +649,8 @@ def dashboard(request):
         "sucursal__nombre", "nombre", "codigo"
     )[:180]
     fleet_units = Unidad.objects.filter(activa=True).select_related("sucursal").order_by("codigo")[:6]
+    sucursales_list = sucursales_operativas().order_by("nombre")
+    categorias_list = CategoriaFalla.objects.filter(activo=True).order_by("orden", "nombre")
     return render(
         request,
         "mantenimiento/dashboard.html",
@@ -585,11 +661,15 @@ def dashboard(request):
             "provider_options": provider_options,
             "asset_options": asset_options,
             "fleet_units": fleet_units,
+            "sucursales_list": sucursales_list,
+            "categorias_list": categorias_list,
             "origen": origen or "todos",
             "counts": _unified_counts(),
             "estatus_fallas": ReporteFalla.ESTATUS,
             "estatus_unidad": ReporteUnidad.ESTATUS_CHOICES,
             "estatus_orden": OrdenMantenimiento.ESTATUS_CHOICES,
+            "areas_falla": ReporteFalla.AREAS,
+            "prioridades_falla": ReporteFalla.PRIORIDAD,
         },
     )
 
