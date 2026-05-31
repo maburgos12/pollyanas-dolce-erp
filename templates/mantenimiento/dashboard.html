@@ -68,6 +68,12 @@
   .mant-asset-create-title{color:#8B2252;font-size:13px;font-weight:900}
   .mant-asset-create-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
   @media(max-width:1180px){.mant-breakdown{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr 1fr}}
+  .mant-semaforo{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:900;border-radius:999px;padding:3px 8px}
+  .mant-semaforo::before{content:"";width:8px;height:8px;border-radius:50%;flex:0 0 8px}
+  .mant-semaforo.verde{background:#e8f6ee;color:#166534}.mant-semaforo.verde::before{background:#22c55e}
+  .mant-semaforo.amarillo{background:#fef9c3;color:#854d0e}.mant-semaforo.amarillo::before{background:#eab308}
+  .mant-semaforo.rojo{background:#fee2e2;color:#991b1b}.mant-semaforo.rojo::before{background:#ef4444}
+  .mant-badge.sin-asignar{background:#fef3c7;color:#92400e}
   .mant-toast-stack{position:fixed;top:16px;right:20px;z-index:2000;display:grid;gap:8px;width:min(380px,calc(100vw - 32px));pointer-events:none}
   .mant-toast-stack .alert{pointer-events:auto;margin:0;padding:12px 16px;border-radius:10px;font-weight:700;box-shadow:0 4px 16px rgba(0,0,0,.12)}
   @media(max-width:760px){.mant-origin-tabs{display:grid}.mant-origin-tab{justify-content:space-between}.mant-form-grid,.mant-asset-create-grid,.mant-board-tools{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr}}
@@ -117,9 +123,11 @@
 
   <section class="bi-kpi-grid" aria-label="Indicadores de mantenimiento">
     <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.total %}warning{% else %}success{% endif %}">{{ summary.total|intcomma }}</div><div class="bi-kpi-label">Reportes visibles</div><div class="bi-kpi-note">Casos del filtro actual.</div></article>
+    <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.rojos %}danger{% else %}success{% endif %}">{{ summary.rojos|intcomma }}</div><div class="bi-kpi-label">Semáforo rojo</div><div class="bi-kpi-note">Abiertos más de 5 días.</div></article>
+    <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.sin_asignar %}warning{% else %}success{% endif %}">{{ summary.sin_asignar|intcomma }}</div><div class="bi-kpi-label">Sin asignar</div><div class="bi-kpi-note">Sin proveedor ni responsable.</div></article>
+    <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.tiempo_promedio > 5 %}danger{% elif summary.tiempo_promedio > 2 %}warning{% else %}success{% endif %}">{{ summary.tiempo_promedio }}</div><div class="bi-kpi-label">Días promedio</div><div class="bi-kpi-note">Tiempo promedio abierto.</div></article>
     <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.ordenes_abiertas %}warning{% else %}success{% endif %}">{{ summary.ordenes_abiertas|intcomma }}</div><div class="bi-kpi-label">Órdenes abiertas</div><div class="bi-kpi-note">Equipo y maquinaria.</div></article>
     <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.reparaciones_flota %}warning{% else %}success{% endif %}">{{ summary.reparaciones_flota|intcomma }}</div><div class="bi-kpi-label">Reparaciones flota</div><div class="bi-kpi-note">Reportes de unidades.</div></article>
-    <article class="bi-kpi-card"><div class="bi-kpi-value success">{{ summary.activos_registrados|intcomma }}</div><div class="bi-kpi-label">Activos registrados</div><div class="bi-kpi-note">Base de activos disponible.</div></article>
   </section>
 
   <section class="mant-breakdown" aria-label="Distribución de mantenimiento">
@@ -192,6 +200,8 @@
                 <div class="mant-ticket-tags">
                   <span class="mant-badge {{ item.origen }}">{{ item.origen|title }}</span>
                   <span class="mant-badge">{{ item.prioridad }}</span>
+                  {% if not item.asignado %}<span class="mant-badge sin-asignar">Sin asignar</span>{% endif %}
+                  <span class="mant-semaforo {{ item.semaforo }}">{{ item.dias_abierto }}d</span>
                 </div>
                 <div>
                   <div class="mant-ticket-title">{{ item.referencia }} · {{ item.titulo }}</div>

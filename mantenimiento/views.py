@@ -110,7 +110,24 @@ def _unit_open_statuses():
     return [ReporteUnidad.ESTATUS_ABIERTO, ReporteUnidad.ESTATUS_EN_PROCESO, ReporteUnidad.ESTATUS_PROGRAMADO]
 
 
+def _dias_abierto(fecha):
+    if not fecha:
+        return 0
+    ahora = timezone.now()
+    delta = ahora - (fecha if fecha.tzinfo else timezone.make_aware(fecha))
+    return max(0, delta.days)
+
+
+def _semaforo(dias):
+    if dias > 5:
+        return "rojo"
+    if dias > 2:
+        return "amarillo"
+    return "verde"
+
+
 def _branch_falla_item(reporte):
+    dias = _dias_abierto(reporte.fecha_reporte)
     return {
         "uid": f"falla:{reporte.id}",
         "tipo": "falla",
@@ -131,10 +148,14 @@ def _branch_falla_item(reporte):
         "proveedor": reporte.proveedor_servicio,
         "costo_estimado": reporte.costo_estimado,
         "costo_real": reporte.costo_real,
+        "dias_abierto": dias,
+        "semaforo": _semaforo(dias),
+        "asignado": bool(getattr(reporte, "asignado_a_id", None)),
     }
 
 
 def _branch_order_item(orden):
+    dias = _dias_abierto(orden.creado_en)
     return {
         "uid": f"orden:{orden.id}",
         "tipo": "orden",
@@ -155,10 +176,14 @@ def _branch_order_item(orden):
         "proveedor": orden.responsable,
         "costo_estimado": None,
         "costo_real": orden.costo_total,
+        "dias_abierto": dias,
+        "semaforo": _semaforo(dias),
+        "asignado": bool(orden.responsable),
     }
 
 
 def _logistica_item(reporte):
+    dias = _dias_abierto(reporte.fecha_reporte)
     return {
         "uid": f"unidad:{reporte.id}",
         "tipo": "unidad",
@@ -179,6 +204,9 @@ def _logistica_item(reporte):
         "proveedor": reporte.proveedor_servicio,
         "costo_estimado": reporte.costo_servicio,
         "costo_real": reporte.costo_servicio,
+        "dias_abierto": dias,
+        "semaforo": _semaforo(dias),
+        "asignado": bool(reporte.proveedor_servicio),
     }
 
 
@@ -261,6 +289,10 @@ def _dashboard_summary(items):
     costo_30d = sum(
         (item.get("costo_real") or item.get("costo_estimado") or Decimal("0")) for item in items
     )
+    dias_list = [item["dias_abierto"] for item in items if item.get("dias_abierto", 0) > 0]
+    tiempo_promedio = round(sum(dias_list) / len(dias_list), 1) if dias_list else 0
+    sin_asignar = sum(1 for item in items if not item.get("asignado"))
+    rojos = sum(1 for item in items if item.get("semaforo") == "rojo")
     return {
         "total": len(items),
         "fallas_activas": sum(1 for item in items if item["tipo"] == "falla"),
@@ -270,6 +302,9 @@ def _dashboard_summary(items):
         "costo_30d": costo_30d,
         "unidades_activas": Unidad.objects.filter(activa=True).count(),
         "activos_registrados": Activo.objects.filter(activo=True).count(),
+        "tiempo_promedio": tiempo_promedio,
+        "sin_asignar": sin_asignar,
+        "rojos": rojos,
         "por_ubicacion": _top_counts(items, "ubicacion"),
         "por_area": _top_counts(items, "area"),
         "por_tipo": _top_counts(items, "categoria"),
@@ -644,7 +679,20 @@ def dashboard(request):
     if origen not in {"", "sucursales", "logistica"}:
         return redirect("mantenimiento:dashboard")
     items = _unified_items(origen)
-    provider_options = Proveedor.objects.filter(activo=True).order_by("nombre")[:120]
+    # Top-5 proveedores más usados en mantenimiento primero, luego el resto
+    from django.db.models import Count as _Count
+    top_ids = list(
+        ReporteFalla.objects.exclude(proveedor_servicio="")
+        .values("proveedor_servicio")
+        .annotate(n=_Count("id"))
+        .order_by("-n")
+        .values_list("proveedor_servicio", flat=True)[:5]
+    )
+    top_proveedores = list(Proveedor.objects.filter(nombre__in=top_ids, activo=True))
+    resto_proveedores = list(
+        Proveedor.objects.filter(activo=True).exclude(nombre__in=top_ids).order_by("nombre")[:115]
+    )
+    provider_options = top_proveedores + resto_proveedores
     asset_options = Activo.objects.select_related("sucursal").filter(activo=True).order_by(
         "sucursal__nombre", "nombre", "codigo"
     )[:180]
