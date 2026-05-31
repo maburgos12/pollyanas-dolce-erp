@@ -14,7 +14,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento
-from core.access import can_manage_submodule, can_view_module, can_view_submodule
+from core.access import can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
 from core.models import sucursales_operativas
 from fallas.models import BitacoraFalla, ReporteFalla
 from logistica.models import ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
@@ -56,6 +56,8 @@ class EsMantenimiento(BasePermission):
 
 
 def _require_mantenimiento(user):
+    if is_admin_or_dg(user):
+        return
     if not can_view_submodule(user, "mantenimiento", "dashboard"):
         raise PermissionDenied("No tienes permisos para ver Mantenimiento.")
 
@@ -594,6 +596,6 @@ def dashboard(request):
 
 @login_required
 def pwa_mantenimiento(request):
-    if not EsMantenimiento().has_permission(request, None):
+    if not (is_admin_or_dg(request.user) or EsMantenimiento().has_permission(request, None)):
         raise PermissionDenied("No tienes permisos para usar Mantenimiento")
     return render(request, "mantenimiento/pwa.html")

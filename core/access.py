@@ -230,6 +230,15 @@ def has_any_role(user: AbstractBaseUser, *roles: str) -> bool:
     return bool(_group_names(user).intersection(set(roles)))
 
 
+def is_admin_or_dg(user: AbstractBaseUser) -> bool:
+    """Superuser, is_staff, o miembro de grupo DG/ADMIN siempre tiene acceso total."""
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_superuser or user.is_staff:
+        return True
+    return bool(_group_names(user) & {"dg", "DG", "admin", "ADMIN"})
+
+
 def _is_locked(user: AbstractBaseUser, lock_field: str) -> bool:
     if not user or not user.is_authenticated:
         return False

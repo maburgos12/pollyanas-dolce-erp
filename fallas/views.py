@@ -15,7 +15,7 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from activos.models import Activo
-from core.access import can_manage_submodule, can_view_module, can_view_submodule, is_repartidor_only
+from core.access import can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg, is_repartidor_only
 from core.models import Sucursal, sucursales_operativas_q
 
 from .models import BitacoraFalla, CategoriaFalla, ReporteFalla
@@ -59,7 +59,7 @@ class EsPersonalSucursal(permissions.BasePermission):
     """Personal de sucursal o gestores autorizados pueden reportar fallas."""
 
     def has_permission(self, request, view):
-        return _puede_reportar_fallas(request.user)
+        return is_admin_or_dg(request.user) or _puede_reportar_fallas(request.user)
 
 
 class EsComprasODG(permissions.BasePermission):
@@ -109,7 +109,7 @@ class SucursalFallaListView(generics.ListAPIView):
 
     def get_queryset(self):
         qs = Sucursal.objects.filter(sucursales_operativas_q()).order_by("nombre")
-        if _puede_cambiar_estatus_fallas(self.request.user):
+        if is_admin_or_dg(self.request.user) or _puede_cambiar_estatus_fallas(self.request.user):
             return qs
         sucursal = _sucursal_usuario(self.request.user)
         if sucursal:
