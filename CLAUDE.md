@@ -137,6 +137,21 @@ reportar el bloqueo exacto, lo que sí quedó hecho y qué falta para confirmar.
 - NUNCA borrar migraciones existentes
 - NUNCA modificar migraciones ya aplicadas en producción
 
+### PR abierto = tarea sin terminar — deploy obligatorio antes de continuar
+Un PR mergeado sin deploy en VPS equivale a un cambio que no existe para el usuario.
+No pasar a una segunda tarea hasta que la primera esté deployada y validada en producción.
+
+**Prohibido:**
+- Crear PR y abrir otra tarea sin deployar primero
+- Copiar archivos al VPS por SCP como atajo al flujo git — `git pull` es el único canal válido
+- Declarar "listo" cuando el VPS aún corre el código anterior
+
+**Flujo mínimo obligatorio al cerrar cualquier cambio de código:**
+1. PR mergeado a main
+2. `git pull origin main` en VPS
+3. `docker compose restart web` en VPS
+4. Verificar resultado visible en producción
+
 ### Datos de usuarios — NUNCA pisar
 `bono_extra`, `ajuste_positivo`, `ajuste_negativo` son datos de nómina real capturados
 por las jefas. Un borrado accidental es crítico.
