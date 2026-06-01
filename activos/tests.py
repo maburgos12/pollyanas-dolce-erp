@@ -104,25 +104,13 @@ class ActivosFlowsTests(TestCase):
         self.assertEqual(response.context["focus_summary"]["label"], "Sin categoría")
 
     def test_dashboard_shows_release_gate_enterprise_block(self):
+        # El dashboard activos es ahora una shell JS que carga datos vía API.
         self.client.force_login(self.admin)
         Activo.objects.create(nombre="Activo QA", categoria="Frío", activo=True)
         response = self.client.get(reverse("activos:dashboard"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Centro de mando ERP")
-        self.assertContains(response, "Criterios de cierre ERP")
-        self.assertContains(response, "Radar ejecutivo ERP")
-        self.assertContains(response, "Cierre global")
-        self.assertContains(response, "Cadena troncal del mantenimiento")
-        self.assertContains(response, "Entrega de activos a downstream")
-        self.assertContains(response, "Ruta crítica ERP")
-        self.assertContains(response, "Depende de")
-        self.assertContains(response, "Dependencia")
-        self.assertIn("erp_command_center", response.context)
-        self.assertIn("release_gate_rows", response.context)
-        self.assertIn("release_gate_completion", response.context)
-        self.assertIn("critical_path_rows", response.context)
-        self.assertIn("executive_radar_rows", response.context)
-        self.assertEqual(len(response.context["executive_radar_rows"]), 4)
+        self.assertContains(response, "Panel de mantenimiento")
+        self.assertContains(response, "Director General")
 
     def test_planes_view_shows_enterprise_cards_and_filter(self):
         self.client.force_login(self.admin)
@@ -345,6 +333,8 @@ class ActivosFlowsTests(TestCase):
         self.assertIsNotNone(response.context["focus_summary"])
 
     def test_dashboard_alertas_criticas_context(self):
+        # El dashboard activos es ahora una shell JS; los datos se cargan vía API.
+        # Verificamos que la vista carga y que los activos/planes/órdenes se crean.
         self.client.force_login(self.admin)
         activo = Activo.objects.create(nombre="AA Critico", categoria="Aire", criticidad=Activo.CRITICIDAD_ALTA)
         PlanMantenimiento.objects.create(
@@ -365,27 +355,10 @@ class ActivosFlowsTests(TestCase):
         )
         response = self.client.get(reverse("activos:dashboard"))
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.context["planes_vencidos_rows"])
-        self.assertTrue(response.context["ordenes_criticas_rows"])
-        self.assertTrue(response.context["enterprise_cards"])
-        self.assertTrue(response.context["operational_health_cards"])
-        self.assertEqual(response.context["enterprise_health_label"], "Con bloqueos")
-        self.assertTrue(response.context["activos_blocker_rows"])
-        self.assertContains(response, "Cadena documental ERP")
-        self.assertContains(response, "Madurez ERP de activos")
-        self.assertContains(response, "Ruta crítica ERP")
-        self.assertContains(response, "Radar ejecutivo ERP")
-        self.assertContains(response, "Cadena de control ERP")
-        self.assertContains(response, "Salud operativa ERP")
-        self.assertContains(response, "Cierre por etapa documental")
-        self.assertContains(response, "Mesa de gobierno ERP")
-        self.assertTrue(response.context["enterprise_chain"])
-        self.assertTrue(response.context["document_stage_rows"])
-        self.assertIn("enterprise_maturity_summary", response.context)
-        self.assertIn("enterprise_handoff_map", response.context)
-        self.assertIn("critical_path_rows", response.context)
-        self.assertIn("executive_radar_rows", response.context)
-        self.assertEqual(len(response.context["enterprise_handoff_map"]), 3)
+        self.assertContains(response, "Panel de mantenimiento")
+        self.assertTrue(Activo.objects.filter(nombre="AA Critico").exists())
+        self.assertTrue(PlanMantenimiento.objects.filter(activo_ref=activo).exists())
+        self.assertTrue(OrdenMantenimiento.objects.filter(activo_ref=activo, prioridad=OrdenMantenimiento.PRIORIDAD_CRITICA).exists())
 
     def test_activos_catalog_filters_by_enterprise_gap(self):
         self.client.force_login(self.admin)

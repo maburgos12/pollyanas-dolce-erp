@@ -14,9 +14,9 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento
-from core.access import can_manage_submodule, can_view_module, can_view_submodule
+from core.access import can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
 from core.models import sucursales_operativas
-from fallas.models import BitacoraFalla, ReporteFalla
+from fallas.models import BitacoraFalla, CategoriaFalla, ReporteFalla
 from logistica.models import ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
 from maestros.models import Proveedor
 
@@ -56,6 +56,8 @@ class EsMantenimiento(BasePermission):
 
 
 def _require_mantenimiento(user):
+    if is_admin_or_dg(user):
+        return
     if not can_view_submodule(user, "mantenimiento", "dashboard"):
         raise PermissionDenied("No tienes permisos para ver Mantenimiento.")
 
@@ -108,7 +110,24 @@ def _unit_open_statuses():
     return [ReporteUnidad.ESTATUS_ABIERTO, ReporteUnidad.ESTATUS_EN_PROCESO, ReporteUnidad.ESTATUS_PROGRAMADO]
 
 
+def _dias_abierto(fecha):
+    if not fecha:
+        return 0
+    ahora = timezone.now()
+    delta = ahora - (fecha if fecha.tzinfo else timezone.make_aware(fecha))
+    return max(0, delta.days)
+
+
+def _semaforo(dias):
+    if dias > 5:
+        return "rojo"
+    if dias > 2:
+        return "amarillo"
+    return "verde"
+
+
 def _branch_falla_item(reporte):
+    dias = _dias_abierto(reporte.fecha_reporte)
     return {
         "uid": f"falla:{reporte.id}",
         "tipo": "falla",
@@ -129,10 +148,14 @@ def _branch_falla_item(reporte):
         "proveedor": reporte.proveedor_servicio,
         "costo_estimado": reporte.costo_estimado,
         "costo_real": reporte.costo_real,
+        "dias_abierto": dias,
+        "semaforo": _semaforo(dias),
+        "asignado": bool(getattr(reporte, "asignado_a_id", None)),
     }
 
 
 def _branch_order_item(orden):
+    dias = _dias_abierto(orden.creado_en)
     return {
         "uid": f"orden:{orden.id}",
         "tipo": "orden",
@@ -153,10 +176,14 @@ def _branch_order_item(orden):
         "proveedor": orden.responsable,
         "costo_estimado": None,
         "costo_real": orden.costo_total,
+        "dias_abierto": dias,
+        "semaforo": _semaforo(dias),
+        "asignado": bool(orden.responsable),
     }
 
 
 def _logistica_item(reporte):
+    dias = _dias_abierto(reporte.fecha_reporte)
     return {
         "uid": f"unidad:{reporte.id}",
         "tipo": "unidad",
@@ -177,6 +204,9 @@ def _logistica_item(reporte):
         "proveedor": reporte.proveedor_servicio,
         "costo_estimado": reporte.costo_servicio,
         "costo_real": reporte.costo_servicio,
+        "dias_abierto": dias,
+        "semaforo": _semaforo(dias),
+        "asignado": bool(reporte.proveedor_servicio),
     }
 
 
@@ -259,6 +289,10 @@ def _dashboard_summary(items):
     costo_30d = sum(
         (item.get("costo_real") or item.get("costo_estimado") or Decimal("0")) for item in items
     )
+    dias_list = [item["dias_abierto"] for item in items if item.get("dias_abierto", 0) > 0]
+    tiempo_promedio = round(sum(dias_list) / len(dias_list), 1) if dias_list else 0
+    sin_asignar = sum(1 for item in items if not item.get("asignado"))
+    rojos = sum(1 for item in items if item.get("semaforo") == "rojo")
     return {
         "total": len(items),
         "fallas_activas": sum(1 for item in items if item["tipo"] == "falla"),
@@ -268,6 +302,9 @@ def _dashboard_summary(items):
         "costo_30d": costo_30d,
         "unidades_activas": Unidad.objects.filter(activa=True).count(),
         "activos_registrados": Activo.objects.filter(activo=True).count(),
+        "tiempo_promedio": tiempo_promedio,
+        "sin_asignar": sin_asignar,
+        "rojos": rojos,
         "por_ubicacion": _top_counts(items, "ubicacion"),
         "por_area": _top_counts(items, "area"),
         "por_tipo": _top_counts(items, "categoria"),
@@ -506,6 +543,13 @@ def actualizar_item(request, tipo, pk):
         if costo_real is not None:
             reporte.costo_real = costo_real
         reporte.save()
+        # Si la falla se cierra, restaurar el activo vinculado a OPERATIVO
+        if estatus in (ReporteFalla.ESTATUS_CERRADO, ReporteFalla.ESTATUS_RESUELTO):
+            if reporte.activo_relacionado_id:
+                activo_vinculado = reporte.activo_relacionado
+                if activo_vinculado.estado == Activo.ESTADO_MANTENIMIENTO:
+                    activo_vinculado.estado = Activo.ESTADO_OPERATIVO
+                    activo_vinculado.save(update_fields=["estado", "actualizado_en"])
         BitacoraFalla.objects.create(
             reporte=reporte,
             usuario=request.user,
@@ -562,17 +606,99 @@ def actualizar_item(request, tipo, pk):
 
 
 @login_required
+def crear_falla(request):
+    """Crea un ReporteFalla directamente desde el panel de mantenimiento (sin PWA)."""
+    _require_mantenimiento(request.user)
+    if request.method != "POST":
+        return redirect("mantenimiento:dashboard")
+
+    sucursal_id = request.POST.get("sucursal") or ""
+    categoria_id = request.POST.get("categoria") or ""
+    titulo = (request.POST.get("titulo") or "").strip()
+    descripcion = (request.POST.get("descripcion") or "").strip()
+    area = (request.POST.get("area") or ReporteFalla.AREA_GENERAL).strip()
+    prioridad = (request.POST.get("prioridad") or ReporteFalla.PRIORIDAD_MEDIA).strip()
+    activo_id = (request.POST.get("activo_id") or "").strip()
+
+    errores = []
+    if not sucursal_id:
+        errores.append("Selecciona una sucursal.")
+    if not categoria_id:
+        errores.append("Selecciona una categoría.")
+    if not titulo:
+        errores.append("El título es obligatorio.")
+    if not descripcion:
+        errores.append("La descripción es obligatoria.")
+
+    from django.contrib import messages as msg
+    if errores:
+        for e in errores:
+            msg.error(request, e)
+        return redirect("mantenimiento:dashboard")
+
+    from core.models import Sucursal
+    sucursal = Sucursal.objects.filter(pk=sucursal_id).first()
+    categoria = CategoriaFalla.objects.filter(pk=categoria_id, activo=True).first()
+    if not sucursal or not categoria:
+        msg.error(request, "Sucursal o categoría no válida.")
+        return redirect("mantenimiento:dashboard")
+
+    activo_obj = Activo.objects.filter(pk=activo_id, activo=True).first() if activo_id else None
+
+    foto = request.FILES.get("foto_evidencia")
+    reporte = ReporteFalla(
+        sucursal=sucursal,
+        categoria=categoria,
+        area=area,
+        titulo=titulo,
+        descripcion=descripcion,
+        prioridad=prioridad,
+        activo_relacionado=activo_obj,
+        reportado_por=request.user,
+        estatus=ReporteFalla.ESTATUS_ABIERTO,
+    )
+    if foto:
+        reporte.foto_evidencia = foto
+    reporte.save()
+
+    BitacoraFalla.objects.create(
+        reporte=reporte,
+        usuario=request.user,
+        estatus_anterior="",
+        estatus_nuevo=ReporteFalla.ESTATUS_ABIERTO,
+        comentario="Reporte creado desde panel de Mantenimiento.",
+    )
+    msg.success(request, f"Falla #{reporte.id} creada: {titulo}")
+    return redirect("mantenimiento:dashboard")
+
+
+@login_required
 def dashboard(request):
     _require_mantenimiento(request.user)
     origen = (request.GET.get("origen") or "").strip().lower()
     if origen not in {"", "sucursales", "logistica"}:
         return redirect("mantenimiento:dashboard")
     items = _unified_items(origen)
-    provider_options = Proveedor.objects.filter(activo=True).order_by("nombre")[:120]
+    # Top-5 proveedores más usados en mantenimiento primero, luego el resto
+    from django.db.models import Count as _Count
+    top_ids = list(
+        ReporteFalla.objects.exclude(proveedor_servicio="")
+        .values("proveedor_servicio")
+        .annotate(n=_Count("id"))
+        .order_by("-n")
+        .values_list("proveedor_servicio", flat=True)[:5]
+    )
+    top_proveedores = list(Proveedor.objects.filter(nombre__in=top_ids, activo=True))
+    resto_proveedores = list(
+        Proveedor.objects.filter(activo=True).exclude(nombre__in=top_ids).order_by("nombre")[:115]
+    )
+    provider_options = top_proveedores + resto_proveedores
     asset_options = Activo.objects.select_related("sucursal").filter(activo=True).order_by(
         "sucursal__nombre", "nombre", "codigo"
     )[:180]
     fleet_units = Unidad.objects.filter(activa=True).select_related("sucursal").order_by("codigo")[:6]
+    sucursales_list = sucursales_operativas().order_by("nombre")
+    categorias_list = CategoriaFalla.objects.filter(activo=True).order_by("orden", "nombre")
     return render(
         request,
         "mantenimiento/dashboard.html",
@@ -583,17 +709,21 @@ def dashboard(request):
             "provider_options": provider_options,
             "asset_options": asset_options,
             "fleet_units": fleet_units,
+            "sucursales_list": sucursales_list,
+            "categorias_list": categorias_list,
             "origen": origen or "todos",
             "counts": _unified_counts(),
             "estatus_fallas": ReporteFalla.ESTATUS,
             "estatus_unidad": ReporteUnidad.ESTATUS_CHOICES,
             "estatus_orden": OrdenMantenimiento.ESTATUS_CHOICES,
+            "areas_falla": ReporteFalla.AREAS,
+            "prioridades_falla": ReporteFalla.PRIORIDAD,
         },
     )
 
 
 @login_required
 def pwa_mantenimiento(request):
-    if not EsMantenimiento().has_permission(request, None):
+    if not (is_admin_or_dg(request.user) or EsMantenimiento().has_permission(request, None)):
         raise PermissionDenied("No tienes permisos para usar Mantenimiento")
     return render(request, "mantenimiento/pwa.html")

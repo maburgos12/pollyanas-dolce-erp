@@ -68,6 +68,14 @@
   .mant-asset-create-title{color:#8B2252;font-size:13px;font-weight:900}
   .mant-asset-create-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
   @media(max-width:1180px){.mant-breakdown{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr 1fr}}
+  .mant-semaforo{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:900;border-radius:999px;padding:3px 8px}
+  .mant-semaforo::before{content:"";width:8px;height:8px;border-radius:50%;flex:0 0 8px}
+  .mant-semaforo.verde{background:#e8f6ee;color:#166534}.mant-semaforo.verde::before{background:#22c55e}
+  .mant-semaforo.amarillo{background:#fef9c3;color:#854d0e}.mant-semaforo.amarillo::before{background:#eab308}
+  .mant-semaforo.rojo{background:#fee2e2;color:#991b1b}.mant-semaforo.rojo::before{background:#ef4444}
+  .mant-badge.sin-asignar{background:#fef3c7;color:#92400e}
+  .mant-toast-stack{position:fixed;top:16px;right:20px;z-index:2000;display:grid;gap:8px;width:min(380px,calc(100vw - 32px));pointer-events:none}
+  .mant-toast-stack .alert{pointer-events:auto;margin:0;padding:12px 16px;border-radius:10px;font-weight:700;box-shadow:0 4px 16px rgba(0,0,0,.12)}
   @media(max-width:760px){.mant-origin-tabs{display:grid}.mant-origin-tab{justify-content:space-between}.mant-form-grid,.mant-asset-create-grid,.mant-board-tools{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr}}
 </style>
 {% endblock %}
@@ -115,9 +123,11 @@
 
   <section class="bi-kpi-grid" aria-label="Indicadores de mantenimiento">
     <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.total %}warning{% else %}success{% endif %}">{{ summary.total|intcomma }}</div><div class="bi-kpi-label">Reportes visibles</div><div class="bi-kpi-note">Casos del filtro actual.</div></article>
+    <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.rojos %}danger{% else %}success{% endif %}">{{ summary.rojos|intcomma }}</div><div class="bi-kpi-label">Semáforo rojo</div><div class="bi-kpi-note">Abiertos más de 5 días.</div></article>
+    <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.sin_asignar %}warning{% else %}success{% endif %}">{{ summary.sin_asignar|intcomma }}</div><div class="bi-kpi-label">Sin asignar</div><div class="bi-kpi-note">Sin proveedor ni responsable.</div></article>
+    <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.tiempo_promedio > 5 %}danger{% elif summary.tiempo_promedio > 2 %}warning{% else %}success{% endif %}">{{ summary.tiempo_promedio }}</div><div class="bi-kpi-label">Días promedio</div><div class="bi-kpi-note">Tiempo promedio abierto.</div></article>
     <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.ordenes_abiertas %}warning{% else %}success{% endif %}">{{ summary.ordenes_abiertas|intcomma }}</div><div class="bi-kpi-label">Órdenes abiertas</div><div class="bi-kpi-note">Equipo y maquinaria.</div></article>
     <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.reparaciones_flota %}warning{% else %}success{% endif %}">{{ summary.reparaciones_flota|intcomma }}</div><div class="bi-kpi-label">Reparaciones flota</div><div class="bi-kpi-note">Reportes de unidades.</div></article>
-    <article class="bi-kpi-card"><div class="bi-kpi-value success">{{ summary.activos_registrados|intcomma }}</div><div class="bi-kpi-label">Activos registrados</div><div class="bi-kpi-note">Base de activos disponible.</div></article>
   </section>
 
   <section class="mant-breakdown" aria-label="Distribución de mantenimiento">
@@ -161,7 +171,8 @@
         <p class="bi-copy">El tablero muestra en qué etapa está cada caso; el panel lateral guarda avance, proveedor, cotización y cierre.</p>
       </div>
       <div class="bi-panel-actions">
-        <a class="btn btn-secondary btn-sm" href="{% url 'mantenimiento:app' %}">Levantar reporte</a>
+        <button class="btn btn-primary btn-sm" type="button" id="btnNuevaFalla" style="background:#8B2252;border-color:#8B2252;">+ Nueva falla</button>
+        <a class="btn btn-secondary btn-sm" href="{% url 'mantenimiento:app' %}">App móvil</a>
       </div>
     </div>
     <div class="mant-flow-demo" aria-label="Ejemplo visual de avance">
@@ -189,6 +200,8 @@
                 <div class="mant-ticket-tags">
                   <span class="mant-badge {{ item.origen }}">{{ item.origen|title }}</span>
                   <span class="mant-badge">{{ item.prioridad }}</span>
+                  {% if not item.asignado %}<span class="mant-badge sin-asignar">Sin asignar</span>{% endif %}
+                  <span class="mant-semaforo {{ item.semaforo }}">{{ item.dias_abierto }}d</span>
                 </div>
                 <div>
                   <div class="mant-ticket-title">{{ item.referencia }} · {{ item.titulo }}</div>
@@ -236,6 +249,80 @@
       {% endfor %}
     </div>
   </section>
+</div>
+
+{% if messages %}
+<div class="mant-toast-stack">
+  {% for message in messages %}
+    <div class="alert alert-{{ message.tags|default:'info' }}" style="margin:0;padding:12px 16px;border-radius:10px;font-weight:700;box-shadow:0 4px 16px rgba(0,0,0,.12)">{{ message }}</div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Modal nueva falla -->
+<div class="mant-drawer" id="modalNuevaFalla" role="dialog" aria-modal="true" aria-labelledby="modalNuevaFallaTitulo">
+  <aside class="mant-drawer-panel">
+    <div class="mant-drawer-head">
+      <div>
+        <h2 id="modalNuevaFallaTitulo">Nueva falla</h2>
+        <p>Captura directa desde el panel de mantenimiento</p>
+      </div>
+      <button class="btn btn-secondary btn-sm" type="button" data-close-nueva-falla>Cerrar</button>
+    </div>
+    <form class="mant-form" method="post" action="{% url 'mantenimiento:crear-falla' %}" enctype="multipart/form-data">
+      {% csrf_token %}
+      <div class="mant-form-grid">
+        <label class="mant-field">Sucursal <span style="color:#E53935">*</span>
+          <select class="mant-input" name="sucursal" required>
+            <option value="">Seleccionar sucursal...</option>
+            {% for s in sucursales_list %}
+              <option value="{{ s.id }}">{{ s.nombre }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="mant-field">Categoría <span style="color:#E53935">*</span>
+          <select class="mant-input" name="categoria" required>
+            <option value="">Seleccionar categoría...</option>
+            {% for c in categorias_list %}
+              <option value="{{ c.id }}">{{ c.nombre }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="mant-field">Área
+          <select class="mant-input" name="area">
+            {% for value,label in areas_falla %}
+              <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="mant-field">Prioridad
+          <select class="mant-input" name="prioridad">
+            {% for value,label in prioridades_falla %}
+              <option value="{{ value }}" {% if value == 'media' %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="mant-field full">Activo relacionado <span style="color:#77656d;font-weight:400">(opcional)</span>
+          <select class="mant-input" name="activo_id">
+            <option value="">Sin activo vinculado</option>
+            {% for activo in asset_options %}
+              <option value="{{ activo.id }}">{{ activo.codigo }} · {{ activo.nombre }}{% if activo.sucursal %} · {{ activo.sucursal.nombre }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="mant-field full">Título <span style="color:#E53935">*</span>
+          <input class="mant-input" name="titulo" type="text" required maxlength="200" placeholder="Describe brevemente la falla">
+        </label>
+        <label class="mant-field full">Descripción <span style="color:#E53935">*</span>
+          <textarea class="mant-input" name="descripcion" required placeholder="Detalla qué ocurre, cuándo inició y qué se afecta"></textarea>
+        </label>
+        <label class="mant-field full">Foto de evidencia <span style="color:#77656d;font-weight:400">(opcional desde escritorio)</span>
+          <input class="mant-input" name="foto_evidencia" type="file" accept="image/*" style="padding:8px">
+        </label>
+      </div>
+      <button class="btn btn-primary" type="submit" style="background:#8B2252;border-color:#8B2252;">Crear reporte de falla</button>
+    </form>
+  </aside>
 </div>
 
 <datalist id="mant-provider-list">
@@ -368,7 +455,31 @@
     if (event.target === drawer) drawer.classList.remove("is-open");
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") drawer.classList.remove("is-open");
+    if (event.key === "Escape") {
+      drawer.classList.remove("is-open");
+      modalNuevaFalla.classList.remove("is-open");
+    }
+  });
+})();
+
+// Modal nueva falla
+(() => {
+  const modal = document.getElementById("modalNuevaFalla");
+  const btnAbrir = document.getElementById("btnNuevaFalla");
+  if (!modal || !btnAbrir) return;
+
+  btnAbrir.addEventListener("click", () => modal.classList.add("is-open"));
+
+  document.querySelectorAll("[data-close-nueva-falla]").forEach((btn) => {
+    btn.addEventListener("click", () => modal.classList.remove("is-open"));
+  });
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) modal.classList.remove("is-open");
+  });
+
+  // Auto-hide django messages after 4s
+  document.querySelectorAll(".alert").forEach((el) => {
+    setTimeout(() => el.style.display = "none", 4000);
   });
 })();
 </script>
