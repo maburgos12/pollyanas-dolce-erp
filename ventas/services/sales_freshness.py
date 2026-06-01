@@ -3,11 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 
-from django.db.models import Max
 from django.utils import timezone
 
-from pos_bridge.models import PointDailySale
 from pos_bridge.tasks.celery_tasks import task_daily_sales_sync
+from ventas.services.sales_canonical_source import canonical_point_max_date
 
 
 FORECAST_SALES_LAG_DAYS = 1
@@ -35,7 +34,7 @@ class ForecastSalesFreshness:
 
 
 def latest_sales_fact_date() -> date | None:
-    return PointDailySale.objects.aggregate(latest=Max("sale_date"))["latest"]
+    return canonical_point_max_date()
 
 
 def build_forecast_sales_freshness(
