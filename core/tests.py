@@ -53,6 +53,9 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn("--erp-workspace-max", css)
         self.assertIn("overflow-x: clip", css)
         self.assertIn(".period-filter", css)
+        self.assertIn("overflow-wrap: anywhere", css)
+        self.assertIn("white-space: normal", css)
+        self.assertIn("min-width: 0", css)
 
     def test_guardrails_cover_capital_humano_family(self):
         css = (Path(settings.BASE_DIR) / "static" / "css" / "hallmark_guardrails.css").read_text()
@@ -83,6 +86,14 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
             f"{issue.rule}: {issue.path} :: {issue.snippet}" for issue in issues[:20]
         )
         self.assertEqual(issues, [], details)
+
+    def test_reportes_produccion_contains_visible_data_guardrails(self):
+        css = (Path(settings.BASE_DIR) / "static" / "css" / "styles.css").read_text()
+        self.assertIn(".production-kpi-number-currency", css)
+        self.assertIn("overflow-wrap: anywhere", css)
+        self.assertIn(".production-state-cell", css)
+        self.assertIn("white-space: normal !important", css)
+        self.assertIn("width: 260px", css)
 
 
 class NavigationActiveStateTests(TestCase):

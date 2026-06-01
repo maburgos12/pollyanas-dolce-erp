@@ -510,9 +510,10 @@ body,
   .permisos-table,
   .ch-table,
   .monitor-table
-) :is(.cell-wrap, td:first-child) {
+) :is(.cell-wrap, .cell-status, .cell-badge, [data-cell-status="true"], td:first-child) {
   max-width: 32ch;
   white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .main-content[data-hallmark-scope="erp"] :is(
@@ -596,10 +597,31 @@ body,
   justify-content: center;
   line-height: 1.15;
   max-width: 100%;
-  min-width: max-content;
+  min-width: 0;
+  overflow-wrap: anywhere;
   text-align: center;
-  white-space: nowrap;
+  white-space: normal;
   word-break: keep-all;
+}
+
+.main-content[data-hallmark-scope="erp"] :is(
+  .cell-status,
+  .cell-badge,
+  [data-cell-status="true"]
+) :is(
+  .badge,
+  .status-pill,
+  .rrhh-status,
+  .permiso-badge,
+  .vacantes-badge,
+  .org-badge,
+  .production-state-label
+) {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .main-content[data-hallmark-scope="erp"] :is(
