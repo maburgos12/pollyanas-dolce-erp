@@ -92,6 +92,8 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
     def test_reportes_produccion_contains_visible_data_guardrails(self):
         css = (Path(settings.BASE_DIR) / "static" / "css" / "styles.css").read_text()
         self.assertIn(".production-kpi-number-currency", css)
+        self.assertIn(".production-kpi-card .kpi-card-inner", css)
+        self.assertIn(".production-kpi-card .kpi-number", css)
         self.assertIn("overflow-wrap: anywhere", css)
         self.assertIn(".production-state-cell", css)
         self.assertIn("white-space: normal !important", css)
