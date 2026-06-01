@@ -901,8 +901,6 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         source_dates: dict[str, date | None],
     ) -> list[str]:
         banners = []
-        if source_dates.get("produccion"):
-            banners.append(f"Módulo de producción: datos disponibles desde {source_dates['produccion']:%Y-%m-%d}.")
         if sales_source == "ProductoMonthClosureLine":
             banners.append("Ventas: sin registros diarios para este periodo; se usó cierre mensual consolidado.")
         elif sales_source == "sin_datos":
@@ -913,9 +911,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             banners.append("Producción: sin registros para este periodo.")
         if merma_source == "sin_datos":
             banners.append("Merma: sin registros consolidados para este periodo.")
-        if source_dates.get("cierre"):
-            banners.append(f"Cierre mensual: inventarios disponibles desde {source_dates['cierre']:%Y-%m}.")
-        return banners
+        return [banner for banner in banners if banner]
 
     def _categories(self) -> list[str]:
         values = (
