@@ -6187,17 +6187,32 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   gap: 8px;
 }
 .production-filter-action { align-self: end; }
-.production-kpi-card-currency .kpi-card-inner {
+.production-kpi-card .kpi-card-inner {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr);
   gap: 14px;
   align-items: center;
   overflow: clip;
 }
-.production-kpi-card-currency .kpi-body {
+.production-kpi-card .kpi-body {
   min-width: 0;
   max-width: 100%;
   overflow: clip;
+}
+.production-kpi-card .kpi-number {
+  display: block;
+  width: 100%;
+  font-size: clamp(1.55rem, 1.75vw, 2.05rem);
+  line-height: 0.95;
+  max-width: 100%;
+  overflow: clip;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.production-kpi-card .kpi-label {
+  text-align: left;
 }
 .production-kpi-number-currency {
   display: block;
