@@ -451,6 +451,8 @@
         unidades: [],
         tiposServicio: [],
         ordenes: [],
+        bandeja: [],
+        bandejaFiltro: "todos",
         ordenActual: null,
         filtroOrdenes: "abiertas",
         busquedaEquipo: "",
@@ -670,18 +672,67 @@
         return state.ordenes;
       }
 
+      async function loadBandeja(force = false) {
+        if (state.bandeja.length && !force) return state.bandeja;
+        const res = await apiFetch("/bandeja/");
+        if (res.ok) {
+          const data = await res.json();
+          state.bandeja = data.items || [];
+        } else {
+          state.bandeja = [];
+        }
+        return state.bandeja;
+      }
+
+      function itemAbierto(item) {
+        const e = String(item.estatus || "").toLowerCase();
+        return !["cerrada", "cancelada", "cerrado", "cancelado", "resuelto"].includes(e);
+      }
+
       function ordenAbierta(orden) {
         return !["CERRADA", "CANCELADA"].includes(orden.estatus);
       }
 
       function metricasMantenimiento() {
-        const ordenes = state.ordenes || [];
+        const items = state.bandeja || [];
+        const abiertos = items.filter(itemAbierto);
         return {
-          abiertas: ordenes.filter(ordenAbierta).length,
-          proceso: ordenes.filter((o) => o.estatus === "EN_PROCESO").length,
-          criticas: ordenes.filter((o) => ordenAbierta(o) && ["CRITICA", "ALTA"].includes(o.prioridad)).length,
-          cerradas: ordenes.filter((o) => o.estatus === "CERRADA").length,
+          abiertas: abiertos.length,
+          proceso: items.filter((i) => ["en_proceso", "EN_PROCESO"].includes(i.estatus)).length,
+          criticas: abiertos.filter((i) => i.semaforo === "rojo").length,
+          cerradas: items.filter((i) => ["cerrada", "cerrado", "CERRADA"].includes(i.estatus)).length,
         };
+      }
+
+      function bandejaItemCard(item) {
+        const abierto = itemAbierto(item);
+        const esLogistica = item.origen === "logistica";
+        const semClass = item.semaforo === "rojo" ? "alta" : item.semaforo === "amarillo" ? "media" : "baja";
+        const badge = esLogistica
+          ? `<span class="status-chip" style="background:#8B2252;color:#fff">Flota</span>`
+          : `<span class="status-chip" style="background:#C9A84C;color:#fff">Sucursal</span>`;
+        return `
+          <article class="card report-card">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+              <div>
+                <p style="margin:0;font-weight:900">${esc(item.titulo || item.activo || "Sin título")}</p>
+                <p class="muted">${esc(item.referencia || "")} · ${esc(item.ubicacion || item.area || "")}</p>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+                ${badge}
+                <span class="status-chip ${semClass}">${esc(item.estatus_display || item.estatus)}</span>
+              </div>
+            </div>
+            <p class="muted" style="margin:6px 0 0">${esc(item.descripcion || "Sin descripción")}</p>
+            ${item.dias_abierto > 0 ? `<p class="muted" style="margin:4px 0 0">${item.dias_abierto} días abierto</p>` : ""}
+            ${abierto && item.tipo === "orden" ? `
+              <div class="card-actions">
+                <button onclick="abrirOrden(${item.id})">Ver detalle</button>
+                ${item.estatus !== "EN_PROCESO" ? `<button onclick="actualizarOrdenRapida(${item.id}, 'EN_PROCESO')">Iniciar</button>` : ""}
+                <button onclick="actualizarOrdenRapida(${item.id}, 'CERRADA')">Cerrar</button>
+              </div>` : ""}
+          </article>
+        `;
       }
 
       function statusClass(orden) {
@@ -712,7 +763,7 @@
       }
 
       async function renderDashboard() {
-        await loadOrdenes(true);
+        await loadBandeja(true);
         const m = metricasMantenimiento();
         render(shell(`
           <p style="margin:0 0 12px;color:var(--gold);font-weight:800;">Bandeja de mantenimiento</p>
@@ -735,17 +786,29 @@
       }
 
       async function renderPendientes() {
-        await loadOrdenes(true);
-        const pendientes = state.ordenes.filter(ordenAbierta);
+        await loadBandeja(true);
+        const todos = state.bandeja.filter(itemAbierto);
+        const filtro = state.bandejaFiltro;
+        const visibles = filtro === "sucursales" ? todos.filter((i) => i.origen === "sucursales")
+          : filtro === "logistica" ? todos.filter((i) => i.origen === "logistica")
+          : filtro === "criticos" ? todos.filter((i) => i.semaforo === "rojo")
+          : todos;
+        const counts = {
+          todos: todos.length,
+          sucursales: todos.filter((i) => i.origen === "sucursales").length,
+          logistica: todos.filter((i) => i.origen === "logistica").length,
+          criticos: todos.filter((i) => i.semaforo === "rojo").length,
+        };
         render(shell(`
           <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
           <h1 class="screen-title" style="margin-top:16px">Pendientes</h1>
           <div class="toolbar">
-            <button class="${state.filtroOrdenes === "abiertas" ? "active" : ""}" onclick="state.filtroOrdenes='abiertas'; renderPendientes()">Abiertas</button>
-            <button class="${state.filtroOrdenes === "criticas" ? "active" : ""}" onclick="state.filtroOrdenes='criticas'; renderPendientes()">Críticas / altas</button>
+            <button class="${filtro === "todos" ? "active" : ""}" onclick="state.bandejaFiltro='todos'; renderPendientes()">Todos (${counts.todos})</button>
+            <button class="${filtro === "sucursales" ? "active" : ""}" onclick="state.bandejaFiltro='sucursales'; renderPendientes()">Sucursales (${counts.sucursales})</button>
+            <button class="${filtro === "logistica" ? "active" : ""}" onclick="state.bandejaFiltro='logistica'; renderPendientes()">Flota (${counts.logistica})</button>
+            <button class="${filtro === "criticos" ? "active" : ""}" onclick="state.bandejaFiltro='criticos'; renderPendientes()">Críticos (${counts.criticos})</button>
           </div>
-          ${(state.filtroOrdenes === "criticas" ? pendientes.filter((o) => ["CRITICA", "ALTA"].includes(o.prioridad)) : pendientes)
-            .map((orden) => ordenCard(orden)).join("") || `<div class="empty">Sin órdenes pendientes.</div>`}
+          ${visibles.map(bandejaItemCard).join("") || `<div class="empty">Sin pendientes en esta categoría.</div>`}
         `));
       }
 
@@ -802,18 +865,20 @@
       }
 
       async function renderSeguimiento() {
-        await loadOrdenes(true);
+        await loadBandeja(true);
+        const abiertos = state.bandeja.filter(itemAbierto);
         render(shell(`
           <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
           <h1 class="screen-title" style="margin-top:16px">Seguimiento</h1>
-          ${state.ordenes.filter(ordenAbierta).map((orden) => ordenCard(orden)).join("") || `<div class="empty">Sin trabajos activos.</div>`}
+          ${abiertos.map(bandejaItemCard).join("") || `<div class="empty">Sin trabajos activos.</div>`}
         `));
       }
 
       async function renderReportes() {
-        await loadOrdenes(true);
+        await loadBandeja(true);
         await ensureActivos();
         const m = metricasMantenimiento();
+        const recientes = state.bandeja.slice(0, 10);
         render(shell(`
           <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
           <h1 class="screen-title" style="margin-top:16px">Reportes</h1>
@@ -824,7 +889,7 @@
             <div class="summary-card"><strong>${state.activos.length}</strong><span>Equipos</span></div>
           </div>
           <p style="color:var(--gold);font-weight:800;margin:14px 0 10px">Últimos movimientos</p>
-          ${state.ordenes.slice(0, 8).map((orden) => ordenCard(orden, {compact: true})).join("") || `<div class="empty">Sin órdenes registradas.</div>`}
+          ${recientes.map(bandejaItemCard).join("") || `<div class="empty">Sin movimientos registrados.</div>`}
         `));
       }
 
@@ -1124,6 +1189,7 @@
         }
         state.ordenActual = await res.json();
         state.ordenes = [];
+        state.bandeja = [];
         renderOrdenDetalle();
       }
 
@@ -1135,6 +1201,7 @@
         });
         if (res.ok) {
           state.ordenes = [];
+          state.bandeja = [];
           await showScreen(state.pantalla || "dashboard");
         }
       }
