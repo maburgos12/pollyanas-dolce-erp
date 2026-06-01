@@ -778,3 +778,46 @@ body,
   .panel-dg-td-titulo-inner,
   .panel-dg-colab-item-label { white-space: normal; }
 }
+
+/* Hallmark containment override.
+ * Last-mile rule: visible KPI values and table states must stay inside their
+ * own card, cell or pill, even when older module CSS defines nowrap or large
+ * display numbers.
+ */
+.main-content[data-hallmark-scope="erp"] .production-kpi-card-currency .kpi-card-inner {
+  display: grid !important;
+  grid-template-columns: 44px minmax(0, 1fr) !important;
+  gap: 14px !important;
+  overflow: clip !important;
+}
+
+.main-content[data-hallmark-scope="erp"] .production-kpi-card-currency .kpi-body,
+.main-content[data-hallmark-scope="erp"] .production-kpi-card-currency .production-kpi-number-currency {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: clip !important;
+}
+
+.main-content[data-hallmark-scope="erp"] .production-kpi-card-currency .production-kpi-number-currency {
+  display: block !important;
+  width: 100% !important;
+  font-size: clamp(1.55rem, 1.75vw, 2.05rem) !important;
+  line-height: 0.95 !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  word-break: normal !important;
+}
+
+.main-content[data-hallmark-scope="erp"] .production-table-wrap .production-col-estado {
+  width: 260px !important;
+  min-width: 260px !important;
+}
+
+.main-content[data-hallmark-scope="erp"] .production-primary-table .production-state-cell,
+.main-content[data-hallmark-scope="erp"] .production-primary-table .production-state-label {
+  box-sizing: border-box !important;
+  max-width: 100% !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  word-break: normal !important;
+}

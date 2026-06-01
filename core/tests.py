@@ -46,6 +46,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         html = base.read_text()
         self.assertIn('data-hallmark-scope="erp"', html)
         self.assertLess(html.index("{% block extra_css %}"), html.index("hallmark_guardrails.css"))
+        self.assertIn("20260601-reportes-contencion-datos-v1", html)
 
     def test_guardrails_define_global_erp_scope(self):
         css = (Path(settings.BASE_DIR) / "static" / "css" / "hallmark_guardrails.css").read_text()
@@ -56,6 +57,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn("overflow-wrap: anywhere", css)
         self.assertIn("white-space: normal", css)
         self.assertIn("min-width: 0", css)
+        self.assertIn("Hallmark containment override", css)
 
     def test_guardrails_cover_capital_humano_family(self):
         css = (Path(settings.BASE_DIR) / "static" / "css" / "hallmark_guardrails.css").read_text()
