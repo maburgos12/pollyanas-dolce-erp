@@ -1216,7 +1216,6 @@ def _export_reportes_servicio_xlsx(rows: list[dict]) -> HttpResponse:
 def dashboard(request):
     if not can_view_inventario(request.user):
         raise PermissionDenied("No tienes permisos para ver Activos.")
-    return render(request, "activos/dashboard.html")
 
     today = timezone.localdate()
     week_limit = today + timedelta(days=7)
