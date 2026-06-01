@@ -84,8 +84,8 @@
       <div class="ch-kicker">Capital Humano · Checador</div>
       <h1 class="ch-title">Carga y sincronización de asistencia</h1>
       <p class="ch-copy">
-        Consulta lo que ya está entrando por las sincronizaciones automáticas y carga archivos Excel cuando necesites recuperar
-        asistencias manualmente.
+        La fuente principal es el checador Hikvision por IP/ISAPI mediante el túnel QNAP. Si esa conexión falla, usa el Excel
+        exportado desde Hik-Connect como respaldo para recuperar asistencias.
       </p>
       <div class="ch-actions">
         <a class="btn btn-primary" href="{% url 'rrhh:rrhh_monitor_sync' %}">Monitor checador</a>
@@ -98,12 +98,12 @@
         <span>{% if ultima_api %}{{ ultima_api.creado_en|date:"Y-m-d H:i" }}{% else %}-{% endif %}</span>
       </div>
       <div class="ch-status-row">
-        <span>Fuente automática</span>
-        <span>Hikvision API / PointMeUp</span>
+        <span>Fuente principal</span>
+        <span>Hikvision ISAPI/IP · túnel QNAP</span>
       </div>
       <div class="ch-status-row">
-        <span>Receptor ERP</span>
-        <span>/rrhh/api/asistencia-hik/ + pos_bridge.attendance_sync</span>
+        <span>Respaldo</span>
+        <span>Hik-Connect Excel / receptor ERP</span>
       </div>
     </div>
   </section>
@@ -125,7 +125,7 @@
 
   <section class="ch-layout">
     <article class="ch-card">
-      <h2>Cargar Excel manual</h2>
+      <h2>Respaldo Hik-Connect Excel</h2>
       <form method="post" enctype="multipart/form-data" class="ch-fields">
         {% csrf_token %}
         <label class="ch-field">Fecha inicio
@@ -134,7 +134,7 @@
         <label class="ch-field">Fecha fin
           <input type="date" name="fecha_fin" value="{{ hoy|date:'Y-m-d' }}" required>
         </label>
-        <label class="ch-field ch-file">Archivo Excel exportado del checador
+        <label class="ch-field ch-file">Archivo Excel exportado desde Hik-Connect
           <input type="file" name="archivo" accept=".xlsx,.xls" required>
         </label>
         <button class="btn btn-primary" type="submit">Cargar archivo al ERP</button>

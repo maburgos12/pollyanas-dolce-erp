@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+from datetime import date, timedelta
+
 from celery import shared_task
 from django.utils import timezone
 
@@ -10,6 +13,30 @@ def sync_asistencia_point():
     Futura integración: jalar checadas de PointMeUp via pos_bridge.
     """
     return {"ok": True, "procesados": 0, "fuente": "point_placeholder"}
+
+
+@shared_task
+def sync_asistencia_hikvision_isapi(dias: int = 1):
+    """
+    Sincroniza asistencia desde el checador por ISAPI/IP.
+    Hik-Connect Excel queda como respaldo manual desde el comando/pantalla de carga.
+    """
+    from .services_hikvision import importar_asistencia_isapi
+
+    hasta = date.today()
+    desde = hasta - timedelta(days=max(int(dias), 1))
+    password = os.getenv("HIKVISION_ISAPI_PASSWORD", "")
+    if not password:
+        return {"ok": False, "error": "HIKVISION_ISAPI_PASSWORD no configurado"}
+
+    resultado = importar_asistencia_isapi(
+        fecha_inicio=desde,
+        fecha_fin=hasta,
+        base_url=os.getenv("HIKVISION_ISAPI_URL", "http://127.0.0.1:28073"),
+        username=os.getenv("HIKVISION_ISAPI_USER", "admin"),
+        password=password,
+    )
+    return {"ok": True, **resultado}
 
 
 @shared_task

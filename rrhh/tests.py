@@ -594,6 +594,123 @@ class CapitalHumanoAPITests(TestCase):
         resp = self.client.post(reverse("rrhh:rrhh_receptor_hik"), {"eventos": []}, format="json")
         self.assertEqual(resp.status_code, 401)
 
+    def test_isapi_normaliza_eventos_validos_del_checador(self):
+        from rrhh.services_hikvision import normalizar_eventos_isapi
+
+        eventos = normalizar_eventos_isapi(
+            {
+                "AcsEvent": {
+                    "InfoList": [
+                        {
+                            "name": "EVERARDO RODRIGUEZ LIZARRAGA",
+                            "employeeNoString": "340",
+                            "time": "2026-05-01T11:27:06-07:00",
+                            "attendanceStatus": "checkIn",
+                            "label": "ENTRADA",
+                            "serialNo": 235726,
+                        },
+                        {
+                            "time": "2026-05-01T11:27:06-07:00",
+                            "label": "ENTRADA",
+                            "serialNo": 235727,
+                        },
+                    ]
+                }
+            }
+        )
+
+        self.assertEqual(len(eventos), 1)
+        self.assertEqual(eventos[0]["employee_no"], "340")
+        self.assertEqual(eventos[0]["attendance_status"], "checkIn")
+        self.assertEqual(eventos[0]["serial_no"], 235726)
+
+    def test_procesar_eventos_hik_no_duplica_entrada_y_completa_salida(self):
+        from rrhh.services_hikvision import procesar_eventos_hik
+
+        empleado = Empleado.objects.create(nombre="Empleado ISAPI", codigo="340", salario_diario="400.00")
+
+        resultado = procesar_eventos_hik(
+            [
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkIn",
+                    "time": "2026-05-01T08:01:00-07:00",
+                    "serial_no": 1,
+                },
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkIn",
+                    "time": "2026-05-01T08:03:00-07:00",
+                    "serial_no": 2,
+                },
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkOut",
+                    "time": "2026-05-01T16:11:00-07:00",
+                    "serial_no": 3,
+                },
+            ]
+        )
+
+        self.assertEqual(resultado["procesados"], 2)
+        self.assertEqual(resultado["duplicados"], 1)
+        asistencia = AsistenciaEmpleado.objects.get(empleado=empleado, fecha="2026-05-01")
+        self.assertEqual(asistencia.entrada.minute, 1)
+        self.assertEqual(asistencia.salida.minute, 11)
+        self.assertEqual(asistencia.minutos_trabajados, 490)
+        self.assertEqual(asistencia.fuente, AsistenciaEmpleado.FUENTE_HIKCONNECT_API)
+
+    def test_importar_asistencia_isapi_registra_importacion_api(self):
+        from datetime import date
+
+        from rrhh.models import ImportacionChecador
+        from rrhh.services_hikvision import importar_asistencia_isapi
+
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {
+                    "AcsEvent": {
+                        "responseStatusStrg": "OK",
+                        "numOfMatches": 1,
+                        "InfoList": [
+                            {
+                                "name": "Empleado ISAPI",
+                                "employeeNoString": "341",
+                                "time": "2026-05-02T08:01:00-07:00",
+                                "attendanceStatus": "checkIn",
+                                "serialNo": 10,
+                            }
+                        ],
+                    }
+                }
+
+        class FakeSession:
+            def post(self, *args, **kwargs):
+                return FakeResponse()
+
+        Empleado.objects.create(nombre="Empleado ISAPI", codigo="341", salario_diario="400.00")
+
+        resultado = importar_asistencia_isapi(
+            fecha_inicio=date(2026, 5, 2),
+            fecha_fin=date(2026, 5, 2),
+            base_url="http://127.0.0.1:28073",
+            username="admin",
+            password="secret",
+            session=FakeSession(),
+        )
+
+        self.assertEqual(resultado["procesados"], 1)
+        self.assertTrue(AsistenciaEmpleado.objects.filter(empleado__codigo="341", fecha="2026-05-02").exists())
+        importacion = ImportacionChecador.objects.get()
+        self.assertEqual(importacion.metodo, ImportacionChecador.METODO_API)
+        self.assertIn("ISAPI", importacion.log)
+
 
 class RRHHViewsTests(TestCase):
     def setUp(self):
