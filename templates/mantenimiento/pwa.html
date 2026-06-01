@@ -467,6 +467,7 @@
           step: 1,
           activo: null,
           activoLabel: "",
+          ubicacionFiltro: "",
           tipo: "",
           descripcion: "",
           proveedor: "",
@@ -728,12 +729,10 @@
             </div>
             <p class="muted" style="margin:6px 0 0">${esc(item.descripcion || "Sin descripción")}</p>
             ${item.dias_abierto > 0 ? `<p class="muted" style="margin:4px 0 0">${item.dias_abierto} días abierto</p>` : ""}
-            ${abierto && item.tipo === "orden" ? `
-              <div class="card-actions">
-                <button onclick="abrirOrden(${item.id})">Ver detalle</button>
-                ${item.estatus !== "EN_PROCESO" ? `<button onclick="actualizarOrdenRapida(${item.id}, 'EN_PROCESO')">Iniciar</button>` : ""}
-                <button onclick="actualizarOrdenRapida(${item.id}, 'CERRADA')">Cerrar</button>
-              </div>` : ""}
+            <div class="card-actions">
+              <button onclick="abrirBandejaItemPorUid('${esc(item.uid)}')">Ver y seguir</button>
+              ${abierto && item.tipo === "orden" && item.estatus !== "EN_PROCESO" ? `<button onclick="actualizarOrdenRapida(${item.id}, 'EN_PROCESO')">Iniciar</button>` : ""}
+            </div>
           </article>
         `;
       }
@@ -925,20 +924,31 @@
         let body = "";
         if (d.step === 1) {
           await ensureActivos();
-          const lista = state.activos.map(activoCard).join("") || `<div class="empty">No hay equipos registrados.</div>`;
+          const ubicaciones = ubicacionesDesdeActivos();
+          const activosFiltrados = state.activos.filter((a) =>
+            !d.ubicacionFiltro || a.ubicacion === d.ubicacionFiltro
+          );
+          const lista = activosFiltrados.map(activoCard).join("") || `<div class="empty">No hay equipos en esta área.</div>`;
           body = `
-            <h1 class="screen-title">Seleccionar equipo</h1>
+            <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
+            <h1 class="screen-title" style="margin-top:16px">Seleccionar equipo</h1>
             ${progressDots(1)}
             <div class="field">
-              <input type="search" placeholder="Buscar por nombre, código o sucursal" oninput="filtrarActivos(this.value)">
+              <label>Área / Ubicación</label>
+              <select onchange="state.equipoDraft.ubicacionFiltro=this.value; renderEquipoDraft()">
+                <option value="">Todas las áreas</option>
+                ${ubicaciones.map((u) => `<option value="${esc(u)}" ${d.ubicacionFiltro === u ? "selected" : ""}>${esc(u)}</option>`).join("")}
+              </select>
+            </div>
+            <div class="field">
+              <input type="search" placeholder="Buscar por nombre o código" oninput="filtrarActivos(this.value, '${esc(d.ubicacionFiltro)}')">
             </div>
             <div class="card-list" id="lista-activos">${lista}</div>
             <div class="inline-note">
-              Si no existe el equipo, área o instalación en la base, registra primero un punto mantenible.
+              Si no existe el equipo en la base, regístralo como punto mantenible.
             </div>
             <button class="secondary-btn" style="width:100%" onclick="startPuntoMantenible()">No encuentro el equipo</button>
             <div class="actions">
-              <button class="secondary-btn" onclick="showScreen('dashboard')">Cancelar</button>
               <button class="primary-btn" onclick="nextEquipoStep()" ${d.activo ? "" : "disabled"}>Siguiente</button>
             </div>
           `;
@@ -1112,9 +1122,131 @@
 
       async function abrirOrden(id) {
         const res = await apiFetch(`/ordenes/${id}/`);
-        if (!res.ok) return renderSeguimiento();
+        if (!res.ok) return showScreen("pendientes");
         state.ordenActual = await res.json();
         renderOrdenDetalle();
+      }
+
+      function abrirBandejaItemPorUid(uid) {
+        const item = state.bandeja.find((i) => i.uid === uid);
+        if (!item) return showScreen("pendientes");
+        if (item.tipo === "orden") return abrirOrden(item.id);
+        if (item.tipo === "falla") return renderFallaDetalle(item);
+        if (item.tipo === "unidad") return renderUnidadDetalle(item);
+      }
+
+      function renderFallaDetalle(item) {
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('pendientes')">Volver</button>
+          <h1 class="screen-title" style="margin-top:16px">Falla #${esc(String(item.id))}</h1>
+          <section class="card report-card">
+            <p style="margin:0;font-weight:900">${esc(item.titulo)}</p>
+            <p class="muted">${esc(item.referencia || "")} · ${esc(item.ubicacion || item.area || "")}</p>
+            <div class="kv"><b>Estatus</b><span>${esc(item.estatus_display)}</span></div>
+            <div class="kv"><b>Prioridad</b><span>${esc(item.prioridad || "-")}</span></div>
+            <div class="kv"><b>Días abierto</b><span>${item.dias_abierto || 0}</span></div>
+            ${item.activo ? `<div class="kv"><b>Equipo</b><span>${esc(item.activo)}</span></div>` : ""}
+            <p style="margin:8px 0 0">${esc(item.descripcion || "Sin descripción")}</p>
+          </section>
+          <section class="card report-card" style="margin-top:12px">
+            <p style="color:var(--gold);font-weight:800;margin:0 0 12px">Dar seguimiento</p>
+            <div class="field">
+              <label>Nuevo estatus</label>
+              <select id="falla-estatus">
+                <option value="abierto" ${item.estatus==="abierto"?"selected":""}>Abierto</option>
+                <option value="en_revision" ${item.estatus==="en_revision"?"selected":""}>En revisión</option>
+                <option value="programado" ${item.estatus==="programado"?"selected":""}>Programado</option>
+                <option value="resuelto" ${item.estatus==="resuelto"?"selected":""}>Resuelto</option>
+                <option value="cerrado" ${item.estatus==="cerrado"?"selected":""}>Cerrado</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Proveedor / técnico</label>
+              <input id="falla-proveedor" placeholder="Nombre del taller o técnico" value="${esc(item.proveedor || "")}">
+            </div>
+            <div class="field">
+              <label>Costo estimado (MXN)</label>
+              <input id="falla-costo" type="number" step="0.01" min="0" placeholder="0.00" value="${esc(String(item.costo_estimado || ""))}">
+            </div>
+            <div class="field">
+              <label>Comentario</label>
+              <textarea id="falla-comentario" placeholder="Notas del seguimiento"></textarea>
+            </div>
+            <button class="primary-btn" onclick="guardarSeguimientoFalla(${item.id})">Guardar seguimiento</button>
+          </section>
+        `));
+      }
+
+      async function guardarSeguimientoFalla(id) {
+        const estatus = document.getElementById("falla-estatus")?.value || "";
+        const proveedor = document.getElementById("falla-proveedor")?.value || "";
+        const costo = document.getElementById("falla-costo")?.value || "";
+        const comentario = document.getElementById("falla-comentario")?.value || "";
+        const res = await apiFetch(`/bandeja/falla/${id}/actualizar/`, {
+          method: "PATCH",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({estatus, proveedor_servicio: proveedor, costo_estimado: costo || null, comentario}),
+        });
+        if (res.ok) {
+          state.bandeja = [];
+          showScreen("pendientes");
+        }
+      }
+
+      function renderUnidadDetalle(item) {
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('pendientes')">Volver</button>
+          <h1 class="screen-title" style="margin-top:16px">Reporte flota</h1>
+          <section class="card report-card">
+            <p style="margin:0;font-weight:900">${esc(item.titulo)}</p>
+            <p class="muted">${esc(item.referencia || "")} · ${esc(item.categoria || item.area || "")}</p>
+            <div class="kv"><b>Estatus</b><span>${esc(item.estatus_display)}</span></div>
+            <div class="kv"><b>Severidad</b><span>${esc(item.prioridad || "-")}</span></div>
+            <div class="kv"><b>Días abierto</b><span>${item.dias_abierto || 0}</span></div>
+            <p style="margin:8px 0 0">${esc(item.descripcion || "Sin descripción")}</p>
+          </section>
+          <section class="card report-card" style="margin-top:12px">
+            <p style="color:var(--gold);font-weight:800;margin:0 0 12px">Dar seguimiento</p>
+            <div class="field">
+              <label>Nuevo estatus</label>
+              <select id="unidad-estatus">
+                <option value="abierto" ${item.estatus==="abierto"?"selected":""}>Abierto</option>
+                <option value="en_proceso" ${item.estatus==="en_proceso"?"selected":""}>En proceso</option>
+                <option value="programado" ${item.estatus==="programado"?"selected":""}>Programado</option>
+                <option value="cerrado" ${item.estatus==="cerrado"?"selected":""}>Cerrado</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Taller / proveedor</label>
+              <input id="unidad-proveedor" placeholder="Nombre del taller" value="${esc(item.proveedor || "")}">
+            </div>
+            <div class="field">
+              <label>Costo real (MXN)</label>
+              <input id="unidad-costo" type="number" step="0.01" min="0" placeholder="0.00">
+            </div>
+            <div class="field">
+              <label>Notas</label>
+              <textarea id="unidad-comentario" placeholder="Observaciones del seguimiento"></textarea>
+            </div>
+            <button class="primary-btn" onclick="guardarSeguimientoUnidad(${item.id})">Guardar seguimiento</button>
+          </section>
+        `));
+      }
+
+      async function guardarSeguimientoUnidad(id) {
+        const estatus = document.getElementById("unidad-estatus")?.value || "";
+        const proveedor = document.getElementById("unidad-proveedor")?.value || "";
+        const costo = document.getElementById("unidad-costo")?.value || "";
+        const comentario = document.getElementById("unidad-comentario")?.value || "";
+        const res = await apiFetch(`/bandeja/unidad/${id}/actualizar/`, {
+          method: "PATCH",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({estatus, proveedor_servicio: proveedor, costo_real: costo || null, comentario}),
+        });
+        if (res.ok) {
+          state.bandeja = [];
+          showScreen("pendientes");
+        }
       }
 
       function renderOrdenDetalle(error = "") {
@@ -1206,16 +1338,18 @@
         }
       }
 
-      function filtrarActivos(q) {
+      function filtrarActivos(q, ubicacionFiltro = "") {
         const lista = document.getElementById("lista-activos");
         if (!lista) return;
         const value = q.toLowerCase();
-        const filtrados = state.activos.filter((activo) =>
-          activo.nombre.toLowerCase().includes(value) ||
-          activo.codigo.toLowerCase().includes(value) ||
-          (activo.sucursal_nombre || "").toLowerCase().includes(value) ||
-          (activo.ubicacion || "").toLowerCase().includes(value)
-        );
+        const filtrados = state.activos.filter((activo) => {
+          const matchUbicacion = !ubicacionFiltro || activo.ubicacion === ubicacionFiltro;
+          const matchTexto = !value ||
+            activo.nombre.toLowerCase().includes(value) ||
+            activo.codigo.toLowerCase().includes(value) ||
+            (activo.ubicacion || "").toLowerCase().includes(value);
+          return matchUbicacion && matchTexto;
+        });
         lista.innerHTML = filtrados.map(activoCard).join("") || `<div class="empty">Sin resultados.</div>`;
       }
 
