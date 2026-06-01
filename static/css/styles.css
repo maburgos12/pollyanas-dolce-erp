@@ -1147,8 +1147,8 @@ textarea:focus,
 .table-responsive [data-cell-status="true"],
 .table-responsive [data-cell-actions="true"] {
   text-align: center;
-  white-space: nowrap;
-  overflow-wrap: normal;
+  white-space: normal;
+  overflow-wrap: anywhere;
   word-break: keep-all;
   hyphens: manual;
 }
@@ -1160,8 +1160,9 @@ textarea:focus,
 .table-responsive .cell-badge .badge,
 .table-responsive [data-cell-status="true"] .badge {
   width: max-content;
-  max-width: none;
+  max-width: 100%;
   margin-inline: auto;
+  white-space: normal;
 }
 
 .table-responsive .cell-actions .quick-actions,
@@ -6189,17 +6190,26 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
 .production-kpi-card-currency .kpi-card-inner {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr);
+  gap: 14px;
   align-items: center;
+  overflow: clip;
 }
 .production-kpi-card-currency .kpi-body {
   min-width: 0;
+  max-width: 100%;
+  overflow: clip;
 }
 .production-kpi-number-currency {
-  font-size: clamp(1.85rem, 2vw, 2.35rem);
+  display: block;
+  width: 100%;
+  font-size: clamp(1.55rem, 1.75vw, 2.05rem);
   line-height: 0.95;
   max-width: 100%;
-  overflow: visible;
-  white-space: nowrap;
+  overflow: clip;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
 .production-table-card {
   display: grid;
@@ -6231,7 +6241,7 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   table-layout: auto;
 }
 .production-primary-table {
-  --table-min-width: 1080px;
+  --table-min-width: 1220px;
 }
 .production-secondary-table {
   --table-min-width: 1160px;
@@ -6255,8 +6265,8 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   min-width: 112px;
 }
 .production-table-wrap .production-col-estado {
-  width: 182px;
-  min-width: 182px;
+  width: 260px;
+  min-width: 260px;
 }
 .production-table-wrap .table thead th:first-child,
 .production-table-wrap .table tbody td:first-child,
@@ -6287,11 +6297,14 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
 }
 .production-state-cell {
   text-align: center;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
 }
 .production-state-label {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
   min-height: 32px;
   padding: 6px 12px;
   border-radius: 999px;
@@ -6299,6 +6312,8 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   font-weight: 800;
   line-height: 1.15;
   white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
   max-width: 100%;
   text-align: center;
 }

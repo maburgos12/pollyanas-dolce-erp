@@ -12,9 +12,12 @@ Estas reglas son obligatorias para vistas nuevas o existentes del ERP.
 
 - Los shells principales (`.module-shell`, `.bonos-shell`, `.rrhh-page`, `.bi-shell`, `.costeo-shell`, etc.) deben ocupar el ancho operativo, con `max-width` global y alineacion consistente.
 - Los grids de metricas, filtros, configuraciones y formularios deben usar columnas responsivas basadas en `auto-fit` o reglas globales equivalentes.
-- Botones, chips, badges y estatus no deben cortar palabras ni salirse de su figura.
+- Botones, chips, badges, KPI y estatus no deben cortar letras, numeros, palabras ni salirse de su figura.
+- Los badges y estatus deben centrarse con `max-width: 100%`, `min-width: 0`, `white-space: normal` y texto envuelto dentro de la figura.
+- Los numeros de KPI deben usar numeros tabulares y una regla de contencion; si el valor crece, se reduce o envuelve dentro del card, nunca se corta por el borde.
 - Tablas pueden tener scroll horizontal interno cuando el numero de columnas lo exige, pero no deben generar scroll horizontal de pagina.
 - Si una tabla analitica supera el primer plano operativo (aprox. 8 columnas de lectura primaria o 10+ columnas totales), debe dividirse en tabla principal y tabla secundaria, o en un detalle expandible. No debe depender de que el usuario lea toda la operacion con scroll horizontal.
+- Las columnas de estado con frases largas deben ganar ancho o moverse a detalle secundario; no se permite cortar frases como `Faltante no explicado` por falta de columna.
 - Inputs, selects y textareas siempre deben tener `min-width: 0`, ancho maximo de su contenedor y altura minima consistente.
 
 ## Reportes
@@ -40,6 +43,7 @@ Antes de publicar cambios visuales:
 - Confirmar `document.documentElement.scrollWidth - document.documentElement.clientWidth === 0`.
 - Confirmar que `hallmark_guardrails.css` esta cargado.
 - Revisar que botones y chips no tengan `scrollWidth > clientWidth`.
+- Revisar que KPI, badges, estatus y celdas visibles no tengan `scrollWidth > clientWidth`.
 - Para tablas, validar que el scroll sea interno al `.table-responsive`, no de toda la pagina.
 
 ## Gate obligatorio
