@@ -915,4 +915,5 @@ def detalle_item_dg(request, pk):
         "checklist_completo": bool(checks) and all(c.completado for c in checks),
         "estatus_en_revision": SeguimientoItem.ESTATUS_EN_REVISION,
         "es_vista_dg": True,
+        "puede_resolver_dg": item.estatus == SeguimientoItem.ESTATUS_EN_REVISION,
     })
