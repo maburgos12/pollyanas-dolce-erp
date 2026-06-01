@@ -36,6 +36,9 @@ outputs/
 output/
 storage/pos_bridge/logs/*
 storage/pos_bridge/raw_exports/*
+storage/pos_bridge/reports/**/*.csv
+storage/pos_bridge/reports/**/*.json
+storage/pos_bridge/reports/**/*.md
 storage/pos_bridge/screenshots/*
 !storage/pos_bridge/logs/.gitkeep
 !storage/pos_bridge/raw_exports/.gitkeep
@@ -72,6 +75,12 @@ tmp/
 backups/
 test-results/
 .tmp/
+session_script.py
+storage/imports/
+storage/quarantine/
+storage/uploads/
+storage/gastos_abril_2026_point_ventas.json
+storage/import_gastos_abril_2026.py
 
 # Archivos operativos de jobs puntuales
 job588_*.csv
