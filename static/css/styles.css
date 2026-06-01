@@ -6186,9 +6186,20 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   gap: 8px;
 }
 .production-filter-action { align-self: end; }
+.production-kpi-card-currency .kpi-card-inner {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+}
+.production-kpi-card-currency .kpi-body {
+  min-width: 0;
+}
 .production-kpi-number-currency {
-  font-size: clamp(2.35rem, 3.25vw, 3.45rem);
+  font-size: clamp(2.05rem, 2.75vw, 3rem);
   line-height: 0.95;
+  max-width: 100%;
+  overflow: visible;
+  white-space: nowrap;
 }
 .production-table-card {
   display: grid;
