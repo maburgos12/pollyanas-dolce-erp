@@ -2797,7 +2797,7 @@
                       ${draft.fotoSalidaError ? `<p class="error">${escapeHtml(draft.fotoSalidaError)}</p>` : ""}
                     </div>
                     <p class="gps-registered">📍 Ubicación registrada</p>
-                    <button class="primary-btn" type="button" onclick="guardarSalida()" ${ubicacionLista && draft.km_salida && draft.nivel_gas_salida && draft.foto_tablero_salida ? "" : "disabled"}>Iniciar turno</button>
+                    <button class="primary-btn" type="button" onclick="guardarSalida()">Iniciar turno</button>
                   </div>
                 ` : ""}
               `}
@@ -2877,8 +2877,14 @@
       async function guardarSalida(event) {
         if (event) event.preventDefault();
         const draft = ensureBitacoraSalidaDraft();
-        if (!draft.unidad || !draft.nivel_gas_salida || !draft.foto_tablero_salida || !draft.latitud_salida) {
-          return renderBitacoraSalida("Completa unidad, gas, foto y ubicación.");
+        const faltantes = [];
+        if (!draft.unidad) faltantes.push("unidad");
+        if (!draft.km_salida) faltantes.push("KM salida");
+        if (!draft.nivel_gas_salida) faltantes.push("nivel de gasolina");
+        if (!draft.foto_tablero_salida) faltantes.push("foto del tablero");
+        if (!draft.latitud_salida) faltantes.push("ubicación");
+        if (faltantes.length) {
+          return renderBitacoraSalida(`Completa antes de iniciar turno: ${faltantes.join(", ")}.`);
         }
         const payload = new FormData();
         payload.append("unidad", draft.unidad);
@@ -3170,7 +3176,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=network-first-shell").catch(() => {});
+          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=inicio-turno-validacion").catch(() => {});
         }
 
         try {
