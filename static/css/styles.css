@@ -6169,7 +6169,16 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
 
 /* === Producido vs Vendido === */
 .production-report .card-header { margin-bottom: 0; }
-.production-page-header { align-items: flex-start; }
+.production-page-header {
+  align-items: flex-start;
+  gap: 18px;
+}
+.production-export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
 .production-source-list,
 .production-banner-list {
   display: flex;
@@ -6177,52 +6186,82 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   gap: 8px;
 }
 .production-filter-action { align-self: end; }
+.production-kpi-number-currency {
+  font-size: clamp(2.35rem, 3.25vw, 3.45rem);
+  line-height: 0.95;
+}
+.production-table-card {
+  display: grid;
+  gap: 18px;
+}
+.production-section-header {
+  align-items: end;
+}
+.production-table-meta {
+  margin: 4px 0 0;
+  color: var(--texto-light);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+.production-data-shell {
+  display: grid;
+  gap: 14px;
+}
+.production-analytic-table {
+  --table-min-width: 100%;
+}
 
 .production-table-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
 .production-table-wrap > table.table {
-  min-width: 1300px;
-  width: 100%;
-  table-layout: fixed;
+  width: max-content;
+  table-layout: auto;
 }
-.production-table-wrap td:first-child,
-.production-table-wrap th:first-child {
-  width: 170px;
-  min-width: 170px;
+.production-primary-table {
+  --table-min-width: 1080px;
+}
+.production-secondary-table {
+  --table-min-width: 1160px;
+}
+.production-table-wrap .production-col-receta {
+  width: 280px;
+  min-width: 280px;
+}
+.production-table-wrap .production-col-categoria {
+  width: 150px;
+  min-width: 150px;
+}
+.production-table-wrap .production-col-small,
+.production-table-wrap .production-col-merma,
+.production-table-wrap .production-col-dif,
+.production-table-wrap .production-col-costo,
+.production-table-wrap .production-col-percent,
+.production-table-wrap .production-col-enteros,
+.production-table-wrap .production-col-inv {
+  width: 112px;
+  min-width: 112px;
+}
+.production-table-wrap .production-col-estado {
+  width: 182px;
+  min-width: 182px;
+}
+.production-table-wrap .table thead th:first-child,
+.production-table-wrap .table tbody td:first-child,
+.production-table-wrap .table thead th:nth-child(2),
+.production-table-wrap .table tbody td:nth-child(2) {
   white-space: normal;
+  overflow-wrap: anywhere;
   word-break: normal;
-  overflow-wrap: normal;
   hyphens: manual;
-  line-height: 1.3;
+  line-height: 1.35;
 }
-.production-table-wrap td:nth-child(2),
-.production-table-wrap th:nth-child(2) {
-  width: 90px;
-  min-width: 90px;
-  white-space: normal;
-  word-break: normal;
-  overflow-wrap: normal;
-  hyphens: manual;
-  line-height: 1.3;
-}
-.production-table-wrap td:nth-child(n+3),
-.production-table-wrap th:nth-child(n+3) {
-  white-space: nowrap;
-  text-align: right;
-  width: 95px;
-  min-width: 95px;
-}
-.production-table-wrap th,
 .production-table-wrap .table thead th {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   font-size: 0.78rem;
   letter-spacing: 0;
-  padding-left: 6px;
-  padding-right: 6px;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 .production-subtotal-row td {
   background: var(--gris-suave);
@@ -6234,6 +6273,41 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   border-top: 2px solid var(--rosa-deep);
   color: var(--vino);
   font-weight: 900;
+}
+.production-state-cell {
+  text-align: center;
+}
+.production-state-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.15;
+  white-space: normal;
+  max-width: 100%;
+  text-align: center;
+}
+.production-state-label.is-success {
+  background: rgba(47, 126, 87, 0.13);
+  color: var(--verde);
+}
+.production-state-label.is-warning {
+  background: rgba(214, 165, 45, 0.18);
+  color: #96680d;
+}
+.production-state-label.is-danger {
+  background: rgba(179, 53, 67, 0.14);
+  color: var(--rojo);
+}
+.production-state-label.is-neutral,
+.production-state-label.is-subtotal,
+.production-state-label.is-total {
+  background: rgba(110, 32, 58, 0.1);
+  color: var(--vino);
 }
 
 /* ── bi-shell / bi-hero ─────────────────────────────── */
