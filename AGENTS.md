@@ -166,6 +166,21 @@ Esto aplica a cualquier módulo con PWA hoy o en el futuro — no es exclusivo d
 - Si un endpoint llama `recalcular_todos()` automáticamente (ej: resumen), revisar
   que no pise datos manuales capturados por las jefas.
 
+### PR abierto = tarea sin terminar — deploy obligatorio antes de continuar
+Un PR mergeado sin deploy en VPS equivale a un cambio que no existe para el usuario.
+No abrir una segunda tarea hasta que la primera esté deployada y validada en producción.
+
+**Prohibido:**
+- Crear PR y pasar a otra tarea sin deployar
+- Copiar archivos al VPS por SCP como atajo al flujo git (git pull es el único canal)
+- Declarar "listo" cuando el VPS aún corre el código anterior
+
+**Flujo mínimo obligatorio al cerrar cualquier cambio de código:**
+1. PR mergeado a main
+2. `git pull origin main` en VPS
+3. `docker compose restart web` en VPS
+4. Verificar que el resultado es visible en producción
+
 ### Ramas — control de desorden
 - Una rama = una tarea = un módulo. Si la tarea crece, abrir rama nueva.
 - Nunca dejar commits de fix+revert en la misma rama sin squashearlos.
