@@ -96,6 +96,30 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn(".production-state-cell", css)
         self.assertIn("white-space: normal !important", css)
         self.assertIn("width: 260px", css)
+        self.assertIn("--table-min-width: 1780px", css)
+
+        template = (Path(settings.BASE_DIR) / "reportes" / "templates" / "reportes" / "producido_vs_vendido.html").read_text()
+        required_headers = [
+            "Receta",
+            "Cat.",
+            "Vta.",
+            "Prod.",
+            "Dif",
+            "Merma",
+            "Conv.",
+            "Eq.",
+            "Costo",
+            "%",
+            "Ini.",
+            "Fin.",
+            "Físico",
+            "Inv Δ",
+            "Est.",
+        ]
+        for header in required_headers:
+            with self.subTest(header=header):
+                self.assertIn(header, template)
+        self.assertNotIn("production-secondary-table", template)
 
 
 class NavigationActiveStateTests(TestCase):

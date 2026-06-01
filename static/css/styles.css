@@ -6241,7 +6241,7 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   table-layout: auto;
 }
 .production-primary-table {
-  --table-min-width: 1220px;
+  --table-min-width: 1780px;
 }
 .production-secondary-table {
   --table-min-width: 1160px;
