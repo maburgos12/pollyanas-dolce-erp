@@ -66,6 +66,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
             ".rrhh-edit-form",
             "--erp-tab-min",
             ".rrhh-tabs",
+            ".report-tabs",
             ".permisos-board",
             ".ch-kanban",
             ".rule-selector",

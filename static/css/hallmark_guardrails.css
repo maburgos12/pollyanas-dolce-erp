@@ -182,6 +182,7 @@ body,
   .module-actions,
   .quick-actions,
   .rrhh-tabs,
+  .report-tabs,
   .assign-tabs,
   .assign-choices,
   .assign-card-header,
@@ -259,14 +260,15 @@ body,
  * containment rules instead of drifting into isolated card walls or wide forms.
  */
 .main-content[data-hallmark-scope="erp"] > .module-tabs,
-.main-content[data-hallmark-scope="erp"] > .rrhh-tabs {
+.main-content[data-hallmark-scope="erp"] > .rrhh-tabs,
+.main-content[data-hallmark-scope="erp"] > .report-tabs {
   width: 100% !important;
   max-width: min(var(--erp-workspace-max), 100%) !important;
   margin-left: 0 !important;
   margin-right: auto !important;
 }
 
-.main-content[data-hallmark-scope="erp"] .rrhh-tabs {
+.main-content[data-hallmark-scope="erp"] :is(.rrhh-tabs, .report-tabs) {
   display: grid !important;
   gap: 8px;
   grid-template-columns: repeat(auto-fit, var(--erp-tab-min)) !important;
@@ -274,7 +276,7 @@ body,
   overflow: visible !important;
 }
 
-.main-content[data-hallmark-scope="erp"] .rrhh-tabs .module-tab {
+.main-content[data-hallmark-scope="erp"] :is(.rrhh-tabs, .report-tabs) .module-tab {
   align-items: center;
   display: inline-flex;
   justify-content: center;
@@ -713,7 +715,7 @@ body,
     width: 100%;
   }
 
-  .main-content[data-hallmark-scope="erp"] .rrhh-tabs .module-tab {
+  .main-content[data-hallmark-scope="erp"] :is(.rrhh-tabs, .report-tabs) .module-tab {
     min-width: 0;
   }
 }

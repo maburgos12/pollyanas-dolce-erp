@@ -94,13 +94,19 @@ def scan_hallmark_ui(base_dir: Path) -> list[HallmarkIssue]:
                 )
             )
 
-        if is_template and "module-tabs" in text and "rrhh-tabs" not in text and not is_exempt_template:
+        if (
+            is_template
+            and "module-tabs" in text
+            and "rrhh-tabs" not in text
+            and "report-tabs" not in text
+            and not is_exempt_template
+        ):
             issues.append(
                 HallmarkIssue(
                     "module-tabs-without-responsive-family",
                     rel_path,
                     "module-tabs",
-                    "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs.",
+                    "Los tabs operativos deben usar una familia responsive conocida, por ejemplo .module-tabs.rrhh-tabs o .module-tabs.report-tabs.",
                 )
             )
 
