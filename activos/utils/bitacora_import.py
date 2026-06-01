@@ -23,7 +23,48 @@ SECTION_HINTS = (
     "ALMACEN",
     "OFICINA",
     "AREA",
+    "HORNOS",
+    "CEDIS",
+    "LOGISTICA",
+    "LEYVA",
+    "PAYAN",
+    "GLORIAS",
+    "COLOSIO",
+    "CRUCERO",
+    "NIO",
+    "TUNEL",
+    "GUAMUCHIL",
 )
+
+# Nombres exactos de sección reconocidos (mayúsculas)
+KNOWN_SECTIONS: frozenset[str] = frozenset({
+    "HORNOS",
+    "LEYVA",
+    "PAYAN",
+    "GLORIAS",
+    "COLOSIO",
+    "CRUCERO",
+    "NIO",
+    "TUNEL",
+    "GUAMUCHIL",
+    "LOGISTICA",
+    "OFICINA VENTAS",
+    "PRODUCCION CEDIS",
+    "PRODUCCION CRUCERO",
+    "OFICINA PRODUCCIÓN",
+    "OFICINA PRODUCCION",
+    "VENTAS",
+    "MATRIZ",
+})
+
+# Secciones cuyo contenido se omite completamente
+SKIP_SECTIONS: frozenset[str] = frozenset({"LOGISTICA"})
+
+# Series que indican trabajo civil/instalación, no activo físico
+SKIP_SERIES_VALUES: frozenset[str] = frozenset({"INSTALACION"})
+
+# Nombres de equipo que, aunque tengan serie de servicio, sí son activos físicos
+FORCE_INCLUDE_NAMES: frozenset[str] = frozenset({"CORTINA METALICA"})
 
 
 @dataclass
@@ -85,9 +126,20 @@ def import_bitacora(
                 continue
 
             if _is_header_row(raw_name, raw_brand, raw_model, raw_serial):
+                # Capturar nombre de sección cuando viene en la misma fila que los headers de columna
+                if raw_name and _looks_like_section(raw_name):
+                    current_location = raw_name.strip()
                 continue
 
             if not raw_name:
+                continue
+
+            # Omitir secciones excluidas (ej. logística — tiene su propio módulo)
+            if current_location.upper() in SKIP_SECTIONS:
+                continue
+
+            # Omitir registros de instalación/trabajo civil (no son activos físicos)
+            if raw_serial.upper() in SKIP_SERIES_VALUES and raw_name.upper() not in FORCE_INCLUDE_NAMES:
                 continue
 
             parsed = ParsedRow(
@@ -329,6 +381,11 @@ def _as_date(value) -> date | None:
     return None
 
 
+def _looks_like_section(name: str) -> bool:
+    upper = name.strip().upper()
+    return upper in KNOWN_SECTIONS or any(h in upper for h in SECTION_HINTS)
+
+
 def _is_header_row(name: str, brand: str, model: str, serial: str) -> bool:
     key = " ".join([name, brand, model, serial]).upper()
     return "FECHA MANTENIMIENTO" in key or ("MARCA" in key and "MODELO" in key)
@@ -347,16 +404,32 @@ def _infer_categoria(nombre: str) -> str:
     n = (nombre or "").upper()
     if "HORNO" in n:
         return "Hornos"
-    if "AIRE" in n or "MINISPLIT" in n:
+    if "AIRE" in n or "MINISPLIT" in n or "ACONDICIONADO" in n or "ACONDIONADO" in n:
         return "Aire acondicionado"
-    if "REFRIG" in n or "FREEZER" in n or "CUARTO FRIO" in n:
+    if "CUARTO FRIO" in n or "CUARTO FRÍO" in n:
+        return "Cuartos fríos"
+    if "REFRIG" in n or "FREEZER" in n or "COOLER" in n or "MESA REFRIG" in n:
         return "Refrigeración"
+    if "BITRINA" in n or "VITRINA" in n or "CARRITO" in n:
+        return "Exhibición"
     if "BATIDORA" in n:
         return "Batidoras"
     if "BASCULA" in n:
         return "Básculas"
     if "LICUADORA" in n:
         return "Licuadoras"
+    if "COMPUTADORA" in n or "LAPTOP" in n or "IPAD" in n:
+        return "Cómputo"
+    if "IMPRESORA" in n:
+        return "Impresoras/POS"
+    if "CORTINA" in n:
+        return "Infraestructura"
+    if "EXTRACTOR" in n:
+        return "Ventilación"
+    if "TARTERA" in n or "LAMINADORA" in n or "RALLADOR" in n or "CREMADORA" in n:
+        return "Equipos de pastelería"
+    if "MICROONDAS" in n or "ESTUFA" in n or "TARJA" in n or "COMPRESOR" in n:
+        return "Equipos de cocina"
     return "Equipos"
 
 
@@ -377,39 +450,52 @@ def _compose_notes(marca: str, modelo: str, serie: str, previous: str) -> str:
 
 
 def _upsert_activo(parsed: ParsedRow) -> tuple[Activo, bool, bool]:
+    new_notes = _compose_notes(parsed.marca, parsed.modelo, parsed.serie, "")
+
+    # Buscar coincidencia exacta por nombre + ubicación + notas idénticas
     qs = Activo.objects.filter(nombre__iexact=parsed.nombre)
     if parsed.ubicacion:
         qs = qs.filter(ubicacion__iexact=parsed.ubicacion)
-    activo = qs.order_by("id").first()
 
-    created = False
-    changed = False
-    if not activo:
-        activo = Activo(
-            nombre=parsed.nombre,
-            categoria=_infer_categoria(parsed.nombre),
-            ubicacion=parsed.ubicacion,
-            estado=Activo.ESTADO_OPERATIVO,
-            criticidad=Activo.CRITICIDAD_MEDIA,
-            activo=True,
-        )
-        created = True
+    # Si hay serie, intentar match exacto por notas que contengan esa serie
+    if parsed.serie:
+        match = qs.filter(notas__icontains=parsed.serie).order_by("id").first()
+        if match:
+            return match, False, False
 
-    new_notes = _compose_notes(parsed.marca, parsed.modelo, parsed.serie, activo.notas)
-    if parsed.ubicacion and activo.ubicacion != parsed.ubicacion:
-        activo.ubicacion = parsed.ubicacion
-        changed = True
-    if new_notes != (activo.notas or ""):
-        activo.notas = new_notes
-        changed = True
-    if not activo.categoria:
-        activo.categoria = _infer_categoria(parsed.nombre)
-        changed = True
+    # Sin serie: tomar el primero cuyas notas sean idénticas al nuevo registro
+    # (evita fusionar piezas distintas con el mismo nombre)
+    if new_notes:
+        match = qs.filter(notas=new_notes).order_by("id").first()
+        if match:
+            return match, False, False
+    elif not parsed.serie:
+        # Mismo nombre, misma ubicación, sin serie ni notas:
+        # contar cuántos ya existen con notas vacías para no crear infinitos duplicados
+        existing_empty = list(qs.filter(notas="").order_by("id"))
+        if existing_empty:
+            # Ya existe al menos uno sin serie — devolver el último para no duplicar
+            # en re-importaciones, pero NO crear uno nuevo aquí; se crea abajo si no hay ninguno
+            return existing_empty[-1], False, False
 
-    if created or changed:
-        activo.save()
+    # Crear nuevo activo — cada pieza física es un registro independiente
+    nombre_final = parsed.nombre
+    # Si ya existe otro con mismo nombre+ubicación, añadir sufijo para distinguirlos
+    count = qs.count()
+    if count > 0:
+        nombre_final = f"{parsed.nombre} ({count + 1})"
 
-    return activo, created, changed
+    activo = Activo(
+        nombre=nombre_final,
+        categoria=_infer_categoria(parsed.nombre),
+        ubicacion=parsed.ubicacion,
+        estado=Activo.ESTADO_OPERATIVO,
+        criticidad=Activo.CRITICIDAD_MEDIA,
+        notas=new_notes,
+        activo=True,
+    )
+    activo.save()
+    return activo, True, False
 
 
 def _ensure_service_order(activo: Activo, fecha: date, costo: Decimal) -> bool:
