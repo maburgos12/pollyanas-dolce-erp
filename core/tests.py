@@ -46,7 +46,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         html = base.read_text()
         self.assertIn('data-hallmark-scope="erp"', html)
         self.assertLess(html.index("{% block extra_css %}"), html.index("hallmark_guardrails.css"))
-        self.assertIn("20260601-reportes-contencion-datos-v1", html)
+        self.assertIn("20260601-reportes-kpis-order-v1", html)
 
     def test_guardrails_define_global_erp_scope(self):
         css = (Path(settings.BASE_DIR) / "static" / "css" / "hallmark_guardrails.css").read_text()
