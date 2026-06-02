@@ -468,6 +468,7 @@
           activo: null,
           activoLabel: "",
           ubicacionFiltro: "",
+          busquedaTexto: "",
           tipo: "",
           descripcion: "",
           proveedor: "",
@@ -568,12 +569,16 @@
           .replace(/'/g, "&#039;");
       }
 
-      function render(html) {
+      function render(html, autofocusId = "") {
         app.classList.add("is-changing");
         window.setTimeout(() => {
           app.innerHTML = html;
           app.classList.remove("is-changing");
-        }, 120);
+          if (autofocusId) {
+            const el = document.getElementById(autofocusId);
+            if (el) { el.focus(); el.select && el.select(); }
+          }
+        }, 140);
       }
 
       function appGlyph(name) {
@@ -835,18 +840,24 @@
           const text = `${activo.nombre} ${activo.codigo} ${activo.categoria} ${activo.ubicacion} ${activo.sucursal_nombre || ""}`.toLowerCase();
           return matchesUbicacion && (!q || text.includes(q));
         });
+        const LIMITE = 20;
+        const visibles = q ? filtrados : filtrados.slice(0, LIMITE);
+        const notaBuscar = !q && filtrados.length > LIMITE
+          ? `<p class="muted" style="text-align:center;font-size:12px;margin:4px 0 8px">Mostrando ${LIMITE} de ${filtrados.length}. Escribe para buscar.</p>`
+          : "";
         const ubicaciones = ubicacionesDesdeActivos();
         render(shell(`
           <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
           <h1 class="screen-title" style="margin-top:16px">Buscar equipo</h1>
           <div class="search-row">
+            <input id="buscar-equipo-main" type="search" placeholder="Nombre, código o categoría" value="${esc(state.busquedaEquipo)}" oninput="debounceBuscar(this.value)">
             <select onchange="state.sucursalFiltro=this.value; renderBuscarEquipo()">
               <option value="">Todas las áreas</option>
               ${ubicaciones.map((u) => `<option value="${esc(u)}" ${state.sucursalFiltro === u ? "selected" : ""}>${esc(u)}</option>`).join("")}
             </select>
-            <input type="search" placeholder="Nombre, código o categoría" value="${esc(state.busquedaEquipo)}" oninput="debounceBuscar(this.value)">
           </div>
-          ${filtrados.map((activo) => `
+          ${notaBuscar}
+          ${visibles.map((activo) => `
             <article class="card report-card">
               <p style="margin:0;font-weight:900">${esc(activo.nombre)}</p>
               <p class="muted">${esc(activo.codigo)} · ${esc(activo.sucursal_nombre || "Sin sucursal")}</p>
@@ -860,7 +871,7 @@
           <div style="margin-top:14px">
             <button class="secondary-btn" style="width:100%" onclick="startPuntoMantenible()">Registrar punto mantenible</button>
           </div>
-        `));
+        `, "buscar-equipo-main"));
       }
 
       async function renderSeguimiento() {
@@ -925,25 +936,38 @@
         if (d.step === 1) {
           await ensureActivos();
           const ubicaciones = ubicacionesDesdeActivos();
-          const activosFiltrados = state.activos.filter((a) =>
-            !d.ubicacionFiltro || a.ubicacion === d.ubicacionFiltro
-          );
-          const lista = activosFiltrados.map(activoCard).join("") || `<div class="empty">No hay equipos en esta área.</div>`;
+          const q = (d.busquedaTexto || "").toLowerCase().trim();
+          const activosFiltrados = state.activos.filter((a) => {
+            const matchUbicacion = !d.ubicacionFiltro || a.ubicacion === d.ubicacionFiltro;
+            const matchTexto = !q ||
+              a.nombre.toLowerCase().includes(q) ||
+              a.codigo.toLowerCase().includes(q) ||
+              (a.categoria || "").toLowerCase().includes(q) ||
+              (a.ubicacion || "").toLowerCase().includes(q) ||
+              (a.sucursal_nombre || "").toLowerCase().includes(q);
+            return matchUbicacion && matchTexto;
+          });
+          const LIMITE = 20;
+          const visibles = q ? activosFiltrados : activosFiltrados.slice(0, LIMITE);
+          const nota = !q && activosFiltrados.length > LIMITE
+            ? `<p class="muted" style="text-align:center;font-size:12px">Mostrando ${LIMITE} de ${activosFiltrados.length}. Escribe para buscar.</p>`
+            : activosFiltrados.length === 0 ? "" : "";
+          const lista = visibles.map(activoCard).join("") || `<div class="empty">No hay equipos con esos filtros.</div>`;
           body = `
             <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
             <h1 class="screen-title" style="margin-top:16px">Seleccionar equipo</h1>
             ${progressDots(1)}
             <div class="field">
-              <label>Área / Ubicación</label>
+              <input id="buscar-equipo-input" type="search" placeholder="Buscar por nombre, código o categoría" value="${esc(d.busquedaTexto)}" oninput="state.equipoDraft.busquedaTexto=this.value; filtrarActivosEstado()">
+            </div>
+            <div class="field">
               <select onchange="state.equipoDraft.ubicacionFiltro=this.value; renderEquipoDraft()">
                 <option value="">Todas las áreas</option>
                 ${ubicaciones.map((u) => `<option value="${esc(u)}" ${d.ubicacionFiltro === u ? "selected" : ""}>${esc(u)}</option>`).join("")}
               </select>
             </div>
-            <div class="field">
-              <input type="search" placeholder="Buscar por nombre o código" oninput="filtrarActivos(this.value, '${esc(d.ubicacionFiltro)}')">
-            </div>
             <div class="card-list" id="lista-activos">${lista}</div>
+            ${nota}
             <div class="inline-note">
               Si no existe el equipo en la base, regístralo como punto mantenible.
             </div>
@@ -1010,7 +1034,8 @@
             </div>
           `;
         }
-        render(shell(body));
+        const focusId = d.step === 1 ? "buscar-equipo-input" : "";
+        render(shell(body), focusId);
       }
 
       async function startPuntoMantenible() {
@@ -1351,6 +1376,26 @@
           return matchUbicacion && matchTexto;
         });
         lista.innerHTML = filtrados.map(activoCard).join("") || `<div class="empty">Sin resultados.</div>`;
+      }
+
+      function filtrarActivosEstado() {
+        const d = state.equipoDraft;
+        const lista = document.getElementById("lista-activos");
+        if (!lista) return;
+        const q = (d.busquedaTexto || "").toLowerCase().trim();
+        const LIMITE = 20;
+        const filtrados = state.activos.filter((a) => {
+          const matchUbicacion = !d.ubicacionFiltro || a.ubicacion === d.ubicacionFiltro;
+          const matchTexto = !q ||
+            a.nombre.toLowerCase().includes(q) ||
+            a.codigo.toLowerCase().includes(q) ||
+            (a.categoria || "").toLowerCase().includes(q) ||
+            (a.ubicacion || "").toLowerCase().includes(q) ||
+            (a.sucursal_nombre || "").toLowerCase().includes(q);
+          return matchUbicacion && matchTexto;
+        });
+        const visibles = q ? filtrados : filtrados.slice(0, LIMITE);
+        lista.innerHTML = visibles.map(activoCard).join("") || `<div class="empty">Sin resultados.</div>`;
       }
 
       function setFotoEquipo(input) {
