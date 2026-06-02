@@ -112,6 +112,9 @@ class SucursalFallaListView(generics.ListAPIView):
         qs = Sucursal.objects.filter(sucursales_operativas_q()).order_by("nombre")
         if is_admin_or_dg(self.request.user) or _puede_cambiar_estatus_fallas(self.request.user):
             return qs
+        grupos_lower = {g.lower() for g in _group_names(self.request.user)}
+        if "produccion" in grupos_lower:
+            return qs
         sucursal = _sucursal_usuario(self.request.user)
         if sucursal:
             return qs.filter(pk=sucursal.pk)
