@@ -43,6 +43,9 @@ NAV_GROUPS = [
         "key": "produccion",
         "label": "Producción",
         "items": [
+            ("fallas", "dashboard", "Fallas producción", "/fallas/", ["/fallas/"]),
+            ("fallas", "reportar", "Reportar falla", "/fallas/reportar/", ["/fallas/reportar/"]),
+            ("fallas", "mis_reportes", "Mis reportes", "/fallas/mis-reportes/", ["/fallas/mis-reportes/"]),
             ("produccion", "plan", "Plan de producción", "/recetas/plan-produccion/", ["/recetas/plan-produccion/"]),
             ("produccion", "bonos", "Bonos producción", "/bonos-produccion/dashboard/", ["/bonos-produccion/"]),
             ("produccion", "reabasto_cedis", "Reabasto CEDIS", "/recetas/reabasto-cedis/", ["/recetas/reabasto-cedis/"]),

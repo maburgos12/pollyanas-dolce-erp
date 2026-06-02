@@ -357,7 +357,7 @@ def _role_module_access(user: AbstractBaseUser, module: str) -> str:
     if ROLE_PRODUCCION in groups:
         if module == "produccion":
             return ACCESS_MANAGE
-        if module in {"recetas", "reportes"}:
+        if module in {"recetas", "reportes", "fallas"}:
             return ACCESS_VIEW
     if ROLE_VENTAS in groups:
         if module in {"ventas", "crm"}:
