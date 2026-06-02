@@ -350,6 +350,13 @@ def dashboard_view(request):
 
 
 @login_required
+def pwa_app(request):
+    if not _puede_reportar_fallas(request.user):
+        raise PermissionDenied
+    return render(request, "fallas/pwa_reporte.html")
+
+
+@login_required
 def pwa_reporte(request):
     if not _puede_reportar_fallas(request.user):
         raise PermissionDenied

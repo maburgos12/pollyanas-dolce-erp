@@ -6,6 +6,7 @@ app_name = "fallas"
 
 urlpatterns = [
     path("", views.dashboard_view, name="dashboard"),
+    path("app/", views.pwa_app, name="app"),
     path("reportar/", views.pwa_reporte, name="pwa-reporte"),
     path("mis-reportes/", views.pwa_mis_reportes, name="pwa-mis-reportes"),
     path("mis-reportes/<int:pk>/editar/", views.pwa_editar_reporte, name="pwa-editar-reporte"),
