@@ -12,6 +12,7 @@ from pos_bridge.browser.inventory_page import PointInventoryPage
 from pos_bridge.browser.session import BrowserSessionManager
 from pos_bridge.config import PointBridgeSettings, load_point_bridge_settings
 from pos_bridge.services.auth_service import PointAuthService
+from pos_bridge.services.point_cost_validation import validate_point_inventory_cost_row
 from pos_bridge.services.recipe_identity_service import PointRecipeIdentityService
 from reportes.models import ProductoReventaCosto
 from recetas.utils.normalizacion import normalizar_nombre
@@ -46,6 +47,8 @@ class PointInventoryCostCaptureResult:
     zero_cost_matches: int
     unresolved_samples: list[dict[str, str]]
     zero_cost_samples: list[dict[str, str]]
+    rejected_matches: int = 0
+    rejected_samples: list[dict[str, str]] | None = None
     resale_costs_created: int = 0
     resale_costs_existing: int = 0
     # Desglose por sección: insumos vs. productos de reventa
@@ -321,6 +324,9 @@ class PointInventoryCostCaptureService:
             return None, False, "NO_MATCH_ERP"
         if row.unit_cost <= 0:
             return None, False, "UNIT_COST_ZERO"
+        validation = validate_point_inventory_cost_row(row, resolved.insumo)
+        if not validation.ok:
+            return None, False, ",".join(validation.reasons)
 
         supplier, _ = Proveedor.objects.get_or_create(nombre=supplier_name, defaults={"activo": True})
         source_hash = hashlib.sha256(
@@ -407,10 +413,12 @@ class PointInventoryCostCaptureService:
         existing = 0
         unresolved = 0
         zero_cost = 0
+        rejected = 0
         resale_created = 0
         resale_existing = 0
         unresolved_samples: list[dict[str, str]] = []
         zero_cost_samples: list[dict[str, str]] = []
+        rejected_samples: list[dict[str, str]] = []
         branch_name = branch_hint
 
         for row in rows:
@@ -480,6 +488,22 @@ class PointInventoryCostCaptureService:
                         }
                     )
                 continue
+            if status not in {"CREATED", "EXISTS"}:
+                rejected += 1
+                if len(rejected_samples) < sample_limit:
+                    rejected_samples.append(
+                        {
+                            "point_code": row.point_code,
+                            "point_name": row.point_name,
+                            "category": row.category_name,
+                            "unit": row.unit,
+                            "quantity": str(row.quantity),
+                            "unit_cost": str(row.unit_cost),
+                            "kind": "supply",
+                            "status": status,
+                        }
+                    )
+                continue
             if was_created:
                 created += 1
             else:
@@ -490,13 +514,15 @@ class PointInventoryCostCaptureService:
         return PointInventoryCostCaptureResult(
             branch_name=branch_name,
             rows_seen=len(rows),
-            matches_found=created + existing + unresolved + zero_cost,
+            matches_found=created + existing + unresolved + zero_cost + rejected,
             costs_created=created,
             costs_existing=existing,
             unresolved_matches=unresolved,
             zero_cost_matches=zero_cost,
+            rejected_matches=rejected,
             unresolved_samples=unresolved_samples,
             zero_cost_samples=zero_cost_samples,
+            rejected_samples=rejected_samples,
             resale_costs_created=resale_created,
             resale_costs_existing=resale_existing,
             supply_rows_seen=supply_rows,

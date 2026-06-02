@@ -3,7 +3,7 @@ from __future__ import annotations
 from django.test import TestCase
 from unittest.mock import patch
 
-from maestros.models import Insumo, InsumoAlias, UnidadMedida
+from maestros.models import CostoInsumo, Insumo, InsumoAlias, UnidadMedida
 from pos_bridge.models import PointProduct
 from pos_bridge.services.point_inventory_cost_capture_service import PointInventoryCostCaptureService, PointInventoryCostRow
 from reportes.models import ProductoReventaCosto
@@ -34,7 +34,8 @@ class PointInventoryCostCaptureServiceTests(TestCase):
         self.assertIn("009", point_codes)
 
     def test_capture_and_persist_all_summarizes_created_existing_and_skipped_rows(self):
-        unidad = UnidadMedida.objects.create(codigo="pz", nombre="Pieza", tipo=UnidadMedida.TIPO_PIEZA, factor_to_base=1)
+        unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA, factor_to_base=1000)
+        pieza = UnidadMedida.objects.create(codigo="pz", nombre="Pieza", tipo=UnidadMedida.TIPO_PIEZA, factor_to_base=1)
         insumo = Insumo.objects.create(
             codigo_point="009",
             nombre_point="SUSTITUTO DE CREMA",
@@ -45,7 +46,7 @@ class PointInventoryCostCaptureServiceTests(TestCase):
             codigo_point="011",
             nombre_point="COSTO CERO",
             nombre="COSTO CERO",
-            unidad_base=unidad,
+            unidad_base=pieza,
         )
         PointProduct.objects.create(
             external_id="009",
@@ -116,3 +117,115 @@ class PointInventoryCostCaptureServiceTests(TestCase):
         self.assertEqual(second.resale_costs_created, 0)
         self.assertEqual(second.resale_costs_existing, 1)
         self.assertEqual(ProductoReventaCosto.objects.count(), 1)
+
+    def test_persist_cost_row_rejects_reused_point_code_with_different_name(self):
+        unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA, factor_to_base=1000)
+        Insumo.objects.create(
+            codigo_point="50161813",
+            nombre_point="CRUNCH ROCKS",
+            nombre="CRUNCH ROCKS",
+            unidad_base=unidad,
+        )
+        service = PointInventoryCostCaptureService()
+        row = PointInventoryCostRow(
+            branch_name="ALMACEN",
+            category_name="Insumos",
+            point_internal_id="1",
+            point_code="50161813",
+            point_name="HERSHEYS MINIATURA",
+            point_category="Insumos",
+            quantity=1,
+            unit="PZA",
+            unit_cost=2.92,
+            total_cost=2.92,
+            last_movement="2026-04-14T10:00:00",
+            raw_row=[],
+        )
+
+        cost, created, status = service.persist_cost_row(row)
+
+        self.assertIsNone(cost)
+        self.assertFalse(created)
+        self.assertIn("NOMBRE_POINT_NO_COINCIDE", status)
+        self.assertIn("UNIDAD_INCOMPATIBLE", status)
+        self.assertEqual(CostoInsumo.objects.count(), 0)
+
+    def test_persist_cost_row_rejects_positive_cost_with_non_positive_quantity(self):
+        unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA, factor_to_base=1000)
+        Insumo.objects.create(
+            codigo_point="50161813",
+            nombre_point="CRUNCH ROCKS",
+            nombre="CRUNCH ROCKS",
+            unidad_base=unidad,
+        )
+        service = PointInventoryCostCaptureService()
+        row = PointInventoryCostRow(
+            branch_name="ALMACEN",
+            category_name="Insumos",
+            point_internal_id="1",
+            point_code="50161813",
+            point_name="CRUNCH ROCKS",
+            point_category="Insumos",
+            quantity=0,
+            unit="kg",
+            unit_cost=319.83,
+            total_cost=0,
+            last_movement="2026-04-14T10:00:00",
+            raw_row=[],
+        )
+
+        cost, created, status = service.persist_cost_row(row)
+
+        self.assertIsNone(cost)
+        self.assertFalse(created)
+        self.assertEqual(status, "QTY_NO_POSITIVA_CON_COSTO")
+        self.assertEqual(CostoInsumo.objects.count(), 0)
+
+    def test_capture_and_persist_all_reports_validation_rejections(self):
+        unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA, factor_to_base=1000)
+        Insumo.objects.create(
+            codigo_point="50161813",
+            nombre_point="CRUNCH ROCKS",
+            nombre="CRUNCH ROCKS",
+            unidad_base=unidad,
+        )
+        service = PointInventoryCostCaptureService()
+        rows = [
+            PointInventoryCostRow(
+                branch_name="ALMACEN",
+                category_name="Insumos",
+                point_internal_id="1",
+                point_code="50161813",
+                point_name="CRUNCH ROCKS",
+                point_category="Insumos",
+                quantity=1,
+                unit="kg",
+                unit_cost=319.83,
+                total_cost=319.83,
+                last_movement="2026-04-14T10:00:00",
+                raw_row=[],
+            ),
+            PointInventoryCostRow(
+                branch_name="ALMACEN",
+                category_name="Insumos",
+                point_internal_id="2",
+                point_code="50161813",
+                point_name="HERSHEYS MINIATURA",
+                point_category="Insumos",
+                quantity=0,
+                unit="PZA",
+                unit_cost=2.92,
+                total_cost=0,
+                last_movement="2026-04-14T10:00:00",
+                raw_row=[],
+            ),
+        ]
+
+        with patch.object(service, "capture_all_rows", return_value=rows):
+            result = service.capture_and_persist_all(branch_hint="ALMACEN")
+
+        self.assertEqual(result.costs_created, 1)
+        self.assertEqual(result.rejected_matches, 1)
+        self.assertEqual(result.rejected_samples[0]["point_code"], "50161813")
+        self.assertIn("NOMBRE_POINT_NO_COINCIDE", result.rejected_samples[0]["status"])
+        self.assertEqual(CostoInsumo.objects.count(), 1)

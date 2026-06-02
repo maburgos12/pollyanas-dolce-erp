@@ -37,6 +37,7 @@ class Command(BaseCommand):
 
         created = 0
         skipped = 0
+        rejected = 0
         resale_created = 0
         resale_skipped = 0
         for row in rows:
@@ -50,9 +51,12 @@ class Command(BaseCommand):
                 created += 1
             else:
                 skipped += 1
+                if status not in {"NO_MATCH_ERP", "UNIT_COST_ZERO", "EXISTS"}:
+                    rejected += 1
                 self.stdout.write(f"    - omitido [{row.point_code}] {row.point_name}: {status}")
 
         self.stdout.write(self.style.SUCCESS(f"Costos creados: {created}"))
         self.stdout.write(f"  - omitidos: {skipped}")
+        self.stdout.write(f"  - rechazados por validacion: {rejected}")
         self.stdout.write(self.style.SUCCESS(f"Costos reventa creados: {resale_created}"))
         self.stdout.write(f"  - reventa omitidos: {resale_skipped}")

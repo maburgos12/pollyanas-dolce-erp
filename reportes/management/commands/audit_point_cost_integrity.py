@@ -7,54 +7,21 @@ from decimal import Decimal
 from django.core.management.base import BaseCommand
 
 from maestros.models import CostoInsumo, Insumo
+from pos_bridge.services.point_cost_validation import (
+    STATUS_NOMBRE_POINT_NO_COINCIDE,
+    STATUS_QTY_NO_POSITIVA_CON_COSTO,
+    STATUS_UNIDAD_DESCONOCIDA,
+    STATUS_UNIDAD_INCOMPATIBLE,
+    decimal_or_none as _decimal,
+    name_matches_insumo as _name_matches,
+    point_unit_code as _unit_code,
+    point_unit_type as _unit_type,
+)
 from recetas.models import LineaReceta
-from recetas.utils.normalizacion import normalizar_nombre
 from reportes.models import InsumoCostoHistoricoMensual, RecetaCostoHistoricoMensual
 
 
 POINT_EXISTENCIA_SOURCE = "POINT_EXISTENCIA_ALMACEN"
-
-UNIT_ALIAS = {
-    "g": "g",
-    "gr": "g",
-    "gramo": "g",
-    "gramos": "g",
-    "kg": "kg",
-    "kilo": "kg",
-    "kilogramo": "kg",
-    "kilogramos": "kg",
-    "ml": "ml",
-    "mililitro": "ml",
-    "mililitros": "ml",
-    "l": "lt",
-    "lt": "lt",
-    "lts": "lt",
-    "litro": "lt",
-    "litros": "lt",
-    "pza": "pza",
-    "pz": "pza",
-    "pieza": "pza",
-    "piezas": "pza",
-    "unidad": "unidad",
-    "unidades": "unidad",
-    "u": "unidad",
-}
-UNIT_TYPE = {
-    "g": "MASS",
-    "kg": "MASS",
-    "ml": "VOLUME",
-    "lt": "VOLUME",
-    "pza": "UNIT",
-    "unidad": "UNIT",
-}
-STOPWORDS = {"de", "del", "la", "el", "y", "para", "con"}
-
-
-def _decimal(value) -> Decimal | None:
-    try:
-        return Decimal(str(value))
-    except Exception:
-        return None
 
 
 def _str_decimal(value) -> str | None:
@@ -78,36 +45,6 @@ def _point_name(cost: CostoInsumo) -> str:
     return str(raw.get("point_name") or raw.get("article_name") or "").strip()
 
 
-def _unit_code(value: str) -> str | None:
-    return UNIT_ALIAS.get(str(value or "").strip().lower().rstrip("."))
-
-
-def _unit_type(value: str) -> str | None:
-    return UNIT_TYPE.get(_unit_code(value) or "")
-
-
-def _name_matches(insumo: Insumo, point_name: str) -> bool:
-    point_norm = normalizar_nombre(point_name or "")
-    erp_names = [
-        normalizar_nombre(insumo.nombre or ""),
-        normalizar_nombre(insumo.nombre_point or ""),
-        normalizar_nombre(insumo.nombre_normalizado or ""),
-    ]
-    erp_names = [name for name in erp_names if name]
-    if not point_norm or not erp_names:
-        return True
-    if any(point_norm == name or point_norm in name or name in point_norm for name in erp_names):
-        return True
-
-    point_tokens = {token for token in point_norm.split() if len(token) > 2 and token not in STOPWORDS}
-    erp_tokens = {
-        token
-        for token in " ".join(erp_names).split()
-        if len(token) > 2 and token not in STOPWORDS
-    }
-    return bool(point_tokens and erp_tokens and len(point_tokens & erp_tokens) >= min(2, len(point_tokens)))
-
-
 def classify_point_cost(cost: CostoInsumo) -> list[str]:
     classes: list[str] = []
     quantity = _raw_quantity(cost)
@@ -116,16 +53,16 @@ def classify_point_cost(cost: CostoInsumo) -> list[str]:
     unit_cost = _decimal(cost.costo_unitario) or Decimal("0")
 
     if quantity is not None and quantity <= 0 and unit_cost > 0:
-        classes.append("QTY_NO_POSITIVA_CON_COSTO")
+        classes.append(STATUS_QTY_NO_POSITIVA_CON_COSTO)
     if not _name_matches(insumo, _point_name(cost)):
-        classes.append("NOMBRE_POINT_NO_COINCIDE")
+        classes.append(STATUS_NOMBRE_POINT_NO_COINCIDE)
 
     point_unit_type = _unit_type(unit)
     erp_unit_type = getattr(insumo.unidad_base, "tipo", None) if insumo.unidad_base_id else None
     if unit and point_unit_type and erp_unit_type and point_unit_type != erp_unit_type:
-        classes.append("UNIDAD_INCOMPATIBLE")
+        classes.append(STATUS_UNIDAD_INCOMPATIBLE)
     if unit and not _unit_code(unit):
-        classes.append("UNIDAD_DESCONOCIDA")
+        classes.append(STATUS_UNIDAD_DESCONOCIDA)
     return classes
 
 
