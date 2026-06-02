@@ -837,7 +837,7 @@
         const q = state.busquedaEquipo.toLowerCase().trim();
         const filtrados = state.activos.filter((activo) => {
           const matchesUbicacion = !state.sucursalFiltro || activo.ubicacion === state.sucursalFiltro;
-          const text = `${activo.nombre} ${activo.codigo} ${activo.categoria} ${activo.ubicacion} ${activo.sucursal_nombre || ""}`.toLowerCase();
+          const text = `${activo.nombre} ${activo.codigo} ${activo.categoria || ""}`.toLowerCase();
           return matchesUbicacion && (!q || text.includes(q));
         });
         const LIMITE = 20;
@@ -942,9 +942,7 @@
             const matchTexto = !q ||
               a.nombre.toLowerCase().includes(q) ||
               a.codigo.toLowerCase().includes(q) ||
-              (a.categoria || "").toLowerCase().includes(q) ||
-              (a.ubicacion || "").toLowerCase().includes(q) ||
-              (a.sucursal_nombre || "").toLowerCase().includes(q);
+              (a.categoria || "").toLowerCase().includes(q);
             return matchUbicacion && matchTexto;
           });
           const LIMITE = 20;
@@ -1389,9 +1387,7 @@
           const matchTexto = !q ||
             a.nombre.toLowerCase().includes(q) ||
             a.codigo.toLowerCase().includes(q) ||
-            (a.categoria || "").toLowerCase().includes(q) ||
-            (a.ubicacion || "").toLowerCase().includes(q) ||
-            (a.sucursal_nombre || "").toLowerCase().includes(q);
+            (a.categoria || "").toLowerCase().includes(q);
           return matchUbicacion && matchTexto;
         });
         const visibles = q ? filtrados : filtrados.slice(0, LIMITE);
