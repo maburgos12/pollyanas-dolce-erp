@@ -396,6 +396,14 @@ def pwa_reporte(request):
             messages.success(request, f"Reporte de falla #{reporte.id} registrado correctamente.")
             return redirect("fallas:pwa-mis-reportes")
 
+    grupos_lower = {g.lower() for g in _group_names(request.user)}
+    if "produccion" in grupos_lower:
+        area_default = ReporteFalla.AREA_PRODUCCION
+    elif "ventas" in grupos_lower:
+        area_default = ReporteFalla.AREA_VENTAS
+    else:
+        area_default = ReporteFalla.AREA_GENERAL
+
     return render(
         request,
         "fallas/reporte_form.html",
@@ -407,6 +415,7 @@ def pwa_reporte(request):
             "activos": activos,
             "areas": ReporteFalla.AREAS,
             "prioridades": ReporteFalla.PRIORIDAD,
+            "area_default": area_default,
         },
     )
 

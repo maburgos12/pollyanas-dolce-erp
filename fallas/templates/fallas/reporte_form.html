@@ -81,7 +81,7 @@
       <label class="fallas-field">Área
         <select class="fallas-input" name="area" required>
           {% for value,label in areas %}
-          <option value="{{ value }}" {% if reporte and reporte.area == value %}selected{% endif %}>{{ label }}</option>
+          <option value="{{ value }}" {% if reporte and reporte.area == value %}selected{% elif not reporte and value == area_default %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </label>
