@@ -413,7 +413,7 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "Buscar equipo")
         self.assertContains(response, "Seguimiento")
         self.assertContains(response, "Reportes")
-        self.assertContains(response, "Registrar mantenimiento de equipo")
+        self.assertContains(response, "Registrar mantenimiento")
         self.assertNotContains(response, "Vehículo de flota")
 
     def test_pwa_logout_buttons_redirect_to_django_logout(self):

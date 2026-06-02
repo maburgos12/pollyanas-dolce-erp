@@ -165,6 +165,8 @@
   </section>
 </div>
 
+{% endblock %}
+
 {% block extra_js %}
 <script>
 function toggleAppMode(on) {
@@ -176,4 +178,3 @@ function toggleAppMode(on) {
 if (localStorage.getItem('fallas_app_mode') === '1') toggleAppMode(true);
 </script>
 {% endblock %}
-
