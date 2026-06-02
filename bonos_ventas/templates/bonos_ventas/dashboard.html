@@ -62,6 +62,9 @@
   .money-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.75rem}
   .status-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:.28rem .6rem;font-size:.72rem;font-weight:900;white-space:nowrap}
   .status-pill.ok{background:#dcfce7;color:#166534}.status-pill.bad{background:#fee2e2;color:#991b1b}.status-pill.neutral{background:#f4edf4;color:#8b2252}
+  .status-pill.cerrado{background:#fee2e2;color:#991b1b}
+  .status-pill.cierra-hoy{background:#fef9c3;color:#854d0e}
+  .status-pill.activo{background:#dcfce7;color:#166534}
   .category-table-wrap{overflow-x:auto}
   .category-table{width:100%;border-collapse:collapse;font-size:.9rem}
   .category-table th{padding:.7rem .8rem;text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:#6b5f70;border-bottom:1px solid #ede6f0}
@@ -129,6 +132,9 @@
   <section class="kpi-grid">
     <article class="kpi-card"><div class="kpi-label">Total a pagar</div><div class="kpi-value gold">${{ total_bonos|floatformat:2|intcomma }}</div></article>
     <article class="kpi-card"><div class="kpi-label">Empleados</div><div class="kpi-value">{{ bonos|length|intcomma }}</div></article>
+    {% if periodo_estado == "cerrado" %}<article class="kpi-card"><div class="kpi-label">Estado</div><div class="kpi-value" style="font-size:1rem"><span class="status-pill cerrado">⬛ Período cerrado</span></div></article>
+    {% elif periodo_estado == "cierra_hoy" %}<article class="kpi-card"><div class="kpi-label">Estado</div><div class="kpi-value" style="font-size:1rem"><span class="status-pill cierra-hoy">⚠ Cierra hoy</span></div></article>
+    {% endif %}
     <article class="kpi-card"><div class="kpi-label">Pasan asistencia</div><div class="kpi-value wine">{{ passing_asistencia|intcomma }}</div></article>
     <article class="kpi-card"><div class="kpi-label">Con bono ventas</div><div class="kpi-value">{{ con_bono_ventas|intcomma }}</div></article>
     <article class="kpi-card"><div class="kpi-label">Repartidores con bono</div><div class="kpi-value">{{ repartidores_con_bono|intcomma }}</div></article>
@@ -137,7 +143,15 @@
   <section class="bonos-card">
     <div class="bonos-card-h">
       <div class="bonos-card-title">Configuración del período</div>
-      {% if not periodo %}<span class="status-pill bad">Sin período creado</span>{% endif %}
+      {% if not periodo %}
+        <span class="status-pill bad">Sin período creado</span>
+      {% elif periodo_estado == "cerrado" %}
+        <span class="status-pill cerrado">⬛ Período cerrado</span>
+      {% elif periodo_estado == "cierra_hoy" %}
+        <span class="status-pill cierra-hoy">⚠ Cierra hoy</span>
+      {% else %}
+        <span class="status-pill activo">● Activo</span>
+      {% endif %}
     </div>
     <div class="bonos-card-body">
       <form method="post">
