@@ -461,6 +461,60 @@
 </section>
 
 <section class="card">
+  <div class="card-header">Importar lista de raya</div>
+  {% if can_manage_rrhh %}
+  <form method="post" enctype="multipart/form-data" class="filters" style="margin-bottom:0;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="import_lista_raya">
+    <input class="input-field" type="file" name="archivo" accept=".xls" required>
+    <label class="muted" style="display:flex;align-items:center;gap:8px;">
+      <input type="checkbox" name="replace">
+      Reemplazar periodo existente
+    </label>
+    <button class="btn btn-primary" type="submit">Importar lista de raya</button>
+  </form>
+  {% else %}
+  <p class="muted">Tu rol es de consulta. No puedes importar listas de raya.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">Importaciones recientes</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Archivo</th>
+          <th>Periodo</th>
+          <th>Empleados</th>
+          <th class="text-end">Neto</th>
+          <th>Fecha</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in importaciones %}
+        <tr>
+          <td>{{ item.archivo_nombre }}</td>
+          <td>
+            {% if item.periodo %}
+            <a href="{% url 'rrhh:nomina_detail' item.periodo.id %}">{{ item.periodo.folio }}</a>
+            {% else %}
+            -
+            {% endif %}
+          </td>
+          <td>{{ item.empleados_detectados }}</td>
+          <td class="text-end">${{ item.total_neto|floatformat:2|intcomma }}</td>
+          <td>{{ item.created_at|date:"Y-m-d H:i" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="muted">Sin importaciones de lista de raya.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
   <div class="card-header">Periodos registrados</div>
   <form method="get" class="filters" style="margin-bottom:14px;">
     <select class="input-field" name="tipo">

@@ -1,5 +1,6 @@
 from django.contrib.auth.models import Group, User
 from django.core.management import call_command
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -1629,6 +1630,32 @@ class RRHHViewsTests(TestCase):
         self.assertIn("release_gate_completion", resp_line.context)
         periodo.refresh_from_db()
         self.assertGreater(periodo.total_neto, 0)
+
+    def test_nomina_importa_lista_raya_desde_web(self):
+        if not LISTA_RAYA_SAMPLE.exists():
+            raise SkipTest("No está disponible el archivo real de lista de raya.")
+
+        upload = SimpleUploadedFile(
+            "lista_raya_abril_2026.xls",
+            LISTA_RAYA_SAMPLE.read_bytes(),
+            content_type="application/vnd.ms-excel",
+        )
+
+        response = self.client.post(
+            reverse("rrhh:nomina"),
+            {
+                "action": "import_lista_raya",
+                "archivo": upload,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        periodo = NominaPeriodo.objects.get(fecha_inicio="2026-04-16", fecha_fin="2026-04-30")
+        self.assertEqual(Empleado.objects.count(), 67)
+        self.assertEqual(periodo.lineas.count(), 67)
+        self.assertEqual(NominaConceptoLinea.objects.count(), 336)
+        self.assertEqual(NominaImportacion.objects.count(), 1)
+        self.assertEqual(response.url, reverse("rrhh:nomina_detail", kwargs={"pk": periodo.pk}))
 
     def test_redirect_when_anonymous(self):
         self.client.logout()
