@@ -185,11 +185,26 @@ def bonos_produccion_dashboard(request):
     total_bonos = sum((bono.total_a_pagar for bono in bonos), Decimal("0"))
     passing = sum(1 for bono in bonos if bono.pasa_uniforme and bono.pasa_asistencia and bono.pasa_puntualidad and bono.pasa_produccion)
 
+    # Estado visual del período basado en fecha_fin vs hoy (sin cambio en BD)
+    periodo_estado = None
+    if periodo:
+        if periodo.fecha_fin:
+            dias_diff = (periodo.fecha_fin - today).days
+            if dias_diff < 0:
+                periodo_estado = "cerrado"
+            elif dias_diff == 0:
+                periodo_estado = "cierra_hoy"
+            else:
+                periodo_estado = "activo"
+        else:
+            periodo_estado = "activo"
+
     return render(
         request,
         "bonos_produccion/dashboard.html",
         {
             "periodo": periodo,
+            "periodo_estado": periodo_estado,
             "mes": mes,
             "anio": anio,
             "bonos": bonos,

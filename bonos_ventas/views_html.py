@@ -283,11 +283,26 @@ def bonos_ventas_dashboard(request):
             }
         )
 
+    # Estado visual del período basado en fecha_fin vs hoy (sin cambio en BD)
+    periodo_estado = None
+    if periodo:
+        if periodo.fecha_fin:
+            dias_diff = (periodo.fecha_fin - today).days
+            if dias_diff < 0:
+                periodo_estado = "cerrado"
+            elif dias_diff == 0:
+                periodo_estado = "cierra_hoy"
+            else:
+                periodo_estado = "activo"
+        else:
+            periodo_estado = "activo"
+
     return render(
         request,
         "bonos_ventas/dashboard.html",
         {
             "periodo": periodo,
+            "periodo_estado": periodo_estado,
             "mes": mes,
             "anio": anio,
             "bonos": bonos,
