@@ -3,7 +3,7 @@ from calendar import monthrange
 from decimal import Decimal
 import os
 import tempfile
-from io import BytesIO
+from io import BytesIO, StringIO
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -8272,3 +8272,175 @@ class MrpRapidoEnterpriseTests(TestCase):
         self.assertContains(response, "Demanda comercial")
         self.assertContains(response, "Alineación forecast/solicitud")
         self.assertContains(response, "Forecast vigente")
+
+
+class CosteoCiruelaGuardrailTests(TestCase):
+    def setUp(self):
+        self.kg = UnidadMedida.objects.create(
+            codigo="kg",
+            nombre="Kilogramo",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        self.g = UnidadMedida.objects.create(
+            codigo="g",
+            nombre="Gramo",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1"),
+        )
+        self.lt = UnidadMedida.objects.create(
+            codigo="lt",
+            nombre="Litro",
+            tipo=UnidadMedida.TIPO_VOLUMEN,
+            factor_to_base=Decimal("1000"),
+        )
+        self.ml = UnidadMedida.objects.create(
+            codigo="ml",
+            nombre="Mililitro",
+            tipo=UnidadMedida.TIPO_VOLUMEN,
+            factor_to_base=Decimal("1"),
+        )
+        self.pza = UnidadMedida.objects.create(
+            codigo="pza",
+            nombre="Pieza",
+            tipo=UnidadMedida.TIPO_PIEZA,
+            factor_to_base=Decimal("1"),
+        )
+
+    def test_guardrail_forces_protected_ciruela_yield(self):
+        from recetas.utils.rendimientos_protegidos import enforce_protected_preparation_yield
+
+        receta = Receta.objects.create(
+            nombre="Ciruela Cocida",
+            codigo_point="01CC07",
+            hash_contenido="ciruela-cocida-guardrail",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("1"),
+            rendimiento_unidad=self.kg,
+        )
+
+        qty, unit, protected = enforce_protected_preparation_yield(receta, Decimal("1"), self.kg)
+
+        self.assertTrue(protected)
+        self.assertEqual(qty, Decimal("5.172000"))
+        self.assertEqual(unit, self.kg)
+
+    def test_restaurar_costeo_ciruela_restores_yields_and_versions(self):
+        insumo_ciruela = Insumo.objects.create(nombre="Ciruela", unidad_base=self.kg, activo=True)
+        CostoInsumo.objects.create(
+            insumo=insumo_ciruela,
+            costo_unitario=Decimal("119.47"),
+            source_hash="ciruela-cost-guardrail",
+        )
+        insumo_agua = Insumo.objects.create(nombre="AGUA", unidad_base=self.lt, activo=True)
+        CostoInsumo.objects.create(
+            insumo=insumo_agua,
+            costo_unitario=Decimal("0.895"),
+            source_hash="agua-cost-guardrail",
+        )
+        insumo_azucar = Insumo.objects.create(nombre="AZUCAR ESTANDAR", unidad_base=self.kg, activo=True)
+        CostoInsumo.objects.create(
+            insumo=insumo_azucar,
+            costo_unitario=Decimal("18.80"),
+            source_hash="azucar-cost-guardrail",
+        )
+
+        ciruela_cocida = Receta.objects.create(
+            nombre="Ciruela Cocida",
+            codigo_point="01CC07",
+            hash_contenido="ciruela-cocida-command",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("1"),
+            rendimiento_unidad=self.kg,
+        )
+        jugo = Receta.objects.create(
+            nombre="Jugo de Ciruela",
+            codigo_point="03JUC64",
+            hash_contenido="jugo-ciruela-command",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("1"),
+            rendimiento_unidad=self.lt,
+        )
+        mermelada = Receta.objects.create(
+            nombre="Mermelada de Ciruela",
+            codigo_point="02MC08",
+            hash_contenido="mermelada-ciruela-command",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("1"),
+            rendimiento_unidad=self.kg,
+        )
+        final_recipes = [
+            Receta.objects.create(
+                nombre="Pastel de Ciruela Chico",
+                codigo_point="0113",
+                hash_contenido="pastel-ciruela-chico-command",
+                tipo=Receta.TIPO_PRODUCTO_FINAL,
+            ),
+            Receta.objects.create(
+                nombre="Pastel de Ciruela Mediano",
+                codigo_point="0112",
+                hash_contenido="pastel-ciruela-mediano-command",
+                tipo=Receta.TIPO_PRODUCTO_FINAL,
+            ),
+            Receta.objects.create(
+                nombre="Pastel de Ciruela Grande",
+                codigo_point="0111",
+                hash_contenido="pastel-ciruela-grande-command",
+                tipo=Receta.TIPO_PRODUCTO_FINAL,
+            ),
+            Receta.objects.create(
+                nombre="Pastel de Ciruela R",
+                codigo_point="0114",
+                hash_contenido="pastel-ciruela-r-command",
+                tipo=Receta.TIPO_PRODUCTO_FINAL,
+            ),
+        ]
+
+        LineaReceta.objects.create(
+            receta=ciruela_cocida,
+            posicion=1,
+            insumo=insumo_ciruela,
+            insumo_texto="CIRUELA",
+            cantidad=Decimal("2260"),
+            unidad=self.g,
+            unidad_texto="g",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        LineaReceta.objects.create(
+            receta=ciruela_cocida,
+            posicion=2,
+            insumo=insumo_agua,
+            insumo_texto="AGUA",
+            cantidad=Decimal("5204"),
+            unidad=self.ml,
+            unidad_texto="ml",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        LineaReceta.objects.create(
+            receta=ciruela_cocida,
+            posicion=3,
+            insumo=insumo_azucar,
+            insumo_texto="AZUCAR ESTANDAR",
+            cantidad=Decimal("4000"),
+            unidad=self.g,
+            unidad_texto="g",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+
+        call_command(
+            "restaurar_costeo_ciruela",
+            "--anchor-date=2026-06-02",
+            "--skip-historical",
+            stdout=StringIO(),
+            verbosity=0,
+        )
+
+        ciruela_cocida.refresh_from_db()
+        jugo.refresh_from_db()
+        mermelada.refresh_from_db()
+        self.assertEqual(ciruela_cocida.rendimiento_cantidad, Decimal("5.172000"))
+        self.assertEqual(jugo.rendimiento_cantidad, Decimal("1.078000"))
+        self.assertEqual(mermelada.rendimiento_cantidad, Decimal("4.094000"))
+        self.assertTrue(RecetaCostoVersion.objects.filter(receta=ciruela_cocida, fuente="RESTAURA_RENDIMIENTO_CIRUELA").exists())
+        for receta in final_recipes:
+            self.assertTrue(RecetaCostoVersion.objects.filter(receta=receta, fuente="RESTAURA_RENDIMIENTO_CIRUELA").exists())

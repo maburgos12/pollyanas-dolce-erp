@@ -10,6 +10,7 @@ from maestros.models import UnidadMedida, seed_unidades_basicas
 from recetas.models import Receta, RecetaPresentacion
 from recetas.utils.importador import ImportadorCosteo, _to_float
 from recetas.utils.normalizacion import normalizar_nombre
+from recetas.utils.rendimientos_protegidos import enforce_protected_preparation_yield
 
 
 class Command(BaseCommand):
@@ -125,6 +126,11 @@ class Command(BaseCommand):
 
                 rendimiento_cantidad, rendimiento_unidad, presentaciones = importador._extract_preparacion_metadata(
                     ws, r, rr, lineas
+                )
+                rendimiento_cantidad, rendimiento_unidad, _protected_yield = enforce_protected_preparation_yield(
+                    receta,
+                    rendimiento_cantidad,
+                    rendimiento_unidad,
                 )
 
                 changed_fields: List[str] = []
