@@ -3,6 +3,8 @@ from __future__ import annotations
 from calendar import monthrange
 from datetime import date as dt_date, timedelta
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -26,6 +28,7 @@ from .models import (
     HoraExtra,
     ImportacionChecador,
     NominaConceptoLinea,
+    NominaImportacion,
     NominaLinea,
     NominaPeriodo,
     PermisoSalida,
@@ -33,6 +36,7 @@ from .models import (
     VacanteRRHH,
 )
 from .services_bonos import asegurar_esquemas_base, sincronizar_esquemas_bono
+from .services.lista_raya import importar_lista_raya_nomina
 from .services_permisos import can_authorize_direccion, resolver_permiso_direccion
 from .services_vacantes import crear_solicitud_vacante
 
@@ -96,6 +100,14 @@ def _parse_date(raw: str | None):
         return dt_date.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _guardar_upload_temporal(archivo) -> Path:
+    suffix = Path(archivo.name or "").suffix.lower()
+    with NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        for chunk in archivo.chunks():
+            tmp.write(chunk)
+        return Path(tmp.name)
 
 
 def _catalogo_value(post_data, field_name: str) -> str:
@@ -969,6 +981,52 @@ def nomina(request):
         if not can_manage_rrhh(request.user):
             raise PermissionDenied("No tienes permisos para gestionar RRHH")
 
+        action = (request.POST.get("action") or "create_period").strip()
+        if action == "import_lista_raya":
+            archivo = request.FILES.get("archivo")
+            replace = request.POST.get("replace") == "on"
+            if not archivo:
+                messages.error(request, "Selecciona el archivo XLS de lista de raya.")
+                return redirect("rrhh:nomina")
+            if Path(archivo.name or "").suffix.lower() != ".xls":
+                messages.error(request, "La importación de lista de raya espera el archivo .xls de CONTPAQi.")
+                return redirect("rrhh:nomina")
+
+            temp_path = _guardar_upload_temporal(archivo)
+            try:
+                resultado = importar_lista_raya_nomina(
+                    temp_path,
+                    created_by=request.user,
+                    replace=replace,
+                    archivo_nombre=archivo.name,
+                )
+            except Exception as exc:
+                messages.error(request, f"No se importó la lista de raya: {exc}")
+                return redirect("rrhh:nomina")
+            finally:
+                temp_path.unlink(missing_ok=True)
+
+            periodo = resultado["periodo"]
+            importacion = resultado["importacion"]
+            messages.success(
+                request,
+                f"Lista de raya importada: {importacion.empleados_detectados} empleados, "
+                f"periodo {periodo.folio}, neto ${periodo.total_neto}.",
+            )
+            log_event(
+                request.user,
+                "CREATE",
+                "rrhh.NominaImportacion",
+                str(importacion.id),
+                {
+                    "archivo": importacion.archivo_nombre,
+                    "periodo": periodo.folio,
+                    "empleados": importacion.empleados_detectados,
+                    "replace": replace,
+                },
+            )
+            return redirect("rrhh:nomina_detail", pk=periodo.id)
+
         fecha_inicio = request.POST.get("fecha_inicio")
         fecha_fin = request.POST.get("fecha_fin")
         fecha_inicio_obj = _parse_date(fecha_inicio)
@@ -1053,6 +1111,7 @@ def nomina(request):
         "module_tabs": _module_tabs("nomina"),
         "can_manage_rrhh": can_manage_rrhh(request.user),
         "nominas": nominas_qs.order_by("-fecha_fin", "-id")[:120],
+        "importaciones": NominaImportacion.objects.select_related("periodo", "created_by")[:10],
         "estatus": estatus,
         "tipo": tipo,
         "tipo_choices": NominaPeriodo.TIPO_CHOICES,
