@@ -365,9 +365,11 @@ def pwa_reporte(request):
         raise PermissionDenied
 
     sucursales = Sucursal.objects.filter(sucursales_operativas_q()).order_by("nombre")
-    if not _puede_cambiar_estatus_fallas(request.user):
-        sucursal_usuario = _sucursal_usuario(request.user)
-        sucursales = sucursales.filter(pk=sucursal_usuario.pk) if sucursal_usuario else sucursales.none()
+    if not (is_admin_or_dg(request.user) or _puede_cambiar_estatus_fallas(request.user)):
+        grupos_lower = {g.lower() for g in _group_names(request.user)}
+        if "produccion" not in grupos_lower:
+            sucursal_usuario = _sucursal_usuario(request.user)
+            sucursales = sucursales.filter(pk=sucursal_usuario.pk) if sucursal_usuario else sucursales.none()
 
     categorias = CategoriaFalla.objects.filter(activo=True).order_by("orden", "nombre")
     activos = Activo.objects.filter(activo=True).order_by("nombre", "codigo")[:150]
