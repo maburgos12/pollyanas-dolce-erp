@@ -17,6 +17,7 @@ from .matching import match_insumo, clasificar_match
 from .normalizacion import normalizar_nombre
 from .subsection_costing import find_parent_cost_for_stage
 from .costeo_versionado import asegurar_version_costeo
+from .rendimientos_protegidos import enforce_protected_preparation_yield
 from recetas.models import Receta, LineaReceta, RecetaPresentacion, CostoDriver
 
 log = logging.getLogger(__name__)
@@ -1173,6 +1174,11 @@ class ImportadorCosteo:
                 receta.tipo = recipe_type
                 changed = True
 
+            rendimiento_cantidad, rendimiento_unidad, _protected_yield = enforce_protected_preparation_yield(
+                receta,
+                rendimiento_cantidad,
+                rendimiento_unidad,
+            )
             if rendimiento_cantidad is not None and rendimiento_cantidad > 0:
                 qty = Decimal(str(rendimiento_cantidad))
                 if receta.rendimiento_cantidad != qty:
@@ -1193,6 +1199,12 @@ class ImportadorCosteo:
             _remove_duplicate_recetas(nombre_norm, receta.id)
             receta.lineas.all().delete()
         else:
+            seed_receta = Receta(nombre=nombre, hash_contenido=hash_contenido)
+            rendimiento_cantidad, rendimiento_unidad, _protected_yield = enforce_protected_preparation_yield(
+                seed_receta,
+                rendimiento_cantidad,
+                rendimiento_unidad,
+            )
             receta = Receta.objects.create(
                 nombre=nombre,
                 sheet_name=sheet_name,
