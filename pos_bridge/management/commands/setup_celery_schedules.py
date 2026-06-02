@@ -320,6 +320,31 @@ class Command(BaseCommand):
             },
         )
 
+        investment_snapshot_minute = (analytics_refresh_minute + 15) % 60
+        investment_snapshot_hour = (
+            (analytics_refresh_hour + 1) % 24
+            if analytics_refresh_minute >= 45
+            else analytics_refresh_hour
+        )
+        investment_snapshot_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute=str(investment_snapshot_minute),
+            hour=str(investment_snapshot_hour),
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="reportes: refresh snapshots inversion",
+            defaults={
+                "task": "reportes.refresh_investment_snapshots",
+                "crontab": investment_snapshot_cron,
+                "interval": None,
+                "kwargs": json.dumps({}),
+                "enabled": True,
+            },
+        )
+
         erp_doctor_cron, _ = CrontabSchedule.objects.get_or_create(
             minute="0",
             hour="6",

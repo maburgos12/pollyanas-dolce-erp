@@ -37,6 +37,32 @@ def task_refresh_dg_operacion_snapshot(self):
     }
 
 
+@shared_task(name="reportes.refresh_investment_snapshots", bind=True, max_retries=1, default_retry_delay=300)
+def task_refresh_investment_snapshots(self):
+    from reportes.models import ProyectoInversion
+    from reportes.services_investment_projects import ProyectoInversionRefreshService
+
+    statuses = [ProyectoInversion.ESTATUS_ACTIVO, ProyectoInversion.ESTATUS_EN_RECUPERACION]
+    service = ProyectoInversionRefreshService()
+    results = []
+    for project in ProyectoInversion.objects.filter(estatus__in=statuses).order_by("id"):
+        result = service.refresh_project(project)
+        results.append(
+            {
+                "project_id": result.project_id,
+                "snapshots_updated": result.snapshots_updated,
+                "latest_period": result.latest_period.isoformat() if result.latest_period else None,
+                "project_status": result.project_status,
+                "data_gaps": result.data_gaps,
+            }
+        )
+    return {
+        "projects_refreshed": len(results),
+        "snapshots_created": sum(item["snapshots_updated"] for item in results),
+        "results": results,
+    }
+
+
 @shared_task(name="reportes.cierre_produccion_nocturno", bind=True, max_retries=1, default_retry_delay=300)
 def task_cierre_produccion_nocturno(self):
     """
