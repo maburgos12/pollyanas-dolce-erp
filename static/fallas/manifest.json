@@ -2,7 +2,7 @@
   "name": "Pollyana's Fallas",
   "short_name": "PD Fallas",
   "description": "Reporta fallas en tu sucursal",
-  "start_url": "/fallas/reportar/",
+  "start_url": "/fallas/app/",
   "display": "standalone",
   "background_color": "#0f0f14",
   "theme_color": "#8B2252",
