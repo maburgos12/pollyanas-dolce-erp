@@ -37,7 +37,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--skip-historical",
             action="store_true",
-            help="No reconstruir costeo historico mensual.",
+            help="No refrescar filas historicas mensuales de las recetas afectadas.",
         )
 
     def handle(self, *args, **options):
@@ -118,16 +118,10 @@ class Command(BaseCommand):
 
         historical_payload = None
         if not options.get("skip_historical"):
-            from reportes.services_historical_costing import MonthlyHistoricalCostingService
-
-            historical = MonthlyHistoricalCostingService().build_period(period_start=historical_period)
-            historical_payload = {
-                "period_start": historical.period_start.isoformat(),
-                "insumo_rows": historical.insumo_rows,
-                "receta_rows": historical.receta_rows,
-                "missing_recipe_rows": historical.missing_recipe_rows,
-                "producto_reventa_rows": historical.producto_reventa_rows,
-            }
+            historical_payload = self._sync_target_historical_rows(
+                period_start=historical_period,
+                receta_ids=receta_ids,
+            )
 
         payload = {
             "updated_yields": updated_yields,
@@ -162,3 +156,40 @@ class Command(BaseCommand):
             return date(int(year), int(month), 1)
         except (TypeError, ValueError) as exc:
             raise CommandError("historical-period debe venir en formato YYYY-MM.") from exc
+
+    def _sync_target_historical_rows(self, *, period_start: date, receta_ids: list[int]) -> dict[str, object]:
+        from reportes.models import RecetaCostoHistoricoMensual
+
+        rows: list[dict[str, object]] = []
+        for receta in Receta.objects.filter(id__in=receta_ids).select_related("rendimiento_unidad").order_by("id"):
+            lineas_totales = receta.lineas.exclude(tipo_linea="SUBSECCION").count()
+            row, _created = RecetaCostoHistoricoMensual.objects.update_or_create(
+                periodo=period_start,
+                receta=receta,
+                defaults={
+                    "costo_total": receta.costo_total_estimado_decimal,
+                    "costo_por_unidad_rendimiento": receta.costo_por_unidad_rendimiento,
+                    "lineas_costeadas": lineas_totales,
+                    "lineas_totales": lineas_totales,
+                    "coverage_pct": Decimal("100.000000") if lineas_totales else Decimal("0.000000"),
+                    "metadata": {
+                        "source": VERSION_SOURCE,
+                        "bom_basis": "CURRENT_RECIPE_STRUCTURE_TARGETED_RESTORE",
+                        "rendimiento_cantidad": str(receta.rendimiento_cantidad or ""),
+                        "rendimiento_unidad": receta.rendimiento_unidad.codigo if receta.rendimiento_unidad_id else "",
+                    },
+                },
+            )
+            rows.append(
+                {
+                    "receta_id": receta.id,
+                    "nombre": receta.nombre,
+                    "costo_total": str(row.costo_total),
+                    "costo_por_unidad_rendimiento": str(row.costo_por_unidad_rendimiento or ""),
+                }
+            )
+        return {
+            "period_start": period_start.isoformat(),
+            "receta_rows_updated": len(rows),
+            "rows": rows,
+        }
