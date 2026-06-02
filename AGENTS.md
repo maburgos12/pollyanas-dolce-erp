@@ -31,7 +31,26 @@ prototipos o producción.
 - **Implementación real:** trabajar en rama limpia, con checks, PR, deploy y
   validación en el lugar real donde se usa.
 
-### 2. Auditar estado del repo antes de cualquier cambio
+### 2. Sincronizar entorno local con main ANTES de tocar cualquier archivo
+
+**Obligatorio al inicio de cada tarea, sin excepción.**
+El SQLite local puede estar días o semanas detrás de `origin/main`. Si no se
+sincroniza primero, `migrate --check` muestra migraciones pendientes de otras apps
+que no son de la tarea, el entorno no es confiable y el diff final queda sucio.
+
+```bash
+git fetch origin main
+git checkout -b codex/<modulo>-<descripcion> origin/main   # rama desde main actualizado
+python manage.py migrate                                    # aplicar TODO lo que main tiene
+python manage.py migrate --check                           # debe quedar en 0 pendientes
+python manage.py check                                     # debe quedar en 0 errores
+```
+
+**Si `migrate --check` no es 0 al inicio:** aplicar las migraciones pendientes
+antes de escribir código. Nunca iniciar una tarea sobre una DB local desactualizada.
+Ese ruido de migraciones ajenas contamina el diff y obliga a trabajo extra al final.
+
+### 3. Auditar estado del repo antes de cualquier cambio
 Antes de editar archivos, ejecutar y revisar:
 ```bash
 git status --short --branch
@@ -54,7 +73,7 @@ En cualquiera de esos casos, detenerse, reportar el estado exacto y proponer
 rescate: respaldar parche, crear rama limpia desde `origin/main` o desde la
 rama correcta, y aplicar solo los cambios relacionados.
 
-### 3. Una tarea, una rama, un objetivo
+### 4. Una tarea, una rama, un objetivo
 - No mezclar RRHH, recetas, ventas, reportes, CSS global, activos u otros módulos
   si la solicitud no los necesita.
 - No hacer refactors oportunistas ni "aprovechar" para tocar archivos ajenos.
@@ -63,7 +82,7 @@ rama correcta, y aplicar solo los cambios relacionados.
 - Para cambios grandes o productivos, crear rama nueva desde una base limpia
   antes de implementar.
 
-### 4. Docker local no equivale a producción
+### 5. Docker local no equivale a producción
 - Docker Desktop puede usarse para prototipos o validación local del ERP.
 - Si Docker local falla, diagnosticar primero logs, variables de entorno y
   `docker compose config`; no cambiar código ni producción por intuición.
@@ -72,7 +91,7 @@ rama correcta, y aplicar solo los cambios relacionados.
 - Una validación local en Docker no sustituye la validación final en VPS,
   navegador real, reporte real, pantalla real o usuario real afectado.
 
-### 5. Higiene de commits — quirúrgico y descriptivo
+### 6. Higiene de commits — quirúrgico y descriptivo
 Antes de cualquier commit:
 ```bash
 git status --short --branch
@@ -94,7 +113,7 @@ git worktree list
   git stash push -u -m "resguardo-<tarea>-<fecha>"
   ```
 
-### 6. Pull requests — una tarea, un PR
+### 7. Pull requests — una tarea, un PR
 Antes de crear cualquier PR:
 ```bash
 git status --short --branch
@@ -108,7 +127,7 @@ git diff origin/main..HEAD --stat
 - No abrir PR si `python manage.py check` da errores.
 - No abrir PR si hay migraciones sin verificar en producción.
 
-### 7. Validación mínima antes de cerrar
+### 8. Validación mínima antes de cerrar
 - Correr `python manage.py check` antes de cualquier commit.
 - Correr `python manage.py migrate --check` antes de deploy.
 - Ejecutar tests del módulo afectado cuando existan.
@@ -117,7 +136,7 @@ git diff origin/main..HEAD --stat
 - Para datos operativos, validar tabla/conteo/registros y luego confirmar que
   aparecen en la pantalla, reporte, app o archivo donde se usan.
 
-### 8. Cierre responsable
+### 9. Cierre responsable
 No declarar terminado un cambio si solo compila, si solo responde la API, o si
 solo la base de datos tiene datos. Termina hasta que el resultado esté validado
 en el flujo real. Si no se puede validar, reportar el bloqueo exacto, lo que sí
