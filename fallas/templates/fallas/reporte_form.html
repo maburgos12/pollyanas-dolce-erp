@@ -89,7 +89,7 @@
         <select class="fallas-input" name="sucursal" required>
           <option value="">Selecciona sucursal</option>
           {% for sucursal in sucursales %}
-          <option value="{{ sucursal.id }}" {% if reporte and reporte.sucursal_id == sucursal.id %}selected{% endif %}>{{ sucursal.codigo }} · {{ sucursal.nombre }}</option>
+          <option value="{{ sucursal.id }}" {% if reporte and reporte.sucursal_id == sucursal.id %}selected{% endif %}>{{ sucursal.nombre }}</option>
           {% endfor %}
         </select>
       </label>
