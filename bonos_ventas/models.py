@@ -216,11 +216,11 @@ class BonoVentasEmpleado(models.Model):
         cancela_bono = False
         cancel_por_asistencia = getattr(cfg, "cancela_por_asistencia", False)
         limite_cancel_asistencia = _to_int(getattr(cfg, "limite_asistencia_cancelacion", None), cfg.limite_asistencia)
-        if cancel_por_asistencia and (faltas > limite_cancel_asistencia):
+        if cancel_por_asistencia and (faltas >= limite_cancel_asistencia):
             cancela_bono = True
         cancel_por_puntualidad = getattr(cfg, "cancela_por_puntualidad", False)
         limite_cancel_retardos = _to_int(getattr(cfg, "limite_retardos_cancelacion", None), cfg.limite_puntualidad)
-        if cancel_por_puntualidad and (retardos > limite_cancel_retardos):
+        if cancel_por_puntualidad and (retardos >= limite_cancel_retardos):
             cancela_bono = True
         self.cancela_bono = cancela_bono
         self.monto_uniforme = self._monto_concepto(base, cfg.pct_uniforme, self.pasa_uniforme and not cancela_bono)
