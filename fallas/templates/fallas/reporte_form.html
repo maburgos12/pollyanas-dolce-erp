@@ -165,6 +165,8 @@
   </section>
 </div>
 
+{% endblock %}
+
 {% block extra_js %}
 <script>
 function toggleAppMode(on) {
@@ -172,7 +174,6 @@ function toggleAppMode(on) {
   localStorage.setItem('fallas_app_mode', on ? '1' : '0');
   if (on) window.scrollTo(0, 0);
 }
-// Restaurar preferencia al cargar
 if (localStorage.getItem('fallas_app_mode') === '1') toggleAppMode(true);
 </script>
 {% endblock %}
