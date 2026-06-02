@@ -485,6 +485,43 @@
     </div>
   </form>
 </section>
+
+<section class="card">
+  <div class="card-header">Registrar factura / nota de remisión</div>
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="update_factura">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;align-items:end;">
+      <div>
+        <label>Orden</label>
+        <select name="orden_id" required>
+          <option value="">Selecciona...</option>
+          {% for o in ordenes_editables %}
+            <option value="{{ o.id }}">{{ o.folio }} · {{ o.activo_ref.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Número de factura / remisión</label>
+        <input type="text" name="numero_factura" placeholder="FAC-2024-00123">
+      </div>
+      <div>
+        <label>Archivo de factura (PDF / imagen)</label>
+        <input type="file" name="factura_archivo" accept=".pdf,image/*" style="padding:8px;">
+      </div>
+      <div>
+        <label>Nota del trabajo</label>
+        <input type="text" name="nota_trabajo" placeholder="Descripción breve del trabajo">
+      </div>
+    </div>
+    <div style="margin-top:12px;">
+      <button type="submit" class="btn btn-primary">Guardar factura</button>
+      <span class="muted" style="margin-left:12px;font-size:.85rem;">
+        Para notas largas usa la vista de evidencias de la orden.
+      </span>
+    </div>
+  </form>
+</section>
 {% endif %}
 
 <section class="card">

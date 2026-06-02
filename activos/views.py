@@ -26,7 +26,7 @@ from fallas.models import ReporteFalla
 from logistica.models import ReparacionUnidad, ServicioRealizadoUnidad, Unidad
 from maestros.models import Proveedor
 
-from .models import Activo, BitacoraMantenimiento, OrdenMantenimiento, PlanMantenimiento
+from .models import Activo, BitacoraMantenimiento, EvidenciaOrden, OrdenMantenimiento, PlanMantenimiento, SolicitudFalla
 from .utils.bitacora_import import import_bitacora
 
 
@@ -74,7 +74,9 @@ def _module_tabs(active: str) -> list[dict]:
         {"label": "Dashboard", "url_name": "activos:dashboard", "active": active == "dashboard"},
         {"label": "Activos", "url_name": "activos:activos", "active": active == "activos"},
         {"label": "Planes", "url_name": "activos:planes", "active": active == "planes"},
-        {"label": "Órdenes", "url_name": "activos:ordenes", "active": active == "ordenes"},
+        {"label": "Órdenes", "url_name": "activos:ordenes", "active": active in ("ordenes", "activos:ordenes")},
+        {"label": "Reportar falla", "url_name": "activos:solicitudes_falla", "active": active == "activos:solicitudes_falla"},
+        {"label": "Registro rápido", "url_name": "activos:registro_rapido", "active": active == "activos:registro_rapido"},
         {"label": "Reportes", "url_name": "activos:reportes", "active": active == "reportes"},
         {"label": "Calendario", "url_name": "activos:calendario", "active": active == "calendario"},
     ]
@@ -2369,6 +2371,39 @@ def ordenes(request):
             messages.success(request, f"Orden {orden.folio} actualizada (costos).")
             return redirect("activos:ordenes")
 
+        if action == "update_factura":
+            orden_id = _safe_int(request.POST.get("orden_id"))
+            if not orden_id:
+                messages.error(request, "Selecciona una orden válida.")
+                return redirect("activos:ordenes")
+            orden = get_object_or_404(OrdenMantenimiento, pk=orden_id)
+            numero_factura = (request.POST.get("numero_factura") or "").strip()
+            nota_trabajo = (request.POST.get("nota_trabajo") or "").strip()
+            factura_archivo = request.FILES.get("factura_archivo")
+            update_fields = ["numero_factura", "nota_trabajo", "actualizado_en"]
+            orden.numero_factura = numero_factura
+            orden.nota_trabajo = nota_trabajo
+            if factura_archivo:
+                if factura_archivo.size > 30 * 1024 * 1024:
+                    messages.error(request, "El archivo supera el límite de 30 MB.")
+                    return redirect("activos:ordenes")
+                if orden.factura_archivo:
+                    orden.factura_archivo.delete(save=False)
+                orden.factura_archivo = factura_archivo
+                update_fields.append("factura_archivo")
+            orden.save(update_fields=update_fields)
+            BitacoraMantenimiento.objects.create(
+                orden=orden,
+                accion="FACTURA",
+                comentario=f"Factura/nota registrada: {numero_factura or '—'}",
+                usuario=request.user,
+            )
+            log_event(request.user, "UPDATE", "activos.OrdenMantenimiento", orden.id, {
+                "folio": orden.folio, "numero_factura": numero_factura,
+            })
+            messages.success(request, f"Factura de {orden.folio} actualizada.")
+            return redirect("activos:ordenes")
+
         messages.error(request, "Acción no reconocida.")
         return redirect("activos:ordenes")
 
@@ -3196,3 +3231,291 @@ def api_bandeja_compras(request):
             "reparaciones_recientes": reparaciones,
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# Solicitudes de falla
+# ---------------------------------------------------------------------------
+
+@login_required
+def solicitudes_falla(request):
+    if not can_view_inventario(request.user):
+        raise PermissionDenied("No tienes permisos para ver Activos.")
+
+    if request.method == "POST":
+        activo_id = (request.POST.get("activo_id") or "").strip()
+        descripcion = (request.POST.get("descripcion") or "").strip()
+        urgencia = (request.POST.get("urgencia") or SolicitudFalla.URGENCIA_MEDIA).strip().upper()
+        nombre_reportante = (request.POST.get("nombre_reportante") or "").strip()
+
+        if not activo_id.isdigit() or not descripcion:
+            messages.error(request, "Selecciona un equipo y escribe la descripción de la falla.")
+            return redirect("activos:solicitudes_falla")
+
+        activo_obj = get_object_or_404(Activo, pk=int(activo_id))
+        sf = SolicitudFalla.objects.create(
+            activo_ref=activo_obj,
+            descripcion=descripcion,
+            urgencia=urgencia if urgencia in {x[0] for x in SolicitudFalla.URGENCIA_CHOICES} else SolicitudFalla.URGENCIA_MEDIA,
+            reportado_por=request.user,
+            nombre_reportante=nombre_reportante or request.user.get_full_name() or request.user.username,
+        )
+        log_event(request.user, "CREATE", "activos.SolicitudFalla", sf.id, {"folio": sf.folio, "activo": activo_obj.nombre})
+        messages.success(request, f"Falla {sf.folio} registrada. Mantenimiento será notificado.")
+        return redirect("activos:solicitudes_falla")
+
+    activos = Activo.objects.filter(activo=True).order_by("nombre")
+    abiertas = (
+        SolicitudFalla.objects.filter(estatus__in=[SolicitudFalla.ESTATUS_ABIERTA, SolicitudFalla.ESTATUS_EN_PROCESO])
+        .select_related("activo_ref", "activo_ref__sucursal", "reportado_por")
+        .order_by("-fecha_reporte")
+    )
+    recientes = (
+        SolicitudFalla.objects.filter(estatus__in=[SolicitudFalla.ESTATUS_ATENDIDA, SolicitudFalla.ESTATUS_CANCELADA])
+        .select_related("activo_ref", "activo_ref__sucursal")
+        .order_by("-actualizado_en")[:20]
+    )
+    return render(request, "activos/solicitudes_falla.html", {
+        "activos": activos,
+        "abiertas": abiertas,
+        "recientes": recientes,
+        "urgencias": SolicitudFalla.URGENCIA_CHOICES,
+        "module_tabs": _module_tabs("activos:solicitudes_falla"),
+        "can_manage_activos": can_manage_inventario(request.user),
+    })
+
+
+@login_required
+def api_fallas_por_activo(request, activo_id):
+    """AJAX: devuelve solicitudes de falla abiertas para un activo."""
+    fallas = list(
+        SolicitudFalla.objects.filter(
+            activo_ref_id=activo_id,
+            estatus__in=[SolicitudFalla.ESTATUS_ABIERTA, SolicitudFalla.ESTATUS_EN_PROCESO],
+        )
+        .values("id", "folio", "descripcion", "urgencia", "fecha_reporte", "nombre_reportante")
+        .order_by("-fecha_reporte")
+    )
+    from django.http import JsonResponse
+    for f in fallas:
+        f["fecha_reporte"] = f["fecha_reporte"].strftime("%d/%m/%Y %H:%M")
+    return JsonResponse({"fallas": fallas})
+
+
+# ---------------------------------------------------------------------------
+# Evidencias de órdenes
+# ---------------------------------------------------------------------------
+
+@login_required
+def subir_evidencia(request, orden_id):
+    if not can_view_inventario(request.user):
+        raise PermissionDenied
+
+    orden = get_object_or_404(OrdenMantenimiento, pk=orden_id)
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "subir_evidencia").strip()
+
+        # Acción: actualizar factura / nota de trabajo
+        if action == "update_factura":
+            if not can_manage_inventario(request.user):
+                raise PermissionDenied
+            numero_factura = (request.POST.get("numero_factura") or "").strip()
+            nota_trabajo = (request.POST.get("nota_trabajo") or "").strip()
+            factura_archivo = request.FILES.get("factura_archivo")
+            update_fields = ["numero_factura", "nota_trabajo", "actualizado_en"]
+            orden.numero_factura = numero_factura
+            orden.nota_trabajo = nota_trabajo
+            if factura_archivo:
+                if factura_archivo.size > 30 * 1024 * 1024:
+                    messages.error(request, "El archivo supera el límite de 30 MB.")
+                    return redirect("activos:orden_evidencias", orden_id=orden_id)
+                if orden.factura_archivo:
+                    orden.factura_archivo.delete(save=False)
+                orden.factura_archivo = factura_archivo
+                update_fields.append("factura_archivo")
+            orden.save(update_fields=update_fields)
+            BitacoraMantenimiento.objects.create(
+                orden=orden, accion="FACTURA",
+                comentario=f"Factura/nota actualizada: {numero_factura or '—'}",
+                usuario=request.user,
+            )
+            messages.success(request, "Factura y notas guardadas.")
+            return redirect("activos:orden_evidencias", orden_id=orden_id)
+
+        # Acción por defecto: subir evidencia
+        archivo = request.FILES.get("archivo")
+        descripcion = (request.POST.get("descripcion") or "").strip()
+        tipo = (request.POST.get("tipo") or EvidenciaOrden.TIPO_FOTO).strip().upper()
+
+        if not archivo:
+            messages.error(request, "Selecciona un archivo.")
+            return redirect("activos:orden_evidencias", orden_id=orden_id)
+
+        # Límite 30 MB
+        if archivo.size > 30 * 1024 * 1024:
+            messages.error(request, "El archivo supera el límite de 30 MB.")
+            return redirect("activos:orden_evidencias", orden_id=orden_id)
+
+        ev = EvidenciaOrden.objects.create(
+            orden=orden,
+            archivo=archivo,
+            tipo=tipo if tipo in {x[0] for x in EvidenciaOrden.TIPO_CHOICES} else EvidenciaOrden.TIPO_FOTO,
+            descripcion=descripcion,
+            subido_por=request.user,
+        )
+        BitacoraMantenimiento.objects.create(
+            orden=orden,
+            accion="EVIDENCIA",
+            comentario=f"Evidencia subida: {archivo.name} ({ev.tipo})",
+            usuario=request.user,
+        )
+        log_event(request.user, "CREATE", "activos.EvidenciaOrden", ev.id, {"orden": orden.folio, "archivo": archivo.name})
+        messages.success(request, "Evidencia subida correctamente.")
+        return redirect("activos:orden_evidencias", orden_id=orden_id)
+
+    evidencias = orden.evidencias.select_related("subido_por").all()
+    return render(request, "activos/orden_evidencias.html", {
+        "orden": orden,
+        "evidencias": evidencias,
+        "tipos": EvidenciaOrden.TIPO_CHOICES,
+        "module_tabs": _module_tabs("activos:ordenes"),
+        "can_manage_activos": can_manage_inventario(request.user),
+    })
+
+
+@login_required
+def eliminar_evidencia(request, evidencia_id):
+    if not can_manage_inventario(request.user):
+        raise PermissionDenied
+    ev = get_object_or_404(EvidenciaOrden, pk=evidencia_id)
+    orden_id = ev.orden_id
+    ev.archivo.delete(save=False)
+    ev.delete()
+    messages.success(request, "Evidencia eliminada.")
+    return redirect("activos:orden_evidencias", orden_id=orden_id)
+
+
+# ---------------------------------------------------------------------------
+# Registro rápido de mantenimiento no planeado (vista mobile-first)
+# ---------------------------------------------------------------------------
+
+@login_required
+def registro_rapido(request):
+    """Vista mobile-first para registrar un mantenimiento correctivo en campo."""
+    if not can_view_inventario(request.user):
+        raise PermissionDenied
+
+    if request.method == "POST":
+        if not can_manage_inventario(request.user):
+            raise PermissionDenied
+
+        activo_id = (request.POST.get("activo_id") or "").strip()
+        descripcion = (request.POST.get("descripcion") or "").strip()
+        prioridad = (request.POST.get("prioridad") or OrdenMantenimiento.PRIORIDAD_ALTA).strip().upper()
+        origen = (request.POST.get("origen") or OrdenMantenimiento.ORIGEN_EMERGENCIA).strip().upper()
+        responsable = (request.POST.get("responsable") or "").strip()
+        proveedor_id = (request.POST.get("proveedor_id") or "").strip()
+        costo_repuestos = _safe_decimal(request.POST.get("costo_repuestos"))
+        costo_mano_obra = _safe_decimal(request.POST.get("costo_mano_obra"))
+        costo_otros = _safe_decimal(request.POST.get("costo_otros"))
+        proxima_revision_raw = (request.POST.get("proxima_revision") or "").strip()
+        solicitudes_ids = request.POST.getlist("solicitud_id")
+        numero_factura = (request.POST.get("numero_factura") or "").strip()
+        nota_trabajo = (request.POST.get("nota_trabajo") or "").strip()
+        factura_archivo = request.FILES.get("factura_archivo")
+
+        if not activo_id.isdigit() or not descripcion:
+            messages.error(request, "Selecciona un equipo y describe el mantenimiento.")
+            return redirect("activos:registro_rapido")
+
+        activo_obj = get_object_or_404(Activo, pk=int(activo_id))
+        proveedor_obj = None
+        if proveedor_id.isdigit():
+            proveedor_obj = Proveedor.objects.filter(pk=int(proveedor_id)).first()
+
+        try:
+            proxima_revision = (
+                timezone.datetime.fromisoformat(proxima_revision_raw).date()
+                if proxima_revision_raw else None
+            )
+        except ValueError:
+            proxima_revision = None
+
+        orden = OrdenMantenimiento.objects.create(
+            activo_ref=activo_obj,
+            tipo=OrdenMantenimiento.TIPO_CORRECTIVO,
+            prioridad=prioridad if prioridad in {x[0] for x in OrdenMantenimiento.PRIORIDAD_CHOICES} else OrdenMantenimiento.PRIORIDAD_ALTA,
+            origen=origen if origen in {x[0] for x in OrdenMantenimiento.ORIGEN_CHOICES} else OrdenMantenimiento.ORIGEN_EMERGENCIA,
+            descripcion=descripcion,
+            responsable=responsable or request.user.get_full_name() or request.user.username,
+            proveedor_servicio=proveedor_obj,
+            proxima_revision=proxima_revision,
+            costo_repuestos=costo_repuestos,
+            costo_mano_obra=costo_mano_obra,
+            costo_otros=costo_otros,
+            numero_factura=numero_factura,
+            nota_trabajo=nota_trabajo,
+            fecha_programada=timezone.localdate(),
+            fecha_inicio=timezone.localdate(),
+            estatus=OrdenMantenimiento.ESTATUS_EN_PROCESO,
+            creado_por=request.user,
+        )
+        # Guardar factura si se adjuntó
+        if factura_archivo and factura_archivo.size <= 30 * 1024 * 1024:
+            orden.factura_archivo = factura_archivo
+            orden.save(update_fields=["factura_archivo"])
+
+        BitacoraMantenimiento.objects.create(
+            orden=orden,
+            accion="CREADA",
+            comentario=f"Orden de emergencia registrada desde dispositivo móvil. Origen: {orden.get_origen_display()}",
+            usuario=request.user,
+        )
+
+        # Vincular solicitudes de falla seleccionadas
+        for sid in solicitudes_ids:
+            if sid.isdigit():
+                sf = SolicitudFalla.objects.filter(pk=int(sid), activo_ref=activo_obj).first()
+                if sf:
+                    sf.estatus = SolicitudFalla.ESTATUS_EN_PROCESO
+                    sf.orden_atencion = orden
+                    sf.save(update_fields=["estatus", "orden_atencion", "actualizado_en"])
+
+        # Subir evidencias adjuntas
+        archivos = request.FILES.getlist("evidencias")
+        for archivo in archivos[:10]:
+            if archivo.size <= 30 * 1024 * 1024:
+                tipo_ev = EvidenciaOrden.TIPO_FOTO
+                ext = archivo.name.rsplit(".", 1)[-1].lower() if "." in archivo.name else ""
+                if ext in {"mp4", "mov", "avi", "mkv"}:
+                    tipo_ev = EvidenciaOrden.TIPO_VIDEO
+                elif ext in {"pdf", "doc", "docx", "xls", "xlsx"}:
+                    tipo_ev = EvidenciaOrden.TIPO_DOCUMENTO
+                EvidenciaOrden.objects.create(
+                    orden=orden,
+                    archivo=archivo,
+                    tipo=tipo_ev,
+                    descripcion="Evidencia del mantenimiento",
+                    subido_por=request.user,
+                )
+
+        log_event(request.user, "CREATE", "activos.OrdenMantenimiento", orden.id, {
+            "folio": orden.folio,
+            "activo": activo_obj.nombre,
+            "origen": orden.origen,
+            "tipo": orden.tipo,
+        })
+        messages.success(request, f"Mantenimiento {orden.folio} registrado correctamente.")
+        return redirect("activos:orden_evidencias", orden_id=orden.id)
+
+    activos = Activo.objects.filter(activo=True).select_related("sucursal").order_by("nombre")
+    proveedores = Proveedor.objects.filter(activo=True).order_by("nombre")
+    return render(request, "activos/registro_rapido.html", {
+        "activos": activos,
+        "proveedores": proveedores,
+        "prioridades": OrdenMantenimiento.PRIORIDAD_CHOICES,
+        "origenes": OrdenMantenimiento.ORIGEN_CHOICES,
+        "module_tabs": _module_tabs("activos:ordenes"),
+        "can_manage_activos": can_manage_inventario(request.user),
+    })

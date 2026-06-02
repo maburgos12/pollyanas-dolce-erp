@@ -16,4 +16,9 @@ urlpatterns = [
     path("calendario/", views.calendario, name="calendario"),
     path("api/dashboard-ejecutivo/", views.api_dashboard_ejecutivo, name="api-dashboard-ejecutivo"),
     path("api/bandeja-compras/", views.api_bandeja_compras, name="api-bandeja-compras"),
+    path("fallas/", views.solicitudes_falla, name="solicitudes_falla"),
+    path("api/fallas-por-activo/<int:activo_id>/", views.api_fallas_por_activo, name="api_fallas_por_activo"),
+    path("ordenes/<int:orden_id>/evidencias/", views.subir_evidencia, name="orden_evidencias"),
+    path("evidencias/<int:evidencia_id>/eliminar/", views.eliminar_evidencia, name="eliminar_evidencia"),
+    path("registro-rapido/", views.registro_rapido, name="registro_rapido"),
 ]

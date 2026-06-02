@@ -161,6 +161,17 @@ class OrdenMantenimiento(models.Model):
         (ESTATUS_CANCELADA, "Cancelada"),
     ]
 
+    ORIGEN_PLAN = "PLAN"
+    ORIGEN_SOLICITUD = "SOLICITUD"
+    ORIGEN_EMERGENCIA = "EMERGENCIA"
+    ORIGEN_INICIATIVA = "INICIATIVA"
+    ORIGEN_CHOICES = [
+        (ORIGEN_PLAN, "Plan de mantenimiento"),
+        (ORIGEN_SOLICITUD, "Solicitud de falla"),
+        (ORIGEN_EMERGENCIA, "Emergencia no reportada"),
+        (ORIGEN_INICIATIVA, "Iniciativa del técnico"),
+    ]
+
     folio = models.CharField(max_length=24, unique=True, blank=True)
     activo_ref = models.ForeignKey(Activo, on_delete=models.PROTECT, related_name="ordenes_mantenimiento")
     plan_ref = models.ForeignKey(
@@ -181,6 +192,24 @@ class OrdenMantenimiento(models.Model):
     costo_repuestos = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0"))
     costo_mano_obra = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0"))
     costo_otros = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0"))
+    origen = models.CharField(max_length=16, choices=ORIGEN_CHOICES, default=ORIGEN_PLAN)
+    numero_factura = models.CharField(max_length=80, blank=True, default="", verbose_name="Número de factura / remisión")
+    factura_archivo = models.FileField(
+        upload_to="activos/facturas/%Y/%m/",
+        null=True, blank=True,
+        verbose_name="Archivo de factura",
+        help_text="PDF o foto de la factura / nota de remisión del proveedor",
+    )
+    nota_trabajo = models.TextField(blank=True, default="", verbose_name="Nota del trabajo realizado")
+    proveedor_servicio = models.ForeignKey(
+        Proveedor,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ordenes_mantenimiento",
+        verbose_name="Proveedor del servicio",
+    )
+    proxima_revision = models.DateField(null=True, blank=True, verbose_name="Próxima revisión")
     creado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -219,6 +248,110 @@ class OrdenMantenimiento(models.Model):
 
     def __str__(self):
         return self.folio
+
+
+class SolicitudFalla(models.Model):
+    ESTATUS_ABIERTA = "ABIERTA"
+    ESTATUS_EN_PROCESO = "EN_PROCESO"
+    ESTATUS_ATENDIDA = "ATENDIDA"
+    ESTATUS_CANCELADA = "CANCELADA"
+    ESTATUS_CHOICES = [
+        (ESTATUS_ABIERTA, "Abierta"),
+        (ESTATUS_EN_PROCESO, "En proceso"),
+        (ESTATUS_ATENDIDA, "Atendida"),
+        (ESTATUS_CANCELADA, "Cancelada"),
+    ]
+
+    URGENCIA_CRITICA = "CRITICA"
+    URGENCIA_ALTA = "ALTA"
+    URGENCIA_MEDIA = "MEDIA"
+    URGENCIA_BAJA = "BAJA"
+    URGENCIA_CHOICES = [
+        (URGENCIA_CRITICA, "Crítica — equipo detenido"),
+        (URGENCIA_ALTA, "Alta — falla visible"),
+        (URGENCIA_MEDIA, "Media — funciona con problema"),
+        (URGENCIA_BAJA, "Baja — detallar para seguimiento"),
+    ]
+
+    folio = models.CharField(max_length=24, unique=True, blank=True)
+    activo_ref = models.ForeignKey(
+        Activo, on_delete=models.PROTECT, related_name="solicitudes_falla"
+    )
+    descripcion = models.TextField()
+    urgencia = models.CharField(max_length=10, choices=URGENCIA_CHOICES, default=URGENCIA_MEDIA)
+    estatus = models.CharField(max_length=16, choices=ESTATUS_CHOICES, default=ESTATUS_ABIERTA)
+    reportado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="solicitudes_falla_reportadas",
+    )
+    nombre_reportante = models.CharField(max_length=120, blank=True, default="")
+    fecha_reporte = models.DateTimeField(default=timezone.now)
+    orden_atencion = models.ForeignKey(
+        "OrdenMantenimiento",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="solicitudes_atendidas",
+    )
+    actualizado_en = models.DateTimeField(auto_now=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-fecha_reporte", "-id"]
+        verbose_name = "Solicitud de falla"
+        verbose_name_plural = "Solicitudes de falla"
+
+    def save(self, *args, **kwargs):
+        if not self.folio:
+            ymd = timezone.localdate().strftime("%y%m%d")
+            prefix = f"SF-{ymd}-"
+            seq = SolicitudFalla.objects.filter(folio__startswith=prefix).count() + 1
+            self.folio = f"{prefix}{seq:03d}"
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.folio} · {self.activo_ref.nombre}"
+
+
+class EvidenciaOrden(models.Model):
+    TIPO_FOTO = "FOTO"
+    TIPO_VIDEO = "VIDEO"
+    TIPO_DOCUMENTO = "DOCUMENTO"
+    TIPO_CHOICES = [
+        (TIPO_FOTO, "Foto"),
+        (TIPO_VIDEO, "Video"),
+        (TIPO_DOCUMENTO, "Documento / PDF"),
+    ]
+
+    orden = models.ForeignKey(
+        "OrdenMantenimiento", on_delete=models.CASCADE, related_name="evidencias"
+    )
+    archivo = models.FileField(upload_to="activos/evidencias/%Y/%m/")
+    tipo = models.CharField(max_length=16, choices=TIPO_CHOICES, default=TIPO_FOTO)
+    descripcion = models.CharField(max_length=240, blank=True, default="")
+    subido_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-creado_en"]
+        verbose_name = "Evidencia de orden"
+        verbose_name_plural = "Evidencias de orden"
+
+    def __str__(self):
+        return f"{self.orden.folio} · {self.tipo} · {self.archivo.name}"
+
+    @property
+    def es_imagen(self):
+        ext = self.archivo.name.rsplit(".", 1)[-1].lower() if self.archivo else ""
+        return ext in {"jpg", "jpeg", "png", "gif", "webp", "heic"}
 
 
 class BitacoraMantenimiento(models.Model):
