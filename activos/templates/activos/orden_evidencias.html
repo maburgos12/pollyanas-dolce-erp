@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}Evidencias · {{ orden.folio }}{% endblock %}
+{% block page_title %}Activos · Evidencias{% endblock %}
+
+{% block extra_css %}
+<style>
+.orden-header {
+  display: flex; flex-wrap: wrap; gap: 12px;
+  align-items: center; margin-bottom: 16px;
+}
+.orden-folio { font-family: monospace; font-size: 1.3rem; font-weight: 700; color: var(--vino); }
+.orden-meta { font-size: 0.9rem; color: var(--texto-light); }
+.ev-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+@media (max-width: 480px) { .ev-grid { grid-template-columns: repeat(2, 1fr); } }
+.ev-card {
+  border: 1.5px solid #e0d0d0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+  position: relative;
+}
+.ev-card img { width: 100%; height: 140px; object-fit: cover; display: block; cursor: pointer; }
+.ev-card .ev-icon { height: 140px; display: flex; align-items: center; justify-content: center; font-size: 3rem; background: var(--gris-suave); }
+.ev-card .ev-body { padding: 8px 10px; }
+.ev-card .ev-tipo { font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: var(--texto-light); }
+.ev-card .ev-desc { font-size: 0.85rem; color: var(--texto); margin-top: 2px; word-break: break-word; }
+.ev-card .ev-meta { font-size: 0.75rem; color: var(--texto-light); margin-top: 4px; }
+.ev-card .ev-actions { padding: 6px 10px 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+.upload-area {
+  border: 2px dashed var(--dorado);
+  border-radius: 10px;
+  padding: 24px 16px;
+  text-align: center;
+  background: #fffbf0;
+  cursor: pointer;
+}
+.upload-area input[type="file"] { display: none; }
+.upload-area .upload-icon { font-size: 2.5rem; margin-bottom: 6px; }
+.upload-area p { margin: 4px 0; color: var(--texto-light); font-size: 0.9rem; }
+.mobile-form-group { margin-bottom: 14px; }
+.mobile-form-group label { display: block; font-weight: 700; font-size: .9rem; margin-bottom: 5px; }
+.mobile-form-group select,
+.mobile-form-group input[type="text"] {
+  width: 100%; font-size: 1rem; padding: 11px;
+  border-radius: 8px; border: 1.5px solid #d0c0c0;
+  background: #fff; box-sizing: border-box;
+}
+.lightbox-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,.88); z-index: 9999;
+  align-items: center; justify-content: center;
+}
+.lightbox-overlay.active { display: flex; }
+.lightbox-overlay img { max-width: 94vw; max-height: 90vh; border-radius: 8px; }
+.lightbox-close {
+  position: absolute; top: 16px; right: 20px;
+  color: #fff; font-size: 2rem; cursor: pointer; line-height: 1;
+}
+.btn-grande { width: 100%; padding: 14px; font-size: 1rem; font-weight: 700; border-radius: 10px; margin-top: 6px; }
+.preview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px,1fr)); gap: 8px; margin-top: 10px; }
+.preview-item { position: relative; border-radius: 8px; overflow: hidden; background: #f0f0f0; }
+.preview-item img { width: 100%; height: 80px; object-fit: cover; display: block; }
+.preview-item .doc-icon { height: 80px; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; }
+.preview-item .preview-remove {
+  position: absolute; top: 3px; right: 3px;
+  background: rgba(229,57,53,.85); color: #fff;
+  border: none; border-radius: 50%; width: 20px; height: 20px;
+  font-size: .7rem; cursor: pointer; line-height: 20px; text-align: center; padding: 0;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-tabs mant-tabs">
+  {% for tab in module_tabs %}
+    <a class="module-tab {% if tab.active %}active{% endif %}" href="{% url tab.url_name %}">{{ tab.label }}</a>
+  {% endfor %}
+</div>
+
+{% if messages %}
+  {% for msg in messages %}
+    <div class="alert alert-{{ msg.tags|default:'info' }}" style="margin-bottom:12px;">{{ msg }}</div>
+  {% endfor %}
+{% endif %}
+
+<!-- Encabezado de la orden -->
+<section class="card">
+  <div class="orden-header">
+    <div>
+      <span class="orden-folio">{{ orden.folio }}</span>
+      <span class="badge {% if orden.tipo == 'CORRECTIVO' %}bg-danger{% else %}bg-primary{% endif %}" style="margin-left:8px;">{{ orden.get_tipo_display }}</span>
+      <span class="badge {% if orden.estatus == 'CERRADA' %}bg-success{% elif orden.estatus == 'EN_PROCESO' %}bg-warning{% else %}bg-secondary{% endif %}" style="margin-left:4px;">{{ orden.get_estatus_display }}</span>
+    </div>
+    <div>
+      <div style="font-weight:700;">{{ orden.activo_ref.nombre }}</div>
+      <div class="orden-meta">
+        {% if orden.activo_ref.sucursal %}{{ orden.activo_ref.sucursal.nombre }} · {% endif %}
+        {% if orden.proveedor_servicio %}Proveedor: {{ orden.proveedor_servicio.nombre }} · {% endif %}
+        Fecha: {{ orden.fecha_programada|date:"d/m/Y" }}
+        {% if orden.proxima_revision %} · Próxima revisión: {{ orden.proxima_revision|date:"d/m/Y" }}{% endif %}
+      </div>
+    </div>
+    <div style="margin-left:auto;">
+      <a href="{% url 'activos:ordenes' %}" class="btn btn-secondary btn-sm">← Volver a órdenes</a>
+    </div>
+  </div>
+  {% if orden.descripcion %}
+    <p style="margin:0;color:var(--texto);">{{ orden.descripcion }}</p>
+  {% endif %}
+</section>
+
+<!-- Galería de evidencias existentes -->
+<section class="card">
+  <div class="card-header">
+    Evidencias ({{ evidencias|length }})
+  </div>
+  {% if evidencias %}
+    <div class="ev-grid">
+      {% for ev in evidencias %}
+        <div class="ev-card">
+          {% if ev.es_imagen %}
+            <img src="{{ ev.archivo.url }}" alt="{{ ev.descripcion }}"
+                 onclick="openLightbox('{{ ev.archivo.url }}')" title="Ver imagen">
+          {% elif ev.tipo == 'VIDEO' %}
+            <a href="{{ ev.archivo.url }}" target="_blank" style="text-decoration:none;">
+              <div class="ev-icon">🎥</div>
+            </a>
+          {% else %}
+            <a href="{{ ev.archivo.url }}" target="_blank" style="text-decoration:none;">
+              <div class="ev-icon">📄</div>
+            </a>
+          {% endif %}
+          <div class="ev-body">
+            <div class="ev-tipo">{{ ev.get_tipo_display }}</div>
+            {% if ev.descripcion %}<div class="ev-desc">{{ ev.descripcion }}</div>{% endif %}
+            <div class="ev-meta">
+              {{ ev.creado_en|date:"d/m/Y H:i" }}
+              {% if ev.subido_por %} · {{ ev.subido_por.get_full_name|default:ev.subido_por.username }}{% endif %}
+            </div>
+          </div>
+          {% if can_manage_activos %}
+          <div class="ev-actions">
+            <a href="{{ ev.archivo.url }}" target="_blank" class="btn btn-secondary btn-sm">⬇ Ver</a>
+            <form method="post" action="{% url 'activos:eliminar_evidencia' ev.id %}" style="display:inline;"
+                  onsubmit="return confirm('¿Eliminar esta evidencia?')">
+              {% csrf_token %}
+              <button type="submit" class="btn btn-sm" style="background:#fdecea;color:var(--rojo);border-color:var(--rojo);">🗑</button>
+            </form>
+          </div>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="padding: 12px 0;">No hay evidencias subidas todavía.</p>
+  {% endif %}
+</section>
+
+<!-- Sección de Factura / Nota de trabajo -->
+{% if can_manage_activos %}
+<section class="card card-form-narrow">
+  <div class="card-header" style="background:linear-gradient(135deg,#1565C0,#0D47A1);color:#fff;">
+    🧾 Factura / Nota de remisión y trabajo
+  </div>
+
+  <!-- Vista de lo registrado -->
+  {% if orden.numero_factura or orden.factura_archivo or orden.nota_trabajo %}
+  <div style="margin-bottom:16px;padding:14px;background:#f0f9ff;border:1.5px solid #90CAF9;border-radius:10px;">
+    {% if orden.numero_factura %}
+      <div style="margin-bottom:8px;">
+        <strong>Número de factura:</strong>
+        <span style="font-family:monospace;font-size:1rem;color:#1565C0;">{{ orden.numero_factura }}</span>
+      </div>
+    {% endif %}
+    {% if orden.factura_archivo %}
+      <div style="margin-bottom:8px;display:flex;align-items:center;gap:10px;">
+        <span style="font-size:1.5rem;">🧾</span>
+        <a href="{{ orden.factura_archivo.url }}" target="_blank" class="btn btn-secondary btn-sm">
+          Ver / descargar factura
+        </a>
+      </div>
+    {% endif %}
+    {% if orden.nota_trabajo %}
+      <div>
+        <strong>Nota del trabajo:</strong>
+        <p style="margin:6px 0 0;white-space:pre-line;color:var(--texto);">{{ orden.nota_trabajo }}</p>
+      </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- Formulario para actualizar -->
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="update_factura">
+
+    <div class="mobile-form-group">
+      <label>Número de factura o remisión</label>
+      <input type="text" name="numero_factura" value="{{ orden.numero_factura }}" placeholder="Ej: FAC-2024-00123">
+    </div>
+
+    <div class="mobile-form-group">
+      <label>Archivo de factura{% if orden.factura_archivo %} <span style="color:var(--verde);font-weight:400;">(ya hay uno, subir reemplaza)</span>{% endif %}</label>
+      <div class="upload-area" style="padding:14px;" onclick="document.getElementById('input-factura-ev').click()">
+        <input type="file" name="factura_archivo" id="input-factura-ev" accept=".pdf,image/*" capture="environment">
+        <div style="font-size:1.8rem;margin-bottom:4px;">🧾</div>
+        <p><strong>Toca para adjuntar factura</strong></p>
+        <p>PDF o foto · Máx. 30 MB</p>
+      </div>
+      <div id="preview-factura-ev" style="margin-top:8px;"></div>
+    </div>
+
+    <div class="mobile-form-group">
+      <label>Nota del trabajo realizado</label>
+      <textarea name="nota_trabajo" rows="4" placeholder="Describe qué se hizo, piezas cambiadas, resultado de la prueba…">{{ orden.nota_trabajo }}</textarea>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-grande" style="background:#1565C0;border-color:#1565C0;">
+      Guardar factura y notas
+    </button>
+  </form>
+</section>
+{% endif %}
+
+<!-- Subir nueva evidencia -->
+{% if can_manage_activos %}
+<section class="card card-form-narrow">
+  <div class="card-header">Agregar evidencia fotográfica / video</div>
+  <form method="post" enctype="multipart/form-data" id="form-upload">
+    {% csrf_token %}
+
+    <div class="upload-area" id="upload-area" onclick="document.getElementById('input-archivo').click()">
+      <input type="file" name="archivo" id="input-archivo"
+             accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx"
+             capture="environment">
+      <div class="upload-icon">📷</div>
+      <p><strong>Toca para agregar foto, video o documento</strong></p>
+      <p>JPG, PNG, MP4, PDF · Máx. 30 MB</p>
+    </div>
+    <div class="preview-grid" id="preview-grid"></div>
+
+    <div class="mobile-form-group" style="margin-top:14px;">
+      <label>Tipo</label>
+      <select name="tipo">
+        {% for val, label in tipos %}
+          <option value="{{ val }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="mobile-form-group">
+      <label>Descripción (opcional)</label>
+      <input type="text" name="descripcion" placeholder="Ej: Foto antes de intervención, Factura proveedor…">
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-grande">Subir evidencia</button>
+  </form>
+</section>
+{% endif %}
+
+<!-- Lightbox -->
+<div class="lightbox-overlay" id="lightbox" onclick="closeLightbox()">
+  <span class="lightbox-close" onclick="closeLightbox()">×</span>
+  <img id="lightbox-img" src="" alt="Evidencia">
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Lightbox
+function openLightbox(url) {
+  document.getElementById('lightbox-img').src = url;
+  document.getElementById('lightbox').classList.add('active');
+}
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('active');
+  document.getElementById('lightbox-img').src = '';
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+
+// Preview de factura
+const inputFacturaEv = document.getElementById('input-factura-ev');
+const previewFacturaEv = document.getElementById('preview-factura-ev');
+if (inputFacturaEv) {
+  inputFacturaEv.addEventListener('change', function() {
+    previewFacturaEv.innerHTML = '';
+    const file = this.files[0];
+    if (!file) return;
+    const ext = file.name.split('.').pop().toLowerCase();
+    const isImg = ['jpg','jpeg','png','gif','webp','heic'].includes(ext);
+    const div = document.createElement('div');
+    div.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px;background:#f0fff4;border-radius:8px;border:1.5px solid var(--verde);margin-top:4px;';
+    div.innerHTML = `<span style="font-size:1.8rem">${isImg ? '🖼️' : '🧾'}</span><div><strong>${file.name}</strong><br><span style="font-size:.8rem;color:var(--texto-light)">${(file.size/1024/1024).toFixed(2)} MB</span></div>`;
+    previewFacturaEv.appendChild(div);
+  });
+}
+
+// Preview de archivo seleccionado
+const inputArchivo = document.getElementById('input-archivo');
+const previewGrid  = document.getElementById('preview-grid');
+if (inputArchivo) {
+  inputArchivo.addEventListener('change', function() {
+    previewGrid.innerHTML = '';
+    Array.from(this.files).forEach(file => {
+      const div = document.createElement('div');
+      div.className = 'preview-item';
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (['jpg','jpeg','png','gif','webp','heic'].includes(ext)) {
+        const img = document.createElement('img');
+        img.src = URL.createObjectURL(file);
+        div.appendChild(img);
+      } else {
+        const icon = document.createElement('div');
+        icon.className = 'doc-icon';
+        icon.textContent = ['mp4','mov','avi'].includes(ext) ? '🎥' : '📄';
+        div.appendChild(icon);
+      }
+      previewGrid.appendChild(div);
+    });
+  });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,405 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}Registro Rápido de Mantenimiento{% endblock %}
+{% block page_title %}Activos · Registro Rápido{% endblock %}
+
+{% block extra_css %}
+<style>
+.rr-section { margin-bottom: 20px; }
+.rr-section-title {
+  font-family: 'Playfair Display', serif;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--vino);
+  border-bottom: 2px solid var(--rosa-hover);
+  padding-bottom: 6px;
+  margin-bottom: 14px;
+}
+.mobile-form-group { margin-bottom: 14px; }
+.mobile-form-group label {
+  display: block;
+  font-weight: 700;
+  font-size: 0.9rem;
+  margin-bottom: 5px;
+  color: var(--texto);
+}
+.mobile-form-group select,
+.mobile-form-group input[type="text"],
+.mobile-form-group input[type="date"],
+.mobile-form-group input[type="number"],
+.mobile-form-group textarea {
+  width: 100%;
+  font-size: 1rem;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1.5px solid #d0c0c0;
+  background: #fff;
+  box-sizing: border-box;
+}
+.mobile-form-group textarea { min-height: 90px; resize: vertical; }
+.mobile-form-group .hint { font-size: 0.8rem; color: var(--texto-light); margin-top: 4px; }
+.costos-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+@media (max-width: 480px) { .costos-grid { grid-template-columns: 1fr; } }
+.btn-grande { width: 100%; padding: 16px; font-size: 1.1rem; font-weight: 700; border-radius: 10px; margin-top: 8px; }
+
+/* Fallas vinculables */
+#fallas-container { display: none; }
+.falla-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1.5px solid var(--amarillo);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: #fffbe6;
+  cursor: pointer;
+}
+.falla-item.selected { border-color: var(--verde); background: #f0fff4; }
+.falla-item input[type="checkbox"] { width: 20px; height: 20px; margin-top: 2px; flex-shrink: 0; }
+.falla-item-body { flex: 1; }
+.falla-item-folio { font-family: monospace; font-weight: 700; font-size: 0.85rem; color: var(--vino); }
+.falla-item-desc { font-size: 0.9rem; margin: 3px 0; }
+.falla-item-meta { font-size: 0.78rem; color: var(--texto-light); }
+.fallas-loading { color: var(--texto-light); font-style: italic; padding: 8px 0; }
+.fallas-empty { color: var(--texto-light); font-size: 0.9rem; padding: 8px 0; }
+
+/* Upload evidencias */
+.upload-area {
+  border: 2px dashed var(--dorado);
+  border-radius: 10px;
+  padding: 24px 16px;
+  text-align: center;
+  background: #fffbf0;
+  cursor: pointer;
+  transition: border-color .2s, background .2s;
+}
+.upload-area:hover, .upload-area.drag-over { border-color: var(--vino); background: var(--rosa); }
+.upload-area input[type="file"] { display: none; }
+.upload-area .upload-icon { font-size: 2.5rem; margin-bottom: 8px; }
+.upload-area p { margin: 0; color: var(--texto-light); font-size: 0.9rem; }
+.preview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; margin-top: 12px; }
+.preview-item { position: relative; border-radius: 8px; overflow: hidden; background: #f0f0f0; }
+.preview-item img { width: 100%; height: 90px; object-fit: cover; display: block; }
+.preview-item .preview-name { font-size: 0.7rem; padding: 4px; color: var(--texto); word-break: break-all; text-align: center; }
+.preview-item .preview-remove {
+  position: absolute; top: 4px; right: 4px;
+  background: rgba(229,57,53,.85); color: #fff;
+  border: none; border-radius: 50%; width: 22px; height: 22px;
+  font-size: 0.75rem; cursor: pointer; line-height: 22px; text-align: center; padding: 0;
+}
+.doc-preview { height: 90px; display: flex; align-items: center; justify-content: center; font-size: 2rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-tabs mant-tabs">
+  {% for tab in module_tabs %}
+    <a class="module-tab {% if tab.active %}active{% endif %}" href="{% url tab.url_name %}">{{ tab.label }}</a>
+  {% endfor %}
+</div>
+
+{% if messages %}
+  {% for msg in messages %}
+    <div class="alert alert-{{ msg.tags|default:'info' }}" style="margin-bottom:12px;">{{ msg }}</div>
+  {% endfor %}
+{% endif %}
+
+<section class="card card-form-narrow">
+  <div class="card-header" style="background:linear-gradient(135deg,var(--vino),#6B1740);color:#fff;">
+    🔧 Registrar mantenimiento no planeado
+  </div>
+
+  <form method="post" enctype="multipart/form-data" id="form-registro-rapido">
+    {% csrf_token %}
+
+    <!-- ① EQUIPO -->
+    <div class="rr-section">
+      <div class="rr-section-title">① Equipo intervenido</div>
+
+      <div class="mobile-form-group">
+        <label>Equipo *</label>
+        <select name="activo_id" id="sel-activo" required>
+          <option value="">— Busca y selecciona el equipo —</option>
+          {% for a in activos %}
+            <option value="{{ a.id }}">{{ a.nombre }}{% if a.sucursal %} · {{ a.sucursal.nombre }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <!-- Fallas abiertas vinculables -->
+      <div id="fallas-container">
+        <label style="font-weight:700;font-size:.9rem;color:var(--texto);display:block;margin-bottom:8px;">
+          Fallas reportadas para este equipo (selecciona las que resuelve este mantenimiento)
+        </label>
+        <div id="fallas-lista"><span class="fallas-loading">Cargando…</span></div>
+      </div>
+    </div>
+
+    <!-- ② DETALLE DEL TRABAJO -->
+    <div class="rr-section">
+      <div class="rr-section-title">② ¿Qué se hizo?</div>
+
+      <div class="mobile-form-group">
+        <label>Origen del mantenimiento *</label>
+        <select name="origen" required>
+          {% for val, label in origenes %}
+            <option value="{{ val }}" {% if val == "EMERGENCIA" %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="mobile-form-group">
+        <label>Descripción del trabajo realizado *</label>
+        <textarea name="descripcion" placeholder="Ej: Se reemplazó resistencia quemada del horno 3. Se verificó temperatura tras encendido. Equipo vuelve a operar normal." required></textarea>
+      </div>
+
+      <div class="mobile-form-group">
+        <label>Prioridad</label>
+        <select name="prioridad">
+          {% for val, label in prioridades %}
+            <option value="{{ val }}" {% if val == "ALTA" %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="mobile-form-group">
+        <label>Técnico / Responsable</label>
+        <input type="text" name="responsable" placeholder="Nombre del técnico que realizó el trabajo" value="{{ request.user.get_full_name }}">
+      </div>
+    </div>
+
+    <!-- ③ PROVEEDOR -->
+    <div class="rr-section">
+      <div class="rr-section-title">③ Proveedor del servicio (si fue externo)</div>
+
+      <div class="mobile-form-group">
+        <label>Proveedor</label>
+        <select name="proveedor_id">
+          <option value="">— Servicio interno / sin proveedor —</option>
+          {% for p in proveedores %}
+            <option value="{{ p.id }}">{{ p.nombre }}</option>
+          {% endfor %}
+        </select>
+        <div class="hint">Si fue técnico de la empresa, deja en blanco.</div>
+      </div>
+    </div>
+
+    <!-- ④ COSTOS -->
+    <div class="rr-section">
+      <div class="rr-section-title">④ Costos (puedes completarlos después)</div>
+
+      <div class="costos-grid">
+        <div class="mobile-form-group">
+          <label>Repuestos $</label>
+          <input type="number" step="0.01" min="0" name="costo_repuestos" value="0" placeholder="0.00">
+        </div>
+        <div class="mobile-form-group">
+          <label>Mano de obra $</label>
+          <input type="number" step="0.01" min="0" name="costo_mano_obra" value="0" placeholder="0.00">
+        </div>
+        <div class="mobile-form-group">
+          <label>Otros $</label>
+          <input type="number" step="0.01" min="0" name="costo_otros" value="0" placeholder="0.00">
+        </div>
+      </div>
+    </div>
+
+    <!-- ⑤ FACTURA / NOTA DE REMISIÓN -->
+    <div class="rr-section">
+      <div class="rr-section-title">⑤ Factura / Nota de remisión</div>
+
+      <div class="mobile-form-group">
+        <label>Número de factura o remisión</label>
+        <input type="text" name="numero_factura" placeholder="Ej: FAC-2024-00123 o R-456">
+      </div>
+
+      <div class="mobile-form-group">
+        <label>Archivo de factura (PDF o foto)</label>
+        <div class="upload-area" style="padding:16px 12px;" onclick="document.getElementById('input-factura').click()">
+          <input type="file" name="factura_archivo" id="input-factura"
+                 accept=".pdf,image/*" capture="environment">
+          <div style="font-size:1.8rem;margin-bottom:4px;">🧾</div>
+          <p><strong>Toca para adjuntar factura</strong></p>
+          <p>PDF o foto de la factura · Máx. 30 MB</p>
+        </div>
+        <div id="preview-factura" style="margin-top:8px;"></div>
+      </div>
+
+      <div class="mobile-form-group">
+        <label>Nota del trabajo realizado</label>
+        <textarea name="nota_trabajo" placeholder="Ej: Se reemplazó resistencia quemada en horno 3. Prueba de temperatura 30 min. Equipo operativo."></textarea>
+      </div>
+    </div>
+
+    <!-- ⑥ PRÓXIMA REVISIÓN -->
+    <div class="rr-section">
+      <div class="rr-section-title">⑦ Próxima revisión (opcional)</div>
+
+      <div class="mobile-form-group">
+        <label>Fecha de seguimiento recomendada</label>
+        <input type="date" name="proxima_revision">
+        <div class="hint">Si el equipo necesita revisión posterior, marca la fecha aquí.</div>
+      </div>
+    </div>
+
+    <!-- ⑧ EVIDENCIAS -->
+    <div class="rr-section">
+      <div class="rr-section-title">⑧ Evidencias adicionales (fotos, videos)</div>
+
+      <div class="upload-area" id="upload-area" onclick="document.getElementById('input-evidencias').click()">
+        <input type="file" name="evidencias" id="input-evidencias" multiple
+               accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx"
+               capture="environment">
+        <div class="upload-icon">📷</div>
+        <p><strong>Toca aquí para agregar fotos o archivos</strong></p>
+        <p>Fotos, videos, PDF de factura · Máx. 30 MB por archivo</p>
+      </div>
+      <div class="preview-grid" id="preview-grid"></div>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-grande">
+      ✔ Guardar mantenimiento
+    </button>
+  </form>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ──────────────────────────────────────────
+// Preview factura
+// ──────────────────────────────────────────
+const inputFactura = document.getElementById('input-factura');
+const previewFactura = document.getElementById('preview-factura');
+if (inputFactura) {
+  inputFactura.addEventListener('change', function() {
+    previewFactura.innerHTML = '';
+    const file = this.files[0];
+    if (!file) return;
+    const ext = file.name.split('.').pop().toLowerCase();
+    const isImg = ['jpg','jpeg','png','gif','webp','heic'].includes(ext);
+    const div = document.createElement('div');
+    div.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px;background:#f0fff4;border-radius:8px;border:1.5px solid var(--verde);';
+    div.innerHTML = `<span style="font-size:1.8rem">${isImg ? '🖼️' : '🧾'}</span><div><strong>${file.name}</strong><br><span style="font-size:.8rem;color:var(--texto-light)">${(file.size/1024/1024).toFixed(2)} MB</span></div>`;
+    previewFactura.appendChild(div);
+  });
+}
+
+// ──────────────────────────────────────────
+// Carga de fallas por equipo (AJAX)
+// ──────────────────────────────────────────
+const selActivo = document.getElementById('sel-activo');
+const fallasContainer = document.getElementById('fallas-container');
+const fallasLista = document.getElementById('fallas-lista');
+
+selActivo.addEventListener('change', function() {
+  const activoId = this.value;
+  if (!activoId) { fallasContainer.style.display = 'none'; return; }
+
+  fallasContainer.style.display = 'block';
+  fallasLista.innerHTML = '<span class="fallas-loading">Buscando fallas reportadas…</span>';
+
+  fetch(`/activos/api/fallas-por-activo/${activoId}/`)
+    .then(r => r.json())
+    .then(data => {
+      if (!data.fallas || data.fallas.length === 0) {
+        fallasLista.innerHTML = '<p class="fallas-empty">No hay fallas abiertas para este equipo.</p>';
+        return;
+      }
+      fallasLista.innerHTML = data.fallas.map(f => `
+        <label class="falla-item" id="fi-${f.id}">
+          <input type="checkbox" name="solicitud_id" value="${f.id}"
+                 onchange="this.closest('.falla-item').classList.toggle('selected', this.checked)">
+          <div class="falla-item-body">
+            <div class="falla-item-folio">${f.folio} · <strong>${f.urgencia}</strong></div>
+            <div class="falla-item-desc">${f.descripcion}</div>
+            <div class="falla-item-meta">Reportado por ${f.nombre_reportante} · ${f.fecha_reporte}</div>
+          </div>
+        </label>
+      `).join('');
+    })
+    .catch(() => {
+      fallasLista.innerHTML = '<p class="fallas-empty">Error al cargar fallas. Continúa sin vincular.</p>';
+    });
+});
+
+// ──────────────────────────────────────────
+// Preview de evidencias
+// ──────────────────────────────────────────
+const inputEvidencias = document.getElementById('input-evidencias');
+const previewGrid = document.getElementById('preview-grid');
+const uploadArea = document.getElementById('upload-area');
+let selectedFiles = [];
+
+// Drag & drop
+uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('drag-over'); });
+uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('drag-over'));
+uploadArea.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadArea.classList.remove('drag-over');
+  addFiles(Array.from(e.dataTransfer.files));
+});
+
+inputEvidencias.addEventListener('change', function() {
+  addFiles(Array.from(this.files));
+  this.value = ''; // reset so same file can be added again if needed
+});
+
+function addFiles(files) {
+  files.forEach(file => {
+    if (file.size > 30 * 1024 * 1024) {
+      alert(`"${file.name}" supera el límite de 30 MB y no se agregó.`);
+      return;
+    }
+    selectedFiles.push(file);
+  });
+  renderPreviews();
+  syncFileInput();
+}
+
+function renderPreviews() {
+  previewGrid.innerHTML = '';
+  selectedFiles.forEach((file, idx) => {
+    const div = document.createElement('div');
+    div.className = 'preview-item';
+    const ext = file.name.split('.').pop().toLowerCase();
+    const isImg = ['jpg','jpeg','png','gif','webp','heic'].includes(ext);
+    const isVideo = ['mp4','mov','avi','mkv'].includes(ext);
+
+    if (isImg) {
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(file);
+      div.appendChild(img);
+    } else if (isVideo) {
+      const icon = document.createElement('div');
+      icon.className = 'doc-preview'; icon.textContent = '🎥';
+      div.appendChild(icon);
+    } else {
+      const icon = document.createElement('div');
+      icon.className = 'doc-preview'; icon.textContent = '📄';
+      div.appendChild(icon);
+    }
+
+    const name = document.createElement('div');
+    name.className = 'preview-name';
+    name.textContent = file.name.length > 20 ? file.name.substring(0,18)+'…' : file.name;
+    div.appendChild(name);
+
+    const btn = document.createElement('button');
+    btn.className = 'preview-remove'; btn.type = 'button'; btn.textContent = '×';
+    btn.onclick = () => { selectedFiles.splice(idx, 1); renderPreviews(); syncFileInput(); };
+    div.appendChild(btn);
+
+    previewGrid.appendChild(div);
+  });
+}
+
+function syncFileInput() {
+  // Rebuild a DataTransfer to re-assign files to the input
+  const dt = new DataTransfer();
+  selectedFiles.forEach(f => dt.items.add(f));
+  inputEvidencias.files = dt.files;
+}
+</script>
+{% endblock %}

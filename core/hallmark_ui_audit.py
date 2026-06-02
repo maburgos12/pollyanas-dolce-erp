@@ -99,6 +99,7 @@ def scan_hallmark_ui(base_dir: Path) -> list[HallmarkIssue]:
             and "module-tabs" in text
             and "rrhh-tabs" not in text
             and "report-tabs" not in text
+            and "mant-tabs" not in text
             and not is_exempt_template
         ):
             issues.append(
