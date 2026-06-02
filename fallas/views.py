@@ -93,11 +93,12 @@ def _puede_modificar_reporte_propio(reporte, user) -> bool:
 
 def _filtrar_reportes_por_usuario(qs, user):
     grupos = _group_names(user)
+    grupos_lower = {g.lower() for g in grupos}
     if user.is_superuser or grupos & GRUPOS_VER_TODO_FALLAS:
         return qs
-    if "ventas" in grupos:
+    if "ventas" in grupos_lower:
         return qs.filter(area=ReporteFalla.AREA_VENTAS)
-    if "produccion" in grupos:
+    if "produccion" in grupos_lower:
         return qs.filter(area=ReporteFalla.AREA_PRODUCCION)
     return qs.filter(reportado_por=user)
 
@@ -329,11 +330,12 @@ def dashboard_view(request):
     if not can_view_submodule(request.user, "fallas", "dashboard"):
         raise PermissionDenied
     grupos = _group_names(request.user)
+    grupos_lower = {g.lower() for g in grupos}
     es_dg = request.user.is_superuser or bool(grupos & GRUPOS_GESTION_FALLAS)
     area_usuario = ""
-    if "ventas" in grupos and not (grupos & GRUPOS_VER_TODO_FALLAS) and not request.user.is_superuser:
+    if "ventas" in grupos_lower and not (grupos & GRUPOS_VER_TODO_FALLAS) and not request.user.is_superuser:
         area_usuario = ReporteFalla.AREA_VENTAS
-    elif "produccion" in grupos and not (grupos & GRUPOS_VER_TODO_FALLAS) and not request.user.is_superuser:
+    elif "produccion" in grupos_lower and not (grupos & GRUPOS_VER_TODO_FALLAS) and not request.user.is_superuser:
         area_usuario = ReporteFalla.AREA_PRODUCCION
     return render(
         request,
