@@ -245,6 +245,26 @@
   </div>
   {% endif %}
 
+  <!-- Revisión DG: aprobar o devolver -->
+  {% if puede_resolver_dg %}
+  <div class="bi-panel" style="margin-bottom:16px; border-left:4px solid var(--dorado);">
+    <p class="seg-section-title">Revisión — acción requerida</p>
+    <div class="seg-entregar-box">
+      <p style="margin:0; color:var(--texto-light); font-size:.9rem;">
+        Este acuerdo está esperando tu aprobación. Puedes aprobarlo como completado o devolverlo con observaciones.
+      </p>
+      <form method="post" action="{% url 'seguimiento:resolver_revision' item.pk %}" style="display:grid; gap:10px;">
+        {% csrf_token %}
+        <textarea name="comentario" class="seg-form-textarea" placeholder="Observación (obligatoria si devuelves, opcional si apruebas)"></textarea>
+        <div class="seg-entregar-actions">
+          <button class="btn btn-primary" type="submit" name="accion" value="aprobar">✓ Aprobar como completado</button>
+          <button class="btn btn-secondary" type="submit" name="accion" value="devolver">↩ Devolver para corrección</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Cierre directo (sin aprobación requerida o checklist 100%) -->
   {% if puede_cerrar_directo %}
   <div class="bi-panel" style="margin-bottom:16px;">
@@ -293,7 +313,7 @@
           <input type="file" name="archivo"
             accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf">
           <div class="seg-entregar-actions">
-            <button class="btn btn-primary" type="submit">Listo — enviar a revisión</button>
+            <button class="btn btn-primary" type="submit">✓ Terminé — notificar al Director General</button>
           </div>
         </div>
       </form>
