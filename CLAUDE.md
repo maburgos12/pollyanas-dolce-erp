@@ -51,7 +51,26 @@ prototipos o producción.
 - **Implementación real:** trabajar en rama limpia, con checks, PR, deploy y validación
   en el lugar real donde se usa.
 
-### 2. Auditar estado del repo antes de cualquier cambio
+### 2. Sincronizar entorno local con main ANTES de tocar cualquier archivo
+
+**Obligatorio al inicio de cada tarea, sin excepción.**
+El SQLite local puede estar días o semanas detrás de `origin/main`. Si no se sincroniza
+primero, aparecen migraciones "pendientes" de otras apps que no son de la tarea actual,
+`manage.py check` falla con ruido ajeno y el entorno no es confiable.
+
+```bash
+git fetch origin main
+git checkout -b codex/<modulo>-<descripcion> origin/main   # rama limpia desde main actualizado
+python manage.py migrate                                    # aplicar TODO lo que main ya tiene
+python manage.py migrate --check                           # debe quedar en 0 pendientes
+python manage.py check                                     # debe quedar en 0 errores
+```
+
+**Regla:** si `migrate --check` no es 0 antes de empezar a escribir código, detener
+y aplicar las migraciones pendientes primero. Nunca iniciar una tarea sobre un entorno
+de DB desactualizado.
+
+### 3. Auditar estado del repo antes de cualquier cambio
 ```bash
 git branch --show-current        # confirmar rama correcta
 git status --short --branch      # sin cambios ajenos sin commitear
@@ -69,14 +88,14 @@ git rev-list --left-right --count origin/main...HEAD  # cuánto detrás/adelante
 En esos casos: respaldar parche, crear rama limpia desde `origin/main` y aplicar
 solo los cambios relacionados.
 
-### 3. Una tarea, una rama, un objetivo
+### 4. Una tarea, una rama, un objetivo
 - No mezclar RRHH + bonos + reportes + CSS + activos en una sola rama
 - No hacer refactors oportunistas ni tocar archivos que no son de la tarea
 - Nombre de rama: `codex/<modulo>-<descripcion>` o `fix/<descripcion>`
 - Para cambios grandes o productivos, crear rama nueva desde base limpia
 - Nunca dejar pares fix+revert sin squash — generan ruido y confusión
 
-### 4. Docker local no equivale a producción
+### 5. Docker local no equivale a producción
 - Si Docker local falla, diagnosticar logs y variables de entorno primero;
   no cambiar código ni producción por intuición
 - No modificar `.env` de producción ni puertos de `docker-compose.yml` sin
@@ -84,7 +103,7 @@ solo los cambios relacionados.
 - Una validación local no sustituye la validación final en VPS, navegador real,
   reporte real, pantalla real o usuario real afectado
 
-### 5. Higiene de commits — quirúrgico y descriptivo
+### 6. Higiene de commits — quirúrgico y descriptivo
 Antes de cualquier commit:
 ```bash
 git status --short --branch
@@ -97,7 +116,7 @@ git worktree list
   `*.png/jpg/gif` fuera de `static/`, `storage/dg_reports/`, logs temporales
 - Mensaje descriptivo: qué cambió y por qué, no solo "fix"
 
-### 6. Pull requests — una tarea, un PR
+### 7. Pull requests — una tarea, un PR
 Antes de crear o aprobar cualquier PR:
 ```bash
 git diff origin/main..HEAD --stat   # qué archivos cambian
@@ -107,7 +126,7 @@ git log --oneline --decorate -5     # historial limpio sin mezcla
 - No abrir PR con `python manage.py check` con errores
 - No aprobar PR de Codex sin revisar el diff aquí primero
 
-### 6. Validación mínima antes de cerrar
+### 8. Validación mínima antes de cerrar
 - `python manage.py check` → 0 errores antes de cualquier commit
 - `python manage.py migrate --check` → sin migraciones pendientes antes de deploy
 - Tests del módulo afectado cuando existan
@@ -116,7 +135,7 @@ git log --oneline --decorate -5     # historial limpio sin mezcla
 - Para datos operativos: validar conteo/registros en tabla y confirmar que aparecen
   en la pantalla, reporte o app donde se usan
 
-### 7. Cierre responsable
+### 9. Cierre responsable
 No declarar terminado si solo compila, solo responde la API, o solo la base tiene datos.
 Termina cuando el resultado está validado en el flujo real. Si no se puede validar,
 reportar el bloqueo exacto, lo que sí quedó hecho y qué falta para confirmar.
