@@ -455,9 +455,11 @@ class PointSyncService:
                 "inventory_cost_resale_costs_existing": 0,
                 "inventory_cost_unresolved_matches": 0,
                 "inventory_cost_zero_cost_matches": 0,
+                "inventory_cost_rejected_matches": 0,
                 "inventory_cost_status": "SKIPPED" if not should_capture_costs else "PENDING",
                 "inventory_cost_unresolved_samples": [],
                 "inventory_cost_zero_cost_samples": [],
+                "inventory_cost_rejected_samples": [],
             }
             for branch_result in branch_results:
                 branch_summary = self.persist_branch_inventory(sync_job, branch_result)
@@ -500,9 +502,11 @@ class PointSyncService:
                         "inventory_cost_resale_costs_existing": cost_result.resale_costs_existing,
                         "inventory_cost_unresolved_matches": cost_result.unresolved_matches,
                         "inventory_cost_zero_cost_matches": cost_result.zero_cost_matches,
+                        "inventory_cost_rejected_matches": cost_result.rejected_matches,
                         "inventory_cost_status": "SUCCESS",
                         "inventory_cost_unresolved_samples": cost_result.unresolved_samples,
                         "inventory_cost_zero_cost_samples": cost_result.zero_cost_samples,
+                        "inventory_cost_rejected_samples": cost_result.rejected_samples or [],
                     }
                 )
                 self.record_log(
@@ -518,9 +522,10 @@ class PointSyncService:
                         "resale_costs_existing": cost_result.resale_costs_existing,
                         "unresolved_matches": cost_result.unresolved_matches,
                         "zero_cost_matches": cost_result.zero_cost_matches,
+                        "rejected_matches": cost_result.rejected_matches,
                     },
                 )
-                if cost_result.unresolved_matches or cost_result.zero_cost_matches:
+                if cost_result.unresolved_matches or cost_result.zero_cost_matches or cost_result.rejected_matches:
                     self.record_log(
                         sync_job,
                         PointExtractionLog.LEVEL_WARNING,
@@ -528,8 +533,10 @@ class PointSyncService:
                         context={
                             "unresolved_matches": cost_result.unresolved_matches,
                             "zero_cost_matches": cost_result.zero_cost_matches,
+                            "rejected_matches": cost_result.rejected_matches,
                             "unresolved_samples": cost_result.unresolved_samples,
                             "zero_cost_samples": cost_result.zero_cost_samples,
+                            "rejected_samples": cost_result.rejected_samples or [],
                         },
                     )
             return self.mark_success(sync_job, summary)
