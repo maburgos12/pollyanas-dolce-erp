@@ -75,6 +75,12 @@ CRITICAL_BEAT_TASKS = [
         "task": "pos_bridge.daily_sales_sync",
         "expected_cron": {"minute": "30", "hour": "1"},
     },
+    {
+        "label": "investment_snapshot_refresh",
+        "names": ["reportes: refresh snapshots inversion", "investment_snapshot_refresh"],
+        "task": "reportes.refresh_investment_snapshots",
+        "expected_cron": {"minute": "50", "hour": "3"},
+    },
 ]
 INVESTMENT_COGS_RATIO_THRESHOLD = Decimal("2.0")
 INVESTMENT_COGS_OFFENDER_LIMIT = 20

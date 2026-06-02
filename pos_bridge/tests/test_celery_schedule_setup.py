@@ -28,9 +28,11 @@ class SetupCelerySchedulesCommandTests(TestCase):
             {
                 "pos_bridge: ventas cerradas diario",
                 "pos_bridge: ventas intradia actual",
+                "pos_bridge: asistencias Point intradia",
                 "rentabilidad: recalculo intradia periodo actual",
                 "pos_bridge: cierre producto mensual",
                 "pos_bridge: inventario completo diario",
+                "pos_bridge: costos reventa desde compras Point",
                 "pos_bridge: inventario cierre diario",
                 "pos_bridge: mermas diario",
                 "pos_bridge: produccion diario",
@@ -51,6 +53,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "recetas: consolidado nocturno CEDIS",
                 "recetas: inventario final cierre email",
                 "reportes: refresh analytics operativo",
+                "reportes: refresh snapshots inversion",
                 "erp-doctor: reporte diario",
                 "ventas: sync ventas autoritativas mensual",
                 "reportes: snapshot operacion dg",
@@ -60,7 +63,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "orquestacion: guardia ajustes inventario",
             },
         )
-        self.assertEqual(PeriodicTask.objects.count(), 32)
+        self.assertEqual(PeriodicTask.objects.count(), 35)
         intraday_sales = PeriodicTask.objects.get(name="pos_bridge: ventas intradia actual")
         self.assertEqual(intraday_sales.task, "pos_bridge.daily_sales_sync")
         self.assertEqual(intraday_sales.crontab.hour, "8-22")
@@ -95,6 +98,10 @@ class SetupCelerySchedulesCommandTests(TestCase):
         analytics_refresh = PeriodicTask.objects.get(name="reportes: refresh analytics operativo")
         self.assertEqual(analytics_refresh.crontab.hour, "3")
         self.assertEqual(analytics_refresh.crontab.minute, "35")
+        investment_refresh = PeriodicTask.objects.get(name="reportes: refresh snapshots inversion")
+        self.assertEqual(investment_refresh.task, "reportes.refresh_investment_snapshots")
+        self.assertEqual(investment_refresh.crontab.hour, "3")
+        self.assertEqual(investment_refresh.crontab.minute, "50")
         erp_doctor = PeriodicTask.objects.get(name="erp-doctor: reporte diario")
         self.assertEqual(erp_doctor.task, "reportes.erp_doctor_daily_report")
         self.assertEqual(erp_doctor.crontab.hour, "6")
@@ -191,3 +198,6 @@ class SetupCelerySchedulesCommandTests(TestCase):
         self.assertEqual(analytics_refresh.crontab.hour, "4")
         self.assertEqual(analytics_refresh.crontab.minute, "10")
         self.assertEqual(analytics_refresh.kwargs, '{"lookback_days": 9}')
+        investment_refresh = PeriodicTask.objects.get(name="reportes: refresh snapshots inversion")
+        self.assertEqual(investment_refresh.crontab.hour, "4")
+        self.assertEqual(investment_refresh.crontab.minute, "25")

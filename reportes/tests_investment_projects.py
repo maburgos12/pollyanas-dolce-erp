@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import io
 import json
 from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth.models import Group, User
+from django.core.management import call_command
 from django.db import connection
 from django.test import TestCase
 from django.urls import reverse
@@ -123,6 +125,29 @@ class ProyectoInversionRefreshServiceTests(TestCase):
         self.assertIsNotNone(snapshot.health_score)
         self.project.refresh_from_db()
         self.assertEqual(self.project.monto_inversion_real, Decimal("213440.00"))
+
+    def test_refresh_investment_snapshots_command_refreshes_active_projects(self):
+        self.project.estatus = ProyectoInversion.ESTATUS_EN_RECUPERACION
+        self.project.save(update_fields=["estatus"])
+
+        stdout = io.StringIO()
+        call_command(
+            "refresh_investment_snapshots",
+            project_id=[self.project.pk],
+            until="2026-02-28",
+            stdout=stdout,
+        )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["projects_refreshed"], 1)
+        self.assertEqual(payload["results"][0]["project_id"], self.project.pk)
+        self.assertEqual(payload["results"][0]["latest_period"], "2026-02-01")
+        self.assertTrue(
+            ProyectoInversionSnapshotMensual.objects.filter(
+                proyecto=self.project,
+                periodo=date(2026, 2, 1),
+            ).exists()
+        )
 
 
 class ProyectoInversionViewsTests(TestCase):
