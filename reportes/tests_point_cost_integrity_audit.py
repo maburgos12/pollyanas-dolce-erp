@@ -150,6 +150,10 @@ class PointCostIntegrityAuditCommandTests(TestCase):
         self.assertEqual(payload["monthly_bad"][0]["insumo"], "HUEVO")
         self.assertEqual(payload["recipe_month_impacts_top"][0]["receta"], "Galleta de prueba")
         self.assertEqual(payload["summary"]["point_code_collision_count"], 1)
+        self.assertEqual(payload["summary"]["point_corrections_count"], 2)
+        self.assertEqual(payload["point_corrections"][0]["point_code"], "50161813")
+        self.assertIn("Corregir en Point", payload["point_corrections"][0]["action"])
+        self.assertIn("NOMBRE_POINT_NO_COINCIDE", payload["point_corrections"][0]["classes"])
 
         self.assertEqual(CostoInsumo.objects.count(), before_costs)
         self.assertEqual(InsumoCostoHistoricoMensual.objects.count(), before_monthly)
