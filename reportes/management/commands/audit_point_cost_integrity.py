@@ -22,6 +22,11 @@ from reportes.models import InsumoCostoHistoricoMensual, RecetaCostoHistoricoMen
 
 
 POINT_EXISTENCIA_SOURCE = "POINT_EXISTENCIA_ALMACEN"
+COST_BLOCKER_CLASSES = {
+    STATUS_NOMBRE_POINT_NO_COINCIDE,
+    STATUS_UNIDAD_INCOMPATIBLE,
+    STATUS_UNIDAD_DESCONOCIDA,
+}
 
 
 def _str_decimal(value) -> str | None:
@@ -143,6 +148,9 @@ class Command(BaseCommand):
         bad_insumos: dict[int, set[str]] = defaultdict(set)
         class_counts: Counter[str] = Counter()
         class_insumos: dict[str, set[int]] = defaultdict(set)
+        inventory_alerts_by_id: dict[int, list[str]] = {}
+        inventory_alert_counts: Counter[str] = Counter()
+        inventory_alert_insumos: dict[str, set[int]] = defaultdict(set)
         point_name_sets: dict[int, set[str]] = defaultdict(set)
         point_code_names: dict[str, set[str]] = defaultdict(set)
         correction_by_key: dict[tuple[str, str, str, int], dict[str, object]] = {}
@@ -166,10 +174,22 @@ class Command(BaseCommand):
             classes = classify_point_cost(cost)
             if not classes:
                 continue
-            bad_by_id[cost.id] = classes
+            inventory_classes = [
+                class_name for class_name in classes if class_name == STATUS_QTY_NO_POSITIVA_CON_COSTO
+            ]
+            if inventory_classes:
+                inventory_alerts_by_id[cost.id] = inventory_classes
+                for class_name in inventory_classes:
+                    inventory_alert_counts[class_name] += 1
+                    inventory_alert_insumos[class_name].add(cost.insumo_id)
+
+            blocker_classes = [class_name for class_name in classes if class_name in COST_BLOCKER_CLASSES]
+            if not blocker_classes:
+                continue
+            bad_by_id[cost.id] = blocker_classes
             correction_key = (point_code, point_name, _raw_unit(cost), cost.insumo_id)
-            correction_by_key[correction_key] = _point_correction_payload(cost, classes)
-            for class_name in classes:
+            correction_by_key[correction_key] = _point_correction_payload(cost, blocker_classes)
+            for class_name in blocker_classes:
                 class_counts[class_name] += 1
                 class_insumos[class_name].add(cost.insumo_id)
                 bad_insumos[cost.insumo_id].add(class_name)
@@ -291,6 +311,11 @@ class Command(BaseCommand):
                 "bad_cost_rows_total": len(bad_by_id),
                 "bad_rows_by_class": dict(class_counts),
                 "bad_insumos_by_class": {key: len(value) for key, value in class_insumos.items()},
+                "inventory_alert_rows_total": len(inventory_alerts_by_id),
+                "inventory_alerts_by_class": dict(inventory_alert_counts),
+                "inventory_alert_insumos_by_class": {
+                    key: len(value) for key, value in inventory_alert_insumos.items()
+                },
                 "latest_unsafe_count": len(latest_unsafe),
                 "monthly_bad_count": len(monthly_bad),
                 "monthly_bad_periods": dict(sorted(monthly_by_period.items())),
