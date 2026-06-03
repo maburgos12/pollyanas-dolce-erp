@@ -4,6 +4,7 @@ from django.contrib.auth.models import Group, User
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from core.models import Notificacion, Sucursal
 from rrhh.models import Empleado, VacanteCobertura, VacanteMovimiento, VacanteRRHH, VacanteSeguimiento
@@ -54,7 +55,7 @@ class VacantesSolicitudServiceTests(TestCase):
             motivo_solicitud="Cubrir dos cajas por apertura de turno.",
         )
 
-        self.assertTrue(vacante.folio.startswith("VAC-2605-"))
+        self.assertTrue(vacante.folio.startswith(f"VAC-{timezone.localdate():%y%m}-"))
         self.assertEqual(vacante.estado, VacanteRRHH.ESTADO_SOLICITADA)
         self.assertEqual(vacante.area, "VENTAS")
         self.assertEqual(vacante.puesto, "CAJERA")

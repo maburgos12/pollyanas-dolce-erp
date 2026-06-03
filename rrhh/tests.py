@@ -382,6 +382,10 @@ class CapitalHumanoAPITests(TestCase):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
 
+    def assertHoraLocal(self, dt, hora, minuto=0):
+        local_dt = timezone.localtime(dt)
+        self.assertEqual((local_dt.hour, local_dt.minute), (hora, minuto))
+
     def test_permiso_api_crea_folio_para_empleado_actual(self):
         resp = self.client.post(
             reverse("rrhh:permiso-list"),
@@ -625,7 +629,7 @@ class CapitalHumanoAPITests(TestCase):
         self.assertEqual(eventos[0]["attendance_status"], "checkIn")
         self.assertEqual(eventos[0]["serial_no"], 235726)
 
-    def test_procesar_eventos_hik_no_duplica_entrada_y_completa_salida(self):
+    def test_procesar_eventos_hik_conserva_flujo_dos_marcajes(self):
         from rrhh.services_hikvision import procesar_eventos_hik
 
         empleado = Empleado.objects.create(nombre="Empleado ISAPI", codigo="340", salario_diario="400.00")
@@ -642,27 +646,215 @@ class CapitalHumanoAPITests(TestCase):
                 {
                     "employee_no": "340",
                     "name": "Empleado ISAPI",
-                    "attendance_status": "checkIn",
-                    "time": "2026-05-01T08:03:00-07:00",
-                    "serial_no": 2,
-                },
-                {
-                    "employee_no": "340",
-                    "name": "Empleado ISAPI",
                     "attendance_status": "checkOut",
                     "time": "2026-05-01T16:11:00-07:00",
-                    "serial_no": 3,
+                    "serial_no": 2,
                 },
             ]
         )
 
         self.assertEqual(resultado["procesados"], 2)
-        self.assertEqual(resultado["duplicados"], 1)
+        self.assertEqual(resultado["duplicados"], 0)
         asistencia = AsistenciaEmpleado.objects.get(empleado=empleado, fecha="2026-05-01")
-        self.assertEqual(asistencia.entrada.minute, 1)
-        self.assertEqual(asistencia.salida.minute, 11)
+        self.assertHoraLocal(asistencia.entrada, 8, 1)
+        self.assertHoraLocal(asistencia.salida, 16, 11)
         self.assertEqual(asistencia.minutos_trabajados, 490)
         self.assertEqual(asistencia.fuente, AsistenciaEmpleado.FUENTE_HIKCONNECT_API)
+
+    def test_procesar_eventos_hik_asigna_cuatro_marcajes_y_descuenta_comida(self):
+        from rrhh.services_hikvision import procesar_eventos_hik
+
+        empleado = Empleado.objects.create(nombre="Empleado ISAPI", codigo="340", salario_diario="400.00")
+
+        resultado = procesar_eventos_hik(
+            [
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkIn",
+                    "time": "2026-05-01T08:00:00-07:00",
+                    "serial_no": 1,
+                },
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkIn",
+                    "time": "2026-05-01T13:00:00-07:00",
+                    "serial_no": 2,
+                },
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkIn",
+                    "time": "2026-05-01T13:35:00-07:00",
+                    "serial_no": 3,
+                },
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkOut",
+                    "time": "2026-05-01T17:00:00-07:00",
+                    "serial_no": 4,
+                },
+            ]
+        )
+
+        self.assertEqual(resultado["procesados"], 4)
+        self.assertEqual(resultado["duplicados"], 0)
+        asistencia = AsistenciaEmpleado.objects.get(empleado=empleado, fecha="2026-05-01")
+        self.assertHoraLocal(asistencia.entrada, 8)
+        self.assertHoraLocal(asistencia.salida_comida, 13)
+        self.assertHoraLocal(asistencia.regreso_comida, 13, 35)
+        self.assertHoraLocal(asistencia.salida, 17)
+        self.assertEqual(asistencia.minutos_comida, 35)
+        self.assertEqual(asistencia.minutos_trabajados, 505)
+        self.assertEqual(asistencia.fuente, AsistenciaEmpleado.FUENTE_HIKCONNECT_API)
+
+    def test_procesar_eventos_hik_reclasifica_cuatro_marcajes_en_corridas_incrementales(self):
+        from rrhh.services_hikvision import procesar_eventos_hik
+
+        empleado = Empleado.objects.create(nombre="Empleado ISAPI", codigo="340", salario_diario="400.00")
+
+        procesar_eventos_hik(
+            [
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkIn",
+                    "time": "2026-05-01T08:00:00-07:00",
+                    "serial_no": 1,
+                },
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkIn",
+                    "time": "2026-05-01T13:00:00-07:00",
+                    "serial_no": 2,
+                },
+            ]
+        )
+
+        asistencia = AsistenciaEmpleado.objects.get(empleado=empleado, fecha="2026-05-01")
+        self.assertHoraLocal(asistencia.entrada, 8)
+        self.assertHoraLocal(asistencia.salida_comida, 13)
+        self.assertIsNone(asistencia.salida)
+
+        resultado = procesar_eventos_hik(
+            [
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkIn",
+                    "time": "2026-05-01T13:35:00-07:00",
+                    "serial_no": 3,
+                },
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkOut",
+                    "time": "2026-05-01T17:15:00-07:00",
+                    "serial_no": 4,
+                },
+            ]
+        )
+
+        self.assertEqual(resultado["procesados"], 2)
+        asistencia.refresh_from_db()
+        self.assertHoraLocal(asistencia.regreso_comida, 13, 35)
+        self.assertHoraLocal(asistencia.salida, 17, 15)
+        self.assertEqual(asistencia.minutos_comida, 35)
+        self.assertEqual(asistencia.minutos_trabajados, 520)
+
+    def test_procesar_eventos_hik_tres_marcajes_quedan_en_revision(self):
+        from rrhh.services_hikvision import procesar_eventos_hik
+
+        empleado = Empleado.objects.create(nombre="Empleado ISAPI", codigo="340", salario_diario="400.00")
+
+        procesar_eventos_hik(
+            [
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkIn",
+                    "time": "2026-05-01T08:00:00-07:00",
+                    "serial_no": 1,
+                },
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkIn",
+                    "time": "2026-05-01T13:00:00-07:00",
+                    "serial_no": 2,
+                },
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkIn",
+                    "time": "2026-05-01T13:35:00-07:00",
+                    "serial_no": 3,
+                },
+            ]
+        )
+
+        asistencia = AsistenciaEmpleado.objects.get(empleado=empleado, fecha="2026-05-01")
+        self.assertHoraLocal(asistencia.entrada, 8)
+        self.assertHoraLocal(asistencia.salida_comida, 13)
+        self.assertHoraLocal(asistencia.regreso_comida, 13, 35)
+        self.assertIsNone(asistencia.salida)
+        self.assertEqual(asistencia.minutos_comida, 35)
+        self.assertEqual(asistencia.minutos_trabajados, 0)
+        self.assertIn("REVISIÓN: 3 marcajes", asistencia.observacion)
+
+    def test_procesar_eventos_hik_cinco_marcajes_usa_ultima_como_salida(self):
+        from rrhh.services_hikvision import procesar_eventos_hik
+
+        empleado = Empleado.objects.create(nombre="Empleado ISAPI", codigo="340", salario_diario="400.00")
+
+        procesar_eventos_hik(
+            [
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkIn",
+                    "time": "2026-05-01T08:00:00-07:00",
+                    "serial_no": 1,
+                },
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkIn",
+                    "time": "2026-05-01T13:00:00-07:00",
+                    "serial_no": 2,
+                },
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkIn",
+                    "time": "2026-05-01T13:35:00-07:00",
+                    "serial_no": 3,
+                },
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkIn",
+                    "time": "2026-05-01T16:55:00-07:00",
+                    "serial_no": 4,
+                },
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkOut",
+                    "time": "2026-05-01T17:10:00-07:00",
+                    "serial_no": 5,
+                },
+            ]
+        )
+
+        asistencia = AsistenciaEmpleado.objects.get(empleado=empleado, fecha="2026-05-01")
+        self.assertHoraLocal(asistencia.salida, 17, 10)
+        self.assertEqual(asistencia.minutos_comida, 35)
+        self.assertEqual(asistencia.minutos_trabajados, 515)
+        self.assertIn("Marcajes extra", asistencia.observacion)
 
     def test_importar_asistencia_isapi_registra_importacion_api(self):
         from datetime import date

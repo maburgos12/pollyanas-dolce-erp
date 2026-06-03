@@ -45,7 +45,10 @@
           <th>Fecha</th>
           <th>Empleado</th>
           <th>Entrada</th>
+          <th>Sale comida</th>
+          <th>Regresa comida</th>
           <th>Salida</th>
+          <th>Min. comida</th>
           <th>Minutos</th>
           <th>Fuente</th>
         </tr>
@@ -56,12 +59,15 @@
           <td>{{ asistencia.fecha|date:"Y-m-d" }}</td>
           <td>{{ asistencia.empleado.nombre }}</td>
           <td>{{ asistencia.entrada|date:"H:i"|default:"-" }}</td>
+          <td>{{ asistencia.salida_comida|date:"H:i"|default:"-" }}</td>
+          <td>{{ asistencia.regreso_comida|date:"H:i"|default:"-" }}</td>
           <td>{{ asistencia.salida|date:"H:i"|default:"-" }}</td>
+          <td>{{ asistencia.minutos_comida }}</td>
           <td>{{ asistencia.minutos_trabajados }}</td>
           <td>{{ asistencia.get_fuente_display }}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="6">Sin asistencias para el filtro seleccionado.</td></tr>
+        <tr><td colspan="9">Sin asistencias para el filtro seleccionado.</td></tr>
         {% endfor %}
       </tbody>
     </table>
