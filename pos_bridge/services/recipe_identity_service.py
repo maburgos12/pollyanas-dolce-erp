@@ -49,6 +49,16 @@ class PointRecipeIdentityService:
             "lt": "lt",
             "l": "lt",
             "ml": "ml",
+            "gli": "GLI",
+            "gl": "GLI",
+            "galon": "GLI",
+            "galones": "GLI",
+            "gfn": "Gfn",
+            "garrafon": "Gfn",
+            "garrafones": "Gfn",
+            "cja": "CJA",
+            "caja": "CJA",
+            "cajas": "CJA",
         }.get(key, key)
         return UnidadMedida.objects.filter(codigo__iexact=key).first() or UnidadMedida.objects.filter(nombre__iexact=key).first()
 

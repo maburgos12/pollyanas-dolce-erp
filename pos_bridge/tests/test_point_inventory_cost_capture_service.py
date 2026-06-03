@@ -5,11 +5,20 @@ from unittest.mock import patch
 
 from maestros.models import CostoInsumo, Insumo, InsumoAlias, UnidadMedida
 from pos_bridge.models import PointProduct
+from pos_bridge.services.point_cost_validation import point_unit_code, point_unit_type
 from pos_bridge.services.point_inventory_cost_capture_service import PointInventoryCostCaptureService, PointInventoryCostRow
 from reportes.models import ProductoReventaCosto
 
 
 class PointInventoryCostCaptureServiceTests(TestCase):
+    def test_company_point_units_are_recognized_by_cost_validator(self):
+        self.assertEqual(point_unit_code("GLI"), "gli")
+        self.assertEqual(point_unit_type("GLI"), "VOLUME")
+        self.assertEqual(point_unit_code("Gfn"), "gfn")
+        self.assertEqual(point_unit_type("Gfn"), "VOLUME")
+        self.assertEqual(point_unit_code("CJA"), "cja")
+        self.assertEqual(point_unit_type("CJA"), "UNIT")
+
     def test_expand_search_scope_uses_aliases_and_point_code_from_resolved_insumo(self):
         unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA, factor_to_base=1000)
         insumo = Insumo.objects.create(
