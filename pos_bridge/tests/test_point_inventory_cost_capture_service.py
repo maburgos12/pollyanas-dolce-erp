@@ -159,7 +159,7 @@ class PointInventoryCostCaptureServiceTests(TestCase):
         self.assertIn("UNIDAD_INCOMPATIBLE", status)
         self.assertEqual(CostoInsumo.objects.count(), 0)
 
-    def test_persist_cost_row_rejects_positive_cost_with_non_positive_quantity(self):
+    def test_persist_cost_row_accepts_positive_cost_with_non_positive_quantity(self):
         unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA, factor_to_base=1000)
         Insumo.objects.create(
             codigo_point="50161813",
@@ -185,10 +185,10 @@ class PointInventoryCostCaptureServiceTests(TestCase):
 
         cost, created, status = service.persist_cost_row(row)
 
-        self.assertIsNone(cost)
-        self.assertFalse(created)
-        self.assertEqual(status, "QTY_NO_POSITIVA_CON_COSTO")
-        self.assertEqual(CostoInsumo.objects.count(), 0)
+        self.assertIsNotNone(cost)
+        self.assertTrue(created)
+        self.assertEqual(status, "CREATED")
+        self.assertEqual(CostoInsumo.objects.count(), 1)
 
     def test_capture_and_persist_all_reports_validation_rejections(self):
         unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA, factor_to_base=1000)

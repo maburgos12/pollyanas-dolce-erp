@@ -119,12 +119,8 @@ def name_matches_insumo(insumo: Insumo, point_name: str) -> bool:
 
 def validate_point_inventory_cost_row(row: Any, insumo: Insumo) -> PointCostValidationResult:
     reasons: list[str] = []
-    quantity = decimal_or_none(getattr(row, "quantity", None))
     unit_cost = decimal_or_none(getattr(row, "unit_cost", None)) or Decimal("0")
     raw_unit = str(getattr(row, "unit", "") or "").strip()
-
-    if quantity is not None and quantity <= 0 and unit_cost > 0:
-        reasons.append(STATUS_QTY_NO_POSITIVA_CON_COSTO)
 
     if not name_matches_insumo(insumo, str(getattr(row, "point_name", "") or "")):
         reasons.append(STATUS_NOMBRE_POINT_NO_COINCIDE)
