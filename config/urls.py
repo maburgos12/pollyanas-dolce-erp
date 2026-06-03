@@ -76,6 +76,8 @@ urlpatterns = [
     path("app/", include(("operacion.urls", "operacion"), namespace="operacion")),
     path("logistica/", include(("logistica.urls", "logistica"), namespace="logistica")),
     path("fallas/", include(("fallas.urls", "fallas"), namespace="fallas")),
+    path("merma/", RedirectView.as_view(url="/mermas/", permanent=False, query_string=True)),
+    path("merma/<path:path>", RedirectView.as_view(url="/mermas/%(path)s", permanent=False, query_string=True)),
     path("mermas/", include(("mermas.urls", "mermas"), namespace="mermas")),
     path("mantenimiento/", include(("mantenimiento.urls", "mantenimiento"), namespace="mantenimiento")),
     path("seguimiento/", include(("seguimiento.urls", "seguimiento"), namespace="seguimiento")),
