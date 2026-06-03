@@ -295,6 +295,19 @@ class OperacionAppTests(TestCase):
         self.assertEqual(blocked.status_code, 302)
         self.assertEqual(blocked["Location"], "/mermas/app/")
 
+    def test_merma_singular_paths_redirect_to_mermas_without_losing_query(self):
+        user = self._user("mermas.singular", sucursal=self.sucursal)
+        self._grant(user, "mermas.captura")
+        self.client.force_login(user)
+
+        home = self.client.get("/merma/")
+        app = self.client.get("/merma/app/?modo=captura")
+
+        self.assertEqual(home.status_code, 302)
+        self.assertEqual(home["Location"], "/mermas/")
+        self.assertEqual(app.status_code, 302)
+        self.assertEqual(app["Location"], "/mermas/app/?modo=captura")
+
     def test_mermas_capture_cancel_returns_to_unified_app_for_branch_user(self):
         user = self._user("mermas.cancelar", sucursal=self.sucursal)
         self._grant(user, "mermas.captura")
