@@ -7,6 +7,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.models import Sucursal, UserModuleAccess, UserProfile
+from core.navigation import build_nav_groups
 
 from .models import CategoriaFalla, ReporteFalla
 
@@ -113,14 +114,14 @@ class MisReportesActionsTests(TestCase):
         self.assertEqual(delete_response.status_code, 403)
         self.assertTrue(ReporteFalla.objects.filter(pk=self.reporte.id).exists())
 
-    def test_mis_reportes_colaborador_solo_muestra_reportes_propios(self):
+    def test_reportes_muestra_reportes_de_otros_colaboradores(self):
         reporte_ajeno = self._crear_reporte(self.other_user, "Falla de otro usuario")
         self.client.force_login(self.user)
 
         response = self.client.get(reverse("fallas:pwa-mis-reportes"))
 
         self.assertContains(response, "Letrero sin luz")
-        self.assertNotContains(response, reporte_ajeno.titulo)
+        self.assertContains(response, reporte_ajeno.titulo)
 
     def test_api_mine_muestra_reporte_propio_aunque_area_no_coincida(self):
         self.user.groups.add(self.produccion_group)
@@ -187,3 +188,51 @@ class MisReportesActionsTests(TestCase):
         self.reporte.refresh_from_db()
         self.assertEqual(self.reporte.titulo, "Editado por API")
         self.assertEqual(self.reporte.prioridad, ReporteFalla.PRIORIDAD_ALTA)
+
+    def test_api_lista_reportes_de_todas_las_areas_para_usuario_fallas(self):
+        self.user.groups.add(self.produccion_group)
+        reporte_ajeno = self._crear_reporte(self.other_user, "Falla visible para todos")
+        reporte_ajeno.area = ReporteFalla.AREA_VENTAS
+        reporte_ajeno.save(update_fields=["area"])
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("fallas_api:reportes-list"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        rows = payload["results"] if isinstance(payload, dict) else payload
+        ids = {item["id"] for item in rows}
+        self.assertIn(self.reporte.id, ids)
+        self.assertIn(reporte_ajeno.id, ids)
+
+    def test_navegacion_muestra_fallas_una_sola_vez_para_produccion_staff(self):
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+        self.user.groups.add(self.produccion_group)
+
+        nav = build_nav_groups(self.user, "/fallas/")
+        fallas_groups = [
+            group
+            for group in nav
+            if any(item["module"] == "fallas" for item in group["items"])
+        ]
+
+        self.assertEqual([group["key"] for group in fallas_groups], ["fallas"])
+        self.assertEqual(
+            [item["label"] for item in fallas_groups[0]["items"] if item["module"] == "fallas"],
+            ["Reportes de fallas", "Reportar falla", "Reportes"],
+        )
+
+    def test_navegacion_muestra_fallas_una_sola_vez_para_usuario_ventas_autorizado(self):
+        ventas_group, _ = Group.objects.get_or_create(name="VENTAS")
+        self.other_user.groups.add(ventas_group)
+        UserModuleAccess.objects.create(user=self.other_user, module="fallas", access=UserModuleAccess.ACCESS_MANAGE)
+
+        nav = build_nav_groups(self.other_user, "/fallas/reportar/")
+        fallas_groups = [
+            group
+            for group in nav
+            if any(item["module"] == "fallas" for item in group["items"])
+        ]
+
+        self.assertEqual([group["key"] for group in fallas_groups], ["fallas"])

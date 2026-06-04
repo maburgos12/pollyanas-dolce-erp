@@ -74,7 +74,7 @@
   <nav class="module-tabs">
     <a href="{% url 'fallas:dashboard' %}" class="module-tab {% if not tab or tab == 'reportes' %}active{% endif %}">Dashboard</a>
     <a href="{% url 'fallas:pwa-reporte' %}" class="module-tab">Reportar falla</a>
-    <a href="{% url 'fallas:pwa-mis-reportes' %}" class="module-tab">Mis reportes</a>
+    <a href="{% url 'fallas:pwa-mis-reportes' %}" class="module-tab">Reportes</a>
     {% if es_dg %}
     <a href="{% url 'fallas:dashboard' %}?tab=categorias" class="module-tab {% if tab == 'categorias' %}active{% endif %}">Categorías</a>
     {% endif %}
@@ -254,7 +254,7 @@
 const API = "/api/fallas";
 const token = localStorage.getItem("pd_logistica_access") || localStorage.getItem("fallas_jwt") || localStorage.getItem("access_token") || "";
 const csrf = "{{ csrf_token }}";
-const AREA_USUARIO = "{{ area_usuario|default:'' }}";
+const AREA_USUARIO = "";
 const PUEDE_GESTIONAR = {{ puede_gestionar|yesno:"true,false" }};
 const esc = (v) => String(v ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
 const h = (json=false) => {

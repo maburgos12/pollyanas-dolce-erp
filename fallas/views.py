@@ -31,10 +31,7 @@ from .serializers import (
 )
 
 
-GRUPOS_AREA_FALLAS = {"ventas", "produccion"}
-GRUPOS_REPORTE_FALLAS = {"personal_sucursal", "compras_logistica", "dg", *GRUPOS_AREA_FALLAS}
 GRUPOS_GESTION_FALLAS = {"compras_logistica", "dg"}
-GRUPOS_VER_TODO_FALLAS = {"compras_logistica", "dg", "supervisor_logistica"}
 
 
 def _group_names(user) -> set[str]:
@@ -93,15 +90,9 @@ def _puede_modificar_reporte_propio(reporte, user) -> bool:
 
 
 def _filtrar_reportes_por_usuario(qs, user):
-    grupos = _group_names(user)
-    grupos_lower = {g.lower() for g in grupos}
-    if user.is_superuser or grupos & GRUPOS_VER_TODO_FALLAS:
+    if user.is_superuser or can_view_module(user, "fallas"):
         return qs
-    if "ventas" in grupos_lower:
-        return qs.filter(Q(area=ReporteFalla.AREA_VENTAS) | Q(reportado_por=user))
-    if "produccion" in grupos_lower:
-        return qs.filter(Q(area=ReporteFalla.AREA_PRODUCCION) | Q(reportado_por=user))
-    return qs.filter(reportado_por=user)
+    return qs.none()
 
 
 def _sucursales_disponibles_para_reporte(user):
@@ -361,18 +352,11 @@ def dashboard_view(request):
     if not can_view_submodule(request.user, "fallas", "dashboard"):
         raise PermissionDenied
     grupos = _group_names(request.user)
-    grupos_lower = {g.lower() for g in grupos}
     es_dg = request.user.is_superuser or bool(grupos & GRUPOS_GESTION_FALLAS)
-    area_usuario = ""
-    if "ventas" in grupos_lower and not (grupos & GRUPOS_VER_TODO_FALLAS) and not request.user.is_superuser:
-        area_usuario = ReporteFalla.AREA_VENTAS
-    elif "produccion" in grupos_lower and not (grupos & GRUPOS_VER_TODO_FALLAS) and not request.user.is_superuser:
-        area_usuario = ReporteFalla.AREA_PRODUCCION
     return render(
         request,
         "fallas/dashboard.html",
         {
-            "area_usuario": area_usuario,
             "es_dg": es_dg,
             "puede_gestionar": _puede_cambiar_estatus_fallas(request.user),
             "tab": request.GET.get("tab") or "reportes",
@@ -544,10 +528,7 @@ def pwa_mis_reportes(request):
         raise PermissionDenied
 
     qs = ReporteFalla.objects.select_related("sucursal", "categoria", "reportado_por").order_by("-fecha_reporte")
-    if request.user.is_superuser or _group_names(request.user) & GRUPOS_VER_TODO_FALLAS:
-        qs = _filtrar_reportes_por_usuario(qs, request.user)
-    else:
-        qs = qs.filter(reportado_por=request.user)
+    qs = _filtrar_reportes_por_usuario(qs, request.user)
 
     estatus = request.GET.get("estatus")
     prioridad = request.GET.get("prioridad")

@@ -743,7 +743,7 @@
       }
 
       async function loadMisReportes() {
-        const response = await apiFetch("/reportes/?mine=1");
+        const response = await apiFetch("/reportes/");
         const data = response.ok ? await response.json() : [];
         state.misReportes = data.results || data;
         return state.misReportes;
@@ -756,7 +756,7 @@
           <p class="unit-line">Reporta fallas de sucursal con foto y ubicación.</p>
           <div class="dash-grid">
             <button class="dash-btn" onclick="startNuevoReporte()">${appGlyph("falla")}<span>Reportar falla</span></button>
-            <button class="dash-btn" onclick="showScreen('mis_reportes')">${appGlyph("historial")}<span>Mis Reportes</span>${abiertos ? `<span class="badge">${abiertos}</span>` : ""}</button>
+            <button class="dash-btn" onclick="showScreen('mis_reportes')">${appGlyph("historial")}<span>Reportes</span>${abiertos ? `<span class="badge">${abiertos}</span>` : ""}</button>
           </div>
         `));
       }
@@ -1118,10 +1118,10 @@
                 </article>
               `;
             }).join("")
-          : `<div class="empty">Todavia no tienes reportes registrados.</div>`;
+          : `<div class="empty">Todavia no hay reportes registrados.</div>`;
         render(shell(`
           <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
-          <h1 class="screen-title" style="margin-top:16px;">Mis reportes</h1>
+          <h1 class="screen-title" style="margin-top:16px;">Reportes</h1>
           ${error ? `<p class="error">${esc(error)}</p>` : ""}
           ${cards}
         `));

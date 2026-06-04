@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}Mis reportes de fallas{% endblock %}
-{% block page_title %}Fallas · Mis reportes{% endblock %}
+{% block title %}Reportes de fallas{% endblock %}
+{% block page_title %}Fallas · Reportes{% endblock %}
 {% block body_class %}page-fallas-mis-reportes{% endblock %}
 
 {% block extra_css %}
@@ -46,7 +46,7 @@
     <a href="{% url 'fallas:dashboard' %}" class="module-tab">Dashboard</a>
     {% endif %}
     <a href="{% url 'fallas:pwa-reporte' %}" class="module-tab">Reportar falla</a>
-    <a href="{% url 'fallas:pwa-mis-reportes' %}" class="module-tab active">Mis reportes</a>
+    <a href="{% url 'fallas:pwa-mis-reportes' %}" class="module-tab active">Reportes</a>
     {% if can_dashboard and es_dg %}
     <a href="{% url 'fallas:dashboard' %}?tab=categorias" class="module-tab">Categorías</a>
     {% endif %}
@@ -55,8 +55,8 @@
   <section class="fallas-card">
     <div class="fallas-head">
       <div>
-        <h1 class="fallas-title">Mis reportes</h1>
-        <p class="fallas-muted">Consulta reportes de fallas dentro del ERP, sin abrir la app móvil.</p>
+        <h1 class="fallas-title">Reportes</h1>
+        <p class="fallas-muted">Consulta todos los reportes de fallas dentro del ERP, sin abrir la app móvil.</p>
       </div>
       <a class="btn-wine" href="{% url 'fallas:pwa-reporte' %}">Nuevo reporte</a>
     </div>
