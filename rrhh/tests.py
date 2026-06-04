@@ -856,6 +856,54 @@ class CapitalHumanoAPITests(TestCase):
         self.assertEqual(asistencia.minutos_trabajados, 515)
         self.assertIn("Marcajes extra", asistencia.observacion)
 
+    def test_procesar_eventos_hik_limpia_observaciones_tecnicas_anteriores(self):
+        from rrhh.services_hikvision import procesar_eventos_hik
+
+        empleado = Empleado.objects.create(nombre="Empleado ISAPI", codigo="340", salario_diario="400.00")
+        AsistenciaEmpleado.objects.create(
+            empleado=empleado,
+            fecha="2026-05-01",
+            observacion="breakOut@10:02 | breakIn@10:37 | Nota manual RRHH",
+        )
+
+        procesar_eventos_hik(
+            [
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkIn",
+                    "time": "2026-05-01T08:00:00-07:00",
+                    "serial_no": 1,
+                },
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "breakOut",
+                    "time": "2026-05-01T13:00:00-07:00",
+                    "serial_no": 2,
+                },
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "breakIn",
+                    "time": "2026-05-01T13:35:00-07:00",
+                    "serial_no": 3,
+                },
+                {
+                    "employee_no": "340",
+                    "name": "Empleado ISAPI",
+                    "attendance_status": "checkOut",
+                    "time": "2026-05-01T17:00:00-07:00",
+                    "serial_no": 4,
+                },
+            ]
+        )
+
+        asistencia = AsistenciaEmpleado.objects.get(empleado=empleado, fecha="2026-05-01")
+        self.assertNotIn("breakOut@", asistencia.observacion)
+        self.assertNotIn("breakIn@", asistencia.observacion)
+        self.assertIn("Nota manual RRHH", asistencia.observacion)
+
     def test_importar_asistencia_isapi_registra_importacion_api(self):
         from datetime import date
 

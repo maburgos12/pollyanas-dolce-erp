@@ -19,6 +19,7 @@ ESTADO_SALIDA = {"checkOut", "overtimeOut"}
 VENTANA_DUPLICADO_MINUTOS = 5
 OBS_REVISION_TRES_MARCAJES = "REVISIÓN: 3 marcajes"
 OBS_MARCAJES_EXTRA = "Marcajes extra"
+OBS_TECNICAS_HIK_PREFIXES = ("breakOut@", "breakIn@", "checkIn@", "checkOut@", "overtimeIn@", "overtimeOut@")
 
 
 @dataclass(frozen=True)
@@ -115,6 +116,7 @@ def _actualizar_observacion_hik(asistencia: AsistenciaEmpleado, notas: list[str]
         if parte.strip()
         and not parte.strip().startswith(OBS_REVISION_TRES_MARCAJES)
         and not parte.strip().startswith(OBS_MARCAJES_EXTRA)
+        and not parte.strip().startswith(OBS_TECNICAS_HIK_PREFIXES)
     ]
     asistencia.observacion = " | ".join([*partes_actuales, *notas])
 
