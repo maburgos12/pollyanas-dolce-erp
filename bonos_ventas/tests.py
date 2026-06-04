@@ -120,6 +120,8 @@ class BonosVentasTests(TestCase):
         self.assertIn("Imprimir / PDF", content)
         self.assertIn("Permiso ${lastPermiso.folio} registrado", content)
         self.assertIn("Imprimir / guardar PDF", content)
+        self.assertIn("Sincronizar repartidores", content)
+        self.assertIn("/api/bonos-ventas/ventas-categoria/sync-repartidores/", content)
         self.assertIn("ReactDOM.createPortal", content)
         self.assertIn("body > :not(.print-modal)", content)
         self.assertIn("transform:none!important", content)
@@ -131,7 +133,7 @@ class BonosVentasTests(TestCase):
         self.assertIn("savingDia", content)
         self.assertIn("const nextWorked=!(r&&r.tiene_asistencia);", content)
         self.assertIn("{tiene_asistencia:nextWorked,tiene_uniforme:nextWorked,tiene_puntualidad:nextWorked}", content)
-        self.assertIn("onClick:()=>togDia(d)", content)
+        self.assertIn("onClick:()=>togDia(dia)", content)
         self.assertNotIn("togDia(d); setSelDia(d);", content)
         self.assertNotIn("pd_logistica_access", content)
 
@@ -149,7 +151,7 @@ class BonosVentasTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-ventas-pwa-v3", sw_content)
+        self.assertIn("pollyanas-bonos-ventas-pwa-v9", sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-ventas/dashboard/")', sw_content)
 
     def test_api_ventas_acepta_post_con_sesion_y_csrf(self):
