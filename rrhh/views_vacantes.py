@@ -168,7 +168,6 @@ def vacante_detalle(request, pk: int):
         VacanteRRHH.ESTADO_PAUSADA,
     }
     show_cover_action = can_gestionar_vacantes(request.user) and vacante.estado in {
-        VacanteRRHH.ESTADO_AUTORIZADA,
         VacanteRRHH.ESTADO_RECLUTAMIENTO,
     }
     show_pause_action = (
