@@ -5,50 +5,115 @@
 
 {% block extra_css %}
 <style>
-  .vacante-detail { display: grid; gap: 16px; }
-  .vacante-detail-head,
-  .vacante-panel { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 18px; }
-  .vacante-detail-head { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr) auto; }
-  .vacante-title { color: var(--vino); font-family: "Playfair Display", serif; font-size: 25px; font-weight: 800; }
-  .vacante-subtitle { color: var(--texto-light); margin-top: 4px; }
-  .vacante-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 6px 10px; }
-  .vacante-panel h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
-  .vacante-flow { display: grid; gap: 16px; }
-  .vacante-flow-steps { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
-  .vacante-flow-step { align-items: center; border-top: 4px solid #ead4de; color: var(--texto-light); display: grid; gap: 6px; min-height: 58px; padding-top: 8px; }
-  .vacante-flow-step span { font-size: 12px; font-weight: 900; text-transform: uppercase; }
-  .vacante-flow-step strong { color: var(--texto); font-size: 13px; }
-  .vacante-flow-step.done { border-color: #7a9f5a; }
-  .vacante-flow-step.current { border-color: var(--vino); }
-  .vacante-flow-step.attention { border-color: #c9862c; }
-  .vacante-flow-step.blocked { border-color: #a13d4f; }
-  .vacante-flow-step.pending strong { color: var(--texto-light); }
-  .vacante-flow-summary { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .vacante-flow-summary .vacante-kv { background: #fffafb; }
-  .vacante-grid { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .vacante-kv { border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; }
-  .vacante-kv span { color: var(--texto-light); display: block; font-size: 12px; font-weight: 900; text-transform: uppercase; }
-  .vacante-kv strong { color: var(--texto); display: block; margin-top: 5px; }
-  .vacante-action-block { border-top: 1px solid var(--rosa); display: grid; gap: 10px; padding-top: 12px; }
-  .vacante-action-block:first-child { border-top: 0; padding-top: 0; }
-  .vacante-action-block h3 { color: var(--texto); font-size: 14px; font-weight: 900; margin: 0; }
-  .vacante-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
-  .vacante-action-form { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
-  .vacante-action-form input,
-  .vacante-action-form select { min-width: 180px; }
-  .vacante-history { display: grid; gap: 10px; }
-  .vacante-history-item { border-bottom: 1px solid var(--rosa); display: grid; gap: 3px; padding: 10px 0; }
-  .vacante-muted { color: var(--texto-light); font-size: 13px; }
-  @media (max-width: 1100px) {
-    .vacante-detail-head { grid-template-columns: 1fr; }
-    .vacante-actions { justify-content: flex-start; }
-    .vacante-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .vacante-flow-steps,
-    .vacante-flow-summary { grid-template-columns: 1fr; }
+  .vd { display: grid; gap: 16px; }
+  .vd-panel { background: #fff; border: 1px solid var(--rosa); border-radius: 10px; padding: 20px; }
+  .vd-panel h2 { color: var(--vino); font-family: "Playfair Display", serif; font-size: 17px; margin: 0 0 14px; }
+
+  /* Cabecera */
+  .vd-head { display: grid; gap: 12px; grid-template-columns: 1fr auto; align-items: start; }
+  .vd-title { color: var(--vino); font-family: "Playfair Display", serif; font-size: 22px; font-weight: 800; }
+  .vd-subtitle { color: var(--texto-light); font-size: 13px; margin-top: 3px; }
+  .vd-estado-badge { background: #f7edf2; border-radius: 999px; color: var(--vino);
+    font-size: 12px; font-weight: 900; padding: 6px 12px; }
+
+  /* Pasos del proceso */
+  .vd-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; margin-bottom: 14px; }
+  .vd-step { border-top: 4px solid #e8d8e4; border-radius: 0 0 4px 4px; padding: 8px 6px 6px; }
+  .vd-step .step-num { color: var(--texto-light); font-size: 10px; font-weight: 900; text-transform: uppercase; }
+  .vd-step .step-label { color: var(--texto); font-size: 12px; font-weight: 700; margin-top: 3px; }
+  .vd-step.done { border-color: #66bb6a; }
+  .vd-step.done .step-label { color: #2e7d32; }
+  .vd-step.current { border-color: var(--vino); }
+  .vd-step.current .step-label { color: var(--vino); }
+  .vd-step.attention { border-color: #fb8c00; }
+  .vd-step.attention .step-label { color: #e65100; }
+  .vd-step.blocked { border-color: #e53935; }
+  .vd-step.blocked .step-label { color: #b71c1c; }
+  .vd-step.pending .step-label { color: var(--texto-light); }
+
+  .vd-flow-meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .vd-kv { background: var(--gris-suave); border-radius: 6px; padding: 10px 12px; }
+  .vd-kv span { color: var(--texto-light); display: block; font-size: 10px; font-weight: 900; text-transform: uppercase; }
+  .vd-kv strong { color: var(--texto); display: block; font-size: 13px; margin-top: 3px; }
+
+  /* Grid de datos */
+  .vd-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .vd-grid .vd-kv { background: var(--gris-suave); }
+  @media (max-width: 900px) { .vd-grid { grid-template-columns: repeat(2, 1fr); } .vd-flow-meta { grid-template-columns: 1fr; } }
+  @media (max-width: 500px) { .vd-grid { grid-template-columns: 1fr; } .vd-head { grid-template-columns: 1fr; } }
+
+  /* Bloque acción requerida */
+  .vd-accion-banner {
+    background: linear-gradient(135deg, #f7edf2 0%, #fff 100%);
+    border: 2px solid var(--vino); border-radius: 10px; padding: 18px 20px;
   }
-  @media (max-width: 680px) {
-    .vacante-grid { grid-template-columns: 1fr; }
+  .vd-accion-banner h2 { color: var(--vino); font-size: 15px; margin: 0 0 4px; }
+  .vd-accion-quien { color: var(--texto-light); font-size: 13px; margin-bottom: 14px; }
+  .vd-action-blocks { display: grid; gap: 12px; }
+  .vd-action-block { border-top: 1px solid var(--rosa); padding-top: 12px; }
+  .vd-action-block:first-child { border-top: none; padding-top: 0; }
+  .vd-action-block h3 { color: var(--texto); font-size: 13px; font-weight: 900; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .03em; }
+  .vd-action-forms { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+  .vd-action-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .vd-action-form input[type="text"],
+  .vd-action-form select,
+  .vd-action-form input[type="date"] { min-width: 160px; }
+
+  /* Seguimiento — chips de etapa */
+  .seg-etapas { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .seg-chip {
+    align-items: center; background: var(--gris-suave); border: 2px solid transparent;
+    border-radius: 999px; cursor: pointer; display: flex; gap: 6px;
+    font-size: 12px; font-weight: 700; padding: 6px 14px; transition: all .15s;
+    user-select: none;
   }
+  .seg-chip:hover { background: var(--rosa); border-color: var(--vino); color: var(--vino); }
+  .seg-chip.active { background: var(--vino); border-color: var(--vino); color: #fff; }
+  .seg-chip.chip-contratado.active { background: #2e7d32; border-color: #2e7d32; }
+  .seg-chip.chip-descartado.active { background: #b71c1c; border-color: #b71c1c; }
+
+  .seg-form-fields { display: none; }
+  .seg-form-fields.visible { display: grid; gap: 10px; }
+  .seg-form-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+  .seg-form-row.full { grid-template-columns: 1fr; }
+  .seg-form-label { color: var(--texto-light); display: block; font-size: 11px; font-weight: 900; margin-bottom: 3px; text-transform: uppercase; }
+  .seg-form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+
+  /* Timeline de seguimiento */
+  .seg-timeline { display: grid; gap: 0; }
+  .seg-item { display: grid; grid-template-columns: 28px 1fr; gap: 0 12px; padding-bottom: 14px; position: relative; }
+  .seg-item:last-child { padding-bottom: 0; }
+  .seg-item:last-child .seg-line { display: none; }
+  .seg-dot-col { display: flex; flex-direction: column; align-items: center; }
+  .seg-dot { border-radius: 50%; flex-shrink: 0; height: 12px; margin-top: 3px; width: 12px; }
+  .seg-line { background: var(--rosa); flex: 1; margin-top: 3px; width: 2px; }
+  .seg-content { padding-bottom: 4px; }
+  .seg-etapa-label { font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: .03em; }
+  .seg-candidato { color: var(--texto); font-size: 13px; font-weight: 700; margin-top: 2px; }
+  .seg-nota { color: var(--texto-light); font-size: 13px; margin-top: 2px; }
+  .seg-meta { color: var(--texto-light); font-size: 11px; margin-top: 3px; }
+
+  /* Colores por etapa */
+  .dot-postulante    { background: #90caf9; } .label-postulante    { color: #1565c0; }
+  .dot-entrevista_tel { background: #80cbc4; } .label-entrevista_tel { color: #00695c; }
+  .dot-filtro        { background: #ffcc80; } .label-filtro        { color: #e65100; }
+  .dot-entrevista_pres { background: #ce93d8; } .label-entrevista_pres { color: #6a1b9a; }
+  .dot-seleccionado  { background: #f48fb1; } .label-seleccionado  { color: #880e4f; }
+  .dot-documentos    { background: #fff176; } .label-documentos    { color: #f57f17; }
+  .dot-prueba        { background: #a5d6a7; } .label-prueba        { color: #1b5e20; }
+  .dot-contratado    { background: #66bb6a; } .label-contratado    { color: #1b5e20; }
+  .dot-descartado    { background: #ef9a9a; } .label-descartado    { color: #b71c1c; }
+  .dot-comentario    { background: #b0bec5; } .label-comentario    { color: #455a64; }
+  .dot-busqueda      { background: #90caf9; } .label-busqueda      { color: #1565c0; }
+  .dot-contacto      { background: #80cbc4; } .label-contacto      { color: #00695c; }
+  .dot-entrevista    { background: #ce93d8; } .label-entrevista    { color: #6a1b9a; }
+  .dot-oferta        { background: #ffcc80; } .label-oferta        { color: #e65100; }
+
+  /* Coberturas e historial */
+  .vd-list { display: grid; gap: 8px; }
+  .vd-list-item { border-bottom: 1px solid var(--rosa); display: grid; gap: 2px; padding: 8px 0; }
+  .vd-list-item:last-child { border-bottom: none; }
+  .vd-muted { color: var(--texto-light); font-size: 13px; }
 </style>
 {% endblock %}
 
@@ -59,258 +124,313 @@
   {% endfor %}
 </section>
 
-<section class="vacante-detail">
-  <div class="vacante-detail-head">
-    <div>
-      <div class="vacante-title">{{ vacante.area }} · {{ vacante.puesto }}</div>
-      <div class="vacante-subtitle">{{ vacante.folio }} · {{ vacante.get_tipo_solicitud_display }} · {{ vacante.cantidad_solicitada }} plaza(s)</div>
+{% if messages %}
+  {% for msg in messages %}
+    <div class="alert alert-{{ msg.tags|default:'info' }}" style="margin-bottom:12px;">{{ msg }}</div>
+  {% endfor %}
+{% endif %}
+
+<section class="vd">
+
+  {# ── Cabecera ── #}
+  <div class="vd-panel">
+    <div class="vd-head">
+      <div>
+        <div class="vd-title">{{ vacante.area }} · {{ vacante.puesto }}</div>
+        <div class="vd-subtitle">
+          {{ vacante.folio }} · {{ vacante.get_tipo_solicitud_display }}
+          · {{ vacante.cantidad_solicitada }} plaza(s)
+          · {{ vacante.get_prioridad_display }}
+        </div>
+      </div>
+      <span class="vd-estado-badge">{{ vacante.get_estado_display }}</span>
     </div>
-    <div><span class="vacante-badge">{{ vacante.get_estado_display }}</span></div>
   </div>
 
-  <section class="vacante-panel">
+  {# ── Proceso ── #}
+  <div class="vd-panel">
     <h2>Proceso</h2>
-    <div class="vacante-flow">
-      <div class="vacante-flow-steps">
-        {% for step in workflow.steps %}
-          <div class="vacante-flow-step {{ step.state }}">
-            <span>{{ forloop.counter|stringformat:"02d" }}</span>
-            <strong>{{ step.label }}</strong>
-          </div>
-        {% endfor %}
-      </div>
-      <div class="vacante-flow-summary">
-        <div class="vacante-kv"><span>Estado actual</span><strong>{{ vacante.get_estado_display }}</strong></div>
-        <div class="vacante-kv"><span>Responsable actual</span><strong>{{ workflow.responsable }}</strong></div>
-        <div class="vacante-kv"><span>Siguiente paso</span><strong>{{ workflow.siguiente }}</strong></div>
-      </div>
-    </div>
-  </section>
-
-  <section class="vacante-panel">
-    <h2>Solicitud</h2>
-    <div class="vacante-grid">
-      <div class="vacante-kv"><span>Solicitada</span><strong>{{ vacante.fecha_solicitada|date:"Y-m-d" }}</strong></div>
-      <div class="vacante-kv"><span>Necesaria</span><strong>{{ vacante.fecha_necesaria|date:"Y-m-d"|default:"-" }}</strong></div>
-      <div class="vacante-kv"><span>Prioridad</span><strong>{{ vacante.get_prioridad_display }}</strong></div>
-      <div class="vacante-kv"><span>Cobertura</span><strong>{{ vacante.coberturas.count }} / {{ vacante.cantidad_solicitada }}</strong></div>
-      <div class="vacante-kv"><span>Departamento</span><strong>{{ vacante.get_departamento_display|default:"-" }}</strong></div>
-      <div class="vacante-kv"><span>Sucursal</span><strong>{% if vacante.sucursal %}{{ vacante.sucursal.nombre }}{% else %}-{% endif %}</strong></div>
-      <div class="vacante-kv"><span>Solicitante</span><strong>{% if vacante.solicitado_por %}{{ vacante.solicitado_por.get_full_name|default:vacante.solicitado_por.username }}{% else %}-{% endif %}</strong></div>
-      <div class="vacante-kv"><span>Capturó</span><strong>{% if vacante.creado_por %}{{ vacante.creado_por.get_full_name|default:vacante.creado_por.username }}{% else %}-{% endif %}</strong></div>
-    </div>
-  </section>
-
-  <section class="vacante-panel">
-    <h2>Autorización</h2>
-    <div class="vacante-grid">
-      <div class="vacante-kv"><span>Ruta</span><strong>{{ vacante.get_tipo_autorizacion_display }}</strong></div>
-      <div class="vacante-kv"><span>Responsable</span><strong>{{ workflow.autorizacion }}</strong></div>
-      <div class="vacante-kv"><span>Validó RRHH</span><strong>{% if vacante.validado_rrhh_por %}{{ vacante.validado_rrhh_por.get_full_name|default:vacante.validado_rrhh_por.username }}{% else %}-{% endif %}</strong></div>
-      <div class="vacante-kv"><span>Autorizó</span><strong>{% if vacante.autorizado_por %}{{ vacante.autorizado_por.get_full_name|default:vacante.autorizado_por.username }}{% else %}-{% endif %}</strong></div>
-      <div class="vacante-kv">
-        <span>Asignado a</span>
-        <strong>
-          {% if vacante.requiere_direccion %}
-            Dirección General
-          {% elif vacante.autorizador_asignado %}
-            {{ vacante.autorizador_asignado.get_full_name|default:vacante.autorizador_asignado.username }}
-          {% elif vacante.autorizado_por %}
-            {{ vacante.autorizado_por.get_full_name|default:vacante.autorizado_por.username }}
-          {% else %}
-            Pendiente de asignar
-          {% endif %}
-        </strong>
-      </div>
-    </div>
-  </section>
-
-  <section class="vacante-panel">
-    <h2>Justificación</h2>
-    <p>{{ vacante.motivo_solicitud|default:"Sin justificación capturada." }}</p>
-    {% if vacante.sugerencias %}
-      <p class="vacante-muted">{{ vacante.sugerencias }}</p>
-    {% endif %}
-  </section>
-
-  {% if show_rrhh_review_actions or show_reenviar_revision or show_authorize_actions or show_recruitment_action or show_cover_action or show_pause_action or show_cancel_action %}
-  <section class="vacante-panel">
-    <h2>Acción requerida</h2>
-    <div class="vacante-history">
-      {% if show_rrhh_review_actions %}
-        <div class="vacante-action-block">
-          <h3>Revisión de Capital Humano</h3>
-          <div class="vacante-actions">
-            <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-              {% csrf_token %}
-              <input type="hidden" name="action" value="enviar_autorizacion">
-              <input type="text" name="comentario" placeholder="Comentario">
-              <button class="btn btn-primary" type="submit">Validar solicitud</button>
-            </form>
-            <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-              {% csrf_token %}
-              <input type="hidden" name="action" value="devolver_correccion">
-              <input type="text" name="comentario" placeholder="Qué falta corregir">
-              <button class="btn btn-secondary" type="submit">Devolver a corrección</button>
-            </form>
-          </div>
+    <div class="vd-steps">
+      {% for step in workflow.steps %}
+        <div class="vd-step {{ step.state }}">
+          <div class="step-num">{{ forloop.counter|stringformat:"02d" }}</div>
+          <div class="step-label">{{ step.label }}</div>
         </div>
+      {% endfor %}
+    </div>
+    <div class="vd-flow-meta">
+      <div class="vd-kv"><span>Estado actual</span><strong>{{ vacante.get_estado_display }}</strong></div>
+      <div class="vd-kv"><span>Responsable</span><strong>{{ workflow.responsable }}</strong></div>
+      <div class="vd-kv"><span>Siguiente paso</span><strong>{{ workflow.siguiente }}</strong></div>
+    </div>
+  </div>
+
+  {# ── Acción requerida (solo si hay algo que hacer) ── #}
+  {% if show_rrhh_review_actions or show_reenviar_revision or show_authorize_actions or show_recruitment_action or show_cover_action or show_pause_action or show_cancel_action %}
+  <div class="vd-accion-banner">
+    <h2>⚡ Acción requerida</h2>
+    <p class="vd-accion-quien">Responsable: <strong>{{ workflow.responsable }}</strong> · {{ workflow.siguiente }}</p>
+    <div class="vd-action-blocks">
+
+      {% if show_rrhh_review_actions %}
+      <div class="vd-action-block">
+        <h3>Revisión Capital Humano</h3>
+        <div class="vd-action-forms">
+          <form class="vd-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+            {% csrf_token %}<input type="hidden" name="action" value="enviar_autorizacion">
+            <input type="text" name="comentario" placeholder="Comentario (opcional)">
+            <button class="btn btn-primary" type="submit">Validar y enviar a autorización</button>
+          </form>
+          <form class="vd-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+            {% csrf_token %}<input type="hidden" name="action" value="devolver_correccion">
+            <input type="text" name="comentario" placeholder="¿Qué falta corregir?">
+            <button class="btn btn-secondary" type="submit">Devolver a corrección</button>
+          </form>
+        </div>
+      </div>
       {% endif %}
 
       {% if show_reenviar_revision %}
-        <div class="vacante-action-block">
-          <h3>Corrección de solicitud</h3>
-          <div class="vacante-actions">
-            <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-              {% csrf_token %}
-              <input type="hidden" name="action" value="reenviar_revision">
-              <input type="text" name="comentario" placeholder="Qué se corrigió">
-              <button class="btn btn-primary" type="submit">Reenviar a revisión</button>
-            </form>
-          </div>
+      <div class="vd-action-block">
+        <h3>Corrección de solicitud</h3>
+        <div class="vd-action-forms">
+          <form class="vd-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+            {% csrf_token %}<input type="hidden" name="action" value="reenviar_revision">
+            <input type="text" name="comentario" placeholder="¿Qué se corrigió?">
+            <button class="btn btn-primary" type="submit">Reenviar a revisión</button>
+          </form>
         </div>
+      </div>
       {% endif %}
 
       {% if show_authorize_actions %}
-        <div class="vacante-action-block">
-          <h3>Autorización</h3>
-          <div class="vacante-actions">
-            <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-              {% csrf_token %}
-              <input type="hidden" name="action" value="aprobar">
-              <input type="text" name="comentario" placeholder="Comentario">
-              <button class="btn btn-primary" type="submit">Aprobar</button>
-            </form>
-            <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-              {% csrf_token %}
-              <input type="hidden" name="action" value="rechazar">
-              <input type="text" name="comentario" placeholder="Motivo">
-              <button class="btn btn-secondary" type="submit">Rechazar</button>
-            </form>
-          </div>
+      <div class="vd-action-block">
+        <h3>Autorización</h3>
+        <div class="vd-action-forms">
+          <form class="vd-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+            {% csrf_token %}<input type="hidden" name="action" value="aprobar">
+            <input type="text" name="comentario" placeholder="Comentario (opcional)">
+            <button class="btn btn-primary" type="submit">✓ Aprobar</button>
+          </form>
+          <form class="vd-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+            {% csrf_token %}<input type="hidden" name="action" value="rechazar">
+            <input type="text" name="comentario" placeholder="Motivo del rechazo">
+            <button class="btn btn-secondary" type="submit">✕ Rechazar</button>
+          </form>
         </div>
+      </div>
       {% endif %}
 
       {% if show_recruitment_action or show_cover_action %}
-        <div class="vacante-action-block">
-          <h3>Reclutamiento y cobertura</h3>
-          <div class="vacante-actions">
-            {% if show_recruitment_action %}
-              <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="reclutamiento">
-                <input type="text" name="comentario" placeholder="Comentario">
-                <button class="btn btn-primary" type="submit">Iniciar reclutamiento</button>
-              </form>
-            {% endif %}
-            {% if show_cover_action %}
-              <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="cubrir">
-                <select name="empleado" required>
-                  <option value="">Empleado que cubre</option>
-                  {% for empleado in empleados %}
-                    <option value="{{ empleado.id }}">{{ empleado.nombre }}</option>
-                  {% endfor %}
-                </select>
-                <input type="date" name="fecha_cobertura">
-                <input type="text" name="comentario" placeholder="Nota">
-                <button class="btn btn-primary" type="submit">Registrar cobertura</button>
-              </form>
-            {% endif %}
-          </div>
+      <div class="vd-action-block">
+        <h3>Reclutamiento y cobertura</h3>
+        <div class="vd-action-forms">
+          {% if show_recruitment_action %}
+          <form class="vd-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+            {% csrf_token %}<input type="hidden" name="action" value="reclutamiento">
+            <input type="text" name="comentario" placeholder="Comentario (opcional)">
+            <button class="btn btn-primary" type="submit">Iniciar reclutamiento</button>
+          </form>
+          {% endif %}
+          {% if show_cover_action %}
+          <form class="vd-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+            {% csrf_token %}<input type="hidden" name="action" value="cubrir">
+            <select name="empleado" required>
+              <option value="">Empleado que cubre la plaza</option>
+              {% for emp in empleados %}
+                <option value="{{ emp.id }}">{{ emp.nombre }}</option>
+              {% endfor %}
+            </select>
+            <input type="date" name="fecha_cobertura">
+            <input type="text" name="comentario" placeholder="Nota">
+            <button class="btn btn-primary" type="submit">Registrar cobertura</button>
+          </form>
+          {% endif %}
         </div>
+      </div>
       {% endif %}
 
       {% if show_pause_action or show_cancel_action %}
-        <div class="vacante-action-block">
-          <h3>Control</h3>
-          <div class="vacante-actions">
-            {% if show_pause_action %}
-              <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="pausar">
-                <input type="text" name="comentario" placeholder="Motivo">
-                <button class="btn btn-secondary" type="submit">Pausar</button>
-              </form>
-            {% endif %}
-            {% if show_cancel_action %}
-              <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="cancelar">
-                <input type="text" name="comentario" placeholder="Motivo">
-                <button class="btn btn-secondary" type="submit">Cancelar</button>
-              </form>
-            {% endif %}
-          </div>
+      <div class="vd-action-block">
+        <h3>Control</h3>
+        <div class="vd-action-forms">
+          {% if show_pause_action %}
+          <form class="vd-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+            {% csrf_token %}<input type="hidden" name="action" value="pausar">
+            <input type="text" name="comentario" placeholder="Motivo de pausa">
+            <button class="btn btn-secondary" type="submit">⏸ Pausar</button>
+          </form>
+          {% endif %}
+          {% if show_cancel_action %}
+          <form class="vd-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+            {% csrf_token %}<input type="hidden" name="action" value="cancelar">
+            <input type="text" name="comentario" placeholder="Motivo de cancelación">
+            <button class="btn btn-secondary" type="submit">✕ Cancelar solicitud</button>
+          </form>
+          {% endif %}
         </div>
+      </div>
       {% endif %}
+
     </div>
-  </section>
+  </div>
   {% endif %}
 
-  <section class="vacante-panel">
-    <h2>Seguimiento de reclutamiento</h2>
-    {% if show_tracking_form %}
-      <form class="vacante-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="seguimiento">
-        <select name="etapa">
-          {% for value, label in seguimiento_etapas %}
-            <option value="{{ value }}">{{ label }}</option>
-          {% endfor %}
-        </select>
-        <input type="date" name="fecha">
-        <input type="text" name="candidato" placeholder="Candidato">
-        <input type="text" name="comentario" placeholder="Comentario de seguimiento" required>
-        <button class="btn btn-primary" type="submit">Agregar seguimiento</button>
-      </form>
+  {# ── Datos de solicitud ── #}
+  <div class="vd-panel">
+    <h2>Solicitud</h2>
+    <div class="vd-grid">
+      <div class="vd-kv"><span>Solicitada</span><strong>{{ vacante.fecha_solicitada|date:"d/m/Y" }}</strong></div>
+      <div class="vd-kv"><span>Necesaria</span><strong>{{ vacante.fecha_necesaria|date:"d/m/Y"|default:"—" }}</strong></div>
+      <div class="vd-kv"><span>Prioridad</span><strong>{{ vacante.get_prioridad_display }}</strong></div>
+      <div class="vd-kv"><span>Cobertura</span><strong>{{ vacante.coberturas.count }} / {{ vacante.cantidad_solicitada }}</strong></div>
+      <div class="vd-kv"><span>Departamento</span><strong>{{ vacante.get_departamento_display|default:"—" }}</strong></div>
+      <div class="vd-kv"><span>Sucursal</span><strong>{{ vacante.sucursal.nombre|default:"—" }}</strong></div>
+      <div class="vd-kv"><span>Solicitante</span><strong>{{ vacante.solicitado_por.get_full_name|default:vacante.solicitado_por.username|default:"—" }}</strong></div>
+      <div class="vd-kv"><span>Capturó</span><strong>{{ vacante.creado_por.get_full_name|default:vacante.creado_por.username|default:"—" }}</strong></div>
+    </div>
+    {% if vacante.motivo_solicitud %}
+    <div style="margin-top:14px;">
+      <div style="font-size:11px;font-weight:900;color:var(--texto-light);text-transform:uppercase;margin-bottom:5px;">Justificación</div>
+      <p style="margin:0;font-size:14px;color:var(--texto);">{{ vacante.motivo_solicitud }}</p>
+    </div>
     {% endif %}
-    <div class="vacante-history">
-      {% for seguimiento in vacante.seguimientos.all %}
-        <div class="vacante-history-item">
-          <strong>{{ seguimiento.get_etapa_display }} · {{ seguimiento.fecha|date:"Y-m-d" }}</strong>
-          <span class="vacante-muted">
-            {% if seguimiento.candidato %}{{ seguimiento.candidato }} · {% endif %}
-            {{ seguimiento.comentario }}
-            {% if seguimiento.creado_por %} · {{ seguimiento.creado_por.get_full_name|default:seguimiento.creado_por.username }}{% endif %}
-          </span>
+    {% if vacante.sugerencias %}
+    <p class="vd-muted" style="margin-top:8px;">{{ vacante.sugerencias }}</p>
+    {% endif %}
+  </div>
+
+  {# ── Autorización ── #}
+  <div class="vd-panel">
+    <h2>Autorización</h2>
+    <div class="vd-grid">
+      <div class="vd-kv"><span>Ruta</span><strong>{{ vacante.get_tipo_autorizacion_display }}</strong></div>
+      <div class="vd-kv"><span>Autorizador</span><strong>{{ workflow.autorizacion }}</strong></div>
+      <div class="vd-kv"><span>Validó RRHH</span><strong>{{ vacante.validado_rrhh_por.get_full_name|default:vacante.validado_rrhh_por.username|default:"—" }}</strong></div>
+      <div class="vd-kv"><span>Autorizó</span><strong>{{ vacante.autorizado_por.get_full_name|default:vacante.autorizado_por.username|default:"—" }}</strong></div>
+    </div>
+  </div>
+
+  {# ── Seguimiento de reclutamiento ── #}
+  <div class="vd-panel">
+    <h2>Seguimiento de reclutamiento</h2>
+
+    {% if show_tracking_form %}
+    <form id="seg-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="seguimiento">
+      <input type="hidden" name="etapa" id="seg-etapa-val" value="">
+
+      <p style="font-size:12px;color:var(--texto-light);margin:0 0 10px;">¿En qué etapa se registra esta novedad?</p>
+
+      <div class="seg-etapas">
+        <button type="button" class="seg-chip chip-postulante"     data-etapa="postulante"      onclick="selEtapa(this)">📋 Candidatos recibidos</button>
+        <button type="button" class="seg-chip chip-entrevista_tel" data-etapa="entrevista_tel"  onclick="selEtapa(this)">📞 1ra entrevista (tel.)</button>
+        <button type="button" class="seg-chip chip-filtro"         data-etapa="filtro"          onclick="selEtapa(this)">⚖️ Filtro / preselección</button>
+        <button type="button" class="seg-chip chip-entrevista_pres" data-etapa="entrevista_pres" onclick="selEtapa(this)">🏢 2da entrevista (pres.)</button>
+        <button type="button" class="seg-chip chip-seleccionado"   data-etapa="seleccionado"    onclick="selEtapa(this)">⭐ Candidato seleccionado</button>
+        <button type="button" class="seg-chip chip-documentos"     data-etapa="documentos"      onclick="selEtapa(this)">📁 Solicitud de documentos</button>
+        <button type="button" class="seg-chip chip-prueba"         data-etapa="prueba"          onclick="selEtapa(this)">🔄 Periodo de prueba</button>
+        <button type="button" class="seg-chip chip-contratado"     data-etapa="contratado"      onclick="selEtapa(this)">✅ Contratado</button>
+        <button type="button" class="seg-chip chip-descartado"     data-etapa="descartado"      onclick="selEtapa(this)">✗ Descartado</button>
+        <button type="button" class="seg-chip chip-comentario"     data-etapa="comentario"      onclick="selEtapa(this)">📝 Nota</button>
+      </div>
+
+      <div class="seg-form-fields" id="seg-fields">
+        <div class="seg-form-row">
+          <div>
+            <label class="seg-form-label">Candidato (nombre)</label>
+            <input type="text" name="candidato" placeholder="Nombre del candidato" maxlength="180">
+          </div>
+          <div>
+            <label class="seg-form-label">Fecha</label>
+            <input type="date" name="fecha" value="{% now 'Y-m-d' %}">
+          </div>
+        </div>
+        <div class="seg-form-row full">
+          <div>
+            <label class="seg-form-label">Comentario <span style="color:var(--rojo)">*</span></label>
+            <input type="text" name="comentario" placeholder="Describe qué pasó en esta etapa..." required maxlength="500">
+          </div>
+        </div>
+        <div class="seg-form-actions">
+          <button class="btn btn-primary" type="submit">Guardar seguimiento</button>
+        </div>
+      </div>
+    </form>
+    {% endif %}
+
+    {# Timeline #}
+    <div style="margin-top:{% if show_tracking_form %}20px{% else %}0{% endif %};">
+      {% if vacante.seguimientos.all %}
+      <div class="seg-timeline">
+        {% for seg in vacante.seguimientos.all %}
+        <div class="seg-item">
+          <div class="seg-dot-col">
+            <div class="seg-dot dot-{{ seg.etapa }}"></div>
+            <div class="seg-line"></div>
+          </div>
+          <div class="seg-content">
+            <div class="seg-etapa-label label-{{ seg.etapa }}">{{ seg.get_etapa_display }}</div>
+            {% if seg.candidato %}<div class="seg-candidato">{{ seg.candidato }}</div>{% endif %}
+            <div class="seg-nota">{{ seg.comentario }}</div>
+            <div class="seg-meta">
+              {{ seg.fecha|date:"d/m/Y" }}
+              {% if seg.creado_por %} · {{ seg.creado_por.get_full_name|default:seg.creado_por.username }}{% endif %}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="vd-muted">Sin seguimiento registrado aún.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ── Coberturas ── #}
+  <div class="vd-panel">
+    <h2>Coberturas ({{ vacante.coberturas.count }} / {{ vacante.cantidad_solicitada }})</h2>
+    <div class="vd-list">
+      {% for cob in vacante.coberturas.all %}
+        <div class="vd-list-item">
+          <strong>{{ cob.empleado.nombre }}</strong>
+          <span class="vd-muted">{{ cob.fecha_cobertura|date:"d/m/Y" }}{% if cob.nota %} · {{ cob.nota }}{% endif %}</span>
         </div>
       {% empty %}
-        <div class="vacante-muted">Sin seguimiento registrado.</div>
+        <p class="vd-muted">Aún no hay empleados vinculados a esta solicitud.</p>
       {% endfor %}
     </div>
-  </section>
+  </div>
 
-  <section class="vacante-panel">
-    <h2>Coberturas</h2>
-    <div class="vacante-history">
-      {% for cobertura in vacante.coberturas.all %}
-        <div class="vacante-history-item">
-          <strong>{{ cobertura.empleado.nombre }} · {{ cobertura.fecha_cobertura|date:"Y-m-d" }}</strong>
-          {% if cobertura.nota %}<span class="vacante-muted">{{ cobertura.nota }}</span>{% endif %}
-        </div>
-      {% empty %}
-        <div class="vacante-muted">Aún no hay empleados vinculados a esta solicitud.</div>
-      {% endfor %}
-    </div>
-  </section>
-
-  <section class="vacante-panel">
+  {# ── Historial de movimientos ── #}
+  <div class="vd-panel">
     <h2>Historial</h2>
-    <div class="vacante-history">
-      {% for movimiento in vacante.movimientos.all %}
-        <div class="vacante-history-item">
-          <strong>{{ movimiento.get_estado_nuevo_display }} · {{ movimiento.creado_en|date:"Y-m-d H:i" }}</strong>
-          <span class="vacante-muted">
-            {% if movimiento.actor %}{{ movimiento.actor.get_full_name|default:movimiento.actor.username }}{% else %}Sistema{% endif %}
-            {% if movimiento.comentario %} · {{ movimiento.comentario }}{% endif %}
+    <div class="vd-list">
+      {% for mov in vacante.movimientos.all %}
+        <div class="vd-list-item">
+          <strong>{{ mov.get_estado_nuevo_display }} · {{ mov.creado_en|date:"d/m/Y H:i" }}</strong>
+          <span class="vd-muted">
+            {% if mov.actor %}{{ mov.actor.get_full_name|default:mov.actor.username }}{% else %}Sistema{% endif %}
+            {% if mov.comentario %} · {{ mov.comentario }}{% endif %}
           </span>
         </div>
       {% empty %}
-        <div class="vacante-muted">Sin movimientos registrados.</div>
+        <p class="vd-muted">Sin movimientos registrados.</p>
       {% endfor %}
     </div>
-  </section>
+  </div>
+
 </section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function selEtapa(btn) {
+  document.querySelectorAll('.seg-chip').forEach(c => c.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('seg-etapa-val').value = btn.dataset.etapa;
+  document.getElementById('seg-fields').classList.add('visible');
+}
+</script>
 {% endblock %}
