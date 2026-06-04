@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, time as dtime
 from typing import Any
 
@@ -14,6 +16,17 @@ log = logging.getLogger("rrhh.hikvision")
 
 ESTADO_ENTRADA = {"checkIn", "overtimeIn"}
 ESTADO_SALIDA = {"checkOut", "overtimeOut"}
+VENTANA_DUPLICADO_MINUTOS = 5
+OBS_REVISION_TRES_MARCAJES = "REVISIÓN: 3 marcajes"
+OBS_MARCAJES_EXTRA = "Marcajes extra"
+
+
+@dataclass(frozen=True)
+class MarcaHik:
+    dt: Any
+    status: str
+    serial_no: Any = None
+    nueva: bool = True
 
 
 def _parse_hik_time(time_str: str):
@@ -60,24 +73,95 @@ def _detectar_turno(hora_entrada: dtime) -> Turno | None:
     return mejor
 
 
-def _aplicar_evento(asistencia: AsistenciaEmpleado, status: str, dt) -> str:
-    if status in ESTADO_ENTRADA:
-        if asistencia.entrada:
-            return "entrada duplicada"
-        asistencia.entrada = dt
-        asistencia.fuente = AsistenciaEmpleado.FUENTE_HIKCONNECT_API
-        return "entrada registrada"
+def _minutos_entre(inicio, fin) -> int:
+    if not inicio or not fin:
+        return 0
+    return max(int((fin - inicio).total_seconds() / 60), 0)
 
-    if status in ESTADO_SALIDA:
-        asistencia.salida = dt
-        asistencia.fuente = AsistenciaEmpleado.FUENTE_HIKCONNECT_API
-        return "salida registrada"
 
-    obs = asistencia.observacion or ""
-    hora = timezone.localtime(dt).strftime("%H:%M")
-    asistencia.observacion = f"{obs} | {status}@{hora}".strip(" |")
+def _marcas_existentes(asistencia: AsistenciaEmpleado) -> list[MarcaHik]:
+    marcas = []
+    if asistencia.entrada:
+        marcas.append(MarcaHik(asistencia.entrada, "checkIn", nueva=False))
+    if asistencia.salida_comida:
+        marcas.append(MarcaHik(asistencia.salida_comida, "checkIn", nueva=False))
+    if asistencia.regreso_comida:
+        marcas.append(MarcaHik(asistencia.regreso_comida, "checkIn", nueva=False))
+    if asistencia.salida:
+        marcas.append(MarcaHik(asistencia.salida, "checkOut", nueva=False))
+    return marcas
+
+
+def _es_marca_cercana(a, b) -> bool:
+    return abs((timezone.localtime(a) - timezone.localtime(b)).total_seconds()) <= VENTANA_DUPLICADO_MINUTOS * 60
+
+
+def _filtrar_marcas_cercanas(marcas: list[MarcaHik]) -> tuple[list[MarcaHik], int]:
+    aceptadas: list[MarcaHik] = []
+    duplicados = 0
+    for marca in sorted(marcas, key=lambda item: timezone.localtime(item.dt)):
+        if any(_es_marca_cercana(marca.dt, aceptada.dt) for aceptada in aceptadas):
+            if marca.nueva:
+                duplicados += 1
+            continue
+        aceptadas.append(marca)
+    return aceptadas, duplicados
+
+
+def _actualizar_observacion_hik(asistencia: AsistenciaEmpleado, notas: list[str]) -> None:
+    partes_actuales = [
+        parte.strip()
+        for parte in (asistencia.observacion or "").split(" | ")
+        if parte.strip()
+        and not parte.strip().startswith(OBS_REVISION_TRES_MARCAJES)
+        and not parte.strip().startswith(OBS_MARCAJES_EXTRA)
+    ]
+    asistencia.observacion = " | ".join([*partes_actuales, *notas])
+
+
+def _aplicar_marcajes(asistencia: AsistenciaEmpleado, marcas_nuevas: list[MarcaHik]) -> tuple[int, str]:
+    marcas, duplicados = _filtrar_marcas_cercanas([*_marcas_existentes(asistencia), *marcas_nuevas])
+    marcas = sorted(marcas, key=lambda item: timezone.localtime(item.dt))
+    notas: list[str] = []
+
+    asistencia.entrada = marcas[0].dt if len(marcas) >= 1 else None
+    asistencia.salida_comida = None
+    asistencia.regreso_comida = None
+    asistencia.salida = None
+
+    if len(marcas) == 2:
+        if marcas[1].status in ESTADO_SALIDA:
+            asistencia.salida = marcas[1].dt
+        else:
+            asistencia.salida_comida = marcas[1].dt
+    elif len(marcas) == 3:
+        asistencia.salida_comida = marcas[1].dt
+        asistencia.regreso_comida = marcas[2].dt
+        notas.append(OBS_REVISION_TRES_MARCAJES)
+    elif len(marcas) >= 4:
+        asistencia.salida_comida = marcas[1].dt
+        asistencia.regreso_comida = marcas[2].dt
+        asistencia.salida = marcas[-1].dt
+        if len(marcas) > 4:
+            extras = ", ".join(timezone.localtime(marca.dt).strftime("%H:%M") for marca in marcas[3:-1])
+            if extras:
+                notas.append(f"{OBS_MARCAJES_EXTRA}: {extras}")
+
+    asistencia.minutos_comida = _minutos_entre(asistencia.salida_comida, asistencia.regreso_comida)
+    if asistencia.entrada and asistencia.salida:
+        if asistencia.salida_comida and asistencia.regreso_comida:
+            asistencia.minutos_trabajados = _minutos_entre(asistencia.entrada, asistencia.salida_comida) + _minutos_entre(
+                asistencia.regreso_comida,
+                asistencia.salida,
+            )
+        else:
+            asistencia.minutos_trabajados = _minutos_entre(asistencia.entrada, asistencia.salida)
+    else:
+        asistencia.minutos_trabajados = 0
+
     asistencia.fuente = AsistenciaEmpleado.FUENTE_HIKCONNECT_API
-    return "observacion registrada"
+    _actualizar_observacion_hik(asistencia, notas)
+    return duplicados, f"{len(marcas)} marcajes aplicados"
 
 
 def _status_desde_label(label: str) -> str:
@@ -120,6 +204,7 @@ def procesar_eventos_hik(eventos: list[dict[str, Any]]) -> dict[str, Any]:
     errores = 0
     duplicados = 0
     detalle = []
+    grupos = defaultdict(list)
 
     for ev in eventos:
         emp_no = str(ev.get("employee_no", "")).strip()
@@ -145,6 +230,10 @@ def procesar_eventos_hik(eventos: list[dict[str, Any]]) -> dict[str, Any]:
 
         local_dt = timezone.localtime(dt)
         fecha = local_dt.date()
+        grupos[(empleado.pk, fecha)].append((empleado, ev, MarcaHik(dt=dt, status=status, serial_no=ev.get("serial_no"))))
+
+    for (_, fecha), registros in grupos.items():
+        empleado = registros[0][0]
         asistencia, creada = AsistenciaEmpleado.objects.get_or_create(
             empleado=empleado,
             fecha=fecha,
@@ -154,18 +243,14 @@ def procesar_eventos_hik(eventos: list[dict[str, Any]]) -> dict[str, Any]:
             },
         )
 
-        resultado = _aplicar_evento(asistencia, status, dt)
-        if resultado == "entrada duplicada":
-            duplicados += 1
-            detalle.append({"employee_no": emp_no, "fecha": str(fecha), "resultado": resultado})
-            continue
-
-        if asistencia.entrada and asistencia.salida:
-            delta = asistencia.salida - asistencia.entrada
-            asistencia.minutos_trabajados = max(int(delta.total_seconds() / 60), 0)
+        marcas_nuevas = [registro[2] for registro in registros]
+        duplicados_grupo, resultado = _aplicar_marcajes(asistencia, marcas_nuevas)
+        duplicados += duplicados_grupo
+        procesados_grupo = max(len(marcas_nuevas) - duplicados_grupo, 0)
+        procesados += procesados_grupo
 
         if not asistencia.turno_id:
-            turno = _detectar_turno(local_dt.time())
+            turno = _detectar_turno(timezone.localtime(asistencia.entrada).time()) if asistencia.entrada else None
             if turno:
                 asistencia.turno = turno
 
@@ -176,15 +261,16 @@ def procesar_eventos_hik(eventos: list[dict[str, Any]]) -> dict[str, Any]:
             except Exception as exc:
                 log.warning("Error generando horas extra para %s: %s", empleado, exc)
 
-        procesados += 1
-        detalle.append(
-            {
-                "employee_no": emp_no,
-                "fecha": str(fecha),
-                "status": status,
-                "resultado": "creado" if creada else resultado,
-            }
-        )
+        for _, ev, marca in registros:
+            marca_duplicada = any(_es_marca_cercana(marca.dt, existente.dt) for existente in _marcas_existentes(asistencia) if existente.dt != marca.dt)
+            detalle.append(
+                {
+                    "employee_no": str(ev.get("employee_no", "")).strip(),
+                    "fecha": str(fecha),
+                    "status": marca.status,
+                    "resultado": "marca duplicada" if marca_duplicada else ("creado" if creada else resultado),
+                }
+            )
 
     log.info("Eventos Hikvision: procesados=%d errores=%d duplicados=%d", procesados, errores, duplicados)
     return {"procesados": procesados, "errores": errores, "duplicados": duplicados, "detalle": detalle}

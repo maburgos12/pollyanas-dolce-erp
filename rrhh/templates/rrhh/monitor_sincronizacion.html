@@ -65,7 +65,10 @@
         <tr>
           <th>Empleado</th>
           <th>Entrada</th>
+          <th>Sale comida</th>
+          <th>Regresa comida</th>
           <th>Salida</th>
+          <th>Min. comida</th>
           <th>Mins</th>
           <th>Fuente</th>
           <th>Turno</th>
@@ -76,13 +79,16 @@
         <tr>
           <td>{{ asistencia.empleado.nombre }}</td>
           <td>{{ asistencia.entrada|date:"H:i"|default:"-" }}</td>
+          <td>{{ asistencia.salida_comida|date:"H:i"|default:"-" }}</td>
+          <td>{{ asistencia.regreso_comida|date:"H:i"|default:"-" }}</td>
           <td>{{ asistencia.salida|date:"H:i"|default:"-" }}</td>
+          <td>{{ asistencia.minutos_comida }}</td>
           <td>{{ asistencia.minutos_trabajados }}</td>
           <td><span class="badge-source badge-{{ asistencia.fuente }}">{{ asistencia.get_fuente_display }}</span></td>
           <td>{{ asistencia.turno|default:"-" }}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="6">Sin asistencias registradas hoy.</td></tr>
+        <tr><td colspan="9">Sin asistencias registradas hoy.</td></tr>
         {% endfor %}
       </tbody>
     </table>

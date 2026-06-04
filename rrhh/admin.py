@@ -198,7 +198,17 @@ class VacanteSeguimientoAdmin(admin.ModelAdmin):
 
 @admin.register(AsistenciaEmpleado)
 class AsistenciaAdmin(admin.ModelAdmin):
-    list_display = ("empleado", "fecha", "entrada", "salida", "minutos_trabajados", "fuente")
+    list_display = (
+        "empleado",
+        "fecha",
+        "entrada",
+        "salida_comida",
+        "regreso_comida",
+        "salida",
+        "minutos_comida",
+        "minutos_trabajados",
+        "fuente",
+    )
     list_filter = ("fuente", "sucursal", "fecha")
     search_fields = ("empleado__nombre", "empleado__codigo")
 
