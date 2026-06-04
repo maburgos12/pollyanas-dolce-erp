@@ -1129,7 +1129,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% static 'fallas/sw.js' %}").catch(() => {});
+          navigator.serviceWorker.register("{% static 'fallas/sw.js' %}?v=20260604-v4").catch(() => {});
         }
         if (state.token) {
           try {
