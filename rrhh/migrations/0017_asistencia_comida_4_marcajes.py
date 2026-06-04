@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('rrhh', '0015_alter_vacantemovimiento_estado_nuevo_and_more'),
+        ('rrhh', '0016_documentos_empleado_pipeline_vacantes'),
     ]
 
     operations = [
