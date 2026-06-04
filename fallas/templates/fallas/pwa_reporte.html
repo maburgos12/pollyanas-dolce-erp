@@ -488,6 +488,22 @@
         border-radius: 10px;
         margin-top: 8px;
       }
+
+      .inline-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-top: 12px;
+      }
+
+      .edit-btn {
+        min-height: 42px;
+        border: 1px solid var(--wine);
+        border-radius: 10px;
+        background: #261521;
+        color: var(--text);
+        font-weight: 800;
+      }
     </style>
     <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
   </head>
@@ -529,7 +545,7 @@
           step: 1,
           sucursal: "",
           categoria: "",
-          area: "ventas",
+          area: "general",
           activo: "",
           prioridad: "media",
           titulo: "",
@@ -539,7 +555,10 @@
           fotoError: "",
           latitud: "",
           longitud: "",
-          geoStatus: "idle"
+          geoStatus: "idle",
+          editMode: false,
+          reporteId: null,
+          fotoActual: ""
         };
       }
 
@@ -555,6 +574,13 @@
       function fmt(value) {
         if (!value) return "-";
         return new Intl.DateTimeFormat("es-MX", {dateStyle: "medium", timeStyle: "short"}).format(new Date(value));
+      }
+
+      function defaultArea() {
+        const grupos = (state.perfil?.groups || []).map((g) => String(g).toLowerCase());
+        if (grupos.includes("produccion")) return "produccion";
+        if (grupos.includes("ventas")) return "ventas";
+        return "general";
       }
 
       function apiErrorMessage(error, fallback) {
@@ -717,7 +743,7 @@
       }
 
       async function loadMisReportes() {
-        const response = await apiFetch("/reportes/");
+        const response = await apiFetch("/reportes/?mine=1");
         const data = response.ok ? await response.json() : [];
         state.misReportes = data.results || data;
         return state.misReportes;
@@ -737,6 +763,35 @@
 
       function startNuevoReporte() {
         state.draft = emptyDraft();
+        state.draft.area = defaultArea();
+        showScreen("nuevo_reporte");
+      }
+
+      async function startEditarReporte(id) {
+        const response = await apiFetch(`/reportes/${encodeURIComponent(id)}/`);
+        if (!response.ok) return renderMisReportes("No se pudo abrir el reporte para edición.");
+        const reporte = await response.json();
+        if (!reporte.puede_editar) return renderMisReportes("Este reporte ya está en seguimiento y no se puede editar.");
+        state.draft = {
+          ...emptyDraft(),
+          step: 1,
+          editMode: true,
+          reporteId: reporte.id,
+          sucursal: reporte.sucursal || "",
+          categoria: reporte.categoria || "",
+          area: reporte.area || "general",
+          activo: reporte.activo_relacionado || "",
+          prioridad: reporte.prioridad || "media",
+          titulo: reporte.titulo || "",
+          descripcion: reporte.descripcion || "",
+          latitud: reporte.latitud || "",
+          longitud: reporte.longitud || "",
+          geoStatus: reporte.latitud ? "ready" : "idle",
+          fotoActual: reporte.foto_evidencia || ""
+        };
+        await loadSucursales();
+        await loadCategorias();
+        if (state.draft.sucursal) await loadActivos(state.draft.sucursal);
         showScreen("nuevo_reporte");
       }
 
@@ -787,8 +842,8 @@
         if (d.step === 2 && (!d.titulo.trim() || !d.descripcion.trim())) {
           return renderNuevoReporte("Captura titulo y descripcion.");
         }
-        if (d.step === 2 && !isGeoReady(d)) return renderNuevoReporte("Se requiere ubicación para continuar.");
-        if (d.step === 2 && !d.foto) return renderNuevoReporte("La foto debe tomarse en este momento.");
+        if (d.step === 2 && !d.editMode && !isGeoReady(d)) return renderNuevoReporte("Se requiere ubicación para continuar.");
+        if (d.step === 2 && !d.editMode && !d.foto) return renderNuevoReporte("La foto debe tomarse en este momento.");
         d.step = Math.min(3, d.step + 1);
         renderNuevoReporte();
       }
@@ -806,7 +861,7 @@
           if (!state.categorias.length) await loadCategorias();
           if (d.sucursal && !state.activos.length) await loadActivos(d.sucursal);
           body = `
-            <h1 class="screen-title">Nuevo reporte</h1>
+            <h1 class="screen-title">${d.editMode ? `Editar reporte #${esc(d.reporteId)}` : "Nuevo reporte"}</h1>
             ${progressDots(1)}
             <div class="field">
               <label for="sucursal">Sucursal</label>
@@ -848,7 +903,7 @@
               `).join("")}
             </div>
             <div class="actions">
-              <button class="secondary-btn" onclick="showScreen('dashboard')">Cancelar</button>
+              <button class="secondary-btn" onclick="${d.editMode ? "showScreen('mis_reportes')" : "showScreen('dashboard')"}">Cancelar</button>
               <button class="primary-btn" onclick="nextReporteStep()" ${d.sucursal && d.categoria && d.area && d.prioridad ? "" : "disabled"}>Siguiente</button>
             </div>
           `;
@@ -870,13 +925,14 @@
                 <label for="foto">Foto</label>
                 ${fotoInput("foto", Boolean(d.foto), "setFotoReporte(this)")}
                 ${d.fotoPreview ? `<img class="thumb" src="${d.fotoPreview}" alt="Vista previa">` : ""}
+                ${d.editMode && d.fotoActual && !d.fotoPreview ? `<p class="muted">Si no tomas otra foto, se conserva la evidencia actual.</p>` : ""}
                 ${d.fotoError ? `<p class="error">${esc(d.fotoError)}</p>` : ""}
               </div>
               <p class="gps-registered">Ubicacion registrada</p>
               ${error ? `<p class="error">${esc(error)}</p>` : ""}
               <div class="actions">
                 <button class="secondary-btn" onclick="prevReporteStep()">Atrás</button>
-                <button class="primary-btn" onclick="nextReporteStep()" ${ubicacionLista && d.foto ? "" : "disabled"}>Siguiente</button>
+                <button class="primary-btn" onclick="nextReporteStep()" ${(d.editMode || ubicacionLista) && (d.editMode || d.foto) ? "" : "disabled"}>Siguiente</button>
               </div>
             </div>
             ${geoOverlay(d)}
@@ -898,7 +954,7 @@
             ${error ? `<p class="error">${esc(error)}</p>` : ""}
             <div class="actions">
               <button class="secondary-btn" onclick="prevReporteStep()">Atrás</button>
-              <button class="primary-btn" onclick="enviarReporte()" ${isGeoReady(d) && d.foto ? "" : "disabled"}>Enviar reporte</button>
+              <button class="primary-btn" onclick="enviarReporte()" ${(d.editMode || isGeoReady(d)) && (d.editMode || d.foto) ? "" : "disabled"}>${d.editMode ? "Guardar cambios" : "Enviar reporte"}</button>
             </div>
           `;
         }
@@ -1000,7 +1056,7 @@
 
       async function enviarReporte() {
         const d = state.draft;
-        if (!isGeoReady(d) || !d.foto) return renderNuevoReporte("Se requiere ubicación y foto tomada en este momento.");
+        if (!d.editMode && (!isGeoReady(d) || !d.foto)) return renderNuevoReporte("Se requiere ubicación y foto tomada en este momento.");
         const form = new FormData();
         form.append("sucursal", d.sucursal);
         form.append("categoria", d.categoria);
@@ -1009,29 +1065,30 @@
         form.append("titulo", d.titulo.trim());
         form.append("descripcion", d.descripcion.trim());
         form.append("prioridad", d.prioridad);
-        form.append("foto_evidencia", d.foto);
-        form.append("latitud", d.latitud);
-        form.append("longitud", d.longitud);
-        const response = await apiFetch("/reportes/", {method: "POST", body: form});
+        if (d.foto) form.append("foto_evidencia", d.foto);
+        if (d.latitud) form.append("latitud", d.latitud);
+        if (d.longitud) form.append("longitud", d.longitud);
+        const path = d.editMode ? `/reportes/${encodeURIComponent(d.reporteId)}/` : "/reportes/";
+        const response = await apiFetch(path, {method: d.editMode ? "PATCH" : "POST", body: form});
         if (!response.ok) {
           const error = await response.json().catch(() => ({}));
-          return renderNuevoReporte(apiErrorMessage(error, "No se pudo enviar el reporte."));
+          return renderNuevoReporte(apiErrorMessage(error, d.editMode ? "No se pudo guardar el reporte." : "No se pudo enviar el reporte."));
         }
         const data = await response.json();
         render(shell(`
           <section class="confirm">
             <div class="confirm-mark">OK</div>
-            <h1 class="screen-title">Reporte enviado</h1>
-            <p class="muted">Folio #${esc(data.id)} registrado. Compras recibira notificacion y dara seguimiento.</p>
+            <h1 class="screen-title">${d.editMode ? "Reporte actualizado" : "Reporte enviado"}</h1>
+            <p class="muted">Folio #${esc(data.id || d.reporteId)} ${d.editMode ? "actualizado correctamente." : "registrado. Compras recibira notificacion y dara seguimiento."}</p>
             <div class="confirm-actions">
               <button class="primary-btn" onclick="startNuevoReporte()">Reportar otra falla</button>
-              <button class="secondary-btn" onclick="showScreen('dashboard')">Volver al inicio</button>
+              <button class="secondary-btn" onclick="showScreen('mis_reportes')">Ver mis reportes</button>
             </div>
           </section>
         `));
       }
 
-      async function renderMisReportes() {
+      async function renderMisReportes(error = "") {
         await loadMisReportes();
         const cards = state.misReportes.length
           ? state.misReportes.map((r) => {
@@ -1052,6 +1109,12 @@
                     <div class="kv"><b>Prioridad</b><span>${esc(r.prioridad_display || r.prioridad)}</span></div>
                     <div class="kv"><b>GPS</b><span>${r.latitud ? "Registrado" : "-"}</span></div>
                   </div>
+                  ${r.puede_editar ? `
+                    <div class="inline-actions">
+                      <button class="edit-btn" onclick="event.stopPropagation(); startEditarReporte(${Number(r.id)})">Editar</button>
+                      <button class="secondary-btn" onclick="event.stopPropagation(); showScreen('dashboard')">Inicio</button>
+                    </div>
+                  ` : ""}
                 </article>
               `;
             }).join("")
@@ -1059,6 +1122,7 @@
         render(shell(`
           <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
           <h1 class="screen-title" style="margin-top:16px;">Mis reportes</h1>
+          ${error ? `<p class="error">${esc(error)}</p>` : ""}
           ${cards}
         `));
       }

@@ -26,6 +26,7 @@ from .serializers import (
     ReporteFallaCreateSerializer,
     ReporteFallaDetailSerializer,
     ReporteFallaListSerializer,
+    ReporteFallaUpdateSerializer,
     SucursalFallaSerializer,
 )
 
@@ -97,10 +98,21 @@ def _filtrar_reportes_por_usuario(qs, user):
     if user.is_superuser or grupos & GRUPOS_VER_TODO_FALLAS:
         return qs
     if "ventas" in grupos_lower:
-        return qs.filter(area=ReporteFalla.AREA_VENTAS)
+        return qs.filter(Q(area=ReporteFalla.AREA_VENTAS) | Q(reportado_por=user))
     if "produccion" in grupos_lower:
-        return qs.filter(area=ReporteFalla.AREA_PRODUCCION)
+        return qs.filter(Q(area=ReporteFalla.AREA_PRODUCCION) | Q(reportado_por=user))
     return qs.filter(reportado_por=user)
+
+
+def _sucursales_disponibles_para_reporte(user):
+    sucursales = Sucursal.objects.filter(sucursales_operativas_q()).order_by("nombre")
+    if is_admin_or_dg(user) or _puede_cambiar_estatus_fallas(user):
+        return sucursales
+    grupos_lower = {g.lower() for g in _group_names(user)}
+    if "produccion" in grupos_lower:
+        return sucursales
+    sucursal_usuario = _sucursal_usuario(user)
+    return sucursales.filter(pk=sucursal_usuario.pk) if sucursal_usuario else sucursales.none()
 
 
 class SucursalFallaListView(generics.ListAPIView):
@@ -167,6 +179,8 @@ class ReporteFallaListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         qs = ReporteFalla.objects.select_related("sucursal", "categoria", "reportado_por")
+        if self.request.query_params.get("mine") in {"1", "true", "True"}:
+            return qs.filter(reportado_por=self.request.user)
         estatus = self.request.query_params.get("estatus")
         sucursal = self.request.query_params.get("sucursal")
         prioridad = self.request.query_params.get("prioridad")
@@ -190,7 +204,7 @@ class ReporteFallaListCreateView(generics.ListCreateAPIView):
 
 class ReporteFallaDetailView(generics.RetrieveUpdateAPIView):
     authentication_classes = [JWTAuthentication, TokenAuthentication, SessionAuthentication]
-    http_method_names = ["get", "head", "options"]
+    http_method_names = ["get", "patch", "put", "head", "options"]
     queryset = ReporteFalla.objects.select_related("sucursal", "categoria", "reportado_por").prefetch_related(
         "bitacora__usuario"
     )
@@ -200,6 +214,20 @@ class ReporteFallaDetailView(generics.RetrieveUpdateAPIView):
     def get_queryset(self):
         qs = super().get_queryset()
         return _filtrar_reportes_por_usuario(qs, self.request.user)
+
+    def get_serializer_class(self):
+        if self.request.method in {"PUT", "PATCH"}:
+            return ReporteFallaUpdateSerializer
+        return ReporteFallaDetailSerializer
+
+    def perform_update(self, serializer):
+        reporte = self.get_object()
+        if not _puede_modificar_reporte_propio(reporte, self.request.user):
+            raise PermissionDenied
+        sucursal = serializer.validated_data.get("sucursal")
+        if sucursal and not _sucursales_disponibles_para_reporte(self.request.user).filter(pk=sucursal.pk).exists():
+            raise PermissionDenied
+        serializer.save()
 
 
 @api_view(["POST"])
@@ -364,13 +392,7 @@ def pwa_reporte(request):
     if not _puede_reportar_fallas(request.user):
         raise PermissionDenied
 
-    sucursales = Sucursal.objects.filter(sucursales_operativas_q()).order_by("nombre")
-    if not (is_admin_or_dg(request.user) or _puede_cambiar_estatus_fallas(request.user)):
-        grupos_lower = {g.lower() for g in _group_names(request.user)}
-        if "produccion" not in grupos_lower:
-            sucursal_usuario = _sucursal_usuario(request.user)
-            sucursales = sucursales.filter(pk=sucursal_usuario.pk) if sucursal_usuario else sucursales.none()
-
+    sucursales = _sucursales_disponibles_para_reporte(request.user)
     categorias = CategoriaFalla.objects.filter(activo=True).order_by("orden", "nombre")
     activos = Activo.objects.filter(activo=True).order_by("nombre", "codigo")[:150]
 
@@ -445,11 +467,7 @@ def pwa_editar_reporte(request, pk):
     if not reporte or not _puede_modificar_reporte_propio(reporte, request.user):
         raise PermissionDenied
 
-    sucursales = Sucursal.objects.filter(sucursales_operativas_q()).order_by("nombre")
-    if not _puede_cambiar_estatus_fallas(request.user):
-        sucursal_usuario = _sucursal_usuario(request.user)
-        sucursales = sucursales.filter(pk=sucursal_usuario.pk) if sucursal_usuario else sucursales.none()
-
+    sucursales = _sucursales_disponibles_para_reporte(request.user)
     categorias = CategoriaFalla.objects.filter(activo=True).order_by("orden", "nombre")
     activos = Activo.objects.filter(activo=True).order_by("nombre", "codigo")[:150]
 
@@ -526,7 +544,10 @@ def pwa_mis_reportes(request):
         raise PermissionDenied
 
     qs = ReporteFalla.objects.select_related("sucursal", "categoria", "reportado_por").order_by("-fecha_reporte")
-    qs = _filtrar_reportes_por_usuario(qs, request.user)
+    if request.user.is_superuser or _group_names(request.user) & GRUPOS_VER_TODO_FALLAS:
+        qs = _filtrar_reportes_por_usuario(qs, request.user)
+    else:
+        qs = qs.filter(reportado_por=request.user)
 
     estatus = request.GET.get("estatus")
     prioridad = request.GET.get("prioridad")
