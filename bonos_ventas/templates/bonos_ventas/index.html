@@ -485,6 +485,12 @@ function App(){
       .then(()=>{ showStatus('Sincronización completada','ok'); cargar(); })
       .catch(err=>showStatus(err.message,'err'));
   }
+  function syncRepartidores(){
+    if(!periodo) return;
+    api('/api/bonos-ventas/ventas-categoria/sync-repartidores/',{method:'POST',body:JSON.stringify({periodo:periodo.id})})
+      .then(r=>{ showStatus(`Repartidores sincronizados: ${r.actualizados}`+(r.sin_repartidor_vinculado?` · ${r.sin_repartidor_vinculado} sin vínculo`:''),'ok'); cargar(); })
+      .catch(err=>showStatus(err.message,'err'));
+  }
   function showStatus(msg,type='ok'){ setStatus(msg); setStatusType(type); setTimeout(()=>setStatus(''),4000); }
 
   const bonosFiltrados = filtroSuc ? bonos.filter(b=>String(b.sucursal)===filtroSuc) : bonos;
@@ -537,6 +543,7 @@ function App(){
         })(),
         !periodo && h('button',{className:'btn btn-wine btn-sm',onClick:crearPeriodo},'Crear período'),
         periodo && h('button',{className:'btn btn-ghost btn-sm',onClick:inicializar},'Inicializar empleados'),
+        periodo && h('button',{className:'btn btn-ghost btn-sm',onClick:syncRepartidores},'Sincronizar repartidores'),
         periodo && h('div',{style:{marginLeft:'auto',display:'flex',gap:8,alignItems:'center'}},
           h('span',{style:{fontSize:12,color:'var(--sub)',fontWeight:700}},'Sucursal:'),
           h('select',{value:filtroSuc,onChange:e=>setFiltroSuc(e.target.value),style:{padding:'5px 10px',border:'1px solid var(--line)',borderRadius:6,font:'inherit',fontSize:13}},
