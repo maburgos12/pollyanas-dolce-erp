@@ -409,6 +409,40 @@
     </div>
   </div>
 
+  {# ── Registrar cobertura (al final del flujo de reclutamiento) ── #}
+  {% if can_manage_vacantes and vacante.estado == 'reclutamiento' %}
+  <div class="vd-panel" style="border-color: var(--vino);">
+    <h2>¿Ya tienes al candidato? Registra la cobertura</h2>
+    <p style="color:var(--texto-light);font-size:13px;margin:0 0 14px;">
+      Completa este paso una vez que el candidato seleccionado va a incorporarse.
+      Esto cierra la vacante.
+    </p>
+    <form method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}" style="display:grid;gap:10px;">
+      {% csrf_token %}<input type="hidden" name="action" value="cubrir">
+      <div class="vd-cover-row">
+        <div>
+          <label class="vd-field-label">Empleado que cubre la plaza</label>
+          <select name="empleado" required>
+            <option value="">Buscar y seleccionar...</option>
+            {% for emp in empleados %}
+              <option value="{{ emp.id }}">{{ emp.nombre }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="vd-field-label">Fecha de ingreso</label>
+          <input type="date" name="fecha_cobertura">
+        </div>
+        <div>
+          <label class="vd-field-label">Nota (opcional)</label>
+          <input type="text" name="comentario" placeholder="Ej. contrato temporal, periodo de prueba...">
+        </div>
+      </div>
+      <div><button class="btn btn-primary" type="submit">✓ Confirmar cobertura y cerrar vacante</button></div>
+    </form>
+  </div>
+  {% endif %}
+
   {# ── Coberturas ── #}
   <div class="vd-panel">
     <h2>Coberturas ({{ vacante.coberturas.count }} / {{ vacante.cantidad_solicitada }})</h2>
