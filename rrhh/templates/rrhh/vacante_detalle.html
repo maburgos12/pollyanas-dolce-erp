@@ -53,11 +53,19 @@
   .vd-action-block { border-top: 1px solid var(--rosa); padding-top: 12px; }
   .vd-action-block:first-child { border-top: none; padding-top: 0; }
   .vd-action-block h3 { color: var(--texto); font-size: 13px; font-weight: 900; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .03em; }
+  .vd-action-desc { color: var(--texto-light); font-size: 13px; margin: 0 0 10px; }
+  .vd-field-label { color: var(--texto-light); display: block; font-size: 11px; font-weight: 900; margin-bottom: 4px; text-transform: uppercase; }
+  .vd-cover-row { display: grid; grid-template-columns: 2fr 1fr 2fr; gap: 10px; }
+  .vd-cover-row select,
+  .vd-cover-row input { width: 100%; }
+  .vd-action-block-secondary { background: var(--gris-suave); border-radius: 6px; margin-top: 4px; padding: 12px; }
+  .vd-action-block-secondary h3 { color: var(--texto-light); }
   .vd-action-forms { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
   .vd-action-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .vd-action-form input[type="text"],
   .vd-action-form select,
   .vd-action-form input[type="date"] { min-width: 160px; }
+  @media (max-width: 800px) { .vd-cover-row { grid-template-columns: 1fr; } }
 
   /* Seguimiento — chips de etapa */
   .seg-etapas { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
@@ -221,44 +229,57 @@
       </div>
       {% endif %}
 
-      {% if show_recruitment_action or show_cover_action %}
+      {% if show_recruitment_action %}
       <div class="vd-action-block">
-        <h3>Reclutamiento y cobertura</h3>
-        <div class="vd-action-forms">
-          {% if show_recruitment_action %}
-          <form class="vd-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-            {% csrf_token %}<input type="hidden" name="action" value="reclutamiento">
-            <input type="text" name="comentario" placeholder="Comentario (opcional)">
-            <button class="btn btn-primary" type="submit">Iniciar reclutamiento</button>
-          </form>
-          {% endif %}
-          {% if show_cover_action %}
-          <form class="vd-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
-            {% csrf_token %}<input type="hidden" name="action" value="cubrir">
-            <select name="empleado" required>
-              <option value="">Empleado que cubre la plaza</option>
-              {% for emp in empleados %}
-                <option value="{{ emp.id }}">{{ emp.nombre }}</option>
-              {% endfor %}
-            </select>
-            <input type="date" name="fecha_cobertura">
-            <input type="text" name="comentario" placeholder="Nota">
-            <button class="btn btn-primary" type="submit">Registrar cobertura</button>
-          </form>
-          {% endif %}
-        </div>
+        <h3>Iniciar reclutamiento</h3>
+        <p class="vd-action-desc">La vacante está autorizada. Marca el inicio formal de la búsqueda de candidatos.</p>
+        <form class="vd-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+          {% csrf_token %}<input type="hidden" name="action" value="reclutamiento">
+          <input type="text" name="comentario" placeholder="Comentario (opcional)">
+          <button class="btn btn-primary" type="submit">Iniciar reclutamiento</button>
+        </form>
+      </div>
+      {% endif %}
+
+      {% if show_cover_action %}
+      <div class="vd-action-block">
+        <h3>Registrar cobertura</h3>
+        <p class="vd-action-desc">Ya encontraste al candidato. Selecciona al empleado que cubre esta plaza para cerrar la vacante.</p>
+        <form method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}" style="display:grid;gap:10px;">
+          {% csrf_token %}<input type="hidden" name="action" value="cubrir">
+          <div class="vd-cover-row">
+            <div>
+              <label class="vd-field-label">Empleado que cubre la plaza</label>
+              <select name="empleado" required>
+                <option value="">Buscar y seleccionar...</option>
+                {% for emp in empleados %}
+                  <option value="{{ emp.id }}">{{ emp.nombre }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div>
+              <label class="vd-field-label">Fecha de ingreso</label>
+              <input type="date" name="fecha_cobertura" >
+            </div>
+            <div>
+              <label class="vd-field-label">Nota (opcional)</label>
+              <input type="text" name="comentario" placeholder="Ej. contrato temporal, periodo de prueba..." >
+            </div>
+          </div>
+          <div><button class="btn btn-primary" type="submit">✓ Confirmar cobertura</button></div>
+        </form>
       </div>
       {% endif %}
 
       {% if show_pause_action or show_cancel_action %}
-      <div class="vd-action-block">
-        <h3>Control</h3>
+      <div class="vd-action-block vd-action-block-secondary">
+        <h3>Otras acciones</h3>
         <div class="vd-action-forms">
           {% if show_pause_action %}
           <form class="vd-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
             {% csrf_token %}<input type="hidden" name="action" value="pausar">
             <input type="text" name="comentario" placeholder="Motivo de pausa">
-            <button class="btn btn-secondary" type="submit">⏸ Pausar</button>
+            <button class="btn btn-secondary" type="submit">⏸ Pausar búsqueda</button>
           </form>
           {% endif %}
           {% if show_cancel_action %}
