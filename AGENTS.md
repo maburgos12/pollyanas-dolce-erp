@@ -135,6 +135,8 @@ git diff origin/main..HEAD --stat
   navegador real con consola y Network/XHR cuando aplique.
 - Para datos operativos, validar tabla/conteo/registros y luego confirmar que
   aparecen en la pantalla, reporte, app o archivo donde se usan.
+- Para bonos producción o bonos ventas, validar además el contrato operativo del
+  periodo activo documentado en `docs/OPERACION_BONOS.md`.
 
 ### 9. Cierre responsable
 No declarar terminado un cambio si solo compila, si solo responde la API, o si
