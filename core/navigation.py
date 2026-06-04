@@ -1,20 +1,5 @@
 from core.access import can_view_submodule, has_any_role, ROLE_DG, ROLE_ADMIN
 
-# Grupos que gestionan fallas desde Comercial (ven fallas en ese grupo, no en Producción)
-_FALLAS_COMERCIAL_ROLES = {"dg", "DG", "admin", "ADMIN", "compras_logistica", "ventas", "VENTAS"}
-
-
-def _es_produccion_exclusivo(user) -> bool:
-    """True si el usuario pertenece a producción pero no a ningún rol de gestión/comercial."""
-    if not user or not user.is_authenticated or user.is_superuser or user.is_staff:
-        return False
-    from core.access import _group_names
-    grupos = _group_names(user)
-    grupos_lower = {g.lower() for g in grupos}
-    es_produccion = "produccion" in grupos_lower
-    tiene_comercial = bool(grupos & _FALLAS_COMERCIAL_ROLES) or "compras_logistica" in grupos_lower
-    return es_produccion and not tiene_comercial
-
 
 NAV_GROUPS = [
     {
@@ -49,18 +34,21 @@ NAV_GROUPS = [
             ("crm", "dashboard", "CRM", "/crm/dashboard/", ["/crm/dashboard/"]),
             ("crm", "clientes", "Clientes", "/crm/clientes/", ["/crm/clientes/"]),
             ("crm", "pedidos", "Pedidos", "/crm/pedidos/", ["/crm/pedidos/"]),
-            ("fallas", "dashboard", "Fallas", "/fallas/", ["/fallas/"]),
+        ],
+    },
+    {
+        "key": "fallas",
+        "label": "Fallas",
+        "items": [
+            ("fallas", "dashboard", "Reportes de fallas", "/fallas/", ["/fallas/"]),
             ("fallas", "reportar", "Reportar falla", "/fallas/reportar/", ["/fallas/reportar/"]),
-            ("fallas", "mis_reportes", "Mis reportes", "/fallas/mis-reportes/", ["/fallas/mis-reportes/"]),
+            ("fallas", "mis_reportes", "Reportes", "/fallas/mis-reportes/", ["/fallas/mis-reportes/"]),
         ],
     },
     {
         "key": "produccion",
         "label": "Producción",
         "items": [
-            ("fallas", "dashboard", "Fallas producción", "/fallas/", ["/fallas/"]),
-            ("fallas", "reportar", "Reportar falla", "/fallas/reportar/", ["/fallas/reportar/"]),
-            ("fallas", "mis_reportes", "Mis reportes", "/fallas/mis-reportes/", ["/fallas/mis-reportes/"]),
             ("produccion", "plan", "Plan de producción", "/recetas/plan-produccion/", ["/recetas/plan-produccion/"]),
             ("produccion", "bonos", "Bonos producción", "/bonos-produccion/dashboard/", ["/bonos-produccion/"]),
             ("produccion", "reabasto_cedis", "Reabasto CEDIS", "/recetas/reabasto-cedis/", ["/recetas/reabasto-cedis/"]),
@@ -193,15 +181,10 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
     current_path = current_path or ""
     visible_groups = []
     best_match_len = 0
-    es_produccion_excl = _es_produccion_exclusivo(user)
     for group in NAV_GROUPS:
         items = []
         for module, submodule, label, url, prefixes in group["items"]:
             if not can_view_submodule(user, module, submodule):
-                continue
-            # Fallas en Comercial se oculta para usuarios exclusivos de producción
-            # (ellos ya la ven en el grupo Producción)
-            if group["key"] == "comercial" and module == "fallas" and es_produccion_excl:
                 continue
             match_len = max((len(prefix) for prefix in prefixes if current_path.startswith(prefix)), default=0)
             best_match_len = max(best_match_len, match_len)
