@@ -1,4 +1,7 @@
+import json
+
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
@@ -13,11 +16,22 @@ class MisReportesActionsTests(TestCase):
         User = get_user_model()
         self.user = User.objects.create_user(username="reporta", password="pass123")
         self.other_user = User.objects.create_user(username="otro", password="pass123")
+        self.produccion_group, _ = Group.objects.get_or_create(name="produccion")
         for user in (self.user, self.other_user):
             UserModuleAccess.objects.create(user=user, module="fallas.mis_reportes", access=UserModuleAccess.ACCESS_VIEW)
             UserModuleAccess.objects.create(user=user, module="fallas.reportar", access=UserModuleAccess.ACCESS_VIEW)
 
-        self.sucursal = Sucursal.objects.create(codigo="LG", nombre="Las Glorias", activa=True)
+        self.sucursal, _ = Sucursal.objects.get_or_create(
+            codigo="LG",
+            defaults={"nombre": "Las Glorias", "activa": True},
+        )
+        self.cedis, _ = Sucursal.objects.get_or_create(
+            codigo="CEDIS",
+            defaults={"nombre": "CEDIS", "activa": True},
+        )
+        Sucursal.objects.filter(pk__in=[self.sucursal.pk, self.cedis.pk]).update(activa=True, fecha_apertura=None)
+        self.sucursal.refresh_from_db()
+        self.cedis.refresh_from_db()
         UserProfile.objects.create(user=self.user, sucursal=self.sucursal)
         UserProfile.objects.create(user=self.other_user, sucursal=self.sucursal)
         self.categoria = CategoriaFalla.objects.create(nombre="Mobiliario", tipo=CategoriaFalla.TIPO_MOBILIARIO)
@@ -98,3 +112,78 @@ class MisReportesActionsTests(TestCase):
         self.assertEqual(edit_response.status_code, 403)
         self.assertEqual(delete_response.status_code, 403)
         self.assertTrue(ReporteFalla.objects.filter(pk=self.reporte.id).exists())
+
+    def test_mis_reportes_colaborador_solo_muestra_reportes_propios(self):
+        reporte_ajeno = self._crear_reporte(self.other_user, "Falla de otro usuario")
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("fallas:pwa-mis-reportes"))
+
+        self.assertContains(response, "Letrero sin luz")
+        self.assertNotContains(response, reporte_ajeno.titulo)
+
+    def test_api_mine_muestra_reporte_propio_aunque_area_no_coincida(self):
+        self.user.groups.add(self.produccion_group)
+        self.reporte.area = ReporteFalla.AREA_VENTAS
+        self.reporte.save(update_fields=["area"])
+        self._crear_reporte(self.other_user, "Falla producción ajena")
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("fallas_api:reportes-list"), {"mine": "1"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        rows = payload["results"] if isinstance(payload, dict) else payload
+        ids = [item["id"] for item in rows]
+        self.assertIn(self.reporte.id, ids)
+        self.assertEqual(ids, [self.reporte.id])
+        self.assertTrue(rows[0]["puede_editar"])
+
+    def test_produccion_puede_editar_reporte_propio_de_cedis(self):
+        self.user.groups.add(self.produccion_group)
+        self.reporte.sucursal = self.cedis
+        self.reporte.area = ReporteFalla.AREA_PRODUCCION
+        self.reporte.save(update_fields=["sucursal", "area"])
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("fallas:pwa-editar-reporte", args=[self.reporte.id]),
+            {
+                "sucursal": self.cedis.id,
+                "categoria": self.categoria.id,
+                "area": ReporteFalla.AREA_PRODUCCION,
+                "prioridad": ReporteFalla.PRIORIDAD_ALTA,
+                "titulo": "Falla CEDIS corregida",
+                "descripcion": "Se actualiza desde Producción.",
+                "latitud": "",
+                "longitud": "",
+            },
+        )
+
+        self.assertRedirects(response, reverse("fallas:pwa-mis-reportes"))
+        self.reporte.refresh_from_db()
+        self.assertEqual(self.reporte.sucursal, self.cedis)
+        self.assertEqual(self.reporte.titulo, "Falla CEDIS corregida")
+
+    def test_api_permite_al_creador_actualizar_reporte_abierto(self):
+        self.client.force_login(self.user)
+
+        response = self.client.patch(
+            reverse("fallas_api:reporte-detail", args=[self.reporte.id]),
+            data=json.dumps(
+                {
+                    "sucursal": self.sucursal.id,
+                    "categoria": self.categoria.id,
+                    "area": ReporteFalla.AREA_GENERAL,
+                    "prioridad": ReporteFalla.PRIORIDAD_ALTA,
+                    "titulo": "Editado por API",
+                    "descripcion": "Cambio desde la app móvil.",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.reporte.refresh_from_db()
+        self.assertEqual(self.reporte.titulo, "Editado por API")
+        self.assertEqual(self.reporte.prioridad, ReporteFalla.PRIORIDAD_ALTA)

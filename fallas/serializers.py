@@ -69,9 +69,20 @@ class ReporteFallaListSerializer(serializers.ModelSerializer):
     prioridad_display = serializers.CharField(source="get_prioridad_display", read_only=True)
     area_display = serializers.CharField(source="get_area_display", read_only=True)
     reportado_por_nombre = serializers.SerializerMethodField()
+    puede_editar = serializers.SerializerMethodField()
 
     def get_reportado_por_nombre(self, obj):
         return obj.reportado_por.get_full_name() or obj.reportado_por.username
+
+    def get_puede_editar(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        return bool(
+            user
+            and user.is_authenticated
+            and obj.reportado_por_id == user.id
+            and obj.estatus == ReporteFalla.ESTATUS_ABIERTO
+        )
 
     class Meta:
         model = ReporteFalla
@@ -79,6 +90,7 @@ class ReporteFallaListSerializer(serializers.ModelSerializer):
             "id",
             "sucursal_nombre",
             "titulo",
+            "descripcion",
             "categoria_nombre",
             "prioridad",
             "prioridad_display",
@@ -87,8 +99,11 @@ class ReporteFallaListSerializer(serializers.ModelSerializer):
             "area",
             "area_display",
             "fecha_reporte",
+            "latitud",
+            "longitud",
             "reportado_por_nombre",
             "foto_evidencia",
+            "puede_editar",
         ]
 
 
@@ -134,6 +149,38 @@ class ReporteFallaCreateSerializer(serializers.ModelSerializer):
         return reporte
 
 
+class ReporteFallaUpdateSerializer(serializers.ModelSerializer):
+    """Permite al creador corregir un reporte propio antes de seguimiento."""
+
+    class Meta:
+        model = ReporteFalla
+        fields = [
+            "sucursal",
+            "activo_relacionado",
+            "categoria",
+            "titulo",
+            "descripcion",
+            "prioridad",
+            "foto_evidencia",
+            "latitud",
+            "longitud",
+            "area",
+        ]
+        extra_kwargs = {"foto_evidencia": {"required": False}}
+
+    def update(self, instance, validated_data):
+        with transaction.atomic():
+            reporte = super().update(instance, validated_data)
+            BitacoraFalla.objects.create(
+                reporte=reporte,
+                usuario=self.context["request"].user,
+                estatus_anterior=ReporteFalla.ESTATUS_ABIERTO,
+                estatus_nuevo=ReporteFalla.ESTATUS_ABIERTO,
+                comentario="Reporte editado por el usuario que lo levantó.",
+            )
+        return reporte
+
+
 class ReporteFallaDetailSerializer(ReporteFallaListSerializer):
     bitacora = BitacoraSerializer(many=True, read_only=True)
     activo_nombre = serializers.SerializerMethodField()
@@ -143,7 +190,10 @@ class ReporteFallaDetailSerializer(ReporteFallaListSerializer):
 
     class Meta(ReporteFallaListSerializer.Meta):
         fields = ReporteFallaListSerializer.Meta.fields + [
+            "sucursal",
+            "categoria",
             "descripcion",
+            "activo_relacionado",
             "activo_nombre",
             "latitud",
             "longitud",
