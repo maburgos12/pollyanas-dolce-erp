@@ -115,6 +115,9 @@ class Empleado(models.Model):
     participa_bonos_ventas = models.BooleanField(default=False)
     participa_bonos_produccion = models.BooleanField(default=False)
     bonos_esquemas = models.ManyToManyField(BonoEsquema, blank=True, related_name="empleados")
+    banco = models.CharField(max_length=80, blank=True, default="")
+    cuenta_clabe = models.CharField(max_length=18, blank=True, default="")
+    numero_cuenta = models.CharField(max_length=20, blank=True, default="")
     activo = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -611,23 +614,37 @@ class VacanteCobertura(models.Model):
 
 
 class VacanteSeguimiento(models.Model):
+    ETAPA_POSTULANTE = "postulante"
+    ETAPA_ENTREVISTA_TEL = "entrevista_tel"
+    ETAPA_FILTRO = "filtro"
+    ETAPA_ENTREVISTA_PRES = "entrevista_pres"
+    ETAPA_SELECCIONADO = "seleccionado"
+    ETAPA_DOCUMENTOS = "documentos"
+    ETAPA_PRUEBA = "prueba"
+    ETAPA_CONTRATADO = "contratado"
+    ETAPA_DESCARTADO = "descartado"
     ETAPA_COMENTARIO = "comentario"
+    # Etapas heredadas (compatibilidad con registros anteriores)
     ETAPA_BUSQUEDA = "busqueda"
     ETAPA_CONTACTO = "contacto"
     ETAPA_ENTREVISTA = "entrevista"
-    ETAPA_PRUEBA = "prueba"
     ETAPA_OFERTA = "oferta"
-    ETAPA_CONTRATADO = "contratado"
-    ETAPA_DESCARTADO = "descartado"
     ETAPA_CHOICES = [
-        (ETAPA_COMENTARIO, "Comentario"),
-        (ETAPA_BUSQUEDA, "Búsqueda"),
-        (ETAPA_CONTACTO, "Contacto"),
-        (ETAPA_ENTREVISTA, "Entrevista"),
-        (ETAPA_PRUEBA, "Prueba"),
-        (ETAPA_OFERTA, "Oferta"),
+        (ETAPA_POSTULANTE, "Candidatos recibidos"),
+        (ETAPA_ENTREVISTA_TEL, "1ra entrevista (telefónica)"),
+        (ETAPA_FILTRO, "Filtro / preselección"),
+        (ETAPA_ENTREVISTA_PRES, "2da entrevista (presencial)"),
+        (ETAPA_SELECCIONADO, "Candidato seleccionado"),
+        (ETAPA_DOCUMENTOS, "Solicitud de documentos"),
+        (ETAPA_PRUEBA, "Periodo de prueba"),
         (ETAPA_CONTRATADO, "Contratado"),
         (ETAPA_DESCARTADO, "Descartado"),
+        (ETAPA_COMENTARIO, "Nota / comentario"),
+        # heredadas
+        (ETAPA_BUSQUEDA, "Búsqueda (legacy)"),
+        (ETAPA_CONTACTO, "Contacto (legacy)"),
+        (ETAPA_ENTREVISTA, "Entrevista (legacy)"),
+        (ETAPA_OFERTA, "Oferta (legacy)"),
     ]
 
     vacante = models.ForeignKey("rrhh.VacanteRRHH", on_delete=models.CASCADE, related_name="seguimientos")
@@ -645,6 +662,76 @@ class VacanteSeguimiento(models.Model):
 
     def __str__(self) -> str:
         return f"{self.vacante.folio} · {self.get_etapa_display()} · {self.fecha}"
+
+
+class EmpleadoDocumento(models.Model):
+    TIPO_NSS = "nss"
+    TIPO_FISCAL = "fiscal"
+    TIPO_INE = "ine"
+    TIPO_CURP = "curp"
+    TIPO_ACTA = "acta"
+    TIPO_DOMICILIO = "domicilio"
+    TIPO_ESTUDIOS = "estudios"
+    TIPO_CARTA_LABORAL = "carta_laboral"
+    TIPO_BANCO = "banco"
+    TIPO_OTRO = "otro"
+    TIPO_CHOICES = [
+        (TIPO_NSS, "NSS"),
+        (TIPO_FISCAL, "Constancia de situación fiscal"),
+        (TIPO_INE, "INE"),
+        (TIPO_CURP, "CURP"),
+        (TIPO_ACTA, "Acta de nacimiento"),
+        (TIPO_DOMICILIO, "Comprobante de domicilio"),
+        (TIPO_ESTUDIOS, "Constancia de estudios"),
+        (TIPO_CARTA_LABORAL, "Carta laboral"),
+        (TIPO_BANCO, "Cuenta bancaria"),
+        (TIPO_OTRO, "Otro"),
+    ]
+    # Tipos que se capturan como texto (sin archivo requerido)
+    TIPOS_TEXTO = {TIPO_NSS, TIPO_CURP, TIPO_BANCO}
+    # Tipos que sincronizan un campo en Empleado
+    CAMPO_EMPLEADO_MAP = {
+        TIPO_NSS: "nss",
+        TIPO_CURP: "curp",
+        TIPO_FISCAL: "rfc",
+    }
+
+    empleado = models.ForeignKey(
+        Empleado, on_delete=models.CASCADE, related_name="documentos"
+    )
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, db_index=True)
+    archivo = models.FileField(
+        upload_to="rrhh/documentos/", blank=True, null=True,
+        help_text="PDF o imagen del documento"
+    )
+    valor_texto = models.CharField(
+        max_length=200, blank=True, default="",
+        help_text="NSS, CURP, RFC u otro dato de texto"
+    )
+    notas = models.TextField(blank=True, default="")
+    subido_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="documentos_subidos"
+    )
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["empleado", "tipo", "-creado_en"]
+        verbose_name = "Documento de empleado"
+        verbose_name_plural = "Documentos de empleados"
+
+    def __str__(self) -> str:
+        return f"{self.empleado} · {self.get_tipo_display()}"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Sincronizar campos del empleado si aplica
+        campo = self.CAMPO_EMPLEADO_MAP.get(self.tipo)
+        if campo and self.valor_texto:
+            Empleado.objects.filter(pk=self.empleado_id).update(**{campo: self.valor_texto.strip().upper()})
+        # Banco: sincronizar los tres subcampos si vienen en notas estructuradas
+        # (la view los guarda directamente en Empleado; aquí solo es fallback)
 
 
 class Turno(models.Model):

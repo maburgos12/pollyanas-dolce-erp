@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+
+{% block title %}Documentos · {{ empleado.nombre }}{% endblock %}
+{% block page_title %}Documentos · {{ empleado.nombre }}{% endblock %}
+
+{% block extra_css %}
+<style>
+  .docs-layout { display: grid; gap: 20px; }
+  .docs-card { background: #fff; border: 1px solid var(--rosa); border-radius: 12px; padding: 22px; }
+  .docs-card h2 { color: var(--vino); font-family: "Playfair Display", serif; font-size: 18px; margin: 0 0 16px; }
+
+  .emp-resumen { display: flex; gap: 24px; flex-wrap: wrap; }
+  .emp-resumen-item { font-size: 13px; color: var(--texto-light); }
+  .emp-resumen-item strong { color: var(--texto); display: block; font-size: 12px; font-weight: 900; text-transform: uppercase; }
+
+  .doc-tipo-list { display: grid; gap: 10px; }
+  .doc-tipo-row { border: 1px solid var(--rosa); border-radius: 8px; overflow: hidden; }
+  .doc-tipo-header {
+    align-items: center; background: var(--gris-suave); cursor: pointer;
+    display: flex; gap: 10px; padding: 12px 16px; user-select: none;
+  }
+  .doc-tipo-header:hover { background: var(--rosa-hover); }
+  .doc-tipo-icon { font-size: 18px; width: 26px; text-align: center; flex-shrink: 0; }
+  .doc-tipo-label { flex: 1; font-weight: 700; color: var(--texto); font-size: 14px; }
+  .doc-badge { font-size: 11px; font-weight: 900; border-radius: 999px; padding: 3px 10px; flex-shrink: 0; }
+  .doc-badge.ok { background: #e8f5e9; color: #2e7d32; }
+  .doc-badge.pendiente { background: #fff3e0; color: #bf360c; }
+  .doc-chevron { color: var(--texto-light); font-size: 11px; transition: transform .2s; flex-shrink: 0; }
+  .doc-tipo-row.open .doc-chevron { transform: rotate(180deg); }
+
+  .doc-tipo-body { display: none; padding: 16px; border-top: 1px solid var(--rosa); background: #fffafb; }
+  .doc-tipo-row.open .doc-tipo-body { display: block; }
+
+  .doc-saved-list { margin-bottom: 14px; display: grid; gap: 8px; }
+  .doc-saved-item {
+    align-items: center; background: #fff; border: 1px solid #e8d8e4;
+    border-radius: 6px; display: flex; gap: 12px; padding: 10px 14px;
+  }
+  .doc-saved-info { flex: 1; min-width: 0; }
+  .doc-saved-info strong { display: block; font-size: 13px; color: var(--texto); word-break: break-word; }
+  .doc-saved-info span { color: var(--texto-light); font-size: 12px; }
+  .doc-saved-link { color: var(--vino); font-size: 12px; font-weight: 700; text-decoration: none; }
+  .doc-saved-link:hover { text-decoration: underline; }
+
+  .doc-form { display: grid; gap: 12px; margin-top: 4px; }
+  .doc-form-row { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+  .banco-fields { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+  .doc-form-group label { color: var(--texto-light); display: block; font-size: 11px; font-weight: 900; margin-bottom: 4px; text-transform: uppercase; }
+  .doc-form-group input[type="text"],
+  .doc-form-group input[type="file"] { width: 100%; }
+  .doc-form-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .doc-form-divider { border: none; border-top: 1px dashed var(--rosa); margin: 6px 0; }
+
+  @media (max-width: 680px) {
+    .emp-resumen { gap: 12px; }
+    .doc-form-row, .banco-fields { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+{% if messages %}
+  {% for msg in messages %}
+    <div class="alert alert-{{ msg.tags|default:'info' }}" style="margin-bottom:12px;">{{ msg }}</div>
+  {% endfor %}
+{% endif %}
+
+<section class="docs-layout">
+
+  <div class="docs-card">
+    <h2>{{ empleado.nombre }}</h2>
+    <div class="emp-resumen">
+      <div class="emp-resumen-item"><strong>NSS</strong>{{ empleado.nss|default:"—" }}</div>
+      <div class="emp-resumen-item"><strong>CURP</strong>{{ empleado.curp|default:"—" }}</div>
+      <div class="emp-resumen-item"><strong>RFC</strong>{{ empleado.rfc|default:"—" }}</div>
+      <div class="emp-resumen-item"><strong>Banco</strong>{{ empleado.banco|default:"—" }}</div>
+      <div class="emp-resumen-item"><strong>CLABE</strong>{{ empleado.cuenta_clabe|default:"—" }}</div>
+      <div class="emp-resumen-item"><strong>N° Cuenta</strong>{{ empleado.numero_cuenta|default:"—" }}</div>
+    </div>
+  </div>
+
+  <div class="docs-card">
+    <h2>Expediente de documentos</h2>
+    <div class="doc-tipo-list">
+
+      {% for tipo_key, tipo_label in tipo_choices %}
+      {% with tiene=tipo_key|stringformat:"s" %}
+
+      {% if tipo_key in tipos_con_docs %}
+        {% with esta_ok=True %}
+        <div class="doc-tipo-row open" id="row-{{ tipo_key }}">
+        {% endwith %}
+      {% else %}
+        <div class="doc-tipo-row" id="row-{{ tipo_key }}">
+      {% endif %}
+
+        <div class="doc-tipo-header" onclick="toggleDoc('{{ tipo_key }}')">
+          <span class="doc-tipo-icon">
+            {% if tipo_key == "nss" %}🔢
+            {% elif tipo_key == "fiscal" %}📄
+            {% elif tipo_key == "ine" %}🪪
+            {% elif tipo_key == "curp" %}📋
+            {% elif tipo_key == "acta" %}📜
+            {% elif tipo_key == "domicilio" %}🏠
+            {% elif tipo_key == "estudios" %}🎓
+            {% elif tipo_key == "carta_laboral" %}💼
+            {% elif tipo_key == "banco" %}🏦
+            {% else %}📁{% endif %}
+          </span>
+          <span class="doc-tipo-label">{{ tipo_label }}</span>
+          {% if tipo_key in tipos_con_docs %}
+            <span class="doc-badge ok">✓ Capturado</span>
+          {% else %}
+            <span class="doc-badge pendiente">Pendiente</span>
+          {% endif %}
+          <span class="doc-chevron">▼</span>
+        </div>
+
+        <div class="doc-tipo-body">
+
+          {# Documentos ya guardados #}
+          {% if tipo_key in tipos_con_docs %}
+          <div class="doc-saved-list">
+            {% for doc in documentos %}{% if doc.tipo == tipo_key %}
+            <div class="doc-saved-item">
+              <div class="doc-saved-info">
+                {% if doc.valor_texto %}<strong>{{ doc.valor_texto }}</strong>{% endif %}
+                {% if doc.archivo %}
+                  <a class="doc-saved-link" href="{{ doc.archivo.url }}" target="_blank">📎 Ver archivo</a>
+                {% endif %}
+                <span>
+                  {{ doc.creado_en|date:"d/m/Y H:i" }}
+                  {% if doc.subido_por %} · {{ doc.subido_por.get_full_name|default:doc.subido_por.username }}{% endif %}
+                  {% if doc.notas %} · {{ doc.notas }}{% endif %}
+                </span>
+              </div>
+              <form method="post" action="{% url 'rrhh:rrhh_documento_eliminar' empleado.pk doc.pk %}" style="margin:0">
+                {% csrf_token %}
+                <button class="btn btn-sm btn-secondary" type="submit"
+                  onclick="return confirm('¿Eliminar este documento?')">✕</button>
+              </form>
+            </div>
+            {% endif %}{% endfor %}
+          </div>
+          <hr class="doc-form-divider">
+          {% endif %}
+
+          {# Formulario de captura #}
+          <p style="font-size:12px;color:var(--texto-light);margin:0 0 10px;">
+            {% if tipo_key in tipos_con_docs %}Actualizar o agregar nuevo registro{% else %}Capturar documento{% endif %}
+          </p>
+
+          <form class="doc-form" method="post"
+                action="{% url 'rrhh:rrhh_empleado_documentos' empleado.pk %}"
+                enctype="multipart/form-data">
+            {% csrf_token %}
+            <input type="hidden" name="tipo" value="{{ tipo_key }}">
+
+            {% if tipo_key == "nss" %}
+              <div class="doc-form-group">
+                <label>Número de Seguridad Social</label>
+                <input type="text" name="valor_texto" placeholder="123456789012" maxlength="30"
+                  value="{{ empleado.nss }}">
+              </div>
+
+            {% elif tipo_key == "fiscal" %}
+              <div class="doc-form-row">
+                <div class="doc-form-group">
+                  <label>RFC</label>
+                  <input type="text" name="valor_texto" placeholder="XAXX010101000" maxlength="20"
+                    value="{{ empleado.rfc }}">
+                </div>
+                <div class="doc-form-group">
+                  <label>Archivo de la constancia (PDF / imagen)</label>
+                  <input type="file" name="archivo" accept=".pdf,.jpg,.jpeg,.png">
+                </div>
+              </div>
+
+            {% elif tipo_key == "curp" %}
+              <div class="doc-form-group">
+                <label>CURP</label>
+                <input type="text" name="valor_texto" placeholder="XAXX010101HXXXXX00" maxlength="24"
+                  value="{{ empleado.curp }}">
+              </div>
+
+            {% elif tipo_key == "banco" %}
+              <div class="banco-fields">
+                <div class="doc-form-group">
+                  <label>Banco</label>
+                  <input type="text" name="banco" placeholder="Ej. BBVA, Banamex, HSBC..." maxlength="80"
+                    value="{{ empleado.banco }}">
+                </div>
+                <div class="doc-form-group">
+                  <label>CLABE interbancaria (18 dígitos)</label>
+                  <input type="text" name="cuenta_clabe" placeholder="000000000000000000" maxlength="18"
+                    value="{{ empleado.cuenta_clabe }}">
+                </div>
+                <div class="doc-form-group">
+                  <label>Número de cuenta / tarjeta</label>
+                  <input type="text" name="numero_cuenta" placeholder="Número de cuenta" maxlength="20"
+                    value="{{ empleado.numero_cuenta }}">
+                </div>
+              </div>
+
+            {% else %}
+              <div class="doc-form-group">
+                <label>Archivo (PDF o imagen)</label>
+                <input type="file" name="archivo" accept=".pdf,.jpg,.jpeg,.png">
+              </div>
+            {% endif %}
+
+            <div class="doc-form-group">
+              <label>Notas (opcional)</label>
+              <input type="text" name="notas" placeholder="Ej. copia simple, original entregado..." maxlength="200">
+            </div>
+
+            <div class="doc-form-actions">
+              <button class="btn btn-primary btn-sm" type="submit">Guardar</button>
+            </div>
+          </form>
+        </div>
+
+      </div>
+      {% endwith %}
+      {% endfor %}
+
+    </div>
+  </div>
+
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleDoc(key) {
+  const row = document.getElementById('row-' + key);
+  if (row) row.classList.toggle('open');
+}
+</script>
+{% endblock %}
