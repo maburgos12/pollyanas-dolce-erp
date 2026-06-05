@@ -3,6 +3,28 @@ from django.db import models
 from django.utils import timezone
 
 
+class ProveedorServicio(models.Model):
+    """Talleres, técnicos y empresas de mantenimiento — separado de los proveedores de insumos."""
+
+    nombre = models.CharField(max_length=200)
+    contacto = models.CharField(max_length=120, blank=True, default="", verbose_name="Nombre del contacto")
+    telefono = models.CharField(max_length=30, blank=True, default="")
+    especialidad = models.CharField(max_length=120, blank=True, default="",
+                                    help_text="Ej. Refrigeración, Electricidad, Mecánica general")
+    notas = models.TextField(blank=True, default="")
+    activo = models.BooleanField(default=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["nombre"]
+        verbose_name = "Proveedor de servicio"
+        verbose_name_plural = "Proveedores de servicio"
+
+    def __str__(self):
+        return self.nombre
+
+
 class SolicitudCancelacion(models.Model):
     TIPO_FALLA = "falla"
     TIPO_UNIDAD = "unidad"

@@ -15,7 +15,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento, PlanMantenimiento
-from mantenimiento.models import SolicitudCancelacion
+from mantenimiento.models import SolicitudCancelacion, ProveedorServicio
 from core.access import can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
 from core.models import sucursales_operativas
 from fallas.models import BitacoraFalla, CategoriaFalla, ReporteFalla
@@ -775,15 +775,14 @@ def dashboard(request):
             "plan_estatus_choices": PlanMantenimiento.ESTATUS_CHOICES,
             "activos_para_plan": list(Activo.objects.select_related("sucursal").filter(activo=True).order_by("sucursal__nombre", "nombre")[:400]),
             "unidades_para_servicio": list(Unidad.objects.filter(activa=True).select_related("sucursal").order_by("descripcion", "codigo")),
-            "proveedores_servicio": list(Proveedor.objects.filter(activo=True).order_by("nombre")),
-            "proveedores_todos": list(Proveedor.objects.order_by("nombre")),
+            "proveedores_todos": list(ProveedorServicio.objects.order_by("nombre")),
         },
     )
 
 
 @login_required
 def gestionar_proveedor(request):
-    """Crear o editar un Proveedor desde el módulo de mantenimiento."""
+    """Crear o editar un ProveedorServicio desde el módulo de mantenimiento."""
     _require_mantenimiento(request.user)
     if request.method != "POST":
         return redirect("mantenimiento:dashboard")
@@ -796,18 +795,30 @@ def gestionar_proveedor(request):
         msg.error(request, "El nombre del proveedor es obligatorio.")
         return redirect("mantenimiento:dashboard")
 
+    contacto = (request.POST.get("contacto") or "").strip()
+    telefono = (request.POST.get("telefono") or "").strip()
+    especialidad = (request.POST.get("especialidad") or "").strip()
+    notas = (request.POST.get("notas") or "").strip()
+
     if action == "editar":
         prov_id = _safe_int(request.POST.get("proveedor_id"))
-        proveedor = get_object_or_404(Proveedor, pk=prov_id)
-        proveedor.nombre = nombre
-        proveedor.activo = request.POST.get("activo", "1") != "0"
-        proveedor.save()
+        prov = get_object_or_404(ProveedorServicio, pk=prov_id)
+        prov.nombre = nombre
+        prov.contacto = contacto
+        prov.telefono = telefono
+        prov.especialidad = especialidad
+        prov.notas = notas
+        prov.activo = request.POST.get("activo", "1") != "0"
+        prov.save()
         msg.success(request, f"Proveedor '{nombre}' actualizado.")
     else:
-        if Proveedor.objects.filter(nombre__iexact=nombre).exists():
-            msg.warning(request, f"Ya existe un proveedor con ese nombre.")
+        if ProveedorServicio.objects.filter(nombre__iexact=nombre).exists():
+            msg.warning(request, f"Ya existe un proveedor de servicio con ese nombre.")
         else:
-            Proveedor.objects.create(nombre=nombre, activo=True)
+            ProveedorServicio.objects.create(
+                nombre=nombre, contacto=contacto, telefono=telefono,
+                especialidad=especialidad, notas=notas, activo=True,
+            )
             msg.success(request, f"Proveedor '{nombre}' creado.")
 
     return redirect("mantenimiento:dashboard")
