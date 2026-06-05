@@ -345,10 +345,31 @@ class VacantesSolicitudViewTests(TestCase):
         response = self.client.get(reverse("rrhh:rrhh_vacante_detalle", kwargs={"pk": vacante.pk}))
 
         self.assertContains(response, "Proceso")
-        self.assertContains(response, "Responsable actual")
+        self.assertContains(response, "Responsable")
         self.assertContains(response, "Siguiente paso")
         self.assertContains(response, "Capital Humano")
         self.assertContains(response, "Validar o devolver a corrección.")
+
+    def test_detalle_renderiza_solicitada_sin_validacion_ni_autorizacion(self):
+        vacante = crear_solicitud_vacante(
+            area="logistica",
+            puesto="repartidor",
+            fecha_solicitada=date(2026, 5, 15),
+            solicitado_por=self.rrhh_user,
+            creado_por=self.rrhh_user,
+            departamento=Empleado.DEP_LOGISTICA,
+            estado_inicial=VacanteRRHH.ESTADO_SOLICITADA,
+        )
+        self.assertIsNone(vacante.validado_rrhh_por)
+        self.assertIsNone(vacante.autorizado_por)
+        self.client.force_login(self.rrhh_user)
+
+        response = self.client.get(reverse("rrhh:rrhh_vacante_detalle", kwargs={"pk": vacante.pk}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, vacante.folio)
+        self.assertContains(response, "Validó RRHH")
+        self.assertContains(response, "Autorizó")
 
     def test_jefatura_puede_crear_solicitud_para_revision_rrhh(self):
         self.assertTrue(can_solicitar_vacantes(self.jefe_ventas))

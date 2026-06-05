@@ -363,8 +363,14 @@
     <div class="vd-grid">
       <div class="vd-kv"><span>Ruta</span><strong>{{ vacante.get_tipo_autorizacion_display }}</strong></div>
       <div class="vd-kv"><span>Autorizador</span><strong>{{ workflow.autorizacion }}</strong></div>
-      <div class="vd-kv"><span>Validó RRHH</span><strong>{{ vacante.validado_rrhh_por.get_full_name|default:vacante.validado_rrhh_por.username|default:"—" }}</strong></div>
-      <div class="vd-kv"><span>Autorizó</span><strong>{{ vacante.autorizado_por.get_full_name|default:vacante.autorizado_por.username|default:"—" }}</strong></div>
+      <div class="vd-kv">
+        <span>Validó RRHH</span>
+        <strong>{% if vacante.validado_rrhh_por %}{{ vacante.validado_rrhh_por.get_full_name|default:vacante.validado_rrhh_por.username }}{% else %}—{% endif %}</strong>
+      </div>
+      <div class="vd-kv">
+        <span>Autorizó</span>
+        <strong>{% if vacante.autorizado_por %}{{ vacante.autorizado_por.get_full_name|default:vacante.autorizado_por.username }}{% else %}—{% endif %}</strong>
+      </div>
     </div>
   </div>
 
