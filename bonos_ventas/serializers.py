@@ -68,6 +68,10 @@ class BonoVentasResumenSerializer(serializers.ModelSerializer):
     empleado_nombre = serializers.CharField(source="empleado.nombre", read_only=True)
     empleado_codigo = serializers.CharField(source="empleado.codigo", read_only=True)
     sucursal_nombre = serializers.CharField(source="sucursal.nombre", read_only=True)
+    es_repartidor = serializers.SerializerMethodField()
+
+    def get_es_repartidor(self, obj):
+        return obj._es_repartidor()
 
     class Meta:
         model = BonoVentasEmpleado
@@ -78,6 +82,7 @@ class BonoVentasResumenSerializer(serializers.ModelSerializer):
             "empleado_codigo",
             "sucursal",
             "sucursal_nombre",
+            "es_repartidor",
             "dias_trabajados",
             "dias_asistencia",
             "dias_uniforme",
