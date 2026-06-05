@@ -1028,28 +1028,46 @@ def registrar_servicio_flota(request):
     tipo_srv = get_object_or_404(TipoServicioUnidad, pk=tipo_id, activo=True)
 
     from django.utils.dateparse import parse_date as _pd
-    km = _safe_int(request.POST.get("km_al_servicio")) or None
+
+    modo = (request.POST.get("modo_servicio") or "realizado").strip().lower()
     proxima_manual = _pd(request.POST.get("proxima_fecha") or "")
     proximos_km_manual = _safe_int(request.POST.get("proximos_km")) or None
 
-    srv = ServicioRealizadoUnidad(
-        unidad=unidad,
-        tipo_servicio=tipo_srv,
-        fecha_servicio=fecha,
-        km_al_servicio=km,
-        proveedor=(request.POST.get("proveedor") or "").strip(),
-        costo=_parse_decimal(request.POST.get("costo")),
-        notas=(request.POST.get("notas") or "").strip(),
-        registrado_por=request.user,
-    )
-    srv.save()  # save() auto-calcula proxima_fecha y proximos_km desde el tipo
-    # Sobrescribir con valores manuales si el técnico los especificó
-    if proxima_manual or proximos_km_manual:
-        if proxima_manual:
-            srv.proxima_fecha = proxima_manual
-        if proximos_km_manual:
-            srv.proximos_km = proximos_km_manual
-        srv.save(update_fields=["proxima_fecha", "proximos_km"])
+    if modo == "programado":
+        # Sin historial previo: guardamos la fecha como "último conocido" hoy
+        # y establecemos la próxima manualmente
+        if not proxima_manual:
+            msg.error(request, "En modo 'Programar próximo' debes indicar la próxima fecha.")
+            return redirect("mantenimiento:dashboard")
+        srv = ServicioRealizadoUnidad(
+            unidad=unidad,
+            tipo_servicio=tipo_srv,
+            fecha_servicio=fecha,  # hoy como referencia de inicio
+            notas=(request.POST.get("notas") or "Sin historial previo — fecha programada manualmente.").strip(),
+            registrado_por=request.user,
+            proxima_fecha=proxima_manual,
+            proximos_km=proximos_km_manual,
+        )
+        srv.save()
+    else:
+        km = _safe_int(request.POST.get("km_al_servicio")) or None
+        srv = ServicioRealizadoUnidad(
+            unidad=unidad,
+            tipo_servicio=tipo_srv,
+            fecha_servicio=fecha,
+            km_al_servicio=km,
+            proveedor=(request.POST.get("proveedor") or "").strip(),
+            costo=_parse_decimal(request.POST.get("costo")),
+            notas=(request.POST.get("notas") or "").strip(),
+            registrado_por=request.user,
+        )
+        srv.save()  # auto-calcula proxima_fecha desde el tipo
+        if proxima_manual or proximos_km_manual:
+            if proxima_manual:
+                srv.proxima_fecha = proxima_manual
+            if proximos_km_manual:
+                srv.proximos_km = proximos_km_manual
+            srv.save(update_fields=["proxima_fecha", "proximos_km"])
     msg.success(request, f"Servicio registrado: {tipo_srv.nombre} · {unidad.codigo}.")
     return redirect("mantenimiento:dashboard")
 
