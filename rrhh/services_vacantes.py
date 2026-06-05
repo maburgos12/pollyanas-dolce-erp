@@ -18,7 +18,7 @@ from core.access import (
 from core.models import Notificacion
 from core.notificaciones import crear_notificaciones, usuarios_direccion_general, usuarios_por_grupo
 
-from .models import Empleado, VacanteCobertura, VacanteMovimiento, VacanteRRHH, VacanteSeguimiento
+from .models import CandidatoVacante, Empleado, VacanteCobertura, VacanteMovimiento, VacanteRRHH, VacanteSeguimiento
 
 
 def _normalizar_texto(value: str | None) -> str:
@@ -480,6 +480,58 @@ def _inferir_departamento_vacante(vacante: VacanteRRHH) -> str:
     if "ADMIN" in texto or "ALMAC" in texto or "AFAN" in texto or "LIMPIEZA" in texto:
         return Empleado.DEP_ADMINISTRACION
     return ""
+
+
+def agregar_candidato(
+    vacante: VacanteRRHH,
+    user,
+    *,
+    nombre: str,
+    telefono: str = "",
+    email: str = "",
+    fuente: str = CandidatoVacante.FUENTE_REFERENCIA,
+    notas: str = "",
+) -> CandidatoVacante:
+    _require_rrhh(user)
+    if vacante.estado not in {VacanteRRHH.ESTADO_RECLUTAMIENTO, VacanteRRHH.ESTADO_AUTORIZADA}:
+        raise ValidationError("Solo se pueden agregar candidatos cuando la vacante está en reclutamiento.")
+    nombre = (nombre or "").strip()
+    if not nombre:
+        raise ValidationError("El nombre del candidato es obligatorio.")
+    return CandidatoVacante.objects.create(
+        vacante=vacante,
+        nombre=nombre,
+        telefono=(telefono or "").strip(),
+        email=(email or "").strip(),
+        fuente=fuente or CandidatoVacante.FUENTE_REFERENCIA,
+        notas=(notas or "").strip(),
+        etapa_actual=CandidatoVacante.ETAPA_ENTREVISTA,
+        creado_por=user,
+    )
+
+
+def avanzar_etapa_candidato(
+    candidato: CandidatoVacante,
+    user,
+    nueva_etapa: str,
+    comentario: str = "",
+) -> CandidatoVacante:
+    _require_rrhh(user)
+    etapas_validas = [e for e, _ in CandidatoVacante.ETAPA_CHOICES]
+    if nueva_etapa not in etapas_validas:
+        raise ValidationError("Etapa inválida.")
+    candidato.etapa_actual = nueva_etapa
+    candidato.save(update_fields=["etapa_actual", "actualizado_en"])
+    if comentario.strip():
+        VacanteSeguimiento.objects.create(
+            vacante=candidato.vacante,
+            candidato_obj=candidato,
+            etapa=nueva_etapa,
+            candidato=candidato.nombre,
+            comentario=comentario.strip(),
+            creado_por=user,
+        )
+    return candidato
 
 
 def notificar_vacante_solicitada(vacante: VacanteRRHH, *, actor=None) -> int:

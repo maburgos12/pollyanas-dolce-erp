@@ -613,10 +613,63 @@ class VacanteCobertura(models.Model):
         return f"{self.vacante.folio} · {self.empleado.nombre}"
 
 
+class CandidatoVacante(models.Model):
+    FUENTE_REFERENCIA = "referencia"
+    FUENTE_BOLSA = "bolsa"
+    FUENTE_REDES = "redes"
+    FUENTE_OTRO = "otro"
+    FUENTE_CHOICES = [
+        (FUENTE_REFERENCIA, "Referencia interna"),
+        (FUENTE_BOLSA, "Bolsa de trabajo"),
+        (FUENTE_REDES, "Redes sociales"),
+        (FUENTE_OTRO, "Otro"),
+    ]
+
+    ETAPA_ENTREVISTA = "entrevista_pres"
+    ETAPA_SELECCIONADO = "seleccionado"
+    ETAPA_DOCUMENTOS = "documentos"
+    ETAPA_PRUEBA = "prueba"
+    ETAPA_CONTRATADO = "contratado"
+    ETAPA_DESCARTADO = "descartado"
+    ETAPA_CHOICES = [
+        (ETAPA_ENTREVISTA, "Entrevista presencial"),
+        (ETAPA_SELECCIONADO, "Candidato seleccionado"),
+        (ETAPA_DOCUMENTOS, "Solicitud de documentos"),
+        (ETAPA_PRUEBA, "Periodo de prueba"),
+        (ETAPA_CONTRATADO, "Contratado"),
+        (ETAPA_DESCARTADO, "Descartado"),
+    ]
+    ETAPAS_ACTIVAS = {ETAPA_ENTREVISTA, ETAPA_SELECCIONADO, ETAPA_DOCUMENTOS, ETAPA_PRUEBA}
+
+    vacante = models.ForeignKey("rrhh.VacanteRRHH", on_delete=models.CASCADE, related_name="candidatos")
+    nombre = models.CharField(max_length=180)
+    telefono = models.CharField(max_length=30, blank=True, default="")
+    email = models.EmailField(blank=True, default="")
+    fuente = models.CharField(max_length=20, choices=FUENTE_CHOICES, default=FUENTE_REFERENCIA)
+    etapa_actual = models.CharField(max_length=20, choices=ETAPA_CHOICES, default=ETAPA_ENTREVISTA)
+    empleado = models.ForeignKey(
+        Empleado, null=True, blank=True, on_delete=models.SET_NULL, related_name="candidatura"
+    )
+    notas = models.TextField(blank=True, default="")
+    creado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["etapa_actual", "nombre"]
+        verbose_name = "Candidato"
+        verbose_name_plural = "Candidatos"
+
+    def __str__(self) -> str:
+        return f"{self.nombre} — {self.vacante.folio}"
+
+    @property
+    def activo(self) -> bool:
+        return self.etapa_actual not in {self.ETAPA_CONTRATADO, self.ETAPA_DESCARTADO}
+
+
 class VacanteSeguimiento(models.Model):
-    ETAPA_POSTULANTE = "postulante"
-    ETAPA_ENTREVISTA_TEL = "entrevista_tel"
-    ETAPA_FILTRO = "filtro"
+    # Etapas activas en la UI
     ETAPA_ENTREVISTA_PRES = "entrevista_pres"
     ETAPA_SELECCIONADO = "seleccionado"
     ETAPA_DOCUMENTOS = "documentos"
@@ -624,23 +677,25 @@ class VacanteSeguimiento(models.Model):
     ETAPA_CONTRATADO = "contratado"
     ETAPA_DESCARTADO = "descartado"
     ETAPA_COMENTARIO = "comentario"
-    # Etapas heredadas (compatibilidad con registros anteriores)
+    # Legacy (compatibilidad registros anteriores)
+    ETAPA_POSTULANTE = "postulante"
+    ETAPA_ENTREVISTA_TEL = "entrevista_tel"
+    ETAPA_FILTRO = "filtro"
     ETAPA_BUSQUEDA = "busqueda"
     ETAPA_CONTACTO = "contacto"
     ETAPA_ENTREVISTA = "entrevista"
     ETAPA_OFERTA = "oferta"
     ETAPA_CHOICES = [
-        (ETAPA_POSTULANTE, "Candidatos recibidos"),
-        (ETAPA_ENTREVISTA_TEL, "1ra entrevista (telefónica)"),
-        (ETAPA_FILTRO, "Filtro / preselección"),
-        (ETAPA_ENTREVISTA_PRES, "2da entrevista (presencial)"),
+        (ETAPA_ENTREVISTA_PRES, "Entrevista presencial"),
         (ETAPA_SELECCIONADO, "Candidato seleccionado"),
         (ETAPA_DOCUMENTOS, "Solicitud de documentos"),
         (ETAPA_PRUEBA, "Periodo de prueba"),
         (ETAPA_CONTRATADO, "Contratado"),
         (ETAPA_DESCARTADO, "Descartado"),
-        (ETAPA_COMENTARIO, "Nota / comentario"),
-        # heredadas
+        (ETAPA_COMENTARIO, "Nota"),
+        (ETAPA_POSTULANTE, "Candidatos recibidos (legacy)"),
+        (ETAPA_ENTREVISTA_TEL, "1ra entrevista tel. (legacy)"),
+        (ETAPA_FILTRO, "Filtro preselección (legacy)"),
         (ETAPA_BUSQUEDA, "Búsqueda (legacy)"),
         (ETAPA_CONTACTO, "Contacto (legacy)"),
         (ETAPA_ENTREVISTA, "Entrevista (legacy)"),
@@ -648,6 +703,9 @@ class VacanteSeguimiento(models.Model):
     ]
 
     vacante = models.ForeignKey("rrhh.VacanteRRHH", on_delete=models.CASCADE, related_name="seguimientos")
+    candidato_obj = models.ForeignKey(
+        CandidatoVacante, null=True, blank=True, on_delete=models.SET_NULL, related_name="seguimientos"
+    )
     etapa = models.CharField(max_length=20, choices=ETAPA_CHOICES, default=ETAPA_COMENTARIO)
     candidato = models.CharField(max_length=180, blank=True, default="")
     comentario = models.TextField()
