@@ -718,8 +718,8 @@ def dashboard(request):
         .order_by("proxima_ejecucion")[:40]
     )
     for plan in planes_proximos:
-        plan._dias_para_vencer = (plan.proxima_ejecucion - today).days if plan.proxima_ejecucion else None
-        plan._vencido = plan._dias_para_vencer is not None and plan._dias_para_vencer < 0
+        plan.dias_para_vencer = (plan.proxima_ejecucion - today).days if plan.proxima_ejecucion else None
+        plan.vencido = plan.dias_para_vencer is not None and plan.dias_para_vencer < 0
 
     # Servicios de flota próximos (por fecha)
     # Solo el registro más reciente por unidad+tipo, con proxima_fecha próxima
@@ -739,8 +739,8 @@ def dashboard(request):
         .order_by("proxima_fecha")[:30]
     )
     for srv in servicios_flota:
-        srv._dias_para_vencer = (srv.proxima_fecha - today).days if srv.proxima_fecha else None
-        srv._vencido = srv._dias_para_vencer is not None and srv._dias_para_vencer < 0
+        srv.dias_para_vencer = (srv.proxima_fecha - today).days if srv.proxima_fecha else None
+        srv.vencido = srv.dias_para_vencer is not None and srv.dias_para_vencer < 0
 
     solicitudes_cancelacion = (
         SolicitudCancelacion.objects.filter(estatus=SolicitudCancelacion.ESTATUS_PENDIENTE)

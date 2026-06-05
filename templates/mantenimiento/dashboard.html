@@ -292,15 +292,15 @@
     <h3 style="margin:0 0 10px;color:#8B2252;font-size:15px;font-family:'Playfair Display',serif">Servicios de flota (vehiculos)</h3>
     <div class="mant-planes-grid" style="margin-bottom:20px">
       {% for srv in servicios_flota %}
-      <article class="mant-plan-row {% if srv._vencido %}vencido{% endif %}">
+      <article class="mant-plan-row {% if srv.vencido %}vencido{% endif %}">
         <div>
           <div class="mant-plan-title">
-            {% if srv._vencido %}
+            {% if srv.vencido %}
               <span class="mant-badge" style="background:#fee2e2;color:#b91c1c;margin-right:6px">Vencido</span>
-            {% elif srv._dias_para_vencer == 0 %}
+            {% elif srv.dias_para_vencer == 0 %}
               <span class="mant-badge" style="background:#fef9c3;color:#854d0e;margin-right:6px">Hoy</span>
-            {% elif srv._dias_para_vencer <= 7 %}
-              <span class="mant-badge" style="background:#fef3c7;color:#92400e;margin-right:6px">{{ srv._dias_para_vencer }}d</span>
+            {% elif srv.dias_para_vencer <= 7 %}
+              <span class="mant-badge" style="background:#fef3c7;color:#92400e;margin-right:6px">{{ srv.dias_para_vencer }}d</span>
             {% endif %}
             {{ srv.unidad.descripcion|default:srv.unidad.codigo }} · {{ srv.tipo_servicio.nombre }}
           </div>
@@ -321,15 +321,15 @@
     {% if planes_proximos %}
     <div class="mant-planes-grid">
       {% for plan in planes_proximos %}
-      <article class="mant-plan-row {% if plan._vencido %}vencido{% endif %}">
+      <article class="mant-plan-row {% if plan.vencido %}vencido{% endif %}">
         <div>
           <div class="mant-plan-title">
-            {% if plan._vencido %}
+            {% if plan.vencido %}
               <span class="mant-badge" style="background:#fee2e2;color:#b91c1c;margin-right:6px">Vencido</span>
-            {% elif plan._dias_para_vencer == 0 %}
+            {% elif plan.dias_para_vencer == 0 %}
               <span class="mant-badge" style="background:#fef9c3;color:#854d0e;margin-right:6px">Hoy</span>
-            {% elif plan._dias_para_vencer <= 7 %}
-              <span class="mant-badge" style="background:#fef3c7;color:#92400e;margin-right:6px">{{ plan._dias_para_vencer }}d</span>
+            {% elif plan.dias_para_vencer <= 7 %}
+              <span class="mant-badge" style="background:#fef3c7;color:#92400e;margin-right:6px">{{ plan.dias_para_vencer }}d</span>
             {% endif %}
             {{ plan.nombre }}
           </div>
