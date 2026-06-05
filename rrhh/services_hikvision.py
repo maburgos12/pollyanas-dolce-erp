@@ -9,8 +9,9 @@ from typing import Any
 import requests
 from django.utils import timezone
 
-from .models import AsistenciaEmpleado, Empleado, ImportacionChecador, Turno
+from .models import AsistenciaEmpleado, Empleado, EmpleadoIdentidadPendiente, ImportacionChecador, Turno
 from .services import generar_horas_extra_automatico
+from .services_identidad import buscar_empleado_por_codigo, registrar_identidad_pendiente
 
 log = logging.getLogger("rrhh.hikvision")
 
@@ -217,8 +218,14 @@ def procesar_eventos_hik(eventos: list[dict[str, Any]]) -> dict[str, Any]:
             detalle.append({"employee_no": emp_no, "resultado": "campos faltantes"})
             continue
 
-        empleado = Empleado.objects.filter(codigo=emp_no).first()
+        empleado = buscar_empleado_por_codigo(emp_no)
         if not empleado:
+            registrar_identidad_pendiente(
+                fuente=EmpleadoIdentidadPendiente.FUENTE_HIKVISION,
+                codigo_externo=emp_no,
+                nombre_externo=str(ev.get("name", "")).strip(),
+                notas="Detectado automáticamente desde checador.",
+            )
             errores += 1
             log.warning("Empleado no encontrado desde Hikvision: codigo=%s nombre=%s", emp_no, ev.get("name", ""))
             detalle.append({"employee_no": emp_no, "resultado": "empleado no encontrado"})

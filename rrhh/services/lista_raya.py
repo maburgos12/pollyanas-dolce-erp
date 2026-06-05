@@ -152,7 +152,8 @@ def importar_lista_raya_nomina(
     from django.utils import timezone
 
     from recetas.utils.normalizacion import normalizar_nombre
-    from rrhh.models import Empleado, NominaConceptoLinea, NominaImportacion, NominaLinea, NominaPeriodo
+    from rrhh.models import Empleado, EmpleadoIdentidadPendiente, NominaConceptoLinea, NominaImportacion, NominaLinea, NominaPeriodo
+    from rrhh.services_identidad import registrar_identidad_pendiente, sugerir_empleado_por_nombre
 
     source = Path(path)
     result = parse_lista_raya_xls(source)
@@ -191,13 +192,25 @@ def importar_lista_raya_nomina(
         }
         empleados_to_create: list[Empleado] = []
         empleados_to_update: list[Empleado] = []
+        empleados_by_row_codigo: dict[str, Empleado] = {}
         for row in result.empleados:
             empleado = empleados_by_codigo.get(row.codigo)
             if not empleado:
-                empleado = Empleado(codigo=row.codigo)
-                empleados_to_create.append(empleado)
+                empleado = sugerir_empleado_por_nombre(row.nombre)
+                if empleado:
+                    registrar_identidad_pendiente(
+                        fuente=EmpleadoIdentidadPendiente.FUENTE_NOMINA,
+                        codigo_externo=row.codigo,
+                        nombre_externo=row.nombre,
+                        notas="Detectado automáticamente desde lista de raya.",
+                    )
+                    empleados_to_update.append(empleado)
+                else:
+                    empleado = Empleado(codigo=row.codigo)
+                    empleados_to_create.append(empleado)
             else:
                 empleados_to_update.append(empleado)
+            empleados_by_row_codigo[row.codigo] = empleado
             empleado.nombre = row.nombre
             empleado.nombre_normalizado = normalizar_nombre(row.nombre)
             empleado.rfc = row.rfc
@@ -226,10 +239,16 @@ def importar_lista_raya_nomina(
                 ],
             )
 
-        empleados_by_codigo = {
+        empleados_exactos_by_codigo = {
             empleado.codigo: empleado
             for empleado in Empleado.objects.filter(codigo__in=[row.codigo for row in result.empleados])
         }
+        empleados_by_codigo = {}
+        for row in result.empleados:
+            empleado = empleados_exactos_by_codigo.get(row.codigo) or empleados_by_row_codigo[row.codigo]
+            if not empleado.pk:
+                empleado = Empleado.objects.get(codigo=row.codigo)
+            empleados_by_codigo[row.codigo] = empleado
         lineas_to_create: list[NominaLinea] = []
         row_by_codigo = {row.codigo: row for row in result.empleados}
         for row in result.empleados:
@@ -256,13 +275,13 @@ def importar_lista_raya_nomina(
             )
 
         NominaLinea.objects.bulk_create(lineas_to_create)
-        lineas_by_codigo = {
-            linea.empleado.codigo: linea
-            for linea in periodo.lineas.select_related("empleado").filter(empleado__codigo__in=row_by_codigo.keys())
+        lineas_by_empleado_id = {
+            linea.empleado_id: linea
+            for linea in periodo.lineas.select_related("empleado").filter(empleado_id__in=[e.id for e in empleados_by_codigo.values()])
         }
         conceptos_to_create: list[NominaConceptoLinea] = []
         for codigo, row in row_by_codigo.items():
-            linea = lineas_by_codigo[codigo]
+            linea = lineas_by_empleado_id[empleados_by_codigo[codigo].id]
             conceptos_to_create.extend(
                 [
                     NominaConceptoLinea(
