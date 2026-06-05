@@ -23,4 +23,8 @@ urlpatterns = [
     path("<int:pk>/completar/", views.completar_directamente, name="completar"),
     path("<int:pk>/resolver/", views.resolver_revision, name="resolver_revision"),
     path("<int:pk>/prorroga/<int:prorroga_id>/resolver/", views.resolver_prorroga, name="resolver_prorroga"),
+    path("<int:pk>/retractar/", views.retractar_entrega, name="retractar"),
+    path("<int:pk>/comentario/<int:comentario_id>/editar/", views.editar_comentario_propio, name="editar_comentario"),
+    path("<int:pk>/evidencia/<int:evidencia_id>/editar-nota/", views.editar_nota_evidencia, name="editar_nota_evidencia"),
+    path("<int:pk>/evidencia/<int:evidencia_id>/eliminar/", views.eliminar_evidencia_propia, name="eliminar_evidencia"),
 ]

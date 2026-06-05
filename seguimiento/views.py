@@ -852,6 +852,12 @@ def detalle_item(request, pk):
     puede_cerrar_directo = not item.requiere_aprobacion or checklist_completo
     puede_entregar = not item.esta_cerrado and item.requiere_aprobacion and not checklist_completo
 
+    tiene_revision_dg = comentarios.filter(tipo=SeguimientoComentario.TIPO_REVISION_DG).exists()
+    puede_retractar = (
+        item.estatus == SeguimientoItem.ESTATUS_EN_REVISION
+        and not tiene_revision_dg
+    )
+
     return render(
         request,
         "seguimiento/detalle_item.html",
@@ -870,8 +876,90 @@ def detalle_item(request, pk):
             "puede_entregar": puede_entregar,
             "checklist_completo": checklist_completo,
             "estatus_en_revision": SeguimientoItem.ESTATUS_EN_REVISION,
+            "puede_retractar": puede_retractar,
+            "current_user": request.user,
         },
     )
+
+
+@login_required
+@require_POST
+def eliminar_evidencia_propia(request, pk, evidencia_id):
+    item = _get_item_para_usuario(request.user, pk)
+    if item.esta_cerrado:
+        messages.error(request, "No puedes eliminar archivos de un acuerdo cerrado.")
+        return redirect("seguimiento:detalle", pk=pk)
+    evidencia = get_object_or_404(
+        SeguimientoEvidencia,
+        pk=evidencia_id,
+        seguimiento=item,
+        usuario=request.user,
+    )
+    nombre = evidencia.nombre_original
+    if evidencia.archivo:
+        evidencia.archivo.delete(save=False)
+    evidencia.delete()
+    log_event(request.user, "seguimiento.evidencia.eliminar", "SeguimientoItem", item.pk, {"archivo": nombre})
+    messages.success(request, f"Archivo '{nombre}' eliminado. Ahora puedes subir el correcto.")
+    return redirect("seguimiento:detalle", pk=pk)
+
+
+@login_required
+@require_POST
+def editar_comentario_propio(request, pk, comentario_id):
+    item = _get_item_para_usuario(request.user, pk)
+    comentario = get_object_or_404(
+        SeguimientoComentario,
+        pk=comentario_id,
+        seguimiento=item,
+        usuario=request.user,
+        tipo=SeguimientoComentario.TIPO_FEEDBACK,
+    )
+    nuevo_texto = (request.POST.get("comentario") or "").strip()
+    if not nuevo_texto:
+        messages.error(request, "El comentario no puede quedar vacío.")
+        return redirect("seguimiento:detalle", pk=pk)
+    comentario.comentario = nuevo_texto
+    comentario.save(update_fields=["comentario"])
+    log_event(request.user, "seguimiento.comentario.editar", "SeguimientoComentario", comentario.pk, {"seguimiento_id": item.pk})
+    messages.success(request, "Comentario actualizado.")
+    return redirect("seguimiento:detalle", pk=pk)
+
+
+@login_required
+@require_POST
+def editar_nota_evidencia(request, pk, evidencia_id):
+    item = _get_item_para_usuario(request.user, pk)
+    evidencia = get_object_or_404(
+        SeguimientoEvidencia,
+        pk=evidencia_id,
+        seguimiento=item,
+        usuario=request.user,
+    )
+    nueva_nota = (request.POST.get("comentario") or "").strip()
+    evidencia.comentario = nueva_nota
+    evidencia.save(update_fields=["comentario"])
+    log_event(request.user, "seguimiento.evidencia.editar_nota", "SeguimientoEvidencia", evidencia.pk, {"seguimiento_id": item.pk})
+    messages.success(request, "Nota de evidencia actualizada.")
+    return redirect("seguimiento:detalle", pk=pk)
+
+
+@login_required
+@require_POST
+def retractar_entrega(request, pk):
+    item = _get_item_para_usuario(request.user, pk)
+    if item.estatus != SeguimientoItem.ESTATUS_EN_REVISION:
+        messages.error(request, "Solo puedes retractar cuando el acuerdo está en revisión.")
+        return redirect("seguimiento:detalle", pk=pk)
+    tiene_revision_dg = item.comentarios.filter(tipo=SeguimientoComentario.TIPO_REVISION_DG).exists()
+    if tiene_revision_dg:
+        messages.error(request, "El Director General ya revisó este acuerdo. No es posible retractarlo.")
+        return redirect("seguimiento:detalle", pk=pk)
+    item.estatus = SeguimientoItem.ESTATUS_EN_PROCESO
+    item.save(update_fields=["estatus", "updated_at"])
+    log_event(request.user, "seguimiento.retractar", "SeguimientoItem", item.pk, {})
+    messages.success(request, "Acuerdo regresado a 'En proceso'. Ya puedes hacer cambios y volver a enviarlo.")
+    return redirect("seguimiento:detalle", pk=pk)
 
 
 @login_required

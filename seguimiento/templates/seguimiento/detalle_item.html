@@ -297,6 +297,24 @@
   </div>
   {% endif %}
 
+  <!-- Retractar entrega (EN_REVISION y DG aún no ha actuado) -->
+  {% if puede_retractar %}
+  <div class="bi-panel" style="margin-bottom:16px; border-left:4px solid var(--amarillo);">
+    <p class="seg-section-title">Acuerdo enviado a revisión</p>
+    <div class="seg-entregar-box">
+      <p style="margin:0; color:var(--texto-light); font-size:.9rem;">
+        ¿Necesitas hacer cambios antes de que el Director General lo revise? Puedes retractar el envío, corregir lo que necesites y volver a enviarlo.
+      </p>
+      <form method="post" action="{% url 'seguimiento:retractar' item.pk %}" onsubmit="return confirm('¿Retractar el envío y regresar a En proceso?')">
+        {% csrf_token %}
+        <div class="seg-entregar-actions">
+          <button class="btn btn-secondary" type="submit">↩ Retractar y hacer cambios</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Entregar para revisión DG (requiere aprobación y checklist incompleto o sin checklist) -->
   {% if puede_entregar %}
   <div class="bi-panel" style="margin-bottom:16px;">
@@ -321,6 +339,23 @@
   </div>
   {% endif %}
 
+  <!-- Subir archivo (siempre visible cuando no está cerrado) -->
+  {% if not item.esta_cerrado %}
+  <div class="bi-panel" style="margin-bottom:16px;">
+    <p class="seg-section-title">Agregar archivo de evidencia</p>
+    <form method="post" action="{% url 'seguimiento:subir_evidencia' item.pk %}" enctype="multipart/form-data" style="display:grid; gap:10px;">
+      {% csrf_token %}
+      <input type="file" name="archivo"
+        accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf"
+        style="border:1px solid rgba(139,34,82,.14); border-radius:12px; padding:10px; font:inherit; background:rgba(255,255,255,.96);">
+      <textarea name="comentario" class="seg-form-textarea" placeholder="Nota sobre el archivo (opcional)" style="min-height:50px;"></textarea>
+      <div>
+        <button class="btn btn-primary btn-sm" type="submit">📎 Subir archivo</button>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+
   <!-- Historial de actividad -->
   <div class="bi-panel" style="margin-bottom:16px;">
     <p class="seg-section-title">Historial de actividad</p>
@@ -340,6 +375,22 @@
           <p class="seg-timeline-meta">{{ ev.created_at|date:"d/m/Y H:i" }}
             · <span class="badge {% if ev.estatus == 'APROBADA' %}bg-success{% elif ev.estatus == 'RECHAZADA' %}bg-danger{% else %}bg-warning{% endif %}">{{ ev.get_estatus_display }}</span>
           </p>
+          {% if ev.usuario == current_user and not item.esta_cerrado %}
+          <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:8px; align-items:center;">
+            <details>
+              <summary style="cursor:pointer; list-style:none; display:inline-flex; align-items:center; gap:6px; font-size:.82rem; color:var(--vino); font-weight:700;">✏ Editar nota</summary>
+              <form method="post" action="{% url 'seguimiento:editar_nota_evidencia' item.pk ev.pk %}" style="margin-top:8px; display:grid; gap:8px;">
+                {% csrf_token %}
+                <textarea name="comentario" class="seg-form-textarea" style="min-height:50px;" placeholder="Nota sobre el archivo (opcional)">{{ ev.comentario }}</textarea>
+                <button class="btn btn-sm btn-primary" type="submit">Guardar nota</button>
+              </form>
+            </details>
+            <form method="post" action="{% url 'seguimiento:eliminar_evidencia' item.pk ev.pk %}" onsubmit="return confirm('¿Eliminar el archivo {{ ev.nombre_original|escapejs }}? No se puede deshacer.')">
+              {% csrf_token %}
+              <button class="btn btn-sm btn-secondary" type="submit" style="color:var(--rojo); border-color:rgba(229,57,53,.3);">🗑 Eliminar archivo</button>
+            </form>
+          </div>
+          {% endif %}
         </div>
       </div>
       {% endfor %}
@@ -354,6 +405,16 @@
           <span class="muted" style="font-size:.82rem;"> · {{ com.get_tipo_display }}</span>
           <p style="margin:6px 0 0;">{{ com.comentario }}</p>
           <p class="seg-timeline-meta">{{ com.created_at|date:"d/m/Y H:i" }}</p>
+          {% if com.tipo == 'FEEDBACK' and com.usuario == current_user and not item.esta_cerrado %}
+          <details style="margin-top:8px;">
+            <summary style="cursor:pointer; list-style:none; display:inline-flex; align-items:center; gap:6px; font-size:.82rem; color:var(--vino); font-weight:700;">✏ Editar</summary>
+            <form method="post" action="{% url 'seguimiento:editar_comentario' item.pk com.pk %}" style="margin-top:8px; display:grid; gap:8px;">
+              {% csrf_token %}
+              <textarea name="comentario" class="seg-form-textarea" style="min-height:50px;" required>{{ com.comentario }}</textarea>
+              <button class="btn btn-sm btn-primary" type="submit">Guardar cambio</button>
+            </form>
+          </details>
+          {% endif %}
         </div>
       </div>
       {% endfor %}
