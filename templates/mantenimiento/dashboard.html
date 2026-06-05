@@ -88,6 +88,10 @@
   .mant-plan-form{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
   .mant-plan-date{min-height:38px;border:1px solid rgba(139,34,82,.22);border-radius:8px;padding:7px 10px;font:inherit;font-size:13px}
   .mant-plan-notas{min-width:160px}
+  .mant-modal-lg{width:min(640px,100%);max-height:90vh;overflow-y:auto}
+  .mant-modal-md{width:min(560px,100%)}
+  .mant-field{display:grid;gap:5px;font-size:13px;font-weight:700;color:#513744}
+  .span-2{grid-column:1/-1}
   .mant-eliminar-modal{position:fixed;inset:0;z-index:1400;display:none;background:rgba(31,18,26,.5);align-items:center;justify-content:center;padding:20px}
   .mant-eliminar-modal.is-open{display:flex}
   .mant-eliminar-panel{background:#fff;border-radius:14px;padding:24px;width:min(440px,100%);box-shadow:0 20px 50px rgba(0,0,0,.24)}
@@ -263,6 +267,9 @@
           <h2 class="bi-panel-title">Mantenimiento preventivo de equipos</h2>
           <p class="bi-copy">Hornos, refrigeradores, vitrinas y maquinaria de sucursales. Marca ejecutado para registrar y recalcular la próxima fecha.</p>
         </div>
+        <div class="bi-panel-actions">
+          <button class="btn btn-primary btn-sm" type="button" onclick="abrirModalPlan()" style="background:#8B2252;border-color:#8B2252">+ Nuevo plan</button>
+        </div>
       </div>
       {% if planes_proximos %}
       <div class="mant-planes-grid">
@@ -287,14 +294,20 @@
               Próxima: <strong>{% if plan.proxima_ejecucion %}{{ plan.proxima_ejecucion|date:"d/m/Y" }}{% else %}Sin fecha{% endif %}</strong>{% if plan.ultima_ejecucion %} · Última: {{ plan.ultima_ejecucion|date:"d/m/Y" }}{% endif %}
             </div>
           </div>
-          <form class="mant-plan-form" method="post" action="{% url 'mantenimiento:mant-plan-ejecutar' plan.pk %}">
-            {% csrf_token %}
-            <label style="display:grid;gap:4px;font-size:12px;font-weight:900;color:#513744">Fecha
-              <input class="mant-plan-date" type="date" name="fecha_ejecucion" value="{{ today|date:'Y-m-d' }}" required>
-            </label>
-            <input class="mant-plan-date mant-plan-notas" type="text" name="notas" placeholder="Notas (opcional)">
-            <button class="btn btn-primary btn-sm" type="submit" style="background:#8B2252;border-color:#8B2252">Marcar ejecutado</button>
-          </form>
+          <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+            <button class="btn btn-secondary btn-sm" type="button"
+              onclick="abrirEditarPlan({{ plan.pk }},'{{ plan.nombre|escapejs }}',{{ plan.activo_ref.pk }},'{{ plan.tipo }}','{{ plan.estatus }}',{{ plan.frecuencia_dias }},{{ plan.tolerancia_dias }},'{{ plan.proxima_ejecucion|date:'Y-m-d' }}','{{ plan.ultima_ejecucion|date:'Y-m-d' }}','{{ plan.responsable|escapejs }}','{{ plan.instrucciones|escapejs }}')">
+              Editar plan
+            </button>
+            <form class="mant-plan-form" method="post" action="{% url 'mantenimiento:mant-plan-ejecutar' plan.pk %}">
+              {% csrf_token %}
+              <label style="display:grid;gap:4px;font-size:12px;font-weight:900;color:#513744">Fecha
+                <input class="mant-plan-date" type="date" name="fecha_ejecucion" value="{{ today|date:'Y-m-d' }}" required>
+              </label>
+              <input class="mant-plan-date mant-plan-notas" type="text" name="notas" placeholder="Notas (opcional)">
+              <button class="btn btn-primary btn-sm" type="submit" style="background:#8B2252;border-color:#8B2252">Marcar ejecutado</button>
+            </form>
+          </div>
         </article>
         {% endfor %}
       </div>
@@ -311,10 +324,10 @@
         <div>
           <div class="bi-kicker">Preventivo · Unidades logísticas</div>
           <h2 class="bi-panel-title">Mantenimiento preventivo de flota</h2>
-          <p class="bi-copy">Servicios programados para las unidades de reparto — cambios de aceite, frenos, llantas y más. Para registrar el servicio entra al detalle de la unidad.</p>
+          <p class="bi-copy">Cambios de aceite, frenos, llantas y más. Registra el servicio aquí para actualizar la próxima fecha automáticamente.</p>
         </div>
         <div class="bi-panel-actions">
-          <a class="btn btn-secondary btn-sm" href="{% url 'logistica:unidades_list' %}">Gestionar unidades</a>
+          <button class="btn btn-primary btn-sm" type="button" onclick="abrirModalServicio()" style="background:#8B2252;border-color:#8B2252">+ Registrar servicio</button>
         </div>
       </div>
       {% if servicios_flota %}
@@ -526,6 +539,110 @@
     </form>
   </aside>
 </div>
+
+<!-- ── Modal crear / editar plan de mantenimiento ── -->
+<div class="mant-eliminar-modal" id="modalPlan" role="dialog" aria-modal="true">
+  <div class="mant-eliminar-panel mant-modal-lg">
+    <h3 id="modalPlanTitulo">Nuevo plan de mantenimiento</h3>
+    <form id="formPlan" method="post" action="{% url 'mantenimiento:mant-plan-gestionar' %}">
+      {% csrf_token %}
+      <input type="hidden" name="action" id="planAction" value="crear">
+      <input type="hidden" name="plan_id" id="planId">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+        <label class="mant-field span-2">Activo / Equipo <span style="color:#E53935">*</span>
+          <select name="activo_id" id="planActivoId" class="mant-input" required>
+            <option value="">Seleccionar equipo...</option>
+            {% for a in activos_para_plan %}
+              <option value="{{ a.id }}">{{ a.nombre }}{% if a.sucursal %} · {{ a.sucursal.nombre }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="mant-field span-2">Nombre del plan <span style="color:#E53935">*</span>
+          <input type="text" name="nombre" id="planNombre" class="mant-input" required placeholder="Ej. Mantenimiento preventivo mensual">
+        </label>
+        <label class="mant-field">Tipo
+          <select name="tipo" id="planTipo" class="mant-input">
+            {% for v,l in plan_tipo_choices %}<option value="{{ v }}">{{ l }}</option>{% endfor %}
+          </select>
+        </label>
+        <label class="mant-field">Estatus
+          <select name="estatus" id="planEstatus" class="mant-input">
+            {% for v,l in plan_estatus_choices %}<option value="{{ v }}">{{ l }}</option>{% endfor %}
+          </select>
+        </label>
+        <label class="mant-field">Frecuencia (días)
+          <input type="number" name="frecuencia_dias" id="planFrecuencia" class="mant-input" min="1" value="30">
+        </label>
+        <label class="mant-field">Tolerancia (días)
+          <input type="number" name="tolerancia_dias" id="planTolerancia" class="mant-input" min="0" value="0">
+        </label>
+        <label class="mant-field">Última ejecución
+          <input type="date" name="ultima_ejecucion" id="planUltima" class="mant-input">
+        </label>
+        <label class="mant-field">Próxima ejecución
+          <input type="date" name="proxima_ejecucion" id="planProxima" class="mant-input">
+        </label>
+        <label class="mant-field span-2">Responsable
+          <input type="text" name="responsable" id="planResponsable" class="mant-input" placeholder="Nombre del técnico encargado">
+        </label>
+        <label class="mant-field span-2">Instrucciones / checklist
+          <textarea name="instrucciones" id="planInstrucciones" class="mant-input" style="min-height:72px" placeholder="Pasos, verificaciones o materiales necesarios"></textarea>
+        </label>
+      </div>
+      <div class="mant-eliminar-actions">
+        <button class="btn btn-secondary btn-sm" type="button" onclick="cerrarModalPlan()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" type="submit" style="background:#8B2252;border-color:#8B2252" id="planSubmitBtn">Guardar plan</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Modal registrar servicio de flota ── -->
+<div class="mant-eliminar-modal" id="modalServicio" role="dialog" aria-modal="true">
+  <div class="mant-eliminar-panel mant-modal-md">
+    <h3>Registrar servicio de unidad</h3>
+    <form method="post" action="{% url 'mantenimiento:mant-flota-servicio' %}">
+      {% csrf_token %}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+        <label class="mant-field span-2">Unidad <span style="color:#E53935">*</span>
+          <select name="unidad_id" class="mant-input" required>
+            <option value="">Seleccionar unidad...</option>
+            {% for u in unidades_para_servicio %}
+              <option value="{{ u.id }}">{{ u.descripcion|default:u.codigo }}{% if u.sucursal %} · {{ u.sucursal.nombre }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="mant-field span-2">Tipo de servicio <span style="color:#E53935">*</span>
+          <select name="tipo_servicio_id" class="mant-input" required>
+            <option value="">Seleccionar tipo...</option>
+            {% for ts in tipos_servicio %}
+              <option value="{{ ts.id }}">{{ ts.nombre }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="mant-field">Fecha del servicio
+          <input type="date" name="fecha_servicio" class="mant-input" value="{{ today|date:'Y-m-d' }}" required>
+        </label>
+        <label class="mant-field">Km al servicio
+          <input type="number" name="km_al_servicio" class="mant-input" min="0" placeholder="Opcional">
+        </label>
+        <label class="mant-field">Proveedor / taller
+          <input type="text" name="proveedor" class="mant-input" placeholder="Nombre del taller">
+        </label>
+        <label class="mant-field">Costo ($)
+          <input type="number" name="costo" class="mant-input" min="0" step="0.01" placeholder="0.00">
+        </label>
+        <label class="mant-field span-2">Notas
+          <input type="text" name="notas" class="mant-input" placeholder="Observaciones del servicio">
+        </label>
+      </div>
+      <div class="mant-eliminar-actions">
+        <button class="btn btn-secondary btn-sm" type="button" onclick="cerrarModalServicio()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" type="submit" style="background:#8B2252;border-color:#8B2252">Registrar servicio</button>
+      </div>
+    </form>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -688,5 +805,63 @@
     setTimeout(() => el.style.display = "none", 4000);
   });
 })();
+
+// ── Modal plan (crear / editar) ──
+function abrirModalPlan() {
+  document.getElementById("modalPlanTitulo").textContent = "Nuevo plan de mantenimiento";
+  document.getElementById("planAction").value = "crear";
+  document.getElementById("planId").value = "";
+  document.getElementById("planActivoId").disabled = false;
+  document.getElementById("planActivoId").value = "";
+  document.getElementById("planNombre").value = "";
+  document.getElementById("planFrecuencia").value = "30";
+  document.getElementById("planTolerancia").value = "0";
+  document.getElementById("planProxima").value = "";
+  document.getElementById("planUltima").value = "";
+  document.getElementById("planResponsable").value = "";
+  document.getElementById("planInstrucciones").value = "";
+  document.getElementById("planSubmitBtn").textContent = "Guardar plan";
+  document.getElementById("modalPlan").classList.add("is-open");
+}
+function abrirEditarPlan(id, nombre, activoId, tipo, estatus, freq, tol, proxima, ultima, resp, instrucciones) {
+  document.getElementById("modalPlanTitulo").textContent = "Editar plan";
+  document.getElementById("planAction").value = "editar";
+  document.getElementById("planId").value = id;
+  const activoSel = document.getElementById("planActivoId");
+  activoSel.value = activoId;
+  activoSel.disabled = true;
+  document.getElementById("planNombre").value = nombre;
+  document.getElementById("planFrecuencia").value = freq;
+  document.getElementById("planTolerancia").value = tol;
+  document.getElementById("planProxima").value = proxima || "";
+  document.getElementById("planUltima").value = ultima || "";
+  document.getElementById("planResponsable").value = resp || "";
+  document.getElementById("planInstrucciones").value = instrucciones || "";
+  document.getElementById("planSubmitBtn").textContent = "Guardar cambios";
+  const tipoSel = document.getElementById("planTipo");
+  for (let o of tipoSel.options) o.selected = o.value === tipo;
+  const estSel = document.getElementById("planEstatus");
+  for (let o of estSel.options) o.selected = o.value === estatus;
+  document.getElementById("modalPlan").classList.add("is-open");
+}
+function cerrarModalPlan() {
+  document.getElementById("modalPlan").classList.remove("is-open");
+  document.getElementById("planActivoId").disabled = false;
+}
+document.getElementById("modalPlan").addEventListener("click", (e) => { if (e.target === document.getElementById("modalPlan")) cerrarModalPlan(); });
+
+// ── Modal servicio flota ──
+function abrirModalServicio() {
+  document.getElementById("modalServicio").classList.add("is-open");
+}
+function cerrarModalServicio() {
+  document.getElementById("modalServicio").classList.remove("is-open");
+}
+document.getElementById("modalServicio").addEventListener("click", (e) => { if (e.target === document.getElementById("modalServicio")) cerrarModalServicio(); });
+
+// Cerrar con ESC (extender el existente)
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { cerrarModalPlan(); cerrarModalServicio(); }
+});
 </script>
 {% endblock %}

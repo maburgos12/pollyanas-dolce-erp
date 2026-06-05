@@ -12,4 +12,6 @@ urlpatterns = [
     path("bandeja/<str:tipo>/<int:pk>/cancelar/", views.solicitar_cancelacion, name="mant-cancelar"),
     path("cancelaciones/<int:solicitud_id>/resolver/", views.resolver_cancelacion, name="mant-resolver-cancelacion"),
     path("planes/<int:pk>/ejecutar/", views.registrar_ejecucion_plan, name="mant-plan-ejecutar"),
+    path("planes/gestionar/", views.gestionar_plan, name="mant-plan-gestionar"),
+    path("flota/servicio/", views.registrar_servicio_flota, name="mant-flota-servicio"),
 ]

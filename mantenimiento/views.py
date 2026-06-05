@@ -771,6 +771,11 @@ def dashboard(request):
             "solicitudes_cancelacion": solicitudes_cancelacion,
             "puede_eliminar": _puede_eliminar(request.user),
             "today": today,
+            "plan_tipo_choices": PlanMantenimiento.TIPO_CHOICES,
+            "plan_estatus_choices": PlanMantenimiento.ESTATUS_CHOICES,
+            "activos_para_plan": list(Activo.objects.select_related("sucursal").filter(activo=True).order_by("sucursal__nombre", "nombre")[:400]),
+            "unidades_para_servicio": list(Unidad.objects.filter(activa=True).select_related("sucursal").order_by("descripcion", "codigo")),
+            "tipos_servicio": list(TipoServicioUnidad.objects.filter(activo=True).order_by("nombre")),
         },
     )
 
@@ -902,6 +907,95 @@ def resolver_cancelacion(request, solicitud_id):
         solicitud.save()
         msg.info(request, f"Solicitud #{solicitud.id} rechazada.")
 
+    return redirect("mantenimiento:dashboard")
+
+
+@login_required
+def gestionar_plan(request):
+    """Crear o editar un PlanMantenimiento desde el módulo de mantenimiento."""
+    _require_mantenimiento(request.user)
+    if request.method != "POST":
+        return redirect("mantenimiento:dashboard")
+
+    from django.contrib import messages as msg
+
+    action = (request.POST.get("action") or "crear").strip().lower()
+
+    if action == "editar":
+        plan_id = _safe_int(request.POST.get("plan_id"))
+        plan = get_object_or_404(PlanMantenimiento, pk=plan_id)
+    else:
+        activo_id = _safe_int(request.POST.get("activo_id"))
+        if not activo_id:
+            msg.error(request, "Selecciona un activo para el plan.")
+            return redirect("mantenimiento:dashboard")
+        activo_obj = get_object_or_404(Activo, pk=activo_id, activo=True)
+        plan = PlanMantenimiento(activo_ref=activo_obj)
+
+    nombre = (request.POST.get("nombre") or "").strip()
+    if not nombre:
+        msg.error(request, "El nombre del plan es obligatorio.")
+        return redirect("mantenimiento:dashboard")
+
+    tipo = (request.POST.get("tipo") or PlanMantenimiento.TIPO_PREVENTIVO).strip().upper()
+    estatus = (request.POST.get("estatus") or PlanMantenimiento.ESTATUS_ACTIVO).strip().upper()
+    plan.nombre = nombre
+    plan.tipo = tipo if tipo in {x[0] for x in PlanMantenimiento.TIPO_CHOICES} else PlanMantenimiento.TIPO_PREVENTIVO
+    plan.estatus = estatus if estatus in {x[0] for x in PlanMantenimiento.ESTATUS_CHOICES} else PlanMantenimiento.ESTATUS_ACTIVO
+    plan.frecuencia_dias = max(1, _safe_int(request.POST.get("frecuencia_dias"), default=30))
+    plan.tolerancia_dias = max(0, _safe_int(request.POST.get("tolerancia_dias"), default=0))
+    plan.responsable = (request.POST.get("responsable") or "").strip()
+    plan.instrucciones = (request.POST.get("instrucciones") or "").strip()
+    from django.utils.dateparse import parse_date as _pd
+    nueva_ultima = _pd(request.POST.get("ultima_ejecucion") or "")
+    nueva_proxima = _pd(request.POST.get("proxima_ejecucion") or "")
+    if nueva_ultima:
+        plan.ultima_ejecucion = nueva_ultima
+    if nueva_proxima:
+        plan.proxima_ejecucion = nueva_proxima
+    elif nueva_ultima and plan.frecuencia_dias:
+        plan.recompute_next_date()
+    plan.activo = True
+    plan.save()
+
+    verbo = "actualizado" if action == "editar" else "creado"
+    msg.success(request, f"Plan '{plan.nombre}' {verbo}.")
+    return redirect("mantenimiento:dashboard")
+
+
+@login_required
+def registrar_servicio_flota(request):
+    """Registra un ServicioRealizadoUnidad desde el módulo de mantenimiento."""
+    _require_mantenimiento(request.user)
+    if request.method != "POST":
+        return redirect("mantenimiento:dashboard")
+
+    from django.contrib import messages as msg
+    from django.utils.dateparse import parse_date as _pd
+
+    unidad_id = _safe_int(request.POST.get("unidad_id"))
+    tipo_id = _safe_int(request.POST.get("tipo_servicio_id"))
+    fecha_raw = request.POST.get("fecha_servicio") or ""
+    fecha = _pd(fecha_raw) or timezone.localdate()
+
+    if not unidad_id or not tipo_id:
+        msg.error(request, "Selecciona unidad y tipo de servicio.")
+        return redirect("mantenimiento:dashboard")
+
+    unidad = get_object_or_404(Unidad, pk=unidad_id, activa=True)
+    tipo_srv = get_object_or_404(TipoServicioUnidad, pk=tipo_id, activo=True)
+
+    ServicioRealizadoUnidad.objects.create(
+        unidad=unidad,
+        tipo_servicio=tipo_srv,
+        fecha_servicio=fecha,
+        km_al_servicio=_safe_int(request.POST.get("km_al_servicio")) or None,
+        proveedor=(request.POST.get("proveedor") or "").strip(),
+        costo=_parse_decimal(request.POST.get("costo")),
+        notas=(request.POST.get("notas") or "").strip(),
+        registrado_por=request.user,
+    )
+    msg.success(request, f"Servicio registrado: {tipo_srv.nombre} · {unidad.codigo}.")
     return redirect("mantenimiento:dashboard")
 
 
