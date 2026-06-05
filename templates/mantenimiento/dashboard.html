@@ -404,11 +404,15 @@
         <div>
           <div class="mant-plan-title">
             {% if not prov.activo %}<span class="mant-badge" style="background:#f5f5f5;color:#616161;margin-right:6px">Inactivo</span>{% endif %}
-            {{ prov.nombre }}
+            {{ prov.nombre }}{% if prov.especialidad %} <span class="mant-badge" style="background:#e8f0fe;color:#1a56db;margin-left:4px">{{ prov.especialidad }}</span>{% endif %}
+          </div>
+          <div class="mant-plan-meta">
+            {% if prov.contacto %}{{ prov.contacto }}{% endif %}{% if prov.telefono %} · {{ prov.telefono }}{% endif %}
+            {% if prov.notas %}<br>{{ prov.notas }}{% endif %}
           </div>
         </div>
         <button class="btn btn-secondary btn-sm" type="button"
-          onclick="abrirEditarProveedor({{ prov.pk }},'{{ prov.nombre|escapejs }}',{{ prov.activo|yesno:'true,false' }})">
+          onclick="abrirEditarProveedor({{ prov.pk }},'{{ prov.nombre|escapejs }}','{{ prov.contacto|escapejs }}','{{ prov.telefono|escapejs }}','{{ prov.especialidad|escapejs }}','{{ prov.notas|escapejs }}',{{ prov.activo|yesno:'true,false' }})">
           Editar
         </button>
       </article>
@@ -773,12 +777,28 @@
       {% csrf_token %}
       <input type="hidden" name="action" id="proveedorAction" value="crear">
       <input type="hidden" name="proveedor_id" id="proveedorId">
-      <div style="display:grid;gap:12px;margin-bottom:16px">
-        <label class="mant-field">Nombre del proveedor / taller <span style="color:#E53935">*</span>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+        <label class="mant-field span-2">Nombre del taller / técnico <span style="color:#E53935">*</span>
           <input type="text" name="nombre" id="proveedorNombre" class="mant-input" required
-            placeholder="Ej. Taller Mecánico López, Frío Express, Técnico Ramírez">
+            placeholder="Ej. Taller Mecánico López, Frío Express, Ing. Ramírez">
         </label>
-        <div id="proveedorActivoBlock" style="display:none">
+        <label class="mant-field">Especialidad
+          <input type="text" name="especialidad" id="proveedorEspecialidad" class="mant-input"
+            placeholder="Ej. Refrigeración, Electricidad, Mecánica">
+        </label>
+        <label class="mant-field">Teléfono
+          <input type="text" name="telefono" id="proveedorTelefono" class="mant-input"
+            placeholder="Ej. 667 123 4567">
+        </label>
+        <label class="mant-field span-2">Nombre del contacto
+          <input type="text" name="contacto" id="proveedorContacto" class="mant-input"
+            placeholder="Persona que atiende (opcional)">
+        </label>
+        <label class="mant-field span-2">Notas
+          <input type="text" name="notas" id="proveedorNotas" class="mant-input"
+            placeholder="Horario, dirección, condiciones especiales">
+        </label>
+        <div id="proveedorActivoBlock" class="span-2" style="display:none">
           <label style="display:flex;align-items:center;gap:10px;font-size:13px;font-weight:700;color:#513744;cursor:pointer">
             <input type="checkbox" name="activo" id="proveedorActivo" value="1" checked>
             Proveedor activo
@@ -1091,20 +1111,28 @@ document.getElementById("modalTipoServicio").addEventListener("click", (e) => {
 
 // ── Modal proveedor ──
 function abrirModalProveedor() {
-  document.getElementById("modalProveedorTitulo").textContent = "Nuevo proveedor";
+  document.getElementById("modalProveedorTitulo").textContent = "Nuevo proveedor de servicio";
   document.getElementById("proveedorAction").value = "crear";
   document.getElementById("proveedorId").value = "";
   document.getElementById("proveedorNombre").value = "";
+  document.getElementById("proveedorEspecialidad").value = "";
+  document.getElementById("proveedorTelefono").value = "";
+  document.getElementById("proveedorContacto").value = "";
+  document.getElementById("proveedorNotas").value = "";
   document.getElementById("proveedorActivoBlock").style.display = "none";
   document.getElementById("proveedorSubmitBtn").textContent = "Guardar";
   document.getElementById("modalProveedor").classList.add("is-open");
   setTimeout(() => document.getElementById("proveedorNombre").focus(), 120);
 }
-function abrirEditarProveedor(id, nombre, activo) {
+function abrirEditarProveedor(id, nombre, contacto, telefono, especialidad, notas, activo) {
   document.getElementById("modalProveedorTitulo").textContent = "Editar proveedor";
   document.getElementById("proveedorAction").value = "editar";
   document.getElementById("proveedorId").value = id;
   document.getElementById("proveedorNombre").value = nombre;
+  document.getElementById("proveedorEspecialidad").value = especialidad || "";
+  document.getElementById("proveedorTelefono").value = telefono || "";
+  document.getElementById("proveedorContacto").value = contacto || "";
+  document.getElementById("proveedorNotas").value = notas || "";
   document.getElementById("proveedorActivo").checked = activo;
   document.getElementById("proveedorActivoBlock").style.display = "block";
   document.getElementById("proveedorSubmitBtn").textContent = "Guardar cambios";
