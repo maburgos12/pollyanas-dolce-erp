@@ -411,10 +411,17 @@
             {% if prov.notas %}<br>{{ prov.notas }}{% endif %}
           </div>
         </div>
-        <button class="btn btn-secondary btn-sm" type="button"
-          onclick="abrirEditarProveedor({{ prov.pk }},'{{ prov.nombre|escapejs }}','{{ prov.contacto|escapejs }}','{{ prov.telefono|escapejs }}','{{ prov.especialidad|escapejs }}','{{ prov.notas|escapejs }}',{{ prov.activo|yesno:'true,false' }})">
-          Editar
-        </button>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-secondary btn-sm" type="button"
+            onclick="abrirEditarProveedor({{ prov.pk }},'{{ prov.nombre|escapejs }}','{{ prov.contacto|escapejs }}','{{ prov.telefono|escapejs }}','{{ prov.especialidad|escapejs }}','{{ prov.notas|escapejs }}',{{ prov.activo|yesno:'true,false' }})">
+            Editar
+          </button>
+          <form method="post" action="{% url 'mantenimiento:mant-proveedor-eliminar' prov.pk %}"
+            onsubmit="return confirm('¿Eliminar a {{ prov.nombre|escapejs }}?')">
+            {% csrf_token %}
+            <button class="btn btn-sm mant-btn-eliminar" type="submit">Eliminar</button>
+          </form>
+        </div>
       </article>
       {% empty %}
       <div class="mant-empty">Sin proveedores registrados. Agrega talleres y técnicos para asignarlos a los reportes.</div>

@@ -822,6 +822,19 @@ def importar_proveedores(request):
 
 
 @login_required
+def eliminar_proveedor(request, pk):
+    _require_mantenimiento(request.user)
+    if request.method != "POST":
+        return redirect("mantenimiento:dashboard")
+    from django.contrib import messages as msg
+    prov = get_object_or_404(ProveedorServicio, pk=pk)
+    nombre = prov.nombre
+    prov.delete()
+    msg.success(request, f"Proveedor '{nombre}' eliminado.")
+    return redirect("mantenimiento:dashboard")
+
+
+@login_required
 def gestionar_proveedor(request):
     """Crear o editar un ProveedorServicio desde el módulo de mantenimiento."""
     _require_mantenimiento(request.user)
