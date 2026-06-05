@@ -236,6 +236,7 @@ class RegistroDiarioVentasViewSet(viewsets.ModelViewSet):
 class PermisosVentasEquipoViewSet(BasePermisosEquipoViewSet):
     permission_classes = [IsAuthenticated, CanAccessBonosVentas]
     origen_solicitud = "bonos_ventas"
+    grupo_repartidores = "REPARTIDORES"
 
     def _bonos_periodo_queryset(self):
         mes = self.request.query_params.get("mes")
@@ -245,7 +246,10 @@ class PermisosVentasEquipoViewSet(BasePermisosEquipoViewSet):
         qs = BonoVentasEmpleado.objects.filter(periodo__mes=mes, periodo__anio=anio).select_related("empleado", "sucursal")
         sucursal_id = self.request.query_params.get("sucursal")
         if sucursal_id:
-            qs = qs.filter(sucursal_id=sucursal_id)
+            if sucursal_id == self.grupo_repartidores:
+                qs = qs.filter(empleado__puesto_operativo__iexact="REPARTIDOR")
+            else:
+                qs = qs.filter(sucursal_id=sucursal_id)
         return qs
 
     def list(self, request):
@@ -275,6 +279,8 @@ class PermisosVentasEquipoViewSet(BasePermisosEquipoViewSet):
         qs = empleados_elegibles_bonos_ventas()
         sucursal_id = self.request.query_params.get("sucursal")
         if sucursal_id:
+            if sucursal_id == self.grupo_repartidores:
+                return qs.filter(puesto_operativo__iexact="REPARTIDOR")
             try:
                 sucursal = Sucursal.objects.get(pk=sucursal_id)
                 qs = qs.filter(sucursal__iexact=sucursal.nombre)

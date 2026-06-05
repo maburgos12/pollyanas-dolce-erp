@@ -122,6 +122,8 @@ class BonosVentasTests(TestCase):
         self.assertIn("Imprimir / guardar PDF", content)
         self.assertIn("Sincronizar repartidores", content)
         self.assertIn("/api/bonos-ventas/ventas-categoria/sync-repartidores/", content)
+        self.assertIn("const REPARTIDORES_KEY = 'REPARTIDORES';", content)
+        self.assertIn("grupoVentasKey", content)
         self.assertIn("ReactDOM.createPortal", content)
         self.assertIn("body > :not(.print-modal)", content)
         self.assertIn("transform:none!important", content)
@@ -151,7 +153,7 @@ class BonosVentasTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-ventas-pwa-v9", sw_content)
+        self.assertIn("pollyanas-bonos-ventas-pwa-v10", sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-ventas/dashboard/")', sw_content)
 
     def test_api_ventas_acepta_post_con_sesion_y_csrf(self):
@@ -423,6 +425,10 @@ class BonosVentasTests(TestCase):
         self.assertEqual(payload["sin_sucursal"], [sin_sucursal.nombre])
         self.assertTrue(BonoVentasEmpleado.objects.filter(periodo=periodo, empleado=con_sucursal, sucursal=sucursal).exists())
         self.assertTrue(BonoVentasEmpleado.objects.filter(periodo=periodo, empleado=repartidor, sucursal=sucursal).exists())
+        resumen = self.client.get("/api/bonos-ventas/bonos/resumen/?mes=5&anio=2026")
+        self.assertEqual(resumen.status_code, 200)
+        repartidor_row = next(row for row in resumen.json()["bonos"] if row["empleado"] == repartidor.id)
+        self.assertTrue(repartidor_row["es_repartidor"])
 
     def test_permisos_equipo_ventas_crea_y_preautoriza(self):
         Empleado.objects.all().delete()
@@ -458,6 +464,9 @@ class BonosVentasTests(TestCase):
         empleados_payload = listado.json()["empleados"]
         self.assertEqual([row["id"] for row in empleados_payload], [repartidor.id, empleado.id])
         self.assertEqual({row["sucursal_nombre"] for row in empleados_payload}, {"Payán"})
+        repartidores = self.client.get("/api/bonos-ventas/permisos/?mes=5&anio=2026&sucursal=REPARTIDORES")
+        self.assertEqual(repartidores.status_code, 200)
+        self.assertEqual([row["id"] for row in repartidores.json()["empleados"]], [repartidor.id])
 
         creado = self.client.post(
             "/api/bonos-ventas/permisos/",

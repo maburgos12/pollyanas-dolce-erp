@@ -281,6 +281,15 @@ function buildDiasCal(periodo,mes,anio){
   return Array.from({length:total},(_,i)=>({dia:i+1,date:null,label:String(i+1),mes:null,showMes:false}));
 }
 function normalizeText(v){ return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim(); }
+const REPARTIDORES_KEY = 'REPARTIDORES';
+function grupoVentasKey(b){ return b&&b.es_repartidor ? REPARTIDORES_KEY : String((b&&b.sucursal)||''); }
+function grupoVentasNombre(b){ return b&&b.es_repartidor ? 'Repartidores' : ((b&&b.sucursal_nombre)||'Sin sucursal'); }
+function gruposVentasFromBonos(bonos){
+  const m = new Map();
+  bonos.forEach(b=>{ const key=grupoVentasKey(b); if(key)m.set(key,grupoVentasNombre(b)); });
+  return Array.from(m.entries()).sort((a,b)=>a[1].localeCompare(b[1]));
+}
+function filtrarBonosPorGrupo(bonos,key){ return key ? bonos.filter(b=>grupoVentasKey(b)===key) : bonos; }
 
 // SVG icons inline
 const IconCheck = () => h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2.5,strokeLinecap:'round',strokeLinejoin:'round',style:{width:13,height:13}},h('polyline',{points:'20 6 9 17 4 12'}));
@@ -447,9 +456,7 @@ function App(){
   React.useEffect(()=>{ cargar(); },[mes,anio]);
 
   const sucursales = React.useMemo(()=>{
-    const m = new Map();
-    bonos.forEach(b=>{ if(b.sucursal && b.sucursal_nombre) m.set(String(b.sucursal), b.sucursal_nombre); });
-    return Array.from(m.entries()).sort((a,b)=>a[1].localeCompare(b[1]));
+    return gruposVentasFromBonos(bonos);
   },[bonos]);
 
   function cargar(){
@@ -493,7 +500,7 @@ function App(){
   }
   function showStatus(msg,type='ok'){ setStatus(msg); setStatusType(type); setTimeout(()=>setStatus(''),4000); }
 
-  const bonosFiltrados = filtroSuc ? bonos.filter(b=>String(b.sucursal)===filtroSuc) : bonos;
+  const bonosFiltrados = filtrarBonosPorGrupo(bonos,filtroSuc);
   const totalPagar = bonosFiltrados.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
   const showBonusContext = tab !== 'permisos';
 
@@ -620,16 +627,14 @@ function CapturaTab({bonos,mes,anio,periodo,showStatus}){
   const [loadingReg, setLoadingReg] = React.useState(false);
 
   const sucursales = React.useMemo(()=>{
-    const m = new Map();
-    bonos.forEach(b=>{ if(b.sucursal&&b.sucursal_nombre) m.set(String(b.sucursal),b.sucursal_nombre); });
-    return Array.from(m.entries()).sort((a,b)=>a[1].localeCompare(b[1]));
+    return gruposVentasFromBonos(bonos);
   },[bonos]);
 
   React.useEffect(()=>{
     if(!selSuc && sucursales.length) setSelSuc(sucursales[0][0]);
   },[sucursales]);
 
-  const bonosSuc = selSuc ? bonos.filter(b=>String(b.sucursal)===selSuc) : [];
+  const bonosSuc = selSuc ? filtrarBonosPorGrupo(bonos,selSuc) : [];
   const bonosSucIds = bonosSuc.map(b=>b.id).join(',');
 
   React.useEffect(()=>{
@@ -1028,7 +1033,7 @@ function ResumenTab({bonos,sucursales,mes,anio}){
   if(!bonos.length) return h('div',{className:'empty'},'Sin datos para este periodo.');
   const totalGlobal = bonos.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
   const periodoLabel=`${MESES[+mes]||''} ${anio}`;
-  const grupos = GroupBy(bonos,b=>String(b.sucursal),b=>b.sucursal_nombre||'Sin sucursal');
+  const grupos = GroupBy(bonos,grupoVentasKey,grupoVentasNombre);
   const selectedBonos=bonos.filter(b=>selectedIds.has(b.id));
   const allVisibleSelected=bonos.length>0&&bonos.every(b=>selectedIds.has(b.id));
   function toggleSelected(id){
@@ -1097,12 +1102,10 @@ function ResumenTab({bonos,sucursales,mes,anio}){
 function AjustesTab({bonos,cargar,showStatus}){
   const [selSuc, setSelSuc] = React.useState('');
   const sucursales = React.useMemo(()=>{
-    const m = new Map();
-    bonos.forEach(b=>{ if(b.sucursal&&b.sucursal_nombre) m.set(String(b.sucursal),b.sucursal_nombre); });
-    return Array.from(m.entries()).sort((a,b)=>a[1].localeCompare(b[1]));
+    return gruposVentasFromBonos(bonos);
   },[bonos]);
   React.useEffect(()=>{ if(!selSuc&&sucursales.length) setSelSuc(sucursales[0][0]); },[sucursales]);
-  const bonosSuc = selSuc ? bonos.filter(b=>String(b.sucursal)===selSuc) : bonos;
+  const bonosSuc = selSuc ? filtrarBonosPorGrupo(bonos,selSuc) : bonos;
 
   function patch(id,campo,val){
     api(`/api/bonos-ventas/bonos/${id}/`,{method:'PATCH',body:JSON.stringify({[campo]:val})})
