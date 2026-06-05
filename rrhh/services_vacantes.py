@@ -393,14 +393,27 @@ def agregar_seguimiento_vacante(
 
 def vacante_requiere_autorizacion_direccion(vacante: VacanteRRHH) -> bool:
     """
-    Replica el criterio operativo de permisos: Dirección solo interviene en jefaturas.
-    El resto de las vacantes se autoriza con el jefe directo del área/puesto.
+    Requiere DG solo si el puesto solicitado es de primer nivel en el organigrama
+    (jefatura sin jefe_directo asignado = reporta directo a Dirección General).
+    Cualquier puesto operativo o jefatura intermedia NO requiere DG.
     """
     departamento = _inferir_departamento_vacante(vacante)
-    if departamento not in DIRECCION_DEPARTAMENTOS:
+    if not departamento:
         return False
-    texto = f"{departamento} {vacante.area or ''} {vacante.puesto or ''}".upper()
-    return any(keyword in texto for keyword in DIRECCION_PUESTO_KEYWORDS)
+    # Buscar jefatura del departamento que no tenga jefe_directo (primer nivel)
+    jefatura_primer_nivel = (
+        Empleado.objects.filter(
+            activo=True,
+            departamento=departamento,
+            puesto_operativo="JEFATURA",
+            jefe_directo__isnull=True,
+        ).exists()
+    )
+    if not jefatura_primer_nivel:
+        return False
+    # Solo aplica si el puesto solicitado ES esa jefatura de primer nivel
+    texto_puesto = _normalizar_texto(vacante.puesto)
+    return any(keyword in texto_puesto for keyword in DIRECCION_PUESTO_KEYWORDS)
 
 
 def resolver_autorizador_vacante(vacante: VacanteRRHH, *, exclude_user=None):
@@ -410,9 +423,12 @@ def resolver_autorizador_vacante(vacante: VacanteRRHH, *, exclude_user=None):
     exclude_ids = {getattr(exclude_user, "id", None)}
     exclude_ids = {user_id for user_id in exclude_ids if user_id}
     departamento = _inferir_departamento_vacante(vacante)
+
+    # Si el solicitante ya es jefatura de ese departamento, se auto-autoriza
     if _usuario_es_jefatura_departamento(vacante.solicitado_por, departamento):
         return vacante.solicitado_por
 
+    # Buscar jefatura del departamento con usuario ERP activo
     jefe = (
         Empleado.objects.select_related("usuario_erp")
         .filter(activo=True, usuario_erp__is_active=True, departamento=departamento)
@@ -424,7 +440,9 @@ def resolver_autorizador_vacante(vacante: VacanteRRHH, *, exclude_user=None):
     if jefe and jefe.usuario_erp_id:
         return jefe.usuario_erp
 
-    return None
+    # Si no hay jefatura configurada en el depto, RRHH puede proceder sin autorizador externo
+    # → retorna el propio solicitante para que RRHH lo valide directamente
+    return vacante.solicitado_por if vacante.solicitado_por else None
 
 
 def _usuario_es_jefatura_departamento(user, departamento: str) -> bool:
