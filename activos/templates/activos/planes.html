@@ -1,8 +1,75 @@
 {% extends "base.html" %}
+{% load static %}
 
-{% block title %}Activos - Planes{% endblock %}
+{% block title %}Activos - Planes de mantenimiento{% endblock %}
 {% block page_title %}Activos · Planes{% endblock %}
 {% block body_class %}page-activos-planes{% endblock %}
+
+{% block extra_css %}
+<style>
+  /* ── KPI strip ── */
+  .planes-kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+  .planes-kpi-card{background:#fff;border:1px solid rgba(139,34,82,.12);border-radius:12px;padding:16px 18px}
+  .planes-kpi-num{font-family:"Playfair Display",serif;font-size:32px;font-weight:700;line-height:1}
+  .planes-kpi-num.ok{color:#4CAF50}
+  .planes-kpi-num.warn{color:#FFC107}
+  .planes-kpi-num.bad{color:#E53935}
+  .planes-kpi-label{color:#7A6565;font-size:13px;margin-top:4px}
+
+  /* ── Toolbar ── */
+  .planes-toolbar{display:grid;grid-template-columns:1fr 160px 160px auto;gap:10px;align-items:end;margin-bottom:16px}
+  .planes-toolbar input,.planes-toolbar select{width:100%;min-height:40px;border:1px solid rgba(139,34,82,.22);border-radius:8px;padding:0 10px;font:inherit;font-size:13px;background:#fff}
+
+  /* ── Tabla ── */
+  .planes-table-wrap{overflow-x:auto;border-radius:12px;border:1px solid rgba(139,34,82,.10)}
+  .planes-table{width:100%;border-collapse:collapse;font-size:13px}
+  .planes-table thead tr{background:#8B2252;color:#fff}
+  .planes-table thead th{padding:11px 14px;font-weight:700;text-align:left}
+  .planes-table tbody tr{border-bottom:1px solid #f5eef2}
+  .planes-table tbody tr:last-child{border-bottom:0}
+  .planes-table tbody tr:hover{background:#fffafc}
+  .planes-table td{padding:10px 14px;vertical-align:middle;color:#3D2B2B}
+  .planes-table td.muted-cell{color:#7A6565}
+
+  /* ── Badges de estado ── */
+  .plan-badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:3px 10px;font-size:11px;font-weight:900}
+  .plan-badge.activo{background:#e8f5e9;color:#2e7d32}
+  .plan-badge.pausado{background:#f5f5f5;color:#616161}
+  .plan-badge.vencido{background:#ffebee;color:#c62828}
+  .plan-badge.ok{background:#e8f5e9;color:#2e7d32}
+  .plan-badge.proximo{background:#fff8e1;color:#f57f17}
+  .plan-badge.sin-fecha{background:#fce4ec;color:#880e4f}
+
+  /* ── Acciones fila ── */
+  .planes-row-actions{display:flex;gap:6px;flex-wrap:nowrap}
+
+  /* ── Panel nuevo plan ── */
+  .planes-form-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .planes-form-grid label{display:grid;gap:5px;font-size:13px;font-weight:700;color:#513744}
+  .planes-form-grid input,.planes-form-grid select,.planes-form-grid textarea{min-height:40px;border:1px solid rgba(139,34,82,.22);border-radius:8px;padding:0 10px;font:inherit;font-size:13px;background:#fff}
+  .planes-form-grid .span-full{grid-column:1/-1}
+  .planes-form-grid textarea{min-height:72px;padding:8px 10px;resize:vertical}
+
+  /* ── Modal edición ── */
+  .planes-modal-backdrop{position:fixed;inset:0;z-index:1200;display:none;background:rgba(24,12,18,.52);padding:20px;overflow:auto}
+  .planes-modal-backdrop.open{display:flex;align-items:flex-start;justify-content:center}
+  .planes-modal{width:min(760px,100%);margin:40px 0;background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.28)}
+  .planes-modal-head{display:flex;justify-content:space-between;align-items:center;background:#8B2252;color:#fff;padding:16px 20px;border-radius:14px 14px 0 0}
+  .planes-modal-head strong{font-family:"Playfair Display",serif;font-size:18px}
+  .planes-modal-body{padding:20px}
+  .planes-modal-footer{display:flex;justify-content:flex-end;gap:10px;padding:14px 20px;border-top:1px solid #f0e1e8}
+
+  @media(max-width:900px){
+    .planes-kpi{grid-template-columns:repeat(2,1fr)}
+    .planes-toolbar{grid-template-columns:1fr 1fr}
+    .planes-form-grid{grid-template-columns:1fr 1fr}
+  }
+  @media(max-width:560px){
+    .planes-kpi{grid-template-columns:1fr 1fr}
+    .planes-toolbar{grid-template-columns:1fr}
+  }
+</style>
+{% endblock %}
 
 {% block content %}
 <div class="module-tabs">
@@ -11,637 +78,339 @@
   {% endfor %}
 </div>
 
-<section class="card">
-  <div class="card-header">Centro de mando ERP</div>
-  <div class="kpi-grid kpi-mini">
-    <article class="kpi-card">
-      <div class="kpi-label">Responsable principal</div>
-      <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
-      <div class="kpi-label">Semáforo global</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-number">{{ erp_command_center.blockers }}</div>
-      <div class="kpi-label">Bloqueos abiertos</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-label">Siguiente paso</div>
-      <div class="muted" style="margin:8px 0 10px;">{{ erp_command_center.next_step }}</div>
-      <a class="btn btn-secondary btn-small" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
-    </article>
+<!-- KPIs -->
+<div class="planes-kpi">
+  <div class="planes-kpi-card">
+    <div class="planes-kpi-num">{{ kpi.total }}</div>
+    <div class="planes-kpi-label">Planes totales</div>
   </div>
-</section>
+  <div class="planes-kpi-card">
+    <div class="planes-kpi-num ok">{{ kpi.activos }}</div>
+    <div class="planes-kpi-label">Activos</div>
+  </div>
+  <div class="planes-kpi-card">
+    <div class="planes-kpi-num {% if kpi.vencidos %}bad{% else %}ok{% endif %}">{{ kpi.vencidos }}</div>
+    <div class="planes-kpi-label">Vencidos</div>
+  </div>
+  <div class="planes-kpi-card">
+    <div class="planes-kpi-num {% if kpi.proximos_semana %}warn{% else %}ok{% endif %}">{{ kpi.proximos_semana }}</div>
+    <div class="planes-kpi-label">Próximos 7 días</div>
+  </div>
+</div>
 
-<section class="card">
-  <div class="card-header">Expediente ERP del módulo</div>
-  <div class="table-responsive">
-    <table class="table">
-      <tbody>
-        <tr>
-          <td style="width:28%;"><strong>Documento</strong></td>
-          <td>Planes preventivos, correctivos programados y cobertura operativa por activo.</td>
-        </tr>
-        <tr>
-          <td><strong>Fuente de control</strong></td>
-          <td>Maestro de activos, periodicidad, responsable técnico y próxima ejecución.</td>
-        </tr>
-        <tr>
-          <td><strong>Etapa ERP</strong></td>
-          <td>Planificación preventiva y disparo documental de órdenes de mantenimiento.</td>
-        </tr>
-        <tr>
-          <td><strong>Propósito</strong></td>
-          <td>Evitar vencimientos, asegurar cobertura mínima y generar órdenes con anticipación controlada.</td>
-        </tr>
-        <tr>
-          <td><strong>Regla de salida</strong></td>
-          <td>Todo activo crítico debe tener plan vigente, responsable asignado y próxima ejecución definida.</td>
-        </tr>
-        <tr>
-          <td><strong>Siguiente paso</strong></td>
-          <td>Regulariza planes vencidos y usa la generación automática para no romper la continuidad documental.</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Workflow ERP del módulo</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Etapa</th>
-          <th>Responsable</th>
-          <th>Entrada</th>
-          <th>Control</th>
-          <th>Salida</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>01 · Activo listo para operar</td>
-          <td>Activos / Mantenimiento</td>
-          <td>Equipo clasificado</td>
-          <td>Proveedor y criticidad completos</td>
-          <td>Apto para plan</td>
-        </tr>
-        <tr>
-          <td>02 · Definición del plan</td>
-          <td>Planeación / Operación</td>
-          <td>Frecuencia y responsable</td>
-          <td>Próxima ejecución documentada</td>
-          <td>Plan vigente</td>
-        </tr>
-        <tr>
-          <td>03 · Generación de orden</td>
-          <td>Mantenimiento / Ejecución</td>
-          <td>Vencimiento o ventana</td>
-          <td>Disparo preventivo controlado</td>
-          <td>Orden lista para ejecutar</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Cadena documental ERP</div>
-  <div class="enterprise-pill-grid enterprise-pill-grid-compact">
-    {% for item in enterprise_chain %}
-      <article class="enterprise-pill-card {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
-        <div class="enterprise-pill-title">{{ item.step }} · {{ item.title }}</div>
-        <div class="enterprise-pill-text">{{ item.detail }}</div>
-        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="margin-top:10px;">{{ item.count }}</div>
-        <div class="muted">{{ item.status }}</div>
-        <div style="margin-top:10px;">
-          <a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a>
-        </div>
-      </article>
-    {% endfor %}
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Cadena troncal del mantenimiento</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Tramo</th>
-          <th>Depende de</th>
-          <th>Responsable</th>
-          <th>Cierre</th>
-          <th>Estatus</th>
-          <th>Dependencia</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in enterprise_chain %}
-          <tr>
-            <td><strong>{{ item.step }} · {{ item.title }}</strong></td>
-            <td>{{ item.depends_on }}</td>
-            <td>{{ item.owner }}</td>
-            <td>{{ item.completion }}%</td>
-            <td>{{ item.status }}</td>
-            <td>{{ item.dependency_status }}</td>
-            <td>{{ item.next_step }}</td>
-            <td><a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-
-{% if critical_path_rows %}
-<section class="card">
-  <div class="card-header">Ruta crítica ERP</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Prioridad</th>
-          <th>Tramo</th>
-          <th>Responsable</th>
-          <th>Bloqueos</th>
-          <th>Cierre</th>
-          <th>Depende de</th>
-          <th>Lectura ejecutiva</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in critical_path_rows %}
-          <tr>
-            <td>{{ row.priority }}</td>
-            <td><strong>{{ row.title }}</strong></td>
-            <td>{{ row.owner }}</td>
-            <td>{{ row.blockers }}</td>
-            <td>{{ row.completion }}%</td>
-            <td>{{ row.depends_on }}</td>
-            <td>{{ row.detail }}</td>
-            <td>{{ row.next_step }}</td>
-            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-{% endif %}
-
-{% if executive_radar_rows %}
-<section class="card">
-  <div class="card-header">Radar ejecutivo ERP</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Tramo</th>
-          <th>Responsable</th>
-          <th>Bloqueo dominante</th>
-          <th>Depende de</th>
-          <th>Cierre</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in executive_radar_rows %}
-          <tr>
-            <td><strong>{{ row.phase }}</strong><div class="muted">{{ row.status }}</div></td>
-            <td>{{ row.owner }}</td>
-            <td>{{ row.dominant_blocker }}</td>
-            <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
-            <td>{{ row.progress_pct }}%</td>
-            <td>{{ row.next_step }}</td>
-            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-{% endif %}
-
-<section class="card">
-  <div class="card-header">Madurez ERP de activos</div>
-  <div class="kpi-grid">
-    <article class="kpi-card">
-      <div class="kpi-number is-success">{{ enterprise_maturity_summary.completed_steps }}</div>
-      <div class="kpi-label">Etapas estabilizadas</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-number is-warning">{{ enterprise_maturity_summary.attention_steps }}</div>
-      <div class="kpi-label">Etapas con atención</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-number">{{ enterprise_maturity_summary.coverage_pct }}%</div>
-      <div class="kpi-label">Cobertura documental</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-label">Siguiente prioridad</div>
-      <div style="font-weight:700; margin:8px 0 6px;">{{ enterprise_maturity_summary.next_priority_title }}</div>
-      <div class="muted">{{ enterprise_maturity_summary.next_priority_detail }}</div>
-      <div style="margin-top:10px;">
-        <a class="btn btn-secondary btn-small" href="{{ enterprise_maturity_summary.next_priority_url }}">{{ enterprise_maturity_summary.next_priority_cta }}</a>
-      </div>
-    </article>
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Criterios de cierre ERP</div>
-  <div class="enterprise-kpi-strip enterprise-kpi-strip-compact">
-    <article class="enterprise-kpi-card">
-      <div class="enterprise-kpi-label">Cierre global</div>
-      <div class="kpi-number">{{ release_gate_completion }}%</div>
-      <div class="muted">Planes, activos condicionantes y órdenes preventivas controlados para sostener la cobertura.</div>
-    </article>
-  </div>
-  <div class="blocker-list">
-    {% for row in release_gate_rows %}
-      <article class="stage-row">
-        <div class="stage-step">{{ row.step }}</div>
-        <div class="blocker-meta">
-          <strong>{{ row.title }}</strong>
-          <small>{{ row.detail }}</small>
-        </div>
-        <div class="module-chip-list">
-          <span class="module-chip manage">Cerrados {{ row.completed }}</span>
-          <span class="module-chip {% if row.tone == 'success' %}manage{% else %}blocked{% endif %}">Abiertos {{ row.open_count }}</span>
-        </div>
-        <div class="blocker-action">
-          <a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a>
-        </div>
-      </article>
-    {% endfor %}
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Cadena de control ERP</div>
-  <div class="enterprise-pill-grid enterprise-pill-grid-compact">
-    {% for item in enterprise_handoff_map %}
-      <article class="enterprise-pill-card {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
-        <div class="enterprise-pill-title">{{ item.label }}</div>
-        <div class="enterprise-pill-text">{{ item.detail }}</div>
-        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="margin-top:10px;">{{ item.count }}</div>
-        <div class="muted">{{ item.status }}</div>
-        <div style="margin-top:10px;">
-          <a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a>
-        </div>
-      </article>
-    {% endfor %}
-  </div>
-</section>
-
-{% if enterprise_handoff_map %}
-<section class="card">
-  <div class="card-header">Entrega de activos a downstream</div>
-  <p class="muted mb-2">
-    Expone si el módulo ya puede bajar con control hacia planes, órdenes y bitácora, junto con el criterio de salida documental de cada tramo.
-  </p>
-  <div class="table-responsive">
-    <table class="table table-striped align-middle">
-      <thead>
-        <tr>
-          <th>Destino</th>
-          <th>Responsable</th>
-          <th>Estatus</th>
-          <th class="text-end">Bloqueos</th>
-          <th>Cierre</th>
-          <th>Depende de</th>
-          <th>Criterio de salida</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in enterprise_handoff_map %}
-          <tr>
-            <td><strong>{{ row.label }}</strong><div class="muted">{{ row.detail }}</div></td>
-            <td>{{ row.owner }}</td>
-            <td>{{ row.status }}</td>
-            <td class="text-end">{{ row.count }}</td>
-            <td style="min-width:160px;">
-              <div class="erp-progress">
-                <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="width: {{ row.completion }}%;"></div>
-              </div>
-              <div class="muted mt-1">{{ row.completion }}%</div>
-            </td>
-            <td>{{ row.depends_on }}</td>
-            <td>{{ row.exit_criteria }}</td>
-            <td>{{ row.next_step }}</td>
-            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-{% endif %}
-
-<section class="card">
-  <div class="card-header">Salud operativa ERP</div>
-  <div class="kpi-grid">
-    {% for card in operational_health_cards %}
-      <article class="kpi-card">
-        <div class="kpi-number {% if card.tone == 'danger' %}is-danger{% else %}is-warning{% endif %}">{{ card.count }}</div>
-        <div class="kpi-label">{{ card.label }}</div>
-      </article>
-    {% endfor %}
-  </div>
-</section>
-
-{% if can_manage_activos %}
-<section class="card">
-  <div class="card-header">Nuevo plan de mantenimiento</div>
-  <form method="post">
-    {% csrf_token %}
-    <input type="hidden" name="action" value="create_plan">
-    <div class="row" style="display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:10px;">
-      <div>
-        <label>Activo</label>
-        <select name="activo_id" required>
-          <option value="">Selecciona...</option>
-          {% for a in activos %}
-            <option value="{{ a.id }}">{{ a.nombre }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label>Nombre plan</label>
-        <input type="text" name="nombre" required>
-      </div>
-      <div>
-        <label>Tipo</label>
-        <select name="tipo">
-          {% for v, l in tipo_choices %}
-            <option value="{{ v }}">{{ l }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label>Estatus</label>
-        <select name="estatus">
-          {% for v, l in estatus_choices %}
-            <option value="{{ v }}">{{ l }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label>Frecuencia (días)</label>
-        <input type="number" name="frecuencia_dias" min="1" value="30">
-      </div>
-      <div>
-        <label>Tolerancia (días)</label>
-        <input type="number" name="tolerancia_dias" min="0" value="0">
-      </div>
-      <div>
-        <label>Última ejecución</label>
-        <input type="date" name="ultima_ejecucion">
-      </div>
-      <div>
-        <label>Próxima ejecución</label>
-        <input type="date" name="proxima_ejecucion">
-      </div>
-      <div>
-        <label>Responsable</label>
-        <input type="text" name="responsable" maxlength="120">
-      </div>
-      <div style="grid-column: span 3;">
-        <label>Instrucciones</label>
-        <input type="text" name="instrucciones" placeholder="Checklist o detalle de mantenimiento">
-      </div>
-      <div style="display:flex;align-items:end;">
-        <label style="display:flex;align-items:center;gap:8px;">
-          <input type="checkbox" name="activo" value="1" checked>
-          Plan habilitado
-        </label>
-      </div>
+<!-- Toolbar y acciones -->
+<div class="card" style="margin-bottom:16px">
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+    <span>Planes de mantenimiento</span>
+    <div style="display:flex;gap:8px">
+      <a class="btn btn-secondary btn-small" href="?q={{ filters.q|urlencode }}&estatus={{ filters.estatus|urlencode }}&scope={{ filters.scope|urlencode }}&export=csv">CSV</a>
+      <a class="btn btn-secondary btn-small" href="?q={{ filters.q|urlencode }}&estatus={{ filters.estatus|urlencode }}&scope={{ filters.scope|urlencode }}&export=xlsx">XLSX</a>
+      {% if can_manage_activos %}
+      <button class="btn btn-primary btn-small" type="button" onclick="abrirNuevoPlan()">+ Nuevo plan</button>
+      {% endif %}
     </div>
-    <div style="margin-top:12px;">
-      <button class="btn btn-primary" type="submit">Guardar plan</button>
-    </div>
-  </form>
-</section>
+  </div>
 
-<section class="card">
-  <div class="card-header">Generación automática de órdenes preventivas</div>
-  <form method="post">
-    {% csrf_token %}
-    <input type="hidden" name="action" value="generar_ordenes_programadas">
-    <div class="row" style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;align-items:end;">
-      <div>
-        <label>Alcance</label>
-        <select name="scope">
-          <option value="overdue">Planes vencidos (hasta hoy)</option>
-          <option value="week">Planes próximos 7 días</option>
-        </select>
-      </div>
-      <div style="display:flex;align-items:center;">
-        <label style="display:flex;align-items:center;gap:8px;">
-          <input type="checkbox" name="dry_run" value="1">
-          Simular sin crear
-        </label>
-      </div>
-      <div class="quick-actions">
-        <button class="btn btn-primary" type="submit">Generar órdenes</button>
-      </div>
-    </div>
-  </form>
-</section>
-{% endif %}
-
-<section class="card">
-  <div class="card-header">Planes registrados</div>
-  <form method="get">
-    <div class="row" style="display:grid;grid-template-columns:repeat(5,minmax(160px,1fr));gap:10px;align-items:end;">
-      <div>
-        <label>Buscar</label>
-        <input type="text" name="q" value="{{ filters.q }}" placeholder="Activo o plan">
-      </div>
-      <div>
-        <label>Estatus</label>
-        <select name="estatus">
-          <option value="">Todos</option>
-          {% for v, l in estatus_choices %}
-            <option value="{{ v }}" {% if filters.estatus == v %}selected{% endif %}>{{ l }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label>Alcance</label>
-        <select name="scope">
-          <option value="all" {% if filters.scope == 'all' %}selected{% endif %}>Todos</option>
-          <option value="overdue" {% if filters.scope == 'overdue' %}selected{% endif %}>Vencidos</option>
-          <option value="week" {% if filters.scope == 'week' %}selected{% endif %}>Próx. 7 días</option>
-        </select>
-      </div>
-      <div>
-        <label>Bloqueo ERP</label>
-        <select name="enterprise_gap">
-          <option value="">Todos</option>
-          {% for card in enterprise_cards %}
-            <option value="{{ card.key }}" {% if filters.enterprise_gap == card.key %}selected{% endif %}>{{ card.label }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="quick-actions">
+  <form method="get" style="margin-bottom:14px">
+    <div class="planes-toolbar">
+      <input type="text" name="q" value="{{ filters.q }}" placeholder="Buscar activo o nombre del plan...">
+      <select name="estatus">
+        <option value="">Todos los estatus</option>
+        {% for v,l in estatus_choices %}
+          <option value="{{ v }}" {% if filters.estatus == v %}selected{% endif %}>{{ l }}</option>
+        {% endfor %}
+      </select>
+      <select name="scope">
+        <option value="all" {% if filters.scope == 'all' %}selected{% endif %}>Todos</option>
+        <option value="overdue" {% if filters.scope == 'overdue' %}selected{% endif %}>Vencidos</option>
+        <option value="week" {% if filters.scope == 'week' %}selected{% endif %}>Próx. 7 días</option>
+      </select>
+      <div style="display:flex;gap:8px">
         <button class="btn btn-primary" type="submit">Filtrar</button>
         <a href="{% url 'activos:planes' %}" class="btn btn-secondary">Limpiar</a>
       </div>
     </div>
   </form>
-  <div class="kpi-grid" style="margin-top:14px;">
-    {% for card in enterprise_cards %}
-      <article class="kpi-card">
-        <div class="kpi-number {% if card.tone == 'danger' %}is-danger{% else %}is-warning{% endif %}">{{ card.count }}</div>
-        <div class="kpi-label">{{ card.label }}</div>
-        <div style="margin-top:10px;">
-          <a class="btn btn-secondary" href="{% url 'activos:planes' %}?enterprise_gap={{ card.key }}">Abrir</a>
-        </div>
-      </article>
-    {% endfor %}
-  </div>
-  <div class="quick-actions" style="margin-top:10px;">
-    <a class="btn btn-secondary" href="?q={{ filters.q|urlencode }}&estatus={{ filters.estatus|urlencode }}&scope={{ filters.scope|urlencode }}&enterprise_gap={{ filters.enterprise_gap|urlencode }}&export=csv">Export CSV</a>
-    <a class="btn btn-secondary" href="?q={{ filters.q|urlencode }}&estatus={{ filters.estatus|urlencode }}&scope={{ filters.scope|urlencode }}&enterprise_gap={{ filters.enterprise_gap|urlencode }}&export=xlsx">Export XLSX</a>
-  </div>
 
-  <div class="table-responsive" style="margin-top:12px;">
-    <table class="table table-striped">
+  <!-- Tabla -->
+  <div class="planes-table-wrap table-responsive">
+    <table class="planes-table">
       <thead>
         <tr>
           <th>Activo</th>
           <th>Plan</th>
           <th>Tipo</th>
           <th>Frecuencia</th>
-          <th>Última</th>
-          <th>Próxima</th>
-          <th>Estatus</th>
-          <th>Estado ERP</th>
-          <th>Siguiente acción</th>
-          <th>Acciones</th>
+          <th>Última ejecución</th>
+          <th>Próxima ejecución</th>
+          <th>Estatus plan</th>
+          <th>Estado</th>
+          {% if can_manage_activos %}<th>Acciones</th>{% endif %}
         </tr>
       </thead>
       <tbody>
         {% for row in planes_rows %}
-          {% with p=row.plan enterprise=row.enterprise %}
-          <tr>
-            <td>{{ p.activo_ref.nombre }}</td>
-            <td>{{ p.nombre }}</td>
-            <td>{{ p.get_tipo_display }}</td>
-            <td>{{ p.frecuencia_dias }} días</td>
-            <td>{% if p.ultima_ejecucion %}{{ p.ultima_ejecucion|date:"Y-m-d" }}{% else %}-{% endif %}</td>
-            <td>{% if p.proxima_ejecucion %}{{ p.proxima_ejecucion|date:"Y-m-d" }}{% else %}-{% endif %}</td>
-            <td><span class="badge badge-primary">{{ p.estatus }}</span></td>
-            <td><span class="badge badge-{% if enterprise.status_tone == 'success' %}success{% elif enterprise.status_tone == 'danger' %}danger{% else %}warning{% endif %}">{{ enterprise.status_label }}</span></td>
-            <td>{{ enterprise.next_action }}</td>
-            <td>
-              {% if can_manage_activos %}
-                <div class="quick-actions" style="gap:6px;flex-wrap:wrap;">
-                  <form method="post">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="registrar_ejecucion">
-                    <input type="hidden" name="plan_id" value="{{ p.id }}">
-                    <input type="hidden" name="fecha" value="{{ today|date:'Y-m-d' }}">
-                    <button class="btn btn-secondary" type="submit">Marcar ejecutado hoy</button>
-                  </form>
-                  <form method="post">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="toggle_plan">
-                    <input type="hidden" name="plan_id" value="{{ p.id }}">
-                    <button class="btn {% if p.estatus == 'ACTIVO' %}btn-danger{% else %}btn-success{% endif %}" type="submit">
-                      {% if p.estatus == 'ACTIVO' %}Pausar{% else %}Activar{% endif %}
-                    </button>
-                  </form>
-                </div>
+        {% with p=row.plan enterprise=row.enterprise %}
+        <tr>
+          <td>
+            <strong>{{ p.activo_ref.nombre }}</strong>
+            {% if p.activo_ref.sucursal %}<div class="muted-cell">{{ p.activo_ref.sucursal.nombre }}</div>{% endif %}
+          </td>
+          <td>{{ p.nombre }}</td>
+          <td><span class="plan-badge activo">{{ p.get_tipo_display }}</span></td>
+          <td class="muted-cell">Cada {{ p.frecuencia_dias }} días</td>
+          <td class="muted-cell">{{ p.ultima_ejecucion|date:"d/m/Y"|default:"—" }}</td>
+          <td>
+            {% if p.proxima_ejecucion %}
+              {% if enterprise.status_tone == 'danger' %}
+                <span class="plan-badge vencido">{{ p.proxima_ejecucion|date:"d/m/Y" }}</span>
+              {% elif enterprise.status_tone == 'warning' %}
+                <span class="plan-badge proximo">{{ p.proxima_ejecucion|date:"d/m/Y" }}</span>
               {% else %}
-                -
+                {{ p.proxima_ejecucion|date:"d/m/Y" }}
               {% endif %}
-            </td>
-          </tr>
-          {% endwith %}
+            {% else %}
+              <span class="plan-badge sin-fecha">Sin fecha</span>
+            {% endif %}
+          </td>
+          <td>
+            <span class="plan-badge {% if p.estatus == 'ACTIVO' %}activo{% else %}pausado{% endif %}">
+              {{ p.get_estatus_display }}
+            </span>
+          </td>
+          <td>
+            <span class="plan-badge {% if enterprise.status_tone == 'success' %}ok{% elif enterprise.status_tone == 'danger' %}vencido{% else %}proximo{% endif %}">
+              {{ enterprise.status_label }}
+            </span>
+          </td>
+          {% if can_manage_activos %}
+          <td>
+            <div class="planes-row-actions">
+              <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="registrar_ejecucion">
+                <input type="hidden" name="plan_id" value="{{ p.id }}">
+                <input type="hidden" name="fecha" value="{{ today|date:'Y-m-d' }}">
+                <button class="btn btn-secondary btn-small" type="submit">Ejecutado hoy</button>
+              </form>
+              <button class="btn btn-secondary btn-small" type="button"
+                onclick="abrirEditPlan({{ p.id }},'{{ p.nombre|escapejs }}','{{ p.activo_ref.nombre|escapejs }}','{{ p.get_tipo_display }}','{{ p.estatus }}',{{ p.frecuencia_dias }},{{ p.tolerancia_dias }},'{{ p.proxima_ejecucion|date:'Y-m-d' }}','{{ p.ultima_ejecucion|date:'Y-m-d' }}','{{ p.responsable|escapejs }}')">
+                Editar
+              </button>
+              <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="toggle_plan">
+                <input type="hidden" name="plan_id" value="{{ p.id }}">
+                <button class="btn btn-secondary btn-small" type="submit">
+                  {% if p.estatus == 'ACTIVO' %}Pausar{% else %}Activar{% endif %}
+                </button>
+              </form>
+            </div>
+          </td>
+          {% endif %}
+        </tr>
+        {% endwith %}
         {% empty %}
-          <tr><td colspan="10" class="text-muted">Sin planes para el filtro actual.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Cierre por etapa documental</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
         <tr>
-          <th>Etapa</th>
-          <th>Responsable</th>
-          <th>Abiertos</th>
-          <th>Cerrados</th>
-          <th>Cierre</th>
-          <th>Detalle</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
+          <td colspan="{% if can_manage_activos %}9{% else %}8{% endif %}" style="text-align:center;color:#7A6565;padding:24px">
+            Sin planes para el filtro actual.
+          </td>
         </tr>
-      </thead>
-      <tbody>
-        {% for row in document_stage_rows %}
-          <tr>
-            <td>{{ row.label }}</td>
-            <td>{{ row.owner|default:"Operación ERP" }}</td>
-            <td>{{ row.open }}</td>
-            <td>{{ row.closed }}</td>
-            <td>{{ row.completion|default:0 }}%</td>
-            <td>{{ row.detail }}</td>
-            <td>{{ row.next_step|default:"Revisar etapa" }}</td>
-            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">Abrir</a></td>
-          </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
-</section>
+</div>
 
-<section class="card">
-  <div class="card-header">Mesa de gobierno ERP</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Frente</th>
-          <th>Responsable</th>
-          <th>Bloqueos</th>
-          <th>Cierre</th>
-          <th>Detalle</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in erp_governance_rows %}
-          <tr>
-            <td><strong>{{ row.front }}</strong></td>
-            <td>{{ row.owner }}</td>
-            <td>{{ row.blockers }}</td>
-            <td>{{ row.completion }}%</td>
-            <td>{{ row.detail }}</td>
-            <td>{{ row.next_step }}</td>
-            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+{% if can_manage_activos %}
+<!-- Generar órdenes automáticas -->
+<div class="card" style="margin-bottom:16px">
+  <div class="card-header">Generar órdenes preventivas automáticas</div>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="generar_ordenes_programadas">
+    <div style="display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:end">
+      <div>
+        <label style="display:grid;gap:5px;font-size:13px;font-weight:700;color:#513744">
+          Alcance
+          <select name="scope" style="min-height:40px;border:1px solid rgba(139,34,82,.22);border-radius:8px;padding:0 10px;font:inherit">
+            <option value="overdue">Planes vencidos (hasta hoy)</option>
+            <option value="week">Planes próximos 7 días</option>
+          </select>
+        </label>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:#513744;padding-bottom:2px">
+        <input type="checkbox" name="dry_run" value="1"> Simular sin crear
+      </label>
+      <button class="btn btn-primary" type="submit">Generar órdenes</button>
+    </div>
+  </form>
+  {% if gen_result %}
+  <div class="alert {% if gen_result.dry_run %}alert-info{% else %}alert-success{% endif %}" style="margin-top:14px">
+    {% if gen_result.dry_run %}<strong>Simulación:</strong>{% else %}<strong>Creadas:</strong>{% endif %}
+    {{ gen_result.ordenes_creadas }} orden(es) · {{ gen_result.planes_procesados }} plan(es) procesados
+    {% if gen_result.errores %} · {{ gen_result.errores }} error(es){% endif %}
   </div>
-</section>
+  {% endif %}
+</div>
+
+<!-- Modal nuevo plan -->
+<div class="planes-modal-backdrop" id="modalNuevoPlan">
+  <div class="planes-modal">
+    <div class="planes-modal-head">
+      <strong>Nuevo plan de mantenimiento</strong>
+      <button class="btn btn-secondary btn-small" type="button" onclick="cerrarNuevoPlan()">Cerrar</button>
+    </div>
+    <div class="planes-modal-body">
+      <form method="post" id="formNuevoPlan">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="create_plan">
+        <div class="planes-form-grid">
+          <label>Activo <span style="color:#E53935">*</span>
+            <select name="activo_id" required>
+              <option value="">Selecciona...</option>
+              {% for a in activos %}
+                <option value="{{ a.id }}">{{ a.nombre }}{% if a.sucursal %} · {{ a.sucursal.nombre }}{% endif %}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Nombre del plan <span style="color:#E53935">*</span>
+            <input type="text" name="nombre" required placeholder="Ej. Mantenimiento preventivo mensual">
+          </label>
+          <label>Tipo
+            <select name="tipo">
+              {% for v,l in tipo_choices %}
+                <option value="{{ v }}">{{ l }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Estatus
+            <select name="estatus">
+              {% for v,l in estatus_choices %}
+                <option value="{{ v }}">{{ l }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Frecuencia (días)
+            <input type="number" name="frecuencia_dias" min="1" value="30">
+          </label>
+          <label>Tolerancia (días)
+            <input type="number" name="tolerancia_dias" min="0" value="0">
+          </label>
+          <label>Última ejecución
+            <input type="date" name="ultima_ejecucion">
+          </label>
+          <label>Próxima ejecución
+            <input type="date" name="proxima_ejecucion">
+          </label>
+          <label>Responsable
+            <input type="text" name="responsable" maxlength="120" placeholder="Nombre del técnico">
+          </label>
+          <label class="span-full">Instrucciones
+            <textarea name="instrucciones" placeholder="Checklist o detalle del mantenimiento a realizar"></textarea>
+          </label>
+        </div>
+        <div class="planes-modal-footer">
+          <button class="btn btn-secondary" type="button" onclick="cerrarNuevoPlan()">Cancelar</button>
+          <button class="btn btn-primary" type="submit">Guardar plan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Modal editar plan -->
+<div class="planes-modal-backdrop" id="modalEditPlan">
+  <div class="planes-modal">
+    <div class="planes-modal-head">
+      <strong id="editPlanTitulo">Editar plan</strong>
+      <button class="btn btn-secondary btn-small" type="button" onclick="cerrarEditPlan()">Cerrar</button>
+    </div>
+    <div class="planes-modal-body">
+      <form method="post" id="formEditPlan">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="edit_plan">
+        <input type="hidden" name="plan_id" id="editPlanId">
+        <div class="planes-form-grid">
+          <label>Nombre del plan
+            <input type="text" name="nombre" id="editPlanNombre" required>
+          </label>
+          <label>Tipo
+            <select name="tipo" id="editPlanTipo">
+              {% for v,l in tipo_choices %}
+                <option value="{{ v }}">{{ l }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Estatus
+            <select name="estatus" id="editPlanEstatus">
+              {% for v,l in estatus_choices %}
+                <option value="{{ v }}">{{ l }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Frecuencia (días)
+            <input type="number" name="frecuencia_dias" id="editPlanFrecuencia" min="1">
+          </label>
+          <label>Tolerancia (días)
+            <input type="number" name="tolerancia_dias" id="editPlanTolerancia" min="0">
+          </label>
+          <label>Última ejecución
+            <input type="date" name="ultima_ejecucion" id="editPlanUltima">
+          </label>
+          <label>Próxima ejecución
+            <input type="date" name="proxima_ejecucion" id="editPlanProxima">
+          </label>
+          <label>Responsable
+            <input type="text" name="responsable" id="editPlanResponsable" maxlength="120">
+          </label>
+        </div>
+        <div class="planes-modal-footer">
+          <button class="btn btn-secondary" type="button" onclick="cerrarEditPlan()">Cancelar</button>
+          <button class="btn btn-primary" type="submit">Guardar cambios</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function abrirNuevoPlan() {
+  document.getElementById("modalNuevoPlan").classList.add("open");
+}
+function cerrarNuevoPlan() {
+  document.getElementById("modalNuevoPlan").classList.remove("open");
+}
+function abrirEditPlan(id, nombre, activo, tipo, estatus, freq, tol, proxima, ultima, resp) {
+  document.getElementById("editPlanId").value = id;
+  document.getElementById("editPlanTitulo").textContent = "Editar plan · " + activo;
+  document.getElementById("editPlanNombre").value = nombre;
+  document.getElementById("editPlanFrecuencia").value = freq;
+  document.getElementById("editPlanTolerancia").value = tol;
+  document.getElementById("editPlanProxima").value = proxima || "";
+  document.getElementById("editPlanUltima").value = ultima || "";
+  document.getElementById("editPlanResponsable").value = resp || "";
+  const tipoSel = document.getElementById("editPlanTipo");
+  for (let opt of tipoSel.options) opt.selected = opt.value === tipo;
+  const estSel = document.getElementById("editPlanEstatus");
+  for (let opt of estSel.options) opt.selected = opt.value === estatus;
+  document.getElementById("modalEditPlan").classList.add("open");
+}
+function cerrarEditPlan() {
+  document.getElementById("modalEditPlan").classList.remove("open");
+}
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    cerrarNuevoPlan();
+    cerrarEditPlan();
+  }
+});
+document.querySelectorAll(".planes-modal-backdrop").forEach((el) => {
+  el.addEventListener("click", (e) => { if (e.target === el) { cerrarNuevoPlan(); cerrarEditPlan(); } });
+});
+</script>
 {% endblock %}
