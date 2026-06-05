@@ -10,7 +10,11 @@
 <style>
   .page-mantenimiento-dashboard .container{width:100%;max-width:none;margin:0;padding:clamp(18px,1.8vw,32px);overflow-x:hidden}
   .page-mantenimiento-dashboard .bi-shell{width:100%;max-width:none;margin:0;gap:16px}
-  .mant-tabs .module-tab{white-space:nowrap}
+  .mant-tabs .module-tab{cursor:pointer;border:none;background:none;font:inherit}
+  .mant-tab-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;border-radius:999px;background:rgba(139,34,82,.14);color:#8B2252;font-size:11px;font-weight:900;padding:0 5px;margin-left:4px}
+  .module-tab.active .mant-tab-count{background:rgba(255,255,255,.3);color:#fff}
+  .mant-tab-panel{display:none;flex-direction:column;gap:16px}
+  .mant-tab-panel.active{display:contents}
   .mant-origin-tabs{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .mant-origin-tab{display:inline-flex;align-items:center;gap:8px;min-height:38px;border:1px solid rgba(139,34,82,.14);border-radius:999px;background:#fff;color:#8B2252;text-decoration:none;font-weight:900;padding:8px 14px}
   .mant-origin-tab.active{background:#8B2252;border-color:#8B2252;color:#fff}
@@ -99,305 +103,257 @@
 
 {% block content %}
 <div class="module-shell bi-shell">
-  <nav class="module-tabs mant-tabs" aria-label="Submódulos Mantenimiento">
-    <a href="#dashboard" class="module-tab active">Dashboard</a>
-    <a href="#seguimiento" class="module-tab">Seguimiento</a>
-    <a href="#activos" class="module-tab">Activos</a>
-    <a href="#proveedores" class="module-tab">Proveedores</a>
+  <nav class="module-tabs mant-tabs" aria-label="Secciones de mantenimiento">
+    <button class="module-tab active" data-tab="tab-dashboard">Dashboard</button>
+    <button class="module-tab" data-tab="tab-seguimiento">Seguimiento <span class="mant-tab-count">{{ summary.total }}</span></button>
+    <button class="module-tab" data-tab="tab-equipos">Preventivo equipos <span class="mant-tab-count">{{ planes_proximos|length }}</span></button>
+    <button class="module-tab" data-tab="tab-flota">Preventivo flota <span class="mant-tab-count">{{ servicios_flota|length }}</span></button>
     <a href="{% url 'mantenimiento:app' %}" class="module-tab">App móvil</a>
   </nav>
 
-  <section class="bi-hero" id="dashboard">
-    <div class="bi-hero-main">
-      <div class="bi-kicker">Mantenimiento</div>
-      <h1 class="bi-hero-title">Panel de mantenimiento</h1>
-      <p class="bi-copy">Seguimiento unificado de sucursales, Producción (CEDIS), activos y logística sin duplicar reportes.</p>
-      <div class="mant-origin-tabs" aria-label="Filtro de origen">
-        <a href="{% url 'mantenimiento:dashboard' %}" class="mant-origin-tab {% if origen == 'todos' %}active{% endif %}">
-          Todo <span class="mant-origin-count">{{ counts.sucursales|add:counts.logistica }}</span>
-        </a>
-        <a href="{% url 'mantenimiento:dashboard' %}?origen=sucursales" class="mant-origin-tab {% if origen == 'sucursales' %}active{% endif %}">
-          Sucursales / Producción (CEDIS) <span class="mant-origin-count">{{ counts.sucursales }}</span>
-        </a>
-        <a href="{% url 'mantenimiento:dashboard' %}?origen=logistica" class="mant-origin-tab {% if origen == 'logistica' %}active{% endif %}">
-          Logística <span class="mant-origin-count">{{ counts.logistica }}</span>
-        </a>
+  {# ── TAB: DASHBOARD ── #}
+  <div class="mant-tab-panel active" id="tab-dashboard">
+    <section class="bi-hero">
+      <div class="bi-hero-main">
+        <div class="bi-kicker">Mantenimiento</div>
+        <h1 class="bi-hero-title">Panel de mantenimiento</h1>
+        <p class="bi-copy">Resumen global de fallas activas, costos y estado de la operación.</p>
       </div>
-    </div>
-    <div class="bi-hero-side">
-      <div class="bi-hero-status-grid">
-        <article class="bi-status-card"><span class="bi-status-label">Fallas activas</span><strong>{{ summary.fallas_activas|intcomma }}</strong></article>
-        <article class="bi-status-card"><span class="bi-status-label">Críticas</span><strong>{{ summary.criticas|intcomma }}</strong></article>
-        <article class="bi-status-card"><span class="bi-status-label">Costo visible</span><strong>${{ summary.costo_30d|floatformat:0|intcomma }}</strong></article>
-        <article class="bi-status-card"><span class="bi-status-label">Unidades activas</span><strong>{{ summary.unidades_activas|intcomma }}</strong></article>
+      <div class="bi-hero-side">
+        <div class="bi-hero-status-grid">
+          <article class="bi-status-card"><span class="bi-status-label">Fallas activas</span><strong>{{ summary.fallas_activas|intcomma }}</strong></article>
+          <article class="bi-status-card"><span class="bi-status-label">Críticas</span><strong>{{ summary.criticas|intcomma }}</strong></article>
+          <article class="bi-status-card"><span class="bi-status-label">Costo visible</span><strong>${{ summary.costo_30d|floatformat:0|intcomma }}</strong></article>
+          <article class="bi-status-card"><span class="bi-status-label">Unidades activas</span><strong>{{ summary.unidades_activas|intcomma }}</strong></article>
+        </div>
+        <div class="bi-summary-band">
+          <div class="bi-summary-chip"><span>Usuario</span><strong>{{ request.user.get_full_name|default:request.user.username }}</strong></div>
+        </div>
       </div>
-      <div class="bi-summary-band">
-        <div class="bi-summary-chip"><span>Usuario</span><strong>{{ request.user.get_full_name|default:request.user.username }}</strong></div>
-        <div class="bi-summary-chip"><span>Filtro</span><strong>{{ origen|title }}</strong></div>
-      </div>
-    </div>
-  </section>
-
-  <section class="bi-kpi-grid" aria-label="Indicadores de mantenimiento">
-    <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.total %}warning{% else %}success{% endif %}">{{ summary.total|intcomma }}</div><div class="bi-kpi-label">Reportes visibles</div><div class="bi-kpi-note">Casos del filtro actual.</div></article>
-    <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.rojos %}danger{% else %}success{% endif %}">{{ summary.rojos|intcomma }}</div><div class="bi-kpi-label">Semáforo rojo</div><div class="bi-kpi-note">Abiertos más de 5 días.</div></article>
-    <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.sin_asignar %}warning{% else %}success{% endif %}">{{ summary.sin_asignar|intcomma }}</div><div class="bi-kpi-label">Sin asignar</div><div class="bi-kpi-note">Sin proveedor ni responsable.</div></article>
-    <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.tiempo_promedio > 5 %}danger{% elif summary.tiempo_promedio > 2 %}warning{% else %}success{% endif %}">{{ summary.tiempo_promedio }}</div><div class="bi-kpi-label">Días promedio</div><div class="bi-kpi-note">Tiempo promedio abierto.</div></article>
-    <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.ordenes_abiertas %}warning{% else %}success{% endif %}">{{ summary.ordenes_abiertas|intcomma }}</div><div class="bi-kpi-label">Órdenes abiertas</div><div class="bi-kpi-note">Equipo y maquinaria.</div></article>
-    <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.reparaciones_flota %}warning{% else %}success{% endif %}">{{ summary.reparaciones_flota|intcomma }}</div><div class="bi-kpi-label">Reparaciones flota</div><div class="bi-kpi-note">Reportes de unidades.</div></article>
-  </section>
-
-  <section class="mant-breakdown" aria-label="Distribución de mantenimiento">
-    <article class="bi-panel">
-      <div class="bi-panel-head"><div><div class="bi-kicker">Ubicación</div><h2 class="bi-panel-title">Fallas por ubicación</h2></div></div>
-      <div class="mant-breakdown-list">
-        {% for label,count in summary.por_ubicacion %}
-          <div class="mant-breakdown-row"><span>{{ label }}</span><span class="mant-breakdown-count">{{ count }}</span></div>
-        {% empty %}
-          <div class="mant-breakdown-row"><span>Sin reportes</span><span class="mant-breakdown-count">0</span></div>
-        {% endfor %}
-      </div>
-    </article>
-    <article class="bi-panel">
-      <div class="bi-panel-head"><div><div class="bi-kicker">Área</div><h2 class="bi-panel-title">Fallas por área</h2></div></div>
-      <div class="mant-breakdown-list">
-        {% for label,count in summary.por_area %}
-          <div class="mant-breakdown-row"><span>{{ label }}</span><span class="mant-breakdown-count">{{ count }}</span></div>
-        {% empty %}
-          <div class="mant-breakdown-row"><span>Sin reportes</span><span class="mant-breakdown-count">0</span></div>
-        {% endfor %}
-      </div>
-    </article>
-    <article class="bi-panel" id="proveedores">
-      <div class="bi-panel-head"><div><div class="bi-kicker">Tipo</div><h2 class="bi-panel-title">Mantenimiento por tipo</h2></div></div>
-      <div class="mant-breakdown-list">
-        {% for label,count in summary.por_tipo %}
-          <div class="mant-breakdown-row"><span>{{ label }}</span><span class="mant-breakdown-count">{{ count }}</span></div>
-        {% empty %}
-          <div class="mant-breakdown-row"><span>Sin reportes</span><span class="mant-breakdown-count">0</span></div>
-        {% endfor %}
-      </div>
-    </article>
-  </section>
-
-  <section class="bi-panel" id="seguimiento">
-    <div class="bi-panel-head">
-      <div>
-        <div class="bi-kicker">Operación</div>
-        <h2 class="bi-panel-title">Seguimiento progresivo</h2>
-        <p class="bi-copy">El tablero muestra en qué etapa está cada caso; el panel lateral guarda avance, proveedor, cotización y cierre.</p>
-      </div>
-      <div class="bi-panel-actions">
-        <button class="btn btn-primary btn-sm" type="button" id="btnNuevaFalla" style="background:#8B2252;border-color:#8B2252;">+ Nueva falla</button>
-        <a class="btn btn-secondary btn-sm" href="{% url 'mantenimiento:app' %}">App móvil</a>
-      </div>
-    </div>
-    <div class="mant-flow-demo" aria-label="Ejemplo visual de avance">
-      <article class="mant-flow-step"><span>Nuevo</span><strong>Horno CEDIS reportado</strong><small>Reporte recibido y pendiente de revisión.</small></article>
-      <article class="mant-flow-step"><span>Diagnóstico</span><strong>Revisión inicial</strong><small>Se valida falla, activo y prioridad.</small></article>
-      <article class="mant-flow-step"><span>Cotización</span><strong>Proveedor asignado</strong><small>Se captura taller, monto estimado y evidencia.</small></article>
-      <article class="mant-flow-step"><span>Programado</span><strong>Visita agendada</strong><small>Fecha acordada para atención del servicio.</small></article>
-      <article class="mant-flow-step"><span>En atención</span><strong>Trabajo activo</strong><small>El proveedor está atendiendo el caso.</small></article>
-      <article class="mant-flow-step"><span>Validación</span><strong>Cierre y factura</strong><small>Se confirma resultado, costo final y folio.</small></article>
-    </div>
-    <div class="mant-board-tools" aria-label="Herramientas de seguimiento">
-      <input class="mant-input" id="mantBoardSearch" type="search" placeholder="Filtrar por unidad, sucursal, proveedor, activo o descripción">
-      <span class="mant-board-help">El filtro no duplica reportes; solo reduce las tarjetas visibles.</span>
-    </div>
-    <div class="mant-board">
-      {% for column in kanban_columns %}
-        <article class="mant-col">
-          <div class="mant-col-head">
-            <div><strong>{{ column.label }}</strong><span>{{ column.hint }}</span></div>
-            <span class="mant-col-count">{{ column.items|length }}</span>
+    </section>
+    <section class="bi-kpi-grid" aria-label="Indicadores de mantenimiento">
+      <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.total %}warning{% else %}success{% endif %}">{{ summary.total|intcomma }}</div><div class="bi-kpi-label">Reportes abiertos</div><div class="bi-kpi-note">Sucursales + logística.</div></article>
+      <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.rojos %}danger{% else %}success{% endif %}">{{ summary.rojos|intcomma }}</div><div class="bi-kpi-label">Semáforo rojo</div><div class="bi-kpi-note">Abiertos más de 5 días.</div></article>
+      <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.sin_asignar %}warning{% else %}success{% endif %}">{{ summary.sin_asignar|intcomma }}</div><div class="bi-kpi-label">Sin asignar</div><div class="bi-kpi-note">Sin proveedor ni responsable.</div></article>
+      <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.tiempo_promedio > 5 %}danger{% elif summary.tiempo_promedio > 2 %}warning{% else %}success{% endif %}">{{ summary.tiempo_promedio }}</div><div class="bi-kpi-label">Días promedio</div><div class="bi-kpi-note">Tiempo promedio abierto.</div></article>
+      <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.ordenes_abiertas %}warning{% else %}success{% endif %}">{{ summary.ordenes_abiertas|intcomma }}</div><div class="bi-kpi-label">Órdenes abiertas</div><div class="bi-kpi-note">Equipo y maquinaria.</div></article>
+      <article class="bi-kpi-card"><div class="bi-kpi-value {% if summary.reparaciones_flota %}warning{% else %}success{% endif %}">{{ summary.reparaciones_flota|intcomma }}</div><div class="bi-kpi-label">Reparaciones flota</div><div class="bi-kpi-note">Reportes de unidades.</div></article>
+    </section>
+    <section class="mant-breakdown" aria-label="Distribución de mantenimiento">
+      <article class="bi-panel">
+        <div class="bi-panel-head"><div><div class="bi-kicker">Ubicación</div><h2 class="bi-panel-title">Por sucursal</h2></div></div>
+        <div class="mant-breakdown-list">
+          {% for label,count in summary.por_ubicacion %}<div class="mant-breakdown-row"><span>{{ label }}</span><span class="mant-breakdown-count">{{ count }}</span></div>{% empty %}<div class="mant-breakdown-row"><span>Sin reportes</span><span class="mant-breakdown-count">0</span></div>{% endfor %}
+        </div>
+      </article>
+      <article class="bi-panel">
+        <div class="bi-panel-head"><div><div class="bi-kicker">Área</div><h2 class="bi-panel-title">Por área</h2></div></div>
+        <div class="mant-breakdown-list">
+          {% for label,count in summary.por_area %}<div class="mant-breakdown-row"><span>{{ label }}</span><span class="mant-breakdown-count">{{ count }}</span></div>{% empty %}<div class="mant-breakdown-row"><span>Sin reportes</span><span class="mant-breakdown-count">0</span></div>{% endfor %}
+        </div>
+      </article>
+      <article class="bi-panel">
+        <div class="bi-panel-head"><div><div class="bi-kicker">Tipo</div><h2 class="bi-panel-title">Por tipo</h2></div></div>
+        <div class="mant-breakdown-list">
+          {% for label,count in summary.por_tipo %}<div class="mant-breakdown-row"><span>{{ label }}</span><span class="mant-breakdown-count">{{ count }}</span></div>{% empty %}<div class="mant-breakdown-row"><span>Sin reportes</span><span class="mant-breakdown-count">0</span></div>{% endfor %}
+        </div>
+      </article>
+    </section>
+    {% if puede_eliminar and solicitudes_cancelacion %}
+    <section class="bi-panel">
+      <div class="bi-panel-head"><div><div class="bi-kicker">Pendiente tu revisión</div><h2 class="bi-panel-title">Solicitudes de cancelación</h2><p class="bi-copy">El equipo solicitó cancelar estos reportes.</p></div></div>
+      <div class="mant-planes-grid">
+        {% for sol in solicitudes_cancelacion %}
+        <article class="mant-plan-row" style="border-color:#fca5a5;background:#fff5f5">
+          <div>
+            <div class="mant-plan-title"><span class="mant-badge" style="background:#fee2e2;color:#b91c1c;margin-right:6px">Pendiente</span>{{ sol.referencia }}</div>
+            <div class="mant-plan-meta">Por: <strong>{% if sol.solicitado_por %}{{ sol.solicitado_por.get_full_name|default:sol.solicitado_por.username }}{% else %}Usuario eliminado{% endif %}</strong> · {{ sol.creado_en|date:"d/m/Y H:i" }}<br><strong>Motivo:</strong> {{ sol.motivo }}</div>
           </div>
-          <div class="mant-col-body">
-            {% for item in column.items %}
-              <article class="mant-ticket">
-                <div class="mant-ticket-tags">
-                  <span class="mant-badge {{ item.origen }}">{{ item.origen|title }}</span>
-                  <span class="mant-badge">{{ item.prioridad }}</span>
-                  {% if not item.asignado %}<span class="mant-badge sin-asignar">Sin asignar</span>{% endif %}
-                  <span class="mant-semaforo {{ item.semaforo }}">{{ item.dias_abierto }}d</span>
-                </div>
-                <div>
-                  <div class="mant-ticket-title">{{ item.referencia }} · {{ item.titulo }}</div>
-                  <div class="mant-ticket-meta">{{ item.ubicacion|default:"Sin ubicación" }}{% if item.activo %} · {{ item.activo }}{% endif %}<br>{{ item.fecha|date:"d/m/Y H:i" }}</div>
-                </div>
-                <div class="mant-ticket-meta">{{ item.descripcion|truncatechars:110 }}</div>
-                {% if item.proveedor or item.costo_estimado or item.costo_real %}
-                  <div class="mant-ticket-meta">{{ item.proveedor|default:"Sin proveedor" }} · Est. ${{ item.costo_estimado|default:"0" }} · Real ${{ item.costo_real|default:"0" }}</div>
-                {% endif %}
-                <div class="mant-ticket-actions">
-                  <button
-                    class="btn btn-secondary btn-sm"
-                    type="button"
-                    data-open-follow
-                    data-action="{% url 'mantenimiento:mant-actualizar' item.tipo item.id %}"
-                    data-type="{{ item.tipo }}"
-                    data-status="{{ item.estatus }}"
-                    data-provider="{{ item.proveedor|default:'' }}"
-                    data-estimated="{{ item.costo_estimado|default:'' }}"
-                    data-real="{{ item.costo_real|default:'' }}"
-                    data-asset-id="{{ item.activo_id|default:'' }}"
-                    data-title="{{ item.referencia }} · {{ item.titulo }}"
-                    data-meta="{{ item.ubicacion|default:'Sin ubicación' }} · {{ item.estatus_display }}"
-                    data-description="{{ item.descripcion }}"
-                  >Trabajar</button>
-                  <button
-                    class="btn btn-sm mant-btn-eliminar"
-                    type="button"
-                    data-open-cancelar
-                    data-action="{% url 'mantenimiento:mant-cancelar' item.tipo item.id %}"
-                    data-label="{{ item.referencia }} · {{ item.titulo }}"
-                    data-es-dg="{% if puede_eliminar %}1{% else %}0{% endif %}"
-                    title="{% if puede_eliminar %}Eliminar reporte{% else %}Solicitar cancelación{% endif %}"
-                  >{% if puede_eliminar %}Eliminar{% else %}Solicitar cancelación{% endif %}</button>
-                </div>
-              </article>
-            {% empty %}
-              <div class="mant-empty">Sin casos en esta etapa.</div>
-            {% endfor %}
+          <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+            <form method="post" action="{% url 'mantenimiento:mant-resolver-cancelacion' sol.pk %}">{% csrf_token %}<input type="hidden" name="accion" value="aprobar"><button class="btn btn-sm" type="submit" style="background:#b91c1c;border-color:#b91c1c;color:#fff">Aprobar y eliminar</button></form>
+            <form method="post" action="{% url 'mantenimiento:mant-resolver-cancelacion' sol.pk %}">{% csrf_token %}<input type="hidden" name="accion" value="rechazar"><button class="btn btn-secondary btn-sm" type="submit">Rechazar</button></form>
           </div>
         </article>
-      {% endfor %}
-    </div>
-  </section>
-
-  <section class="bi-panel" id="activos">
-    <div class="bi-panel-head">
-      <div><div class="bi-kicker">Flota</div><h2 class="bi-panel-title">Estado de flota</h2></div>
-    </div>
-    <div class="mant-fleet-grid">
-      {% for unidad in fleet_units %}
-        <article class="mant-fleet-item"><strong>{{ unidad.descripcion|default:unidad.codigo }}</strong><span>{{ unidad.codigo }} · {{ unidad.sucursal|default:"Sin sucursal" }}</span></article>
-      {% empty %}
-        <article class="mant-fleet-item"><strong>Sin unidades activas</strong><span>Logística no tiene unidades visibles.</span></article>
-      {% endfor %}
-    </div>
-  </section>
-
-  <section class="bi-panel" id="planes-recurrentes">
-    <div class="bi-panel-head">
-      <div>
-        <div class="bi-kicker">Preventivo recurrente</div>
-        <h2 class="bi-panel-title">Planes de mantenimiento — próximos 30 días</h2>
-        <p class="bi-copy">Registra la ejecución aquí. Se genera la orden preventiva y se recalcula la próxima fecha automáticamente.</p>
+        {% endfor %}
       </div>
-      <div class="bi-panel-actions">
-        <a class="btn btn-secondary btn-sm" href="{% url 'activos:planes' %}">Ver todos los planes</a>
-      </div>
-    </div>
-    {% if servicios_flota %}
-    <h3 style="margin:0 0 10px;color:#8B2252;font-size:15px;font-family:'Playfair Display',serif">Servicios de flota (vehiculos)</h3>
-    <div class="mant-planes-grid" style="margin-bottom:20px">
-      {% for srv in servicios_flota %}
-      <article class="mant-plan-row {% if srv.vencido %}vencido{% endif %}">
-        <div>
-          <div class="mant-plan-title">
-            {% if srv.vencido %}
-              <span class="mant-badge" style="background:#fee2e2;color:#b91c1c;margin-right:6px">Vencido</span>
-            {% elif srv.dias_para_vencer == 0 %}
-              <span class="mant-badge" style="background:#fef9c3;color:#854d0e;margin-right:6px">Hoy</span>
-            {% elif srv.dias_para_vencer <= 7 %}
-              <span class="mant-badge" style="background:#fef3c7;color:#92400e;margin-right:6px">{{ srv.dias_para_vencer }}d</span>
-            {% endif %}
-            {{ srv.unidad.descripcion|default:srv.unidad.codigo }} · {{ srv.tipo_servicio.nombre }}
-          </div>
-          <div class="mant-plan-meta">
-            {{ srv.unidad.codigo }}{% if srv.unidad.sucursal %} · {{ srv.unidad.sucursal.nombre }}{% endif %}<br>
-            Próxima: <strong>{{ srv.proxima_fecha|date:"d/m/Y" }}</strong>
-            {% if srv.proximos_km %} · o a los <strong>{{ srv.proximos_km|floatformat:0 }} km</strong>{% endif %}
-            · Último servicio: {{ srv.fecha_servicio|date:"d/m/Y" }}
-          </div>
-        </div>
-        <a class="btn btn-secondary btn-sm" href="{% url 'logistica:unidad_detalle' srv.unidad.pk %}">Ver unidad</a>
-      </article>
-      {% endfor %}
-    </div>
+    </section>
     {% endif %}
+  </div>
 
-    <h3 style="margin:0 0 10px;color:#8B2252;font-size:15px;font-family:'Playfair Display',serif">Mantenimiento de equipos (activos)</h3>
-    {% if planes_proximos %}
-    <div class="mant-planes-grid">
-      {% for plan in planes_proximos %}
-      <article class="mant-plan-row {% if plan.vencido %}vencido{% endif %}">
+  {# ── TAB: SEGUIMIENTO (kanban reactivo) ── #}
+  <div class="mant-tab-panel" id="tab-seguimiento">
+    <section class="bi-panel">
+      <div class="bi-panel-head">
         <div>
-          <div class="mant-plan-title">
-            {% if plan.vencido %}
-              <span class="mant-badge" style="background:#fee2e2;color:#b91c1c;margin-right:6px">Vencido</span>
-            {% elif plan.dias_para_vencer == 0 %}
-              <span class="mant-badge" style="background:#fef9c3;color:#854d0e;margin-right:6px">Hoy</span>
-            {% elif plan.dias_para_vencer <= 7 %}
-              <span class="mant-badge" style="background:#fef3c7;color:#92400e;margin-right:6px">{{ plan.dias_para_vencer }}d</span>
-            {% endif %}
-            {{ plan.nombre }}
-          </div>
-          <div class="mant-plan-meta">
-            {{ plan.activo_ref.nombre }} · {{ plan.activo_ref.sucursal|default:"Sin sucursal" }}<br>
-            Tipo: {{ plan.get_tipo_display }} · Cada {{ plan.frecuencia_dias }} días
-            {% if plan.responsable %} · Resp: {{ plan.responsable }}{% endif %}<br>
-            Próxima: <strong>{{ plan.proxima_ejecucion|date:"d/m/Y" }}</strong>
-            {% if plan.ultima_ejecucion %} · Última: {{ plan.ultima_ejecucion|date:"d/m/Y" }}{% endif %}
-          </div>
+          <div class="bi-kicker">Correctivo y reactivo</div>
+          <h2 class="bi-panel-title">Seguimiento de fallas y reparaciones</h2>
+          <p class="bi-copy">Todos los reportes abiertos — sucursales, equipos y flota — en una sola vista. Usa "Trabajar" para avanzar cada caso.</p>
         </div>
-        <form class="mant-plan-form" method="post" action="{% url 'mantenimiento:mant-plan-ejecutar' plan.pk %}">
-          {% csrf_token %}
-          <label style="display:grid;gap:4px;font-size:12px;font-weight:900;color:#513744">
-            Fecha ejecución
-            <input class="mant-plan-date" type="date" name="fecha_ejecucion" value="{{ today|date:'Y-m-d' }}" required>
-          </label>
-          <input class="mant-plan-date mant-plan-notas" type="text" name="notas" placeholder="Notas (opcional)">
-          <button class="btn btn-primary btn-sm mant-plan-submit" type="submit" style="background:#8B2252;border-color:#8B2252">Marcar ejecutado</button>
-        </form>
-      </article>
-      {% endfor %}
-    </div>
-    {% else %}
-    <div class="mant-empty">Sin planes con vencimiento en los próximos 30 días.</div>
-    {% endif %}
-  </section>
-
-  {% if puede_eliminar and solicitudes_cancelacion %}
-  <section class="bi-panel" id="solicitudes-cancelacion">
-    <div class="bi-panel-head">
-      <div>
-        <div class="bi-kicker">Pendiente tu revisión</div>
-        <h2 class="bi-panel-title">Solicitudes de cancelación</h2>
-        <p class="bi-copy">El equipo de mantenimiento solicitó cancelar estos reportes. Aprueba para eliminar o rechaza para mantenerlos.</p>
+        <div class="bi-panel-actions">
+          <button class="btn btn-primary btn-sm" type="button" id="btnNuevaFalla" style="background:#8B2252;border-color:#8B2252;">+ Nueva falla</button>
+        </div>
       </div>
-    </div>
-    <div class="mant-planes-grid">
-      {% for sol in solicitudes_cancelacion %}
-      <article class="mant-plan-row" style="border-color:#fca5a5;background:#fff5f5">
+      <div class="mant-origin-tabs" style="margin-bottom:14px" aria-label="Filtro de origen">
+        <a href="{% url 'mantenimiento:dashboard' %}#tab-seguimiento" class="mant-origin-tab {% if origen == 'todos' %}active{% endif %}">Todo <span class="mant-origin-count">{{ counts.sucursales|add:counts.logistica }}</span></a>
+        <a href="{% url 'mantenimiento:dashboard' %}?origen=sucursales#tab-seguimiento" class="mant-origin-tab {% if origen == 'sucursales' %}active{% endif %}">Sucursales / CEDIS <span class="mant-origin-count">{{ counts.sucursales }}</span></a>
+        <a href="{% url 'mantenimiento:dashboard' %}?origen=logistica#tab-seguimiento" class="mant-origin-tab {% if origen == 'logistica' %}active{% endif %}">Logística <span class="mant-origin-count">{{ counts.logistica }}</span></a>
+      </div>
+      <div class="mant-board-tools">
+        <input class="mant-input" id="mantBoardSearch" type="search" placeholder="Filtrar por sucursal, unidad, activo o descripción...">
+        <span class="mant-board-help">El filtro no duplica reportes; solo reduce las tarjetas visibles.</span>
+      </div>
+      <div class="mant-board">
+        {% for column in kanban_columns %}
+          <article class="mant-col">
+            <div class="mant-col-head">
+              <div><strong>{{ column.label }}</strong><span>{{ column.hint }}</span></div>
+              <span class="mant-col-count">{{ column.items|length }}</span>
+            </div>
+            <div class="mant-col-body">
+              {% for item in column.items %}
+                <article class="mant-ticket">
+                  <div class="mant-ticket-tags">
+                    <span class="mant-badge {{ item.origen }}">{% if item.origen == 'logistica' %}Flota{% else %}Sucursal{% endif %}</span>
+                    <span class="mant-badge">{{ item.prioridad }}</span>
+                    {% if not item.asignado %}<span class="mant-badge sin-asignar">Sin asignar</span>{% endif %}
+                    <span class="mant-semaforo {{ item.semaforo }}">{{ item.dias_abierto }}d</span>
+                  </div>
+                  <div>
+                    <div class="mant-ticket-title">{{ item.referencia }} · {{ item.titulo }}</div>
+                    <div class="mant-ticket-meta">{{ item.ubicacion|default:"Sin ubicación" }}{% if item.activo %} · {{ item.activo }}{% endif %}<br>{{ item.fecha|date:"d/m/Y H:i" }}</div>
+                  </div>
+                  <div class="mant-ticket-meta">{{ item.descripcion|truncatechars:110 }}</div>
+                  {% if item.proveedor or item.costo_estimado or item.costo_real %}
+                    <div class="mant-ticket-meta">{{ item.proveedor|default:"Sin proveedor" }} · Est. ${{ item.costo_estimado|default:"0" }} · Real ${{ item.costo_real|default:"0" }}</div>
+                  {% endif %}
+                  <div class="mant-ticket-actions">
+                    <button class="btn btn-secondary btn-sm" type="button" data-open-follow
+                      data-action="{% url 'mantenimiento:mant-actualizar' item.tipo item.id %}"
+                      data-type="{{ item.tipo }}" data-status="{{ item.estatus }}"
+                      data-provider="{{ item.proveedor|default:'' }}"
+                      data-estimated="{{ item.costo_estimado|default:'' }}"
+                      data-real="{{ item.costo_real|default:'' }}"
+                      data-asset-id="{{ item.activo_id|default:'' }}"
+                      data-title="{{ item.referencia }} · {{ item.titulo }}"
+                      data-meta="{{ item.ubicacion|default:'Sin ubicación' }} · {{ item.estatus_display }}"
+                      data-description="{{ item.descripcion }}"
+                    >Trabajar</button>
+                    <button class="btn btn-sm mant-btn-eliminar" type="button" data-open-cancelar
+                      data-action="{% url 'mantenimiento:mant-cancelar' item.tipo item.id %}"
+                      data-label="{{ item.referencia }} · {{ item.titulo }}"
+                      data-es-dg="{% if puede_eliminar %}1{% else %}0{% endif %}"
+                    >{% if puede_eliminar %}Eliminar{% else %}Solicitar cancelación{% endif %}</button>
+                  </div>
+                </article>
+              {% empty %}
+                <div class="mant-empty">Sin casos en esta etapa.</div>
+              {% endfor %}
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+
+  {# ── TAB: PREVENTIVO EQUIPOS ── #}
+  <div class="mant-tab-panel" id="tab-equipos">
+    <section class="bi-panel">
+      <div class="bi-panel-head">
         <div>
-          <div class="mant-plan-title">
-            <span class="mant-badge" style="background:#fee2e2;color:#b91c1c;margin-right:6px">Pendiente</span>
-            {{ sol.referencia }}
-          </div>
-          <div class="mant-plan-meta">
-            Solicitado por: <strong>{% if sol.solicitado_por %}{{ sol.solicitado_por.get_full_name|default:sol.solicitado_por.username }}{% else %}Usuario eliminado{% endif %}</strong>
-            · {{ sol.creado_en|date:"d/m/Y H:i" }}<br>
-            <strong>Motivo:</strong> {{ sol.motivo }}
-          </div>
+          <div class="bi-kicker">Preventivo · Equipos y maquinaria</div>
+          <h2 class="bi-panel-title">Mantenimiento preventivo de equipos</h2>
+          <p class="bi-copy">Planes programados para hornos, refrigeradores, vitrinas y demás equipos de las sucursales. Marca ejecutado para registrar la atención y calcular la próxima fecha.</p>
         </div>
-        <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
-          <form method="post" action="{% url 'mantenimiento:mant-resolver-cancelacion' sol.pk %}">
-            {% csrf_token %}
-            <input type="hidden" name="accion" value="aprobar">
-            <button class="btn btn-sm" type="submit" style="background:#b91c1c;border-color:#b91c1c;color:#fff">Aprobar y eliminar</button>
-          </form>
-          <form method="post" action="{% url 'mantenimiento:mant-resolver-cancelacion' sol.pk %}">
-            {% csrf_token %}
-            <input type="hidden" name="accion" value="rechazar">
-            <button class="btn btn-secondary btn-sm" type="submit">Rechazar</button>
-          </form>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary btn-sm" href="{% url 'activos:planes' %}">Ver todos los planes</a>
         </div>
-      </article>
-      {% endfor %}
-    </div>
-  </section>
-  {% endif %}
+      </div>
+      {% if planes_proximos %}
+      <div class="mant-planes-grid">
+        {% for plan in planes_proximos %}
+        <article class="mant-plan-row {% if plan.vencido %}vencido{% endif %}">
+          <div>
+            <div class="mant-plan-title">
+              {% if plan.vencido %}<span class="mant-badge" style="background:#fee2e2;color:#b91c1c;margin-right:6px">Vencido</span>
+              {% elif plan.dias_para_vencer == 0 %}<span class="mant-badge" style="background:#fef9c3;color:#854d0e;margin-right:6px">Hoy</span>
+              {% elif plan.dias_para_vencer <= 7 %}<span class="mant-badge" style="background:#fef3c7;color:#92400e;margin-right:6px">{{ plan.dias_para_vencer }}d</span>
+              {% endif %}
+              {{ plan.nombre }}
+            </div>
+            <div class="mant-plan-meta">
+              <strong>{{ plan.activo_ref.nombre }}</strong>{% if plan.activo_ref.sucursal %} · {{ plan.activo_ref.sucursal.nombre }}{% endif %}<br>
+              {{ plan.get_tipo_display }} · Cada {{ plan.frecuencia_dias }} días{% if plan.responsable %} · {{ plan.responsable }}{% endif %}<br>
+              Próxima: <strong>{{ plan.proxima_ejecucion|date:"d/m/Y" }}</strong>{% if plan.ultima_ejecucion %} · Última: {{ plan.ultima_ejecucion|date:"d/m/Y" }}{% endif %}
+            </div>
+          </div>
+          <form class="mant-plan-form" method="post" action="{% url 'mantenimiento:mant-plan-ejecutar' plan.pk %}">
+            {% csrf_token %}
+            <label style="display:grid;gap:4px;font-size:12px;font-weight:900;color:#513744">Fecha
+              <input class="mant-plan-date" type="date" name="fecha_ejecucion" value="{{ today|date:'Y-m-d' }}" required>
+            </label>
+            <input class="mant-plan-date mant-plan-notas" type="text" name="notas" placeholder="Notas (opcional)">
+            <button class="btn btn-primary btn-sm" type="submit" style="background:#8B2252;border-color:#8B2252">Marcar ejecutado</button>
+          </form>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="mant-empty">Sin planes de equipos con vencimiento en los próximos 30 días.</div>
+      {% endif %}
+    </section>
+  </div>
+
+  {# ── TAB: PREVENTIVO FLOTA ── #}
+  <div class="mant-tab-panel" id="tab-flota">
+    <section class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Preventivo · Unidades logísticas</div>
+          <h2 class="bi-panel-title">Mantenimiento preventivo de flota</h2>
+          <p class="bi-copy">Servicios programados para las unidades de reparto — cambios de aceite, frenos, llantas y más. Para registrar el servicio entra al detalle de la unidad.</p>
+        </div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary btn-sm" href="{% url 'logistica:unidades_list' %}">Ver todas las unidades</a>
+        </div>
+      </div>
+      {% if servicios_flota %}
+      <div class="mant-planes-grid">
+        {% for srv in servicios_flota %}
+        <article class="mant-plan-row {% if srv.vencido %}vencido{% endif %}">
+          <div>
+            <div class="mant-plan-title">
+              {% if srv.vencido %}<span class="mant-badge" style="background:#fee2e2;color:#b91c1c;margin-right:6px">Vencido</span>
+              {% elif srv.dias_para_vencer == 0 %}<span class="mant-badge" style="background:#fef9c3;color:#854d0e;margin-right:6px">Hoy</span>
+              {% elif srv.dias_para_vencer <= 7 %}<span class="mant-badge" style="background:#fef3c7;color:#92400e;margin-right:6px">{{ srv.dias_para_vencer }}d</span>
+              {% endif %}
+              {{ srv.unidad.descripcion|default:srv.unidad.codigo }} · {{ srv.tipo_servicio.nombre }}
+            </div>
+            <div class="mant-plan-meta">
+              Unidad: <strong>{{ srv.unidad.codigo }}</strong>{% if srv.unidad.sucursal %} · {{ srv.unidad.sucursal.nombre }}{% endif %}<br>
+              Próxima fecha: <strong>{{ srv.proxima_fecha|date:"d/m/Y" }}</strong>
+              {% if srv.proximos_km %} · o a los <strong>{{ srv.proximos_km|floatformat:0 }} km</strong>{% endif %}<br>
+              Último servicio: {{ srv.fecha_servicio|date:"d/m/Y" }}
+            </div>
+          </div>
+          <a class="btn btn-secondary btn-sm" href="{% url 'logistica:unidad_detalle' srv.unidad.pk %}">Registrar servicio</a>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="mant-empty">Sin servicios de flota con vencimiento en los próximos 30 días.</div>
+      {% endif %}
+    </section>
+    <section class="bi-panel" style="margin-top:0">
+      <div class="bi-panel-head"><div><div class="bi-kicker">Estado actual</div><h2 class="bi-panel-title">Unidades activas</h2></div></div>
+      <div class="mant-fleet-grid">
+        {% for unidad in fleet_units %}
+          <article class="mant-fleet-item"><strong>{{ unidad.descripcion|default:unidad.codigo }}</strong><span>{{ unidad.codigo }}{% if unidad.sucursal %} · {{ unidad.sucursal.nombre }}{% endif %}</span></article>
+        {% empty %}
+          <article class="mant-fleet-item"><strong>Sin unidades activas</strong><span>Logística no tiene unidades registradas.</span></article>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
 </div>
 
 {% if messages %}
@@ -573,6 +529,33 @@
 
 {% block extra_js %}
 <script>
+// ── Tab switching ──
+(() => {
+  const tabs = document.querySelectorAll("[data-tab]");
+  const panels = document.querySelectorAll(".mant-tab-panel");
+
+  function activateTab(tabId) {
+    tabs.forEach((t) => t.classList.toggle("active", t.dataset.tab === tabId));
+    panels.forEach((p) => p.classList.toggle("active", p.id === tabId));
+    try { sessionStorage.setItem("mant_tab", tabId); } catch(e) {}
+  }
+
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => activateTab(tab.dataset.tab));
+  });
+
+  // Restore on load or activate from URL hash
+  const hash = location.hash.replace("#", "");
+  const saved = (hash && document.getElementById(hash)) ? hash : (() => { try { return sessionStorage.getItem("mant_tab"); } catch(e) { return null; } })();
+  if (saved && document.getElementById(saved)) {
+    activateTab(saved);
+  } else {
+    // default: dashboard; but if origen filter is active go to seguimiento
+    const hasOrigen = new URLSearchParams(location.search).has("origen");
+    activateTab(hasOrigen ? "tab-seguimiento" : "tab-dashboard");
+  }
+})();
+
 (() => {
   const drawer = document.getElementById("mantDrawer");
   const form = document.getElementById("mantFollowForm");
