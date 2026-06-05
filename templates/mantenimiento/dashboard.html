@@ -422,31 +422,6 @@
     </div>
   </section>
 
-  {% if proveedores_importables %}
-  <section class="bi-panel">
-    <div class="bi-panel-head">
-      <div>
-        <div class="bi-kicker">Migración única</div>
-        <h2 class="bi-panel-title">Importar proveedores existentes</h2>
-        <p class="bi-copy">Estos proveedores estaban en el sistema pero no son de insumos de Point. Marca los que sean talleres, técnicos o empresas de servicio para traerlos aquí. Los de insumos no los selecciones.</p>
-      </div>
-    </div>
-    <form method="post" action="{% url 'mantenimiento:mant-proveedor-importar' %}">
-      {% csrf_token %}
-      <div class="mant-planes-grid" style="margin-bottom:14px">
-        {% for p in proveedores_importables %}
-        <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#fff;border:1px solid rgba(139,34,82,.12);border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;color:#3D2B2B">
-          <input type="checkbox" name="proveedor_ids" value="{{ p.id }}">
-          {{ p.nombre }}
-        </label>
-        {% endfor %}
-      </div>
-      <button class="btn btn-primary btn-sm" type="submit" style="background:#8B2252;border-color:#8B2252">
-        Importar seleccionados
-      </button>
-    </form>
-  </section>
-  {% endif %}
 </div>
 
 {% if messages %}
@@ -806,7 +781,14 @@
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
         <label class="mant-field span-2">Nombre del taller / técnico <span style="color:#E53935">*</span>
           <input type="text" name="nombre" id="proveedorNombre" class="mant-input" required
-            placeholder="Ej. Taller Mecánico López, Frío Express, Ing. Ramírez">
+            placeholder="Escribe para buscar o agregar nuevo..."
+            list="proveedores-sugeridos" autocomplete="off">
+          <datalist id="proveedores-sugeridos">
+            {% for p in proveedores_importables %}
+              <option value="{{ p.nombre }}">
+            {% endfor %}
+          </datalist>
+          <span class="mant-plan-meta">Si el proveedor ya existía en el sistema aparece como sugerencia al escribir.</span>
         </label>
         <label class="mant-field">Especialidad
           <input type="text" name="especialidad" id="proveedorEspecialidad" class="mant-input"
