@@ -370,12 +370,55 @@
       {% endif %}
     </section>
     <section class="bi-panel" style="margin-top:0">
-      <div class="bi-panel-head"><div><div class="bi-kicker">Estado actual</div><h2 class="bi-panel-title">Unidades activas</h2></div></div>
+      <div class="bi-panel-head">
+        <div><div class="bi-kicker">Estado actual</div><h2 class="bi-panel-title">Unidades activas</h2></div>
+      </div>
       <div class="mant-fleet-grid">
         {% for unidad in fleet_units %}
           <article class="mant-fleet-item"><strong>{{ unidad.descripcion|default:unidad.codigo }}</strong><span>{{ unidad.codigo }}{% if unidad.sucursal %} · {{ unidad.sucursal.nombre }}{% endif %}</span></article>
         {% empty %}
           <article class="mant-fleet-item"><strong>Sin unidades activas</strong><span>Logística no tiene unidades registradas.</span></article>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="bi-panel" style="margin-top:0">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Catálogo</div>
+          <h2 class="bi-panel-title">Tipos de servicio</h2>
+          <p class="bi-copy">Define los servicios recurrentes de tu flota con el intervalo exacto — cualquier número de meses o km, sin opciones fijas.</p>
+        </div>
+        <div class="bi-panel-actions">
+          <button class="btn btn-primary btn-sm" type="button" onclick="abrirModalTipoServicio()" style="background:#8B2252;border-color:#8B2252">+ Nuevo tipo</button>
+        </div>
+      </div>
+      <div class="mant-planes-grid">
+        {% for ts in tipos_servicio %}
+        <article class="mant-plan-row">
+          <div>
+            <div class="mant-plan-title">{{ ts.nombre }}</div>
+            <div class="mant-plan-meta">
+              {% if ts.tipo_intervalo == 'tiempo' %}
+                <span class="mant-badge" style="background:#e8f0fe;color:#1a56db">Por tiempo</span>
+                &nbsp;Cada <strong>{{ ts.intervalo_meses }}</strong> mes{{ ts.intervalo_meses|pluralize:"es" }}
+              {% elif ts.tipo_intervalo == 'km' %}
+                <span class="mant-badge" style="background:#f0fdf4;color:#166534">Por km</span>
+                &nbsp;Cada <strong>{{ ts.intervalo_km|floatformat:0 }}</strong> km
+              {% else %}
+                <span class="mant-badge" style="background:#fef9c3;color:#854d0e">Tiempo o km</span>
+                &nbsp;{{ ts.intervalo_meses }}m o {{ ts.intervalo_km|floatformat:0 }} km
+              {% endif %}
+              {% if ts.notas %}<br><span class="muted-cell">{{ ts.notas }}</span>{% endif %}
+            </div>
+          </div>
+          <button class="btn btn-secondary btn-sm" type="button"
+            onclick="abrirEditarTipoServicio({{ ts.pk }},'{{ ts.nombre|escapejs }}','{{ ts.tipo_intervalo }}',{{ ts.intervalo_meses|default:'null' }},{{ ts.intervalo_km|default:'null' }},'{{ ts.notas|escapejs }}')">
+            Editar
+          </button>
+        </article>
+        {% empty %}
+        <div class="mant-empty">Sin tipos de servicio registrados. Crea uno para empezar a dar seguimiento a tu flota.</div>
         {% endfor %}
       </div>
     </section>
@@ -604,6 +647,51 @@
       <div class="mant-eliminar-actions">
         <button class="btn btn-secondary btn-sm" type="button" onclick="cerrarModalPlan()">Cancelar</button>
         <button class="btn btn-primary btn-sm" type="submit" style="background:#8B2252;border-color:#8B2252" id="planSubmitBtn">Guardar plan</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Modal crear / editar tipo de servicio ── -->
+<div class="mant-eliminar-modal" id="modalTipoServicio" role="dialog" aria-modal="true">
+  <div class="mant-eliminar-panel mant-modal-md">
+    <h3 id="modalTipoTitulo">Nuevo tipo de servicio</h3>
+    <form id="formTipoServicio" method="post" action="{% url 'mantenimiento:mant-flota-tipo' %}">
+      {% csrf_token %}
+      <input type="hidden" name="action" id="tipoAction" value="crear">
+      <input type="hidden" name="tipo_id" id="tipoId">
+      <div style="display:grid;gap:12px;margin-bottom:14px">
+        <label class="mant-field">Nombre del servicio <span style="color:#E53935">*</span>
+          <input type="text" name="nombre" id="tipoNombre" class="mant-input" required placeholder="Ej. Mantenimiento sistema refrigeración">
+        </label>
+        <label class="mant-field">Tipo de intervalo
+          <select name="tipo_intervalo" id="tipoIntervalo" class="mant-input" onchange="actualizarCamposTipo()">
+            <option value="tiempo">Por tiempo (meses)</option>
+            <option value="km">Por kilómetros</option>
+            <option value="ambos">Tiempo o km — lo que ocurra primero</option>
+          </select>
+        </label>
+        <div id="campoMeses" style="display:grid;gap:12px;grid-template-columns:1fr 1fr">
+          <label class="mant-field">Cada cuántos meses <span style="color:#E53935">*</span>
+            <input type="number" name="intervalo_meses" id="tipoMeses" class="mant-input" min="1" placeholder="Ej. 6 para semestral, 18 para año y medio">
+          </label>
+          <div class="mant-plan-meta" style="align-self:end;padding-bottom:8px">
+            Escribe cualquier número — no hay opciones fijas.<br>
+            Ej: 1 = mensual · 3 = trimestral · 6 = semestral · 12 = anual · 18 = año y medio
+          </div>
+        </div>
+        <div id="campoKm" style="display:none">
+          <label class="mant-field">Cada cuántos km
+            <input type="number" name="intervalo_km" id="tipoKm" class="mant-input" min="1" placeholder="Ej. 5000">
+          </label>
+        </div>
+        <label class="mant-field">Notas / descripción
+          <input type="text" name="notas" id="tipoNotas" class="mant-input" placeholder="Qué incluye este servicio (opcional)">
+        </label>
+      </div>
+      <div class="mant-eliminar-actions">
+        <button class="btn btn-secondary btn-sm" type="button" onclick="cerrarModalTipoServicio()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" type="submit" style="background:#8B2252;border-color:#8B2252" id="tipoSubmitBtn">Guardar tipo</button>
       </div>
     </form>
   </div>
@@ -915,9 +1003,50 @@ function cerrarModalServicio() {
 }
 document.getElementById("modalServicio").addEventListener("click", (e) => { if (e.target === document.getElementById("modalServicio")) cerrarModalServicio(); });
 
+// ── Modal tipo de servicio ──
+function actualizarCamposTipo() {
+  const v = document.getElementById("tipoIntervalo").value;
+  document.getElementById("campoMeses").style.display = (v === "tiempo" || v === "ambos") ? "grid" : "none";
+  document.getElementById("campoKm").style.display   = (v === "km"     || v === "ambos") ? "block" : "none";
+  document.getElementById("tipoMeses").required = (v === "tiempo" || v === "ambos");
+  document.getElementById("tipoKm").required    = (v === "km"     || v === "ambos");
+}
+function abrirModalTipoServicio() {
+  document.getElementById("modalTipoTitulo").textContent = "Nuevo tipo de servicio";
+  document.getElementById("tipoAction").value = "crear";
+  document.getElementById("tipoId").value = "";
+  document.getElementById("tipoNombre").value = "";
+  document.getElementById("tipoIntervalo").value = "tiempo";
+  document.getElementById("tipoMeses").value = "";
+  document.getElementById("tipoKm").value = "";
+  document.getElementById("tipoNotas").value = "";
+  document.getElementById("tipoSubmitBtn").textContent = "Guardar tipo";
+  actualizarCamposTipo();
+  document.getElementById("modalTipoServicio").classList.add("is-open");
+}
+function abrirEditarTipoServicio(id, nombre, tipo, meses, km, notas) {
+  document.getElementById("modalTipoTitulo").textContent = "Editar tipo de servicio";
+  document.getElementById("tipoAction").value = "editar";
+  document.getElementById("tipoId").value = id;
+  document.getElementById("tipoNombre").value = nombre;
+  document.getElementById("tipoIntervalo").value = tipo;
+  document.getElementById("tipoMeses").value = meses || "";
+  document.getElementById("tipoKm").value = km || "";
+  document.getElementById("tipoNotas").value = notas || "";
+  document.getElementById("tipoSubmitBtn").textContent = "Guardar cambios";
+  actualizarCamposTipo();
+  document.getElementById("modalTipoServicio").classList.add("is-open");
+}
+function cerrarModalTipoServicio() {
+  document.getElementById("modalTipoServicio").classList.remove("is-open");
+}
+document.getElementById("modalTipoServicio").addEventListener("click", (e) => {
+  if (e.target === document.getElementById("modalTipoServicio")) cerrarModalTipoServicio();
+});
+
 // Cerrar con ESC (extender el existente)
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { cerrarModalPlan(); cerrarModalServicio(); }
+  if (e.key === "Escape") { cerrarModalPlan(); cerrarModalServicio(); cerrarModalTipoServicio(); }
 });
 </script>
 {% endblock %}
