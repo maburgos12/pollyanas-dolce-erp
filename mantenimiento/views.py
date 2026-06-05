@@ -104,6 +104,20 @@ def _create_asset_from_followup(data, sucursal, proveedor_obj=None):
     )
 
 
+def _get_proveedores_importables():
+    from maestros.models import Insumo
+    con_insumos = Insumo.objects.filter(
+        proveedor_principal__isnull=False
+    ).values_list("proveedor_principal_id", flat=True)
+    ya_importados = ProveedorServicio.objects.values_list("nombre", flat=True)
+    return list(
+        Proveedor.objects.exclude(id__in=con_insumos)
+        .filter(activo=True)
+        .exclude(nombre__in=ya_importados)
+        .order_by("nombre")
+    )
+
+
 def _branch_statuses():
     return [ReporteFalla.ESTATUS_ABIERTO, ReporteFalla.ESTATUS_REVISION, ReporteFalla.ESTATUS_PROCESO]
 
@@ -776,8 +790,35 @@ def dashboard(request):
             "activos_para_plan": list(Activo.objects.select_related("sucursal").filter(activo=True).order_by("sucursal__nombre", "nombre")[:400]),
             "unidades_para_servicio": list(Unidad.objects.filter(activa=True).select_related("sucursal").order_by("descripcion", "codigo")),
             "proveedores_todos": list(ProveedorServicio.objects.order_by("nombre")),
+            "proveedores_importables": _get_proveedores_importables(),
         },
     )
+
+
+@login_required
+def importar_proveedores(request):
+    """Importa proveedores seleccionados del catálogo general como ProveedorServicio."""
+    _require_mantenimiento(request.user)
+    if request.method != "POST":
+        return redirect("mantenimiento:dashboard")
+
+    from django.contrib import messages as msg
+
+    ids = request.POST.getlist("proveedor_ids")
+    if not ids:
+        msg.warning(request, "Selecciona al menos un proveedor para importar.")
+        return redirect("mantenimiento:dashboard")
+
+    importados = 0
+    for prov in Proveedor.objects.filter(id__in=ids, activo=True):
+        _, created = ProveedorServicio.objects.get_or_create(
+            nombre=prov.nombre, defaults={"activo": True}
+        )
+        if created:
+            importados += 1
+
+    msg.success(request, f"{importados} proveedor(es) importado(s) correctamente.")
+    return redirect("mantenimiento:dashboard")
 
 
 @login_required
