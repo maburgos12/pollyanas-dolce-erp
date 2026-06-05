@@ -1,3 +1,4 @@
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.contrib.auth.decorators import login_required
@@ -13,7 +14,8 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento
+from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento, PlanMantenimiento
+from mantenimiento.models import SolicitudCancelacion
 from core.access import can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
 from core.models import sucursales_operativas
 from fallas.models import BitacoraFalla, CategoriaFalla, ReporteFalla
@@ -60,6 +62,10 @@ def _require_mantenimiento(user):
         return
     if not can_view_submodule(user, "mantenimiento", "dashboard"):
         raise PermissionDenied("No tienes permisos para ver Mantenimiento.")
+
+
+def _puede_eliminar(user) -> bool:
+    return user.is_authenticated and (user.is_superuser or user.is_staff or user.groups.filter(name__in=["dg", "DG"]).exists())
 
 
 def _parse_decimal(raw):
@@ -699,6 +705,51 @@ def dashboard(request):
     fleet_units = Unidad.objects.filter(activa=True).select_related("sucursal").order_by("codigo")[:6]
     sucursales_list = sucursales_operativas().order_by("nombre")
     categorias_list = CategoriaFalla.objects.filter(activo=True).order_by("orden", "nombre")
+
+    today = timezone.localdate()
+    planes_proximos = list(
+        PlanMantenimiento.objects.filter(
+            estatus=PlanMantenimiento.ESTATUS_ACTIVO,
+            activo=True,
+            proxima_ejecucion__isnull=False,
+            proxima_ejecucion__lte=today + timedelta(days=30),
+        )
+        .select_related("activo_ref", "activo_ref__sucursal")
+        .order_by("proxima_ejecucion")[:40]
+    )
+    for plan in planes_proximos:
+        plan._dias_para_vencer = (plan.proxima_ejecucion - today).days if plan.proxima_ejecucion else None
+        plan._vencido = plan._dias_para_vencer is not None and plan._dias_para_vencer < 0
+
+    # Servicios de flota próximos (por fecha)
+    # Solo el registro más reciente por unidad+tipo, con proxima_fecha próxima
+    from django.db.models import Max
+    ultimos_ids = (
+        ServicioRealizadoUnidad.objects.filter(
+            proxima_fecha__isnull=False,
+            proxima_fecha__lte=today + timedelta(days=30),
+        )
+        .values("unidad_id", "tipo_servicio_id")
+        .annotate(ultimo_id=Max("id"))
+        .values_list("ultimo_id", flat=True)
+    )
+    servicios_flota = list(
+        ServicioRealizadoUnidad.objects.filter(id__in=ultimos_ids)
+        .select_related("unidad", "unidad__sucursal", "tipo_servicio")
+        .order_by("proxima_fecha")[:30]
+    )
+    for srv in servicios_flota:
+        srv._dias_para_vencer = (srv.proxima_fecha - today).days if srv.proxima_fecha else None
+        srv._vencido = srv._dias_para_vencer is not None and srv._dias_para_vencer < 0
+
+    solicitudes_cancelacion = (
+        SolicitudCancelacion.objects.filter(estatus=SolicitudCancelacion.ESTATUS_PENDIENTE)
+        .select_related("solicitado_por")
+        .order_by("-creado_en")[:20]
+        if _puede_eliminar(request.user)
+        else []
+    )
+
     return render(
         request,
         "mantenimiento/dashboard.html",
@@ -718,6 +769,11 @@ def dashboard(request):
             "estatus_orden": OrdenMantenimiento.ESTATUS_CHOICES,
             "areas_falla": ReporteFalla.AREAS,
             "prioridades_falla": ReporteFalla.PRIORIDAD,
+            "planes_proximos": planes_proximos,
+            "servicios_flota": servicios_flota,
+            "solicitudes_cancelacion": solicitudes_cancelacion,
+            "puede_eliminar": _puede_eliminar(request.user),
+            "today": today,
         },
     )
 
@@ -727,3 +783,173 @@ def pwa_mantenimiento(request):
     if not (is_admin_or_dg(request.user) or EsMantenimiento().has_permission(request, None)):
         raise PermissionDenied("No tienes permisos para usar Mantenimiento")
     return render(request, "mantenimiento/pwa.html")
+
+
+@login_required
+def solicitar_cancelacion(request, tipo, pk):
+    """Crea una SolicitudCancelacion y notifica al DG por email."""
+    _require_mantenimiento(request.user)
+    if request.method != "POST":
+        return redirect("mantenimiento:dashboard")
+
+    from django.contrib import messages as msg
+    from django.core.mail import send_mail
+    from django.conf import settings as djsettings
+    from django.contrib.auth import get_user_model
+
+    tipo = (tipo or "").strip().lower()
+    motivo = (request.POST.get("motivo") or "").strip()
+    if not motivo:
+        msg.error(request, "Debes indicar el motivo de cancelación.")
+        return redirect("mantenimiento:dashboard")
+
+    if tipo == "falla":
+        obj = get_object_or_404(ReporteFalla, pk=pk)
+        referencia = f"Falla #{obj.id} · {obj.titulo}"
+    elif tipo == "unidad":
+        obj = get_object_or_404(ReporteUnidad, pk=pk)
+        referencia = f"Reporte unidad #{obj.id} · {obj.get_tipo_display()}"
+    elif tipo == "orden":
+        obj = get_object_or_404(OrdenMantenimiento, pk=pk)
+        referencia = f"Orden {obj.folio}"
+    else:
+        msg.error(request, "Tipo no válido.")
+        return redirect("mantenimiento:dashboard")
+
+    if _puede_eliminar(request.user):
+        # DG elimina directo sin pasar por solicitud
+        obj.delete()
+        msg.success(request, f"{referencia} eliminado.")
+        return redirect("mantenimiento:dashboard")
+
+    solicitud = SolicitudCancelacion.objects.create(
+        tipo=tipo,
+        objeto_id=pk,
+        referencia=referencia,
+        motivo=motivo,
+        solicitado_por=request.user,
+    )
+
+    dg_emails = list(
+        get_user_model()
+        .objects.filter(groups__name__in=["dg", "DG"], email__isnull=False)
+        .exclude(email="")
+        .values_list("email", flat=True)
+        .distinct()
+    )
+    if dg_emails:
+        solicitante = request.user.get_full_name() or request.user.username
+        asunto = f"[ERP Mantenimiento] Solicitud cancelación: {referencia}"
+        cuerpo = (
+            f"El usuario {solicitante} solicita cancelar el siguiente reporte:\n\n"
+            f"Referencia: {referencia}\n"
+            f"Motivo: {motivo}\n\n"
+            f"Revisa y aprueba o rechaza en el ERP:\n"
+            f"Mantenimiento > Solicitudes de cancelación\n\n"
+            f"ID solicitud: #{solicitud.id}"
+        )
+        try:
+            send_mail(asunto, cuerpo, djsettings.DEFAULT_FROM_EMAIL, dg_emails, fail_silently=True)
+        except Exception:
+            pass
+
+    msg.success(request, f"Solicitud de cancelación enviada para '{referencia}'. El DG recibirá la notificación.")
+    return redirect("mantenimiento:dashboard")
+
+
+@login_required
+def resolver_cancelacion(request, solicitud_id):
+    """DG aprueba (elimina el objeto) o rechaza la solicitud."""
+    if not _puede_eliminar(request.user):
+        raise PermissionDenied("Solo el DG puede resolver solicitudes de cancelación.")
+    if request.method != "POST":
+        return redirect("mantenimiento:dashboard")
+
+    from django.contrib import messages as msg
+
+    solicitud = get_object_or_404(SolicitudCancelacion, pk=solicitud_id, estatus=SolicitudCancelacion.ESTATUS_PENDIENTE)
+    accion = (request.POST.get("accion") or "").strip().lower()
+    notas = (request.POST.get("notas_resolucion") or "").strip()
+
+    solicitud.resuelto_por = request.user
+    solicitud.resuelto_en = timezone.now()
+    solicitud.notas_resolucion = notas
+
+    if accion == "aprobar":
+        tipo = solicitud.tipo
+        pk = solicitud.objeto_id
+        eliminado = False
+        if tipo == "falla":
+            obj = ReporteFalla.objects.filter(pk=pk).first()
+            if obj:
+                obj.delete()
+                eliminado = True
+        elif tipo == "unidad":
+            obj = ReporteUnidad.objects.filter(pk=pk).first()
+            if obj:
+                obj.delete()
+                eliminado = True
+        elif tipo == "orden":
+            obj = OrdenMantenimiento.objects.filter(pk=pk).first()
+            if obj:
+                obj.delete()
+                eliminado = True
+        solicitud.estatus = SolicitudCancelacion.ESTATUS_APROBADA
+        solicitud.save()
+        if eliminado:
+            msg.success(request, f"Solicitud #{solicitud.id} aprobada. '{solicitud.referencia}' eliminado.")
+        else:
+            msg.warning(request, f"Solicitud #{solicitud.id} aprobada, pero el objeto ya no existía.")
+    else:
+        solicitud.estatus = SolicitudCancelacion.ESTATUS_RECHAZADA
+        solicitud.save()
+        msg.info(request, f"Solicitud #{solicitud.id} rechazada.")
+
+    return redirect("mantenimiento:dashboard")
+
+
+@login_required
+def registrar_ejecucion_plan(request, pk):
+    """Registra la ejecución de un plan de mantenimiento recurrente."""
+    _require_mantenimiento(request.user)
+    if request.method != "POST":
+        return redirect("mantenimiento:dashboard")
+
+    plan = get_object_or_404(PlanMantenimiento, pk=pk, activo=True)
+    from django.contrib import messages as msg
+
+    fecha_raw = (request.POST.get("fecha_ejecucion") or "").strip()
+    notas = (request.POST.get("notas") or "").strip()
+    try:
+        from django.utils.dateparse import parse_date
+        fecha = parse_date(fecha_raw) or timezone.localdate()
+    except Exception:
+        fecha = timezone.localdate()
+
+    plan.ultima_ejecucion = fecha
+    plan.recompute_next_date()
+    plan.save(update_fields=["ultima_ejecucion", "proxima_ejecucion", "actualizado_en"])
+
+    # Crear orden de mantenimiento preventivo cerrada para trazabilidad
+    orden = OrdenMantenimiento.objects.create(
+        activo_ref=plan.activo_ref,
+        plan_ref=plan,
+        tipo=OrdenMantenimiento.TIPO_PREVENTIVO,
+        prioridad=OrdenMantenimiento.PRIORIDAD_BAJA,
+        estatus=OrdenMantenimiento.ESTATUS_CERRADA,
+        fecha_programada=fecha,
+        fecha_inicio=fecha,
+        fecha_cierre=fecha,
+        responsable=request.user.get_full_name() or request.user.username,
+        descripcion=notas or f"Ejecución de plan: {plan.nombre}",
+        origen=OrdenMantenimiento.ORIGEN_PLAN,
+        creado_por=request.user,
+    )
+    BitacoraMantenimiento.objects.create(
+        orden=orden,
+        usuario=request.user,
+        accion="Ejecución registrada",
+        comentario=notas or f"Registrado desde bandeja de mantenimiento. Plan: {plan.nombre}",
+    )
+    msg.success(request, f"Plan '{plan.nombre}' ejecutado. Próxima: {plan.proxima_ejecucion}")
+    return redirect("mantenimiento:dashboard")

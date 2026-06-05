@@ -23,7 +23,7 @@
   .mant-col-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:6px 6px 10px;border-bottom:1px solid #f0e1e8;margin-bottom:10px}
   .mant-col-head strong{display:block;color:#3a2b30;font-size:16px}
   .mant-col-head span{display:block;margin-top:2px;color:#77656d;font-size:12px}
-  .mant-col-count{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;flex:0 0 32px;border-radius:999px;background:#8B2252;color:#fff;font-size:13px;font-weight:900;line-height:1;text-align:center;font-variant-numeric:tabular-nums}
+  .mant-col-count{display:flex;align-items:center;justify-content:center;width:32px;height:32px;min-width:32px;border-radius:999px;background:#C9A84C;color:#fff;font-size:14px;font-weight:900;line-height:32px;font-variant-numeric:tabular-nums}
   .mant-col-body{display:grid;gap:10px;max-height:min(520px,58vh);overflow-y:auto;padding-right:4px;overscroll-behavior:contain}
   .mant-col-body::-webkit-scrollbar{width:8px}
   .mant-col-body::-webkit-scrollbar-thumb{background:#e3b9ca;border-radius:999px}
@@ -74,6 +74,23 @@
   .mant-semaforo.amarillo{background:#fef9c3;color:#854d0e}.mant-semaforo.amarillo::before{background:#eab308}
   .mant-semaforo.rojo{background:#fee2e2;color:#991b1b}.mant-semaforo.rojo::before{background:#ef4444}
   .mant-badge.sin-asignar{background:#fef3c7;color:#92400e}
+  .mant-btn-eliminar{background:#fff0f0;border:1px solid #fca5a5;color:#b91c1c;font-size:12px}
+  .mant-btn-eliminar:hover{background:#fee2e2}
+  .mant-description-box{background:#fdf6f9;border:1px solid #f0d0dc;border-radius:8px;padding:10px 12px;font-size:13px;color:#42292e;line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:180px;overflow-y:auto;margin-bottom:4px}
+  .mant-planes-grid{display:grid;gap:10px}
+  .mant-plan-row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:start;background:#fff;border:1px solid rgba(139,34,82,.12);border-radius:12px;padding:12px}
+  .mant-plan-row.vencido{border-color:#fca5a5;background:#fff5f5}
+  .mant-plan-title{font-weight:900;color:#3a2b30}
+  .mant-plan-meta{color:#77656d;font-size:12px;margin-top:3px}
+  .mant-plan-form{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+  .mant-plan-date{min-height:38px;border:1px solid rgba(139,34,82,.22);border-radius:8px;padding:7px 10px;font:inherit;font-size:13px}
+  .mant-plan-notas{min-width:160px}
+  .mant-eliminar-modal{position:fixed;inset:0;z-index:1400;display:none;background:rgba(31,18,26,.5);align-items:center;justify-content:center;padding:20px}
+  .mant-eliminar-modal.is-open{display:flex}
+  .mant-eliminar-panel{background:#fff;border-radius:14px;padding:24px;width:min(440px,100%);box-shadow:0 20px 50px rgba(0,0,0,.24)}
+  .mant-eliminar-panel h3{margin:0 0 10px;color:#8B2252}
+  .mant-eliminar-panel p{color:#42292e;margin:0 0 18px;line-height:1.5}
+  .mant-eliminar-actions{display:flex;gap:10px;justify-content:flex-end}
   .mant-toast-stack{position:fixed;top:16px;right:20px;z-index:2000;display:grid;gap:8px;width:min(380px,calc(100vw - 32px));pointer-events:none}
   .mant-toast-stack .alert{pointer-events:auto;margin:0;padding:12px 16px;border-radius:10px;font-weight:700;box-shadow:0 4px 16px rgba(0,0,0,.12)}
   @media(max-width:760px){.mant-origin-tabs{display:grid}.mant-origin-tab{justify-content:space-between}.mant-form-grid,.mant-asset-create-grid,.mant-board-tools{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr}}
@@ -225,7 +242,17 @@
                     data-asset-id="{{ item.activo_id|default:'' }}"
                     data-title="{{ item.referencia }} · {{ item.titulo }}"
                     data-meta="{{ item.ubicacion|default:'Sin ubicación' }} · {{ item.estatus_display }}"
+                    data-description="{{ item.descripcion }}"
                   >Trabajar</button>
+                  <button
+                    class="btn btn-sm mant-btn-eliminar"
+                    type="button"
+                    data-open-cancelar
+                    data-action="{% url 'mantenimiento:mant-cancelar' item.tipo item.id %}"
+                    data-label="{{ item.referencia }} · {{ item.titulo }}"
+                    data-es-dg="{% if puede_eliminar %}1{% else %}0{% endif %}"
+                    title="{% if puede_eliminar %}Eliminar reporte{% else %}Solicitar cancelación{% endif %}"
+                  >{% if puede_eliminar %}Eliminar{% else %}Solicitar cancelación{% endif %}</button>
                 </div>
               </article>
             {% empty %}
@@ -249,6 +276,128 @@
       {% endfor %}
     </div>
   </section>
+
+  <section class="bi-panel" id="planes-recurrentes">
+    <div class="bi-panel-head">
+      <div>
+        <div class="bi-kicker">Preventivo recurrente</div>
+        <h2 class="bi-panel-title">Planes de mantenimiento — próximos 30 días</h2>
+        <p class="bi-copy">Registra la ejecución aquí. Se genera la orden preventiva y se recalcula la próxima fecha automáticamente.</p>
+      </div>
+      <div class="bi-panel-actions">
+        <a class="btn btn-secondary btn-sm" href="{% url 'activos:planes' %}">Ver todos los planes</a>
+      </div>
+    </div>
+    {% if servicios_flota %}
+    <h3 style="margin:0 0 10px;color:#8B2252;font-size:15px;font-family:'Playfair Display',serif">Servicios de flota (vehiculos)</h3>
+    <div class="mant-planes-grid" style="margin-bottom:20px">
+      {% for srv in servicios_flota %}
+      <article class="mant-plan-row {% if srv._vencido %}vencido{% endif %}">
+        <div>
+          <div class="mant-plan-title">
+            {% if srv._vencido %}
+              <span class="mant-badge" style="background:#fee2e2;color:#b91c1c;margin-right:6px">Vencido</span>
+            {% elif srv._dias_para_vencer == 0 %}
+              <span class="mant-badge" style="background:#fef9c3;color:#854d0e;margin-right:6px">Hoy</span>
+            {% elif srv._dias_para_vencer <= 7 %}
+              <span class="mant-badge" style="background:#fef3c7;color:#92400e;margin-right:6px">{{ srv._dias_para_vencer }}d</span>
+            {% endif %}
+            {{ srv.unidad.descripcion|default:srv.unidad.codigo }} · {{ srv.tipo_servicio.nombre }}
+          </div>
+          <div class="mant-plan-meta">
+            {{ srv.unidad.codigo }}{% if srv.unidad.sucursal %} · {{ srv.unidad.sucursal.nombre }}{% endif %}<br>
+            Próxima: <strong>{{ srv.proxima_fecha|date:"d/m/Y" }}</strong>
+            {% if srv.proximos_km %} · o a los <strong>{{ srv.proximos_km|floatformat:0 }} km</strong>{% endif %}
+            · Último servicio: {{ srv.fecha_servicio|date:"d/m/Y" }}
+          </div>
+        </div>
+        <a class="btn btn-secondary btn-sm" href="{% url 'logistica:unidad_detalle' srv.unidad.pk %}">Ver unidad</a>
+      </article>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <h3 style="margin:0 0 10px;color:#8B2252;font-size:15px;font-family:'Playfair Display',serif">Mantenimiento de equipos (activos)</h3>
+    {% if planes_proximos %}
+    <div class="mant-planes-grid">
+      {% for plan in planes_proximos %}
+      <article class="mant-plan-row {% if plan._vencido %}vencido{% endif %}">
+        <div>
+          <div class="mant-plan-title">
+            {% if plan._vencido %}
+              <span class="mant-badge" style="background:#fee2e2;color:#b91c1c;margin-right:6px">Vencido</span>
+            {% elif plan._dias_para_vencer == 0 %}
+              <span class="mant-badge" style="background:#fef9c3;color:#854d0e;margin-right:6px">Hoy</span>
+            {% elif plan._dias_para_vencer <= 7 %}
+              <span class="mant-badge" style="background:#fef3c7;color:#92400e;margin-right:6px">{{ plan._dias_para_vencer }}d</span>
+            {% endif %}
+            {{ plan.nombre }}
+          </div>
+          <div class="mant-plan-meta">
+            {{ plan.activo_ref.nombre }} · {{ plan.activo_ref.sucursal|default:"Sin sucursal" }}<br>
+            Tipo: {{ plan.get_tipo_display }} · Cada {{ plan.frecuencia_dias }} días
+            {% if plan.responsable %} · Resp: {{ plan.responsable }}{% endif %}<br>
+            Próxima: <strong>{{ plan.proxima_ejecucion|date:"d/m/Y" }}</strong>
+            {% if plan.ultima_ejecucion %} · Última: {{ plan.ultima_ejecucion|date:"d/m/Y" }}{% endif %}
+          </div>
+        </div>
+        <form class="mant-plan-form" method="post" action="{% url 'mantenimiento:mant-plan-ejecutar' plan.pk %}">
+          {% csrf_token %}
+          <label style="display:grid;gap:4px;font-size:12px;font-weight:900;color:#513744">
+            Fecha ejecución
+            <input class="mant-plan-date" type="date" name="fecha_ejecucion" value="{{ today|date:'Y-m-d' }}" required>
+          </label>
+          <input class="mant-plan-date mant-plan-notas" type="text" name="notas" placeholder="Notas (opcional)">
+          <button class="btn btn-primary btn-sm mant-plan-submit" type="submit" style="background:#8B2252;border-color:#8B2252">Marcar ejecutado</button>
+        </form>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="mant-empty">Sin planes con vencimiento en los próximos 30 días.</div>
+    {% endif %}
+  </section>
+
+  {% if puede_eliminar and solicitudes_cancelacion %}
+  <section class="bi-panel" id="solicitudes-cancelacion">
+    <div class="bi-panel-head">
+      <div>
+        <div class="bi-kicker">Pendiente tu revisión</div>
+        <h2 class="bi-panel-title">Solicitudes de cancelación</h2>
+        <p class="bi-copy">El equipo de mantenimiento solicitó cancelar estos reportes. Aprueba para eliminar o rechaza para mantenerlos.</p>
+      </div>
+    </div>
+    <div class="mant-planes-grid">
+      {% for sol in solicitudes_cancelacion %}
+      <article class="mant-plan-row" style="border-color:#fca5a5;background:#fff5f5">
+        <div>
+          <div class="mant-plan-title">
+            <span class="mant-badge" style="background:#fee2e2;color:#b91c1c;margin-right:6px">Pendiente</span>
+            {{ sol.referencia }}
+          </div>
+          <div class="mant-plan-meta">
+            Solicitado por: <strong>{% if sol.solicitado_por %}{{ sol.solicitado_por.get_full_name|default:sol.solicitado_por.username }}{% else %}Usuario eliminado{% endif %}</strong>
+            · {{ sol.creado_en|date:"d/m/Y H:i" }}<br>
+            <strong>Motivo:</strong> {{ sol.motivo }}
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+          <form method="post" action="{% url 'mantenimiento:mant-resolver-cancelacion' sol.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="accion" value="aprobar">
+            <button class="btn btn-sm" type="submit" style="background:#b91c1c;border-color:#b91c1c;color:#fff">Aprobar y eliminar</button>
+          </form>
+          <form method="post" action="{% url 'mantenimiento:mant-resolver-cancelacion' sol.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="accion" value="rechazar">
+            <button class="btn btn-secondary btn-sm" type="submit">Rechazar</button>
+          </form>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
 </div>
 
 {% if messages %}
@@ -258,6 +407,27 @@
   {% endfor %}
 </div>
 {% endif %}
+
+<!-- Modal cancelación / solicitud cancelación -->
+<div class="mant-eliminar-modal" id="mantCancelarModal" role="dialog" aria-modal="true">
+  <div class="mant-eliminar-panel">
+    <h3 id="mantCancelarTitulo">Eliminar reporte</h3>
+    <p id="mantCancelarLabel" style="margin-bottom:12px"></p>
+    <form id="mantCancelarForm" method="post">
+      {% csrf_token %}
+      <div id="mantMotivoBlock" style="display:none;margin-bottom:14px">
+        <label style="display:grid;gap:6px;font-size:13px;font-weight:900;color:#513744">
+          Motivo de cancelación <span style="color:#E53935">*</span>
+          <textarea name="motivo" id="mantMotivoInput" class="mant-input" placeholder="Explica por qué es un duplicado o debe cancelarse..." required style="min-height:80px"></textarea>
+        </label>
+      </div>
+      <div class="mant-eliminar-actions">
+        <button class="btn btn-secondary btn-sm" type="button" id="mantCancelarCerrar">Cancelar</button>
+        <button class="btn btn-sm" id="mantCancelarSubmit" type="submit" style="background:#b91c1c;border-color:#b91c1c;color:#fff">Eliminar</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <!-- Modal nueva falla -->
 <div class="mant-drawer" id="modalNuevaFalla" role="dialog" aria-modal="true" aria-labelledby="modalNuevaFallaTitulo">
@@ -350,6 +520,10 @@
       </div>
       <button class="btn btn-secondary btn-sm" type="button" data-close-drawer>Cerrar</button>
     </div>
+    <div id="mantDrawerDescBlock" style="display:none;margin-bottom:14px">
+      <div style="font-size:12px;font-weight:900;color:#8B2252;margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em">Descripción del reporte</div>
+      <div class="mant-description-box" id="mantDrawerDescription"></div>
+    </div>
     <form class="mant-form" id="mantFollowForm" method="post">
       {% csrf_token %}
       <div class="mant-form-grid">
@@ -421,6 +595,9 @@
     });
   }
 
+  const descBlock = document.getElementById("mantDrawerDescBlock");
+  const descBox = document.getElementById("mantDrawerDescription");
+
   function openDrawer(button) {
     const template = document.getElementById(`mant-status-${button.dataset.type}`);
     const hideAssets = button.dataset.type === "unidad";
@@ -440,6 +617,13 @@
       input.disabled = hideAssets;
       input.value = "";
     });
+    const desc = (button.dataset.description || "").trim();
+    if (desc && descBlock && descBox) {
+      descBox.textContent = desc;
+      descBlock.style.display = "";
+    } else if (descBlock) {
+      descBlock.style.display = "none";
+    }
     drawer.classList.add("is-open");
   }
 
@@ -457,9 +641,47 @@
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       drawer.classList.remove("is-open");
-      modalNuevaFalla.classList.remove("is-open");
+      document.getElementById("modalNuevaFalla").classList.remove("is-open");
+      document.getElementById("mantCancelarModal").classList.remove("is-open");
     }
   });
+})();
+
+// Modal cancelación / solicitud cancelación
+(() => {
+  const modal = document.getElementById("mantCancelarModal");
+  const form = document.getElementById("mantCancelarForm");
+  const titulo = document.getElementById("mantCancelarTitulo");
+  const label = document.getElementById("mantCancelarLabel");
+  const motivoBlock = document.getElementById("mantMotivoBlock");
+  const motivoInput = document.getElementById("mantMotivoInput");
+  const submitBtn = document.getElementById("mantCancelarSubmit");
+  const cerrar = document.getElementById("mantCancelarCerrar");
+  if (!modal || !form) return;
+
+  document.querySelectorAll("[data-open-cancelar]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const esDG = btn.dataset.esDg === "1";
+      form.action = btn.dataset.action;
+      if (esDG) {
+        titulo.textContent = "Eliminar reporte";
+        label.textContent = `¿Confirmas eliminar "${btn.dataset.label}"? Esta acción no se puede deshacer.`;
+        motivoBlock.style.display = "none";
+        motivoInput.required = false;
+        submitBtn.textContent = "Eliminar";
+      } else {
+        titulo.textContent = "Solicitar cancelación";
+        label.textContent = `Solicitar cancelación de: "${btn.dataset.label}". El DG recibirá una notificación para aprobar o rechazar.`;
+        motivoBlock.style.display = "";
+        motivoInput.required = true;
+        motivoInput.value = "";
+        submitBtn.textContent = "Enviar solicitud";
+      }
+      modal.classList.add("is-open");
+    });
+  });
+  cerrar.addEventListener("click", () => modal.classList.remove("is-open"));
+  modal.addEventListener("click", (e) => { if (e.target === modal) modal.classList.remove("is-open"); });
 })();
 
 // Modal nueva falla
