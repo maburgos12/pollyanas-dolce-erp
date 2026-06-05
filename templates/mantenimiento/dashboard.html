@@ -643,6 +643,10 @@
         <label class="mant-field span-2">Instrucciones / checklist
           <textarea name="instrucciones" id="planInstrucciones" class="mant-input" style="min-height:72px" placeholder="Pasos, verificaciones o materiales necesarios"></textarea>
         </label>
+        <div class="mant-plan-meta span-2" style="background:#f0fdf4;border-radius:8px;padding:10px 12px;border:1px solid #bbf7d0">
+          <strong>Sin historial previo:</strong> deja "Última ejecución" vacía y solo pon la "Próxima ejecución" con la fecha que sabes que toca. El sistema la usará como punto de arranque.<br>
+          <strong>Registrar retroactivo:</strong> pon la fecha real en "Última ejecución" y la próxima se calcula automáticamente.
+        </div>
       </div>
       <div class="mant-eliminar-actions">
         <button class="btn btn-secondary btn-sm" type="button" onclick="cerrarModalPlan()">Cancelar</button>
@@ -699,13 +703,26 @@
 
 <!-- ── Modal registrar servicio de flota ── -->
 <div class="mant-eliminar-modal" id="modalServicio" role="dialog" aria-modal="true">
-  <div class="mant-eliminar-panel mant-modal-md">
-    <h3>Registrar servicio de unidad</h3>
+  <div class="mant-eliminar-panel mant-modal-lg">
+    <h3 id="modalServicioTitulo">Registrar servicio de unidad</h3>
+
+    <!-- Selector de modo -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;border:1px solid rgba(139,34,82,.14);border-radius:10px;padding:4px;background:#fdf6f9">
+      <button type="button" id="modoRealizado" class="btn btn-primary btn-sm" onclick="setModoServicio('realizado')" style="background:#8B2252;border-color:#8B2252">
+        Ya se realizó
+      </button>
+      <button type="button" id="modoProgramado" class="btn btn-secondary btn-sm" onclick="setModoServicio('programado')">
+        Programar próximo
+      </button>
+    </div>
+    <p id="modoHelp" class="mant-plan-meta" style="margin-bottom:14px;background:#fdf6f9;border-radius:8px;padding:8px 10px"></p>
+
     <form method="post" action="{% url 'mantenimiento:mant-flota-servicio' %}">
       {% csrf_token %}
+      <input type="hidden" name="modo_servicio" id="modoServicioInput" value="realizado">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
         <label class="mant-field span-2">Unidad <span style="color:#E53935">*</span>
-          <select name="unidad_id" class="mant-input" required>
+          <select name="unidad_id" id="servicioUnidadId" class="mant-input" required>
             <option value="">Seleccionar unidad...</option>
             {% for u in unidades_para_servicio %}
               <option value="{{ u.id }}">{{ u.descripcion|default:u.codigo }}{% if u.sucursal %} · {{ u.sucursal.nombre }}{% endif %}</option>
@@ -713,39 +730,45 @@
           </select>
         </label>
         <label class="mant-field span-2">Tipo de servicio <span style="color:#E53935">*</span>
-          <select name="tipo_servicio_id" class="mant-input" required>
+          <select name="tipo_servicio_id" id="servicioTipoId" class="mant-input" required>
             <option value="">Seleccionar tipo...</option>
             {% for ts in tipos_servicio %}
               <option value="{{ ts.id }}">{{ ts.nombre }}</option>
             {% endfor %}
           </select>
         </label>
-        <label class="mant-field">Fecha del servicio
-          <input type="date" name="fecha_servicio" class="mant-input" value="{{ today|date:'Y-m-d' }}" required>
-        </label>
-        <label class="mant-field">Km al servicio
-          <input type="number" name="km_al_servicio" class="mant-input" min="0" placeholder="Opcional">
-        </label>
-        <label class="mant-field">Proveedor / taller
-          <input type="text" name="proveedor" class="mant-input" placeholder="Nombre del taller">
-        </label>
-        <label class="mant-field">Costo ($)
-          <input type="number" name="costo" class="mant-input" min="0" step="0.01" placeholder="0.00">
-        </label>
-        <label class="mant-field">Próxima fecha <span class="mant-badge" style="font-size:10px;padding:2px 7px;margin-left:4px">Opcional</span>
-          <input type="date" name="proxima_fecha" class="mant-input">
+
+        <!-- Campos modo "ya se realizó" -->
+        <div id="bloqueRealizado" style="display:contents">
+          <label class="mant-field" id="lblFechaServicio">Fecha en que se realizó
+            <input type="date" name="fecha_servicio" id="servicioFecha" class="mant-input" value="{{ today|date:'Y-m-d' }}">
+          </label>
+          <label class="mant-field">Km al momento del servicio
+            <input type="number" name="km_al_servicio" class="mant-input" min="0" placeholder="Opcional">
+          </label>
+          <label class="mant-field">Proveedor / taller
+            <input type="text" name="proveedor" class="mant-input" placeholder="Nombre del taller">
+          </label>
+          <label class="mant-field">Costo ($)
+            <input type="number" name="costo" class="mant-input" min="0" step="0.01" placeholder="0.00">
+          </label>
+        </div>
+
+        <!-- Próxima fecha (ambos modos, obligatoria en "programado") -->
+        <label class="mant-field" id="lblProximaFecha">Próxima fecha del servicio
+          <input type="date" name="proxima_fecha" id="servicioProximaFecha" class="mant-input">
+          <span class="mant-plan-meta" id="proximaFechaHelp">Si se deja vacía, se calcula automáticamente según el intervalo del tipo.</span>
         </label>
         <label class="mant-field">Próximos km <span class="mant-badge" style="font-size:10px;padding:2px 7px;margin-left:4px">Opcional</span>
-          <input type="number" name="proximos_km" class="mant-input" min="0" placeholder="Si se deja vacío se calcula solo">
+          <input type="number" name="proximos_km" id="servicioProximosKm" class="mant-input" min="0" placeholder="Si se deja vacío se calcula solo">
         </label>
         <label class="mant-field span-2">Notas
-          <input type="text" name="notas" class="mant-input" placeholder="Observaciones del servicio">
+          <input type="text" name="notas" class="mant-input" placeholder="Observaciones">
         </label>
-        <p class="mant-plan-meta span-2" style="margin:0">Si dejas "Próxima fecha" vacía, se calcula automáticamente según el intervalo del tipo de servicio.</p>
       </div>
       <div class="mant-eliminar-actions">
         <button class="btn btn-secondary btn-sm" type="button" onclick="cerrarModalServicio()">Cancelar</button>
-        <button class="btn btn-primary btn-sm" type="submit" style="background:#8B2252;border-color:#8B2252">Registrar servicio</button>
+        <button class="btn btn-primary btn-sm" id="servicioSubmitBtn" type="submit" style="background:#8B2252;border-color:#8B2252">Registrar</button>
       </div>
     </form>
   </div>
@@ -973,24 +996,65 @@ function calcularProximaFecha(tipoId, fechaBase) {
 }
 
 // ── Modal servicio flota ──
+const MODOS_HELP = {
+  realizado: "Úsalo para registrar un servicio que ya ocurrió — aunque haya sido hace meses. La próxima fecha se calcula sola según el intervalo del tipo, o la puedes fijar tú.",
+  programado: "Úsalo cuando aún no hay historial pero ya sabes cuándo toca el próximo servicio. Registra solo la fecha objetivo y el sistema la usará como punto de partida.",
+};
+
+function setModoServicio(modo) {
+  document.getElementById("modoServicioInput").value = modo;
+  const esRealizado = modo === "realizado";
+  document.getElementById("modoRealizado").className = esRealizado ? "btn btn-primary btn-sm" : "btn btn-secondary btn-sm";
+  document.getElementById("modoProgramado").className = esRealizado ? "btn btn-secondary btn-sm" : "btn btn-primary btn-sm";
+  if (!esRealizado) {
+    document.getElementById("modoRealizado").removeAttribute("style");
+    document.getElementById("modoProgramado").style.cssText = "background:#8B2252;border-color:#8B2252";
+  } else {
+    document.getElementById("modoRealizado").style.cssText = "background:#8B2252;border-color:#8B2252";
+    document.getElementById("modoProgramado").removeAttribute("style");
+  }
+  document.getElementById("modoHelp").textContent = MODOS_HELP[modo];
+  document.getElementById("bloqueRealizado").style.display = esRealizado ? "contents" : "none";
+  document.getElementById("servicioFecha").required = esRealizado;
+  const lblFecha = document.getElementById("lblFechaServicio");
+  if (lblFecha) lblFecha.style.display = esRealizado ? "" : "none";
+  const lblProxima = document.getElementById("lblProximaFecha");
+  const proximaInput = document.getElementById("servicioProximaFecha");
+  const proximaHelp = document.getElementById("proximaFechaHelp");
+  if (!esRealizado) {
+    lblProxima.querySelector("label,span,div:first-child") && (lblProxima.childNodes[0].textContent = "Próxima fecha del servicio ");
+    if (proximaInput) proximaInput.required = true;
+    if (proximaHelp) proximaHelp.textContent = "Pon aquí la fecha en que toca el servicio.";
+    document.getElementById("servicioSubmitBtn").textContent = "Programar servicio";
+    document.getElementById("modalServicioTitulo").textContent = "Programar próximo servicio";
+  } else {
+    if (proximaInput) proximaInput.required = false;
+    if (proximaHelp) proximaHelp.textContent = "Si se deja vacía, se calcula automáticamente según el intervalo del tipo.";
+    document.getElementById("servicioSubmitBtn").textContent = "Registrar servicio";
+    document.getElementById("modalServicioTitulo").textContent = "Registrar servicio de unidad";
+  }
+}
+
 function abrirModalServicio(unidadId, tipoId) {
   const modal = document.getElementById("modalServicio");
-  const uSel = modal.querySelector("[name=unidad_id]");
-  const tSel = modal.querySelector("[name=tipo_servicio_id]");
-  const pFecha = modal.querySelector("[name=proxima_fecha]");
-  const fServ = modal.querySelector("[name=fecha_servicio]");
-  if (unidadId && uSel) uSel.value = unidadId;
-  if (tipoId && tSel) {
-    tSel.value = tipoId;
-    if (pFecha) pFecha.value = calcularProximaFecha(tipoId, fServ ? fServ.value : null);
+  document.getElementById("servicioUnidadId").value = unidadId || "";
+  if (tipoId) {
+    document.getElementById("servicioTipoId").value = tipoId;
+    const f = document.getElementById("servicioFecha");
+    const pf = document.getElementById("servicioProximaFecha");
+    if (pf && !pf.value) {
+      const sug = calcularProximaFecha(tipoId, f ? f.value : null);
+      if (sug) pf.placeholder = `Sugerida: ${sug}`;
+    }
   }
+  setModoServicio("realizado");
   modal.classList.add("is-open");
 }
 
 // Auto-calcular próxima fecha al cambiar tipo en el modal
 const tipoSelect = document.querySelector("#modalServicio [name=tipo_servicio_id]");
-const fechaServSelect = document.querySelector("#modalServicio [name=fecha_servicio]");
-const proximaFechaInput = document.querySelector("#modalServicio [name=proxima_fecha]");
+const fechaServSelect = document.getElementById("servicioFecha");
+const proximaFechaInput = document.getElementById("servicioProximaFecha");
 function actualizarProximaFecha() {
   if (!tipoSelect || !proximaFechaInput || proximaFechaInput.value) return;
   const sugerida = calcularProximaFecha(tipoSelect.value, fechaServSelect ? fechaServSelect.value : null);
