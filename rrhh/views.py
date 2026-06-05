@@ -19,6 +19,7 @@ from django.contrib.auth import get_user_model
 
 from core.access import can_manage_rrhh, can_view_rrhh
 from core.audit import log_event
+from core.models import Sucursal, UserProfile
 
 from .models import (
     AsistenciaEmpleado,
@@ -764,6 +765,11 @@ def empleados(request):
                 elif usuario_erp_id == "":
                     empleado.usuario_erp = None
                 empleado.save()
+                sucursal_app_id = (request.POST.get("sucursal_app_id") or "").strip()
+                if empleado.usuario_erp_id:
+                    profile, _ = UserProfile.objects.get_or_create(user_id=empleado.usuario_erp_id)
+                    profile.sucursal_id = int(sucursal_app_id) if sucursal_app_id.isdigit() else None
+                    profile.save(update_fields=["sucursal"])
                 sincronizar_esquemas_bono(empleado, request.POST, organizacion)
                 log_event(
                     request.user,
@@ -926,6 +932,7 @@ def empleados(request):
         "bono_esquemas": BonoEsquema.objects.filter(activo=True).order_by("nombre"),
         "empleados_jefes": Empleado.objects.filter(activo=True).order_by("nombre"),
         "usuarios_erp": get_user_model().objects.filter(is_active=True).order_by("username"),
+        "sucursales_app": Sucursal.objects.filter(activa=True).order_by("nombre"),
         "motivo_baja_choices": EmpleadoBaja.MOTIVO_CHOICES,
         "months": range(1, 13),
         "bajas_recientes": EmpleadoBaja.objects.select_related("empleado").order_by("-fecha_baja")[:8],
