@@ -964,6 +964,48 @@ def gestionar_plan(request):
 
 
 @login_required
+def gestionar_tipo_servicio(request):
+    """Crear o editar un TipoServicioUnidad desde mantenimiento."""
+    _require_mantenimiento(request.user)
+    if request.method != "POST":
+        return redirect("mantenimiento:dashboard")
+
+    from django.contrib import messages as msg
+
+    action = (request.POST.get("action") or "crear").strip().lower()
+    nombre = (request.POST.get("nombre") or "").strip()
+    if not nombre:
+        msg.error(request, "El nombre del tipo de servicio es obligatorio.")
+        return redirect("mantenimiento:dashboard")
+
+    tipo_intervalo = (request.POST.get("tipo_intervalo") or TipoServicioUnidad.INTERVALO_TIEMPO).strip().lower()
+    if tipo_intervalo not in {TipoServicioUnidad.INTERVALO_KM, TipoServicioUnidad.INTERVALO_TIEMPO, TipoServicioUnidad.INTERVALO_AMBOS}:
+        tipo_intervalo = TipoServicioUnidad.INTERVALO_TIEMPO
+
+    intervalo_meses = _safe_int(request.POST.get("intervalo_meses")) or None
+    intervalo_km = _safe_int(request.POST.get("intervalo_km")) or None
+    notas = (request.POST.get("notas") or "").strip()
+
+    if action == "editar":
+        tipo_id = _safe_int(request.POST.get("tipo_id"))
+        obj = get_object_or_404(TipoServicioUnidad, pk=tipo_id)
+    else:
+        obj = TipoServicioUnidad()
+
+    obj.nombre = nombre
+    obj.tipo_intervalo = tipo_intervalo
+    obj.intervalo_meses = intervalo_meses
+    obj.intervalo_km = intervalo_km
+    obj.notas = notas
+    obj.activo = True
+    obj.save()
+
+    verbo = "actualizado" if action == "editar" else "creado"
+    msg.success(request, f"Tipo de servicio '{nombre}' {verbo}.")
+    return redirect("mantenimiento:dashboard")
+
+
+@login_required
 def registrar_servicio_flota(request):
     """Registra un ServicioRealizadoUnidad desde el módulo de mantenimiento."""
     _require_mantenimiento(request.user)
