@@ -261,10 +261,7 @@
         <div>
           <div class="bi-kicker">Preventivo · Equipos y maquinaria</div>
           <h2 class="bi-panel-title">Mantenimiento preventivo de equipos</h2>
-          <p class="bi-copy">Planes programados para hornos, refrigeradores, vitrinas y demás equipos de las sucursales. Marca ejecutado para registrar la atención y calcular la próxima fecha.</p>
-        </div>
-        <div class="bi-panel-actions">
-          <a class="btn btn-secondary btn-sm" href="{% url 'activos:planes' %}">Ver todos los planes</a>
+          <p class="bi-copy">Hornos, refrigeradores, vitrinas y maquinaria de sucursales. Marca ejecutado para registrar y recalcular la próxima fecha.</p>
         </div>
       </div>
       {% if planes_proximos %}
@@ -273,16 +270,21 @@
         <article class="mant-plan-row {% if plan.vencido %}vencido{% endif %}">
           <div>
             <div class="mant-plan-title">
-              {% if plan.vencido %}<span class="mant-badge" style="background:#fee2e2;color:#b91c1c;margin-right:6px">Vencido</span>
-              {% elif plan.dias_para_vencer == 0 %}<span class="mant-badge" style="background:#fef9c3;color:#854d0e;margin-right:6px">Hoy</span>
-              {% elif plan.dias_para_vencer <= 7 %}<span class="mant-badge" style="background:#fef3c7;color:#92400e;margin-right:6px">{{ plan.dias_para_vencer }}d</span>
+              {% if plan.vencido %}
+                <span class="mant-badge" style="background:#fee2e2;color:#b91c1c;margin-right:6px">Vencido</span>
+              {% elif plan.dias_para_vencer == 0 %}
+                <span class="mant-badge" style="background:#fef9c3;color:#854d0e;margin-right:6px">Hoy</span>
+              {% elif plan.urgente %}
+                <span class="mant-badge" style="background:#fef3c7;color:#92400e;margin-right:6px">{{ plan.dias_para_vencer }}d</span>
+              {% elif plan.proxima_ejecucion %}
+                <span class="mant-badge" style="background:#e8f5e9;color:#2e7d32;margin-right:6px">{{ plan.dias_para_vencer }}d</span>
               {% endif %}
               {{ plan.nombre }}
             </div>
             <div class="mant-plan-meta">
               <strong>{{ plan.activo_ref.nombre }}</strong>{% if plan.activo_ref.sucursal %} · {{ plan.activo_ref.sucursal.nombre }}{% endif %}<br>
               {{ plan.get_tipo_display }} · Cada {{ plan.frecuencia_dias }} días{% if plan.responsable %} · {{ plan.responsable }}{% endif %}<br>
-              Próxima: <strong>{{ plan.proxima_ejecucion|date:"d/m/Y" }}</strong>{% if plan.ultima_ejecucion %} · Última: {{ plan.ultima_ejecucion|date:"d/m/Y" }}{% endif %}
+              Próxima: <strong>{% if plan.proxima_ejecucion %}{{ plan.proxima_ejecucion|date:"d/m/Y" }}{% else %}Sin fecha{% endif %}</strong>{% if plan.ultima_ejecucion %} · Última: {{ plan.ultima_ejecucion|date:"d/m/Y" }}{% endif %}
             </div>
           </div>
           <form class="mant-plan-form" method="post" action="{% url 'mantenimiento:mant-plan-ejecutar' plan.pk %}">
@@ -297,7 +299,7 @@
         {% endfor %}
       </div>
       {% else %}
-      <div class="mant-empty">Sin planes de equipos con vencimiento en los próximos 30 días.</div>
+      <div class="mant-empty">No hay planes de mantenimiento de equipos registrados. Puedes crearlos desde el módulo Activos.</div>
       {% endif %}
     </section>
   </div>
@@ -312,7 +314,7 @@
           <p class="bi-copy">Servicios programados para las unidades de reparto — cambios de aceite, frenos, llantas y más. Para registrar el servicio entra al detalle de la unidad.</p>
         </div>
         <div class="bi-panel-actions">
-          <a class="btn btn-secondary btn-sm" href="{% url 'logistica:unidades_list' %}">Ver todas las unidades</a>
+          <a class="btn btn-secondary btn-sm" href="{% url 'logistica:unidades_list' %}">Gestionar unidades</a>
         </div>
       </div>
       {% if servicios_flota %}
