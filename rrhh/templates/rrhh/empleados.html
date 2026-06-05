@@ -1194,6 +1194,18 @@
                         </select>
                         <div class="rrhh-help">Vincula el perfil de logística con el registro de nómina para cálculo de bonos.</div>
                       </div>
+                      {% if e.usuario_erp_id %}
+                      <div class="rrhh-field span-2">
+                        <label for="edit_sucursal_app_{{ e.id }}">Sucursal en app (mermas y apps móviles)</label>
+                        <select id="edit_sucursal_app_{{ e.id }}" class="input-field" name="sucursal_app_id">
+                          <option value="">— Sin sucursal —</option>
+                          {% for s in sucursales_app %}
+                          <option value="{{ s.id }}" {% if e.usuario_erp.userprofile.sucursal_id == s.id %}selected{% endif %}>{{ s.nombre }}</option>
+                          {% endfor %}
+                        </select>
+                        <div class="rrhh-help">Define desde qué sucursal opera el usuario en apps de captura (mermas, recepción, etc.).</div>
+                      </div>
+                      {% endif %}
                       <label class="rrhh-checkline">
                         <input type="checkbox" name="activo" {% if e.activo %}checked{% endif %}>
                         Activo

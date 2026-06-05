@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+
+{% block title %}RRHH · Sucursal de usuarios{% endblock %}
+{% block page_title %}RRHH · Sucursal de usuarios{% endblock %}
+
+{% block extra_css %}
+<style>
+  .us-page { display: grid; gap: 16px; max-width: 900px; }
+  .us-header h1 { color: var(--vino); font-size: 24px; font-weight: 800; margin: 0 0 4px; }
+  .us-header p { color: var(--texto-light); margin: 0; max-width: 640px; }
+  .us-back { color: var(--vino); font-weight: 800; text-decoration: none; font-size: .9rem; }
+  .us-back:hover { text-decoration: underline; }
+  .us-search { min-height: 40px; border: 1px solid var(--rosa-deep); border-radius: 8px; padding: 0 12px; font: inherit; width: 100%; max-width: 360px; }
+  .us-card { background: #fff; border: 1px solid var(--rosa); border-radius: 10px; box-shadow: 0 2px 10px rgba(139,34,82,.06); overflow: hidden; }
+  .us-table { width: 100%; border-collapse: collapse; }
+  .us-table th { background: var(--rosa); color: var(--vino); font-size: .75rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; padding: 10px 14px; text-align: left; }
+  .us-table td { padding: 10px 14px; border-bottom: 1px solid var(--rosa); vertical-align: middle; font-size: .9rem; }
+  .us-table tbody tr:last-child td { border-bottom: 0; }
+  .us-table tbody tr:hover td { background: #fdf5f9; }
+  .us-name { font-weight: 800; color: var(--texto); }
+  .us-username { color: var(--texto-light); font-size: .82rem; }
+  .us-select { min-height: 36px; border: 1px solid var(--rosa-deep); border-radius: 7px; padding: 0 8px; font: inherit; font-size: .88rem; background: #fff; color: var(--texto); }
+  .us-select:focus { outline: 2px solid var(--vino); outline-offset: 1px; border-color: var(--vino); }
+  .us-badge { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px; font-size: .78rem; font-weight: 900; }
+  .us-badge.has-suc { background: #e8f5e9; color: #2e7d32; }
+  .us-badge.no-suc { background: var(--rosa); color: var(--vino); }
+  .us-status { font-size: .8rem; font-weight: 800; min-height: 18px; color: var(--texto-light); }
+  .us-status.ok { color: #2e7d32; }
+  .us-status.err { color: var(--rojo); }
+  .us-row-hidden { display: none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="us-page">
+  <div class="us-header">
+    <a class="us-back" href="{% url 'rrhh:rrhh_asignacion_sucursal' %}">← Asignación de personal</a>
+    <h1>Sucursal de usuarios</h1>
+    <p>Asigna o corrige la sucursal operativa de cada usuario. Esta sucursal determina desde qué sucursal capturan mermas y otras apps móviles.</p>
+  </div>
+
+  <input class="us-search" type="search" placeholder="Buscar por nombre o usuario…" id="us-search-input" autocomplete="off">
+
+  <div class="us-card">
+    <div class="table-responsive">
+    <table class="us-table" id="us-table">
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>Sucursal actual</th>
+          <th>Cambiar a</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in usuarios %}
+        <tr data-uid="{{ u.id }}" data-search="{{ u.get_full_name|lower }} {{ u.username|lower }}">
+          <td>
+            <div class="us-name">{{ u.get_full_name|default:u.username }}</div>
+            <div class="us-username">{{ u.username }}</div>
+          </td>
+          <td>
+            {% if u.userprofile.sucursal %}
+              <span class="us-badge has-suc">{{ u.userprofile.sucursal.nombre }}</span>
+            {% else %}
+              <span class="us-badge no-suc">Sin sucursal</span>
+            {% endif %}
+          </td>
+          <td>
+            <select class="us-select" data-uid="{{ u.id }}">
+              <option value="">— Sin sucursal —</option>
+              {% for s in sucursales %}
+              <option value="{{ s.id }}" {% if u.userprofile.sucursal_id == s.id %}selected{% endif %}>{{ s.nombre }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>
+            <div class="us-status" data-status="{{ u.id }}"></div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4" style="color:var(--texto-light);padding:16px;">No hay usuarios activos.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const ENDPOINT = "{% url 'rrhh:rrhh_usuarios_sucursal_update' %}";
+
+  function csrf() {
+    return document.cookie.split("; ").find(r => r.startsWith("csrftoken="))?.split("=")[1] || "";
+  }
+
+  function setStatus(uid, msg, tone) {
+    const el = document.querySelector(`[data-status="${uid}"]`);
+    if (!el) return;
+    el.textContent = msg;
+    el.className = `us-status${tone ? " " + tone : ""}`;
+  }
+
+  function updateBadge(uid, sucursalNombre) {
+    const row = document.querySelector(`tr[data-uid="${uid}"]`);
+    if (!row) return;
+    const td = row.querySelector("td:nth-child(2)");
+    if (sucursalNombre) {
+      td.innerHTML = `<span class="us-badge has-suc">${sucursalNombre}</span>`;
+    } else {
+      td.innerHTML = `<span class="us-badge no-suc">Sin sucursal</span>`;
+    }
+  }
+
+  document.querySelectorAll("select[data-uid]").forEach(select => {
+    let timer = null;
+    select.addEventListener("change", () => {
+      const uid = select.dataset.uid;
+      clearTimeout(timer);
+      setStatus(uid, "Guardando…", "");
+      timer = setTimeout(async () => {
+        try {
+          const res = await fetch(ENDPOINT, {
+            method: "POST",
+            headers: {"Content-Type": "application/json", "X-CSRFToken": csrf()},
+            body: JSON.stringify({user_id: parseInt(uid), sucursal_id: select.value || null}),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Error");
+          setStatus(uid, "Guardado ✓", "ok");
+          updateBadge(uid, data.sucursal_nombre === "Sin sucursal" ? "" : data.sucursal_nombre);
+          setTimeout(() => setStatus(uid, "", ""), 3000);
+        } catch (e) {
+          setStatus(uid, e.message, "err");
+        }
+      }, 400);
+    });
+  });
+
+  const searchInput = document.getElementById("us-search-input");
+  searchInput.addEventListener("input", () => {
+    const q = searchInput.value.trim().toLowerCase();
+    document.querySelectorAll("#us-table tbody tr[data-search]").forEach(row => {
+      row.classList.toggle("us-row-hidden", q.length > 0 && !row.dataset.search.includes(q));
+    });
+  });
+})();
+</script>
+{% endblock %}
