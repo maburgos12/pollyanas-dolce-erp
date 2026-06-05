@@ -707,28 +707,24 @@ def dashboard(request):
     categorias_list = CategoriaFalla.objects.filter(activo=True).order_by("orden", "nombre")
 
     today = timezone.localdate()
+    # Todos los planes activos ordenados: vencidos primero, luego por fecha
     planes_proximos = list(
         PlanMantenimiento.objects.filter(
             estatus=PlanMantenimiento.ESTATUS_ACTIVO,
             activo=True,
-            proxima_ejecucion__isnull=False,
-            proxima_ejecucion__lte=today + timedelta(days=30),
         )
         .select_related("activo_ref", "activo_ref__sucursal")
-        .order_by("proxima_ejecucion")[:40]
+        .order_by("proxima_ejecucion")[:80]
     )
     for plan in planes_proximos:
         plan.dias_para_vencer = (plan.proxima_ejecucion - today).days if plan.proxima_ejecucion else None
         plan.vencido = plan.dias_para_vencer is not None and plan.dias_para_vencer < 0
+        plan.urgente = plan.dias_para_vencer is not None and 0 <= plan.dias_para_vencer <= 7
 
-    # Servicios de flota próximos (por fecha)
-    # Solo el registro más reciente por unidad+tipo, con proxima_fecha próxima
+    # Servicios de flota — todos con proxima_fecha pendiente, más reciente por unidad+tipo
     from django.db.models import Max
     ultimos_ids = (
-        ServicioRealizadoUnidad.objects.filter(
-            proxima_fecha__isnull=False,
-            proxima_fecha__lte=today + timedelta(days=30),
-        )
+        ServicioRealizadoUnidad.objects.filter(proxima_fecha__isnull=False)
         .values("unidad_id", "tipo_servicio_id")
         .annotate(ultimo_id=Max("id"))
         .values_list("ultimo_id", flat=True)
@@ -736,11 +732,12 @@ def dashboard(request):
     servicios_flota = list(
         ServicioRealizadoUnidad.objects.filter(id__in=ultimos_ids)
         .select_related("unidad", "unidad__sucursal", "tipo_servicio")
-        .order_by("proxima_fecha")[:30]
+        .order_by("proxima_fecha")[:60]
     )
     for srv in servicios_flota:
         srv.dias_para_vencer = (srv.proxima_fecha - today).days if srv.proxima_fecha else None
         srv.vencido = srv.dias_para_vencer is not None and srv.dias_para_vencer < 0
+        srv.urgente = srv.dias_para_vencer is not None and 0 <= srv.dias_para_vencer <= 7
 
     solicitudes_cancelacion = (
         SolicitudCancelacion.objects.filter(estatus=SolicitudCancelacion.ESTATUS_PENDIENTE)
