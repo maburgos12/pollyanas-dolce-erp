@@ -10,10 +10,9 @@
 <style>
   .page-mantenimiento-dashboard .container{width:100%;max-width:none;margin:0;padding:clamp(18px,1.8vw,32px);overflow-x:hidden}
   .page-mantenimiento-dashboard .bi-shell{width:100%;max-width:none;margin:0;gap:16px}
-  .mant-tabs .module-tab{cursor:pointer;border:none;background:none;font:inherit}
   .mant-tab-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;border-radius:999px;background:rgba(139,34,82,.14);color:#8B2252;font-size:11px;font-weight:900;padding:0 5px;margin-left:4px}
-  .module-tab.active .mant-tab-count{background:rgba(255,255,255,.3);color:#fff}
-  .mant-tab-panel{display:none;flex-direction:column;gap:16px}
+  .module-tab.active .mant-tab-count,.module-tab:hover .mant-tab-count{background:rgba(139,34,82,.18);color:#8B2252}
+  .mant-tab-panel{display:none}
   .mant-tab-panel.active{display:contents}
   .mant-origin-tabs{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .mant-origin-tab{display:inline-flex;align-items:center;gap:8px;min-height:38px;border:1px solid rgba(139,34,82,.14);border-radius:999px;background:#fff;color:#8B2252;text-decoration:none;font-weight:900;padding:8px 14px}
@@ -103,13 +102,13 @@
 
 {% block content %}
 <div class="module-shell bi-shell">
-  <nav class="module-tabs mant-tabs" aria-label="Secciones de mantenimiento">
-    <button class="module-tab active" data-tab="tab-dashboard">Dashboard</button>
-    <button class="module-tab" data-tab="tab-seguimiento">Seguimiento <span class="mant-tab-count">{{ summary.total }}</span></button>
-    <button class="module-tab" data-tab="tab-equipos">Preventivo equipos <span class="mant-tab-count">{{ planes_proximos|length }}</span></button>
-    <button class="module-tab" data-tab="tab-flota">Preventivo flota <span class="mant-tab-count">{{ servicios_flota|length }}</span></button>
+  <div class="module-tabs">
+    <a href="#tab-dashboard" class="module-tab active" data-tab="tab-dashboard">Dashboard</a>
+    <a href="#tab-seguimiento" class="module-tab" data-tab="tab-seguimiento">Seguimiento <span class="mant-tab-count">{{ summary.total }}</span></a>
+    <a href="#tab-equipos" class="module-tab" data-tab="tab-equipos">Preventivo equipos <span class="mant-tab-count">{{ planes_proximos|length }}</span></a>
+    <a href="#tab-flota" class="module-tab" data-tab="tab-flota">Preventivo flota <span class="mant-tab-count">{{ servicios_flota|length }}</span></a>
     <a href="{% url 'mantenimiento:app' %}" class="module-tab">App móvil</a>
-  </nav>
+  </div>
 
   {# ── TAB: DASHBOARD ── #}
   <div class="mant-tab-panel active" id="tab-dashboard">
