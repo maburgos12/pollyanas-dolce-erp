@@ -702,7 +702,7 @@ def dashboard(request):
     asset_options = Activo.objects.select_related("sucursal").filter(activo=True).order_by(
         "sucursal__nombre", "nombre", "codigo"
     )[:180]
-    fleet_units = Unidad.objects.filter(activa=True).select_related("sucursal").order_by("codigo")[:6]
+    fleet_units = Unidad.objects.filter(activa=True).select_related("sucursal").order_by("descripcion", "codigo")
     sucursales_list = sucursales_operativas().order_by("nombre")
     categorias_list = CategoriaFalla.objects.filter(activo=True).order_by("orden", "nombre")
 
