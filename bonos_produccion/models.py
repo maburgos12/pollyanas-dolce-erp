@@ -17,7 +17,7 @@ AREA_CRUCERO = "CRUCERO"
 
 AREAS_PRODUCCION = [
     (AREA_HORNOS, "Hornos"),
-    (AREA_PRODUCCION, "Producción"),
+    (AREA_PRODUCCION, "Embetunado"),
     (AREA_ARMADO, "Armado"),
     (AREA_LOGISTICA, "Logística"),
     (AREA_CRUCERO, "Crucero"),
@@ -29,8 +29,8 @@ def normalizar_area_produccion(value: str) -> str:
     aliases = {
         "HORNO": AREA_HORNOS,
         "HORNOS": AREA_HORNOS,
-        "EMBETUNADO": AREA_EMBETUNADO,
-        "EMBETUNADOS": AREA_EMBETUNADO,
+        "EMBETUNADO": AREA_PRODUCCION,
+        "EMBETUNADOS": AREA_PRODUCCION,
         "PRODUCCION": AREA_PRODUCCION,
         "PRODUCCIÓN": AREA_PRODUCCION,
         "PROD": AREA_PRODUCCION,

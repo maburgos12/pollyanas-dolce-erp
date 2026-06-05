@@ -46,7 +46,7 @@ from .services_vacantes import crear_solicitud_vacante
 AREA_DIVISION_CHOICES = [
     ("HORNOS", "Hornos", Empleado.DEP_PRODUCCION, Empleado.DEP_PRODUCCION, "HORNOS"),
     ("ARMADO", "Armado", Empleado.DEP_PRODUCCION, Empleado.DEP_PRODUCCION, "ARMADO"),
-    ("EMBETUNADO", "Producción / Embetunado", Empleado.DEP_PRODUCCION, Empleado.DEP_PRODUCCION, "PRODUCCION"),
+    ("EMBETUNADO", "Embetunado", Empleado.DEP_PRODUCCION, Empleado.DEP_PRODUCCION, "EMBETUNADO"),
     ("CRUCERO", "Crucero", Empleado.DEP_PRODUCCION, Empleado.DEP_PRODUCCION, "CRUCERO"),
     ("ENVIO A SUCURSAL", "Envío a sucursal", Empleado.DEP_LOGISTICA, Empleado.DEP_PRODUCCION, "ENVIO_SUCURSAL"),
     ("CAJAS", "Cajas", Empleado.DEP_VENTAS, Empleado.DEP_VENTAS, "CAJAS"),
@@ -64,7 +64,7 @@ AREA_DIVISION_CHOICES = [
 PUESTO_OPERATIVO_CHOICES = [
     ("JEFATURA", "Jefatura"),
     ("HORNOS", "Hornos"),
-    ("PRODUCCION", "Producción / Embetunado"),
+    ("EMBETUNADO", "Embetunado"),
     ("ARMADO", "Armado"),
     ("CRUCERO", "Crucero"),
     ("ENVIO_SUCURSAL", "Envío a sucursal"),
