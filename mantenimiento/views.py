@@ -985,16 +985,29 @@ def registrar_servicio_flota(request):
     unidad = get_object_or_404(Unidad, pk=unidad_id, activa=True)
     tipo_srv = get_object_or_404(TipoServicioUnidad, pk=tipo_id, activo=True)
 
-    ServicioRealizadoUnidad.objects.create(
+    from django.utils.dateparse import parse_date as _pd
+    km = _safe_int(request.POST.get("km_al_servicio")) or None
+    proxima_manual = _pd(request.POST.get("proxima_fecha") or "")
+    proximos_km_manual = _safe_int(request.POST.get("proximos_km")) or None
+
+    srv = ServicioRealizadoUnidad(
         unidad=unidad,
         tipo_servicio=tipo_srv,
         fecha_servicio=fecha,
-        km_al_servicio=_safe_int(request.POST.get("km_al_servicio")) or None,
+        km_al_servicio=km,
         proveedor=(request.POST.get("proveedor") or "").strip(),
         costo=_parse_decimal(request.POST.get("costo")),
         notas=(request.POST.get("notas") or "").strip(),
         registrado_por=request.user,
     )
+    srv.save()  # save() auto-calcula proxima_fecha y proximos_km desde el tipo
+    # Sobrescribir con valores manuales si el técnico los especificó
+    if proxima_manual or proximos_km_manual:
+        if proxima_manual:
+            srv.proxima_fecha = proxima_manual
+        if proximos_km_manual:
+            srv.proximos_km = proximos_km_manual
+        srv.save(update_fields=["proxima_fecha", "proximos_km"])
     msg.success(request, f"Servicio registrado: {tipo_srv.nombre} · {unidad.codigo}.")
     return redirect("mantenimiento:dashboard")
 

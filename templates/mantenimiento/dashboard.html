@@ -632,9 +632,16 @@
         <label class="mant-field">Costo ($)
           <input type="number" name="costo" class="mant-input" min="0" step="0.01" placeholder="0.00">
         </label>
+        <label class="mant-field">Próxima fecha <span class="mant-badge" style="font-size:10px;padding:2px 7px;margin-left:4px">Opcional</span>
+          <input type="date" name="proxima_fecha" class="mant-input">
+        </label>
+        <label class="mant-field">Próximos km <span class="mant-badge" style="font-size:10px;padding:2px 7px;margin-left:4px">Opcional</span>
+          <input type="number" name="proximos_km" class="mant-input" min="0" placeholder="Si se deja vacío se calcula solo">
+        </label>
         <label class="mant-field span-2">Notas
           <input type="text" name="notas" class="mant-input" placeholder="Observaciones del servicio">
         </label>
+        <p class="mant-plan-meta span-2" style="margin:0">Si dejas "Próxima fecha" vacía, se calcula automáticamente según el intervalo del tipo de servicio.</p>
       </div>
       <div class="mant-eliminar-actions">
         <button class="btn btn-secondary btn-sm" type="button" onclick="cerrarModalServicio()">Cancelar</button>
