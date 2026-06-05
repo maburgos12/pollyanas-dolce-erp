@@ -294,25 +294,24 @@
               Próxima: <strong>{% if plan.proxima_ejecucion %}{{ plan.proxima_ejecucion|date:"d/m/Y" }}{% else %}Sin fecha{% endif %}</strong>{% if plan.ultima_ejecucion %} · Última: {{ plan.ultima_ejecucion|date:"d/m/Y" }}{% endif %}
             </div>
           </div>
-          <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+          <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+            <form method="post" action="{% url 'mantenimiento:mant-plan-ejecutar' plan.pk %}">
+              {% csrf_token %}
+              <input type="hidden" name="fecha_ejecucion" value="{{ today|date:'Y-m-d' }}">
+              <button class="btn btn-primary btn-sm" type="submit" style="background:#8B2252;border-color:#8B2252">
+                Hecho hoy
+              </button>
+            </form>
             <button class="btn btn-secondary btn-sm" type="button"
               onclick="abrirEditarPlan({{ plan.pk }},'{{ plan.nombre|escapejs }}',{{ plan.activo_ref.pk }},'{{ plan.tipo }}','{{ plan.estatus }}',{{ plan.frecuencia_dias }},{{ plan.tolerancia_dias }},'{{ plan.proxima_ejecucion|date:'Y-m-d' }}','{{ plan.ultima_ejecucion|date:'Y-m-d' }}','{{ plan.responsable|escapejs }}','{{ plan.instrucciones|escapejs }}')">
-              Editar plan
+              Editar / Otra fecha
             </button>
-            <form class="mant-plan-form" method="post" action="{% url 'mantenimiento:mant-plan-ejecutar' plan.pk %}">
-              {% csrf_token %}
-              <label style="display:grid;gap:4px;font-size:12px;font-weight:900;color:#513744">Fecha
-                <input class="mant-plan-date" type="date" name="fecha_ejecucion" value="{{ today|date:'Y-m-d' }}" required>
-              </label>
-              <input class="mant-plan-date mant-plan-notas" type="text" name="notas" placeholder="Notas (opcional)">
-              <button class="btn btn-primary btn-sm" type="submit" style="background:#8B2252;border-color:#8B2252">Marcar ejecutado</button>
-            </form>
           </div>
         </article>
         {% endfor %}
       </div>
       {% else %}
-      <div class="mant-empty">No hay planes de mantenimiento de equipos registrados. Puedes crearlos desde el módulo Activos.</div>
+      <div class="mant-empty">No hay planes registrados aún. Usa <strong>+ Nuevo plan</strong> para crear el primero.</div>
       {% endif %}
     </section>
   </div>
@@ -707,12 +706,14 @@
     <h3 id="modalServicioTitulo">Registrar servicio de unidad</h3>
 
     <!-- Selector de modo -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;border:1px solid rgba(139,34,82,.14);border-radius:10px;padding:4px;background:#fdf6f9">
-      <button type="button" id="modoRealizado" class="btn btn-primary btn-sm" onclick="setModoServicio('realizado')" style="background:#8B2252;border-color:#8B2252">
-        Ya se realizó
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;margin-bottom:16px;border:1px solid rgba(139,34,82,.22);border-radius:10px;overflow:hidden">
+      <button type="button" id="modoRealizado" onclick="setModoServicio('realizado')"
+        style="padding:10px;font:inherit;font-size:13px;font-weight:900;border:none;cursor:pointer;background:#8B2252;color:#fff;border-right:1px solid rgba(255,255,255,.2)">
+        Registrar servicio ya realizado
       </button>
-      <button type="button" id="modoProgramado" class="btn btn-secondary btn-sm" onclick="setModoServicio('programado')">
-        Programar próximo
+      <button type="button" id="modoProgramado" onclick="setModoServicio('programado')"
+        style="padding:10px;font:inherit;font-size:13px;font-weight:700;border:none;cursor:pointer;background:#f5eef2;color:#8B2252">
+        Programar próximo (sin historial)
       </button>
     </div>
     <p id="modoHelp" class="mant-plan-meta" style="margin-bottom:14px;background:#fdf6f9;border-radius:8px;padding:8px 10px"></p>
@@ -1004,15 +1005,9 @@ const MODOS_HELP = {
 function setModoServicio(modo) {
   document.getElementById("modoServicioInput").value = modo;
   const esRealizado = modo === "realizado";
-  document.getElementById("modoRealizado").className = esRealizado ? "btn btn-primary btn-sm" : "btn btn-secondary btn-sm";
-  document.getElementById("modoProgramado").className = esRealizado ? "btn btn-secondary btn-sm" : "btn btn-primary btn-sm";
-  if (!esRealizado) {
-    document.getElementById("modoRealizado").removeAttribute("style");
-    document.getElementById("modoProgramado").style.cssText = "background:#8B2252;border-color:#8B2252";
-  } else {
-    document.getElementById("modoRealizado").style.cssText = "background:#8B2252;border-color:#8B2252";
-    document.getElementById("modoProgramado").removeAttribute("style");
-  }
+  const BASE = "padding:10px;font:inherit;font-size:13px;border:none;cursor:pointer;";
+  document.getElementById("modoRealizado").style.cssText  = BASE + (esRealizado  ? "font-weight:900;background:#8B2252;color:#fff;border-right:1px solid rgba(255,255,255,.2)" : "font-weight:700;background:#f5eef2;color:#8B2252;border-right:1px solid rgba(139,34,82,.15)");
+  document.getElementById("modoProgramado").style.cssText = BASE + (!esRealizado ? "font-weight:900;background:#8B2252;color:#fff" : "font-weight:700;background:#f5eef2;color:#8B2252");
   document.getElementById("modoHelp").textContent = MODOS_HELP[modo];
   document.getElementById("bloqueRealizado").style.display = esRealizado ? "contents" : "none";
   document.getElementById("servicioFecha").required = esRealizado;
