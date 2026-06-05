@@ -68,6 +68,32 @@
     margin-top: 4px;
   }
 
+  .identity-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .identity-item {
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    padding: 12px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .identity-title {
+    color: var(--texto);
+    font-weight: 800;
+  }
+
+  .identity-meta {
+    color: var(--texto-light);
+    font-size: 13px;
+    margin-top: 3px;
+  }
+
   .rrhh-layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -535,6 +561,43 @@
     </article>
   </section>
 
+  {% if can_manage_rrhh and identidades_pendientes %}
+  <article class="rrhh-card">
+    <div class="rrhh-card-header">
+      <div>
+        <div class="rrhh-card-title">Pendientes de vincular</div>
+        <div class="rrhh-card-subtitle">Códigos recibidos desde checador o nómina que podrían pertenecer a empleados existentes.</div>
+      </div>
+    </div>
+    <div class="rrhh-card-body identity-list">
+      {% for pendiente in identidades_pendientes %}
+      <div class="identity-item">
+        <div>
+          <div class="identity-title">{{ pendiente.codigo_externo }} · {{ pendiente.nombre_externo }}</div>
+          <div class="identity-meta">
+            {{ pendiente.get_fuente_display }}
+            {% if pendiente.empleado_sugerido %}
+              · Sugerido: {{ pendiente.empleado_sugerido.nombre }}{% if pendiente.empleado_sugerido.codigo %} ({{ pendiente.empleado_sugerido.codigo }}){% endif %}
+            {% else %}
+              · Sin sugerencia automática
+            {% endif %}
+          </div>
+        </div>
+        {% if pendiente.empleado_sugerido %}
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="vincular_identidad">
+          <input type="hidden" name="pendiente_id" value="{{ pendiente.id }}">
+          <input type="hidden" name="empleado_id" value="{{ pendiente.empleado_sugerido_id }}">
+          <button class="btn btn-primary btn-small" type="submit">Vincular código</button>
+        </form>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </article>
+  {% endif %}
+
   <section class="rrhh-layout">
     <article class="rrhh-card">
       <div class="rrhh-card-header">
@@ -552,6 +615,11 @@
             <div class="rrhh-field span-2">
               <label for="nombre">Nombre completo</label>
               <input id="nombre" class="input-field" type="text" name="nombre" required>
+            </div>
+            <div class="rrhh-field">
+              <label for="codigo">Código de empleado / ID checador</label>
+              <input id="codigo" class="input-field" type="text" name="codigo" autocomplete="off">
+              <div class="rrhh-help">Debe coincidir con el número usado en nómina y checador.</div>
             </div>
             <div class="rrhh-field">
               <label for="rfc">RFC</label>
@@ -986,6 +1054,11 @@
                       <div class="rrhh-field span-2">
                         <label for="edit_nombre_{{ e.id }}">Nombre</label>
                         <input id="edit_nombre_{{ e.id }}" class="input-field" type="text" name="nombre" value="{{ e.nombre }}" required>
+                      </div>
+                      <div class="rrhh-field">
+                        <label for="edit_codigo_{{ e.id }}">Código de empleado / ID checador</label>
+                        <input id="edit_codigo_{{ e.id }}" class="input-field" type="text" name="codigo" value="{{ e.codigo }}" autocomplete="off">
+                        <div class="rrhh-help">Llave para nómina, checador y asistencias. No debe repetirse.</div>
                       </div>
                       <div class="rrhh-field">
                         <label for="edit_rfc_{{ e.id }}">RFC</label>

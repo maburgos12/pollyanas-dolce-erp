@@ -137,10 +137,68 @@ class Empleado(models.Model):
         return f"{prefix}{seq:03d}"
 
     def save(self, *args, **kwargs):
+        self.codigo = (self.codigo or "").strip()
         self.nombre_normalizado = normalizar_nombre(self.nombre or "")
         if not self.codigo:
             self.codigo = self._generate_codigo()
         super().save(*args, **kwargs)
+
+
+class EmpleadoIdentidadPendiente(models.Model):
+    FUENTE_HIKVISION = "hikvision"
+    FUENTE_NOMINA = "nomina"
+    FUENTE_CHOICES = [
+        (FUENTE_HIKVISION, "Hikvision / checador"),
+        (FUENTE_NOMINA, "Nómina / lista de raya"),
+    ]
+
+    ESTADO_PENDIENTE = "pendiente"
+    ESTADO_VINCULADO = "vinculado"
+    ESTADO_DESCARTADO = "descartado"
+    ESTADO_CHOICES = [
+        (ESTADO_PENDIENTE, "Pendiente"),
+        (ESTADO_VINCULADO, "Vinculado"),
+        (ESTADO_DESCARTADO, "Descartado"),
+    ]
+
+    fuente = models.CharField(max_length=20, choices=FUENTE_CHOICES, db_index=True)
+    codigo_externo = models.CharField(max_length=40, db_index=True)
+    nombre_externo = models.CharField(max_length=180)
+    nombre_normalizado = models.CharField(max_length=180, db_index=True, editable=False)
+    empleado_sugerido = models.ForeignKey(
+        Empleado,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="identidades_sugeridas",
+    )
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE, db_index=True)
+    notas = models.TextField(blank=True, default="")
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+    resuelto_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="identidades_rrhh_resueltas",
+    )
+    resuelto_en = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ("fuente", "codigo_externo")
+        ordering = ["estado", "-actualizado_en"]
+        verbose_name = "Identidad pendiente de empleado"
+        verbose_name_plural = "Identidades pendientes de empleados"
+
+    def save(self, *args, **kwargs):
+        self.codigo_externo = (self.codigo_externo or "").strip()
+        self.nombre_externo = (self.nombre_externo or "").strip()
+        self.nombre_normalizado = normalizar_nombre(self.nombre_externo or "")
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"{self.codigo_externo} · {self.nombre_externo}"
 
 
 class NominaPeriodo(models.Model):

@@ -25,6 +25,7 @@ from .models import (
     BonoEsquema,
     Empleado,
     EmpleadoBaja,
+    EmpleadoIdentidadPendiente,
     HoraExtra,
     ImportacionChecador,
     NominaConceptoLinea,
@@ -36,6 +37,7 @@ from .models import (
     VacanteRRHH,
 )
 from .services_bonos import asegurar_esquemas_base, sincronizar_esquemas_bono
+from .services_identidad import normalizar_codigo_empleado, vincular_identidad_pendiente
 from .services.lista_raya import importar_lista_raya_nomina
 from .services_permisos import can_authorize_direccion, resolver_permiso_direccion
 from .services_vacantes import crear_solicitud_vacante
@@ -100,6 +102,19 @@ def _parse_date(raw: str | None):
         return dt_date.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _codigo_empleado_desde_post(post_data) -> str:
+    return normalizar_codigo_empleado(post_data.get("codigo"))
+
+
+def _empleado_con_codigo_duplicado(codigo: str, empleado_id: int | None = None) -> Empleado | None:
+    if not codigo:
+        return None
+    qs = Empleado.objects.filter(codigo__iexact=codigo)
+    if empleado_id:
+        qs = qs.exclude(pk=empleado_id)
+    return qs.first()
 
 
 def _guardar_upload_temporal(archivo) -> Path:
@@ -682,6 +697,20 @@ def empleados(request):
 
         action = (request.POST.get("action") or "create").strip()
         nombre = (request.POST.get("nombre") or "").strip()
+        if action == "vincular_identidad":
+            pendiente = get_object_or_404(
+                EmpleadoIdentidadPendiente,
+                pk=request.POST.get("pendiente_id"),
+                estado=EmpleadoIdentidadPendiente.ESTADO_PENDIENTE,
+            )
+            empleado = get_object_or_404(Empleado, pk=request.POST.get("empleado_id"))
+            try:
+                vincular_identidad_pendiente(pendiente, empleado, user=request.user)
+            except ValueError as exc:
+                messages.error(request, str(exc))
+            else:
+                messages.success(request, f"Código {pendiente.codigo_externo} vinculado a {empleado.nombre}.")
+            return redirect("rrhh:empleados")
         if action == "baja":
             empleado = None
             empleado_id = (request.POST.get("empleado") or "").strip()
@@ -723,6 +752,7 @@ def empleados(request):
             )
             messages.success(request, f"Plantilla autorizada actualizada: {plantilla}.")
             return redirect("rrhh:empleados")
+        codigo = _codigo_empleado_desde_post(request.POST)
         if not nombre:
             messages.error(request, "Nombre del empleado es obligatorio.")
         elif action == "update":
@@ -730,8 +760,12 @@ def empleados(request):
             empleado = get_object_or_404(Empleado, pk=int(empleado_id)) if empleado_id.isdigit() else None
             if not empleado:
                 messages.error(request, "Selecciona un empleado válido para editar.")
+            elif duplicado := _empleado_con_codigo_duplicado(codigo, empleado.id):
+                messages.error(request, f"El código {codigo} ya pertenece a {duplicado.nombre}.")
             else:
                 organizacion = _organizacion_desde_post(request.POST)
+                if codigo:
+                    empleado.codigo = codigo
                 empleado.nombre = nombre
                 empleado.rfc = (request.POST.get("rfc") or "").strip()
                 empleado.curp = (request.POST.get("curp") or "").strip()
@@ -780,7 +814,11 @@ def empleados(request):
                 return redirect("rrhh:empleados")
         else:
             organizacion = _organizacion_desde_post(request.POST)
+            if duplicado := _empleado_con_codigo_duplicado(codigo):
+                messages.error(request, f"El código {codigo} ya pertenece a {duplicado.nombre}.")
+                return redirect("rrhh:empleados")
             empleado = Empleado.objects.create(
+                codigo=codigo,
                 nombre=nombre,
                 rfc=(request.POST.get("rfc") or "").strip(),
                 curp=(request.POST.get("curp") or "").strip(),
@@ -905,6 +943,12 @@ def empleados(request):
     for empleado in empleados_page:
         empleado.bono_esquema_ids = {esquema.id for esquema in empleado.bonos_esquemas.all()}
 
+    identidades_pendientes = (
+        EmpleadoIdentidadPendiente.objects.select_related("empleado_sugerido")
+        .filter(estado=EmpleadoIdentidadPendiente.ESTADO_PENDIENTE)
+        .order_by("-actualizado_en")[:20]
+    )
+
     context = {
         "module_tabs": _module_tabs("empleados"),
         "can_manage_rrhh": can_manage_rrhh(request.user),
@@ -930,6 +974,7 @@ def empleados(request):
         "months": range(1, 13),
         "bajas_recientes": EmpleadoBaja.objects.select_related("empleado").order_by("-fecha_baja")[:8],
         "plantillas": PlantillaAutorizada.objects.order_by("-anio", "-mes", "area")[:8],
+        "identidades_pendientes": identidades_pendientes,
         "enterprise_chain": enterprise_chain,
         "critical_path_rows": _rrhh_critical_path_rows(enterprise_chain),
         "document_stage_rows": document_stage_rows,

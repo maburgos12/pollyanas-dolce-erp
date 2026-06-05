@@ -16,6 +16,7 @@ from rrhh.models import (
     BonoEsquema,
     Empleado,
     EmpleadoBaja,
+    EmpleadoIdentidadPendiente,
     HoraExtra,
     NominaConceptoLinea,
     NominaImportacion,
@@ -965,6 +966,7 @@ class RRHHViewsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "RRHH · Empleados")
         self.assertContains(resp, "Alta de empleado")
+        self.assertContains(resp, "Código de empleado / ID checador")
         self.assertContains(resp, "Vista rápida")
         self.assertContains(resp, "Catálogo de empleados")
         self.assertContains(resp, "Modificar")
@@ -983,6 +985,84 @@ class RRHHViewsTests(TestCase):
         self.assertIn("erp_governance_rows", resp.context)
         self.assertIn("executive_radar_rows", resp.context)
         self.assertIn("erp_command_center", resp.context)
+
+    def test_empleados_crea_y_edita_codigo_operativo(self):
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "create",
+                "codigo": " 346 ",
+                "nombre": "REY IVAN VALDEZ FELIX",
+                "salario_diario": "300.00",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        empleado = Empleado.objects.get(nombre="REY IVAN VALDEZ FELIX")
+        self.assertEqual(empleado.codigo, "346")
+
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "update",
+                "empleado_id": str(empleado.id),
+                "codigo": " 00346 ",
+                "nombre": "REY IVAN VALDEZ FELIX",
+                "salario_diario": "300.00",
+                "activo": "on",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        empleado.refresh_from_db()
+        self.assertEqual(empleado.codigo, "00346")
+
+    def test_empleados_bloquea_codigo_duplicado(self):
+        existente = Empleado.objects.create(nombre="Empleado Existente", codigo="346")
+        otro = Empleado.objects.create(nombre="Empleado Otro", codigo="999")
+
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "update",
+                "empleado_id": str(otro.id),
+                "codigo": "346",
+                "nombre": otro.nombre,
+                "salario_diario": "300.00",
+                "activo": "on",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        otro.refresh_from_db()
+        self.assertEqual(otro.codigo, "999")
+        self.assertContains(resp, f"El código 346 ya pertenece a {existente.nombre}")
+
+    def test_checador_desconocido_crea_pendiente_con_sugerencia_por_nombre(self):
+        from rrhh.services_hikvision import procesar_eventos_hik
+
+        empleado = Empleado.objects.create(nombre="REY IVAN VALDEZ FELIX", codigo="EMP-2606-001")
+
+        resultado = procesar_eventos_hik(
+            [
+                {
+                    "employee_no": "346",
+                    "name": "REY IVAN VALDEZ FELIX",
+                    "attendance_status": "checkIn",
+                    "time": "2026-06-04T08:05:00-07:00",
+                    "serial_no": 34601,
+                }
+            ]
+        )
+
+        self.assertEqual(resultado["errores"], 1)
+        pendiente = EmpleadoIdentidadPendiente.objects.get(fuente=EmpleadoIdentidadPendiente.FUENTE_HIKVISION, codigo_externo="346")
+        self.assertEqual(pendiente.nombre_externo, "REY IVAN VALDEZ FELIX")
+        self.assertEqual(pendiente.empleado_sugerido, empleado)
+        self.assertEqual(Empleado.objects.filter(nombre="REY IVAN VALDEZ FELIX").count(), 1)
         self.assertIn("owner", resp.context["document_stage_rows"][0])
         self.assertIn("completion", resp.context["document_stage_rows"][0])
         self.assertTrue(resp.context["release_gate_rows"])
@@ -1924,7 +2004,68 @@ class ListaRayaImportTests(TestCase):
         self.assertEqual(result.empleados[0].rfc, "LOMM-750126-DB4")
         self.assertEqual(result.empleados[0].curp, "LOMM-750126-MSLPDR06")
 
+
+class ListaRayaIdentidadTests(TestCase):
+    def test_importar_lista_raya_usa_empleado_sugerido_y_no_duplica(self):
+        from datetime import date
+        from tempfile import NamedTemporaryFile
+
+        from rrhh.services.lista_raya import (
+            EmpleadoListaRaya,
+            ListaRayaParseResult,
+            importar_lista_raya_nomina,
+        )
+
+        empleado = Empleado.objects.create(nombre="REY IVAN VALDEZ FELIX", codigo="EMP-2606-001")
+        row = EmpleadoListaRaya(
+            codigo="346",
+            nombre="REY IVAN VALDEZ FELIX",
+            area="PRODUCCION",
+            rfc="",
+            nss="",
+            curp="",
+            fecha_ingreso=date(2026, 6, 4),
+            salario_diario=Decimal("300.00"),
+            sdi=Decimal("300.00"),
+            sbc=Decimal("300.00"),
+            dias_pagados=Decimal("15"),
+            horas_trabajadas=Decimal("120"),
+            horas_dia=Decimal("8"),
+            horas_extra=Decimal("0"),
+            ausencias=Decimal("0"),
+            incapacidades=Decimal("0"),
+            total_percepciones=Decimal("4500.00"),
+            total_deducciones=Decimal("0.00"),
+            neto=Decimal("4500.00"),
+            conceptos=[],
+        )
+        parse_result = ListaRayaParseResult(
+            source_path="fake.xls",
+            source_hash="hash-identidad-test",
+            empresa="Pollyana's Dolce",
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 15),
+            periodo_numero="11",
+            empleados=[row],
+            total_empleados_reportado=1,
+            total_percepciones_reportado=Decimal("4500.00"),
+            total_deducciones_reportado=Decimal("0.00"),
+            total_neto_reportado=Decimal("4500.00"),
+        )
+
+        with NamedTemporaryFile(suffix=".xls") as tmp, patch("rrhh.services.lista_raya.parse_lista_raya_xls", return_value=parse_result):
+            importar_lista_raya_nomina(tmp.name, commit=True)
+
+        self.assertEqual(Empleado.objects.filter(nombre="REY IVAN VALDEZ FELIX").count(), 1)
+        self.assertEqual(NominaLinea.objects.get().empleado, empleado)
+        pendiente = EmpleadoIdentidadPendiente.objects.get(fuente=EmpleadoIdentidadPendiente.FUENTE_NOMINA, codigo_externo="346")
+        self.assertEqual(pendiente.empleado_sugerido, empleado)
+        empleado.refresh_from_db()
+        self.assertEqual(empleado.codigo, "EMP-2606-001")
+
     def test_command_dry_run_no_toca_base(self):
+        if not LISTA_RAYA_SAMPLE.exists():
+            raise SkipTest("No está disponible el archivo real de lista de raya.")
         call_command("importar_lista_raya", str(LISTA_RAYA_SAMPLE))
 
         self.assertEqual(Empleado.objects.count(), 0)
@@ -1932,6 +2073,8 @@ class ListaRayaImportTests(TestCase):
         self.assertEqual(NominaImportacion.objects.count(), 0)
 
     def test_command_commit_importa_periodo_y_conceptos(self):
+        if not LISTA_RAYA_SAMPLE.exists():
+            raise SkipTest("No está disponible el archivo real de lista de raya.")
         call_command("importar_lista_raya", str(LISTA_RAYA_SAMPLE), "--commit")
 
         periodo = NominaPeriodo.objects.get(fecha_inicio="2026-04-16", fecha_fin="2026-04-30")

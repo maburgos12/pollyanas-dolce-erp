@@ -5,6 +5,7 @@ from .models import (
     BonoEsquema,
     Empleado,
     EmpleadoBaja,
+    EmpleadoIdentidadPendiente,
     HoraExtra,
     ImportacionChecador,
     ImportacionNominaContpaq,
@@ -72,6 +73,14 @@ class EmpleadoAdmin(admin.ModelAdmin):
         "puesto_operativo",
         "jefe_directo__nombre",
     )
+
+
+@admin.register(EmpleadoIdentidadPendiente)
+class EmpleadoIdentidadPendienteAdmin(admin.ModelAdmin):
+    list_display = ("codigo_externo", "nombre_externo", "fuente", "empleado_sugerido", "estado", "actualizado_en")
+    list_filter = ("fuente", "estado")
+    search_fields = ("codigo_externo", "nombre_externo", "empleado_sugerido__nombre", "empleado_sugerido__codigo")
+    readonly_fields = ("nombre_normalizado", "creado_en", "actualizado_en", "resuelto_en")
 
 
 class NominaConceptoLineaInline(admin.TabularInline):
