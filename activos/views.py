@@ -2004,6 +2004,34 @@ def planes(request):
             messages.success(request, f"Ejecución registrada para {plan.nombre}.")
             return redirect("activos:planes")
 
+        if action == "edit_plan":
+            plan_id = _safe_int(request.POST.get("plan_id"))
+            plan = get_object_or_404(PlanMantenimiento, pk=plan_id)
+            nombre = (request.POST.get("nombre") or "").strip()
+            if not nombre:
+                messages.error(request, "El nombre del plan es obligatorio.")
+                return redirect("activos:planes")
+            tipo = (request.POST.get("tipo") or plan.tipo).strip().upper()
+            estatus_val = (request.POST.get("estatus") or plan.estatus).strip().upper()
+            plan.nombre = nombre
+            plan.tipo = tipo if tipo in {x[0] for x in PlanMantenimiento.TIPO_CHOICES} else plan.tipo
+            plan.estatus = estatus_val if estatus_val in {x[0] for x in PlanMantenimiento.ESTATUS_CHOICES} else plan.estatus
+            plan.frecuencia_dias = max(1, _safe_int(request.POST.get("frecuencia_dias"), default=plan.frecuencia_dias))
+            plan.tolerancia_dias = max(0, _safe_int(request.POST.get("tolerancia_dias"), default=plan.tolerancia_dias))
+            nueva_ultima = _parse_date(request.POST.get("ultima_ejecucion"))
+            nueva_proxima = _parse_date(request.POST.get("proxima_ejecucion"))
+            if nueva_ultima:
+                plan.ultima_ejecucion = nueva_ultima
+            if nueva_proxima:
+                plan.proxima_ejecucion = nueva_proxima
+            elif nueva_ultima and plan.frecuencia_dias:
+                plan.recompute_next_date()
+            plan.responsable = (request.POST.get("responsable") or "").strip()
+            plan.save()
+            log_event(request.user, "UPDATE", "activos.PlanMantenimiento", plan.id, {"nombre": plan.nombre})
+            messages.success(request, f"Plan '{plan.nombre}' actualizado.")
+            return redirect("activos:planes")
+
         if action == "generar_ordenes_programadas":
             scope = (request.POST.get("scope") or "overdue").strip().lower()
             dry_run = (request.POST.get("dry_run") or "").strip().lower() in {"1", "on", "true", "yes"}
@@ -2183,10 +2211,29 @@ def planes(request):
         ).count(),
         bitacora_30d=BitacoraMantenimiento.objects.filter(fecha__date__gte=today - timedelta(days=30)).count(),
     )
+    kpi = {
+        "total": all_planes_qs.count(),
+        "activos": all_planes_qs.filter(estatus=PlanMantenimiento.ESTATUS_ACTIVO, activo=True).count(),
+        "vencidos": all_planes_qs.filter(
+            estatus=PlanMantenimiento.ESTATUS_ACTIVO,
+            activo=True,
+            proxima_ejecucion__isnull=False,
+            proxima_ejecucion__lt=today,
+        ).count(),
+        "proximos_semana": all_planes_qs.filter(
+            estatus=PlanMantenimiento.ESTATUS_ACTIVO,
+            activo=True,
+            proxima_ejecucion__isnull=False,
+            proxima_ejecucion__gte=today,
+            proxima_ejecucion__lte=today + timedelta(days=7),
+        ).count(),
+    }
     context = {
         "module_tabs": _module_tabs("planes"),
         "planes_rows": planes_rows,
-        "activos": list(Activo.objects.filter(activo=True).order_by("nombre")[:800]),
+        "kpi": kpi,
+        "gen_result": None,
+        "activos": list(Activo.objects.select_related("sucursal").filter(activo=True).order_by("nombre")[:800]),
         "tipo_choices": PlanMantenimiento.TIPO_CHOICES,
         "estatus_choices": PlanMantenimiento.ESTATUS_CHOICES,
         "filters": {"q": q, "estatus": estatus, "scope": scope, "enterprise_gap": enterprise_gap},
