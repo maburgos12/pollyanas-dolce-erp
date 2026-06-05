@@ -15,4 +15,5 @@ urlpatterns = [
     path("planes/gestionar/", views.gestionar_plan, name="mant-plan-gestionar"),
     path("flota/servicio/", views.registrar_servicio_flota, name="mant-flota-servicio"),
     path("flota/tipos/", views.gestionar_tipo_servicio, name="mant-flota-tipo"),
+    path("proveedores/", views.gestionar_proveedor, name="mant-proveedor"),
 ]

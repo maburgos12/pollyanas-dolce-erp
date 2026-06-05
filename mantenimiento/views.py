@@ -775,9 +775,42 @@ def dashboard(request):
             "plan_estatus_choices": PlanMantenimiento.ESTATUS_CHOICES,
             "activos_para_plan": list(Activo.objects.select_related("sucursal").filter(activo=True).order_by("sucursal__nombre", "nombre")[:400]),
             "unidades_para_servicio": list(Unidad.objects.filter(activa=True).select_related("sucursal").order_by("descripcion", "codigo")),
-            "tipos_servicio": list(TipoServicioUnidad.objects.filter(activo=True).order_by("nombre")),
+            "proveedores_servicio": list(Proveedor.objects.filter(activo=True).order_by("nombre")),
+            "proveedores_todos": list(Proveedor.objects.order_by("nombre")),
         },
     )
+
+
+@login_required
+def gestionar_proveedor(request):
+    """Crear o editar un Proveedor desde el módulo de mantenimiento."""
+    _require_mantenimiento(request.user)
+    if request.method != "POST":
+        return redirect("mantenimiento:dashboard")
+
+    from django.contrib import messages as msg
+
+    action = (request.POST.get("action") or "crear").strip().lower()
+    nombre = (request.POST.get("nombre") or "").strip()
+    if not nombre:
+        msg.error(request, "El nombre del proveedor es obligatorio.")
+        return redirect("mantenimiento:dashboard")
+
+    if action == "editar":
+        prov_id = _safe_int(request.POST.get("proveedor_id"))
+        proveedor = get_object_or_404(Proveedor, pk=prov_id)
+        proveedor.nombre = nombre
+        proveedor.activo = request.POST.get("activo", "1") != "0"
+        proveedor.save()
+        msg.success(request, f"Proveedor '{nombre}' actualizado.")
+    else:
+        if Proveedor.objects.filter(nombre__iexact=nombre).exists():
+            msg.warning(request, f"Ya existe un proveedor con ese nombre.")
+        else:
+            Proveedor.objects.create(nombre=nombre, activo=True)
+            msg.success(request, f"Proveedor '{nombre}' creado.")
+
+    return redirect("mantenimiento:dashboard")
 
 
 @login_required
@@ -1016,18 +1049,19 @@ def registrar_servicio_flota(request):
     from django.utils.dateparse import parse_date as _pd
 
     unidad_id = _safe_int(request.POST.get("unidad_id"))
-    tipo_id = _safe_int(request.POST.get("tipo_servicio_id"))
+    nombre_servicio = (request.POST.get("nombre_servicio") or "").strip()
     fecha_raw = request.POST.get("fecha_servicio") or ""
     fecha = _pd(fecha_raw) or timezone.localdate()
 
-    if not unidad_id or not tipo_id:
-        msg.error(request, "Selecciona unidad y tipo de servicio.")
+    if not unidad_id or not nombre_servicio:
+        msg.error(request, "Selecciona una unidad e indica qué servicio se realizó.")
         return redirect("mantenimiento:dashboard")
 
     unidad = get_object_or_404(Unidad, pk=unidad_id, activa=True)
-    tipo_srv = get_object_or_404(TipoServicioUnidad, pk=tipo_id, activo=True)
-
-    from django.utils.dateparse import parse_date as _pd
+    tipo_srv, _ = TipoServicioUnidad.objects.get_or_create(
+        nombre=nombre_servicio,
+        defaults={"tipo_intervalo": TipoServicioUnidad.INTERVALO_TIEMPO, "activo": True},
+    )
 
     modo = (request.POST.get("modo_servicio") or "realizado").strip().lower()
     proxima_manual = _pd(request.POST.get("proxima_fecha") or "")

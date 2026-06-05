@@ -111,6 +111,7 @@
     <a href="#tab-seguimiento" class="module-tab" data-tab="tab-seguimiento">Seguimiento <span class="mant-tab-count">{{ summary.total }}</span></a>
     <a href="#tab-equipos" class="module-tab" data-tab="tab-equipos">Preventivo equipos <span class="mant-tab-count">{{ planes_proximos|length }}</span></a>
     <a href="#tab-flota" class="module-tab" data-tab="tab-flota">Preventivo flota <span class="mant-tab-count">{{ servicios_flota|length }}</span></a>
+    <a href="#tab-proveedores" class="module-tab" data-tab="tab-proveedores">Proveedores</a>
     <a href="{% url 'mantenimiento:app' %}" class="module-tab">App móvil</a>
   </div>
 
@@ -358,7 +359,7 @@
             </div>
           </div>
           <button class="btn btn-secondary btn-sm" type="button"
-            onclick="abrirModalServicio('{{ srv.unidad.pk }}','{{ srv.tipo_servicio.pk }}')">
+            onclick="abrirModalServicio('{{ srv.unidad.pk }}')">
             Registrar siguiente
           </button>
         </article>
@@ -381,47 +382,41 @@
       </div>
     </section>
 
-    <section class="bi-panel" style="margin-top:0">
-      <div class="bi-panel-head">
-        <div>
-          <div class="bi-kicker">Catálogo</div>
-          <h2 class="bi-panel-title">Tipos de servicio</h2>
-          <p class="bi-copy">Define los servicios recurrentes de tu flota con el intervalo exacto — cualquier número de meses o km, sin opciones fijas.</p>
-        </div>
-        <div class="bi-panel-actions">
-          <button class="btn btn-primary btn-sm" type="button" onclick="abrirModalTipoServicio()" style="background:#8B2252;border-color:#8B2252">+ Nuevo tipo</button>
-        </div>
-      </div>
-      <div class="mant-planes-grid">
-        {% for ts in tipos_servicio %}
-        <article class="mant-plan-row">
-          <div>
-            <div class="mant-plan-title">{{ ts.nombre }}</div>
-            <div class="mant-plan-meta">
-              {% if ts.tipo_intervalo == 'tiempo' %}
-                <span class="mant-badge" style="background:#e8f0fe;color:#1a56db">Por tiempo</span>
-                &nbsp;Cada <strong>{{ ts.intervalo_meses }}</strong> mes{{ ts.intervalo_meses|pluralize:"es" }}
-              {% elif ts.tipo_intervalo == 'km' %}
-                <span class="mant-badge" style="background:#f0fdf4;color:#166534">Por km</span>
-                &nbsp;Cada <strong>{{ ts.intervalo_km|floatformat:0 }}</strong> km
-              {% else %}
-                <span class="mant-badge" style="background:#fef9c3;color:#854d0e">Tiempo o km</span>
-                &nbsp;{{ ts.intervalo_meses }}m o {{ ts.intervalo_km|floatformat:0 }} km
-              {% endif %}
-              {% if ts.notas %}<br><span class="muted-cell">{{ ts.notas }}</span>{% endif %}
-            </div>
-          </div>
-          <button class="btn btn-secondary btn-sm" type="button"
-            onclick="abrirEditarTipoServicio({{ ts.pk }},'{{ ts.nombre|escapejs }}','{{ ts.tipo_intervalo }}',{{ ts.intervalo_meses|default:'null' }},{{ ts.intervalo_km|default:'null' }},'{{ ts.notas|escapejs }}')">
-            Editar
-          </button>
-        </article>
-        {% empty %}
-        <div class="mant-empty">Sin tipos de servicio registrados. Crea uno para empezar a dar seguimiento a tu flota.</div>
-        {% endfor %}
-      </div>
-    </section>
   </div>
+</div>
+
+{# ── TAB: PROVEEDORES ── #}
+<div class="mant-tab-panel" id="tab-proveedores">
+  <section class="bi-panel">
+    <div class="bi-panel-head">
+      <div>
+        <div class="bi-kicker">Catálogo</div>
+        <h2 class="bi-panel-title">Proveedores de servicio</h2>
+        <p class="bi-copy">Talleres, técnicos y empresas de mantenimiento. Agrégalos aquí para asignarlos rápidamente a cualquier reporte u orden.</p>
+      </div>
+      <div class="bi-panel-actions">
+        <button class="btn btn-primary btn-sm" type="button" onclick="abrirModalProveedor()" style="background:#8B2252;border-color:#8B2252">+ Nuevo proveedor</button>
+      </div>
+    </div>
+    <div class="mant-planes-grid">
+      {% for prov in proveedores_todos %}
+      <article class="mant-plan-row {% if not prov.activo %}vencido{% endif %}">
+        <div>
+          <div class="mant-plan-title">
+            {% if not prov.activo %}<span class="mant-badge" style="background:#f5f5f5;color:#616161;margin-right:6px">Inactivo</span>{% endif %}
+            {{ prov.nombre }}
+          </div>
+        </div>
+        <button class="btn btn-secondary btn-sm" type="button"
+          onclick="abrirEditarProveedor({{ prov.pk }},'{{ prov.nombre|escapejs }}',{{ prov.activo|yesno:'true,false' }})">
+          Editar
+        </button>
+      </article>
+      {% empty %}
+      <div class="mant-empty">Sin proveedores registrados. Agrega talleres y técnicos para asignarlos a los reportes.</div>
+      {% endfor %}
+    </div>
+  </section>
 </div>
 
 {% if messages %}
@@ -730,13 +725,9 @@
             {% endfor %}
           </select>
         </label>
-        <label class="mant-field span-2">Tipo de servicio <span style="color:#E53935">*</span>
-          <select name="tipo_servicio_id" id="servicioTipoId" class="mant-input" required>
-            <option value="">Seleccionar tipo...</option>
-            {% for ts in tipos_servicio %}
-              <option value="{{ ts.id }}">{{ ts.nombre }}</option>
-            {% endfor %}
-          </select>
+        <label class="mant-field span-2">¿Qué servicio se realizó? <span style="color:#E53935">*</span>
+          <input type="text" name="nombre_servicio" id="servicioNombre" class="mant-input" required
+            placeholder="Ej. Cambio de aceite, Revisión de frenos, Mantenimiento refrigeración...">
         </label>
 
         <!-- Campos modo "ya se realizó" -->
@@ -774,6 +765,34 @@
     </form>
   </div>
 </div>
+<!-- ── Modal crear / editar proveedor ── -->
+<div class="mant-eliminar-modal" id="modalProveedor" role="dialog" aria-modal="true">
+  <div class="mant-eliminar-panel mant-modal-md">
+    <h3 id="modalProveedorTitulo">Nuevo proveedor</h3>
+    <form id="formProveedor" method="post" action="{% url 'mantenimiento:mant-proveedor' %}">
+      {% csrf_token %}
+      <input type="hidden" name="action" id="proveedorAction" value="crear">
+      <input type="hidden" name="proveedor_id" id="proveedorId">
+      <div style="display:grid;gap:12px;margin-bottom:16px">
+        <label class="mant-field">Nombre del proveedor / taller <span style="color:#E53935">*</span>
+          <input type="text" name="nombre" id="proveedorNombre" class="mant-input" required
+            placeholder="Ej. Taller Mecánico López, Frío Express, Técnico Ramírez">
+        </label>
+        <div id="proveedorActivoBlock" style="display:none">
+          <label style="display:flex;align-items:center;gap:10px;font-size:13px;font-weight:700;color:#513744;cursor:pointer">
+            <input type="checkbox" name="activo" id="proveedorActivo" value="1" checked>
+            Proveedor activo
+          </label>
+        </div>
+      </div>
+      <div class="mant-eliminar-actions">
+        <button class="btn btn-secondary btn-sm" type="button" onclick="cerrarModalProveedor()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" type="submit" id="proveedorSubmitBtn" style="background:#8B2252;border-color:#8B2252">Guardar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
@@ -981,20 +1000,6 @@ function cerrarModalPlan() {
 }
 document.getElementById("modalPlan").addEventListener("click", (e) => { if (e.target === document.getElementById("modalPlan")) cerrarModalPlan(); });
 
-// Datos de tipos de servicio para auto-calcular próxima fecha
-const TIPOS_SERVICIO = {
-  {% for ts in tipos_servicio %}
-  "{{ ts.pk }}": { meses: {{ ts.intervalo_meses|default:"null" }}, km: {{ ts.intervalo_km|default:"null" }}, tipo: "{{ ts.tipo_intervalo }}" }{% if not forloop.last %},{% endif %}
-  {% endfor %}
-};
-
-function calcularProximaFecha(tipoId, fechaBase) {
-  const ts = TIPOS_SERVICIO[tipoId];
-  if (!ts || !ts.meses) return "";
-  const d = new Date(fechaBase || new Date());
-  d.setMonth(d.getMonth() + ts.meses);
-  return d.toISOString().slice(0, 10);
-}
 
 // ── Modal servicio flota ──
 const MODOS_HELP = {
@@ -1030,33 +1035,14 @@ function setModoServicio(modo) {
   }
 }
 
-function abrirModalServicio(unidadId, tipoId) {
+function abrirModalServicio(unidadId) {
   const modal = document.getElementById("modalServicio");
   document.getElementById("servicioUnidadId").value = unidadId || "";
-  if (tipoId) {
-    document.getElementById("servicioTipoId").value = tipoId;
-    const f = document.getElementById("servicioFecha");
-    const pf = document.getElementById("servicioProximaFecha");
-    if (pf && !pf.value) {
-      const sug = calcularProximaFecha(tipoId, f ? f.value : null);
-      if (sug) pf.placeholder = `Sugerida: ${sug}`;
-    }
-  }
+  document.getElementById("servicioNombre").value = "";
   setModoServicio("realizado");
   modal.classList.add("is-open");
+  setTimeout(() => document.getElementById("servicioNombre").focus(), 120);
 }
-
-// Auto-calcular próxima fecha al cambiar tipo en el modal
-const tipoSelect = document.querySelector("#modalServicio [name=tipo_servicio_id]");
-const fechaServSelect = document.getElementById("servicioFecha");
-const proximaFechaInput = document.getElementById("servicioProximaFecha");
-function actualizarProximaFecha() {
-  if (!tipoSelect || !proximaFechaInput || proximaFechaInput.value) return;
-  const sugerida = calcularProximaFecha(tipoSelect.value, fechaServSelect ? fechaServSelect.value : null);
-  if (sugerida) proximaFechaInput.placeholder = `Sugerida: ${sugerida}`;
-}
-if (tipoSelect) tipoSelect.addEventListener("change", actualizarProximaFecha);
-if (fechaServSelect) fechaServSelect.addEventListener("change", actualizarProximaFecha);
 function cerrarModalServicio() {
   document.getElementById("modalServicio").classList.remove("is-open");
 }
@@ -1103,9 +1089,37 @@ document.getElementById("modalTipoServicio").addEventListener("click", (e) => {
   if (e.target === document.getElementById("modalTipoServicio")) cerrarModalTipoServicio();
 });
 
+// ── Modal proveedor ──
+function abrirModalProveedor() {
+  document.getElementById("modalProveedorTitulo").textContent = "Nuevo proveedor";
+  document.getElementById("proveedorAction").value = "crear";
+  document.getElementById("proveedorId").value = "";
+  document.getElementById("proveedorNombre").value = "";
+  document.getElementById("proveedorActivoBlock").style.display = "none";
+  document.getElementById("proveedorSubmitBtn").textContent = "Guardar";
+  document.getElementById("modalProveedor").classList.add("is-open");
+  setTimeout(() => document.getElementById("proveedorNombre").focus(), 120);
+}
+function abrirEditarProveedor(id, nombre, activo) {
+  document.getElementById("modalProveedorTitulo").textContent = "Editar proveedor";
+  document.getElementById("proveedorAction").value = "editar";
+  document.getElementById("proveedorId").value = id;
+  document.getElementById("proveedorNombre").value = nombre;
+  document.getElementById("proveedorActivo").checked = activo;
+  document.getElementById("proveedorActivoBlock").style.display = "block";
+  document.getElementById("proveedorSubmitBtn").textContent = "Guardar cambios";
+  document.getElementById("modalProveedor").classList.add("is-open");
+}
+function cerrarModalProveedor() {
+  document.getElementById("modalProveedor").classList.remove("is-open");
+}
+document.getElementById("modalProveedor").addEventListener("click", (e) => {
+  if (e.target === document.getElementById("modalProveedor")) cerrarModalProveedor();
+});
+
 // Cerrar con ESC (extender el existente)
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { cerrarModalPlan(); cerrarModalServicio(); cerrarModalTipoServicio(); }
+  if (e.key === "Escape") { cerrarModalPlan(); cerrarModalServicio(); cerrarModalTipoServicio(); cerrarModalProveedor(); }
 });
 </script>
 {% endblock %}
