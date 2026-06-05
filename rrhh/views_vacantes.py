@@ -11,10 +11,12 @@ from django.shortcuts import get_object_or_404, redirect, render
 
 from core.models import Sucursal
 
-from .models import Empleado, VacanteRRHH, VacanteSeguimiento
+from .models import CandidatoVacante, Empleado, VacanteRRHH, VacanteSeguimiento
 from .services_vacantes import (
+    agregar_candidato,
     agregar_seguimiento_vacante,
     aprobar_vacante_autorizacion,
+    avanzar_etapa_candidato,
     cancelar_vacante,
     can_autorizar_vacante,
     can_gestionar_vacantes,
@@ -210,6 +212,9 @@ def vacante_detalle(request, pk: int):
             "show_reenviar_revision": show_reenviar_revision,
             "show_tracking_form": show_tracking_form,
             "seguimiento_etapas": VacanteSeguimiento.ETAPA_CHOICES,
+            "candidatos": vacante.candidatos.select_related("creado_por").order_by("etapa_actual", "nombre"),
+            "candidato_etapa_choices": CandidatoVacante.ETAPA_CHOICES,
+            "candidato_fuente_choices": CandidatoVacante.FUENTE_CHOICES,
         },
     )
 
@@ -246,6 +251,20 @@ def vacante_accion(request, pk: int):
         elif action == "reenviar_revision":
             reenviar_vacante_revision(vacante, request.user, comentario)
             messages.success(request, f"Solicitud {vacante.folio} reenviada a revisión.")
+        elif action == "agregar_candidato":
+            agregar_candidato(
+                vacante, request.user,
+                nombre=request.POST.get("nombre") or "",
+                telefono=request.POST.get("telefono") or "",
+                email=request.POST.get("email") or "",
+                fuente=request.POST.get("fuente") or CandidatoVacante.FUENTE_REFERENCIA,
+                notas=comentario,
+            )
+            messages.success(request, "Candidato agregado.")
+        elif action == "avanzar_candidato":
+            candidato = get_object_or_404(CandidatoVacante, pk=request.POST.get("candidato_id"), vacante=vacante)
+            avanzar_etapa_candidato(candidato, request.user, request.POST.get("nueva_etapa") or "", comentario)
+            messages.success(request, f"Etapa de {candidato.nombre} actualizada.")
         elif action == "seguimiento":
             agregar_seguimiento_vacante(
                 vacante,

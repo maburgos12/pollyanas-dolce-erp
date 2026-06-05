@@ -117,6 +117,42 @@
   .dot-entrevista    { background: #ce93d8; } .label-entrevista    { color: #6a1b9a; }
   .dot-oferta        { background: #ffcc80; } .label-oferta        { color: #e65100; }
 
+  /* Candidatos */
+  .cand-add-details { margin-bottom: 16px; }
+  .cand-add-summary {
+    align-items: center; color: var(--vino); cursor: pointer; display: flex;
+    font-size: 13px; font-weight: 900; gap: 6px; list-style: none; padding: 8px 0;
+  }
+  .cand-add-summary::-webkit-details-marker { display: none; }
+  .cand-add-form { background: var(--gris-suave); border-radius: 8px; margin-top: 8px; padding: 14px; }
+  .cand-add-grid { display: grid; grid-template-columns: 2fr 1fr 2fr 1fr; gap: 10px; }
+  @media (max-width: 900px) { .cand-add-grid { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 500px) { .cand-add-grid { grid-template-columns: 1fr; } }
+
+  .cand-list { display: grid; gap: 10px; }
+  .cand-card { border: 1px solid var(--rosa); border-radius: 8px; overflow: hidden; }
+  .cand-card-head { align-items: flex-start; display: flex; gap: 12px; justify-content: space-between; padding: 12px 14px; }
+  .cand-info { flex: 1; min-width: 0; }
+  .cand-nombre { color: var(--texto); display: block; font-size: 14px; font-weight: 700; }
+  .cand-meta { color: var(--texto-light); display: block; font-size: 12px; margin-top: 2px; }
+  .cand-notas { color: var(--texto-light); display: block; font-size: 12px; font-style: italic; margin-top: 3px; }
+  .cand-badge { border-radius: 999px; font-size: 11px; font-weight: 900; padding: 4px 10px; }
+  .cand-badge-entrevista_pres { background: #ede7f6; color: #4527a0; }
+  .cand-badge-seleccionado   { background: #fff8e1; color: #e65100; }
+  .cand-badge-documentos     { background: #e8f5e9; color: #1b5e20; }
+  .cand-badge-prueba         { background: #e3f2fd; color: #0d47a1; }
+  .cand-badge-contratado     { background: #e8f5e9; color: #1b5e20; }
+  .cand-badge-descartado     { background: #fce4ec; color: #b71c1c; }
+  .cand-etapa-contratado .cand-card-head { background: #f1f8f1; }
+  .cand-etapa-descartado { opacity: .65; }
+  .cand-actions { border-top: 1px solid var(--rosa); display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; padding: 10px 14px; background: #fffafb; }
+  .cand-action-form { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; }
+  .cand-action-form select { min-width: 180px; }
+  .cand-action-form input[type="text"] { min-width: 200px; }
+  .cand-timeline { border-top: 1px dashed var(--rosa); padding: 8px 14px; display: grid; gap: 6px; }
+  .cand-seg-item { align-items: baseline; display: flex; gap: 8px; font-size: 12px; }
+  .seg-dot-sm { border-radius: 50%; flex-shrink: 0; height: 8px; margin-top: 3px; width: 8px; }
+
   /* Coberturas e historial */
   .vd-list { display: grid; gap: 8px; }
   .vd-list-item { border-bottom: 1px solid var(--rosa); display: grid; gap: 2px; padding: 8px 0; }
@@ -332,82 +368,158 @@
     </div>
   </div>
 
-  {# ── Seguimiento de reclutamiento ── #}
+  {# ── Candidatos ── #}
+  {% if can_manage_vacantes and vacante.estado == 'reclutamiento' %}
   <div class="vd-panel">
-    <h2>Seguimiento de reclutamiento</h2>
+    <h2>Candidatos</h2>
+
+    {# Agregar candidato #}
+    <details class="cand-add-details">
+      <summary class="cand-add-summary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M12 5v14M5 12h14"/></svg>
+        Agregar candidato
+      </summary>
+      <form class="cand-add-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+        {% csrf_token %}<input type="hidden" name="action" value="agregar_candidato">
+        <div class="cand-add-grid">
+          <div>
+            <label class="vd-field-label">Nombre completo *</label>
+            <input type="text" name="nombre" placeholder="Nombre del candidato" required maxlength="180">
+          </div>
+          <div>
+            <label class="vd-field-label">Teléfono</label>
+            <input type="text" name="telefono" placeholder="Ej. 667 000 0000" maxlength="30">
+          </div>
+          <div>
+            <label class="vd-field-label">Email</label>
+            <input type="email" name="email" placeholder="correo@ejemplo.com">
+          </div>
+          <div>
+            <label class="vd-field-label">Fuente</label>
+            <select name="fuente">
+              {% for val, lbl in candidato_fuente_choices %}<option value="{{ val }}">{{ lbl }}</option>{% endfor %}
+            </select>
+          </div>
+        </div>
+        <div style="margin-top:8px">
+          <label class="vd-field-label">Notas iniciales (opcional)</label>
+          <input type="text" name="comentario" placeholder="Ej. referido por Paula, tiene experiencia en..." maxlength="300">
+        </div>
+        <div style="margin-top:10px">
+          <button class="btn btn-primary btn-sm" type="submit">Agregar candidato</button>
+        </div>
+      </form>
+    </details>
+
+    {# Lista de candidatos #}
+    {% if candidatos %}
+    <div class="cand-list">
+      {% for cand in candidatos %}
+      <div class="cand-card cand-etapa-{{ cand.etapa_actual }}">
+        <div class="cand-card-head">
+          <div class="cand-info">
+            <strong class="cand-nombre">{{ cand.nombre }}</strong>
+            <span class="cand-meta">
+              {{ cand.get_fuente_display }}
+              {% if cand.telefono %} · {{ cand.telefono }}{% endif %}
+              {% if cand.email %} · {{ cand.email }}{% endif %}
+            </span>
+            {% if cand.notas %}<span class="cand-notas">{{ cand.notas }}</span>{% endif %}
+          </div>
+          <span class="cand-badge cand-badge-{{ cand.etapa_actual }}">{{ cand.get_etapa_actual_display }}</span>
+        </div>
+
+        {# Acciones del candidato #}
+        {% if cand.activo %}
+        <div class="cand-actions">
+          <form class="cand-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="avanzar_candidato">
+            <input type="hidden" name="candidato_id" value="{{ cand.id }}">
+            <select name="nueva_etapa">
+              {% for val, lbl in candidato_etapa_choices %}
+                <option value="{{ val }}" {% if val == cand.etapa_actual %}selected{% endif %}>{{ lbl }}</option>
+              {% endfor %}
+            </select>
+            <input type="text" name="comentario" placeholder="Nota sobre este cambio (opcional)" maxlength="300">
+            <button class="btn btn-sm btn-primary" type="submit">Actualizar etapa</button>
+          </form>
+        </div>
+        {% endif %}
+
+        {# Notas del candidato en el timeline #}
+        {% with notas_cand=cand.seguimientos.all %}
+        {% if notas_cand %}
+        <div class="cand-timeline">
+          {% for seg in notas_cand %}
+          <div class="cand-seg-item">
+            <div class="seg-dot seg-dot-sm dot-{{ seg.etapa }}"></div>
+            <div>
+              <span class="seg-etapa-label label-{{ seg.etapa }}" style="font-size:11px;">{{ seg.get_etapa_display }}</span>
+              · <span class="vd-muted">{{ seg.comentario }}</span>
+              <span class="vd-muted" style="font-size:11px;"> · {{ seg.fecha|date:"d/m/Y" }}</span>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="vd-muted" style="margin-top:12px;">Aún no hay candidatos registrados. Agrega el primero con el botón de arriba.</p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# ── Seguimiento general (notas sin candidato + legacy) ── #}
+  {% with segs_generales=vacante.seguimientos.all %}
+  {% if segs_generales or show_tracking_form %}
+  <div class="vd-panel">
+    <h2>Notas generales del proceso</h2>
 
     {% if show_tracking_form %}
-    <form id="seg-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+    <form method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}" style="margin-bottom:16px;">
       {% csrf_token %}
       <input type="hidden" name="action" value="seguimiento">
-      <input type="hidden" name="etapa" id="seg-etapa-val" value="">
-
-      <p style="font-size:12px;color:var(--texto-light);margin:0 0 10px;">¿En qué etapa se registra esta novedad?</p>
-
-      <div class="seg-etapas">
-        <button type="button" class="seg-chip chip-postulante"     data-etapa="postulante"      onclick="selEtapa(this)">📋 Candidatos recibidos</button>
-        <button type="button" class="seg-chip chip-entrevista_tel" data-etapa="entrevista_tel"  onclick="selEtapa(this)">📞 1ra entrevista (tel.)</button>
-        <button type="button" class="seg-chip chip-filtro"         data-etapa="filtro"          onclick="selEtapa(this)">⚖️ Filtro / preselección</button>
-        <button type="button" class="seg-chip chip-entrevista_pres" data-etapa="entrevista_pres" onclick="selEtapa(this)">🏢 2da entrevista (pres.)</button>
-        <button type="button" class="seg-chip chip-seleccionado"   data-etapa="seleccionado"    onclick="selEtapa(this)">⭐ Candidato seleccionado</button>
-        <button type="button" class="seg-chip chip-documentos"     data-etapa="documentos"      onclick="selEtapa(this)">📁 Solicitud de documentos</button>
-        <button type="button" class="seg-chip chip-prueba"         data-etapa="prueba"          onclick="selEtapa(this)">🔄 Periodo de prueba</button>
-        <button type="button" class="seg-chip chip-contratado"     data-etapa="contratado"      onclick="selEtapa(this)">✅ Contratado</button>
-        <button type="button" class="seg-chip chip-descartado"     data-etapa="descartado"      onclick="selEtapa(this)">✗ Descartado</button>
-        <button type="button" class="seg-chip chip-comentario"     data-etapa="comentario"      onclick="selEtapa(this)">📝 Nota</button>
+      <input type="hidden" name="etapa" value="comentario">
+      <div class="seg-form-row">
+        <div>
+          <label class="seg-form-label">Nota general</label>
+          <input type="text" name="comentario" placeholder="Observación sobre el proceso en general..." required maxlength="500">
+        </div>
+        <div>
+          <label class="seg-form-label">Fecha</label>
+          <input type="date" name="fecha" value="{% now 'Y-m-d' %}">
+        </div>
       </div>
-
-      <div class="seg-form-fields" id="seg-fields" style="display:none">
-        <div class="seg-form-row">
-          <div>
-            <label class="seg-form-label">Candidato (nombre)</label>
-            <input type="text" name="candidato" placeholder="Nombre del candidato" maxlength="180">
-          </div>
-          <div>
-            <label class="seg-form-label">Fecha</label>
-            <input type="date" name="fecha" value="{% now 'Y-m-d' %}">
-          </div>
-        </div>
-        <div class="seg-form-row full">
-          <div>
-            <label class="seg-form-label">Comentario <span style="color:var(--rojo)">*</span></label>
-            <input type="text" name="comentario" placeholder="Describe qué pasó en esta etapa..." required maxlength="500">
-          </div>
-        </div>
-        <div class="seg-form-actions">
-          <button class="btn btn-primary" type="submit">Guardar seguimiento</button>
-        </div>
+      <div class="seg-form-actions" style="margin-top:8px;">
+        <button class="btn btn-secondary btn-sm" type="submit">Guardar nota</button>
       </div>
     </form>
     {% endif %}
 
-    {# Timeline #}
-    <div style="margin-top:{% if show_tracking_form %}20px{% else %}0{% endif %};">
-      {% if vacante.seguimientos.all %}
-      <div class="seg-timeline">
-        {% for seg in vacante.seguimientos.all %}
-        <div class="seg-item">
-          <div class="seg-dot-col">
-            <div class="seg-dot dot-{{ seg.etapa }}"></div>
-            <div class="seg-line"></div>
-          </div>
-          <div class="seg-content">
-            <div class="seg-etapa-label label-{{ seg.etapa }}">{{ seg.get_etapa_display }}</div>
-            {% if seg.candidato %}<div class="seg-candidato">{{ seg.candidato }}</div>{% endif %}
-            <div class="seg-nota">{{ seg.comentario }}</div>
-            <div class="seg-meta">
-              {{ seg.fecha|date:"d/m/Y" }}
-              {% if seg.creado_por %} · {{ seg.creado_por.get_full_name|default:seg.creado_por.username }}{% endif %}
-            </div>
-          </div>
+    {% if segs_generales %}
+    <div class="seg-timeline">
+      {% for seg in segs_generales %}
+      <div class="seg-item">
+        <div class="seg-dot-col">
+          <div class="seg-dot dot-{{ seg.etapa }}"></div>
+          <div class="seg-line"></div>
         </div>
-        {% endfor %}
+        <div class="seg-content">
+          <div class="seg-etapa-label label-{{ seg.etapa }}">{{ seg.get_etapa_display }}{% if seg.candidato_obj %} — {{ seg.candidato_obj.nombre }}{% elif seg.candidato %} — {{ seg.candidato }}{% endif %}</div>
+          <div class="seg-nota">{{ seg.comentario }}</div>
+          <div class="seg-meta">{{ seg.fecha|date:"d/m/Y" }}{% if seg.creado_por %} · {{ seg.creado_por.get_full_name|default:seg.creado_por.username }}{% endif %}</div>
+        </div>
       </div>
-      {% else %}
-      <p class="vd-muted">Sin seguimiento registrado aún.</p>
-      {% endif %}
+      {% endfor %}
     </div>
+    {% endif %}
   </div>
+  {% endif %}
+  {% endwith %}
 
   {# ── Registrar cobertura (al final del flujo de reclutamiento) ── #}
   {% if can_manage_vacantes and vacante.estado == 'reclutamiento' %}
