@@ -3,7 +3,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from rest_framework import generics, status
@@ -148,6 +148,7 @@ def _semaforo(dias):
 
 def _branch_falla_item(reporte):
     dias = _dias_abierto(reporte.fecha_reporte)
+    ultima_bitacora = next(iter(getattr(reporte, "bitacora_reciente", [])), None)
     return {
         "uid": f"falla:{reporte.id}",
         "tipo": "falla",
@@ -164,6 +165,11 @@ def _branch_falla_item(reporte):
         "estatus": reporte.estatus,
         "estatus_display": reporte.get_estatus_display(),
         "descripcion": reporte.descripcion,
+        "foto_url": reporte.foto_evidencia.url if reporte.foto_evidencia else "",
+        "reportado_por": reporte.reportado_por.get_full_name() or reporte.reportado_por.username,
+        "ultimo_avance": ultima_bitacora.comentario if ultima_bitacora else "",
+        "ultimo_avance_fecha": ultima_bitacora.timestamp if ultima_bitacora else None,
+        "bitacora_total": getattr(reporte, "bitacora_total", 0),
         "fecha": reporte.fecha_reporte,
         "proveedor": reporte.proveedor_servicio,
         "costo_estimado": reporte.costo_estimado,
@@ -235,9 +241,18 @@ def _unified_items(origen=""):
     if origen in ("", "sucursales"):
         fallas = (
             ReporteFalla.objects.filter(estatus__in=_branch_statuses())
-            .select_related("sucursal", "categoria", "activo_relacionado")
+            .select_related("sucursal", "categoria", "activo_relacionado", "reportado_por")
+            .prefetch_related(
+                Prefetch(
+                    "bitacora",
+                    queryset=BitacoraFalla.objects.select_related("usuario").order_by("-timestamp"),
+                    to_attr="bitacora_reciente",
+                )
+            )
             .order_by("-fecha_reporte")[:80]
         )
+        for falla in fallas:
+            falla.bitacora_total = len(getattr(falla, "bitacora_reciente", []))
         ordenes = (
             OrdenMantenimiento.objects.filter(estatus__in=_order_open_statuses())
             .select_related("activo_ref", "activo_ref__sucursal")
