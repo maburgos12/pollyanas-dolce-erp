@@ -448,6 +448,7 @@
         pantalla: "login",
         activos: [],
         sucursales: [],
+        proveedores: [],
         unidades: [],
         tiposServicio: [],
         ordenes: [],
@@ -613,6 +614,13 @@
         ).join("")}</div>`;
       }
 
+      function providerOptions(selected = "") {
+        const selectedValue = String(selected || "");
+        return `<option value="">Sin proveedor asignado</option>${state.proveedores.map((proveedor) =>
+          `<option value="${esc(proveedor.nombre)}" ${selectedValue === proveedor.nombre ? "selected" : ""}>${esc(proveedor.nombre)}</option>`
+        ).join("")}`;
+      }
+
       async function showScreen(name) {
         state.pantalla = name;
         if (name === "login") return renderLogin();
@@ -691,6 +699,13 @@
           state.bandeja = [];
         }
         return state.bandeja;
+      }
+
+      async function ensureProveedores() {
+        if (state.proveedores.length) return state.proveedores;
+        const res = await apiFetch("/proveedores/");
+        state.proveedores = res.ok ? await parseListResponse(res) : [];
+        return state.proveedores;
       }
 
       function itemAbierto(item) {
@@ -975,6 +990,7 @@
             </div>
           `;
         } else if (d.step === 2) {
+          await ensureProveedores();
           body = `
             <h1 class="screen-title">Tipo de servicio</h1>
             ${progressDots(2)}
@@ -995,7 +1011,7 @@
             </div>
             <div class="field">
               <label for="prov-eq">Proveedor</label>
-              <input id="prov-eq" placeholder="Nombre del taller o técnico" value="${esc(d.proveedor)}" oninput="state.equipoDraft.proveedor=this.value">
+              <select id="prov-eq" onchange="state.equipoDraft.proveedor=this.value">${providerOptions(d.proveedor)}</select>
             </div>
             <div class="field">
               <label for="costo-eq">Costo real (MXN)</label>
@@ -1158,7 +1174,8 @@
         if (item.tipo === "unidad") return renderUnidadDetalle(item);
       }
 
-      function renderFallaDetalle(item) {
+      async function renderFallaDetalle(item) {
+        await ensureProveedores();
         render(shell(`
           <button class="secondary-btn" onclick="showScreen('pendientes')">Volver</button>
           <h1 class="screen-title" style="margin-top:16px">Falla #${esc(String(item.id))}</h1>
@@ -1185,7 +1202,7 @@
             </div>
             <div class="field">
               <label>Proveedor / técnico</label>
-              <input id="falla-proveedor" placeholder="Nombre del taller o técnico" value="${esc(item.proveedor || "")}">
+              <select id="falla-proveedor">${providerOptions(item.proveedor || "")}</select>
             </div>
             <div class="field">
               <label>Costo estimado (MXN)</label>
@@ -1216,7 +1233,8 @@
         }
       }
 
-      function renderUnidadDetalle(item) {
+      async function renderUnidadDetalle(item) {
+        await ensureProveedores();
         render(shell(`
           <button class="secondary-btn" onclick="showScreen('pendientes')">Volver</button>
           <h1 class="screen-title" style="margin-top:16px">Reporte flota</h1>
@@ -1241,7 +1259,7 @@
             </div>
             <div class="field">
               <label>Taller / proveedor</label>
-              <input id="unidad-proveedor" placeholder="Nombre del taller" value="${esc(item.proveedor || "")}">
+              <select id="unidad-proveedor">${providerOptions(item.proveedor || "")}</select>
             </div>
             <div class="field">
               <label>Costo real (MXN)</label>
@@ -1272,7 +1290,8 @@
         }
       }
 
-      function renderOrdenDetalle(error = "") {
+      async function renderOrdenDetalle(error = "") {
+        await ensureProveedores();
         const orden = state.ordenActual;
         if (!orden) return showScreen("seguimiento");
         render(shell(`
@@ -1299,7 +1318,7 @@
             </div>
             <div class="field">
               <label>Responsable</label>
-              <input id="seguimiento-responsable" value="${esc(orden.responsable || "")}" placeholder="Técnico o proveedor">
+              <select id="seguimiento-responsable">${providerOptions(orden.responsable || "")}</select>
             </div>
             <div class="field">
               <label>Comentario de seguimiento</label>
@@ -1496,6 +1515,7 @@
             </div>
           `;
         } else if (d.step === 2) {
+          await ensureProveedores();
           const tipoServicioSelect = d.modo === "servicio" ? `
             <div class="field">
               <label>Tipo de servicio</label>
@@ -1546,7 +1566,7 @@
             ${d.modo ? `
               <div class="field">
                 <label for="prov-v">Proveedor / taller</label>
-                <input id="prov-v" placeholder="Nombre del taller" value="${esc(d.proveedor)}" oninput="state.vehiculoDraft.proveedor=this.value">
+                <select id="prov-v" onchange="state.vehiculoDraft.proveedor=this.value">${providerOptions(d.proveedor)}</select>
               </div>
               <div class="field">
                 <label for="costo-v">Costo (MXN)</label>

@@ -264,6 +264,7 @@
                       data-estimated="{{ item.costo_estimado|default:'' }}"
                       data-real="{{ item.costo_real|default:'' }}"
                       data-asset-id="{{ item.activo_id|default:'' }}"
+                      data-asset-name="{{ item.activo|default:'' }}"
                       data-title="{{ item.referencia }} · {{ item.titulo }}"
                       data-meta="{{ item.ubicacion|default:'Sin ubicación' }} · {{ item.estatus_display }}"
                       data-description="{{ item.descripcion }}"
@@ -560,12 +561,6 @@
   </aside>
 </div>
 
-<datalist id="mant-provider-list">
-  {% for proveedor in provider_options %}
-    <option value="{{ proveedor.nombre }}">
-  {% endfor %}
-</datalist>
-
 <template id="mant-status-falla">
   {% for value,label in estatus_fallas %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
 </template>
@@ -612,7 +607,12 @@
           <select class="mant-input" name="estatus" id="mantDrawerStatus"></select>
         </label>
         <label class="mant-field">Proveedor o taller
-          <input class="mant-input" name="proveedor_servicio" id="mantDrawerProvider" list="mant-provider-list" placeholder="Buscar o escribir proveedor nuevo">
+          <select class="mant-input" name="proveedor_servicio" id="mantDrawerProvider">
+            <option value="">Sin proveedor asignado</option>
+            {% for proveedor in provider_options %}
+              <option value="{{ proveedor.nombre }}">{{ proveedor.nombre }}</option>
+            {% endfor %}
+          </select>
         </label>
         <label class="mant-field" id="mantDrawerAssetField">Activo relacionado
           <select class="mant-input" name="activo_id" id="mantDrawerAsset">
@@ -621,6 +621,7 @@
               <option value="{{ activo.id }}">{{ activo.codigo }} · {{ activo.nombre }}{% if activo.sucursal %} · {{ activo.sucursal.nombre }}{% endif %}</option>
             {% endfor %}
           </select>
+          <span class="mant-plan-meta" id="mantDrawerAssetLocked" hidden></span>
         </label>
         <div class="mant-asset-create" id="mantDrawerAssetCreate">
           <div class="mant-asset-create-title">Si no existe el activo, captúralo aquí y quedará ligado al reporte.</div>
@@ -629,10 +630,20 @@
               <input class="mant-input" name="activo_nombre_nuevo" id="mantDrawerNewAssetName" placeholder="Ej. Vitrina fría CEDIS">
             </label>
             <label class="mant-field">Categoría
-              <input class="mant-input" name="activo_categoria_nueva" id="mantDrawerNewAssetCategory" placeholder="Refrigeración, horno, equipo">
+              <select class="mant-input" name="activo_categoria_nueva" id="mantDrawerNewAssetCategory">
+                <option value="">Seleccionar categoría existente...</option>
+                {% for categoria in asset_categories %}
+                  <option value="{{ categoria }}">{{ categoria }}</option>
+                {% endfor %}
+              </select>
             </label>
             <label class="mant-field">Ubicación
-              <input class="mant-input" name="activo_ubicacion_nueva" id="mantDrawerNewAssetLocation" placeholder="Área o punto físico">
+              <select class="mant-input" name="activo_ubicacion_nueva" id="mantDrawerNewAssetLocation">
+                <option value="">Seleccionar ubicación existente...</option>
+                {% for ubicacion in asset_locations %}
+                  <option value="{{ ubicacion }}">{{ ubicacion }}</option>
+                {% endfor %}
+              </select>
             </label>
           </div>
         </div>
@@ -801,7 +812,12 @@
             <input type="number" name="km_al_servicio" class="mant-input" min="0" placeholder="Opcional">
           </label>
           <label class="mant-field">Proveedor / taller
-            <input type="text" name="proveedor" class="mant-input" placeholder="Nombre del taller">
+            <select name="proveedor" class="mant-input">
+              <option value="">Sin proveedor asignado</option>
+              {% for proveedor in provider_options %}
+                <option value="{{ proveedor.nombre }}">{{ proveedor.nombre }}</option>
+              {% endfor %}
+            </select>
           </label>
           <label class="mant-field">Costo ($)
             <input type="number" name="costo" class="mant-input" min="0" step="0.01" placeholder="0.00">
@@ -920,8 +936,9 @@
   const real = document.getElementById("mantDrawerReal");
   const asset = document.getElementById("mantDrawerAsset");
   const assetField = document.getElementById("mantDrawerAssetField");
+  const assetLocked = document.getElementById("mantDrawerAssetLocked");
   const assetCreate = document.getElementById("mantDrawerAssetCreate");
-  const assetCreateInputs = assetCreate ? assetCreate.querySelectorAll("input") : [];
+  const assetCreateInputs = assetCreate ? assetCreate.querySelectorAll("input, select") : [];
   const boardSearch = document.getElementById("mantBoardSearch");
 
   function filterBoard() {
@@ -950,6 +967,7 @@
 
   function openDrawer(button) {
     const template = document.getElementById(`mant-status-${button.dataset.type}`);
+    const hasLinkedAsset = Boolean(button.dataset.assetId);
     const hideAssets = button.dataset.type === "unidad";
     form.action = button.dataset.action;
     title.textContent = button.dataset.title || "Seguimiento";
@@ -961,10 +979,14 @@
     real.value = button.dataset.real || "";
     asset.value = button.dataset.assetId || "";
     assetField.hidden = hideAssets;
-    if (assetCreate) assetCreate.hidden = hideAssets;
-    asset.disabled = hideAssets;
+    if (assetLocked) {
+      assetLocked.hidden = !hasLinkedAsset || hideAssets;
+      assetLocked.textContent = hasLinkedAsset ? `Activo ya relacionado por el reporte: ${button.dataset.assetName || "Activo seleccionado"}` : "";
+    }
+    if (assetCreate) assetCreate.hidden = hideAssets || hasLinkedAsset;
+    asset.disabled = hideAssets || hasLinkedAsset;
     assetCreateInputs.forEach((input) => {
-      input.disabled = hideAssets;
+      input.disabled = hideAssets || hasLinkedAsset;
       input.value = "";
     });
     const photoUrl = (button.dataset.photo || "").trim();
