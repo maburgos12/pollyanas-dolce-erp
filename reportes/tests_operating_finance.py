@@ -820,6 +820,40 @@ class MonthlyHistoricalCostingServiceTests(TestCase):
         self.assertEqual(result.total_cost, Decimal("9.250000"))
         self.assertEqual(result.unit_cost, Decimal("9.250000"))
 
+    def test_monthly_cost_infers_missing_raw_unit_from_same_insumo_point_cost(self):
+        crunch = Insumo.objects.create(
+            codigo="CRUNCH",
+            nombre="Trozos Crunch",
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            unidad_base=self.unit_g,
+            activo=True,
+        )
+        CostoInsumo.objects.create(
+            insumo=crunch,
+            fecha=date(2026, 2, 28),
+            costo_unitario=Decimal("264.021944"),
+            source_hash="crunch_feb_no_unit",
+            raw={"fuente": "AUTO_HOMOLOGACION_TOKEN_SET", "match_nombre": "Crunch Trozos"},
+        )
+        CostoInsumo.objects.create(
+            insumo=crunch,
+            fecha=date(2026, 4, 20),
+            costo_unitario=Decimal("264.022200"),
+            source_hash="crunch_apr_point_kg",
+            raw={"source": "POINT_EXISTENCIA_ALMACEN", "unit": "KG", "point_name": "TROZOS CRUNCH"},
+        )
+
+        row = MonthlyHistoricalCostingService()._build_insumo_monthly_cost(
+            period_start=date(2026, 2, 1),
+            insumo=crunch,
+        )
+
+        self.assertIsNotNone(row)
+        self.assertEqual(row.costo_unitario, Decimal("0.264022"))
+        normalization = row.metadata["unit_normalization"][0]
+        self.assertEqual(normalization["unit_resolution"], "inferred_from_same_insumo_cost")
+        self.assertEqual(normalization["inferred_from_unit"], "kg")
+
     def test_operating_snapshot_uses_monthly_historical_cost_when_weekly_missing(self):
         sucursal = Sucursal.objects.create(codigo="MAT", nombre="Matriz")
         point_branch = PointBranch.objects.create(external_id="1", name="Matriz", erp_branch=sucursal)
