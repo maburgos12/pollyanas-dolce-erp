@@ -949,6 +949,33 @@ class MonthlyHistoricalCostingServiceTests(TestCase):
         self.assertEqual(row.costo_unitario, Decimal("80.000000"))
         self.assertEqual(row.metodo, InsumoCostoHistoricoMensual.METODO_SIGUIENTE)
 
+    def test_missing_month_uses_first_future_cost_without_manual_rule(self):
+        bag = Insumo.objects.create(
+            codigo="BOLSA_GALLETERA",
+            nombre="Bolsa galletera impresa",
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            unidad_base=self.unit_pza,
+            activo=True,
+        )
+        CostoInsumo.objects.create(
+            insumo=bag,
+            fecha=date(2026, 4, 20),
+            costo_unitario=Decimal("4.04"),
+            source_hash="bag_apr_1",
+            raw={"source": "POINT_COMPRAS_HISTORICAS", "cantidad": "100", "unit": "pza"},
+        )
+
+        row = MonthlyHistoricalCostingService()._build_insumo_monthly_cost(
+            period_start=date(2026, 1, 1),
+            insumo=bag,
+        )
+
+        self.assertIsNotNone(row)
+        self.assertEqual(row.costo_unitario, Decimal("4.040000"))
+        self.assertEqual(row.metodo, InsumoCostoHistoricoMensual.METODO_SIGUIENTE)
+        self.assertEqual(row.source_date, date(2026, 4, 20))
+        self.assertEqual(row.metadata["fallback_method"], "AUTO_FIRST_FUTURE_COST")
+
     def test_derived_presentation_uses_parent_unit_cost_in_historical_snapshot(self):
         parent_recipe = Receta.objects.create(
             nombre="Pay Grande",
