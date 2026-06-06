@@ -8,7 +8,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 
 from maestros.models import CostoInsumo, Insumo, InsumoAlias, UnidadMedida
-from pos_bridge.models import PointDailySale
+from pos_bridge.models import PointDailySale, PointProduct
 from recetas.models import LineaReceta, Receta, RecetaPresentacion
 from recetas.utils.costeo_snapshot import (
     POINT_UNIT_ALIASES,
@@ -190,6 +190,7 @@ class MonthlyHistoricalCostingService:
         self._recipe_cache: dict[tuple[date, int], _RecipeCostResult] = {}
         self._active_stack: set[tuple[date, int]] = set()
         self._insumo_rule_stack: set[tuple[date, int]] = set()
+        self._resale_product_ids_by_period: dict[date, set[int]] = {}
 
     def _purchase_like_costs(self, *, insumo: Insumo, period_end: date):
         rows = list(
@@ -252,7 +253,40 @@ class MonthlyHistoricalCostingService:
                 },
             },
         )
+        self._resale_product_ids_by_period.setdefault(period_start, set()).add(producto_point_id)
         return row
+
+    def _resolve_resale_point_product(self, *, period_start: date, receta: Receta) -> PointProduct | None:
+        period_start, period_end = _month_bounds(period_start)
+        product_id = (
+            PointDailySale.objects.filter(
+                receta=receta,
+                sale_date__range=(period_start, period_end),
+                product_id__isnull=False,
+                total_amount__gt=0,
+            )
+            .order_by("product_id")
+            .values_list("product_id", flat=True)
+            .first()
+        )
+        if product_id:
+            product = PointProduct.objects.filter(id=product_id).first()
+            if product is not None:
+                return product
+
+        codigo_point = (receta.codigo_point or "").strip()
+        if codigo_point:
+            by_sku = PointProduct.objects.filter(sku__iexact=codigo_point).order_by("-active", "id").first()
+            if by_sku is not None:
+                return by_sku
+            by_external_id = PointProduct.objects.filter(external_id__iexact=codigo_point).order_by("-active", "id").first()
+            if by_external_id is not None:
+                return by_external_id
+
+        normalized_name = (receta.nombre_normalizado or "").strip()
+        if normalized_name:
+            return PointProduct.objects.filter(normalized_name=normalized_name).order_by("-active", "id").first()
+        return None
 
     def _resolve_resale_insumo(self, *, receta: Receta) -> Insumo | None:
         codigo_point = (receta.codigo_point or "").strip()
@@ -284,6 +318,30 @@ class MonthlyHistoricalCostingService:
         return None
 
     def _build_resale_recipe_monthly_cost(self, *, period_start: date, receta: Receta) -> _RecipeCostResult:
+        product = self._resolve_resale_point_product(period_start=period_start, receta=receta)
+        if product is not None:
+            product_month = self._build_resale_product_monthly_cost(
+                period_start=period_start,
+                producto_point_id=product.id,
+            )
+            if product_month is not None and product_month.costo_promedio > 0:
+                unit_cost = _q6(product_month.costo_promedio)
+                return _RecipeCostResult(
+                    total_cost=unit_cost,
+                    unit_cost=unit_cost,
+                    costed_lines=1,
+                    total_lines=1,
+                    metadata={
+                        "missing_lines": [],
+                        "source_labels": [f"REVENTA_PRODUCTO_{product_month.metodo}"],
+                        "bom_basis": "POINT_PRODUCT_RESALE_COST",
+                        "matched_producto_point_id": product.id,
+                        "matched_producto_point_nombre": product.name,
+                        "matched_producto_point_sku": product.sku,
+                        "matched_producto_point_external_id": product.external_id,
+                    },
+                )
+
         insumo = self._resolve_resale_insumo(receta=receta)
         if insumo is None:
             return _RecipeCostResult(
@@ -749,6 +807,7 @@ class MonthlyHistoricalCostingService:
             if row is not None:
                 productos_reventa_costeados.add(producto_id)
 
+        productos_reventa_costeados.update(self._resale_product_ids_by_period.get(period_start, set()))
         ProductoReventaCostoHistoricoMensual.objects.filter(periodo=period_start).exclude(
             producto_point_id__in=productos_reventa_costeados
         ).delete()
