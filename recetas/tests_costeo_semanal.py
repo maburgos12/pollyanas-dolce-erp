@@ -9,6 +9,7 @@ from django.test import TestCase
 from maestros.models import Insumo, UnidadMedida
 from recetas.models import LineaReceta, Receta, RecetaAgrupacionAddon, RecetaCostoSemanal
 from recetas.utils.costeo_semanal import snapshot_weekly_costs
+from reportes.models import RecetaCostoHistoricoMensual
 
 
 class WeeklyCostSnapshotTests(TestCase):
@@ -104,3 +105,29 @@ class WeeklyCostSnapshotTests(TestCase):
 
         self.assertEqual(latest.costo_mp, Decimal("10.000000"))
         self.assertEqual(latest.costo_total, Decimal("10.000000"))
+
+    def test_snapshot_prefers_complete_monthly_historical_cost(self):
+        linea = self.base_recipe.lineas.first()
+        linea.costo_unitario_snapshot = Decimal("37120.844267")
+        linea.save(update_fields=["costo_unitario_snapshot"])
+        RecetaCostoHistoricoMensual.objects.create(
+            periodo=date(2026, 4, 1),
+            receta=self.base_recipe,
+            costo_total=Decimal("17.380640"),
+            costo_por_unidad_rendimiento=Decimal("17.380640"),
+            lineas_costeadas=1,
+            lineas_totales=1,
+            coverage_pct=Decimal("100.000000"),
+            metadata={"source": "test"},
+        )
+
+        snapshot_weekly_costs(anchor_date=date(2026, 4, 27), receta_ids=[self.base_recipe.id], include_addons=False)
+        latest = RecetaCostoSemanal.objects.get(
+            identity_key=f"RECIPE:{self.base_recipe.id}",
+            week_start=date(2026, 4, 27),
+        )
+
+        self.assertEqual(latest.costo_mp, Decimal("17.380640"))
+        self.assertEqual(latest.costo_total, Decimal("17.380640"))
+        self.assertIsNone(latest.version_receta)
+        self.assertEqual(latest.metadata["cost_source"], "HISTORICAL_MONTHLY")
