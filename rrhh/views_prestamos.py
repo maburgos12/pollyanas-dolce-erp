@@ -134,7 +134,7 @@ def prestamos_lista(request):
             "por_autorizar": por_autorizar,
             "can_manage_rrhh": can_manage_rrhh(request.user),
             "show_rrhh_tabs": can_view_rrhh(request.user),
-            "module_tabs": _module_tabs("prestamos"),
+            "module_tabs": _module_tabs("prestamos", request.user),
         },
     )
 
@@ -189,7 +189,7 @@ def prestamo_nuevo(request):
             "empleados": empleados,
             "autorizadores": autorizadores,
             "metodos": Prestamo.METODO_CHOICES,
-            "module_tabs": _module_tabs("prestamos"),
+            "module_tabs": _module_tabs("prestamos", request.user),
         },
     )
 
@@ -214,7 +214,7 @@ def prestamo_detalle(request, pk):
             "prestamo": prestamo,
             "cuotas": cuotas,
             "progreso": max(0, min(progreso, 100)),
-            "module_tabs": _module_tabs("prestamos"),
+            "module_tabs": _module_tabs("prestamos", request.user),
             "can_manage_rrhh": can_manage_rrhh(request.user),
             "show_rrhh_tabs": can_view_rrhh(request.user),
             "can_authorize_jefe": _can_authorize_jefe(request.user, prestamo),
@@ -303,7 +303,7 @@ def importar_contpaq(request):
     return render(
         request,
         "rrhh/importar_contpaq.html",
-        {"historial": historial, "module_tabs": _module_tabs("prestamos")},
+        {"historial": historial, "module_tabs": _module_tabs("prestamos", request.user)},
     )
 
 
@@ -335,6 +335,6 @@ def quincena_cobros(request):
             "cuotas": cuotas_pendientes,
             "desde": desde,
             "hasta": hasta,
-            "module_tabs": _module_tabs("prestamos"),
+            "module_tabs": _module_tabs("prestamos", request.user),
         },
     )

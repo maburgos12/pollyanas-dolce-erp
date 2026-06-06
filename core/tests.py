@@ -127,7 +127,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
 class NavigationActiveStateTests(TestCase):
     def _active_labels(self, path: str) -> list[str]:
         with patch("core.navigation.can_view_submodule", return_value=True):
-            groups = build_nav_groups(SimpleNamespace(is_authenticated=True, is_superuser=True), path)
+            groups = build_nav_groups(SimpleNamespace(is_authenticated=True, is_superuser=True, is_staff=False), path)
         return [
             item["label"]
             for group in groups
@@ -140,6 +140,15 @@ class NavigationActiveStateTests(TestCase):
 
     def test_recetas_catalog_does_not_capture_plan_routes(self):
         self.assertEqual(self._active_labels("/recetas/"), ["Recetas"])
+
+    def test_rrhh_submodule_access_only_shows_allowed_capital_humano_item(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="jefe.vacantes", password="test12345")
+        UserModuleAccess.objects.create(user=user, module="rrhh.vacantes", access=UserModuleAccess.ACCESS_VIEW)
+
+        groups = build_nav_groups(user, "/rrhh/vacantes/")
+        capital_humano = next(group for group in groups if group["key"] == "capital_humano")
+        self.assertEqual([item["label"] for item in capital_humano["items"]], ["Vacantes"])
 
 
 class NotificacionesTests(TestCase):

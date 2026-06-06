@@ -81,7 +81,7 @@ def vacantes_lista(request):
         request,
         "rrhh/vacantes.html",
         {
-            "module_tabs": _module_tabs("vacantes"),
+            "module_tabs": _module_tabs("vacantes", request.user),
             "can_manage_vacantes": can_gestionar_vacantes(request.user),
             "can_create_vacante_request": can_solicitar_vacantes(request.user),
             "can_authorize_vacante": can_autorizar_vacante(request.user),
@@ -132,7 +132,7 @@ def vacante_nueva(request):
         request,
         "rrhh/vacante_form.html",
         {
-            "module_tabs": _module_tabs("vacantes"),
+            "module_tabs": _module_tabs("vacantes", request.user),
             "sucursales": Sucursal.objects.filter(activa=True).order_by("nombre"),
             "can_manage_vacantes": can_manage,
             "solicitantes": _usuarios_solicitantes_vacantes(),
@@ -196,7 +196,7 @@ def vacante_detalle(request, pk: int):
         request,
         "rrhh/vacante_detalle.html",
         {
-            "module_tabs": _module_tabs("vacantes"),
+            "module_tabs": _module_tabs("vacantes", request.user),
             "vacante": vacante,
             "empleados": Empleado.objects.filter(activo=True).order_by("nombre")[:1200],
             "can_manage_vacantes": can_gestionar_vacantes(request.user),
