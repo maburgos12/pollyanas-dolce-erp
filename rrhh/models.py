@@ -74,6 +74,18 @@ class Empleado(models.Model):
         (TIPO_POLLYANA, "Pollyana's Dolce"),
         (TIPO_EXTERNO, "Externo / apoyo"),
     ]
+    NIVEL_COLABORADOR = "COLABORADOR"
+    NIVEL_ENCARGADA = "ENCARGADA"
+    NIVEL_SUPERVISION = "SUPERVISION"
+    NIVEL_JEFATURA = "JEFATURA"
+    NIVEL_DIRECCION = "DIRECCION"
+    NIVEL_ORGANIZACIONAL_CHOICES = [
+        (NIVEL_COLABORADOR, "Colaborador"),
+        (NIVEL_ENCARGADA, "Encargada / encargado"),
+        (NIVEL_SUPERVISION, "Supervisión"),
+        (NIVEL_JEFATURA, "Jefatura"),
+        (NIVEL_DIRECCION, "Dirección"),
+    ]
 
     codigo = models.CharField(max_length=40, unique=True, blank=True)
     nombre = models.CharField(max_length=180)
@@ -92,6 +104,13 @@ class Empleado(models.Model):
     departamento_origen = models.CharField(max_length=40, choices=DEP_CHOICES, blank=True, default="", db_index=True)
     departamento = models.CharField(max_length=40, choices=DEP_CHOICES, blank=True, default="", db_index=True)
     puesto_operativo = models.CharField(max_length=80, blank=True, default="", db_index=True)
+    nivel_organizacional = models.CharField(
+        max_length=20,
+        choices=NIVEL_ORGANIZACIONAL_CHOICES,
+        blank=True,
+        default="",
+        db_index=True,
+    )
     jefe_directo = models.ForeignKey(
         "self",
         null=True,

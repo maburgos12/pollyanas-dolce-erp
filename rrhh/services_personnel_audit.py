@@ -190,7 +190,11 @@ def build_personnel_identity_audit(*, limit: int = 25) -> dict:
                 {**_employee_detail(empleado), "departamento_key": departamento_key},
             )
 
-        if not empleado.jefe_directo_id and empleado.puesto_operativo != "JEFATURA":
+        if (
+            not empleado.jefe_directo_id
+            and empleado.puesto_operativo != "JEFATURA"
+            and empleado.nivel_organizacional not in {Empleado.NIVEL_JEFATURA, Empleado.NIVEL_DIRECCION}
+        ):
             record(
                 "active_employee_without_direct_boss",
                 "warning",
@@ -274,6 +278,7 @@ def _employee_detail(empleado: Empleado) -> dict:
         "employee": empleado.nombre,
         "departamento": empleado.departamento or "",
         "puesto_operativo": empleado.puesto_operativo or "",
+        "nivel_organizacional": empleado.nivel_organizacional or "",
         "sucursal": empleado.sucursal or "",
         "jefe_directo": empleado.jefe_directo.nombre if empleado.jefe_directo_id else "",
     }

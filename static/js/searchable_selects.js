@@ -103,6 +103,7 @@
 
         wrapper.className = "pd-searchable-select";
         input.type = "text";
+        input.id = uid + "-input";
         input.className = "pd-searchable-select__input";
         input.setAttribute("autocomplete", "off");
         input.setAttribute("role", "combobox");

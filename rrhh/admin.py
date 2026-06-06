@@ -42,6 +42,7 @@ class EmpleadoAdmin(admin.ModelAdmin):
         "area",
         "puesto",
         "puesto_operativo",
+        "nivel_organizacional",
         "jefe_directo",
         "tipo_personal",
         "participa_bonos_ventas",
@@ -55,6 +56,7 @@ class EmpleadoAdmin(admin.ModelAdmin):
         "departamento_origen",
         "departamento",
         "puesto_operativo",
+        "nivel_organizacional",
         "tipo_personal",
         "participa_bonos_ventas",
         "participa_bonos_produccion",
@@ -71,6 +73,7 @@ class EmpleadoAdmin(admin.ModelAdmin):
         "area",
         "puesto",
         "puesto_operativo",
+        "nivel_organizacional",
         "jefe_directo__nombre",
     )
 

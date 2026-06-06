@@ -1063,6 +1063,8 @@ class RRHHViewsTests(TestCase):
         self.assertEqual(pendiente.nombre_externo, "REY IVAN VALDEZ FELIX")
         self.assertEqual(pendiente.empleado_sugerido, empleado)
         self.assertEqual(Empleado.objects.filter(nombre="REY IVAN VALDEZ FELIX").count(), 1)
+        resp = self.client.get(reverse("rrhh:empleados"), secure=True)
+        self.assertEqual(resp.status_code, 200)
         self.assertIn("owner", resp.context["document_stage_rows"][0])
         self.assertIn("completion", resp.context["document_stage_rows"][0])
         self.assertTrue(resp.context["release_gate_rows"])
@@ -1073,7 +1075,7 @@ class RRHHViewsTests(TestCase):
             reverse("rrhh:empleados"),
             {
                 "nombre": "Empleado Demo",
-                "area": "Producción",
+                "area": "HORNOS",
                 "puesto": "Pastelero",
                 "salario_diario": "450.00",
             },
@@ -1092,7 +1094,7 @@ class RRHHViewsTests(TestCase):
                 "rfc": "DEMO-010101-AA1",
                 "curp": "DEMO010101HSLAAA01",
                 "nss": "11-22-33-4444-5",
-                "area": "Administración",
+                "area": "ALMACEN",
                 "puesto": "Coordinador",
                 "tipo_contrato": "FIJO",
                 "fecha_ingreso": "2026-04-30",
@@ -1108,7 +1110,7 @@ class RRHHViewsTests(TestCase):
         empleado.refresh_from_db()
         self.assertEqual(empleado.nombre, "Empleado Demo Editado")
         self.assertEqual(empleado.rfc, "DEMO-010101-AA1")
-        self.assertEqual(empleado.area, "Administración")
+        self.assertEqual(empleado.area, "ALMACEN")
 
     def test_empleados_baja_expone_datos_para_autollenado(self):
         empleado = Empleado.objects.create(
@@ -1281,8 +1283,14 @@ class RRHHViewsTests(TestCase):
         self.assertContains(resp, "Área / división")
         self.assertContains(resp, "Hornos")
         self.assertContains(resp, "Armado")
-        self.assertContains(resp, "Otro...")
-        self.assertContains(resp, "modal-catalogo-otro")
+        self.assertContains(resp, "Nivel organizacional")
+        self.assertContains(resp, "Colaborador")
+        self.assertContains(resp, "Encargada / encargado")
+        self.assertContains(resp, "Supervisión")
+        self.assertContains(resp, 'data-searchable-select="true"')
+        self.assertNotContains(resp, "modal-catalogo-otro")
+        self.assertNotContains(resp, "Agregar otro valor")
+        self.assertNotContains(resp, "__otro__")
         self.assertContains(resp, "modal-bono-esquema-otro")
 
     def test_empleados_crea_esquema_bono_otro_y_lo_asigna(self):
@@ -1373,26 +1381,51 @@ class RRHHViewsTests(TestCase):
         self.assertTrue(empleado.participa_bonos_produccion)
         self.assertEqual(set(empleado.bonos_esquemas.values_list("codigo", flat=True)), {"PRODUCCION"})
 
-    def test_empleados_guarda_area_y_puesto_operativo_otro_desde_modal(self):
+    def test_empleados_rechaza_area_y_puesto_operativo_fuera_de_catalogo(self):
         resp = self.client.post(
             reverse("rrhh:empleados"),
             {
-                "nombre": "Empleado Catalogo Otro",
+                "nombre": "Empleado Catalogo Cerrado",
                 "departamento": Empleado.DEP_PRODUCCION,
-                "area": "__otro__",
-                "area_otro": "Decorado especial",
+                "area": "DECORADO ESPECIAL",
                 "puesto": "Auxiliar",
-                "puesto_operativo": "__otro__",
-                "puesto_operativo_otro": "DECORADO",
+                "puesto_operativo": "DECORADO",
                 "salario_diario": "300.00",
             },
             follow=True,
         )
 
         self.assertEqual(resp.status_code, 200)
-        empleado = Empleado.objects.get(nombre="Empleado Catalogo Otro")
-        self.assertEqual(empleado.area, "DECORADO ESPECIAL")
-        self.assertEqual(empleado.puesto_operativo, "DECORADO")
+        self.assertContains(resp, "Organización inválida")
+        self.assertFalse(Empleado.objects.filter(nombre="Empleado Catalogo Cerrado").exists())
+
+    def test_empleados_update_conserva_valores_legacy_actuales_sin_crear_nuevos(self):
+        empleado = Empleado.objects.create(
+            nombre="Empleado Legacy Catalogo",
+            area="AFANADORA",
+            puesto_operativo="ENCARGADA_PRODUCCION",
+            salario_diario="300.00",
+        )
+
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "update",
+                "empleado_id": str(empleado.id),
+                "nombre": empleado.nombre,
+                "area": "AFANADORA",
+                "departamento": Empleado.DEP_PRODUCCION,
+                "puesto_operativo": "ENCARGADA_PRODUCCION",
+                "salario_diario": "300.00",
+                "activo": "on",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        empleado.refresh_from_db()
+        self.assertEqual(empleado.area, "AFANADORA")
+        self.assertEqual(empleado.puesto_operativo, "ENCARGADA_PRODUCCION")
 
     def test_bonos_usan_campos_de_rrhh_sin_repetir_area_macro(self):
         from bonos_produccion.models import AREA_LOGISTICA, area_bono_produccion_empleado
@@ -1808,7 +1841,7 @@ class RRHHViewsTests(TestCase):
             reverse("rrhh:empleados"),
             {
                 "nombre": "Empleado Nómina",
-                "area": "Ventas",
+                "area": "CAJAS",
                 "puesto": "Vendedor",
                 "salario_diario": "350.00",
             },
