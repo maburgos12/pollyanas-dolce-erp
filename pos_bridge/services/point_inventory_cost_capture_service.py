@@ -299,15 +299,15 @@ class PointInventoryCostCaptureService:
 
     def _resolve_point_product(self, row: PointInventoryCostRow) -> PointProduct | None:
         codes: list[str] = []
-        for code in [row.point_code, row.point_code.lstrip("0"), row.point_code.zfill(4)]:
+        for code in [row.point_internal_id, row.point_code]:
             code = str(code or "").strip()
             if code and code not in codes:
                 codes.append(code)
         if codes:
-            product = PointProduct.objects.filter(external_id__in=codes).order_by("id").first()
+            product = PointProduct.objects.filter(sku__in=codes).order_by("id").first()
             if product is not None:
                 return product
-            product = PointProduct.objects.filter(sku__in=codes).order_by("id").first()
+            product = PointProduct.objects.filter(external_id__in=codes).order_by("id").first()
             if product is not None:
                 return product
 
