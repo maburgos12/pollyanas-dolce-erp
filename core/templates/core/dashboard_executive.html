@@ -534,6 +534,41 @@
     </div>
   </section>
 
+  {% if seguimiento_pendientes %}
+  <section class="home-exec-card is-warning">
+    <div class="home-exec-section-head">
+      <div>
+        <div class="home-exec-kicker">Acuerdos</div>
+        <h2 class="home-exec-title">Pendientes de tu revisión ({{ seguimiento_pendientes_total }})</h2>
+        <p class="home-exec-copy">Acuerdos en revisión y solicitudes de más tiempo de tu equipo.</p>
+      </div>
+      <div class="home-exec-pills">
+        <a class="home-exec-pill" href="{% url 'seguimiento:panel_dg' %}">Ver panel completo</a>
+      </div>
+    </div>
+    <div style="display:grid; gap:10px; margin-top:12px;">
+      {% for item in seguimiento_pendientes %}
+      <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center; padding:10px 12px; background:rgba(255,255,255,.6); border:1px solid rgba(139,34,82,.10); border-radius:12px;">
+        <div style="overflow:hidden;">
+          <strong style="font-size:.95rem;">{{ item.titulo }}</strong>
+          {% if item.prorroga_pendiente %}<span class="badge bg-warning" style="font-size:.66rem;">⏳ Prórroga</span>{% endif %}
+          <div class="home-exec-subtle">{{ item.responsable_nombre }} · {{ item.get_tipo_display }} · límite {% if item.fecha_limite %}{{ item.fecha_limite|date:"d/m/Y" }}{% else %}sin fecha{% endif %}</div>
+        </div>
+        <div style="display:flex; gap:8px; flex-shrink:0;">
+          {% if item.es_en_revision and not item.prorroga_pendiente %}
+          <form method="post" action="{% url 'seguimiento:resolver_revision' item.pk %}">
+            {% csrf_token %}<input type="hidden" name="next" value="dashboard"><input type="hidden" name="accion" value="aprobar">
+            <button class="btn btn-primary btn-sm" type="submit">✓ Aprobar</button>
+          </form>
+          {% endif %}
+          <a class="btn btn-secondary btn-sm" href="{% url 'seguimiento:detalle_dg' item.pk %}">Revisar</a>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
   {% if sales_refresh_status %}
   <section class="home-exec-card {% if sales_refresh_status.last_status == 'ERROR' %}is-danger{% elif sales_refresh_status.is_cut_delayed or sales_refresh_status.last_status == 'INCONSISTENCIA' or sales_refresh_status.last_status == 'REZAGO' or sales_refresh_status.last_status == 'PENDIENTE_REZAGO' %}is-warning{% else %}is-success{% endif %}">
     <div class="home-exec-section-head">

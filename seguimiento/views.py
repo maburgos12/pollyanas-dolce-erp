@@ -6,7 +6,6 @@ from pathlib import Path
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.core.mail import send_mail
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.dateparse import parse_date
@@ -30,28 +29,6 @@ from .models import (
     SeguimientoProrrogaSolicitud,
 )
 from .services import empleado_de_usuario
-
-
-def _notificar_dg_revision(item: SeguimientoItem, accion: str, usuario_nombre: str) -> None:
-    director_email = (getattr(settings, "DIRECTOR_EMAIL", "") or "").strip()
-    if not director_email:
-        return
-    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "")
-    titulo = item.titulo[:80]
-    asunto = f"[Seguimiento] {accion}: {titulo}"
-    cuerpo = (
-        f"{usuario_nombre} marcó el acuerdo '{titulo}' como listo para revisión.\n\n"
-        f"Tipo: {item.get_tipo_display()}\n"
-        f"Estatus: {item.get_estatus_display()}\n"
-        f"Área: {item.area or '—'}\n"
-        f"Fecha límite: {item.fecha_limite.strftime('%d/%m/%Y %H:%M') if item.fecha_limite else 'Sin fecha'}\n\n"
-        f"Revisa en el ERP: /seguimiento/{item.pk}/\n"
-        f"Bandeja de revisión: /seguimiento/revision/"
-    )
-    try:
-        send_mail(asunto, cuerpo, from_email, [director_email], fail_silently=True)
-    except Exception:
-        pass
 
 
 EVIDENCIA_ALLOWED_EXTENSIONS = {
@@ -297,7 +274,12 @@ def toggle_checklist(request, pk, check_id):
         check.completado_at = None
     check.save(update_fields=["completado", "completado_por", "completado_at", "updated_at"])
     log_event(request.user, "seguimiento.checklist", "SeguimientoChecklistItem", check.pk, {"seguimiento_id": item.pk})
-    notificar_seguimiento_avance(item, actor=request.user, mensaje_extra=f"Check: {'✓ ' if check.completado else '○ '}{check.titulo}")
+    notificar_seguimiento_avance(
+        item,
+        actor=request.user,
+        mensaje_extra=f"Check: {'✓ ' if check.completado else '○ '}{check.titulo}",
+        enviar_correo=False,
+    )
     messages.success(request, "Checklist actualizado.")
     return redirect("seguimiento:detalle", pk=item.pk)
 
@@ -434,8 +416,6 @@ def entregar_para_revision(request, pk):
     item.save(update_fields=["estatus", "updated_at"])
     log_event(request.user, "seguimiento.entrega", "SeguimientoItem", item.pk, {"entrega": True})
     notificar_seguimiento_entrega(item, actor=request.user)
-    nombre_usuario = request.user.get_full_name() or request.user.username
-    _notificar_dg_revision(item, "Entregado para revisión", nombre_usuario)
     messages.success(request, "Acuerdo enviado a revisión. El Director General será notificado.")
     return redirect("seguimiento:detalle", pk=pk)
 
@@ -525,6 +505,18 @@ def bandeja_revision(request):
     return render(request, "seguimiento/bandeja_revision.html", {"items": items, "total": items.count()})
 
 
+def _redirect_post_resolucion(request, pk):
+    """Devuelve al DG al lugar de donde resolvió (panel, detalle, dashboard o bandeja)."""
+    destino = (request.POST.get("next") or "").strip()
+    if destino == "panel":
+        return redirect("seguimiento:panel_dg")
+    if destino == "detalle":
+        return redirect("seguimiento:detalle_dg", pk=pk)
+    if destino == "dashboard":
+        return redirect("dashboard")
+    return redirect("seguimiento:bandeja_revision")
+
+
 @login_required
 @require_POST
 def resolver_revision(request, pk):
@@ -550,7 +542,7 @@ def resolver_revision(request, pk):
     elif accion == "devolver":
         if not comentario_texto:
             messages.error(request, "Escribe el motivo para devolver el acuerdo.")
-            return redirect("seguimiento:detalle", pk=pk)
+            return _redirect_post_resolucion(request, pk)
         item.estatus = SeguimientoItem.ESTATUS_EN_PROCESO
         item.save(update_fields=["estatus", "updated_at"])
         SeguimientoComentario.objects.create(
@@ -562,7 +554,7 @@ def resolver_revision(request, pk):
         messages.warning(request, f"'{item.titulo[:60]}' devuelto para corrección.")
     else:
         messages.error(request, "Acción no reconocida.")
-    return redirect("seguimiento:bandeja_revision")
+    return _redirect_post_resolucion(request, pk)
 
 
 @login_required
@@ -594,7 +586,7 @@ def resolver_prorroga(request, pk, prorroga_id):
         prorroga.save()
         log_event(request.user, "seguimiento.prorroga.rechazar", "SeguimientoProrrogaSolicitud", prorroga.pk, {})
         messages.warning(request, "Solicitud de prórroga rechazada.")
-    return redirect("seguimiento:bandeja_revision")
+    return _redirect_post_resolucion(request, pk)
 
 
 @login_required
@@ -725,8 +717,27 @@ def panel_dg(request):
         if i.fecha_limite and now <= i.fecha_limite <= now + timedelta(hours=24) and not i.esta_cerrado
     )
 
+    # Sección "Requiere tu acción": en revisión + prórrogas pendientes (sin importar filtros).
+    from .services import items_pendientes_revision_dg, _responsable_nombre
+
+    pendientes_accion = list(items_pendientes_revision_dg())
+    for item in pendientes_accion:
+        checks = list(item.checklist.all())
+        item.checklist_total = len(checks)
+        item.checklist_done = sum(1 for c in checks if c.completado)
+        item.progreso_pct = round((item.checklist_done / item.checklist_total) * 100) if item.checklist_total else 0
+        item.responsable_nombre = _responsable_nombre(item)
+        item.ultima_evidencia = item.evidencias.order_by("-created_at").first()
+        item.ultimo_comentario = item.comentarios.order_by("-created_at").first()
+        item.prorroga_pendiente = next(
+            (p for p in item.prorrogas.all() if p.estatus == SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE), None
+        )
+        item.es_en_revision = item.estatus == SeguimientoItem.ESTATUS_EN_REVISION
+
     return render(request, "seguimiento/panel_dg.html", {
         "items": items,
+        "pendientes_accion": pendientes_accion,
+        "pendientes_accion_total": len(pendientes_accion),
         "colaboradores_resumen": colaboradores_resumen,
         "vista": vista,
         "active_tab": active_tab,
@@ -793,8 +804,6 @@ def entregar_para_revision(request, pk):
     item.save(update_fields=["estatus", "updated_at"])
     log_event(request.user, "seguimiento.entrega", "SeguimientoItem", item.pk, {"entrega": True})
     notificar_seguimiento_entrega(item, actor=request.user)
-    nombre_usuario = request.user.get_full_name() or request.user.username
-    _notificar_dg_revision(item, "Entregado para revisión", nombre_usuario)
     messages.success(request, "Acuerdo enviado a revisión. El Director General será notificado.")
     return redirect("seguimiento:detalle", pk=pk)
 

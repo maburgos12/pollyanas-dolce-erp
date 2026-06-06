@@ -2820,6 +2820,25 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             "can_manage_orquestacion": can_manage_orquestacion(u),
         }
     )
+    # Acuerdos de seguimiento pendientes de la revisión del DG (en revisión + prórrogas)
+    try:
+        if u.is_superuser or u.is_staff or u.groups.filter(name__in=[ROLE_DG, ROLE_ADMIN]).exists():
+            from seguimiento.models import SeguimientoItem as _SegItem, SeguimientoProrrogaSolicitud as _SegProrroga
+            from seguimiento.services import items_pendientes_revision_dg, _responsable_nombre
+
+            _pend_qs = items_pendientes_revision_dg()
+            ctx["seguimiento_pendientes_total"] = _pend_qs.count()
+            _pend = list(_pend_qs[:6])
+            for _it in _pend:
+                _it.responsable_nombre = _responsable_nombre(_it)
+                _it.es_en_revision = _it.estatus == _SegItem.ESTATUS_EN_REVISION
+                _it.prorroga_pendiente = next(
+                    (p for p in _it.prorrogas.all() if p.estatus == _SegProrroga.ESTATUS_PENDIENTE), None
+                )
+            ctx["seguimiento_pendientes"] = _pend
+    except Exception:
+        logger.exception("Dashboard seguimiento pendientes failed")
+
     if ctx.get("can_view_reportes"):
         try:
             materialized_ctx = _dashboard_materialized_executive_context(request.GET.get("months"))

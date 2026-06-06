@@ -1,11 +1,56 @@
 from __future__ import annotations
 
+import logging
+import os
 from collections.abc import Iterable
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.mail import send_mail
 
 from core.access import ROLE_ADMIN, ROLE_DG
 from core.models import Notificacion
+
+logger = logging.getLogger(__name__)
+
+# URL base pública para los enlaces de los correos (los links relativos no sirven en email).
+PUBLIC_BASE_URL = (os.getenv("PUBLIC_BASE_URL") or "https://erp.pollyanasdolce.com").rstrip("/")
+
+
+def _panel_url(pk) -> str:
+    return f"/seguimiento/panel/{pk}/"
+
+
+def _enviar_correo_dg(asunto: str, cuerpo: str) -> None:
+    """Envía un correo al Director General. Nunca rompe el flujo si falla el envío."""
+    director_email = (getattr(settings, "DIRECTOR_EMAIL", "") or "").strip()
+    if not director_email:
+        return
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "") or None
+    try:
+        send_mail(asunto, cuerpo, from_email, [director_email], fail_silently=True)
+    except Exception:
+        logger.exception("Fallo al enviar correo de seguimiento al DG")
+
+
+def _cuerpo_correo_seguimiento(item, *, encabezado: str, actor=None, extra: str = "") -> str:
+    actor_nombre = ""
+    if actor:
+        actor_nombre = actor.get_full_name() or actor.username
+    fecha_limite = item.fecha_limite.strftime("%d/%m/%Y %H:%M") if item.fecha_limite else "Sin fecha"
+    lineas = [
+        encabezado,
+        "",
+        f"Acuerdo: {item.titulo}",
+        f"Tipo: {item.get_tipo_display()}",
+        f"Responsable: {actor_nombre or '—'}",
+        f"Área: {item.area or '—'}",
+        f"Fecha límite: {fecha_limite}",
+    ]
+    if extra:
+        lineas += ["", extra]
+    lineas += ["", f"Abrir el acuerdo: {PUBLIC_BASE_URL}{_panel_url(item.pk)}"]
+    return "\n".join(lineas)
 
 
 def _usuarios_activos(users: Iterable) -> list:
@@ -190,17 +235,17 @@ def notificar_prestamo_aprobado(prestamo, *, actor=None) -> int:
     )
 
 
-def notificar_seguimiento_avance(item, *, actor=None, mensaje_extra: str = "") -> int:
+def notificar_seguimiento_avance(item, *, actor=None, mensaje_extra: str = "", enviar_correo: bool = True) -> int:
     destinatarios = usuarios_direccion_general()
     titulo = item.titulo[:80]
     responsable = ""
     if actor:
         responsable = f"{actor.get_full_name() or actor.username} · "
-    return crear_notificaciones(
+    creadas = crear_notificaciones(
         destinatarios,
         titulo=f"Avance: {titulo}",
         mensaje=f"{responsable}{item.get_tipo_display()} · {item.area or 'Sin área'}" + (f"\n{mensaje_extra}" if mensaje_extra else ""),
-        url=f"/seguimiento/panel/{item.pk}/",
+        url=_panel_url(item.pk),
         tipo=Notificacion.TIPO_SEGUIMIENTO,
         prioridad=Notificacion.PRIORIDAD_NORMAL,
         actor=actor,
@@ -208,6 +253,12 @@ def notificar_seguimiento_avance(item, *, actor=None, mensaje_extra: str = "") -
         objeto_id=item.pk,
         excluir=actor,
     )
+    if enviar_correo:
+        _enviar_correo_dg(
+            f"[Seguimiento] Avance: {titulo}",
+            _cuerpo_correo_seguimiento(item, encabezado="Un colaborador registró un avance.", actor=actor, extra=mensaje_extra),
+        )
+    return creadas
 
 
 def notificar_seguimiento_prorroga(item, fecha_solicitada, motivo: str = "", *, actor=None) -> int:
@@ -216,11 +267,11 @@ def notificar_seguimiento_prorroga(item, fecha_solicitada, motivo: str = "", *, 
     actor_nombre = ""
     if actor:
         actor_nombre = f"{actor.get_full_name() or actor.username} · "
-    return crear_notificaciones(
+    creadas = crear_notificaciones(
         destinatarios,
         titulo=f"Prórroga solicitada: {titulo}",
         mensaje=f"{actor_nombre}Nueva fecha: {fecha_solicitada:%d/%m/%Y}" + (f"\nMotivo: {motivo[:120]}" if motivo else ""),
-        url=f"/seguimiento/revision/",
+        url=_panel_url(item.pk),
         tipo=Notificacion.TIPO_SEGUIMIENTO,
         prioridad=Notificacion.PRIORIDAD_ALTA,
         actor=actor,
@@ -228,6 +279,14 @@ def notificar_seguimiento_prorroga(item, fecha_solicitada, motivo: str = "", *, 
         objeto_id=item.pk,
         excluir=actor,
     )
+    extra = f"Nueva fecha solicitada: {fecha_solicitada:%d/%m/%Y}"
+    if motivo:
+        extra += f"\nMotivo: {motivo[:300]}"
+    _enviar_correo_dg(
+        f"[Seguimiento] Prórroga solicitada: {titulo}",
+        _cuerpo_correo_seguimiento(item, encabezado="Un colaborador pide más tiempo para un acuerdo.", actor=actor, extra=extra),
+    )
+    return creadas
 
 
 def notificar_seguimiento_entrega(item, *, actor=None) -> int:
@@ -236,11 +295,11 @@ def notificar_seguimiento_entrega(item, *, actor=None) -> int:
     actor_nombre = ""
     if actor:
         actor_nombre = f"{actor.get_full_name() or actor.username} · "
-    return crear_notificaciones(
+    creadas = crear_notificaciones(
         destinatarios,
         titulo=f"Listo para revisión: {titulo}",
         mensaje=f"{actor_nombre}{item.get_tipo_display()} enviado a revisión.",
-        url=f"/seguimiento/revision/",
+        url=_panel_url(item.pk),
         tipo=Notificacion.TIPO_SEGUIMIENTO,
         prioridad=Notificacion.PRIORIDAD_ALTA,
         actor=actor,
@@ -248,6 +307,11 @@ def notificar_seguimiento_entrega(item, *, actor=None) -> int:
         objeto_id=item.pk,
         excluir=actor,
     )
+    _enviar_correo_dg(
+        f"[Seguimiento] Listo para revisión: {titulo}",
+        _cuerpo_correo_seguimiento(item, encabezado="Un colaborador entregó un acuerdo y espera tu revisión.", actor=actor),
+    )
+    return creadas
 
 
 def notificar_seguimiento_completado(item, *, actor=None) -> int:
@@ -256,11 +320,11 @@ def notificar_seguimiento_completado(item, *, actor=None) -> int:
     actor_nombre = ""
     if actor:
         actor_nombre = f"{actor.get_full_name() or actor.username} · "
-    return crear_notificaciones(
+    creadas = crear_notificaciones(
         destinatarios,
         titulo=f"Completado: {titulo}",
         mensaje=f"{actor_nombre}{item.get_tipo_display()} marcado como completado.",
-        url=f"/seguimiento/panel/{item.pk}/",
+        url=_panel_url(item.pk),
         tipo=Notificacion.TIPO_SEGUIMIENTO,
         prioridad=Notificacion.PRIORIDAD_NORMAL,
         actor=actor,
@@ -268,6 +332,11 @@ def notificar_seguimiento_completado(item, *, actor=None) -> int:
         objeto_id=item.pk,
         excluir=actor,
     )
+    _enviar_correo_dg(
+        f"[Seguimiento] Completado: {titulo}",
+        _cuerpo_correo_seguimiento(item, encabezado="Un colaborador cerró un acuerdo que no requería tu aprobación.", actor=actor),
+    )
+    return creadas
 
 
 def _url_permiso_por_origen(permiso) -> str:
