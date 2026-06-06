@@ -596,6 +596,9 @@ class OperatingFinanceSnapshotServiceTests(TestCase):
 class MonthlyHistoricalCostingServiceTests(TestCase):
     def setUp(self):
         self.unit_kg = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA, factor_to_base=1000)
+        self.unit_g = UnidadMedida.objects.create(codigo="g", nombre="Gramo", tipo=UnidadMedida.TIPO_MASA, factor_to_base=1)
+        self.unit_lt = UnidadMedida.objects.create(codigo="lt", nombre="Litro", tipo=UnidadMedida.TIPO_VOLUMEN, factor_to_base=1000)
+        self.unit_ml = UnidadMedida.objects.create(codigo="ml", nombre="Mililitro", tipo=UnidadMedida.TIPO_VOLUMEN, factor_to_base=1)
         self.unit_pza = UnidadMedida.objects.create(codigo="pza", nombre="Pieza", tipo=UnidadMedida.TIPO_PIEZA, factor_to_base=1)
         self.harvest = Insumo.objects.create(
             codigo="HARINA",
@@ -721,6 +724,101 @@ class MonthlyHistoricalCostingServiceTests(TestCase):
         self.assertEqual(prep_cost.costo_por_unidad_rendimiento, Decimal("22.500000"))
         self.assertEqual(final_cost.costo_total, Decimal("11.250000"))
         self.assertEqual(final_cost.coverage_pct, Decimal("100.000000"))
+
+    def test_monthly_cost_normalizes_point_kg_cost_to_gram_base(self):
+        chocolate = Insumo.objects.create(
+            codigo="CHOCOLATE",
+            nombre="Chocolate",
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            unidad_base=self.unit_g,
+            activo=True,
+        )
+        CostoInsumo.objects.create(
+            insumo=chocolate,
+            fecha=date(2026, 4, 10),
+            costo_unitario=Decimal("319.83"),
+            source_hash="chocolate_apr_kg",
+            raw={"fecha": "2026-04-10", "cantidad": 1, "unit": "kg", "producto": "Chocolate"},
+        )
+
+        row = MonthlyHistoricalCostingService()._build_insumo_monthly_cost(
+            period_start=date(2026, 4, 1),
+            insumo=chocolate,
+        )
+
+        self.assertIsNotNone(row)
+        self.assertEqual(row.costo_unitario, Decimal("0.319830"))
+        self.assertEqual(row.metadata["unit_normalization"][0]["source_unit"], "kg")
+        self.assertEqual(row.metadata["unit_normalization"][0]["target_unit"], "g")
+
+    def test_monthly_cost_normalizes_point_liter_cost_to_ml_base(self):
+        vanilla = Insumo.objects.create(
+            codigo="VAINILLA",
+            nombre="Vainilla",
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            unidad_base=self.unit_ml,
+            activo=True,
+        )
+        CostoInsumo.objects.create(
+            insumo=vanilla,
+            fecha=date(2026, 4, 11),
+            costo_unitario=Decimal("69.62175"),
+            source_hash="vainilla_apr_lt",
+            raw={"fecha": "2026-04-11", "cantidad": 1, "unidad": "litro", "producto": "Vainilla"},
+        )
+
+        row = MonthlyHistoricalCostingService()._build_insumo_monthly_cost(
+            period_start=date(2026, 4, 1),
+            insumo=vanilla,
+        )
+
+        self.assertIsNotNone(row)
+        self.assertEqual(row.costo_unitario, Decimal("0.069622"))
+        self.assertEqual(row.metadata["unit_normalization"][0]["source_unit"], "lt")
+        self.assertEqual(row.metadata["unit_normalization"][0]["target_unit"], "ml")
+
+    def test_recipe_historical_cost_uses_normalized_insumo_base_cost(self):
+        flour = Insumo.objects.create(
+            codigo="HARINA_G",
+            nombre="Harina por gramo",
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            unidad_base=self.unit_g,
+            activo=True,
+        )
+        recipe = Receta.objects.create(
+            nombre="Base Gramos",
+            hash_contenido="hist_grams_hash",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("1"),
+            rendimiento_unidad=self.unit_kg,
+        )
+        LineaReceta.objects.create(
+            receta=recipe,
+            posicion=1,
+            insumo=flour,
+            insumo_texto="Harina por gramo",
+            cantidad=Decimal("500"),
+            unidad=self.unit_g,
+            unidad_texto="g",
+            costo_unitario_snapshot=Decimal("0"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+        CostoInsumo.objects.create(
+            insumo=flour,
+            fecha=date(2026, 4, 12),
+            costo_unitario=Decimal("18.50"),
+            source_hash="harina_apr_kg",
+            raw={"fecha": "2026-04-12", "cantidad": 1, "unit": "kg", "producto": "Harina"},
+        )
+
+        result = MonthlyHistoricalCostingService()._build_recipe_monthly_cost(
+            period_start=date(2026, 4, 1),
+            receta=recipe,
+        )
+
+        self.assertEqual(result.total_cost, Decimal("9.250000"))
+        self.assertEqual(result.unit_cost, Decimal("9.250000"))
 
     def test_operating_snapshot_uses_monthly_historical_cost_when_weekly_missing(self):
         sucursal = Sucursal.objects.create(codigo="MAT", nombre="Matriz")
