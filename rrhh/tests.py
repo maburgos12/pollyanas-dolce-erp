@@ -10,7 +10,7 @@ from rest_framework.test import APIClient
 from unittest import SkipTest
 from unittest.mock import patch
 
-from core.models import Notificacion, Sucursal
+from core.models import Notificacion, Sucursal, UserProfile
 from rrhh.models import (
     AsistenciaEmpleado,
     BonoEsquema,
@@ -1018,6 +1018,48 @@ class RRHHViewsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         empleado.refresh_from_db()
         self.assertEqual(empleado.codigo, "00346")
+
+    def test_empleados_liga_usuario_repartidor_y_crea_identidad_logistica(self):
+        from logistica.models import Repartidor
+
+        sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        usuario = User.objects.create_user(username="ivan.felix", password="pass123")
+
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "create",
+                "nombre": "VALDEZ FÉLIX REY IVÁN",
+                "area": "REPARTIDORES",
+                "usuario_erp": str(usuario.id),
+                "sucursal_app_id": str(sucursal.id),
+                "salario_diario": "300.00",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        empleado = Empleado.objects.get(nombre="VALDEZ FÉLIX REY IVÁN")
+        usuario.refresh_from_db()
+        self.assertEqual(empleado.usuario_erp, usuario)
+        self.assertEqual(usuario.get_full_name(), "VALDEZ FÉLIX REY IVÁN")
+        self.assertTrue(usuario.groups.filter(name="repartidor").exists())
+        self.assertEqual(UserProfile.objects.get(user=usuario).sucursal, sucursal)
+        repartidor = Repartidor.objects.get(user=usuario)
+        self.assertEqual(repartidor.sucursal, sucursal)
+        self.assertEqual(str(repartidor), "VALDEZ FÉLIX REY IVÁN")
+
+    def test_identidad_operativa_limpia_sucursal_app(self):
+        from rrhh.services_identidad import asegurar_identidad_operativa_empleado
+
+        sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        usuario = User.objects.create_user(username="usuario.sucursal", password="pass123")
+        empleado = Empleado.objects.create(nombre="Empleado Sucursal", usuario_erp=usuario)
+        UserProfile.objects.create(user=usuario, sucursal=sucursal)
+
+        asegurar_identidad_operativa_empleado(empleado, sucursal_app_id=None)
+
+        self.assertIsNone(UserProfile.objects.get(user=usuario).sucursal)
 
     def test_empleados_bloquea_codigo_duplicado(self):
         existente = Empleado.objects.create(nombre="Empleado Existente", codigo="346")

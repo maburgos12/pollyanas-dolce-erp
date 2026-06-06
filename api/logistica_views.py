@@ -34,6 +34,7 @@ from logistica.models import (
     RutaEntrega,
     Unidad,
 )
+from rrhh.services_identidad import nombre_operativo_usuario
 
 from .logistica_serializers import (
     LogisticaBitacoraSerializer,
@@ -182,7 +183,7 @@ class LogisticaMiPerfilView(_LogisticaBaseView):
             "user": {
                 "id": request.user.id,
                 "username": request.user.username,
-                "nombre": request.user.get_full_name() or request.user.username,
+                "nombre": nombre_operativo_usuario(request.user),
                 "email": request.user.email,
             },
             "roles": list(request.user.groups.values_list("name", flat=True)),
@@ -352,7 +353,7 @@ class LogisticaReportesUnidadAbiertosView(_LogisticaBaseView):
         reportes = _reportes_with_reafirmaciones(
             ReporteUnidad.objects.filter(unidad_id=unidad_id)
             .exclude(estatus=ReporteUnidad.ESTATUS_CERRADO)
-            .select_related("unidad", "repartidor__user", "asignado_a")
+            .select_related("unidad", "repartidor__user", "repartidor__user__empleado_rrhh", "asignado_a")
         )
         tipo = (request.query_params.get("tipo") or "").strip()
         if tipo:
@@ -368,7 +369,12 @@ class LogisticaReporteReafirmarView(_LogisticaBaseView):
         if not repartidor or not _can_operate_pwa(request.user):
             return Response({"detail": "Solo repartidores registrados pueden reafirmar reportes."}, status=status.HTTP_403_FORBIDDEN)
         reporte = get_object_or_404(
-            ReporteUnidad.objects.select_related("unidad", "repartidor__user", "asignado_a").exclude(estatus=ReporteUnidad.ESTATUS_CERRADO),
+            ReporteUnidad.objects.select_related(
+                "unidad",
+                "repartidor__user",
+                "repartidor__user__empleado_rrhh",
+                "asignado_a",
+            ).exclude(estatus=ReporteUnidad.ESTATUS_CERRADO),
             pk=reporte_id,
         )
         reafirmacion = ReporteUnidadReafirmacion.objects.create(
@@ -386,7 +392,14 @@ class LogisticaReporteReafirmarView(_LogisticaBaseView):
             str(reafirmacion.id),
             {"reporte": reporte.id, "unidad": reporte.unidad.codigo},
         )
-        reporte = _reportes_with_reafirmaciones(ReporteUnidad.objects.filter(pk=reporte.pk).select_related("unidad", "repartidor__user", "asignado_a")).first()
+        reporte = _reportes_with_reafirmaciones(
+            ReporteUnidad.objects.filter(pk=reporte.pk).select_related(
+                "unidad",
+                "repartidor__user",
+                "repartidor__user__empleado_rrhh",
+                "asignado_a",
+            )
+        ).first()
         return Response(
             {
                 "reafirmacion": LogisticaReporteReafirmacionSerializer(reafirmacion).data,
@@ -402,7 +415,14 @@ class LogisticaMisReportesView(_LogisticaBaseView):
         repartidor = _get_repartidor_for_user(request.user)
         if not repartidor:
             return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
-        reportes = _reportes_with_reafirmaciones(ReporteUnidad.objects.filter(repartidor=repartidor).select_related("unidad", "repartidor__user", "asignado_a"))
+        reportes = _reportes_with_reafirmaciones(
+            ReporteUnidad.objects.filter(repartidor=repartidor).select_related(
+                "unidad",
+                "repartidor__user",
+                "repartidor__user__empleado_rrhh",
+                "asignado_a",
+            )
+        )
         return Response(LogisticaReporteSerializer(reportes, many=True).data, status=status.HTTP_200_OK)
 
 
@@ -411,7 +431,9 @@ class LogisticaTodosReportesView(_LogisticaBaseView):
         if not _can_view_all_reportes(request.user):
             return Response({"detail": "No tienes permisos para consultar todos los reportes."}, status=status.HTTP_403_FORBIDDEN)
 
-        qs = _reportes_with_reafirmaciones(ReporteUnidad.objects.select_related("unidad", "repartidor__user", "asignado_a"))
+        qs = _reportes_with_reafirmaciones(
+            ReporteUnidad.objects.select_related("unidad", "repartidor__user", "repartidor__user__empleado_rrhh", "asignado_a")
+        )
         estatus_filtro = (request.query_params.get("estatus") or "").strip()
         severidad = (request.query_params.get("severidad") or "").strip()
         if estatus_filtro:
@@ -426,7 +448,7 @@ class LogisticaReporteDetailView(_LogisticaBaseView):
 
     def patch(self, request, reporte_id: int):
         reporte = get_object_or_404(
-            ReporteUnidad.objects.select_related("repartidor__user", "unidad", "asignado_a"),
+            ReporteUnidad.objects.select_related("repartidor__user", "repartidor__user__empleado_rrhh", "unidad", "asignado_a"),
             pk=reporte_id,
         )
         repartidor = _get_repartidor_for_user(request.user)
@@ -461,7 +483,7 @@ class LogisticaBitacoraView(_LogisticaBaseView):
     def get(self, request):
         repartidor = _get_repartidor_for_user(request.user)
         if _can_view_all_reportes(request.user):
-            qs = BitacoraRepartidor.objects.select_related("repartidor__user").all()
+            qs = BitacoraRepartidor.objects.select_related("repartidor__user", "repartidor__user__empleado_rrhh").all()
             repartidor_id = request.query_params.get("repartidor")
             fecha = request.query_params.get("fecha")
             if repartidor_id:
@@ -469,7 +491,7 @@ class LogisticaBitacoraView(_LogisticaBaseView):
             if fecha:
                 qs = qs.filter(fecha=fecha)
         elif repartidor:
-            qs = BitacoraRepartidor.objects.select_related("repartidor__user").filter(repartidor=repartidor)
+            qs = BitacoraRepartidor.objects.select_related("repartidor__user", "repartidor__user__empleado_rrhh").filter(repartidor=repartidor)
         else:
             return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
         return Response(LogisticaBitacoraSerializer(qs, many=True).data, status=status.HTTP_200_OK)
@@ -591,7 +613,7 @@ class LogisticaLavadoEstadoView(_LogisticaBaseView):
         unidad = get_object_or_404(Unidad.objects.filter(activa=True), pk=unidad_id)
         hoy = timezone.localdate()
         ultimo_lavado = (
-            LavadoUnidad.objects.select_related("unidad", "registrado_por")
+            LavadoUnidad.objects.select_related("unidad", "registrado_por", "registrado_por__empleado_rrhh")
             .filter(unidad=unidad)
             .order_by("-fecha", "-fecha_registro", "-id")
             .first()
@@ -647,7 +669,10 @@ class LogisticaBitacoraSalidaDetailView(_LogisticaBaseView):
 
     def patch(self, request, bitacora_id: int):
         repartidor = _get_repartidor_for_user(request.user)
-        bitacora = get_object_or_404(BitacoraSalidaLlegada.objects.select_related("repartidor__user", "unidad"), pk=bitacora_id)
+        bitacora = get_object_or_404(
+            BitacoraSalidaLlegada.objects.select_related("repartidor__user", "repartidor__user__empleado_rrhh", "unidad"),
+            pk=bitacora_id,
+        )
         if not repartidor or bitacora.repartidor_id != repartidor.id:
             return Response({"detail": "No tienes permisos para actualizar esta bitácora."}, status=status.HTTP_403_FORBIDDEN)
         if bitacora.cerrada:
@@ -666,7 +691,7 @@ class LogisticaBitacoraSalidaActivaView(_LogisticaBaseView):
             return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
         bitacora = (
             BitacoraSalidaLlegada.objects.filter(repartidor=repartidor, cerrada=False)
-            .select_related("unidad", "repartidor__user")
+            .select_related("unidad", "repartidor__user", "repartidor__user__empleado_rrhh")
             .prefetch_related("cargas_combustible")
             .first()
         )
@@ -698,7 +723,11 @@ class LogisticaInspeccionUltimaView(_LogisticaBaseView):
         repartidor = _get_repartidor_for_user(request.user)
         if not repartidor or not repartidor.unidad_asignada_id:
             return Response({"detail": "No tienes unidad asignada."}, status=status.HTTP_404_NOT_FOUND)
-        inspeccion = InspeccionVehiculo.objects.filter(unidad=repartidor.unidad_asignada).select_related("repartidor__user", "unidad").first()
+        inspeccion = (
+            InspeccionVehiculo.objects.filter(unidad=repartidor.unidad_asignada)
+            .select_related("repartidor__user", "repartidor__user__empleado_rrhh", "unidad")
+            .first()
+        )
         if not inspeccion:
             return Response({}, status=status.HTTP_200_OK)
         return Response(LogisticaInspeccionVehiculoSerializer(inspeccion).data, status=status.HTTP_200_OK)
@@ -727,7 +756,7 @@ class InspeccionDiariaCheckView(_LogisticaBaseView):
         if not unidad_id:
             return Response({"detail": "unidad_id es obligatorio."}, status=status.HTTP_400_BAD_REQUEST)
         inspeccion = (
-            InspeccionDiaria.objects.select_related("repartidor__user", "unidad")
+            InspeccionDiaria.objects.select_related("repartidor__user", "repartidor__user__empleado_rrhh", "unidad")
             .filter(unidad_id=unidad_id, fecha=timezone.localdate())
             .first()
         )
@@ -737,7 +766,7 @@ class InspeccionDiariaCheckView(_LogisticaBaseView):
         return Response(
             {
                 "ya_inspeccionada": True,
-                "repartidor_nombre": inspeccion.repartidor.user.get_full_name() or inspeccion.repartidor.user.username,
+                "repartidor_nombre": nombre_operativo_usuario(inspeccion.repartidor.user),
                 "hora": hora_local.strftime("%H:%M"),
                 "fecha": inspeccion.fecha.isoformat(),
                 "inspeccion_id": inspeccion.id,

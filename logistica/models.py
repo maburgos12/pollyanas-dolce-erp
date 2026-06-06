@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from core.models import Sucursal
 from crm.models import PedidoCliente
+from rrhh.services_identidad import nombre_operativo_usuario
 
 
 class RutaEntrega(models.Model):
@@ -184,7 +185,7 @@ class Repartidor(models.Model):
         verbose_name_plural = "Repartidores"
 
     def __str__(self) -> str:
-        return self.user.get_full_name() or self.user.username
+        return nombre_operativo_usuario(self.user)
 
 
 class ReporteUnidad(models.Model):
