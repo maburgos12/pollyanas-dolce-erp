@@ -98,3 +98,8 @@ storage/dg_reports/logs/*.log
 !static/**/*.png
 !static/**/*.jpg
 !static/**/*.gif
+
+# Entregables operativos de marketing generados fuera del flujo de código
+docs/marketing/*.docx
+docs/marketing/*.pdf
+docs/marketing/*.pptx
