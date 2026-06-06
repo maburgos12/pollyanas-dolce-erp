@@ -8,7 +8,7 @@ from activos.models import Activo, OrdenMantenimiento
 from core.access import ACCESS_MANAGE
 from core.models import Sucursal, UserModuleAccess
 from core.navigation import build_nav_groups
-from fallas.models import CategoriaFalla, ReporteFalla
+from fallas.models import BitacoraFalla, CategoriaFalla, ReporteFalla
 from logistica.models import Repartidor, ReporteUnidad, Unidad
 from maestros.models import Proveedor
 
@@ -50,7 +50,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
         perfil = self.client.get("/api/mantenimiento/me/")
 
         self.assertEqual(portal.status_code, 200)
-        self.assertContains(portal, "Sucursales / Producción (CEDIS)")
+        self.assertContains(portal, "Sucursales / CEDIS")
         self.assertContains(portal, "Logística")
         self.assertEqual(perfil.status_code, 200)
         self.assertEqual(perfil.json()["username"], "jorge.isaac")
@@ -121,6 +121,25 @@ class MantenimientoUnifiedInboxTests(TestCase):
         self.assertIn(f"falla:{self.falla.id}", [item["uid"] for item in sucursales["items"]])
         self.assertIn(f"orden:{self.orden.id}", [item["uid"] for item in sucursales["items"]])
         self.assertIn(f"unidad:{self.reporte_unidad.id}", [item["uid"] for item in logistica["items"]])
+
+    def test_branch_failure_items_include_evidence_and_work_context(self):
+        BitacoraFalla.objects.create(
+            reporte=self.falla,
+            usuario=self.user,
+            estatus_anterior=ReporteFalla.ESTATUS_ABIERTO,
+            estatus_nuevo=ReporteFalla.ESTATUS_REVISION,
+            comentario="Se revisa evidencia antes de asignar proveedor.",
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get("/api/mantenimiento/bandeja/", {"origen": "sucursales"})
+
+        self.assertEqual(response.status_code, 200)
+        item = next(row for row in response.json()["items"] if row["uid"] == f"falla:{self.falla.id}")
+        self.assertIn("fallas/evidencias", item["foto_url"])
+        self.assertEqual(item["reportado_por"], "reporter")
+        self.assertEqual(item["ultimo_avance"], "Se revisa evidencia antes de asignar proveedor.")
+        self.assertEqual(item["bitacora_total"], 1)
 
     def test_can_update_original_source_without_creating_duplicate_report(self):
         self.client.force_login(self.user)

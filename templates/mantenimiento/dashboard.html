@@ -32,8 +32,13 @@
   .mant-col-body::-webkit-scrollbar-thumb{background:#e3b9ca;border-radius:999px}
   .mant-ticket{display:grid;gap:10px;background:#fffafc;border:1px solid #f0c9d9;border-radius:12px;padding:12px}
   .mant-ticket.is-hidden{display:none}
+  .mant-ticket-main{display:grid;grid-template-columns:76px minmax(0,1fr);gap:10px;align-items:start}
+  .mant-ticket-main.no-photo{grid-template-columns:1fr}
+  .mant-ticket-photo{width:76px;aspect-ratio:1;border-radius:8px;object-fit:cover;border:1px solid rgba(139,34,82,.16);background:#f6edf2}
+  .mant-ticket-photo-empty{width:76px;aspect-ratio:1;border-radius:8px;border:1px dashed #e8b7cb;background:#fff;display:flex;align-items:center;justify-content:center;color:#9d6d82;font-size:11px;font-weight:900;text-align:center;padding:6px}
   .mant-ticket-title{color:#8B2252;font-weight:900;line-height:1.2}
   .mant-ticket-meta{color:#77656d;font-size:12px;line-height:1.45}
+  .mant-ticket-desc{color:#42292e;font-size:13px;line-height:1.45;background:#fff;border:1px solid rgba(139,34,82,.08);border-radius:8px;padding:8px}
   .mant-ticket-tags{display:flex;gap:6px;flex-wrap:wrap}
   .mant-badge{display:inline-flex;width:max-content;border-radius:999px;padding:4px 9px;font-size:11px;font-weight:900;background:#f3dce7;color:#8B2252}
   .mant-badge.logistica{background:#e8f6ee;color:#166534}
@@ -80,6 +85,14 @@
   .mant-btn-eliminar{background:#fff0f0;border:1px solid #fca5a5;color:#b91c1c;font-size:12px}
   .mant-btn-eliminar:hover{background:#fee2e2}
   .mant-description-box{background:#fdf6f9;border:1px solid #f0d0dc;border-radius:8px;padding:10px 12px;font-size:13px;color:#42292e;line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:180px;overflow-y:auto;margin-bottom:4px}
+  .mant-drawer-evidence{display:grid;grid-template-columns:150px minmax(0,1fr);gap:12px;align-items:start;margin-bottom:14px}
+  .mant-drawer-photo{display:block;width:150px;aspect-ratio:1;border-radius:10px;object-fit:cover;border:1px solid rgba(139,34,82,.16);background:#f6edf2}
+  .mant-drawer-facts{display:grid;gap:8px}
+  .mant-fact-row{display:grid;grid-template-columns:112px minmax(0,1fr);gap:8px;font-size:13px;line-height:1.35}
+  .mant-fact-row span{color:#8B2252;font-weight:900}
+  .mant-fact-row strong{color:#3a2b30;font-weight:800;word-break:break-word}
+  .mant-latest-note{background:#fffafc;border:1px solid #f0d0dc;border-radius:8px;padding:10px 12px;font-size:13px;color:#42292e;line-height:1.45;margin-bottom:14px}
+  .mant-latest-note span{display:block;color:#8B2252;font-size:11px;font-weight:900;text-transform:uppercase;margin-bottom:5px}
   .mant-planes-grid{display:grid;gap:10px}
   .mant-plan-row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:start;background:#fff;border:1px solid rgba(139,34,82,.12);border-radius:12px;padding:12px}
   .mant-plan-row.vencido{border-color:#fca5a5;background:#fff5f5}
@@ -100,7 +113,7 @@
   .mant-eliminar-actions{display:flex;gap:10px;justify-content:flex-end}
   .mant-toast-stack{position:fixed;top:16px;right:20px;z-index:2000;display:grid;gap:8px;width:min(380px,calc(100vw - 32px));pointer-events:none}
   .mant-toast-stack .alert{pointer-events:auto;margin:0;padding:12px 16px;border-radius:10px;font-weight:700;box-shadow:0 4px 16px rgba(0,0,0,.12)}
-  @media(max-width:760px){.mant-origin-tabs{display:grid}.mant-origin-tab{justify-content:space-between}.mant-form-grid,.mant-asset-create-grid,.mant-board-tools{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr}}
+  @media(max-width:760px){.mant-origin-tabs{display:grid}.mant-origin-tab{justify-content:space-between}.mant-form-grid,.mant-asset-create-grid,.mant-board-tools,.mant-drawer-evidence{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr}.mant-drawer-photo{width:100%;max-height:280px;aspect-ratio:16/10}.mant-ticket-main{grid-template-columns:64px minmax(0,1fr)}.mant-ticket-photo,.mant-ticket-photo-empty{width:64px}}
 </style>
 {% endblock %}
 
@@ -222,11 +235,24 @@
                     {% if not item.asignado %}<span class="mant-badge sin-asignar">Sin asignar</span>{% endif %}
                     <span class="mant-semaforo {{ item.semaforo }}">{{ item.dias_abierto }}d</span>
                   </div>
-                  <div>
-                    <div class="mant-ticket-title">{{ item.referencia }} · {{ item.titulo }}</div>
-                    <div class="mant-ticket-meta">{{ item.ubicacion|default:"Sin ubicación" }}{% if item.activo %} · {{ item.activo }}{% endif %}<br>{{ item.fecha|date:"d/m/Y H:i" }}</div>
+                  <div class="mant-ticket-main {% if not item.foto_url %}no-photo{% endif %}">
+                    {% if item.foto_url %}
+                      <img class="mant-ticket-photo" src="{{ item.foto_url }}" alt="Evidencia de {{ item.referencia }}">
+                    {% elif item.tipo == "falla" %}
+                      <div class="mant-ticket-photo-empty">Sin foto</div>
+                    {% endif %}
+                    <div>
+                      <div class="mant-ticket-title">{{ item.referencia }} · {{ item.titulo }}</div>
+                      <div class="mant-ticket-meta">
+                        {{ item.ubicacion|default:"Sin ubicación" }}{% if item.activo %} · {{ item.activo }}{% endif %}<br>
+                        {% if item.reportado_por %}Reportó: {{ item.reportado_por }} · {% endif %}{{ item.fecha|date:"d/m/Y H:i" }}
+                      </div>
+                    </div>
                   </div>
-                  <div class="mant-ticket-meta">{{ item.descripcion|truncatechars:110 }}</div>
+                  <div class="mant-ticket-desc">{{ item.descripcion|truncatechars:180 }}</div>
+                  {% if item.ultimo_avance %}
+                    <div class="mant-ticket-meta"><strong>Último avance:</strong> {{ item.ultimo_avance|truncatechars:120 }}</div>
+                  {% endif %}
                   {% if item.proveedor or item.costo_estimado or item.costo_real %}
                     <div class="mant-ticket-meta">{{ item.proveedor|default:"Sin proveedor" }} · Est. ${{ item.costo_estimado|default:"0" }} · Real ${{ item.costo_real|default:"0" }}</div>
                   {% endif %}
@@ -241,6 +267,14 @@
                       data-title="{{ item.referencia }} · {{ item.titulo }}"
                       data-meta="{{ item.ubicacion|default:'Sin ubicación' }} · {{ item.estatus_display }}"
                       data-description="{{ item.descripcion }}"
+                      data-photo="{{ item.foto_url|default:'' }}"
+                      data-reporter="{{ item.reportado_por|default:'' }}"
+                      data-area="{{ item.area|default:'' }}"
+                      data-category="{{ item.categoria|default:'' }}"
+                      data-priority="{{ item.prioridad|default:'' }}"
+                      data-date="{{ item.fecha|date:'d/m/Y H:i' }}"
+                      data-latest-note="{{ item.ultimo_avance|default:'' }}"
+                      data-latest-date="{% if item.ultimo_avance_fecha %}{{ item.ultimo_avance_fecha|date:'d/m/Y H:i' }}{% endif %}"
                     >Trabajar</button>
                     <button class="btn btn-sm mant-btn-eliminar" type="button" data-open-cancelar
                       data-action="{% url 'mantenimiento:mant-cancelar' item.tipo item.id %}"
@@ -551,9 +585,25 @@
       </div>
       <button class="btn btn-secondary btn-sm" type="button" data-close-drawer>Cerrar</button>
     </div>
+    <div class="mant-drawer-evidence" id="mantDrawerEvidence" style="display:none">
+      <a id="mantDrawerPhotoLink" href="#" target="_blank" rel="noopener">
+        <img class="mant-drawer-photo" id="mantDrawerPhoto" src="" alt="Evidencia del reporte">
+      </a>
+      <div class="mant-drawer-facts">
+        <div class="mant-fact-row"><span>Reportó</span><strong id="mantDrawerReporter">-</strong></div>
+        <div class="mant-fact-row"><span>Área</span><strong id="mantDrawerArea">-</strong></div>
+        <div class="mant-fact-row"><span>Categoría</span><strong id="mantDrawerCategory">-</strong></div>
+        <div class="mant-fact-row"><span>Prioridad</span><strong id="mantDrawerPriority">-</strong></div>
+        <div class="mant-fact-row"><span>Fecha</span><strong id="mantDrawerDate">-</strong></div>
+      </div>
+    </div>
     <div id="mantDrawerDescBlock" style="display:none;margin-bottom:14px">
       <div style="font-size:12px;font-weight:900;color:#8B2252;margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em">Descripción del reporte</div>
       <div class="mant-description-box" id="mantDrawerDescription"></div>
+    </div>
+    <div class="mant-latest-note" id="mantDrawerLatestBlock" style="display:none">
+      <span>Último avance</span>
+      <div id="mantDrawerLatestNote"></div>
     </div>
     <form class="mant-form" id="mantFollowForm" method="post">
       {% csrf_token %}
@@ -883,6 +933,20 @@
 
   const descBlock = document.getElementById("mantDrawerDescBlock");
   const descBox = document.getElementById("mantDrawerDescription");
+  const evidence = document.getElementById("mantDrawerEvidence");
+  const photo = document.getElementById("mantDrawerPhoto");
+  const photoLink = document.getElementById("mantDrawerPhotoLink");
+  const reporter = document.getElementById("mantDrawerReporter");
+  const area = document.getElementById("mantDrawerArea");
+  const category = document.getElementById("mantDrawerCategory");
+  const priority = document.getElementById("mantDrawerPriority");
+  const date = document.getElementById("mantDrawerDate");
+  const latestBlock = document.getElementById("mantDrawerLatestBlock");
+  const latestNote = document.getElementById("mantDrawerLatestNote");
+
+  function setFact(element, value) {
+    if (element) element.textContent = (value || "").trim() || "-";
+  }
 
   function openDrawer(button) {
     const template = document.getElementById(`mant-status-${button.dataset.type}`);
@@ -903,12 +967,41 @@
       input.disabled = hideAssets;
       input.value = "";
     });
+    const photoUrl = (button.dataset.photo || "").trim();
+    const hasFallaContext = button.dataset.type === "falla";
+    if (evidence) {
+      evidence.style.display = hasFallaContext ? "" : "none";
+    }
+    if (photo && photoLink) {
+      if (photoUrl) {
+        photo.src = photoUrl;
+        photoLink.href = photoUrl;
+        photoLink.style.display = "";
+      } else {
+        photo.removeAttribute("src");
+        photoLink.removeAttribute("href");
+        photoLink.style.display = "none";
+      }
+    }
+    setFact(reporter, button.dataset.reporter);
+    setFact(area, button.dataset.area);
+    setFact(category, button.dataset.category);
+    setFact(priority, button.dataset.priority);
+    setFact(date, button.dataset.date);
     const desc = (button.dataset.description || "").trim();
     if (desc && descBlock && descBox) {
       descBox.textContent = desc;
       descBlock.style.display = "";
     } else if (descBlock) {
       descBlock.style.display = "none";
+    }
+    const latest = (button.dataset.latestNote || "").trim();
+    const latestDate = (button.dataset.latestDate || "").trim();
+    if (latest && latestBlock && latestNote) {
+      latestNote.textContent = latestDate ? `${latestDate} · ${latest}` : latest;
+      latestBlock.style.display = "";
+    } else if (latestBlock) {
+      latestBlock.style.display = "none";
     }
     drawer.classList.add("is-open");
   }
