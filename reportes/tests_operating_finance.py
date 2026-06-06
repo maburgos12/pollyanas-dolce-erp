@@ -1034,6 +1034,39 @@ class MonthlyHistoricalCostingServiceTests(TestCase):
             RecetaCostoHistoricoMensual.objects.filter(periodo=date(2026, 1, 1), receta=service_recipe).exists()
         )
 
+    def test_historical_snapshot_excludes_recipes_marked_excluir_cierre(self):
+        excluded_recipe = Receta.objects.create(
+            nombre="Bollo Mini Chocolate",
+            codigo_point="11203",
+            hash_contenido="hist_excluded_bollo_hash",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            modo_costeo=Receta.MODO_COSTEO_FABRICADO,
+            excluir_cierre=True,
+        )
+        point_branch = PointBranch.objects.create(external_id="10B", name="Sucursal 10B")
+        point_product = PointProduct.objects.create(
+            external_id="PBOLLO",
+            sku="11203",
+            name="Bollo Mini Chocolate",
+            category="Bollos",
+        )
+        PointDailySale.objects.create(
+            branch=point_branch,
+            product=point_product,
+            receta=excluded_recipe,
+            sale_date=date(2026, 1, 12),
+            quantity=Decimal("2"),
+            total_amount=Decimal("100"),
+            gross_amount=Decimal("100"),
+            net_amount=Decimal("86.21"),
+        )
+
+        MonthlyHistoricalCostingService().build_period(period_start=date(2026, 1, 1))
+
+        self.assertFalse(
+            RecetaCostoHistoricoMensual.objects.filter(periodo=date(2026, 1, 1), receta=excluded_recipe).exists()
+        )
+
     def test_historical_snapshot_includes_resale_sales_using_purchase_cost(self):
         tea_insumo = Insumo.objects.create(
             codigo="TE01",

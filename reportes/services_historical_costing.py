@@ -773,6 +773,7 @@ class MonthlyHistoricalCostingService:
             Receta.objects.filter(
                 tipo=Receta.TIPO_PRODUCTO_FINAL,
                 modo_costeo__in=[Receta.MODO_COSTEO_FABRICADO, Receta.MODO_COSTEO_REVENTA],
+                excluir_cierre=False,
                 point_daily_sales__sale_date__range=(period_start, period_end),
                 point_daily_sales__total_amount__gt=0,
             )
