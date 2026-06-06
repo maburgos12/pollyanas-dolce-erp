@@ -182,6 +182,78 @@
   {% endfor %}
   {% endif %}
 
+  <!-- ── Requiere tu acción ── -->
+  {% if pendientes_accion %}
+  <section class="panel-dg-accion" style="margin-bottom:22px;">
+    <div class="home-exec-section-head" style="margin-bottom:12px;">
+      <div>
+        <div class="home-exec-kicker" style="color:var(--dorado);">Requiere tu acción</div>
+        <h2 class="home-exec-title" style="margin:0;">Pendientes de tu revisión ({{ pendientes_accion_total }})</h2>
+      </div>
+    </div>
+    <div style="display:grid; gap:12px;">
+      {% for item in pendientes_accion %}
+      <div class="bi-panel" style="border-left:4px solid {% if item.prorroga_pendiente %}var(--amarillo){% else %}var(--dorado){% endif %}; padding:16px;">
+        <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:flex-start;">
+          <div style="overflow:hidden;">
+            <span class="bi-pill" style="font-size:.7rem;">{{ item.get_tipo_display }}</span>
+            {% if item.es_en_revision %}<span class="bi-pill pill-en_revision" style="font-size:.7rem;">En revisión</span>{% endif %}
+            {% if item.prorroga_pendiente %}<span class="badge bg-warning" style="font-size:.68rem;">⏳ Prórroga</span>{% endif %}
+            <h3 style="margin:6px 0 2px; font-size:1.02rem;">{{ item.titulo }}</h3>
+            <p class="muted" style="margin:0; font-size:.82rem;">
+              {{ item.responsable_nombre }} · {{ item.area|default:"—" }} ·
+              Límite: {% if item.fecha_limite %}{{ item.fecha_limite|date:"d/m/Y" }}{% else %}sin fecha{% endif %} ·
+              Checks {{ item.checklist_done }}/{{ item.checklist_total }}
+            </p>
+          </div>
+          <a href="{% url 'seguimiento:detalle_dg' item.pk %}" class="btn btn-secondary btn-sm" style="flex-shrink:0;">Ver detalle</a>
+        </div>
+
+        {% if item.ultima_evidencia %}
+        <div style="margin-top:10px;">
+          <a href="{{ item.ultima_evidencia.archivo.url }}" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">📎 {{ item.ultima_evidencia.nombre_original|truncatechars:40 }}</a>
+          {% if item.ultimo_comentario %}<span class="muted" style="font-size:.82rem; margin-left:6px;">"{{ item.ultimo_comentario.comentario|truncatechars:120 }}"</span>{% endif %}
+        </div>
+        {% elif item.ultimo_comentario %}
+        <p class="muted" style="margin:10px 0 0; font-size:.85rem;">"{{ item.ultimo_comentario.comentario|truncatechars:160 }}"</p>
+        {% endif %}
+
+        {% if item.prorroga_pendiente %}
+        <div style="margin-top:12px; background:rgba(255,193,7,.10); border:1px solid rgba(255,193,7,.30); border-radius:10px; padding:10px;">
+          <p style="margin:0 0 8px; font-size:.86rem;">
+            <strong>⏳ Pide más tiempo</strong> hasta {{ item.prorroga_pendiente.fecha_solicitada|date:"d/m/Y" }} —
+            {{ item.prorroga_pendiente.motivo|truncatechars:140 }}
+          </p>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <form method="post" action="{% url 'seguimiento:resolver_prorroga' item.pk item.prorroga_pendiente.pk %}">
+              {% csrf_token %}<input type="hidden" name="next" value="panel"><input type="hidden" name="accion" value="aprobar">
+              <button class="btn btn-primary btn-sm" type="submit">✓ Aprobar prórroga</button>
+            </form>
+            <form method="post" action="{% url 'seguimiento:resolver_prorroga' item.pk item.prorroga_pendiente.pk %}">
+              {% csrf_token %}<input type="hidden" name="next" value="panel"><input type="hidden" name="accion" value="rechazar">
+              <button class="btn btn-secondary btn-sm" type="submit">✕ Rechazar</button>
+            </form>
+          </div>
+        </div>
+        {% endif %}
+
+        {% if item.es_en_revision %}
+        <form method="post" action="{% url 'seguimiento:resolver_revision' item.pk %}" style="margin-top:12px; display:grid; gap:8px;">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="panel">
+          <textarea name="comentario" placeholder="Observación (obligatoria si devuelves, opcional si apruebas)" style="border:1px solid rgba(139,34,82,.14); border-radius:10px; padding:9px 10px; font:inherit; min-height:54px; resize:vertical;"></textarea>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn btn-primary btn-sm" type="submit" name="accion" value="aprobar">✓ Aprobar como completado</button>
+            <button class="btn btn-secondary btn-sm" type="submit" name="accion" value="devolver">↩ Devolver para corrección</button>
+          </div>
+        </form>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
   <!-- Filtros con bi-filterbar + bi-control -->
   <form class="bi-filterbar" method="get" id="filtros-form" style="margin-bottom:16px;">
     <div class="bi-control">

@@ -242,6 +242,41 @@
     <strong>Más tiempo solicitado:</strong> hasta {{ prorroga_pendiente.fecha_solicitada|date:"d/m/Y" }} —
     {{ prorroga_pendiente.motivo|truncatechars:140 }}
     <span class="badge bg-warning" style="margin-left:8px;">Pendiente de aprobación</span>
+    {% if es_vista_dg %}
+    <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
+      <form method="post" action="{% url 'seguimiento:resolver_prorroga' item.pk prorroga_pendiente.pk %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="detalle">
+        <input type="hidden" name="accion" value="aprobar">
+        <button class="btn btn-primary btn-sm" type="submit">✓ Aprobar prórroga</button>
+      </form>
+      <form method="post" action="{% url 'seguimiento:resolver_prorroga' item.pk prorroga_pendiente.pk %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="detalle">
+        <input type="hidden" name="accion" value="rechazar">
+        <button class="btn btn-secondary btn-sm" type="submit">✕ Rechazar prórroga</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- Archivos entregados (vista DG) -->
+  {% if es_vista_dg and evidencias %}
+  <div class="bi-panel" style="margin-bottom:16px; border-left:4px solid var(--verde);">
+    <p class="seg-section-title">Archivos entregados ({{ evidencias|length }})</p>
+    <div style="display:grid; gap:8px;">
+      {% for ev in evidencias %}
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:8px 10px; background:rgba(35,109,83,.06); border:1px solid rgba(35,109,83,.14); border-radius:10px;">
+        <a href="{{ ev.archivo.url }}" target="_blank" rel="noopener" class="btn btn-secondary btn-sm" style="flex-shrink:0;">📎 Abrir</a>
+        <div style="overflow:hidden; flex:1;">
+          <strong style="font-size:.9rem;">{{ ev.nombre_original }}</strong>
+          {% if ev.comentario %}<div class="muted" style="font-size:.82rem;">{{ ev.comentario }}</div>{% endif %}
+          <div class="seg-timeline-meta">{{ ev.usuario.get_full_name|default:ev.usuario.username }} · {{ ev.created_at|date:"d/m/Y H:i" }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
   </div>
   {% endif %}
 
@@ -255,6 +290,7 @@
       </p>
       <form method="post" action="{% url 'seguimiento:resolver_revision' item.pk %}" style="display:grid; gap:10px;">
         {% csrf_token %}
+        <input type="hidden" name="next" value="detalle">
         <textarea name="comentario" class="seg-form-textarea" placeholder="Observación (obligatoria si devuelves, opcional si apruebas)"></textarea>
         <div class="seg-entregar-actions">
           <button class="btn btn-primary" type="submit" name="accion" value="aprobar">✓ Aprobar como completado</button>

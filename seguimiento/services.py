@@ -8,9 +8,40 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime, parse_time
 
+from django.db.models import Q
+
 from recetas.utils.normalizacion import normalizar_nombre
 from rrhh.models import Empleado
-from seguimiento.models import SeguimientoChecklistItem, SeguimientoItem
+from seguimiento.models import (
+    SeguimientoChecklistItem,
+    SeguimientoItem,
+    SeguimientoProrrogaSolicitud,
+)
+
+
+def items_pendientes_revision_dg():
+    """Acuerdos que requieren acción del DG: en revisión o con prórroga pendiente.
+
+    Independiente de filtros de UI — siempre devuelve todo lo accionable.
+    """
+    return (
+        SeguimientoItem.objects.filter(
+            Q(estatus=SeguimientoItem.ESTATUS_EN_REVISION)
+            | Q(prorrogas__estatus=SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE)
+        )
+        .select_related("responsable_user", "responsable_empleado")
+        .prefetch_related("evidencias__usuario", "comentarios", "prorrogas", "checklist")
+        .distinct()
+        .order_by("fecha_limite", "-updated_at")
+    )
+
+
+def _responsable_nombre(item) -> str:
+    if item.responsable_user:
+        return item.responsable_user.get_full_name() or item.responsable_user.username
+    if item.responsable_empleado:
+        return item.responsable_empleado.nombre
+    return "Sin asignar"
 
 
 AGENTE_DG_SOURCE_TABLE_TYPES = {
