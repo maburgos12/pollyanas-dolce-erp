@@ -562,17 +562,37 @@ class MonthlyHistoricalCostingService:
                     )
                     if fallback_row is not None:
                         return fallback_row
-                self._insumo_cache[cache_key] = None
-                return None
+                future_row = self._future_purchase_like_cost(insumo=insumo, period_end=period_end)
+                if future_row is None:
+                    self._insumo_cache[cache_key] = None
+                    return None
+                normalized_cost, row_metadata = _normalized_cost_for_insumo(future_row, insumo)
+                if normalized_cost is None:
+                    metadata["skipped_source_rows"] = skipped_rows + [row_metadata]
+                    self._insumo_cache[cache_key] = None
+                    return None
+                cost_value = _q6(normalized_cost)
+                method = InsumoCostoHistoricoMensual.METODO_SIGUIENTE
+                source_date = future_row.fecha
+                sample_count = 1
+                weighted_qty = _weight_from_raw(future_row)
+                metadata["source_rows"] = [future_row.id]
+                metadata["unit_normalization"] = [row_metadata]
+                metadata["fallback_method"] = "AUTO_FIRST_FUTURE_COST"
+                if skipped_rows:
+                    metadata["skipped_source_rows"] = skipped_rows
+                latest = future_row
+                latest_cost_value = normalized_cost
             cost_value = _q6(latest_cost_value)
-            method = InsumoCostoHistoricoMensual.METODO_ARRASTRE
-            source_date = latest.fecha
-            sample_count = 1
-            weighted_qty = _weight_from_raw(latest)
-            metadata["source_rows"] = [latest.id]
-            metadata["unit_normalization"] = [latest_metadata]
-            if skipped_rows:
-                metadata["skipped_source_rows"] = skipped_rows
+            if method is None:
+                method = InsumoCostoHistoricoMensual.METODO_ARRASTRE
+                source_date = latest.fecha
+                sample_count = 1
+                weighted_qty = _weight_from_raw(latest)
+                metadata["source_rows"] = [latest.id]
+                metadata["unit_normalization"] = [latest_metadata]
+                if skipped_rows:
+                    metadata["skipped_source_rows"] = skipped_rows
 
         row, _ = InsumoCostoHistoricoMensual.objects.update_or_create(
             periodo=period_start,
