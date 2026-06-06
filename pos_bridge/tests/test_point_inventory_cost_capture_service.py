@@ -127,6 +127,67 @@ class PointInventoryCostCaptureServiceTests(TestCase):
         self.assertEqual(second.resale_costs_existing, 1)
         self.assertEqual(ProductoReventaCosto.objects.count(), 1)
 
+    def test_resale_product_match_preserves_leading_zero_point_code(self):
+        tea = PointProduct.objects.create(
+            external_id="402",
+            sku="0313",
+            name="TE DEL JARDIN",
+            category="Te",
+        )
+        oreo = PointProduct.objects.create(
+            external_id="137",
+            sku="0402",
+            name="Galleta Oreo Base",
+            category="Galletas",
+        )
+        service = PointInventoryCostCaptureService()
+        row = PointInventoryCostRow(
+            branch_name="ALMACEN",
+            category_name="GALLETAS",
+            point_internal_id="137",
+            point_code="0402",
+            point_name="Galleta Oreo Base",
+            point_category="GALLETAS",
+            quantity=1,
+            unit="KG",
+            unit_cost=117.72,
+            total_cost=117.72,
+            last_movement="2026-04-24T10:00:00",
+            raw_row=[],
+        )
+
+        product = service._resolve_point_product(row)
+
+        self.assertEqual(product, oreo)
+        self.assertNotEqual(product, tea)
+
+    def test_resale_product_match_does_not_strip_leading_zero_to_external_id(self):
+        PointProduct.objects.create(
+            external_id="402",
+            sku="0313",
+            name="TE DEL JARDIN",
+            category="Te",
+        )
+        service = PointInventoryCostCaptureService()
+        row = PointInventoryCostRow(
+            branch_name="ALMACEN",
+            category_name="GALLETAS",
+            point_internal_id="137",
+            point_code="0402",
+            point_name="Galleta Oreo Base",
+            point_category="GALLETAS",
+            quantity=1,
+            unit="KG",
+            unit_cost=117.72,
+            total_cost=117.72,
+            last_movement="2026-04-24T10:00:00",
+            raw_row=[],
+        )
+
+        product = service._resolve_point_product(row)
+
+        self.assertIsNone(product)
+
     def test_persist_cost_row_rejects_reused_point_code_with_different_name(self):
         unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA, factor_to_base=1000)
         Insumo.objects.create(
