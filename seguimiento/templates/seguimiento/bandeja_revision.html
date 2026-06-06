@@ -127,14 +127,6 @@
     </div>
   </section>
 
-  {% if messages %}
-  {% for message in messages %}
-  <div class="alert alert-{% if message.tags == 'error' %}danger{% elif message.tags == 'warning' %}warning{% else %}success{% endif %}" style="margin-bottom:12px;">
-    {{ message }}
-  </div>
-  {% endfor %}
-  {% endif %}
-
   {% if not items %}
   <div class="bi-panel seg-empty">
     <p style="font-size:2rem; margin:0;">✅</p>

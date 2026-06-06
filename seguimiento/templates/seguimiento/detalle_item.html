@@ -172,14 +172,6 @@
     <span class="seg-badge-status {{ item.estatus|lower }}">{{ item.get_estatus_display }}</span>
   </div>
 
-  {% if messages %}
-  {% for message in messages %}
-  <div class="alert alert-{% if message.tags == 'error' %}danger{% elif message.tags == 'warning' %}warning{% else %}success{% endif %}" style="margin-bottom:16px;">
-    {{ message }}
-  </div>
-  {% endfor %}
-  {% endif %}
-
   <!-- Metadata -->
   <div class="bi-panel" style="margin-bottom:16px;">
     <div class="bi-metric-strip" style="flex-wrap:wrap;">
