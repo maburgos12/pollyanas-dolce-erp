@@ -82,16 +82,33 @@ def _ensure_provider(nombre):
     nombre = (nombre or "").strip()
     if not nombre:
         return None
+    ProveedorServicio.objects.get_or_create(nombre=nombre, defaults={"activo": True})
     proveedor, _created = Proveedor.objects.get_or_create(nombre=nombre, defaults={"activo": True})
     return proveedor
+
+
+def _asset_catalog_values(field):
+    return list(
+        Activo.objects.filter(activo=True)
+        .exclude(**{f"{field}__exact": ""})
+        .values_list(field, flat=True)
+        .distinct()
+        .order_by(field)
+    )
 
 
 def _create_asset_from_followup(data, sucursal, proveedor_obj=None):
     nombre = (data.get("activo_nombre_nuevo") or "").strip()
     if not nombre:
         return None
-    categoria = (data.get("activo_categoria_nueva") or "").strip() or "Mantenimiento"
+    categoria = (data.get("activo_categoria_nueva") or "").strip()
     ubicacion = (data.get("activo_ubicacion_nueva") or "").strip()
+    categorias_validas = set(_asset_catalog_values("categoria"))
+    ubicaciones_validas = set(_asset_catalog_values("ubicacion"))
+    if not categoria or categoria not in categorias_validas:
+        return None
+    if ubicaciones_validas and ubicacion not in ubicaciones_validas:
+        return None
     return Activo.objects.create(
         nombre=nombre,
         categoria=categoria,
@@ -513,6 +530,17 @@ def sucursales(request):
 
 
 @api_view(["GET"])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def proveedores_servicio(request):
+    data = [
+        {"id": proveedor.id, "nombre": proveedor.nombre}
+        for proveedor in ProveedorServicio.objects.filter(activo=True).order_by("nombre")
+    ]
+    return Response(data)
+
+
+@api_view(["GET"])
 @authentication_classes([SessionAuthentication])
 @permission_classes([EsMantenimiento])
 def session_token(request):
@@ -714,20 +742,7 @@ def dashboard(request):
     if origen not in {"", "sucursales", "logistica"}:
         return redirect("mantenimiento:dashboard")
     items = _unified_items(origen)
-    # Top-5 proveedores más usados en mantenimiento primero, luego el resto
-    from django.db.models import Count as _Count
-    top_ids = list(
-        ReporteFalla.objects.exclude(proveedor_servicio="")
-        .values("proveedor_servicio")
-        .annotate(n=_Count("id"))
-        .order_by("-n")
-        .values_list("proveedor_servicio", flat=True)[:5]
-    )
-    top_proveedores = list(Proveedor.objects.filter(nombre__in=top_ids, activo=True))
-    resto_proveedores = list(
-        Proveedor.objects.filter(activo=True).exclude(nombre__in=top_ids).order_by("nombre")[:115]
-    )
-    provider_options = top_proveedores + resto_proveedores
+    provider_options = list(ProveedorServicio.objects.filter(activo=True).order_by("nombre")[:180])
     asset_options = Activo.objects.select_related("sucursal").filter(activo=True).order_by(
         "sucursal__nombre", "nombre", "codigo"
     )[:180]
@@ -785,6 +800,8 @@ def dashboard(request):
             "summary": _dashboard_summary(items),
             "provider_options": provider_options,
             "asset_options": asset_options,
+            "asset_categories": _asset_catalog_values("categoria"),
+            "asset_locations": _asset_catalog_values("ubicacion"),
             "fleet_units": fleet_units,
             "sucursales_list": sucursales_list,
             "categorias_list": categorias_list,

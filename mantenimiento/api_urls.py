@@ -8,6 +8,7 @@ urlpatterns = [
     path("me/", views.mi_perfil, name="mant-perfil"),
     path("session-token/", views.session_token, name="mant-session-token"),
     path("sucursales/", views.sucursales, name="mant-sucursales"),
+    path("proveedores/", views.proveedores_servicio, name="mant-proveedores"),
     path("bandeja/", views.bandeja, name="mant-bandeja"),
     path("bandeja/<str:tipo>/<int:pk>/actualizar/", views.actualizar_item, name="mant-actualizar"),
     path("activos/", views.ActivoListView.as_view(), name="mant-activos"),

@@ -10,6 +10,7 @@ from core.models import Sucursal, UserModuleAccess
 from core.navigation import build_nav_groups
 from fallas.models import BitacoraFalla, CategoriaFalla, ReporteFalla
 from logistica.models import Repartidor, ReporteUnidad, Unidad
+from mantenimiento.models import ProveedorServicio
 from maestros.models import Proveedor
 
 
@@ -44,6 +45,8 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertNotIn("Fallas", labels)
 
     def test_mantenimiento_permission_allows_portal_and_api(self):
+        Proveedor.objects.create(nombre="Proveedor insumos QA", activo=True)
+        ProveedorServicio.objects.create(nombre="Taller mantenimiento QA", activo=True)
         self.client.force_login(self.mantenimiento)
 
         portal = self.client.get(reverse("mantenimiento:dashboard"))
@@ -52,8 +55,19 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertEqual(portal.status_code, 200)
         self.assertContains(portal, "Sucursales / CEDIS")
         self.assertContains(portal, "Logística")
+        self.assertEqual([p.nombre for p in portal.context["provider_options"]], ["Taller mantenimiento QA"])
         self.assertEqual(perfil.status_code, 200)
         self.assertEqual(perfil.json()["username"], "jorge.isaac")
+
+    def test_provider_api_uses_service_provider_catalog(self):
+        Proveedor.objects.create(nombre="Proveedor insumos QA", activo=True)
+        ProveedorServicio.objects.create(nombre="Taller mantenimiento QA", activo=True)
+        self.client.force_login(self.mantenimiento)
+
+        response = self.client.get("/api/mantenimiento/proveedores/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), [{"id": ProveedorServicio.objects.get().id, "nombre": "Taller mantenimiento QA"}])
 
     def test_compras_logistica_group_does_not_open_maintenance_without_permission(self):
         self.client.force_login(self.compras)
@@ -72,7 +86,12 @@ class MantenimientoUnifiedInboxTests(TestCase):
         UserModuleAccess.objects.create(user=self.user, module="mantenimiento", access=ACCESS_MANAGE)
         self.reporter = user_model.objects.create_user(username="reporter", password="test12345")
         self.branch = Sucursal.objects.create(codigo="MNTQA", nombre="CEDIS QA", activa=True)
-        self.activo = Activo.objects.create(nombre="Horno CEDIS", categoria="Hornos", sucursal=self.branch)
+        self.activo = Activo.objects.create(
+            nombre="Horno CEDIS",
+            categoria="Hornos",
+            ubicacion="Produccion CEDIS",
+            sucursal=self.branch,
+        )
         self.categoria = CategoriaFalla.objects.create(nombre="Equipo", tipo=CategoriaFalla.TIPO_EQUIPO)
         self.falla = ReporteFalla.objects.create(
             sucursal=self.branch,
@@ -173,8 +192,8 @@ class MantenimientoUnifiedInboxTests(TestCase):
                 "estatus": ReporteFalla.ESTATUS_REVISION,
                 "proveedor_servicio": "Refrigeracion QA",
                 "activo_nombre_nuevo": "Vitrina fria CEDIS QA",
-                "activo_categoria_nueva": "Refrigeracion",
-                "activo_ubicacion_nueva": "Linea fria",
+                "activo_categoria_nueva": "Hornos",
+                "activo_ubicacion_nueva": "Produccion CEDIS",
                 "comentario": "Se registra activo faltante para seguimiento.",
             },
         )
@@ -184,9 +203,31 @@ class MantenimientoUnifiedInboxTests(TestCase):
         self.assertEqual(ReporteFalla.objects.count(), report_count)
         self.assertEqual(self.falla.proveedor_servicio, "Refrigeracion QA")
         self.assertTrue(Proveedor.objects.filter(nombre="Refrigeracion QA", activo=True).exists())
+        self.assertTrue(ProveedorServicio.objects.filter(nombre="Refrigeracion QA", activo=True).exists())
         self.assertIsNotNone(self.falla.activo_relacionado)
         self.assertEqual(self.falla.activo_relacionado.nombre, "Vitrina fria CEDIS QA")
         self.assertEqual(self.falla.activo_relacionado.proveedor_mantenimiento.nombre, "Refrigeracion QA")
+
+    def test_followup_does_not_create_asset_with_uncataloged_category(self):
+        self.client.force_login(self.user)
+        self.falla.activo_relacionado = None
+        self.falla.save(update_fields=["activo_relacionado"])
+
+        response = self.client.post(
+            "/api/mantenimiento/bandeja/falla/%s/actualizar/" % self.falla.id,
+            {
+                "estatus": ReporteFalla.ESTATUS_REVISION,
+                "activo_nombre_nuevo": "Activo con categoria libre",
+                "activo_categoria_nueva": "Refrigeracion con typo",
+                "activo_ubicacion_nueva": "Produccion CEDIS",
+                "comentario": "No debe crear catálogo nuevo por texto libre.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.falla.refresh_from_db()
+        self.assertIsNone(self.falla.activo_relacionado)
+        self.assertFalse(Activo.objects.filter(nombre="Activo con categoria libre").exists())
 
     def test_logistics_followup_uses_final_cost_when_available(self):
         self.client.force_login(self.user)
