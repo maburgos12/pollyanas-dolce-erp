@@ -635,7 +635,7 @@
             </div>
             <div class="rrhh-field">
               <label for="area">Área / división</label>
-              <select id="area" class="input-field" name="area" data-catalog-select data-catalog-field="area">
+              <select id="area" class="input-field" name="area" data-catalog-select data-catalog-field="area" data-searchable-select="true">
                 <option value="">Sin definir</option>
                 {% for value,label,departamento_origen,departamento_actual,puesto_operativo in area_division_choices %}
                   <option value="{{ value }}"
@@ -643,10 +643,8 @@
                           data-departamento-actual="{{ departamento_actual }}"
                           data-puesto-operativo="{{ puesto_operativo }}">{{ label }}</option>
                 {% endfor %}
-                <option value="__otro__">Otro...</option>
               </select>
               <div class="rrhh-help">Regla para bonos y permisos: Hornos, Armado, Repartidores, Envío a sucursal, etc.</div>
-              <input type="hidden" name="area_otro" data-catalog-other="area">
             </div>
             <div class="rrhh-field">
               <label for="puesto">Puesto descriptivo</label>
@@ -675,15 +673,22 @@
             </div>
             <div class="rrhh-field">
               <label for="puesto_operativo">Puesto operativo</label>
-              <select id="puesto_operativo" class="input-field" name="puesto_operativo" data-catalog-select data-catalog-field="puesto_operativo">
+              <select id="puesto_operativo" class="input-field" name="puesto_operativo" data-catalog-select data-catalog-field="puesto_operativo" data-searchable-select="true">
                 <option value="">Sin definir</option>
                 {% for value,label in puesto_operativo_choices %}
                   <option value="{{ value }}">{{ label }}</option>
                 {% endfor %}
-                <option value="__otro__">Otro...</option>
               </select>
               <div class="rrhh-help">Lista controlada para reglas internas. Normalmente se llena sola al elegir área/división.</div>
-              <input type="hidden" name="puesto_operativo_otro" data-catalog-other="puesto_operativo">
+            </div>
+            <div class="rrhh-field">
+              <label for="nivel_organizacional">Nivel organizacional</label>
+              <select id="nivel_organizacional" class="input-field" name="nivel_organizacional" data-searchable-select="true">
+                {% for value,label in nivel_organizacional_choices %}
+                  <option value="{{ value }}" {% if value == "COLABORADOR" %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <div class="rrhh-help">Autoridad real: colaborador, encargada, supervisión, jefatura o dirección.</div>
             </div>
             <div class="rrhh-field span-2">
               <label for="jefe_directo">Jefe directo</label>
@@ -990,6 +995,7 @@
               <th>Origen</th>
               <th>Adscripción</th>
               <th>Puesto</th>
+              <th>Nivel</th>
               <th>Jefe directo</th>
               <th>Bonos</th>
               <th>Ingreso</th>
@@ -1012,6 +1018,7 @@
               <td class="cell-wrap">{{ e.get_departamento_origen_display|default:"-" }}</td>
               <td class="cell-wrap">{{ e.get_departamento_display|default:"-" }}</td>
               <td class="cell-wrap">{{ e.puesto|default:"-" }}</td>
+              <td class="cell-wrap">{{ e.get_nivel_organizacional_display|default:"-" }}</td>
               <td class="cell-wrap">{{ e.jefe_directo.nombre|default:"-" }}</td>
               <td class="cell-status">
                 {% for esquema in e.bonos_esquemas.all %}
@@ -1074,7 +1081,7 @@
                       </div>
                       <div class="rrhh-field">
                         <label for="edit_area_{{ e.id }}">Área / división</label>
-                        <select id="edit_area_{{ e.id }}" class="input-field" name="area" data-catalog-select data-catalog-field="area">
+                        <select id="edit_area_{{ e.id }}" class="input-field" name="area" data-catalog-select data-catalog-field="area" data-searchable-select="true">
                           <option value="">Sin definir</option>
                           {% if e.area and e.area not in area_division_values %}
                             <option value="{{ e.area }}" selected>{{ e.area }} (actual)</option>
@@ -1086,10 +1093,8 @@
                                     data-puesto-operativo="{{ puesto_operativo }}"
                                     {% if e.area == value %}selected{% endif %}>{{ label }}</option>
                           {% endfor %}
-                          <option value="__otro__">Otro...</option>
                         </select>
                         <div class="rrhh-help">Regla para bonos y permisos: Hornos, Armado, Repartidores, Envío a sucursal, etc.</div>
-                        <input type="hidden" name="area_otro" data-catalog-other="area">
                       </div>
                       <div class="rrhh-field">
                         <label for="edit_puesto_{{ e.id }}">Puesto descriptivo</label>
@@ -1118,7 +1123,7 @@
                       </div>
                       <div class="rrhh-field">
                         <label for="edit_puesto_operativo_{{ e.id }}">Puesto operativo</label>
-                        <select id="edit_puesto_operativo_{{ e.id }}" class="input-field" name="puesto_operativo" data-catalog-select data-catalog-field="puesto_operativo">
+                        <select id="edit_puesto_operativo_{{ e.id }}" class="input-field" name="puesto_operativo" data-catalog-select data-catalog-field="puesto_operativo" data-searchable-select="true">
                           <option value="">Sin definir</option>
                           {% if e.puesto_operativo and e.puesto_operativo not in puesto_operativo_values %}
                             <option value="{{ e.puesto_operativo }}" selected>{{ e.puesto_operativo }} (actual)</option>
@@ -1126,10 +1131,18 @@
                           {% for value,label in puesto_operativo_choices %}
                             <option value="{{ value }}" {% if e.puesto_operativo == value %}selected{% endif %}>{{ label }}</option>
                           {% endfor %}
-                          <option value="__otro__">Otro...</option>
                         </select>
                         <div class="rrhh-help">Lista controlada para reglas internas. Normalmente se llena sola al elegir área/división.</div>
-                        <input type="hidden" name="puesto_operativo_otro" data-catalog-other="puesto_operativo">
+                      </div>
+                      <div class="rrhh-field">
+                        <label for="edit_nivel_organizacional_{{ e.id }}">Nivel organizacional</label>
+                        <select id="edit_nivel_organizacional_{{ e.id }}" class="input-field" name="nivel_organizacional" data-searchable-select="true">
+                          <option value="">Sin definir</option>
+                          {% for value,label in nivel_organizacional_choices %}
+                            <option value="{{ value }}" {% if e.nivel_organizacional == value %}selected{% endif %}>{{ label }}</option>
+                          {% endfor %}
+                        </select>
+                        <div class="rrhh-help">Autoridad real separada del puesto operativo.</div>
                       </div>
                       <div class="rrhh-field span-2">
                         <label for="edit_jefe_directo_{{ e.id }}">Jefe directo</label>
@@ -1246,7 +1259,7 @@
             </tr>
             {% endif %}
             {% empty %}
-            <tr><td colspan="14" class="muted">Sin empleados para este filtro.</td></tr>
+            <tr><td colspan="15" class="muted">Sin empleados para este filtro.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -1254,23 +1267,6 @@
     </div>
   </section>
 </div>
-
-<dialog id="modal-catalogo-otro" class="rrhh-dialog">
-  <div class="rrhh-dialog-body">
-    <div>
-      <div class="rrhh-dialog-title">Agregar otro valor</div>
-      <div class="muted" id="catalogo_otro_contexto">Catálogo de empleado</div>
-    </div>
-    <div class="rrhh-field">
-      <label for="catalogo_otro_valor">Valor requerido</label>
-      <input id="catalogo_otro_valor" class="input-field" type="text" autocomplete="off">
-    </div>
-    <div class="rrhh-actions">
-      <button class="btn btn-secondary" type="button" data-catalog-cancel>Cancelar</button>
-      <button class="btn btn-primary" type="button" data-catalog-apply>Aplicar</button>
-    </div>
-  </div>
-</dialog>
 
 <dialog id="modal-bono-esquema-otro" class="rrhh-dialog">
   <div class="rrhh-dialog-body">
@@ -1327,23 +1323,8 @@
     tableShells.forEach(syncTableShellWidth);
   });
 
-  const modal = document.getElementById('modal-catalogo-otro');
-  const input = document.getElementById('catalogo_otro_valor');
-  const context = document.getElementById('catalogo_otro_contexto');
-  let activeSelect = null;
-  let previousValue = '';
-
-  function openCatalogModal(select) {
-    activeSelect = select;
-    previousValue = Array.from(select.options).find(option => option.defaultSelected)?.value || '';
-    context.textContent = select.dataset.catalogField === 'area' ? 'Área / división' : 'Puesto operativo';
-    input.value = '';
-    modal.showModal();
-    input.focus();
-  }
-
   function syncAreaDefaults(select) {
-    if (!select || select.dataset.catalogField !== 'area' || select.value === '__otro__') return;
+    if (!select || select.dataset.catalogField !== 'area') return;
     const selected = select.selectedOptions[0];
     const form = select.closest('form');
     const origen = selected?.dataset.departamentoOrigen || '';
@@ -1391,10 +1372,6 @@
   document.addEventListener('change', (event) => {
     const select = event.target.closest('[data-catalog-select]');
     if (!select) return;
-    if (select.value === '__otro__') {
-      openCatalogModal(select);
-      return;
-    }
     syncAreaDefaults(select);
     // también reaccionar al cambio directo de puesto_operativo en edición inline
     if (select.name === 'puesto_operativo') {
@@ -1402,25 +1379,6 @@
     }
   });
 
-  modal.querySelector('[data-catalog-cancel]').addEventListener('click', () => {
-    if (activeSelect) activeSelect.value = previousValue;
-    modal.close();
-  });
-
-  modal.querySelector('[data-catalog-apply]').addEventListener('click', () => {
-    const value = input.value.trim().toUpperCase();
-    if (!value || !activeSelect) return;
-    const field = activeSelect.dataset.catalogField;
-    const form = activeSelect.closest('form');
-    const otherInput = form.querySelector(`[data-catalog-other="${field}"]`);
-    if (otherInput) otherInput.value = value;
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = `${value} (nuevo)`;
-    option.selected = true;
-    activeSelect.insertBefore(option, activeSelect.querySelector('option[value="__otro__"]'));
-    modal.close();
-  });
 })();
 
 (() => {

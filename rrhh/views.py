@@ -8,7 +8,7 @@ from tempfile import NamedTemporaryFile
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Avg, Count, Q, Sum
 from django.shortcuts import get_object_or_404, redirect, render
@@ -38,54 +38,18 @@ from .models import (
     VacanteRRHH,
 )
 from .services_bonos import asegurar_esquemas_base, sincronizar_esquemas_bono
+from .services_catalogos import (
+    AREA_DIVISION_CHOICES,
+    AREA_DIVISION_MAP,
+    AREA_DIVISION_VALUES,
+    NIVEL_ORGANIZACIONAL_VALUES,
+    PUESTO_OPERATIVO_CHOICES,
+    PUESTO_OPERATIVO_VALUES,
+)
 from .services_identidad import normalizar_codigo_empleado, vincular_identidad_pendiente
 from .services.lista_raya import importar_lista_raya_nomina
 from .services_permisos import can_authorize_direccion, resolver_permiso_direccion
 from .services_vacantes import crear_solicitud_vacante
-
-AREA_DIVISION_CHOICES = [
-    ("HORNOS", "Hornos", Empleado.DEP_PRODUCCION, Empleado.DEP_PRODUCCION, "HORNOS"),
-    ("ARMADO", "Armado", Empleado.DEP_PRODUCCION, Empleado.DEP_PRODUCCION, "ARMADO"),
-    ("EMBETUNADO", "Embetunado", Empleado.DEP_PRODUCCION, Empleado.DEP_PRODUCCION, "EMBETUNADO"),
-    ("CRUCERO", "Crucero", Empleado.DEP_PRODUCCION, Empleado.DEP_PRODUCCION, "CRUCERO"),
-    ("ENVIO A SUCURSAL", "Envío a sucursal", Empleado.DEP_LOGISTICA, Empleado.DEP_PRODUCCION, "ENVIO_SUCURSAL"),
-    ("CAJAS", "Cajas", Empleado.DEP_VENTAS, Empleado.DEP_VENTAS, "CAJAS"),
-    ("AUXILIAR CAJAS", "Auxiliar cajas", Empleado.DEP_VENTAS, Empleado.DEP_VENTAS, "AUXILIAR_CAJAS"),
-    ("CALL CENTER", "Call center", Empleado.DEP_VENTAS, Empleado.DEP_VENTAS, "CALL_CENTER"),
-    ("REPARTIDORES", "Repartidores", Empleado.DEP_LOGISTICA, Empleado.DEP_VENTAS, "REPARTIDOR"),
-    ("COMPRAS", "Compras", Empleado.DEP_COMPRAS, Empleado.DEP_COMPRAS, "COMPRAS"),
-    ("ALMACEN", "Almacén", Empleado.DEP_ADMINISTRACION, Empleado.DEP_ADMINISTRACION, "ALMACEN"),
-    ("LIMPIEZA", "Limpieza / afanadoras", Empleado.DEP_ADMINISTRACION, Empleado.DEP_ADMINISTRACION, "LIMPIEZA"),
-    ("AUXILIAR CONTABLE", "Auxiliar contable", Empleado.DEP_ADMINISTRACION, Empleado.DEP_ADMINISTRACION, "AUXILIAR_CONTABLE"),
-    ("RRHH", "Recursos Humanos", Empleado.DEP_RRHH, Empleado.DEP_RRHH, "RRHH"),
-    ("MANTENIMIENTO", "Mantenimiento", Empleado.DEP_MANTENIMIENTO, Empleado.DEP_MANTENIMIENTO, "MANTENIMIENTO"),
-    ("MARKETING", "Marketing externo", Empleado.DEP_MARKETING, Empleado.DEP_MARKETING, "MARKETING"),
-]
-PUESTO_OPERATIVO_CHOICES = [
-    ("JEFATURA", "Jefatura"),
-    ("HORNOS", "Hornos"),
-    ("EMBETUNADO", "Embetunado"),
-    ("ARMADO", "Armado"),
-    ("CRUCERO", "Crucero"),
-    ("ENVIO_SUCURSAL", "Envío a sucursal"),
-    ("REPARTIDOR", "Repartidor"),
-    ("CAJAS", "Cajas"),
-    ("AUXILIAR_CAJAS", "Auxiliar cajas"),
-    ("CALL_CENTER", "Call center"),
-    ("COMPRAS", "Compras"),
-    ("ALMACEN", "Almacén"),
-    ("LIMPIEZA", "Limpieza"),
-    ("MANTENIMIENTO", "Mantenimiento"),
-    ("RRHH", "Recursos Humanos"),
-]
-AREA_DIVISION_MAP = {
-    value: {
-        "departamento_origen": departamento_origen,
-        "departamento": departamento_actual,
-        "puesto_operativo": puesto_operativo,
-    }
-    for value, _label, departamento_origen, departamento_actual, puesto_operativo in AREA_DIVISION_CHOICES
-}
 
 
 def _parse_decimal(raw: str | None) -> Decimal:
@@ -126,18 +90,33 @@ def _guardar_upload_temporal(archivo) -> Path:
         return Path(tmp.name)
 
 
-def _catalogo_value(post_data, field_name: str) -> str:
+def _catalogo_value(post_data, field_name: str, allowed_values: frozenset[str], current_value: str = "") -> str:
     value = (post_data.get(field_name) or "").strip()
     if value == "__otro__":
-        value = (post_data.get(f"{field_name}_otro") or "").strip()
-        return value.upper()
+        raise ValidationError("Solo se permiten valores del catalogo oficial.")
+    if value and value not in allowed_values and value != (current_value or ""):
+        raise ValidationError("Selecciona un valor del catalogo oficial.")
     return value
 
 
-def _organizacion_desde_post(post_data) -> dict:
-    area = _catalogo_value(post_data, "area")
+def _organizacion_desde_post(post_data, empleado: Empleado | None = None) -> dict:
+    area = _catalogo_value(post_data, "area", AREA_DIVISION_VALUES, empleado.area if empleado else "")
     defaults = AREA_DIVISION_MAP.get(area, {})
-    puesto_operativo = _catalogo_value(post_data, "puesto_operativo") or defaults.get("puesto_operativo", "")
+    puesto_operativo = (
+        _catalogo_value(
+            post_data,
+            "puesto_operativo",
+            PUESTO_OPERATIVO_VALUES,
+            empleado.puesto_operativo if empleado else "",
+        )
+        or defaults.get("puesto_operativo", "")
+    )
+    nivel_organizacional = _catalogo_value(
+        post_data,
+        "nivel_organizacional",
+        NIVEL_ORGANIZACIONAL_VALUES,
+        empleado.nivel_organizacional if empleado else "",
+    ) or defaults.get("nivel_organizacional", Empleado.NIVEL_COLABORADOR)
     departamento = (post_data.get("departamento") or defaults.get("departamento") or "").strip()
     departamento_origen = (post_data.get("departamento_origen") or defaults.get("departamento_origen") or departamento).strip()
     return {
@@ -145,6 +124,7 @@ def _organizacion_desde_post(post_data) -> dict:
         "departamento": departamento,
         "departamento_origen": departamento_origen,
         "puesto_operativo": puesto_operativo,
+        "nivel_organizacional": nivel_organizacional,
         "participa_bonos_ventas": post_data.get("participa_bonos_ventas") == "on",
         "participa_bonos_produccion": post_data.get("participa_bonos_produccion") == "on",
     }
@@ -764,7 +744,11 @@ def empleados(request):
             elif duplicado := _empleado_con_codigo_duplicado(codigo, empleado.id):
                 messages.error(request, f"El código {codigo} ya pertenece a {duplicado.nombre}.")
             else:
-                organizacion = _organizacion_desde_post(request.POST)
+                try:
+                    organizacion = _organizacion_desde_post(request.POST, empleado)
+                except ValidationError as exc:
+                    messages.error(request, f"Organización inválida: {exc.messages[0]}")
+                    return redirect("rrhh:empleados")
                 if codigo:
                     empleado.codigo = codigo
                 empleado.nombre = nombre
@@ -776,6 +760,7 @@ def empleados(request):
                 empleado.departamento_origen = organizacion["departamento_origen"]
                 empleado.departamento = organizacion["departamento"]
                 empleado.puesto_operativo = organizacion["puesto_operativo"]
+                empleado.nivel_organizacional = organizacion["nivel_organizacional"]
                 jefe_id = (request.POST.get("jefe_directo") or "").strip()
                 empleado.jefe_directo_id = int(jefe_id) if jefe_id.isdigit() and int(jefe_id) != empleado.id else None
                 empleado.tipo_personal = (request.POST.get("tipo_personal") or Empleado.TIPO_POLLYANA).strip()
@@ -819,7 +804,11 @@ def empleados(request):
                 messages.success(request, f"Empleado {empleado.nombre} actualizado.")
                 return redirect("rrhh:empleados")
         else:
-            organizacion = _organizacion_desde_post(request.POST)
+            try:
+                organizacion = _organizacion_desde_post(request.POST)
+            except ValidationError as exc:
+                messages.error(request, f"Organización inválida: {exc.messages[0]}")
+                return redirect("rrhh:empleados")
             if duplicado := _empleado_con_codigo_duplicado(codigo):
                 messages.error(request, f"El código {codigo} ya pertenece a {duplicado.nombre}.")
                 return redirect("rrhh:empleados")
@@ -834,6 +823,7 @@ def empleados(request):
                 departamento_origen=organizacion["departamento_origen"],
                 departamento=organizacion["departamento"],
                 puesto_operativo=organizacion["puesto_operativo"],
+                nivel_organizacional=organizacion["nivel_organizacional"],
                 jefe_directo_id=(
                     int(request.POST.get("jefe_directo"))
                     if (request.POST.get("jefe_directo") or "").strip().isdigit()
@@ -969,9 +959,11 @@ def empleados(request):
         "contrato_choices": Empleado.CONTRATO_CHOICES,
         "departamento_choices": Empleado.DEP_CHOICES,
         "area_division_choices": AREA_DIVISION_CHOICES,
-        "area_division_values": {value for value, *_rest in AREA_DIVISION_CHOICES},
+        "area_division_values": AREA_DIVISION_VALUES,
         "puesto_operativo_choices": PUESTO_OPERATIVO_CHOICES,
-        "puesto_operativo_values": {value for value, _ in PUESTO_OPERATIVO_CHOICES},
+        "puesto_operativo_values": PUESTO_OPERATIVO_VALUES,
+        "nivel_organizacional_choices": Empleado.NIVEL_ORGANIZACIONAL_CHOICES,
+        "nivel_organizacional_values": NIVEL_ORGANIZACIONAL_VALUES,
         "tipo_personal_choices": Empleado.TIPO_PERSONAL_CHOICES,
         "bono_esquemas": BonoEsquema.objects.filter(activo=True).order_by("nombre"),
         "empleados_jefes": Empleado.objects.filter(activo=True).order_by("nombre"),

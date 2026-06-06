@@ -28,6 +28,7 @@ class EmpleadoRegla:
     departamento: str
     puesto: str
     puesto_operativo: str = ""
+    nivel_organizacional: str = Empleado.NIVEL_COLABORADOR
     jefe_nombre: str = ""
     participa_bonos_ventas: bool = False
     participa_bonos_produccion: bool = False
@@ -41,30 +42,35 @@ REGLAS_NOMINALES = [
         Empleado.DEP_ADMINISTRACION,
         "Jefe de Administración",
         PUESTO_JEFATURA,
+        Empleado.NIVEL_JEFATURA,
     ),
     EmpleadoRegla(
         "LOPEZ PALOS JOHANA ADELIN",
         Empleado.DEP_VENTAS,
         "Jefe de Ventas",
         PUESTO_JEFATURA,
+        Empleado.NIVEL_JEFATURA,
     ),
     EmpleadoRegla(
         "CAYETANO VALENZUELA CAROLINA",
         Empleado.DEP_PRODUCCION,
         "Jefe de Producción",
         PUESTO_JEFATURA,
+        Empleado.NIVEL_JEFATURA,
     ),
     EmpleadoRegla(
         "LUGO ESPINOZA PAULA ELIZABETH",
         Empleado.DEP_RRHH,
         "Jefe de Recursos Humanos",
         PUESTO_RRHH,
+        Empleado.NIVEL_JEFATURA,
     ),
     EmpleadoRegla(
         "RIVAS SOLIS ROXANA",
         Empleado.DEP_PRODUCCION,
         "Supervisora de Producción",
         "SUPERVISION_PRODUCCION",
+        Empleado.NIVEL_SUPERVISION,
         "CAYETANO VALENZUELA CAROLINA",
     ),
     EmpleadoRegla(
@@ -72,6 +78,7 @@ REGLAS_NOMINALES = [
         Empleado.DEP_PRODUCCION,
         "Encargada de Producción",
         "ENCARGADA_PRODUCCION",
+        Empleado.NIVEL_ENCARGADA,
         "CAYETANO VALENZUELA CAROLINA",
     ),
     EmpleadoRegla(
@@ -79,6 +86,7 @@ REGLAS_NOMINALES = [
         Empleado.DEP_MANTENIMIENTO,
         "Mantenimiento",
         PUESTO_MANTENIMIENTO,
+        Empleado.NIVEL_COLABORADOR,
         "SOTO INZUNZA YESENIA",
     ),
 ]
@@ -125,6 +133,7 @@ def _base_por_area(empleado: Empleado, jefes: dict[str, Empleado]) -> dict:
         "departamento_origen": "",
         "tipo_personal": Empleado.TIPO_POLLYANA,
         "puesto_operativo": puesto_operativo,
+        "nivel_organizacional": Empleado.NIVEL_COLABORADOR,
         "participa_bonos_ventas": False,
         "participa_bonos_produccion": False,
     }
@@ -187,6 +196,7 @@ def _aplicar(empleado: Empleado, data: dict) -> bool:
                 "departamento_origen",
                 "puesto",
                 "puesto_operativo",
+                "nivel_organizacional",
                 "jefe_directo",
                 "tipo_personal",
                 "participa_bonos_ventas",
@@ -219,6 +229,7 @@ def aplicar_estructura_organizacional_inicial() -> dict[str, int]:
                 "departamento_origen": regla.departamento_origen or regla.departamento,
                 "puesto": regla.puesto,
                 "puesto_operativo": regla.puesto_operativo,
+                "nivel_organizacional": regla.nivel_organizacional,
                 "jefe_directo": jefe,
                 "tipo_personal": regla.tipo_personal,
                 "participa_bonos_ventas": regla.participa_bonos_ventas,
