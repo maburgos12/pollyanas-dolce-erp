@@ -72,6 +72,39 @@ def _raw_unit_value(cost: CostoInsumo) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
 
+def _unit_from_raw_value(raw_unit: str) -> UnidadMedida | None:
+    unit_code = POINT_UNIT_ALIASES.get(raw_unit)
+    if not unit_code:
+        return None
+    return UnidadMedida.objects.filter(codigo__iexact=unit_code).first()
+
+
+def _infer_source_unit_from_sibling_cost(
+    cost: CostoInsumo,
+    target_unit: UnidadMedida | None,
+) -> tuple[UnidadMedida | None, dict[str, object] | None]:
+    if target_unit is None:
+        return None, None
+    candidates = (
+        CostoInsumo.objects.filter(insumo_id=cost.insumo_id, costo_unitario__gt=0)
+        .exclude(id=cost.id)
+        .order_by("-fecha", "-id")
+    )
+    for candidate in candidates:
+        candidate_raw_unit = _raw_unit_value(candidate)
+        if not candidate_raw_unit:
+            continue
+        source_unit = _unit_from_raw_value(candidate_raw_unit)
+        if source_unit is None or not _compatible_units(source_unit, target_unit):
+            continue
+        return source_unit, {
+            "inferred_from_cost_row_id": candidate.id,
+            "inferred_from_raw_unit": candidate_raw_unit,
+            "inferred_from_unit": source_unit.codigo,
+        }
+    return None, None
+
+
 def _source_unit_from_raw(cost: CostoInsumo, target_unit: UnidadMedida | None) -> tuple[UnidadMedida | None, dict[str, object]]:
     raw_unit = _raw_unit_value(cost)
     metadata: dict[str, object] = {
@@ -80,6 +113,11 @@ def _source_unit_from_raw(cost: CostoInsumo, target_unit: UnidadMedida | None) -
         "target_unit": target_unit.codigo if target_unit else None,
     }
     if not raw_unit:
+        inferred_unit, inferred_metadata = _infer_source_unit_from_sibling_cost(cost, target_unit)
+        if inferred_unit is not None:
+            metadata["unit_resolution"] = "inferred_from_same_insumo_cost"
+            metadata.update(inferred_metadata or {})
+            return inferred_unit, metadata
         metadata["unit_resolution"] = "fallback_target_unit_no_raw_unit"
         return target_unit, metadata
 
