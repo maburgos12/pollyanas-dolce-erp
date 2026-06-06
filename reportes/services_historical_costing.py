@@ -7,10 +7,11 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import transaction
 
-from maestros.models import CostoInsumo, Insumo, InsumoAlias
+from maestros.models import CostoInsumo, Insumo, InsumoAlias, UnidadMedida
 from pos_bridge.models import PointDailySale
 from recetas.models import LineaReceta, Receta, RecetaPresentacion
 from recetas.utils.costeo_snapshot import (
+    POINT_UNIT_ALIASES,
     convert_unit_cost,
     resolve_preparation_recipe_for_insumo,
 )
@@ -55,6 +56,70 @@ def _weight_from_raw(cost: CostoInsumo) -> Decimal:
         if weight > 0:
             return weight
     return Decimal("1")
+
+
+def _compatible_units(source_unit: UnidadMedida | None, target_unit: UnidadMedida | None) -> bool:
+    if source_unit is None or target_unit is None:
+        return False
+    return (source_unit.tipo or "").strip().upper() == (target_unit.tipo or "").strip().upper()
+
+
+def _raw_unit_value(cost: CostoInsumo) -> str:
+    raw = cost.raw or {}
+    if not isinstance(raw, dict):
+        return ""
+    value = raw.get("unit") or raw.get("unidad") or raw.get("rendimiento_unidad")
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def _source_unit_from_raw(cost: CostoInsumo, target_unit: UnidadMedida | None) -> tuple[UnidadMedida | None, dict[str, object]]:
+    raw_unit = _raw_unit_value(cost)
+    metadata: dict[str, object] = {
+        "cost_row_id": cost.id,
+        "raw_unit": raw_unit,
+        "target_unit": target_unit.codigo if target_unit else None,
+    }
+    if not raw_unit:
+        metadata["unit_resolution"] = "fallback_target_unit_no_raw_unit"
+        return target_unit, metadata
+
+    unit_code = POINT_UNIT_ALIASES.get(raw_unit)
+    metadata["resolved_unit_code"] = unit_code
+    if not unit_code:
+        metadata["unit_resolution"] = "fallback_target_unit_unknown_raw_unit"
+        return target_unit, metadata
+
+    source_unit = UnidadMedida.objects.filter(codigo__iexact=unit_code).first()
+    if source_unit is None:
+        metadata["unit_resolution"] = "missing_unit_catalog_code"
+        return None, metadata
+
+    metadata["source_unit"] = source_unit.codigo
+    metadata["unit_resolution"] = "point_raw_unit"
+    if target_unit is not None and not _compatible_units(source_unit, target_unit):
+        metadata["unit_resolution"] = "incompatible_unit_type"
+        metadata["source_unit_type"] = source_unit.tipo
+        metadata["target_unit_type"] = target_unit.tipo
+        return None, metadata
+    return source_unit, metadata
+
+
+def _normalized_cost_for_insumo(cost: CostoInsumo, insumo: Insumo) -> tuple[Decimal | None, dict[str, object]]:
+    target_unit = insumo.unidad_base
+    source_unit, unit_metadata = _source_unit_from_raw(cost, target_unit)
+    unit_metadata["raw_cost_unitario"] = str(_q6(cost.costo_unitario))
+    if source_unit is None or target_unit is None:
+        unit_metadata["normalization_status"] = "missing_unit"
+        return None, unit_metadata
+
+    converted = convert_unit_cost(cost.costo_unitario, source_unit=source_unit, target_unit=target_unit)
+    if converted is None or converted <= 0:
+        unit_metadata["normalization_status"] = "conversion_failed"
+        return None, unit_metadata
+
+    unit_metadata["normalized_cost_unitario"] = str(converted)
+    unit_metadata["normalization_status"] = "ok"
+    return converted, unit_metadata
 
 
 def _source_method(rows: list[CostoInsumo]) -> str:
@@ -300,11 +365,14 @@ class MonthlyHistoricalCostingService:
                 future_row = self._future_purchase_like_cost(insumo=target, period_end=period_end)
                 if future_row is None:
                     return None
+                normalized_cost, normalization_metadata = _normalized_cost_for_insumo(future_row, target)
+                if normalized_cost is None:
+                    return None
                 row, _ = InsumoCostoHistoricoMensual.objects.update_or_create(
                     periodo=period_start,
                     insumo=insumo,
                     defaults={
-                        "costo_unitario": _q6(future_row.costo_unitario),
+                        "costo_unitario": _q6(normalized_cost),
                         "metodo": InsumoCostoHistoricoMensual.METODO_SIGUIENTE,
                         "source_date": future_row.fecha,
                         "sample_count": 1,
@@ -317,6 +385,7 @@ class MonthlyHistoricalCostingService:
                             "fallback_target_insumo_id": target.id,
                             "fallback_target_name": target.nombre,
                             "source_rows": [future_row.id],
+                            "unit_normalization": [normalization_metadata],
                         },
                     },
                 )
@@ -347,18 +416,47 @@ class MonthlyHistoricalCostingService:
         if same_month:
             weighted_total = Decimal("0")
             weighted_qty = Decimal("0")
+            normalized_rows: list[tuple[CostoInsumo, Decimal, Decimal, dict[str, object]]] = []
+            skipped_rows: list[dict[str, object]] = []
             for row in same_month:
+                normalized_cost, row_metadata = _normalized_cost_for_insumo(row, insumo)
+                if normalized_cost is None:
+                    skipped_rows.append(row_metadata)
+                    continue
                 weight = _weight_from_raw(row)
+                normalized_rows.append((row, normalized_cost, weight, row_metadata))
                 weighted_qty += weight
-                weighted_total += Decimal(str(row.costo_unitario or 0)) * weight
-            sample_count = len(same_month)
-            cost_value = _q6(weighted_total / weighted_qty) if weighted_qty > 0 else _q6(same_month[-1].costo_unitario)
-            method = _source_method(same_month)
-            source_date = same_month[-1].fecha
-            metadata["source_rows"] = [row.id for row in same_month]
+                weighted_total += normalized_cost * weight
+            if not normalized_rows:
+                metadata["skipped_source_rows"] = skipped_rows
+                self._insumo_cache[cache_key] = None
+                return None
+            sample_count = len(normalized_rows)
+            cost_value = _q6(weighted_total / weighted_qty) if weighted_qty > 0 else _q6(normalized_rows[-1][1])
+            source_rows = [row for row, _, _, _ in normalized_rows]
+            method = _source_method(source_rows)
+            source_date = source_rows[-1].fecha
+            metadata["source_rows"] = [row.id for row in source_rows]
+            metadata["unit_normalization"] = [row_metadata for _, _, _, row_metadata in normalized_rows]
+            if skipped_rows:
+                metadata["skipped_source_rows"] = skipped_rows
         else:
-            latest = next((row for row in reversed(purchase_like) if row.costo_unitario > 0), None)
-            if latest is None:
+            latest = None
+            latest_cost_value = None
+            latest_metadata = None
+            skipped_rows = []
+            for candidate in reversed(purchase_like):
+                if candidate.costo_unitario <= 0:
+                    continue
+                normalized_cost, row_metadata = _normalized_cost_for_insumo(candidate, insumo)
+                if normalized_cost is None:
+                    skipped_rows.append(row_metadata)
+                    continue
+                latest = candidate
+                latest_cost_value = normalized_cost
+                latest_metadata = row_metadata
+                break
+            if latest is None or latest_cost_value is None:
                 for rule in self._fallback_rules(insumo=insumo):
                     fallback_row = self._apply_fallback_rule(
                         period_start=period_start,
@@ -370,12 +468,15 @@ class MonthlyHistoricalCostingService:
                         return fallback_row
                 self._insumo_cache[cache_key] = None
                 return None
-            cost_value = _q6(latest.costo_unitario)
+            cost_value = _q6(latest_cost_value)
             method = InsumoCostoHistoricoMensual.METODO_ARRASTRE
             source_date = latest.fecha
             sample_count = 1
             weighted_qty = _weight_from_raw(latest)
             metadata["source_rows"] = [latest.id]
+            metadata["unit_normalization"] = [latest_metadata]
+            if skipped_rows:
+                metadata["skipped_source_rows"] = skipped_rows
 
         row, _ = InsumoCostoHistoricoMensual.objects.update_or_create(
             periodo=period_start,
