@@ -18,6 +18,7 @@ from logistica.models import (
     RutaEntrega,
     Unidad,
 )
+from rrhh.services_identidad import nombre_operativo_usuario
 
 
 class LogisticaRutaSerializer(serializers.ModelSerializer):
@@ -136,7 +137,7 @@ class LogisticaRepartidorSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_nombre(self, obj):
-        return obj.user.get_full_name() or obj.user.username
+        return nombre_operativo_usuario(obj.user)
 
     def _licencia_delta(self, obj):
         if not obj.licencia_expiracion:
@@ -229,12 +230,12 @@ class LogisticaReporteSerializer(serializers.ModelSerializer):
         ]
 
     def get_repartidor_nombre(self, obj):
-        return obj.repartidor.user.get_full_name() or obj.repartidor.user.username
+        return nombre_operativo_usuario(obj.repartidor.user)
 
     def get_asignado_a_nombre(self, obj):
         if not obj.asignado_a_id:
             return ""
-        return obj.asignado_a.get_full_name() or obj.asignado_a.username
+        return nombre_operativo_usuario(obj.asignado_a)
 
     def get_reafirmaciones_count(self, obj):
         if hasattr(obj, "reafirmaciones_count"):
@@ -249,13 +250,15 @@ class LogisticaReporteSerializer(serializers.ModelSerializer):
 
 
 class LogisticaReporteCreateSerializer(serializers.ModelSerializer):
+    unidad = serializers.PrimaryKeyRelatedField(queryset=Unidad.objects.filter(activa=True), required=False, allow_null=True)
+
     class Meta:
         model = ReporteUnidad
         fields = ["unidad", "tipo", "severidad", "descripcion", "foto", "kilometraje", "latitud", "longitud"]
 
     def create(self, validated_data):
         repartidor = self.context["repartidor"]
-        unidad = validated_data.pop("unidad", None)
+        unidad = validated_data.pop("unidad", None) or repartidor.unidad_asignada
         if not unidad or not unidad.activa:
             raise serializers.ValidationError("Selecciona una unidad activa para levantar reportes.")
         return ReporteUnidad.objects.create(repartidor=repartidor, unidad=unidad, **validated_data)
@@ -279,7 +282,7 @@ class LogisticaReporteReafirmacionSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "reporte", "repartidor", "repartidor_nombre", "creado_en"]
 
     def get_repartidor_nombre(self, obj):
-        return obj.repartidor.user.get_full_name() or obj.repartidor.user.username
+        return nombre_operativo_usuario(obj.repartidor.user)
 
 
 class LogisticaReportePatchSerializer(serializers.ModelSerializer):
@@ -324,7 +327,7 @@ class LogisticaBitacoraSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "repartidor", "repartidor_nombre", "creado_en", "actualizado_en"]
 
     def get_repartidor_nombre(self, obj):
-        return obj.repartidor.user.get_full_name() or obj.repartidor.user.username
+        return nombre_operativo_usuario(obj.repartidor.user)
 
     def validate(self, attrs):
         km_inicio = attrs.get("km_inicio")
@@ -384,7 +387,7 @@ class LogisticaBitacoraSalidaLlegadaSerializer(serializers.ModelSerializer):
         ]
 
     def get_repartidor_nombre(self, obj):
-        return obj.repartidor.user.get_full_name() or obj.repartidor.user.username
+        return nombre_operativo_usuario(obj.repartidor.user)
 
     def get_cargas_combustible(self, obj):
         return LogisticaCargaCombustibleSerializer(
@@ -429,7 +432,7 @@ class LogisticaCargaCombustibleSerializer(serializers.ModelSerializer):
         ]
 
     def get_repartidor_nombre(self, obj):
-        return obj.repartidor.user.get_full_name() or obj.repartidor.user.username
+        return nombre_operativo_usuario(obj.repartidor.user)
 
 
 class LogisticaCargaCombustibleCreateSerializer(serializers.ModelSerializer):
@@ -524,7 +527,7 @@ class LogisticaLavadoUnidadSerializer(serializers.ModelSerializer):
     def get_repartidor_nombre(self, obj):
         if not obj.registrado_por:
             return ""
-        return obj.registrado_por.get_full_name() or obj.registrado_por.username
+        return nombre_operativo_usuario(obj.registrado_por)
 
 
 class LogisticaLavadoUnidadCreateSerializer(serializers.ModelSerializer):
@@ -686,7 +689,7 @@ class LogisticaInspeccionVehiculoSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "repartidor", "unidad", "fecha", "ip_registro", "repartidor_nombre", "unidad_codigo", "unidad_descripcion"]
 
     def get_repartidor_nombre(self, obj):
-        return obj.repartidor.user.get_full_name() or obj.repartidor.user.username
+        return nombre_operativo_usuario(obj.repartidor.user)
 
 
 class LogisticaInspeccionVehiculoCreateSerializer(serializers.ModelSerializer):
@@ -730,7 +733,7 @@ class LogisticaInspeccionDiariaSerializer(serializers.ModelSerializer):
         ]
 
     def get_repartidor_nombre(self, obj):
-        return obj.repartidor.user.get_full_name() or obj.repartidor.user.username
+        return nombre_operativo_usuario(obj.repartidor.user)
 
     def create(self, validated_data):
         repartidor = self.context["repartidor"]

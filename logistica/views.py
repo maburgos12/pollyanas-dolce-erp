@@ -884,12 +884,21 @@ def capturas_pwa(request):
     tipo = (request.GET.get("tipo") or "todas").strip().lower()
 
     bitacoras_qs = (
-        BitacoraSalidaLlegada.objects.select_related("repartidor__user", "unidad")
+        BitacoraSalidaLlegada.objects.select_related("repartidor__user", "repartidor__user__empleado_rrhh", "unidad")
         .prefetch_related("cargas_combustible")
         .order_by("-hora_salida", "-id")
     )
-    inspecciones_qs = InspeccionVehiculo.objects.select_related("repartidor__user", "unidad").order_by("-fecha", "-id")
-    reportes_qs = ReporteUnidad.objects.select_related("repartidor__user", "unidad", "asignado_a").order_by("-fecha_reporte", "-id")
+    inspecciones_qs = InspeccionVehiculo.objects.select_related(
+        "repartidor__user",
+        "repartidor__user__empleado_rrhh",
+        "unidad",
+    ).order_by("-fecha", "-id")
+    reportes_qs = ReporteUnidad.objects.select_related(
+        "repartidor__user",
+        "repartidor__user__empleado_rrhh",
+        "unidad",
+        "asignado_a",
+    ).order_by("-fecha_reporte", "-id")
 
     if query:
         bitacoras_qs = bitacoras_qs.filter(
@@ -899,6 +908,7 @@ def capturas_pwa(request):
             | Q(repartidor__user__username__icontains=query)
             | Q(repartidor__user__first_name__icontains=query)
             | Q(repartidor__user__last_name__icontains=query)
+            | Q(repartidor__user__empleado_rrhh__nombre__icontains=query)
         )
         inspecciones_qs = inspecciones_qs.filter(
             Q(unidad__codigo__icontains=query)
@@ -906,6 +916,7 @@ def capturas_pwa(request):
             | Q(repartidor__user__username__icontains=query)
             | Q(repartidor__user__first_name__icontains=query)
             | Q(repartidor__user__last_name__icontains=query)
+            | Q(repartidor__user__empleado_rrhh__nombre__icontains=query)
         )
         reportes_qs = reportes_qs.filter(
             Q(unidad__codigo__icontains=query)
@@ -913,6 +924,7 @@ def capturas_pwa(request):
             | Q(repartidor__user__username__icontains=query)
             | Q(repartidor__user__first_name__icontains=query)
             | Q(repartidor__user__last_name__icontains=query)
+            | Q(repartidor__user__empleado_rrhh__nombre__icontains=query)
             | Q(descripcion__icontains=query)
             | Q(proveedor_servicio__icontains=query)
         )
@@ -1844,7 +1856,7 @@ def reportes_lista(request):
     if not can_view_submodule(request.user, "logistica", "reportes"):
         raise PermissionDenied("No tienes permisos para ver reportes de Logística")
 
-    qs = ReporteUnidad.objects.select_related("unidad", "repartidor__user").order_by("-fecha_reporte")
+    qs = ReporteUnidad.objects.select_related("unidad", "repartidor__user", "repartidor__user__empleado_rrhh").order_by("-fecha_reporte")
     estatus = (request.GET.get("estatus") or "").strip()
     severidad = (request.GET.get("severidad") or "").strip()
     unidad_id = (request.GET.get("unidad") or "").strip()

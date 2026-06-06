@@ -19,7 +19,7 @@ from django.contrib.auth import get_user_model
 
 from core.access import can_manage_rrhh, can_view_rrhh, can_view_submodule
 from core.audit import log_event
-from core.models import Sucursal, UserProfile
+from core.models import Sucursal
 
 from .models import (
     AsistenciaEmpleado,
@@ -47,7 +47,11 @@ from .services_catalogos import (
     PUESTO_OPERATIVO_CHOICES,
     PUESTO_OPERATIVO_VALUES,
 )
-from .services_identidad import normalizar_codigo_empleado, vincular_identidad_pendiente
+from .services_identidad import (
+    asegurar_identidad_operativa_empleado,
+    normalizar_codigo_empleado,
+    vincular_identidad_pendiente,
+)
 from .services.lista_raya import importar_lista_raya_nomina
 from .services_permisos import can_authorize_direccion, resolver_permiso_direccion
 from .services_vacantes import (
@@ -824,10 +828,10 @@ def empleados(request):
                     empleado.usuario_erp = None
                 empleado.save()
                 sucursal_app_id = (request.POST.get("sucursal_app_id") or "").strip()
-                if empleado.usuario_erp_id:
-                    profile, _ = UserProfile.objects.get_or_create(user_id=empleado.usuario_erp_id)
-                    profile.sucursal_id = int(sucursal_app_id) if sucursal_app_id.isdigit() else None
-                    profile.save(update_fields=["sucursal"])
+                asegurar_identidad_operativa_empleado(
+                    empleado,
+                    sucursal_app_id=int(sucursal_app_id) if sucursal_app_id.isdigit() else None,
+                )
                 sincronizar_esquemas_bono(empleado, request.POST, organizacion)
                 log_event(
                     request.user,
@@ -885,6 +889,11 @@ def empleados(request):
                 if nuevo_user and (not hasattr(nuevo_user, "empleado_rrhh") or nuevo_user.empleado_rrhh is None):
                     empleado.usuario_erp = nuevo_user
                     empleado.save(update_fields=["usuario_erp"])
+            sucursal_app_id = (request.POST.get("sucursal_app_id") or "").strip()
+            asegurar_identidad_operativa_empleado(
+                empleado,
+                sucursal_app_id=int(sucursal_app_id) if sucursal_app_id.isdigit() else None,
+            )
             sincronizar_esquemas_bono(empleado, request.POST, organizacion)
             log_event(
                 request.user,

@@ -8,6 +8,14 @@ from rest_framework.test import APIClient
 from core.access import ACCESS_MANAGE
 from core.models import Sucursal, UserModuleAccess
 from logistica.models import LavadoUnidad, Repartidor, ReporteUnidad, Unidad
+from rrhh.models import Empleado
+
+
+VALID_GIF = (
+    b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!"
+    b"\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00"
+    b"\x00\x02\x02D\x01\x00;"
+)
 
 
 @override_settings(CELERY_TASK_ALWAYS_EAGER=True, EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
@@ -75,6 +83,30 @@ class LogisticaReportesApiTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(ReporteUnidad.objects.count(), 1)
         self.assertEqual(response.data["unidad_codigo"], self.unidad.codigo)
+
+    def test_reporte_prefiere_nombre_rrhh_del_repartidor(self):
+        Empleado.objects.create(
+            nombre="VALDEZ FÉLIX REY IVÁN",
+            usuario_erp=self.user_repartidor,
+            departamento=Empleado.DEP_VENTAS,
+            puesto_operativo="REPARTIDOR",
+        )
+
+        self._auth(self._jwt_for("repartidor.api"))
+        response = self.client.post(
+            reverse("api_logistica_reportes"),
+            {
+                "unidad": self.unidad.id,
+                "tipo": ReporteUnidad.TIPO_FALLA,
+                "severidad": ReporteUnidad.SEVERIDAD_URGENTE,
+                "descripcion": "La unidad requiere revisión.",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(str(self.repartidor), "VALDEZ FÉLIX REY IVÁN")
+        self.assertEqual(response.data["repartidor_nombre"], "VALDEZ FÉLIX REY IVÁN")
 
     def test_mantenimiento_con_perfil_repartidor_crea_reporte_sin_grupo_logistica(self):
         user = User.objects.create_user(username="mantenimiento.logistica", password="pass123")
@@ -170,7 +202,7 @@ class LogisticaReportesApiTests(TestCase):
 
     def test_repartidor_registra_lavado_con_varias_partes_importe_y_foto(self):
         self._auth(self._jwt_for("repartidor.api"))
-        foto = SimpleUploadedFile("lavado.jpg", b"fake-image", content_type="image/jpeg")
+        foto = SimpleUploadedFile("lavado.gif", VALID_GIF, content_type="image/gif")
 
         response = self.client.post(
             reverse("api_logistica_lavados"),
@@ -200,7 +232,7 @@ class LogisticaReportesApiTests(TestCase):
 
     def test_repartidor_no_registra_lavado_sin_partes(self):
         self._auth(self._jwt_for("repartidor.api"))
-        foto = SimpleUploadedFile("lavado.jpg", b"fake-image", content_type="image/jpeg")
+        foto = SimpleUploadedFile("lavado.gif", VALID_GIF, content_type="image/gif")
 
         response = self.client.post(
             reverse("api_logistica_lavados"),
