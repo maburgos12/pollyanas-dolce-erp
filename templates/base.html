@@ -12,7 +12,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/styles.css?v=20260601-reportes-kpis-order-v1">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260606-alert-close-v1">
     <link rel="stylesheet" href="/static/css/pollyana_ops_ui.css?v=20260526-logistica-bitacoras-v1">
     {% block extra_css %}{% endblock %}
     <link rel="stylesheet" href="/static/css/hallmark_guardrails.css?v=20260601-reportes-kpis-order-v1">
@@ -790,9 +790,9 @@
             {% if messages %}
             <div class="messages-container">
                 {% for message in messages %}
-                <div class="alert alert-{{ message.tags }}">
+                <div class="alert alert-{% if message.tags == 'error' %}danger{% elif message.tags == 'warning' %}warning{% elif message.tags == 'info' %}info{% else %}success{% endif %}" role="status">
                     <span>{{ message }}</span>
-                    <button class="alert-close" onclick="this.parentElement.remove()" aria-label="Cerrar">
+                    <button class="alert-close" type="button" onclick="this.parentElement.remove()" aria-label="Cerrar">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M18 6 6 18M6 6l12 12"/>
                         </svg>

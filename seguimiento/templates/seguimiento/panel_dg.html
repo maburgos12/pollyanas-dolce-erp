@@ -176,12 +176,6 @@
     </div>
   </section>
 
-  {% if messages %}
-  {% for message in messages %}
-  <div class="alert alert-{% if message.tags == 'error' %}danger{% elif message.tags == 'warning' %}warning{% else %}success{% endif %}" style="margin-bottom:12px;">{{ message }}</div>
-  {% endfor %}
-  {% endif %}
-
   <!-- ── Requiere tu acción ── -->
   {% if pendientes_accion %}
   <section class="panel-dg-accion" style="margin-bottom:22px;">
