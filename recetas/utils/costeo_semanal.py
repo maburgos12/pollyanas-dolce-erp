@@ -9,6 +9,7 @@ from django.db import transaction
 from recetas.models import Receta, RecetaAgrupacionAddon, RecetaCostoSemanal
 from recetas.utils.addon_grouping import calculate_grouped_addon_cost
 from recetas.utils.costeo_versionado import asegurar_version_costeo
+from reportes.models import RecetaCostoHistoricoMensual
 
 
 ZERO = Decimal("0")
@@ -52,6 +53,21 @@ def _delta_from_previous(*, identity_key: str, week_start: date, current_total: 
     return delta_total, delta_pct
 
 
+def _historical_monthly_recipe_cost(*, receta: Receta, week_start: date) -> RecetaCostoHistoricoMensual | None:
+    period_start = week_start.replace(day=1)
+    row = (
+        RecetaCostoHistoricoMensual.objects.filter(
+            periodo=period_start,
+            receta=receta,
+            coverage_pct__gte=Decimal("100"),
+            costo_total__gt=0,
+        )
+        .order_by("-id")
+        .first()
+    )
+    return row
+
+
 def snapshot_weekly_costs(
     *,
     anchor_date: date | None = None,
@@ -80,11 +96,26 @@ def snapshot_weekly_costs(
     with transaction.atomic():
         if include_recipes:
             for receta in recipe_qs:
-                version, _ = asegurar_version_costeo(receta, fuente="WEEKLY_SNAPSHOT")
+                historical_cost = _historical_monthly_recipe_cost(receta=receta, week_start=week_start)
+                version = None
+                if historical_cost is None:
+                    version, _ = asegurar_version_costeo(receta, fuente="WEEKLY_SNAPSHOT")
+                costo_mp = (
+                    _q6(historical_cost.costo_total)
+                    if historical_cost is not None
+                    else _q6(version.costo_mp)
+                )
+                costo_mo = ZERO if historical_cost is not None else _q6(version.costo_mo)
+                costo_indirecto = ZERO if historical_cost is not None else _q6(version.costo_indirecto)
+                costo_total = (
+                    _q6(historical_cost.costo_total)
+                    if historical_cost is not None
+                    else _q6(version.costo_total)
+                )
                 delta_total, delta_pct = _delta_from_previous(
                     identity_key=f"RECIPE:{receta.id}",
                     week_start=week_start,
-                    current_total=Decimal(version.costo_total),
+                    current_total=costo_total,
                 )
                 _, created = RecetaCostoSemanal.objects.update_or_create(
                     identity_key=f"RECIPE:{receta.id}",
@@ -101,19 +132,26 @@ def snapshot_weekly_costs(
                         "temporalidad_detalle": receta.temporalidad_detalle[:120],
                         "familia": (receta.familia or "")[:120],
                         "categoria": (receta.categoria or "")[:120],
-                        "costo_mp": version.costo_mp,
-                        "costo_mo": version.costo_mo,
-                        "costo_indirecto": version.costo_indirecto,
-                        "costo_total": version.costo_total,
+                        "costo_mp": costo_mp,
+                        "costo_mo": costo_mo,
+                        "costo_indirecto": costo_indirecto,
+                        "costo_total": costo_total,
                         "delta_total": delta_total,
                         "delta_pct": delta_pct,
-                        "version_receta": version.version_num,
+                        "version_receta": version.version_num if version is not None else None,
                         "version_base": None,
                         "version_addon": None,
                         "metadata": {
                             "tipo": receta.tipo,
                             "codigo_point": receta.codigo_point,
                             "sheet_name": receta.sheet_name,
+                            "cost_source": "HISTORICAL_MONTHLY"
+                            if historical_cost is not None
+                            else "VERSION_COSTEO",
+                            "historical_month_period": historical_cost.periodo.isoformat()
+                            if historical_cost is not None
+                            else None,
+                            "historical_month_row_id": historical_cost.id if historical_cost is not None else None,
                         },
                     },
                 )
