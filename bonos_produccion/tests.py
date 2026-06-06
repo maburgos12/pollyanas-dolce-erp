@@ -11,12 +11,16 @@ from core.navigation import NAV_GROUPS
 from rrhh.models import Empleado, NominaLinea, NominaPeriodo, PermisoSalida
 
 from .models import (
+    AREA_EMBETUNADO,
     AREA_HORNOS,
     AREA_LOGISTICA,
     AREA_PRODUCCION,
+    AREAS_PRODUCCION,
     BonoProduccionEmpleado,
     ConfigBonoPeriodo,
     RegistroDiarioProduccion,
+    area_bono_produccion_empleado,
+    normalizar_area_produccion,
 )
 from .views import _recalcular_desde_registros
 
@@ -33,7 +37,11 @@ class BonosProduccionTests(TestCase):
         user = get_user_model().objects.create_superuser(username="admin-bonos", password="x")
         self.client.force_login(user)
         periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
-        empleado = Empleado.objects.create(nombre="Empleado Dashboard", area="PRODUCCION")
+        empleado = Empleado.objects.create(
+            nombre="Empleado Dashboard",
+            area="PRODUCCION",
+            participa_bonos_produccion=True,
+        )
         BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado, area=AREA_PRODUCCION)
 
         response = self.client.get("/bonos-produccion/dashboard/?mes=5&anio=2026")
@@ -49,6 +57,14 @@ class BonosProduccionTests(TestCase):
         self.assertIn("Usa concepto producción", content)
         self.assertIn("Empleado Dashboard", content)
         self.assertEqual(response["Cache-Control"], "max-age=0, no-cache, no-store, must-revalidate, private")
+
+    def test_embetunado_es_etiqueta_del_bucket_historico_produccion(self):
+        empleado = Empleado.objects.create(nombre="Empleado Embetunado", puesto_operativo="EMBETUNADO")
+
+        self.assertNotEqual(AREA_EMBETUNADO, AREA_PRODUCCION)
+        self.assertEqual(dict(AREAS_PRODUCCION)[AREA_PRODUCCION], "Embetunado")
+        self.assertEqual(normalizar_area_produccion("EMBETUNADO"), AREA_PRODUCCION)
+        self.assertEqual(area_bono_produccion_empleado(empleado), AREA_PRODUCCION)
 
     def test_raiz_web_de_bonos_produccion_redirige_al_dashboard(self):
         response = self.client.get("/bonos-produccion/")
@@ -166,7 +182,12 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(bono.observaciones, "Ajuste operativo")
 
     def test_reglas_por_area_permiten_logistica_sin_concepto_produccion(self):
-        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026, monto_logistica=Decimal("1000.00"))
+        periodo = ConfigBonoPeriodo.objects.create(
+            mes=5,
+            anio=2026,
+            dias_laborables=20,
+            monto_logistica=Decimal("1000.00"),
+        )
         periodo.asegurar_reglas_area()
         regla = periodo.reglas_area.get(area=AREA_LOGISTICA)
         self.assertFalse(regla.usa_produccion)
@@ -191,8 +212,16 @@ class BonosProduccionTests(TestCase):
 
     def test_premio_embetunado_se_asigna_en_area_produccion(self):
         periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026, premio_embetunado=Decimal("400.00"))
-        empleado_1 = Empleado.objects.create(nombre="Empleado Produccion 1", area="PRODUCCION")
-        empleado_2 = Empleado.objects.create(nombre="Empleado Produccion 2", area="PRODUCCION")
+        empleado_1 = Empleado.objects.create(
+            nombre="Empleado Produccion 1",
+            area="PRODUCCION",
+            participa_bonos_produccion=True,
+        )
+        empleado_2 = Empleado.objects.create(
+            nombre="Empleado Produccion 2",
+            area="PRODUCCION",
+            participa_bonos_produccion=True,
+        )
         bono_1 = BonoProduccionEmpleado.objects.create(
             periodo=periodo,
             empleado=empleado_1,
@@ -309,7 +338,7 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-produccion-pwa-v5", sw_content)
+        self.assertIn("pollyanas-bonos-produccion-pwa-v11", sw_content)
         self.assertIn('cache: "no-store"', sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-produccion/dashboard/")', sw_content)
 
@@ -335,6 +364,8 @@ class BonosProduccionTests(TestCase):
         periodo.asegurar_reglas_area()
         regla = periodo.reglas_area.get(area=AREA_HORNOS)
         regla.limite_asistencia = 0
+        regla.cancela_por_asistencia = True
+        regla.limite_asistencia_cancelacion = 1
         regla.save()
         bono = BonoProduccionEmpleado.objects.create(
             periodo=periodo,
@@ -362,6 +393,8 @@ class BonosProduccionTests(TestCase):
         periodo.asegurar_reglas_area()
         regla = periodo.reglas_area.get(area=AREA_HORNOS)
         regla.limite_puntualidad = 2
+        regla.cancela_por_puntualidad = True
+        regla.limite_retardos_cancelacion = 3
         regla.save()
         bono = BonoProduccionEmpleado.objects.create(
             periodo=periodo,
@@ -386,7 +419,11 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(bono.total_a_pagar, Decimal("0.00"))
 
     def test_regla_cancelacion_personalizada_cancela_bono_con_una_falta(self):
-        empleado = Empleado.objects.create(nombre="Empleado Produccion", area="PRODUCCION")
+        empleado = Empleado.objects.create(
+            nombre="Empleado Produccion",
+            area="PRODUCCION",
+            participa_bonos_produccion=True,
+        )
         periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026, dias_laborables=23, monto_hornos=Decimal("800.00"))
         periodo.asegurar_reglas_area()
         regla = periodo.reglas_area.get(area=AREA_HORNOS)
@@ -489,8 +526,12 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(bono.dias_trabajados, 24)
 
     def test_aplicar_a_nomina_escribe_total_en_linea_bonos(self):
-        empleado = Empleado.objects.create(nombre="Empleado Produccion", area="PRODUCCION")
-        periodo_bono = ConfigBonoPeriodo.objects.create(mes=5, anio=2026, dias_laborables=23)
+        empleado = Empleado.objects.create(
+            nombre="Empleado Produccion",
+            area="PRODUCCION",
+            participa_bonos_produccion=True,
+        )
+        periodo_bono = ConfigBonoPeriodo.objects.create(mes=5, anio=2026, dias_laborables=15)
         nomina = NominaPeriodo.objects.create(fecha_inicio=date(2026, 5, 1), fecha_fin=date(2026, 5, 31))
         bono = BonoProduccionEmpleado.objects.create(
             periodo=periodo_bono,
@@ -570,7 +611,7 @@ class BonosProduccionTests(TestCase):
         self.assertNotIn(no_elegible.nombre, contenido)
 
     def test_logistica_es_area_valida_de_bonos_produccion(self):
-        periodo = ConfigBonoPeriodo.objects.create(mes=6, anio=2026)
+        periodo = ConfigBonoPeriodo.objects.create(mes=6, anio=2026, dias_laborables=10)
         empleado = Empleado.objects.create(nombre="Empleado Logistica", area="LOGISTICA")
 
         bono = BonoProduccionEmpleado.objects.create(
@@ -595,8 +636,18 @@ class BonosProduccionTests(TestCase):
         self.client.force_login(user)
         periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
         jefe = Empleado.objects.create(nombre="Jefe Produccion", departamento=Empleado.DEP_PRODUCCION, usuario_erp=user)
-        empleado = Empleado.objects.create(nombre="Empleado Hornos A", area="PRODUCCION", jefe_directo=jefe)
-        empleado_2 = Empleado.objects.create(nombre="Empleado Hornos B", area="PRODUCCION", jefe_directo=jefe)
+        empleado = Empleado.objects.create(
+            nombre="Empleado Hornos A",
+            area="PRODUCCION",
+            jefe_directo=jefe,
+            participa_bonos_produccion=True,
+        )
+        empleado_2 = Empleado.objects.create(
+            nombre="Empleado Hornos B",
+            area="PRODUCCION",
+            jefe_directo=jefe,
+            participa_bonos_produccion=True,
+        )
         BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado, area=AREA_HORNOS)
         BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado_2, area=AREA_HORNOS)
         Empleado.objects.create(nombre="Empleado Ventas", area="VENTAS")
@@ -642,7 +693,12 @@ class BonosProduccionTests(TestCase):
         user.groups.add(Group.objects.get_or_create(name=ROLE_PRODUCCION)[0])
         self.client.force_login(user)
         periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
-        empleado = Empleado.objects.create(nombre="MEZA TABIZON JESUS ADRIAN", area="ADMINISTRACION", activo=True)
+        empleado = Empleado.objects.create(
+            nombre="MEZA TABIZON JESUS ADRIAN",
+            area="ADMINISTRACION",
+            activo=True,
+            participa_bonos_produccion=True,
+        )
         BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado, area=AREA_LOGISTICA)
 
         response = self.client.post(

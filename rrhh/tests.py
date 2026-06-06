@@ -1168,6 +1168,7 @@ class RRHHViewsTests(TestCase):
         limpieza = Empleado.objects.create(nombre="GARCIA HIGUERA BEATRIZ", area="AFANADORA")
         repartidor = Empleado.objects.create(nombre="LOPEZ VILLALOBOS JORGE ALFONSO", area="REPARTIDOR")
         hornos = Empleado.objects.create(nombre="COTA MEDINA MINERVA CECILIA", area="HORNOS", puesto="Hornos")
+        embetunado = Empleado.objects.create(nombre="EMBETUNADO DEMO", area="PRODUCCION")
         call_center = Empleado.objects.create(nombre="CALL CENTER DEMO", area="VENTAS", puesto="Call Center")
         marketing = Empleado.objects.create(nombre="MARKETING EXTERNO DEMO", area="MARKETING")
 
@@ -1186,6 +1187,7 @@ class RRHHViewsTests(TestCase):
         limpieza.refresh_from_db()
         repartidor.refresh_from_db()
         hornos.refresh_from_db()
+        embetunado.refresh_from_db()
         call_center.refresh_from_db()
         marketing.refresh_from_db()
 
@@ -1206,6 +1208,9 @@ class RRHHViewsTests(TestCase):
         self.assertEqual(hornos.departamento, "PRODUCCION")
         self.assertEqual(hornos.puesto_operativo, "HORNOS")
         self.assertTrue(hornos.participa_bonos_produccion)
+        self.assertEqual(embetunado.departamento, "PRODUCCION")
+        self.assertEqual(embetunado.puesto_operativo, "EMBETUNADO")
+        self.assertTrue(embetunado.participa_bonos_produccion)
         self.assertEqual(call_center.tipo_personal, "POLLYANA")
         self.assertEqual(marketing.tipo_personal, "EXTERNO")
 

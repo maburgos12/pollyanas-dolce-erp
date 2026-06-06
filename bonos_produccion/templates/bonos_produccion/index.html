@@ -199,7 +199,7 @@ const TODAY=new Date();
 const MESES=['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const AREA_TODAS='TODAS';
 const AREAS=['HORNOS','PRODUCCION','ARMADO','LOGISTICA','CRUCERO'];
-const AREA_LABELS={TODAS:'Todas',HORNOS:'Hornos',EMBETUNADO:'Embetunado',PRODUCCION:'Produccion',ARMADO:'Armado',LOGISTICA:'Logistica',CRUCERO:'Crucero'};
+const AREA_LABELS={TODAS:'Todas',HORNOS:'Hornos',EMBETUNADO:'Embetunado',PRODUCCION:'Embetunado',ARMADO:'Armado',LOGISTICA:'Logistica',CRUCERO:'Crucero'};
 const FORCE_CAPTURE=new URLSearchParams(window.location.search).get('captura')==='1';
 function api(path,opts={}){
   const csrfMatch=document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);

@@ -8,7 +8,8 @@ from .models import Empleado
 
 
 PUESTO_HORNOS = "HORNOS"
-PUESTO_PRODUCCION = "PRODUCCION"
+PUESTO_EMBETUNADO = "EMBETUNADO"
+PUESTO_PRODUCCION = PUESTO_EMBETUNADO
 PUESTO_ARMADO = "ARMADO"
 PUESTO_CRUCERO = "CRUCERO"
 PUESTO_ENVIO_SUCURSAL = "ENVIO_SUCURSAL"
@@ -111,7 +112,7 @@ def _inferir_puesto_operativo(empleado: Empleado) -> str:
         return PUESTO_LIMPIEZA
     if "ALMACEN" in texto or "ALMACÉN" in texto:
         return PUESTO_ALMACEN
-    if "PRODUCCION" in area or "PRODUCCIÓN" in area:
+    if "EMBETUNADO" in texto or "PRODUCCION" in area or "PRODUCCIÓN" in area:
         return PUESTO_PRODUCCION
     return ""
 
@@ -144,7 +145,7 @@ def _base_por_area(empleado: Empleado, jefes: dict[str, Empleado]) -> dict:
         data["participa_bonos_ventas"] = True
         if "CALL" in puesto:
             data["puesto_operativo"] = PUESTO_CALL_CENTER
-    elif "HORNOS" in area or "PRODUCCION" in area or "PRODUCCIÓN" in area:
+    elif "HORNOS" in area or "EMBETUNADO" in area or "PRODUCCION" in area or "PRODUCCIÓN" in area:
         data["departamento_origen"] = Empleado.DEP_PRODUCCION
         data["departamento"] = Empleado.DEP_PRODUCCION
         data["jefe_directo"] = jefes.get("carolina")
