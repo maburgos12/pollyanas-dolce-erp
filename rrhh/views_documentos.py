@@ -68,7 +68,7 @@ def empleado_documentos(request, empleado_pk: int):
         request,
         "rrhh/empleado_documentos.html",
         {
-            "module_tabs": _module_tabs("empleados"),
+            "module_tabs": _module_tabs("empleados", request.user),
             "empleado": empleado,
             "documentos": documentos,
             "docs_por_tipo": docs_por_tipo,

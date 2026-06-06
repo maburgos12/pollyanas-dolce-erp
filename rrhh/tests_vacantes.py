@@ -21,6 +21,7 @@ from rrhh.services_vacantes import (
     iniciar_reclutamiento_vacante,
     reenviar_vacante_revision,
 )
+from rrhh.views import _module_tabs
 
 
 class VacantesSolicitudServiceTests(TestCase):
@@ -397,3 +398,8 @@ class VacantesSolicitudViewTests(TestCase):
         self.assertEqual(vacante.estado, VacanteRRHH.ESTADO_REVISION_RRHH)
         self.assertEqual(vacante.creado_por, self.jefe_ventas)
         self.assertEqual(vacante.solicitado_por, self.jefe_ventas)
+
+    def test_jefatura_solo_ve_tab_de_vacantes_en_tarea_puntual(self):
+        labels = [tab["label"] for tab in _module_tabs("vacantes", self.jefe_ventas)]
+
+        self.assertEqual(labels, ["Vacantes"])

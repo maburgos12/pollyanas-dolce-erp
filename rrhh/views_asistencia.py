@@ -35,7 +35,7 @@ def monitor_sincronizacion(request):
         request,
         "rrhh/monitor_sincronizacion.html",
         {
-            "module_tabs": _module_tabs("monitor_sync"),
+            "module_tabs": _module_tabs("monitor_sync", request.user),
             "hoy": hoy,
             "ayer": hoy - timedelta(days=1),
             "empleados_activos": empleados_activos,

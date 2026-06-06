@@ -17,7 +17,7 @@ from django.utils import timezone
 
 from django.contrib.auth import get_user_model
 
-from core.access import can_manage_rrhh, can_view_rrhh
+from core.access import can_manage_rrhh, can_view_rrhh, can_view_submodule
 from core.audit import log_event
 from core.models import Sucursal, UserProfile
 
@@ -35,6 +35,7 @@ from .models import (
     NominaPeriodo,
     PermisoSalida,
     PlantillaAutorizada,
+    Prestamo,
     VacanteRRHH,
 )
 from .services_bonos import asegurar_esquemas_base, sincronizar_esquemas_bono
@@ -49,7 +50,12 @@ from .services_catalogos import (
 from .services_identidad import normalizar_codigo_empleado, vincular_identidad_pendiente
 from .services.lista_raya import importar_lista_raya_nomina
 from .services_permisos import can_authorize_direccion, resolver_permiso_direccion
-from .services_vacantes import crear_solicitud_vacante
+from .services_vacantes import (
+    can_autorizar_vacante,
+    can_solicitar_vacantes,
+    can_ver_vacante,
+    crear_solicitud_vacante,
+)
 
 
 def _parse_decimal(raw: str | None) -> Decimal:
@@ -130,19 +136,52 @@ def _organizacion_desde_post(post_data, empleado: Empleado | None = None) -> dic
     }
 
 
-def _module_tabs(active: str) -> list[dict]:
-    return [
-        {"label": "Indicadores", "url_name": "rrhh:rrhh_indicadores", "active": active == "dashboard"},
-        {"label": "Organización", "url_name": "rrhh:rrhh_organizacion", "active": active == "organizacion"},
-        {"label": "Empleados", "url_name": "rrhh:empleados", "active": active == "empleados"},
-        {"label": "Permisos", "url_name": "rrhh:rrhh_permisos_list", "active": active == "permisos"},
-        {"label": "Horas extra", "url_name": "rrhh:rrhh_he_list", "active": active == "horas_extra"},
-        {"label": "Asistencias", "url_name": "rrhh:rrhh_asistencias", "active": active == "asistencias"},
-        {"label": "Checador", "url_name": "rrhh:rrhh_importar", "active": active == "checador"},
-        {"label": "Vacantes", "url_name": "rrhh:rrhh_vacantes", "active": active == "vacantes"},
-        {"label": "Préstamos", "url_name": "rrhh:rrhh_prestamos_lista", "active": active == "prestamos"},
-        {"label": "Nómina", "url_name": "rrhh:nomina", "active": active == "nomina"},
-    ]
+RRHH_MODULE_TABS = [
+    {"label": "Indicadores", "url_name": "rrhh:rrhh_indicadores", "key": "dashboard", "submodule": "dashboard"},
+    {"label": "Organización", "url_name": "rrhh:rrhh_organizacion", "key": "organizacion", "submodule": "organizacion"},
+    {"label": "Empleados", "url_name": "rrhh:empleados", "key": "empleados", "submodule": "empleados"},
+    {"label": "Permisos", "url_name": "rrhh:rrhh_permisos_list", "key": "permisos", "submodule": "permisos"},
+    {"label": "Horas extra", "url_name": "rrhh:rrhh_he_list", "key": "horas_extra", "submodule": "horas_extra"},
+    {"label": "Asistencias", "url_name": "rrhh:rrhh_asistencias", "key": "asistencias", "submodule": "asistencias"},
+    {"label": "Checador", "url_name": "rrhh:rrhh_importar", "key": "checador", "submodule": "importar_checador"},
+    {"label": "Vacantes", "url_name": "rrhh:rrhh_vacantes", "key": "vacantes", "submodule": "vacantes"},
+    {"label": "Préstamos", "url_name": "rrhh:rrhh_prestamos_lista", "key": "prestamos", "submodule": "prestamos"},
+    {"label": "Nómina", "url_name": "rrhh:nomina", "key": "nomina", "submodule": "nomina"},
+]
+
+
+def _has_rrhh_task_access(user, tab_key: str) -> bool:
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    if tab_key == "vacantes":
+        return bool(
+            can_solicitar_vacantes(user)
+            or can_autorizar_vacante(user)
+            or can_ver_vacante(user)
+            or VacanteRRHH.objects.filter(Q(solicitado_por=user) | Q(creado_por=user)).exists()
+        )
+    if tab_key == "prestamos":
+        return Prestamo.objects.filter(jefe_directo=user).exists()
+    if tab_key == "horas_extra":
+        return HoraExtra.objects.filter(jefe_directo=user).exists()
+    return False
+
+
+def _module_tabs(active: str, user=None) -> list[dict]:
+    tabs = []
+    for tab in RRHH_MODULE_TABS:
+        if user is not None and not (
+            can_view_submodule(user, "rrhh", tab["submodule"]) or _has_rrhh_task_access(user, tab["key"])
+        ):
+            continue
+        tabs.append(
+            {
+                "label": tab["label"],
+                "url_name": tab["url_name"],
+                "active": active == tab["key"],
+            }
+        )
+    return tabs
 
 
 def _rrhh_enterprise_chain(
@@ -946,7 +985,7 @@ def empleados(request):
     )
 
     context = {
-        "module_tabs": _module_tabs("empleados"),
+        "module_tabs": _module_tabs("empleados", request.user),
         "can_manage_rrhh": can_manage_rrhh(request.user),
         "empleados": empleados_page,
         "q": q,
@@ -1152,7 +1191,7 @@ def nomina(request):
     )
 
     context = {
-        "module_tabs": _module_tabs("nomina"),
+        "module_tabs": _module_tabs("nomina", request.user),
         "can_manage_rrhh": can_manage_rrhh(request.user),
         "nominas": nominas_qs.order_by("-fecha_fin", "-id")[:120],
         "importaciones": NominaImportacion.objects.select_related("periodo", "created_by")[:10],
@@ -1367,7 +1406,7 @@ def nomina_detail(request, pk: int):
     )
 
     context = {
-        "module_tabs": _module_tabs("nomina"),
+        "module_tabs": _module_tabs("nomina", request.user),
         "can_manage_rrhh": can_manage_rrhh(request.user),
         "periodo": periodo,
         "lineas": periodo.lineas.select_related("empleado").order_by("empleado__nombre", "id"),
@@ -1588,7 +1627,7 @@ def indicadores_ch(request):
         )
 
     context = {
-        "module_tabs": _module_tabs("dashboard"),
+        "module_tabs": _module_tabs("dashboard", request.user),
         "can_manage_rrhh": can_manage_rrhh(request.user),
         "mes": mes,
         "months": range(1, 13),
@@ -1665,7 +1704,7 @@ def vacantes_ch(request):
         request,
         "rrhh/vacantes.html",
         {
-            "module_tabs": _module_tabs("vacantes"),
+            "module_tabs": _module_tabs("vacantes", request.user),
             "can_manage_rrhh": can_manage_rrhh(request.user),
             "vacantes": vacantes[:300],
             "empleados": Empleado.objects.filter(activo=True).order_by("nombre")[:1200],
@@ -1707,7 +1746,7 @@ def organizacion_ch(request):
         request,
         "rrhh/organizacion.html",
         {
-            "module_tabs": _module_tabs("organizacion"),
+            "module_tabs": _module_tabs("organizacion", request.user),
             "empleados": empleados,
             "departamentos": departamentos,
             "jefes": jefes,
@@ -1737,7 +1776,7 @@ def dashboard_ch(request):
     return render(
         request,
         "rrhh/dashboard_ch.html",
-        {"module_tabs": _module_tabs("dashboard"), "stats": stats, "can_manage_rrhh": can_manage_rrhh(request.user)},
+        {"module_tabs": _module_tabs("dashboard", request.user), "stats": stats, "can_manage_rrhh": can_manage_rrhh(request.user)},
     )
 
 
@@ -1754,7 +1793,7 @@ def asistencias_view(request):
     if empleado_id.isdigit():
         qs = qs.filter(empleado_id=int(empleado_id))
     context = {
-        "module_tabs": _module_tabs("asistencias"),
+        "module_tabs": _module_tabs("asistencias", request.user),
         "asistencias": qs[:500],
         "empleados": Empleado.objects.filter(activo=True).order_by("nombre")[:1000],
         "mes": mes,
@@ -1801,7 +1840,7 @@ def importar_checador(request):
         request,
         "rrhh/importar_checador.html",
         {
-            "module_tabs": _module_tabs("checador"),
+            "module_tabs": _module_tabs("checador", request.user),
             "historial": historial,
             "ultimas_api": ultimas_api,
             "ultima_api": ultima_api,
@@ -1860,7 +1899,7 @@ def horas_extra_list(request):
         request,
         "rrhh/horas_extra_list.html",
         {
-            "module_tabs": _module_tabs("horas_extra"),
+            "module_tabs": _module_tabs("horas_extra", request.user),
             "columnas": columnas,
             "can_view_rrhh": can_view_rrhh(request.user),
             "user_id": request.user.id,
@@ -1935,7 +1974,7 @@ def permisos_list(request):
         request,
         "rrhh/permisos_list.html",
         {
-            "module_tabs": _module_tabs("permisos"),
+            "module_tabs": _module_tabs("permisos", request.user),
             "permisos": permisos,
             "columnas": columnas,
             "stats": stats,
