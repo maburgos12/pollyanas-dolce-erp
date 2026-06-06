@@ -1076,6 +1076,54 @@ class MonthlyHistoricalCostingServiceTests(TestCase):
         self.assertEqual(historical_row.costo_total, Decimal("12.500000"))
         self.assertEqual(historical_row.coverage_pct, Decimal("100.000000"))
 
+    def test_historical_snapshot_includes_resale_recipe_using_point_product_cost(self):
+        resale_recipe = Receta.objects.create(
+            nombre="TE DEL JARDIN",
+            codigo_point="0313",
+            hash_contenido="hist_resale_point_product_hash",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            modo_costeo=Receta.MODO_COSTEO_REVENTA,
+        )
+        point_branch = PointBranch.objects.create(external_id="11B", name="Sucursal 11B")
+        point_product = PointProduct.objects.create(
+            external_id="402",
+            sku="0313",
+            name="TE DEL JARDIN",
+            category="Te",
+        )
+        ProductoReventaCosto.objects.create(
+            producto_point=point_product,
+            costo_unitario=Decimal("14.00"),
+            fecha_vigencia=date(2026, 1, 8),
+            fuente=ProductoReventaCosto.FUENTE_POINT_HISTORIAL,
+            unidad="pza",
+            cantidad_snapshot=Decimal("1"),
+            source_hash="hist_resale_product_te_del_jardin",
+        )
+        PointDailySale.objects.create(
+            branch=point_branch,
+            product=point_product,
+            receta=resale_recipe,
+            sale_date=date(2026, 1, 12),
+            quantity=Decimal("2"),
+            total_amount=Decimal("100"),
+            gross_amount=Decimal("100"),
+            net_amount=Decimal("86.21"),
+        )
+
+        MonthlyHistoricalCostingService().build_period(period_start=date(2026, 1, 1))
+
+        historical_row = RecetaCostoHistoricoMensual.objects.get(periodo=date(2026, 1, 1), receta=resale_recipe)
+        product_cost_row = ProductoReventaCostoHistoricoMensual.objects.get(
+            periodo=date(2026, 1, 1),
+            producto_point=point_product,
+        )
+        self.assertEqual(historical_row.costo_total, Decimal("14.000000"))
+        self.assertEqual(historical_row.coverage_pct, Decimal("100.000000"))
+        self.assertEqual(historical_row.metadata["bom_basis"], "POINT_PRODUCT_RESALE_COST")
+        self.assertEqual(historical_row.metadata["matched_producto_point_sku"], "0313")
+        self.assertEqual(product_cost_row.costo_promedio, Decimal("14.000000"))
+
     def test_historical_snapshot_includes_resale_sales_using_alias_match(self):
         box_insumo = Insumo.objects.create(
             codigo="042",
