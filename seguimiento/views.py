@@ -91,28 +91,6 @@ def _get_item_para_usuario(user, pk):
     return get_object_or_404(SeguimientoItem.objects.filter(filters).distinct(), pk=pk)
 
 
-def _es_dg(user) -> bool:
-    return bool(user.is_staff or user.is_superuser or has_any_role(user, ROLE_DG, ROLE_ADMIN))
-
-
-def _get_item_editable(user, pk):
-    """Resuelve el acuerdo permitiendo al responsable/participante O al DG.
-
-    El DG abre cualquier acuerdo desde su panel (detalle_dg) y debe poder marcar el
-    checklist o subir evidencia sin chocar con el filtro de responsable.
-    """
-    if _es_dg(user):
-        return get_object_or_404(SeguimientoItem, pk=pk)
-    return _get_item_para_usuario(user, pk)
-
-
-def _redirect_detalle(request, pk):
-    """Vuelve al detalle correcto según desde dónde se actuó (DG o colaborador)."""
-    if (request.POST.get("next") or "").strip() == "detalle_dg":
-        return redirect("seguimiento:detalle_dg", pk=pk)
-    return redirect("seguimiento:detalle", pk=pk)
-
-
 def _validar_archivo_evidencia(archivo) -> str | None:
     max_bytes = int(getattr(settings, "SEGUIMIENTO_EVIDENCIA_MAX_UPLOAD_BYTES", DEFAULT_EVIDENCIA_MAX_UPLOAD_BYTES))
     if archivo.size and archivo.size > max_bytes:
@@ -282,8 +260,24 @@ def seguimiento_compromisos(request):
 @login_required
 @require_POST
 def toggle_checklist(request, pk, check_id):
-    item = _get_item_editable(request.user, pk)
+    item = _get_item_para_usuario(request.user, pk)
     check = get_object_or_404(SeguimientoChecklistItem, pk=check_id, seguimiento=item)
+    checks = list(item.checklist.all())  # ordenado por (orden, id) según Meta
+
+    # Orden secuencial: los pasos se completan en orden y se deshacen en orden inverso.
+    if not check.completado:
+        # Marcar: todos los pasos anteriores deben estar completados.
+        anteriores = [c for c in checks if (c.orden, c.id) < (check.orden, check.id)]
+        if any(not c.completado for c in anteriores):
+            messages.error(request, "Completa primero los pasos anteriores, en orden.")
+            return redirect("seguimiento:detalle", pk=item.pk)
+    else:
+        # Desmarcar: ningún paso posterior debe estar completado.
+        posteriores = [c for c in checks if (c.orden, c.id) > (check.orden, check.id)]
+        if any(c.completado for c in posteriores):
+            messages.error(request, "Desmarca primero los pasos posteriores, en orden inverso.")
+            return redirect("seguimiento:detalle", pk=item.pk)
+
     check.completado = not check.completado
     if check.completado:
         check.completado_por = request.user
@@ -303,7 +297,7 @@ def toggle_checklist(request, pk, check_id):
         enviar_correo=False,
     )
     messages.success(request, "Checklist actualizado.")
-    return _redirect_detalle(request, item.pk)
+    return redirect("seguimiento:detalle", pk=item.pk)
 
 
 @login_required
@@ -336,7 +330,7 @@ def registrar_feedback(request, pk):
 @login_required
 @require_POST
 def subir_evidencia(request, pk):
-    item = _get_item_editable(request.user, pk)
+    item = _get_item_para_usuario(request.user, pk)
     archivo = request.FILES.get("archivo")
     if not archivo:
         messages.error(request, "Selecciona un archivo de evidencia.")
@@ -352,8 +346,7 @@ def subir_evidencia(request, pk):
         nombre_original=archivo.name,
         comentario=(request.POST.get("comentario") or "").strip(),
     )
-    # El DG no escala a revisión su propio acuerdo al adjuntar; eso lo hace el colaborador.
-    if item.requiere_aprobacion and not _es_dg(request.user):
+    if item.requiere_aprobacion:
         if item.estatus in {SeguimientoItem.ESTATUS_PENDIENTE, SeguimientoItem.ESTATUS_EN_PROCESO}:
             item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
             item.save(update_fields=["estatus", "updated_at"])
@@ -363,7 +356,7 @@ def subir_evidencia(request, pk):
     log_event(request.user, "seguimiento.evidencia", "SeguimientoItem", item.pk, {"archivo": archivo.name})
     notificar_seguimiento_avance(item, actor=request.user, mensaje_extra=f"Archivo: {archivo.name}")
     messages.success(request, "Evidencia subida.")
-    return _redirect_detalle(request, item.pk)
+    return redirect("seguimiento:detalle", pk=item.pk)
 
 
 @login_required
@@ -907,6 +900,11 @@ def detalle_item(request, pk):
         and not tiene_revision_dg
     )
 
+    # Orden secuencial: solo el primer paso incompleto se puede marcar y solo el último
+    # completado se puede deshacer. El resto queda bloqueado en la interfaz.
+    siguiente_check_id = next((c.id for c in checks if not c.completado), None)
+    ultimo_completado_id = next((c.id for c in reversed(checks) if c.completado), None)
+
     return render(
         request,
         "seguimiento/detalle_item.html",
@@ -927,6 +925,8 @@ def detalle_item(request, pk):
             "estatus_en_revision": SeguimientoItem.ESTATUS_EN_REVISION,
             "puede_retractar": puede_retractar,
             "current_user": request.user,
+            "siguiente_check_id": siguiente_check_id,
+            "ultimo_completado_id": ultimo_completado_id,
         },
     )
 
@@ -1019,7 +1019,7 @@ def detalle_item_dg(request, pk):
         return redirect("seguimiento:mi_seguimiento")
     item = get_object_or_404(
         SeguimientoItem.objects.select_related("responsable_user", "responsable_empleado", "aprobado_por")
-        .prefetch_related("checklist", "comentarios__usuario", "evidencias__usuario", "prorrogas"),
+        .prefetch_related("checklist__completado_por", "comentarios__usuario", "evidencias__usuario", "prorrogas"),
         pk=pk,
     )
     checks = list(item.checklist.all())

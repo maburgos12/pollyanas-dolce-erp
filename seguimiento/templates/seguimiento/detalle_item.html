@@ -211,19 +211,41 @@
     {% endif %}
   </div>
 
-  <!-- Checklist -->
+  <!-- Proceso / Checklist -->
   {% if checks %}
   <div class="bi-panel" style="margin-bottom:16px;">
-    <p class="seg-section-title">Checklist</p>
-    <div style="display:flex; flex-wrap:wrap; gap:8px;">
+    <p class="seg-section-title">Proceso{% if es_vista_dg %} · solo lectura{% endif %}</p>
+    <p class="muted" style="margin:-4px 0 10px; font-size:.82rem;">
+      {% if es_vista_dg %}Avance del colaborador. El responsable marca cada paso en orden.
+      {% else %}Marca los pasos en orden: solo el siguiente está disponible.{% endif %}
+    </p>
+    <div style="display:grid; gap:8px;">
       {% for check in checks %}
-      <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk check.pk %}">
-        {% csrf_token %}
-        {% if es_vista_dg %}<input type="hidden" name="next" value="detalle_dg">{% endif %}
-        <button class="btn btn-sm {% if check.completado %}btn-primary{% else %}btn-secondary{% endif %}" type="submit">
-          {% if check.completado %}✓{% else %}○{% endif %} {{ check.titulo }}
-        </button>
-      </form>
+      <div style="display:flex; align-items:center; gap:10px; padding:8px 12px; border:1px solid rgba(139,34,82,.10); border-radius:10px;{% if check.completado %} background:rgba(76,175,80,.06);{% endif %}">
+        <span class="muted" style="font-weight:800;">{{ forloop.counter }}.</span>
+        <span style="font-size:1.05rem;">{% if check.completado %}✅{% elif es_vista_dg %}⬜{% elif check.pk == siguiente_check_id %}⭕{% else %}🔒{% endif %}</span>
+        <div style="flex:1; overflow:hidden;">
+          <div style="font-weight:600;">{{ check.titulo }}</div>
+          {% if check.completado %}
+          <div class="muted" style="font-size:.78rem;">
+            Hecho por {{ check.completado_por.get_full_name|default:check.completado_por.username|default:"—" }}{% if check.completado_at %} · {{ check.completado_at|date:"d/m/Y H:i" }}{% endif %}
+          </div>
+          {% endif %}
+        </div>
+        {% if not es_vista_dg and not item.esta_cerrado %}
+          {% if check.pk == siguiente_check_id %}
+          <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk check.pk %}">
+            {% csrf_token %}
+            <button class="btn btn-primary btn-sm" type="submit">Marcar hecho</button>
+          </form>
+          {% elif check.completado and check.pk == ultimo_completado_id %}
+          <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk check.pk %}">
+            {% csrf_token %}
+            <button class="btn btn-secondary btn-sm" type="submit">Deshacer</button>
+          </form>
+          {% endif %}
+        {% endif %}
+      </div>
       {% endfor %}
     </div>
   </div>
@@ -368,13 +390,12 @@
   </div>
   {% endif %}
 
-  <!-- Subir archivo (siempre visible cuando no está cerrado) -->
-  {% if not item.esta_cerrado %}
+  <!-- Subir archivo (colaborador, cuando no está cerrado) -->
+  {% if not item.esta_cerrado and not es_vista_dg %}
   <div class="bi-panel" style="margin-bottom:16px;">
     <p class="seg-section-title">Agregar archivo de evidencia</p>
     <form method="post" action="{% url 'seguimiento:subir_evidencia' item.pk %}" enctype="multipart/form-data" style="display:grid; gap:10px;">
       {% csrf_token %}
-      {% if es_vista_dg %}<input type="hidden" name="next" value="detalle_dg">{% endif %}
       <input type="file" name="archivo"
         accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf"
         style="border:1px solid rgba(139,34,82,.14); border-radius:12px; padding:10px; font:inherit; background:rgba(255,255,255,.96);">
