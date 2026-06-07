@@ -275,6 +275,16 @@ class AgenteDGSeguimientoImporter:
             "source_status": str(row.get("status") or ""),
             "source_participants": participant_payload,
         }
+        # Solo minutas y proyectos pasan por aprobación del DG. Los compromisos son
+        # actividades de desempeño que el colaborador gestiona y cierra por su cuenta.
+        requiere_aprobacion = tipo in (SeguimientoItem.TIPO_MINUTA, SeguimientoItem.TIPO_PROYECTO)
+
+        estatus = agente_dg_status_a_erp(row.get("status"))
+        # El Agente DG manda los compromisos como SUBMITTED → EN_REVISION; como no
+        # requieren tu visto bueno, no deben atorarse en tu bandeja: quedan en proceso.
+        if not requiere_aprobacion and estatus == SeguimientoItem.ESTATUS_EN_REVISION:
+            estatus = SeguimientoItem.ESTATUS_EN_PROCESO
+
         defaults = {
             "tipo": tipo,
             "titulo": row["titulo"],
@@ -284,7 +294,8 @@ class AgenteDGSeguimientoImporter:
             "responsable_empleado": empleado,
             "area": row.get("area_name") or "",
             "fecha_limite": agente_dg_as_datetime(row.get("due_at") or row.get("target_date") or row.get("due_date"), row.get("due_time")),
-            "estatus": agente_dg_status_a_erp(row.get("status")),
+            "estatus": estatus,
+            "requiere_aprobacion": requiere_aprobacion,
             "origen": "Agente DG",
             "referencia_externa": f"{source_table}:{row['id']}",
             "metadata": metadata,
