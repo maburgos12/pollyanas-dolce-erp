@@ -135,31 +135,6 @@ def _get_proveedores_importables():
     )
 
 
-def _service_provider_options():
-    linked_provider_names = Proveedor.objects.filter(
-        activos_mantenimiento__isnull=False,
-        activo=True,
-    ).values_list("nombre", flat=True)
-    failure_provider_names = ReporteFalla.objects.exclude(
-        proveedor_servicio=""
-    ).values_list("proveedor_servicio", flat=True)
-    order_provider_names = OrdenMantenimiento.objects.exclude(
-        responsable=""
-    ).values_list("responsable", flat=True)
-    used_names = set(linked_provider_names) | set(failure_provider_names) | set(order_provider_names)
-    return (
-        ProveedorServicio.objects.filter(activo=True)
-        .filter(
-            Q(nombre__in=used_names)
-            | ~Q(especialidad="")
-            | ~Q(contacto="")
-            | ~Q(telefono="")
-            | ~Q(notas="")
-        )
-        .order_by("nombre")
-    )
-
-
 def _branch_statuses():
     return [ReporteFalla.ESTATUS_ABIERTO, ReporteFalla.ESTATUS_REVISION, ReporteFalla.ESTATUS_PROCESO]
 
@@ -560,7 +535,7 @@ def sucursales(request):
 def proveedores_servicio(request):
     data = [
         {"id": proveedor.id, "nombre": proveedor.nombre}
-        for proveedor in _service_provider_options()
+        for proveedor in ProveedorServicio.objects.filter(activo=True).order_by("nombre")
     ]
     return Response(data)
 
@@ -767,7 +742,7 @@ def dashboard(request):
     if origen not in {"", "sucursales", "logistica"}:
         return redirect("mantenimiento:dashboard")
     items = _unified_items(origen)
-    provider_options = list(_service_provider_options()[:180])
+    provider_options = list(ProveedorServicio.objects.filter(activo=True).order_by("nombre")[:180])
     asset_options = Activo.objects.select_related("sucursal").filter(activo=True).order_by(
         "sucursal__nombre", "nombre", "codigo"
     )[:180]
@@ -846,7 +821,7 @@ def dashboard(request):
             "plan_estatus_choices": PlanMantenimiento.ESTATUS_CHOICES,
             "activos_para_plan": list(Activo.objects.select_related("sucursal").filter(activo=True).order_by("sucursal__nombre", "nombre")[:400]),
             "unidades_para_servicio": list(Unidad.objects.filter(activa=True).select_related("sucursal").order_by("descripcion", "codigo")),
-            "proveedores_todos": list(_service_provider_options()),
+            "proveedores_todos": list(ProveedorServicio.objects.order_by("nombre")),
             "proveedores_importables": _get_proveedores_importables(),
         },
     )

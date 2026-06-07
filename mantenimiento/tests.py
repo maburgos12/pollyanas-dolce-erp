@@ -56,8 +56,14 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertEqual(portal.status_code, 200)
         self.assertContains(portal, "Sucursales / CEDIS")
         self.assertContains(portal, "Logística")
-        self.assertEqual([p.nombre for p in portal.context["provider_options"]], ["Taller mantenimiento QA"])
-        self.assertEqual([p.nombre for p in portal.context["proveedores_todos"]], ["Taller mantenimiento QA"])
+        self.assertEqual(
+            [p.nombre for p in portal.context["provider_options"]],
+            ["Proveedor importado QA", "Taller mantenimiento QA"],
+        )
+        self.assertEqual(
+            [p.nombre for p in portal.context["proveedores_todos"]],
+            ["Proveedor importado QA", "Taller mantenimiento QA"],
+        )
         self.assertEqual(perfil.status_code, 200)
         self.assertEqual(perfil.json()["username"], "jorge.isaac")
 
@@ -72,7 +78,10 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.json(),
-            [{"id": ProveedorServicio.objects.get(nombre="Taller mantenimiento QA").id, "nombre": "Taller mantenimiento QA"}],
+            [
+                {"id": ProveedorServicio.objects.get(nombre="Proveedor importado QA").id, "nombre": "Proveedor importado QA"},
+                {"id": ProveedorServicio.objects.get(nombre="Taller mantenimiento QA").id, "nombre": "Taller mantenimiento QA"},
+            ],
         )
 
     def test_compras_logistica_group_does_not_open_maintenance_without_permission(self):
