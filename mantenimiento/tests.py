@@ -46,7 +46,8 @@ class MantenimientoUnifiedAccessTests(TestCase):
 
     def test_mantenimiento_permission_allows_portal_and_api(self):
         Proveedor.objects.create(nombre="Proveedor insumos QA", activo=True)
-        ProveedorServicio.objects.create(nombre="Taller mantenimiento QA", activo=True)
+        ProveedorServicio.objects.create(nombre="Proveedor importado QA", activo=True)
+        ProveedorServicio.objects.create(nombre="Taller mantenimiento QA", especialidad="Refrigeracion", activo=True)
         self.client.force_login(self.mantenimiento)
 
         portal = self.client.get(reverse("mantenimiento:dashboard"))
@@ -56,18 +57,23 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertContains(portal, "Sucursales / CEDIS")
         self.assertContains(portal, "Logística")
         self.assertEqual([p.nombre for p in portal.context["provider_options"]], ["Taller mantenimiento QA"])
+        self.assertEqual([p.nombre for p in portal.context["proveedores_todos"]], ["Taller mantenimiento QA"])
         self.assertEqual(perfil.status_code, 200)
         self.assertEqual(perfil.json()["username"], "jorge.isaac")
 
     def test_provider_api_uses_service_provider_catalog(self):
         Proveedor.objects.create(nombre="Proveedor insumos QA", activo=True)
-        ProveedorServicio.objects.create(nombre="Taller mantenimiento QA", activo=True)
+        ProveedorServicio.objects.create(nombre="Proveedor importado QA", activo=True)
+        ProveedorServicio.objects.create(nombre="Taller mantenimiento QA", especialidad="Refrigeracion", activo=True)
         self.client.force_login(self.mantenimiento)
 
         response = self.client.get("/api/mantenimiento/proveedores/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), [{"id": ProveedorServicio.objects.get().id, "nombre": "Taller mantenimiento QA"}])
+        self.assertEqual(
+            response.json(),
+            [{"id": ProveedorServicio.objects.get(nombre="Taller mantenimiento QA").id, "nombre": "Taller mantenimiento QA"}],
+        )
 
     def test_compras_logistica_group_does_not_open_maintenance_without_permission(self):
         self.client.force_login(self.compras)
