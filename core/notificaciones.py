@@ -8,7 +8,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
 
-from core.access import ROLE_ADMIN, ROLE_DG
+from core.access import ROLE_ADMIN, ROLE_DG, group_name_variants
 from core.models import Notificacion
 
 logger = logging.getLogger(__name__)
@@ -133,7 +133,7 @@ def crear_notificaciones(
 def usuarios_por_grupo(*group_names: str) -> list:
     User = get_user_model()
     return list(
-        User.objects.filter(is_active=True, groups__name__in=group_names)
+        User.objects.filter(is_active=True, groups__name__in=group_name_variants(*group_names))
         .distinct()
         .order_by("username")
     )
@@ -143,7 +143,7 @@ def usuarios_direccion_general() -> list:
     User = get_user_model()
     return list(
         User.objects.filter(is_active=True)
-        .filter(groups__name__in=[ROLE_DG, ROLE_ADMIN])
+        .filter(groups__name__in=group_name_variants(ROLE_DG, ROLE_ADMIN))
         .distinct()
         .order_by("username")
     ) + list(User.objects.filter(is_active=True, is_superuser=True).order_by("username"))

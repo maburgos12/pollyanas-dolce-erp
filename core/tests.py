@@ -19,17 +19,21 @@ from core.access import (
     ROLE_ADMIN,
     ROLE_BONOS_PRODUCCION_CAPTURA,
     ROLE_COMPRAS,
+    ROLE_DG,
     ROLE_PRODUCCION,
     ROLE_RRHH,
     ROLE_VENTAS,
     can_view_compras,
     can_view_submodule,
+    group_name_variants,
+    has_any_role,
+    primary_role,
 )
 from core.branch_catalog import eligible_operational_branch_qs
 from core.middleware import CanonicalLocalHostMiddleware
 from core.models import Departamento, Notificacion, Sucursal, UserModuleAccess, UserProfile
 from core.navigation import build_nav_groups
-from core.notificaciones import notificar_permiso_solicitado, notificar_prestamo_solicitado
+from core.notificaciones import notificar_permiso_solicitado, notificar_prestamo_solicitado, usuarios_por_grupo
 from core.hallmark_ui_audit import new_issues_against_baseline
 from core.views import _build_dashboard_daily_sales_snapshot, _build_dashboard_sales_history_summary, _compute_budget_semaforo, _compute_plan_forecast_semaforo, _sales_previous_dates, _sales_source_context
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
@@ -38,6 +42,30 @@ from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointDaily
 from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, PoliticaStockSucursalProducto, Receta, VentaHistorica
 from reportes.models import CentroCosto
 from rrhh.models import Empleado, PermisoSalida, Prestamo
+
+
+class GroupAliasCompatibilityTests(TestCase):
+    def test_group_name_variants_expand_legacy_and_canonical_names(self):
+        self.assertEqual(set(group_name_variants("produccion")), {"PRODUCCION", "produccion"})
+        self.assertEqual(set(group_name_variants(ROLE_DG)), {"DG", "dg"})
+        self.assertEqual(set(group_name_variants("compras_logistica")), {"compras_logistica"})
+
+    def test_has_any_role_accepts_canonical_user_with_legacy_role_lookup(self):
+        user = get_user_model().objects.create_user(username="carolina.alias")
+        user.groups.add(Group.objects.get_or_create(name=ROLE_PRODUCCION)[0])
+
+        self.assertTrue(has_any_role(user, "produccion"))
+        self.assertEqual(primary_role(user), ROLE_PRODUCCION)
+
+    def test_usuarios_por_grupo_finds_canonical_group_from_legacy_name(self):
+        user = get_user_model().objects.create_user(username="jefa.produccion.alias", is_active=True)
+        user.groups.add(Group.objects.get_or_create(name=ROLE_PRODUCCION)[0])
+        inactive = get_user_model().objects.create_user(username="inactiva.produccion.alias", is_active=False)
+        inactive.groups.add(Group.objects.get_or_create(name=ROLE_PRODUCCION)[0])
+
+        users = usuarios_por_grupo("produccion")
+
+        self.assertEqual(users, [user])
 
 
 class HallmarkGuardrailsStaticTests(SimpleTestCase):
