@@ -164,6 +164,15 @@ class Unidad(models.Model):
 
 
 class Repartidor(models.Model):
+    TIPO_EMPLEADO_DOLCE = "empleado_dolce"
+    TIPO_EXTERNO_AUTORIZADO = "externo_autorizado"
+    TIPO_CUENTA_TECNICA = "cuenta_tecnica"
+    TIPO_IDENTIDAD_CHOICES = [
+        (TIPO_EMPLEADO_DOLCE, "Empleado Dolce"),
+        (TIPO_EXTERNO_AUTORIZADO, "Externo autorizado"),
+        (TIPO_CUENTA_TECNICA, "Cuenta técnica"),
+    ]
+
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="repartidor_logistica")
     unidad_asignada = models.ForeignKey(
         Unidad,
@@ -178,6 +187,15 @@ class Repartidor(models.Model):
     licencia_expedicion = models.DateField(null=True, blank=True)
     licencia_expiracion = models.DateField(null=True, blank=True)
     archivo_licencia = models.FileField(upload_to="licencias_repartidores/", null=True, blank=True)
+    tipo_identidad = models.CharField(
+        max_length=30,
+        choices=TIPO_IDENTIDAD_CHOICES,
+        default=TIPO_EMPLEADO_DOLCE,
+    )
+    empresa_externa = models.CharField(max_length=160, blank=True, default="")
+    motivo_autorizacion = models.CharField(max_length=240, blank=True, default="")
+    autorizado_por = models.CharField(max_length=160, blank=True, default="")
+    notas_identidad = models.TextField(blank=True, default="")
 
     class Meta:
         ordering = ["user__username"]
@@ -186,6 +204,10 @@ class Repartidor(models.Model):
 
     def __str__(self) -> str:
         return nombre_operativo_usuario(self.user)
+
+    @property
+    def es_externo_autorizado(self) -> bool:
+        return self.tipo_identidad == self.TIPO_EXTERNO_AUTORIZADO
 
 
 class ReporteUnidad(models.Model):

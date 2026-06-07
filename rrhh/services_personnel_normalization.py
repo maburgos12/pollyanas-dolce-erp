@@ -6,6 +6,7 @@ from typing import Iterable
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Count
 
 from core.access import ROLE_ORDER
@@ -402,6 +403,7 @@ def _user_access_proposals() -> list[NormalizationProposal]:
         profile = getattr(user, "userprofile", None)
         group_names = sorted(user.groups.values_list("name", flat=True))
         has_access = user.module_access.exists()
+        external_repartidor = _external_logistics_repartidor(user)
 
         if employee and not profile:
             proposed = _profile_suggestion(employee, sucursales, departamentos)
@@ -419,7 +421,7 @@ def _user_access_proposals() -> list[NormalizationProposal]:
                     reason="Usuario vinculado a empleado necesita perfil para sucursal/departamento y pantallas de acceso.",
                 )
             )
-        elif not profile:
+        elif not profile and not external_repartidor:
             action = "clasificar_cuenta_no_personal" if _looks_non_person_user(user.username) else "vincular_usuario_o_crear_perfil"
             proposals.append(
                 _proposal(
@@ -436,7 +438,7 @@ def _user_access_proposals() -> list[NormalizationProposal]:
                 )
             )
 
-        if not employee:
+        if not employee and not external_repartidor:
             severity = "risk" if not group_names and not has_access else "warning"
             proposals.append(
                 _proposal(
@@ -548,21 +550,38 @@ def _repartidor_proposals() -> list[NormalizationProposal]:
     for user in User.objects.filter(is_active=True, groups__name__iexact="repartidor").distinct().order_by("username"):
         groups = sorted(user.groups.values_list("name", flat=True))
         employee = getattr(user, "empleado_rrhh", None)
+        external_repartidor = _external_logistics_repartidor(user)
         if not employee:
-            proposals.append(
-                _proposal(
-                    key=f"repartidor.user_without_employee:{user.pk}",
-                    plane="repartidores",
-                    entity_type="User",
-                    entity_id=user.pk,
-                    display=user.username,
-                    current_value=f"usuario app/logistica; grupos={groups}; empleado_vinculado=no",
-                    proposed_value="Vincular a Empleado repartidor correcto o clasificar como cuenta tecnica",
-                    action="revisar_usuario_repartidor_sin_empleado",
-                    severity="risk",
-                    reason="El usuario puede tener acceso operativo, pero falta el enlace a la persona RRHH fuente de verdad.",
+            if external_repartidor:
+                proposals.append(
+                    _proposal(
+                        key=f"repartidor.external_authorized:{user.pk}",
+                        plane="repartidores",
+                        entity_type="Repartidor",
+                        entity_id=external_repartidor.pk,
+                        display=user.username,
+                        current_value=external_repartidor.empresa_externa or "externo autorizado",
+                        proposed_value="Mantener separado de rrhh.Empleado",
+                        action="cuenta_externa_logistica_autorizada",
+                        severity="info",
+                        reason="Cuenta externa autorizada para registrar uso ocasional de unidades sin crear empleado Dolce.",
+                    )
                 )
-            )
+            else:
+                proposals.append(
+                    _proposal(
+                        key=f"repartidor.user_without_employee:{user.pk}",
+                        plane="repartidores",
+                        entity_type="User",
+                        entity_id=user.pk,
+                        display=user.username,
+                        current_value=f"usuario app/logistica; grupos={groups}; empleado_vinculado=no",
+                        proposed_value="Vincular a Empleado repartidor correcto o clasificar como cuenta tecnica",
+                        action="revisar_usuario_repartidor_sin_empleado",
+                        severity="risk",
+                        reason="El usuario puede tener acceso operativo, pero falta el enlace a la persona RRHH fuente de verdad.",
+                    )
+                )
         non_repartidor_groups = [group for group in groups if group.lower() != "repartidor"]
         if non_repartidor_groups:
             proposals.append(
@@ -580,6 +599,16 @@ def _repartidor_proposals() -> list[NormalizationProposal]:
                 )
             )
     return proposals
+
+
+def _external_logistics_repartidor(user):
+    try:
+        repartidor = user.repartidor_logistica
+    except ObjectDoesNotExist:
+        return None
+    if getattr(repartidor, "tipo_identidad", "") == "externo_autorizado":
+        return repartidor
+    return None
 
 
 def _catalog_index(model, *fields: str) -> dict[str, object]:
