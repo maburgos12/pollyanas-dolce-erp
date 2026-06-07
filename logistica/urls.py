@@ -25,6 +25,7 @@ urlpatterns = [
     path("unidades/<int:pk>/editar/", views.unidad_edit, name="unidad_edit"),
     path("unidades/<int:pk>/toggle/", views.unidad_toggle, name="unidad_toggle"),
     path("reportes/", views.reportes_lista, name="reportes_lista"),
+    path("reportes/nuevo/", views.reporte_crear, name="reporte_crear"),
     path("bitacoras/", views.bitacoras_lista, name="bitacoras_lista"),
     path("rutas/<int:pk>/", views.ruta_detail, name="ruta_detail"),
 ]

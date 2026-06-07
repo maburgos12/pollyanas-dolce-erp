@@ -50,8 +50,13 @@
     <div class="logi-box-head">
       <div>
         <h1 class="logi-box-title">Reportes de unidad</h1>
-        <p class="logi-box-copy">Tickets capturados desde la app móvil, visibles y consultables dentro del ERP.</p>
+        <p class="logi-box-copy">Tickets de fallas e incidencias de la flota, consultables y creables desde el ERP.</p>
       </div>
+      {% if can_crear_reporte %}
+      <a class="btn btn-primary" href="{% url 'logistica:reporte_crear' %}" style="background:#8B2252;border-color:#8B2252;">
+        + Nuevo reporte
+      </a>
+      {% endif %}
     </div>
     <form class="reports-filter" method="get">
       <label>Estatus
@@ -94,7 +99,7 @@
           <tr class="report-row" data-detail-row="reporte-{{ reporte.id }}">
             <td>#{{ reporte.id }}</td>
             <td><strong>{{ reporte.unidad.codigo }}</strong><br><span class="report-muted">{{ reporte.unidad.placa|default:reporte.unidad.descripcion }}</span></td>
-            <td>{{ reporte.repartidor }}</td>
+            <td>{{ reporte.repartidor|default:"—" }}</td>
             <td>{{ reporte.get_tipo_display }}</td>
             <td><span class="report-badge {% if reporte.severidad == 'critico' %}danger{% elif reporte.severidad == 'urgente' %}warn{% else %}ok{% endif %}">{{ reporte.get_severidad_display }}</span></td>
             <td><span class="report-badge {% if reporte.estatus == 'abierto' %}danger{% elif reporte.estatus == 'cerrado' %}ok{% else %}info{% endif %}">{{ reporte.get_estatus_display }}</span></td>
