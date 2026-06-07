@@ -112,6 +112,9 @@ class PersonnelNormalizationPlanTests(TestCase):
         self.assertIn("crear_perfil_desde_empleado_vinculado", actions)
         self.assertIn("vincular_usuario_repartidor", actions)
         self.assertIn("separar_grupos_repartidor", actions)
+        repartidor_rows = [item for item in report["proposals"] if item["action"] == "vincular_usuario_repartidor"]
+        self.assertTrue(repartidor_rows)
+        self.assertIn("usuario real que ya usa en app logistica", repartidor_rows[0]["proposed_value"])
         self.assertEqual(UserProfile.objects.count(), 0)
         self.assertEqual(Empleado.objects.count(), 2)
 
