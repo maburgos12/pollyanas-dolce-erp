@@ -608,7 +608,7 @@
       </div>
       <div class="rrhh-card-body">
         {% if can_manage_rrhh %}
-        <form method="post">
+        <form method="post" enctype="multipart/form-data">
           {% csrf_token %}
           <input type="hidden" name="action" value="create">
           <div class="rrhh-form-grid">
@@ -735,17 +735,60 @@
               <label for="sucursal">Sucursal</label>
               <input id="sucursal" class="input-field" type="text" name="sucursal">
             </div>
-            <div class="rrhh-field span-2" id="campo-usuario-erp" style="display:none">
-              <label for="usuario_erp">Usuario ERP (acceso al sistema)</label>
+            <div class="rrhh-field span-2" data-access-block>
+              <label for="usuario_erp">Usuario ERP / app</label>
               <select id="usuario_erp" class="input-field" name="usuario_erp">
-                <option value="">— Sin usuario ERP vinculado —</option>
+                <option value="">Sin usuario vinculado</option>
                 {% for u in usuarios_erp %}
                   {% if not u.empleado_rrhh %}
                   <option value="{{ u.id }}">{{ u.username }}{% if u.get_full_name %} · {{ u.get_full_name }}{% endif %}</option>
                   {% endif %}
                 {% endfor %}
               </select>
-              <div class="rrhh-help">Requerido para repartidores: vincula el perfil de logística con el registro de nómina.</div>
+              <label class="rrhh-checkline">
+                <input type="checkbox" name="crear_usuario_erp" data-create-user-toggle>
+                Crear usuario nuevo desde Capital Humano
+              </label>
+              <div class="rrhh-help">Usa una sola opción: seleccionar usuario existente o crear uno nuevo para este empleado.</div>
+            </div>
+            <div class="rrhh-field" data-new-user-field style="display:none">
+              <label for="nuevo_usuario_username">Usuario nuevo</label>
+              <input id="nuevo_usuario_username" class="input-field" type="text" name="nuevo_usuario_username" autocomplete="off">
+            </div>
+            <div class="rrhh-field" data-new-user-field style="display:none">
+              <label for="nuevo_usuario_password">Contraseña temporal</label>
+              <input id="nuevo_usuario_password" class="input-field" type="password" name="nuevo_usuario_password" minlength="8" autocomplete="new-password">
+            </div>
+            <div class="rrhh-field span-2">
+              <label for="sucursal_app_id">Sucursal en app</label>
+              <select id="sucursal_app_id" class="input-field" name="sucursal_app_id">
+                <option value="">Sin sucursal</option>
+                {% for s in sucursales_app %}
+                  <option value="{{ s.id }}">{{ s.nombre }}</option>
+                {% endfor %}
+              </select>
+              <div class="rrhh-help">Para repartidores define desde qué sucursal opera la app de logística.</div>
+            </div>
+            <div class="rrhh-field span-2" data-driver-license-block style="display:none">
+              <label>Licencia de repartidor</label>
+              <div class="rrhh-form-grid">
+                <div class="rrhh-field">
+                  <label for="numero_licencia">Número de licencia</label>
+                  <input id="numero_licencia" class="input-field" type="text" name="numero_licencia">
+                </div>
+                <div class="rrhh-field">
+                  <label for="licencia_expedicion">Expedición</label>
+                  <input id="licencia_expedicion" class="input-field" type="date" name="licencia_expedicion">
+                </div>
+                <div class="rrhh-field">
+                  <label for="licencia_expiracion">Vencimiento</label>
+                  <input id="licencia_expiracion" class="input-field" type="date" name="licencia_expiracion">
+                </div>
+                <div class="rrhh-field">
+                  <label for="archivo_licencia">Archivo licencia</label>
+                  <input id="archivo_licencia" class="input-field" type="file" name="archivo_licencia" accept=".pdf,image/*">
+                </div>
+              </div>
             </div>
             <div class="rrhh-bonus-box" data-bonus-scope>
               <div>
@@ -1049,7 +1092,7 @@
               <td colspan="14">
                 <details class="rrhh-edit-panel">
                   <summary>Editar {{ e.nombre }}</summary>
-                  <form method="post" class="rrhh-edit-form">
+                  <form method="post" class="rrhh-edit-form" enctype="multipart/form-data">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="update">
                     <input type="hidden" name="empleado_id" value="{{ e.id }}">
@@ -1193,10 +1236,10 @@
                         <label for="edit_sucursal_{{ e.id }}">Sucursal</label>
                         <input id="edit_sucursal_{{ e.id }}" class="input-field" type="text" name="sucursal" value="{{ e.sucursal }}">
                       </div>
-                      <div class="rrhh-field span-2" data-usuario-erp-field style="{% if e.puesto_operativo != 'REPARTIDOR' %}display:none{% endif %}">
-                        <label for="edit_usuario_erp_{{ e.id }}">Usuario ERP (acceso al sistema)</label>
+                      <div class="rrhh-field span-2" data-access-block>
+                        <label for="edit_usuario_erp_{{ e.id }}">Usuario ERP / app</label>
                         <select id="edit_usuario_erp_{{ e.id }}" class="input-field" name="usuario_erp">
-                          <option value="">— Sin usuario ERP vinculado —</option>
+                          <option value="">Sin usuario vinculado</option>
                           {% for u in usuarios_erp %}
                             {% if not u.empleado_rrhh or u.empleado_rrhh.pk == e.pk %}
                             <option value="{{ u.id }}" {% if e.usuario_erp_id == u.id %}selected{% endif %}>
@@ -1205,20 +1248,55 @@
                             {% endif %}
                           {% endfor %}
                         </select>
-                        <div class="rrhh-help">Vincula el perfil de logística con el registro de nómina para cálculo de bonos.</div>
+                        {% if not e.usuario_erp_id %}
+                        <label class="rrhh-checkline">
+                          <input type="checkbox" name="crear_usuario_erp" data-create-user-toggle>
+                          Crear usuario nuevo desde Capital Humano
+                        </label>
+                        {% endif %}
+                        <div class="rrhh-help">Vincula o crea el acceso desde la misma ficha del empleado.</div>
                       </div>
-                      {% if e.usuario_erp_id %}
+                      {% if not e.usuario_erp_id %}
+                      <div class="rrhh-field" data-new-user-field style="display:none">
+                        <label for="edit_nuevo_usuario_username_{{ e.id }}">Usuario nuevo</label>
+                        <input id="edit_nuevo_usuario_username_{{ e.id }}" class="input-field" type="text" name="nuevo_usuario_username" autocomplete="off">
+                      </div>
+                      <div class="rrhh-field" data-new-user-field style="display:none">
+                        <label for="edit_nuevo_usuario_password_{{ e.id }}">Contraseña temporal</label>
+                        <input id="edit_nuevo_usuario_password_{{ e.id }}" class="input-field" type="password" name="nuevo_usuario_password" minlength="8" autocomplete="new-password">
+                      </div>
+                      {% endif %}
                       <div class="rrhh-field span-2">
                         <label for="edit_sucursal_app_{{ e.id }}">Sucursal en app (mermas y apps móviles)</label>
                         <select id="edit_sucursal_app_{{ e.id }}" class="input-field" name="sucursal_app_id">
                           <option value="">— Sin sucursal —</option>
                           {% for s in sucursales_app %}
-                          <option value="{{ s.id }}" {% if e.usuario_erp.userprofile.sucursal_id == s.id %}selected{% endif %}>{{ s.nombre }}</option>
+                          <option value="{{ s.id }}" {% if e.usuario_erp_id and e.usuario_erp.userprofile.sucursal_id == s.id %}selected{% endif %}>{{ s.nombre }}</option>
                           {% endfor %}
                         </select>
                         <div class="rrhh-help">Define desde qué sucursal opera el usuario en apps de captura (mermas, recepción, etc.).</div>
                       </div>
-                      {% endif %}
+                      <div class="rrhh-field span-2" data-driver-license-block style="{% if e.puesto_operativo != 'REPARTIDOR' %}display:none{% endif %}">
+                        <label>Licencia de repartidor</label>
+                        <div class="rrhh-form-grid">
+                          <div class="rrhh-field">
+                            <label for="edit_numero_licencia_{{ e.id }}">Número de licencia</label>
+                            <input id="edit_numero_licencia_{{ e.id }}" class="input-field" type="text" name="numero_licencia" value="{{ e.repartidor_logistica.numero_licencia|default:'' }}">
+                          </div>
+                          <div class="rrhh-field">
+                            <label for="edit_licencia_expedicion_{{ e.id }}">Expedición</label>
+                            <input id="edit_licencia_expedicion_{{ e.id }}" class="input-field" type="date" name="licencia_expedicion" value="{{ e.repartidor_logistica.licencia_expedicion|date:'Y-m-d' }}">
+                          </div>
+                          <div class="rrhh-field">
+                            <label for="edit_licencia_expiracion_{{ e.id }}">Vencimiento</label>
+                            <input id="edit_licencia_expiracion_{{ e.id }}" class="input-field" type="date" name="licencia_expiracion" value="{{ e.repartidor_logistica.licencia_expiracion|date:'Y-m-d' }}">
+                          </div>
+                          <div class="rrhh-field">
+                            <label for="edit_archivo_licencia_{{ e.id }}">Archivo licencia</label>
+                            <input id="edit_archivo_licencia_{{ e.id }}" class="input-field" type="file" name="archivo_licencia" accept=".pdf,image/*">
+                          </div>
+                        </div>
+                      </div>
                       <label class="rrhh-checkline">
                         <input type="checkbox" name="activo" {% if e.activo %}checked{% endif %}>
                         Activo
@@ -1338,7 +1416,7 @@
     if (puesto && puestoSelect && Array.from(puestoSelect.options).some(option => option.value === puesto)) {
       puestoSelect.value = puesto;
     }
-    _toggleUsuarioErpField(form, puesto);
+    _toggleOperationalBlocks(form, puesto);
   }
 
   const bajaEmpleado = document.getElementById('baja_empleado');
@@ -1363,20 +1441,46 @@
     });
   }
 
-  function _toggleUsuarioErpField(form, puesto) {
-    const campo = form.querySelector('#campo-usuario-erp, [data-usuario-erp-field]');
-    if (!campo) return;
-    campo.style.display = puesto === 'REPARTIDOR' ? '' : 'none';
+  function _toggleOperationalBlocks(form, puesto) {
+    if (!form) return;
+    const licenseBlock = form.querySelector('[data-driver-license-block]');
+    if (licenseBlock) licenseBlock.style.display = puesto === 'REPARTIDOR' ? '' : 'none';
+    _toggleNewUserFields(form);
+  }
+
+  function _toggleNewUserFields(form) {
+    if (!form) return;
+    const createToggle = form.querySelector('[data-create-user-toggle]');
+    const show = Boolean(createToggle && createToggle.checked);
+    form.querySelectorAll('[data-new-user-field]').forEach((field) => {
+      field.style.display = show ? '' : 'none';
+    });
+    const existingUserSelect = form.querySelector('select[name="usuario_erp"]');
+    if (existingUserSelect) {
+      existingUserSelect.disabled = show;
+      if (show) existingUserSelect.value = '';
+    }
   }
 
   document.addEventListener('change', (event) => {
+    const createToggle = event.target.closest('[data-create-user-toggle]');
+    if (createToggle) {
+      _toggleNewUserFields(createToggle.closest('form'));
+      return;
+    }
     const select = event.target.closest('[data-catalog-select]');
     if (!select) return;
     syncAreaDefaults(select);
     // también reaccionar al cambio directo de puesto_operativo en edición inline
     if (select.name === 'puesto_operativo') {
-      _toggleUsuarioErpField(select.closest('form'), select.value);
+      _toggleOperationalBlocks(select.closest('form'), select.value);
     }
+  });
+
+  document.querySelectorAll('form').forEach((form) => {
+    _toggleNewUserFields(form);
+    const puesto = form.querySelector('select[name="puesto_operativo"]');
+    if (puesto) _toggleOperationalBlocks(form, puesto.value);
   });
 
 })();

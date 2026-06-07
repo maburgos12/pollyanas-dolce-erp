@@ -141,6 +141,117 @@ def _organizacion_desde_post(post_data, empleado: Empleado | None = None) -> dic
     }
 
 
+def _safe_int(raw: str | None) -> int | None:
+    value = (raw or "").strip()
+    return int(value) if value.isdigit() else None
+
+
+def _crear_usuario_rrhh_para_empleado(request, empleado: Empleado):
+    if request.POST.get("crear_usuario_erp") != "on":
+        return None
+    User = get_user_model()
+    username = (request.POST.get("nuevo_usuario_username") or "").strip()
+    password = (request.POST.get("nuevo_usuario_password") or "").strip()
+    if not username:
+        raise ValidationError("Captura el usuario para el acceso ERP/app.")
+    if User.objects.filter(username__iexact=username).exists():
+        raise ValidationError("Ese usuario ya existe. Selecciónalo en Usuario ERP o usa otro username.")
+    if len(password) < 8:
+        raise ValidationError("La contraseña temporal debe tener al menos 8 caracteres.")
+
+    user = User.objects.create_user(
+        username=username,
+        email=empleado.email or "",
+        password=password,
+    )
+    user.first_name = empleado.nombre.strip()
+    user.last_name = ""
+    user.is_active = True
+    user.save(update_fields=["first_name", "last_name", "email", "is_active"])
+
+    log_event(
+        request.user,
+        "CREATE",
+        "auth.User",
+        str(user.id),
+        {
+            "username": user.username,
+            "source": "rrhh.empleados",
+            "empleado": empleado.id,
+            "password_created": True,
+        },
+    )
+    return user
+
+
+def _resolver_usuario_erp_desde_post(request, empleado: Empleado):
+    crear_usuario = request.POST.get("crear_usuario_erp") == "on"
+    usuario_erp_id = (request.POST.get("usuario_erp") or "").strip()
+    if crear_usuario and usuario_erp_id:
+        raise ValidationError("Elige crear usuario nuevo o vincular usuario existente, no ambos.")
+    if crear_usuario and (empleado.puesto_operativo or "").strip().upper() == "REPARTIDOR" and not _safe_int(request.POST.get("sucursal_app_id")):
+        raise ValidationError("Selecciona la sucursal app para crear el usuario de un repartidor.")
+    if crear_usuario:
+        return _crear_usuario_rrhh_para_empleado(request, empleado)
+    if usuario_erp_id.isdigit():
+        User = get_user_model()
+        nuevo_user = User.objects.filter(pk=int(usuario_erp_id)).first()
+        if nuevo_user and (
+            not hasattr(nuevo_user, "empleado_rrhh")
+            or nuevo_user.empleado_rrhh is None
+            or nuevo_user.empleado_rrhh.pk == empleado.pk
+        ):
+            return nuevo_user
+        if not nuevo_user:
+            return None
+    if usuario_erp_id == "":
+        return None
+    return empleado.usuario_erp
+
+
+def _sincronizar_licencia_repartidor_desde_post(request, empleado: Empleado) -> bool:
+    if (empleado.puesto_operativo or "").strip().upper() != "REPARTIDOR" or not empleado.usuario_erp_id:
+        return False
+    try:
+        repartidor = empleado.usuario_erp.repartidor_logistica
+    except Exception:
+        return False
+
+    changed_fields: set[str] = set()
+    field_map = {
+        "numero_licencia": "numero_licencia",
+        "licencia_expedicion": "licencia_expedicion",
+        "licencia_expiracion": "licencia_expiracion",
+    }
+    for post_field, model_field in field_map.items():
+        raw_value = (request.POST.get(post_field) or "").strip()
+        value = _parse_date(raw_value) if model_field.startswith("licencia_") else raw_value
+        if getattr(repartidor, model_field) != value:
+            setattr(repartidor, model_field, value)
+            changed_fields.add(model_field)
+
+    archivo = request.FILES.get("archivo_licencia")
+    if archivo:
+        repartidor.archivo_licencia = archivo
+        changed_fields.add("archivo_licencia")
+
+    if changed_fields:
+        repartidor.save(update_fields=sorted(changed_fields))
+        log_event(
+            request.user,
+            "UPDATE",
+            "logistica.Repartidor",
+            str(repartidor.id),
+            {
+                "empleado": empleado.id,
+                "username": empleado.usuario_erp.username,
+                "campos": sorted(changed_fields),
+                "source": "rrhh.empleados",
+            },
+        )
+    return bool(changed_fields)
+
+
 RRHH_MODULE_TABS = [
     {"label": "Indicadores", "url_name": "rrhh:rrhh_indicadores", "key": "dashboard", "submodule": "dashboard"},
     {"label": "Organización", "url_name": "rrhh:rrhh_organizacion", "key": "organizacion", "submodule": "organizacion"},
@@ -875,22 +986,18 @@ def empleados(request):
                 empleado.email = (request.POST.get("email") or "").strip()
                 empleado.sucursal = (request.POST.get("sucursal") or "").strip()
                 empleado.activo = request.POST.get("activo") == "on"
-                usuario_erp_id = (request.POST.get("usuario_erp") or "").strip()
-                if usuario_erp_id.isdigit():
-                    User = get_user_model()
-                    nuevo_user = User.objects.filter(pk=int(usuario_erp_id)).first()
-                    if nuevo_user and (not hasattr(nuevo_user, "empleado_rrhh") or nuevo_user.empleado_rrhh is None or nuevo_user.empleado_rrhh.pk == empleado.pk):
-                        empleado.usuario_erp = nuevo_user
-                    elif not nuevo_user:
-                        empleado.usuario_erp = None
-                elif usuario_erp_id == "":
-                    empleado.usuario_erp = None
+                try:
+                    empleado.usuario_erp = _resolver_usuario_erp_desde_post(request, empleado)
+                except ValidationError as exc:
+                    messages.error(request, exc.messages[0])
+                    return redirect("rrhh:empleados")
                 empleado.save()
                 sucursal_app_id = (request.POST.get("sucursal_app_id") or "").strip()
                 asegurar_identidad_operativa_empleado(
                     empleado,
                     sucursal_app_id=int(sucursal_app_id) if sucursal_app_id.isdigit() else None,
                 )
+                _sincronizar_licencia_repartidor_desde_post(request, empleado)
                 sincronizar_esquemas_bono(empleado, request.POST, organizacion)
                 log_event(
                     request.user,
@@ -941,18 +1048,20 @@ def empleados(request):
                 email=(request.POST.get("email") or "").strip(),
                 sucursal=(request.POST.get("sucursal") or "").strip(),
             )
-            usuario_erp_id = (request.POST.get("usuario_erp") or "").strip()
-            if usuario_erp_id.isdigit():
-                User = get_user_model()
-                nuevo_user = User.objects.filter(pk=int(usuario_erp_id)).first()
-                if nuevo_user and (not hasattr(nuevo_user, "empleado_rrhh") or nuevo_user.empleado_rrhh is None):
-                    empleado.usuario_erp = nuevo_user
-                    empleado.save(update_fields=["usuario_erp"])
+            try:
+                empleado.usuario_erp = _resolver_usuario_erp_desde_post(request, empleado)
+            except ValidationError as exc:
+                empleado.delete()
+                messages.error(request, exc.messages[0])
+                return redirect("rrhh:empleados")
+            if empleado.usuario_erp_id:
+                empleado.save(update_fields=["usuario_erp"])
             sucursal_app_id = (request.POST.get("sucursal_app_id") or "").strip()
             asegurar_identidad_operativa_empleado(
                 empleado,
                 sucursal_app_id=int(sucursal_app_id) if sucursal_app_id.isdigit() else None,
             )
+            _sincronizar_licencia_repartidor_desde_post(request, empleado)
             sincronizar_esquemas_bono(empleado, request.POST, organizacion)
             log_event(
                 request.user,
@@ -1045,6 +1154,12 @@ def empleados(request):
     empleados_page = list(qs.order_by("nombre")[:600])
     for empleado in empleados_page:
         empleado.bono_esquema_ids = {esquema.id for esquema in empleado.bonos_esquemas.all()}
+        empleado.repartidor_logistica = None
+        if empleado.usuario_erp_id:
+            try:
+                empleado.repartidor_logistica = empleado.usuario_erp.repartidor_logistica
+            except Exception:
+                empleado.repartidor_logistica = None
 
     identidades_pendientes = (
         EmpleadoIdentidadPendiente.objects.select_related("empleado_sugerido")
