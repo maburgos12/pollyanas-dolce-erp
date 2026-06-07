@@ -21,6 +21,12 @@ def _panel_url(pk) -> str:
     return f"/seguimiento/panel/{pk}/"
 
 
+def _correo_dg_aplica(item) -> bool:
+    """El DG recibe correo solo de minutas. Compromisos y proyectos quedan solo
+    como notificación dentro del ERP para no saturar su bandeja."""
+    return getattr(item, "tipo", "") == "MINUTA"
+
+
 def _enviar_correo_dg(asunto: str, cuerpo: str) -> None:
     """Envía un correo al Director General. Nunca rompe el flujo si falla el envío."""
     director_email = (getattr(settings, "DIRECTOR_EMAIL", "") or "").strip()
@@ -253,7 +259,7 @@ def notificar_seguimiento_avance(item, *, actor=None, mensaje_extra: str = "", e
         objeto_id=item.pk,
         excluir=actor,
     )
-    if enviar_correo:
+    if enviar_correo and _correo_dg_aplica(item):
         _enviar_correo_dg(
             f"[Seguimiento] Avance: {titulo}",
             _cuerpo_correo_seguimiento(item, encabezado="Un colaborador registró un avance.", actor=actor, extra=mensaje_extra),
@@ -282,10 +288,11 @@ def notificar_seguimiento_prorroga(item, fecha_solicitada, motivo: str = "", *, 
     extra = f"Nueva fecha solicitada: {fecha_solicitada:%d/%m/%Y}"
     if motivo:
         extra += f"\nMotivo: {motivo[:300]}"
-    _enviar_correo_dg(
-        f"[Seguimiento] Prórroga solicitada: {titulo}",
-        _cuerpo_correo_seguimiento(item, encabezado="Un colaborador pide más tiempo para un acuerdo.", actor=actor, extra=extra),
-    )
+    if _correo_dg_aplica(item):
+        _enviar_correo_dg(
+            f"[Seguimiento] Prórroga solicitada: {titulo}",
+            _cuerpo_correo_seguimiento(item, encabezado="Un colaborador pide más tiempo para un acuerdo.", actor=actor, extra=extra),
+        )
     return creadas
 
 
@@ -307,10 +314,11 @@ def notificar_seguimiento_entrega(item, *, actor=None) -> int:
         objeto_id=item.pk,
         excluir=actor,
     )
-    _enviar_correo_dg(
-        f"[Seguimiento] Listo para revisión: {titulo}",
-        _cuerpo_correo_seguimiento(item, encabezado="Un colaborador entregó un acuerdo y espera tu revisión.", actor=actor),
-    )
+    if _correo_dg_aplica(item):
+        _enviar_correo_dg(
+            f"[Seguimiento] Listo para revisión: {titulo}",
+            _cuerpo_correo_seguimiento(item, encabezado="Un colaborador entregó un acuerdo y espera tu revisión.", actor=actor),
+        )
     return creadas
 
 
@@ -332,10 +340,11 @@ def notificar_seguimiento_completado(item, *, actor=None) -> int:
         objeto_id=item.pk,
         excluir=actor,
     )
-    _enviar_correo_dg(
-        f"[Seguimiento] Completado: {titulo}",
-        _cuerpo_correo_seguimiento(item, encabezado="Un colaborador cerró un acuerdo que no requería tu aprobación.", actor=actor),
-    )
+    if _correo_dg_aplica(item):
+        _enviar_correo_dg(
+            f"[Seguimiento] Completado: {titulo}",
+            _cuerpo_correo_seguimiento(item, encabezado="Un colaborador cerró un acuerdo.", actor=actor),
+        )
     return creadas
 
 

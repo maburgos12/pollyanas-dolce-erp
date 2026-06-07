@@ -298,8 +298,12 @@ def registrar_feedback(request, pk):
         tipo=SeguimientoComentario.TIPO_FEEDBACK,
         comentario=comentario,
     )
-    if item.estatus in {SeguimientoItem.ESTATUS_PENDIENTE, SeguimientoItem.ESTATUS_EN_PROCESO}:
-        item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
+    if item.requiere_aprobacion:
+        if item.estatus in {SeguimientoItem.ESTATUS_PENDIENTE, SeguimientoItem.ESTATUS_EN_PROCESO}:
+            item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
+            item.save(update_fields=["estatus", "updated_at"])
+    elif item.estatus == SeguimientoItem.ESTATUS_PENDIENTE:
+        item.estatus = SeguimientoItem.ESTATUS_EN_PROCESO
         item.save(update_fields=["estatus", "updated_at"])
     log_event(request.user, "seguimiento.retroalimentacion", "SeguimientoItem", item.pk, {"comentario": True})
     notificar_seguimiento_avance(item, actor=request.user, mensaje_extra=comentario[:160])
@@ -326,8 +330,12 @@ def subir_evidencia(request, pk):
         nombre_original=archivo.name,
         comentario=(request.POST.get("comentario") or "").strip(),
     )
-    if item.estatus in {SeguimientoItem.ESTATUS_PENDIENTE, SeguimientoItem.ESTATUS_EN_PROCESO}:
-        item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
+    if item.requiere_aprobacion:
+        if item.estatus in {SeguimientoItem.ESTATUS_PENDIENTE, SeguimientoItem.ESTATUS_EN_PROCESO}:
+            item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
+            item.save(update_fields=["estatus", "updated_at"])
+    elif item.estatus == SeguimientoItem.ESTATUS_PENDIENTE:
+        item.estatus = SeguimientoItem.ESTATUS_EN_PROCESO
         item.save(update_fields=["estatus", "updated_at"])
     log_event(request.user, "seguimiento.evidencia", "SeguimientoItem", item.pk, {"archivo": archivo.name})
     notificar_seguimiento_avance(item, actor=request.user, mensaje_extra=f"Archivo: {archivo.name}")
@@ -339,6 +347,9 @@ def subir_evidencia(request, pk):
 @require_POST
 def solicitar_prorroga(request, pk):
     item = _get_item_para_usuario(request.user, pk)
+    if not item.requiere_aprobacion:
+        messages.error(request, "Las prórrogas aplican solo a minutas y proyectos.")
+        return redirect("seguimiento:detalle", pk=item.pk)
     fecha_solicitada = parse_date((request.POST.get("fecha_solicitada") or "").strip())
     motivo = (request.POST.get("motivo") or "").strip()
     if not fecha_solicitada:
@@ -409,6 +420,9 @@ def entregar_para_revision(request, pk):
     item = _get_item_para_usuario(request.user, pk)
     if item.esta_cerrado:
         messages.error(request, "Este acuerdo ya está cerrado.")
+        return redirect("seguimiento:detalle", pk=pk)
+    if not item.requiere_aprobacion:
+        messages.error(request, "Este tipo de acuerdo no requiere aprobación; márcalo como completado.")
         return redirect("seguimiento:detalle", pk=pk)
     if not _registrar_cierre_opcional(request, item, "ENTREGA"):
         return redirect("seguimiento:detalle", pk=pk)
@@ -795,6 +809,9 @@ def entregar_para_revision(request, pk):
     item = _get_item_para_usuario(request.user, pk)
     if item.esta_cerrado:
         messages.error(request, "Este acuerdo ya está cerrado.")
+        return redirect("seguimiento:detalle", pk=pk)
+    if not item.requiere_aprobacion:
+        messages.error(request, "Este tipo de acuerdo no requiere aprobación; márcalo como completado.")
         return redirect("seguimiento:detalle", pk=pk)
 
     if not _registrar_cierre_opcional(request, item, "ENTREGA"):
