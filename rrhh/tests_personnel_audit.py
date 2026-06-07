@@ -10,6 +10,7 @@ from django.test import TestCase
 
 from core.models import Departamento, Sucursal, UserModuleAccess, UserProfile
 from rrhh.models import Empleado
+from rrhh.services_personnel_identity_sync import build_personnel_identity_projection_plan
 from rrhh.services_personnel_normalization import build_personnel_normalization_plan
 from rrhh.services_personnel_audit import build_personnel_identity_audit, normalize_catalog_key
 
@@ -134,3 +135,112 @@ class PersonnelNormalizationPlanTests(TestCase):
         self.assertFalse(payload["writes"])
         self.assertIn("summary", payload)
         self.assertIn("proposals", payload)
+
+
+class PersonnelIdentityProjectionTests(TestCase):
+    def test_dry_run_reports_safe_projection_without_writes(self):
+        User = get_user_model()
+        Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        Departamento.objects.create(codigo="VENTAS", nombre="Ventas")
+        usuario = User.objects.create_user(username="repartidor.demo", password="pass123")
+        Empleado.objects.create(
+            nombre="Repartidor Demo",
+            departamento=Empleado.DEP_VENTAS,
+            puesto_operativo="REPARTIDOR",
+            sucursal="Matriz",
+            usuario_erp=usuario,
+        )
+
+        report = build_personnel_identity_projection_plan(limit=100)
+        actions = {item["action"] for item in report["actions"]}
+
+        self.assertTrue(report["dry_run"])
+        self.assertFalse(report["writes"])
+        self.assertFalse(report["include_repartidores"])
+        self.assertIn("sincronizar_nombre_usuario_desde_empleado", actions)
+        self.assertIn("crear_userprofile_desde_empleado_vinculado", actions)
+        self.assertIn("crear_repartidor_logistica_desde_empleado_vinculado", actions)
+        self.assertEqual(UserProfile.objects.count(), 0)
+        self.assertFalse(hasattr(usuario, "repartidor_logistica"))
+        usuario.refresh_from_db()
+        self.assertEqual(usuario.get_full_name(), "")
+
+    def test_apply_preserves_login_groups_and_explicit_access(self):
+        User = get_user_model()
+        sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        departamento = Departamento.objects.create(codigo="VENTAS", nombre="Ventas")
+        grupo = Group.objects.create(name="VENTAS")
+        usuario = User.objects.create_user(username="ventas.demo", password="pass123")
+        usuario.groups.add(grupo)
+        UserModuleAccess.objects.create(user=usuario, module="ventas", access=UserModuleAccess.ACCESS_MANAGE)
+        Empleado.objects.create(
+            nombre="Ventas Demo",
+            departamento=Empleado.DEP_VENTAS,
+            sucursal="Matriz",
+            usuario_erp=usuario,
+        )
+
+        report = build_personnel_identity_projection_plan(apply=True, limit=100)
+
+        usuario.refresh_from_db()
+        profile = UserProfile.objects.get(user=usuario)
+        self.assertFalse(report["dry_run"])
+        self.assertTrue(report["writes"])
+        self.assertEqual(report["summary"]["applied"], 2)
+        self.assertTrue(usuario.check_password("pass123"))
+        self.assertTrue(usuario.is_active)
+        self.assertFalse(usuario.is_staff)
+        self.assertFalse(usuario.is_superuser)
+        self.assertEqual(list(usuario.groups.values_list("name", flat=True)), ["VENTAS"])
+        self.assertTrue(UserModuleAccess.objects.filter(user=usuario, module="ventas", access="manage").exists())
+        self.assertEqual(usuario.get_full_name(), "Ventas Demo")
+        self.assertEqual(profile.departamento, departamento)
+        self.assertEqual(profile.sucursal, sucursal)
+
+    def test_apply_does_not_guess_unlinked_repartidor_user(self):
+        User = get_user_model()
+        Group.objects.create(name="repartidor")
+        usuario = User.objects.create_user(username="rep.existente", password="pass123")
+        usuario.groups.add(Group.objects.get(name="repartidor"))
+        Empleado.objects.create(
+            nombre="Repartidor Sin Liga",
+            departamento=Empleado.DEP_LOGISTICA,
+            puesto_operativo="REPARTIDOR",
+            sucursal="Matriz",
+        )
+
+        report = build_personnel_identity_projection_plan(apply=True, include_repartidores=True, limit=100)
+
+        self.assertEqual(report["summary"]["actions"], 0)
+        self.assertFalse(Empleado.objects.get(nombre="Repartidor Sin Liga").usuario_erp_id)
+        self.assertFalse(hasattr(usuario, "empleado_rrhh"))
+
+    def test_repartidor_projection_requires_explicit_flag(self):
+        from logistica.models import Repartidor
+
+        User = get_user_model()
+        Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        usuario = User.objects.create_user(username="rep.demo", password="pass123")
+        Empleado.objects.create(
+            nombre="Repartidor Ligado",
+            departamento=Empleado.DEP_LOGISTICA,
+            puesto_operativo="REPARTIDOR",
+            sucursal="Matriz",
+            usuario_erp=usuario,
+        )
+
+        build_personnel_identity_projection_plan(apply=True, limit=100)
+        self.assertFalse(Repartidor.objects.filter(user=usuario).exists())
+
+        build_personnel_identity_projection_plan(apply=True, include_repartidores=True, limit=100)
+        self.assertTrue(Repartidor.objects.filter(user=usuario, sucursal__codigo="MATRIZ").exists())
+        self.assertTrue(usuario.groups.filter(name="repartidor").exists())
+
+    def test_projection_command_outputs_json(self):
+        out = io.StringIO()
+        call_command("sync_personnel_identity_projections", "--json", stdout=out)
+
+        payload = json.loads(out.getvalue())
+        self.assertTrue(payload["dry_run"])
+        self.assertFalse(payload["writes"])
+        self.assertIn("no_cambia_passwords", payload["guardrails"])
