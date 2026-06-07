@@ -77,6 +77,8 @@ class UnidadAdmin(admin.ModelAdmin):
 class RepartidorAdmin(admin.ModelAdmin):
     list_display = (
         "user",
+        "tipo_identidad",
+        "empresa_externa",
         "telefono",
         "sucursal",
         "unidad_asignada",
@@ -84,13 +86,15 @@ class RepartidorAdmin(admin.ModelAdmin):
         "licencia_expedicion",
         "licencia_expiracion",
     )
-    list_filter = ("sucursal", "unidad_asignada", "licencia_expiracion")
+    list_filter = ("tipo_identidad", "sucursal", "unidad_asignada", "licencia_expiracion")
     search_fields = (
         "user__username",
         "user__first_name",
         "user__last_name",
         "telefono",
         "numero_licencia",
+        "empresa_externa",
+        "autorizado_por",
         "unidad_asignada__codigo",
     )
     autocomplete_fields = ("user", "unidad_asignada", "sucursal")

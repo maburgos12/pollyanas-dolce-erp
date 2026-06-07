@@ -9,6 +9,7 @@ from django.core.management import call_command
 from django.test import TestCase
 
 from core.models import Departamento, Sucursal, UserModuleAccess, UserProfile
+from logistica.models import Repartidor
 from rrhh.models import Empleado
 from rrhh.services_personnel_identity_sync import build_personnel_identity_projection_plan
 from rrhh.services_personnel_normalization import build_personnel_normalization_plan
@@ -118,6 +119,37 @@ class PersonnelNormalizationPlanTests(TestCase):
         self.assertIn("usuario real que ya usa en app logistica", repartidor_rows[0]["proposed_value"])
         self.assertEqual(UserProfile.objects.count(), 0)
         self.assertEqual(Empleado.objects.count(), 2)
+
+    def test_external_logistics_account_is_not_forced_into_employee_rrhh(self):
+        User = get_user_model()
+        sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz")
+        group = Group.objects.get_or_create(name="repartidor")[0]
+        external_user = User.objects.create_user(
+            username="marcortez.alvarez.vea",
+            first_name="Bernardo",
+            last_name="Alvarez Vea",
+        )
+        external_user.groups.add(group)
+        Repartidor.objects.create(
+            user=external_user,
+            sucursal=sucursal,
+            tipo_identidad=Repartidor.TIPO_EXTERNO_AUTORIZADO,
+            empresa_externa="Empresa externa",
+            motivo_autorizacion="Uso ocasional de unidades",
+            autorizado_por="Dirección",
+        )
+
+        report = build_personnel_normalization_plan(limit=100)
+        actions = {item["action"] for item in report["proposals"]}
+
+        self.assertIn("cuenta_externa_logistica_autorizada", actions)
+        self.assertNotIn("revisar_usuario_repartidor_sin_empleado", actions)
+        self.assertNotIn("vincular_usuario_o_crear_perfil", actions)
+        external_rows = [
+            item for item in report["proposals"] if item["action"] == "cuenta_externa_logistica_autorizada"
+        ]
+        self.assertEqual(external_rows[0]["severity"], "info")
+        self.assertIn("sin crear empleado Dolce", external_rows[0]["reason"])
 
     def test_command_outputs_markdown_table_and_json(self):
         out = io.StringIO()
