@@ -8,6 +8,8 @@ from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.html import strip_tags
 
+from core.access import group_name_variants
+
 from .models import (
     BitacoraSalidaLlegada,
     ConfigAlertaFlota,
@@ -22,7 +24,7 @@ from .models import (
 def _emails_de_grupo(nombre_grupo: str) -> list[str]:
     return list(
         get_user_model()
-        .objects.filter(groups__name=nombre_grupo, email__isnull=False)
+        .objects.filter(groups__name__in=group_name_variants(nombre_grupo), email__isnull=False)
         .exclude(email="")
         .values_list("email", flat=True)
         .distinct()

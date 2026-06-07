@@ -7,6 +7,18 @@ from core.access import ACCESS_MANAGE
 from core.models import Sucursal, UserModuleAccess
 from crm.models import Cliente, PedidoCliente
 from logistica.models import EntregaRuta, Repartidor, RutaEntrega, Unidad
+from logistica.tasks import _emails_de_grupo
+
+
+class LogisticaGroupAliasCompatibilityTests(TestCase):
+    def test_emails_de_grupo_legacy_dg_uses_canonical_group(self):
+        user = User.objects.create_user(
+            username="dg.logistica.alias",
+            email="dg.logistica@example.com",
+        )
+        user.groups.add(Group.objects.get_or_create(name="DG")[0])
+
+        self.assertEqual(_emails_de_grupo("dg"), ["dg.logistica@example.com"])
 
 
 class LogisticaViewsTests(TestCase):

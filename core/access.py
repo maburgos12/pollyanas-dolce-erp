@@ -12,6 +12,13 @@ ROLE_LECTURA = "LECTURA"
 ROLE_REPARTIDOR = "repartidor"
 ROLE_BONOS_PRODUCCION_CAPTURA = "bonos_produccion_captura"
 
+ROLE_GROUP_ALIASES = {
+    ROLE_DG: {"DG", "dg"},
+    ROLE_ADMIN: {"ADMIN", "admin"},
+    ROLE_PRODUCCION: {"PRODUCCION", "produccion"},
+    ROLE_VENTAS: {"VENTAS", "ventas"},
+}
+
 ROLE_ORDER = [
     ROLE_DG,
     ROLE_ADMIN,
@@ -222,12 +229,24 @@ def _group_names(user: AbstractBaseUser) -> set[str]:
     return names
 
 
+def group_name_variants(*group_names: str) -> tuple[str, ...]:
+    names = {name for name in group_names if name}
+    aliases_by_lower = {
+        alias.lower(): aliases
+        for aliases in ROLE_GROUP_ALIASES.values()
+        for alias in aliases
+    }
+    for name in list(names):
+        names.update(aliases_by_lower.get(name.lower(), {name}))
+    return tuple(sorted(names))
+
+
 def has_any_role(user: AbstractBaseUser, *roles: str) -> bool:
     if not user or not user.is_authenticated:
         return False
     if user.is_superuser:
         return True
-    return bool(_group_names(user).intersection(set(roles)))
+    return bool(_group_names(user).intersection(group_name_variants(*roles)))
 
 
 def is_admin_or_dg(user: AbstractBaseUser) -> bool:
@@ -236,7 +255,7 @@ def is_admin_or_dg(user: AbstractBaseUser) -> bool:
         return False
     if user.is_superuser or user.is_staff:
         return True
-    return bool(_group_names(user) & {"dg", "DG", "admin", "ADMIN"})
+    return has_any_role(user, ROLE_DG, ROLE_ADMIN)
 
 
 def _is_locked(user: AbstractBaseUser, lock_field: str) -> bool:
@@ -274,13 +293,13 @@ def is_repartidor_only(user: AbstractBaseUser) -> bool:
         "supervisor_logistica",
         "personal_sucursal",
     }
-    return not bool(groups.intersection(elevated))
+    return not bool(groups.intersection(group_name_variants(*elevated)))
 
 
 def primary_role(user: AbstractBaseUser) -> str:
     groups = _group_names(user)
     for role in ROLE_ORDER:
-        if role in groups:
+        if groups.intersection(group_name_variants(role)):
             return role
     return ""
 

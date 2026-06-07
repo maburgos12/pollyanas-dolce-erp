@@ -30,6 +30,7 @@ from core.access import (
     ROLE_ORDER,
     can_manage_orquestacion,
     can_manage_users,
+    group_name_variants,
     primary_role,
     can_manage_crm,
     can_view_audit,
@@ -2802,8 +2803,8 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     ctx.update(
         {
             "can_view_recetas": u.has_perm("recetas.view_receta"),
-            "can_import": u.is_superuser or u.groups.filter(name__in=["ADMIN", "COMPRAS"]).exists(),
-            "can_review_matching": u.is_superuser or u.groups.filter(name__in=["ADMIN"]).exists(),
+            "can_import": u.is_superuser or u.groups.filter(name__in=group_name_variants("ADMIN", "COMPRAS")).exists(),
+            "can_review_matching": u.is_superuser or u.groups.filter(name__in=group_name_variants("ADMIN")).exists(),
             "can_view_maestros": can_view_maestros(u),
             "can_view_recetas": can_view_recetas(u),
             "can_view_compras": can_view_compras(u),
@@ -2822,7 +2823,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     )
     # Acuerdos de seguimiento pendientes de la revisión del DG (en revisión + prórrogas)
     try:
-        if u.is_superuser or u.is_staff or u.groups.filter(name__in=[ROLE_DG, ROLE_ADMIN]).exists():
+        if u.is_superuser or u.is_staff or u.groups.filter(name__in=group_name_variants(ROLE_DG, ROLE_ADMIN)).exists():
             from seguimiento.models import SeguimientoItem as _SegItem, SeguimientoProrrogaSolicitud as _SegProrroga
             from seguimiento.services import items_pendientes_revision_dg, _responsable_nombre
 
@@ -4188,7 +4189,7 @@ def ai_private_hub_view(request: HttpRequest) -> HttpResponse:
 def usuario_permisos_update(request: HttpRequest, user_id: int) -> HttpResponse:
     if not request.user.is_authenticated:
         return redirect("/login/")
-    if not (request.user.is_superuser or request.user.groups.filter(name__in=["DG", "dg"]).exists()):
+    if not (request.user.is_superuser or request.user.groups.filter(name__in=group_name_variants(ROLE_DG)).exists()):
         return HttpResponseForbidden()
     if request.method != "POST":
         return redirect("users_access")

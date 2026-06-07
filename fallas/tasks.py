@@ -5,6 +5,8 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
 
+from core.access import group_name_variants
+
 logger = logging.getLogger(__name__)
 
 EMOJI_PRIORIDAD = {
@@ -27,7 +29,7 @@ EMOJI_ESTATUS = {
 def _emails_de_grupo(nombre_grupo: str) -> list[str]:
     return list(
         get_user_model()
-        .objects.filter(groups__name=nombre_grupo, is_active=True, email__isnull=False)
+        .objects.filter(groups__name__in=group_name_variants(nombre_grupo), is_active=True, email__isnull=False)
         .exclude(email="")
         .values_list("email", flat=True)
         .distinct()

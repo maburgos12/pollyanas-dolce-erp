@@ -10,6 +10,7 @@ from core.models import Sucursal, UserModuleAccess, UserProfile
 from core.navigation import build_nav_groups
 
 from .models import CategoriaFalla, ReporteFalla
+from .tasks import _emails_de_grupo
 
 
 class MisReportesActionsTests(TestCase):
@@ -236,3 +237,14 @@ class MisReportesActionsTests(TestCase):
         ]
 
         self.assertEqual([group["key"] for group in fallas_groups], ["fallas"])
+
+
+class FallasGroupAliasCompatibilityTests(TestCase):
+    def test_emails_de_grupo_legacy_dg_uses_canonical_group(self):
+        user = get_user_model().objects.create_user(
+            username="dg.fallas.alias",
+            email="dg.fallas@example.com",
+        )
+        user.groups.add(Group.objects.get_or_create(name="DG")[0])
+
+        self.assertEqual(_emails_de_grupo("dg"), ["dg.fallas@example.com"])

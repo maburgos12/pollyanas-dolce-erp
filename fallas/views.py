@@ -15,7 +15,14 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from activos.models import Activo
-from core.access import can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg, is_repartidor_only
+from core.access import (
+    can_manage_submodule,
+    can_view_module,
+    can_view_submodule,
+    group_name_variants,
+    is_admin_or_dg,
+    is_repartidor_only,
+)
 from core.models import Sucursal, sucursales_operativas_q
 
 from .models import BitacoraFalla, CategoriaFalla, ReporteFalla
@@ -38,6 +45,10 @@ def _group_names(user) -> set[str]:
     if not user or not user.is_authenticated:
         return set()
     return set(user.groups.values_list("name", flat=True))
+
+
+def _has_grupo_gestion(user) -> bool:
+    return user.groups.filter(name__in=group_name_variants(*GRUPOS_GESTION_FALLAS)).exists()
 
 
 def _sucursal_usuario(user):
@@ -427,7 +438,7 @@ def pwa_reporte(request):
         "fallas/reporte_form.html",
         {
             "can_dashboard": can_view_submodule(request.user, "fallas", "dashboard"),
-            "es_dg": request.user.is_superuser or request.user.groups.filter(name__in=["compras_logistica", "dg"]).exists(),
+            "es_dg": request.user.is_superuser or _has_grupo_gestion(request.user),
             "sucursales": sucursales,
             "categorias": categorias,
             "activos": activos,
@@ -493,7 +504,7 @@ def pwa_editar_reporte(request, pk):
         request,
         "fallas/reporte_form.html",
         {
-            "es_dg": request.user.is_superuser or request.user.groups.filter(name__in=["compras_logistica", "dg"]).exists(),
+            "es_dg": request.user.is_superuser or _has_grupo_gestion(request.user),
             "sucursales": sucursales,
             "categorias": categorias,
             "activos": activos,
@@ -543,7 +554,7 @@ def pwa_mis_reportes(request):
         "fallas/mis_reportes.html",
         {
             "can_dashboard": can_view_submodule(request.user, "fallas", "dashboard"),
-            "es_dg": request.user.is_superuser or request.user.groups.filter(name__in=["compras_logistica", "dg"]).exists(),
+            "es_dg": request.user.is_superuser or _has_grupo_gestion(request.user),
             "reportes": reportes,
             "estatus_choices": ReporteFalla.ESTATUS,
             "prioridad_choices": ReporteFalla.PRIORIDAD,
@@ -561,7 +572,7 @@ def usuarios_gestion(request):
 
     User = get_user_model()
     qs = (
-        User.objects.filter(groups__name__in=["compras_logistica", "dg"], is_active=True)
+        User.objects.filter(groups__name__in=group_name_variants(*GRUPOS_GESTION_FALLAS), is_active=True)
         .distinct()
         .order_by("first_name", "last_name", "username")
     )
