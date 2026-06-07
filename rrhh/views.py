@@ -53,6 +53,7 @@ from .services_identidad import (
     vincular_identidad_pendiente,
 )
 from .services.lista_raya import importar_lista_raya_nomina
+from .services_personnel_normalization import build_personnel_normalization_plan
 from .services_permisos import can_authorize_direccion, resolver_permiso_direccion
 from .services_vacantes import (
     can_autorizar_vacante,
@@ -152,6 +153,64 @@ RRHH_MODULE_TABS = [
     {"label": "Préstamos", "url_name": "rrhh:rrhh_prestamos_lista", "key": "prestamos", "submodule": "prestamos"},
     {"label": "Nómina", "url_name": "rrhh:nomina", "key": "nomina", "submodule": "nomina"},
 ]
+
+
+IDENTITY_PLANE_LABELS = {
+    "accesos": "Accesos",
+    "catalogos": "Catálogos",
+    "personal": "Personal",
+    "repartidores": "Repartidores",
+    "usuarios": "Usuarios",
+}
+
+IDENTITY_SEVERITY_LABELS = {
+    "risk": "Riesgo",
+    "warning": "Revisión",
+    "info": "Info",
+}
+
+IDENTITY_ACTION_LABELS = {
+    "alinear_area_repartidor": "Alinear área de repartidor",
+    "alinear_puesto_operativo_y_area": "Alinear área y puesto",
+    "capturar_sucursal_requerida": "Capturar sucursal",
+    "clasificar_cuenta_no_personal": "Clasificar cuenta técnica",
+    "clasificar_usuario_sin_empleado": "Clasificar usuario sin empleado",
+    "crear_departamento_core_faltante": "Crear departamento catálogo",
+    "crear_perfil_desde_empleado_vinculado": "Crear perfil operativo",
+    "definir_nivel_organizacional": "Definir nivel",
+    "resolver_sucursal_legacy_no_mapeada": "Resolver sucursal no mapeada",
+    "revisar_alias_grupo_canonico": "Revisar alias de grupo",
+    "revisar_fusion_grupo_mayusculas": "Fusionar grupos por mayúsculas",
+    "revisar_grupos_alias_en_usuario": "Revisar alias en usuario",
+    "revisar_puesto_operativo_no_catalogado": "Revisar puesto no catalogado",
+    "revisar_usuario_con_multiples_grupos": "Revisar múltiples grupos",
+    "revisar_usuario_repartidor_sin_empleado": "Vincular usuario app a empleado",
+    "separar_grupos_repartidor": "Separar rol repartidor",
+    "separar_jefatura_de_puesto_operativo": "Separar jefatura de puesto",
+    "validar_produccion_vs_embetunado": "Validar Producción vs Embetunado",
+    "vincular_usuario_o_crear_perfil": "Vincular usuario o perfil",
+    "vincular_usuario_repartidor": "Vincular usuario real de repartidor",
+}
+
+
+def _identity_map_context(limit: int = 80) -> dict:
+    report = build_personnel_normalization_plan(limit=limit)
+    rows = []
+    for item in report["proposals"]:
+        rows.append(
+            {
+                **item,
+                "plane_label": IDENTITY_PLANE_LABELS.get(item["plane"], item["plane"]),
+                "severity_label": IDENTITY_SEVERITY_LABELS.get(item["severity"], item["severity"]),
+                "action_label": IDENTITY_ACTION_LABELS.get(item["action"], item["action"].replace("_", " ").title()),
+            }
+        )
+    return {
+        "summary": report["summary"],
+        "rows": rows,
+        "dry_run": report["dry_run"],
+        "writes": report["writes"],
+    }
 
 
 def _has_rrhh_task_access(user, tab_key: str) -> bool:
@@ -1751,6 +1810,7 @@ def organizacion_ch(request):
         .prefetch_related("colaboradores_directos")
     )
     sin_jefe = empleados.filter(jefe_directo__isnull=True).exclude(puesto_operativo="JEFATURA")
+    identity_map = _identity_map_context(limit=80)
     return render(
         request,
         "rrhh/organizacion.html",
@@ -1761,6 +1821,7 @@ def organizacion_ch(request):
             "jefes": jefes,
             "sin_jefe": sin_jefe,
             "total_activos": empleados.count(),
+            "identity_map": identity_map,
         },
     )
 

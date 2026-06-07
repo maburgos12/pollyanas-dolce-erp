@@ -522,11 +522,11 @@ def _repartidor_proposals() -> list[NormalizationProposal]:
                     entity_type="Empleado",
                     entity_id=empleado.pk,
                     display=empleado.nombre,
-                    current_value="usuario_erp=(vacio)",
-                    proposed_value="Vincular usuario ERP de repartidor",
+                    current_value="Empleado.usuario_erp=(vacio)",
+                    proposed_value="Vincular el usuario real que ya usa en app logistica",
                     action="vincular_usuario_repartidor",
                     severity="risk",
-                    reason="La app/logistica y filtros especiales de repartidores dependen de usuario vinculado.",
+                    reason="Si ya tiene acceso a la PWA, capturar esa cuenta en Empleado.usuario_erp para unir persona RRHH, usuario y logistica.",
                 )
             )
         if normalize_catalog_key(empleado.area) != "REPARTIDORES":
@@ -556,11 +556,11 @@ def _repartidor_proposals() -> list[NormalizationProposal]:
                     entity_type="User",
                     entity_id=user.pk,
                     display=user.username,
-                    current_value=f"grupos={groups}, empleado=no",
-                    proposed_value="Vincular a empleado repartidor o retirar grupo repartidor",
+                    current_value=f"usuario app/logistica; grupos={groups}; empleado_vinculado=no",
+                    proposed_value="Vincular a Empleado repartidor correcto o clasificar como cuenta tecnica",
                     action="revisar_usuario_repartidor_sin_empleado",
                     severity="risk",
-                    reason="Un usuario repartidor sin empleado rompe la trazabilidad persona-app-bonos.",
+                    reason="El usuario puede tener acceso operativo, pero falta el enlace a la persona RRHH fuente de verdad.",
                 )
             )
         non_repartidor_groups = [group for group in groups if group.lower() != "repartidor"]

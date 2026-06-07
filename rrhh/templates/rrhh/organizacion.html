@@ -24,6 +24,18 @@
   .org-grid { display: grid; gap: 16px; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); }
   .org-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 16px; }
   .org-card h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
+  .identity-head { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) auto; margin-bottom: 14px; }
+  .identity-meta { color: var(--texto-light); font-size: 13px; }
+  .identity-stats { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+  .identity-stat { border: 1px solid var(--rosa); border-radius: 8px; min-width: 104px; padding: 10px; }
+  .identity-stat strong { color: var(--vino); display: block; font-size: 20px; line-height: 1; }
+  .identity-stat span { color: var(--texto-light); font-size: 11px; font-weight: 900; text-transform: uppercase; }
+  .identity-sev { border-radius: 999px; display: inline-flex; font-size: 11px; font-weight: 900; padding: 5px 8px; text-transform: uppercase; }
+  .identity-sev-risk { background: #f8dddd; color: #8f1f1f; }
+  .identity-sev-warning { background: #fff1ce; color: #765300; }
+  .identity-sev-info { background: #e7f1ff; color: #1f4f8f; }
+  .identity-action { color: var(--vino); font-weight: 900; }
+  .identity-value { max-width: 240px; overflow-wrap: anywhere; }
   .org-tree { display: grid; gap: 10px; }
   .org-leader { border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; }
   .org-leader-title { color: var(--vino); font-weight: 900; }
@@ -37,7 +49,9 @@
   .org-muted { color: var(--texto-light); font-size: 13px; }
   @media (max-width: 1100px) {
     .org-head,
+    .identity-head,
     .org-grid { grid-template-columns: 1fr; }
+    .identity-stats { justify-content: flex-start; }
   }
   @media (max-width: 680px) { .org-stats { grid-template-columns: 1fr; } }
 </style>
@@ -65,6 +79,54 @@
       <div class="org-stat"><strong>{{ sin_jefe|length }}</strong><span>Sin jefe definido</span></div>
     </div>
   </div>
+
+  <section class="org-card">
+    <div class="identity-head">
+      <div>
+        <h2>Mapa de identidad y accesos</h2>
+        <div class="identity-meta">
+          Fuente única: empleado RRHH. Usuario ERP, perfil, grupos, accesos y logística se revisan como extensiones vinculadas.
+          {% if identity_map.dry_run and not identity_map.writes %}Lectura dry-run, sin escrituras.{% endif %}
+        </div>
+      </div>
+      <div class="identity-stats" aria-label="Resumen de identidad">
+        <div class="identity-stat"><strong>{{ identity_map.summary.proposals }}</strong><span>Propuestas</span></div>
+        <div class="identity-stat"><strong>{{ identity_map.summary.by_severity.risk|default:0 }}</strong><span>Riesgo</span></div>
+        <div class="identity-stat"><strong>{{ identity_map.summary.by_severity.warning|default:0 }}</strong><span>Revisión</span></div>
+        <div class="identity-stat"><strong>{{ identity_map.summary.by_severity.info|default:0 }}</strong><span>Info</span></div>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="org-table">
+        <thead>
+          <tr>
+            <th>Prioridad</th>
+            <th>Plano</th>
+            <th>Acción</th>
+            <th>Entidad</th>
+            <th>Actual</th>
+            <th>Propuesto</th>
+            <th>Razón</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in identity_map.rows %}
+            <tr>
+              <td><span class="identity-sev identity-sev-{{ row.severity }}">{{ row.severity_label }}</span></td>
+              <td>{{ row.plane_label }}</td>
+              <td class="identity-action">{{ row.action_label }}</td>
+              <td class="identity-value"><strong>{{ row.display }}</strong><br><span class="org-muted">{{ row.entity_type }} {{ row.entity_id }}</span></td>
+              <td class="identity-value">{{ row.current_value|default:"-" }}</td>
+              <td class="identity-value">{{ row.proposed_value|default:"-" }}</td>
+              <td class="identity-value">{{ row.reason }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="7">Sin propuestas de normalización.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
 
   <div class="org-grid">
     <section class="org-card">

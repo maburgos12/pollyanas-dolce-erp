@@ -1303,6 +1303,8 @@ class RRHHViewsTests(TestCase):
         self.assertContains(resp, "LOPEZ PALOS JOHANA ADELIN")
         self.assertContains(resp, "LOPEZ VILLALOBOS JORGE ALFONSO")
         self.assertContains(resp, "Jefe directo")
+        self.assertContains(resp, "Mapa de identidad y accesos")
+        self.assertContains(resp, "Lectura dry-run, sin escrituras.")
 
     def test_empleados_expone_campos_de_organizacion(self):
         Empleado.objects.create(nombre="LOPEZ PALOS JOHANA ADELIN", departamento="VENTAS", puesto="Jefe de Ventas")
