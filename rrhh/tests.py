@@ -1,6 +1,6 @@
 from django.contrib.auth.models import Group, User
-from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -1048,6 +1048,71 @@ class RRHHViewsTests(TestCase):
         repartidor = Repartidor.objects.get(user=usuario)
         self.assertEqual(repartidor.sucursal, sucursal)
         self.assertEqual(str(repartidor), "VALDEZ FÉLIX REY IVÁN")
+
+    def test_empleados_crea_usuario_repartidor_con_password_y_licencia(self):
+        from logistica.models import Repartidor
+
+        sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        archivo = SimpleUploadedFile("licencia.pdf", b"PDF demo", content_type="application/pdf")
+
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "create",
+                "nombre": "REPARTIDOR NUEVO",
+                "area": "REPARTIDORES",
+                "crear_usuario_erp": "on",
+                "nuevo_usuario_username": "rep.nuevo",
+                "nuevo_usuario_password": "Temporal123",
+                "sucursal_app_id": str(sucursal.id),
+                "numero_licencia": "LIC-123",
+                "licencia_expedicion": "2026-01-01",
+                "licencia_expiracion": "2028-01-01",
+                "archivo_licencia": archivo,
+                "salario_diario": "300.00",
+            },
+            follow=True,
+            secure=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        usuario = User.objects.get(username="rep.nuevo")
+        empleado = Empleado.objects.get(nombre="REPARTIDOR NUEVO")
+        repartidor = Repartidor.objects.get(user=usuario)
+        self.assertEqual(empleado.usuario_erp, usuario)
+        self.assertTrue(usuario.check_password("Temporal123"))
+        self.assertEqual(usuario.get_full_name(), "REPARTIDOR NUEVO")
+        self.assertTrue(usuario.groups.filter(name="repartidor").exists())
+        self.assertEqual(UserProfile.objects.get(user=usuario).sucursal, sucursal)
+        self.assertEqual(repartidor.numero_licencia, "LIC-123")
+        self.assertEqual(str(repartidor.licencia_expedicion), "2026-01-01")
+        self.assertEqual(str(repartidor.licencia_expiracion), "2028-01-01")
+        self.assertIn("licencia", repartidor.archivo_licencia.name)
+
+    def test_empleados_bloquea_crear_usuario_duplicado_desde_rrhh(self):
+        sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        User.objects.create_user(username="rep.duplicado", password="pass12345")
+
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "create",
+                "nombre": "REPARTIDOR DUPLICADO",
+                "area": "REPARTIDORES",
+                "crear_usuario_erp": "on",
+                "nuevo_usuario_username": "rep.duplicado",
+                "nuevo_usuario_password": "Temporal123",
+                "sucursal_app_id": str(sucursal.id),
+                "salario_diario": "300.00",
+            },
+            follow=True,
+            secure=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(Empleado.objects.filter(nombre="REPARTIDOR DUPLICADO").exists())
+        self.assertEqual(User.objects.filter(username="rep.duplicado").count(), 1)
+        self.assertContains(resp, "Ese usuario ya existe")
 
     def test_identidad_operativa_limpia_sucursal_app(self):
         from rrhh.services_identidad import asegurar_identidad_operativa_empleado
