@@ -91,6 +91,28 @@ def _get_item_para_usuario(user, pk):
     return get_object_or_404(SeguimientoItem.objects.filter(filters).distinct(), pk=pk)
 
 
+def _es_dg(user) -> bool:
+    return bool(user.is_staff or user.is_superuser or has_any_role(user, ROLE_DG, ROLE_ADMIN))
+
+
+def _get_item_editable(user, pk):
+    """Resuelve el acuerdo permitiendo al responsable/participante O al DG.
+
+    El DG abre cualquier acuerdo desde su panel (detalle_dg) y debe poder marcar el
+    checklist o subir evidencia sin chocar con el filtro de responsable.
+    """
+    if _es_dg(user):
+        return get_object_or_404(SeguimientoItem, pk=pk)
+    return _get_item_para_usuario(user, pk)
+
+
+def _redirect_detalle(request, pk):
+    """Vuelve al detalle correcto según desde dónde se actuó (DG o colaborador)."""
+    if (request.POST.get("next") or "").strip() == "detalle_dg":
+        return redirect("seguimiento:detalle_dg", pk=pk)
+    return redirect("seguimiento:detalle", pk=pk)
+
+
 def _validar_archivo_evidencia(archivo) -> str | None:
     max_bytes = int(getattr(settings, "SEGUIMIENTO_EVIDENCIA_MAX_UPLOAD_BYTES", DEFAULT_EVIDENCIA_MAX_UPLOAD_BYTES))
     if archivo.size and archivo.size > max_bytes:
@@ -260,7 +282,7 @@ def seguimiento_compromisos(request):
 @login_required
 @require_POST
 def toggle_checklist(request, pk, check_id):
-    item = _get_item_para_usuario(request.user, pk)
+    item = _get_item_editable(request.user, pk)
     check = get_object_or_404(SeguimientoChecklistItem, pk=check_id, seguimiento=item)
     check.completado = not check.completado
     if check.completado:
@@ -281,7 +303,7 @@ def toggle_checklist(request, pk, check_id):
         enviar_correo=False,
     )
     messages.success(request, "Checklist actualizado.")
-    return redirect("seguimiento:detalle", pk=item.pk)
+    return _redirect_detalle(request, item.pk)
 
 
 @login_required
@@ -314,7 +336,7 @@ def registrar_feedback(request, pk):
 @login_required
 @require_POST
 def subir_evidencia(request, pk):
-    item = _get_item_para_usuario(request.user, pk)
+    item = _get_item_editable(request.user, pk)
     archivo = request.FILES.get("archivo")
     if not archivo:
         messages.error(request, "Selecciona un archivo de evidencia.")
@@ -330,7 +352,8 @@ def subir_evidencia(request, pk):
         nombre_original=archivo.name,
         comentario=(request.POST.get("comentario") or "").strip(),
     )
-    if item.requiere_aprobacion:
+    # El DG no escala a revisión su propio acuerdo al adjuntar; eso lo hace el colaborador.
+    if item.requiere_aprobacion and not _es_dg(request.user):
         if item.estatus in {SeguimientoItem.ESTATUS_PENDIENTE, SeguimientoItem.ESTATUS_EN_PROCESO}:
             item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
             item.save(update_fields=["estatus", "updated_at"])
@@ -340,7 +363,7 @@ def subir_evidencia(request, pk):
     log_event(request.user, "seguimiento.evidencia", "SeguimientoItem", item.pk, {"archivo": archivo.name})
     notificar_seguimiento_avance(item, actor=request.user, mensaje_extra=f"Archivo: {archivo.name}")
     messages.success(request, "Evidencia subida.")
-    return redirect("seguimiento:detalle", pk=item.pk)
+    return _redirect_detalle(request, item.pk)
 
 
 @login_required

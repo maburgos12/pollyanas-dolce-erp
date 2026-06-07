@@ -219,6 +219,7 @@
       {% for check in checks %}
       <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk check.pk %}">
         {% csrf_token %}
+        {% if es_vista_dg %}<input type="hidden" name="next" value="detalle_dg">{% endif %}
         <button class="btn btn-sm {% if check.completado %}btn-primary{% else %}btn-secondary{% endif %}" type="submit">
           {% if check.completado %}✓{% else %}○{% endif %} {{ check.titulo }}
         </button>
@@ -373,6 +374,7 @@
     <p class="seg-section-title">Agregar archivo de evidencia</p>
     <form method="post" action="{% url 'seguimiento:subir_evidencia' item.pk %}" enctype="multipart/form-data" style="display:grid; gap:10px;">
       {% csrf_token %}
+      {% if es_vista_dg %}<input type="hidden" name="next" value="detalle_dg">{% endif %}
       <input type="file" name="archivo"
         accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf"
         style="border:1px solid rgba(139,34,82,.14); border-radius:12px; padding:10px; font:inherit; background:rgba(255,255,255,.96);">
