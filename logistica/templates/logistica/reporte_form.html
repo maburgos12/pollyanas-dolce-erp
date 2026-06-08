@@ -7,17 +7,17 @@
 {% block extra_css %}
 <style>
   /* ── shell ─────────────────────────────────────────────── */
-  .rf-shell { display: grid; gap: 18px; max-width: 840px; }
+  .rf-shell { display: grid; gap: 18px; }
 
   /* ── card con encabezado vino ──────────────────────────── */
   .rf-card { background: var(--blanco, #fffaf5); border: 1px solid rgba(139,34,82,.16); border-radius: 16px; overflow: hidden; box-shadow: 0 4px 18px rgba(139,34,82,.08); }
   .rf-card-head { background: linear-gradient(135deg, #8B2252 0%, #6B1740 100%); color: #fff; padding: 20px 24px 16px; }
   .rf-card-head h2 { margin: 0 0 4px; font-family: "Playfair Display", serif; font-size: 22px; font-weight: 700; }
   .rf-card-head p  { margin: 0; font-size: 13px; opacity: .82; }
-  .rf-card-body { padding: 24px; }
+  .rf-card-body { padding: 24px 28px; }
 
   /* ── cuadrícula de campos ──────────────────────────────── */
-  .rf-grid { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rf-grid { display: grid; gap: 20px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .rf-col-full { grid-column: 1 / -1; }
 
   /* ── campo individual ─────────────────────────────────── */
