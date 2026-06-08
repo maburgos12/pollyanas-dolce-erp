@@ -229,15 +229,45 @@
           <span class="muted" style="font-size:.76rem;">{% if check.completado %}Hecho{% elif not es_vista_dg and check.pk == siguiente_check_id %}En turno{% else %}Pendiente{% endif %} ▾</span>
         </summary>
         <div style="padding:2px 14px 14px 40px; display:grid; gap:8px;">
+          <div class="muted" style="font-size:.8rem; display:flex; flex-wrap:wrap; gap:4px 14px;">
+            {% if check.tipo %}<span>Tipo: <strong>{{ check.tipo|title }}</strong></span>{% endif %}
+            {% if check.responsable_nombre %}<span>Responsable: <strong>{{ check.responsable_nombre }}</strong></span>{% endif %}
+            {% if check.vence %}<span>Vence: <strong>{{ check.vence|date:"d/m/Y H:i" }}</strong></span>{% endif %}
+            {% if check.prioridad %}<span>Prioridad: <strong>{{ check.prioridad }}</strong></span>{% endif %}
+            <span>Paso {{ forloop.counter }} de {{ checklist_total }}</span>
+          </div>
+
           {% if check.descripcion %}
           <div style="color:var(--texto); font-size:.92rem; white-space:pre-line;">{{ check.descripcion }}</div>
-          {% else %}
-          <div class="muted" style="font-size:.85rem;">Sin descripción registrada para este paso.</div>
           {% endif %}
-          <div class="muted" style="font-size:.76rem;">Paso {{ forloop.counter }} de {{ checklist_total }}</div>
+
+          {% if check.requiere_aprobacion %}
+          <div style="font-size:.8rem;"><span class="badge bg-warning">Requiere aprobación</span>{% if check.aprobador_nombre %} <span class="muted">· Aprobador: {{ check.aprobador_nombre }}</span>{% endif %}</div>
+          {% endif %}
+
+          {% if check.entregable %}
+          <div style="font-size:.86rem;"><span class="muted" style="font-weight:700;">Entregable:</span> <span style="white-space:pre-line;">{{ check.entregable }}</span></div>
+          {% endif %}
+
+          {% if check.sub_checklist %}
+          <div style="border:1px dashed rgba(139,34,82,.18); border-radius:10px; padding:8px 10px;">
+            <div class="muted" style="font-size:.72rem; font-weight:800; text-transform:uppercase; letter-spacing:.04em; margin-bottom:6px;">Checklist operativo del paso</div>
+            <div style="display:grid; gap:4px;">
+              {% for sub in check.sub_checklist %}
+              <div style="display:flex; align-items:center; gap:8px; font-size:.88rem;">
+                <span>{% if sub.completado %}✅{% else %}⬜{% endif %}</span>
+                <span style="flex:1; overflow:hidden;">{{ sub.titulo }}</span>
+                <span class="muted" style="font-size:.7rem;">{% if sub.completado %}Resuelto{% else %}Pendiente{% endif %}</span>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+
           {% if check.completado %}
           <div class="muted" style="font-size:.8rem;">✓ Hecho por {{ check.completado_por.get_full_name|default:check.completado_por.username|default:"—" }}{% if check.completado_at %} · {{ check.completado_at|date:"d/m/Y H:i" }}{% endif %}</div>
           {% endif %}
+
           {% if not es_vista_dg and not item.esta_cerrado %}
             {% if check.pk == siguiente_check_id %}
             <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk check.pk %}">

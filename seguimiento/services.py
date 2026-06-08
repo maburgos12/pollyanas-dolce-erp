@@ -198,6 +198,62 @@ def agente_dg_checklist_from_json(raw_value: str | None) -> list[str]:
     return []
 
 
+def _texto_a_puntos(texto: str) -> list[str]:
+    """Desglosa un entregable en puntos: por líneas o por separadores '-' / '•'."""
+    if not texto:
+        return []
+    bruto = texto.replace("•", "\n").replace("; ", "\n")
+    lineas = [l for l in bruto.splitlines()]
+    if len(lineas) <= 1:
+        # Una sola línea tipo "- A - B - C": separar por " - "
+        unica = lineas[0] if lineas else texto
+        partes = unica.split(" - ")
+        lineas = partes if len(partes) > 1 else [unica]
+    puntos = []
+    for linea in lineas:
+        limpio = linea.strip().lstrip("-*•").strip()
+        if limpio:
+            puntos.append(limpio)
+    return puntos
+
+
+def sub_checklist_de_paso(checklist_items_json: str | None, deliverable_text: str | None) -> list[dict]:
+    """Devuelve [{titulo, completado}] del checklist operativo del paso.
+
+    Usa el estado real de checklist_items_json si existe; si no, desglosa el entregable
+    (todos pendientes) para que al menos se vean los puntos.
+    """
+    items: list[dict] = []
+    raw = (checklist_items_json or "").strip()
+    if raw:
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError):
+            payload = None
+        if isinstance(payload, list):
+            for it in payload:
+                if isinstance(it, str):
+                    titulo = it.strip()
+                    completado = False
+                elif isinstance(it, dict):
+                    titulo = (it.get("title") or it.get("titulo") or it.get("text") or it.get("label") or "").strip()
+                    estado = it.get("status") or it.get("estado")
+                    completado = bool(
+                        it.get("done")
+                        or it.get("completed")
+                        or it.get("completado")
+                        or it.get("checked")
+                        or (isinstance(estado, str) and estado.upper() in {"DONE", "COMPLETED", "RESUELTO", "OK"})
+                    )
+                else:
+                    continue
+                if titulo:
+                    items.append({"titulo": titulo, "completado": completado})
+    if not items:
+        items = [{"titulo": p, "completado": False} for p in _texto_a_puntos(deliverable_text or "")]
+    return items
+
+
 class AgenteDGSeguimientoImporter:
     def _resolve_user(self, row):
         User = get_user_model()
@@ -368,6 +424,15 @@ class AgenteDGSeguimientoImporter:
                 "titulo": titulo,
                 "descripcion": payload.get("descripcion") or "",
                 "completado": bool(payload.get("completado")),
+                "entregable": payload.get("entregable") or "",
+                "responsable_nombre": payload.get("responsable_nombre") or "",
+                "aprobador_nombre": payload.get("aprobador_nombre") or "",
+                "requiere_aprobacion": bool(payload.get("requiere_aprobacion")),
+                "vence": agente_dg_as_datetime(payload.get("vence")) if payload.get("vence") else None,
+                "prioridad": payload.get("prioridad") or "",
+                "tipo": payload.get("tipo") or "",
+                "estatus_origen": payload.get("estatus_origen") or "",
+                "sub_checklist": sub_checklist_de_paso(payload.get("checklist_items_json"), payload.get("entregable")),
             }
             if check:
                 for key, value in defaults.items():
