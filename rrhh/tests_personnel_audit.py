@@ -173,6 +173,55 @@ class PersonnelNormalizationPlanTests(TestCase):
         self.assertIn("clasificar_cuenta_no_personal", rows_by_user["debug-rrhh"])
         self.assertIn("clasificar_usuario_sin_empleado", rows_by_user["debug-rrhh"])
 
+    def test_production_leadership_is_not_forced_into_embetunado_position(self):
+        Empleado.objects.create(
+            nombre="Encargada Produccion",
+            departamento=Empleado.DEP_PRODUCCION,
+            area="PRODUCCION",
+            puesto_operativo="",
+            nivel_organizacional=Empleado.NIVEL_ENCARGADA,
+        )
+
+        report = build_personnel_normalization_plan(limit=100)
+        actions = {item["action"] for item in report["proposals"]}
+
+        self.assertNotIn("validar_produccion_vs_embetunado", actions)
+
+    def test_occasional_driver_is_not_reported_as_mixed_repartidor_role(self):
+        User = get_user_model()
+        sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz")
+        production_group = Group.objects.get_or_create(name="PRODUCCION")[0]
+        repartidor_group = Group.objects.get_or_create(name="repartidor")[0]
+        user = User.objects.create_user(username="carolina.cayetano")
+        user.groups.add(production_group, repartidor_group)
+        Empleado.objects.create(
+            nombre="Carolina Cayetano",
+            departamento=Empleado.DEP_PRODUCCION,
+            area="PRODUCCION",
+            nivel_organizacional=Empleado.NIVEL_JEFATURA,
+            usuario_erp=user,
+        )
+        Repartidor.objects.create(
+            user=user,
+            sucursal=sucursal,
+            tipo_identidad=Repartidor.TIPO_EMPLEADO_CONDUCTOR_OCASIONAL,
+            motivo_autorizacion="Uso ocasional de unidades",
+            autorizado_por="Direccion",
+        )
+
+        report = build_personnel_normalization_plan(limit=100)
+        actions = {item["action"] for item in report["proposals"]}
+
+        self.assertIn("conductor_occasional_logistica_autorizado", actions)
+        self.assertNotIn("separar_grupos_repartidor", actions)
+        self.assertNotIn("revisar_usuario_con_multiples_grupos", actions)
+
+        user.groups.remove(repartidor_group)
+        report_without_group = build_personnel_normalization_plan(limit=100)
+        actions_without_group = {item["action"] for item in report_without_group["proposals"]}
+        self.assertIn("conductor_occasional_logistica_autorizado", actions_without_group)
+        self.assertNotIn("separar_grupos_repartidor", actions_without_group)
+
     def test_command_outputs_markdown_table_and_json(self):
         out = io.StringIO()
         call_command("plan_personnel_normalization", "--limit", "5", stdout=out)

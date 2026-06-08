@@ -90,7 +90,7 @@ def _is_repartidor(user) -> bool:
 
 
 def _can_operate_pwa(user) -> bool:
-    return _is_repartidor(user) or can_view_module(user, "mantenimiento")
+    return bool(_get_repartidor_for_user(user)) or _is_repartidor(user) or can_view_module(user, "mantenimiento")
 
 
 def _is_compras_logistica(user) -> bool:

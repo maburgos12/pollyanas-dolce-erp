@@ -8,6 +8,7 @@ from core.models import Sucursal, UserModuleAccess
 from crm.models import Cliente, PedidoCliente
 from logistica.models import EntregaRuta, Repartidor, RutaEntrega, Unidad
 from logistica.tasks import _emails_de_grupo
+from api.logistica_views import _can_operate_pwa
 
 
 class LogisticaGroupAliasCompatibilityTests(TestCase):
@@ -247,10 +248,24 @@ class LogisticaPwaApiTests(TestCase):
         self.assertIn("access", payload)
         self.assertIn("refresh", payload)
 
-        self.client.logout()
         perfil = self.client.get(reverse("api_logistica_mi_perfil"), HTTP_AUTHORIZATION=f"Bearer {payload['access']}")
         self.assertEqual(perfil.status_code, 200)
         self.assertEqual(perfil.json()["user"]["username"], self.user.username)
+
+        self.client.logout()
+
+    def test_occasional_driver_with_repartidor_profile_can_operate_without_repartidor_group(self):
+        user = User.objects.create_user(username="conductora.ocasional", password="pass123")
+        user.groups.add(Group.objects.get_or_create(name="PRODUCCION")[0])
+        Repartidor.objects.create(
+            user=user,
+            sucursal=self.sucursal,
+            tipo_identidad=Repartidor.TIPO_EMPLEADO_CONDUCTOR_OCASIONAL,
+            motivo_autorizacion="Uso ocasional de unidades",
+            autorizado_por="Direccion",
+        )
+
+        self.assertTrue(_can_operate_pwa(user))
 
     def test_session_token_rejects_users_without_logistica_access(self):
         self.client.logout()
