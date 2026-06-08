@@ -165,10 +165,12 @@ class Unidad(models.Model):
 
 class Repartidor(models.Model):
     TIPO_EMPLEADO_DOLCE = "empleado_dolce"
+    TIPO_EMPLEADO_CONDUCTOR_OCASIONAL = "empleado_conductor_ocasional"
     TIPO_EXTERNO_AUTORIZADO = "externo_autorizado"
     TIPO_CUENTA_TECNICA = "cuenta_tecnica"
     TIPO_IDENTIDAD_CHOICES = [
         (TIPO_EMPLEADO_DOLCE, "Empleado Dolce"),
+        (TIPO_EMPLEADO_CONDUCTOR_OCASIONAL, "Empleado conductor ocasional"),
         (TIPO_EXTERNO_AUTORIZADO, "Externo autorizado"),
         (TIPO_CUENTA_TECNICA, "Cuenta técnica"),
     ]

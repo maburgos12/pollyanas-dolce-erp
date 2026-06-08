@@ -7,7 +7,7 @@ from typing import Iterable
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.exceptions import ObjectDoesNotExist
-from django.db.models import Count
+from django.db.models import Count, Q
 
 from core.access import ROLE_ORDER
 from core.models import Departamento, Sucursal, UserModuleAccess, UserProfile
@@ -310,7 +310,11 @@ def _employee_catalog_proposals() -> list[NormalizationProposal]:
                 )
             )
 
-        if normalize_catalog_key(empleado.area) == "PRODUCCION" and empleado.puesto_operativo in {"", "PRODUCCION"}:
+        if (
+            normalize_catalog_key(empleado.area) == "PRODUCCION"
+            and empleado.puesto_operativo in {"", "PRODUCCION"}
+            and not _is_production_leadership_exception(empleado)
+        ):
             proposals.append(
                 _proposal(
                     key=f"employee.production_embetunado:{empleado.pk}",
@@ -411,6 +415,7 @@ def _user_access_proposals() -> list[NormalizationProposal]:
         has_access = user.module_access.exists()
         external_repartidor = _external_logistics_repartidor(user)
         technical_account = _authorized_technical_account(user.username)
+        occasional_driver = _occasional_logistics_driver(user)
 
         if technical_account and not employee:
             proposals.append(
@@ -495,7 +500,7 @@ def _user_access_proposals() -> list[NormalizationProposal]:
                 )
             )
 
-        if len(group_names) > 1:
+        if len(group_names) > 1 and not _only_mixes_logistics_access(group_names, occasional_driver):
             proposals.append(
                 _proposal(
                     key=f"user.multiple_groups:{user.pk}",
@@ -570,10 +575,16 @@ def _repartidor_proposals() -> list[NormalizationProposal]:
                 )
             )
 
-    for user in User.objects.filter(is_active=True, groups__name__iexact="repartidor").distinct().order_by("username"):
+    logistics_identity_users = User.objects.filter(
+        Q(groups__name__iexact="repartidor")
+        | Q(repartidor_logistica__tipo_identidad__in=["externo_autorizado", "empleado_conductor_ocasional"]),
+        is_active=True,
+    ).distinct()
+    for user in logistics_identity_users.order_by("username"):
         groups = sorted(user.groups.values_list("name", flat=True))
         employee = getattr(user, "empleado_rrhh", None)
         external_repartidor = _external_logistics_repartidor(user)
+        occasional_driver = _occasional_logistics_driver(user)
         if not employee:
             if external_repartidor:
                 proposals.append(
@@ -605,8 +616,23 @@ def _repartidor_proposals() -> list[NormalizationProposal]:
                         reason="El usuario puede tener acceso operativo, pero falta el enlace a la persona RRHH fuente de verdad.",
                     )
                 )
+        elif occasional_driver:
+            proposals.append(
+                _proposal(
+                    key=f"repartidor.occasional_authorized:{user.pk}",
+                    plane="repartidores",
+                    entity_type="Repartidor",
+                    entity_id=occasional_driver.pk,
+                    display=user.username,
+                    current_value=f"empleado={employee.nombre}; grupos={groups}",
+                    proposed_value="Mantener como empleado Dolce con acceso logistico ocasional",
+                    action="conductor_occasional_logistica_autorizado",
+                    severity="info",
+                    reason="Empleado no repartidor con permiso controlado para registrar uso ocasional de unidades.",
+                )
+            )
         non_repartidor_groups = [group for group in groups if group.lower() != "repartidor"]
-        if non_repartidor_groups:
+        if non_repartidor_groups and not occasional_driver:
             proposals.append(
                 _proposal(
                     key=f"repartidor.mixed_groups:{user.pk}",
@@ -632,6 +658,32 @@ def _external_logistics_repartidor(user):
     if getattr(repartidor, "tipo_identidad", "") == "externo_autorizado":
         return repartidor
     return None
+
+
+def _occasional_logistics_driver(user):
+    try:
+        repartidor = user.repartidor_logistica
+    except ObjectDoesNotExist:
+        return None
+    if getattr(repartidor, "tipo_identidad", "") == "empleado_conductor_ocasional":
+        return repartidor
+    return None
+
+
+def _only_mixes_logistics_access(group_names: list[str], occasional_driver) -> bool:
+    if not occasional_driver:
+        return False
+    non_repartidor_groups = [group for group in group_names if group.lower() != "repartidor"]
+    return any(group.lower() == "repartidor" for group in group_names) and len(non_repartidor_groups) == 1
+
+
+def _is_production_leadership_exception(empleado: Empleado) -> bool:
+    return empleado.nivel_organizacional in {
+        Empleado.NIVEL_DIRECCION,
+        Empleado.NIVEL_JEFATURA,
+        Empleado.NIVEL_SUPERVISION,
+        Empleado.NIVEL_ENCARGADA,
+    }
 
 
 def _catalog_index(model, *fields: str) -> dict[str, object]:
