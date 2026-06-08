@@ -162,6 +162,7 @@ class Command(AgenteDGSeguimientoImporter, BaseCommand):
                     checklist=[
                         {
                             "titulo": step["title"],
+                            "origen_step_id": step.get("id"),
                             "descripcion": step.get("description") or "",
                             "completado": _status_agente_a_erp(step.get("status")) == SeguimientoItem.ESTATUS_COMPLETADO,
                             "entregable": step.get("deliverable_text") or "",

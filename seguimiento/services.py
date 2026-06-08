@@ -422,6 +422,7 @@ class AgenteDGSeguimientoImporter:
             check = existing.get(index)
             defaults = {
                 "titulo": titulo,
+                "origen_step_id": payload.get("origen_step_id"),
                 "descripcion": payload.get("descripcion") or "",
                 "completado": bool(payload.get("completado")),
                 "entregable": payload.get("entregable") or "",
