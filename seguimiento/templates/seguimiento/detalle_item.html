@@ -221,14 +221,17 @@
     </p>
     <div style="display:grid; gap:8px;">
       {% for check in checks %}
-      <div style="display:flex; align-items:center; gap:10px; padding:8px 12px; border:1px solid rgba(139,34,82,.10); border-radius:10px;{% if check.completado %} background:rgba(76,175,80,.06);{% endif %}">
-        <span class="muted" style="font-weight:800;">{{ forloop.counter }}.</span>
-        <span style="font-size:1.05rem;">{% if check.completado %}✅{% elif es_vista_dg %}⬜{% elif check.pk == siguiente_check_id %}⭕{% else %}🔒{% endif %}</span>
+      <div style="display:flex; align-items:flex-start; gap:10px; padding:10px 12px; border:1px solid rgba(139,34,82,.10); border-radius:10px;{% if check.completado %} background:rgba(76,175,80,.06);{% endif %}">
+        <span class="muted" style="font-weight:800; padding-top:2px;">{{ forloop.counter }}.</span>
+        <span style="font-size:1.05rem; padding-top:1px;">{% if check.completado %}✅{% elif es_vista_dg %}⬜{% elif check.pk == siguiente_check_id %}⭕{% else %}🔒{% endif %}</span>
         <div style="flex:1; overflow:hidden;">
-          <div style="font-weight:600;">{{ check.titulo }}</div>
+          <div style="font-weight:700;">{{ check.titulo }}</div>
+          {% if check.descripcion %}
+          <div style="margin-top:3px; color:var(--texto); font-size:.9rem; white-space:pre-line;">{{ check.descripcion }}</div>
+          {% endif %}
           {% if check.completado %}
-          <div class="muted" style="font-size:.78rem;">
-            Hecho por {{ check.completado_por.get_full_name|default:check.completado_por.username|default:"—" }}{% if check.completado_at %} · {{ check.completado_at|date:"d/m/Y H:i" }}{% endif %}
+          <div class="muted" style="font-size:.78rem; margin-top:5px;">
+            ✓ Hecho por {{ check.completado_por.get_full_name|default:check.completado_por.username|default:"—" }}{% if check.completado_at %} · {{ check.completado_at|date:"d/m/Y H:i" }}{% endif %}
           </div>
           {% endif %}
         </div>
