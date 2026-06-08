@@ -68,6 +68,111 @@
     margin-top: 4px;
   }
 
+  .identity-workflow {
+    background: #fff;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    display: grid;
+    gap: 14px;
+    padding: 16px;
+  }
+
+  .identity-workflow-header {
+    align-items: flex-start;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+  }
+
+  .identity-workflow-title {
+    color: var(--vino);
+    font-size: 16px;
+    font-weight: 900;
+  }
+
+  .identity-workflow-copy {
+    color: var(--texto-light);
+    font-size: 13px;
+    margin-top: 3px;
+  }
+
+  .identity-stepper {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+  }
+
+  .identity-step {
+    background: #fffafb;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    color: var(--texto);
+    display: grid;
+    gap: 4px;
+    min-height: 72px;
+    padding: 10px;
+  }
+
+  .identity-step-number {
+    align-items: center;
+    background: var(--vino);
+    border-radius: 999px;
+    color: #fff;
+    display: inline-flex;
+    font-size: 11px;
+    font-weight: 900;
+    height: 22px;
+    justify-content: center;
+    width: 22px;
+  }
+
+  .identity-step-label {
+    font-size: 13px;
+    font-weight: 900;
+  }
+
+  .identity-guard-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
+  }
+
+  .identity-guard-card {
+    background: #fff;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    min-height: 118px;
+    padding: 12px;
+  }
+
+  .identity-guard-value {
+    color: var(--vino);
+    font-size: 24px;
+    font-weight: 900;
+    line-height: 1;
+  }
+
+  .identity-guard-label {
+    color: var(--texto);
+    font-size: 12px;
+    font-weight: 900;
+    margin-top: 8px;
+  }
+
+  .identity-guard-status {
+    color: var(--texto-light);
+    font-size: 12px;
+    font-weight: 800;
+    margin-top: 4px;
+  }
+
+  .identity-guard-detail {
+    color: var(--texto-light);
+    font-size: 11px;
+    line-height: 1.35;
+    margin-top: 6px;
+  }
+
   .identity-list {
     display: grid;
     gap: 8px;
@@ -482,6 +587,38 @@
     font-weight: 900;
   }
 
+  .rrhh-flow-note {
+    background: #fff;
+    border: 1px dashed var(--rosa);
+    border-radius: 8px;
+    color: var(--texto-light);
+    font-size: 12px;
+    grid-column: 1 / -1;
+    line-height: 1.4;
+    padding: 10px 12px;
+  }
+
+  .rrhh-flow-note strong {
+    color: var(--vino);
+  }
+
+  .rrhh-inline-warning {
+    background: #fff8e6;
+    border: 1px solid #edd39b;
+    border-radius: 8px;
+    color: #6d4a00;
+    display: none;
+    font-size: 12px;
+    font-weight: 700;
+    grid-column: 1 / -1;
+    line-height: 1.35;
+    padding: 10px 12px;
+  }
+
+  .rrhh-inline-warning.is-visible {
+    display: block;
+  }
+
   .rrhh-dialog-wide {
     max-width: 760px;
   }
@@ -589,7 +726,8 @@
     }
 
     .identity-item,
-    .identity-grid {
+    .identity-grid,
+    .identity-stepper {
       grid-template-columns: 1fr;
     }
   }
@@ -625,6 +763,33 @@
       <div class="rrhh-metric-label">Nóminas</div>
       <div class="rrhh-metric-note">Periodos capturados</div>
     </article>
+  </section>
+
+  <section class="identity-workflow" aria-label="Orden de identidad operativa">
+    <div class="identity-workflow-header">
+      <div>
+        <div class="identity-workflow-title">Orden de alta y accesos</div>
+        <div class="identity-workflow-copy">Capital Humano captura la persona; usuarios, apps, logística y bonos quedan como extensiones de esa misma ficha.</div>
+      </div>
+    </div>
+    <div class="identity-stepper">
+      {% for step in identity_workflow_steps %}
+      <div class="identity-step">
+        <span class="identity-step-number">{{ forloop.counter }}</span>
+        <span class="identity-step-label">{{ step }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="identity-guard-grid">
+      {% for card in identity_guard_cards %}
+      <article class="identity-guard-card">
+        <div class="identity-guard-value">{{ card.value }}</div>
+        <div class="identity-guard-label">{{ card.label }}</div>
+        <div class="identity-guard-status">{{ card.status }}</div>
+        <div class="identity-guard-detail">{{ card.detail }}</div>
+      </article>
+      {% endfor %}
+    </div>
   </section>
 
   {% if can_manage_rrhh and identidades_pendientes %}
@@ -690,7 +855,7 @@
       </div>
       <div class="rrhh-card-body">
         {% if can_manage_rrhh %}
-        <form method="post" enctype="multipart/form-data">
+        <form method="post" enctype="multipart/form-data" data-has-user="false">
           {% csrf_token %}
           <input type="hidden" name="action" value="create">
           <div class="rrhh-form-grid">
@@ -829,6 +994,9 @@
                 Crear usuario y contraseña para este empleado
               </label>
             </div>
+            <div class="rrhh-flow-note">
+              <strong>Regla:</strong> si la persona usará una app, el usuario se crea aquí y queda ligado a este empleado. No se captura otra persona en Logística, Bonos, Mermas o Fallas.
+            </div>
             <div class="rrhh-field" data-new-user-field style="display:none">
               <label for="nuevo_usuario_username">Usuario nuevo</label>
               <input id="nuevo_usuario_username" class="input-field" type="text" name="nuevo_usuario_username" autocomplete="off">
@@ -856,6 +1024,12 @@
               </select>
               <div class="rrhh-help">Al seleccionar acceso se abre la captura de licencia y autorización.</div>
               <button class="btn btn-secondary btn-small" type="button" data-open-logistics-dialog style="display:none">Completar licencia y autorización</button>
+            </div>
+            <div class="rrhh-inline-warning" data-user-required-warning>
+              Para habilitar logística primero crea el usuario y contraseña desde esta misma alta.
+            </div>
+            <div class="rrhh-inline-warning" data-sucursal-required-warning>
+              Para habilitar logística selecciona la sucursal en app. Ese dato alimenta permisos y capturas móviles.
             </div>
             <dialog class="rrhh-dialog rrhh-dialog-wide" data-driver-license-dialog>
               <div class="rrhh-dialog-body">
@@ -1200,7 +1374,7 @@
               <td colspan="14">
                 <details class="rrhh-edit-panel">
                   <summary>Editar {{ e.nombre }}</summary>
-                  <form method="post" class="rrhh-edit-form" enctype="multipart/form-data">
+                  <form method="post" class="rrhh-edit-form" enctype="multipart/form-data" data-has-user="{% if e.usuario_erp_id %}true{% else %}false{% endif %}">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="update">
                     <input type="hidden" name="empleado_id" value="{{ e.id }}">
@@ -1363,6 +1537,9 @@
                         </label>
                         {% endif %}
                       </div>
+                      <div class="rrhh-flow-note">
+                        <strong>Regla:</strong> el usuario y los accesos se administran desde esta ficha del empleado. Las apps consumen esta relación; no crean otra persona.
+                      </div>
                       {% if not e.usuario_erp_id %}
                       <div class="rrhh-field" data-new-user-field style="display:none">
                         <label for="edit_nuevo_usuario_username_{{ e.id }}">Usuario nuevo</label>
@@ -1397,6 +1574,12 @@
                         </select>
                         <div class="rrhh-help">Al seleccionar acceso se abre la captura de licencia y autorización.</div>
                         <button class="btn btn-secondary btn-small" type="button" data-open-logistics-dialog style="{% if e.puesto_operativo != 'REPARTIDOR' and not e.repartidor_logistica %}display:none{% endif %}">Completar licencia y autorización</button>
+                      </div>
+                      <div class="rrhh-inline-warning" data-user-required-warning>
+                        Para habilitar logística primero crea o conserva el usuario ligado a este empleado.
+                      </div>
+                      <div class="rrhh-inline-warning" data-sucursal-required-warning>
+                        Para habilitar logística selecciona la sucursal en app. Ese dato alimenta permisos y capturas móviles.
                       </div>
                       <dialog class="rrhh-dialog rrhh-dialog-wide" data-driver-license-dialog>
                         <div class="rrhh-dialog-body">
@@ -1626,6 +1809,19 @@
     const hasLogisticsAccess = Boolean(logisticsAccess && logisticsAccess.value);
     const logisticsButton = form.querySelector('[data-open-logistics-dialog]');
     if (logisticsButton) logisticsButton.style.display = (puesto === 'REPARTIDOR' || hasLogisticsAccess) ? '' : 'none';
+    const hasLinkedUser = form.dataset.hasUser === 'true';
+    const createToggle = form.querySelector('[data-create-user-toggle]');
+    const willCreateUser = Boolean(createToggle && createToggle.checked);
+    const sucursalSelect = form.querySelector('select[name="sucursal_app_id"]');
+    const hasSucursal = Boolean(sucursalSelect && sucursalSelect.value);
+    const userWarning = form.querySelector('[data-user-required-warning]');
+    const sucursalWarning = form.querySelector('[data-sucursal-required-warning]');
+    if (userWarning) {
+      userWarning.classList.toggle('is-visible', hasLogisticsAccess && !hasLinkedUser && !willCreateUser);
+    }
+    if (sucursalWarning) {
+      sucursalWarning.classList.toggle('is-visible', hasLogisticsAccess && !hasSucursal);
+    }
     _toggleNewUserFields(form);
   }
 
@@ -1647,6 +1843,9 @@
     const createToggle = event.target.closest('[data-create-user-toggle]');
     if (createToggle) {
       _toggleNewUserFields(createToggle.closest('form'));
+      const form = createToggle.closest('form');
+      const puesto = form?.querySelector('select[name="puesto_operativo"]')?.value || '';
+      _toggleOperationalBlocks(form, puesto);
       return;
     }
     const logisticsAccess = event.target.closest('[data-logistics-access]');
@@ -1669,6 +1868,13 @@
     const departamentoSelect = event.target.closest('select[name="departamento"]');
     if (departamentoSelect) {
       syncJefeDirectoOptions(departamentoSelect.closest('form'));
+      return;
+    }
+    const sucursalAppSelect = event.target.closest('select[name="sucursal_app_id"]');
+    if (sucursalAppSelect) {
+      const form = sucursalAppSelect.closest('form');
+      const puesto = form?.querySelector('select[name="puesto_operativo"]')?.value || '';
+      _toggleOperationalBlocks(form, puesto);
       return;
     }
   });
