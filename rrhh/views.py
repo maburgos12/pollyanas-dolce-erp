@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 from django.contrib import messages
+from django.contrib.auth.models import Group
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
@@ -38,6 +39,15 @@ from .models import (
     Prestamo,
     VacanteRRHH,
 )
+
+LOGISTICA_TIPO_EMPLEADO_DOLCE = "empleado_dolce"
+LOGISTICA_TIPO_CONDUCTOR_OCASIONAL = "empleado_conductor_ocasional"
+LOGISTICA_TIPOS_RRHH = (
+    ("", "Sin acceso a logística"),
+    (LOGISTICA_TIPO_EMPLEADO_DOLCE, "Repartidor operativo"),
+    (LOGISTICA_TIPO_CONDUCTOR_OCASIONAL, "Conductor ocasional autorizado"),
+)
+LOGISTICA_TIPOS_RRHH_VALUES = {value for value, _label in LOGISTICA_TIPOS_RRHH}
 from .services_bonos import asegurar_esquemas_base, sincronizar_esquemas_bono
 from .services_catalogos import (
     AREA_DIVISION_CHOICES,
@@ -190,8 +200,8 @@ def _resolver_usuario_erp_desde_post(request, empleado: Empleado):
     usuario_erp_id = (request.POST.get("usuario_erp") or "").strip()
     if crear_usuario and usuario_erp_id:
         raise ValidationError("Elige crear usuario nuevo o vincular usuario existente, no ambos.")
-    if crear_usuario and (empleado.puesto_operativo or "").strip().upper() == "REPARTIDOR" and not _safe_int(request.POST.get("sucursal_app_id")):
-        raise ValidationError("Selecciona la sucursal app para crear el usuario de un repartidor.")
+    if crear_usuario and _logistica_tipo_desde_post(request.POST, empleado) and not _safe_int(request.POST.get("sucursal_app_id")):
+        raise ValidationError("Selecciona la sucursal app para crear el usuario con acceso a logística.")
     if crear_usuario:
         return _crear_usuario_rrhh_para_empleado(request, empleado)
     if usuario_erp_id.isdigit():
@@ -210,15 +220,84 @@ def _resolver_usuario_erp_desde_post(request, empleado: Empleado):
     return empleado.usuario_erp
 
 
-def _sincronizar_licencia_repartidor_desde_post(request, empleado: Empleado) -> bool:
-    if (empleado.puesto_operativo or "").strip().upper() != "REPARTIDOR" or not empleado.usuario_erp_id:
-        return False
+def _logistica_tipo_desde_post(post_data, empleado: Empleado) -> str:
+    value = (post_data.get("logistica_tipo_identidad") or "").strip()
+    if value not in LOGISTICA_TIPOS_RRHH_VALUES:
+        raise ValidationError("Selecciona un tipo de acceso logístico válido.")
+    es_repartidor_operativo = (empleado.puesto_operativo or "").strip().upper() == "REPARTIDOR"
+    if value == LOGISTICA_TIPO_CONDUCTOR_OCASIONAL and es_repartidor_operativo:
+        raise ValidationError("Un puesto operativo repartidor debe quedar como Repartidor operativo.")
+    if not value and es_repartidor_operativo:
+        return LOGISTICA_TIPO_EMPLEADO_DOLCE
+    return value
+
+
+def _logistica_tipo_explicitado(post_data) -> bool:
+    return bool((post_data.get("logistica_tipo_identidad") or "").strip())
+
+
+def _sucursal_logistica_desde_post(request, empleado: Empleado):
+    sucursal_app_id = _safe_int(request.POST.get("sucursal_app_id"))
+    if sucursal_app_id:
+        return Sucursal.objects.filter(pk=sucursal_app_id, activa=True).first()
+    if not empleado.usuario_erp_id:
+        return None
     try:
-        repartidor = empleado.usuario_erp.repartidor_logistica
+        return empleado.usuario_erp.repartidor_logistica.sucursal
     except Exception:
+        pass
+    try:
+        return empleado.usuario_erp.userprofile.sucursal
+    except Exception:
+        return None
+
+
+def _sincronizar_logistica_desde_post(request, empleado: Empleado) -> bool:
+    tipo_identidad = _logistica_tipo_desde_post(request.POST, empleado)
+    if not tipo_identidad:
         return False
+    if not empleado.usuario_erp_id:
+        if not _logistica_tipo_explicitado(request.POST):
+            return False
+        raise ValidationError("Vincula o crea usuario ERP/app antes de habilitar acceso logístico.")
+
+    sucursal = _sucursal_logistica_desde_post(request, empleado)
+    if not sucursal:
+        raise ValidationError("Selecciona la sucursal en app para habilitar acceso logístico.")
+
+    from logistica.models import Repartidor
+
+    repartidor, created = Repartidor.objects.get_or_create(
+        user=empleado.usuario_erp,
+        defaults={
+            "sucursal": sucursal,
+            "telefono": empleado.telefono or "",
+            "tipo_identidad": tipo_identidad,
+        },
+    )
 
     changed_fields: set[str] = set()
+    if repartidor.sucursal_id != sucursal.id:
+        repartidor.sucursal = sucursal
+        changed_fields.add("sucursal")
+    if empleado.telefono and repartidor.telefono != empleado.telefono:
+        repartidor.telefono = empleado.telefono
+        changed_fields.add("telefono")
+    if repartidor.tipo_identidad != tipo_identidad:
+        repartidor.tipo_identidad = tipo_identidad
+        changed_fields.add("tipo_identidad")
+
+    text_fields = {
+        "motivo_autorizacion": "motivo_autorizacion",
+        "autorizado_por": "autorizado_por",
+        "notas_identidad": "notas_identidad",
+    }
+    for post_field, model_field in text_fields.items():
+        value = (request.POST.get(post_field) or "").strip()
+        if getattr(repartidor, model_field) != value:
+            setattr(repartidor, model_field, value)
+            changed_fields.add(model_field)
+
     field_map = {
         "numero_licencia": "numero_licencia",
         "licencia_expedicion": "licencia_expedicion",
@@ -238,19 +317,28 @@ def _sincronizar_licencia_repartidor_desde_post(request, empleado: Empleado) -> 
 
     if changed_fields:
         repartidor.save(update_fields=sorted(changed_fields))
+
+    grupo, _ = Group.objects.get_or_create(name="repartidor")
+    if tipo_identidad == LOGISTICA_TIPO_EMPLEADO_DOLCE:
+        empleado.usuario_erp.groups.add(grupo)
+    elif (empleado.puesto_operativo or "").strip().upper() != "REPARTIDOR":
+        empleado.usuario_erp.groups.remove(grupo)
+
+    if created or changed_fields:
         log_event(
             request.user,
-            "UPDATE",
+            "CREATE" if created else "UPDATE",
             "logistica.Repartidor",
             str(repartidor.id),
             {
                 "empleado": empleado.id,
                 "username": empleado.usuario_erp.username,
+                "tipo_identidad": repartidor.tipo_identidad,
                 "campos": sorted(changed_fields),
                 "source": "rrhh.empleados",
             },
         )
-    return bool(changed_fields)
+    return created or bool(changed_fields)
 
 
 RRHH_MODULE_TABS = [
@@ -998,7 +1086,11 @@ def empleados(request):
                     empleado,
                     sucursal_app_id=int(sucursal_app_id) if sucursal_app_id.isdigit() else None,
                 )
-                _sincronizar_licencia_repartidor_desde_post(request, empleado)
+                try:
+                    _sincronizar_logistica_desde_post(request, empleado)
+                except ValidationError as exc:
+                    messages.error(request, exc.messages[0])
+                    return redirect("rrhh:empleados")
                 sincronizar_esquemas_bono(empleado, request.POST, organizacion)
                 log_event(
                     request.user,
@@ -1062,7 +1154,12 @@ def empleados(request):
                 empleado,
                 sucursal_app_id=int(sucursal_app_id) if sucursal_app_id.isdigit() else None,
             )
-            _sincronizar_licencia_repartidor_desde_post(request, empleado)
+            try:
+                _sincronizar_logistica_desde_post(request, empleado)
+            except ValidationError as exc:
+                empleado.delete()
+                messages.error(request, exc.messages[0])
+                return redirect("rrhh:empleados")
             sincronizar_esquemas_bono(empleado, request.POST, organizacion)
             log_event(
                 request.user,
@@ -1185,6 +1282,7 @@ def empleados(request):
         "area_division_values": AREA_DIVISION_VALUES,
         "puesto_operativo_choices": PUESTO_OPERATIVO_CHOICES,
         "puesto_operativo_values": PUESTO_OPERATIVO_VALUES,
+        "logistica_tipo_identidad_choices": LOGISTICA_TIPOS_RRHH,
         "nivel_organizacional_choices": Empleado.NIVEL_ORGANIZACIONAL_CHOICES,
         "nivel_organizacional_values": NIVEL_ORGANIZACIONAL_VALUES,
         "tipo_personal_choices": Empleado.TIPO_PERSONAL_CHOICES,
