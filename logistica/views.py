@@ -1883,6 +1883,7 @@ def reportes_lista(request):
             "unidades": Unidad.objects.filter(activa=True).order_by("codigo"),
             "estatus_choices": ReporteUnidad.ESTATUS_CHOICES,
             "severidad_choices": ReporteUnidad.SEVERIDAD_CHOICES,
+            "can_crear_reporte": can_manage_submodule(request.user, "logistica", "reportes"),
             "filters": {
                 "estatus": estatus,
                 "severidad": severidad,
@@ -1890,6 +1891,113 @@ def reportes_lista(request):
                 "fecha_desde": fecha_desde.isoformat() if fecha_desde else "",
                 "fecha_hasta": fecha_hasta.isoformat() if fecha_hasta else "",
             },
+        },
+    )
+
+
+@login_required
+def reporte_crear(request):
+    if not can_manage_submodule(request.user, "logistica", "reportes"):
+        raise PermissionDenied("No tienes permisos para crear reportes de Logística")
+
+    unidades = Unidad.objects.filter(activa=True).order_by("codigo")
+    repartidores = Repartidor.objects.select_related("user", "user__empleado_rrhh").order_by("user__first_name", "user__username")
+
+    if request.method == "POST":
+        unidad_id = (request.POST.get("unidad") or "").strip()
+        tipo = (request.POST.get("tipo") or "").strip()
+        severidad = (request.POST.get("severidad") or "").strip()
+        descripcion = (request.POST.get("descripcion") or "").strip()
+        kilometraje_raw = (request.POST.get("kilometraje") or "").strip()
+        repartidor_id = (request.POST.get("repartidor") or "").strip()
+        foto = request.FILES.get("foto")
+
+        errors: dict[str, str] = {}
+        if not unidad_id:
+            errors["unidad"] = "Selecciona una unidad."
+        if tipo not in {c[0] for c in ReporteUnidad.TIPO_CHOICES}:
+            errors["tipo"] = "Tipo de reporte no válido."
+        if severidad not in {c[0] for c in ReporteUnidad.SEVERIDAD_CHOICES}:
+            errors["severidad"] = "Severidad no válida."
+        if not descripcion:
+            errors["descripcion"] = "La descripción es obligatoria."
+
+        unidad = None
+        if unidad_id and not errors.get("unidad"):
+            unidad = Unidad.objects.filter(pk=unidad_id, activa=True).first()
+            if not unidad:
+                errors["unidad"] = "Unidad no encontrada."
+
+        repartidor = None
+        if repartidor_id:
+            repartidor = Repartidor.objects.filter(pk=repartidor_id).first()
+
+        kilometraje = None
+        if kilometraje_raw:
+            try:
+                kilometraje = int(kilometraje_raw)
+            except ValueError:
+                errors["kilometraje"] = "El kilometraje debe ser un número entero."
+
+        if not errors:
+            reporte = ReporteUnidad.objects.create(
+                unidad=unidad,
+                repartidor=repartidor,
+                tipo=tipo,
+                severidad=severidad,
+                descripcion=descripcion,
+                kilometraje=kilometraje,
+                foto=foto if foto else None,
+                ip_reporte=request.META.get("REMOTE_ADDR"),
+                estatus=ReporteUnidad.ESTATUS_ABIERTO,
+            )
+            log_event(
+                request.user,
+                "CREATE",
+                "logistica.ReporteUnidad",
+                str(reporte.id),
+                {
+                    "unidad": reporte.unidad.codigo,
+                    "tipo": reporte.tipo,
+                    "severidad": reporte.severidad,
+                    "origen": "erp",
+                },
+            )
+            messages.success(request, f"Reporte #{reporte.id} creado correctamente.")
+            return redirect("logistica:reportes_lista")
+
+        return render(
+            request,
+            "logistica/reporte_form.html",
+            {
+                "module_tabs": _module_tabs("reportes", request.user),
+                "unidades": unidades,
+                "repartidores": repartidores,
+                "tipo_choices": ReporteUnidad.TIPO_CHOICES,
+                "severidad_choices": ReporteUnidad.SEVERIDAD_CHOICES,
+                "errors": errors,
+                "prev": {
+                    "unidad": unidad_id,
+                    "tipo": tipo,
+                    "severidad": severidad,
+                    "descripcion": descripcion,
+                    "kilometraje": kilometraje_raw,
+                    "repartidor": repartidor_id,
+                },
+            },
+        )
+
+    return render(
+        request,
+        "logistica/reporte_form.html",
+        {
+            "module_tabs": _module_tabs("reportes", request.user),
+            "unidades": unidades,
+            "repartidores": repartidores,
+            "tipo_choices": ReporteUnidad.TIPO_CHOICES,
+            "severidad_choices": ReporteUnidad.SEVERIDAD_CHOICES,
+            "errors": {},
+            "prev": {},
         },
     )
 

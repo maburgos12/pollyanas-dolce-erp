@@ -246,7 +246,7 @@ class ReporteUnidad(models.Model):
         (ESTATUS_CERRADO, "Cerrado"),
     ]
 
-    repartidor = models.ForeignKey(Repartidor, on_delete=models.PROTECT, related_name="reportes_unidad")
+    repartidor = models.ForeignKey(Repartidor, on_delete=models.PROTECT, null=True, blank=True, related_name="reportes_unidad")
     unidad = models.ForeignKey(Unidad, on_delete=models.PROTECT, related_name="reportes")
     tipo = models.CharField(max_length=30, choices=TIPO_CHOICES)
     severidad = models.CharField(max_length=20, choices=SEVERIDAD_CHOICES, default=SEVERIDAD_INFORMATIVO)
