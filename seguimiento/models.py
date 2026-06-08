@@ -123,6 +123,14 @@ class SeguimientoChecklistItem(models.Model):
     entregable = models.TextField(blank=True, default="")
     responsable_nombre = models.CharField(max_length=160, blank=True, default="")
     aprobador_nombre = models.CharField(max_length=160, blank=True, default="")
+    # Usuario del ERP que debe aprobar este paso (resuelto del aprobador_nombre durante el import)
+    aprobador_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="seguimiento_pasos_a_aprobar",
+        null=True,
+        blank=True,
+    )
     requiere_aprobacion = models.BooleanField(default=False)
     vence = models.DateTimeField(null=True, blank=True)
     prioridad = models.CharField(max_length=40, blank=True, default="")

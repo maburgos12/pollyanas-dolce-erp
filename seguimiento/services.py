@@ -408,6 +408,24 @@ class AgenteDGSeguimientoImporter:
             )
         return users, empleados, payload
 
+    def _resolver_aprobador_user(self, email: str, nombre: str):
+        """Intenta resolver el aprobador de un paso a un usuario del ERP.
+
+        Busca primero por e-mail (exacto), luego por nombre completo normalizado.
+        Devuelve None si no se puede resolver.
+        """
+        User = get_user_model()
+        if email:
+            user = User.objects.filter(email__iexact=email.strip(), is_active=True).first()
+            if user:
+                return user
+        if nombre:
+            nombre_norm = normalizar_nombre(nombre.strip())
+            for u in User.objects.filter(is_active=True):
+                if normalizar_nombre(u.get_full_name() or u.username) == nombre_norm:
+                    return u
+        return None
+
     def _sync_checklist(self, item: SeguimientoItem, checklist_payload):
         if not checklist_payload:
             item.checklist.all().delete()
@@ -420,6 +438,11 @@ class AgenteDGSeguimientoImporter:
                 continue
             desired_orders.add(index)
             check = existing.get(index)
+            # Resolver el aprobador del ERP desde e-mail o nombre (datos del Agente DG)
+            aprobador_user = self._resolver_aprobador_user(
+                payload.get("aprobador_email") or "",
+                payload.get("aprobador_nombre") or "",
+            )
             defaults = {
                 "titulo": titulo,
                 "origen_step_id": payload.get("origen_step_id"),
@@ -428,6 +451,7 @@ class AgenteDGSeguimientoImporter:
                 "entregable": payload.get("entregable") or "",
                 "responsable_nombre": payload.get("responsable_nombre") or "",
                 "aprobador_nombre": payload.get("aprobador_nombre") or "",
+                "aprobador_user": aprobador_user,
                 "requiere_aprobacion": bool(payload.get("requiere_aprobacion")),
                 "vence": agente_dg_as_datetime(payload.get("vence")) if payload.get("vence") else None,
                 "prioridad": payload.get("prioridad") or "",

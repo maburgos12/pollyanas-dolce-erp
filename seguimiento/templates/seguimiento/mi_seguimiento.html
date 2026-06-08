@@ -408,6 +408,45 @@
     </article>
   </section>
 
+  <!-- Pasos de proyectos que esperan la aprobación de este usuario -->
+  {% if mis_aprobaciones %}
+  <div class="bi-panel" style="margin-bottom:20px; border-left:4px solid var(--dorado);">
+    <p class="seg-section-title">Pasos que esperan tu aprobación <span class="badge bg-warning" style="font-size:.72rem;">{{ mis_aprobaciones|length }}</span></p>
+    <p class="muted" style="margin:-4px 0 12px; font-size:.82rem;">
+      Eres el aprobador designado. El responsable ya los marcó como listos para tu revisión.
+    </p>
+    <div style="display:grid; gap:10px;">
+      {% for paso in mis_aprobaciones %}
+      <div style="padding:12px 14px; background:rgba(201,168,76,.08); border:1px solid rgba(201,168,76,.25); border-radius:12px;">
+        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:flex-start; justify-content:space-between; margin-bottom:6px;">
+          <div>
+            <div style="font-weight:700; font-size:.95rem;">{{ paso.titulo }}</div>
+            <div class="muted" style="font-size:.8rem; margin-top:2px;">
+              Proyecto: <strong>{{ paso.seguimiento.titulo }}</strong>
+              {% with resp=paso.seguimiento.responsable_user %}{% if resp %} · Responsable: {{ resp.get_full_name|default:resp.username }}{% endif %}{% endwith %}
+              {% if paso.vence %} · Vence: {{ paso.vence|date:"d/m/Y" }}{% endif %}
+            </div>
+            {% if paso.entregable %}<div class="muted" style="font-size:.78rem; margin-top:4px;">Entregable: {{ paso.entregable|truncatechars:100 }}</div>{% endif %}
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; flex-shrink:0;">
+            <form method="post" action="{% url 'seguimiento:aprobar_paso' paso.seguimiento_id paso.pk %}">
+              {% csrf_token %}
+              <input type="hidden" name="accion" value="aprobar">
+              <button class="btn btn-primary btn-sm" type="submit">✓ Aprobar</button>
+            </form>
+            <form method="post" action="{% url 'seguimiento:aprobar_paso' paso.seguimiento_id paso.pk %}" onsubmit="return confirm('¿Devolver al responsable para corrección?')">
+              {% csrf_token %}
+              <input type="hidden" name="accion" value="devolver">
+              <button class="btn btn-secondary btn-sm" type="submit">↩ Devolver</button>
+            </form>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   <div class="seguimiento-board {% if modo_detalle %}is-detail{% endif %}">
     {% for section in sections %}
     <section class="bi-panel seguimiento-column {{ section.tone }}">

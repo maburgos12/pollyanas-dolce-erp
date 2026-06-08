@@ -28,4 +28,5 @@ urlpatterns = [
     path("<int:pk>/comentario/<int:comentario_id>/editar/", views.editar_comentario_propio, name="editar_comentario"),
     path("<int:pk>/evidencia/<int:evidencia_id>/editar-nota/", views.editar_nota_evidencia, name="editar_nota_evidencia"),
     path("<int:pk>/evidencia/<int:evidencia_id>/eliminar/", views.eliminar_evidencia_propia, name="eliminar_evidencia"),
+    path("<int:pk>/paso/<int:check_id>/aprobar/", views.aprobar_paso_colaborador, name="aprobar_paso"),
 ]
