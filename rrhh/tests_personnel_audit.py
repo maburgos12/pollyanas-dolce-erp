@@ -151,6 +151,28 @@ class PersonnelNormalizationPlanTests(TestCase):
         self.assertEqual(external_rows[0]["severity"], "info")
         self.assertIn("sin crear empleado Dolce", external_rows[0]["reason"])
 
+    def test_authorized_technical_accounts_are_not_forced_into_employee_rrhh(self):
+        User = get_user_model()
+        User.objects.create_user(username="ad_agent_service")
+        User.objects.create_user(username="omnichannel_service")
+        User.objects.create_user(username="debug-rrhh")
+
+        report = build_personnel_normalization_plan(limit=100)
+        rows_by_user = {}
+        for item in report["proposals"]:
+            rows_by_user.setdefault(item["display"], []).append(item["action"])
+
+        self.assertEqual(
+            rows_by_user["ad_agent_service"],
+            ["cuenta_tecnica_autorizada"],
+        )
+        self.assertEqual(
+            rows_by_user["omnichannel_service"],
+            ["cuenta_tecnica_autorizada"],
+        )
+        self.assertIn("clasificar_cuenta_no_personal", rows_by_user["debug-rrhh"])
+        self.assertIn("clasificar_usuario_sin_empleado", rows_by_user["debug-rrhh"])
+
     def test_command_outputs_markdown_table_and_json(self):
         out = io.StringIO()
         call_command("plan_personnel_normalization", "--limit", "5", stdout=out)
