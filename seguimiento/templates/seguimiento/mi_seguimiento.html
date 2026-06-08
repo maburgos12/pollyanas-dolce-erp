@@ -244,6 +244,47 @@
     text-align: center;
   }
 
+  .seguimiento-item.has-dg-response {
+    border-color: rgba(201, 168, 76, 0.45);
+    background: rgba(255, 252, 240, 0.98);
+  }
+
+  .seg-dg-respuesta {
+    background: rgba(255, 250, 230, 0.92);
+    border: 1px solid rgba(201, 168, 76, 0.25);
+    border-radius: 12px;
+    padding: 10px 12px;
+    display: grid;
+    gap: 5px;
+  }
+
+  .seg-dg-respuesta.is-nueva {
+    border-color: rgba(201, 168, 76, 0.55);
+    background: rgba(255, 248, 210, 0.98);
+  }
+
+  .seg-dg-respuesta-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    font-weight: 800;
+    color: #8b6b1c;
+    flex-wrap: wrap;
+  }
+
+  .seg-dg-fecha {
+    font-weight: 400;
+    color: var(--texto-light);
+  }
+
+  .seg-dg-texto {
+    margin: 0;
+    font-size: 0.88rem;
+    color: var(--texto);
+    line-height: 1.42;
+  }
+
   @media (max-width: 1320px) {
     .seguimiento-board {
       grid-template-columns: 1fr;
@@ -395,7 +436,7 @@
 
       <div class="bi-list bi-list-dense seguimiento-list">
         {% for item in section.items %}
-        <article class="seguimiento-item {% if item.esta_vencido %}is-overdue{% endif %}">
+        <article class="seguimiento-item {% if item.esta_vencido %}is-overdue{% endif %} {% if item.respuesta_dg_nueva %}has-dg-response{% endif %}">
           <div>
             <div class="seguimiento-item-head">
               <h3 class="seguimiento-item-title"><a href="{% url 'seguimiento:detalle' item.pk %}" style="color:inherit; text-decoration:none;">{{ item.titulo }}</a></h3>
@@ -441,6 +482,18 @@
             <span class="bi-progress-fill {% if item.esta_vencido %}is-danger{% elif item.progreso_pct >= 100 %}is-success{% else %}is-plum{% endif %}" style="width: {{ item.progreso_pct }}%"></span>
           </div>
           <div class="bi-subtle">{{ item.checklist_done }}/{{ item.checklist_total }} checks · {{ item.progreso_pct }}%</div>
+
+          {% if item.ultimo_comentario_dg %}
+          <div class="seg-dg-respuesta {% if item.respuesta_dg_nueva %}is-nueva{% endif %}">
+            <div class="seg-dg-respuesta-head">
+              <span>⭐</span>
+              <span>Director General</span>
+              <span class="seg-dg-fecha">· {{ item.ultimo_comentario_dg.created_at|date:"d/m/Y H:i" }}</span>
+              {% if item.respuesta_dg_nueva %}<span class="badge bg-warning" style="font-size:.7rem; padding:2px 8px;">Nuevo</span>{% endif %}
+            </div>
+            <p class="seg-dg-texto">{{ item.ultimo_comentario_dg.comentario|truncatechars:260 }}</p>
+          </div>
+          {% endif %}
 
           <details>
             <summary class="seguimiento-action-summary">Actualizar seguimiento</summary>
