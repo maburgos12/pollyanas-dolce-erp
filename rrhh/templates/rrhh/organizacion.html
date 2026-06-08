@@ -35,16 +35,67 @@
   .identity-sev-warning { background: #fff1ce; color: #765300; }
   .identity-sev-info { background: #e7f1ff; color: #1f4f8f; }
   .identity-action { color: var(--vino); font-weight: 900; }
-  .identity-value { max-width: 240px; overflow-wrap: anywhere; }
+  .identity-value { overflow-wrap: anywhere; }
   .org-tree { display: grid; gap: 10px; }
   .org-leader { border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; }
   .org-leader-title { color: var(--vino); font-weight: 900; }
   .org-leader-meta { color: var(--texto-light); font-size: 13px; margin-top: 2px; }
   .org-children { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
   .org-chip { background: #f7edf2; border-radius: 999px; color: var(--texto); display: inline-flex; font-size: 12px; font-weight: 800; padding: 5px 9px; }
-  .org-table { min-width: 1120px; width: 100%; border-collapse: collapse; }
-  .org-table th, .org-table td { border-bottom: 1px solid var(--rosa); padding: 10px; text-align: left; vertical-align: top; }
-  .org-table th { color: var(--vino); font-size: 12px; text-transform: uppercase; }
+  .org-table-shell {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-gutter: stable;
+  }
+  .org-table {
+    border-collapse: collapse;
+    table-layout: fixed;
+    width: 100%;
+  }
+  .org-table th,
+  .org-table td {
+    border-bottom: 1px solid var(--rosa);
+    font-size: 13px;
+    line-height: 1.35;
+    padding: 10px 12px;
+    text-align: left;
+    vertical-align: top;
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: anywhere;
+  }
+  .org-table th {
+    color: var(--vino);
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+  .identity-table { min-width: 1260px; }
+  .identity-table .col-priority { width: 100px; }
+  .identity-table .col-plane { width: 110px; }
+  .identity-table .col-action { width: 170px; }
+  .identity-table .col-entity { width: 230px; }
+  .identity-table .col-current,
+  .identity-table .col-proposed { width: 230px; }
+  .identity-table .col-reason { width: 280px; }
+  .summary-table { min-width: 680px; }
+  .summary-table .col-department { width: 46%; }
+  .summary-table .col-count { width: 18%; }
+  .master-table { min-width: 1380px; }
+  .master-table .col-code { width: 90px; }
+  .master-table .col-employee { width: 230px; }
+  .master-table .col-origin,
+  .master-table .col-department,
+  .master-table .col-area,
+  .master-table .col-position,
+  .master-table .col-operative,
+  .master-table .col-boss,
+  .master-table .col-branch,
+  .master-table .col-type,
+  .master-table .col-bonus { width: 120px; }
+  .master-table .col-position,
+  .master-table .col-boss { width: 180px; }
   .org-badge { background: rgba(201,168,76,.18); border-radius: 999px; color: #6f5415; display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }
   .org-muted { color: var(--texto-light); font-size: 13px; }
   @media (max-width: 1100px) {
@@ -96,8 +147,17 @@
         <div class="identity-stat"><strong>{{ identity_map.summary.by_severity.info|default:0 }}</strong><span>Info</span></div>
       </div>
     </div>
-    <div class="table-responsive">
-      <table class="org-table">
+    <div class="table-responsive org-table-shell">
+      <table class="org-table identity-table">
+        <colgroup>
+          <col class="col-priority">
+          <col class="col-plane">
+          <col class="col-action">
+          <col class="col-entity">
+          <col class="col-current">
+          <col class="col-proposed">
+          <col class="col-reason">
+        </colgroup>
         <thead>
           <tr>
             <th>Prioridad</th>
@@ -150,8 +210,14 @@
 
     <section class="org-card">
       <h2>Resumen por departamento</h2>
-      <div class="table-responsive">
-        <table class="org-table" style="min-width:680px;">
+      <div class="table-responsive org-table-shell">
+        <table class="org-table summary-table">
+          <colgroup>
+            <col class="col-department">
+            <col class="col-count">
+            <col class="col-count">
+            <col class="col-count">
+          </colgroup>
           <thead><tr><th>Departamento</th><th>Activos</th><th>Bonos ventas</th><th>Bonos producción</th></tr></thead>
           <tbody>
             {% for row in departamentos %}
@@ -172,8 +238,21 @@
 
   <section class="org-card">
     <h2>Base maestra de personal</h2>
-    <div class="table-responsive">
-      <table class="org-table">
+    <div class="table-responsive org-table-shell">
+      <table class="org-table master-table">
+        <colgroup>
+          <col class="col-code">
+          <col class="col-employee">
+          <col class="col-origin">
+          <col class="col-department">
+          <col class="col-area">
+          <col class="col-position">
+          <col class="col-operative">
+          <col class="col-boss">
+          <col class="col-branch">
+          <col class="col-type">
+          <col class="col-bonus">
+        </colgroup>
         <thead>
           <tr>
             <th>Código</th>
@@ -209,7 +288,7 @@
             </td>
           </tr>
           {% empty %}
-          <tr><td colspan="9">Sin empleados activos.</td></tr>
+          <tr><td colspan="11">Sin empleados activos.</td></tr>
           {% endfor %}
         </tbody>
       </table>
