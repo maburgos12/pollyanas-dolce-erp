@@ -767,11 +767,28 @@
                   <option value="{{ s.id }}">{{ s.nombre }}</option>
                 {% endfor %}
               </select>
-              <div class="rrhh-help">Para repartidores define desde qué sucursal opera la app de logística.</div>
+              <div class="rrhh-help">Define desde qué sucursal opera el usuario en apps móviles y capturas.</div>
+            </div>
+            <div class="rrhh-field span-2">
+              <label for="logistica_tipo_identidad">Acceso logística / unidades</label>
+              <select id="logistica_tipo_identidad" class="input-field" name="logistica_tipo_identidad" data-logistics-access>
+                {% for value,label in logistica_tipo_identidad_choices %}
+                  <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+              <div class="rrhh-help">Repartidor operativo agrega el grupo repartidor. Conductor ocasional solo autoriza uso de unidades con su mismo usuario.</div>
             </div>
             <div class="rrhh-field span-2" data-driver-license-block style="display:none">
-              <label>Licencia de repartidor</label>
+              <label>Licencia y autorización de unidades</label>
               <div class="rrhh-form-grid">
+                <div class="rrhh-field">
+                  <label for="motivo_autorizacion">Motivo de autorización</label>
+                  <input id="motivo_autorizacion" class="input-field" type="text" name="motivo_autorizacion">
+                </div>
+                <div class="rrhh-field">
+                  <label for="autorizado_por">Autorizado por</label>
+                  <input id="autorizado_por" class="input-field" type="text" name="autorizado_por">
+                </div>
                 <div class="rrhh-field">
                   <label for="numero_licencia">Número de licencia</label>
                   <input id="numero_licencia" class="input-field" type="text" name="numero_licencia">
@@ -787,6 +804,10 @@
                 <div class="rrhh-field">
                   <label for="archivo_licencia">Archivo licencia</label>
                   <input id="archivo_licencia" class="input-field" type="file" name="archivo_licencia" accept=".pdf,image/*">
+                </div>
+                <div class="rrhh-field span-2">
+                  <label for="notas_identidad">Notas de logística</label>
+                  <textarea id="notas_identidad" class="input-field" name="notas_identidad" rows="2"></textarea>
                 </div>
               </div>
             </div>
@@ -1276,9 +1297,31 @@
                         </select>
                         <div class="rrhh-help">Define desde qué sucursal opera el usuario en apps de captura (mermas, recepción, etc.).</div>
                       </div>
-                      <div class="rrhh-field span-2" data-driver-license-block style="{% if e.puesto_operativo != 'REPARTIDOR' %}display:none{% endif %}">
-                        <label>Licencia de repartidor</label>
+                      <div class="rrhh-field span-2">
+                        <label for="edit_logistica_tipo_identidad_{{ e.id }}">Acceso logística / unidades</label>
+                        <select id="edit_logistica_tipo_identidad_{{ e.id }}" class="input-field" name="logistica_tipo_identidad" data-logistics-access>
+                          {% for value,label in logistica_tipo_identidad_choices %}
+                            <option value="{{ value }}"
+                              {% if e.repartidor_logistica and e.repartidor_logistica.tipo_identidad == value %}
+                                selected
+                              {% elif not e.repartidor_logistica and e.puesto_operativo == 'REPARTIDOR' and value == 'empleado_dolce' %}
+                                selected
+                              {% endif %}>{{ label }}</option>
+                          {% endfor %}
+                        </select>
+                        <div class="rrhh-help">Usa conductor ocasional para jefaturas o empleados que manejan unidades sin ser repartidores.</div>
+                      </div>
+                      <div class="rrhh-field span-2" data-driver-license-block style="{% if e.puesto_operativo != 'REPARTIDOR' and not e.repartidor_logistica %}display:none{% endif %}">
+                        <label>Licencia y autorización de unidades</label>
                         <div class="rrhh-form-grid">
+                          <div class="rrhh-field">
+                            <label for="edit_motivo_autorizacion_{{ e.id }}">Motivo de autorización</label>
+                            <input id="edit_motivo_autorizacion_{{ e.id }}" class="input-field" type="text" name="motivo_autorizacion" value="{{ e.repartidor_logistica.motivo_autorizacion|default:'' }}">
+                          </div>
+                          <div class="rrhh-field">
+                            <label for="edit_autorizado_por_{{ e.id }}">Autorizado por</label>
+                            <input id="edit_autorizado_por_{{ e.id }}" class="input-field" type="text" name="autorizado_por" value="{{ e.repartidor_logistica.autorizado_por|default:'' }}">
+                          </div>
                           <div class="rrhh-field">
                             <label for="edit_numero_licencia_{{ e.id }}">Número de licencia</label>
                             <input id="edit_numero_licencia_{{ e.id }}" class="input-field" type="text" name="numero_licencia" value="{{ e.repartidor_logistica.numero_licencia|default:'' }}">
@@ -1294,6 +1337,10 @@
                           <div class="rrhh-field">
                             <label for="edit_archivo_licencia_{{ e.id }}">Archivo licencia</label>
                             <input id="edit_archivo_licencia_{{ e.id }}" class="input-field" type="file" name="archivo_licencia" accept=".pdf,image/*">
+                          </div>
+                          <div class="rrhh-field span-2">
+                            <label for="edit_notas_identidad_{{ e.id }}">Notas de logística</label>
+                            <textarea id="edit_notas_identidad_{{ e.id }}" class="input-field" name="notas_identidad" rows="2">{{ e.repartidor_logistica.notas_identidad|default:'' }}</textarea>
                           </div>
                         </div>
                       </div>
@@ -1443,8 +1490,13 @@
 
   function _toggleOperationalBlocks(form, puesto) {
     if (!form) return;
+    const logisticsAccess = form.querySelector('[data-logistics-access]');
+    if (puesto === 'REPARTIDOR' && logisticsAccess && !logisticsAccess.value) {
+      logisticsAccess.value = 'empleado_dolce';
+    }
+    const hasLogisticsAccess = Boolean(logisticsAccess && logisticsAccess.value);
     const licenseBlock = form.querySelector('[data-driver-license-block]');
-    if (licenseBlock) licenseBlock.style.display = puesto === 'REPARTIDOR' ? '' : 'none';
+    if (licenseBlock) licenseBlock.style.display = (puesto === 'REPARTIDOR' || hasLogisticsAccess) ? '' : 'none';
     _toggleNewUserFields(form);
   }
 
@@ -1466,6 +1518,13 @@
     const createToggle = event.target.closest('[data-create-user-toggle]');
     if (createToggle) {
       _toggleNewUserFields(createToggle.closest('form'));
+      return;
+    }
+    const logisticsAccess = event.target.closest('[data-logistics-access]');
+    if (logisticsAccess) {
+      const form = logisticsAccess.closest('form');
+      const puesto = form?.querySelector('select[name="puesto_operativo"]')?.value || '';
+      _toggleOperationalBlocks(form, puesto);
       return;
     }
     const select = event.target.closest('[data-catalog-select]');

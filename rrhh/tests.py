@@ -1089,6 +1089,49 @@ class RRHHViewsTests(TestCase):
         self.assertEqual(str(repartidor.licencia_expiracion), "2028-01-01")
         self.assertIn("licencia", repartidor.archivo_licencia.name)
 
+    def test_empleados_autoriza_conductor_occasional_sin_grupo_repartidor(self):
+        from api.logistica_views import _can_operate_pwa
+        from logistica.models import Repartidor
+
+        sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        usuario = User.objects.create_user(username="carolina.cayetano", password="pass123")
+        usuario.groups.add(Group.objects.create(name="repartidor"))
+
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "create",
+                "nombre": "CAYETANO VALENZUELA CAROLINA",
+                "area": "EMBETUNADO",
+                "puesto_operativo": "EMBETUNADO",
+                "usuario_erp": str(usuario.id),
+                "sucursal_app_id": str(sucursal.id),
+                "logistica_tipo_identidad": "empleado_conductor_ocasional",
+                "motivo_autorizacion": "Vueltas de la empresa",
+                "autorizado_por": "Dirección",
+                "notas_identidad": "No es repartidora operativa.",
+                "numero_licencia": "LIC-OCASIONAL",
+                "licencia_expedicion": "2026-01-01",
+                "licencia_expiracion": "2028-01-01",
+                "salario_diario": "300.00",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        empleado = Empleado.objects.get(nombre="CAYETANO VALENZUELA CAROLINA")
+        usuario.refresh_from_db()
+        repartidor = Repartidor.objects.get(user=usuario)
+        self.assertEqual(empleado.usuario_erp, usuario)
+        self.assertEqual(UserProfile.objects.get(user=usuario).sucursal, sucursal)
+        self.assertEqual(repartidor.tipo_identidad, Repartidor.TIPO_EMPLEADO_CONDUCTOR_OCASIONAL)
+        self.assertEqual(repartidor.motivo_autorizacion, "Vueltas de la empresa")
+        self.assertEqual(repartidor.autorizado_por, "Dirección")
+        self.assertEqual(repartidor.notas_identidad, "No es repartidora operativa.")
+        self.assertEqual(repartidor.numero_licencia, "LIC-OCASIONAL")
+        self.assertFalse(usuario.groups.filter(name="repartidor").exists())
+        self.assertTrue(_can_operate_pwa(usuario))
+
     def test_empleados_bloquea_crear_usuario_duplicado_desde_rrhh(self):
         sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
         User.objects.create_user(username="rep.duplicado", password="pass12345")
