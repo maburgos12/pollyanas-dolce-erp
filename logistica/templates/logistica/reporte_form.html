@@ -6,262 +6,204 @@
 
 {% block extra_css %}
 <style>
-  /* ── logi-box header (patrón estándar del módulo logística) ── */
-  .logi-box-head  { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 20px; }
-  .logi-box-title { margin: 0; font-family: "Playfair Display", serif; font-size: 26px; line-height: 1.1; color: #3f2633; }
-  .logi-box-copy  { margin: 5px 0 0; color: #77656d; font-size: 14px; line-height: 1.45; }
+  /* Únicamente para los 3 elementos sin equivalente global: tipo, severidad, foto */
 
-  /* ── grid 2 columnas para el formulario ── */
-  .reporte-form-grid { display: grid; gap: 20px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .reporte-form-grid .full { grid-column: 1 / -1; }
-
-  /* ── campo individual ── */
-  .rf-field { display: grid; gap: 6px; }
-  .rf-label { font-size: 13px; font-weight: 800; color: var(--vino, #8B2252); display: flex; align-items: center; gap: 5px; }
-  .rf-label .rf-req { color: #bc3b3b; }
-  .rf-hint  { font-size: 12px; color: var(--texto-light, #7a6565); margin: 0; }
-  .rf-error { font-size: 12px; font-weight: 700; color: #bc3b3b; }
-
-  /* ── tipo de reporte ── */
-  .rf-tipo-group { display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .rf-tipo-opt  { position: relative; }
-  .rf-tipo-opt input[type="radio"] { position: absolute; opacity: 0; width: 0; height: 0; }
-  .rf-tipo-label {
+  /* Tipo de reporte — radio cards en grid */
+  .tipo-grid { display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tipo-opt  { position: relative; }
+  .tipo-opt input[type="radio"] { position: absolute; opacity: 0; width: 0; height: 0; }
+  .tipo-btn {
     display: flex; align-items: center; gap: 8px; padding: 10px 12px;
-    border-radius: 8px; cursor: pointer;
-    border: 1.5px solid #e8d0dc; background: #fffaf5;
-    font-size: 13px; font-weight: 700; color: var(--texto, #3d2b2b);
+    border-radius: var(--radius-sm); cursor: pointer;
+    border: 1.5px solid var(--rosa-deep); background: #fff;
+    font-size: 13px; font-weight: 700; color: var(--texto);
     transition: border-color .15s, background .15s;
   }
-  .rf-tipo-opt input:checked + .rf-tipo-label { border-color: #8B2252; background: #fdf0f5; color: #8B2252; }
-  .rf-tipo-icon { font-size: 17px; line-height: 1; }
+  .tipo-opt input:checked + .tipo-btn { border-color: var(--vino); background: #fdf0f5; color: var(--vino); }
+  .tipo-icon { font-size: 16px; line-height: 1; }
 
-  /* ── severidad visual ── */
-  .rf-severity-group { display: flex; gap: 10px; flex-wrap: wrap; }
-  .rf-severity-opt { position: relative; flex: 1; min-width: 110px; }
-  .rf-severity-opt input[type="radio"] { position: absolute; opacity: 0; width: 0; height: 0; }
-  .rf-severity-label {
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 6px; padding: 14px 10px; border-radius: 8px; cursor: pointer;
-    border: 2px solid #e8d0dc; background: #fffaf5;
-    font-size: 13px; font-weight: 800; text-align: center;
+  /* Severidad — tres cards horizontales */
+  .sev-grid { display: flex; gap: 10px; }
+  .sev-opt  { position: relative; flex: 1; }
+  .sev-opt input[type="radio"] { position: absolute; opacity: 0; width: 0; height: 0; }
+  .sev-btn {
+    display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 10px;
+    border-radius: var(--radius-sm); cursor: pointer;
+    border: 2px solid var(--rosa-deep); background: #fff;
+    font-size: 13px; font-weight: 800; text-align: center; width: 100%;
     transition: border-color .15s, background .15s, box-shadow .15s;
   }
-  .rf-sev-icon { font-size: 22px; line-height: 1; }
-  .rf-severity-opt input:checked + .rf-severity-label { box-shadow: 0 0 0 3px currentColor; }
-  .rf-severity-opt.informativo input:checked + .rf-severity-label { border-color: #1f7554; background: #e5f5ee; color: #1f7554; }
-  .rf-severity-opt.urgente     input:checked + .rf-severity-label { border-color: #9a6a00; background: #fff4d8; color: #9a6a00; }
-  .rf-severity-opt.critico     input:checked + .rf-severity-label { border-color: #bc3b56; background: #ffe8ec; color: #bc3b56; }
+  .sev-opt input:checked + .sev-btn { box-shadow: 0 0 0 3px currentColor; }
+  .sev-opt.ok   input:checked + .sev-btn { border-color: #1f7554; background: #e5f5ee; color: #1f7554; }
+  .sev-opt.warn input:checked + .sev-btn { border-color: #9a6a00; background: #fff4d8; color: #9a6a00; }
+  .sev-opt.crit input:checked + .sev-btn { border-color: #bc3b56; background: #ffe8ec; color: #bc3b56; }
 
-  /* ── foto upload ── */
-  .rf-foto-zone {
-    border: 2px dashed rgba(139,34,82,.30); border-radius: 8px; padding: 20px;
-    text-align: center; cursor: pointer; background: #fffaf5;
+  /* Zona de foto */
+  .foto-zone {
+    border: 2px dashed var(--rosa-deep); border-radius: var(--radius-sm);
+    padding: 20px; text-align: center; cursor: pointer; background: #fff;
     transition: border-color .15s, background .15s;
   }
-  .rf-foto-zone:hover { border-color: #8B2252; background: #fdf0f5; }
-  .rf-foto-zone input[type="file"] { display: none; }
-  .rf-foto-zone-text { color: var(--texto-light, #7a6565); font-size: 13px; margin: 6px 0 0; }
-  .rf-foto-preview { display: none; margin-top: 10px; }
-  .rf-foto-preview img { max-height: 140px; border-radius: 8px; border: 1px solid #efc7d8; object-fit: cover; }
-
-  /* ── separador y nota informativa ── */
-  .rf-section-sep { border: 0; border-top: 1px solid rgba(139,34,82,.12); margin: 0; }
-  .rf-info-note {
-    display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px;
-    background: #fdf0f5; border: 1px solid #efc7d8; border-radius: 8px;
-    font-size: 13px; color: #6f3150;
-  }
-  .rf-info-note svg { flex-shrink: 0; margin-top: 1px; }
-
-  /* ── acciones ── */
-  .rf-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+  .foto-zone:hover { border-color: var(--vino); background: #fdf0f5; }
+  .foto-zone input[type="file"] { display: none; }
+  .foto-preview { display: none; margin-top: 10px; }
+  .foto-preview img { max-height: 140px; border-radius: var(--radius-sm); border: 1px solid var(--rosa-deep); object-fit: cover; }
 
   @media (max-width: 760px) {
-    .reporte-form-grid    { grid-template-columns: 1fr; }
-    .rf-tipo-group        { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .rf-severity-group    { flex-direction: column; }
-    .rf-actions           { flex-direction: column; }
+    .tipo-grid { grid-template-columns: repeat(2, 1fr); }
+    .sev-grid  { flex-wrap: wrap; }
+    .sev-opt   { min-width: 30%; }
   }
 </style>
-<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
 {% endblock %}
 
 {% block content %}
-<div class="reports-shell">
 
-  {# ── tabs del módulo ── #}
-  <section class="module-tabs report-tabs" aria-label="Submódulos Logística">
-    {% for tab in module_tabs %}
-      <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
-    {% endfor %}
-  </section>
+{# ── tabs del módulo ── #}
+<section class="module-tabs report-tabs" aria-label="Submódulos Logística">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
 
-  {# ── nota informativa ── #}
-  <div class="rf-info-note">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8B2252" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="10"/>
-      <line x1="12" y1="8" x2="12" y2="12"/>
-      <line x1="12" y1="16" x2="12.01" y2="16"/>
-    </svg>
-    <span>Los reportes creados desde el ERP quedan registrados como <strong>Abiertos</strong> y activan la notificación automática al equipo de compras y mantenimiento.</span>
-  </div>
-
-  {# ── card principal ── #}
-  <section class="logi-box">
-    <div class="logi-box-head">
-      <div>
-        <h1 class="logi-box-title">Nuevo reporte de unidad</h1>
-        <p class="logi-box-copy">Registra una falla, incidencia o necesidad de mantenimiento directamente desde el ERP.</p>
-      </div>
-    </div>
-
-    <form method="post" enctype="multipart/form-data" novalidate>
-      {% csrf_token %}
-      <div class="reporte-form-grid">
-
-        {# ── unidad ── #}
-        <div class="rf-field">
-          <label class="rf-label" for="id_unidad">Unidad <span class="rf-req">*</span></label>
-          <select class="input-field" id="id_unidad" name="unidad" required>
-            <option value="">Selecciona unidad</option>
-            {% for u in unidades %}
-            <option value="{{ u.id }}" {% if prev.unidad == u.id|stringformat:"s" %}selected{% endif %}>
-              {{ u.codigo }}{% if u.placa %} · {{ u.placa }}{% endif %}{% if u.descripcion %} — {{ u.descripcion }}{% endif %}
-            </option>
-            {% endfor %}
-          </select>
-          {% if errors.unidad %}<p class="rf-error">{{ errors.unidad }}</p>{% endif %}
-        </div>
-
-        {# ── repartidor (opcional) ── #}
-        <div class="rf-field">
-          <label class="rf-label" for="id_repartidor">Repartidor asociado</label>
-          <select class="input-field" id="id_repartidor" name="repartidor">
-            <option value="">Sin repartidor (reporte de gestión)</option>
-            {% for r in repartidores %}
-            <option value="{{ r.id }}" {% if prev.repartidor == r.id|stringformat:"s" %}selected{% endif %}>{{ r }}</option>
-            {% endfor %}
-          </select>
-          <p class="rf-hint">Opcional. Selecciona si el reporte está vinculado a un repartidor específico.</p>
-        </div>
-
-        {# ── tipo ── #}
-        <div class="rf-field full">
-          <label class="rf-label">Tipo de reporte <span class="rf-req">*</span></label>
-          <div class="rf-tipo-group">
-            {% for value, label in tipo_choices %}
-            <div class="rf-tipo-opt">
-              <input type="radio" id="tipo_{{ value }}" name="tipo" value="{{ value }}"
-                {% if prev.tipo == value or not prev.tipo and value == "falla" %}checked{% endif %} required>
-              <label class="rf-tipo-label" for="tipo_{{ value }}">
-                <span class="rf-tipo-icon">
-                  {% if value == "falla" %}🔧
-                  {% elif value == "mantenimiento" %}🛠
-                  {% elif value == "accidente" %}⚠️
-                  {% elif value == "llanta" %}🔩
-                  {% elif value == "documentos" %}📄
-                  {% else %}📋{% endif %}
-                </span>
-                {{ label }}
-              </label>
-            </div>
-            {% endfor %}
-          </div>
-          {% if errors.tipo %}<p class="rf-error">{{ errors.tipo }}</p>{% endif %}
-        </div>
-
-        {# ── severidad ── #}
-        <div class="rf-field full">
-          <label class="rf-label">Severidad <span class="rf-req">*</span></label>
-          <div class="rf-severity-group">
-            <div class="rf-severity-opt informativo">
-              <input type="radio" id="sev_informativo" name="severidad" value="informativo"
-                {% if prev.severidad == "informativo" or not prev.severidad %}checked{% endif %}>
-              <label class="rf-severity-label" for="sev_informativo">
-                <span class="rf-sev-icon">🟢</span>Informativo
-              </label>
-            </div>
-            <div class="rf-severity-opt urgente">
-              <input type="radio" id="sev_urgente" name="severidad" value="urgente"
-                {% if prev.severidad == "urgente" %}checked{% endif %}>
-              <label class="rf-severity-label" for="sev_urgente">
-                <span class="rf-sev-icon">🟡</span>Urgente
-              </label>
-            </div>
-            <div class="rf-severity-opt critico">
-              <input type="radio" id="sev_critico" name="severidad" value="critico"
-                {% if prev.severidad == "critico" %}checked{% endif %}>
-              <label class="rf-severity-label" for="sev_critico">
-                <span class="rf-sev-icon">🔴</span>Crítico
-              </label>
-            </div>
-          </div>
-          {% if errors.severidad %}<p class="rf-error">{{ errors.severidad }}</p>{% endif %}
-        </div>
-
-        <hr class="rf-section-sep full">
-
-        {# ── descripción ── #}
-        <div class="rf-field full">
-          <label class="rf-label" for="id_descripcion">Descripción <span class="rf-req">*</span></label>
-          <textarea class="input-field" id="id_descripcion" name="descripcion" rows="4"
-            placeholder="Describe el problema con el mayor detalle posible: síntomas, cuándo ocurrió, condiciones observadas…"
-            required>{{ prev.descripcion|default:"" }}</textarea>
-          {% if errors.descripcion %}<p class="rf-error">{{ errors.descripcion }}</p>{% endif %}
-        </div>
-
-        {# ── kilometraje ── #}
-        <div class="rf-field">
-          <label class="rf-label" for="id_kilometraje">Kilometraje actual</label>
-          <input class="input-field" id="id_kilometraje" name="kilometraje" type="number" min="0"
-            placeholder="Ej: 84500" value="{{ prev.kilometraje|default:'' }}">
-          <p class="rf-hint">Opcional. Úsalo para registrar el odómetro al momento del reporte.</p>
-          {% if errors.kilometraje %}<p class="rf-error">{{ errors.kilometraje }}</p>{% endif %}
-        </div>
-
-        {# ── foto ── #}
-        <div class="rf-field">
-          <label class="rf-label">Foto de evidencia</label>
-          <div class="rf-foto-zone" id="rf-foto-zone" onclick="document.getElementById('id_foto').click()">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#8B2252" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-              <circle cx="12" cy="13" r="4"/>
-            </svg>
-            <p class="rf-foto-zone-text">Toca para adjuntar foto (JPG, PNG · máx. 10 MB)</p>
-            <input id="id_foto" name="foto" type="file" accept="image/*" onchange="previewFoto(this)">
-          </div>
-          <div class="rf-foto-preview" id="rf-foto-preview">
-            <img id="rf-foto-img" src="" alt="Vista previa">
-            <p class="rf-hint" id="rf-foto-name"></p>
-          </div>
-        </div>
-
-      </div>{# end reporte-form-grid #}
-
-      <div class="rf-actions">
-        <button class="btn btn-primary" style="background:#8B2252;border-color:#8B2252;" type="submit">Crear reporte</button>
-        <a class="btn btn-secondary" href="{% url 'logistica:reportes_lista' %}">Cancelar</a>
-      </div>
-    </form>
-  </section>
-
+{# ── aviso informativo ── #}
+<div class="alert alert-info" role="note">
+  Los reportes creados desde el ERP quedan registrados como <strong>Abiertos</strong> y activan la notificación automática al equipo de compras y mantenimiento.
 </div>
+
+{# ── formulario ── #}
+<section class="card">
+  <div class="card-header">Nuevo reporte de unidad</div>
+  <p class="muted">Registra una falla, incidencia o necesidad de mantenimiento directamente desde el ERP.</p>
+
+  <form method="post" enctype="multipart/form-data" novalidate>
+    {% csrf_token %}
+    <div class="form-grid-2">
+
+      {# Unidad #}
+      <div class="form-group">
+        <label for="id_unidad">Unidad <span class="text-danger">*</span></label>
+        <select class="input-field" id="id_unidad" name="unidad" required>
+          <option value="">Selecciona unidad</option>
+          {% for u in unidades %}
+          <option value="{{ u.id }}" {% if prev.unidad == u.id|stringformat:"s" %}selected{% endif %}>
+            {{ u.codigo }}{% if u.placa %} · {{ u.placa }}{% endif %}{% if u.descripcion %} — {{ u.descripcion }}{% endif %}
+          </option>
+          {% endfor %}
+        </select>
+        {% if errors.unidad %}<p class="text-danger">{{ errors.unidad }}</p>{% endif %}
+      </div>
+
+      {# Repartidor (opcional) #}
+      <div class="form-group">
+        <label for="id_repartidor">Repartidor asociado</label>
+        <select class="input-field" id="id_repartidor" name="repartidor">
+          <option value="">Sin repartidor (reporte de gestión)</option>
+          {% for r in repartidores %}
+          <option value="{{ r.id }}" {% if prev.repartidor == r.id|stringformat:"s" %}selected{% endif %}>{{ r }}</option>
+          {% endfor %}
+        </select>
+        <p class="muted">Opcional. Selecciona si el reporte está vinculado a un repartidor específico.</p>
+      </div>
+
+      {# Tipo de reporte #}
+      <div class="form-group full">
+        <label>Tipo de reporte <span class="text-danger">*</span></label>
+        <div class="tipo-grid">
+          {% for value, label in tipo_choices %}
+          <div class="tipo-opt">
+            <input type="radio" id="tipo_{{ value }}" name="tipo" value="{{ value }}"
+              {% if prev.tipo == value or not prev.tipo and value == "falla" %}checked{% endif %} required>
+            <label class="tipo-btn" for="tipo_{{ value }}">
+              <span class="tipo-icon">
+                {% if value == "falla" %}🔧{% elif value == "mantenimiento" %}🛠{% elif value == "accidente" %}⚠️{% elif value == "llanta" %}🔩{% elif value == "documentos" %}📄{% else %}📋{% endif %}
+              </span>
+              {{ label }}
+            </label>
+          </div>
+          {% endfor %}
+        </div>
+        {% if errors.tipo %}<p class="text-danger">{{ errors.tipo }}</p>{% endif %}
+      </div>
+
+      {# Severidad #}
+      <div class="form-group full">
+        <label>Severidad <span class="text-danger">*</span></label>
+        <div class="sev-grid">
+          <div class="sev-opt ok">
+            <input type="radio" id="sev_informativo" name="severidad" value="informativo"
+              {% if prev.severidad == "informativo" or not prev.severidad %}checked{% endif %}>
+            <label class="sev-btn" for="sev_informativo"><span>🟢</span>Informativo</label>
+          </div>
+          <div class="sev-opt warn">
+            <input type="radio" id="sev_urgente" name="severidad" value="urgente"
+              {% if prev.severidad == "urgente" %}checked{% endif %}>
+            <label class="sev-btn" for="sev_urgente"><span>🟡</span>Urgente</label>
+          </div>
+          <div class="sev-opt crit">
+            <input type="radio" id="sev_critico" name="severidad" value="critico"
+              {% if prev.severidad == "critico" %}checked{% endif %}>
+            <label class="sev-btn" for="sev_critico"><span>🔴</span>Crítico</label>
+          </div>
+        </div>
+        {% if errors.severidad %}<p class="text-danger">{{ errors.severidad }}</p>{% endif %}
+      </div>
+
+      {# Descripción #}
+      <div class="form-group full">
+        <label for="id_descripcion">Descripción <span class="text-danger">*</span></label>
+        <textarea class="input-field" id="id_descripcion" name="descripcion" rows="4"
+          placeholder="Describe el problema con el mayor detalle posible: síntomas, cuándo ocurrió, condiciones observadas…"
+          required>{{ prev.descripcion|default:"" }}</textarea>
+        {% if errors.descripcion %}<p class="text-danger">{{ errors.descripcion }}</p>{% endif %}
+      </div>
+
+      {# Kilometraje #}
+      <div class="form-group">
+        <label for="id_kilometraje">Kilometraje actual</label>
+        <input class="input-field" id="id_kilometraje" name="kilometraje" type="number" min="0"
+          placeholder="Ej: 84500" value="{{ prev.kilometraje|default:'' }}">
+        <p class="muted">Opcional. Registra el odómetro al momento del reporte.</p>
+        {% if errors.kilometraje %}<p class="text-danger">{{ errors.kilometraje }}</p>{% endif %}
+      </div>
+
+      {# Foto #}
+      <div class="form-group">
+        <label>Foto de evidencia</label>
+        <div class="foto-zone" id="foto-zone" onclick="document.getElementById('id_foto').click()">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--vino)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+            <circle cx="12" cy="13" r="4"/>
+          </svg>
+          <p class="muted" style="margin:4px 0 0;">JPG / PNG · máx. 10 MB</p>
+          <input id="id_foto" name="foto" type="file" accept="image/*" onchange="previewFoto(this)">
+        </div>
+        <div class="foto-preview" id="foto-preview">
+          <img id="foto-img" src="" alt="Vista previa">
+          <p class="muted" id="foto-name"></p>
+        </div>
+      </div>
+
+    </div>{# /form-grid-2 #}
+
+    <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">
+      <button class="btn btn-primary" style="background:var(--vino);border-color:var(--vino);" type="submit">Crear reporte</button>
+      <a class="btn btn-secondary" href="{% url 'logistica:reportes_lista' %}">Cancelar</a>
+    </div>
+  </form>
+</section>
+
 {% endblock %}
 
 {% block extra_js %}
 <script>
 function previewFoto(input) {
-  const preview = document.getElementById("rf-foto-preview");
-  const img     = document.getElementById("rf-foto-img");
-  const name    = document.getElementById("rf-foto-name");
+  const preview = document.getElementById("foto-preview");
+  const img     = document.getElementById("foto-img");
+  const name    = document.getElementById("foto-name");
   if (input.files && input.files[0]) {
     const reader = new FileReader();
-    reader.onload = (e) => {
-      img.src = e.target.result;
-      preview.style.display = "block";
-      name.textContent = input.files[0].name;
-    };
+    reader.onload = e => { img.src = e.target.result; preview.style.display = "block"; name.textContent = input.files[0].name; };
     reader.readAsDataURL(input.files[0]);
   }
 }
