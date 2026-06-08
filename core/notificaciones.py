@@ -409,6 +409,53 @@ def notificar_seguimiento_devuelto(item, *, comentario: str = "", actor=None) ->
     )
 
 
+def notificar_paso_aprobado_por_colaborador(check, *, actor=None) -> int:
+    """Notifica al responsable del proyecto que su paso fue aprobado por el aprobador colaborador."""
+    item = check.seguimiento
+    destinatarios = _responsables_item(item)
+    if not destinatarios:
+        return 0
+    actor_nombre = (actor.get_full_name() or actor.username) if actor else "El aprobador"
+    titulo_paso = check.titulo[:60]
+    return crear_notificaciones(
+        destinatarios,
+        titulo=f"✓ Paso aprobado: {titulo_paso}",
+        mensaje=f"{actor_nombre} aprobó tu paso en '{item.titulo[:60]}'.",
+        url=f"/seguimiento/{item.pk}/",
+        tipo=Notificacion.TIPO_SEGUIMIENTO,
+        prioridad=Notificacion.PRIORIDAD_NORMAL,
+        actor=actor,
+        objeto_tipo="seguimiento.SeguimientoChecklistItem",
+        objeto_id=check.pk,
+        excluir=actor,
+    )
+
+
+def notificar_paso_devuelto_por_colaborador(check, *, motivo: str = "", actor=None) -> int:
+    """Notifica al responsable del proyecto que su paso fue devuelto para corrección."""
+    item = check.seguimiento
+    destinatarios = _responsables_item(item)
+    if not destinatarios:
+        return 0
+    actor_nombre = (actor.get_full_name() or actor.username) if actor else "El aprobador"
+    titulo_paso = check.titulo[:60]
+    mensaje = f"{actor_nombre} devolvió tu paso para corrección en '{item.titulo[:60]}'."
+    if motivo:
+        mensaje += f"\nMotivo: {motivo[:200]}"
+    return crear_notificaciones(
+        destinatarios,
+        titulo=f"↩ Paso devuelto: {titulo_paso}",
+        mensaje=mensaje,
+        url=f"/seguimiento/{item.pk}/",
+        tipo=Notificacion.TIPO_SEGUIMIENTO,
+        prioridad=Notificacion.PRIORIDAD_ALTA,
+        actor=actor,
+        objeto_tipo="seguimiento.SeguimientoChecklistItem",
+        objeto_id=check.pk,
+        excluir=actor,
+    )
+
+
 def notificar_seguimiento_feedback_responsable(item, *, comentario: str = "", actor=None) -> int:
     """Notifica al responsable que el DG dejó retroalimentación en su acuerdo."""
     destinatarios = _responsables_item(item)
