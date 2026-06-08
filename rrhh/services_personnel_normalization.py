@@ -18,6 +18,12 @@ from rrhh.services_personnel_audit import SPECIAL_OPERATIONAL_GROUPS, normalize_
 
 SEVERITY_ORDER = {"risk": 0, "warning": 1, "info": 2}
 MANUAL_ONLY = False
+AUTHORIZED_TECHNICAL_USERNAMES = frozenset(
+    {
+        "ad_agent_service",
+        "omnichannel_service",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -404,6 +410,23 @@ def _user_access_proposals() -> list[NormalizationProposal]:
         group_names = sorted(user.groups.values_list("name", flat=True))
         has_access = user.module_access.exists()
         external_repartidor = _external_logistics_repartidor(user)
+        technical_account = _authorized_technical_account(user.username)
+
+        if technical_account and not employee:
+            proposals.append(
+                _proposal(
+                    key=f"user.technical_authorized:{user.pk}",
+                    plane="usuarios",
+                    entity_type="User",
+                    entity_id=user.pk,
+                    display=user.username,
+                    current_value=f"cuenta tecnica; perfil={'si' if profile else 'no'}",
+                    proposed_value="Mantener sin rrhh.Empleado; administrar como credencial de servicio",
+                    action="cuenta_tecnica_autorizada",
+                    severity="info",
+                    reason="Cuenta de integracion/IA autorizada; no representa una persona de Capital Humano.",
+                )
+            )
 
         if employee and not profile:
             proposed = _profile_suggestion(employee, sucursales, departamentos)
@@ -421,7 +444,7 @@ def _user_access_proposals() -> list[NormalizationProposal]:
                     reason="Usuario vinculado a empleado necesita perfil para sucursal/departamento y pantallas de acceso.",
                 )
             )
-        elif not profile and not external_repartidor:
+        elif not profile and not external_repartidor and not technical_account:
             action = "clasificar_cuenta_no_personal" if _looks_non_person_user(user.username) else "vincular_usuario_o_crear_perfil"
             proposals.append(
                 _proposal(
@@ -438,7 +461,7 @@ def _user_access_proposals() -> list[NormalizationProposal]:
                 )
             )
 
-        if not employee and not external_repartidor:
+        if not employee and not external_repartidor and not technical_account:
             severity = "risk" if not group_names and not has_access else "warning"
             proposals.append(
                 _proposal(
@@ -678,3 +701,7 @@ def _looks_non_person_user(username: str) -> bool:
     value = (username or "").lower()
     markers = ("service", "debug", "bot", "sync", "omnichannel", "ad_agent")
     return any(marker in value for marker in markers)
+
+
+def _authorized_technical_account(username: str) -> bool:
+    return (username or "").strip().lower() in AUTHORIZED_TECHNICAL_USERNAMES
