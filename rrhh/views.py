@@ -1250,6 +1250,24 @@ def empleados(request):
     empleados_total = Empleado.objects.count()
     empleados_activos = Empleado.objects.filter(activo=True).count()
     empleados_inactivos = max(empleados_total - empleados_activos, 0)
+    empleados_activos_con_usuario = Empleado.objects.filter(activo=True, usuario_erp__isnull=False).count()
+    empleados_activos_sin_usuario = max(empleados_activos - empleados_activos_con_usuario, 0)
+    identidades_pendientes_total = EmpleadoIdentidadPendiente.objects.filter(
+        estado=EmpleadoIdentidadPendiente.ESTADO_PENDIENTE
+    ).count()
+    User = get_user_model()
+    usuarios_activos_sin_empleado = (
+        User.objects.filter(is_active=True, empleado_rrhh__isnull=True)
+        .exclude(username__in=USUARIOS_ERP_EXCLUIDOS_RRHH)
+        .count()
+    )
+    from logistica.models import Repartidor
+
+    conductores_activos = Repartidor.objects.filter(user__is_active=True).count()
+    conductores_ocasionales = Repartidor.objects.filter(
+        user__is_active=True,
+        tipo_identidad=LOGISTICA_TIPO_CONDUCTOR_OCASIONAL,
+    ).count()
     nominas_total = NominaPeriodo.objects.count()
     nominas_borrador = NominaPeriodo.objects.filter(estatus=NominaPeriodo.ESTATUS_BORRADOR).count()
     nominas_cerradas = NominaPeriodo.objects.filter(estatus=NominaPeriodo.ESTATUS_CERRADA).count()
@@ -1316,6 +1334,51 @@ def empleados(request):
         "total_activos": empleados_activos,
         "total_inactivos": empleados_inactivos,
         "total_nominas": nominas_total,
+        "identity_guard_cards": [
+            {
+                "label": "Fuente oficial",
+                "value": empleados_activos,
+                "status": "Controlado",
+                "detail": "Empleado RRHH activo. Los módulos leen desde esta persona.",
+            },
+            {
+                "label": "Con usuario/app",
+                "value": empleados_activos_con_usuario,
+                "status": "Ligados",
+                "detail": "Credenciales ERP/app unidas al empleado.",
+            },
+            {
+                "label": "Sin usuario/app",
+                "value": empleados_activos_sin_usuario,
+                "status": "Operativo",
+                "detail": "Personal sin acceso digital requerido por ahora.",
+            },
+            {
+                "label": "Nómina/Hikvision",
+                "value": identidades_pendientes_total,
+                "status": "Pendientes",
+                "detail": "Códigos recibidos por vincular antes de duplicar.",
+            },
+            {
+                "label": "Logística/unidades",
+                "value": conductores_activos,
+                "status": f"{conductores_ocasionales} ocasional(es)",
+                "detail": "Repartidores y conductores ocasionales autorizados.",
+            },
+            {
+                "label": "Usuarios sin empleado",
+                "value": usuarios_activos_sin_empleado,
+                "status": "Excepciones",
+                "detail": "Solo deben quedar técnicos, externos o administradores.",
+            },
+        ],
+        "identity_workflow_steps": [
+            "Persona",
+            "Organización",
+            "Usuario/app",
+            "Logística/documentos",
+            "Bonos/permisos",
+        ],
         "contrato_choices": Empleado.CONTRATO_CHOICES,
         "departamento_choices": Empleado.DEP_CHOICES,
         "area_division_choices": AREA_DIVISION_CHOICES,
