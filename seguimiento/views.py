@@ -143,9 +143,10 @@ def mi_seguimiento(request, tipo: str | None = None):
 
     for item in items:
         checks = list(item.checklist.all())
+        comentarios_list = list(item.comentarios.all())  # prefetched, orden -created_at
         actividad = [item.updated_at]
         actividad.extend(check.updated_at for check in checks if check.updated_at)
-        actividad.extend(comentario.created_at for comentario in item.comentarios.all())
+        actividad.extend(c.created_at for c in comentarios_list)
         actividad.extend(evidencia.created_at for evidencia in item.evidencias.all())
         actividad.extend(prorroga.created_at for prorroga in item.prorrogas.all())
 
@@ -162,6 +163,23 @@ def mi_seguimiento(request, tipo: str | None = None):
                 if prorroga.estatus == SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE
             ),
             None,
+        )
+        ultimo_comentario_dg = next(
+            (c for c in comentarios_list if c.tipo == SeguimientoComentario.TIPO_REVISION_DG),
+            None,
+        )
+        ultimo_feedback_propio = next(
+            (
+                c for c in comentarios_list
+                if c.tipo == SeguimientoComentario.TIPO_FEEDBACK
+                and c.usuario_id == item.responsable_user_id
+            ),
+            None,
+        )
+        item.ultimo_comentario_dg = ultimo_comentario_dg
+        item.respuesta_dg_nueva = ultimo_comentario_dg is not None and (
+            ultimo_feedback_propio is None
+            or ultimo_comentario_dg.created_at > ultimo_feedback_propio.created_at
         )
         if item.esta_vencido:
             item.prioridad_label = "Vencido"
