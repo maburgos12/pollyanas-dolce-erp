@@ -1415,7 +1415,8 @@ class RRHHViewsTests(TestCase):
         self.assertContains(resp, "Lectura dry-run, sin escrituras.")
 
     def test_empleados_expone_campos_de_organizacion(self):
-        Empleado.objects.create(nombre="LOPEZ PALOS JOHANA ADELIN", departamento="VENTAS", puesto="Jefe de Ventas")
+        jefe = Empleado.objects.create(nombre="LOPEZ PALOS JOHANA ADELIN", departamento="VENTAS", puesto="Jefe de Ventas")
+        colaborador = Empleado.objects.create(nombre="COLABORADOR SIN JERARQUIA", departamento="VENTAS", puesto="Cajera")
         BonoEsquema.objects.get_or_create(codigo="VENTAS", defaults={"nombre": "Ventas"})
 
         resp = self.client.get(reverse("rrhh:empleados"))
@@ -1424,6 +1425,9 @@ class RRHHViewsTests(TestCase):
         self.assertContains(resp, "Departamento")
         self.assertContains(resp, "Puesto operativo")
         self.assertContains(resp, "Jefe directo")
+        self.assertContains(resp, "LOPEZ PALOS JOHANA ADELIN")
+        self.assertIn(jefe, list(resp.context["empleados_jefes"]))
+        self.assertNotIn(colaborador, list(resp.context["empleados_jefes"]))
         self.assertContains(resp, "Esquemas de bono")
         self.assertContains(resp, "Agregar esquema de bono")
         self.assertContains(resp, "Puesto descriptivo")
@@ -1440,10 +1444,35 @@ class RRHHViewsTests(TestCase):
         self.assertContains(resp, "Encargada / encargado")
         self.assertContains(resp, "Supervisión")
         self.assertContains(resp, 'data-searchable-select="true"')
+        self.assertContains(resp, "Crear usuario y contraseña para este empleado")
+        self.assertNotContains(resp, '<select id="usuario_erp"')
         self.assertNotContains(resp, "modal-catalogo-otro")
         self.assertNotContains(resp, "Agregar otro valor")
         self.assertNotContains(resp, "__otro__")
         self.assertContains(resp, "modal-bono-esquema-otro")
+
+    def test_empleados_rechaza_jefe_directo_fuera_de_jerarquia(self):
+        jefe_ventas = Empleado.objects.create(
+            nombre="JEFA VENTAS",
+            departamento=Empleado.DEP_VENTAS,
+            nivel_organizacional=Empleado.NIVEL_JEFATURA,
+        )
+
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "nombre": "Empleado Produccion",
+                "area": "HORNOS",
+                "departamento": Empleado.DEP_PRODUCCION,
+                "jefe_directo": str(jefe_ventas.id),
+                "salario_diario": "300.00",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(Empleado.objects.filter(nombre="Empleado Produccion").exists())
+        self.assertContains(resp, "El jefe directo debe corresponder a la jerarquia del departamento.")
 
     def test_empleados_crea_esquema_bono_otro_y_lo_asigna(self):
         resp = self.client.post(

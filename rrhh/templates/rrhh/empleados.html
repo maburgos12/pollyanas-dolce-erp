@@ -425,6 +425,26 @@
     min-height: 38px;
   }
 
+  .rrhh-access-panel {
+    background: #fffafb;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    display: grid;
+    gap: 10px;
+    grid-column: 1 / -1;
+    padding: 12px;
+  }
+
+  .rrhh-access-title {
+    color: var(--vino);
+    font-size: 13px;
+    font-weight: 900;
+  }
+
+  .rrhh-dialog-wide {
+    max-width: 760px;
+  }
+
   .rrhh-dialog {
     border: 1px solid var(--rosa);
     border-radius: 8px;
@@ -692,10 +712,12 @@
             </div>
             <div class="rrhh-field span-2">
               <label for="jefe_directo">Jefe directo</label>
-              <select id="jefe_directo" class="input-field" name="jefe_directo">
+              <select id="jefe_directo" class="input-field" name="jefe_directo" data-jefe-directo-select data-searchable-select="true">
                 <option value="">Sin jefe directo</option>
                 {% for jefe in empleados_jefes %}
-                  <option value="{{ jefe.id }}">{{ jefe.nombre }}{% if jefe.departamento %} · {{ jefe.get_departamento_display }}{% endif %}</option>
+                  <option value="{{ jefe.id }}"
+                          data-departamento="{{ jefe.departamento|default_if_none:'' }}"
+                          data-nivel="{{ jefe.nivel_organizacional|default_if_none:'' }}">{{ jefe.nombre }}{% if jefe.departamento %} · {{ jefe.get_departamento_display }}{% endif %}</option>
                 {% endfor %}
               </select>
             </div>
@@ -735,21 +757,15 @@
               <label for="sucursal">Sucursal</label>
               <input id="sucursal" class="input-field" type="text" name="sucursal">
             </div>
-            <div class="rrhh-field span-2" data-access-block>
-              <label for="usuario_erp">Usuario ERP / app</label>
-              <select id="usuario_erp" class="input-field" name="usuario_erp">
-                <option value="">Sin usuario vinculado</option>
-                {% for u in usuarios_erp %}
-                  {% if not u.empleado_rrhh %}
-                  <option value="{{ u.id }}">{{ u.username }}{% if u.get_full_name %} · {{ u.get_full_name }}{% endif %}</option>
-                  {% endif %}
-                {% endfor %}
-              </select>
+            <div class="rrhh-access-panel" data-access-block>
+              <div>
+                <div class="rrhh-access-title">Acceso a apps y ERP</div>
+                <div class="rrhh-help">El usuario se crea desde esta alta para evitar cuentas sueltas sin empleado.</div>
+              </div>
               <label class="rrhh-checkline">
                 <input type="checkbox" name="crear_usuario_erp" data-create-user-toggle>
-                Crear usuario nuevo desde Capital Humano
+                Crear usuario y contraseña para este empleado
               </label>
-              <div class="rrhh-help">Usa una sola opción: seleccionar usuario existente o crear uno nuevo para este empleado.</div>
             </div>
             <div class="rrhh-field" data-new-user-field style="display:none">
               <label for="nuevo_usuario_username">Usuario nuevo</label>
@@ -776,11 +792,16 @@
                   <option value="{{ value }}">{{ label }}</option>
                 {% endfor %}
               </select>
-              <div class="rrhh-help">Repartidor operativo agrega el grupo repartidor. Conductor ocasional solo autoriza uso de unidades con su mismo usuario.</div>
+              <div class="rrhh-help">Al seleccionar acceso se abre la captura de licencia y autorización.</div>
+              <button class="btn btn-secondary btn-small" type="button" data-open-logistics-dialog style="display:none">Completar licencia y autorización</button>
             </div>
-            <div class="rrhh-field span-2" data-driver-license-block style="display:none">
-              <label>Licencia y autorización de unidades</label>
-              <div class="rrhh-form-grid">
+            <dialog class="rrhh-dialog rrhh-dialog-wide" data-driver-license-dialog>
+              <div class="rrhh-dialog-body">
+                <div>
+                  <div class="rrhh-dialog-title">Licencia y autorización de unidades</div>
+                  <div class="muted">Estos datos complementan el usuario de app logística creado desde Capital Humano.</div>
+                </div>
+                <div class="rrhh-form-grid">
                 <div class="rrhh-field">
                   <label for="motivo_autorizacion">Motivo de autorización</label>
                   <input id="motivo_autorizacion" class="input-field" type="text" name="motivo_autorizacion">
@@ -809,8 +830,12 @@
                   <label for="notas_identidad">Notas de logística</label>
                   <textarea id="notas_identidad" class="input-field" name="notas_identidad" rows="2"></textarea>
                 </div>
+                </div>
+                <div class="rrhh-actions">
+                  <button class="btn btn-secondary" type="button" data-close-logistics-dialog>Continuar editando</button>
+                </div>
               </div>
-            </div>
+            </dialog>
             <div class="rrhh-bonus-box" data-bonus-scope>
               <div>
                 <div class="rrhh-bonus-title">Esquemas de bono</div>
@@ -1210,11 +1235,14 @@
                       </div>
                       <div class="rrhh-field span-2">
                         <label for="edit_jefe_directo_{{ e.id }}">Jefe directo</label>
-                        <select id="edit_jefe_directo_{{ e.id }}" class="input-field" name="jefe_directo">
+                        <select id="edit_jefe_directo_{{ e.id }}" class="input-field" name="jefe_directo" data-jefe-directo-select data-searchable-select="true">
                           <option value="">Sin jefe directo</option>
                           {% for jefe in empleados_jefes %}
                             {% if jefe.id != e.id %}
-                              <option value="{{ jefe.id }}" {% if e.jefe_directo_id == jefe.id %}selected{% endif %}>
+                              <option value="{{ jefe.id }}"
+                                      data-departamento="{{ jefe.departamento|default_if_none:'' }}"
+                                      data-nivel="{{ jefe.nivel_organizacional|default_if_none:'' }}"
+                                      {% if e.jefe_directo_id == jefe.id %}selected{% endif %}>
                                 {{ jefe.nombre }}{% if jefe.departamento %} · {{ jefe.get_departamento_display }}{% endif %}
                               </option>
                             {% endif %}
@@ -1257,25 +1285,21 @@
                         <label for="edit_sucursal_{{ e.id }}">Sucursal</label>
                         <input id="edit_sucursal_{{ e.id }}" class="input-field" type="text" name="sucursal" value="{{ e.sucursal }}">
                       </div>
-                      <div class="rrhh-field span-2" data-access-block>
-                        <label for="edit_usuario_erp_{{ e.id }}">Usuario ERP / app</label>
-                        <select id="edit_usuario_erp_{{ e.id }}" class="input-field" name="usuario_erp">
-                          <option value="">Sin usuario vinculado</option>
-                          {% for u in usuarios_erp %}
-                            {% if not u.empleado_rrhh or u.empleado_rrhh.pk == e.pk %}
-                            <option value="{{ u.id }}" {% if e.usuario_erp_id == u.id %}selected{% endif %}>
-                              {{ u.username }}{% if u.get_full_name %} · {{ u.get_full_name }}{% endif %}
-                            </option>
-                            {% endif %}
-                          {% endfor %}
-                        </select>
+                      <div class="rrhh-access-panel" data-access-block>
+                        <div>
+                          <div class="rrhh-access-title">Acceso a apps y ERP</div>
+                          {% if e.usuario_erp_id %}
+                            <div class="rrhh-help">Usuario vinculado: {{ e.usuario_erp.username }}{% if e.usuario_erp.get_full_name %} · {{ e.usuario_erp.get_full_name }}{% endif %}</div>
+                          {% else %}
+                            <div class="rrhh-help">Crea el usuario desde esta ficha para que quede ligado al empleado.</div>
+                          {% endif %}
+                        </div>
                         {% if not e.usuario_erp_id %}
                         <label class="rrhh-checkline">
                           <input type="checkbox" name="crear_usuario_erp" data-create-user-toggle>
-                          Crear usuario nuevo desde Capital Humano
+                          Crear usuario y contraseña para este empleado
                         </label>
                         {% endif %}
-                        <div class="rrhh-help">Vincula o crea el acceso desde la misma ficha del empleado.</div>
                       </div>
                       {% if not e.usuario_erp_id %}
                       <div class="rrhh-field" data-new-user-field style="display:none">
@@ -1309,11 +1333,16 @@
                               {% endif %}>{{ label }}</option>
                           {% endfor %}
                         </select>
-                        <div class="rrhh-help">Usa conductor ocasional para jefaturas o empleados que manejan unidades sin ser repartidores.</div>
+                        <div class="rrhh-help">Al seleccionar acceso se abre la captura de licencia y autorización.</div>
+                        <button class="btn btn-secondary btn-small" type="button" data-open-logistics-dialog style="{% if e.puesto_operativo != 'REPARTIDOR' and not e.repartidor_logistica %}display:none{% endif %}">Completar licencia y autorización</button>
                       </div>
-                      <div class="rrhh-field span-2" data-driver-license-block style="{% if e.puesto_operativo != 'REPARTIDOR' and not e.repartidor_logistica %}display:none{% endif %}">
-                        <label>Licencia y autorización de unidades</label>
-                        <div class="rrhh-form-grid">
+                      <dialog class="rrhh-dialog rrhh-dialog-wide" data-driver-license-dialog>
+                        <div class="rrhh-dialog-body">
+                          <div>
+                            <div class="rrhh-dialog-title">Licencia y autorización de unidades</div>
+                            <div class="muted">Estos datos complementan el usuario de app logística creado desde Capital Humano.</div>
+                          </div>
+                          <div class="rrhh-form-grid">
                           <div class="rrhh-field">
                             <label for="edit_motivo_autorizacion_{{ e.id }}">Motivo de autorización</label>
                             <input id="edit_motivo_autorizacion_{{ e.id }}" class="input-field" type="text" name="motivo_autorizacion" value="{{ e.repartidor_logistica.motivo_autorizacion|default:'' }}">
@@ -1342,8 +1371,12 @@
                             <label for="edit_notas_identidad_{{ e.id }}">Notas de logística</label>
                             <textarea id="edit_notas_identidad_{{ e.id }}" class="input-field" name="notas_identidad" rows="2">{{ e.repartidor_logistica.notas_identidad|default:'' }}</textarea>
                           </div>
+                          </div>
+                          <div class="rrhh-actions">
+                            <button class="btn btn-secondary" type="button" data-close-logistics-dialog>Continuar editando</button>
+                          </div>
                         </div>
-                      </div>
+                      </dialog>
                       <label class="rrhh-checkline">
                         <input type="checkbox" name="activo" {% if e.activo %}checked{% endif %}>
                         Activo
@@ -1463,7 +1496,41 @@
     if (puesto && puestoSelect && Array.from(puestoSelect.options).some(option => option.value === puesto)) {
       puestoSelect.value = puesto;
     }
+    syncJefeDirectoOptions(form);
     _toggleOperationalBlocks(form, puesto);
+  }
+
+  function syncJefeDirectoOptions(form) {
+    if (!form) return;
+    const deptSelect = form.querySelector('select[name="departamento"]');
+    const jefeSelect = form.querySelector('[data-jefe-directo-select]');
+    if (!deptSelect || !jefeSelect) return;
+    const dept = deptSelect.value || '';
+    let selectedStillValid = jefeSelect.value === '';
+    Array.from(jefeSelect.options).forEach((option) => {
+      if (!option.value) {
+        option.disabled = false;
+        option.hidden = false;
+        return;
+      }
+      const optionDept = option.dataset.departamento || '';
+      const optionNivel = option.dataset.nivel || '';
+      const visible = !dept || optionDept === dept || optionNivel === 'DIRECCION';
+      option.disabled = !visible;
+      option.hidden = !visible;
+      if (visible && option.value === jefeSelect.value) selectedStillValid = true;
+    });
+    if (!selectedStillValid) {
+      jefeSelect.value = '';
+      jefeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }
+
+  function openLogisticsDialog(form) {
+    const dialog = form?.querySelector('[data-driver-license-dialog]');
+    if (dialog && !dialog.open && typeof dialog.showModal === 'function') {
+      dialog.showModal();
+    }
   }
 
   const bajaEmpleado = document.getElementById('baja_empleado');
@@ -1495,8 +1562,8 @@
       logisticsAccess.value = 'empleado_dolce';
     }
     const hasLogisticsAccess = Boolean(logisticsAccess && logisticsAccess.value);
-    const licenseBlock = form.querySelector('[data-driver-license-block]');
-    if (licenseBlock) licenseBlock.style.display = (puesto === 'REPARTIDOR' || hasLogisticsAccess) ? '' : 'none';
+    const logisticsButton = form.querySelector('[data-open-logistics-dialog]');
+    if (logisticsButton) logisticsButton.style.display = (puesto === 'REPARTIDOR' || hasLogisticsAccess) ? '' : 'none';
     _toggleNewUserFields(form);
   }
 
@@ -1525,21 +1592,51 @@
       const form = logisticsAccess.closest('form');
       const puesto = form?.querySelector('select[name="puesto_operativo"]')?.value || '';
       _toggleOperationalBlocks(form, puesto);
+      if (logisticsAccess.value) openLogisticsDialog(form);
       return;
     }
     const select = event.target.closest('[data-catalog-select]');
-    if (!select) return;
-    syncAreaDefaults(select);
-    // también reaccionar al cambio directo de puesto_operativo en edición inline
-    if (select.name === 'puesto_operativo') {
-      _toggleOperationalBlocks(select.closest('form'), select.value);
+    if (select) {
+      syncAreaDefaults(select);
+      // también reaccionar al cambio directo de puesto_operativo en edición inline
+      if (select.name === 'puesto_operativo') {
+        _toggleOperationalBlocks(select.closest('form'), select.value);
+      }
+      return;
     }
+    const departamentoSelect = event.target.closest('select[name="departamento"]');
+    if (departamentoSelect) {
+      syncJefeDirectoOptions(departamentoSelect.closest('form'));
+      return;
+    }
+  });
+
+  document.addEventListener('click', (event) => {
+    const openButton = event.target.closest('[data-open-logistics-dialog]');
+    if (openButton) {
+      openLogisticsDialog(openButton.closest('form'));
+      return;
+    }
+    const closeButton = event.target.closest('[data-close-logistics-dialog]');
+    if (closeButton) {
+      closeButton.closest('dialog')?.close();
+      return;
+    }
+  });
+
+  document.querySelectorAll('[data-driver-license-dialog]').forEach((dialog) => {
+    dialog.addEventListener('click', (event) => {
+      if (event.target === dialog) dialog.close();
+    });
   });
 
   document.querySelectorAll('form').forEach((form) => {
     _toggleNewUserFields(form);
+    syncJefeDirectoOptions(form);
     const puesto = form.querySelector('select[name="puesto_operativo"]');
-    if (puesto) _toggleOperationalBlocks(form, puesto.value);
+    if (puesto) {
+      _toggleOperationalBlocks(form, puesto.value);
+    }
   });
 
 })();

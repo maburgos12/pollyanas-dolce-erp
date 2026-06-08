@@ -252,7 +252,20 @@
         }
 
         input.addEventListener("focus", function () {
-            render(input.value);
+            input.select();
+            render("");
+            setOpen(true);
+        });
+
+        input.addEventListener("mousedown", function () {
+            render("");
+            setOpen(true);
+        });
+
+        chevron.addEventListener("mousedown", function (event) {
+            event.preventDefault();
+            input.focus();
+            render("");
             setOpen(true);
         });
 

@@ -48,6 +48,14 @@ LOGISTICA_TIPOS_RRHH = (
     (LOGISTICA_TIPO_CONDUCTOR_OCASIONAL, "Conductor ocasional autorizado"),
 )
 LOGISTICA_TIPOS_RRHH_VALUES = {value for value, _label in LOGISTICA_TIPOS_RRHH}
+USUARIOS_ERP_EXCLUIDOS_RRHH = frozenset(
+    {
+        "ad_agent_service",
+        "omnichannel_service",
+        "fallas.sucursal.test",
+        "debug",
+    }
+)
 from .services_bonos import asegurar_esquemas_base, sincronizar_esquemas_bono
 from .services_catalogos import (
     AREA_DIVISION_CHOICES,
@@ -64,7 +72,7 @@ from .services_identidad import (
 )
 from .services.lista_raya import importar_lista_raya_nomina
 from .services_personnel_normalization import build_personnel_normalization_plan
-from .services_niveles import jefatura_q
+from .services_niveles import jefatura_q, liderazgo_q
 from .services_permisos import can_authorize_direccion, resolver_permiso_direccion
 from .services_vacantes import (
     can_autorizar_vacante,
@@ -152,6 +160,25 @@ def _organizacion_desde_post(post_data, empleado: Empleado | None = None) -> dic
     }
 
 
+def _resolver_jefe_directo_desde_post(post_data, organizacion: dict, empleado: Empleado | None = None) -> int | None:
+    jefe_id = (post_data.get("jefe_directo") or "").strip()
+    if not jefe_id:
+        return None
+    if not jefe_id.isdigit():
+        raise ValidationError("Selecciona un jefe directo valido.")
+    qs = Empleado.objects.filter(pk=int(jefe_id), activo=True).filter(liderazgo_q())
+    if empleado:
+        qs = qs.exclude(pk=empleado.pk)
+    jefe = qs.first()
+    if not jefe:
+        raise ValidationError("El jefe directo debe ser una persona activa con nivel de liderazgo.")
+    departamento = (organizacion.get("departamento") or "").strip().upper()
+    jefe_departamento = (jefe.departamento or "").strip().upper()
+    if departamento and jefe_departamento != departamento and jefe.nivel_organizacional != Empleado.NIVEL_DIRECCION:
+        raise ValidationError("El jefe directo debe corresponder a la jerarquia del departamento.")
+    return jefe.id
+
+
 def _safe_int(raw: str | None) -> int | None:
     value = (raw or "").strip()
     return int(value) if value.isdigit() else None
@@ -216,8 +243,17 @@ def _resolver_usuario_erp_desde_post(request, empleado: Empleado):
         if not nuevo_user:
             return None
     if usuario_erp_id == "":
-        return None
+        return empleado.usuario_erp
     return empleado.usuario_erp
+
+
+def _usuarios_erp_disponibles_rrhh():
+    return (
+        get_user_model()
+        .objects.filter(is_active=True, is_staff=False, is_superuser=False)
+        .exclude(username__in=USUARIOS_ERP_EXCLUIDOS_RRHH)
+        .order_by("username")
+    )
 
 
 def _logistica_tipo_desde_post(post_data, empleado: Empleado) -> str:
@@ -1063,8 +1099,11 @@ def empleados(request):
                 empleado.departamento = organizacion["departamento"]
                 empleado.puesto_operativo = organizacion["puesto_operativo"]
                 empleado.nivel_organizacional = organizacion["nivel_organizacional"]
-                jefe_id = (request.POST.get("jefe_directo") or "").strip()
-                empleado.jefe_directo_id = int(jefe_id) if jefe_id.isdigit() and int(jefe_id) != empleado.id else None
+                try:
+                    empleado.jefe_directo_id = _resolver_jefe_directo_desde_post(request.POST, organizacion, empleado)
+                except ValidationError as exc:
+                    messages.error(request, exc.messages[0])
+                    return redirect("rrhh:empleados")
                 empleado.tipo_personal = (request.POST.get("tipo_personal") or Empleado.TIPO_POLLYANA).strip()
                 empleado.participa_bonos_ventas = organizacion["participa_bonos_ventas"]
                 empleado.participa_bonos_produccion = organizacion["participa_bonos_produccion"]
@@ -1114,6 +1153,11 @@ def empleados(request):
             if duplicado := _empleado_con_codigo_duplicado(codigo):
                 messages.error(request, f"El código {codigo} ya pertenece a {duplicado.nombre}.")
                 return redirect("rrhh:empleados")
+            try:
+                jefe_directo_id = _resolver_jefe_directo_desde_post(request.POST, organizacion)
+            except ValidationError as exc:
+                messages.error(request, exc.messages[0])
+                return redirect("rrhh:empleados")
             empleado = Empleado.objects.create(
                 codigo=codigo,
                 nombre=nombre,
@@ -1126,11 +1170,7 @@ def empleados(request):
                 departamento=organizacion["departamento"],
                 puesto_operativo=organizacion["puesto_operativo"],
                 nivel_organizacional=organizacion["nivel_organizacional"],
-                jefe_directo_id=(
-                    int(request.POST.get("jefe_directo"))
-                    if (request.POST.get("jefe_directo") or "").strip().isdigit()
-                    else None
-                ),
+                jefe_directo_id=jefe_directo_id,
                 tipo_personal=(request.POST.get("tipo_personal") or Empleado.TIPO_POLLYANA).strip(),
                 participa_bonos_ventas=organizacion["participa_bonos_ventas"],
                 participa_bonos_produccion=organizacion["participa_bonos_produccion"],
@@ -1287,8 +1327,8 @@ def empleados(request):
         "nivel_organizacional_values": NIVEL_ORGANIZACIONAL_VALUES,
         "tipo_personal_choices": Empleado.TIPO_PERSONAL_CHOICES,
         "bono_esquemas": BonoEsquema.objects.filter(activo=True).order_by("nombre"),
-        "empleados_jefes": Empleado.objects.filter(activo=True).order_by("nombre"),
-        "usuarios_erp": get_user_model().objects.filter(is_active=True).order_by("username"),
+        "empleados_jefes": Empleado.objects.filter(activo=True).filter(liderazgo_q()).order_by("departamento", "nombre"),
+        "usuarios_erp": _usuarios_erp_disponibles_rrhh(),
         "sucursales_app": Sucursal.objects.filter(activa=True).order_by("nombre"),
         "motivo_baja_choices": EmpleadoBaja.MOTIVO_CHOICES,
         "months": range(1, 13),
