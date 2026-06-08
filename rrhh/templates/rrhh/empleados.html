@@ -70,13 +70,13 @@
 
   .identity-list {
     display: grid;
-    gap: 10px;
+    gap: 8px;
   }
 
   .identity-item {
     border: 1px solid var(--rosa);
     border-radius: 8px;
-    padding: 12px;
+    padding: 10px 12px;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 12px;
@@ -92,6 +92,47 @@
     color: var(--texto-light);
     font-size: 13px;
     margin-top: 3px;
+  }
+
+  .identity-grid {
+    display: grid;
+    gap: 6px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .identity-kv {
+    min-width: 0;
+  }
+
+  .identity-label {
+    color: var(--texto-light);
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .identity-value {
+    color: var(--texto);
+    font-size: 13px;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+  }
+
+  .identity-chip {
+    background: #fff7fb;
+    border: 1px solid var(--rosa);
+    border-radius: 999px;
+    color: var(--vino);
+    display: inline-flex;
+    font-size: 12px;
+    font-weight: 800;
+    padding: 4px 8px;
+  }
+
+  .identity-warning {
+    color: var(--texto-light);
+    font-size: 12px;
+    margin-top: 4px;
   }
 
   .rrhh-layout {
@@ -546,6 +587,11 @@
     .rrhh-bonus-other {
       grid-template-columns: 1fr;
     }
+
+    .identity-item,
+    .identity-grid {
+      grid-template-columns: 1fr;
+    }
   }
 </style>
 {% endblock %}
@@ -586,22 +632,38 @@
     <div class="rrhh-card-header">
       <div>
         <div class="rrhh-card-title">Pendientes de vincular</div>
-        <div class="rrhh-card-subtitle">Códigos recibidos desde checador o nómina que podrían pertenecer a empleados existentes.</div>
+        <div class="rrhh-card-subtitle">Códigos nuevos recibidos desde nómina o checador. El sistema sugiere por nombre normalizado; Capital Humano confirma antes de unir.</div>
       </div>
     </div>
     <div class="rrhh-card-body identity-list">
       {% for pendiente in identidades_pendientes %}
       <div class="identity-item">
         <div>
-          <div class="identity-title">{{ pendiente.codigo_externo }} · {{ pendiente.nombre_externo }}</div>
-          <div class="identity-meta">
-            {{ pendiente.get_fuente_display }}
-            {% if pendiente.empleado_sugerido %}
-              · Sugerido: {{ pendiente.empleado_sugerido.nombre }}{% if pendiente.empleado_sugerido.codigo %} ({{ pendiente.empleado_sugerido.codigo }}){% endif %}
-            {% else %}
-              · Sin sugerencia automática
-            {% endif %}
+          <div class="identity-grid">
+            <div class="identity-kv">
+              <div class="identity-label">Fuente</div>
+              <div class="identity-value"><span class="identity-chip">{{ pendiente.get_fuente_display }}</span></div>
+            </div>
+            <div class="identity-kv">
+              <div class="identity-label">Código recibido</div>
+              <div class="identity-value">{{ pendiente.codigo_externo }}</div>
+            </div>
+            <div class="identity-kv">
+              <div class="identity-label">Nombre recibido</div>
+              <div class="identity-value">{{ pendiente.nombre_externo|default:"-" }}</div>
+            </div>
+            <div class="identity-kv">
+              <div class="identity-label">Empleado sugerido</div>
+              <div class="identity-value">
+                {% if pendiente.empleado_sugerido %}
+                  {{ pendiente.empleado_sugerido.nombre }}{% if pendiente.empleado_sugerido.codigo %} · {{ pendiente.empleado_sugerido.codigo }}{% endif %}
+                {% else %}
+                  Sin sugerencia automática
+                {% endif %}
+              </div>
+            </div>
           </div>
+          <div class="identity-warning">Al vincular, este código queda como ID operativo del empleado para próximas cargas. No crea otro empleado.</div>
         </div>
         {% if pendiente.empleado_sugerido %}
         <form method="post">
