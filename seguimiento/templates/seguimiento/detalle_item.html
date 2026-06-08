@@ -475,6 +475,42 @@
   </div>
   {% endif %}
 
+  <!-- Pasos que esperan la aprobación del usuario logueado (colaborador aprobador) -->
+  {% if pasos_a_aprobar %}
+  <div class="bi-panel" style="margin-bottom:16px; border-left:4px solid var(--dorado);">
+    <p class="seg-section-title">Pasos que esperan tu aprobación</p>
+    <p class="muted" style="margin:-4px 0 10px; font-size:.82rem;">
+      Eres el aprobador designado de estos pasos. El responsable ya los envió a revisión.
+    </p>
+    <div style="display:grid; gap:10px;">
+      {% for paso in pasos_a_aprobar %}
+      <div style="padding:12px 14px; background:rgba(201,168,76,.08); border:1px solid rgba(201,168,76,.25); border-radius:12px;">
+        <div style="font-weight:700; font-size:.95rem; margin-bottom:6px;">
+          {{ forloop.counter }}. {{ paso.titulo }}
+        </div>
+        <div class="muted" style="font-size:.8rem; margin-bottom:8px; display:flex; flex-wrap:wrap; gap:4px 14px;">
+          {% if paso.responsable_nombre %}<span>Responsable: <strong>{{ paso.responsable_nombre }}</strong></span>{% endif %}
+          {% if paso.vence %}<span>Vence: <strong>{{ paso.vence|date:"d/m/Y" }}</strong></span>{% endif %}
+          {% if paso.entregable %}<span>Entregable: {{ paso.entregable|truncatechars:80 }}</span>{% endif %}
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <form method="post" action="{% url 'seguimiento:aprobar_paso' item.pk paso.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="accion" value="aprobar">
+            <button class="btn btn-primary btn-sm" type="submit">✓ Aprobar paso</button>
+          </form>
+          <form method="post" action="{% url 'seguimiento:aprobar_paso' item.pk paso.pk %}" onsubmit="return confirm('¿Devolver el paso al responsable para que lo corrija?')">
+            {% csrf_token %}
+            <input type="hidden" name="accion" value="devolver">
+            <button class="btn btn-secondary btn-sm" type="submit">↩ Devolver para corrección</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Historial de actividad -->
   <div class="bi-panel" style="margin-bottom:16px;">
     <p class="seg-section-title">Historial de actividad</p>

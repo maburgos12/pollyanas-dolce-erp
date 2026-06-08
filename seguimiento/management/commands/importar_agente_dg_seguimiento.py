@@ -168,6 +168,8 @@ class Command(AgenteDGSeguimientoImporter, BaseCommand):
                             "entregable": step.get("deliverable_text") or "",
                             "responsable_nombre": step.get("owner_user_name") or "",
                             "aprobador_nombre": step.get("approver_user_name") or "",
+                            # Email del aprobador para resolución exacta contra usuarios del ERP
+                            "aprobador_email": step.get("approver_user_email") or "",
                             "requiere_aprobacion": bool(step.get("requires_approval")),
                             "vence": step.get("due_at"),
                             "prioridad": step.get("priority") or "",

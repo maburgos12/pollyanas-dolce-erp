@@ -258,6 +258,18 @@ def mi_seguimiento(request, tipo: str | None = None):
             }
         )
 
+    # Pasos de proyectos donde el usuario es aprobador y están esperando su aprobación
+    mis_aprobaciones = list(
+        SeguimientoChecklistItem.objects.filter(
+            aprobador_user=request.user,
+            requiere_aprobacion=True,
+            completado=False,
+            estatus_origen="SUBMITTED",
+        )
+        .select_related("seguimiento", "seguimiento__responsable_user", "seguimiento__responsable_empleado")
+        .order_by("vence", "id")
+    )
+
     return render(
         request,
         "seguimiento/mi_seguimiento.html",
@@ -270,6 +282,8 @@ def mi_seguimiento(request, tipo: str | None = None):
             "tabs": tabs,
             "active_tipo": tipo,
             "modo_detalle": bool(tipo),
+            "mis_aprobaciones": mis_aprobaciones,
+            "writeback_activo": _writeback_activo(),
         },
     )
 
@@ -396,7 +410,7 @@ def registrar_feedback(request, pk):
     comentario = (request.POST.get("comentario") or "").strip()
     if not comentario:
         messages.error(request, "Escribe la retroalimentación antes de enviarla.")
-        return redirect("seguimiento:mi_seguimiento")
+        return redirect("seguimiento:detalle", pk=pk)
     SeguimientoComentario.objects.create(
         seguimiento=item,
         usuario=request.user,
@@ -425,11 +439,11 @@ def subir_evidencia(request, pk):
     archivo = request.FILES.get("archivo")
     if not archivo:
         messages.error(request, "Selecciona un archivo de evidencia.")
-        return redirect("seguimiento:mi_seguimiento")
+        return redirect("seguimiento:detalle", pk=pk)
     error_archivo = _validar_archivo_evidencia(archivo)
     if error_archivo:
         messages.error(request, error_archivo)
-        return redirect("seguimiento:mi_seguimiento")
+        return redirect("seguimiento:detalle", pk=pk)
     SeguimientoEvidencia.objects.create(
         seguimiento=item,
         usuario=request.user,
@@ -461,13 +475,13 @@ def solicitar_prorroga(request, pk):
     motivo = (request.POST.get("motivo") or "").strip()
     if not fecha_solicitada:
         messages.error(request, "Selecciona la nueva fecha solicitada.")
-        return redirect("seguimiento:mi_seguimiento")
+        return redirect("seguimiento:detalle", pk=pk)
     if fecha_solicitada <= timezone.localdate():
         messages.error(request, "La fecha solicitada debe ser posterior a hoy.")
-        return redirect("seguimiento:mi_seguimiento")
+        return redirect("seguimiento:detalle", pk=pk)
     if not motivo:
         messages.error(request, "Escribe el motivo para solicitar más tiempo.")
-        return redirect("seguimiento:mi_seguimiento")
+        return redirect("seguimiento:detalle", pk=pk)
 
     SeguimientoProrrogaSolicitud.objects.create(
         seguimiento=item,
@@ -492,116 +506,6 @@ def solicitar_prorroga(request, pk):
     notificar_seguimiento_prorroga(item, fecha_solicitada, motivo, actor=request.user)
     messages.success(request, "Solicitud de prórroga enviada.")
     return redirect("seguimiento:detalle", pk=item.pk)
-
-
-def _registrar_cierre_opcional(request, item, prefijo: str) -> bool:
-    """Guarda comentario y/o evidencia opcionales. Devuelve False si el archivo falla."""
-    comentario_texto = (request.POST.get("comentario") or "").strip()
-    archivo = request.FILES.get("archivo")
-    if archivo:
-        error_archivo = _validar_archivo_evidencia(archivo)
-        if error_archivo:
-            messages.error(request, error_archivo)
-            return False
-        SeguimientoEvidencia.objects.create(
-            seguimiento=item,
-            usuario=request.user,
-            archivo=archivo,
-            nombre_original=archivo.name,
-            comentario=comentario_texto,
-        )
-    if comentario_texto:
-        SeguimientoComentario.objects.create(
-            seguimiento=item,
-            usuario=request.user,
-            tipo=SeguimientoComentario.TIPO_FEEDBACK,
-            comentario=f"[{prefijo}] {comentario_texto}" if comentario_texto else comentario_texto,
-        )
-    return True
-
-
-@login_required
-@require_POST
-def entregar_para_revision(request, pk):
-    """Flujo para acuerdos que sí requieren aprobación del DG."""
-    item = _get_item_para_usuario(request.user, pk)
-    if item.esta_cerrado:
-        messages.error(request, "Este acuerdo ya está cerrado.")
-        return redirect("seguimiento:detalle", pk=pk)
-    if not item.requiere_aprobacion:
-        messages.error(request, "Este tipo de acuerdo no requiere aprobación; márcalo como completado.")
-        return redirect("seguimiento:detalle", pk=pk)
-    if not _registrar_cierre_opcional(request, item, "ENTREGA"):
-        return redirect("seguimiento:detalle", pk=pk)
-    item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
-    item.save(update_fields=["estatus", "updated_at"])
-    log_event(request.user, "seguimiento.entrega", "SeguimientoItem", item.pk, {"entrega": True})
-    notificar_seguimiento_entrega(item, actor=request.user)
-    messages.success(request, "Acuerdo enviado a revisión. El Director General será notificado.")
-    return redirect("seguimiento:detalle", pk=pk)
-
-
-@login_required
-@require_POST
-def completar_directamente(request, pk):
-    """Cierre directo para acuerdos sin aprobación requerida o con checklist 100%."""
-    item = _get_item_para_usuario(request.user, pk)
-    if item.esta_cerrado:
-        messages.error(request, "Este acuerdo ya está cerrado.")
-        return redirect("seguimiento:detalle", pk=pk)
-    checks = list(item.checklist.all())
-    checklist_completo = checks and all(c.completado for c in checks)
-    puede_cerrar_directo = not item.requiere_aprobacion or checklist_completo
-    if not puede_cerrar_directo:
-        messages.error(request, "Este acuerdo requiere aprobación del Director General.")
-        return redirect("seguimiento:detalle", pk=pk)
-    if not _registrar_cierre_opcional(request, item, "COMPLETADO"):
-        return redirect("seguimiento:detalle", pk=pk)
-    item.estatus = SeguimientoItem.ESTATUS_COMPLETADO
-    item.aprobado_at = timezone.now()
-    item.save(update_fields=["estatus", "aprobado_at", "updated_at"])
-    log_event(request.user, "seguimiento.completar", "SeguimientoItem", item.pk, {"directo": True})
-    notificar_seguimiento_completado(item, actor=request.user)
-    messages.success(request, "Acuerdo marcado como completado.")
-    return redirect("seguimiento:detalle", pk=pk)
-
-
-@login_required
-def detalle_item(request, pk):
-    item = _get_item_para_usuario(request.user, pk)
-    checks = list(item.checklist.all())
-    checklist_total = len(checks)
-    checklist_done = sum(1 for c in checks if c.completado)
-    progreso_pct = round((checklist_done / checklist_total) * 100) if checklist_total else 0
-    now = timezone.now()
-    if item.esta_vencido:
-        prioridad_label, prioridad_tone = "Vencido", "danger"
-    elif item.fecha_limite and item.fecha_limite <= now + timedelta(days=2) and not item.esta_cerrado:
-        prioridad_label, prioridad_tone = "Alta", "warn"
-    else:
-        prioridad_label, prioridad_tone = "Normal", ""
-    prorroga_pendiente = item.prorrogas.filter(estatus=SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE).first()
-    comentarios = item.comentarios.select_related("usuario").order_by("created_at")
-    evidencias = item.evidencias.select_related("usuario", "revisado_por").order_by("created_at")
-    checklist_completo = bool(checks) and all(c.completado for c in checks)
-    puede_cerrar_directo = not item.requiere_aprobacion or checklist_completo
-    puede_entregar = not item.esta_cerrado and item.requiere_aprobacion and not checklist_completo
-    return render(request, "seguimiento/detalle_item.html", {
-        "item": item,
-        "checks": checks,
-        "checklist_total": checklist_total,
-        "checklist_done": checklist_done,
-        "progreso_pct": progreso_pct,
-        "prioridad_label": prioridad_label,
-        "prioridad_tone": prioridad_tone,
-        "prorroga_pendiente": prorroga_pendiente,
-        "comentarios": comentarios,
-        "evidencias": evidencias,
-        "puede_cerrar_directo": puede_cerrar_directo and not item.esta_cerrado,
-        "puede_entregar": puede_entregar,
-        "checklist_completo": checklist_completo,
-        "estatus_en_revision": SeguimientoItem.ESTATUS_EN_REVISION,
-    })
 
 
 @login_required
@@ -998,6 +902,15 @@ def detalle_item(request, pk):
     siguiente_check_id = next((c.id for c in checks if not c.completado), None)
     ultimo_completado_id = next((c.id for c in reversed(checks) if c.completado), None)
 
+    # Pasos de ESTE ítem donde el usuario logeado es aprobador y están en espera
+    pasos_a_aprobar = [
+        c for c in checks
+        if c.aprobador_user_id == request.user.pk
+        and c.requiere_aprobacion
+        and not c.completado
+        and c.estatus_origen == "SUBMITTED"
+    ]
+
     return render(
         request,
         "seguimiento/detalle_item.html",
@@ -1021,6 +934,7 @@ def detalle_item(request, pk):
             "siguiente_check_id": siguiente_check_id,
             "ultimo_completado_id": ultimo_completado_id,
             "writeback_activo": _writeback_activo(),
+            "pasos_a_aprobar": pasos_a_aprobar,
         },
     )
 
@@ -1130,6 +1044,8 @@ def detalle_item_dg(request, pk):
     prorroga_pendiente = item.prorrogas.filter(estatus=SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE).first()
     comentarios = item.comentarios.select_related("usuario").order_by("created_at")
     evidencias = item.evidencias.select_related("usuario", "revisado_por").order_by("created_at")
+    checklist_completo = bool(checks) and all(c.completado for c in checks)
+    siguiente_check_id = next((c.id for c in checks if not c.completado), None)
     return render(request, "seguimiento/detalle_item.html", {
         "item": item,
         "checks": checks,
@@ -1143,8 +1059,84 @@ def detalle_item_dg(request, pk):
         "evidencias": evidencias,
         "puede_cerrar_directo": False,
         "puede_entregar": False,
-        "checklist_completo": bool(checks) and all(c.completado for c in checks),
+        "checklist_completo": checklist_completo,
         "estatus_en_revision": SeguimientoItem.ESTATUS_EN_REVISION,
+        "puede_retractar": False,
+        "current_user": request.user,
+        "siguiente_check_id": siguiente_check_id,
+        "ultimo_completado_id": None,
+        "writeback_activo": False,  # DG es solo lectura — nunca activa write-back
+        "pasos_a_aprobar": [],      # DG no aprueba pasos individuales
         "es_vista_dg": True,
         "puede_resolver_dg": item.estatus == SeguimientoItem.ESTATUS_EN_REVISION,
     })
+
+
+@login_required
+@require_POST
+def aprobar_paso_colaborador(request, pk, check_id):
+    """Un colaborador aprueba o devuelve un paso en el que es el aprobador designado.
+
+    El paso debe tener estatus_origen="SUBMITTED" (el responsable lo envió a revisión).
+    Si write-back está activo, sincroniza contra el Agente DG. Si no, actualiza solo el ERP.
+    El DG NO usa esta vista — los ítems completos los aprueba vía resolver_revision.
+    """
+    from .agente_dg_client import AgenteDGError, is_configured, patch_step
+
+    # Solo quien es aprobador del paso puede actuar; 404 para cualquier otro
+    check = get_object_or_404(
+        SeguimientoChecklistItem,
+        pk=check_id,
+        seguimiento_id=pk,
+        aprobador_user=request.user,
+        requiere_aprobacion=True,
+    )
+    item = check.seguimiento
+
+    if item.esta_cerrado:
+        messages.error(request, "El proyecto está cerrado; no se pueden aprobar pasos.")
+        return redirect("seguimiento:mi_seguimiento")
+
+    accion = (request.POST.get("accion") or "").strip()
+    if accion not in {"aprobar", "devolver"}:
+        messages.error(request, "Acción no reconocida.")
+        return redirect("seguimiento:mi_seguimiento")
+
+    wb_activo = _writeback_activo() and is_configured() and bool(check.origen_step_id)
+
+    if accion == "aprobar":
+        nuevo_estatus = "COMPLETED"
+        completado = True
+        msg_ok = "Paso aprobado."
+        msg_wb = "Paso aprobado y sincronizado con el Agente DG."
+    else:  # devolver
+        nuevo_estatus = "IN_PROGRESS"
+        completado = False
+        msg_ok = "Paso devuelto al responsable para corrección."
+        msg_wb = "Paso devuelto al responsable y sincronizado con el Agente DG."
+
+    if wb_activo:
+        try:
+            patch_step(check.origen_step_id, status=nuevo_estatus)
+        except AgenteDGError as exc:
+            logger.warning("Write-back aprobacion-paso falló (step %s): %s", check.origen_step_id, exc)
+            messages.error(request, "No se pudo sincronizar con el Agente DG. Intenta de nuevo.")
+            return redirect("seguimiento:mi_seguimiento")
+        messages.success(request, msg_wb)
+    else:
+        messages.success(request, msg_ok)
+
+    check.estatus_origen = nuevo_estatus
+    check.completado = completado
+    check.completado_por = request.user if completado else None
+    check.completado_at = timezone.now() if completado else None
+    check.save(update_fields=["estatus_origen", "completado", "completado_por", "completado_at", "updated_at"])
+
+    log_event(
+        request.user,
+        f"seguimiento.aprobacion_paso.{accion}",
+        "SeguimientoChecklistItem",
+        check.pk,
+        {"seguimiento_id": item.pk, "writeback": wb_activo},
+    )
+    return redirect("seguimiento:mi_seguimiento")
