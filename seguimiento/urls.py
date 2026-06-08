@@ -16,6 +16,7 @@ urlpatterns = [
     path("compromisos/", views.seguimiento_compromisos, name="compromisos"),
     path("<int:pk>/", views.detalle_item, name="detalle"),
     path("<int:pk>/checklist/<int:check_id>/", views.toggle_checklist, name="toggle_checklist"),
+    path("<int:pk>/paso/<int:check_id>/marcar/", views.marcar_paso, name="marcar_paso"),
     path("<int:pk>/retroalimentacion/", views.registrar_feedback, name="registrar_feedback"),
     path("<int:pk>/evidencias/", views.subir_evidencia, name="subir_evidencia"),
     path("<int:pk>/prorroga/", views.solicitar_prorroga, name="solicitar_prorroga"),

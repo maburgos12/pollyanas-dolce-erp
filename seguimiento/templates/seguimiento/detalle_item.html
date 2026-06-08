@@ -254,11 +254,22 @@
             <div class="muted" style="font-size:.72rem; font-weight:800; text-transform:uppercase; letter-spacing:.04em; margin-bottom:6px;">Checklist operativo del paso</div>
             <div style="display:grid; gap:4px;">
               {% for sub in check.sub_checklist %}
+              {% if not es_vista_dg and writeback_activo and check.origen_step_id and not item.esta_cerrado %}
+              <form method="post" action="{% url 'seguimiento:marcar_paso' item.pk check.pk %}" style="display:flex; align-items:center; gap:8px; font-size:.88rem;">
+                {% csrf_token %}
+                <input type="hidden" name="accion" value="subpunto">
+                <input type="hidden" name="sub_index" value="{{ forloop.counter0 }}">
+                <button type="submit" title="Marcar / desmarcar" style="background:none; border:none; cursor:pointer; font-size:1rem; padding:0; line-height:1;">{% if sub.completado %}✅{% else %}⬜{% endif %}</button>
+                <span style="flex:1; overflow:hidden;">{{ sub.titulo }}</span>
+                <span class="muted" style="font-size:.7rem;">{% if sub.completado %}Resuelto{% else %}Pendiente{% endif %}</span>
+              </form>
+              {% else %}
               <div style="display:flex; align-items:center; gap:8px; font-size:.88rem;">
                 <span>{% if sub.completado %}✅{% else %}⬜{% endif %}</span>
                 <span style="flex:1; overflow:hidden;">{{ sub.titulo }}</span>
                 <span class="muted" style="font-size:.7rem;">{% if sub.completado %}Resuelto{% else %}Pendiente{% endif %}</span>
               </div>
+              {% endif %}
               {% endfor %}
             </div>
           </div>
@@ -269,6 +280,25 @@
           {% endif %}
 
           {% if not es_vista_dg and not item.esta_cerrado %}
+            {% if writeback_activo and check.origen_step_id %}
+            {# Write-back: transiciones de estatus sincronizadas con el Agente DG #}
+            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+              {% if check.completado or check.estatus_origen == 'COMPLETED' %}
+                <span class="muted" style="font-size:.8rem;">✓ Paso completado</span>
+              {% elif check.estatus_origen == 'SUBMITTED' %}
+                <span class="muted" style="font-size:.8rem;">⏳ En revisión del aprobador{% if check.aprobador_nombre %} ({{ check.aprobador_nombre }}){% endif %}</span>
+              {% elif check.estatus_origen == 'IN_PROGRESS' %}
+                {% if check.requiere_aprobacion %}
+                <form method="post" action="{% url 'seguimiento:marcar_paso' item.pk check.pk %}">{% csrf_token %}<input type="hidden" name="accion" value="enviar"><button class="btn btn-primary btn-sm" type="submit">Enviar a revisión</button></form>
+                {% else %}
+                <form method="post" action="{% url 'seguimiento:marcar_paso' item.pk check.pk %}">{% csrf_token %}<input type="hidden" name="accion" value="completar"><button class="btn btn-primary btn-sm" type="submit">Marcar terminado</button></form>
+                {% endif %}
+              {% else %}
+                <form method="post" action="{% url 'seguimiento:marcar_paso' item.pk check.pk %}">{% csrf_token %}<input type="hidden" name="accion" value="iniciar"><button class="btn btn-primary btn-sm" type="submit">Iniciar</button></form>
+              {% endif %}
+            </div>
+            {% else %}
+            {# Comportamiento local (sin write-back) #}
             {% if check.pk == siguiente_check_id %}
             <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk check.pk %}">
               {% csrf_token %}
@@ -279,6 +309,7 @@
               {% csrf_token %}
               <button class="btn btn-secondary btn-sm" type="submit">Deshacer</button>
             </form>
+            {% endif %}
             {% endif %}
           {% endif %}
         </div>
