@@ -216,39 +216,43 @@
   <div class="bi-panel" style="margin-bottom:16px;">
     <p class="seg-section-title">Proceso{% if es_vista_dg %} · solo lectura{% endif %}</p>
     <p class="muted" style="margin:-4px 0 10px; font-size:.82rem;">
-      {% if es_vista_dg %}Avance del colaborador. El responsable marca cada paso en orden.
-      {% else %}Marca los pasos en orden: solo el siguiente está disponible.{% endif %}
+      {% if es_vista_dg %}Avance del colaborador. Toca un paso para ver su detalle. El responsable marca cada paso en orden.
+      {% else %}Toca un paso para ver su detalle. Marca los pasos en orden: solo el siguiente está disponible.{% endif %}
     </p>
     <div style="display:grid; gap:8px;">
       {% for check in checks %}
-      <div style="display:flex; align-items:flex-start; gap:10px; padding:10px 12px; border:1px solid rgba(139,34,82,.10); border-radius:10px;{% if check.completado %} background:rgba(76,175,80,.06);{% endif %}">
-        <span class="muted" style="font-weight:800; padding-top:2px;">{{ forloop.counter }}.</span>
-        <span style="font-size:1.05rem; padding-top:1px;">{% if check.completado %}✅{% elif es_vista_dg %}⬜{% elif check.pk == siguiente_check_id %}⭕{% else %}🔒{% endif %}</span>
-        <div style="flex:1; overflow:hidden;">
-          <div style="font-weight:700;">{{ check.titulo }}</div>
+      <details {% if not es_vista_dg and check.pk == siguiente_check_id %}open{% endif %} style="border:1px solid rgba(139,34,82,.10); border-radius:10px;{% if check.completado %} background:rgba(76,175,80,.06);{% endif %}">
+        <summary style="cursor:pointer; list-style:none; display:flex; align-items:center; gap:10px; padding:10px 12px;">
+          <span class="muted" style="font-weight:800;">{{ forloop.counter }}.</span>
+          <span style="font-size:1.05rem;">{% if check.completado %}✅{% elif es_vista_dg %}⬜{% elif check.pk == siguiente_check_id %}⭕{% else %}🔒{% endif %}</span>
+          <span style="flex:1; font-weight:700; overflow:hidden;">{{ check.titulo }}</span>
+          <span class="muted" style="font-size:.76rem;">{% if check.completado %}Hecho{% elif not es_vista_dg and check.pk == siguiente_check_id %}En turno{% else %}Pendiente{% endif %} ▾</span>
+        </summary>
+        <div style="padding:2px 14px 14px 40px; display:grid; gap:8px;">
           {% if check.descripcion %}
-          <div style="margin-top:3px; color:var(--texto); font-size:.9rem; white-space:pre-line;">{{ check.descripcion }}</div>
+          <div style="color:var(--texto); font-size:.92rem; white-space:pre-line;">{{ check.descripcion }}</div>
+          {% else %}
+          <div class="muted" style="font-size:.85rem;">Sin descripción registrada para este paso.</div>
           {% endif %}
+          <div class="muted" style="font-size:.76rem;">Paso {{ forloop.counter }} de {{ checklist_total }}</div>
           {% if check.completado %}
-          <div class="muted" style="font-size:.78rem; margin-top:5px;">
-            ✓ Hecho por {{ check.completado_por.get_full_name|default:check.completado_por.username|default:"—" }}{% if check.completado_at %} · {{ check.completado_at|date:"d/m/Y H:i" }}{% endif %}
-          </div>
+          <div class="muted" style="font-size:.8rem;">✓ Hecho por {{ check.completado_por.get_full_name|default:check.completado_por.username|default:"—" }}{% if check.completado_at %} · {{ check.completado_at|date:"d/m/Y H:i" }}{% endif %}</div>
+          {% endif %}
+          {% if not es_vista_dg and not item.esta_cerrado %}
+            {% if check.pk == siguiente_check_id %}
+            <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk check.pk %}">
+              {% csrf_token %}
+              <button class="btn btn-primary btn-sm" type="submit">Marcar hecho</button>
+            </form>
+            {% elif check.completado and check.pk == ultimo_completado_id %}
+            <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk check.pk %}">
+              {% csrf_token %}
+              <button class="btn btn-secondary btn-sm" type="submit">Deshacer</button>
+            </form>
+            {% endif %}
           {% endif %}
         </div>
-        {% if not es_vista_dg and not item.esta_cerrado %}
-          {% if check.pk == siguiente_check_id %}
-          <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk check.pk %}">
-            {% csrf_token %}
-            <button class="btn btn-primary btn-sm" type="submit">Marcar hecho</button>
-          </form>
-          {% elif check.completado and check.pk == ultimo_completado_id %}
-          <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk check.pk %}">
-            {% csrf_token %}
-            <button class="btn btn-secondary btn-sm" type="submit">Deshacer</button>
-          </form>
-          {% endif %}
-        {% endif %}
-      </div>
+      </details>
       {% endfor %}
     </div>
   </div>
