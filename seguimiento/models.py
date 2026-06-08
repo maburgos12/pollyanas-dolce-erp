@@ -118,6 +118,16 @@ class SeguimientoChecklistItem(models.Model):
         blank=True,
     )
     completado_at = models.DateTimeField(null=True, blank=True)
+    # Detalle del paso espejado desde el Agente DG (solo lectura en el ERP)
+    entregable = models.TextField(blank=True, default="")
+    responsable_nombre = models.CharField(max_length=160, blank=True, default="")
+    aprobador_nombre = models.CharField(max_length=160, blank=True, default="")
+    requiere_aprobacion = models.BooleanField(default=False)
+    vence = models.DateTimeField(null=True, blank=True)
+    prioridad = models.CharField(max_length=40, blank=True, default="")
+    tipo = models.CharField(max_length=40, blank=True, default="")
+    estatus_origen = models.CharField(max_length=40, blank=True, default="")
+    sub_checklist = models.JSONField(blank=True, default=list)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

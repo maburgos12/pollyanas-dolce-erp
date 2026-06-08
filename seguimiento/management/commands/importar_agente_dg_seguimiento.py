@@ -84,6 +84,11 @@ PROJECT_STEPS_QUERY = """
         s.description,
         s.deliverable_text,
         s.status,
+        s.step_type,
+        s.priority,
+        s.requires_approval,
+        s.due_at,
+        s.checklist_items_json,
         s.order_index,
         s.completed_at
     FROM minute_project_steps s
@@ -157,8 +162,17 @@ class Command(AgenteDGSeguimientoImporter, BaseCommand):
                     checklist=[
                         {
                             "titulo": step["title"],
-                            "descripcion": step.get("description") or step.get("deliverable_text") or "",
+                            "descripcion": step.get("description") or "",
                             "completado": _status_agente_a_erp(step.get("status")) == SeguimientoItem.ESTATUS_COMPLETADO,
+                            "entregable": step.get("deliverable_text") or "",
+                            "responsable_nombre": step.get("owner_user_name") or "",
+                            "aprobador_nombre": step.get("approver_user_name") or "",
+                            "requiere_aprobacion": bool(step.get("requires_approval")),
+                            "vence": step.get("due_at"),
+                            "prioridad": step.get("priority") or "",
+                            "tipo": str(step.get("step_type") or ""),
+                            "estatus_origen": str(step.get("status") or ""),
+                            "checklist_items_json": step.get("checklist_items_json") or "",
                         }
                         for step in project_steps.get(row["id"], [])
                     ],
