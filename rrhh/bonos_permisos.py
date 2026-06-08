@@ -10,10 +10,19 @@ from rest_framework.response import Response
 
 from core.access import has_any_role, ROLE_DG, ROLE_ADMIN
 from core.notificaciones import notificar_permiso_solicitado
-from rrhh.models import Empleado, PermisoSalida
+from rrhh.models import Empleado, PermisoSalida, PermisoSalidaCambio
 from rrhh.services_permisos import can_resolver_permiso_jefe, resolver_permiso_jefe
 
 ESTADOS_EDITABLES = {PermisoSalida.ESTADO_SOLICITADO, PermisoSalida.ESTADO_APROBADO}
+ESTADOS_ELIMINABLES = {PermisoSalida.ESTADO_SOLICITADO, PermisoSalida.ESTADO_APROBADO}
+
+
+def _es_jefe_directo_permiso(user, permiso: PermisoSalida) -> bool:
+    empleado = getattr(permiso, "empleado", None)
+    jefe = getattr(empleado, "jefe_directo", None)
+    if getattr(empleado, "usuario_erp_id", None) == getattr(user, "id", None):
+        return False
+    return getattr(jefe, "usuario_erp_id", None) == getattr(user, "id", None)
 
 
 def can_editar_permiso(user, permiso: PermisoSalida) -> bool:
@@ -23,7 +32,50 @@ def can_editar_permiso(user, permiso: PermisoSalida) -> bool:
         return False
     if user.is_superuser or has_any_role(user, ROLE_DG, ROLE_ADMIN):
         return True
-    return can_resolver_permiso_jefe(user, permiso)
+    return _es_jefe_directo_permiso(user, permiso)
+
+
+def can_eliminar_permiso(user, permiso: PermisoSalida) -> bool:
+    if user is None or not user.is_authenticated:
+        return False
+    if permiso.estado not in ESTADOS_ELIMINABLES:
+        return False
+    if user.is_superuser or has_any_role(user, ROLE_DG, ROLE_ADMIN):
+        return True
+    return _es_jefe_directo_permiso(user, permiso)
+
+
+def _motivo_cambio(request) -> str:
+    motivo = (request.data.get("motivo_cambio") or "").strip()
+    if not motivo:
+        motivo = (request.data.get("motivo_eliminacion") or "").strip()
+    return motivo
+
+
+def _valor_permiso(permiso: PermisoSalida, campo: str):
+    value = getattr(permiso, campo)
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return value
+
+
+def _registrar_cambio_permiso(
+    permiso: PermisoSalida,
+    user,
+    *,
+    accion: str,
+    motivo: str,
+    cambios: dict,
+) -> None:
+    PermisoSalidaCambio.objects.create(
+        permiso=permiso,
+        folio=permiso.folio,
+        empleado_nombre=getattr(permiso.empleado, "nombre", ""),
+        accion=accion,
+        motivo=motivo,
+        cambios=cambios,
+        realizado_por=user if getattr(user, "is_authenticated", False) else None,
+    )
 
 
 TIPO_LABELS = {
@@ -86,6 +138,7 @@ def _permiso_payload(permiso: PermisoSalida, user=None) -> dict:
         "origen_solicitud": permiso.origen_solicitud,
         "puede_preautorizar": can_resolver_permiso_jefe(user, permiso) if user is not None else False,
         "puede_editar": can_editar_permiso(user, permiso) if user is not None else False,
+        "puede_eliminar": can_eliminar_permiso(user, permiso) if user is not None else False,
         "creado_en": permiso.creado_en.isoformat(),
     }
 
@@ -169,6 +222,10 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
         if not can_editar_permiso(request.user, permiso):
             return Response({"detail": "No tienes permiso para editar este registro."}, status=status.HTTP_403_FORBIDDEN)
 
+        motivo_cambio = _motivo_cambio(request)
+        if not motivo_cambio:
+            return Response({"motivo_cambio": "Explica por que se corrige este permiso."}, status=status.HTTP_400_BAD_REQUEST)
+
         tipo = request.data.get("tipo")
         if tipo and tipo not in dict(PermisoSalida.TIPO_CHOICES):
             return Response({"tipo": "Tipo de permiso invalido."}, status=status.HTTP_400_BAD_REQUEST)
@@ -181,6 +238,9 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
         if not motivo:
             return Response({"motivo": "El motivo es obligatorio."}, status=status.HTTP_400_BAD_REQUEST)
 
+        campos_auditados = ["tipo", "fecha_inicio", "fecha_fin", "motivo", "goce_sueldo"]
+        antes = {campo: _valor_permiso(permiso, campo) for campo in campos_auditados}
+
         if tipo:
             permiso.tipo = tipo
         permiso.fecha_inicio = fecha_inicio
@@ -189,7 +249,51 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
         goce = request.data.get("goce_sueldo")
         if goce is not None:
             permiso.goce_sueldo = _parse_bool(goce)
+        despues = {campo: _valor_permiso(permiso, campo) for campo in campos_auditados}
+        cambios = {
+            campo: {"antes": antes[campo], "despues": despues[campo]}
+            for campo in campos_auditados
+            if antes[campo] != despues[campo]
+        }
+        if not cambios:
+            return Response({"detail": "No hay cambios para guardar."}, status=status.HTTP_400_BAD_REQUEST)
         permiso.save()
+        _registrar_cambio_permiso(
+            permiso,
+            request.user,
+            accion=PermisoSalidaCambio.ACCION_EDITAR,
+            motivo=motivo_cambio,
+            cambios=cambios,
+        )
+        return Response(_permiso_payload(permiso, request.user))
+
+    @action(detail=True, methods=["post"])
+    def eliminar(self, request, pk=None):
+        permiso = self.get_object()
+        if not can_eliminar_permiso(request.user, permiso):
+            return Response({"detail": "No tienes permiso para eliminar este registro."}, status=status.HTTP_403_FORBIDDEN)
+        motivo_cambio = _motivo_cambio(request)
+        if not motivo_cambio:
+            return Response({"motivo_cambio": "Explica por que se elimina este permiso."}, status=status.HTTP_400_BAD_REQUEST)
+
+        antes = {
+            "estado": permiso.estado,
+            "estado_jefe": permiso.estado_jefe,
+            "estado_direccion": permiso.estado_direccion,
+        }
+        permiso.estado = PermisoSalida.ESTADO_CANCELADO
+        permiso.save(update_fields=["estado", "actualizado_en"])
+        _registrar_cambio_permiso(
+            permiso,
+            request.user,
+            accion=PermisoSalidaCambio.ACCION_ELIMINAR,
+            motivo=motivo_cambio,
+            cambios={
+                "estado": {"antes": antes["estado"], "despues": permiso.estado},
+                "estado_jefe": {"antes": antes["estado_jefe"], "despues": permiso.estado_jefe},
+                "estado_direccion": {"antes": antes["estado_direccion"], "despues": permiso.estado_direccion},
+            },
+        )
         return Response(_permiso_payload(permiso, request.user))
 
     @action(detail=True, methods=["post"])

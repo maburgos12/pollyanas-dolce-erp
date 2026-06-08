@@ -14,6 +14,7 @@ from .models import (
     NominaLinea,
     NominaPeriodo,
     PermisoSalida,
+    PermisoSalidaCambio,
     PlantillaAutorizada,
     Prestamo,
     PrestamoCuota,
@@ -272,6 +273,20 @@ class PermisoAdmin(admin.ModelAdmin):
         "fecha_autorizacion_direccion",
         "autorizado_por",
     )
+
+
+@admin.register(PermisoSalidaCambio)
+class PermisoSalidaCambioAdmin(admin.ModelAdmin):
+    list_display = ("folio", "empleado_nombre", "accion", "realizado_por", "creado_en")
+    list_filter = ("accion", "creado_en")
+    search_fields = ("folio", "empleado_nombre", "motivo", "realizado_por__username")
+    readonly_fields = ("permiso", "folio", "empleado_nombre", "accion", "motivo", "cambios", "realizado_por", "creado_en")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Turno)
