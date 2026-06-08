@@ -119,6 +119,7 @@ class SeguimientoChecklistItem(models.Model):
     )
     completado_at = models.DateTimeField(null=True, blank=True)
     # Detalle del paso espejado desde el Agente DG (solo lectura en el ERP)
+    origen_step_id = models.IntegerField(null=True, blank=True, db_index=True)
     entregable = models.TextField(blank=True, default="")
     responsable_nombre = models.CharField(max_length=160, blank=True, default="")
     aprobador_nombre = models.CharField(max_length=160, blank=True, default="")
