@@ -348,6 +348,89 @@ def notificar_seguimiento_completado(item, *, actor=None) -> int:
     return creadas
 
 
+def _responsables_item(item) -> list:
+    """Devuelve la lista de usuarios responsables del acuerdo (user directo + usuario del empleado)."""
+    User = get_user_model()
+    responsables = []
+    if item.responsable_user_id:
+        try:
+            responsables.append(item.responsable_user)
+        except Exception:
+            pass
+    if item.responsable_empleado_id:
+        empleado = item.responsable_empleado
+        usuario_emp = getattr(empleado, "usuario_erp", None)
+        if usuario_emp:
+            responsables.append(usuario_emp)
+    return _usuarios_activos(responsables)
+
+
+def notificar_seguimiento_aprobado(item, *, comentario: str = "", actor=None) -> int:
+    """Notifica al responsable que el DG aprobó y cerró su acuerdo."""
+    destinatarios = _responsables_item(item)
+    titulo = item.titulo[:80]
+    actor_nombre = (actor.get_full_name() or actor.username) if actor else "Director General"
+    mensaje = f"{actor_nombre} aprobó el acuerdo como completado."
+    if comentario:
+        mensaje += f"\n{comentario[:200]}"
+    return crear_notificaciones(
+        destinatarios,
+        titulo=f"✓ Aprobado: {titulo}",
+        mensaje=mensaje,
+        url=f"/seguimiento/{item.pk}/",
+        tipo=Notificacion.TIPO_SEGUIMIENTO,
+        prioridad=Notificacion.PRIORIDAD_ALTA,
+        actor=actor,
+        objeto_tipo="seguimiento.SeguimientoItem",
+        objeto_id=item.pk,
+        excluir=actor,
+    )
+
+
+def notificar_seguimiento_devuelto(item, *, comentario: str = "", actor=None) -> int:
+    """Notifica al responsable que el DG devolvió el acuerdo para corrección."""
+    destinatarios = _responsables_item(item)
+    titulo = item.titulo[:80]
+    actor_nombre = (actor.get_full_name() or actor.username) if actor else "Director General"
+    mensaje = f"{actor_nombre} devolvió el acuerdo para corrección."
+    if comentario:
+        mensaje += f"\n{comentario[:200]}"
+    return crear_notificaciones(
+        destinatarios,
+        titulo=f"↩ Devuelto para corrección: {titulo}",
+        mensaje=mensaje,
+        url=f"/seguimiento/{item.pk}/",
+        tipo=Notificacion.TIPO_SEGUIMIENTO,
+        prioridad=Notificacion.PRIORIDAD_ALTA,
+        actor=actor,
+        objeto_tipo="seguimiento.SeguimientoItem",
+        objeto_id=item.pk,
+        excluir=actor,
+    )
+
+
+def notificar_seguimiento_feedback_responsable(item, *, comentario: str = "", actor=None) -> int:
+    """Notifica al responsable que el DG dejó retroalimentación en su acuerdo."""
+    destinatarios = _responsables_item(item)
+    titulo = item.titulo[:80]
+    actor_nombre = (actor.get_full_name() or actor.username) if actor else "Director General"
+    mensaje = f"{actor_nombre} dejó una observación en tu acuerdo."
+    if comentario:
+        mensaje += f"\n{comentario[:200]}"
+    return crear_notificaciones(
+        destinatarios,
+        titulo=f"💬 Retroalimentación DG: {titulo}",
+        mensaje=mensaje,
+        url=f"/seguimiento/{item.pk}/",
+        tipo=Notificacion.TIPO_SEGUIMIENTO,
+        prioridad=Notificacion.PRIORIDAD_NORMAL,
+        actor=actor,
+        objeto_tipo="seguimiento.SeguimientoItem",
+        objeto_id=item.pk,
+        excluir=actor,
+    )
+
+
 def _url_permiso_por_origen(permiso) -> str:
     if permiso.origen_solicitud == permiso.ORIGEN_BONOS_PRODUCCION:
         return "/bonos-produccion/app/?tab=permisos"

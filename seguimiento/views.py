@@ -17,9 +17,12 @@ from django.views.decorators.http import require_POST
 from core.access import ROLE_DG, ROLE_ADMIN, has_any_role
 from core.audit import log_event
 from core.notificaciones import (
+    notificar_seguimiento_aprobado,
     notificar_seguimiento_avance,
     notificar_seguimiento_completado,
+    notificar_seguimiento_devuelto,
     notificar_seguimiento_entrega,
+    notificar_seguimiento_feedback_responsable,
     notificar_seguimiento_prorroga,
 )
 
@@ -391,6 +394,8 @@ def registrar_feedback(request, pk):
         item.save(update_fields=["estatus", "updated_at"])
     log_event(request.user, "seguimiento.retroalimentacion", "SeguimientoItem", item.pk, {"comentario": True})
     notificar_seguimiento_avance(item, actor=request.user, mensaje_extra=comentario[:160])
+    if has_any_role(request.user, ROLE_DG, ROLE_ADMIN) or request.user.is_superuser:
+        notificar_seguimiento_feedback_responsable(item, comentario=comentario, actor=request.user)
     messages.success(request, "Retroalimentación enviada.")
     return redirect("seguimiento:detalle", pk=item.pk)
 
@@ -636,6 +641,7 @@ def resolver_revision(request, pk):
                 comentario=f"[APROBADO] {comentario_texto}",
             )
         log_event(request.user, "seguimiento.aprobar", "SeguimientoItem", item.pk, {})
+        notificar_seguimiento_aprobado(item, comentario=comentario_texto, actor=request.user)
         messages.success(request, f"'{item.titulo[:60]}' marcado como completado.")
     elif accion == "devolver":
         if not comentario_texto:
@@ -649,6 +655,7 @@ def resolver_revision(request, pk):
             comentario=f"[DEVUELTO] {comentario_texto}",
         )
         log_event(request.user, "seguimiento.devolver", "SeguimientoItem", item.pk, {})
+        notificar_seguimiento_devuelto(item, comentario=comentario_texto, actor=request.user)
         messages.warning(request, f"'{item.titulo[:60]}' devuelto para corrección.")
     else:
         messages.error(request, "Acción no reconocida.")
