@@ -114,6 +114,28 @@ class VacantesSolicitudServiceTests(TestCase):
         self.assertEqual(vacante.empleado_cubrio, empleado)
         self.assertEqual(VacanteMovimiento.objects.filter(vacante=vacante).count(), 5)
 
+    def test_autorizador_operativo_puede_usar_nivel_jefatura_sin_puesto_jefatura(self):
+        empleado = self.jefe_ventas.empleado_rrhh
+        empleado.puesto = "Responsable de ventas"
+        empleado.puesto_operativo = "CAJAS"
+        empleado.nivel_organizacional = Empleado.NIVEL_JEFATURA
+        empleado.save(update_fields=["puesto", "puesto_operativo", "nivel_organizacional"])
+
+        vacante = crear_solicitud_vacante(
+            area="ventas",
+            puesto="cajera",
+            fecha_solicitada=date(2026, 5, 28),
+            solicitado_por=self.solicitante,
+            creado_por=self.solicitante,
+            departamento=Empleado.DEP_VENTAS,
+        )
+
+        enviar_vacante_autorizacion(vacante, self.rrhh_user, "Validada por CH")
+        vacante.refresh_from_db()
+
+        self.assertFalse(vacante.requiere_direccion)
+        self.assertEqual(vacante.autorizador_asignado, self.jefe_ventas)
+
     def test_direccion_autoriza_solo_jefaturas(self):
         vacante = crear_solicitud_vacante(
             area="ventas",
@@ -135,6 +157,27 @@ class VacantesSolicitudServiceTests(TestCase):
         vacante.refresh_from_db()
         self.assertEqual(vacante.estado, VacanteRRHH.ESTADO_AUTORIZADA)
         self.assertEqual(vacante.autorizado_por, self.dg_user)
+
+    def test_direccion_detecta_jefatura_primer_nivel_por_nivel_organizacional(self):
+        empleado = self.jefe_ventas.empleado_rrhh
+        empleado.puesto = "Responsable de ventas"
+        empleado.puesto_operativo = "CAJAS"
+        empleado.nivel_organizacional = Empleado.NIVEL_JEFATURA
+        empleado.save(update_fields=["puesto", "puesto_operativo", "nivel_organizacional"])
+
+        vacante = crear_solicitud_vacante(
+            area="ventas",
+            puesto="jefe de ventas",
+            fecha_solicitada=date(2026, 5, 28),
+            solicitado_por=self.solicitante,
+            creado_por=self.solicitante,
+            departamento=Empleado.DEP_VENTAS,
+        )
+        enviar_vacante_autorizacion(vacante, self.rrhh_user)
+        vacante.refresh_from_db()
+
+        self.assertTrue(vacante.requiere_direccion)
+        self.assertEqual(vacante.tipo_autorizacion, VacanteRRHH.AUTORIZACION_DIRECCION)
 
     def test_no_se_inicia_reclutamiento_sin_autorizacion(self):
         vacante = crear_solicitud_vacante(
@@ -398,6 +441,15 @@ class VacantesSolicitudViewTests(TestCase):
         self.assertEqual(vacante.estado, VacanteRRHH.ESTADO_REVISION_RRHH)
         self.assertEqual(vacante.creado_por, self.jefe_ventas)
         self.assertEqual(vacante.solicitado_por, self.jefe_ventas)
+
+    def test_encargada_puede_crear_solicitud_por_nivel_organizacional(self):
+        empleado = self.jefe_ventas.empleado_rrhh
+        empleado.puesto = "Responsable de cajas"
+        empleado.puesto_operativo = "CAJAS"
+        empleado.nivel_organizacional = Empleado.NIVEL_ENCARGADA
+        empleado.save(update_fields=["puesto", "puesto_operativo", "nivel_organizacional"])
+
+        self.assertTrue(can_solicitar_vacantes(self.jefe_ventas))
 
     def test_jefatura_solo_ve_tab_de_vacantes_en_tarea_puntual(self):
         labels = [tab["label"] for tab in _module_tabs("vacantes", self.jefe_ventas)]

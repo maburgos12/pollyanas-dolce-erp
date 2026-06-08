@@ -12,6 +12,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from core.models import Sucursal
 
 from .models import CandidatoVacante, Empleado, VacanteRRHH, VacanteSeguimiento
+from .services_niveles import liderazgo_q
 from .services_vacantes import (
     agregar_candidato,
     agregar_seguimiento_vacante,
@@ -308,9 +309,7 @@ def _usuarios_solicitantes_vacantes():
     ids = set(
         Empleado.objects.filter(activo=True, usuario_erp__isnull=False)
         .filter(
-            Q(puesto_operativo="JEFATURA")
-            | Q(puesto__icontains="jefe")
-            | Q(puesto__icontains="encarg")
+            liderazgo_q()
             | Q(colaboradores_directos__isnull=False)
         )
         .distinct()

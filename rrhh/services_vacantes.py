@@ -19,6 +19,7 @@ from core.models import Notificacion
 from core.notificaciones import crear_notificaciones, usuarios_direccion_general, usuarios_por_grupo
 
 from .models import CandidatoVacante, Empleado, VacanteCobertura, VacanteMovimiento, VacanteRRHH, VacanteSeguimiento
+from .services_niveles import empleado_es_liderazgo, jefatura_q, liderazgo_q
 
 
 def _normalizar_texto(value: str | None) -> str:
@@ -405,9 +406,10 @@ def vacante_requiere_autorizacion_direccion(vacante: VacanteRRHH) -> bool:
         Empleado.objects.filter(
             activo=True,
             departamento=departamento,
-            puesto_operativo="JEFATURA",
             jefe_directo__isnull=True,
-        ).exists()
+        )
+        .filter(jefatura_q())
+        .exists()
     )
     if not jefatura_primer_nivel:
         return False
@@ -432,7 +434,7 @@ def resolver_autorizador_vacante(vacante: VacanteRRHH, *, exclude_user=None):
     jefe = (
         Empleado.objects.select_related("usuario_erp")
         .filter(activo=True, usuario_erp__is_active=True, departamento=departamento)
-        .filter(Q(puesto_operativo="JEFATURA") | Q(puesto__icontains="jefe") | Q(puesto__icontains="encarg"))
+        .filter(liderazgo_q())
         .exclude(usuario_erp_id__in=exclude_ids)
         .order_by("id")
         .first()
@@ -440,9 +442,9 @@ def resolver_autorizador_vacante(vacante: VacanteRRHH, *, exclude_user=None):
     if jefe and jefe.usuario_erp_id:
         return jefe.usuario_erp
 
-    # Si no hay jefatura configurada en el depto, RRHH puede proceder sin autorizador externo
-    # → retorna el propio solicitante para que RRHH lo valide directamente
-    return vacante.solicitado_por if vacante.solicitado_por else None
+    # Sin jefatura configurada no se debe autoautorizar: Capital Humano debe
+    # corregir Organización antes de enviar la vacante.
+    return None
 
 
 def _usuario_es_jefatura_departamento(user, departamento: str) -> bool:
@@ -450,25 +452,12 @@ def _usuario_es_jefatura_departamento(user, departamento: str) -> bool:
         return False
     departamento = _normalizar_texto(departamento)
     empleado = getattr(user, "empleado_rrhh", None)
-    if empleado:
-        empleado_departamento = _normalizar_texto(empleado.departamento)
-        puesto = f"{empleado.puesto_operativo or ''} {empleado.puesto or ''}".upper()
-        if empleado_departamento == departamento and ("JEFATURA" in puesto or "JEFE" in puesto or "ENCARG" in puesto):
-            return True
-    return False
+    return empleado_es_liderazgo(empleado, departamento=departamento)
 
 
 def _usuario_tiene_jefatura(user) -> bool:
     empleado = getattr(user, "empleado_rrhh", None)
-    if not empleado:
-        return False
-    puesto = f"{empleado.puesto_operativo or ''} {empleado.puesto or ''}".upper()
-    return (
-        "JEFATURA" in puesto
-        or "JEFE" in puesto
-        or "ENCARG" in puesto
-        or empleado.colaboradores_directos.exists()
-    )
+    return empleado_es_liderazgo(empleado) or bool(empleado and empleado.colaboradores_directos.exists())
 
 
 def usuarios_autorizadores_vacante(vacante: VacanteRRHH) -> list:

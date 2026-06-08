@@ -54,6 +54,7 @@ from .services_identidad import (
 )
 from .services.lista_raya import importar_lista_raya_nomina
 from .services_personnel_normalization import build_personnel_normalization_plan
+from .services_niveles import jefatura_q
 from .services_permisos import can_authorize_direccion, resolver_permiso_direccion
 from .services_vacantes import (
     can_autorizar_vacante,
@@ -1924,7 +1925,7 @@ def organizacion_ch(request):
         .order_by("departamento", "nombre")
         .prefetch_related("colaboradores_directos")
     )
-    sin_jefe = empleados.filter(jefe_directo__isnull=True).exclude(puesto_operativo="JEFATURA")
+    sin_jefe = empleados.filter(jefe_directo__isnull=True).exclude(jefatura_q())
     identity_map = _identity_map_context(limit=80)
     return render(
         request,
