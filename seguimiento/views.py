@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import os
 from datetime import timedelta
 from pathlib import Path
 
@@ -29,6 +31,12 @@ from .models import (
     SeguimientoProrrogaSolicitud,
 )
 from .services import empleado_de_usuario
+
+logger = logging.getLogger(__name__)
+
+
+def _writeback_activo() -> bool:
+    return (os.getenv("AGENTE_DG_WRITEBACK_ENABLED", "") or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 EVIDENCIA_ALLOWED_EXTENSIONS = {
@@ -297,6 +305,66 @@ def toggle_checklist(request, pk, check_id):
         enviar_correo=False,
     )
     messages.success(request, "Checklist actualizado.")
+    return redirect("seguimiento:detalle", pk=item.pk)
+
+
+@login_required
+@require_POST
+def marcar_paso(request, pk, check_id):
+    """Marca un paso o sub-punto desde el ERP y lo sincroniza al Agente DG (Fase 2b).
+
+    Solo el responsable/participante (el DG queda en solo lectura). Requiere write-back
+    activo y configurado, y que el paso tenga origen_step_id. Si la API falla, NO se
+    cambia el estado local (la fuente de verdad sigue siendo el Agente DG).
+    """
+    from .agente_dg_client import AgenteDGError, is_configured, patch_step
+
+    item = _get_item_para_usuario(request.user, pk)
+    check = get_object_or_404(SeguimientoChecklistItem, pk=check_id, seguimiento=item)
+
+    if not (_writeback_activo() and is_configured()):
+        messages.error(request, "La sincronización con el Agente DG no está activa.")
+        return redirect("seguimiento:detalle", pk=item.pk)
+    if not check.origen_step_id:
+        messages.error(request, "Este paso no está vinculado con el Agente DG.")
+        return redirect("seguimiento:detalle", pk=item.pk)
+
+    accion = (request.POST.get("accion") or "").strip()
+    try:
+        if accion == "subpunto":
+            try:
+                idx = int(request.POST.get("sub_index") or -1)
+            except ValueError:
+                idx = -1
+            subs = list(check.sub_checklist or [])
+            if not (0 <= idx < len(subs)):
+                messages.error(request, "Sub-punto inválido.")
+                return redirect("seguimiento:detalle", pk=item.pk)
+            subs[idx]["completado"] = not bool(subs[idx].get("completado"))
+            items_api = [{"text": s.get("titulo", ""), "completed": bool(s.get("completado"))} for s in subs]
+            patch_step(check.origen_step_id, checklist_items=items_api)
+            check.sub_checklist = subs
+            check.save(update_fields=["sub_checklist", "updated_at"])
+            messages.success(request, "Sub-punto actualizado y sincronizado.")
+        elif accion in {"iniciar", "enviar", "completar"}:
+            status_map = {"iniciar": "IN_PROGRESS", "enviar": "SUBMITTED", "completar": "COMPLETED"}
+            nuevo = status_map[accion]
+            patch_step(check.origen_step_id, status=nuevo)
+            check.estatus_origen = nuevo
+            check.completado = nuevo == "COMPLETED"
+            check.completado_por = request.user if check.completado else None
+            check.completado_at = timezone.now() if check.completado else None
+            check.save(update_fields=["estatus_origen", "completado", "completado_por", "completado_at", "updated_at"])
+            messages.success(request, "Paso sincronizado con el Agente DG.")
+        else:
+            messages.error(request, "Acción no reconocida.")
+            return redirect("seguimiento:detalle", pk=item.pk)
+    except AgenteDGError as exc:
+        logger.warning("Write-back Agente DG falló (step %s): %s", check.origen_step_id, exc)
+        messages.error(request, "No se pudo sincronizar con el Agente DG. El cambio no se aplicó; intenta de nuevo.")
+        return redirect("seguimiento:detalle", pk=item.pk)
+
+    log_event(request.user, "seguimiento.writeback", "SeguimientoChecklistItem", check.pk, {"accion": accion})
     return redirect("seguimiento:detalle", pk=item.pk)
 
 
@@ -927,6 +995,7 @@ def detalle_item(request, pk):
             "current_user": request.user,
             "siguiente_check_id": siguiente_check_id,
             "ultimo_completado_id": ultimo_completado_id,
+            "writeback_activo": _writeback_activo(),
         },
     )
 
