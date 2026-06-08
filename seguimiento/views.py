@@ -17,6 +17,8 @@ from django.views.decorators.http import require_POST
 from core.access import ROLE_DG, ROLE_ADMIN, has_any_role
 from core.audit import log_event
 from core.notificaciones import (
+    notificar_paso_aprobado_por_colaborador,
+    notificar_paso_devuelto_por_colaborador,
     notificar_seguimiento_aprobado,
     notificar_seguimiento_avance,
     notificar_seguimiento_completado,
@@ -1102,6 +1104,8 @@ def aprobar_paso_colaborador(request, pk, check_id):
         messages.error(request, "Acción no reconocida.")
         return redirect("seguimiento:mi_seguimiento")
 
+    motivo = (request.POST.get("motivo") or "").strip()
+
     wb_activo = _writeback_activo() and is_configured() and bool(check.origen_step_id)
 
     if accion == "aprobar":
@@ -1132,11 +1136,30 @@ def aprobar_paso_colaborador(request, pk, check_id):
     check.completado_at = timezone.now() if completado else None
     check.save(update_fields=["estatus_origen", "completado", "completado_por", "completado_at", "updated_at"])
 
+    # Si hay motivo al devolver, guardarlo como comentario en el item
+    if accion == "devolver" and motivo:
+        texto = f"Paso devuelto por {request.user.get_full_name() or request.user.username}: {motivo}"
+        SeguimientoComentario.objects.create(
+            seguimiento=item,
+            autor=request.user,
+            contenido=texto[:1000],
+            tipo=SeguimientoComentario.TIPO_FEEDBACK,
+        )
+
+    # Notificar al responsable del proyecto
+    try:
+        if accion == "aprobar":
+            notificar_paso_aprobado_por_colaborador(check, actor=request.user)
+        else:
+            notificar_paso_devuelto_por_colaborador(check, motivo=motivo, actor=request.user)
+    except Exception:
+        logger.exception("Error al enviar notificación de aprobación de paso colaborador (step %s)", check.pk)
+
     log_event(
         request.user,
         f"seguimiento.aprobacion_paso.{accion}",
         "SeguimientoChecklistItem",
         check.pk,
-        {"seguimiento_id": item.pk, "writeback": wb_activo},
+        {"seguimiento_id": item.pk, "writeback": wb_activo, "tiene_motivo": bool(motivo)},
     )
     return redirect("seguimiento:mi_seguimiento")

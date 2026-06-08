@@ -434,11 +434,18 @@
               <input type="hidden" name="accion" value="aprobar">
               <button class="btn btn-primary btn-sm" type="submit">✓ Aprobar</button>
             </form>
-            <form method="post" action="{% url 'seguimiento:aprobar_paso' paso.seguimiento_id paso.pk %}" onsubmit="return confirm('¿Devolver al responsable para corrección?')">
-              {% csrf_token %}
-              <input type="hidden" name="accion" value="devolver">
-              <button class="btn btn-secondary btn-sm" type="submit">↩ Devolver</button>
-            </form>
+            <details style="display:inline-block;">
+              <summary style="list-style:none; cursor:pointer;" class="btn btn-secondary btn-sm">↩ Devolver</summary>
+              <div style="position:absolute; z-index:10; margin-top:4px; background:var(--blanco); border:1px solid rgba(201,168,76,.35); border-radius:10px; padding:12px 14px; box-shadow:0 4px 16px rgba(0,0,0,.1);">
+                <form method="post" action="{% url 'seguimiento:aprobar_paso' paso.seguimiento_id paso.pk %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="accion" value="devolver">
+                  <label style="font-size:.8rem; font-weight:600; display:block; margin-bottom:4px;">Motivo de devolución (opcional)</label>
+                  <textarea name="motivo" rows="2" placeholder="¿Por qué se devuelve el paso?" class="input-field" style="font-size:.82rem; resize:vertical;"></textarea>
+                  <button class="btn btn-secondary btn-sm" type="submit" style="margin-top:8px;">Confirmar devolución</button>
+                </form>
+              </div>
+            </details>
           </div>
         </div>
       </div>
