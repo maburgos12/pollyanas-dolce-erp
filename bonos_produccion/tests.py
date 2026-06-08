@@ -8,7 +8,7 @@ from django.test import Client, TestCase, override_settings
 
 from core.access import ROLE_PRODUCCION, ROLE_RRHH
 from core.navigation import NAV_GROUPS
-from rrhh.models import Empleado, NominaLinea, NominaPeriodo, PermisoSalida
+from rrhh.models import Empleado, NominaLinea, NominaPeriodo, PermisoSalida, PermisoSalidaCambio
 
 from .models import (
     AREA_EMBETUNADO,
@@ -687,6 +687,99 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_RECHAZADO)
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_RECHAZADO)
         self.assertEqual(permiso.autorizado_jefe_por, user)
+
+    def test_jefe_directo_corrige_y_elimina_permiso_aprobado_con_auditoria(self):
+        user = get_user_model().objects.create_user(username="jefe-produccion-audit")
+        user.groups.add(Group.objects.get_or_create(name=ROLE_PRODUCCION)[0])
+        user.groups.add(Group.objects.get_or_create(name=ROLE_RRHH)[0])
+        self.client.force_login(user)
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
+        jefe = Empleado.objects.create(nombre="Jefe Produccion Audit", departamento=Empleado.DEP_PRODUCCION, usuario_erp=user)
+        empleado = Empleado.objects.create(
+            nombre="Empleado Hornos Audit",
+            area="PRODUCCION",
+            jefe_directo=jefe,
+            participa_bonos_produccion=True,
+        )
+        BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado, area=AREA_HORNOS)
+        permiso = PermisoSalida.objects.create(
+            empleado=empleado,
+            tipo=PermisoSalida.TIPO_PERMISO_HORA,
+            fecha_inicio="2026-05-21T08:00:00-07:00",
+            fecha_fin="2026-05-21T10:00:00-07:00",
+            motivo="Cita",
+            estado=PermisoSalida.ESTADO_APROBADO,
+            estado_jefe=PermisoSalida.ESTADO_JEFE_PREAUTORIZADO,
+            autorizado_jefe_por=user,
+            autorizado_por=user,
+            origen_solicitud=PermisoSalida.ORIGEN_BONOS_PRODUCCION,
+        )
+
+        listado = self.client.get("/api/bonos-produccion/permisos/?mes=5&anio=2026&area=HORNOS")
+
+        self.assertEqual(listado.status_code, 200)
+        permiso_payload = listado.json()["permisos"][0]
+        self.assertTrue(permiso_payload["puede_editar"])
+        self.assertTrue(permiso_payload["puede_eliminar"])
+        self.assertFalse(permiso_payload["puede_preautorizar"])
+
+        sin_motivo = self.client.post(
+            f"/api/bonos-produccion/permisos/{permiso.id}/editar/",
+            json.dumps(
+                {
+                    "tipo": PermisoSalida.TIPO_PERMISO_HORA,
+                    "fecha_inicio": "2026-05-21T09:00:00",
+                    "fecha_fin": "2026-05-21T11:00:00",
+                    "goce_sueldo": True,
+                    "motivo": "Cita corregida",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(sin_motivo.status_code, 400)
+        self.assertEqual(PermisoSalidaCambio.objects.count(), 0)
+
+        corregido = self.client.post(
+            f"/api/bonos-produccion/permisos/{permiso.id}/editar/",
+            json.dumps(
+                {
+                    "tipo": PermisoSalida.TIPO_PERMISO_HORA,
+                    "fecha_inicio": "2026-05-21T09:00:00",
+                    "fecha_fin": "2026-05-21T11:00:00",
+                    "goce_sueldo": False,
+                    "motivo": "Cita corregida",
+                    "motivo_cambio": "Se capturo una hora incorrecta",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(corregido.status_code, 200)
+        permiso.refresh_from_db()
+        self.assertEqual(permiso.estado, PermisoSalida.ESTADO_APROBADO)
+        self.assertFalse(permiso.goce_sueldo)
+        cambio = PermisoSalidaCambio.objects.get(accion=PermisoSalidaCambio.ACCION_EDITAR)
+        self.assertEqual(cambio.motivo, "Se capturo una hora incorrecta")
+        self.assertIn("fecha_inicio", cambio.cambios)
+        self.assertIn("goce_sueldo", cambio.cambios)
+
+        eliminado = self.client.post(
+            f"/api/bonos-produccion/permisos/{permiso.id}/eliminar/",
+            json.dumps({"motivo_cambio": "Permiso duplicado"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(eliminado.status_code, 200)
+        permiso.refresh_from_db()
+        self.assertEqual(permiso.estado, PermisoSalida.ESTADO_CANCELADO)
+        self.assertTrue(
+            PermisoSalidaCambio.objects.filter(
+                accion=PermisoSalidaCambio.ACCION_ELIMINAR,
+                motivo="Permiso duplicado",
+                folio=permiso.folio,
+            ).exists()
+        )
 
     def test_permiso_produccion_se_crea_con_roster_del_periodo_aunque_rrhh_tenga_otra_area(self):
         user = get_user_model().objects.create_user(username="julissa.angulo")

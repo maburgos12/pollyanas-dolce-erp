@@ -163,6 +163,15 @@ class PermisoSalidaViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
             raise PermissionDenied("No puedes solicitar permisos para otro empleado.")
         serializer.save(empleado=empleado)
 
+    def update(self, request, *args, **kwargs):
+        raise PermissionDenied("Las correcciones de permisos deben registrarse desde el flujo auditado de permisos de equipo.")
+
+    def partial_update(self, request, *args, **kwargs):
+        raise PermissionDenied("Las correcciones de permisos deben registrarse desde el flujo auditado de permisos de equipo.")
+
+    def destroy(self, request, *args, **kwargs):
+        raise PermissionDenied("Los permisos se eliminan con motivo desde el flujo auditado de permisos de equipo.")
+
     @action(detail=True, methods=["post"])
     def aprobar(self, request, pk=None):
         raise PermissionDenied("Capital Humano captura, consulta y archiva permisos; no los autoriza.")

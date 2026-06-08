@@ -1107,6 +1107,44 @@ class PermisoSalida(models.Model):
         super().save(*args, **kwargs)
 
 
+class PermisoSalidaCambio(models.Model):
+    ACCION_EDITAR = "editar"
+    ACCION_ELIMINAR = "eliminar"
+    ACCION_CHOICES = [
+        (ACCION_EDITAR, "Correccion"),
+        (ACCION_ELIMINAR, "Eliminacion"),
+    ]
+
+    permiso = models.ForeignKey(
+        PermisoSalida,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="cambios",
+    )
+    folio = models.CharField(max_length=20, db_index=True)
+    empleado_nombre = models.CharField(max_length=180, blank=True, default="")
+    accion = models.CharField(max_length=12, choices=ACCION_CHOICES)
+    motivo = models.TextField()
+    cambios = models.JSONField(default=dict, blank=True)
+    realizado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="permisos_salida_cambios",
+    )
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-creado_en"]
+        verbose_name = "Cambio de permiso"
+        verbose_name_plural = "Cambios de permisos"
+
+    def __str__(self) -> str:
+        return f"{self.folio} · {self.get_accion_display()}"
+
+
 class ImportacionChecador(models.Model):
     METODO_API = "api"
     METODO_EXCEL = "excel"
