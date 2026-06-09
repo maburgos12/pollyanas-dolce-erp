@@ -33,6 +33,14 @@ def registrar_credencial(
     return id_credential
 
 
+def listar_credenciales(*, token: str, client: SyncfyClient | None = None) -> list[dict[str, Any]]:
+    client = client or SyncfyClient()
+    response = client.get("/credentials", token=token)
+    if isinstance(response, list):
+        return [item for item in response if isinstance(item, dict)]
+    return []
+
+
 def refrescar_credencial(*, id_credential: str, token: str, client: SyncfyClient | None = None) -> str:
     client = client or SyncfyClient()
     response = client.post(
