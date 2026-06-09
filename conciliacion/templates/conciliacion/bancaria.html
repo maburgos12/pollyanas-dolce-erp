@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Conciliacion bancaria · ERP{% endblock %}
+{% block page_title %}Conciliacion bancaria{% endblock %}
+{% block body_class %}page-conciliacion-bancaria{% endblock %}
+
+{% block extra_css %}
+<style>
+  .conc-page { display: grid; gap: 16px; }
+  .conc-header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+  .conc-header h1 { margin: 0; color: #1f2937; font-size: 1.65rem; letter-spacing: 0; }
+  .conc-header p { margin: 4px 0 0; color: #64748b; max-width: 860px; }
+  .conc-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .conc-kpi { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px; min-width: 0; }
+  .conc-kpi span { display: block; color: #64748b; font-size: .78rem; font-weight: 800; text-transform: uppercase; }
+  .conc-kpi strong { display: block; margin-top: 4px; color: #111827; font-size: 1.45rem; }
+  .conc-layout { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .conc-panel { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; min-width: 0; }
+  .conc-panel h2 { margin: 0 0 12px; color: #111827; font-size: 1.05rem; letter-spacing: 0; }
+  .conc-form { display: grid; gap: 12px; }
+  .conc-form label { display: grid; gap: 5px; color: #475569; font-weight: 800; font-size: .86rem; }
+  .conc-form select,
+  .conc-form input[type="file"] { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 9px; background: #fff; color: #111827; }
+  .conc-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .conc-note { color: #64748b; font-size: .86rem; line-height: 1.45; }
+  .table-responsive { overflow-x: auto; border: 1px solid #e5e7eb; border-radius: 8px; }
+  .conc-table { width: 100%; border-collapse: collapse; min-width: 760px; background: #fff; }
+  .conc-table th, .conc-table td { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
+  .conc-table th { color: #64748b; font-size: .76rem; text-transform: uppercase; background: #f8fafc; }
+  .conc-table td { color: #111827; }
+  .conc-money { text-align: right; font-variant-numeric: tabular-nums; }
+  .conc-chip { display: inline-flex; align-items: center; min-height: 24px; border-radius: 999px; padding: 3px 8px; font-size: .76rem; font-weight: 900; }
+  .conc-chip.is-ok { background: #dcfce7; color: #166534; }
+  .conc-chip.is-warn { background: #fef3c7; color: #92400e; }
+  .conc-chip.is-info { background: #dbeafe; color: #1d4ed8; }
+  .conc-empty { color: #64748b; padding: 20px; text-align: center; }
+  .conc-errors { margin: 10px 0 0; padding-left: 18px; color: #991b1b; }
+  @media (max-width: 900px) {
+    .conc-header, .conc-layout { display: grid; }
+    .conc-kpis { grid-template-columns: 1fr; }
+    .conc-actions .btn { width: 100%; justify-content: center; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="conc-page">
+  <div class="conc-header">
+    <div>
+      <h1>Conciliacion bancaria</h1>
+      <p>Carga estados de cuenta de BanBajio o BBVA, normaliza movimientos y revisa candidatos CFDI sin depender de Syncfy.</p>
+    </div>
+  </div>
+
+  <div class="conc-kpis">
+    <div class="conc-kpi">
+      <span>Movimientos</span>
+      <strong>{{ movimientos_total|intcomma }}</strong>
+    </div>
+    <div class="conc-kpi">
+      <span>Pendientes</span>
+      <strong>{{ movimientos_pendientes|intcomma }}</strong>
+    </div>
+    <div class="conc-kpi">
+      <span>Conciliados</span>
+      <strong>{{ movimientos_conciliados|intcomma }}</strong>
+    </div>
+  </div>
+
+  <div class="conc-layout">
+    <div class="conc-panel">
+      <h2>Cargar estado de cuenta</h2>
+      <form class="conc-form" method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="preview">
+        <label>
+          Cuenta
+          <select name="cuenta" required>
+            <option value="">Selecciona cuenta</option>
+            {% for cuenta in cuentas %}
+            <option value="{{ cuenta.pk }}">{{ cuenta.nombre_display }}{% if cuenta.numero_cuenta %} · ...{{ cuenta.numero_cuenta|slice:"-4:" }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          Archivo CSV o Excel
+          <input type="file" name="archivo" accept=".csv,.xls,.xlsx,.xlsm" required>
+        </label>
+        <p class="conc-note">Columnas aceptadas: fecha, descripcion/concepto, cargo, abono, monto, referencia, saldo y moneda. Primero se muestra preview; nada se guarda hasta confirmar.</p>
+        <div class="conc-actions">
+          <button class="btn btn-primary" type="submit">Ver preview</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="conc-panel">
+      <h2>Preview de importacion</h2>
+      {% if preview %}
+        <p class="conc-note">
+          {{ preview.movimientos|length }} movimientos validos de {{ preview.archivo_nombre }}.
+          {% if preview.errores %}{{ preview.errores|length }} filas requieren revision.{% endif %}
+        </p>
+        <div class="table-responsive">
+          <table class="conc-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Descripcion</th>
+                <th>Tipo</th>
+                <th class="conc-money">Monto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in preview_rows %}
+              <tr>
+                <td>{{ row.fecha|date:"Y-m-d" }}</td>
+                <td>{{ row.descripcion }}</td>
+                <td><span class="conc-chip {% if row.tipo == 'abono' %}is-ok{% else %}is-warn{% endif %}">{{ row.tipo }}</span></td>
+                <td class="conc-money">${{ row.monto|floatformat:2|intcomma }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if preview.errores %}
+        <ul class="conc-errors">
+          {% for error in preview.errores|slice:":8" %}
+          <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        <form method="post" class="conc-actions" style="margin-top:12px;">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="confirm">
+          <button class="btn btn-primary" type="submit">Importar movimientos</button>
+        </form>
+      {% else %}
+        <div class="conc-empty">Sube un archivo para revisar los movimientos antes de importarlos.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="conc-panel">
+    <h2>Movimientos recientes y candidatos CFDI</h2>
+    <div class="table-responsive">
+      <table class="conc-table">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Cuenta</th>
+            <th>Descripcion</th>
+            <th>Tipo</th>
+            <th class="conc-money">Monto</th>
+            <th>Candidatos</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in movimiento_rows %}
+          <tr>
+            <td>{{ row.movimiento.fecha_transaccion|date:"Y-m-d" }}</td>
+            <td>{{ row.movimiento.cuenta.nombre_display }}{% if row.movimiento.cuenta.numero_cuenta %} · ...{{ row.movimiento.cuenta.numero_cuenta|slice:"-4:" }}{% endif %}</td>
+            <td>{{ row.movimiento.descripcion }}</td>
+            <td><span class="conc-chip {% if row.movimiento.tipo == 'abono' %}is-ok{% else %}is-warn{% endif %}">{{ row.movimiento.tipo }}</span></td>
+            <td class="conc-money">${{ row.movimiento.monto|floatformat:2|intcomma }}</td>
+            <td>
+              {% if row.candidatos %}
+                <span class="conc-chip is-info">{{ row.candidatos|length }} CFDI</span>
+              {% else %}
+                <span class="conc-note">Sin candidato</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6" class="conc-empty">Sin movimientos importados.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="conc-panel">
+    <h2>Ultimas importaciones</h2>
+    <div class="table-responsive">
+      <table class="conc-table">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Cuenta</th>
+            <th>Archivo</th>
+            <th>Nuevos</th>
+            <th>Duplicados</th>
+            <th>Errores</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for importacion in importaciones %}
+          <tr>
+            <td>{{ importacion.creado_en|date:"Y-m-d H:i" }}</td>
+            <td>{{ importacion.cuenta.nombre_display }}</td>
+            <td>{{ importacion.archivo_nombre }}</td>
+            <td>{{ importacion.movimientos_nuevos }}</td>
+            <td>{{ importacion.movimientos_duplicados }}</td>
+            <td>{{ importacion.filas_con_error }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6" class="conc-empty">Sin importaciones manuales.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

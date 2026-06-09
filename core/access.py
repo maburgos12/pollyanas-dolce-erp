@@ -58,6 +58,7 @@ ACCESS_MODULES = [
     ("activos", "Activos"),
     ("rrhh", "RRHH"),
     ("control", "Control"),
+    ("conciliacion", "Conciliación"),
     ("auditoria", "Auditoría"),
     ("sistema", "Sistema"),
 ]
@@ -181,6 +182,9 @@ ACCESS_SUBMODULES = {
         ("discrepancias", "Discrepancias"),
         ("captura_movil", "Captura móvil"),
     ],
+    "conciliacion": [
+        ("bancaria", "Conciliación bancaria"),
+    ],
     "auditoria": [
         ("bitacora", "Bitácora"),
     ],
@@ -203,6 +207,7 @@ LOCK_BY_MODULE = {
     "direccion": "lock_reportes",
     "reportes": "lock_reportes",
     "control": "lock_reportes",
+    "conciliacion": "lock_reportes",
     "ventas": "lock_crm",
     "crm": "lock_crm",
     "logistica": "lock_logistica",
