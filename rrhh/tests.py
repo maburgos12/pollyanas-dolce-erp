@@ -1714,6 +1714,7 @@ class RRHHViewsTests(TestCase):
         self.assertContains(resp, "Supervisión")
         self.assertContains(resp, 'data-searchable-select="true"')
         self.assertContains(resp, "Crear usuario y contraseña para este empleado")
+        self.assertContains(resp, 'name="jefe_directo" data-jefe-directo-select data-native-select="true"')
         self.assertNotContains(resp, '<select id="usuario_erp"')
         self.assertNotContains(resp, "modal-catalogo-otro")
         self.assertNotContains(resp, "Agregar otro valor")
@@ -1742,6 +1743,29 @@ class RRHHViewsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(Empleado.objects.filter(nombre="Empleado Produccion").exists())
         self.assertContains(resp, "El jefe directo debe corresponder a la jerarquia del departamento.")
+
+    def test_empleados_permite_direccion_como_jefe_transversal(self):
+        direccion = Empleado.objects.create(
+            nombre="DIRECCION GENERAL",
+            departamento=Empleado.DEP_ADMINISTRACION,
+            nivel_organizacional=Empleado.NIVEL_DIRECCION,
+        )
+
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "nombre": "Empleado Produccion Direccion",
+                "area": "HORNOS",
+                "departamento": Empleado.DEP_PRODUCCION,
+                "jefe_directo": str(direccion.id),
+                "salario_diario": "300.00",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        empleado = Empleado.objects.get(nombre="Empleado Produccion Direccion")
+        self.assertEqual(empleado.jefe_directo, direccion)
 
     def test_empleados_crea_esquema_bono_otro_y_lo_asigna(self):
         resp = self.client.post(
