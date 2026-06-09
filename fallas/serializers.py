@@ -5,7 +5,7 @@ from rest_framework import serializers
 from core.models import Sucursal
 from activos.models import Activo
 
-from .models import BitacoraFalla, CategoriaFalla, ReporteFalla
+from .models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
 
 
 class SucursalFallaSerializer(serializers.ModelSerializer):
@@ -38,9 +38,25 @@ class CategoriaFallaSerializer(serializers.ModelSerializer):
         fields = ["id", "nombre", "tipo", "tipo_display", "activo", "orden"]
 
 
+class EvidenciaSeguimientoSerializer(serializers.ModelSerializer):
+    url = serializers.SerializerMethodField()
+
+    def get_url(self, obj):
+        request = self.context.get("request")
+        if not obj.archivo:
+            return ""
+        url = obj.archivo.url
+        return request.build_absolute_uri(url) if request else url
+
+    class Meta:
+        model = EvidenciaSeguimientoFalla
+        fields = ["id", "nombre", "url", "creado_en"]
+
+
 class BitacoraSerializer(serializers.ModelSerializer):
     usuario_nombre = serializers.SerializerMethodField()
     estatus_nuevo_display = serializers.SerializerMethodField()
+    evidencias = EvidenciaSeguimientoSerializer(many=True, read_only=True)
 
     def get_usuario_nombre(self, obj):
         return obj.usuario.get_full_name() or obj.usuario.username
@@ -58,6 +74,7 @@ class BitacoraSerializer(serializers.ModelSerializer):
             "estatus_nuevo",
             "estatus_nuevo_display",
             "comentario",
+            "evidencias",
             "timestamp",
         ]
 

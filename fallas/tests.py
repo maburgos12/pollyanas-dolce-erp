@@ -9,7 +9,7 @@ from django.urls import reverse
 from core.models import Sucursal, UserModuleAccess, UserProfile
 from core.navigation import build_nav_groups
 
-from .models import CategoriaFalla, ReporteFalla
+from .models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
 from .tasks import _emails_de_grupo
 
 
@@ -60,8 +60,45 @@ class MisReportesActionsTests(TestCase):
         response = self.client.get(reverse("fallas:pwa-mis-reportes"))
 
         self.assertContains(response, "Acciones")
+        self.assertContains(response, "Ver seguimiento")
         self.assertContains(response, reverse("fallas:pwa-editar-reporte", args=[self.reporte.id]))
         self.assertContains(response, reverse("fallas:pwa-eliminar-reporte", args=[self.reporte.id]))
+
+    def test_mis_reportes_muestra_seguimiento_en_reporte_cerrado_sin_edicion(self):
+        reporte = self._crear_reporte(self.user, "Tarja reparada", ReporteFalla.ESTATUS_CERRADO)
+        BitacoraFalla.objects.create(
+            reporte=reporte,
+            usuario=self.other_user,
+            estatus_anterior=ReporteFalla.ESTATUS_PROCESO,
+            estatus_nuevo=ReporteFalla.ESTATUS_CERRADO,
+            comentario="Se cambió la tarja y quedó funcionando.",
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("fallas:pwa-mis-reportes"))
+
+        self.assertContains(response, f'data-open-falla-detail="{reporte.id}"')
+        self.assertContains(response, "Último avance: Se cambió la tarja y quedó funcionando.")
+        self.assertContains(response, "Seguimiento")
+        self.assertNotContains(response, reverse("fallas:pwa-editar-reporte", args=[reporte.id]))
+
+    def test_cambiar_estatus_guarda_evidencia_de_seguimiento(self):
+        admin = get_user_model().objects.create_superuser(username="admin.fallas", password="pass123")
+        self.client.force_login(admin)
+
+        response = self.client.post(
+            reverse("fallas_api:cambiar-estatus", args=[self.reporte.id]),
+            {
+                "estatus": ReporteFalla.ESTATUS_CERRADO,
+                "comentario": "Trabajo terminado con evidencia.",
+                "evidencias_seguimiento": SimpleUploadedFile("resultado.jpg", b"img", content_type="image/jpeg"),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        bitacora = BitacoraFalla.objects.get(reporte=self.reporte, comentario="Trabajo terminado con evidencia.")
+        evidencia = EvidenciaSeguimientoFalla.objects.get(bitacora=bitacora)
+        self.assertEqual(evidencia.nombre, "resultado.jpg")
 
     def test_editar_reporte_propio_abierto_actualiza_campos(self):
         self.client.force_login(self.user)

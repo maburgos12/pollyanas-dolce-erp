@@ -20,6 +20,7 @@
   .fallas-category-form{display:grid;gap:10px}
   .fallas-check{display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700}
   .fallas-check input{width:auto;min-height:0}
+  .fallas-file-input{min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%}
   .p-critica{background:#fef2f2;color:#991b1b;border:1px solid #fca5a5}
   .p-alta{background:#fff7ed;color:#c2410c;border:1px solid #fdba74}
   .p-media{background:#fffbeb;color:#92400e;border:1px solid #fde68a}
@@ -474,6 +475,8 @@ async function abrirDetalle(id) {
       </div>
       <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin:12px 0 4px">Comentario</label>
       <textarea id="comentario-estatus" rows="3" style="width:100%;min-height:80px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;resize:vertical"></textarea>
+      <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin:10px 0 4px">Evidencia para seguimiento</label>
+      <input id="evidencias-seguimiento" class="fallas-file-input" type="file" multiple accept="image/*,.pdf">
       <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin:10px 0 4px">Proveedor de servicio</label>
       <input id="proveedor-servicio" type="text" placeholder="Nombre del proveedor o técnico" value="${esc(rep.proveedor_servicio || "")}" style="min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%">
     ` : ""}
@@ -487,19 +490,22 @@ async function actualizarEstatus() {
   if (!reporteActual) return;
   const estatus = document.getElementById("nuevo-estatus")?.value;
   const asignadoEl = document.getElementById("asignado-a");
-  const body = {
-    comentario: document.getElementById("comentario-estatus")?.value || "",
-    costo_estimado: document.getElementById("costo-est")?.value || null,
-    costo_real: document.getElementById("costo-real")?.value || null,
-    proveedor_servicio: document.getElementById("proveedor-servicio")?.value || "",
-  };
-  if (estatus) body.estatus = estatus;
-  if (asignadoEl?.value) body.asignado_a = Number(asignadoEl.value);
+  const body = new FormData();
+  body.append("comentario", document.getElementById("comentario-estatus")?.value || "");
+  body.append("proveedor_servicio", document.getElementById("proveedor-servicio")?.value || "");
+  const costoEst = document.getElementById("costo-est")?.value;
+  const costoReal = document.getElementById("costo-real")?.value;
+  if (costoEst) body.append("costo_estimado", costoEst);
+  if (costoReal) body.append("costo_real", costoReal);
+  if (estatus) body.append("estatus", estatus);
+  if (asignadoEl?.value) body.append("asignado_a", asignadoEl.value);
+  const evidencias = document.getElementById("evidencias-seguimiento")?.files || [];
+  Array.from(evidencias).forEach((file) => body.append("evidencias_seguimiento", file));
 
   const res = await fetch(`${API}/reportes/${reporteActual}/estatus/`, {
     method: "POST",
-    headers: h(true),
-    body: JSON.stringify(body)
+    headers: h(),
+    body
   });
   if (res.ok) {
     cerrarModal();

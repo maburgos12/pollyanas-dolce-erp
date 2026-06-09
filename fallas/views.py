@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
-from django.db.models import Avg, Count, DurationField, ExpressionWrapper, F, Q
+from django.db.models import Avg, Count, DurationField, ExpressionWrapper, F, Prefetch, Q
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from rest_framework import generics, permissions
@@ -25,7 +25,7 @@ from core.access import (
 )
 from core.models import Sucursal, sucursales_operativas_q
 
-from .models import BitacoraFalla, CategoriaFalla, ReporteFalla
+from .models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
 from .serializers import (
     ActivoFallaSerializer,
     CambioEstatusSerializer,
@@ -98,6 +98,18 @@ def _puede_modificar_reporte_propio(reporte, user) -> bool:
         and reporte.reportado_por_id == user.id
         and reporte.estatus == ReporteFalla.ESTATUS_ABIERTO
     )
+
+
+def _guardar_evidencias_seguimiento(bitacora, archivos, user):
+    for archivo in archivos:
+        if not archivo:
+            continue
+        EvidenciaSeguimientoFalla.objects.create(
+            bitacora=bitacora,
+            archivo=archivo,
+            nombre=getattr(archivo, "name", "")[:255],
+            subido_por=user,
+        )
 
 
 def _filtrar_reportes_por_usuario(qs, user):
@@ -208,7 +220,8 @@ class ReporteFallaDetailView(generics.RetrieveUpdateAPIView):
     authentication_classes = [JWTAuthentication, TokenAuthentication, SessionAuthentication]
     http_method_names = ["get", "patch", "put", "head", "options"]
     queryset = ReporteFalla.objects.select_related("sucursal", "categoria", "reportado_por").prefetch_related(
-        "bitacora__usuario"
+        "bitacora__usuario",
+        "bitacora__evidencias",
     )
     serializer_class = ReporteFallaDetailSerializer
     permission_classes = [EsPersonalSucursal]
@@ -276,13 +289,14 @@ def cambiar_estatus(request, pk):
 
     comentario = data.get("comentario", "")
     if estatus_cambio or comentario or data.get("asignado_a") or data.get("costo_estimado") is not None or data.get("costo_real") is not None or data.get("proveedor_servicio"):
-        BitacoraFalla.objects.create(
+        bitacora = BitacoraFalla.objects.create(
             reporte=reporte,
             usuario=request.user,
             estatus_anterior=estatus_anterior if estatus_cambio else "",
             estatus_nuevo=nuevo_estatus if estatus_cambio else "",
             comentario=comentario or "Seguimiento actualizado.",
         )
+        _guardar_evidencias_seguimiento(bitacora, request.FILES.getlist("evidencias_seguimiento"), request.user)
 
     if estatus_cambio:
         try:
@@ -292,6 +306,11 @@ def cambiar_estatus(request, pk):
         except Exception:
             pass
 
+    reporte = (
+        ReporteFalla.objects.select_related("sucursal", "categoria", "reportado_por")
+        .prefetch_related("bitacora__usuario", "bitacora__evidencias")
+        .get(pk=reporte.pk)
+    )
     return Response(ReporteFallaDetailSerializer(reporte, context={"request": request}).data)
 
 
@@ -538,7 +557,16 @@ def pwa_mis_reportes(request):
     if not can_view_submodule(request.user, "fallas", "mis_reportes"):
         raise PermissionDenied
 
-    qs = ReporteFalla.objects.select_related("sucursal", "categoria", "reportado_por").order_by("-fecha_reporte")
+    qs = (
+        ReporteFalla.objects.select_related("sucursal", "categoria", "reportado_por", "asignado_a", "cerrado_por")
+        .prefetch_related(
+            Prefetch(
+                "bitacora",
+                queryset=BitacoraFalla.objects.select_related("usuario").prefetch_related("evidencias").order_by("timestamp"),
+            )
+        )
+        .order_by("-fecha_reporte")
+    )
     qs = _filtrar_reportes_por_usuario(qs, request.user)
 
     estatus = request.GET.get("estatus")
@@ -549,6 +577,11 @@ def pwa_mis_reportes(request):
         qs = qs.filter(prioridad=prioridad)
 
     reportes = Paginator(qs, 20).get_page(request.GET.get("page"))
+    for reporte in reportes:
+        bitacora = list(reporte.bitacora.all())
+        ultima_bitacora = bitacora[-1] if bitacora else None
+        reporte.ultima_bitacora_colaborador = ultima_bitacora
+        reporte.tiene_evidencia_seguimiento = any(row.evidencias.all() for row in bitacora)
     return render(
         request,
         "fallas/mis_reportes.html",

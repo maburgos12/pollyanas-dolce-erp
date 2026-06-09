@@ -8,7 +8,7 @@ from activos.models import Activo, OrdenMantenimiento
 from core.access import ACCESS_MANAGE
 from core.models import Sucursal, UserModuleAccess
 from core.navigation import build_nav_groups
-from fallas.models import BitacoraFalla, CategoriaFalla, ReporteFalla
+from fallas.models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
 from logistica.models import Repartidor, ReporteUnidad, Unidad
 from mantenimiento.models import ProveedorServicio
 from maestros.models import Proveedor
@@ -194,6 +194,23 @@ class MantenimientoUnifiedInboxTests(TestCase):
         self.assertEqual(self.falla.estatus, ReporteFalla.ESTATUS_PROCESO)
         self.assertEqual(str(self.falla.costo_estimado), "1250.50")
         self.assertEqual(ReporteFalla.objects.count(), report_count)
+
+    def test_followup_uploads_public_evidence_for_falla_timeline(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            "/api/mantenimiento/bandeja/falla/%s/actualizar/" % self.falla.id,
+            {
+                "estatus": ReporteFalla.ESTATUS_CERRADO,
+                "comentario": "Se entrega funcionando con foto final.",
+                "evidencias_seguimiento": SimpleUploadedFile("foto-final.jpg", b"img", content_type="image/jpeg"),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        bitacora = BitacoraFalla.objects.get(reporte=self.falla, comentario="Se entrega funcionando con foto final.")
+        evidencia = EvidenciaSeguimientoFalla.objects.get(bitacora=bitacora)
+        self.assertEqual(evidencia.nombre, "foto-final.jpg")
 
     def test_followup_can_create_provider_and_asset_without_duplicate_report(self):
         self.client.force_login(self.user)

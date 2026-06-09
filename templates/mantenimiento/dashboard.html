@@ -600,7 +600,7 @@
       <span>Último avance</span>
       <div id="mantDrawerLatestNote"></div>
     </div>
-    <form class="mant-form" id="mantFollowForm" method="post">
+    <form class="mant-form" id="mantFollowForm" method="post" enctype="multipart/form-data">
       {% csrf_token %}
       <div class="mant-form-grid">
         <label class="mant-field">Etapa / estatus
@@ -655,6 +655,10 @@
         </label>
         <label class="mant-field full">Comentario de avance
           <textarea class="mant-input" name="comentario" placeholder="Diagnóstico, autorización, proveedor, folio de factura o cierre del trabajo."></textarea>
+        </label>
+        <label class="mant-field full">Evidencia del avance
+          <input class="mant-input" name="evidencias_seguimiento" type="file" multiple accept="image/*,.pdf" style="padding:8px">
+          <span class="mant-plan-meta">Fotos de cómo quedó, comprobantes o archivos para que el colaborador vea el seguimiento.</span>
         </label>
       </div>
       <button class="btn btn-primary" type="submit" style="background:#8B2252;border-color:#8B2252;">Guardar avance</button>

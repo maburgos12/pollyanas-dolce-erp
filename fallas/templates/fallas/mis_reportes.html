@@ -30,11 +30,36 @@
   .btn-danger-soft{background:#fff;border:1px solid rgba(153,27,27,.28);color:#991b1b;border-radius:12px;padding:10px 14px;font-weight:900;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;min-height:42px}
   .fallas-actions{display:flex;gap:8px;flex-wrap:wrap}
   .fallas-actions form{margin:0}
+  .fallas-progress-note{display:block;margin-top:5px;color:#6f6170;font-size:12px;line-height:1.35}
+  .fallas-progress-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
+  .fallas-chip{display:inline-flex;align-items:center;border-radius:999px;background:#f7edf2;color:#8B2252;border:1px solid rgba(139,34,82,.14);font-size:11px;font-weight:900;padding:3px 8px}
   .fallas-action-note{display:block;color:#7a6871;font-size:12px;line-height:1.25}
   .fallas-thumb{width:58px;height:44px;object-fit:cover;border-radius:8px;border:1px solid rgba(139,34,82,.18)}
   .fallas-empty{padding:36px;text-align:center;color:#7a6871}
   .pagination{display:flex;gap:10px;justify-content:center;align-items:center;margin-top:16px}
+  .fallas-drawer{position:fixed;inset:0;z-index:1300;display:none;background:rgba(31,18,26,.46)}
+  .fallas-drawer.is-open{display:flex;justify-content:flex-end}
+  .fallas-drawer-panel{width:min(620px,100%);height:100%;background:#fff;box-shadow:-16px 0 45px rgba(0,0,0,.18);padding:22px;overflow-y:auto}
+  .fallas-drawer-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;border-bottom:1px solid #f0e1e8;padding-bottom:14px;margin-bottom:16px}
+  .fallas-drawer-head h2{margin:0;color:#42292e;font-size:24px}
+  .fallas-drawer-head p{margin:5px 0 0;color:#6f6170}
+  .fallas-detail-block{border:1px solid rgba(139,34,82,.12);border-radius:14px;padding:14px;margin-bottom:14px;background:#fffafc}
+  .fallas-detail-title{margin:0 0 8px;color:#8B2252;font-size:13px;text-transform:uppercase;letter-spacing:.04em;font-weight:900}
+  .fallas-detail-grid{display:grid;grid-template-columns:120px minmax(0,1fr);gap:12px}
+  .fallas-detail-photo{width:120px;aspect-ratio:1;object-fit:cover;border-radius:10px;border:1px solid rgba(139,34,82,.18)}
+  .fallas-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .fallas-fact{background:#fff;border:1px solid rgba(139,34,82,.09);border-radius:10px;padding:8px 10px}
+  .fallas-fact span{display:block;color:#8b7180;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.04em}
+  .fallas-fact strong{display:block;margin-top:2px;color:#3f2633;font-size:13px}
+  .fallas-timeline{display:grid;gap:10px}
+  .fallas-timeline-item{border-left:3px solid #8B2252;background:#fff;border-radius:0 10px 10px 0;padding:10px 12px}
+  .fallas-timeline-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;color:#6f6170;font-size:12px}
+  .fallas-timeline-top strong{color:#3f2633}
+  .fallas-timeline-comment{margin-top:6px;color:#3f2633;line-height:1.45}
+  .fallas-evidence-list{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .fallas-evidence-link{display:inline-flex;align-items:center;min-height:34px;border-radius:10px;border:1px solid rgba(139,34,82,.18);padding:7px 10px;color:#8B2252;background:#fff;text-decoration:none;font-weight:900;font-size:12px}
   @media(max-width:760px){.fallas-head,.fallas-filter{grid-template-columns:1fr;display:grid}.fallas-head .btn-wine{width:100%}}
+  @media(max-width:760px){.fallas-detail-grid,.fallas-facts{grid-template-columns:1fr}.fallas-detail-photo{width:100%;max-height:220px;aspect-ratio:auto}}
 </style>
 <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
 {% endblock %}
@@ -90,23 +115,32 @@
             <td><strong>#{{ reporte.id }}</strong></td>
             <td>{% if reporte.foto_evidencia %}<a href="{{ reporte.foto_evidencia.url }}" target="_blank" rel="noopener"><img class="fallas-thumb" src="{{ reporte.foto_evidencia.url }}" alt="Evidencia"></a>{% else %}-{% endif %}</td>
             <td>{{ reporte.sucursal.nombre }}</td>
-            <td><strong>{{ reporte.titulo }}</strong><br><span class="fallas-muted">{{ reporte.descripcion|truncatechars:90 }}</span></td>
+            <td>
+              <strong>{{ reporte.titulo }}</strong><br>
+              <span class="fallas-muted">{{ reporte.descripcion|truncatechars:90 }}</span>
+              {% if reporte.ultima_bitacora_colaborador %}
+                <span class="fallas-progress-note">Último avance: {{ reporte.ultima_bitacora_colaborador.comentario|default:"Seguimiento actualizado."|truncatechars:80 }}</span>
+              {% endif %}
+              <span class="fallas-progress-chips">
+                {% if reporte.tiene_evidencia_seguimiento %}<span class="fallas-chip">Evidencia final</span>{% endif %}
+                {% if reporte.fecha_cierre %}<span class="fallas-chip">Cerrado {{ reporte.fecha_cierre|date:"d/m/y" }}</span>{% endif %}
+              </span>
+            </td>
             <td>{{ reporte.categoria.nombre }}</td>
             <td><span class="fallas-badge p-{{ reporte.prioridad }}">{{ reporte.get_prioridad_display }}</span></td>
             <td><span class="fallas-badge e-{{ reporte.estatus }}">{{ reporte.get_estatus_display }}</span></td>
             <td>{{ reporte.fecha_reporte|date:"d/m/Y H:i" }}</td>
             <td>
-              {% if reporte.reportado_por_id == request.user.id and reporte.estatus == "abierto" %}
               <div class="fallas-actions">
+                <button class="btn-soft" type="button" data-open-falla-detail="{{ reporte.id }}">Ver seguimiento</button>
+                {% if reporte.reportado_por_id == request.user.id and reporte.estatus == "abierto" %}
                 <a class="btn-soft" href="{% url 'fallas:pwa-editar-reporte' reporte.id %}">Editar</a>
                 <form method="post" action="{% url 'fallas:pwa-eliminar-reporte' reporte.id %}" onsubmit="return confirm('¿Eliminar el reporte #{{ reporte.id }}? Esta acción no se puede deshacer.');">
                   {% csrf_token %}
                   <button class="btn-danger-soft" type="submit">Eliminar</button>
                 </form>
+                {% endif %}
               </div>
-              {% else %}
-              <span class="fallas-action-note">Sin cambios disponibles</span>
-              {% endif %}
             </td>
           </tr>
           {% empty %}
@@ -124,5 +158,95 @@
     </div>
     {% endif %}
   </section>
+
+  {% for reporte in reportes %}
+  <div class="fallas-drawer" id="fallas-detail-{{ reporte.id }}" role="dialog" aria-modal="true" aria-labelledby="fallas-detail-title-{{ reporte.id }}">
+    <aside class="fallas-drawer-panel">
+      <div class="fallas-drawer-head">
+        <div>
+          <h2 id="fallas-detail-title-{{ reporte.id }}">#{{ reporte.id }} · {{ reporte.titulo }}</h2>
+          <p>{{ reporte.sucursal.nombre }} · {{ reporte.get_area_display }} · {{ reporte.fecha_reporte|date:"d/m/Y H:i" }}</p>
+        </div>
+        <button class="btn-soft" type="button" data-close-falla-detail>Cerrar</button>
+      </div>
+
+      <section class="fallas-detail-block">
+        <h3 class="fallas-detail-title">Reporte original</h3>
+        <div class="fallas-detail-grid">
+          <div>
+            {% if reporte.foto_evidencia %}
+              <a href="{{ reporte.foto_evidencia.url }}" target="_blank" rel="noopener"><img class="fallas-detail-photo" src="{{ reporte.foto_evidencia.url }}" alt="Evidencia original"></a>
+            {% else %}
+              <div class="fallas-detail-photo" style="display:flex;align-items:center;justify-content:center;color:#9d6d82;background:#fff">Sin foto</div>
+            {% endif %}
+          </div>
+          <div>
+            <div class="fallas-facts">
+              <div class="fallas-fact"><span>Estatus</span><strong>{{ reporte.get_estatus_display }}</strong></div>
+              <div class="fallas-fact"><span>Prioridad</span><strong>{{ reporte.get_prioridad_display }}</strong></div>
+              <div class="fallas-fact"><span>Categoría</span><strong>{{ reporte.categoria.nombre }}</strong></div>
+              <div class="fallas-fact"><span>Reportó</span><strong>{{ reporte.reportado_por.get_full_name|default:reporte.reportado_por.username }}</strong></div>
+              {% if reporte.asignado_a %}<div class="fallas-fact"><span>Asignado a</span><strong>{{ reporte.asignado_a.get_full_name|default:reporte.asignado_a.username }}</strong></div>{% endif %}
+              {% if reporte.cerrado_por %}<div class="fallas-fact"><span>Cerró</span><strong>{{ reporte.cerrado_por.get_full_name|default:reporte.cerrado_por.username }}</strong></div>{% endif %}
+            </div>
+            <p style="margin:12px 0 0;color:#3f2633;line-height:1.45">{{ reporte.descripcion }}</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="fallas-detail-block">
+        <h3 class="fallas-detail-title">Seguimiento</h3>
+        <div class="fallas-timeline">
+          {% for evento in reporte.bitacora.all %}
+            <article class="fallas-timeline-item">
+              <div class="fallas-timeline-top">
+                <strong>{{ evento.usuario.get_full_name|default:evento.usuario.username }}</strong>
+                <span>{{ evento.timestamp|date:"d/m/Y H:i" }}</span>
+              </div>
+              <div style="margin-top:6px">
+                {% if evento.estatus_nuevo %}<span class="fallas-badge e-{{ evento.estatus_nuevo }}">{{ evento.get_estatus_nuevo_display }}</span>{% endif %}
+              </div>
+              <div class="fallas-timeline-comment">{{ evento.comentario|default:"Seguimiento actualizado." }}</div>
+              {% if evento.evidencias.all %}
+                <div class="fallas-evidence-list">
+                  {% for evidencia in evento.evidencias.all %}
+                    <a class="fallas-evidence-link" href="{{ evidencia.archivo.url }}" target="_blank" rel="noopener">{{ evidencia.nombre|default:"Ver evidencia" }}</a>
+                  {% endfor %}
+                </div>
+              {% endif %}
+            </article>
+          {% empty %}
+            <div class="fallas-action-note">Aún no hay avances registrados por mantenimiento.</div>
+          {% endfor %}
+        </div>
+      </section>
+    </aside>
+  </div>
+  {% endfor %}
 </div>
+<script>
+(() => {
+  const openButtons = document.querySelectorAll("[data-open-falla-detail]");
+  const closeButtons = document.querySelectorAll("[data-close-falla-detail]");
+  const drawers = document.querySelectorAll(".fallas-drawer");
+
+  function closeAll() {
+    drawers.forEach((drawer) => drawer.classList.remove("is-open"));
+  }
+
+  openButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      closeAll();
+      document.getElementById(`fallas-detail-${button.dataset.openFallaDetail}`)?.classList.add("is-open");
+    });
+  });
+  closeButtons.forEach((button) => button.addEventListener("click", closeAll));
+  drawers.forEach((drawer) => drawer.addEventListener("click", (event) => {
+    if (event.target === drawer) closeAll();
+  }));
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeAll();
+  });
+})();
+</script>
 {% endblock %}
