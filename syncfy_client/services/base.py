@@ -64,10 +64,11 @@ class SyncfyClient:
         path: str,
         *,
         json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
         token: str | None = None,
         api_key_auth: bool = False,
     ) -> Any:
-        return self._request("POST", path, json=json, token=token, api_key_auth=api_key_auth)
+        return self._request("POST", path, json=json, params=params, token=token, api_key_auth=api_key_auth)
 
     def get(
         self,

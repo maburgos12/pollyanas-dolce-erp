@@ -8,6 +8,7 @@ def obtener_token(*, client: SyncfyClient | None = None) -> str:
     client = client or SyncfyClient(config=config)
     response = client.post(
         "/sessions",
+        params={"api_key": config.api_key},
         json={"api_key": config.api_key, "id_user": config.id_user},
     )
     token = ""
