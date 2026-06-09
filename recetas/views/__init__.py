@@ -4,6 +4,7 @@ from .recetas import (
     receta_sync_point,
     costeo_dashboard, costeo_dashboard_snapshot, costeo_simulador_draft_detail,
     costeo_simulador_draft_save, costeo_simulador_insumos_search, monitor_margenes,
+    monitor_margenes_precio_sugerido,
     receta_composition_json, receta_create, receta_detail, receta_update, receta_delete,
     receta_sync_derivados, receta_versiones_export, receta_copy_lineas,
     linea_edit, linea_create, linea_delete, linea_apply_direct_base_replacement,
