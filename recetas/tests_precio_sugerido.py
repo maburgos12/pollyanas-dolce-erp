@@ -166,11 +166,33 @@ class PrecioSugeridoTests(TestCase):
         data = self._fetch(familia="NoExiste")
         self.assertEqual(data["total"], 0)
 
-    def test_sin_pnl_cae_a_margen_fijo_55(self):
+    def test_sin_pnl_cae_a_objetivo_de_margen_bruto(self):
         EmpresaResultadoMensual.objects.all().delete()
         data = self._fetch()
-        self.assertEqual(data["margen_meta"], "55.0")
-        self.assertEqual(data["margen_meta_fuente"], "FIJO_55")
+        # default objetivo 65%, fuente OBJETIVO, razón SIN_PNL
+        self.assertEqual(data["margen_meta"], "65.0")
+        self.assertEqual(data["margen_meta_fuente"], "OBJETIVO")
+        self.assertEqual(data["margen_meta_desglose"]["razon"], "SIN_PNL")
+
+    def test_gastos_pnl_incompletos_caen_a_objetivo(self):
+        # P&L con venta pero gastos comercial/corporativo en cero (como producción).
+        EmpresaResultadoMensual.objects.all().delete()
+        EmpresaResultadoMensual.objects.create(
+            periodo=self.current_period,
+            venta_total=Decimal("1000"),
+            gasto_comercial_total=Decimal("0"),
+            gasto_corporativo_total=Decimal("0"),
+        )
+        data = self._fetch(objetivo_margen="65")
+        self.assertEqual(data["margen_meta"], "65.0")
+        self.assertEqual(data["margen_meta_fuente"], "OBJETIVO")
+        self.assertEqual(data["margen_meta_desglose"]["razon"], "GASTOS_INCOMPLETOS")
+
+    def test_objetivo_margen_es_configurable(self):
+        EmpresaResultadoMensual.objects.all().delete()
+        data = self._fetch(objetivo_margen="70")
+        self.assertEqual(data["margen_meta"], "70.0")
+        self.assertEqual(data["margen_meta_fuente"], "OBJETIVO")
 
     def test_export_csv_responde_archivo(self):
         response = self.client.get(

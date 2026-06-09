@@ -321,8 +321,12 @@
         </select>
       </div>
       <div class="ps-control">
-        <label for="ps-utilidad">Utilidad meta % <span class="ps-hint">(sobre venta)</span></label>
+        <label for="ps-utilidad">Utilidad meta % <span class="ps-hint">(si hay P&amp;L)</span></label>
         <input id="ps-utilidad" class="ps-num" type="number" min="0" max="80" step="1" value="15">
+      </div>
+      <div class="ps-control">
+        <label for="ps-objetivo">Objetivo margen bruto % <span class="ps-hint">(si falta P&amp;L)</span></label>
+        <input id="ps-objetivo" class="ps-num" type="number" min="1" max="90" step="1" value="65">
       </div>
       <div class="ps-control ps-control-fams">
         <label>Familias de producción <span class="ps-hint">(vacío = todas)</span></label>
@@ -618,6 +622,7 @@
   var closeBtn = document.getElementById("ps-close");
   var mesesSel = document.getElementById("ps-meses");
   var utilidadInput = document.getElementById("ps-utilidad");
+  var objetivoInput = document.getElementById("ps-objetivo");
   var famGrid = document.getElementById("ps-fam-grid");
   var calcBtn = document.getElementById("ps-calc");
   var exportLink = document.getElementById("ps-export");
@@ -634,6 +639,7 @@
     var params = new URLSearchParams();
     params.set("meses", mesesSel.value);
     params.set("utilidad_meta", utilidadInput.value || "15");
+    params.set("objetivo_margen", objetivoInput.value || "65");
     selectedFamilies().forEach(function (f) { params.append("familia", f); });
     return params.toString();
   }
@@ -702,9 +708,13 @@
       var d = data.margen_meta_desglose;
       metaTexto = '<div title="Comercial ' + d.comercial_pct + '% + Corporativo ' + d.corporativo_pct + '% + Utilidad meta ' + d.utilidad_meta_pct + '%">' +
         'Margen meta <strong>' + data.margen_meta + '%</strong> ' +
-        '<span class="ps-hint">(comercial ' + d.comercial_pct + '% + corporativo ' + d.corporativo_pct + '% + utilidad ' + d.utilidad_meta_pct + '%)</span></div>';
+        '<span class="ps-hint">(derivado del P&amp;L: comercial ' + d.comercial_pct + '% + corporativo ' + d.corporativo_pct + '% + utilidad ' + d.utilidad_meta_pct + '%)</span></div>';
     } else {
-      metaTexto = '<div>Margen meta <strong>' + data.margen_meta + '%</strong> <span class="ps-hint">(fijo: sin P&amp;L disponible para el periodo)</span></div>';
+      var razon = (data.margen_meta_desglose && data.margen_meta_desglose.razon) || "";
+      var motivo = razon === "GASTOS_INCOMPLETOS"
+        ? "objetivo fijo: el P&amp;L no tiene gastos comercial/corporativo cargados"
+        : "objetivo fijo: sin P&amp;L para el periodo";
+      metaTexto = '<div class="is-alert">Margen meta <strong>' + data.margen_meta + '%</strong> <span class="ps-hint">⚠ ' + motivo + '</span></div>';
     }
     summary.innerHTML =
       '<div><strong>' + data.total + '</strong> productos analizados</div>' +

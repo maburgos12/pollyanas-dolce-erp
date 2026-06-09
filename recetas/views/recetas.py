@@ -6207,14 +6207,31 @@ def _ventana_meses_inicio(today: date, meses: int) -> date:
     return date(year, month, 1)
 
 
+# Ratio mínimo de gasto operativo (comercial + corporativo) sobre venta para
+# considerar que el P&L está cargado. Por debajo de esto los gastos están
+# incompletos y derivar el margen daría un piso engañosamente bajo.
+MIN_GASTO_OPERATIVO_PCT = Decimal("5")
+
+
 def _margen_meta_desde_pnl(
     start_period: date,
     current_period: date,
     utilidad_meta_pct: Decimal,
+    objetivo_margen_pct: Decimal,
 ) -> tuple[Decimal, dict[str, str] | None, str]:
-    """Deriva el margen bruto meta (% sobre venta) que cubre gasto comercial +
-    gasto corporativo + la utilidad operativa meta, usando el P&L real de la
-    empresa (EmpresaResultadoMensual). Si no hay P&L disponible, cae a 55% fijo."""
+    """Define el margen bruto meta (% sobre venta).
+
+    Si el P&L real (EmpresaResultadoMensual) tiene los gastos operativos cargados,
+    deriva: gasto comercial % + gasto corporativo % + utilidad meta % (fuente PNL).
+    Si no hay P&L o los gastos vienen incompletos (ratio operativo por debajo del
+    mínimo), cae a un objetivo de margen bruto fijo (fuente OBJETIVO) para no
+    producir un piso engañoso."""
+    objetivo = objetivo_margen_pct.quantize(Decimal("0.1"))
+    if objetivo < Decimal("1"):
+        objetivo = Decimal("1.0")
+    if objetivo > Decimal("90"):
+        objetivo = Decimal("90.0")
+
     agg = EmpresaResultadoMensual.objects.filter(
         periodo__gte=start_period, periodo__lte=current_period
     ).aggregate(
@@ -6223,11 +6240,14 @@ def _margen_meta_desde_pnl(
         corporativo=Sum("gasto_corporativo_total"),
     )
     venta = Decimal(str(agg["venta"] or 0))
-    if venta <= 0:
-        return Decimal("55.0"), None, "FIJO_55"
+    comercial_pct = (Decimal(str(agg["comercial"] or 0)) / venta * Decimal("100")).quantize(Decimal("0.1")) if venta > 0 else Decimal("0.0")
+    corporativo_pct = (Decimal(str(agg["corporativo"] or 0)) / venta * Decimal("100")).quantize(Decimal("0.1")) if venta > 0 else Decimal("0.0")
 
-    comercial_pct = (Decimal(str(agg["comercial"] or 0)) / venta * Decimal("100")).quantize(Decimal("0.1"))
-    corporativo_pct = (Decimal(str(agg["corporativo"] or 0)) / venta * Decimal("100")).quantize(Decimal("0.1"))
+    # Gastos operativos incompletos: usar objetivo fijo y avisar por qué.
+    if venta <= 0 or (comercial_pct + corporativo_pct) < MIN_GASTO_OPERATIVO_PCT:
+        razon = "SIN_PNL" if venta <= 0 else "GASTOS_INCOMPLETOS"
+        return objetivo, {"razon": razon, "objetivo_margen_pct": str(objetivo)}, "OBJETIVO"
+
     margen_meta = (comercial_pct + corporativo_pct + utilidad_meta_pct).quantize(Decimal("0.1"))
     if margen_meta < Decimal("1"):
         margen_meta = Decimal("1.0")
@@ -6267,6 +6287,11 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
     if utilidad_meta > Decimal("80"):
         utilidad_meta = Decimal("80")
 
+    try:
+        objetivo_margen = Decimal(str(request.GET.get("objetivo_margen") or "65"))
+    except (TypeError, ValueError, ArithmeticError):
+        objetivo_margen = Decimal("65")
+
     familias_sel = [value.strip() for value in request.GET.getlist("familia") if value.strip()]
     export_csv = request.GET.get("export") == "csv"
 
@@ -6276,7 +6301,7 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
     branch_ids = set(sucursales_operativas(today).values_list("id", flat=True))
 
     margen_meta, meta_desglose, meta_fuente = _margen_meta_desde_pnl(
-        start_period, current_period, utilidad_meta
+        start_period, current_period, utilidad_meta, objetivo_margen
     )
 
     recetas_qs = Receta.objects.filter(tipo=Receta.TIPO_PRODUCTO_FINAL)
@@ -6567,6 +6592,7 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             "margen_meta_fuente": meta_fuente,
             "margen_meta_desglose": meta_desglose,
             "utilidad_meta": str(utilidad_meta.quantize(Decimal("0.1"))),
+            "objetivo_margen": str(objetivo_margen.quantize(Decimal("0.1"))),
             "periodo_inicio": start_period.isoformat(),
             "periodo_fin": current_period.isoformat(),
             "familias_seleccionadas": familias_sel,
