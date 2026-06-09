@@ -39,9 +39,10 @@ class SyncfyAuthTests(SimpleTestCase):
         self.assertEqual(token, "token-123")
         self.assertEqual(session.requests[0]["method"], "POST")
         self.assertEqual(session.requests[0]["url"], "https://syncfy.test/v1/sessions")
+        self.assertEqual(session.requests[0]["params"], {"api_key": "api-key"})
         self.assertEqual(session.requests[0]["json"], {"api_key": "api-key", "id_user": "user-1"})
 
-    def test_crear_usuario_uses_api_key_authorization(self):
+    def test_crear_usuario_sends_api_key_query_param_and_body(self):
         session = FakeSession(FakeResponse({"response": {"id_user": "user-1", "name": "pollyanas_dolce"}}))
         client = SyncfyClient(
             config=SyncfyConfig(api_key="api-key", id_user="", base_url="https://syncfy.test/v1"),
@@ -52,4 +53,8 @@ class SyncfyAuthTests(SimpleTestCase):
 
         self.assertEqual(id_user, "user-1")
         self.assertEqual(session.requests[0]["headers"]["Authorization"], "api_key api-key")
-        self.assertEqual(session.requests[0]["json"], {"name": "pollyanas_dolce"})
+        self.assertEqual(session.requests[0]["params"], {"api_key": "api-key"})
+        self.assertEqual(
+            session.requests[0]["json"],
+            {"api_key": "api-key", "name": "pollyanas_dolce", "id_external": "pollyanas_dolce"},
+        )
