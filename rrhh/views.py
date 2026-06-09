@@ -2131,7 +2131,7 @@ def organizacion_ch(request):
         Empleado.objects.filter(colaboradores_directos__isnull=False)
         .filter(colaboradores_directos__activo=True)
         .distinct()
-        .annotate(equipo_activo=Count("colaboradores_directos", filter=Q(colaboradores_directos__activo=True)))
+        .annotate(equipo_activo=Count("colaboradores_directos", filter=Q(colaboradores_directos__activo=True), distinct=True))
         .order_by("departamento", "nombre")
     )
     departamento_jefatura = (request.GET.get("departamento_jefatura") or "").strip().upper()

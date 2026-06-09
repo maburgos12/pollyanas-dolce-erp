@@ -36,7 +36,7 @@
   .identity-sev-info { background: #e7f1ff; color: #1f4f8f; }
   .identity-action { color: var(--vino); font-weight: 900; }
   .identity-value { overflow-wrap: anywhere; }
-  .org-filter-row { align-items: end; display: grid; gap: 10px; grid-template-columns: minmax(170px, .75fr) minmax(220px, 1.25fr) auto; margin-bottom: 12px; }
+  .org-filter-row { align-items: end; display: grid; gap: 10px; grid-template-columns: minmax(150px, .55fr) minmax(240px, 1fr) auto; margin-bottom: 12px; }
   .org-field { display: grid; gap: 5px; }
   .org-field label { color: var(--vino); font-size: 11px; font-weight: 900; text-transform: uppercase; }
   .org-field select {
@@ -44,9 +44,9 @@
     border: 1px solid var(--rosa);
     border-radius: 8px;
     color: var(--texto);
-    font-size: 13px;
-    min-height: 38px;
-    padding: 8px 10px;
+    font-size: 12px;
+    min-height: 34px;
+    padding: 6px 9px;
     width: 100%;
   }
   .org-filter-button {
@@ -55,13 +55,14 @@
     border-radius: 8px;
     color: #fff;
     cursor: pointer;
+    font-size: 12px;
     font-weight: 900;
-    min-height: 38px;
-    padding: 8px 14px;
+    min-height: 34px;
+    padding: 7px 12px;
   }
-  .org-leader-summary { border: 1px solid var(--rosa); border-radius: 8px; margin-bottom: 12px; padding: 12px; }
-  .org-leader-title { color: var(--vino); font-weight: 900; }
-  .org-leader-meta { color: var(--texto-light); font-size: 13px; margin-top: 2px; }
+  .org-leader-summary { border: 1px solid var(--rosa); border-radius: 8px; margin-bottom: 12px; padding: 10px 12px; }
+  .org-leader-title { color: var(--vino); font-size: 14px; font-weight: 900; }
+  .org-leader-meta { color: var(--texto-light); font-size: 12px; margin-top: 2px; }
   .org-table-shell {
     max-width: 100%;
     overflow-x: auto;
@@ -224,7 +225,7 @@
       <form method="get" class="org-filter-row">
         <div class="org-field">
           <label for="departamento_jefatura">Área</label>
-          <select id="departamento_jefatura" name="departamento_jefatura">
+          <select id="departamento_jefatura" name="departamento_jefatura" data-native-select="true">
             <option value="">Todas</option>
             {% for value,label in departamento_choices %}
               <option value="{{ value }}" {% if departamento_jefatura == value %}selected{% endif %}>{{ label }}</option>
@@ -233,7 +234,7 @@
         </div>
         <div class="org-field">
           <label for="jefe">Jefatura</label>
-          <select id="jefe" name="jefe">
+          <select id="jefe" name="jefe" data-native-select="true">
             {% for jefe in jefes %}
               <option value="{{ jefe.id }}" {% if jefe_id == jefe.id|stringformat:"s" %}selected{% endif %}>
                 {{ jefe.nombre }} · {{ jefe.equipo_activo }} personas
