@@ -32,6 +32,7 @@ def rango_unix_syncfy(*, dias_atras: int | None = None, now: datetime | None = N
 def descargar_transacciones(
     *,
     id_credential: str,
+    id_account: str,
     token: str,
     dt_refresh_from: int,
     dt_refresh_to: int,
@@ -46,6 +47,7 @@ def descargar_transacciones(
             "/transactions",
             params={
                 "id_credential": id_credential,
+                "id_account": id_account,
                 "dt_refresh_from": dt_refresh_from,
                 "dt_refresh_to": dt_refresh_to,
                 "limit": limit,
