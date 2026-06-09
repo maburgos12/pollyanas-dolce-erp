@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-fallas-pwa-v4";
+const CACHE_NAME = "pollyanas-fallas-pwa-v5";
 const SHELL_ASSETS = [
   "/fallas/app/",
   "/static/fallas/manifest.json",
