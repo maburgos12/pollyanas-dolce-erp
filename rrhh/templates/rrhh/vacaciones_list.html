@@ -36,6 +36,18 @@
     width: 100%;
   }
   .vac-field textarea { min-height: 88px; resize: vertical; }
+  .vac-employee-card {
+    background: #fbf6f8;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    color: var(--texto-light);
+    display: grid;
+    gap: 4px;
+    min-height: 58px;
+    padding: 10px;
+  }
+  .vac-employee-card strong { color: var(--texto); font-size: 14px; }
+  .vac-employee-card span { font-size: 12px; }
   .vac-saldo-list { display: grid; gap: 8px; margin-top: 12px; max-height: 300px; overflow: auto; }
   .vac-saldo-row { border: 1px solid var(--rosa); border-radius: 8px; display: grid; gap: 4px; padding: 10px; }
   .vac-saldo-main { color: var(--texto); font-weight: 900; }
@@ -139,9 +151,22 @@
               <select id="empleado_id" name="empleado_id" required>
                 <option value="">Selecciona empleado activo</option>
                 {% for empleado in empleados %}
-                  <option value="{{ empleado.id }}">{{ empleado.nombre }} · {{ empleado.sucursal|default:"Sin sucursal" }}</option>
+                  <option
+                    value="{{ empleado.id }}"
+                    data-puesto="{{ empleado.puesto|default:'Sin puesto registrado' }}"
+                    data-puesto-operativo="{{ empleado.puesto_operativo|default:'' }}"
+                    data-departamento="{{ empleado.get_departamento_display|default:'Sin departamento' }}"
+                    data-area="{{ empleado.area|default:'' }}"
+                    data-sucursal="{{ empleado.sucursal|default:'Sin sucursal' }}"
+                  >
+                    {{ empleado.nombre }} · {{ empleado.sucursal|default:"Sin sucursal" }}
+                  </option>
                 {% endfor %}
               </select>
+              <div class="vac-employee-card" id="vacEmpleadoInfo" aria-live="polite">
+                <strong>Selecciona un empleado</strong>
+                <span>El puesto y área aparecerán automáticamente.</span>
+              </div>
             </div>
             <div class="vac-field">
               <label for="fecha_inicio">Inicio</label>
@@ -237,4 +262,38 @@
     </section>
   </section>
 </section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (function () {
+    const empleadoSelect = document.getElementById("empleado_id");
+    const empleadoInfo = document.getElementById("vacEmpleadoInfo");
+    if (!empleadoSelect || !empleadoInfo) return;
+
+    function renderEmpleadoInfo() {
+      const option = empleadoSelect.options[empleadoSelect.selectedIndex];
+      const title = document.createElement("strong");
+      const detail = document.createElement("span");
+      if (!option || !option.value) {
+        title.textContent = "Selecciona un empleado";
+        detail.textContent = "El puesto y área aparecerán automáticamente.";
+        empleadoInfo.replaceChildren(title, detail);
+        return;
+      }
+
+      const puesto = option.dataset.puesto || "Sin puesto registrado";
+      const puestoOperativo = option.dataset.puestoOperativo ? " · " + option.dataset.puestoOperativo : "";
+      const departamento = option.dataset.departamento || "Sin departamento";
+      const area = option.dataset.area ? " · " + option.dataset.area : "";
+      const sucursal = option.dataset.sucursal || "Sin sucursal";
+      title.textContent = puesto + puestoOperativo;
+      detail.textContent = departamento + area + " · " + sucursal;
+      empleadoInfo.replaceChildren(title, detail);
+    }
+
+    empleadoSelect.addEventListener("change", renderEmpleadoInfo);
+    renderEmpleadoInfo();
+  })();
+</script>
 {% endblock %}

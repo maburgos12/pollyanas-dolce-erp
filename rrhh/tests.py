@@ -189,6 +189,30 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertContains(response, "Solicitud de vacaciones")
         self.assertNotContains(response, "Ver reglamento interno")
 
+    def test_vacaciones_list_expone_puesto_del_empleado_en_selector(self):
+        from datetime import date
+
+        rrhh_user = User.objects.create_user(username="paula", is_superuser=True, is_staff=True)
+        Empleado.objects.create(
+            nombre="Johana Lopez",
+            fecha_ingreso=date(2024, 1, 1),
+            activo=True,
+            puesto="Jefa de Ventas",
+            puesto_operativo="CAJAS",
+            departamento=Empleado.DEP_VENTAS,
+            area="VENTAS",
+            sucursal="Matriz",
+        )
+
+        self.client.force_login(rrhh_user)
+        response = self.client.get(reverse("rrhh:rrhh_vacaciones_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-puesto="Jefa de Ventas"')
+        self.assertContains(response, 'data-puesto-operativo="CAJAS"')
+        self.assertContains(response, 'data-departamento="Ventas"')
+        self.assertContains(response, "El puesto y área aparecerán automáticamente.")
+
     def test_permiso_de_jefatura_lo_resuelve_direccion_no_rrhh(self):
         from datetime import datetime
         from zoneinfo import ZoneInfo
