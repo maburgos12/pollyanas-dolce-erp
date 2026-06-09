@@ -1420,6 +1420,8 @@ class RRHHViewsTests(TestCase):
         self.assertContains(resp, "Ver equipo")
         self.assertContains(resp, "Puesto operativo")
         self.assertNotContains(resp, "org-chip")
+        self.assertEqual(resp.context["jefes"][0].equipo_activo, 1)
+        self.assertContains(resp, 'data-native-select="true"')
 
     def test_catalogos_solo_gestion_rrhh_y_guarda_esquema_normalizado(self):
         viewer = User.objects.create_user(username="rrhh.viewer", password="pass123")
