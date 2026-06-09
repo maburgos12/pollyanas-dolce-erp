@@ -52,7 +52,7 @@ class SyncfyAuthTests(SimpleTestCase):
         id_user = crear_usuario_pollyanas(client=client)
 
         self.assertEqual(id_user, "user-1")
-        self.assertEqual(session.requests[0]["headers"]["Authorization"], "api_key api-key")
+        self.assertNotIn("Authorization", session.requests[0]["headers"])
         self.assertEqual(session.requests[0]["params"], {"api_key": "api-key"})
         self.assertEqual(
             session.requests[0]["json"],

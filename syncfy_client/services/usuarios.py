@@ -10,7 +10,6 @@ def crear_usuario_pollyanas(*, name: str = "pollyanas_dolce", client: SyncfyClie
         "/users",
         params={"api_key": config.api_key},
         json={"api_key": config.api_key, "name": name, "id_external": name},
-        api_key_auth=True,
     )
     id_user = ""
     if isinstance(response, dict):
