@@ -41,11 +41,17 @@ def listar_credenciales(*, token: str, client: SyncfyClient | None = None) -> li
     return []
 
 
-def refrescar_credencial(*, id_credential: str, token: str, client: SyncfyClient | None = None) -> str:
+def refrescar_credencial(
+    *,
+    id_credential: str,
+    id_site: str,
+    token: str,
+    client: SyncfyClient | None = None,
+) -> str:
     client = client or SyncfyClient()
     response = client.post(
         "/credentials/pulls",
-        json={"id_credential": id_credential},
+        json={"id_credential": id_credential, "id_site": id_site},
         token=token,
     )
     if isinstance(response, dict):

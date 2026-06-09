@@ -48,7 +48,11 @@ def _sincronizar_cuenta(cuenta: CuentaBancaria, *, token: str) -> dict[str, int 
         )
         return {"status": "sin_account", "total": 0, "nuevos": 0}
 
-    id_job = refrescar_credencial(id_credential=cuenta.id_credential, token=token)
+    id_job = refrescar_credencial(
+        id_credential=cuenta.id_credential,
+        id_site=cuenta.id_site_syncfy,
+        token=token,
+    )
     if id_job:
         esperar_job(id_job=id_job, token=token)
 

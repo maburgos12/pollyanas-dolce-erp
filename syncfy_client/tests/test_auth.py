@@ -4,6 +4,7 @@ from django.test import SimpleTestCase
 
 from syncfy_client.services.auth import obtener_token
 from syncfy_client.services.base import SyncfyClient, SyncfyConfig
+from syncfy_client.services.credenciales import refrescar_credencial
 from syncfy_client.services.usuarios import crear_usuario_pollyanas
 
 
@@ -58,3 +59,22 @@ class SyncfyAuthTests(SimpleTestCase):
             session.requests[0]["json"],
             {"api_key": "api-key", "name": "pollyanas_dolce", "id_external": "pollyanas_dolce"},
         )
+
+    def test_refrescar_credencial_sends_site_and_credential(self):
+        session = FakeSession(FakeResponse({"response": {"id_job": "job-1"}}))
+        client = SyncfyClient(
+            config=SyncfyConfig(api_key="api-key", id_user="user-1", base_url="https://syncfy.test/v1"),
+            session=session,
+        )
+
+        id_job = refrescar_credencial(
+            id_credential="cred-1",
+            id_site="site-1",
+            token="token-1",
+            client=client,
+        )
+
+        self.assertEqual(id_job, "job-1")
+        self.assertEqual(session.requests[0]["method"], "POST")
+        self.assertEqual(session.requests[0]["url"], "https://syncfy.test/v1/credentials/pulls")
+        self.assertEqual(session.requests[0]["json"], {"id_credential": "cred-1", "id_site": "site-1"})
