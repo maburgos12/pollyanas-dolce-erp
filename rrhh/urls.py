@@ -31,6 +31,7 @@ urlpatterns = [
     path("dashboard/", views.dashboard_ch, name="rrhh_dashboard"),
     path("indicadores/", views.indicadores_ch, name="rrhh_indicadores"),
     path("organizacion/", views.organizacion_ch, name="rrhh_organizacion"),
+    path("catalogos/", views.catalogos_ch, name="rrhh_catalogos"),
     path("vacantes/", views_vacantes.vacantes_lista, name="rrhh_vacantes"),
     path("vacantes/nueva/", views_vacantes.vacante_nueva, name="rrhh_vacante_nueva"),
     path("vacantes/<int:pk>/", views_vacantes.vacante_detalle, name="rrhh_vacante_detalle"),

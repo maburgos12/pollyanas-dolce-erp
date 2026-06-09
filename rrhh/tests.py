@@ -10,7 +10,7 @@ from rest_framework.test import APIClient
 from unittest import SkipTest
 from unittest.mock import patch
 
-from core.models import Notificacion, Sucursal, UserProfile
+from core.models import Notificacion, Sucursal, UserModuleAccess, UserProfile
 from rrhh.models import (
     AsistenciaEmpleado,
     BonoEsquema,
@@ -1417,6 +1417,56 @@ class RRHHViewsTests(TestCase):
         self.assertContains(resp, "Jefe directo")
         self.assertContains(resp, "Mapa de identidad y accesos")
         self.assertContains(resp, "Lectura dry-run, sin escrituras.")
+        self.assertContains(resp, "Ver equipo")
+        self.assertContains(resp, "Puesto operativo")
+        self.assertNotContains(resp, "org-chip")
+
+    def test_catalogos_solo_gestion_rrhh_y_guarda_esquema_normalizado(self):
+        viewer = User.objects.create_user(username="rrhh.viewer", password="pass123")
+        UserModuleAccess.objects.create(user=viewer, module="rrhh", access=UserModuleAccess.ACCESS_VIEW, updated_by=self.user)
+        self.client.force_login(viewer)
+
+        resp_forbidden = self.client.get(reverse("rrhh:rrhh_catalogos"))
+        self.assertEqual(resp_forbidden.status_code, 403)
+
+        self.client.force_login(self.user)
+        resp = self.client.get(reverse("rrhh:rrhh_catalogos"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Catálogos oficiales")
+        self.assertContains(resp, "Área / división y puesto operativo")
+        self.assertContains(resp, "Esquemas de bono")
+        self.assertContains(resp, "Catálogos")
+
+        resp_post = self.client.post(
+            reverse("rrhh:rrhh_catalogos"),
+            {
+                "action": "bono_esquema",
+                "nombre": "Almacén",
+                "departamento": Empleado.DEP_ADMINISTRACION,
+                "area": "ALMACEN",
+                "descripcion": "Bono para almacén",
+                "activo": "on",
+            },
+            follow=True,
+        )
+        self.assertEqual(resp_post.status_code, 200)
+        esquema = BonoEsquema.objects.get(codigo="ALMACEN")
+        self.assertEqual(esquema.nombre, "Almacén")
+        self.assertEqual(esquema.departamento, Empleado.DEP_ADMINISTRACION)
+        self.assertEqual(esquema.area, "ALMACEN")
+
+        self.client.post(
+            reverse("rrhh:rrhh_catalogos"),
+            {
+                "action": "bono_esquema",
+                "nombre": "almacen",
+                "departamento": Empleado.DEP_ADMINISTRACION,
+                "area": "ALMACEN",
+                "activo": "on",
+            },
+            follow=True,
+        )
+        self.assertEqual(BonoEsquema.objects.filter(codigo="ALMACEN").count(), 1)
 
     def test_empleados_expone_campos_de_organizacion(self):
         jefe = Empleado.objects.create(nombre="LOPEZ PALOS JOHANA ADELIN", departamento="VENTAS", puesto="Jefe de Ventas")
