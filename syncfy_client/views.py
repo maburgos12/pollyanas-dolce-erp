@@ -78,10 +78,13 @@ def sincronizar_credenciales_view(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"ok": False, "error": str(exc)}, status=502)
 
     actualizadas = 0
-    for cuenta in CuentaBancaria.objects.order_by("banco"):
+    cuentas = list(CuentaBancaria.objects.order_by("banco"))
+    credenciales_por_banco: dict[str, dict[str, Any]] = {}
+    for cuenta in cuentas:
         credencial = _elegir_credencial(cuenta.id_site_syncfy, credenciales)
         if not credencial:
             continue
+        credenciales_por_banco[cuenta.banco] = credencial
         id_credential = str(credencial.get("id_credential") or "").strip()
         if not id_credential:
             continue
@@ -92,8 +95,19 @@ def sincronizar_credenciales_view(request: HttpRequest) -> JsonResponse:
             _log_credential_update(request, cuenta, anterior=anterior, source="credentials_refresh")
             actualizadas += 1
 
-    cuentas = [_cuenta_payload(cuenta) for cuenta in CuentaBancaria.objects.order_by("banco")]
-    return JsonResponse({"ok": True, "credenciales": len(credenciales), "actualizadas": actualizadas, "cuentas": cuentas})
+    cuentas_payload = [_cuenta_payload(cuenta, credenciales_por_banco.get(cuenta.banco)) for cuenta in cuentas]
+    autorizadas = sum(1 for cuenta in cuentas_payload if cuenta["syncfy_authorized"])
+    no_autorizadas = sum(1 for cuenta in cuentas_payload if cuenta["syncfy_code"] and not cuenta["syncfy_authorized"])
+    return JsonResponse(
+        {
+            "ok": True,
+            "credenciales": len(credenciales),
+            "actualizadas": actualizadas,
+            "autorizadas": autorizadas,
+            "no_autorizadas": no_autorizadas,
+            "cuentas": cuentas_payload,
+        }
+    )
 
 
 def _json_payload(request: HttpRequest) -> dict[str, Any]:
@@ -127,8 +141,18 @@ def _safe_int(value: Any) -> int:
         return 0
 
 
-def _cuenta_payload(cuenta: CuentaBancaria) -> dict[str, Any]:
+def _cuenta_payload(cuenta: CuentaBancaria, credencial: dict[str, Any] | None = None) -> dict[str, Any]:
     id_credential = cuenta.id_credential or ""
+    syncfy_authorized = bool(credencial and _safe_int(credencial.get("is_authorized")) == 1)
+    syncfy_code = _safe_int(credencial.get("code")) if credencial else 0
+    if syncfy_authorized:
+        estado_syncfy = "Autorizado"
+    elif syncfy_code:
+        estado_syncfy = f"No autorizado ({syncfy_code})"
+    elif id_credential:
+        estado_syncfy = "Credencial guardada"
+    else:
+        estado_syncfy = "Pendiente"
     return {
         "banco": cuenta.banco,
         "nombre_display": cuenta.nombre_display,
@@ -136,6 +160,9 @@ def _cuenta_payload(cuenta: CuentaBancaria) -> dict[str, Any]:
         "activa": cuenta.activa,
         "tiene_id_credential": bool(id_credential),
         "id_credential_mask": _mask(id_credential),
+        "syncfy_authorized": syncfy_authorized,
+        "syncfy_code": syncfy_code,
+        "estado_syncfy": estado_syncfy,
         "tiene_id_account": bool(cuenta.id_account),
         "numero_cuenta_mask": _mask(cuenta.numero_cuenta or "", suffix=4),
     }

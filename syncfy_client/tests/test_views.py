@@ -69,6 +69,7 @@ class SyncfyBancosViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.bbva.refresh_from_db()
         self.assertEqual(self.bbva.id_credential, "cred-bbva-1")
+        self.assertEqual(response.json()["cuenta"]["estado_syncfy"], "Credencial guardada")
 
     def test_guardar_credential_rejects_site_mismatch(self):
         self.client.force_login(self.admin)
@@ -97,6 +98,7 @@ class SyncfyBancosViewTests(TestCase):
                 "id_credential": "cred-bbva-ok",
                 "id_site": "66cdeccb04d89a0ea654d887",
                 "is_authorized": 1,
+                "code": 200,
                 "dt_authorized": 20,
             },
         ],
@@ -110,3 +112,27 @@ class SyncfyBancosViewTests(TestCase):
         self.bbva.refresh_from_db()
         self.assertEqual(self.bbva.id_credential, "cred-bbva-ok")
         self.assertEqual(response.json()["actualizadas"], 1)
+        self.assertEqual(response.json()["autorizadas"], 1)
+
+    @patch("syncfy_client.views.obtener_token", return_value="token-123")
+    @patch(
+        "syncfy_client.views.listar_credenciales",
+        return_value=[
+            {
+                "id_credential": "cred-bbva-denied",
+                "id_site": "66cdeccb04d89a0ea654d887",
+                "is_authorized": 0,
+                "code": 401,
+            },
+        ],
+    )
+    def test_sincronizar_credenciales_reports_unauthorized_status(self, _credentials, _token):
+        self.client.force_login(self.admin)
+
+        response = self.client.post("/syncfy/bancos/sincronizar-credenciales/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["no_autorizadas"], 1)
+        bbva_payload = next(cuenta for cuenta in payload["cuentas"] if cuenta["banco"] == "bbva")
+        self.assertEqual(bbva_payload["estado_syncfy"], "No autorizado (401)")
