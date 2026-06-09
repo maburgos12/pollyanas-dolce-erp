@@ -1186,6 +1186,214 @@ class PermisoSalidaCambio(models.Model):
         return f"{self.folio} · {self.get_accion_display()}"
 
 
+class ReglamentoLaboral(models.Model):
+    ESTADO_BORRADOR = "borrador"
+    ESTADO_VIGENTE = "vigente"
+    ESTADO_ARCHIVADO = "archivado"
+    ESTADO_CHOICES = [
+        (ESTADO_BORRADOR, "Borrador"),
+        (ESTADO_VIGENTE, "Vigente"),
+        (ESTADO_ARCHIVADO, "Archivado"),
+    ]
+
+    nombre = models.CharField(max_length=180)
+    empresa = models.CharField(max_length=180, default="GRUPO EMPRESARIAL FONSMA S.A. DE C.V.")
+    version = models.CharField(max_length=40, default="2026-04-09")
+    fecha_documento = models.DateField(null=True, blank=True)
+    estado = models.CharField(max_length=16, choices=ESTADO_CHOICES, default=ESTADO_BORRADOR, db_index=True)
+    fuente_archivo = models.CharField(max_length=240, blank=True, default="")
+    notas = models.TextField(blank=True, default="")
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-fecha_documento", "nombre"]
+        verbose_name = "Reglamento laboral"
+        verbose_name_plural = "Reglamentos laborales"
+
+    def __str__(self) -> str:
+        return f"{self.nombre} · {self.version}"
+
+
+class ReglaLaboral(models.Model):
+    TIPO_VACACIONES = "vacaciones"
+    TIPO_DESCANSO = "descanso"
+    TIPO_PERMISOS = "permisos"
+    TIPO_ASISTENCIA = "asistencia"
+    TIPO_DISCIPLINA = "disciplina"
+    TIPO_CHOICES = [
+        (TIPO_VACACIONES, "Vacaciones"),
+        (TIPO_DESCANSO, "Descanso"),
+        (TIPO_PERMISOS, "Permisos"),
+        (TIPO_ASISTENCIA, "Asistencia"),
+        (TIPO_DISCIPLINA, "Disciplina"),
+    ]
+
+    reglamento = models.ForeignKey(ReglamentoLaboral, on_delete=models.CASCADE, related_name="reglas")
+    clave = models.CharField(max_length=60)
+    capitulo = models.CharField(max_length=120, blank=True, default="")
+    articulo = models.CharField(max_length=40, blank=True, default="")
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, db_index=True)
+    titulo = models.CharField(max_length=160)
+    texto = models.TextField()
+    aplica_en_sistema = models.BooleanField(default=True)
+    orden = models.PositiveSmallIntegerField(default=0)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["orden", "id"]
+        unique_together = [("reglamento", "clave")]
+        verbose_name = "Regla laboral"
+        verbose_name_plural = "Reglas laborales"
+
+    def __str__(self) -> str:
+        return f"{self.articulo or self.clave} · {self.titulo}"
+
+
+class PoliticaVacaciones(models.Model):
+    reglamento = models.ForeignKey(
+        ReglamentoLaboral,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="politicas_vacaciones",
+    )
+    nombre = models.CharField(max_length=140, default="Vacaciones LFT vigente")
+    antiguedad_desde = models.PositiveSmallIntegerField()
+    antiguedad_hasta = models.PositiveSmallIntegerField(null=True, blank=True)
+    dias_laborables = models.DecimalField(max_digits=5, decimal_places=2)
+    prima_porcentaje = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("25.00"))
+    vigente_desde = models.DateField(default=timezone.localdate)
+    vigente_hasta = models.DateField(null=True, blank=True)
+    activo = models.BooleanField(default=True, db_index=True)
+    notas = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["antiguedad_desde"]
+        verbose_name = "Política de vacaciones"
+        verbose_name_plural = "Políticas de vacaciones"
+
+    def __str__(self) -> str:
+        hasta = self.antiguedad_hasta if self.antiguedad_hasta is not None else "+"
+        return f"{self.antiguedad_desde}-{hasta} años · {self.dias_laborables} días"
+
+
+class SolicitudVacaciones(models.Model):
+    ESTADO_SOLICITADA = "solicitada"
+    ESTADO_PREAUTORIZADA = "preautorizada"
+    ESTADO_APROBADA = "aprobada"
+    ESTADO_RECHAZADA = "rechazada"
+    ESTADO_CANCELADA = "cancelada"
+    ESTADO_CHOICES = [
+        (ESTADO_SOLICITADA, "Solicitada"),
+        (ESTADO_PREAUTORIZADA, "Preautorizada por jefe"),
+        (ESTADO_APROBADA, "Aprobada"),
+        (ESTADO_RECHAZADA, "Rechazada"),
+        (ESTADO_CANCELADA, "Cancelada"),
+    ]
+
+    empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.CASCADE, related_name="solicitudes_vacaciones")
+    fecha_inicio = models.DateField()
+    fecha_fin = models.DateField()
+    dias_laborables = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0"))
+    motivo = models.TextField(blank=True, default="")
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_SOLICITADA, db_index=True)
+    jefe_directo = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="vacaciones_por_preautorizar",
+    )
+    preautorizado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="vacaciones_preautorizadas",
+    )
+    fecha_preautorizacion = models.DateTimeField(null=True, blank=True)
+    aprobado_rrhh_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="vacaciones_aprobadas_rrhh",
+    )
+    fecha_aprobacion_rrhh = models.DateTimeField(null=True, blank=True)
+    folio = models.CharField(max_length=20, unique=True, editable=False)
+    notas_rrhh = models.TextField(blank=True, default="")
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="vacaciones_solicitadas",
+    )
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-creado_en"]
+        verbose_name = "Solicitud de vacaciones"
+        verbose_name_plural = "Solicitudes de vacaciones"
+
+    def __str__(self) -> str:
+        return f"{self.folio} · {self.empleado}"
+
+    def save(self, *args, **kwargs):
+        if not self.folio:
+            import random
+            import string
+            from datetime import date
+
+            while True:
+                sufijo = "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
+                folio = f"VAC-{date.today().strftime('%y%m')}-{sufijo}"
+                if not SolicitudVacaciones.objects.filter(folio=folio).exists():
+                    self.folio = folio
+                    break
+        super().save(*args, **kwargs)
+
+
+class MovimientoVacaciones(models.Model):
+    TIPO_GENERADO = "generado"
+    TIPO_RESERVADO = "reservado"
+    TIPO_CONSUMIDO = "consumido"
+    TIPO_LIBERADO = "liberado"
+    TIPO_AJUSTE = "ajuste"
+    TIPO_CHOICES = [
+        (TIPO_GENERADO, "Generado"),
+        (TIPO_RESERVADO, "Reservado"),
+        (TIPO_CONSUMIDO, "Consumido"),
+        (TIPO_LIBERADO, "Liberado"),
+        (TIPO_AJUSTE, "Ajuste manual"),
+    ]
+
+    empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.CASCADE, related_name="movimientos_vacaciones")
+    solicitud = models.ForeignKey(
+        SolicitudVacaciones,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="movimientos",
+    )
+    tipo = models.CharField(max_length=16, choices=TIPO_CHOICES, db_index=True)
+    dias = models.DecimalField(max_digits=6, decimal_places=2)
+    periodo_anio = models.PositiveSmallIntegerField(db_index=True)
+    descripcion = models.CharField(max_length=220, blank=True, default="")
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-creado_en", "-id"]
+        verbose_name = "Movimiento de vacaciones"
+        verbose_name_plural = "Movimientos de vacaciones"
+
+    def __str__(self) -> str:
+        return f"{self.empleado} · {self.tipo} · {self.dias}"
+
+
 class ImportacionChecador(models.Model):
     METODO_API = "api"
     METODO_EXCEL = "excel"

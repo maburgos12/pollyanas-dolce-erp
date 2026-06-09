@@ -25,8 +25,12 @@ from rrhh.models import (
     NominaPeriodo,
     PlantillaAutorizada,
     PermisoSalida,
+    PoliticaVacaciones,
     Prestamo,
     PrestamoCuota,
+    ReglamentoLaboral,
+    ReglaLaboral,
+    SolicitudVacaciones,
     Turno,
     VacanteRRHH,
 )
@@ -37,6 +41,154 @@ LISTA_RAYA_SAMPLE = Path("/Users/mauricioburgos/Downloads/Lista de raya del 16 a
 
 
 class CapitalHumanoServiceTests(TestCase):
+    def test_vacaciones_calcula_dias_laborables_y_reserva_saldo(self):
+        from datetime import date
+
+        from rrhh.services_vacaciones import (
+            aprobar_solicitud_vacaciones_rrhh,
+            crear_solicitud_vacaciones,
+            saldo_vacaciones_empleado,
+        )
+
+        rrhh_user = User.objects.create_user(username="paula")
+        rrhh_user.groups.add(Group.objects.create(name="RRHH"))
+        empleado = Empleado.objects.create(
+            nombre="Colaborador Vacaciones",
+            fecha_ingreso=date(2025, 1, 1),
+            activo=True,
+        )
+        PoliticaVacaciones.objects.create(
+            antiguedad_desde=1,
+            antiguedad_hasta=5,
+            dias_laborables=Decimal("12.00"),
+            vigente_desde=date(2026, 1, 1),
+        )
+
+        solicitud = crear_solicitud_vacaciones(
+            empleado=empleado,
+            fecha_inicio=date(2026, 6, 8),
+            fecha_fin=date(2026, 6, 12),
+            motivo="Descanso programado",
+            actor=rrhh_user,
+        )
+
+        self.assertEqual(solicitud.estado, SolicitudVacaciones.ESTADO_SOLICITADA)
+        self.assertEqual(solicitud.dias_laborables, Decimal("5"))
+        saldo = saldo_vacaciones_empleado(empleado, periodo_anio=2026)
+        self.assertEqual(saldo["generado"], Decimal("12.00"))
+        self.assertEqual(saldo["reservado"], Decimal("5"))
+        self.assertEqual(saldo["disponible"], Decimal("7.00"))
+
+        aprobar_solicitud_vacaciones_rrhh(solicitud, rrhh_user)
+        saldo = saldo_vacaciones_empleado(empleado, periodo_anio=2026)
+        self.assertEqual(saldo["consumido"], Decimal("5"))
+        self.assertEqual(saldo["reservado"], Decimal("0"))
+        self.assertEqual(saldo["disponible"], Decimal("7.00"))
+
+    def test_jefe_crea_y_preautoriza_vacaciones_de_equipo(self):
+        from datetime import date
+
+        jefe_user = User.objects.create_user(username="johana")
+        jefa = Empleado.objects.create(
+            nombre="Johana Lopez",
+            fecha_ingreso=date(2023, 1, 1),
+            usuario_erp=jefe_user,
+            activo=True,
+        )
+        colaborador = Empleado.objects.create(
+            nombre="Cajera Operativa",
+            fecha_ingreso=date(2025, 1, 1),
+            jefe_directo=jefa,
+            activo=True,
+        )
+        PoliticaVacaciones.objects.create(
+            antiguedad_desde=1,
+            antiguedad_hasta=5,
+            dias_laborables=Decimal("12.00"),
+            vigente_desde=date(2026, 1, 1),
+        )
+
+        self.client.force_login(jefe_user)
+        response = self.client.post(
+            reverse("rrhh:rrhh_vacaciones_list"),
+            {
+                "action": "crear",
+                "empleado_id": colaborador.id,
+                "fecha_inicio": "2026-06-15",
+                "fecha_fin": "2026-06-19",
+                "motivo": "Solicitud capturada por jefa directa",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        solicitud = SolicitudVacaciones.objects.get(empleado=colaborador)
+        self.assertEqual(solicitud.jefe_directo, jefe_user)
+
+        response = self.client.post(
+            reverse("rrhh:rrhh_vacaciones_list"),
+            {"action": "preautorizar_jefe", "solicitud_id": solicitud.id},
+        )
+        self.assertEqual(response.status_code, 302)
+        solicitud.refresh_from_db()
+        self.assertEqual(solicitud.estado, SolicitudVacaciones.ESTADO_PREAUTORIZADA)
+        self.assertEqual(solicitud.preautorizado_por, jefe_user)
+
+    def test_reglamento_interno_renderiza_reglas_vacaciones(self):
+        reglamento = ReglamentoLaboral.objects.create(
+            nombre="Reglamento interno FONSMA",
+            version="2026-04-09",
+            estado=ReglamentoLaboral.ESTADO_VIGENTE,
+        )
+        ReglaLaboral.objects.create(
+            reglamento=reglamento,
+            clave="art-30",
+            articulo="ARTICULO 30",
+            tipo=ReglaLaboral.TIPO_VACACIONES,
+            titulo="Cómputo por días laborables",
+            texto="Solo se incluyen días laborables.",
+        )
+        rrhh_user = User.objects.create_user(username="paula", is_superuser=True, is_staff=True)
+        rrhh_user.groups.add(Group.objects.create(name="RRHH"))
+
+        self.client.force_login(rrhh_user)
+        response = self.client.get(reverse("rrhh:rrhh_reglamento_interno"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Reglamento interno FONSMA")
+        self.assertContains(response, "Cómputo por días laborables")
+
+    def test_organizacion_renderiza_boton_reglamento(self):
+        from datetime import date
+
+        rrhh_user = User.objects.create_user(username="paula", is_superuser=True, is_staff=True)
+        ReglamentoLaboral.objects.create(
+            nombre="Reglamento interno FONSMA",
+            version="2026-04-09",
+            estado=ReglamentoLaboral.ESTADO_VIGENTE,
+        )
+        Empleado.objects.create(
+            nombre="Colaborador Vacaciones",
+            fecha_ingreso=date(2025, 1, 1),
+            activo=True,
+        )
+
+        self.client.force_login(rrhh_user)
+        response = self.client.get(reverse("rrhh:rrhh_organizacion"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Mapa organizacional")
+        self.assertContains(response, "Ver reglamento interno")
+
+    def test_vacaciones_list_no_muestra_boton_reglamento(self):
+        rrhh_user = User.objects.create_user(username="paula", is_superuser=True, is_staff=True)
+
+        self.client.force_login(rrhh_user)
+        response = self.client.get(reverse("rrhh:rrhh_vacaciones_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Solicitud de vacaciones")
+        self.assertNotContains(response, "Ver reglamento interno")
+
     def test_permiso_de_jefatura_lo_resuelve_direccion_no_rrhh(self):
         from datetime import datetime
         from zoneinfo import ZoneInfo

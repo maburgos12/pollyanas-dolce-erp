@@ -39,6 +39,9 @@ from .models import (
     PermisoSalida,
     PlantillaAutorizada,
     Prestamo,
+    ReglamentoLaboral,
+    ReglaLaboral,
+    SolicitudVacaciones,
     VacanteRRHH,
 )
 
@@ -78,6 +81,15 @@ from .services.lista_raya import importar_lista_raya_nomina
 from .services_personnel_normalization import build_personnel_normalization_plan
 from .services_niveles import jefatura_q, liderazgo_q
 from .services_permisos import can_authorize_direccion, resolver_permiso_direccion
+from .api_views import empleado_de_usuario
+from .services_vacaciones import (
+    aprobar_solicitud_vacaciones_rrhh,
+    can_gestionar_vacaciones_jefe,
+    crear_solicitud_vacaciones,
+    preautorizar_solicitud_vacaciones_jefe,
+    rechazar_solicitud_vacaciones,
+    saldo_vacaciones_empleado,
+)
 from .services_vacantes import (
     can_autorizar_vacante,
     can_solicitar_vacantes,
@@ -394,6 +406,7 @@ RRHH_MODULE_TABS = [
     {"label": "Catálogos", "url_name": "rrhh:rrhh_catalogos", "key": "catalogos", "submodule": "catalogos"},
     {"label": "Empleados", "url_name": "rrhh:empleados", "key": "empleados", "submodule": "empleados"},
     {"label": "Permisos", "url_name": "rrhh:rrhh_permisos_list", "key": "permisos", "submodule": "permisos"},
+    {"label": "Vacaciones", "url_name": "rrhh:rrhh_vacaciones_list", "key": "vacaciones", "submodule": "vacaciones"},
     {"label": "Horas extra", "url_name": "rrhh:rrhh_he_list", "key": "horas_extra", "submodule": "horas_extra"},
     {"label": "Asistencias", "url_name": "rrhh:rrhh_asistencias", "key": "asistencias", "submodule": "asistencias"},
     {"label": "Checador", "url_name": "rrhh:rrhh_importar", "key": "checador", "submodule": "importar_checador"},
@@ -475,6 +488,8 @@ def _has_rrhh_task_access(user, tab_key: str) -> bool:
         return Prestamo.objects.filter(jefe_directo=user).exists()
     if tab_key == "horas_extra":
         return HoraExtra.objects.filter(jefe_directo=user).exists()
+    if tab_key == "vacaciones":
+        return SolicitudVacaciones.objects.filter(Q(jefe_directo=user) | Q(creado_por=user)).exists()
     return False
 
 
@@ -2160,11 +2175,12 @@ def organizacion_ch(request):
     )
     sin_jefe = empleados.filter(jefe_directo__isnull=True).exclude(jefatura_q())
     identity_map = _identity_map_context(limit=80)
+    reglamento = ReglamentoLaboral.objects.filter(estado=ReglamentoLaboral.ESTADO_VIGENTE).first()
     return render(
         request,
         "rrhh/organizacion.html",
         {
-            "module_tabs": _module_tabs("organizacion", request.user),
+            "module_tabs": _module_tabs("vacaciones", request.user),
             "empleados": empleados,
             "departamentos": departamentos,
             "jefes": jefes,
@@ -2176,6 +2192,7 @@ def organizacion_ch(request):
             "sin_jefe": sin_jefe,
             "total_activos": empleados.count(),
             "identity_map": identity_map,
+            "reglamento": reglamento,
         },
     )
 
@@ -2524,6 +2541,154 @@ def permisos_list(request):
 
 
 @login_required
+def vacaciones_list(request):
+    empleado_actual = empleado_de_usuario(request.user)
+    equipo_qs = Empleado.objects.filter(activo=True, jefe_directo__usuario_erp=request.user)
+    tiene_equipo = equipo_qs.exists()
+    puede_ver_vacaciones = can_view_submodule(request.user, "rrhh", "vacaciones") or tiene_equipo or bool(empleado_actual)
+    if not puede_ver_vacaciones:
+        raise PermissionDenied("No tienes permisos para ver vacaciones")
+
+    if can_view_submodule(request.user, "rrhh", "vacaciones"):
+        empleados_qs = Empleado.objects.filter(activo=True).order_by("nombre")
+    elif tiene_equipo:
+        empleado_ids = list(equipo_qs.values_list("id", flat=True))
+        if empleado_actual:
+            empleado_ids.append(empleado_actual.id)
+        empleados_qs = Empleado.objects.filter(id__in=empleado_ids, activo=True).order_by("nombre")
+    else:
+        empleados_qs = Empleado.objects.filter(pk=getattr(empleado_actual, "pk", None), activo=True).order_by("nombre")
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        try:
+            if action == "crear":
+                empleado = get_object_or_404(empleados_qs, pk=request.POST.get("empleado_id"))
+                fecha_inicio = _parse_date(request.POST.get("fecha_inicio"))
+                fecha_fin = _parse_date(request.POST.get("fecha_fin"))
+                if not fecha_inicio or not fecha_fin:
+                    raise ValidationError("Captura fecha inicial y fecha final.")
+                if not (
+                    can_view_submodule(request.user, "rrhh", "vacaciones")
+                    or empleado == empleado_actual
+                    or can_gestionar_vacaciones_jefe(request.user, empleado)
+                ):
+                    raise PermissionDenied("Solo puedes crear vacaciones propias o de tu equipo directo.")
+                solicitud = crear_solicitud_vacaciones(
+                    empleado=empleado,
+                    fecha_inicio=fecha_inicio,
+                    fecha_fin=fecha_fin,
+                    motivo=(request.POST.get("motivo") or "").strip(),
+                    actor=request.user,
+                )
+                messages.success(request, f"Solicitud {solicitud.folio} registrada y saldo reservado.")
+            elif action in {"preautorizar_jefe", "rechazar_jefe"}:
+                solicitud = get_object_or_404(SolicitudVacaciones, pk=request.POST.get("solicitud_id"))
+                preautorizar_solicitud_vacaciones_jefe(
+                    solicitud,
+                    request.user,
+                    aprobar=action == "preautorizar_jefe",
+                )
+                estado = "preautorizada" if action == "preautorizar_jefe" else "rechazada"
+                messages.success(request, f"Vacaciones {solicitud.folio} {estado} por jefe directo.")
+            elif action in {"aprobar_rrhh", "rechazar_rrhh"}:
+                solicitud = get_object_or_404(SolicitudVacaciones, pk=request.POST.get("solicitud_id"))
+                if action == "aprobar_rrhh":
+                    aprobar_solicitud_vacaciones_rrhh(solicitud, request.user)
+                    messages.success(request, f"Vacaciones {solicitud.folio} aprobadas por Capital Humano.")
+                else:
+                    rechazar_solicitud_vacaciones(solicitud, request.user)
+                    messages.success(request, f"Vacaciones {solicitud.folio} rechazadas y reserva liberada.")
+            else:
+                raise PermissionDenied("Acción de vacaciones no válida.")
+        except ValidationError as exc:
+            messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+        return redirect("rrhh:rrhh_vacaciones_list")
+
+    solicitudes_qs = (
+        SolicitudVacaciones.objects.select_related(
+            "empleado",
+            "jefe_directo",
+            "preautorizado_por",
+            "aprobado_rrhh_por",
+            "creado_por",
+        )
+        .order_by("-creado_en")
+    )
+    if not can_view_submodule(request.user, "rrhh", "vacaciones"):
+        if empleado_actual:
+            solicitudes_qs = solicitudes_qs.filter(Q(empleado=empleado_actual) | Q(jefe_directo=request.user))
+        else:
+            solicitudes_qs = solicitudes_qs.filter(jefe_directo=request.user)
+    solicitudes = solicitudes_qs[:500]
+    empleados = list(empleados_qs[:250])
+    empleados_saldo = [
+        {
+            "empleado": empleado,
+            "saldo": saldo_vacaciones_empleado(empleado),
+        }
+        for empleado in empleados[:80]
+    ]
+    columnas = [
+        ("solicitada", "Solicitadas", solicitudes_qs.filter(estado=SolicitudVacaciones.ESTADO_SOLICITADA)[:120]),
+        (
+            "preautorizada",
+            "Preautorizadas",
+            solicitudes_qs.filter(estado=SolicitudVacaciones.ESTADO_PREAUTORIZADA)[:120],
+        ),
+        ("aprobada", "Aprobadas", solicitudes_qs.filter(estado=SolicitudVacaciones.ESTADO_APROBADA)[:120]),
+        ("rechazada", "Rechazadas", solicitudes_qs.filter(estado=SolicitudVacaciones.ESTADO_RECHAZADA)[:120]),
+    ]
+    stats = {
+        "total": solicitudes_qs.count(),
+        "pendientes": solicitudes_qs.filter(
+            estado__in=[SolicitudVacaciones.ESTADO_SOLICITADA, SolicitudVacaciones.ESTADO_PREAUTORIZADA]
+        ).count(),
+        "aprobadas": solicitudes_qs.filter(estado=SolicitudVacaciones.ESTADO_APROBADA).count(),
+        "rechazadas": solicitudes_qs.filter(estado=SolicitudVacaciones.ESTADO_RECHAZADA).count(),
+    }
+    return render(
+        request,
+        "rrhh/vacaciones_list.html",
+        {
+            "module_tabs": _module_tabs("vacaciones", request.user),
+            "empleados": empleados,
+            "empleados_saldo": empleados_saldo,
+            "solicitudes": solicitudes,
+            "columnas": columnas,
+            "stats": stats,
+            "can_manage_rrhh": can_manage_rrhh(request.user),
+            "user_id": request.user.id,
+            "tiene_equipo_vacaciones": tiene_equipo,
+        },
+    )
+
+
+@login_required
+def reglamento_interno(request):
+    if not can_view_rrhh(request.user):
+        raise PermissionDenied("No tienes permisos para ver el reglamento interno")
+
+    reglamento = (
+        ReglamentoLaboral.objects.prefetch_related("reglas")
+        .filter(estado=ReglamentoLaboral.ESTADO_VIGENTE)
+        .first()
+    )
+    reglas = ReglaLaboral.objects.none()
+    if reglamento:
+        reglas = reglamento.reglas.all()
+    return render(
+        request,
+        "rrhh/reglamento_interno.html",
+        {
+            "module_tabs": _module_tabs("organizacion", request.user),
+            "reglamento": reglamento,
+            "reglas": reglas,
+        },
+    )
+
+
+@login_required
 def pwa_capital_humano(request):
     return render(request, "rrhh/pwa_capital_humano.html")
 
@@ -2531,6 +2696,11 @@ def pwa_capital_humano(request):
 @login_required
 def pwa_permisos(request):
     return render(request, "rrhh/pwa_capital_humano.html", {"initial_section": "permisos"})
+
+
+@login_required
+def pwa_vacaciones(request):
+    return render(request, "rrhh/pwa_capital_humano.html", {"initial_section": "vacaciones"})
 
 
 @login_required

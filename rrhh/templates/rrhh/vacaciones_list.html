@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+
+{% block title %}RRHH · Vacaciones{% endblock %}
+{% block page_title %}RRHH · Vacaciones{% endblock %}
+
+{% block extra_css %}
+<style>
+  .vac-page { display: grid; gap: 16px; }
+  .vac-head {
+    background: #fff;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    display: grid;
+    gap: 14px;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, .65fr);
+    padding: 18px;
+  }
+  .vac-title { color: var(--vino); font-family: "Playfair Display", serif; font-size: 25px; font-weight: 800; }
+  .vac-copy { color: var(--texto-light); margin-top: 4px; max-width: 760px; }
+  .vac-stats { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .vac-stat { background: #fbf6f8; border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; }
+  .vac-stat strong { color: var(--vino); display: block; font-size: 22px; line-height: 1; }
+  .vac-stat span { color: var(--texto-light); font-size: 11px; font-weight: 900; text-transform: uppercase; }
+  .vac-layout { display: grid; gap: 16px; }
+  .vac-panel { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 16px; }
+  .vac-panel h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
+  .vac-entry-grid { display: grid; gap: 16px; grid-template-columns: minmax(360px, .9fr) minmax(320px, 1.1fr); align-items: start; }
+  .vac-form { display: grid; gap: 12px; }
+  .vac-field { display: grid; gap: 5px; }
+  .vac-field label { color: var(--vino); font-size: 12px; font-weight: 900; text-transform: uppercase; }
+  .vac-field input, .vac-field select, .vac-field textarea {
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    font: inherit;
+    padding: 10px;
+    width: 100%;
+  }
+  .vac-field textarea { min-height: 88px; resize: vertical; }
+  .vac-saldo-list { display: grid; gap: 8px; margin-top: 12px; max-height: 300px; overflow: auto; }
+  .vac-saldo-row { border: 1px solid var(--rosa); border-radius: 8px; display: grid; gap: 4px; padding: 10px; }
+  .vac-saldo-main { color: var(--texto); font-weight: 900; }
+  .vac-meta { color: var(--texto-light); font-size: 13px; }
+  .vac-status-panel { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 16px; }
+  .vac-status-strip { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 14px; }
+  .vac-status-tab {
+    background: #fbf6f8;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    color: var(--vino);
+    display: grid;
+    gap: 3px;
+    min-height: 68px;
+    padding: 12px;
+    text-decoration: none;
+  }
+  .vac-status-tab strong { font-size: 17px; }
+  .vac-status-tab span { color: var(--texto-light); font-size: 12px; font-weight: 900; text-transform: uppercase; }
+  .vac-status-tab.active { background: var(--vino); color: #fff; }
+  .vac-status-tab.active span { color: rgba(255, 255, 255, .8); }
+  .vac-list { display: grid; gap: 10px; }
+  .vac-card { border: 1px solid var(--rosa); border-radius: 8px; display: grid; gap: 10px; padding: 12px; }
+  .vac-card-row {
+    align-items: center;
+    display: grid;
+    gap: 12px;
+    grid-template-columns: minmax(180px, 1.2fr) minmax(190px, 1fr) minmax(180px, 1fr) minmax(130px, .7fr) auto;
+  }
+  .vac-card-main { color: var(--texto); font-weight: 900; }
+  .vac-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+  .vac-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }
+  .vac-badge.gold { background: rgba(201, 168, 76, .18); color: #6f5415; }
+  .vac-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .vac-reglamento {
+    background: #fff;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    padding: 14px;
+  }
+  .vac-reglamento summary { color: var(--vino); cursor: pointer; font-weight: 900; }
+  .vac-reglamento ul { color: var(--texto-light); margin: 10px 0 0 18px; padding: 0; }
+  @media (max-width: 1280px) {
+    .vac-card-row { grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr); align-items: start; }
+    .vac-entry-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 760px) {
+    .vac-head { grid-template-columns: 1fr; }
+    .vac-status-strip, .vac-stats { grid-template-columns: 1fr; }
+    .vac-card-row { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="vac-page">
+  <div class="vac-head">
+    <div>
+      <div class="vac-title">Solicitud de vacaciones</div>
+      <div class="vac-copy">
+        Prototipo de flujo ordenado desde la fuente consolidada de Capital Humano:
+        empleado activo, antigüedad, saldo, reserva, autorización y archivo RRHH.
+      </div>
+    </div>
+    <div>
+      <div class="vac-stats">
+        <div class="vac-stat"><strong>{{ stats.total }}</strong><span>Total</span></div>
+        <div class="vac-stat"><strong>{{ stats.pendientes }}</strong><span>Pendientes</span></div>
+        <div class="vac-stat"><strong>{{ stats.aprobadas }}</strong><span>Aprobadas</span></div>
+        <div class="vac-stat"><strong>{{ stats.rechazadas }}</strong><span>Rechazadas</span></div>
+      </div>
+    </div>
+  </div>
+
+  <details class="vac-reglamento">
+    <summary>Reglas aplicadas desde reglamento interno</summary>
+    <ul>
+      <li>Las vacaciones se pagan con salario íntegro conforme al artículo 76 de la LFT.</li>
+      <li>Solo cuentan días laborables; se excluye descanso semanal y días oficiales.</li>
+      <li>No se acumulan periodos: deben disfrutarse antes del siguiente aniversario.</li>
+      <li>El flujo reserva saldo al solicitar y consume saldo hasta que RRHH aprueba.</li>
+    </ul>
+  </details>
+
+  <section class="vac-layout">
+    <div class="vac-panel">
+      <div class="vac-entry-grid">
+        <div>
+          <h2>Nueva solicitud</h2>
+          <form class="vac-form" method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="crear">
+            <div class="vac-field">
+              <label for="empleado_id">Empleado</label>
+              <select id="empleado_id" name="empleado_id" required>
+                <option value="">Selecciona empleado activo</option>
+                {% for empleado in empleados %}
+                  <option value="{{ empleado.id }}">{{ empleado.nombre }} · {{ empleado.sucursal|default:"Sin sucursal" }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="vac-field">
+              <label for="fecha_inicio">Inicio</label>
+              <input id="fecha_inicio" type="date" name="fecha_inicio" required>
+            </div>
+            <div class="vac-field">
+              <label for="fecha_fin">Fin</label>
+              <input id="fecha_fin" type="date" name="fecha_fin" required>
+            </div>
+            <div class="vac-field">
+              <label for="motivo">Motivo / notas</label>
+              <textarea id="motivo" name="motivo" placeholder="Cobertura, comentarios de RRHH o contexto operativo"></textarea>
+            </div>
+            <button class="btn btn-primary" type="submit">Reservar y solicitar</button>
+          </form>
+        </div>
+
+        <div>
+          <h2>Saldos iniciales</h2>
+          <div class="vac-saldo-list">
+            {% for row in empleados_saldo %}
+              <div class="vac-saldo-row">
+                <div class="vac-saldo-main">{{ row.empleado.nombre }}</div>
+                <div class="vac-meta">
+                  Disponible: {{ row.saldo.disponible }} días · Generado: {{ row.saldo.generado }} · Reservado: {{ row.saldo.reservado }}
+                </div>
+              </div>
+            {% empty %}
+              <div class="vac-meta">Sin empleados activos.</div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <section class="vac-status-panel">
+      <div class="vac-status-strip">
+      {% for key, label, items in columnas %}
+        <a class="vac-status-tab {% if forloop.first %}active{% endif %}" href="#estado-{{ key }}">
+          <strong>{{ label }}</strong>
+          <span>{{ items|length }} solicitudes</span>
+        </a>
+      {% endfor %}
+      </div>
+
+      <div class="vac-list">
+      {% for key, label, items in columnas %}
+        <div id="estado-{{ key }}">
+          {% for solicitud in items %}
+            <div class="vac-card">
+              <div class="vac-card-row">
+                <div>
+                  <div class="vac-card-main">{{ solicitud.empleado.nombre }}</div>
+                  <div class="vac-meta">{{ solicitud.folio }}</div>
+                </div>
+                <div class="vac-meta">{{ solicitud.fecha_inicio|date:"Y-m-d" }} a {{ solicitud.fecha_fin|date:"Y-m-d" }}</div>
+                <div class="vac-meta">
+                  {% if solicitud.jefe_directo %}Jefe: {{ solicitud.jefe_directo.get_full_name|default:solicitud.jefe_directo.username }}{% endif %}
+                  {% if solicitud.aprobado_rrhh_por %}RRHH: {{ solicitud.aprobado_rrhh_por }}{% endif %}
+                  {% if not solicitud.jefe_directo and not solicitud.aprobado_rrhh_por %}Sin autorizador asignado{% endif %}
+                </div>
+                <div class="vac-badges">
+                  <span class="vac-badge">{{ solicitud.dias_laborables }} días</span>
+                  <span class="vac-badge gold">{{ solicitud.get_estado_display }}</span>
+                </div>
+                {% if solicitud.jefe_directo_id == user_id and solicitud.estado == "solicitada" %}
+                  <form class="vac-card-actions" method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="solicitud_id" value="{{ solicitud.id }}">
+                    <button class="btn btn-primary" type="submit" name="action" value="preautorizar_jefe">Preautorizar</button>
+                    <button class="btn btn-secondary" type="submit" name="action" value="rechazar_jefe">Rechazar</button>
+                  </form>
+                {% elif can_manage_rrhh and solicitud.estado == "solicitada" or can_manage_rrhh and solicitud.estado == "preautorizada" %}
+                  <form class="vac-card-actions" method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="solicitud_id" value="{{ solicitud.id }}">
+                    <button class="btn btn-primary" type="submit" name="action" value="aprobar_rrhh">Aprobar RRHH</button>
+                    <button class="btn btn-secondary" type="submit" name="action" value="rechazar_rrhh">Rechazar</button>
+                  </form>
+                {% endif %}
+              </div>
+              {% if solicitud.motivo %}
+                <div class="vac-meta">{{ solicitud.motivo|truncatechars:160 }}</div>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      {% endfor %}
+      {% if not solicitudes %}
+        <div class="vac-meta">Sin solicitudes.</div>
+      {% endif %}
+      </div>
+    </section>
+  </section>
+</section>
+{% endblock %}

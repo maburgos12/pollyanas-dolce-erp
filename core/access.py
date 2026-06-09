@@ -169,6 +169,7 @@ ACCESS_SUBMODULES = {
         ("asistencias", "Asistencias"),
         ("horas_extra", "Horas extra"),
         ("permisos", "Permisos"),
+        ("vacaciones", "Vacaciones"),
         ("vacantes", "Vacantes"),
         ("prestamos", "Préstamos"),
         ("importar_checador", "Importar checador"),
