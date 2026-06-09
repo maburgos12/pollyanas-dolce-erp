@@ -19,6 +19,9 @@ media/
 .env.*
 !.env.example
 .envrc
+*.cer
+*.key
+efirma/
 
 # Logs
 logs/*.log

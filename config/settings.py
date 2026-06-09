@@ -122,6 +122,7 @@ INSTALLED_APPS = [
     "proyecciones",
     "orquestacion",
     "rentabilidad",
+    "sat_client",
     "api",
 ]
 
@@ -302,7 +303,7 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
-CELERY_IMPORTS = ("pos_bridge.tasks",)
+CELERY_IMPORTS = ("pos_bridge.tasks", "sat_client.tasks")
 CELERY_BEAT_SCHEDULE = {
     "logistica-alertar-documentos-por-vencer": {
         "task": "logistica.tasks.alertar_documentos_por_vencer",
@@ -329,6 +330,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "pos_bridge.daily_sales_sync",
         "schedule": crontab(hour=3, minute=0),
         "kwargs": {"days": 3, "lag_days": 0},
+    },
+    "sat: descarga cfdi nocturna": {
+        "task": "sat_client.ejecutar_descarga_sat_nocturna",
+        "schedule": crontab(hour=1, minute=0),
+        "options": {"timezone": TIME_ZONE},
     },
     # --- Cierre nocturno de producción ---
     "reportes: cierre produccion nocturno": {
@@ -450,6 +456,33 @@ POINT_BRIDGE_SYNC_INTERVAL_HOURS = int(os.getenv("POINT_BRIDGE_SYNC_INTERVAL_HOU
 POINT_BRIDGE_RETRY_ATTEMPTS = int(os.getenv("POINT_BRIDGE_RETRY_ATTEMPTS", "3"))
 
 ORQUESTACION_POINTDAILYSALE_GUARD_ENABLED = env_bool("ORQUESTACION_POINTDAILYSALE_GUARD_ENABLED", default=True)
+
+# SAT Web Service - Descarga Masiva CFDI.
+SAT_DESCARGA_ENABLED = env_bool("SAT_DESCARGA_ENABLED", default=False)
+SAT_EFIRMA_CER_PATH = os.getenv("SAT_EFIRMA_CER_PATH", "")
+SAT_EFIRMA_KEY_PATH = os.getenv("SAT_EFIRMA_KEY_PATH", "")
+SAT_EFIRMA_PASSWORD = os.getenv("SAT_EFIRMA_PASSWORD", "")
+SAT_RFC = os.getenv("SAT_RFC", "")
+SAT_DESCARGA_MESES_ATRAS = env_int("SAT_DESCARGA_MESES_ATRAS", 1)
+SAT_POLL_INTERVAL_SECONDS = env_int("SAT_POLL_INTERVAL_SECONDS", 600)
+SAT_POLL_MAX_ATTEMPTS = env_int("SAT_POLL_MAX_ATTEMPTS", 12)
+SAT_ALERT_EMAILS = env_list("SAT_ALERT_EMAILS", "maburgos12@pollyanasdolce.com")
+SAT_AUTENTICACION_URL = os.getenv(
+    "SAT_AUTENTICACION_URL",
+    "https://cfdidescargamasivasolicitud.clouda.sat.gob.mx/Autenticacion/Autenticacion.svc",
+)
+SAT_SOLICITUD_URL = os.getenv(
+    "SAT_SOLICITUD_URL",
+    "https://cfdidescargamasivasolicitud.clouda.sat.gob.mx/SolicitaDescargaService.svc",
+)
+SAT_VERIFICACION_URL = os.getenv(
+    "SAT_VERIFICACION_URL",
+    "https://cfdidescargamasivasolicitud.clouda.sat.gob.mx/VerificaSolicitudDescargaService.svc",
+)
+SAT_DESCARGA_URL = os.getenv(
+    "SAT_DESCARGA_URL",
+    "https://cfdidescargamasiva.clouda.sat.gob.mx/DescargaMasivaService.svc",
+)
 
 # Umbrales de rentabilidad para el agente IA
 RENT_MARGEN_BRUTO_MIN = 55.0
