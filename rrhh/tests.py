@@ -14,6 +14,7 @@ from core.models import Notificacion, Sucursal, UserModuleAccess, UserProfile
 from rrhh.models import (
     AsistenciaEmpleado,
     BonoEsquema,
+    CatalogoFuncionOperativa,
     Empleado,
     EmpleadoBaja,
     EmpleadoIdentidadPendiente,
@@ -1436,6 +1437,7 @@ class RRHHViewsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Catálogos oficiales")
         self.assertContains(resp, "Área / división y puesto operativo")
+        self.assertContains(resp, "Nueva función operativa")
         self.assertContains(resp, "Esquemas de bono")
         self.assertContains(resp, "Catálogos")
 
@@ -1469,6 +1471,41 @@ class RRHHViewsTests(TestCase):
             follow=True,
         )
         self.assertEqual(BonoEsquema.objects.filter(codigo="ALMACEN").count(), 1)
+
+    def test_catalogo_operativo_alimenta_alta_de_empleado(self):
+        self.client.post(
+            reverse("rrhh:rrhh_catalogos"),
+            {
+                "action": "funcion_operativa",
+                "codigo": "DECORADO",
+                "etiqueta": "Decorado",
+                "departamento_origen": Empleado.DEP_PRODUCCION,
+                "departamento_actual": Empleado.DEP_PRODUCCION,
+                "puesto_operativo": "DECORADO",
+                "nivel_organizacional": Empleado.NIVEL_COLABORADOR,
+                "activo": "on",
+            },
+            follow=True,
+        )
+
+        self.assertTrue(CatalogoFuncionOperativa.objects.filter(codigo="DECORADO", activo=True).exists())
+
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "nombre": "Empleado Decorado",
+                "area": "DECORADO",
+                "puesto": "Decoradora",
+                "salario_diario": "300.00",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        empleado = Empleado.objects.get(nombre="Empleado Decorado")
+        self.assertEqual(empleado.area, "DECORADO")
+        self.assertEqual(empleado.departamento, Empleado.DEP_PRODUCCION)
+        self.assertEqual(empleado.puesto_operativo, "DECORADO")
 
     def test_empleados_expone_campos_de_organizacion(self):
         jefe = Empleado.objects.create(nombre="LOPEZ PALOS JOHANA ADELIN", departamento="VENTAS", puesto="Jefe de Ventas")

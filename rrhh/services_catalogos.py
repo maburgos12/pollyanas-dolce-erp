@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .models import Empleado
+from django.db import OperationalError, ProgrammingError
+
+from .models import CatalogoFuncionOperativa, Empleado
 
 
 @dataclass(frozen=True)
@@ -82,3 +84,69 @@ PUESTO_OPERATIVO_VALUES = frozenset(value for value, _label in PUESTO_OPERATIVO_
 
 NIVEL_ORGANIZACIONAL_CHOICES = Empleado.NIVEL_ORGANIZACIONAL_CHOICES
 NIVEL_ORGANIZACIONAL_VALUES = frozenset(value for value, _label in NIVEL_ORGANIZACIONAL_CHOICES)
+
+
+def _funcion_from_model(item: CatalogoFuncionOperativa) -> FuncionOperativa:
+    return FuncionOperativa(
+        item.codigo,
+        item.etiqueta,
+        item.departamento_origen,
+        item.departamento_actual,
+        item.puesto_operativo,
+        item.nivel_organizacional or Empleado.NIVEL_COLABORADOR,
+    )
+
+
+def funciones_operativas_catalogo(*, incluir_inactivas: bool = False) -> tuple[FuncionOperativa, ...]:
+    try:
+        qs = CatalogoFuncionOperativa.objects.all()
+        if not incluir_inactivas:
+            qs = qs.filter(activo=True)
+        rows = tuple(_funcion_from_model(item) for item in qs.order_by("departamento_actual", "etiqueta", "codigo"))
+    except (OperationalError, ProgrammingError):
+        rows = ()
+    return rows or FUNCIONES_OPERATIVAS
+
+
+def area_division_choices() -> tuple[tuple[str, str, str, str, str], ...]:
+    return tuple(
+        (
+            funcion.codigo,
+            funcion.etiqueta,
+            funcion.departamento_origen,
+            funcion.departamento_actual,
+            funcion.puesto_operativo,
+        )
+        for funcion in funciones_operativas_catalogo()
+    )
+
+
+def area_division_values() -> frozenset[str]:
+    return frozenset(funcion.codigo for funcion in funciones_operativas_catalogo())
+
+
+def area_division_map() -> dict[str, dict[str, str]]:
+    return {
+        funcion.codigo: {
+            "departamento_origen": funcion.departamento_origen,
+            "departamento": funcion.departamento_actual,
+            "puesto_operativo": funcion.puesto_operativo,
+            "nivel_organizacional": funcion.nivel_organizacional,
+        }
+        for funcion in funciones_operativas_catalogo()
+    }
+
+
+def puesto_operativo_choices() -> tuple[tuple[str, str], ...]:
+    seen = set()
+    choices = []
+    for funcion in funciones_operativas_catalogo():
+        if not funcion.puesto_operativo or funcion.puesto_operativo in seen:
+            continue
+        seen.add(funcion.puesto_operativo)
+        choices.append((funcion.puesto_operativo, funcion.etiqueta))
+    return tuple(choices)
+
+
+def puesto_operativo_values() -> frozenset[str]:
+    return frozenset(value for value, _label in puesto_operativo_choices())
