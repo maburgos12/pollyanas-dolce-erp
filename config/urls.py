@@ -81,6 +81,7 @@ urlpatterns = [
     path("mermas/", include(("mermas.urls", "mermas"), namespace="mermas")),
     path("mantenimiento/", include(("mantenimiento.urls", "mantenimiento"), namespace="mantenimiento")),
     path("seguimiento/", include(("seguimiento.urls", "seguimiento"), namespace="seguimiento")),
+    path("syncfy/", include(("syncfy_client.urls", "syncfy_client"), namespace="syncfy_client")),
     path("reportes/", include(("reportes.urls", "reportes"), namespace="reportes")),
     path("inversiones/", include(("reportes.urls_inversiones", "inversiones"), namespace="inversiones")),
     path("integraciones/", include(("integraciones.urls", "integraciones"), namespace="integraciones")),
