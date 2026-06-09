@@ -47,6 +47,25 @@ class Command(BaseCommand):
             },
         )
 
+        sat_download_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="0",
+            hour="1",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="sat: descarga cfdi nocturna",
+            defaults={
+                "task": "sat_client.ejecutar_descarga_sat_nocturna",
+                "crontab": sat_download_cron,
+                "interval": None,
+                "kwargs": json.dumps({}),
+                "enabled": bool(getattr(settings, "SAT_DESCARGA_ENABLED", False)),
+            },
+        )
+
         intraday_sales_cron, _ = CrontabSchedule.objects.get_or_create(
             minute="0",
             hour="8-22",
