@@ -10,7 +10,6 @@ from django.utils import timezone
 from syncfy_client.models import CuentaBancaria, LogSyncfy
 from syncfy_client.services.auth import obtener_token
 from syncfy_client.services.base import SyncfyAuthError, SyncfyConfigurationError, SyncfyServiceError
-from syncfy_client.services.credenciales import esperar_job, refrescar_credencial
 from syncfy_client.services.cuentas import actualizar_cuenta_desde_syncfy, obtener_cuentas, seleccionar_account
 from syncfy_client.services.transacciones import descargar_transacciones, guardar_transacciones, rango_unix_syncfy
 
@@ -47,14 +46,6 @@ def _sincronizar_cuenta(cuenta: CuentaBancaria, *, token: str) -> dict[str, int 
             mensaje="Cuenta bancaria sin id_account de Syncfy; se omite.",
         )
         return {"status": "sin_account", "total": 0, "nuevos": 0}
-
-    id_job = refrescar_credencial(
-        id_credential=cuenta.id_credential,
-        id_site=cuenta.id_site_syncfy,
-        token=token,
-    )
-    if id_job:
-        esperar_job(id_job=id_job, token=token)
 
     accounts = obtener_cuentas(id_credential=cuenta.id_credential, token=token)
     account = seleccionar_account(cuenta, accounts)
