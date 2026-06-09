@@ -56,11 +56,13 @@ USUARIOS_ERP_EXCLUIDOS_RRHH = frozenset(
         "debug",
     }
 )
-from .services_bonos import asegurar_esquemas_base, sincronizar_esquemas_bono
+from .services_bonos import asegurar_esquemas_base, esquema_codigo, sincronizar_esquemas_bono
 from .services_catalogos import (
     AREA_DIVISION_CHOICES,
     AREA_DIVISION_MAP,
     AREA_DIVISION_VALUES,
+    FUNCIONES_OPERATIVAS,
+    NIVEL_ORGANIZACIONAL_CHOICES,
     NIVEL_ORGANIZACIONAL_VALUES,
     PUESTO_OPERATIVO_CHOICES,
     PUESTO_OPERATIVO_VALUES,
@@ -380,6 +382,7 @@ def _sincronizar_logistica_desde_post(request, empleado: Empleado) -> bool:
 RRHH_MODULE_TABS = [
     {"label": "Indicadores", "url_name": "rrhh:rrhh_indicadores", "key": "dashboard", "submodule": "dashboard"},
     {"label": "Organización", "url_name": "rrhh:rrhh_organizacion", "key": "organizacion", "submodule": "organizacion"},
+    {"label": "Catálogos", "url_name": "rrhh:rrhh_catalogos", "key": "catalogos", "submodule": "catalogos"},
     {"label": "Empleados", "url_name": "rrhh:empleados", "key": "empleados", "submodule": "empleados"},
     {"label": "Permisos", "url_name": "rrhh:rrhh_permisos_list", "key": "permisos", "submodule": "permisos"},
     {"label": "Horas extra", "url_name": "rrhh:rrhh_he_list", "key": "horas_extra", "submodule": "horas_extra"},
@@ -469,8 +472,12 @@ def _has_rrhh_task_access(user, tab_key: str) -> bool:
 def _module_tabs(active: str, user=None) -> list[dict]:
     tabs = []
     for tab in RRHH_MODULE_TABS:
+        if tab["key"] == "catalogos" and user is not None and not can_manage_rrhh(user):
+            continue
         if user is not None and not (
-            can_view_submodule(user, "rrhh", tab["submodule"]) or _has_rrhh_task_access(user, tab["key"])
+            tab["key"] == "catalogos"
+            or can_view_submodule(user, "rrhh", tab["submodule"])
+            or _has_rrhh_task_access(user, tab["key"])
         ):
             continue
         tabs.append(
@@ -2120,11 +2127,27 @@ def organizacion_ch(request):
         )
         .order_by("departamento")
     )
-    jefes = (
+    jefes_qs = (
         Empleado.objects.filter(colaboradores_directos__isnull=False)
+        .filter(colaboradores_directos__activo=True)
         .distinct()
+        .annotate(equipo_activo=Count("colaboradores_directos", filter=Q(colaboradores_directos__activo=True)))
         .order_by("departamento", "nombre")
-        .prefetch_related("colaboradores_directos")
+    )
+    departamento_jefatura = (request.GET.get("departamento_jefatura") or "").strip().upper()
+    if departamento_jefatura:
+        jefes_qs = jefes_qs.filter(departamento=departamento_jefatura)
+    jefes = list(jefes_qs)
+    jefe_id = (request.GET.get("jefe") or "").strip()
+    jefe_activo = None
+    if jefe_id:
+        jefe_activo = next((jefe for jefe in jefes if str(jefe.id) == jefe_id), None)
+    if jefe_activo is None and jefes:
+        jefe_activo = jefes[0]
+    equipo_jefatura = (
+        empleados.filter(jefe_directo=jefe_activo).order_by("departamento", "area", "nombre")
+        if jefe_activo
+        else Empleado.objects.none()
     )
     sin_jefe = empleados.filter(jefe_directo__isnull=True).exclude(jefatura_q())
     identity_map = _identity_map_context(limit=80)
@@ -2136,9 +2159,75 @@ def organizacion_ch(request):
             "empleados": empleados,
             "departamentos": departamentos,
             "jefes": jefes,
+            "jefe_activo": jefe_activo,
+            "jefe_id": str(jefe_activo.id) if jefe_activo else "",
+            "equipo_jefatura": equipo_jefatura,
+            "departamento_jefatura": departamento_jefatura,
+            "departamento_choices": Empleado.DEP_CHOICES,
             "sin_jefe": sin_jefe,
             "total_activos": empleados.count(),
             "identity_map": identity_map,
+        },
+    )
+
+
+@login_required
+def catalogos_ch(request):
+    if not can_manage_rrhh(request.user):
+        raise PermissionDenied("No tienes permisos para administrar catálogos de Capital Humano")
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        if action == "bono_esquema":
+            nombre = (request.POST.get("nombre") or "").strip()
+            departamento = (request.POST.get("departamento") or "").strip().upper()
+            area = (request.POST.get("area") or "").strip().upper()
+            descripcion = (request.POST.get("descripcion") or "").strip()
+            activo = request.POST.get("activo") == "on"
+            departamentos_validos = {value for value, _label in Empleado.DEP_CHOICES}
+            if not nombre:
+                messages.error(request, "Captura el nombre del esquema de bono.")
+                return redirect("rrhh:rrhh_catalogos")
+            if departamento and departamento not in departamentos_validos:
+                messages.error(request, "Selecciona un departamento oficial.")
+                return redirect("rrhh:rrhh_catalogos")
+            esquema, created = BonoEsquema.objects.update_or_create(
+                codigo=esquema_codigo(nombre),
+                defaults={
+                    "nombre": nombre,
+                    "departamento": departamento,
+                    "area": area,
+                    "descripcion": descripcion,
+                    "activo": activo,
+                },
+            )
+            log_event(
+                request.user,
+                "CREATE" if created else "UPDATE",
+                "rrhh.BonoEsquema",
+                str(esquema.id),
+                {
+                    "codigo": esquema.codigo,
+                    "nombre": esquema.nombre,
+                    "departamento": esquema.departamento,
+                    "area": esquema.area,
+                    "source": "rrhh.catalogos",
+                },
+            )
+            messages.success(request, "Esquema de bono guardado en el catálogo.")
+            return redirect("rrhh:rrhh_catalogos")
+
+    return render(
+        request,
+        "rrhh/catalogos.html",
+        {
+            "module_tabs": _module_tabs("catalogos", request.user),
+            "can_manage_rrhh": True,
+            "funciones_operativas": FUNCIONES_OPERATIVAS,
+            "departamento_choices": Empleado.DEP_CHOICES,
+            "nivel_choices": NIVEL_ORGANIZACIONAL_CHOICES,
+            "puesto_operativo_choices": PUESTO_OPERATIVO_CHOICES,
+            "bono_esquemas": BonoEsquema.objects.order_by("nombre", "codigo"),
         },
     )
 

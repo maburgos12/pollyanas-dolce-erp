@@ -36,12 +36,32 @@
   .identity-sev-info { background: #e7f1ff; color: #1f4f8f; }
   .identity-action { color: var(--vino); font-weight: 900; }
   .identity-value { overflow-wrap: anywhere; }
-  .org-tree { display: grid; gap: 10px; }
-  .org-leader { border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; }
+  .org-filter-row { align-items: end; display: grid; gap: 10px; grid-template-columns: minmax(170px, .75fr) minmax(220px, 1.25fr) auto; margin-bottom: 12px; }
+  .org-field { display: grid; gap: 5px; }
+  .org-field label { color: var(--vino); font-size: 11px; font-weight: 900; text-transform: uppercase; }
+  .org-field select {
+    background: #fff;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    color: var(--texto);
+    font-size: 13px;
+    min-height: 38px;
+    padding: 8px 10px;
+    width: 100%;
+  }
+  .org-filter-button {
+    background: var(--vino);
+    border: 0;
+    border-radius: 8px;
+    color: #fff;
+    cursor: pointer;
+    font-weight: 900;
+    min-height: 38px;
+    padding: 8px 14px;
+  }
+  .org-leader-summary { border: 1px solid var(--rosa); border-radius: 8px; margin-bottom: 12px; padding: 12px; }
   .org-leader-title { color: var(--vino); font-weight: 900; }
   .org-leader-meta { color: var(--texto-light); font-size: 13px; margin-top: 2px; }
-  .org-children { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-  .org-chip { background: #f7edf2; border-radius: 999px; color: var(--texto); display: inline-flex; font-size: 12px; font-weight: 800; padding: 5px 9px; }
   .org-table-shell {
     max-width: 100%;
     overflow-x: auto;
@@ -82,6 +102,13 @@
   .summary-table { min-width: 680px; }
   .summary-table .col-department { width: 46%; }
   .summary-table .col-count { width: 18%; }
+  .team-table { min-width: 760px; }
+  .team-table .col-code { width: 90px; }
+  .team-table .col-team-employee { width: 250px; }
+  .team-table .col-team-area,
+  .team-table .col-team-operative,
+  .team-table .col-team-branch,
+  .team-table .col-team-bonus { width: 130px; }
   .master-table { min-width: 1380px; }
   .master-table .col-code { width: 90px; }
   .master-table .col-employee { width: 230px; }
@@ -103,6 +130,9 @@
     .identity-head,
     .org-grid { grid-template-columns: 1fr; }
     .identity-stats { justify-content: flex-start; }
+  }
+  @media (max-width: 760px) {
+    .org-filter-row { grid-template-columns: 1fr; }
   }
   @media (max-width: 680px) { .org-stats { grid-template-columns: 1fr; } }
 </style>
@@ -191,21 +221,79 @@
   <div class="org-grid">
     <section class="org-card">
       <h2>Jefatura y equipos</h2>
-      <div class="org-tree">
-        {% for jefe in jefes %}
-          <article class="org-leader">
-            <div class="org-leader-title">{{ jefe.nombre }}</div>
-            <div class="org-leader-meta">{{ jefe.get_departamento_display|default:jefe.departamento }} · {{ jefe.puesto|default:"Sin puesto" }}</div>
-            <div class="org-children">
-              {% for empleado in jefe.colaboradores_directos.all %}
-                {% if empleado.activo %}<span class="org-chip">{{ empleado.nombre }}</span>{% endif %}
+      <form method="get" class="org-filter-row">
+        <div class="org-field">
+          <label for="departamento_jefatura">Área</label>
+          <select id="departamento_jefatura" name="departamento_jefatura">
+            <option value="">Todas</option>
+            {% for value,label in departamento_choices %}
+              <option value="{{ value }}" {% if departamento_jefatura == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="org-field">
+          <label for="jefe">Jefatura</label>
+          <select id="jefe" name="jefe">
+            {% for jefe in jefes %}
+              <option value="{{ jefe.id }}" {% if jefe_id == jefe.id|stringformat:"s" %}selected{% endif %}>
+                {{ jefe.nombre }} · {{ jefe.equipo_activo }} personas
+              </option>
+            {% empty %}
+              <option value="">Sin jefaturas capturadas</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button class="org-filter-button" type="submit">Ver equipo</button>
+      </form>
+
+      {% if jefe_activo %}
+        <div class="org-leader-summary">
+          <div class="org-leader-title">{{ jefe_activo.nombre }}</div>
+          <div class="org-leader-meta">{{ jefe_activo.get_departamento_display|default:jefe_activo.departamento }} · {{ jefe_activo.puesto|default:"Sin puesto" }}</div>
+        </div>
+        <div class="table-responsive org-table-shell">
+          <table class="org-table team-table">
+            <colgroup>
+              <col class="col-code">
+              <col class="col-team-employee">
+              <col class="col-team-area">
+              <col class="col-team-operative">
+              <col class="col-team-branch">
+              <col class="col-team-bonus">
+            </colgroup>
+            <thead>
+              <tr>
+                <th>Código</th>
+                <th>Colaborador</th>
+                <th>Área / división</th>
+                <th>Puesto operativo</th>
+                <th>Sucursal</th>
+                <th>Bonos</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for empleado in equipo_jefatura %}
+                <tr>
+                  <td>{{ empleado.codigo|default:"-" }}</td>
+                  <td><strong>{{ empleado.nombre }}</strong><br><span class="org-muted">{{ empleado.puesto|default:"Sin puesto descriptivo" }}</span></td>
+                  <td>{{ empleado.area|default:"-" }}</td>
+                  <td>{{ empleado.puesto_operativo|default:"-" }}</td>
+                  <td>{{ empleado.sucursal|default:"-" }}</td>
+                  <td>
+                    {% if empleado.participa_bonos_ventas %}<span class="org-badge">Ventas</span>{% endif %}
+                    {% if empleado.participa_bonos_produccion %}<span class="org-badge">Producción</span>{% endif %}
+                    {% if not empleado.participa_bonos_ventas and not empleado.participa_bonos_produccion %}<span class="org-muted">-</span>{% endif %}
+                  </td>
+                </tr>
+              {% empty %}
+                <tr><td colspan="6">Sin colaboradores activos para esta jefatura.</td></tr>
               {% endfor %}
-            </div>
-          </article>
-        {% empty %}
-          <div class="org-muted">Sin jerarquías capturadas todavía.</div>
-        {% endfor %}
-      </div>
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="org-muted">Sin jerarquías capturadas todavía.</div>
+      {% endif %}
     </section>
 
     <section class="org-card">
