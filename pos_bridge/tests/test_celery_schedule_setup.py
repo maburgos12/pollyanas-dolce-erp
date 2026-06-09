@@ -28,6 +28,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
             {
                 "pos_bridge: ventas cerradas diario",
                 "sat: descarga cfdi nocturna",
+                "syncfy: sincronizacion bancaria nocturna",
                 "pos_bridge: ventas intradia actual",
                 "pos_bridge: asistencias Point intradia",
                 "rentabilidad: recalculo intradia periodo actual",
@@ -64,12 +65,17 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "orquestacion: guardia ajustes inventario",
             },
         )
-        self.assertEqual(PeriodicTask.objects.count(), 36)
+        self.assertEqual(PeriodicTask.objects.count(), 37)
         sat_download = PeriodicTask.objects.get(name="sat: descarga cfdi nocturna")
         self.assertEqual(sat_download.task, "sat_client.ejecutar_descarga_sat_nocturna")
         self.assertEqual(sat_download.crontab.hour, "1")
         self.assertEqual(sat_download.crontab.minute, "0")
         self.assertFalse(sat_download.enabled)
+        syncfy = PeriodicTask.objects.get(name="syncfy: sincronizacion bancaria nocturna")
+        self.assertEqual(syncfy.task, "syncfy_client.sincronizar_movimientos_bancarios")
+        self.assertEqual(syncfy.crontab.hour, "2")
+        self.assertEqual(syncfy.crontab.minute, "0")
+        self.assertFalse(syncfy.enabled)
         intraday_sales = PeriodicTask.objects.get(name="pos_bridge: ventas intradia actual")
         self.assertEqual(intraday_sales.task, "pos_bridge.daily_sales_sync")
         self.assertEqual(intraday_sales.crontab.hour, "8-22")

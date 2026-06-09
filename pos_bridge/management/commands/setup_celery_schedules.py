@@ -66,6 +66,25 @@ class Command(BaseCommand):
             },
         )
 
+        syncfy_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="0",
+            hour="2",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="syncfy: sincronizacion bancaria nocturna",
+            defaults={
+                "task": "syncfy_client.sincronizar_movimientos_bancarios",
+                "crontab": syncfy_cron,
+                "interval": None,
+                "kwargs": json.dumps({}),
+                "enabled": bool(getattr(settings, "SYNCFY_ENABLED", False)),
+            },
+        )
+
         intraday_sales_cron, _ = CrontabSchedule.objects.get_or_create(
             minute="0",
             hour="8-22",
