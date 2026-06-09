@@ -7,7 +7,12 @@ from zoneinfo import ZoneInfo
 from django.test import TestCase, override_settings
 
 from syncfy_client.models import CuentaBancaria, MovimientoBancario
-from syncfy_client.services.transacciones import guardar_transacciones, rango_unix_syncfy, timestamp_to_datetime
+from syncfy_client.services.transacciones import (
+    descargar_transacciones,
+    guardar_transacciones,
+    rango_unix_syncfy,
+    timestamp_to_datetime,
+)
 
 
 @override_settings(TIME_ZONE="America/Mazatlan")
@@ -55,3 +60,30 @@ class SyncfyTransaccionesTests(TestCase):
         movimiento = MovimientoBancario.objects.get(id_transaction="tx-1")
         self.assertEqual(movimiento.tipo, MovimientoBancario.TIPO_CARGO)
         self.assertEqual(movimiento.monto, Decimal("123.45"))
+
+    def test_descargar_transacciones_filters_by_account(self):
+        class FakeClient:
+            def __init__(self):
+                self.calls = []
+
+            def get(self, path, *, params, token):
+                self.calls.append((path, params, token))
+                return [{"id_transaction": "tx-1"}]
+
+        client = FakeClient()
+
+        result = descargar_transacciones(
+            id_credential="cred-1",
+            id_account="account-1",
+            token="token-1",
+            dt_refresh_from=100,
+            dt_refresh_to=200,
+            client=client,
+            limit=500,
+        )
+
+        self.assertEqual(result, [{"id_transaction": "tx-1"}])
+        self.assertEqual(client.calls[0][0], "/transactions")
+        self.assertEqual(client.calls[0][1]["id_credential"], "cred-1")
+        self.assertEqual(client.calls[0][1]["id_account"], "account-1")
+        self.assertEqual(client.calls[0][2], "token-1")

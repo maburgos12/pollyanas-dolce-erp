@@ -40,6 +40,13 @@ def _sincronizar_cuenta(cuenta: CuentaBancaria, *, token: str) -> dict[str, int 
             mensaje="Cuenta bancaria sin id_credential de Syncfy; se omite.",
         )
         return {"status": "sin_credential", "total": 0, "nuevos": 0}
+    if not cuenta.id_account:
+        LogSyncfy.objects.create(
+            nivel=LogSyncfy.NIVEL_WARN,
+            cuenta=cuenta,
+            mensaje="Cuenta bancaria sin id_account de Syncfy; se omite.",
+        )
+        return {"status": "sin_account", "total": 0, "nuevos": 0}
 
     id_job = refrescar_credencial(id_credential=cuenta.id_credential, token=token)
     if id_job:
@@ -53,6 +60,7 @@ def _sincronizar_cuenta(cuenta: CuentaBancaria, *, token: str) -> dict[str, int 
     dt_from, dt_to = rango_unix_syncfy()
     transacciones = descargar_transacciones(
         id_credential=cuenta.id_credential,
+        id_account=cuenta.id_account,
         token=token,
         dt_refresh_from=dt_from,
         dt_refresh_to=dt_to,
