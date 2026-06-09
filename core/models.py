@@ -88,6 +88,7 @@ class UserModuleAccess(models.Model):
         ("rrhh.organizacion", "RRHH - Organización"),
         ("rrhh.empleados", "RRHH - Empleados"),
         ("rrhh.permisos", "RRHH - Permisos"),
+        ("rrhh.vacaciones", "RRHH - Vacaciones"),
         ("rrhh.horas_extra", "RRHH - Horas extra"),
         ("rrhh.asistencias", "RRHH - Asistencias"),
         ("rrhh.importar_checador", "RRHH - Checador"),

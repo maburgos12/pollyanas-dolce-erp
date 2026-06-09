@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}RRHH · Reglamento interno{% endblock %}
+{% block page_title %}RRHH · Reglamento interno{% endblock %}
+
+{% block extra_css %}
+<style>
+  .reg-page { display: grid; gap: 16px; }
+  .reg-head {
+    background: #fff;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    display: grid;
+    gap: 12px;
+    padding: 18px;
+  }
+  .reg-title { color: var(--vino); font-family: "Playfair Display", serif; font-size: 25px; font-weight: 800; }
+  .reg-copy { color: var(--texto-light); max-width: 820px; }
+  .reg-meta { color: var(--texto-light); display: flex; flex-wrap: wrap; gap: 8px; font-size: 13px; }
+  .reg-pill { background: #f7edf2; border-radius: 999px; color: var(--vino); font-weight: 900; padding: 6px 10px; }
+  .reg-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .reg-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .reg-section {
+    background: #fff;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    padding: 14px;
+  }
+  .reg-section summary { color: var(--vino); cursor: pointer; font-size: 16px; font-weight: 900; }
+  .reg-section p { color: var(--texto); line-height: 1.55; margin: 12px 0 0; white-space: pre-line; }
+  .reg-empty { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; color: var(--texto-light); padding: 18px; }
+  @media (max-width: 900px) {
+    .reg-grid { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="reg-page">
+  <div class="reg-head">
+    <div class="reg-title">{% if reglamento %}{{ reglamento.nombre }}{% else %}Reglamento interno{% endif %}</div>
+    {% if reglamento %}
+      <div class="reg-copy">
+        Documento normativo cargado como base para reglas operativas de Capital Humano.
+        En este prototipo se muestran los artículos que el ERP puede usar para permisos,
+        descansos, vacaciones y disciplina.
+      </div>
+      <div class="reg-meta">
+        <span class="reg-pill">{{ reglamento.empresa }}</span>
+        <span class="reg-pill">Versión {{ reglamento.version }}</span>
+        {% if reglamento.fecha_documento %}<span class="reg-pill">{{ reglamento.fecha_documento|date:"Y-m-d" }}</span>{% endif %}
+        {% if reglamento.fuente_archivo %}<span class="reg-pill">{{ reglamento.fuente_archivo }}</span>{% endif %}
+      </div>
+    {% else %}
+      <div class="reg-copy">Aún no hay reglamento vigente cargado.</div>
+    {% endif %}
+    <div class="reg-actions">
+      <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_organizacion' %}">Volver a organización</a>
+    </div>
+  </div>
+
+  {% if reglas %}
+    <section class="reg-grid">
+      {% for regla in reglas %}
+        <details class="reg-section" {% if regla.tipo == "vacaciones" %}open{% endif %}>
+          <summary>{{ regla.articulo }} · {{ regla.titulo }}</summary>
+          <p>{{ regla.texto }}</p>
+        </details>
+      {% endfor %}
+    </section>
+  {% else %}
+    <div class="reg-empty">Sin reglas cargadas para mostrar.</div>
+  {% endif %}
+</section>
+{% endblock %}

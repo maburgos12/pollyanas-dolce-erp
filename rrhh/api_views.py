@@ -12,10 +12,18 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from core.access import can_manage_rrhh, can_view_rrhh
 from core.notificaciones import notificar_hora_extra_solicitada
 from recetas.utils.normalizacion import normalizar_nombre
-from .models import AsistenciaEmpleado, Empleado, HoraExtra, PermisoSalida
-from .serializers import AsistenciaSerializer, HoraExtraSerializer, PermisoSalidaSerializer
+from .models import AsistenciaEmpleado, Empleado, HoraExtra, PermisoSalida, SolicitudVacaciones
+from .serializers import AsistenciaSerializer, HoraExtraSerializer, PermisoSalidaSerializer, SolicitudVacacionesSerializer
 from .services import calcular_monto_hora_extra, usuario_jefe_directo_de_empleado
 from .services_permisos import resolver_permiso_direccion
+from .services_vacaciones import (
+    aprobar_solicitud_vacaciones_rrhh,
+    can_gestionar_vacaciones_jefe,
+    crear_solicitud_vacaciones,
+    preautorizar_solicitud_vacaciones_jefe,
+    rechazar_solicitud_vacaciones,
+    saldo_vacaciones_empleado,
+)
 
 
 AUTH_CLASSES = [JWTAuthentication, TokenAuthentication, SessionAuthentication]
@@ -191,6 +199,85 @@ class PermisoSalidaViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def rechazar(self, request, pk=None):
         raise PermissionDenied("Capital Humano captura, consulta y archiva permisos; no los rechaza.")
+
+
+class SolicitudVacacionesViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
+    serializer_class = SolicitudVacacionesSerializer
+
+    def get_queryset(self):
+        qs = SolicitudVacaciones.objects.select_related(
+            "empleado",
+            "jefe_directo",
+            "preautorizado_por",
+            "aprobado_rrhh_por",
+        )
+        empleado = empleado_de_usuario(self.request.user)
+        if can_view_rrhh(self.request.user):
+            pass
+        elif empleado:
+            qs = qs.filter(Q(empleado=empleado) | Q(jefe_directo=self.request.user))
+        else:
+            qs = qs.filter(jefe_directo=self.request.user)
+        if self.request.query_params.get("equipo") == "true":
+            qs = qs.filter(jefe_directo=self.request.user)
+        estado = self.request.query_params.get("estado")
+        if estado:
+            qs = qs.filter(estado=estado)
+        return self._apply_mis_and_limit(qs.order_by("-creado_en"))
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        empleado = serializer.validated_data.get("empleado") or empleado_de_usuario(request.user)
+        if not empleado:
+            raise ValidationError({"empleado": "No se pudo vincular el usuario con un empleado activo."})
+        empleado_actual = empleado_de_usuario(request.user)
+        puede_crear = (
+            can_view_rrhh(request.user)
+            or empleado == empleado_actual
+            or can_gestionar_vacaciones_jefe(request.user, empleado)
+        )
+        if not puede_crear:
+            raise PermissionDenied("Solo puedes crear vacaciones propias o de tu equipo directo.")
+        solicitud = crear_solicitud_vacaciones(
+            empleado=empleado,
+            fecha_inicio=serializer.validated_data["fecha_inicio"],
+            fecha_fin=serializer.validated_data["fecha_fin"],
+            motivo=serializer.validated_data.get("motivo", ""),
+            actor=request.user,
+        )
+        return Response(self.get_serializer(solicitud).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
+    def preautorizar(self, request, pk=None):
+        solicitud = self.get_object()
+        preautorizar_solicitud_vacaciones_jefe(solicitud, request.user, aprobar=True)
+        return Response(self.get_serializer(solicitud).data)
+
+    @action(detail=True, methods=["post"], url_path="rechazar-jefe")
+    def rechazar_jefe(self, request, pk=None):
+        solicitud = self.get_object()
+        preautorizar_solicitud_vacaciones_jefe(solicitud, request.user, aprobar=False)
+        return Response(self.get_serializer(solicitud).data)
+
+    @action(detail=True, methods=["post"], url_path="aprobar-rrhh")
+    def aprobar_rrhh(self, request, pk=None):
+        solicitud = self.get_object()
+        aprobar_solicitud_vacaciones_rrhh(solicitud, request.user)
+        return Response(self.get_serializer(solicitud).data)
+
+    @action(detail=True, methods=["post"], url_path="rechazar-rrhh")
+    def rechazar_rrhh(self, request, pk=None):
+        solicitud = self.get_object()
+        rechazar_solicitud_vacaciones(solicitud, request.user)
+        return Response(self.get_serializer(solicitud).data)
+
+    @action(detail=False, methods=["get"])
+    def saldo(self, request):
+        empleado = empleado_de_usuario(request.user)
+        if not empleado:
+            return Response({"empleado": None, "saldo": None})
+        return Response({"empleado": empleado.id, "saldo": saldo_vacaciones_empleado(empleado)})
 
 
 @api_view(["GET"])

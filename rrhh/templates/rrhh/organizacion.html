@@ -24,6 +24,19 @@
   .org-grid { display: grid; gap: 16px; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); }
   .org-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 16px; }
   .org-card h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
+  .org-policy {
+    align-items: center;
+    background: #fff;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    display: grid;
+    gap: 12px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 16px;
+  }
+  .org-policy-title { color: var(--vino); font-size: 18px; font-weight: 900; }
+  .org-policy-meta { color: var(--texto-light); font-size: 13px; margin-top: 3px; }
+  .org-policy-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
   .identity-head { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) auto; margin-bottom: 14px; }
   .identity-meta { color: var(--texto-light); font-size: 13px; }
   .identity-stats { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
@@ -129,8 +142,10 @@
   @media (max-width: 1100px) {
     .org-head,
     .identity-head,
-    .org-grid { grid-template-columns: 1fr; }
-    .identity-stats { justify-content: flex-start; }
+    .org-grid,
+    .org-policy { grid-template-columns: 1fr; }
+    .identity-stats,
+    .org-policy-actions { justify-content: flex-start; }
   }
   @media (max-width: 760px) {
     .org-filter-row { grid-template-columns: 1fr; }
@@ -161,6 +176,22 @@
       <div class="org-stat"><strong>{{ sin_jefe|length }}</strong><span>Sin jefe definido</span></div>
     </div>
   </div>
+
+  <section class="org-policy">
+    <div>
+      <div class="org-policy-title">Reglamento interno</div>
+      <div class="org-policy-meta">
+        {% if reglamento %}
+          {{ reglamento.nombre }} · versión {{ reglamento.version }}{% if reglamento.fecha_documento %} · {{ reglamento.fecha_documento|date:"Y-m-d" }}{% endif %}
+        {% else %}
+          Documento normativo pendiente de carga.
+        {% endif %}
+      </div>
+    </div>
+    <div class="org-policy-actions">
+      <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_reglamento_interno' %}">Ver reglamento interno</a>
+    </div>
+  </section>
 
   <section class="org-card">
     <div class="identity-head">

@@ -268,7 +268,7 @@
         border-top: 1px solid var(--border);
         padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
       }
-      .nav { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: 100%; max-width: 430px; }
+      .nav { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; width: 100%; max-width: 520px; }
       .nav button { min-height: 44px; border-radius: 10px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 900; }
       .nav button.active { background: rgba(139, 34, 82, .28); color: var(--gold); }
       .hidden { display: none; }
@@ -280,6 +280,7 @@
       <nav class="nav">
         <button data-section="inicio" class="active">Inicio</button>
         <button data-section="permisos">Permisos</button>
+        <button data-section="vacaciones">Vacaciones</button>
         <button data-section="horas">Horas Extra</button>
       </nav>
     </footer>
@@ -294,6 +295,7 @@
         refreshToken: localStorage.getItem("pd_logistica_refresh") || "",
         perfil: null,
         permisos: [],
+        vacaciones: [],
         horas: [],
         message: "",
         error: ""
@@ -377,11 +379,13 @@
       }
 
       async function cargarHistorialReciente() {
-        const [permisosRes, horasRes] = await Promise.all([
+        const [permisosRes, vacacionesRes, horasRes] = await Promise.all([
           apiFetch(`${API}/permisos/?mis=true&limit=3`),
+          apiFetch(`${API}/vacaciones/?mis=true&limit=3`),
           apiFetch(`${API}/horas-extra/?mis=true&limit=3`)
         ]);
         state.permisos = permisosRes.ok ? await permisosRes.json() : [];
+        state.vacaciones = vacacionesRes.ok ? await vacacionesRes.json() : [];
         state.horas = horasRes.ok ? await horasRes.json() : [];
       }
 
@@ -421,6 +425,11 @@
 
       function limpiarFormHE() {
         const form = document.getElementById("form_horas_extra");
+        if (form) form.reset();
+      }
+
+      function limpiarFormVacaciones() {
+        const form = document.getElementById("form_vacaciones");
         if (form) form.reset();
       }
 
@@ -481,6 +490,32 @@
         }
       }
 
+      async function enviarVacaciones(event) {
+        event.preventDefault();
+        const empleado = document.getElementById("v_empleado_id")?.value;
+        const payload = {
+          fecha_inicio: document.getElementById("v_inicio").value,
+          fecha_fin: document.getElementById("v_fin").value,
+          motivo: document.getElementById("v_motivo").value
+        };
+        if (empleado) payload.empleado = empleado;
+        const res = await apiFetch(`${API}/vacaciones/`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok) {
+          await cargarHistorialReciente();
+          limpiarFormVacaciones();
+          state.message = `Vacaciones solicitadas - Folio: ${data.folio || "sin folio"}`;
+          state.error = "";
+          render();
+        } else {
+          mostrarError(`Error al solicitar vacaciones: ${JSON.stringify(data)}`);
+        }
+      }
+
       function shell(content) {
         const nombre = state.perfil?.nombre || "Capital Humano";
         return `
@@ -521,6 +556,13 @@
             folio: p.folio,
             fecha: p.fecha_inicio
           })),
+          ...state.vacaciones.map(v => ({
+            tipo: "Vacaciones",
+            desc: `${v.dias_laborables} días`,
+            estado: v.estado,
+            folio: v.folio,
+            fecha: v.fecha_inicio
+          })),
           ...state.horas.map(h => ({
             tipo: "Horas extra",
             desc: `${h.horas}h`,
@@ -550,6 +592,10 @@
             <button class="quick-btn" onclick="setSection('permisos')">
               <span class="quick-icon">P</span>
               <span>Solicitar permiso</span>
+            </button>
+            <button class="quick-btn" onclick="setSection('vacaciones')">
+              <span class="quick-icon">V</span>
+              <span>Solicitar vacaciones</span>
             </button>
             <button class="quick-btn" onclick="setSection('horas')">
               <span class="quick-icon">HE</span>
@@ -694,6 +740,50 @@
         `);
       }
 
+      function renderVacaciones() {
+        const items = state.vacaciones.map(v => `
+          <article class="card">
+            <div class="row"><strong>${esc(v.folio)}</strong><span class="badge">${esc(v.estado)}</span></div>
+            <div class="muted">${esc(v.fecha_inicio)} a ${esc(v.fecha_fin)} · ${esc(v.dias_laborables)} días</div>
+            ${v.jefe_directo_nombre ? `<div class="muted">Jefe: ${esc(v.jefe_directo_nombre)}</div>` : ""}
+            ${v.motivo ? `<div>${esc(v.motivo)}</div>` : ""}
+          </article>
+        `).join("") || `<div class="muted">Sin vacaciones registradas.</div>`;
+        app.innerHTML = shell(`
+          <section class="panel">
+            <form id="form_vacaciones" onsubmit="enviarVacaciones(event)">
+              <div class="talon-header">SOLICITUD DE VACACIONES</div>
+              <div class="field-row">
+                <label>NOMBRE DE EMPLEADO</label>
+                <input type="text" value="${perfilValue("nombre")}" readonly class="readonly-field">
+              </div>
+              <div class="field-row">
+                <label>PUESTO</label>
+                <input type="text" value="${perfilValue("puesto")}" readonly class="readonly-field">
+              </div>
+              <div class="field-row-double">
+                <div>
+                  <label>INICIO</label>
+                  <input type="date" id="v_inicio" value="${today()}" required>
+                </div>
+                <div>
+                  <label>FIN</label>
+                  <input type="date" id="v_fin" required>
+                </div>
+              </div>
+              <div class="field-row">
+                <label>MOTIVO / NOTAS</label>
+                <textarea id="v_motivo" rows="4" placeholder="Comentarios de cobertura o fechas solicitadas"></textarea>
+              </div>
+              <button class="btn-submit" type="submit">ENVIAR VACACIONES</button>
+              ${state.message ? `<div class="folio-badge">${esc(state.message)}</div>` : ""}
+              ${state.error ? `<div class="error">${esc(state.error)}</div>` : ""}
+            </form>
+          </section>
+          <div class="list">${items}</div>
+        `);
+      }
+
       function setSection(section) {
         state.section = normalizeSection(section);
         state.message = "";
@@ -714,6 +804,7 @@
           btn.classList.toggle("active", btn.dataset.section === state.section);
         });
         if (state.section === "permisos") renderPermisos();
+        else if (state.section === "vacaciones") renderVacaciones();
         else if (state.section === "horas") renderHoras();
         else renderInicio();
       }

@@ -4,7 +4,7 @@ from rest_framework import serializers
 
 from core.access import can_view_rrhh
 
-from .models import AsistenciaEmpleado, Empleado, HoraExtra, PermisoSalida
+from .models import AsistenciaEmpleado, Empleado, HoraExtra, PermisoSalida, SolicitudVacaciones
 
 
 class AsistenciaSerializer(serializers.ModelSerializer):
@@ -117,3 +117,47 @@ class PermisoSalidaSerializer(serializers.ModelSerializer):
             if empleado.email.lower() != request.user.email.lower():
                 raise serializers.ValidationError("No puedes solicitar permisos para otro empleado.")
         return empleado
+
+
+class SolicitudVacacionesSerializer(serializers.ModelSerializer):
+    empleado_nombre = serializers.CharField(source="empleado.nombre", read_only=True)
+    jefe_directo_nombre = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SolicitudVacaciones
+        fields = [
+            "id",
+            "folio",
+            "empleado",
+            "empleado_nombre",
+            "fecha_inicio",
+            "fecha_fin",
+            "dias_laborables",
+            "motivo",
+            "estado",
+            "jefe_directo",
+            "jefe_directo_nombre",
+            "preautorizado_por",
+            "fecha_preautorizacion",
+            "aprobado_rrhh_por",
+            "fecha_aprobacion_rrhh",
+            "creado_en",
+        ]
+        read_only_fields = [
+            "folio",
+            "dias_laborables",
+            "estado",
+            "jefe_directo",
+            "jefe_directo_nombre",
+            "preautorizado_por",
+            "fecha_preautorizacion",
+            "aprobado_rrhh_por",
+            "fecha_aprobacion_rrhh",
+            "creado_en",
+        ]
+        extra_kwargs = {"empleado": {"required": False}}
+
+    def get_jefe_directo_nombre(self, obj):
+        if not obj.jefe_directo_id:
+            return ""
+        return obj.jefe_directo.get_full_name() or obj.jefe_directo.username
