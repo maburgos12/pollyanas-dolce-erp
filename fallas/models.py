@@ -177,3 +177,24 @@ class BitacoraFalla(models.Model):
 
     def __str__(self):
         return f"[{self.timestamp:%d/%m %H:%M}] {self.usuario} -> {self.estatus_nuevo}"
+
+    def get_estatus_nuevo_display(self):
+        return dict(ReporteFalla.ESTATUS).get(self.estatus_nuevo, self.estatus_nuevo)
+
+
+class EvidenciaSeguimientoFalla(models.Model):
+    """Archivo adjunto a un avance de mantenimiento visible en el seguimiento."""
+
+    bitacora = models.ForeignKey(BitacoraFalla, on_delete=models.CASCADE, related_name="evidencias")
+    archivo = models.FileField(upload_to="fallas/seguimiento/%Y/%m/")
+    nombre = models.CharField(max_length=255, blank=True)
+    subido_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    creado_en = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["creado_en"]
+        verbose_name = "Evidencia de seguimiento de falla"
+        verbose_name_plural = "Evidencias de seguimiento de fallas"
+
+    def __str__(self):
+        return self.nombre or self.archivo.name

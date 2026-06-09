@@ -18,7 +18,7 @@ from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento, Pl
 from mantenimiento.models import SolicitudCancelacion, ProveedorServicio
 from core.access import can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
 from core.models import sucursales_operativas
-from fallas.models import BitacoraFalla, CategoriaFalla, ReporteFalla
+from fallas.models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
 from logistica.models import ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
 from maestros.models import Proveedor
 
@@ -76,6 +76,18 @@ def _parse_decimal(raw):
         return Decimal(value)
     except (InvalidOperation, ValueError):
         return None
+
+
+def _guardar_evidencias_falla(bitacora, archivos, user):
+    for archivo in archivos:
+        if not archivo:
+            continue
+        EvidenciaSeguimientoFalla.objects.create(
+            bitacora=bitacora,
+            archivo=archivo,
+            nombre=getattr(archivo, "name", "")[:255],
+            subido_por=user,
+        )
 
 
 def _ensure_provider(nombre):
@@ -613,13 +625,14 @@ def actualizar_item(request, tipo, pk):
                 if activo_vinculado.estado == Activo.ESTADO_MANTENIMIENTO:
                     activo_vinculado.estado = Activo.ESTADO_OPERATIVO
                     activo_vinculado.save(update_fields=["estado", "actualizado_en"])
-        BitacoraFalla.objects.create(
+        bitacora = BitacoraFalla.objects.create(
             reporte=reporte,
             usuario=request.user,
             estatus_anterior=estatus_anterior if estatus != estatus_anterior else "",
             estatus_nuevo=estatus if estatus != estatus_anterior else "",
             comentario=comentario or "Seguimiento actualizado desde Mantenimiento.",
         )
+        _guardar_evidencias_falla(bitacora, request.FILES.getlist("evidencias_seguimiento"), request.user)
         return _update_response(request, _branch_falla_item(reporte))
 
     if tipo == "unidad":
