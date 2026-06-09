@@ -50,6 +50,7 @@ from core.access import (
     can_view_orquestacion,
     get_module_access,
     is_branch_capture_only,
+    is_mermas_only,
 )
 from core.cache_versions import get_or_set_versioned_cache
 from maestros.models import Proveedor, PointPendingMatch
@@ -201,6 +202,10 @@ def _redirect_capture_module():
     return redirect(reverse("recetas:reabasto_cedis_captura"))
 
 
+def _redirect_mermas_app():
+    return redirect(reverse("mermas:app"))
+
+
 def _is_mermas_next_url(next_url: str) -> bool:
     path = urlsplit(next_url or "").path
     return path == "/mermas" or path.startswith("/mermas/")
@@ -226,6 +231,8 @@ def _can_open_dashboard(user) -> bool:
 
 
 def _default_login_redirect_for_user(user) -> str:
+    if is_mermas_only(user):
+        return reverse("mermas:app")
     if _can_open_dashboard(user):
         return "dashboard"
     return reverse("seguimiento:mi_seguimiento")
@@ -2719,6 +2726,8 @@ def login_view(request: HttpRequest) -> HttpResponse:
     if request.user.is_authenticated:
         if is_branch_capture_only(request.user):
             return _redirect_capture_module()
+        if is_mermas_only(request.user):
+            return _redirect_mermas_app()
         return redirect(_login_redirect_for_user(request.user, redirect_url))
 
     if request.method == "POST":
@@ -2735,6 +2744,8 @@ def login_view(request: HttpRequest) -> HttpResponse:
                 logger.info(f"Login successful for user={username}")
                 if is_branch_capture_only(user):
                     return _redirect_capture_module()
+                if is_mermas_only(user):
+                    return _redirect_mermas_app()
                 return redirect(_login_redirect_for_user(user, redirect_url))
             else:
                 logger.warning(f"Authentication failed for username={username}")
@@ -2754,6 +2765,8 @@ def home_redirect(request: HttpRequest) -> HttpResponse:
     if request.user.is_authenticated:
         if is_branch_capture_only(request.user):
             return _redirect_capture_module()
+        if is_mermas_only(request.user):
+            return _redirect_mermas_app()
         return redirect(_default_login_redirect_for_user(request.user))
     return redirect("login")
 
@@ -2763,6 +2776,8 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         return redirect("/login/")
     if is_branch_capture_only(request.user):
         return _redirect_capture_module()
+    if is_mermas_only(request.user):
+        return _redirect_mermas_app()
     if not _can_open_dashboard(request.user):
         return redirect("seguimiento:mi_seguimiento")
 
