@@ -4,6 +4,7 @@ from calendar import monthrange
 from datetime import date as dt_date, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+import re
 from tempfile import NamedTemporaryFile
 
 from django.contrib import messages
@@ -25,6 +26,7 @@ from core.models import Sucursal
 from .models import (
     AsistenciaEmpleado,
     BonoEsquema,
+    CatalogoFuncionOperativa,
     Empleado,
     EmpleadoBaja,
     EmpleadoIdentidadPendiente,
@@ -58,14 +60,14 @@ USUARIOS_ERP_EXCLUIDOS_RRHH = frozenset(
 )
 from .services_bonos import asegurar_esquemas_base, esquema_codigo, sincronizar_esquemas_bono
 from .services_catalogos import (
-    AREA_DIVISION_CHOICES,
-    AREA_DIVISION_MAP,
-    AREA_DIVISION_VALUES,
-    FUNCIONES_OPERATIVAS,
     NIVEL_ORGANIZACIONAL_CHOICES,
     NIVEL_ORGANIZACIONAL_VALUES,
-    PUESTO_OPERATIVO_CHOICES,
-    PUESTO_OPERATIVO_VALUES,
+    area_division_choices,
+    area_division_map,
+    area_division_values,
+    funciones_operativas_catalogo,
+    puesto_operativo_choices,
+    puesto_operativo_values,
 )
 from .services_identidad import (
     asegurar_identidad_operativa_empleado,
@@ -82,6 +84,7 @@ from .services_vacantes import (
     can_ver_vacante,
     crear_solicitud_vacante,
 )
+from recetas.utils.normalizacion import normalizar_nombre
 
 
 def _parse_decimal(raw: str | None) -> Decimal:
@@ -103,6 +106,12 @@ def _parse_date(raw: str | None):
 
 def _codigo_empleado_desde_post(post_data) -> str:
     return normalizar_codigo_empleado(post_data.get("codigo"))
+
+
+def _codigo_catalogo_desde_valor(valor: str, fallback: str) -> str:
+    base = normalizar_nombre(valor or fallback or "").upper()
+    base = re.sub(r"[^A-Z0-9_ ]+", " ", base).strip()[:80]
+    return re.sub(r"\s+", " ", base)
 
 
 def _empleado_con_codigo_duplicado(codigo: str, empleado_id: int | None = None) -> Empleado | None:
@@ -132,13 +141,13 @@ def _catalogo_value(post_data, field_name: str, allowed_values: frozenset[str], 
 
 
 def _organizacion_desde_post(post_data, empleado: Empleado | None = None) -> dict:
-    area = _catalogo_value(post_data, "area", AREA_DIVISION_VALUES, empleado.area if empleado else "")
-    defaults = AREA_DIVISION_MAP.get(area, {})
+    area = _catalogo_value(post_data, "area", area_division_values(), empleado.area if empleado else "")
+    defaults = area_division_map().get(area, {})
     puesto_operativo = (
         _catalogo_value(
             post_data,
             "puesto_operativo",
-            PUESTO_OPERATIVO_VALUES,
+            puesto_operativo_values(),
             empleado.puesto_operativo if empleado else "",
         )
         or defaults.get("puesto_operativo", "")
@@ -1388,10 +1397,10 @@ def empleados(request):
         ],
         "contrato_choices": Empleado.CONTRATO_CHOICES,
         "departamento_choices": Empleado.DEP_CHOICES,
-        "area_division_choices": AREA_DIVISION_CHOICES,
-        "area_division_values": AREA_DIVISION_VALUES,
-        "puesto_operativo_choices": PUESTO_OPERATIVO_CHOICES,
-        "puesto_operativo_values": PUESTO_OPERATIVO_VALUES,
+        "area_division_choices": area_division_choices(),
+        "area_division_values": area_division_values(),
+        "puesto_operativo_choices": puesto_operativo_choices(),
+        "puesto_operativo_values": puesto_operativo_values(),
         "logistica_tipo_identidad_choices": LOGISTICA_TIPOS_RRHH,
         "nivel_organizacional_choices": Empleado.NIVEL_ORGANIZACIONAL_CHOICES,
         "nivel_organizacional_values": NIVEL_ORGANIZACIONAL_VALUES,
@@ -2178,6 +2187,59 @@ def catalogos_ch(request):
 
     if request.method == "POST":
         action = (request.POST.get("action") or "").strip()
+        if action == "funcion_operativa":
+            codigo = (request.POST.get("codigo") or "").strip().upper()
+            etiqueta = (request.POST.get("etiqueta") or "").strip()
+            departamento_origen = (request.POST.get("departamento_origen") or "").strip().upper()
+            departamento_actual = (request.POST.get("departamento_actual") or "").strip().upper()
+            puesto_operativo = (request.POST.get("puesto_operativo") or "").strip().upper()
+            nivel_organizacional = (request.POST.get("nivel_organizacional") or Empleado.NIVEL_COLABORADOR).strip().upper()
+            activo = request.POST.get("activo") == "on"
+            departamentos_validos = {value for value, _label in Empleado.DEP_CHOICES}
+            niveles_validos = {value for value, _label in Empleado.NIVEL_ORGANIZACIONAL_CHOICES}
+            if not etiqueta:
+                messages.error(request, "Captura el nombre de la función operativa.")
+                return redirect("rrhh:rrhh_catalogos")
+            if departamento_origen and departamento_origen not in departamentos_validos:
+                messages.error(request, "Selecciona un departamento origen oficial.")
+                return redirect("rrhh:rrhh_catalogos")
+            if departamento_actual and departamento_actual not in departamentos_validos:
+                messages.error(request, "Selecciona una adscripción oficial.")
+                return redirect("rrhh:rrhh_catalogos")
+            if nivel_organizacional not in niveles_validos:
+                messages.error(request, "Selecciona un nivel organizacional oficial.")
+                return redirect("rrhh:rrhh_catalogos")
+            codigo = _codigo_catalogo_desde_valor(codigo, etiqueta)
+            if not codigo:
+                messages.error(request, "No fue posible generar el código de catálogo.")
+                return redirect("rrhh:rrhh_catalogos")
+            funcion, created = CatalogoFuncionOperativa.objects.get_or_create(
+                codigo=codigo,
+                defaults={"sistema": False},
+            )
+            funcion.etiqueta = etiqueta
+            funcion.departamento_origen = departamento_origen
+            funcion.departamento_actual = departamento_actual
+            funcion.puesto_operativo = puesto_operativo
+            funcion.nivel_organizacional = nivel_organizacional
+            funcion.activo = activo
+            funcion.save()
+            log_event(
+                request.user,
+                "CREATE" if created else "UPDATE",
+                "rrhh.CatalogoFuncionOperativa",
+                str(funcion.id),
+                {
+                    "codigo": funcion.codigo,
+                    "etiqueta": funcion.etiqueta,
+                    "departamento_origen": funcion.departamento_origen,
+                    "departamento_actual": funcion.departamento_actual,
+                    "puesto_operativo": funcion.puesto_operativo,
+                    "source": "rrhh.catalogos",
+                },
+            )
+            messages.success(request, "Función operativa guardada en el catálogo.")
+            return redirect("rrhh:rrhh_catalogos")
         if action == "bono_esquema":
             nombre = (request.POST.get("nombre") or "").strip()
             departamento = (request.POST.get("departamento") or "").strip().upper()
@@ -2223,10 +2285,11 @@ def catalogos_ch(request):
         {
             "module_tabs": _module_tabs("catalogos", request.user),
             "can_manage_rrhh": True,
-            "funciones_operativas": FUNCIONES_OPERATIVAS,
+            "funciones_operativas": CatalogoFuncionOperativa.objects.order_by("departamento_actual", "etiqueta", "codigo"),
+            "funciones_operativas_activas": funciones_operativas_catalogo(),
             "departamento_choices": Empleado.DEP_CHOICES,
             "nivel_choices": NIVEL_ORGANIZACIONAL_CHOICES,
-            "puesto_operativo_choices": PUESTO_OPERATIVO_CHOICES,
+            "puesto_operativo_choices": puesto_operativo_choices(),
             "bono_esquemas": BonoEsquema.objects.order_by("nombre", "codigo"),
         },
     )

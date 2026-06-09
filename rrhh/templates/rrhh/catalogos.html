@@ -17,6 +17,7 @@
   .catalog-title { color: var(--vino); font-family: "Playfair Display", serif; font-size: 25px; font-weight: 800; }
   .catalog-copy { color: var(--texto-light); max-width: 820px; }
   .catalog-grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1.05fr) minmax(320px, .95fr); }
+  .catalog-stack { display: grid; gap: 16px; }
   .catalog-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 16px; }
   .catalog-card h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
   .catalog-form { display: grid; gap: 12px; }
@@ -47,7 +48,7 @@
     width: fit-content;
   }
   .catalog-table-shell { max-width: 100%; overflow-x: auto; scrollbar-gutter: stable; }
-  .catalog-table { border-collapse: collapse; min-width: 820px; table-layout: fixed; width: 100%; }
+  .catalog-table { border-collapse: collapse; min-width: 860px; table-layout: fixed; width: 100%; }
   .catalog-table th,
   .catalog-table td {
     border-bottom: 1px solid var(--rosa);
@@ -61,11 +62,13 @@
   .catalog-table th { color: var(--vino); font-size: 11px; font-weight: 900; text-transform: uppercase; }
   .catalog-muted { color: var(--texto-light); font-size: 13px; }
   .catalog-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }
+  .catalog-badge-muted { background: #f1edf0; color: var(--texto-light); }
   .official-table .col-code { width: 150px; }
   .official-table .col-label { width: 190px; }
   .official-table .col-department,
   .official-table .col-origin,
   .official-table .col-operative { width: 150px; }
+  .official-table .col-status { width: 110px; }
   .bonus-table { min-width: 760px; }
   .bonus-table .col-code { width: 150px; }
   .bonus-table .col-name { width: 190px; }
@@ -91,42 +94,110 @@
   </div>
 
   <div class="catalog-grid">
-    <section class="catalog-card">
-      <h2>Área / división y puesto operativo</h2>
-      <div class="table-responsive catalog-table-shell">
-        <table class="catalog-table official-table">
-          <colgroup>
-            <col class="col-code">
-            <col class="col-label">
-            <col class="col-origin">
-            <col class="col-department">
-            <col class="col-operative">
-          </colgroup>
-          <thead>
-            <tr>
-              <th>Código</th>
-              <th>Nombre</th>
-              <th>Origen</th>
-              <th>Adscripción</th>
-              <th>Puesto operativo</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for funcion in funciones_operativas %}
+    <div class="catalog-stack">
+      <section class="catalog-card">
+        <h2>Nueva función operativa</h2>
+        <form method="post" class="catalog-form">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="funcion_operativa">
+          <div class="catalog-form-row">
+            <div class="catalog-field">
+              <label for="codigo_funcion">Código</label>
+              <input id="codigo_funcion" name="codigo" maxlength="80" placeholder="ALMACEN">
+            </div>
+            <div class="catalog-field">
+              <label for="etiqueta_funcion">Nombre</label>
+              <input id="etiqueta_funcion" name="etiqueta" required maxlength="120" placeholder="Almacén">
+            </div>
+          </div>
+          <div class="catalog-form-row">
+            <div class="catalog-field">
+              <label for="departamento_origen_funcion">Origen</label>
+              <select id="departamento_origen_funcion" name="departamento_origen">
+                <option value="">Sin origen</option>
+                {% for value,label in departamento_choices %}
+                  <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="catalog-field">
+              <label for="departamento_actual_funcion">Adscripción</label>
+              <select id="departamento_actual_funcion" name="departamento_actual">
+                <option value="">Sin adscripción</option>
+                {% for value,label in departamento_choices %}
+                  <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="catalog-form-row">
+            <div class="catalog-field">
+              <label for="puesto_operativo_funcion">Puesto operativo</label>
+              <input id="puesto_operativo_funcion" name="puesto_operativo" maxlength="80" placeholder="ALMACEN">
+            </div>
+            <div class="catalog-field">
+              <label for="nivel_organizacional_funcion">Nivel</label>
+              <select id="nivel_organizacional_funcion" name="nivel_organizacional">
+                {% for value,label in nivel_choices %}
+                  <option value="{{ value }}" {% if value == "COLABORADOR" %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <label class="catalog-check">
+            <input type="checkbox" name="activo" checked>
+            Activo
+          </label>
+          <button class="catalog-button" type="submit">Guardar función</button>
+        </form>
+      </section>
+
+      <section class="catalog-card">
+        <h2>Área / división y puesto operativo</h2>
+        <div class="table-responsive catalog-table-shell">
+          <table class="catalog-table official-table">
+            <colgroup>
+              <col class="col-code">
+              <col class="col-label">
+              <col class="col-origin">
+              <col class="col-department">
+              <col class="col-operative">
+              <col class="col-status">
+            </colgroup>
+            <thead>
               <tr>
-                <td><strong>{{ funcion.codigo }}</strong></td>
-                <td>{{ funcion.etiqueta }}</td>
-                <td>{{ funcion.departamento_origen }}</td>
-                <td>{{ funcion.departamento_actual }}</td>
-                <td>{{ funcion.puesto_operativo|default:"-" }}</td>
+                <th>Código</th>
+                <th>Nombre</th>
+                <th>Origen</th>
+                <th>Adscripción</th>
+                <th>Puesto operativo</th>
+                <th>Estado</th>
               </tr>
-            {% empty %}
-              <tr><td colspan="5">Sin funciones oficiales.</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </section>
+            </thead>
+            <tbody>
+              {% for funcion in funciones_operativas %}
+                <tr>
+                  <td><strong>{{ funcion.codigo }}</strong></td>
+                  <td>{{ funcion.etiqueta }}</td>
+                  <td>{{ funcion.departamento_origen|default:"-" }}</td>
+                  <td>{{ funcion.departamento_actual|default:"-" }}</td>
+                  <td>{{ funcion.puesto_operativo|default:"-" }}</td>
+                  <td>
+                    {% if funcion.activo %}
+                      <span class="catalog-badge">Activo</span>
+                    {% else %}
+                      <span class="catalog-badge catalog-badge-muted">Inactivo</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% empty %}
+                <tr><td colspan="6">Sin funciones oficiales.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
 
     <section class="catalog-card">
       <h2>Nuevo esquema de bono</h2>

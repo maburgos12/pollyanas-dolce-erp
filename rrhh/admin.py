@@ -3,6 +3,7 @@ from django.contrib import admin
 from .models import (
     AsistenciaEmpleado,
     BonoEsquema,
+    CatalogoFuncionOperativa,
     Empleado,
     EmpleadoBaja,
     EmpleadoIdentidadPendiente,
@@ -24,6 +25,22 @@ from .models import (
     VacanteRRHH,
     VacanteSeguimiento,
 )
+
+
+@admin.register(CatalogoFuncionOperativa)
+class CatalogoFuncionOperativaAdmin(admin.ModelAdmin):
+    list_display = (
+        "codigo",
+        "etiqueta",
+        "departamento_origen",
+        "departamento_actual",
+        "puesto_operativo",
+        "nivel_organizacional",
+        "activo",
+        "sistema",
+    )
+    list_filter = ("activo", "sistema", "departamento_origen", "departamento_actual", "nivel_organizacional")
+    search_fields = ("codigo", "etiqueta", "puesto_operativo")
 
 
 @admin.register(BonoEsquema)

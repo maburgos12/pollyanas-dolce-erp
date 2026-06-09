@@ -12,7 +12,7 @@ from django.db.models import Count, Q
 from core.access import ROLE_ORDER
 from core.models import Departamento, Sucursal, UserModuleAccess, UserProfile
 from rrhh.models import Empleado
-from rrhh.services_catalogos import AREA_DIVISION_MAP, AREA_DIVISION_VALUES, PUESTO_OPERATIVO_VALUES
+from rrhh.services_catalogos import area_division_map, area_division_values, puesto_operativo_values
 from rrhh.services_personnel_audit import SPECIAL_OPERATIONAL_GROUPS, normalize_catalog_key
 
 
@@ -214,9 +214,11 @@ def _canonical_group_name(names: list[str], role_order: set[str]) -> str:
 def _employee_catalog_proposals() -> list[NormalizationProposal]:
     proposals: list[NormalizationProposal] = []
     sucursales = _catalog_index(Sucursal, "codigo", "nombre")
+    area_map = area_division_map()
+    puesto_values = puesto_operativo_values()
     area_by_puesto = {
         data["puesto_operativo"]: area
-        for area, data in AREA_DIVISION_MAP.items()
+        for area, data in area_map.items()
         if data.get("puesto_operativo")
     }
     employees = (
@@ -259,8 +261,8 @@ def _employee_catalog_proposals() -> list[NormalizationProposal]:
                 )
             )
 
-        if empleado.area in AREA_DIVISION_MAP:
-            expected_puesto = AREA_DIVISION_MAP[empleado.area]["puesto_operativo"]
+        if empleado.area in area_map:
+            expected_puesto = area_map[empleado.area]["puesto_operativo"]
             if expected_puesto and not empleado.puesto_operativo:
                 proposals.append(
                     _proposal(
@@ -294,7 +296,7 @@ def _employee_catalog_proposals() -> list[NormalizationProposal]:
                         reason="El puesto operativo oficial apunta a otra area/division canonica.",
                     )
                 )
-        elif empleado.puesto_operativo and empleado.puesto_operativo not in PUESTO_OPERATIVO_VALUES:
+        elif empleado.puesto_operativo and empleado.puesto_operativo not in puesto_values:
             proposals.append(
                 _proposal(
                     key=f"employee.unknown_position:{empleado.pk}",
@@ -722,7 +724,7 @@ def _suggest_level(empleado: Empleado) -> str:
         return ""
     if empleado.colaboradores_directos.filter(activo=True).exists():
         return Empleado.NIVEL_SUPERVISION
-    if not current and (empleado.area in AREA_DIVISION_VALUES or empleado.puesto_operativo in PUESTO_OPERATIVO_VALUES):
+    if not current and (empleado.area in area_division_values() or empleado.puesto_operativo in puesto_operativo_values()):
         return Empleado.NIVEL_COLABORADOR
     return ""
 

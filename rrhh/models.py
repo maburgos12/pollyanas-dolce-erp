@@ -163,6 +163,47 @@ class Empleado(models.Model):
         super().save(*args, **kwargs)
 
 
+class CatalogoFuncionOperativa(models.Model):
+    codigo = models.CharField(max_length=80, unique=True, db_index=True)
+    etiqueta = models.CharField(max_length=120)
+    departamento_origen = models.CharField(max_length=40, choices=Empleado.DEP_CHOICES, blank=True, default="", db_index=True)
+    departamento_actual = models.CharField(max_length=40, choices=Empleado.DEP_CHOICES, blank=True, default="", db_index=True)
+    puesto_operativo = models.CharField(max_length=80, blank=True, default="", db_index=True)
+    nivel_organizacional = models.CharField(
+        max_length=20,
+        choices=Empleado.NIVEL_ORGANIZACIONAL_CHOICES,
+        default=Empleado.NIVEL_COLABORADOR,
+        db_index=True,
+    )
+    activo = models.BooleanField(default=True, db_index=True)
+    sistema = models.BooleanField(default=False)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["departamento_actual", "etiqueta", "codigo"]
+        verbose_name = "Función operativa"
+        verbose_name_plural = "Funciones operativas"
+
+    def __str__(self) -> str:
+        return f"{self.codigo} · {self.etiqueta}"
+
+    def save(self, *args, **kwargs):
+        import re
+
+        if not self.codigo:
+            base = normalizar_nombre(self.etiqueta or "").upper()
+            self.codigo = base
+        self.codigo = re.sub(r"[^A-Z0-9_ ]+", " ", normalizar_nombre(self.codigo or "").upper()).strip()[:80]
+        self.codigo = re.sub(r"\s+", " ", self.codigo)
+        self.etiqueta = (self.etiqueta or "").strip()
+        self.departamento_origen = (self.departamento_origen or "").strip().upper()
+        self.departamento_actual = (self.departamento_actual or "").strip().upper()
+        self.puesto_operativo = (self.puesto_operativo or "").strip().upper()
+        self.nivel_organizacional = (self.nivel_organizacional or Empleado.NIVEL_COLABORADOR).strip().upper()
+        super().save(*args, **kwargs)
+
+
 class EmpleadoIdentidadPendiente(models.Model):
     FUENTE_HIKVISION = "hikvision"
     FUENTE_NOMINA = "nomina"
