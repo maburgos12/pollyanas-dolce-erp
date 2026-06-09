@@ -28,6 +28,7 @@ from core.access import (
     ROLE_ADMIN,
     ROLE_DG,
     ROLE_ORDER,
+    can_review_seguimiento_global,
     can_manage_orquestacion,
     can_manage_users,
     group_name_variants,
@@ -220,9 +221,28 @@ def _can_follow_mermas_next(user) -> bool:
         return False
 
 
+def _can_open_dashboard(user) -> bool:
+    return can_review_seguimiento_global(user)
+
+
+def _default_login_redirect_for_user(user) -> str:
+    if _can_open_dashboard(user):
+        return "dashboard"
+    return reverse("seguimiento:mi_seguimiento")
+
+
+def _is_dashboard_redirect(redirect_url: str) -> bool:
+    if redirect_url == "dashboard":
+        return True
+    path = urlsplit(redirect_url or "").path
+    return path == "/dashboard/"
+
+
 def _login_redirect_for_user(user, redirect_url: str) -> str:
     if _is_mermas_next_url(redirect_url) and not _can_follow_mermas_next(user):
-        return "dashboard"
+        return _default_login_redirect_for_user(user)
+    if _is_dashboard_redirect(redirect_url) and not _can_open_dashboard(user):
+        return _default_login_redirect_for_user(user)
     return redirect_url
 
 
@@ -2734,7 +2754,7 @@ def home_redirect(request: HttpRequest) -> HttpResponse:
     if request.user.is_authenticated:
         if is_branch_capture_only(request.user):
             return _redirect_capture_module()
-        return redirect("dashboard")
+        return redirect(_default_login_redirect_for_user(request.user))
     return redirect("login")
 
 
@@ -2743,6 +2763,8 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         return redirect("/login/")
     if is_branch_capture_only(request.user):
         return _redirect_capture_module()
+    if not _can_open_dashboard(request.user):
+        return redirect("seguimiento:mi_seguimiento")
 
     u = request.user
     ctx = {
@@ -2823,7 +2845,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     )
     # Acuerdos de seguimiento pendientes de la revisión del DG (en revisión + prórrogas)
     try:
-        if u.is_superuser or u.is_staff or u.groups.filter(name__in=group_name_variants(ROLE_DG, ROLE_ADMIN)).exists():
+        if can_review_seguimiento_global(u):
             from seguimiento.models import SeguimientoItem as _SegItem, SeguimientoProrrogaSolicitud as _SegProrroga
             from seguimiento.services import items_pendientes_revision_dg, _responsable_nombre
 

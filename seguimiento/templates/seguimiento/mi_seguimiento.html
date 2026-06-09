@@ -323,7 +323,7 @@
     {% for tab in tabs %}
     <a href="{% url tab.url_name %}" class="module-tab {% if active_tipo == tab.tipo %}active{% endif %}">{{ tab.label }}</a>
     {% endfor %}
-    {% if request.user.is_staff or request.user.is_superuser %}
+    {% if puede_revisar_seguimiento_global %}
     <a href="{% url 'seguimiento:bandeja_revision' %}" class="module-tab" style="margin-left:auto; color:var(--dorado);">
       Bandeja DG {% if metrics.en_revision %}<span class="badge bg-warning" style="font-size:.72rem;">{{ metrics.en_revision }}</span>{% endif %}
     </a>

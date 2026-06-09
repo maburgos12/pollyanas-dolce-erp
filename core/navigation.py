@@ -1,4 +1,4 @@
-from core.access import can_view_submodule, has_any_role, ROLE_DG, ROLE_ADMIN
+from core.access import can_review_seguimiento_global, can_view_submodule
 
 
 NAV_GROUPS = [
@@ -331,7 +331,7 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                     "badge_count": horas_extra_por_autorizar,
                 }
             )
-        if user.is_staff or user.is_superuser or has_any_role(user, ROLE_DG, ROLE_ADMIN):
+        if can_review_seguimiento_global(user):
             match_len = len("/seguimiento/panel/") if current_path.startswith("/seguimiento/panel/") else 0
             best_match_len = max(best_match_len, match_len)
             mi_trabajo["items"].append(
