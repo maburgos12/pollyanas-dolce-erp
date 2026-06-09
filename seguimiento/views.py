@@ -14,7 +14,7 @@ from django.utils.dateparse import parse_date
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from core.access import ROLE_DG, ROLE_ADMIN, has_any_role
+from core.access import can_review_seguimiento_global
 from core.audit import log_event
 from core.notificaciones import (
     notificar_paso_aprobado_por_colaborador,
@@ -286,6 +286,7 @@ def mi_seguimiento(request, tipo: str | None = None):
             "modo_detalle": bool(tipo),
             "mis_aprobaciones": mis_aprobaciones,
             "writeback_activo": _writeback_activo(),
+            "puede_revisar_seguimiento_global": can_review_seguimiento_global(request.user),
         },
     )
 
@@ -428,7 +429,7 @@ def registrar_feedback(request, pk):
         item.save(update_fields=["estatus", "updated_at"])
     log_event(request.user, "seguimiento.retroalimentacion", "SeguimientoItem", item.pk, {"comentario": True})
     notificar_seguimiento_avance(item, actor=request.user, mensaje_extra=comentario[:160])
-    if has_any_role(request.user, ROLE_DG, ROLE_ADMIN) or request.user.is_superuser:
+    if can_review_seguimiento_global(request.user):
         notificar_seguimiento_feedback_responsable(item, comentario=comentario, actor=request.user)
     messages.success(request, "Retroalimentación enviada.")
     return redirect("seguimiento:detalle", pk=item.pk)
@@ -512,7 +513,7 @@ def solicitar_prorroga(request, pk):
 
 @login_required
 def bandeja_revision(request):
-    if not (request.user.is_staff or request.user.is_superuser or has_any_role(request.user, ROLE_DG, ROLE_ADMIN)):
+    if not can_review_seguimiento_global(request.user):
         messages.error(request, "No tienes acceso a la bandeja de revisión.")
         return redirect("seguimiento:mi_seguimiento")
     items = (
@@ -547,7 +548,7 @@ def _redirect_post_resolucion(request, pk):
 @login_required
 @require_POST
 def resolver_revision(request, pk):
-    if not (request.user.is_staff or request.user.is_superuser or has_any_role(request.user, ROLE_DG, ROLE_ADMIN)):
+    if not can_review_seguimiento_global(request.user):
         messages.error(request, "No tienes permiso para resolver revisiones.")
         return redirect("seguimiento:bandeja_revision")
     item = get_object_or_404(SeguimientoItem, pk=pk)
@@ -589,7 +590,7 @@ def resolver_revision(request, pk):
 @login_required
 @require_POST
 def resolver_prorroga(request, pk, prorroga_id):
-    if not (request.user.is_staff or request.user.is_superuser or has_any_role(request.user, ROLE_DG, ROLE_ADMIN)):
+    if not can_review_seguimiento_global(request.user):
         messages.error(request, "No tienes permiso para resolver solicitudes de prórroga.")
         return redirect("seguimiento:bandeja_revision")
     prorroga = get_object_or_404(SeguimientoProrrogaSolicitud, pk=prorroga_id, seguimiento_id=pk)
@@ -620,7 +621,7 @@ def resolver_prorroga(request, pk, prorroga_id):
 
 @login_required
 def panel_dg(request):
-    if not (request.user.is_staff or request.user.is_superuser or has_any_role(request.user, ROLE_DG, ROLE_ADMIN)):
+    if not can_review_seguimiento_global(request.user):
         messages.error(request, "Acceso restringido a Dirección General.")
         return redirect("seguimiento:mi_seguimiento")
 
@@ -1024,7 +1025,7 @@ def retractar_entrega(request, pk):
 @login_required
 def detalle_item_dg(request, pk):
     """Detalle de cualquier acuerdo para DG — sin restricción de responsable."""
-    if not (request.user.is_staff or request.user.is_superuser or has_any_role(request.user, ROLE_DG, ROLE_ADMIN)):
+    if not can_review_seguimiento_global(request.user):
         messages.error(request, "Acceso restringido a Dirección General.")
         return redirect("seguimiento:mi_seguimiento")
     item = get_object_or_404(
@@ -1103,6 +1104,9 @@ def aprobar_paso_colaborador(request, pk, check_id):
     if accion not in {"aprobar", "devolver"}:
         messages.error(request, "Acción no reconocida.")
         return redirect("seguimiento:mi_seguimiento")
+    if check.estatus_origen != "SUBMITTED":
+        messages.error(request, "Este paso todavía no está enviado a revisión.")
+        return redirect("seguimiento:mi_seguimiento")
 
     motivo = (request.POST.get("motivo") or "").strip()
 
@@ -1141,8 +1145,8 @@ def aprobar_paso_colaborador(request, pk, check_id):
         texto = f"Paso devuelto por {request.user.get_full_name() or request.user.username}: {motivo}"
         SeguimientoComentario.objects.create(
             seguimiento=item,
-            autor=request.user,
-            contenido=texto[:1000],
+            usuario=request.user,
+            comentario=texto[:1000],
             tipo=SeguimientoComentario.TIPO_FEEDBACK,
         )
 

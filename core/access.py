@@ -260,6 +260,13 @@ def is_admin_or_dg(user: AbstractBaseUser) -> bool:
     return has_any_role(user, ROLE_DG, ROLE_ADMIN)
 
 
+def can_review_seguimiento_global(user: AbstractBaseUser) -> bool:
+    """Permiso para revisar acuerdos/minutas/proyectos de todos los colaboradores."""
+    if not user or not user.is_authenticated:
+        return False
+    return bool(user.is_superuser or has_any_role(user, ROLE_DG, ROLE_ADMIN))
+
+
 def _is_locked(user: AbstractBaseUser, lock_field: str) -> bool:
     if not user or not user.is_authenticated:
         return False

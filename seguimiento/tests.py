@@ -14,7 +14,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from django_celery_beat.models import PeriodicTask
 
-from core.access import can_view_submodule
+from core.access import ROLE_DG, can_view_submodule
 from core.navigation import build_nav_groups
 from rrhh.models import Empleado
 
@@ -218,6 +218,176 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertNotIn("Mis acuerdos", labels)
         self.assertIn("Bonos producción", labels)
         self.assertTrue(can_view_submodule(self.user, "produccion", "bonos"))
+
+    def test_colaborador_staff_no_hereda_panel_dg_de_seguimiento(self):
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+        self.item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
+        self.item.save(update_fields=["estatus"])
+
+        groups = build_nav_groups(self.user, "/seguimiento/")
+        labels = [item["label"] for group in groups for item in group["items"]]
+        response_mi_trabajo = self.client.get("/seguimiento/")
+        response_panel = self.client.get("/seguimiento/panel/")
+        response_revision = self.client.get("/seguimiento/revision/")
+        response_detalle_dg = self.client.get(f"/seguimiento/panel/{self.item.pk}/")
+        response_resolver = self.client.post(
+            f"/seguimiento/{self.item.pk}/resolver/",
+            {"accion": "aprobar"},
+        )
+
+        self.assertNotIn("Panel de acuerdos", labels)
+        self.assertNotContains(response_mi_trabajo, "Bandeja DG")
+        self.assertEqual(response_panel.status_code, 302)
+        self.assertEqual(response_panel["Location"], "/seguimiento/")
+        self.assertEqual(response_revision.status_code, 302)
+        self.assertEqual(response_revision["Location"], "/seguimiento/")
+        self.assertEqual(response_detalle_dg.status_code, 302)
+        self.assertEqual(response_detalle_dg["Location"], "/seguimiento/")
+        self.assertEqual(response_resolver.status_code, 302)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.estatus, SeguimientoItem.ESTATUS_EN_REVISION)
+
+    def test_colaborador_staff_no_aterriza_en_dashboard_dg(self):
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+
+        response_dashboard = self.client.get("/dashboard/")
+        self.client.logout()
+        response_login = self.client.post(
+            "/login/",
+            {"username": self.user.username, "password": "test12345"},
+        )
+
+        self.assertEqual(response_dashboard.status_code, 302)
+        self.assertEqual(response_dashboard["Location"], "/seguimiento/")
+        self.assertEqual(response_login.status_code, 302)
+        self.assertEqual(response_login["Location"], "/seguimiento/")
+
+    def test_dg_real_conserva_panel_y_resuelve_revision(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.dg", password="test12345")
+        dg_user.groups.add(dg_group)
+        self.item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
+        self.item.save(update_fields=["estatus"])
+        self.client.force_login(dg_user)
+
+        response_panel = self.client.get("/seguimiento/panel/")
+        response_detalle_dg = self.client.get(f"/seguimiento/panel/{self.item.pk}/")
+        response_resolver = self.client.post(
+            f"/seguimiento/{self.item.pk}/resolver/",
+            {"accion": "aprobar", "next": "panel"},
+        )
+
+        self.assertContains(response_panel, "Panel de acuerdos")
+        self.assertContains(response_detalle_dg, self.item.titulo)
+        self.assertEqual(response_resolver.status_code, 302)
+        self.assertEqual(response_resolver["Location"], "/seguimiento/panel/")
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.estatus, SeguimientoItem.ESTATUS_COMPLETADO)
+
+    def test_dg_real_aterriza_en_dashboard_dg(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.dashboard", password="test12345")
+        dg_user.groups.add(dg_group)
+        self.client.logout()
+
+        response = self.client.post(
+            "/login/",
+            {"username": dg_user.username, "password": "test12345"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/dashboard/")
+
+    def test_colaborador_staff_aprueba_paso_designado_desde_mi_trabajo(self):
+        ventas, _ = Group.objects.get_or_create(name="VENTAS")
+        johana = get_user_model().objects.create_user(
+            username="johana.lopez",
+            email="ventas.johanna@pollyanasdolce.com",
+            first_name="Johana",
+            last_name="López",
+            password="test12345",
+            is_staff=True,
+        )
+        johana.groups.add(ventas)
+        proyecto = SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_PROYECTO,
+            titulo="Producto Julio",
+            responsable_user=self.user,
+            area="VENTAS",
+            estatus=SeguimientoItem.ESTATUS_EN_PROCESO,
+        )
+        paso = SeguimientoChecklistItem.objects.create(
+            seguimiento=proyecto,
+            titulo="Validar arte final",
+            requiere_aprobacion=True,
+            aprobador_user=johana,
+            aprobador_nombre="Johana López",
+            estatus_origen="SUBMITTED",
+        )
+        self.client.force_login(johana)
+
+        with patch.dict(os.environ, {"AGENTE_DG_WRITEBACK_ENABLED": ""}):
+            response = self.client.get("/seguimiento/")
+            post_response = self.client.post(
+                f"/seguimiento/{proyecto.pk}/paso/{paso.pk}/aprobar/",
+                {"accion": "aprobar"},
+            )
+
+        self.assertContains(response, "Pasos que esperan tu aprobación")
+        self.assertContains(response, "Validar arte final")
+        self.assertNotContains(response, "Bandeja DG")
+        self.assertEqual(post_response.status_code, 302)
+        paso.refresh_from_db()
+        self.assertTrue(paso.completado)
+        self.assertEqual(paso.estatus_origen, "COMPLETED")
+        self.assertEqual(paso.completado_por, johana)
+
+    def test_colaborador_staff_devuelve_paso_con_motivo(self):
+        ventas, _ = Group.objects.get_or_create(name="VENTAS")
+        johana = get_user_model().objects.create_user(
+            username="johana.devolver",
+            first_name="Johana",
+            last_name="López",
+            password="test12345",
+            is_staff=True,
+        )
+        johana.groups.add(ventas)
+        proyecto = SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_PROYECTO,
+            titulo="Producto Julio",
+            responsable_user=self.user,
+            area="VENTAS",
+            estatus=SeguimientoItem.ESTATUS_EN_PROCESO,
+        )
+        paso = SeguimientoChecklistItem.objects.create(
+            seguimiento=proyecto,
+            titulo="Validar presupuesto",
+            requiere_aprobacion=True,
+            aprobador_user=johana,
+            aprobador_nombre="Johana López",
+            estatus_origen="SUBMITTED",
+        )
+        self.client.force_login(johana)
+
+        with patch.dict(os.environ, {"AGENTE_DG_WRITEBACK_ENABLED": ""}):
+            response = self.client.post(
+                f"/seguimiento/{proyecto.pk}/paso/{paso.pk}/aprobar/",
+                {"accion": "devolver", "motivo": "Falta evidencia de costos."},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        paso.refresh_from_db()
+        self.assertFalse(paso.completado)
+        self.assertEqual(paso.estatus_origen, "IN_PROGRESS")
+        self.assertTrue(
+            SeguimientoComentario.objects.filter(
+                seguimiento=proyecto,
+                usuario=johana,
+                comentario__icontains="Falta evidencia de costos.",
+            ).exists()
+        )
 
     def test_mi_trabajo_filtra_por_pestana_de_tipo(self):
         SeguimientoItem.objects.create(
