@@ -154,6 +154,7 @@ NAV_GROUPS = [
             ("activos", "reportes", "Reportes activos", "/activos/reportes/", ["/activos/reportes/"]),
             ("control", "discrepancias", "Control", "/control/discrepancias/", ["/control/discrepancias/"]),
             ("control", "captura_movil", "Captura móvil", "/control/captura-movil/", ["/control/captura-movil/"]),
+            ("conciliacion", "bancaria", "Conciliación bancaria", "/conciliacion/bancaria/", ["/conciliacion/bancaria/"]),
             ("auditoria", "bitacora", "Bitácora", "/auditoria/", ["/auditoria/"]),
         ],
     },

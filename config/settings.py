@@ -124,6 +124,7 @@ INSTALLED_APPS = [
     "rentabilidad",
     "sat_client",
     "syncfy_client",
+    "conciliacion",
     "api",
 ]
 
