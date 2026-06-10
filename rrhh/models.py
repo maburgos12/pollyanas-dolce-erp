@@ -1403,7 +1403,7 @@ class IncidenciaAsistencia(models.Model):
     TIPO_JORNADA_INCOMPLETA = "jornada_incompleta"
     TIPO_HORA_EXTRA_PENDIENTE = "hora_extra_pendiente"
     TIPO_AVISO_BAJA_FALTAS = "aviso_baja_faltas"
-    TIPO_POSIBLE_RESCISION = "posible_rescision"
+    TIPO_BAJA_FALTAS = "baja_faltas"
     TIPO_CHOICES = [
         (TIPO_USO_TOLERANCIA, "Uso de tolerancia"),
         (TIPO_RETARDO, "Retardo"),
@@ -1413,7 +1413,7 @@ class IncidenciaAsistencia(models.Model):
         (TIPO_JORNADA_INCOMPLETA, "Jornada incompleta"),
         (TIPO_HORA_EXTRA_PENDIENTE, "Hora extra pendiente"),
         (TIPO_AVISO_BAJA_FALTAS, "Aviso por faltas"),
-        (TIPO_POSIBLE_RESCISION, "Posible rescision por faltas"),
+        (TIPO_BAJA_FALTAS, "Baja por faltas"),
     ]
 
     ESTADO_PENDIENTE = "pendiente"

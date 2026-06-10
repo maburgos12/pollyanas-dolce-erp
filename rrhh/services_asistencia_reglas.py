@@ -25,7 +25,7 @@ VENTANA_RETARDOS_DIAS = 15
 VENTANA_FALTAS_DIAS = 30
 RETARDOS_POR_FALTA = 3
 FALTAS_AVISO_BAJA = 3
-FALTAS_POSIBLE_RESCISION = 4
+FALTAS_BAJA = 4
 MARCAS_TOLERANCIA_POR_RETARDO = 15
 
 
@@ -429,8 +429,8 @@ def _evaluar_escalamientos(empleado: Empleado, fecha: date, touched: set[str]) -
         creados += int(creada)
         actualizados += int(actualizada)
 
-    if faltas >= FALTAS_POSIBLE_RESCISION:
-        tipo = IncidenciaAsistencia.TIPO_POSIBLE_RESCISION
+    if faltas >= FALTAS_BAJA:
+        tipo = IncidenciaAsistencia.TIPO_BAJA_FALTAS
         touched.add(tipo)
         _, creada, actualizada = _upsert_incidencia(
             empleado=empleado,
@@ -441,7 +441,7 @@ def _evaluar_escalamientos(empleado: Empleado, fecha: date, touched: set[str]) -
             ventana_inicio=desde_faltas,
             ventana_fin=fecha,
             conteo_faltas_30d=faltas,
-            detalle="Cuarta falta en 30 dias: revisar posible rescision conforme a politica interna.",
+            detalle="Cuarta falta en 30 dias: baja por faltas conforme a politica interna.",
             metadata={"faltas_30d": faltas},
         )
         creados += int(creada)

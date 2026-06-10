@@ -16,7 +16,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('fecha', models.DateField(db_index=True)),
-                ('tipo', models.CharField(choices=[('uso_tolerancia', 'Uso de tolerancia'), ('retardo', 'Retardo'), ('retardo_tolerancia', 'Retardo por tolerancia recurrente'), ('falta', 'Falta'), ('falta_retardos', 'Falta por retardos'), ('jornada_incompleta', 'Jornada incompleta'), ('hora_extra_pendiente', 'Hora extra pendiente'), ('aviso_baja_faltas', 'Aviso por faltas'), ('posible_rescision', 'Posible rescision por faltas')], db_index=True, max_length=32)),
+                ('tipo', models.CharField(choices=[('uso_tolerancia', 'Uso de tolerancia'), ('retardo', 'Retardo'), ('retardo_tolerancia', 'Retardo por tolerancia recurrente'), ('falta', 'Falta'), ('falta_retardos', 'Falta por retardos'), ('jornada_incompleta', 'Jornada incompleta'), ('hora_extra_pendiente', 'Hora extra pendiente'), ('aviso_baja_faltas', 'Aviso por faltas'), ('baja_faltas', 'Baja por faltas')], db_index=True, max_length=32)),
                 ('estado', models.CharField(choices=[('pendiente', 'Pendiente'), ('conciliado', 'Conciliado'), ('resuelto', 'Resuelto')], db_index=True, default='pendiente', max_length=16)),
                 ('severidad', models.CharField(choices=[('info', 'Informativa'), ('media', 'Media'), ('alta', 'Alta'), ('critica', 'Critica')], default='media', max_length=12)),
                 ('minutos', models.IntegerField(default=0)),

@@ -141,14 +141,15 @@ class ReglasAsistenciaRRHHTests(TestCase):
             fecha=inicio + timedelta(days=2),
             tipo=IncidenciaAsistencia.TIPO_AVISO_BAJA_FALTAS,
         )
-        posible_rescision = IncidenciaAsistencia.objects.get(
+        baja = IncidenciaAsistencia.objects.get(
             empleado=self.empleado,
             fecha=inicio + timedelta(days=3),
-            tipo=IncidenciaAsistencia.TIPO_POSIBLE_RESCISION,
+            tipo=IncidenciaAsistencia.TIPO_BAJA_FALTAS,
         )
         self.assertEqual(aviso.conteo_faltas_30d, 3)
-        self.assertEqual(posible_rescision.conteo_faltas_30d, 4)
-        self.assertEqual(posible_rescision.severidad, IncidenciaAsistencia.SEVERIDAD_CRITICA)
+        self.assertEqual(baja.conteo_faltas_30d, 4)
+        self.assertEqual(baja.severidad, IncidenciaAsistencia.SEVERIDAD_CRITICA)
+        self.assertIn("baja por faltas", baja.detalle)
 
     def test_falta_sin_registro_se_concilia_con_vacaciones_aprobadas(self):
         fecha = date(2026, 6, 1)
