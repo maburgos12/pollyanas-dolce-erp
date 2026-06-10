@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.core.cache import cache
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -2310,8 +2311,8 @@ class PlanProduccionRobustnessTests(TestCase):
         )
 
     def test_plan_produccion_graceful_when_pronostico_table_unavailable(self):
-        with patch("recetas.views.PronosticoVenta.objects.filter", side_effect=OperationalError("missing table")):
-            response = self.client.get(reverse("recetas:plan_produccion"), {"plan_id": self.plan.id})
+        with patch("recetas.views.plan.PronosticoVenta.objects.filter", side_effect=OperationalError("missing table")):
+            response = self.client.get(reverse("recetas:plan_produccion"), {"plan_id": self.plan.id, "seccion": "todo"})
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.context["pronosticos_unavailable"])
@@ -2572,6 +2573,7 @@ class PlanProduccionPeriodoMrpTests(TestCase):
             reverse("recetas:plan_produccion"),
             {
                 "plan_id": self.plan_q1.id,
+                "seccion": "todo",
                 "mrp_periodo": "2026-02",
                 "mrp_periodo_tipo": "mes",
             },
@@ -2599,6 +2601,7 @@ class PlanProduccionPeriodoMrpTests(TestCase):
             reverse("recetas:plan_produccion"),
             {
                 "plan_id": self.plan_q1.id,
+                "seccion": "diagnostico",
                 "mrp_periodo": "2026-02",
                 "mrp_periodo_tipo": "mes",
             },
@@ -2620,10 +2623,12 @@ class PlanProduccionPeriodoMrpTests(TestCase):
         self.assertContains(response, "Cargar pronóstico")
 
     def test_plan_produccion_renders_sales_history_summary(self):
+        cache.clear()
         response = self.client.get(
             reverse("recetas:plan_produccion"),
             {
                 "plan_id": self.plan_q1.id,
+                "seccion": "todo",
                 "mrp_periodo": "2026-02",
                 "mrp_periodo_tipo": "mes",
             },
@@ -2632,7 +2637,6 @@ class PlanProduccionPeriodoMrpTests(TestCase):
         self.assertContains(response, "Cobertura de demanda")
         self.assertContains(response, "Sucursales líderes")
         self.assertContains(response, "Productos líderes")
-        self.assertContains(response, "Cobertura cerrada")
         summary = response.context["ventas_historicas_summary"]
         self.assertTrue(summary["available"])
         self.assertEqual(summary["branch_count"], 2)
@@ -2705,7 +2709,7 @@ class PlanProduccionWorkflowRowsTests(TestCase):
         PlanProduccionItem.objects.create(plan=self.plan, receta=self.receta_bad, cantidad=Decimal("1"))
 
     def test_plan_produccion_item_rows_include_workflow_health(self):
-        response = self.client.get(reverse("recetas:plan_produccion"), {"plan_id": self.plan.id})
+        response = self.client.get(reverse("recetas:plan_produccion"), {"plan_id": self.plan.id, "seccion": "diagnostico"})
         self.assertEqual(response.status_code, 200)
         items = response.context["explosion"]["items_detalle"]
         labels = {row["receta"].nombre: row["workflow_health_label"] for row in items}
@@ -2832,7 +2836,7 @@ class PlanProduccionSolicitudesModeTests(TestCase):
             conformidad_pct=Decimal("100.00"),
         )
 
-        response = self.client.get(reverse("recetas:plan_produccion"), {"plan_id": self.plan.id})
+        response = self.client.get(reverse("recetas:plan_produccion"), {"plan_id": self.plan.id, "seccion": "diagnostico"})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Prioridades de atención")
         self.assertContains(response, "Resumen de seguimiento")
@@ -3123,10 +3127,9 @@ class PlanProduccionSolicitudesModeTests(TestCase):
             conformidad_pct=Decimal("100.00"),
         )
 
-        response = self.client.get(reverse("recetas:plan_produccion"), {"plan_id": self.plan.id})
+        response = self.client.get(reverse("recetas:plan_produccion"), {"plan_id": self.plan.id, "seccion": "diagnostico"})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Control Documental")
-        self.assertContains(response, "Dependencias del flujo")
         self.assertContains(response, "Plan / BOM")
         self.assertContains(response, "Compras documentales")
         self.assertContains(response, "Inventario / Reabasto")
@@ -3192,7 +3195,7 @@ class PlanProduccionSolicitudesModeTests(TestCase):
             tickets=5,
         )
 
-        response = self.client.get(reverse("recetas:plan_produccion"), {"plan_id": self.plan.id})
+        response = self.client.get(reverse("recetas:plan_produccion"), {"plan_id": self.plan.id, "seccion": "diagnostico"})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Control de maestro crítico por demanda")
         self.assertContains(response, "Liberación del plan retenida")

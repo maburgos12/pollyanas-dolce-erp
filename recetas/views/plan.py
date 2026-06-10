@@ -16994,15 +16994,47 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
     }
     if estado_plan not in estado_plan_map:
         estado_plan = "all"
+    active_section = (request.GET.get("seccion") or "operacion").strip().lower()
+    valid_sections = {"operacion", "demanda", "mrp", "dg", "diagnostico", "todo"}
+    if active_section not in valid_sections:
+        active_section = "operacion"
+    load_all_sections = active_section == "todo"
+    load_demand_workspace = load_all_sections or active_section == "demanda" or bool(
+        request.session.get("pronostico_estadistico_preview")
+        or request.session.get("pronostico_backtest_preview")
+    )
+    load_mrp_workspace = load_all_sections or active_section == "mrp" or any(
+        request.GET.get(key)
+        for key in ("mrp_periodo", "mrp_periodo_tipo", "mrp_focus_kind", "mrp_focus_key")
+    )
+    load_dg_dashboard = load_all_sections or active_section == "dg" or any(
+        request.GET.get(key)
+        for key in ("dg_start_date", "dg_end_date", "dg_group_by")
+    )
+    diagnostic_focus_requested = any(
+        request.GET.get(key)
+        for key in (
+            "stage_key",
+            "closure_key",
+            "handoff_key",
+            "master_focus_key",
+            "master_missing_key",
+        )
+    )
+    load_plan_diagnostics = load_all_sections or active_section == "diagnostico" or diagnostic_focus_requested
     dg_filters = _plan_status_dashboard_filters(request)
 
     planes_qs = PlanProduccion.objects.select_related("creado_por").prefetch_related("items").order_by("-fecha_produccion", "-id")
-    plan_status_dashboard = _plan_status_dashboard(
-        planes_qs,
-        start_date=dg_filters["start_date"],
-        end_date=dg_filters["end_date"],
-        group_by=dg_filters["group_by"],
-        limit=12,
+    plan_status_dashboard = (
+        _plan_status_dashboard(
+            planes_qs,
+            start_date=dg_filters["start_date"],
+            end_date=dg_filters["end_date"],
+            group_by=dg_filters["group_by"],
+            limit=12,
+        )
+        if load_dg_dashboard
+        else None
     )
     plan_status_cards = [
         {
@@ -17042,8 +17074,14 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
         plan_actual = planes.first()
 
     recetas_disponibles = Receta.objects.order_by("tipo", "nombre")
-    explosion = _plan_explosion(plan_actual) if plan_actual else None
-    plan_vs_pronostico = _plan_vs_pronostico(plan_actual) if plan_actual else None
+    plan_items = (
+        list(plan_actual.items.select_related("receta").order_by("receta__nombre", "id"))
+        if plan_actual
+        else []
+    )
+    load_plan_deep_context = load_plan_diagnostics or load_all_sections
+    explosion = _plan_explosion(plan_actual) if plan_actual and load_plan_deep_context else None
+    plan_vs_pronostico = _plan_vs_pronostico(plan_actual) if plan_actual and load_plan_deep_context else None
     periodo_pronostico_default = _normalize_periodo_mes(request.GET.get("periodo"))
     mrp_periodo = _normalize_periodo_mes(request.GET.get("mrp_periodo"))
     mrp_periodo_tipo = (request.GET.get("mrp_periodo_tipo") or "mes").strip().lower()
@@ -17057,59 +17095,72 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
         mrp_periodo_tipo = "mes"
     mrp_focus_kind = (request.GET.get("mrp_focus_kind") or "").strip().lower()
     mrp_focus_key = (request.GET.get("mrp_focus_key") or "").strip().lower()
-    mrp_periodo_resumen = _periodo_mrp_resumen(
-        mrp_periodo,
-        mrp_periodo_tipo,
-        focus_kind=mrp_focus_kind,
-        focus_key=mrp_focus_key,
-    )
+    if load_mrp_workspace:
+        mrp_periodo_resumen = _periodo_mrp_resumen(
+            mrp_periodo,
+            mrp_periodo_tipo,
+            focus_kind=mrp_focus_kind,
+            focus_key=mrp_focus_key,
+        )
+    else:
+        mrp_periodo_resumen = {
+            "planes_count": 0,
+            "insumos_count": 0,
+            "alertas_capacidad": 0,
+            "costo_total": Decimal("0"),
+            "health_tone": "primary",
+            "health_label": "Sin calcular",
+            "health_detail": "Carga el MRP del periodo solo cuando necesites revisar insumos consolidados.",
+        }
     pronosticos_unavailable = False
     ventas_historicas_unavailable = False
     solicitudes_venta_unavailable = False
-    try:
-        pronosticos_periodo = PronosticoVenta.objects.filter(periodo=periodo_pronostico_default)
-        pronosticos_periodo_count = pronosticos_periodo.count()
-        pronosticos_periodo_total = pronosticos_periodo.aggregate(total=Sum("cantidad")).get("total") or Decimal("0")
-    except (OperationalError, ProgrammingError):
-        pronosticos_periodo_count = 0
-        pronosticos_periodo_total = Decimal("0")
-        pronosticos_unavailable = True
-    try:
-        ventas_historicas_count = VentaHistorica.objects.count()
-        ventas_historicas_total = VentaHistorica.objects.aggregate(total=Sum("cantidad")).get("total") or Decimal("0")
-        ventas_hist_fecha_max = VentaHistorica.objects.order_by("-fecha").values_list("fecha", flat=True).first()
-        ventas_historicas_summary = _ventas_historicas_plan_summary()
-    except (OperationalError, ProgrammingError):
-        ventas_historicas_count = 0
-        ventas_historicas_total = Decimal("0")
-        ventas_hist_fecha_max = None
-        ventas_historicas_summary = {
-            "available": False,
-            "status": "Sin histórico",
-            "tone": "warning",
-            "detail": "La base diaria no está disponible en este entorno.",
-            "date_label": "Sin cobertura",
-            "active_days": 0,
-            "expected_days": 0,
-            "missing_days": 0,
-            "branch_count": 0,
-            "recipe_count": 0,
-            "total_rows": 0,
-            "total_units": Decimal("0"),
-            "top_branches": [],
-            "top_recipes": [],
-        }
-        ventas_historicas_unavailable = True
-    try:
-        solicitudes_venta_periodo = SolicitudVenta.objects.filter(periodo=periodo_pronostico_default)
-        solicitudes_venta_count = solicitudes_venta_periodo.count()
-        solicitudes_venta_total = solicitudes_venta_periodo.aggregate(total=Sum("cantidad")).get("total") or Decimal("0")
-        solicitudes_venta_fecha_max = solicitudes_venta_periodo.order_by("-fecha_inicio").values_list("fecha_inicio", flat=True).first()
-    except (OperationalError, ProgrammingError):
-        solicitudes_venta_count = 0
-        solicitudes_venta_total = Decimal("0")
-        solicitudes_venta_fecha_max = None
-        solicitudes_venta_unavailable = True
+    pronosticos_periodo_count = 0
+    pronosticos_periodo_total = Decimal("0")
+    ventas_historicas_count = 0
+    ventas_historicas_total = Decimal("0")
+    ventas_hist_fecha_max = None
+    ventas_historicas_summary = None
+    solicitudes_venta_count = 0
+    solicitudes_venta_total = Decimal("0")
+    solicitudes_venta_fecha_max = None
+    if load_demand_workspace or load_plan_diagnostics:
+        try:
+            pronosticos_periodo = PronosticoVenta.objects.filter(periodo=periodo_pronostico_default)
+            pronosticos_periodo_count = pronosticos_periodo.count()
+            pronosticos_periodo_total = pronosticos_periodo.aggregate(total=Sum("cantidad")).get("total") or Decimal("0")
+        except (OperationalError, ProgrammingError):
+            pronosticos_unavailable = True
+        try:
+            ventas_historicas_count = VentaHistorica.objects.count()
+            ventas_historicas_total = VentaHistorica.objects.aggregate(total=Sum("cantidad")).get("total") or Decimal("0")
+            ventas_hist_fecha_max = VentaHistorica.objects.order_by("-fecha").values_list("fecha", flat=True).first()
+            ventas_historicas_summary = _ventas_historicas_plan_summary()
+        except (OperationalError, ProgrammingError):
+            ventas_historicas_summary = {
+                "available": False,
+                "status": "Sin histórico",
+                "tone": "warning",
+                "detail": "La base diaria no está disponible en este entorno.",
+                "date_label": "Sin cobertura",
+                "active_days": 0,
+                "expected_days": 0,
+                "missing_days": 0,
+                "branch_count": 0,
+                "recipe_count": 0,
+                "total_rows": 0,
+                "total_units": Decimal("0"),
+                "top_branches": [],
+                "top_recipes": [],
+            }
+            ventas_historicas_unavailable = True
+        try:
+            solicitudes_venta_periodo = SolicitudVenta.objects.filter(periodo=periodo_pronostico_default)
+            solicitudes_venta_count = solicitudes_venta_periodo.count()
+            solicitudes_venta_total = solicitudes_venta_periodo.aggregate(total=Sum("cantidad")).get("total") or Decimal("0")
+            solicitudes_venta_fecha_max = solicitudes_venta_periodo.order_by("-fecha_inicio").values_list("fecha_inicio", flat=True).first()
+        except (OperationalError, ProgrammingError):
+            solicitudes_venta_unavailable = True
     forecast_preview = request.session.get("pronostico_estadistico_preview")
     forecast_backtest = request.session.get("pronostico_backtest_preview")
     min_confianza_default = request.GET.get("min_confianza_pct")
@@ -17123,21 +17174,23 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
         forecast_compare_escenario = str((forecast_preview or {}).get("escenario") or "base").strip().lower()
     if forecast_compare_escenario not in {"base", "bajo", "alto"}:
         forecast_compare_escenario = "base"
-    try:
-        forecast_vs_solicitud = _forecast_vs_solicitud_preview(
-            forecast_preview,
-            escenario=forecast_compare_escenario,
-        )
-    except (OperationalError, ProgrammingError):
-        forecast_vs_solicitud = None
-        solicitudes_venta_unavailable = True
-    try:
-        forecast_supply_context = build_projection_supply_context_from_forecast_preview(
-            forecast_preview,
-            escenario=forecast_compare_escenario,
-        )
-    except (OperationalError, ProgrammingError):
-        forecast_supply_context = None
+    forecast_vs_solicitud = None
+    forecast_supply_context = None
+    if load_demand_workspace:
+        try:
+            forecast_vs_solicitud = _forecast_vs_solicitud_preview(
+                forecast_preview,
+                escenario=forecast_compare_escenario,
+            )
+        except (OperationalError, ProgrammingError):
+            solicitudes_venta_unavailable = True
+        try:
+            forecast_supply_context = build_projection_supply_context_from_forecast_preview(
+                forecast_preview,
+                escenario=forecast_compare_escenario,
+            )
+        except (OperationalError, ProgrammingError):
+            forecast_supply_context = None
     forecast_preview_summary = _forecast_preview_operational_summary(forecast_preview)
     demand_gate_summary = _commercial_signal_gate(
         forecast_preview_summary,
@@ -17145,26 +17198,34 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
         action_url="#plan-pronosticos",
         action_label="Abrir pronóstico",
     )
-    master_demand_gate_summary = _plan_master_demand_gate(plan_actual)
+    master_demand_gate_summary = _plan_master_demand_gate(plan_actual) if load_plan_deep_context else None
     sucursales = sucursales_operativas()
-    enterprise_board = _plan_enterprise_board(
-        plan_actual,
-        explosion,
-        plan_vs_pronostico,
-        mrp_periodo_resumen,
+    enterprise_board = (
+        _plan_enterprise_board(
+            plan_actual,
+            explosion,
+            plan_vs_pronostico,
+            mrp_periodo_resumen,
+        )
+        if load_plan_deep_context
+        else None
     )
     stage_key = (request.GET.get("stage_key") or "auto").strip().lower()
     closure_key = (request.GET.get("closure_key") or "auto").strip().lower()
     handoff_key = (request.GET.get("handoff_key") or "auto").strip().lower()
     master_focus_key = (request.GET.get("master_focus_key") or "auto").strip().lower()
     master_missing_key = (request.GET.get("master_missing_key") or "auto").strip().lower()
-    document_control = _plan_document_control(
-        plan_actual,
-        stage_key=stage_key,
-        closure_key=closure_key,
-        handoff_key=handoff_key,
-        master_focus_key=master_focus_key,
-        master_missing_key=master_missing_key,
+    document_control = (
+        _plan_document_control(
+            plan_actual,
+            stage_key=stage_key,
+            closure_key=closure_key,
+            handoff_key=handoff_key,
+            master_focus_key=master_focus_key,
+            master_missing_key=master_missing_key,
+        )
+        if load_plan_deep_context
+        else None
     )
     if document_control and enterprise_board:
         plan_focus_base = reverse("recetas:plan_produccion") + f"?{urlencode({'plan_id': plan_actual.id})}"
@@ -17238,37 +17299,55 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
             }
         else:
             document_control["master_focus"] = None
-    critical_path_rows = _recipes_critical_path_rows(
-        document_control["document_stage_rows"] if document_control else [],
-        owner="Plan / Compras / Producción",
-        fallback_url=reverse("recetas:plan_produccion"),
+    critical_path_rows = (
+        _recipes_critical_path_rows(
+            document_control["document_stage_rows"] if document_control else [],
+            owner="Plan / Compras / Producción",
+            fallback_url=reverse("recetas:plan_produccion"),
+        )
+        if load_plan_deep_context
+        else []
     )
-    trunk_handoff_rows = _plan_trunk_handoff_rows(
-        plan_actual=plan_actual,
-        explosion=explosion,
-        document_control=document_control,
-        demand_gate_summary=demand_gate_summary,
-        master_demand_gate_summary=master_demand_gate_summary,
+    trunk_handoff_rows = (
+        _plan_trunk_handoff_rows(
+            plan_actual=plan_actual,
+            explosion=explosion,
+            document_control=document_control,
+            demand_gate_summary=demand_gate_summary,
+            master_demand_gate_summary=master_demand_gate_summary,
+        )
+        if load_plan_deep_context
+        else []
     )
     critical_master_demand_rows = list((master_demand_gate_summary or {}).get("rows") or [])[:3]
-    daily_decision_rows = _plan_daily_decisions(
-        plan_actual=plan_actual,
-        demand_gate_summary=demand_gate_summary,
-        master_demand_gate_summary=master_demand_gate_summary,
-        ventas_historicas_summary=ventas_historicas_summary,
-        document_control=document_control,
-    )
-    branch_priority_rows = _plan_branch_priority_rows(
-        plan_actual=plan_actual,
-        periodo=periodo_pronostico_default,
-    )
-    branch_supply_rows = _plan_branch_supply_rows(
-        branch_priority_rows=branch_priority_rows,
-    )
+    if load_plan_diagnostics:
+        daily_decision_rows = _plan_daily_decisions(
+            plan_actual=plan_actual,
+            demand_gate_summary=demand_gate_summary,
+            master_demand_gate_summary=master_demand_gate_summary,
+            ventas_historicas_summary=ventas_historicas_summary,
+            document_control=document_control,
+        )
+        branch_priority_rows = _plan_branch_priority_rows(
+            plan_actual=plan_actual,
+            periodo=periodo_pronostico_default,
+        )
+        branch_supply_rows = _plan_branch_supply_rows(
+            branch_priority_rows=branch_priority_rows,
+        )
+    else:
+        daily_decision_rows = []
+        branch_priority_rows = []
+        branch_supply_rows = []
     return render(
         request,
         "recetas/plan_produccion.html",
         {
+            "active_section": active_section,
+            "load_demand_workspace": load_demand_workspace,
+            "load_mrp_workspace": load_mrp_workspace,
+            "load_dg_dashboard": load_dg_dashboard,
+            "load_plan_diagnostics": load_plan_diagnostics,
             "planes": planes[:30],
             "plan_status_dashboard": plan_status_dashboard,
             "plan_status_cards": plan_status_cards,
@@ -17277,6 +17356,7 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
             "dg_end_date": dg_filters["end_date"].isoformat() if dg_filters["end_date"] else "",
             "dg_group_by": dg_filters["group_by"],
             "plan_actual": plan_actual,
+            "plan_items": plan_items,
             "recetas_disponibles": recetas_disponibles,
             "explosion": explosion,
             "plan_vs_pronostico": plan_vs_pronostico,
