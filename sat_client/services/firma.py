@@ -68,6 +68,7 @@ def build_signature(
     private_key,
     *,
     token_reference_id: str | None = None,
+    certificate: str | None = None,
 ) -> etree._Element:
     reference_id = reference_element.get(etree.QName(WSU_NS, "Id"))
     if not reference_id:
@@ -117,6 +118,11 @@ def build_signature(
             URI=f"#{token_reference_id}",
             ValueType=X509_VALUE_TYPE,
         )
+    elif certificate:
+        key_info = etree.SubElement(signature, etree.QName(DS_NS, "KeyInfo"))
+        x509_data = etree.SubElement(key_info, etree.QName(DS_NS, "X509Data"))
+        x509_certificate = etree.SubElement(x509_data, etree.QName(DS_NS, "X509Certificate"))
+        x509_certificate.text = certificate
     return signature
 
 
@@ -152,7 +158,7 @@ def build_security_header(credentials: SatCredentials, *, now: datetime | None =
 
 
 def build_signed_sat_request(
-    tag_name: str,
+    tag_name: str | etree.QName,
     attributes: dict[str, str],
     credentials: SatCredentials,
 ) -> etree._Element:
@@ -162,5 +168,5 @@ def build_signed_sat_request(
     for key, value in attributes.items():
         if value not in (None, ""):
             element.set(key, str(value))
-    element.append(build_signature(element, private_key))
+    element.append(build_signature(element, private_key, certificate=certificate_base64(credentials.cer_path)))
     return element
