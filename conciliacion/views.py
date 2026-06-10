@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.contrib import messages
+from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
@@ -15,6 +16,7 @@ from conciliacion.services.importador import (
 )
 from core.access import is_admin_or_dg
 from core.audit import log_event
+from sat_client.models import CfdiDescargado, LogDescargaSat
 from syncfy_client.models import CuentaBancaria
 
 
@@ -55,6 +57,9 @@ def conciliacion_bancaria_view(request: HttpRequest) -> HttpResponse:
     contexto.update(
         {
             "cuentas": CuentaBancaria.objects.filter(activa=True).order_by("banco"),
+            "sat_descarga_enabled": getattr(settings, "SAT_DESCARGA_ENABLED", False),
+            "sat_cfdis_total": CfdiDescargado.objects.count(),
+            "sat_ultimo_log": LogDescargaSat.objects.order_by("-creado_en").first(),
             "preview": preview,
             "preview_rows": preview.movimientos[:50] if preview else [],
             "movimiento_rows": _movimiento_rows(contexto["ultimos_movimientos"], contexto["candidatos"]),
@@ -83,7 +88,7 @@ def _handle_preview(request: HttpRequest) -> PreviewImportacion | None:
     request.session.modified = True
     messages.success(
         request,
-        f"Preview listo: {len(preview.movimientos)} movimientos validos y {len(preview.errores)} filas con error.",
+        f"Revision lista: {len(preview.movimientos)} movimientos validos y {len(preview.errores)} filas con error.",
     )
     return preview
 
@@ -91,7 +96,7 @@ def _handle_preview(request: HttpRequest) -> PreviewImportacion | None:
 def _handle_confirm(request: HttpRequest) -> None:
     preview_payload = request.session.get(SESSION_PREVIEW_KEY)
     if not isinstance(preview_payload, dict):
-        messages.error(request, "No hay preview pendiente para importar.")
+        messages.error(request, "No hay revision pendiente para importar.")
         return
     try:
         preview = PreviewImportacion.from_session_payload(preview_payload)
