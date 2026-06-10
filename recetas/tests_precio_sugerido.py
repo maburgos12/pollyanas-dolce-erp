@@ -10,6 +10,7 @@ Catálogo/precio/familia desde Point; margen meta 55%; precio sugerido como piso
 """
 
 import json
+from io import BytesIO
 from datetime import date
 from decimal import Decimal
 from uuid import uuid4
@@ -17,6 +18,7 @@ from uuid import uuid4
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from openpyxl import load_workbook
 
 from core.models import Sucursal
 from recetas.models import Receta, RecetaAgrupacionAddon, RecetaCostoVersion
@@ -234,6 +236,34 @@ class PrecioSugeridoViewTests(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertIn("text/csv", resp["Content-Type"])
+
+    def test_export_xlsx_con_branding_y_agrupado_por_familia(self):
+        r1 = self._receta("Pastel A", "XA1")
+        self._point("XA1", "Pastel A", precio=300, categoria="Pastel Mediano")
+        self._operativo(r1, fab=100, mp=60, mo=20, ind=10, emp=10)
+        r2 = self._receta("Pay B", "XB1")
+        self._point("XB1", "Pay B", precio=300, categoria="Pay Grande")
+        self._operativo(r2, fab=100, mp=60, mo=20, ind=10, emp=10)
+
+        resp = self.client.get(
+            reverse("recetas:monitor_margenes_precio_sugerido"), {"meses": 6, "export": "xlsx"},
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            resp["Content-Type"],
+        )
+        wb = load_workbook(BytesIO(resp.content))
+        ws = wb["Precio sugerido"]
+        self.assertEqual(ws["A5"].value, "Pollyana's Dolce - Precio minimo rentable")
+        family_headers = [
+            cell.value for row in ws.iter_rows(min_row=13, max_col=1) for cell in row
+            if isinstance(cell.value, str) and cell.value.startswith("Familia:")
+        ]
+        self.assertIn("Familia: Pastel Mediano (1 productos)", family_headers)
+        self.assertIn("Familia: Pay Grande (1 productos)", family_headers)
+        self.assertTrue(any(drawing.anchor._from.row == 0 for drawing in ws._images))
 
     # ---- margen meta por fuente ----
     def test_margen_meta_55_para_fab_completo(self):

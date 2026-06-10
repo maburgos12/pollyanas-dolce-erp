@@ -341,7 +341,9 @@
       </div>
       <div class="ps-control ps-control-actions">
         <button type="button" class="btn btn-primary" id="ps-calc">Calcular precio sugerido</button>
-        <a class="btn btn-secondary btn-export" id="ps-export" href="#" hidden>Exportar CSV</a>
+        <div class="ps-export-box">
+          <a class="btn btn-secondary btn-export" id="ps-export" href="#" hidden>Exportar Excel</a>
+        </div>
       </div>
     </div>
     <div class="ps-summary" id="ps-summary" hidden></div>
@@ -679,7 +681,7 @@
 
   function estadoChip(estado) {
     if (estado === "CRITICO") return '<span class="mm-badge is-red" title="Se vende por debajo del costo: pierde dinero">⚠ Pierde dinero</span>';
-    if (estado === "AJUSTE") return '<span class="mm-badge is-yellow" title="Margen menor al 55%: subir precio">Ajuste</span>';
+    if (estado === "AJUSTE") return '<span class="mm-badge is-yellow" title="Margen menor a la meta de su fuente de costo: subir precio">Ajuste</span>';
     if (estado === "OK") return '<span class="mm-badge is-green">OK</span>';
     if (estado === "SIN_COSTO") return '<span class="mm-badge is-muted" title="Sin costo en ninguna fuente">Sin costo</span>';
     return '<span class="mm-badge is-muted">Sin precio</span>';
@@ -771,7 +773,7 @@
     result.innerHTML = html;
 
     exportLink.hidden = false;
-    exportLink.href = ENDPOINT + "?" + data.export_query;
+    exportLink.href = ENDPOINT + "?" + (data.export_excel_query || data.export_query);
   }
 
   function calcular() {

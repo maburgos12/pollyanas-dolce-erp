@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
+from django.contrib.staticfiles import finders
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
 from django.db import OperationalError, ProgrammingError, connection, transaction
@@ -25,7 +26,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.drawing.image import Image as OpenpyxlImage
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from rapidfuzz import fuzz
 
 from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
@@ -6232,6 +6234,203 @@ def _margen_meta_por_fuente(fuente: str) -> Decimal:
     return MARGEN_META_FAB_PCT
 
 
+def _precio_sugerido_excel_response(
+    *,
+    rows: list[dict[str, Any]],
+    cnt: dict[str, int],
+    meses: int,
+    today: date,
+    start_period: date,
+    current_period: date,
+    familias_sel: list[str],
+) -> HttpResponse:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Precio sugerido"
+
+    brand = "8B2252"
+    brand_dark = "5F1638"
+    pale = "F9EEF3"
+    soft = "FFF7FB"
+    header_fill = PatternFill("solid", fgColor=brand)
+    family_fill = PatternFill("solid", fgColor=pale)
+    summary_fill = PatternFill("solid", fgColor=soft)
+    thin = Side(style="thin", color="E6D7DE")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    ws.sheet_view.showGridLines = False
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_margins.left = 0.25
+    ws.page_margins.right = 0.25
+    ws.page_margins.top = 0.35
+    ws.page_margins.bottom = 0.35
+
+    logo_path = finders.find("operacion/pollyanas-logo-transparent.png")
+    if logo_path:
+        logo = OpenpyxlImage(logo_path)
+        logo.height = 58
+        logo.width = 160
+        ws.add_image(logo, "A1")
+
+    ws.merge_cells("A5:T5")
+    ws["A5"] = "Pollyana's Dolce - Precio minimo rentable"
+    ws["A5"].font = Font(bold=True, size=16, color=brand_dark)
+    ws["A5"].alignment = Alignment(horizontal="left")
+    ws.merge_cells("A6:T6")
+    familias_label = ", ".join(familias_sel) if familias_sel else "Todas las familias Point"
+    ws["A6"] = (
+        f"Monitor de margenes | Ventana {meses} meses | "
+        f"{start_period:%d/%m/%Y} a {current_period:%d/%m/%Y} | {familias_label}"
+    )
+    ws["A6"].font = Font(size=10, color="5B4A52")
+    ws["A6"].alignment = Alignment(horizontal="left")
+    ws.merge_cells("A7:T7")
+    ws["A7"] = (
+        "Margen meta: 55% costo completo/reventa · 65% solo materia prima. "
+        "Archivo listo para imprimir con texto y tabla alineados al mismo margen."
+    )
+    ws["A7"].font = Font(size=10, color="5B4A52")
+
+    summary_rows = [
+        ("Productos activos", len(rows)),
+        ("Requieren ajuste", cnt["requieren_ajuste"]),
+        ("Pierden dinero", cnt["criticos"]),
+        ("Fab. completo", cnt["fab"]),
+        ("Solo MP", cnt["mp"]),
+        ("Reventa", cnt["reventa"]),
+        ("Sin costo", cnt["sin_costo"]),
+        ("Sin precio", cnt["sin_precio"]),
+    ]
+    for idx, (label, value) in enumerate(summary_rows):
+        col = 1 + (idx * 2)
+        ws.cell(9, col, label)
+        ws.cell(9, col + 1, value)
+        ws.cell(9, col).font = Font(bold=True, color=brand_dark)
+        ws.cell(9, col + 1).font = Font(bold=True, color=brand)
+        ws.cell(9, col).fill = summary_fill
+        ws.cell(9, col + 1).fill = summary_fill
+        ws.cell(9, col).border = border
+        ws.cell(9, col + 1).border = border
+
+    headers = [
+        "Producto", "Codigo Point", "Familia Point", "Tipo", "Fuente costo",
+        f"Costo inicial ({meses}m)", "Costo ultimo mes", "Variacion costo %",
+        "MP", "Mano obra", "Indirectos", "Empaque",
+        "Precio actual", "Fuente precio", "Margen actual %", "Margen meta %",
+        "Utilidad por unidad", "Precio sugerido", "Falta subir %", "Estado",
+    ]
+    header_row = 12
+    for col, header in enumerate(headers, start=1):
+        cell = ws.cell(header_row, col, header)
+        cell.fill = header_fill
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = border
+
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        grouped[row["familia_point"] or "Sin familia"].append(row)
+
+    current_row = header_row + 1
+    for familia in sorted(grouped, key=lambda value: value.lower()):
+        family_rows = sorted(
+            grouped[familia],
+            key=lambda item: (
+                item["estado"],
+                item["_margen_sort"],
+                item["nombre"].lower(),
+            ),
+        )
+        ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=len(headers))
+        family_cell = ws.cell(current_row, 1, f"Familia: {familia} ({len(family_rows)} productos)")
+        family_cell.fill = family_fill
+        family_cell.font = Font(bold=True, color=brand_dark)
+        family_cell.alignment = Alignment(horizontal="left")
+        for col in range(1, len(headers) + 1):
+            ws.cell(current_row, col).border = border
+        current_row += 1
+
+        group_start = current_row
+        for row in family_rows:
+            bd = row["breakdown"] or {}
+            values = [
+                row["nombre"],
+                row["codigo_point"],
+                row["familia_point"],
+                row["modo_costeo_label"],
+                row["costo_fuente"],
+                row["costo_inicial"],
+                row["costo_completo"],
+                row["variacion_costo_pct"] if row["variacion_costo_pct"] is not None else None,
+                bd.get("mp"),
+                bd.get("mo"),
+                bd.get("ind"),
+                bd.get("emp"),
+                row["precio_actual"] if row["precio_actual"] > 0 else None,
+                row["precio_fuente"],
+                row["margen_actual"] if row["margen_actual"] is not None else None,
+                row["margen_meta"],
+                row["utilidad_unit"] if row["utilidad_unit"] is not None else None,
+                row["precio_sugerido"] if row["precio_sugerido"] > 0 else None,
+                row["falta_subir_pct"] if row["falta_subir_pct"] is not None else None,
+                row["estado"],
+            ]
+            for col, value in enumerate(values, start=1):
+                cell = ws.cell(current_row, col, value)
+                cell.border = border
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+                if col in {6, 7, 9, 10, 11, 12, 13, 17, 18}:
+                    cell.number_format = '$#,##0.00'
+                elif col in {8, 15, 16, 19}:
+                    cell.number_format = '0.0'
+                if col == 20:
+                    if row["estado"] == "CRITICO":
+                        cell.fill = PatternFill("solid", fgColor="FDE2E2")
+                        cell.font = Font(bold=True, color="991B1B")
+                    elif row["estado"] == "AJUSTE":
+                        cell.fill = PatternFill("solid", fgColor="FEF3C7")
+                        cell.font = Font(bold=True, color="92400E")
+                    elif row["estado"] == "OK":
+                        cell.fill = PatternFill("solid", fgColor="DCFCE7")
+                        cell.font = Font(bold=True, color="166534")
+            ws.row_dimensions[current_row].outlineLevel = 1
+            current_row += 1
+        if current_row > group_start:
+            ws.row_dimensions.group(group_start, current_row - 1, outline_level=1, hidden=False)
+
+    widths = {
+        "A": 34, "B": 15, "C": 20, "D": 14, "E": 18,
+        "F": 14, "G": 14, "H": 13, "I": 12, "J": 12,
+        "K": 12, "L": 12, "M": 14, "N": 14, "O": 13,
+        "P": 13, "Q": 15, "R": 15, "S": 13, "T": 14,
+    }
+    for col, width in widths.items():
+        ws.column_dimensions[col].width = width
+    for row_idx in range(1, current_row):
+        ws.row_dimensions[row_idx].height = 22
+    ws.row_dimensions[1].height = 45
+    ws.row_dimensions[5].height = 26
+    ws.row_dimensions[header_row].height = 34
+    ws.freeze_panes = "A13"
+    ws.print_title_rows = f"{header_row}:{header_row}"
+    ws.print_area = f"A1:T{max(current_row - 1, header_row)}"
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    response = HttpResponse(
+        buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = (
+        f'attachment; filename="precio_sugerido_pollyanas_{today.isoformat()}_{meses}m.xlsx"'
+    )
+    return response
+
+
 def _serie_variacion(serie: list[Decimal]) -> Decimal | None:
     if len(serie) >= 2 and serie[0] > 0:
         return ((serie[-1] - serie[0]) / serie[0] * Decimal("100")).quantize(Decimal("0.1"))
@@ -6263,7 +6462,9 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
         meses = 6
 
     familias_sel = [value.strip() for value in request.GET.getlist("familia") if value.strip()]
-    export_csv = request.GET.get("export") == "csv"
+    export_format = (request.GET.get("export") or "").lower()
+    export_csv = export_format == "csv"
+    export_xlsx = export_format in {"xlsx", "excel"}
 
     today = timezone.localdate()
     start_period = _ventana_meses_inicio(today, meses)
@@ -6569,6 +6770,17 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             ])
         return response
 
+    if export_xlsx:
+        return _precio_sugerido_excel_response(
+            rows=rows,
+            cnt=cnt,
+            meses=meses,
+            today=today,
+            start_period=start_period,
+            current_period=current_period,
+            familias_sel=familias_sel,
+        )
+
     def _s(value):
         return str(value) if value is not None else None
 
@@ -6602,7 +6814,9 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
         })
 
     export_params = request.GET.copy()
-    export_params["export"] = "csv"
+    export_params["export"] = "xlsx"
+    export_csv_params = request.GET.copy()
+    export_csv_params["export"] = "csv"
 
     return JsonResponse({
         "meses": meses,
@@ -6622,6 +6836,8 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
         "requieren_ajuste": cnt["requieren_ajuste"],
         "combinados": cnt["combinados"],
         "export_query": export_params.urlencode(),
+        "export_excel_query": export_params.urlencode(),
+        "export_csv_query": export_csv_params.urlencode(),
         "rows": payload_rows,
     })
 
