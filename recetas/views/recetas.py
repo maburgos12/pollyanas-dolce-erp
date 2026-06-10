@@ -97,8 +97,8 @@ from reportes.executive_panels import _partial_month_amount_quantity
 from reportes.models import (
     RecetaCostoHistoricoMensual,
     ProductoCostoOperativoMensual,
-    ProductoSucursalContribucionMensual,
-    EmpresaResultadoMensual,
+    ProductoReventaCosto,
+    ProductoReventaCostoHistoricoMensual,
 )
 from ventas.models import VentaAutoritativaPoint
 
@@ -6167,13 +6167,15 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
     export_params = request.GET.copy()
     export_params["export"] = "csv"
 
-    familias_produccion = list(
-        Receta.objects.filter(tipo=Receta.TIPO_PRODUCTO_FINAL)
-        .exclude(familia="")
-        .values_list("familia", flat=True)
-        .distinct()
-        .order_by("familia")
-    )
+    # Familias para el filtro del panel de precio sugerido: categorías de Point
+    # (fuente de verdad), tomadas de los productos activos con precio vigente.
+    familias_produccion = sorted({
+        (categoria or "").strip()
+        for categoria in PointProduct.objects.filter(
+            precio_activo=True, precio__isnull=False
+        ).values_list("category", flat=True)
+        if (categoria or "").strip()
+    })
 
     return render(
         request,
@@ -6207,74 +6209,35 @@ def _ventana_meses_inicio(today: date, meses: int) -> date:
     return date(year, month, 1)
 
 
-# Ratio mínimo de gasto operativo (comercial + corporativo) sobre venta para
-# considerar que el P&L está cargado. Por debajo de esto los gastos están
-# incompletos y derivar el margen daría un piso engañosamente bajo.
-MIN_GASTO_OPERATIVO_PCT = Decimal("5")
+# Fuentes de costo (etiqueta honesta de qué costo se usó por producto).
+COSTO_FAB_COMPLETO = "FAB_COMPLETO"   # operativo con MO/indirectos/empaque reales
+COSTO_MP_FALLBACK = "MP_FALLBACK"     # solo materia prima (rotulado)
+COSTO_REVENTA = "REVENTA_HISTORICO"   # costo de adquisición de reventa
+COSTO_SIN = "SIN_COSTO"               # sin costo en ninguna fuente
+
+MARGEN_META_PCT = Decimal("55")
 
 
-def _margen_meta_desde_pnl(
-    start_period: date,
-    current_period: date,
-    utilidad_meta_pct: Decimal,
-    objetivo_margen_pct: Decimal,
-) -> tuple[Decimal, dict[str, str] | None, str]:
-    """Define el margen bruto meta (% sobre venta) como PISO.
-
-    El objetivo de margen bruto (estándar del negocio, default 65%) actúa como
-    piso. Si el P&L real (EmpresaResultadoMensual) tiene los gastos operativos
-    cargados y exigen un margen mayor (comercial % + corporativo % + utilidad
-    meta %), se usa ese valor más alto (fuente PNL_PISO). Si el P&L no está o los
-    gastos vienen incompletos, manda el objetivo (fuente OBJETIVO). Nunca devuelve
-    un meta por debajo del objetivo, para no sugerir precios poco rentables."""
-    objetivo = objetivo_margen_pct.quantize(Decimal("0.1"))
-    if objetivo < Decimal("1"):
-        objetivo = Decimal("1.0")
-    if objetivo > Decimal("90"):
-        objetivo = Decimal("90.0")
-
-    agg = EmpresaResultadoMensual.objects.filter(
-        periodo__gte=start_period, periodo__lte=current_period
-    ).aggregate(
-        venta=Sum("venta_total"),
-        comercial=Sum("gasto_comercial_total"),
-        corporativo=Sum("gasto_corporativo_total"),
-    )
-    venta = Decimal(str(agg["venta"] or 0))
-    comercial_pct = (Decimal(str(agg["comercial"] or 0)) / venta * Decimal("100")).quantize(Decimal("0.1")) if venta > 0 else Decimal("0.0")
-    corporativo_pct = (Decimal(str(agg["corporativo"] or 0)) / venta * Decimal("100")).quantize(Decimal("0.1")) if venta > 0 else Decimal("0.0")
-
-    # Gastos operativos incompletos: usar objetivo fijo y avisar por qué.
-    if venta <= 0 or (comercial_pct + corporativo_pct) < MIN_GASTO_OPERATIVO_PCT:
-        razon = "SIN_PNL" if venta <= 0 else "GASTOS_INCOMPLETOS"
-        return objetivo, {"razon": razon, "objetivo_margen_pct": str(objetivo)}, "OBJETIVO"
-
-    derivado = (comercial_pct + corporativo_pct + utilidad_meta_pct).quantize(Decimal("0.1"))
-    # El objetivo es piso: el P&L solo puede subir el meta por encima de él.
-    margen_meta = max(derivado, objetivo)
-    if margen_meta > Decimal("90"):
-        margen_meta = Decimal("90.0")
-    desglose = {
-        "comercial_pct": str(comercial_pct),
-        "corporativo_pct": str(corporativo_pct),
-        "utilidad_meta_pct": str(utilidad_meta_pct.quantize(Decimal("0.1"))),
-        "derivado_pct": str(derivado),
-        "objetivo_margen_pct": str(objetivo),
-    }
-    fuente = "PNL_PISO" if derivado <= objetivo else "PNL"
-    return margen_meta, desglose, fuente
+def _serie_variacion(serie: list[Decimal]) -> Decimal | None:
+    if len(serie) >= 2 and serie[0] > 0:
+        return ((serie[-1] - serie[0]) / serie[0] * Decimal("100")).quantize(Decimal("0.1"))
+    return None
 
 
 @login_required
 def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
-    """Sugiere el precio mínimo rentable por producto vendible.
+    """Precio mínimo rentable por producto activo de Point.
 
-    Base de costo: costo vivo de receta (universal, existe para todo el catálogo),
-    combinando los sabores (addons aprobados) en su producto base ponderados por
-    unidades, y resolviendo las rebanadas por porción. El margen meta es un piso
-    (objetivo de margen bruto, default 65%, que el P&L solo puede subir). El precio
-    sugerido es un PISO: nunca recomienda bajar un precio sano; solo marca los que
-    están por debajo del mínimo rentable. Cubre fabricados y reventa."""
+    Costo base por producto, con fuente etiquetada honestamente:
+      - FAB_COMPLETO: ProductoCostoOperativoMensual.costo_fabricacion_unit con
+        componentes reales (mano de obra + indirectos + empaque > 0).
+      - MP_FALLBACK: solo materia prima (operativo MP, histórico mensual o versión)
+        cuando no hay fabricación completa cargada. Se rotula como tal.
+      - REVENTA_HISTORICO: ProductoReventaCostoHistoricoMensual.costo_promedio.
+      - SIN_COSTO: no hay costo en ninguna fuente.
+    Catálogo, precio vigente y familia salen de Point (fuente de verdad). Los
+    sabores (addons) se combinan en su base; el margen meta es 55%; el precio
+    sugerido es un piso (no recomienda bajar precios sanos)."""
     if not can_view_recetas(request.user):
         raise PermissionDenied
 
@@ -6285,20 +6248,6 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
     if meses not in (3, 6, 12):
         meses = 6
 
-    try:
-        utilidad_meta = Decimal(str(request.GET.get("utilidad_meta") or "15"))
-    except (TypeError, ValueError, ArithmeticError):
-        utilidad_meta = Decimal("15")
-    if utilidad_meta < Decimal("0"):
-        utilidad_meta = Decimal("0")
-    if utilidad_meta > Decimal("80"):
-        utilidad_meta = Decimal("80")
-
-    try:
-        objetivo_margen = Decimal(str(request.GET.get("objetivo_margen") or "65"))
-    except (TypeError, ValueError, ArithmeticError):
-        objetivo_margen = Decimal("65")
-
     familias_sel = [value.strip() for value in request.GET.getlist("familia") if value.strip()]
     export_csv = request.GET.get("export") == "csv"
 
@@ -6307,12 +6256,21 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
     current_period = today.replace(day=1)
     branch_ids = set(sucursales_operativas(today).values_list("id", flat=True))
 
-    margen_meta, meta_desglose, meta_fuente = _margen_meta_desde_pnl(
-        start_period, current_period, utilidad_meta, objetivo_margen
-    )
+    # --- Catálogo Point: fuente de verdad de productos activos, precio y familia ---
+    precio_por_sku: dict[str, Decimal] = {}
+    categoria_por_sku: dict[str, str] = {}
+    for registro in PointProduct.objects.filter(
+        active=True, precio_activo=True, precio__isnull=False
+    ).values("sku", "precio", "category"):
+        sku = (registro["sku"] or "").strip()
+        if not sku:
+            continue
+        precio_por_sku[sku] = Decimal(str(registro["precio"]))
+        categoria_por_sku[sku] = (registro["category"] or "").strip()
+    activos_sku = set(precio_por_sku)
+    familias_point = sorted({c for c in categoria_por_sku.values() if c})
 
-    # Addons aprobados: los sabores no se venden solos; su costo se combina en la
-    # base y se excluyen de la lista de productos vendibles.
+    # --- Addons aprobados: se combinan en su base; no se listan solos ---
     addons_por_base: dict[int, list[int]] = defaultdict(list)
     addon_ids: set[int] = set()
     for registro in RecetaAgrupacionAddon.objects.filter(
@@ -6321,177 +6279,244 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
         addons_por_base[registro["base_receta_id"]].append(registro["addon_receta_id"])
         addon_ids.add(registro["addon_receta_id"])
 
-    recetas_qs = Receta.objects.filter(tipo=Receta.TIPO_PRODUCTO_FINAL).exclude(id__in=addon_ids)
+    # --- Recetas activas (match codigo_point con Point), sin addons ---
+    recetas = list(
+        Receta.objects.filter(
+            tipo=Receta.TIPO_PRODUCTO_FINAL, codigo_point__in=activos_sku
+        ).exclude(id__in=addon_ids)
+    )
     if familias_sel:
-        recetas_qs = recetas_qs.filter(familia__in=familias_sel)
-    recetas = list(recetas_qs)
-    receta_ids = {receta.id for receta in recetas}
-
-    # Costo vivo universal para los vendibles y sus sabores (para el rollup).
+        recetas = [
+            r for r in recetas
+            if categoria_por_sku.get((r.codigo_point or "").strip(), "") in familias_sel
+        ]
+    receta_ids = {r.id for r in recetas}
     addons_necesarios: set[int] = set()
     for receta in recetas:
         addons_necesarios.update(addons_por_base.get(receta.id, []))
     cost_ids = receta_ids | addons_necesarios
-    live_cost_map = (
-        resolve_recipe_cost_map(cost_ids, context=CostContext.CURRENT_LIVE) if cost_ids else {}
-    )
 
-    def _live_cost(recipe_id: int) -> Decimal:
-        resolution = live_cost_map.get(recipe_id)
-        return resolution.total_cost if resolution is not None else Decimal("0")
-
-    # Unidades vendidas + ASP por receta (último mes con dato en la ventana).
+    # --- Serie mensual de costo de fabricación (operativo) + componentes ---
+    op_series: dict[int, list[dict[str, Decimal]]] = defaultdict(list)
     unidades_by: dict[int, Decimal] = {}
-    asp_by: dict[int, Decimal] = {}
     if cost_ids:
         for registro in (
             ProductoCostoOperativoMensual.objects.filter(
-                receta_id__in=cost_ids,
-                periodo__gte=start_period,
-                periodo__lte=current_period,
+                receta_id__in=cost_ids, periodo__gte=start_period, periodo__lte=current_period
             )
             .order_by("receta_id", "periodo")
-            .values("receta_id", "unidades_base", "asp")
+            .values(
+                "receta_id", "costo_fabricacion_unit", "costo_mp_unit",
+                "mano_obra_prod_unit", "indirecto_prod_unit", "empaque_prod_unit", "unidades_base",
+            )
         ):
+            op_series[registro["receta_id"]].append({
+                "fab": Decimal(str(registro["costo_fabricacion_unit"] or 0)),
+                "mp": Decimal(str(registro["costo_mp_unit"] or 0)),
+                "mo": Decimal(str(registro["mano_obra_prod_unit"] or 0)),
+                "ind": Decimal(str(registro["indirecto_prod_unit"] or 0)),
+                "emp": Decimal(str(registro["empaque_prod_unit"] or 0)),
+            })
             unidades_by[registro["receta_id"]] = Decimal(str(registro["unidades_base"] or 0))
-            asp_by[registro["receta_id"]] = Decimal(str(registro["asp"] or 0))
 
-    # Tendencia mensual del costo de receta (materia prima) donde exista historial.
-    mp_series: dict[int, list[tuple[date, Decimal]]] = defaultdict(list)
-    if receta_ids:
+    # --- Fallback materia prima: histórico mensual y versión ---
+    mp_series: dict[int, list[Decimal]] = defaultdict(list)
+    version_cost: dict[int, Decimal] = {}
+    if cost_ids:
         for registro in (
             RecetaCostoHistoricoMensual.objects.filter(
-                receta_id__in=receta_ids,
-                periodo__gte=start_period,
-                periodo__lte=current_period,
+                receta_id__in=cost_ids, periodo__gte=start_period, periodo__lte=current_period
             )
             .order_by("receta_id", "periodo")
-            .values("receta_id", "periodo", "costo_total")
+            .values("receta_id", "costo_total")
         ):
-            mp_series[registro["receta_id"]].append(
-                (registro["periodo"], Decimal(str(registro["costo_total"] or 0)))
-            )
+            mp_series[registro["receta_id"]].append(Decimal(str(registro["costo_total"] or 0)))
+        for registro in (
+            RecetaCostoVersion.objects.filter(receta_id__in=cost_ids, costo_total__gt=0)
+            .order_by("receta_id", "-version_num", "-id")
+            .values("receta_id", "costo_total")
+        ):
+            version_cost.setdefault(registro["receta_id"], Decimal(str(registro["costo_total"])))
 
-    # Precio POS de respaldo cuando no hay ASP del costeo operativo.
+    # --- Reventa: histórico mensual y costo vigente, por SKU ---
+    skus_set = {(r.codigo_point or "").strip() for r in recetas}
+    skus_set.discard("")
+    reventa_series: dict[str, list[Decimal]] = defaultdict(list)
+    reventa_vigente: dict[str, Decimal] = {}
+    if skus_set:
+        for registro in (
+            ProductoReventaCostoHistoricoMensual.objects.filter(
+                producto_point__sku__in=skus_set, periodo__gte=start_period, periodo__lte=current_period
+            )
+            .order_by("producto_point__sku", "periodo")
+            .values("producto_point__sku", "costo_promedio")
+        ):
+            sku = (registro["producto_point__sku"] or "").strip()
+            if sku:
+                reventa_series[sku].append(Decimal(str(registro["costo_promedio"] or 0)))
+        for registro in (
+            ProductoReventaCosto.objects.filter(costo_unitario__gt=0, producto_point__sku__in=skus_set)
+            .order_by("producto_point__sku", "-fecha_vigencia", "-id")
+            .values("producto_point__sku", "costo_unitario")
+        ):
+            sku = (registro["producto_point__sku"] or "").strip()
+            if sku:
+                reventa_vigente.setdefault(sku, Decimal(str(registro["costo_unitario"])))
+
     price_stats = _median_point_prices_bulk(receta_ids, start_period, today, branch_ids)
 
+    def _costo_fabricado(recipe_id: int):
+        """(serie, inicial, ultimo, fuente, breakdown|None) para fabricados."""
+        ops = op_series.get(recipe_id, [])
+        if ops:
+            last = ops[-1]
+            componentes = last["mo"] + last["ind"] + last["emp"]
+            if last["fab"] > 0 and componentes > 0:
+                serie = [o["fab"] for o in ops]
+                breakdown = {k: last[k] for k in ("mp", "mo", "ind", "emp", "fab")}
+                return serie, ops[0]["fab"], last["fab"], COSTO_FAB_COMPLETO, breakdown
+            if last["fab"] > 0:
+                serie = [o["fab"] for o in ops]
+                return serie, ops[0]["fab"], last["fab"], COSTO_MP_FALLBACK, None
+        historico = mp_series.get(recipe_id, [])
+        if historico and historico[-1] > 0:
+            return historico, historico[0], historico[-1], COSTO_MP_FALLBACK, None
+        version = version_cost.get(recipe_id)
+        if version and version > 0:
+            return [version], version, version, COSTO_MP_FALLBACK, None
+        return [], Decimal("0"), Decimal("0"), COSTO_SIN, None
+
+    def _costo_addon(addon_id: int) -> Decimal:
+        ops = op_series.get(addon_id, [])
+        if ops and ops[-1]["fab"] > 0:
+            return ops[-1]["fab"]
+        version = version_cost.get(addon_id)
+        return version if (version and version > 0) else Decimal("0")
+
     rows: list[dict[str, Any]] = []
-    requieren_ajuste = 0
-    criticos = 0
-    sin_costo = 0
-    sin_precio = 0
-    combinados = 0
+    cnt = {
+        "fab": 0, "mp": 0, "reventa": 0, "sin_costo": 0, "sin_precio": 0,
+        "criticos": 0, "requieren_ajuste": 0, "combinados": 0,
+    }
 
     for receta in recetas:
-        base_cost = _live_cost(receta.id).quantize(Decimal("0.01"))
+        sku = (receta.codigo_point or "").strip()
+        familia_point = categoria_por_sku.get(sku, "")
+        es_reventa = receta.modo_costeo == Receta.MODO_COSTEO_REVENTA
 
-        # Combinar sabores (addons) en la base, ponderados por unidades vendidas.
-        addon_list = addons_por_base.get(receta.id, [])
-        base_units = unidades_by.get(receta.id, Decimal("0"))
-        if base_units <= 0 and addon_list:
-            base_units = sum((unidades_by.get(aid, Decimal("0")) for aid in addon_list), Decimal("0"))
-        addon_cost = Decimal("0")
-        if addon_list and base_units > 0:
-            for addon_id in addon_list:
-                addon_units = unidades_by.get(addon_id, Decimal("0"))
-                if addon_units > 0:
-                    addon_cost += _live_cost(addon_id) * addon_units / base_units
-        addon_cost = addon_cost.quantize(Decimal("0.01"))
+        if es_reventa:
+            serie = reventa_series.get(sku, [])
+            if serie and serie[-1] > 0:
+                costo_ini, costo_ult, fuente, breakdown = serie[0], serie[-1], COSTO_REVENTA, None
+            elif reventa_vigente.get(sku, Decimal("0")) > 0:
+                vig = reventa_vigente[sku]
+                serie, costo_ini, costo_ult, fuente, breakdown = [vig], vig, vig, COSTO_REVENTA, None
+            else:
+                serie, costo_ini, costo_ult, fuente, breakdown = [], Decimal("0"), Decimal("0"), COSTO_SIN, None
+            addon_cost = Decimal("0")
+        else:
+            serie, costo_ini, costo_ult, fuente, breakdown = _costo_fabricado(receta.id)
+            addon_list = addons_por_base.get(receta.id, [])
+            base_units = unidades_by.get(receta.id, Decimal("0"))
+            if base_units <= 0 and addon_list:
+                base_units = sum((unidades_by.get(a, Decimal("0")) for a in addon_list), Decimal("0"))
+            addon_cost = Decimal("0")
+            if addon_list and base_units > 0 and fuente != COSTO_SIN:
+                for addon_id in addon_list:
+                    addon_units = unidades_by.get(addon_id, Decimal("0"))
+                    if addon_units > 0:
+                        addon_cost += _costo_addon(addon_id) * addon_units / base_units
+            addon_cost = addon_cost.quantize(Decimal("0.01"))
+
+        costo_completo = (costo_ult + addon_cost).quantize(Decimal("0.01"))
+        costo_inicial = (costo_ini + addon_cost).quantize(Decimal("0.01"))
         tiene_sabores = addon_cost > 0
         if tiene_sabores:
-            combinados += 1
+            cnt["combinados"] += 1
+        n_sabores = len([
+            a for a in addons_por_base.get(receta.id, [])
+            if unidades_by.get(a, Decimal("0")) > 0 and _costo_addon(a) > 0
+        ])
+        variacion = _serie_variacion([Decimal(str(s)) for s in serie])
 
-        costo_completo = (base_cost + addon_cost).quantize(Decimal("0.01"))
-        if costo_completo <= 0:
-            sin_costo += 1
-            continue
-
-        asp = asp_by.get(receta.id, Decimal("0"))
-        precio_actual = asp if asp > 0 else price_stats.get(receta.id, (Decimal("0"), 0))[0]
-
-        serie = mp_series.get(receta.id, [])
-        variacion_costo_pct = None
-        if len(serie) >= 2 and serie[0][1] > 0:
-            variacion_costo_pct = (
-                ((serie[-1][1] - serie[0][1]) / serie[0][1]) * Decimal("100")
-            ).quantize(Decimal("0.1"))
-
-        margen_actual = None
-        utilidad_unit = None
-        if precio_actual > 0:
-            margen_actual = (
-                ((precio_actual - costo_completo) / precio_actual) * Decimal("100")
-            ).quantize(Decimal("0.1"))
-            utilidad_unit = (precio_actual - costo_completo).quantize(Decimal("0.01"))
-        else:
-            sin_precio += 1
-
-        sugerencia = suggest_sale_price(
-            unit_cost=costo_completo,
-            target_margin_pct=margen_meta,
-            rounding_increment=Decimal("5"),
-        )
-        precio_sugerido = sugerencia.suggested_price
-
-        # El sugerido es un PISO: solo se marca lo que falta SUBIR; nunca bajar.
-        falta_subir_pct = None
-        if precio_actual > 0 and precio_actual < precio_sugerido:
-            falta_subir_pct = (
-                ((precio_sugerido - precio_actual) / precio_actual) * Decimal("100")
-            ).quantize(Decimal("0.1"))
-
+        precio_actual = precio_por_sku.get(sku, Decimal("0"))
+        precio_fuente = "PRECIO_POINT"
         if precio_actual <= 0:
+            precio_actual = price_stats.get(receta.id, (Decimal("0"), 0))[0]
+            precio_fuente = "POS_MEDIANA" if precio_actual > 0 else "SIN_PRECIO"
+
+        margen = None
+        utilidad = None
+        if costo_completo > 0 and precio_actual > 0:
+            margen = ((precio_actual - costo_completo) / precio_actual * Decimal("100")).quantize(Decimal("0.1"))
+            utilidad = (precio_actual - costo_completo).quantize(Decimal("0.01"))
+
+        if costo_completo > 0:
+            precio_sugerido = suggest_sale_price(
+                unit_cost=costo_completo, target_margin_pct=MARGEN_META_PCT, rounding_increment=Decimal("5"),
+            ).suggested_price
+        else:
+            precio_sugerido = Decimal("0")
+
+        falta_subir = None
+        if precio_actual > 0 and precio_sugerido > 0 and precio_actual < precio_sugerido:
+            falta_subir = ((precio_sugerido - precio_actual) / precio_actual * Decimal("100")).quantize(Decimal("0.1"))
+
+        if fuente == COSTO_SIN or costo_completo <= 0:
+            estado = "SIN_COSTO"
+            cnt["sin_costo"] += 1
+        elif precio_actual <= 0:
             estado = "SIN_PRECIO"
-            requiere = False
-        elif margen_actual is not None and margen_actual < 0:
+            cnt["sin_precio"] += 1
+        elif precio_actual < costo_completo:
             estado = "CRITICO"
-            requiere = True
-            criticos += 1
-            requieren_ajuste += 1
-        elif precio_actual < precio_sugerido:
+            cnt["criticos"] += 1
+            cnt["requieren_ajuste"] += 1
+        elif margen is not None and margen < MARGEN_META_PCT:
             estado = "AJUSTE"
-            requiere = True
-            requieren_ajuste += 1
+            cnt["requieren_ajuste"] += 1
         else:
             estado = "OK"
-            requiere = False
 
-        rows.append(
-            {
-                "receta_id": receta.id,
-                "nombre": receta.nombre,
-                "codigo_point": receta.codigo_point or "",
-                "familia": receta.familia or "",
-                "modo_costeo": receta.modo_costeo,
-                "modo_costeo_label": receta.get_modo_costeo_display(),
-                "es_reventa": receta.modo_costeo == Receta.MODO_COSTEO_REVENTA,
-                "base_cost": base_cost,
-                "addon_cost": addon_cost,
-                "costo_completo": costo_completo,
-                "tiene_sabores": tiene_sabores,
-                "n_sabores": len([a for a in addon_list if unidades_by.get(a, Decimal("0")) > 0]),
-                "variacion_costo_pct": variacion_costo_pct,
-                "precio_actual": precio_actual,
-                "margen_actual": margen_actual,
-                "utilidad_unit": utilidad_unit,
-                "precio_sugerido": precio_sugerido,
-                "falta_subir_pct": falta_subir_pct,
-                "estado": estado,
-                "requiere_ajuste": requiere,
-                "serie": [float(valor) for _, valor in serie],
-                "meses_con_dato": len(serie),
-            }
-        )
+        if fuente == COSTO_FAB_COMPLETO:
+            cnt["fab"] += 1
+        elif fuente == COSTO_MP_FALLBACK:
+            cnt["mp"] += 1
+        elif fuente == COSTO_REVENTA:
+            cnt["reventa"] += 1
 
-    # Orden: críticos primero, luego los que requieren ajuste, luego peor margen arriba.
-    estado_orden = {"CRITICO": 0, "AJUSTE": 1, "SIN_PRECIO": 2, "OK": 3}
-    rows.sort(
-        key=lambda item: (
-            estado_orden.get(item["estado"], 9),
-            item["margen_actual"] if item["margen_actual"] is not None else Decimal("999"),
-            item["nombre"].lower(),
-        )
-    )
+        rows.append({
+            "receta_id": receta.id,
+            "nombre": receta.nombre,
+            "codigo_point": sku,
+            "familia_point": familia_point or "—",
+            "modo_costeo_label": receta.get_modo_costeo_display(),
+            "es_reventa": es_reventa,
+            "costo_inicial": costo_inicial,
+            "costo_completo": costo_completo,
+            "addon_cost": addon_cost,
+            "tiene_sabores": tiene_sabores,
+            "n_sabores": n_sabores,
+            "costo_fuente": fuente,
+            "breakdown": breakdown,
+            "variacion_costo_pct": variacion,
+            "precio_actual": precio_actual,
+            "precio_fuente": precio_fuente,
+            "margen_actual": margen,
+            "utilidad_unit": utilidad,
+            "precio_sugerido": precio_sugerido,
+            "falta_subir_pct": falta_subir,
+            "estado": estado,
+            "serie": [float(s) for s in serie],
+            "_margen_sort": margen if margen is not None else Decimal("9999"),
+        })
+
+    estado_orden = {"CRITICO": 0, "AJUSTE": 1, "OK": 2, "SIN_PRECIO": 3, "SIN_COSTO": 4}
+    rows.sort(key=lambda item: (
+        estado_orden.get(item["estado"], 9),
+        item["_margen_sort"],
+        item["nombre"].lower(),
+    ))
 
     if export_csv:
         response = HttpResponse(content_type="text/csv; charset=utf-8")
@@ -6500,100 +6525,84 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
         )
         response.write("﻿")
         writer = csv.writer(response)
-        writer.writerow(
-            [
-                "Producto",
-                "Codigo Point",
-                "Familia",
-                "Tipo costeo",
-                "Costo base receta",
-                "Costo sabores combinados",
-                "Costo completo",
-                "Variacion costo %",
-                "Precio actual",
-                "Margen bruto actual %",
-                "Utilidad por unidad",
-                f"Precio minimo sugerido (margen meta {margen_meta}%)",
-                "Falta subir %",
-                "Estado",
-            ]
-        )
+        writer.writerow([
+            "Producto", "Codigo Point", "Familia Point", "Tipo", "Fuente costo",
+            f"Costo inicial ({meses}m)", "Costo ultimo mes", "Variacion costo %",
+            "MP", "Mano obra", "Indirectos", "Empaque",
+            "Precio actual", "Fuente precio", "Margen actual %", "Utilidad por unidad",
+            f"Precio sugerido (margen {MARGEN_META_PCT}%)", "Falta subir %", "Estado",
+        ])
         for row in rows:
-            writer.writerow(
-                [
-                    row["nombre"],
-                    row["codigo_point"],
-                    row["familia"],
-                    row["modo_costeo_label"],
-                    row["base_cost"],
-                    row["addon_cost"],
-                    row["costo_completo"],
-                    row["variacion_costo_pct"] if row["variacion_costo_pct"] is not None else "",
-                    row["precio_actual"] if row["precio_actual"] > 0 else "",
-                    row["margen_actual"] if row["margen_actual"] is not None else "",
-                    row["utilidad_unit"] if row["utilidad_unit"] is not None else "",
-                    row["precio_sugerido"],
-                    row["falta_subir_pct"] if row["falta_subir_pct"] is not None else "",
-                    row["estado"],
-                ]
-            )
+            bd = row["breakdown"] or {}
+            writer.writerow([
+                row["nombre"], row["codigo_point"], row["familia_point"], row["modo_costeo_label"],
+                row["costo_fuente"],
+                row["costo_inicial"], row["costo_completo"],
+                row["variacion_costo_pct"] if row["variacion_costo_pct"] is not None else "",
+                bd.get("mp", ""), bd.get("mo", ""), bd.get("ind", ""), bd.get("emp", ""),
+                row["precio_actual"] if row["precio_actual"] > 0 else "",
+                row["precio_fuente"],
+                row["margen_actual"] if row["margen_actual"] is not None else "",
+                row["utilidad_unit"] if row["utilidad_unit"] is not None else "",
+                row["precio_sugerido"] if row["precio_sugerido"] > 0 else "",
+                row["falta_subir_pct"] if row["falta_subir_pct"] is not None else "",
+                row["estado"],
+            ])
         return response
 
-    def _str_or_none(value: Decimal | None) -> str | None:
+    def _s(value):
         return str(value) if value is not None else None
 
     payload_rows = []
     for row in rows:
-        payload_rows.append(
-            {
-                "receta_id": row["receta_id"],
-                "nombre": row["nombre"],
-                "codigo_point": row["codigo_point"],
-                "familia": row["familia"],
-                "modo_costeo_label": row["modo_costeo_label"],
-                "es_reventa": row["es_reventa"],
-                "base_cost": str(row["base_cost"]),
-                "addon_cost": str(row["addon_cost"]),
-                "costo_completo": str(row["costo_completo"]),
-                "tiene_sabores": row["tiene_sabores"],
-                "n_sabores": row["n_sabores"],
-                "variacion_costo_pct": _str_or_none(row["variacion_costo_pct"]),
-                "precio_actual": str(row["precio_actual"]) if row["precio_actual"] > 0 else None,
-                "margen_actual": _str_or_none(row["margen_actual"]),
-                "utilidad_unit": _str_or_none(row["utilidad_unit"]),
-                "precio_sugerido": str(row["precio_sugerido"]),
-                "falta_subir_pct": _str_or_none(row["falta_subir_pct"]),
-                "estado": row["estado"],
-                "requiere_ajuste": row["requiere_ajuste"],
-                "serie": row["serie"],
-                "meses_con_dato": row["meses_con_dato"],
-            }
-        )
+        bd = row["breakdown"]
+        payload_rows.append({
+            "receta_id": row["receta_id"],
+            "nombre": row["nombre"],
+            "codigo_point": row["codigo_point"],
+            "familia_point": row["familia_point"],
+            "modo_costeo_label": row["modo_costeo_label"],
+            "es_reventa": row["es_reventa"],
+            "costo_inicial": str(row["costo_inicial"]),
+            "costo_completo": str(row["costo_completo"]),
+            "addon_cost": str(row["addon_cost"]),
+            "tiene_sabores": row["tiene_sabores"],
+            "n_sabores": row["n_sabores"],
+            "costo_fuente": row["costo_fuente"],
+            "breakdown": ({k: str(v) for k, v in bd.items()} if bd else None),
+            "variacion_costo_pct": _s(row["variacion_costo_pct"]),
+            "precio_actual": str(row["precio_actual"]) if row["precio_actual"] > 0 else None,
+            "precio_fuente": row["precio_fuente"],
+            "margen_actual": _s(row["margen_actual"]),
+            "utilidad_unit": _s(row["utilidad_unit"]),
+            "precio_sugerido": str(row["precio_sugerido"]) if row["precio_sugerido"] > 0 else None,
+            "falta_subir_pct": _s(row["falta_subir_pct"]),
+            "estado": row["estado"],
+            "serie": row["serie"],
+        })
 
     export_params = request.GET.copy()
     export_params["export"] = "csv"
 
-    return JsonResponse(
-        {
-            "meses": meses,
-            "margen_meta": str(margen_meta),
-            "margen_meta_fuente": meta_fuente,
-            "margen_meta_desglose": meta_desglose,
-            "utilidad_meta": str(utilidad_meta.quantize(Decimal("0.1"))),
-            "objetivo_margen": str(objetivo_margen.quantize(Decimal("0.1"))),
-            "periodo_inicio": start_period.isoformat(),
-            "periodo_fin": current_period.isoformat(),
-            "familias_seleccionadas": familias_sel,
-            "total": len(payload_rows),
-            "requieren_ajuste": requieren_ajuste,
-            "criticos": criticos,
-            "sin_costo": sin_costo,
-            "sin_precio": sin_precio,
-            "combinados": combinados,
-            "export_query": export_params.urlencode(),
-            "rows": payload_rows,
-        }
-    )
+    return JsonResponse({
+        "meses": meses,
+        "margen_meta": str(MARGEN_META_PCT),
+        "periodo_inicio": start_period.isoformat(),
+        "periodo_fin": current_period.isoformat(),
+        "familias_point": familias_point,
+        "familias_seleccionadas": familias_sel,
+        "total": len(payload_rows),
+        "fab_completo": cnt["fab"],
+        "mp_fallback": cnt["mp"],
+        "reventa": cnt["reventa"],
+        "sin_costo": cnt["sin_costo"],
+        "sin_precio": cnt["sin_precio"],
+        "criticos": cnt["criticos"],
+        "requieren_ajuste": cnt["requieren_ajuste"],
+        "combinados": cnt["combinados"],
+        "export_query": export_params.urlencode(),
+        "rows": payload_rows,
+    })
 
 
 def _composition_decimal_payload(value: Decimal | int | float | str | None) -> dict[str, str]:
