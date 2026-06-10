@@ -36,6 +36,41 @@ Si migrate falla por columna duplicada: `migrate <app> <numero> --fake` en la mi
 
 ---
 
+## División de trabajo Claude / Codex (regla permanente)
+
+Combinación deliberada por costo: Codex (plan alto) absorbe los tokens caros;
+Claude (plan limitado) se reserva para el criterio. Codex está integrado vía el
+plugin `codex@openai-codex` (comandos `/codex:rescue`, `/codex:review`,
+`/codex:adversarial-review`). Requisito: Codex CLI instalado y autenticado
+(`/codex:setup` debe reportar `ready: true`).
+
+### Claude = cerebro / orquestador
+- Diseño, decisiones de arquitectura y lógica de negocio (costeo, márgenes,
+  nómina, bonos, MRP — todo lo delicado o irreversible).
+- Preparar rama limpia desde `origin/main`, definir el contrato/approach.
+- Validación final: `check`, `migrate --check`, tests, navegador, deploy en VPS.
+- Commit / PR / deploy SIEMPRE los hace Claude siguiendo el protocolo de abajo.
+
+### Codex = talacha pesada (lo que más consume tokens)
+- Delegar con `/codex:rescue --background --write` cuando el trabajo sea:
+  implementación mecánica repetida, refactor masivo en muchos archivos, baterías
+  de tests, migración de patrones, normalización de datos, debugging largo.
+- Codex trabaja sobre el working tree real → SIEMPRE en rama aislada, nunca
+  directo sobre algo que pueda tocar producción sin revisar.
+- Revisión de diffs antes de PR/deploy: `/codex:review` (read-only).
+
+### Lo que NO se delega a Codex
+- Lógica que pisa datos de nómina/RRHH/ventas (ver "Datos de usuarios — NUNCA pisar").
+- Migraciones, `.env`, puertos, `settings.py`, push a `main`.
+- La decisión de commitear/mergear/deployar: ese filtro final es de Claude.
+
+### Criterio de enrutamiento
+Tarea acotada y rápida → la hace Claude. Tarea voluminosa, repetitiva o de
+iteración larga → se delega a Codex. Ante la duda sobre algo delicado, lo
+diseña Claude y Codex solo ejecuta la parte mecánica.
+
+---
+
 ## Protocolo obligatorio — lo sigo siempre
 
 Aplica para cualquier solicitud de Mauricio que implique tocar código, datos,
