@@ -17,7 +17,7 @@ from .models import (
     SolicitudVacaciones,
     Turno,
 )
-from .services import calcular_horas_extra, generar_horas_extra_automatico
+from .services import calcular_horas_extra, generar_horas_extra_automatico, minutos_jornada_programada
 from .services_vacaciones import es_dia_laborable
 
 
@@ -244,19 +244,37 @@ def _evaluar_entrada(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple
         return creados, actualizados
 
     permiso = _permiso_aprobado_en_rango(empleado, fecha, inicio=hora_programada, fin=entrada_local)
+    if not permiso:
+        tipo = IncidenciaAsistencia.TIPO_FALTA
+        touched.add(tipo)
+        _, creada, actualizada = _upsert_incidencia(
+            empleado=empleado,
+            fecha=fecha,
+            tipo=tipo,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+            severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+            asistencia=asistencia,
+            minutos=minutos_tarde,
+            detalle="Entrada posterior a tolerancia sin permiso; se considera falta.",
+            metadata={"minutos_tarde": minutos_tarde, "tolerancia_minutos": asistencia.turno.tolerancia_minutos},
+        )
+        creados += int(creada)
+        actualizados += int(actualizada)
+        return creados, actualizados
+
     tipo = IncidenciaAsistencia.TIPO_RETARDO
     touched.add(tipo)
     _, creada, actualizada = _upsert_incidencia(
         empleado=empleado,
         fecha=fecha,
         tipo=tipo,
-        estado=IncidenciaAsistencia.ESTADO_CONCILIADO if permiso else IncidenciaAsistencia.ESTADO_PENDIENTE,
-        severidad=IncidenciaAsistencia.SEVERIDAD_MEDIA,
+        estado=IncidenciaAsistencia.ESTADO_CONCILIADO,
+        severidad=IncidenciaAsistencia.SEVERIDAD_INFO,
         asistencia=asistencia,
         permiso=permiso,
         minutos=minutos_tarde,
         goce_sueldo=getattr(permiso, "goce_sueldo", None),
-        detalle="Retardo conciliado con permiso." if permiso else "Entrada posterior a tolerancia.",
+        detalle="Entrada posterior a tolerancia conciliada con permiso de ingreso tarde.",
         metadata={"minutos_tarde": minutos_tarde, "tolerancia_minutos": asistencia.turno.tolerancia_minutos},
     )
     creados += int(creada)
@@ -274,7 +292,7 @@ def _evaluar_jornada(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple
     inicio_turno = _aware_datetime(asistencia.fecha, asistencia.turno.hora_entrada)
     if fin_turno <= inicio_turno:
         fin_turno += timedelta(days=1)
-    minutos_jornada = _minutos_entre(inicio_turno, fin_turno)
+    minutos_jornada = minutos_jornada_programada(asistencia)
     minutos_trabajados = int(asistencia.minutos_trabajados or 0)
     faltante = max(minutos_jornada - minutos_trabajados, 0)
     if faltante <= 0:
@@ -505,4 +523,3 @@ def evaluar_rango_asistencia(
             resultado = resultado.sumar(evaluar_dia_empleado(empleado, cursor))
         cursor += timedelta(days=1)
     return resultado
-
