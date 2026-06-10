@@ -250,6 +250,10 @@ def _read_xml_dataframe(content: bytes) -> pd.DataFrame:
     except ET.ParseError as exc:
         raise ImportacionBancariaError("XML invalido.") from exc
 
+    table_dataframe = _read_xml_table_dataframe(root)
+    if not table_dataframe.empty:
+        return table_dataframe
+
     candidates: dict[str, list[dict[str, Any]]] = {}
     for element in root.iter():
         row = _flatten_xml_element(element)
@@ -261,6 +265,84 @@ def _read_xml_dataframe(content: bytes) -> pd.DataFrame:
 
     rows = max(candidates.values(), key=lambda items: (len(items), _xml_rows_score(items)))
     return pd.DataFrame(rows)
+
+
+def _read_xml_table_dataframe(root: ET.Element) -> pd.DataFrame:
+    tables: list[list[list[str]]] = []
+    for element in root.iter():
+        row_elements = [child for child in list(element) if _xml_tag(child.tag).lower() == "row"]
+        rows = [_xml_row_values(row) for row in row_elements]
+        rows = [row for row in rows if any(value for value in row)]
+        if rows:
+            tables.append(rows)
+
+    best_rows: list[dict[str, Any]] = []
+    for table in tables:
+        rows = _xml_table_to_dict_rows(table)
+        if len(rows) > len(best_rows):
+            best_rows = rows
+    return pd.DataFrame(best_rows)
+
+
+def _xml_row_values(row: ET.Element) -> list[str]:
+    values: list[str] = []
+    for cell in list(row):
+        if _xml_tag(cell.tag).lower() != "cell":
+            continue
+        index = _xml_attr(cell, "Index")
+        if index and str(index).isdigit():
+            while len(values) < int(index) - 1:
+                values.append("")
+        values.append(_xml_cell_text(cell))
+    return values
+
+
+def _xml_cell_text(cell: ET.Element) -> str:
+    texts: list[str] = []
+    for element in cell.iter():
+        if element is cell:
+            continue
+        text = (element.text or "").strip()
+        if text:
+            texts.append(text)
+    if texts:
+        return " ".join(texts).strip()
+    return (cell.text or "").strip()
+
+
+def _xml_table_to_dict_rows(table: list[list[str]]) -> list[dict[str, Any]]:
+    for header_index, header in enumerate(table):
+        if _xml_header_score(header) < 3:
+            continue
+        normalized_header = [str(value or "").strip() for value in header]
+        rows: list[dict[str, Any]] = []
+        for raw_values in table[header_index + 1 :]:
+            row = {
+                normalized_header[index]: raw_values[index] if index < len(raw_values) else ""
+                for index in range(len(normalized_header))
+                if normalized_header[index]
+            }
+            if _looks_like_bank_row(row):
+                rows.append(row)
+        if rows:
+            return rows
+    return []
+
+
+def _xml_header_score(header: list[str]) -> int:
+    normalized = {_normalize_header(value) for value in header if value}
+    score = 0
+    if normalized & {"fecha", "fecha_operacion", "fecha_de_operacion", "fecha_movimiento", "fecha_valor"}:
+        score += 1
+    if normalized & {"descripcion", "concepto", "detalle", "movimiento", "operacion"}:
+        score += 1
+    if normalized & {"cargo", "cargos", "retiro", "retiros", "debe"}:
+        score += 1
+    if normalized & {"abono", "abonos", "deposito", "depositos", "credito", "haber"}:
+        score += 1
+    if normalized & {"monto", "importe", "importe_movimiento", "valor", "importe_total"}:
+        score += 1
+    return score
 
 
 def _flatten_xml_element(element: ET.Element) -> dict[str, Any]:
@@ -345,6 +427,14 @@ def _xml_rows_score(rows: list[dict[str, Any]]) -> int:
 
 def _xml_tag(value: str) -> str:
     return str(value).rsplit("}", 1)[-1]
+
+
+def _xml_attr(element: ET.Element, name: str) -> str:
+    normalized_name = _normalize_header(name)
+    for key, value in element.attrib.items():
+        if _normalize_header(_xml_tag(key)) == normalized_name:
+            return str(value)
+    return ""
 
 
 def _fuente_manual(suffix: str) -> str:
@@ -473,6 +563,10 @@ def _first(row: dict[str, Any], *keys: str) -> Any:
         normalized = _normalize_header(key)
         if normalized in row and row[normalized] not in (None, ""):
             return row[normalized]
+        suffix = f"_{normalized}"
+        for row_key, value in row.items():
+            if str(row_key).endswith(suffix) and value not in (None, ""):
+                return value
     return None
 
 
