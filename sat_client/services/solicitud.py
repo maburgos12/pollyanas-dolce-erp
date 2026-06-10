@@ -23,7 +23,12 @@ from sat_client.services.base import (
 )
 from sat_client.services.firma import build_signed_sat_request
 
-SOLICITUD_ACTION = "http://DescargaMasivaTerceros.sat.gob.mx/ISolicitaDescargaService/SolicitaDescarga"
+SOLICITUD_ACTION_EMITIDOS = (
+    "http://DescargaMasivaTerceros.sat.gob.mx/ISolicitaDescargaService/SolicitaDescargaEmitidos"
+)
+SOLICITUD_ACTION_RECIBIDOS = (
+    "http://DescargaMasivaTerceros.sat.gob.mx/ISolicitaDescargaService/SolicitaDescargaRecibidos"
+)
 
 
 def _fecha_inicio(fecha: date) -> str:
@@ -77,15 +82,30 @@ def _build_solicitud_envelope(
         "FechaInicial": _fecha_inicio(fecha_inicial),
         "FechaFinal": _fecha_fin(fecha_final),
         "TipoSolicitud": tipo_solicitud,
+        "EstadoComprobante": "Vigente",
     }
     if direccion == SolicitudDescarga.DIRECCION_EMITIDOS:
+        operation_name = "SolicitaDescargaEmitidos"
         attributes["RfcEmisor"] = credentials.rfc
     else:
+        operation_name = "SolicitaDescargaRecibidos"
         attributes["RfcReceptor"] = credentials.rfc
 
-    operation = etree.Element(etree.QName(SAT_DOWNLOAD_NS, "SolicitaDescarga"), nsmap={None: SAT_DOWNLOAD_NS})
-    operation.append(build_signed_sat_request("solicitud", attributes, credentials))
+    operation = etree.Element(etree.QName(SAT_DOWNLOAD_NS, operation_name), nsmap={None: SAT_DOWNLOAD_NS})
+    operation.append(build_signed_sat_request(etree.QName(SAT_DOWNLOAD_NS, "solicitud"), attributes, credentials))
     return build_envelope(operation)
+
+
+def _soap_action_for_direccion(direccion: str) -> str:
+    if direccion == SolicitudDescarga.DIRECCION_EMITIDOS:
+        return SOLICITUD_ACTION_EMITIDOS
+    return SOLICITUD_ACTION_RECIBIDOS
+
+
+def _result_name_for_direccion(direccion: str) -> str:
+    if direccion == SolicitudDescarga.DIRECCION_EMITIDOS:
+        return "SolicitaDescargaEmitidosResult"
+    return "SolicitaDescargaRecibidosResult"
 
 
 def solicitar_descarga_periodo(
@@ -117,11 +137,11 @@ def solicitar_descarga_periodo(
     content = post_soap(
         get_endpoint("SAT_SOLICITUD_URL"),
         envelope,
-        soap_action=getattr(settings, "SAT_SOLICITUD_ACTION", SOLICITUD_ACTION),
+        soap_action=getattr(settings, "SAT_SOLICITUD_ACTION", "") or _soap_action_for_direccion(direccion),
         token=token,
         transport=transport,
     )
-    attrs = find_result_attributes(content, "SolicitaDescargaResult")
+    attrs = find_result_attributes(content, _result_name_for_direccion(direccion))
     code = attrs.get("CodEstatus", "")
     message = attrs.get("Mensaje") or attrs.get("MensajeError") or ""
     id_solicitud = attrs.get("IdSolicitud") or attrs.get("IdSolicitud")
