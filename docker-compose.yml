@@ -81,7 +81,10 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - default
+      default:
+      erp_bridge:
+        aliases:
+          - pollyanas-erp-worker
     restart: unless-stopped
 
   beat:

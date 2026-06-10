@@ -286,6 +286,82 @@ class SeguimientoColaboradorTests(TestCase):
         self.item.refresh_from_db()
         self.assertEqual(self.item.estatus, SeguimientoItem.ESTATUS_COMPLETADO)
 
+    def test_dg_cierra_minuta_agente_dg_con_writeback(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.writeback", password="test12345")
+        dg_user.groups.add(dg_group)
+        self.item.tipo = SeguimientoItem.TIPO_MINUTA
+        self.item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
+        self.item.requiere_aprobacion = True
+        self.item.origen = "Agente DG"
+        self.item.referencia_externa = "minute_agreements:77"
+        self.item.metadata = {"source": "agente_dg", "source_table": "minute_agreements", "source_id": 77}
+        self.item.save(update_fields=["tipo", "estatus", "requiere_aprobacion", "origen", "referencia_externa", "metadata"])
+        self.client.force_login(dg_user)
+
+        with patch.dict(os.environ, {"AGENTE_DG_WRITEBACK_ENABLED": "true"}), \
+            patch("seguimiento.agente_dg_client.is_configured", return_value=True), \
+            patch("seguimiento.agente_dg_client.patch_minute_agreement", return_value={"id": 77}) as patch_minute:
+            response = self.client.post(
+                f"/seguimiento/{self.item.pk}/resolver/",
+                {"accion": "aprobar", "comentario": "Cierre correcto", "next": "panel"},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        patch_minute.assert_called_once_with(77, status="COMPLETED", completion_note="Cierre correcto")
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.estatus, SeguimientoItem.ESTATUS_COMPLETADO)
+
+    def test_dg_no_cierra_local_si_writeback_agente_dg_falla(self):
+        from .agente_dg_client import AgenteDGError
+
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.writeback.fail", password="test12345")
+        dg_user.groups.add(dg_group)
+        self.item.tipo = SeguimientoItem.TIPO_MINUTA
+        self.item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
+        self.item.requiere_aprobacion = True
+        self.item.origen = "Agente DG"
+        self.item.metadata = {"source": "agente_dg", "source_table": "minute_agreements", "source_id": 77}
+        self.item.save(update_fields=["tipo", "estatus", "requiere_aprobacion", "origen", "metadata"])
+        self.client.force_login(dg_user)
+
+        with patch.dict(os.environ, {"AGENTE_DG_WRITEBACK_ENABLED": "true"}), \
+            patch("seguimiento.agente_dg_client.is_configured", return_value=True), \
+            patch("seguimiento.agente_dg_client.patch_minute_agreement", side_effect=AgenteDGError("sin API")):
+            response = self.client.post(
+                f"/seguimiento/{self.item.pk}/resolver/",
+                {"accion": "aprobar", "comentario": "Cierre correcto", "next": "panel"},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.estatus, SeguimientoItem.ESTATUS_EN_REVISION)
+        self.assertFalse(
+            SeguimientoComentario.objects.filter(
+                seguimiento=self.item,
+                tipo=SeguimientoComentario.TIPO_REVISION_DG,
+                comentario__icontains="[APROBADO]",
+            ).exists()
+        )
+
+    def test_colaborador_ve_conversacion_y_cierre_sin_enviar_feedback(self):
+        self.item.estatus = SeguimientoItem.ESTATUS_COMPLETADO
+        self.item.aprobado_at = timezone.now()
+        self.item.save(update_fields=["estatus", "aprobado_at"])
+        SeguimientoComentario.objects.create(
+            seguimiento=self.item,
+            usuario=self.user,
+            tipo=SeguimientoComentario.TIPO_REVISION_DG,
+            comentario="[APROBADO] Retroalimentación visible para cierre.",
+        )
+
+        response = self.client.get(f"/seguimiento/{self.item.pk}/")
+
+        self.assertContains(response, "Conversación y cierre")
+        self.assertContains(response, "Cierre establecido")
+        self.assertContains(response, "Retroalimentación visible para cierre.")
+
     def test_dg_real_aterriza_en_dashboard_dg(self):
         dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
         dg_user = get_user_model().objects.create_user(username="mauricio.dashboard", password="test12345")

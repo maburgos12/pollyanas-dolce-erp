@@ -1543,6 +1543,35 @@ def production_readonly_checks() -> list[CheckResult]:
             "print('registered_tasks=' + str(len(tasks)))\n"
             "PY".format(dir=PRODUCTION_DIR, compose=PRODUCTION_COMPOSE),
         ),
+        (
+            "Production Agente DG sync health",
+            "cd {dir} && python - <<'PY'\n"
+            "import json, subprocess, sys\n"
+            "compose = {compose!r}.split()\n"
+            "def run(args):\n"
+            "    return subprocess.run(args, text=True, capture_output=True, timeout=60)\n"
+            "ps = run(compose + ['ps', '-q', 'worker'])\n"
+            "worker_id = ps.stdout.strip().splitlines()[0] if ps.stdout.strip() else ''\n"
+            "payload = {{'worker_container': worker_id, 'worker_on_bridge': False, 'resolve_agente_dg_db': None, 'recent_sync_errors': []}}\n"
+            "if worker_id:\n"
+            "    inspect = run(['docker', 'inspect', worker_id])\n"
+            "    if inspect.returncode == 0:\n"
+            "        data = json.loads(inspect.stdout or '[]')\n"
+            "        networks = (data[0].get('NetworkSettings') or {{}}).get('Networks') or {{}}\n"
+            "        payload['networks'] = sorted(networks)\n"
+            "        payload['worker_on_bridge'] = 'pollyanas_erp_bridge' in networks\n"
+            "    resolve = run(compose + ['exec', '-T', 'worker', 'python', '-c', 'import socket; print(socket.gethostbyname(\"agente_dg_db\"))'])\n"
+            "    payload['resolve_agente_dg_db'] = resolve.stdout.strip() if resolve.returncode == 0 else (resolve.stderr.strip() or resolve.stdout.strip())\n"
+            "logs = run(compose + ['logs', '--since', '6h', 'worker'])\n"
+            "for line in (logs.stdout or '').splitlines():\n"
+            "    if 'agente_dg_db' in line or 'seguimiento.importar_agente_dg' in line or 'importar_agente_dg_seguimiento' in line:\n"
+            "        payload['recent_sync_errors'].append(line[-500:])\n"
+            "payload['recent_sync_errors'] = payload['recent_sync_errors'][-12:]\n"
+            "print(json.dumps(payload, ensure_ascii=False, indent=2))\n"
+            "if not payload['worker_on_bridge'] or not payload['resolve_agente_dg_db'] or 'Temporary failure' in str(payload['resolve_agente_dg_db']):\n"
+            "    sys.exit(2)\n"
+            "PY".format(dir=PRODUCTION_DIR, compose=PRODUCTION_COMPOSE),
+        ),
     ]
     checks = [
         run_command(name, [*ssh_base, remote], timeout=240)
