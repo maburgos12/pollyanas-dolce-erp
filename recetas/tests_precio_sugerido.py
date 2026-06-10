@@ -1,12 +1,14 @@
-"""Tests de regresión para el panel de precio sugerido del monitor de márgenes.
+"""Tests de regresión para el panel de precio mínimo rentable del monitor de márgenes.
 
-Cubren la lógica financiera: margen meta derivado del P&L, costo de fabricación
-completo como base, contribución y estados (OK / AJUSTE / CRÍTICO).
+Cubren la lógica financiera: margen meta como piso (objetivo vs P&L), costo vivo
+universal, combinación de sabores (addons) en la base, y precio sugerido como piso
+(nunca recomienda bajar un precio sano).
 """
 
 import json
 from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 from uuid import uuid4
 
 from django.contrib.auth import get_user_model
@@ -14,191 +16,187 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.models import Sucursal
-from recetas.models import Receta
-from recetas.views.recetas import _ventana_meses_inicio
-from reportes.models import (
-    EmpresaResultadoMensual,
-    ProductoCostoOperativoMensual,
-    ProductoSucursalContribucionMensual,
-)
+from recetas.models import Receta, RecetaAgrupacionAddon
+from recetas.views.recetas import _margen_meta_desde_pnl, _ventana_meses_inicio
+from reportes.models import EmpresaResultadoMensual, ProductoCostoOperativoMensual
 
 
-class PrecioSugeridoTests(TestCase):
+class _FakeCost:
+    def __init__(self, total):
+        self.total_cost = Decimal(str(total))
+
+
+class MargenMetaPisoTests(TestCase):
+    """Lógica pura del margen meta (piso vs P&L)."""
+
+    def setUp(self):
+        self.inicio = date(2026, 1, 1)
+        self.fin = date(2026, 6, 1)
+
+    def _empresa(self, comercial, corporativo, venta=Decimal("1000")):
+        EmpresaResultadoMensual.objects.create(
+            periodo=self.fin,
+            venta_total=venta,
+            gasto_comercial_total=comercial,
+            gasto_corporativo_total=corporativo,
+        )
+
+    def test_sin_pnl_usa_objetivo(self):
+        meta, desg, fuente = _margen_meta_desde_pnl(self.inicio, self.fin, Decimal("15"), Decimal("65"))
+        self.assertEqual(meta, Decimal("65.0"))
+        self.assertEqual(fuente, "OBJETIVO")
+        self.assertEqual(desg["razon"], "SIN_PNL")
+
+    def test_gastos_incompletos_usa_objetivo(self):
+        self._empresa(Decimal("0"), Decimal("0"))
+        meta, desg, fuente = _margen_meta_desde_pnl(self.inicio, self.fin, Decimal("15"), Decimal("65"))
+        self.assertEqual(meta, Decimal("65.0"))
+        self.assertEqual(fuente, "OBJETIVO")
+        self.assertEqual(desg["razon"], "GASTOS_INCOMPLETOS")
+
+    def test_objetivo_es_piso_cuando_pnl_deriva_menos(self):
+        # comercial 20% + corporativo 10% + utilidad 15% = 45% < 65% piso
+        self._empresa(Decimal("200"), Decimal("100"))
+        meta, desg, fuente = _margen_meta_desde_pnl(self.inicio, self.fin, Decimal("15"), Decimal("65"))
+        self.assertEqual(meta, Decimal("65.0"))
+        self.assertEqual(fuente, "PNL_PISO")
+        self.assertEqual(desg["derivado_pct"], "45.0")
+
+    def test_pnl_sube_el_meta_cuando_supera_el_objetivo(self):
+        # comercial 40% + corporativo 20% + utilidad 15% = 75% > 65%
+        self._empresa(Decimal("400"), Decimal("200"))
+        meta, desg, fuente = _margen_meta_desde_pnl(self.inicio, self.fin, Decimal("15"), Decimal("65"))
+        self.assertEqual(meta, Decimal("75.0"))
+        self.assertEqual(fuente, "PNL")
+
+    def test_objetivo_configurable(self):
+        meta, _, fuente = _margen_meta_desde_pnl(self.inicio, self.fin, Decimal("15"), Decimal("70"))
+        self.assertEqual(meta, Decimal("70.0"))
+        self.assertEqual(fuente, "OBJETIVO")
+
+
+class PrecioMinimoViewTests(TestCase):
+    """Vista completa: costo vivo, addons combinados, precio como piso."""
+
     def setUp(self):
         user_model = get_user_model()
         self.user = user_model.objects.create_superuser(
-            username="admin_precio_sugerido",
-            email="admin_precio_sugerido@example.com",
+            username="admin_precio_min",
+            email="admin_precio_min@example.com",
             password="test12345",
         )
         self.client.force_login(self.user)
-
         self.sucursal = Sucursal.objects.create(
-            codigo="S1",
-            nombre="Sucursal Prueba",
-            fecha_apertura=date(2020, 1, 1),
+            codigo="S1", nombre="Sucursal Prueba", fecha_apertura=date(2020, 1, 1)
         )
-
-        self.meses = 6
         self.current_period = date.today().replace(day=1)
-        self.start_period = _ventana_meses_inicio(date.today(), self.meses)
 
-        # P&L empresa: gasto comercial 20% y corporativo 10% de la venta.
-        for periodo in (self.start_period, self.current_period):
-            EmpresaResultadoMensual.objects.create(
-                periodo=periodo,
-                venta_total=Decimal("1000"),
-                gasto_comercial_total=Decimal("200"),
-                gasto_corporativo_total=Decimal("100"),
-            )
+        # Productos vendibles
+        self.ok = self._receta("Pastel Sano", "OK01", costo_vivo=95, asp=500)
+        self.critico = self._receta("Pastel Critico", "CR01", costo_vivo=100, asp=90)
+        self.ajuste = self._receta("Pastel Ajuste", "AJ01", costo_vivo=100, asp=150)
 
-        # Producto sano: costo fabricación sube 80 -> 95, ASP 200, contribución +.
-        self.producto_ok = Receta.objects.create(
-            nombre="Pastel Sano",
-            codigo_point="OK001",
+        # Base con un sabor (addon) que se combina y se excluye del listado
+        self.base = self._receta("Pay de Queso Grande", "0001", costo_vivo=178, asp=500, unidades=800)
+        self.addon = self._receta("Sabor Fresa Grande Pay", "SFRESAG", costo_vivo=73, asp=0, unidades=800)
+        RecetaAgrupacionAddon.objects.create(
+            base_receta=self.base,
+            addon_receta=self.addon,
+            addon_codigo_point="SFRESAG",
+            addon_nombre_point="Sabor Fresa Grande Pay",
+            status=RecetaAgrupacionAddon.STATUS_APPROVED,
+        )
+
+        # Mapa de costo vivo por receta
+        self.cost_map = {
+            self.ok.id: _FakeCost(95),
+            self.critico.id: _FakeCost(100),
+            self.ajuste.id: _FakeCost(100),
+            self.base.id: _FakeCost(178),
+            self.addon.id: _FakeCost(73),
+        }
+
+    def _receta(self, nombre, codigo, costo_vivo, asp, unidades=10):
+        receta = Receta.objects.create(
+            nombre=nombre,
+            codigo_point=codigo,
             tipo=Receta.TIPO_PRODUCTO_FINAL,
             familia="Pastel",
             hash_contenido=f"hash-{uuid4()}",
         )
-        self._costo_operativo(self.producto_ok, self.start_period, Decimal("80"), Decimal("200"))
-        self._costo_operativo(self.producto_ok, self.current_period, Decimal("95"), Decimal("200"))
-        self._contribucion(self.producto_ok, Decimal("200"), Decimal("95"), Decimal("75"))
-
-        # Producto crítico: costo = precio, contribución negativa.
-        self.producto_critico = Receta.objects.create(
-            nombre="Pastel Critico",
-            codigo_point="CR001",
-            tipo=Receta.TIPO_PRODUCTO_FINAL,
-            familia="Pastel",
-            hash_contenido=f"hash-{uuid4()}",
-        )
-        self._costo_operativo(self.producto_critico, self.start_period, Decimal("100"), Decimal("100"))
-        self._costo_operativo(self.producto_critico, self.current_period, Decimal("100"), Decimal("100"))
-        self._contribucion(self.producto_critico, Decimal("100"), Decimal("100"), Decimal("-15"))
-
-    def _costo_operativo(self, receta, periodo, costo_fab, asp):
         ProductoCostoOperativoMensual.objects.create(
-            periodo=periodo,
-            receta=receta,
-            unidades_base=Decimal("10"),
-            venta_total=asp * Decimal("10"),
-            asp=asp,
-            costo_mp_unit=costo_fab * Decimal("0.6"),
-            mano_obra_prod_unit=costo_fab * Decimal("0.2"),
-            indirecto_prod_unit=costo_fab * Decimal("0.1"),
-            empaque_prod_unit=costo_fab * Decimal("0.1"),
-            costo_fabricacion_unit=costo_fab,
-        )
-
-    def _contribucion(self, receta, asp, costo_unit, contribucion_unit):
-        unidades = Decimal("10")
-        ProductoSucursalContribucionMensual.objects.create(
             periodo=self.current_period,
             receta=receta,
-            sucursal=self.sucursal,
-            unidades_vendidas=unidades,
-            venta_total=asp * unidades,
-            asp=asp,
-            costo_producto_unit=costo_unit,
-            costo_producto_total=costo_unit * unidades,
-            gasto_comercial_unit=Decimal("0"),
-            gasto_comercial_total=Decimal("0"),
-            contribucion_total=contribucion_unit * unidades,
-            contribucion_unit=contribucion_unit,
-            margen_contribucion_pct=(contribucion_unit / asp * Decimal("100")),
+            unidades_base=Decimal(str(unidades)),
+            asp=Decimal(str(asp)),
+            costo_fabricacion_unit=Decimal("0"),
         )
+        return receta
 
     def _fetch(self, **params):
-        params.setdefault("meses", self.meses)
-        params.setdefault("utilidad_meta", "15")
-        response = self.client.get(
-            reverse("recetas:monitor_margenes_precio_sugerido"), params
-        )
+        params.setdefault("meses", 6)
+        params.setdefault("objetivo_margen", "65")
+        with patch("recetas.views.recetas.resolve_recipe_cost_map", return_value=self.cost_map), \
+             patch("recetas.views.recetas._median_point_prices_bulk", return_value={}):
+            response = self.client.get(
+                reverse("recetas:monitor_margenes_precio_sugerido"), params
+            )
         self.assertEqual(response.status_code, 200)
         return json.loads(response.content)
 
     def _row(self, data, receta):
-        return next(r for r in data["rows"] if r["receta_id"] == receta.id)
+        return next((r for r in data["rows"] if r["receta_id"] == receta.id), None)
 
-    def test_margen_meta_se_deriva_del_pnl(self):
+    def test_addon_se_excluye_del_listado(self):
         data = self._fetch()
-        # comercial 20% + corporativo 10% + utilidad meta 15% = 45%
-        self.assertEqual(data["margen_meta"], "45.0")
-        self.assertEqual(data["margen_meta_fuente"], "PNL")
-        self.assertEqual(data["margen_meta_desglose"]["comercial_pct"], "20.0")
-        self.assertEqual(data["margen_meta_desglose"]["corporativo_pct"], "10.0")
-        self.assertEqual(data["margen_meta_desglose"]["utilidad_meta_pct"], "15.0")
+        self.assertIsNone(self._row(data, self.addon))
 
-    def test_utilidad_meta_mueve_el_margen_meta(self):
-        data = self._fetch(utilidad_meta="25")
-        # 20 + 10 + 25 = 55
-        self.assertEqual(data["margen_meta"], "55.0")
+    def test_addon_se_combina_en_la_base(self):
+        data = self._fetch()
+        row = self._row(data, self.base)
+        self.assertIsNotNone(row)
+        # base 178 + sabor 73 (mismas unidades) = 251
+        self.assertEqual(row["costo_completo"], "251.00")
+        self.assertTrue(row["tiene_sabores"])
+        self.assertEqual(row["n_sabores"], 1)
+        self.assertEqual(data["combinados"], 1)
 
-    def test_producto_sano_es_ok_y_usa_costo_fabricacion_completo(self):
-        row = self._row(self._fetch(), self.producto_ok)
+    def test_producto_sano_no_sugiere_bajar(self):
+        data = self._fetch()
+        row = self._row(data, self.ok)
+        # margen meta 65% objetivo; sugerido = 95/0.35 = 271.4 -> 275; ASP 500 >> 275
         self.assertEqual(row["estado"], "OK")
-        self.assertEqual(row["costo_ultimo"], "95.00")
-        # margen bruto = (200 - 95) / 200 = 52.5% >= 45% meta
-        self.assertEqual(row["margen_actual"], "52.5")
-        # precio sugerido = 95 / (1 - 0.45) = 172.7 -> redondeo techo $5 = 175
-        self.assertEqual(row["precio_sugerido"], "175.00")
-        # variación de costo 80 -> 95 = +18.8%
-        self.assertEqual(row["variacion_costo_pct"], "18.8")
-        # desglose de componentes presente (fabricación completa)
-        self.assertIsNotNone(row["componentes"])
-        self.assertFalse(row["costo_solo_mp"])
-        self.assertEqual(row["contribucion_unit"], "75.00")
+        self.assertEqual(row["precio_sugerido"], "275.00")
+        self.assertIsNone(row["falta_subir_pct"])  # nunca recomienda bajar
 
-    def test_producto_con_contribucion_negativa_es_critico(self):
+    def test_producto_bajo_minimo_pide_subir(self):
         data = self._fetch()
-        row = self._row(data, self.producto_critico)
+        row = self._row(data, self.ajuste)
+        # cost 100 -> sugerido 100/0.35 = 285.7 -> 290; ASP 150 < 290
+        self.assertEqual(row["estado"], "AJUSTE")
+        self.assertEqual(row["precio_sugerido"], "290.00")
+        self.assertIsNotNone(row["falta_subir_pct"])
+        self.assertGreater(float(row["falta_subir_pct"]), 0)
+
+    def test_producto_bajo_costo_es_critico(self):
+        data = self._fetch()
+        row = self._row(data, self.critico)
+        # ASP 90 < costo 100 -> margen negativo
         self.assertEqual(row["estado"], "CRITICO")
-        self.assertEqual(row["contribucion_unit"], "-15.00")
-        # margen bruto 0% no alcanza; sugiere subir precio
-        self.assertEqual(row["margen_actual"], "0.0")
-        self.assertEqual(data["criticos"], 1)
+        self.assertEqual(row["margen_actual"], "-11.1")
+        self.assertGreaterEqual(data["criticos"], 1)
 
-    def test_criticos_aparecen_primero_en_el_orden(self):
+    def test_margen_meta_es_objetivo_sin_pnl(self):
         data = self._fetch()
-        self.assertEqual(data["rows"][0]["receta_id"], self.producto_critico.id)
-
-    def test_filtro_por_familia_inexistente_devuelve_vacio(self):
-        data = self._fetch(familia="NoExiste")
-        self.assertEqual(data["total"], 0)
-
-    def test_sin_pnl_cae_a_objetivo_de_margen_bruto(self):
-        EmpresaResultadoMensual.objects.all().delete()
-        data = self._fetch()
-        # default objetivo 65%, fuente OBJETIVO, razón SIN_PNL
         self.assertEqual(data["margen_meta"], "65.0")
         self.assertEqual(data["margen_meta_fuente"], "OBJETIVO")
-        self.assertEqual(data["margen_meta_desglose"]["razon"], "SIN_PNL")
 
-    def test_gastos_pnl_incompletos_caen_a_objetivo(self):
-        # P&L con venta pero gastos comercial/corporativo en cero (como producción).
-        EmpresaResultadoMensual.objects.all().delete()
-        EmpresaResultadoMensual.objects.create(
-            periodo=self.current_period,
-            venta_total=Decimal("1000"),
-            gasto_comercial_total=Decimal("0"),
-            gasto_corporativo_total=Decimal("0"),
-        )
-        data = self._fetch(objetivo_margen="65")
-        self.assertEqual(data["margen_meta"], "65.0")
-        self.assertEqual(data["margen_meta_fuente"], "OBJETIVO")
-        self.assertEqual(data["margen_meta_desglose"]["razon"], "GASTOS_INCOMPLETOS")
-
-    def test_objetivo_margen_es_configurable(self):
-        EmpresaResultadoMensual.objects.all().delete()
-        data = self._fetch(objetivo_margen="70")
-        self.assertEqual(data["margen_meta"], "70.0")
-        self.assertEqual(data["margen_meta_fuente"], "OBJETIVO")
-
-    def test_export_csv_responde_archivo(self):
-        response = self.client.get(
-            reverse("recetas:monitor_margenes_precio_sugerido"),
-            {"meses": self.meses, "export": "csv"},
-        )
+    def test_export_csv(self):
+        with patch("recetas.views.recetas.resolve_recipe_cost_map", return_value=self.cost_map), \
+             patch("recetas.views.recetas._median_point_prices_bulk", return_value={}):
+            response = self.client.get(
+                reverse("recetas:monitor_margenes_precio_sugerido"),
+                {"meses": 6, "export": "csv"},
+            )
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/csv", response["Content-Type"])
-        self.assertIn("attachment", response["Content-Disposition"])

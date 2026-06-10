@@ -306,8 +306,8 @@
   <section class="ps-panel" id="ps-panel" hidden>
     <div class="ps-head">
       <div>
-        <h2 class="ps-title">💡 Precio sugerido para rentabilidad</h2>
-        <p class="ps-sub">Calcula el precio justo usando el <strong>costo de fabricación completo</strong> (materia prima + mano de obra + indirectos + empaque) del último mes, contra un <strong>margen meta derivado del P&amp;L real</strong> (cubre gasto comercial + corporativo + tu utilidad meta). Marca en <strong>crítico</strong> lo que ya pierde dinero y en <strong>ajuste</strong> lo que no alcanza la meta.</p>
+        <h2 class="ps-title">💡 Precio mínimo rentable</h2>
+        <p class="ps-sub">Calcula el <strong>precio mínimo</strong> para cada producto vendible usando su costo vivo de receta, <strong>combinando los sabores</strong> (Sabor X + base) y resolviendo las rebanadas por porción. El margen meta es un <strong>piso (objetivo de margen bruto, 65%)</strong> que el P&amp;L solo puede subir. Marca lo que <strong>pierde dinero</strong> o está <strong>bajo el mínimo</strong>; nunca recomienda bajar un precio sano.</p>
       </div>
       <button type="button" class="ps-close" id="ps-close" aria-label="Cerrar">✕</button>
     </div>
@@ -685,59 +685,61 @@
   }
 
   function estadoChip(estado) {
-    if (estado === "CRITICO") return '<span class="mm-badge is-red" title="Pierde dinero: contribución negativa">⚠ Crítico</span>';
-    if (estado === "AJUSTE") return '<span class="mm-badge is-yellow">Ajustar</span>';
+    if (estado === "CRITICO") return '<span class="mm-badge is-red" title="Se vende por debajo del costo: pierde dinero">⚠ Pierde dinero</span>';
+    if (estado === "AJUSTE") return '<span class="mm-badge is-yellow" title="Por debajo del precio mínimo rentable">Subir precio</span>';
     if (estado === "OK") return '<span class="mm-badge is-green">OK</span>';
     return '<span class="mm-badge is-muted">Sin precio</span>';
   }
 
   function costoTitle(row) {
-    if (!row.componentes) return "Costo de fabricación del último mes";
-    var c = row.componentes;
-    return "Materia prima $" + parseFloat(c.mp).toFixed(2) +
-      " · Mano obra $" + parseFloat(c.mano_obra).toFixed(2) +
-      " · Indirectos $" + parseFloat(c.indirecto).toFixed(2) +
-      " · Empaque $" + parseFloat(c.empaque).toFixed(2);
+    var base = "Costo vivo de receta $" + parseFloat(row.base_cost).toFixed(2);
+    if (row.tiene_sabores) {
+      base += " + sabores (" + row.n_sabores + ") $" + parseFloat(row.addon_cost).toFixed(2) +
+        " = $" + parseFloat(row.costo_completo).toFixed(2) + " (combinado)";
+    }
+    return base;
   }
 
   function render(data) {
     var meta = parseFloat(data.margen_meta);
     summary.hidden = false;
     var metaTexto;
-    if (data.margen_meta_fuente === "PNL" && data.margen_meta_desglose) {
-      var d = data.margen_meta_desglose;
+    var d = data.margen_meta_desglose || {};
+    if (data.margen_meta_fuente === "PNL") {
       metaTexto = '<div title="Comercial ' + d.comercial_pct + '% + Corporativo ' + d.corporativo_pct + '% + Utilidad meta ' + d.utilidad_meta_pct + '%">' +
         'Margen meta <strong>' + data.margen_meta + '%</strong> ' +
         '<span class="ps-hint">(derivado del P&amp;L: comercial ' + d.comercial_pct + '% + corporativo ' + d.corporativo_pct + '% + utilidad ' + d.utilidad_meta_pct + '%)</span></div>';
+    } else if (data.margen_meta_fuente === "PNL_PISO") {
+      metaTexto = '<div>Margen meta <strong>' + data.margen_meta + '%</strong> <span class="ps-hint">(objetivo piso ' + d.objetivo_margen_pct + '%; el P&amp;L derivaba solo ' + d.derivado_pct + '%)</span></div>';
     } else {
-      var razon = (data.margen_meta_desglose && data.margen_meta_desglose.razon) || "";
+      var razon = d.razon || "";
       var motivo = razon === "GASTOS_INCOMPLETOS"
-        ? "objetivo fijo: el P&amp;L no tiene gastos comercial/corporativo cargados"
-        : "objetivo fijo: sin P&amp;L para el periodo";
-      metaTexto = '<div class="is-alert">Margen meta <strong>' + data.margen_meta + '%</strong> <span class="ps-hint">⚠ ' + motivo + '</span></div>';
+        ? "objetivo de margen bruto (el P&amp;L no tiene gastos comercial/corporativo cargados)"
+        : "objetivo de margen bruto (sin P&amp;L para el periodo)";
+      metaTexto = '<div>Margen meta <strong>' + data.margen_meta + '%</strong> <span class="ps-hint">' + motivo + '</span></div>';
     }
     summary.innerHTML =
-      '<div><strong>' + data.total + '</strong> productos analizados</div>' +
+      '<div><strong>' + data.total + '</strong> productos vendibles</div>' +
       metaTexto +
-      '<div class="' + (data.criticos ? "is-alert" : "") + '"><strong>' + data.criticos + '</strong> críticos (pierden dinero)</div>' +
-      '<div class="' + (data.requieren_ajuste ? "is-alert" : "") + '"><strong>' + data.requieren_ajuste + '</strong> requieren ajuste</div>' +
+      '<div class="' + (data.criticos ? "is-alert" : "") + '"><strong>' + data.criticos + '</strong> pierden dinero</div>' +
+      '<div class="' + (data.requieren_ajuste ? "is-alert" : "") + '"><strong>' + data.requieren_ajuste + '</strong> bajo el mínimo</div>' +
       '<div><strong>' + data.sin_precio + '</strong> sin precio</div>' +
-      '<div><strong>' + data.sin_historial + '</strong> sin costo</div>' +
+      '<div title="Productos con sabores (addons) combinados en su costo"><strong>' + data.combinados + '</strong> con sabores combinados</div>' +
       '<div>Periodo: ' + data.periodo_inicio + ' a ' + data.periodo_fin + '</div>';
 
     if (!data.rows.length) {
-      result.innerHTML = '<div class="mm-empty"><div class="mm-empty-title">Sin resultados</div><div>No hay productos con costo de fabricación para los filtros elegidos en este periodo.</div></div>';
+      result.innerHTML = '<div class="mm-empty"><div class="mm-empty-title">Sin resultados</div><div>No hay productos vendibles con costo para los filtros elegidos.</div></div>';
       exportLink.hidden = true;
       return;
     }
 
     var html = '<div class="mm-table-wrap"><table class="mm-table"><thead><tr>' +
       '<th>Producto</th><th>Tipo</th><th>Familia</th>' +
-      '<th class="is-center">Costo fab. (tendencia)</th>' +
-      '<th class="is-right">Costo inicial</th><th class="is-right">Costo último</th><th class="is-right">Var. costo</th>' +
+      '<th class="is-center">Costo (tendencia)</th>' +
+      '<th class="is-right">Costo completo</th><th class="is-right">Var. costo</th>' +
       '<th class="is-right">Precio actual</th><th class="is-right">Margen bruto</th>' +
-      '<th class="is-right">Contribución</th>' +
-      '<th class="is-right">Precio sugerido</th><th class="is-right">Ajuste</th>' +
+      '<th class="is-right">Utilidad/u</th>' +
+      '<th class="is-right">Precio mín. sugerido</th><th class="is-right">Falta subir</th>' +
       '<th class="is-center">Estado</th>' +
       '</tr></thead><tbody>';
 
@@ -749,32 +751,28 @@
       if (row.variacion_costo_pct !== null) {
         varClass = parseFloat(row.variacion_costo_pct) > 0 ? "ps-up" : (parseFloat(row.variacion_costo_pct) < 0 ? "ps-down" : "");
       }
-      var ajusteClass = "";
-      if (row.ajuste_pct !== null) {
-        ajusteClass = parseFloat(row.ajuste_pct) > 0 ? "ps-up" : (parseFloat(row.ajuste_pct) < 0 ? "ps-down" : "");
+      var saboresFlag = row.tiene_sabores ? ' <span class="ps-hint" title="Incluye costo de sabores combinados">+sabor</span>' : '';
+      var utilTxt = "—";
+      if (row.utilidad_unit !== null) {
+        var uVal = parseFloat(row.utilidad_unit);
+        utilTxt = '<span class="' + (uVal < 0 ? "ps-up" : "ps-down") + '">' + money(row.utilidad_unit) + '</span>';
       }
-      var mpFlag = row.costo_solo_mp ? ' <span class="ps-hint" title="Solo materia prima: este producto no tiene costeo operativo completo">(MP)</span>' : '';
-      var contribTxt = "—";
-      if (row.contribucion_unit !== null) {
-        var cVal = parseFloat(row.contribucion_unit);
-        var cClass = cVal < 0 ? "ps-up" : "ps-down";
-        contribTxt = '<span class="' + cClass + '">' + money(row.contribucion_unit) + '</span>' +
-          (row.margen_contribucion_pct !== null ? '<div class="ps-hint">' + pct(row.margen_contribucion_pct) + '</div>' : '');
-      }
+      var faltaTxt = row.falta_subir_pct !== null
+        ? '<span class="ps-up">+' + parseFloat(row.falta_subir_pct).toFixed(1) + '%</span>'
+        : '<span class="ps-hint">—</span>';
       var rowClass = row.estado === "CRITICO" ? "ps-row-critico" : (row.requiere_ajuste ? "ps-row-alert" : "");
       html += '<tr class="' + rowClass + '">' +
         '<td><span class="mm-recipe-name">' + esc(row.nombre) + '</span>' + (row.codigo_point ? ' <span class="mm-code">' + esc(row.codigo_point) + '</span>' : '') + '</td>' +
         '<td>' + tipoChip + '</td>' +
         '<td><span class="mm-family">' + esc(row.familia || "—") + '</span></td>' +
         '<td class="is-center">' + sparkline(row.serie) + '</td>' +
-        '<td class="is-right">' + money(row.costo_inicial) + '</td>' +
-        '<td class="is-right" title="' + esc(costoTitle(row)) + '">' + money(row.costo_ultimo) + mpFlag + '</td>' +
+        '<td class="is-right" title="' + esc(costoTitle(row)) + '">' + money(row.costo_completo) + saboresFlag + '</td>' +
         '<td class="is-right ' + varClass + '">' + pct(row.variacion_costo_pct, true) + '</td>' +
         '<td class="is-right">' + (row.precio_actual ? money(row.precio_actual) : '<span class="mm-family">Sin precio</span>') + '</td>' +
         '<td class="is-right"><span class="mm-margin-value ' + marginClass(row.margen_actual, meta) + '">' + pct(row.margen_actual) + '</span></td>' +
-        '<td class="is-right">' + contribTxt + '</td>' +
+        '<td class="is-right">' + utilTxt + '</td>' +
         '<td class="is-right ps-suggest">' + money(row.precio_sugerido) + '</td>' +
-        '<td class="is-right ' + ajusteClass + '">' + pct(row.ajuste_pct, true) + '</td>' +
+        '<td class="is-right">' + faltaTxt + '</td>' +
         '<td class="is-center">' + estadoChip(row.estado) + '</td>' +
         '</tr>';
     });
