@@ -201,6 +201,18 @@ class PrecioSugeridoViewTests(TestCase):
         self.assertEqual(row["familia_point"], "Pay Grande")
         self.assertEqual(row["precio_actual"], "400.00")
 
+    def test_activo_sin_precio_point_no_desaparece(self):
+        r = self._receta("Mini activo sin precio", "MINI1")
+        p = self._point("MINI1", "Mini activo sin precio", precio=0, categoria="Pastel Mini")
+        p.precio = None
+        p.save(update_fields=["precio"])
+        self._operativo(r, fab=50, mp=50, mo=0, ind=0, emp=0)
+        row = self._row(self._fetch(), r)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["familia_point"], "Pastel Mini")
+        self.assertEqual(row["estado"], "SIN_PRECIO")
+        self.assertIsNone(row["precio_actual"])
+
     def test_filtro_familia_point(self):
         r1 = self._receta("A", "A1"); self._point("A1", "A", 300, categoria="Pastel Mediano")
         self._operativo(r1, fab=100, mp=60, mo=20, ind=10, emp=10)
