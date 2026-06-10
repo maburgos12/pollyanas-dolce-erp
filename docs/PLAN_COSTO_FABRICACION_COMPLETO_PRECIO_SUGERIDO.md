@@ -51,13 +51,40 @@ Poblar correctamente, por producto y mes, en `ProductoCostoOperativoMensual`:
    - Toma materia prima (receta) + costos de producción y los reparte por producto/volumen,
      produciendo `costo_fabricacion_unit` con sus componentes.
 
+## Aclaración de alcance (confirmada con dirección)
+
+- **Empaque**: ya va incluido en las recetas (materia prima). Solo quedarían aparte los
+  extras al cliente (servilletas, bolsas, complementos). No es el hueco principal.
+- **Hueco real**: **mano de obra de producción** + **gastos indirectos de producción**.
+- **Margen interino mientras se cargan**: el panel ya aplica un mínimo de industria de
+  **65% para productos con costo solo materia prima (MP_FALLBACK)** y 55% para los que ya
+  tienen costo completo (FAB_COMPLETO). Cuando se cargue la mano de obra real, el producto
+  pasa a FAB_COMPLETO y su meta baja a 55%.
+
+## Origen real de los datos (ya existen en el ERP)
+
+- **Mano de obra de producción** → módulo RRHH / Capital Humano:
+  - `rrhh.Empleado.departamento = "PRODUCCION"` (catálogo `DEP_CHOICES`).
+  - `rrhh.NominaLinea.total_percepciones` por empleado y periodo (`NominaPeriodo`).
+  - **Costo de mano de obra de Producción del mes** = Σ `total_percepciones` de las
+    `NominaLinea` cuyos empleados están en departamento `PRODUCCION`, en ese periodo.
+  - Ventaja: se actualiza solo cada mes (alza salarial anual de México queda reflejada
+    sin recapturar).
+- **Gastos indirectos de producción** → `GastoOperativoMensual` (centro de costo de
+  producción / categorías indirectas), cargado vía `import_branch_real_operating_expenses`.
+
 ## Tareas pendientes (a detallar con finanzas/producción)
 
-### 1. Asignación de MO / indirectos / empaque por producto
-- Definir base de prorrateo: por producto, por familia Point, por volumen (unidades) o por
-  tiempo de producción. Documentar la regla elegida.
-- Cargar las tarifas/montos vía `import_production_operating_expenses` para los meses de la
-  ventana de análisis (al menos los últimos 12 meses que el panel puede pedir).
+### 1. Asignación de MO / indirectos por producto — prorrateo POR UNIDADES PRODUCIDAS
+- Regla elegida: **por unidades producidas** en el mes.
+  - `mano_obra_prod_unit` = (mano de obra de Producción del mes) / (unidades producidas del mes).
+  - `indirecto_prod_unit` = (indirectos de producción del mes) / (unidades producidas del mes).
+  - Las unidades por producto ya existen en `ProductoCostoOperativoMensual.unidades_base`.
+- (Empaque extra, si se decide costear: cargar por separado; no confundir con el empaque
+  que ya va en receta.)
+- Implementar la distribución dentro de `snapshot_operating_finance` (o el servicio
+  `reportes/services_operating_finance.py`) para que pueble los componentes y recalcule
+  `costo_fabricacion_unit`.
 
 ### 2. Corregir bases con addons en $0
 - Hoy el snapshot deja la base (p. ej. `Pay de Queso Grande`) en `costo_fabricacion_unit = 0`

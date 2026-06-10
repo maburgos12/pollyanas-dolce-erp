@@ -6215,7 +6215,21 @@ COSTO_MP_FALLBACK = "MP_FALLBACK"     # solo materia prima (rotulado)
 COSTO_REVENTA = "REVENTA_HISTORICO"   # costo de adquisición de reventa
 COSTO_SIN = "SIN_COSTO"               # sin costo en ninguna fuente
 
-MARGEN_META_PCT = Decimal("55")
+# Margen meta por fuente de costo.
+# - Costo de fabricación completo / reventa: 55% (el costo ya trae todo o es de
+#   adquisición; el 55% cubre gasto comercial + corporativo + utilidad).
+# - Solo materia prima (MP_FALLBACK): 65% como mínimo de industria, para cubrir
+#   implícitamente la mano de obra e indirectos de producción que aún NO están
+#   cargados (food cost ~35%). Cuando se cargue fabricación completa, el producto
+#   pasa a FAB_COMPLETO y su meta baja a 55%.
+MARGEN_META_FAB_PCT = Decimal("55")
+MARGEN_META_MP_PCT = Decimal("65")
+
+
+def _margen_meta_por_fuente(fuente: str) -> Decimal:
+    if fuente == COSTO_MP_FALLBACK:
+        return MARGEN_META_MP_PCT
+    return MARGEN_META_FAB_PCT
 
 
 def _serie_variacion(serie: list[Decimal]) -> Decimal | None:
@@ -6445,6 +6459,9 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             precio_actual = price_stats.get(receta.id, (Decimal("0"), 0))[0]
             precio_fuente = "POS_MEDIANA" if precio_actual > 0 else "SIN_PRECIO"
 
+        # Margen meta según la fuente de costo (65% si es solo materia prima).
+        margen_meta_row = _margen_meta_por_fuente(fuente)
+
         margen = None
         utilidad = None
         if costo_completo > 0 and precio_actual > 0:
@@ -6453,7 +6470,7 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
 
         if costo_completo > 0:
             precio_sugerido = suggest_sale_price(
-                unit_cost=costo_completo, target_margin_pct=MARGEN_META_PCT, rounding_increment=Decimal("5"),
+                unit_cost=costo_completo, target_margin_pct=margen_meta_row, rounding_increment=Decimal("5"),
             ).suggested_price
         else:
             precio_sugerido = Decimal("0")
@@ -6472,7 +6489,7 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             estado = "CRITICO"
             cnt["criticos"] += 1
             cnt["requieren_ajuste"] += 1
-        elif margen is not None and margen < MARGEN_META_PCT:
+        elif margen is not None and margen < margen_meta_row:
             estado = "AJUSTE"
             cnt["requieren_ajuste"] += 1
         else:
@@ -6498,6 +6515,7 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             "tiene_sabores": tiene_sabores,
             "n_sabores": n_sabores,
             "costo_fuente": fuente,
+            "margen_meta": margen_meta_row,
             "breakdown": breakdown,
             "variacion_costo_pct": variacion,
             "precio_actual": precio_actual,
@@ -6529,8 +6547,8 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             "Producto", "Codigo Point", "Familia Point", "Tipo", "Fuente costo",
             f"Costo inicial ({meses}m)", "Costo ultimo mes", "Variacion costo %",
             "MP", "Mano obra", "Indirectos", "Empaque",
-            "Precio actual", "Fuente precio", "Margen actual %", "Utilidad por unidad",
-            f"Precio sugerido (margen {MARGEN_META_PCT}%)", "Falta subir %", "Estado",
+            "Precio actual", "Fuente precio", "Margen actual %", "Margen meta %", "Utilidad por unidad",
+            "Precio sugerido", "Falta subir %", "Estado",
         ])
         for row in rows:
             bd = row["breakdown"] or {}
@@ -6543,6 +6561,7 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
                 row["precio_actual"] if row["precio_actual"] > 0 else "",
                 row["precio_fuente"],
                 row["margen_actual"] if row["margen_actual"] is not None else "",
+                row["margen_meta"],
                 row["utilidad_unit"] if row["utilidad_unit"] is not None else "",
                 row["precio_sugerido"] if row["precio_sugerido"] > 0 else "",
                 row["falta_subir_pct"] if row["falta_subir_pct"] is not None else "",
@@ -6569,6 +6588,7 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             "tiene_sabores": row["tiene_sabores"],
             "n_sabores": row["n_sabores"],
             "costo_fuente": row["costo_fuente"],
+            "margen_meta": str(row["margen_meta"]),
             "breakdown": ({k: str(v) for k, v in bd.items()} if bd else None),
             "variacion_costo_pct": _s(row["variacion_costo_pct"]),
             "precio_actual": str(row["precio_actual"]) if row["precio_actual"] > 0 else None,
@@ -6586,7 +6606,8 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
 
     return JsonResponse({
         "meses": meses,
-        "margen_meta": str(MARGEN_META_PCT),
+        "margen_meta_fab": str(MARGEN_META_FAB_PCT),
+        "margen_meta_mp": str(MARGEN_META_MP_PCT),
         "periodo_inicio": start_period.isoformat(),
         "periodo_fin": current_period.isoformat(),
         "familias_point": familias_point,

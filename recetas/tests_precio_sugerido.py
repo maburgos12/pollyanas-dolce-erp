@@ -234,3 +234,24 @@ class PrecioSugeridoViewTests(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertIn("text/csv", resp["Content-Type"])
+
+    # ---- margen meta por fuente ----
+    def test_margen_meta_55_para_fab_completo(self):
+        r = self._receta("Fab", "MF1")
+        self._point("MF1", "Fab", precio=500)
+        self._operativo(r, fab=100, mp=60, mo=20, ind=10, emp=10)
+        data = self._fetch()
+        self.assertEqual(data["margen_meta_fab"], "55")
+        self.assertEqual(data["margen_meta_mp"], "65")
+        self.assertEqual(self._row(data, r)["margen_meta"], "55")
+
+    def test_mp_fallback_usa_margen_meta_65(self):
+        # Solo MP: meta 65%. Precio 200, costo 80 -> margen 60% (>=55 pero <65) -> AJUSTE.
+        r = self._receta("SoloMP", "MM1")
+        self._point("MM1", "SoloMP", precio=200)
+        self._mp_hist(r, 80)
+        row = self._row(self._fetch(), r)
+        self.assertEqual(row["margen_meta"], "65")
+        self.assertEqual(row["estado"], "AJUSTE")
+        # sugerido = 80 / (1 - 0.65) = 228.57 -> redondeo techo $5 = 230
+        self.assertEqual(row["precio_sugerido"], "230.00")
