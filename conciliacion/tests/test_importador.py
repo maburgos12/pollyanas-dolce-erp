@@ -45,6 +45,44 @@ class ImportadorBancarioTests(TestCase):
         self.assertEqual(preview.movimientos[1].monto, Decimal("300.00"))
         self.assertEqual(preview.errores, [])
 
+    def test_generar_preview_normalizes_banbajio_xml(self):
+        archivo = SimpleUploadedFile(
+            "estado_banbajio.xml",
+            (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                "<EstadoCuenta>"
+                "  <Movimientos>"
+                "    <Movimiento>"
+                "      <fechaOperacion>09/06/2026</fechaOperacion>"
+                "      <concepto>SPEI RECIBIDO</concepto>"
+                "      <cargoAbono>ABONO</cargoAbono>"
+                "      <importeMovimiento>1500.50</importeMovimiento>"
+                "      <saldo>2000.00</saldo>"
+                "      <referencia>ABC123</referencia>"
+                "    </Movimiento>"
+                "    <Movimiento>"
+                "      <fechaOperacion>10/06/2026</fechaOperacion>"
+                "      <concepto>PAGO PROVEEDOR</concepto>"
+                "      <cargoAbono>CARGO</cargoAbono>"
+                "      <importeMovimiento>300.00</importeMovimiento>"
+                "      <saldo>1700.00</saldo>"
+                "      <referencia>DEF456</referencia>"
+                "    </Movimiento>"
+                "  </Movimientos>"
+                "</EstadoCuenta>"
+            ).encode("utf-8"),
+            content_type="application/xml",
+        )
+
+        preview = generar_preview(cuenta=self.cuenta, uploaded_file=archivo)
+
+        self.assertEqual(len(preview.movimientos), 2)
+        self.assertEqual(preview.movimientos[0].tipo, MovimientoBancario.TIPO_ABONO)
+        self.assertEqual(preview.movimientos[0].monto, Decimal("1500.50"))
+        self.assertEqual(preview.movimientos[1].tipo, MovimientoBancario.TIPO_CARGO)
+        self.assertEqual(preview.movimientos[1].monto, Decimal("300.00"))
+        self.assertEqual(preview.errores, [])
+
     def test_confirmar_importacion_is_idempotent_by_manual_hash(self):
         archivo = SimpleUploadedFile(
             "bbva.csv",
