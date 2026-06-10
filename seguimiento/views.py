@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from django.conf import settings
 from django.contrib import messages
+from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
@@ -35,7 +36,7 @@ from .models import (
     SeguimientoItem,
     SeguimientoProrrogaSolicitud,
 )
-from .services import empleado_de_usuario
+from .services import empleado_de_usuario, upsert_agente_dg_payload
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +121,97 @@ def _conversacion_context(comentarios):
         "comentarios_dg": comentarios_dg,
         "ultimo_comentario_dg": comentarios_dg[-1] if comentarios_dg else None,
     }
+
+
+ACTIVE_AGENTE_DG_STATUSES = {"OPEN", "IN_PROGRESS", "WAITING_THIRD_PARTY", "POSTPONED", "BLOCKED", "PENDING", "OVERDUE", "DUE_SOON", "AT_RISK", "ACTIVE"}
+CLOSED_AGENTE_DG_STATUSES = {"COMPLETED", "CLOSED", "CANCELLED"}
+
+
+def _source_status(item: SeguimientoItem) -> str:
+    return str((item.metadata or {}).get("source_status") or "").strip().upper()
+
+
+def _tiene_desfase_agente_dg(item: SeguimientoItem) -> bool:
+    source_status = _source_status(item)
+    if str((item.metadata or {}).get("source") or "").strip() != "agente_dg":
+        return False
+    if source_status in ACTIVE_AGENTE_DG_STATUSES and item.aprobado_at:
+        return True
+    if source_status in ACTIVE_AGENTE_DG_STATUSES and item.estatus == SeguimientoItem.ESTATUS_COMPLETADO:
+        return True
+    if source_status in CLOSED_AGENTE_DG_STATUSES and not item.esta_cerrado:
+        return True
+    return False
+
+
+def _aplicar_estado_visual_seguimiento(item: SeguimientoItem, checks=None) -> None:
+    checks = list(checks if checks is not None else item.checklist.all())
+    item.checklist_total = len(checks)
+    item.checklist_done = sum(1 for c in checks if c.completado)
+    item.tiene_desfase_agente_dg = _tiene_desfase_agente_dg(item)
+    item.source_status = _source_status(item)
+    if item.checklist_total:
+        item.progreso_pct = round((item.checklist_done / item.checklist_total) * 100)
+        item.avance_label = f"{item.progreso_pct}%"
+        item.avance_detalle = f"{item.checklist_done}/{item.checklist_total} checks"
+    elif item.esta_cerrado:
+        item.progreso_pct = 100
+        item.avance_label = "Cerrado"
+        item.avance_detalle = "Sin checklist"
+    else:
+        item.progreso_pct = 0
+        item.avance_label = "Sin checklist"
+        item.avance_detalle = "Avance no medible"
+
+
+def _agente_dg_user_id_para_erp_user(user) -> int | None:
+    metadata_match = (
+        SeguimientoItem.objects.filter(responsable_user=user, metadata__source="agente_dg")
+        .exclude(metadata__source_user_id__isnull=True)
+        .values_list("metadata__source_user_id", flat=True)
+        .first()
+    )
+    if metadata_match:
+        try:
+            return int(metadata_match)
+        except (TypeError, ValueError):
+            pass
+    if not user.email:
+        return None
+    from .agente_dg_client import get_users
+
+    for agente_user in get_users():
+        if str(agente_user.get("email") or "").strip().lower() == user.email.strip().lower():
+            try:
+                return int(agente_user.get("id"))
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def _record_minuta_agente_dg(payload: dict, responsable_user=None) -> dict:
+    checklist_items = payload.get("checklist_items") or []
+    checklist_items_json = json_dumps_checklist(checklist_items)
+    return {
+        "id": payload.get("id"),
+        "titulo": payload.get("title") or "",
+        "descripcion": payload.get("agreement_text") or "",
+        "checklist_items_json": checklist_items_json,
+        "status": payload.get("status") or "OPEN",
+        "due_at": payload.get("due_at"),
+        "user_id": payload.get("collaborator_user_id"),
+        "user_email": getattr(responsable_user, "email", "") or "",
+        "user_name": getattr(responsable_user, "get_full_name", lambda: "")() or getattr(responsable_user, "username", "") or "",
+        "area_name": payload.get("meeting_label") or "",
+    }
+
+
+def json_dumps_checklist(checklist_items) -> str:
+    import json
+
+    if not checklist_items:
+        return ""
+    return json.dumps(checklist_items, ensure_ascii=False)
 
 
 EVIDENCIA_ALLOWED_EXTENSIONS = {
@@ -223,6 +315,7 @@ def mi_seguimiento(request, tipo: str | None = None):
 
     for item in items:
         checks = list(item.checklist.all())
+        _aplicar_estado_visual_seguimiento(item, checks)
         comentarios_list = list(item.comentarios.all())  # prefetched, orden -created_at
         actividad = [item.updated_at]
         actividad.extend(check.updated_at for check in checks if check.updated_at)
@@ -230,9 +323,6 @@ def mi_seguimiento(request, tipo: str | None = None):
         actividad.extend(evidencia.created_at for evidencia in item.evidencias.all())
         actividad.extend(prorroga.created_at for prorroga in item.prorrogas.all())
 
-        item.checklist_total = len(checks)
-        item.checklist_done = sum(1 for check in checks if check.completado)
-        item.progreso_pct = round((item.checklist_done / item.checklist_total) * 100) if item.checklist_total else 0
         item.ultima_actividad = max(actividad) if actividad else item.updated_at
         item.origen_display = item.origen or "ERP"
         item.es_compartido = item.participantes_user.exists() or item.participantes_empleado.exists()
@@ -718,6 +808,103 @@ def resolver_prorroga(request, pk, prorroga_id):
 
 
 @login_required
+@require_POST
+def crear_acuerdo_agente_dg(request):
+    """Crea una minuta en app.pollyanasdolce.com y la espeja al ERP."""
+    if not can_review_seguimiento_global(request.user):
+        messages.error(request, "Acceso restringido a Dirección General.")
+        return redirect("seguimiento:mi_seguimiento")
+
+    from .agente_dg_client import AgenteDGError, create_minute_agreement, is_configured
+
+    if not _writeback_activo() or not is_configured():
+        messages.error(request, "La integración con app.pollyanasdolce.com no está activa para crear acuerdos.")
+        return redirect("seguimiento:panel_dg")
+
+    User = get_user_model()
+    responsable = get_object_or_404(User, pk=request.POST.get("responsable_user_id"), is_active=True)
+    titulo = (request.POST.get("titulo") or "").strip()
+    descripcion = (request.POST.get("descripcion") or "").strip()
+    fecha_raw = (request.POST.get("fecha_limite") or "").strip()
+    hora_raw = (request.POST.get("hora_limite") or "18:00").strip() or "18:00"
+    checklist_raw = (request.POST.get("checklist") or "").strip()
+
+    if not titulo:
+        messages.error(request, "El acuerdo necesita un título.")
+        return redirect("seguimiento:panel_dg")
+    fecha = parse_date(fecha_raw)
+    if not fecha:
+        messages.error(request, "La fecha límite no es válida.")
+        return redirect("seguimiento:panel_dg")
+    try:
+        hora = datetime.strptime(hora_raw, "%H:%M").time()
+    except ValueError:
+        messages.error(request, "La hora límite no es válida.")
+        return redirect("seguimiento:panel_dg")
+
+    try:
+        agente_user_id = _agente_dg_user_id_para_erp_user(responsable)
+    except AgenteDGError as exc:
+        logger.warning("No se pudo resolver usuario Agente DG para %s: %s", responsable.pk, exc)
+        messages.error(request, "No se pudo consultar usuarios de app.pollyanasdolce.com para asignar el acuerdo.")
+        return redirect("seguimiento:panel_dg")
+    if not agente_user_id:
+        messages.error(request, "Ese colaborador no tiene usuario ligado en app.pollyanasdolce.com; primero hay que crearlo o vincularlo.")
+        return redirect("seguimiento:panel_dg")
+
+    due_at = timezone.make_aware(datetime.combine(fecha, hora), timezone.get_current_timezone())
+    checklist_items = [
+        {"text": line.strip(), "completed": False}
+        for line in checklist_raw.splitlines()
+        if line.strip()
+    ]
+    payload = {
+        "collaborator_user_id": agente_user_id,
+        "title": titulo,
+        "meeting_label": "ERP Seguimiento",
+        "agreement_text": descripcion,
+        "checklist_items": checklist_items or None,
+        "due_at": due_at.isoformat(),
+        "send_email_on_create": False,
+        "send_whatsapp_on_create": False,
+        "send_calendar_invite_on_create": False,
+        "create_commitment": False,
+    }
+    try:
+        created = create_minute_agreement(**payload)
+    except AgenteDGError as exc:
+        logger.warning("Crear minuta Agente DG falló: %s", exc)
+        messages.error(request, "No se pudo crear el acuerdo en app.pollyanasdolce.com. No se creó en ERP para evitar desfase.")
+        return redirect("seguimiento:panel_dg")
+
+    record = _record_minuta_agente_dg(created, responsable_user=responsable)
+    try:
+        counters = upsert_agente_dg_payload({
+            "source_table": "minute_agreements",
+            "source_id": created.get("id"),
+            "record": record,
+        })
+    except Exception:
+        logger.exception("Minuta creada en Agente DG pero no pudo espejarse al ERP: %s", created.get("id"))
+        messages.warning(
+            request,
+            "El acuerdo se creó en app.pollyanasdolce.com, pero no se pudo reflejar inmediatamente en ERP. "
+            "El sincronizador debe importarlo en el siguiente ciclo.",
+        )
+        return redirect("seguimiento:panel_dg")
+    item = SeguimientoItem.objects.filter(
+        metadata__source="agente_dg",
+        metadata__source_table="minute_agreements",
+        metadata__source_id=created.get("id"),
+    ).first()
+    log_event(request.user, "seguimiento.agente_dg.crear", "SeguimientoItem", item.pk if item else 0, counters)
+    messages.success(request, "Acuerdo creado en app.pollyanasdolce.com y reflejado en el ERP.")
+    if item:
+        return redirect("seguimiento:detalle_dg", pk=item.pk)
+    return redirect("seguimiento:panel_dg")
+
+
+@login_required
 def panel_dg(request):
     if not can_review_seguimiento_global(request.user):
         messages.error(request, "Acceso restringido a Dirección General.")
@@ -753,24 +940,9 @@ def panel_dg(request):
 
     items = list(qs)
 
-    _ESTATUS_PROGRESO = {
-        SeguimientoItem.ESTATUS_COMPLETADO: 100,
-        SeguimientoItem.ESTATUS_EN_REVISION: 80,
-        SeguimientoItem.ESTATUS_EN_PROCESO: 50,
-        SeguimientoItem.ESTATUS_BLOQUEADO: 30,
-        SeguimientoItem.ESTATUS_PENDIENTE: 10,
-        SeguimientoItem.ESTATUS_CANCELADO: 0,
-    }
-
     for item in items:
         checks = list(item.checklist.all())
-        item.checklist_total = len(checks)
-        item.checklist_done = sum(1 for c in checks if c.completado)
-        if item.checklist_total:
-            item.progreso_pct = round((item.checklist_done / item.checklist_total) * 100)
-        else:
-            # Sin checklist: progreso inferido del estatus
-            item.progreso_pct = _ESTATUS_PROGRESO.get(item.estatus, 0)
+        _aplicar_estado_visual_seguimiento(item, checks)
         item.prorroga_pendiente = next(
             (p for p in item.prorrogas.all() if p.estatus == SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE), None
         )
@@ -851,9 +1023,7 @@ def panel_dg(request):
     pendientes_accion = list(items_pendientes_revision_dg())
     for item in pendientes_accion:
         checks = list(item.checklist.all())
-        item.checklist_total = len(checks)
-        item.checklist_done = sum(1 for c in checks if c.completado)
-        item.progreso_pct = round((item.checklist_done / item.checklist_total) * 100) if item.checklist_total else 0
+        _aplicar_estado_visual_seguimiento(item, checks)
         item.responsable_nombre = _responsable_nombre(item)
         item.ultima_evidencia = item.evidencias.order_by("-created_at").first()
         item.ultimo_comentario = item.comentarios.order_by("-created_at").first()
@@ -861,6 +1031,12 @@ def panel_dg(request):
             (p for p in item.prorrogas.all() if p.estatus == SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE), None
         )
         item.es_en_revision = item.estatus == SeguimientoItem.ESTATUS_EN_REVISION
+
+    usuarios_crear_acuerdo = (
+        get_user_model().objects.filter(is_active=True)
+        .exclude(username__startswith="service")
+        .order_by("first_name", "last_name", "username")
+    )
 
     return render(request, "seguimiento/panel_dg.html", {
         "items": items,
@@ -887,6 +1063,8 @@ def panel_dg(request):
         "estatus_choices": SeguimientoItem.ESTATUS_CHOICES,
         "ESTATUS_EN_REVISION": SeguimientoItem.ESTATUS_EN_REVISION,
         "ESTATUS_COMPLETADO": SeguimientoItem.ESTATUS_COMPLETADO,
+        "usuarios_crear_acuerdo": usuarios_crear_acuerdo,
+        "writeback_activo": _writeback_activo(),
     })
 
 
@@ -982,9 +1160,10 @@ def completar_directamente(request, pk):
 def detalle_item(request, pk):
     item = _get_item_para_usuario(request.user, pk)
     checks = list(item.checklist.all())
-    checklist_total = len(checks)
-    checklist_done = sum(1 for c in checks if c.completado)
-    progreso_pct = round((checklist_done / checklist_total) * 100) if checklist_total else 0
+    _aplicar_estado_visual_seguimiento(item, checks)
+    checklist_total = item.checklist_total
+    checklist_done = item.checklist_done
+    progreso_pct = item.progreso_pct
 
     now = timezone.now()
     if item.esta_vencido:
@@ -1143,9 +1322,10 @@ def detalle_item_dg(request, pk):
         pk=pk,
     )
     checks = list(item.checklist.all())
-    checklist_total = len(checks)
-    checklist_done = sum(1 for c in checks if c.completado)
-    progreso_pct = round((checklist_done / checklist_total) * 100) if checklist_total else 0
+    _aplicar_estado_visual_seguimiento(item, checks)
+    checklist_total = item.checklist_total
+    checklist_done = item.checklist_done
+    progreso_pct = item.progreso_pct
     now = timezone.now()
     if item.esta_vencido:
         prioridad_label, prioridad_tone = "Vencido", "danger"
