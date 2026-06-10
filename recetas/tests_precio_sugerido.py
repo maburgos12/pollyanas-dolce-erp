@@ -6,7 +6,7 @@ Semántica honesta de costo:
 - MP_FALLBACK (solo materia prima, rotulado) cuando no hay fabricación completa.
 - REVENTA_HISTORICO desde ProductoReventaCostoHistoricoMensual.
 - SIN_COSTO si no hay ninguna fuente.
-Catálogo/precio/familia desde Point; margen meta 55%; precio sugerido como piso.
+Catálogo/precio/familia desde Point; margen meta según fuente; precio sugerido como piso.
 """
 
 import json
@@ -135,6 +135,7 @@ class PrecioSugeridoViewTests(TestCase):
         self.assertEqual(row["costo_fuente"], "REVENTA_HISTORICO")
         self.assertEqual(row["costo_completo"], "12.00")
         self.assertTrue(row["es_reventa"])
+        self.assertEqual(row["margen_meta"], "30")
 
     def test_sin_costo_cuando_no_hay_fuente(self):
         r = self._receta("Sin Costo", "SC1")
@@ -285,3 +286,16 @@ class PrecioSugeridoViewTests(TestCase):
         self.assertEqual(row["estado"], "AJUSTE")
         # sugerido = 80 / (1 - 0.65) = 228.57 -> redondeo techo $5 = 230
         self.assertEqual(row["precio_sugerido"], "230.00")
+
+    def test_reventa_usa_margen_meta_30_y_no_fuerza_markup_fabricado(self):
+        r = self._receta("Caja carton", "CAJA1", modo=Receta.MODO_COSTEO_REVENTA)
+        p = self._point("CAJA1", "Caja carton", precio=60, categoria="Accesorios")
+        self._reventa_hist(p, Decimal("19.87"))
+        data = self._fetch()
+        row = self._row(data, r)
+        self.assertEqual(data["margen_meta_reventa"], "30")
+        self.assertEqual(row["margen_meta"], "30")
+        self.assertEqual(row["estado"], "OK")
+        # sugerido = 19.87 / (1 - 0.30) = 28.39 -> redondeo techo $5 = 30
+        self.assertEqual(row["precio_sugerido"], "30.00")
+        self.assertIsNone(row["falta_subir_pct"])

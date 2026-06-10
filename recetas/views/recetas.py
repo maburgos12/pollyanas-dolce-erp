@@ -6218,19 +6218,24 @@ COSTO_REVENTA = "REVENTA_HISTORICO"   # costo de adquisición de reventa
 COSTO_SIN = "SIN_COSTO"               # sin costo en ninguna fuente
 
 # Margen meta por fuente de costo.
-# - Costo de fabricación completo / reventa: 55% (el costo ya trae todo o es de
-#   adquisición; el 55% cubre gasto comercial + corporativo + utilidad).
+# - Costo de fabricación completo: 55% (el costo ya trae MP + fabricación).
 # - Solo materia prima (MP_FALLBACK): 65% como mínimo de industria, para cubrir
 #   implícitamente la mano de obra e indirectos de producción que aún NO están
 #   cargados (food cost ~35%). Cuando se cargue fabricación completa, el producto
 #   pasa a FAB_COMPLETO y su meta baja a 55%.
+# - Reventa: 30% para accesorios/productos comprados. No debe usar la misma meta
+#   que un producto fabricado; la práctica comercial real suele ser margen menor
+#   para no romper el ticket principal.
 MARGEN_META_FAB_PCT = Decimal("55")
 MARGEN_META_MP_PCT = Decimal("65")
+MARGEN_META_REVENTA_PCT = Decimal("30")
 
 
 def _margen_meta_por_fuente(fuente: str) -> Decimal:
     if fuente == COSTO_MP_FALLBACK:
         return MARGEN_META_MP_PCT
+    if fuente == COSTO_REVENTA:
+        return MARGEN_META_REVENTA_PCT
     return MARGEN_META_FAB_PCT
 
 
@@ -6289,7 +6294,7 @@ def _precio_sugerido_excel_response(
     ws["A6"].alignment = Alignment(horizontal="left")
     ws.merge_cells("A7:T7")
     ws["A7"] = (
-        "Margen meta: 55% costo completo/reventa · 65% solo materia prima. "
+        "Margen meta: 55% fabricación completa · 65% solo materia prima · 30% reventa. "
         "Archivo listo para imprimir con texto y tabla alineados al mismo margen."
     )
     ws["A7"].font = Font(size=10, color="5B4A52")
@@ -6449,8 +6454,8 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
       - REVENTA_HISTORICO: ProductoReventaCostoHistoricoMensual.costo_promedio.
       - SIN_COSTO: no hay costo en ninguna fuente.
     Catálogo, precio vigente y familia salen de Point (fuente de verdad). Los
-    sabores (addons) se combinan en su base; el margen meta es 55%; el precio
-    sugerido es un piso (no recomienda bajar precios sanos)."""
+    sabores (addons) se combinan en su base; el margen meta depende de la fuente
+    de costo; el precio sugerido es un piso (no recomienda bajar precios sanos)."""
     if not can_view_recetas(request.user):
         raise PermissionDenied
 
@@ -6660,7 +6665,7 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             precio_actual = price_stats.get(receta.id, (Decimal("0"), 0))[0]
             precio_fuente = "POS_MEDIANA" if precio_actual > 0 else "SIN_PRECIO"
 
-        # Margen meta según la fuente de costo (65% si es solo materia prima).
+        # Margen meta según la fuente de costo.
         margen_meta_row = _margen_meta_por_fuente(fuente)
 
         margen = None
@@ -6822,6 +6827,7 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
         "meses": meses,
         "margen_meta_fab": str(MARGEN_META_FAB_PCT),
         "margen_meta_mp": str(MARGEN_META_MP_PCT),
+        "margen_meta_reventa": str(MARGEN_META_REVENTA_PCT),
         "periodo_inicio": start_period.isoformat(),
         "periodo_fin": current_period.isoformat(),
         "familias_point": familias_point,

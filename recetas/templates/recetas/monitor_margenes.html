@@ -312,7 +312,7 @@
     <div class="ps-head">
       <div>
         <h2 class="ps-title">💡 Precio mínimo rentable</h2>
-        <p class="ps-sub">Solo <strong>productos activos de Point</strong> (con precio vigente y familia Point). Costo base por producto con fuente etiquetada: <strong>FAB_COMPLETO</strong> (operativo con MO+indirectos+empaque), <strong>MP_FALLBACK</strong> (solo materia prima, mientras no se cargue fabricación completa), <strong>REVENTA_HISTORICO</strong> o <strong>SIN_COSTO</strong>. Sabores combinados en su base. Margen meta <strong>55%</strong> si el costo es completo, <strong>65%</strong> si es solo materia prima (mínimo de industria que cubre mano de obra e indirectos aún no cargados). Precio sugerido es un piso (no recomienda bajar precios sanos).</p>
+        <p class="ps-sub">Productos activos de Point. El precio sugerido usa la meta correspondiente a su fuente de costo: fabricación completa, solo materia prima o reventa.</p>
       </div>
       <button type="button" class="ps-close" id="ps-close" aria-label="Cerrar">✕</button>
     </div>
@@ -709,7 +709,7 @@
     summary.hidden = false;
     summary.innerHTML =
       '<div><strong>' + data.total + '</strong> productos activos</div>' +
-      '<div title="Costo de fabricación completo usa 55%; solo materia prima usa 65% (mínimo de industria que cubre mano de obra e indirectos aún no cargados)">Margen meta <strong>' + data.margen_meta_fab + '%</strong> completo · <strong>' + data.margen_meta_mp + '%</strong> solo MP</div>' +
+      '<div title="Fabricado completo: costo con componentes productivos; solo MP: sin mano de obra/indirectos cargados; reventa: producto comprado/accesorio">Meta <strong>' + data.margen_meta_fab + '%</strong> fabricación · <strong>' + data.margen_meta_mp + '%</strong> solo MP · <strong>' + data.margen_meta_reventa + '%</strong> reventa</div>' +
       '<div class="' + (data.criticos ? "is-alert" : "") + '"><strong>' + data.criticos + '</strong> pierden dinero</div>' +
       '<div class="' + (data.requieren_ajuste ? "is-alert" : "") + '"><strong>' + data.requieren_ajuste + '</strong> requieren ajuste</div>' +
       '<div title="Costo de fabricación completo / solo materia prima"><strong>' + data.fab_completo + '</strong> fab. completo · <strong>' + data.mp_fallback + '</strong> solo MP</div>' +
