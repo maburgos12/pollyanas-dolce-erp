@@ -5,11 +5,19 @@ import io
 import zipfile
 from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.test import TestCase
+from lxml import etree
 
 from sat_client.models import CfdiDescargado, SolicitudDescarga
-from sat_client.services.descarga import extraer_xmls_de_zip_base64, guardar_cfdis_xml, parse_cfdi_xml
+from sat_client.services.base import SAT_DOWNLOAD_NS, SatCredentials, find_first_element
+from sat_client.services.descarga import (
+    _build_descarga_envelope,
+    extraer_xmls_de_zip_base64,
+    guardar_cfdis_xml,
+    parse_cfdi_xml,
+)
 
 
 CFDI_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
@@ -36,6 +44,33 @@ CFDI_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
 
 
 class SatDescargaServiceTests(TestCase):
+    def test_build_descarga_envelope_uses_current_sat_contract(self):
+        credentials = SatCredentials(
+            cer_path="/tmp/fiel.cer",
+            key_path="/tmp/fiel.key",
+            password="secret",
+            rfc="AAA010101AAA",
+        )
+        captured = {}
+
+        def fake_signed_request(tag_name, attributes, credentials_arg):
+            captured["tag_name"] = tag_name
+            captured["attributes"] = attributes
+            captured["credentials"] = credentials_arg
+            return etree.Element(tag_name)
+
+        with (
+            patch("sat_client.services.descarga.get_sat_credentials", return_value=credentials),
+            patch("sat_client.services.descarga.build_signed_sat_request", side_effect=fake_signed_request),
+        ):
+            envelope = _build_descarga_envelope("PAQUETE_01")
+
+        operation = find_first_element(envelope, "PeticionDescargaMasivaTercerosEntrada")
+        self.assertIsNotNone(operation)
+        self.assertEqual(etree.QName(captured["tag_name"]).namespace, SAT_DOWNLOAD_NS)
+        self.assertEqual(etree.QName(captured["tag_name"]).localname, "peticionDescarga")
+        self.assertEqual(captured["attributes"], {"IdPaquete": "PAQUETE_01", "RfcSolicitante": "AAA010101AAA"})
+
     def test_parse_cfdi_xml_extracts_key_fields(self):
         parsed = parse_cfdi_xml(CFDI_XML)
 
