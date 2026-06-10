@@ -6321,11 +6321,21 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
         addons_por_base[registro["base_receta_id"]].append(registro["addon_receta_id"])
         addon_ids.add(registro["addon_receta_id"])
 
-    recetas_qs = Receta.objects.filter(tipo=Receta.TIPO_PRODUCTO_FINAL).exclude(id__in=addon_ids)
+    # Rebanadas derivadas: su costo vivo (padre/porción) hoy es poco confiable, así
+    # que se excluyen del listado hasta verificar su costeo por porción.
+    derivadas_ids: set[int] = set(
+        RecetaPresentacionDerivada.objects.filter(
+            activo=True, receta_derivada__isnull=False
+        ).values_list("receta_derivada_id", flat=True)
+    )
+    excluidos_ids = addon_ids | derivadas_ids
+
+    recetas_qs = Receta.objects.filter(tipo=Receta.TIPO_PRODUCTO_FINAL).exclude(id__in=excluidos_ids)
     if familias_sel:
         recetas_qs = recetas_qs.filter(familia__in=familias_sel)
     recetas = list(recetas_qs)
     receta_ids = {receta.id for receta in recetas}
+    derivadas_excluidas = len(derivadas_ids)
 
     # Costo vivo universal para los vendibles y sus sabores (para el rollup).
     addons_necesarios: set[int] = set()
@@ -6590,6 +6600,7 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             "sin_costo": sin_costo,
             "sin_precio": sin_precio,
             "combinados": combinados,
+            "derivadas_excluidas": derivadas_excluidas,
             "export_query": export_params.urlencode(),
             "rows": payload_rows,
         }

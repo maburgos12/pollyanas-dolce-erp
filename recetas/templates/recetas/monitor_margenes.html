@@ -724,7 +724,9 @@
       '<div class="' + (data.criticos ? "is-alert" : "") + '"><strong>' + data.criticos + '</strong> pierden dinero</div>' +
       '<div class="' + (data.requieren_ajuste ? "is-alert" : "") + '"><strong>' + data.requieren_ajuste + '</strong> bajo el mínimo</div>' +
       '<div><strong>' + data.sin_precio + '</strong> sin precio</div>' +
+      '<div title="Productos sin costo en ninguna fuente (sin receta costeada). Necesitan costearse para poder sugerir precio."><strong>' + data.sin_costo + '</strong> sin costear</div>' +
       '<div title="Productos con sabores (addons) combinados en su costo"><strong>' + data.combinados + '</strong> con sabores combinados</div>' +
+      (data.derivadas_excluidas ? '<div title="Rebanadas derivadas excluidas hasta verificar su costeo por porción"><strong>' + data.derivadas_excluidas + '</strong> rebanadas excluidas</div>' : '') +
       '<div>Periodo: ' + data.periodo_inicio + ' a ' + data.periodo_fin + '</div>';
 
     if (!data.rows.length) {
