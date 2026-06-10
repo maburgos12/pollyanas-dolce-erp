@@ -118,11 +118,7 @@
       </div>
     </div>
     <div class="conc-status-line">
-      {% if sat_descarga_enabled %}
-        <span class="conc-chip is-ok">Descarga SAT activa</span>
-      {% else %}
-        <span class="conc-chip is-muted">Descarga SAT pausada</span>
-      {% endif %}
+      <span class="conc-chip {{ sat_estado_tone }}">{{ sat_estado_label }}</span>
       {% if sat_ultimo_log %}
         <span class="conc-note">Ultimo registro: {{ sat_ultimo_log.creado_en|date:"Y-m-d H:i" }} - {{ sat_ultimo_log.mensaje }}</span>
       {% else %}
