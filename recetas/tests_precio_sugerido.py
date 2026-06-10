@@ -177,6 +177,16 @@ class PrecioSugeridoViewTests(TestCase):
         self._operativo(r, fab=50, mp=30, mo=10, ind=5, emp=5)
         self.assertIsNone(self._row(self._fetch(), r))
 
+    def test_archivado_con_precio_vivo_se_excluye(self):
+        # Producto desactivado en Point (active=False) que aún conserva precio
+        # vigente NO debe aparecer en el catálogo de "productos activos de Point".
+        r = self._receta("Archivado", "ARCH1")
+        p = self._point("ARCH1", "Archivado", precio=200)
+        p.active = False
+        p.save(update_fields=["active"])
+        self._operativo(r, fab=50, mp=30, mo=10, ind=5, emp=5)
+        self.assertIsNone(self._row(self._fetch(), r))
+
     def test_familia_y_precio_vienen_de_point(self):
         r = self._receta("Conf", "CF1")
         self._point("CF1", "Conf", precio=400, categoria="Pay Grande")

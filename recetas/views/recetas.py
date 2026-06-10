@@ -6260,7 +6260,7 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
     precio_por_sku: dict[str, Decimal] = {}
     categoria_por_sku: dict[str, str] = {}
     for registro in PointProduct.objects.filter(
-        precio_activo=True, precio__isnull=False
+        active=True, precio_activo=True, precio__isnull=False
     ).values("sku", "precio", "category"):
         sku = (registro["sku"] or "").strip()
         if not sku:
