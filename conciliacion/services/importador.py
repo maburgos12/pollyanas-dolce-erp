@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import re
+import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
@@ -20,6 +21,7 @@ from syncfy_client.models import CuentaBancaria, MovimientoBancario
 MAX_PREVIEW_ROWS = 50
 MAX_IMPORT_ROWS = 3000
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+FORMATOS_SOPORTADOS = {"csv", "xlsx", "xlsm", "xls", "xml"}
 
 
 class ImportacionBancariaError(ValueError):
@@ -113,8 +115,8 @@ def generar_preview(*, cuenta: CuentaBancaria, uploaded_file) -> PreviewImportac
 
     nombre = str(uploaded_file.name or "estado_cuenta")
     suffix = nombre.rsplit(".", 1)[-1].lower() if "." in nombre else ""
-    if suffix not in {"csv", "xlsx", "xlsm", "xls"}:
-        raise ImportacionBancariaError("Formato no soportado. Usa CSV, XLSX, XLSM o XLS.")
+    if suffix not in FORMATOS_SOPORTADOS:
+        raise ImportacionBancariaError("Formato no soportado. Usa XML, CSV, XLSX, XLSM o XLS.")
 
     dataframe = _read_dataframe(content, suffix)
     if dataframe.empty:
@@ -139,7 +141,7 @@ def generar_preview(*, cuenta: CuentaBancaria, uploaded_file) -> PreviewImportac
         cuenta_id=cuenta.pk,
         archivo_nombre=nombre,
         archivo_hash=hashlib.sha256(content).hexdigest(),
-        fuente=ImportacionBancaria.FUENTE_MANUAL_CSV if suffix == "csv" else ImportacionBancaria.FUENTE_MANUAL_EXCEL,
+        fuente=_fuente_manual(suffix),
         movimientos=movimientos,
         errores=errores,
     )
@@ -237,7 +239,118 @@ def _read_dataframe(content: bytes, suffix: str) -> pd.DataFrame:
             return pd.read_csv(buffer)
         except UnicodeDecodeError:
             return pd.read_csv(io.BytesIO(content), encoding="latin-1")
+    if suffix == "xml":
+        return _read_xml_dataframe(content)
     return pd.read_excel(buffer)
+
+
+def _read_xml_dataframe(content: bytes) -> pd.DataFrame:
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError as exc:
+        raise ImportacionBancariaError("XML invalido.") from exc
+
+    candidates: dict[str, list[dict[str, Any]]] = {}
+    for element in root.iter():
+        row = _flatten_xml_element(element)
+        if _looks_like_bank_row(row):
+            candidates.setdefault(_xml_tag(element.tag), []).append(row)
+
+    if not candidates:
+        return pd.DataFrame()
+
+    rows = max(candidates.values(), key=lambda items: (len(items), _xml_rows_score(items)))
+    return pd.DataFrame(rows)
+
+
+def _flatten_xml_element(element: ET.Element) -> dict[str, Any]:
+    row: dict[str, Any] = {}
+    for key, value in element.attrib.items():
+        row[_xml_tag(key)] = value
+    _flatten_xml_children(element, row=row, prefix="")
+    return row
+
+
+def _flatten_xml_children(element: ET.Element, *, row: dict[str, Any], prefix: str) -> None:
+    for child in list(element):
+        tag = _xml_tag(child.tag)
+        key = f"{prefix}_{tag}" if prefix else tag
+        text = (child.text or "").strip()
+        if child.attrib:
+            for attr_key, attr_value in child.attrib.items():
+                row[f"{key}_{_xml_tag(attr_key)}"] = attr_value
+        if list(child):
+            _flatten_xml_children(child, row=row, prefix=key)
+        elif text:
+            row[key] = text
+
+
+def _looks_like_bank_row(row: dict[str, Any]) -> bool:
+    normalized = {_normalize_header(key): value for key, value in row.items()}
+    has_date = _first(
+        normalized,
+        "fecha",
+        "fecha_operacion",
+        "fecha_de_operacion",
+        "fecha_movimiento",
+        "fecha_de_movimiento",
+        "fecha_valor",
+        "fecha_aplicacion",
+        "fecha_contable",
+        "date",
+    ) not in (None, "")
+    has_description = _first(
+        normalized,
+        "descripcion",
+        "concepto",
+        "concepto_pago",
+        "detalle",
+        "movimiento",
+        "descripcion_movimiento",
+        "operacion",
+        "description",
+        "referencia",
+        "folio",
+        "rastreo",
+    ) not in (None, "")
+    has_amount = _first(
+        normalized,
+        "cargo",
+        "cargos",
+        "importe_cargo",
+        "retiro",
+        "retiros",
+        "debe",
+        "abono",
+        "abonos",
+        "importe_abono",
+        "deposito",
+        "depositos",
+        "credito",
+        "creditos",
+        "haber",
+        "monto",
+        "importe",
+        "importe_movimiento",
+        "amount",
+        "valor",
+        "importe_total",
+    ) not in (None, "")
+    return has_date and has_description and has_amount
+
+
+def _xml_rows_score(rows: list[dict[str, Any]]) -> int:
+    return sum(len(row) for row in rows)
+
+
+def _xml_tag(value: str) -> str:
+    return str(value).rsplit("}", 1)[-1]
+
+
+def _fuente_manual(suffix: str) -> str:
+    if suffix == "csv":
+        return ImportacionBancaria.FUENTE_MANUAL_CSV
+    return ImportacionBancaria.FUENTE_MANUAL_EXCEL
 
 
 def _normalizar_movimiento(*, row: dict[str, Any], fila: int) -> MovimientoNormalizado:
@@ -250,11 +363,24 @@ def _normalizar_movimiento(*, row: dict[str, Any], fila: int) -> MovimientoNorma
             "fecha_movimiento",
             "fecha_de_movimiento",
             "fecha_valor",
+            "fecha_aplicacion",
+            "fecha_contable",
             "date",
         )
     )
     descripcion = str(
-        _first(row, "descripcion", "concepto", "detalle", "movimiento", "operacion", "description") or ""
+        _first(
+            row,
+            "descripcion",
+            "concepto",
+            "concepto_pago",
+            "detalle",
+            "movimiento",
+            "descripcion_movimiento",
+            "operacion",
+            "description",
+        )
+        or ""
     ).strip()
     referencia = str(_first(row, "referencia", "folio", "autorizacion", "rastreo", "reference") or "").strip()
     if not descripcion and referencia:
@@ -266,11 +392,11 @@ def _normalizar_movimiento(*, row: dict[str, Any], fila: int) -> MovimientoNorma
     abono = _decimal_or_none(
         _first(row, "abono", "abonos", "importe_abono", "deposito", "depositos", "credito", "creditos", "haber")
     )
-    monto_directo = _decimal_or_none(_first(row, "monto", "importe", "amount", "valor", "importe_total"))
+    monto_directo = _decimal_or_none(_first(row, "monto", "importe", "importe_movimiento", "amount", "valor", "importe_total"))
     if cargo is not None or abono is not None:
         firmado = (abono or Decimal("0")) - (cargo or Decimal("0"))
     elif monto_directo is not None:
-        firmado = monto_directo
+        firmado = _aplicar_tipo_movimiento(monto_directo, row)
     else:
         raise ImportacionBancariaError("falta monto, cargo o abono.")
     if firmado == 0:
@@ -323,11 +449,23 @@ def _parse_fecha(value: Any) -> datetime:
 
 
 def _normalize_header(value: Any) -> str:
-    text = str(value or "").strip().lower()
+    text = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", str(value or "").strip()).lower()
     replacements = str.maketrans("áéíóúüñ", "aeiouun")
     text = text.translate(replacements)
     text = re.sub(r"[^a-z0-9]+", "_", text).strip("_")
     return text
+
+
+def _aplicar_tipo_movimiento(monto: Decimal, row: dict[str, Any]) -> Decimal:
+    tipo_raw = str(
+        _first(row, "tipo", "tipo_movimiento", "tipo_operacion", "naturaleza", "cargo_abono", "signo") or ""
+    ).strip()
+    tipo = _normalize_header(tipo_raw)
+    if tipo in {"cargo", "cargos", "retiro", "retiros", "debito", "debe", "egreso", "salida", "minus", "negativo"}:
+        return -abs(monto)
+    if tipo in {"abono", "abonos", "deposito", "depositos", "credito", "haber", "ingreso", "entrada", "plus", "positivo"}:
+        return abs(monto)
+    return monto
 
 
 def _first(row: dict[str, Any], *keys: str) -> Any:
