@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from conciliacion.models import ImportacionBancaria
+from sat_client.models import LogDescargaSat
 from syncfy_client.models import CuentaBancaria, MovimientoBancario
 
 
@@ -29,6 +30,16 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Conciliacion bancaria")
         self.assertContains(response, "BBVA Empresas")
+
+    @override_settings(SAT_DESCARGA_ENABLED=True)
+    def test_get_bancaria_shows_sat_error_status_when_last_log_failed(self):
+        LogDescargaSat.objects.create(nivel=LogDescargaSat.NIVEL_ERROR, mensaje="Error SAT: HTTP 500")
+
+        response = self.client.get("/conciliacion/bancaria/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Descarga SAT con error")
+        self.assertNotContains(response, "Descarga SAT activa")
 
     def test_preview_and_confirm_import_movements(self):
         archivo = SimpleUploadedFile(

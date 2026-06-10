@@ -54,12 +54,25 @@ def conciliacion_bancaria_view(request: HttpRequest) -> HttpResponse:
                 request.session.pop(SESSION_PREVIEW_KEY, None)
 
     contexto = resumen_conciliacion()
+    sat_ultimo_log = LogDescargaSat.objects.order_by("-creado_en").first()
+    sat_descarga_enabled = getattr(settings, "SAT_DESCARGA_ENABLED", False)
+    if sat_ultimo_log and sat_ultimo_log.nivel == LogDescargaSat.NIVEL_ERROR:
+        sat_estado_label = "Descarga SAT con error"
+        sat_estado_tone = "is-warn"
+    elif sat_descarga_enabled:
+        sat_estado_label = "Descarga SAT activa"
+        sat_estado_tone = "is-ok"
+    else:
+        sat_estado_label = "Descarga SAT pausada"
+        sat_estado_tone = "is-muted"
+
     contexto.update(
         {
             "cuentas": CuentaBancaria.objects.filter(activa=True).order_by("banco"),
-            "sat_descarga_enabled": getattr(settings, "SAT_DESCARGA_ENABLED", False),
             "sat_cfdis_total": CfdiDescargado.objects.count(),
-            "sat_ultimo_log": LogDescargaSat.objects.order_by("-creado_en").first(),
+            "sat_estado_label": sat_estado_label,
+            "sat_estado_tone": sat_estado_tone,
+            "sat_ultimo_log": sat_ultimo_log,
             "preview": preview,
             "preview_rows": preview.movimientos[:50] if preview else [],
             "movimiento_rows": _movimiento_rows(contexto["ultimos_movimientos"], contexto["candidatos"]),
