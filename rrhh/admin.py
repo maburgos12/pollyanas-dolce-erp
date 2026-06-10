@@ -8,6 +8,7 @@ from .models import (
     EmpleadoBaja,
     EmpleadoIdentidadPendiente,
     HoraExtra,
+    IncidenciaAsistencia,
     ImportacionChecador,
     ImportacionNominaContpaq,
     NominaConceptoLinea,
@@ -248,6 +249,46 @@ class HoraExtraAdmin(admin.ModelAdmin):
     list_display = ("empleado", "fecha", "horas", "monto_calculado", "estado", "jefe_directo", "autorizado_por")
     list_filter = ("estado", "fecha", "jefe_directo")
     search_fields = ("empleado__nombre", "empleado__codigo")
+
+
+@admin.register(IncidenciaAsistencia)
+class IncidenciaAsistenciaAdmin(admin.ModelAdmin):
+    list_display = (
+        "empleado",
+        "fecha",
+        "tipo",
+        "estado",
+        "severidad",
+        "minutos",
+        "goce_sueldo",
+        "actualizado_en",
+    )
+    list_filter = ("tipo", "estado", "severidad", "fecha", "goce_sueldo")
+    search_fields = ("empleado__nombre", "empleado__codigo", "detalle")
+    readonly_fields = (
+        "empleado",
+        "fecha",
+        "tipo",
+        "estado",
+        "severidad",
+        "asistencia",
+        "permiso",
+        "solicitud_vacaciones",
+        "hora_extra",
+        "minutos",
+        "goce_sueldo",
+        "ventana_inicio",
+        "ventana_fin",
+        "conteo_retardos_15d",
+        "conteo_faltas_30d",
+        "detalle",
+        "metadata",
+        "creado_en",
+        "actualizado_en",
+    )
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(PermisoSalida)

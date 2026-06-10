@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, time
 
 import pandas as pd
@@ -8,9 +9,11 @@ from django.db.models import Q
 from core.models import Sucursal
 from rrhh.models import AsistenciaEmpleado, Empleado, ImportacionChecador
 from rrhh.services import generar_horas_extra_automatico
+from rrhh.services_asistencia_reglas import evaluar_dia_empleado
 
 
 COLUMNAS_ESPERADAS = ["id_empleado", "nombre", "fecha", "hora_entrada", "hora_salida"]
+log = logging.getLogger(__name__)
 
 
 def _normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
@@ -99,6 +102,10 @@ def importar_excel_hikconnect(archivo, user, fecha_inicio, fecha_fin):
                 },
             )
             generar_horas_extra_automatico(asistencia)
+            try:
+                evaluar_dia_empleado(empleado, fecha)
+            except Exception as exc:
+                log.warning("Error evaluando reglas de asistencia para %s %s: %s", empleado, fecha, exc)
             procesados += 1
         except Empleado.DoesNotExist:
             errores += 1

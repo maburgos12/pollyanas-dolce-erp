@@ -1394,6 +1394,102 @@ class MovimientoVacaciones(models.Model):
         return f"{self.empleado} · {self.tipo} · {self.dias}"
 
 
+class IncidenciaAsistencia(models.Model):
+    TIPO_USO_TOLERANCIA = "uso_tolerancia"
+    TIPO_RETARDO = "retardo"
+    TIPO_RETARDO_TOLERANCIA = "retardo_tolerancia"
+    TIPO_FALTA = "falta"
+    TIPO_FALTA_RETARDOS = "falta_retardos"
+    TIPO_JORNADA_INCOMPLETA = "jornada_incompleta"
+    TIPO_HORA_EXTRA_PENDIENTE = "hora_extra_pendiente"
+    TIPO_AVISO_BAJA_FALTAS = "aviso_baja_faltas"
+    TIPO_POSIBLE_RESCISION = "posible_rescision"
+    TIPO_CHOICES = [
+        (TIPO_USO_TOLERANCIA, "Uso de tolerancia"),
+        (TIPO_RETARDO, "Retardo"),
+        (TIPO_RETARDO_TOLERANCIA, "Retardo por tolerancia recurrente"),
+        (TIPO_FALTA, "Falta"),
+        (TIPO_FALTA_RETARDOS, "Falta por retardos"),
+        (TIPO_JORNADA_INCOMPLETA, "Jornada incompleta"),
+        (TIPO_HORA_EXTRA_PENDIENTE, "Hora extra pendiente"),
+        (TIPO_AVISO_BAJA_FALTAS, "Aviso por faltas"),
+        (TIPO_POSIBLE_RESCISION, "Posible rescision por faltas"),
+    ]
+
+    ESTADO_PENDIENTE = "pendiente"
+    ESTADO_CONCILIADO = "conciliado"
+    ESTADO_RESUELTO = "resuelto"
+    ESTADO_CHOICES = [
+        (ESTADO_PENDIENTE, "Pendiente"),
+        (ESTADO_CONCILIADO, "Conciliado"),
+        (ESTADO_RESUELTO, "Resuelto"),
+    ]
+
+    SEVERIDAD_INFO = "info"
+    SEVERIDAD_MEDIA = "media"
+    SEVERIDAD_ALTA = "alta"
+    SEVERIDAD_CRITICA = "critica"
+    SEVERIDAD_CHOICES = [
+        (SEVERIDAD_INFO, "Informativa"),
+        (SEVERIDAD_MEDIA, "Media"),
+        (SEVERIDAD_ALTA, "Alta"),
+        (SEVERIDAD_CRITICA, "Critica"),
+    ]
+
+    empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.CASCADE, related_name="incidencias_asistencia")
+    fecha = models.DateField(db_index=True)
+    tipo = models.CharField(max_length=32, choices=TIPO_CHOICES, db_index=True)
+    estado = models.CharField(max_length=16, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE, db_index=True)
+    severidad = models.CharField(max_length=12, choices=SEVERIDAD_CHOICES, default=SEVERIDAD_MEDIA)
+    asistencia = models.ForeignKey(
+        AsistenciaEmpleado,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="incidencias",
+    )
+    permiso = models.ForeignKey(
+        PermisoSalida,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="incidencias_asistencia",
+    )
+    solicitud_vacaciones = models.ForeignKey(
+        SolicitudVacaciones,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="incidencias_asistencia",
+    )
+    hora_extra = models.ForeignKey(
+        HoraExtra,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="incidencias_asistencia",
+    )
+    minutos = models.IntegerField(default=0)
+    goce_sueldo = models.BooleanField(null=True, blank=True)
+    ventana_inicio = models.DateField(null=True, blank=True)
+    ventana_fin = models.DateField(null=True, blank=True)
+    conteo_retardos_15d = models.PositiveSmallIntegerField(default=0)
+    conteo_faltas_30d = models.PositiveSmallIntegerField(default=0)
+    detalle = models.TextField(blank=True, default="")
+    metadata = models.JSONField(default=dict, blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("empleado", "fecha", "tipo")]
+        ordering = ["-fecha", "empleado__nombre", "tipo"]
+        verbose_name = "Incidencia de asistencia"
+        verbose_name_plural = "Incidencias de asistencia"
+
+    def __str__(self) -> str:
+        return f"{self.empleado} · {self.fecha} · {self.get_tipo_display()}"
+
+
 class ImportacionChecador(models.Model):
     METODO_API = "api"
     METODO_EXCEL = "excel"

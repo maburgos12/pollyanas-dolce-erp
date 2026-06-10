@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from .models import AsistenciaEmpleado, Empleado, EmpleadoIdentidadPendiente, ImportacionChecador, Turno
 from .services import generar_horas_extra_automatico
+from .services_asistencia_reglas import evaluar_dia_empleado
 from .services_identidad import buscar_empleado_por_codigo, registrar_identidad_pendiente
 
 log = logging.getLogger("rrhh.hikvision")
@@ -269,6 +270,10 @@ def procesar_eventos_hik(eventos: list[dict[str, Any]]) -> dict[str, Any]:
                 generar_horas_extra_automatico(asistencia)
             except Exception as exc:
                 log.warning("Error generando horas extra para %s: %s", empleado, exc)
+        try:
+            evaluar_dia_empleado(empleado, fecha)
+        except Exception as exc:
+            log.warning("Error evaluando reglas de asistencia para %s %s: %s", empleado, fecha, exc)
 
         for _, ev, marca in registros:
             marca_duplicada = any(_es_marca_cercana(marca.dt, existente.dt) for existente in _marcas_existentes(asistencia) if existente.dt != marca.dt)

@@ -21,6 +21,7 @@ from pos_bridge.utils.helpers import normalize_text, sanitize_sensitive_data
 from pos_bridge.utils.logger import get_job_logger, get_pos_bridge_logger
 from rrhh.models import AsistenciaEmpleado, Empleado, Turno
 from rrhh.services import generar_horas_extra_automatico
+from rrhh.services_asistencia_reglas import evaluar_dia_empleado
 
 
 @dataclass(frozen=True)
@@ -455,6 +456,10 @@ class PointAttendanceSyncService:
         asistencia.save()
         if asistencia.salida and asistencia.turno_id:
             generar_horas_extra_automatico(asistencia)
+        try:
+            evaluar_dia_empleado(asistencia.empleado, asistencia.fecha)
+        except Exception as exc:
+            self.logger.warning("Error evaluando reglas RRHH para asistencia Point %s: %s", asistencia.id, exc)
         if match_method in {"name", "name_tokens"}:
             return asistencia, "created_by_name" if created else "updated_by_name"
         return asistencia, "created" if created else "updated"
