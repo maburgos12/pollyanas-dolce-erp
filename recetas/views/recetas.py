@@ -6490,13 +6490,17 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
     activos_sku = set(precio_por_sku)
     familias_point = sorted({c for c in categoria_por_sku.values() if c})
 
-    # --- Addons aprobados: se combinan en su base; no se listan solos ---
-    addons_por_base: dict[int, list[int]] = defaultdict(list)
+    # --- Addons aprobados: se listan como combinaciones base + sabor ---
+    addons_por_base: dict[int, list[dict[str, Any]]] = defaultdict(list)
     addon_ids: set[int] = set()
     for registro in RecetaAgrupacionAddon.objects.filter(
         status=RecetaAgrupacionAddon.STATUS_APPROVED, addon_receta__isnull=False
-    ).values("base_receta_id", "addon_receta_id"):
-        addons_por_base[registro["base_receta_id"]].append(registro["addon_receta_id"])
+    ).values("base_receta_id", "addon_receta_id", "addon_codigo_point", "addon_nombre_point"):
+        addons_por_base[registro["base_receta_id"]].append({
+            "id": registro["addon_receta_id"],
+            "codigo_point": (registro["addon_codigo_point"] or "").strip(),
+            "nombre": (registro["addon_nombre_point"] or "").strip(),
+        })
         addon_ids.add(registro["addon_receta_id"])
 
     # --- Recetas activas (match codigo_point con Point), sin addons ---
@@ -6513,7 +6517,7 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
     receta_ids = {r.id for r in recetas}
     addons_necesarios: set[int] = set()
     for receta in recetas:
-        addons_necesarios.update(addons_por_base.get(receta.id, []))
+        addons_necesarios.update(addon["id"] for addon in addons_por_base.get(receta.id, []))
     cost_ids = receta_ids | addons_necesarios
 
     # --- Serie mensual de costo de fabricación (operativo) + componentes ---
@@ -6639,14 +6643,10 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             addon_list = addons_por_base.get(receta.id, [])
             base_units = unidades_by.get(receta.id, Decimal("0"))
             if base_units <= 0 and addon_list:
-                base_units = sum((unidades_by.get(a, Decimal("0")) for a in addon_list), Decimal("0"))
+                base_units = sum((unidades_by.get(addon["id"], Decimal("0")) for addon in addon_list), Decimal("0"))
             addon_cost = Decimal("0")
-            if addon_list and base_units > 0 and fuente != COSTO_SIN:
-                for addon_id in addon_list:
-                    addon_units = unidades_by.get(addon_id, Decimal("0"))
-                    if addon_units > 0:
-                        addon_cost += _costo_addon(addon_id) * addon_units / base_units
-            addon_cost = addon_cost.quantize(Decimal("0.01"))
+            # El renglón base no promedia sabores. Cada sabor se agrega abajo como
+            # renglón propio para ver costo/margen/precio por combinación.
 
         costo_completo = (costo_ult + addon_cost).quantize(Decimal("0.01"))
         costo_inicial = (costo_ini + addon_cost).quantize(Decimal("0.01"))
@@ -6654,8 +6654,8 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
         if tiene_sabores:
             cnt["combinados"] += 1
         n_sabores = len([
-            a for a in addons_por_base.get(receta.id, [])
-            if unidades_by.get(a, Decimal("0")) > 0 and _costo_addon(a) > 0
+            addon for addon in addons_por_base.get(receta.id, [])
+            if unidades_by.get(addon["id"], Decimal("0")) > 0 and _costo_addon(addon["id"]) > 0
         ])
         variacion = _serie_variacion([Decimal(str(s)) for s in serie])
 
@@ -6734,6 +6734,75 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             "serie": [float(s) for s in serie],
             "_margen_sort": margen if margen is not None else Decimal("9999"),
         })
+
+        if not es_reventa and fuente != COSTO_SIN:
+            for addon in addons_por_base.get(receta.id, []):
+                addon_id = addon["id"]
+                sabor_cost = _costo_addon(addon_id).quantize(Decimal("0.01"))
+                if sabor_cost <= 0:
+                    continue
+                combo_costo = (costo_ult + sabor_cost).quantize(Decimal("0.01"))
+                combo_costo_inicial = (costo_ini + sabor_cost).quantize(Decimal("0.01"))
+                addon_sku = addon["codigo_point"]
+                addon_precio = precio_por_sku.get(addon_sku, Decimal("0")) if addon_sku else Decimal("0")
+                combo_precio = addon_precio if addon_precio > 0 else precio_actual
+                combo_precio_fuente = "PRECIO_POINT_ADDON" if addon_precio > 0 else precio_fuente
+                combo_margen = None
+                combo_utilidad = None
+                if combo_costo > 0 and combo_precio > 0:
+                    combo_margen = ((combo_precio - combo_costo) / combo_precio * Decimal("100")).quantize(Decimal("0.1"))
+                    combo_utilidad = (combo_precio - combo_costo).quantize(Decimal("0.01"))
+                combo_sugerido = suggest_sale_price(
+                    unit_cost=combo_costo, target_margin_pct=margen_meta_row, rounding_increment=Decimal("5"),
+                ).suggested_price
+                combo_falta_subir = None
+                if combo_precio > 0 and combo_sugerido > 0 and combo_precio < combo_sugerido:
+                    combo_falta_subir = ((combo_sugerido - combo_precio) / combo_precio * Decimal("100")).quantize(Decimal("0.1"))
+                if combo_precio <= 0:
+                    combo_estado = "SIN_PRECIO"
+                    cnt["sin_precio"] += 1
+                elif combo_precio < combo_costo:
+                    combo_estado = "CRITICO"
+                    cnt["criticos"] += 1
+                    cnt["requieren_ajuste"] += 1
+                elif combo_margen is not None and combo_margen < margen_meta_row:
+                    combo_estado = "AJUSTE"
+                    cnt["requieren_ajuste"] += 1
+                else:
+                    combo_estado = "OK"
+
+                if fuente == COSTO_FAB_COMPLETO:
+                    cnt["fab"] += 1
+                elif fuente == COSTO_MP_FALLBACK:
+                    cnt["mp"] += 1
+                cnt["combinados"] += 1
+
+                rows.append({
+                    "receta_id": receta.id,
+                    "nombre": f"{receta.nombre} + {addon['nombre'] or addon_sku}",
+                    "codigo_point": f"{sku} + {addon_sku}" if addon_sku else sku,
+                    "familia_point": familia_point or "—",
+                    "modo_costeo_label": "Fabricado + sabor",
+                    "es_reventa": False,
+                    "costo_inicial": combo_costo_inicial,
+                    "costo_completo": combo_costo,
+                    "addon_cost": sabor_cost,
+                    "tiene_sabores": True,
+                    "n_sabores": 1,
+                    "costo_fuente": fuente,
+                    "margen_meta": margen_meta_row,
+                    "breakdown": breakdown,
+                    "variacion_costo_pct": variacion,
+                    "precio_actual": combo_precio,
+                    "precio_fuente": combo_precio_fuente,
+                    "margen_actual": combo_margen,
+                    "utilidad_unit": combo_utilidad,
+                    "precio_sugerido": combo_sugerido,
+                    "falta_subir_pct": combo_falta_subir,
+                    "estado": combo_estado,
+                    "serie": [float(s) for s in serie],
+                    "_margen_sort": combo_margen if combo_margen is not None else Decimal("9999"),
+                })
 
     estado_orden = {"CRITICO": 0, "AJUSTE": 1, "OK": 2, "SIN_PRECIO": 3, "SIN_COSTO": 4}
     rows.sort(key=lambda item: (

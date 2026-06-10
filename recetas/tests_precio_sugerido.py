@@ -90,6 +90,9 @@ class PrecioSugeridoViewTests(TestCase):
     def _row(self, data, receta):
         return next((r for r in data["rows"] if r["receta_id"] == receta.id), None)
 
+    def _row_by_name(self, data, name):
+        return next((r for r in data["rows"] if r["nombre"] == name), None)
+
     # ---- fuente de costo ----
     def test_fab_completo_cuando_operativo_tiene_componentes(self):
         r = self._receta("Pastel Fab", "FAB1")
@@ -208,7 +211,7 @@ class PrecioSugeridoViewTests(TestCase):
         self.assertIsNotNone(self._row(data, r2))
 
     # ---- addons ----
-    def test_addon_se_combina_en_base_y_se_excluye(self):
+    def test_addon_se_lista_como_combinacion_base_mas_sabor(self):
         base = self._receta("Pay de Queso Grande", "0001")
         self._point("0001", "Pay de Queso Grande", precio=500)
         self._operativo(base, fab=178, mp=178, mo=0, ind=0, emp=0, unidades=800)
@@ -221,11 +224,19 @@ class PrecioSugeridoViewTests(TestCase):
         )
         data = self._fetch()
         self.assertIsNone(self._row(data, addon))  # addon excluido
-        row = self._row(data, base)
+        row = self._row_by_name(data, "Pay de Queso Grande")
         self.assertIsNotNone(row)
-        # base 178 + sabor 73 (mismas unidades) = 251
-        self.assertEqual(row["costo_completo"], "251.00")
-        self.assertTrue(row["tiene_sabores"])
+        self.assertEqual(row["costo_completo"], "178.00")
+        self.assertFalse(row["tiene_sabores"])
+
+        combo = self._row_by_name(data, "Pay de Queso Grande + Sabor Fresa Grande")
+        self.assertIsNotNone(combo)
+        self.assertEqual(combo["codigo_point"], "0001 + SFRESAG")
+        self.assertEqual(combo["costo_completo"], "251.00")
+        self.assertEqual(combo["addon_cost"], "73.00")
+        self.assertEqual(combo["precio_actual"], "500.00")
+        self.assertTrue(combo["tiene_sabores"])
+        self.assertEqual(combo["precio_sugerido"], "720.00")
 
     # ---- export ----
     def test_export_csv(self):
