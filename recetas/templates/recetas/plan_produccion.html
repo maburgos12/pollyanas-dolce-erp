@@ -9,6 +9,16 @@
   <div class="card-header">Plan de Producción</div>
   <p class="muted mb-3">Define qué productos vas a fabricar y el sistema calcula automáticamente insumos requeridos y costo total estimado.</p>
   <p class="muted mb-2"><strong>Bloqueos del maestro:</strong> el cálculo se frena cuando faltan datos clave del artículo, costo o trazabilidad BOM.</p>
+
+  <div class="toolbar mb-3" aria-label="Secciones del plan de producción">
+    <a class="btn {% if active_section == 'operacion' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'recetas:plan_produccion' %}{% if plan_actual %}?plan_id={{ plan_actual.id }}{% endif %}">Operación</a>
+    <a class="btn {% if active_section == 'demanda' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'recetas:plan_produccion' %}?seccion=demanda{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}&periodo={{ periodo_pronostico_default }}#plan-pronosticos">Demanda</a>
+    <a class="btn {% if active_section == 'mrp' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'recetas:plan_produccion' %}?seccion=mrp{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}&mrp_periodo={{ mrp_periodo }}&mrp_periodo_tipo={{ mrp_periodo_tipo }}#plan-mrp-periodo">MRP</a>
+    <a class="btn {% if active_section == 'dg' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'recetas:plan_produccion' %}?seccion=dg{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}#plan-estados">DG</a>
+    <a class="btn {% if active_section == 'diagnostico' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'recetas:plan_produccion' %}?seccion=diagnostico{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}&periodo={{ periodo_pronostico_default }}">Diagnóstico</a>
+  </div>
+
+  {% if load_plan_diagnostics %}
   {% if daily_decision_rows %}
   <section class="card mb-3">
     <div class="card-header">Top decisiones del plan</div>
@@ -305,6 +315,7 @@
     </div>
   </div>
   {% endif %}
+  {% endif %}
 
   <form class="form-grid-2" method="post" action="{% url 'recetas:plan_produccion_create' %}">
     {% csrf_token %}
@@ -326,6 +337,7 @@
   </form>
 </div>
 
+{% if load_demand_workspace %}
 <div class="card" id="plan-pronosticos">
   <div class="card-header">Pronósticos de Venta (CSV/XLSX)</div>
   <p class="muted mb-3">
@@ -1194,8 +1206,11 @@
     </div>
   </form>
 </div>
+{% else %}
+{% endif %}
 
-<div class="card">
+{% if load_mrp_workspace %}
+<div class="card" id="plan-mrp-periodo">
   <div class="card-header">MRP Consolidado por Período</div>
   <p class="muted mb-2">Calcula requerimientos agregados de insumos para todos los planes del período seleccionado.</p>
   <form class="form-grid-auto mb-2" method="get" action="{% url 'recetas:plan_produccion' %}">
@@ -1465,8 +1480,10 @@
   </div>
   {% endif %}
 </div>
+{% else %}
+{% endif %}
 
-<div class="card">
+<div class="card" id="plan-estados">
   {% if plan_status_dashboard %}
   <div class="card-header">Tablero DG de estados del plan</div>
   <p class="muted mb-2">Lectura ejecutiva para separar rezago operativo, planes pendientes de consumo y planes pendientes de cierre formal.</p>
@@ -1548,6 +1565,7 @@
   {% endif %}
   {% endif %}
   <div class="card-header">Planes recientes</div>
+  {% if load_dg_dashboard %}
   <div class="kpi-mini pd-mb-3">
     {% for card in plan_status_cards %}
     <a class="kpi-card {% if selected_plan_status_filter == card.key %}is-active{% endif %} pd-link-plain" href="{% url 'recetas:plan_produccion' %}?estado_plan={{ card.key }}{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}">
@@ -1556,6 +1574,7 @@
     </a>
     {% endfor %}
   </div>
+  {% endif %}
   <div class="table-responsive">
     <table class="table align-middle">
       <thead>
@@ -1635,10 +1654,14 @@
     </div>
   </div>
   <div class="toolbar mt-2">
-    <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion_export' plan_actual.id %}?format=csv">Exportar CSV</a>
     <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion_export' plan_actual.id %}?format=xlsx">Exportar XLSX</a>
-    <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion_export' plan_actual.id %}?format=point">Exportar catálogo de venta (XLSX)</a>
     <a class="btn btn-primary" href="{% url 'recetas:plan_produccion_solicitud_print' plan_actual.id %}" target="_blank">Imprimir solicitud formal</a>
+    {% if not load_plan_diagnostics %}
+    <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion' %}?seccion=diagnostico&plan_id={{ plan_actual.id }}&periodo={{ periodo_pronostico_default }}">Revisar diagnóstico</a>
+    {% endif %}
+    {% if load_plan_diagnostics %}
+    <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion_export' plan_actual.id %}?format=csv">Exportar CSV</a>
+    <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion_export' plan_actual.id %}?format=point">Exportar catálogo de venta (XLSX)</a>
     <a class="btn btn-primary" href="{% url 'recetas:plan_produccion_solicitud_compras_print' plan_actual.id %}" target="_blank">Imprimir solicitud compras (MP)</a>
     {% if perms.recetas.change_planproduccion %}
     <form method="post" action="{% url 'recetas:plan_produccion_aplicar_consumo' plan_actual.id %}" class="inline-form" onsubmit="return confirm('Se aplicará consumo real al inventario de insumos y productos padre del plan. Esta operación es idempotente, pero debe ejecutarse solo cuando el plan esté listo. ¿Continuar?');">
@@ -1667,6 +1690,7 @@
       <button class="btn btn-secondary" type="submit" name="next_view" value="compras">Generar y abrir Compras</button>
       <button class="btn btn-primary" type="submit" name="next_view" value="compras_print">Generar e imprimir solicitud compras</button>
     </form>
+    {% endif %}
     {% endif %}
   </div>
 
@@ -2472,6 +2496,41 @@
     </div>
   </form>
 </div>
+
+{% if not load_plan_diagnostics %}
+<div class="card" id="plan-productos">
+  <div class="card-header">Productos del plan</div>
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th class="text-end">Cantidad</th>
+          <th>Notas</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in plan_items %}
+        <tr>
+          <td>{{ item.receta.nombre }}</td>
+          <td class="text-end">{{ item.cantidad|floatformat:3 }}</td>
+          <td>{{ item.notas|default:"-" }}</td>
+          <td>
+            <form method="post" action="{% url 'recetas:plan_produccion_item_delete' plan_actual.id item.id %}" class="inline-form">
+              {% csrf_token %}
+              <button class="btn btn-danger" type="submit">Quitar</button>
+            </form>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4" class="text-muted">Sin productos en este plan.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
 
 {% if explosion %}
 <div class="kpi-grid">
