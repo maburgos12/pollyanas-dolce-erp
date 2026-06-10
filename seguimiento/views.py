@@ -44,6 +44,84 @@ def _writeback_activo() -> bool:
     return (os.getenv("AGENTE_DG_WRITEBACK_ENABLED", "") or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _agente_dg_source(item: SeguimientoItem) -> tuple[str, int] | None:
+    metadata = item.metadata or {}
+    source_table = str(metadata.get("source_table") or "").strip()
+    source_id = metadata.get("source_id")
+    if not source_table and item.referencia_externa and ":" in item.referencia_externa:
+        source_table, source_id = item.referencia_externa.split(":", 1)
+    if str(metadata.get("source") or "").strip() != "agente_dg" and not source_table:
+        return None
+    try:
+        return source_table, int(source_id)
+    except (TypeError, ValueError):
+        return None
+
+
+def _writeback_agente_dg_item(item: SeguimientoItem, *, accion: str, comentario: str = "") -> bool:
+    """Sincroniza cierres/devoluciones al Agente DG cuando el item viene de esa app.
+
+    Devuelve True si hizo write-back. Si el item es de Agente DG y el write-back
+    está activo pero falla, lanza AgenteDGError para impedir divergencia local.
+    """
+    source = _agente_dg_source(item)
+    if not source or not _writeback_activo():
+        return False
+
+    from .agente_dg_client import (
+        AgenteDGError,
+        is_configured,
+        patch_commitment_status,
+        patch_minute_agreement,
+    )
+
+    if not is_configured():
+        raise AgenteDGError("La API del Agente DG no está configurada para write-back.")
+
+    source_table, source_id = source
+    accion = accion.strip().lower()
+    comentario = comentario.strip()
+
+    if source_table == "minute_agreements":
+        if accion in {"aprobar", "completar"}:
+            payload = {"status": "COMPLETED"}
+            if comentario:
+                payload["completion_note"] = comentario
+            patch_minute_agreement(source_id, **payload)
+            return True
+        if accion == "devolver":
+            patch_minute_agreement(source_id, status="IN_PROGRESS")
+            return True
+        if accion == "feedback" and comentario:
+            patch_minute_agreement(source_id, completion_note=comentario)
+            return True
+        return False
+
+    if source_table == "commitments":
+        if accion == "aprobar":
+            patch_commitment_status(source_id, status="CLOSED", comment=comentario)
+            return True
+        if accion == "devolver":
+            patch_commitment_status(source_id, status="PENDING", comment=comentario)
+            return True
+        if accion == "completar":
+            patch_commitment_status(source_id, status="CLOSED", comment=comentario)
+            return True
+        return False
+
+    return False
+
+
+def _conversacion_context(comentarios):
+    comentarios_list = list(comentarios)
+    comentarios_dg = [comentario for comentario in comentarios_list if comentario.tipo == SeguimientoComentario.TIPO_REVISION_DG]
+    return {
+        "comentarios": comentarios_list,
+        "comentarios_dg": comentarios_dg,
+        "ultimo_comentario_dg": comentarios_dg[-1] if comentarios_dg else None,
+    }
+
+
 EVIDENCIA_ALLOWED_EXTENSIONS = {
     ".csv",
     ".doc",
@@ -414,13 +492,19 @@ def registrar_feedback(request, pk):
     if not comentario:
         messages.error(request, "Escribe la retroalimentación antes de enviarla.")
         return redirect("seguimiento:detalle", pk=pk)
+    es_revision_dg = can_review_seguimiento_global(request.user)
     SeguimientoComentario.objects.create(
         seguimiento=item,
         usuario=request.user,
-        tipo=SeguimientoComentario.TIPO_FEEDBACK,
+        tipo=SeguimientoComentario.TIPO_REVISION_DG if es_revision_dg else SeguimientoComentario.TIPO_FEEDBACK,
         comentario=comentario,
     )
-    if item.requiere_aprobacion:
+    if es_revision_dg:
+        try:
+            _writeback_agente_dg_item(item, accion="feedback", comentario=comentario)
+        except Exception:
+            logger.exception("Write-back feedback Agente DG falló (item %s)", item.pk)
+    elif item.requiere_aprobacion:
         if item.estatus in {SeguimientoItem.ESTATUS_PENDIENTE, SeguimientoItem.ESTATUS_EN_PROCESO}:
             item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
             item.save(update_fields=["estatus", "updated_at"])
@@ -548,6 +632,8 @@ def _redirect_post_resolucion(request, pk):
 @login_required
 @require_POST
 def resolver_revision(request, pk):
+    from .agente_dg_client import AgenteDGError
+
     if not can_review_seguimiento_global(request.user):
         messages.error(request, "No tienes permiso para resolver revisiones.")
         return redirect("seguimiento:bandeja_revision")
@@ -555,6 +641,12 @@ def resolver_revision(request, pk):
     accion = (request.POST.get("accion") or "").strip()
     comentario_texto = (request.POST.get("comentario") or "").strip()
     if accion == "aprobar":
+        try:
+            _writeback_agente_dg_item(item, accion="aprobar", comentario=comentario_texto)
+        except AgenteDGError as exc:
+            logger.warning("Write-back cierre Agente DG falló (item %s): %s", item.pk, exc)
+            messages.error(request, "No se pudo cerrar en app.pollyanasdolce.com. El acuerdo no se marcó como completado en ERP; intenta de nuevo.")
+            return _redirect_post_resolucion(request, pk)
         item.estatus = SeguimientoItem.ESTATUS_COMPLETADO
         item.aprobado_por = request.user
         item.aprobado_at = timezone.now()
@@ -571,6 +663,12 @@ def resolver_revision(request, pk):
     elif accion == "devolver":
         if not comentario_texto:
             messages.error(request, "Escribe el motivo para devolver el acuerdo.")
+            return _redirect_post_resolucion(request, pk)
+        try:
+            _writeback_agente_dg_item(item, accion="devolver", comentario=comentario_texto)
+        except AgenteDGError as exc:
+            logger.warning("Write-back devolucion Agente DG falló (item %s): %s", item.pk, exc)
+            messages.error(request, "No se pudo devolver en app.pollyanasdolce.com. El acuerdo no se modificó en ERP; intenta de nuevo.")
             return _redirect_post_resolucion(request, pk)
         item.estatus = SeguimientoItem.ESTATUS_EN_PROCESO
         item.save(update_fields=["estatus", "updated_at"])
@@ -845,6 +943,8 @@ def entregar_para_revision(request, pk):
 @require_POST
 def completar_directamente(request, pk):
     """Cierre directo para acuerdos sin aprobación requerida o con checklist 100%."""
+    from .agente_dg_client import AgenteDGError
+
     item = _get_item_para_usuario(request.user, pk)
     if item.esta_cerrado:
         messages.error(request, "Este acuerdo ya está cerrado.")
@@ -859,6 +959,14 @@ def completar_directamente(request, pk):
         return redirect("seguimiento:detalle", pk=pk)
 
     if not _registrar_cierre_opcional(request, item, "COMPLETADO"):
+        return redirect("seguimiento:detalle", pk=pk)
+
+    comentario_texto = (request.POST.get("comentario") or "").strip()
+    try:
+        _writeback_agente_dg_item(item, accion="completar", comentario=comentario_texto)
+    except AgenteDGError as exc:
+        logger.warning("Write-back completar Agente DG falló (item %s): %s", item.pk, exc)
+        messages.error(request, "No se pudo cerrar en app.pollyanasdolce.com. El acuerdo no se marcó como completado en ERP; intenta de nuevo.")
         return redirect("seguimiento:detalle", pk=pk)
 
     item.estatus = SeguimientoItem.ESTATUS_COMPLETADO
@@ -888,6 +996,7 @@ def detalle_item(request, pk):
 
     prorroga_pendiente = item.prorrogas.filter(estatus=SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE).first()
     comentarios = item.comentarios.select_related("usuario").order_by("created_at")
+    conversacion = _conversacion_context(comentarios)
     evidencias = item.evidencias.select_related("usuario", "revisado_por").order_by("created_at")
 
     checklist_completo = bool(checks) and all(c.completado for c in checks)
@@ -926,8 +1035,8 @@ def detalle_item(request, pk):
             "prioridad_label": prioridad_label,
             "prioridad_tone": prioridad_tone,
             "prorroga_pendiente": prorroga_pendiente,
-            "comentarios": comentarios,
             "evidencias": evidencias,
+            **conversacion,
             "puede_cerrar_directo": puede_cerrar_directo and not item.esta_cerrado,
             "puede_entregar": puede_entregar,
             "checklist_completo": checklist_completo,
@@ -1046,6 +1155,7 @@ def detalle_item_dg(request, pk):
         prioridad_label, prioridad_tone = "Normal", ""
     prorroga_pendiente = item.prorrogas.filter(estatus=SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE).first()
     comentarios = item.comentarios.select_related("usuario").order_by("created_at")
+    conversacion = _conversacion_context(comentarios)
     evidencias = item.evidencias.select_related("usuario", "revisado_por").order_by("created_at")
     checklist_completo = bool(checks) and all(c.completado for c in checks)
     siguiente_check_id = next((c.id for c in checks if not c.completado), None)
@@ -1058,8 +1168,8 @@ def detalle_item_dg(request, pk):
         "prioridad_label": prioridad_label,
         "prioridad_tone": prioridad_tone,
         "prorroga_pendiente": prorroga_pendiente,
-        "comentarios": comentarios,
         "evidencias": evidencias,
+        **conversacion,
         "puede_cerrar_directo": False,
         "puede_entregar": False,
         "checklist_completo": checklist_completo,

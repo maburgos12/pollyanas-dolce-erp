@@ -80,6 +80,27 @@
     background: rgba(255, 252, 240, 0.92);
   }
 
+  .seg-conversation-card {
+    border: 1px solid rgba(139, 34, 82, 0.10);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.84);
+    padding: 12px 14px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .seg-conversation-card.is-closed {
+    border-color: rgba(35, 109, 83, 0.22);
+    background: rgba(35, 109, 83, 0.06);
+  }
+
+  .seg-dg-note {
+    border-left: 3px solid var(--dorado);
+    padding: 8px 10px;
+    background: rgba(255, 252, 240, 0.92);
+    border-radius: 8px;
+  }
+
   .seg-timeline-meta {
     font-size: 0.8rem;
     color: var(--texto-light);
@@ -209,6 +230,49 @@
       <span class="seg-progress-fill {% if item.esta_vencido %}is-danger{% elif progreso_pct >= 100 %}is-success{% else %}is-plum{% endif %}" style="--seg-pct:{{ progreso_pct }}%"></span>
     </div>
     {% endif %}
+  </div>
+
+  <!-- Conversación y cierre -->
+  <div class="bi-panel" style="margin-bottom:16px; border-left:4px solid {% if item.esta_cerrado %}var(--verde){% elif ultimo_comentario_dg %}var(--dorado){% else %}rgba(139,34,82,.22){% endif %};">
+    <p class="seg-section-title">Conversación y cierre</p>
+    <div class="seg-conversation-card {% if item.esta_cerrado %}is-closed{% endif %}">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+        <strong>{% if item.esta_cerrado %}Cierre establecido{% elif item.estatus == estatus_en_revision %}En revisión{% else %}Seguimiento abierto{% endif %}</strong>
+        <span class="seg-badge-status {{ item.estatus|lower }}">{{ item.get_estatus_display }}</span>
+      </div>
+      {% if item.aprobado_at %}
+      <p class="seg-timeline-meta" style="margin:0;">
+        Cerrado el {{ item.aprobado_at|date:"d/m/Y H:i" }}{% if item.aprobado_por %} por {{ item.aprobado_por.get_full_name|default:item.aprobado_por.username }}{% endif %}.
+      </p>
+      {% endif %}
+      {% if ultimo_comentario_dg %}
+      <div class="seg-dg-note">
+        <strong>{{ ultimo_comentario_dg.usuario.get_full_name|default:ultimo_comentario_dg.usuario.username }}</strong>
+        <span class="muted" style="font-size:.82rem;"> · {{ ultimo_comentario_dg.created_at|date:"d/m/Y H:i" }}</span>
+        <p style="margin:6px 0 0;">{{ ultimo_comentario_dg.comentario }}</p>
+      </div>
+      {% elif comentarios %}
+      <p class="muted" style="margin:0; font-size:.9rem;">Hay actividad registrada abajo en el historial.</p>
+      {% else %}
+      <p class="muted" style="margin:0; font-size:.9rem;">Sin conversación registrada todavía.</p>
+      {% endif %}
+      {% if comentarios_dg|length > 1 %}
+      <details>
+        <summary style="cursor:pointer; list-style:none; font-size:.84rem; font-weight:800; color:var(--vino);">Ver retroalimentaciones anteriores de DG</summary>
+        <div style="display:grid; gap:8px; margin-top:8px;">
+          {% for com in comentarios_dg %}
+          {% if com.pk != ultimo_comentario_dg.pk %}
+          <div class="seg-dg-note">
+            <strong>{{ com.usuario.get_full_name|default:com.usuario.username }}</strong>
+            <span class="muted" style="font-size:.82rem;"> · {{ com.created_at|date:"d/m/Y H:i" }}</span>
+            <p style="margin:6px 0 0;">{{ com.comentario }}</p>
+          </div>
+          {% endif %}
+          {% endfor %}
+        </div>
+      </details>
+      {% endif %}
+    </div>
   </div>
 
   <!-- Proceso / Checklist -->
