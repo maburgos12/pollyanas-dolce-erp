@@ -240,9 +240,13 @@
         <strong>{% if item.esta_cerrado %}Cierre establecido{% elif item.estatus == estatus_en_revision %}En revisión{% else %}Seguimiento abierto{% endif %}</strong>
         <span class="seg-badge-status {{ item.estatus|lower }}">{{ item.get_estatus_display }}</span>
       </div>
-      {% if item.aprobado_at %}
+      {% if item.aprobado_at and item.esta_cerrado %}
       <p class="seg-timeline-meta" style="margin:0;">
         Cerrado el {{ item.aprobado_at|date:"d/m/Y H:i" }}{% if item.aprobado_por %} por {{ item.aprobado_por.get_full_name|default:item.aprobado_por.username }}{% endif %}.
+      </p>
+      {% elif item.tiene_desfase_agente_dg %}
+      <p class="seg-timeline-meta" style="margin:0; color:#7a5b14; font-weight:800;">
+        Aprobación local anterior pendiente de sincronizar con app.pollyanasdolce.com.
       </p>
       {% endif %}
       {% if ultimo_comentario_dg %}

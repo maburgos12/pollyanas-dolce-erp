@@ -100,6 +100,22 @@ def get_projects() -> list:
     return resp.json()
 
 
+def get_users() -> list:
+    """Lista usuarios del Agente DG para resolver colaboradores por e-mail."""
+    resp = _request("GET", "/api/users/")
+    if resp.status_code >= 400:
+        raise AgenteDGError(f"GET users falló: {resp.status_code} {resp.text[:160]}")
+    return resp.json()
+
+
+def create_minute_agreement(**fields) -> dict:
+    """Crea una minuta/acuerdo en app.pollyanasdolce.com."""
+    resp = _request("POST", "/api/minutas/", json=fields)
+    if resp.status_code >= 400:
+        raise AgenteDGError(f"POST minuta falló: {resp.status_code} {resp.text[:200]}")
+    return resp.json()
+
+
 def patch_step(step_id: int, **fields) -> dict:
     """Actualiza un paso de proyecto en el Agente DG.
 

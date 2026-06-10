@@ -312,6 +312,92 @@ class SeguimientoColaboradorTests(TestCase):
         self.item.refresh_from_db()
         self.assertEqual(self.item.estatus, SeguimientoItem.ESTATUS_COMPLETADO)
 
+    def test_panel_dg_no_inventa_porcentaje_sin_checklist_y_marca_desfase(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.panel", password="test12345")
+        dg_user.groups.add(dg_group)
+        self.item.tipo = SeguimientoItem.TIPO_MINUTA
+        self.item.estatus = SeguimientoItem.ESTATUS_PENDIENTE
+        self.item.origen = "Agente DG"
+        self.item.aprobado_at = timezone.now()
+        self.item.metadata = {
+            "source": "agente_dg",
+            "source_table": "minute_agreements",
+            "source_id": 77,
+            "source_status": "OPEN",
+        }
+        self.item.save(update_fields=["tipo", "estatus", "origen", "aprobado_at", "metadata"])
+        self.item.checklist.all().delete()
+        self.client.force_login(dg_user)
+
+        response = self.client.get("/seguimiento/panel/?tipo=MINUTA&vista=tabla&tab=MINUTA")
+
+        self.assertContains(response, "Sin checklist")
+        self.assertContains(response, "Desfase app")
+        self.assertNotContains(response, ">10%</span>")
+
+    def test_detalle_no_muestra_cerrado_si_fuente_sigue_abierta(self):
+        self.item.tipo = SeguimientoItem.TIPO_MINUTA
+        self.item.estatus = SeguimientoItem.ESTATUS_PENDIENTE
+        self.item.origen = "Agente DG"
+        self.item.aprobado_at = timezone.now()
+        self.item.metadata = {
+            "source": "agente_dg",
+            "source_table": "minute_agreements",
+            "source_id": 77,
+            "source_status": "OPEN",
+        }
+        self.item.save(update_fields=["tipo", "estatus", "origen", "aprobado_at", "metadata"])
+
+        response = self.client.get(f"/seguimiento/{self.item.pk}/")
+
+        self.assertContains(response, "Aprobación local anterior pendiente de sincronizar")
+        self.assertNotContains(response, "Cerrado el")
+
+    def test_dg_crea_minuta_en_app_y_se_refleja_en_erp(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.crea", password="test12345")
+        dg_user.groups.add(dg_group)
+        self.client.force_login(dg_user)
+        created_payload = {
+            "id": 918,
+            "collaborator_user_id": 45,
+            "title": "Nuevo acuerdo desde ERP",
+            "agreement_text": "Detalle operativo",
+            "checklist_items": [
+                {"id": "a", "text": "Primer paso", "completed": False, "completed_at": None},
+                {"id": "b", "text": "Segundo paso", "completed": False, "completed_at": None},
+            ],
+            "due_at": (timezone.now() + timedelta(days=3)).isoformat(),
+            "status": "OPEN",
+            "meeting_label": "ERP Seguimiento",
+        }
+
+        with patch.dict(os.environ, {"AGENTE_DG_WRITEBACK_ENABLED": "true"}), \
+            patch("seguimiento.agente_dg_client.is_configured", return_value=True), \
+            patch("seguimiento.agente_dg_client.get_users", return_value=[{"id": 45, "email": self.user.email}]), \
+            patch("seguimiento.agente_dg_client.create_minute_agreement", return_value=created_payload) as create_minute:
+            response = self.client.post(
+                "/seguimiento/panel/crear-agente-dg/",
+                {
+                    "responsable_user_id": self.user.pk,
+                    "titulo": "Nuevo acuerdo desde ERP",
+                    "descripcion": "Detalle operativo",
+                    "fecha_limite": (timezone.now() + timedelta(days=3)).date().isoformat(),
+                    "hora_limite": "18:00",
+                    "checklist": "Primer paso\nSegundo paso",
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        create_minute.assert_called_once()
+        payload = create_minute.call_args.kwargs
+        self.assertEqual(payload["collaborator_user_id"], 45)
+        self.assertEqual(payload["checklist_items"][0]["text"], "Primer paso")
+        item = SeguimientoItem.objects.get(metadata__source="agente_dg", metadata__source_id=918)
+        self.assertEqual(item.titulo, "Nuevo acuerdo desde ERP")
+        self.assertEqual(item.checklist.count(), 2)
+
     def test_dg_no_cierra_local_si_writeback_agente_dg_falla(self):
         from .agente_dg_client import AgenteDGError
 

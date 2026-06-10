@@ -193,7 +193,7 @@ def agente_dg_checklist_from_json(raw_value: str | None) -> list[str]:
             if isinstance(item, str):
                 values.append(item)
             elif isinstance(item, dict):
-                values.append(item.get("title") or item.get("texto") or item.get("label") or "")
+                values.append(item.get("title") or item.get("text") or item.get("texto") or item.get("label") or "")
         return [value.strip() for value in values if value and value.strip()]
     return []
 

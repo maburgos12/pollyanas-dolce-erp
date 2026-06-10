@@ -64,6 +64,7 @@
   }
   .panel-dg-progress-fill.is-done   { background: var(--verde); }
   .panel-dg-progress-fill.is-danger { background: var(--rojo); }
+  .panel-dg-progress.is-muted { background: rgba(120,120,120,.08); }
 
   /* Pills de estatus */
   .pill-pendiente   { background: rgba(120,120,120,.12); color: #555; }
@@ -72,6 +73,7 @@
   .pill-completado  { background: rgba(76,175,80,.16);   color: #236d53; }
   .pill-bloqueado,
   .pill-cancelado   { background: rgba(229,57,53,.14);   color: #b71c1c; }
+  .pill-desfase     { background: rgba(201,168,76,.20); color: #7a5b14; }
 
   /* colab-item-label — nowrap en guardrails */
   .panel-dg-colab-item-label { flex: 1; min-width: 0; }
@@ -124,9 +126,12 @@
   @media (max-width: 900px) {
     .panel-dg-colab-grid { grid-template-columns: 1fr; }
     .col-area, .col-act { display: none; }
+    form[action$="crear-agente-dg/"] { grid-template-columns: 1fr 1fr !important; }
+    form[action$="crear-agente-dg/"] .bi-control { grid-column: auto !important; }
   }
   @media (max-width: 640px) {
     .col-avance, .col-fecha { display: none; }
+    form[action$="crear-agente-dg/"] { grid-template-columns: 1fr !important; }
   }
 </style>
 {% endblock %}
@@ -174,6 +179,56 @@
         <a href="{% url 'seguimiento:mi_seguimiento' %}" class="btn btn-secondary btn-sm">← Mi trabajo</a>
       </div>
     </div>
+  </section>
+
+  <!-- Crear acuerdo integrado ERP → app -->
+  <section class="bi-panel" style="margin-bottom:20px;">
+    <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:flex-start;">
+      <div>
+        <p class="seg-section-title" style="margin-bottom:4px;">Nuevo acuerdo integrado</p>
+        <p class="muted" style="margin:0; font-size:.86rem;">
+          Se crea primero en app.pollyanasdolce.com y después se refleja en este panel.
+        </p>
+      </div>
+      {% if not writeback_activo %}
+      <span class="bi-pill pill-bloqueado">API desactivada</span>
+      {% endif %}
+    </div>
+    <form method="post" action="{% url 'seguimiento:crear_acuerdo_agente_dg' %}" style="display:grid; grid-template-columns:1.2fr 1.4fr .7fr .5fr; gap:10px; margin-top:12px;">
+      {% csrf_token %}
+      <div class="bi-control">
+        <label for="nuevo-responsable">Colaborador</label>
+        <select id="nuevo-responsable" name="responsable_user_id" required {% if not writeback_activo %}disabled{% endif %}>
+          <option value="">Seleccionar</option>
+          {% for user in usuarios_crear_acuerdo %}
+          <option value="{{ user.pk }}">{{ user.get_full_name|default:user.username }} · {{ user.email|default:user.username }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="bi-control">
+        <label for="nuevo-titulo">Acuerdo</label>
+        <input id="nuevo-titulo" name="titulo" type="text" maxlength="220" required placeholder="Título del acuerdo" {% if not writeback_activo %}disabled{% endif %}>
+      </div>
+      <div class="bi-control">
+        <label for="nuevo-fecha">Fecha límite</label>
+        <input id="nuevo-fecha" name="fecha_limite" type="date" required {% if not writeback_activo %}disabled{% endif %}>
+      </div>
+      <div class="bi-control">
+        <label for="nuevo-hora">Hora</label>
+        <input id="nuevo-hora" name="hora_limite" type="time" value="18:00" required {% if not writeback_activo %}disabled{% endif %}>
+      </div>
+      <div class="bi-control" style="grid-column:1 / span 2;">
+        <label for="nuevo-descripcion">Detalle</label>
+        <textarea id="nuevo-descripcion" name="descripcion" rows="3" placeholder="Resultado esperado, contexto o instrucción" {% if not writeback_activo %}disabled{% endif %}></textarea>
+      </div>
+      <div class="bi-control" style="grid-column:3 / span 2;">
+        <label for="nuevo-checklist">Checklist opcional</label>
+        <textarea id="nuevo-checklist" name="checklist" rows="3" placeholder="Un punto por línea" {% if not writeback_activo %}disabled{% endif %}></textarea>
+      </div>
+      <div style="grid-column:1 / -1; display:flex; justify-content:flex-end;">
+        <button class="btn btn-primary btn-sm" type="submit" {% if not writeback_activo %}disabled{% endif %}>Crear en app y ERP</button>
+      </div>
+    </form>
   </section>
 
   <!-- ── Requiere tu acción ── -->
@@ -330,6 +385,7 @@
         <a href="{% url 'seguimiento:detalle_dg' item.pk %}"
            class="panel-dg-colab-item {% if item.esta_vencido %}is-vencido{% elif item.estatus == ESTATUS_EN_REVISION %}is-revision{% elif item.esta_cerrado %}is-done{% endif %}">
           <span class="panel-dg-colab-item-label">{{ item.titulo }}</span>
+          {% if item.tiene_desfase_agente_dg %}<span class="bi-pill pill-desfase" style="flex-shrink:0; font-size:.68rem;">Desfase app</span>{% endif %}
           <span class="bi-pill pill-{{ item.estatus|lower }}" style="flex-shrink:0; font-size:.72rem;">{{ item.get_estatus_display }}</span>
         </a>
         {% endfor %}
@@ -370,6 +426,7 @@
           <td>
             <span class="panel-dg-cell-trunc panel-dg-cell-title" title="{{ item.titulo }}">{{ item.titulo }}</span>
             <span class="bi-pill" style="font-size:.7rem;">{{ item.get_tipo_display }}</span>
+            {% if item.tiene_desfase_agente_dg %}<span class="bi-pill pill-desfase" style="font-size:.68rem;">Desfase app</span>{% endif %}
             {% if item.prorroga_pendiente %}<span class="badge bg-warning" style="font-size:.68rem;">⏳ Prórroga</span>{% endif %}
           </td>
           <td><span class="panel-dg-cell-trunc">{{ item.responsable_nombre }}</span></td>
@@ -379,10 +436,10 @@
             {% if item.fecha_limite %}{{ item.fecha_limite|date:"d/m/Y" }}{% else %}—{% endif %}
           </td>
           <td>
-            <div class="panel-dg-progress">
+            <div class="panel-dg-progress {% if not item.checklist_total %}is-muted{% endif %}">
               <div class="panel-dg-progress-fill {% if item.esta_vencido %}is-danger{% elif item.progreso_pct >= 100 %}is-done{% endif %}" style="--w:{{ item.progreso_pct }}%"></div>
             </div>
-            <span class="muted" style="font-size:.75rem;">{{ item.progreso_pct }}%</span>
+            <span class="muted" style="font-size:.75rem;" title="{{ item.avance_detalle }}">{{ item.avance_label }}</span>
           </td>
           <td class="muted" style="font-size:.8rem;" title="{{ item.ultima_actualizacion|date:'d/m/Y H:i' }}">{{ item.ultima_actualizacion|timesince }}</td>
           <td><a href="{% url 'seguimiento:detalle_dg' item.pk %}" class="btn btn-secondary btn-sm">Ver</a></td>
