@@ -177,10 +177,13 @@ def guardar_cfdis_xml(
 
 def _build_descarga_envelope(id_paquete: str) -> etree._Element:
     credentials = get_sat_credentials()
-    operation = etree.Element(etree.QName(SAT_DOWNLOAD_NS, "Descargar"), nsmap={None: SAT_DOWNLOAD_NS})
+    operation = etree.Element(
+        etree.QName(SAT_DOWNLOAD_NS, "PeticionDescargaMasivaTercerosEntrada"),
+        nsmap={None: SAT_DOWNLOAD_NS},
+    )
     operation.append(
         build_signed_sat_request(
-            "peticionDescarga",
+            etree.QName(SAT_DOWNLOAD_NS, "peticionDescarga"),
             {
                 "IdPaquete": id_paquete,
                 "RfcSolicitante": credentials.rfc,
