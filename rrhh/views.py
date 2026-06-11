@@ -409,6 +409,7 @@ RRHH_MODULE_TABS = [
     {"label": "Vacaciones", "url_name": "rrhh:rrhh_vacaciones_list", "key": "vacaciones", "submodule": "vacaciones"},
     {"label": "Horas extra", "url_name": "rrhh:rrhh_he_list", "key": "horas_extra", "submodule": "horas_extra"},
     {"label": "Asistencias", "url_name": "rrhh:rrhh_asistencias", "key": "asistencias", "submodule": "asistencias"},
+    {"label": "Reporte asistencia", "url_name": "rrhh:rrhh_reporte_asistencia", "key": "reporte_asistencia", "submodule": "asistencias"},
     {"label": "Checador", "url_name": "rrhh:rrhh_importar", "key": "checador", "submodule": "importar_checador"},
     {"label": "Vacantes", "url_name": "rrhh:rrhh_vacantes", "key": "vacantes", "submodule": "vacantes"},
     {"label": "Préstamos", "url_name": "rrhh:rrhh_prestamos_lista", "key": "prestamos", "submodule": "prestamos"},
