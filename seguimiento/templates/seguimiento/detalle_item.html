@@ -360,7 +360,7 @@
           {% endif %}
 
           {% if check.completado %}
-          <div class="muted" style="font-size:.8rem;">✓ Hecho por {{ check.completado_por.get_full_name|default:check.completado_por.username|default:"—" }}{% if check.completado_at %} · {{ check.completado_at|date:"d/m/Y H:i" }}{% endif %}</div>
+          <div class="muted" style="font-size:.8rem;">✓ Hecho por {% if check.completado_por %}{{ check.completado_por.get_full_name|default:check.completado_por.username }}{% else %}app.pollyanasdolce.com{% endif %}{% if check.completado_at %} · {{ check.completado_at|date:"d/m/Y H:i" }}{% endif %}</div>
           {% endif %}
 
           {% if not es_vista_dg and not item.esta_cerrado %}
