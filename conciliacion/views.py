@@ -19,6 +19,7 @@ from conciliacion.services.importador import (
     resumen_conciliacion,
     sugerir_cfdis_para_movimientos,
 )
+from conciliacion.services.reglas_fiscales import regla_para_movimiento
 from core.access import is_admin_or_dg
 from core.audit import log_event
 from sat_client.models import CfdiDescargado, LogDescargaSat
@@ -211,5 +212,11 @@ def _movimientos_trabajo_context(request: HttpRequest, periodo_resumen: dict) ->
 def _movimiento_rows(movimientos, candidatos: dict[int, list]) -> list[dict]:
     rows = []
     for movimiento in movimientos:
-        rows.append({"movimiento": movimiento, "candidatos": candidatos.get(movimiento.pk, [])})
+        rows.append(
+            {
+                "movimiento": movimiento,
+                "candidatos": candidatos.get(movimiento.pk, []),
+                "regla": regla_para_movimiento(movimiento),
+            }
+        )
     return rows
