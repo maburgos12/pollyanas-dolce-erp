@@ -9,6 +9,7 @@ from .models import (
     EmpleadoIdentidadPendiente,
     HoraExtra,
     IncidenciaAsistencia,
+    IncidenciaAsistenciaBitacora,
     ImportacionChecador,
     ImportacionNominaContpaq,
     NominaConceptoLinea,
@@ -261,9 +262,10 @@ class IncidenciaAsistenciaAdmin(admin.ModelAdmin):
         "severidad",
         "minutos",
         "goce_sueldo",
+        "editado_manual",
         "actualizado_en",
     )
-    list_filter = ("tipo", "estado", "severidad", "fecha", "goce_sueldo")
+    list_filter = ("tipo", "estado", "severidad", "fecha", "goce_sueldo", "editado_manual")
     search_fields = ("empleado__nombre", "empleado__codigo", "detalle")
     readonly_fields = (
         "empleado",
@@ -283,11 +285,26 @@ class IncidenciaAsistenciaAdmin(admin.ModelAdmin):
         "conteo_faltas_30d",
         "detalle",
         "metadata",
+        "editado_manual",
         "creado_en",
         "actualizado_en",
     )
 
     def has_add_permission(self, request):
+        return False
+
+
+@admin.register(IncidenciaAsistenciaBitacora)
+class IncidenciaAsistenciaBitacoraAdmin(admin.ModelAdmin):
+    list_display = ("incidencia", "usuario", "campo", "creado_en")
+    list_filter = ("campo", "creado_en")
+    search_fields = ("incidencia__empleado__nombre", "incidencia__empleado__codigo", "campo", "comentario")
+    readonly_fields = ("incidencia", "usuario", "campo", "valor_anterior", "valor_nuevo", "comentario", "creado_en")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
         return False
 
 

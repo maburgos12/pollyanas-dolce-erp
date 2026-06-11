@@ -43,12 +43,18 @@ class ReglasAsistenciaRRHHTests(TestCase):
         salida: time | None = time(16, 0),
         minutos=480,
         fuente=AsistenciaEmpleado.FUENTE_HIKCONNECT_API,
+        salida_comida: time | None = None,
+        regreso_comida: time | None = None,
+        minutos_comida=0,
     ):
         return AsistenciaEmpleado.objects.create(
             empleado=self.empleado,
             fecha=fecha,
             entrada=dt_local(fecha, entrada),
+            salida_comida=dt_local(fecha, salida_comida) if salida_comida else None,
+            regreso_comida=dt_local(fecha, regreso_comida) if regreso_comida else None,
             salida=dt_local(fecha, salida) if salida else None,
+            minutos_comida=minutos_comida,
             minutos_trabajados=minutos,
             turno=self.turno,
             fuente=fuente,
@@ -95,20 +101,20 @@ class ReglasAsistenciaRRHHTests(TestCase):
         self.assertEqual(retardo.permiso, permiso)
         self.assertIs(retardo.goce_sueldo, False)
 
-    def test_quince_usos_de_tolerancia_generan_retardo_por_tolerancia(self):
+    def test_tres_usos_de_tolerancia_generan_retardo_por_tolerancia(self):
         inicio = date(2026, 6, 1)
-        for offset in range(15):
+        for offset in range(3):
             fecha = inicio + timedelta(days=offset)
             self.crear_asistencia(fecha, time(8, 5), minutos=475)
             evaluar_dia_empleado(self.empleado, fecha)
 
         incidencia = IncidenciaAsistencia.objects.get(
             empleado=self.empleado,
-            fecha=inicio + timedelta(days=14),
+            fecha=inicio + timedelta(days=2),
             tipo=IncidenciaAsistencia.TIPO_RETARDO_TOLERANCIA,
         )
         self.assertEqual(incidencia.estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
-        self.assertEqual(incidencia.metadata["usos_tolerancia_15d"], 15)
+        self.assertEqual(incidencia.metadata["usos_tolerancia_15d"], 3)
 
     def test_tres_retardos_en_quince_dias_generan_falta(self):
         inicio = date(2026, 6, 1)
@@ -150,6 +156,39 @@ class ReglasAsistenciaRRHHTests(TestCase):
         self.assertEqual(baja.conteo_faltas_30d, 4)
         self.assertEqual(baja.severidad, IncidenciaAsistencia.SEVERIDAD_CRITICA)
         self.assertIn("baja por faltas", baja.detalle)
+
+    def test_falta_por_retardos_no_cuenta_para_aviso_o_baja_por_faltas(self):
+        inicio = date(2026, 6, 1)
+        for offset in range(2):
+            IncidenciaAsistencia.objects.create(
+                empleado=self.empleado,
+                fecha=inicio + timedelta(days=offset),
+                tipo=IncidenciaAsistencia.TIPO_FALTA,
+                estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+                severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+            )
+        IncidenciaAsistencia.objects.create(
+            empleado=self.empleado,
+            fecha=inicio + timedelta(days=2),
+            tipo=IncidenciaAsistencia.TIPO_FALTA_RETARDOS,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+            severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+        )
+        fecha_evaluacion = inicio + timedelta(days=3)
+        self.crear_asistencia(fecha_evaluacion, time(8, 0))
+
+        evaluar_dia_empleado(self.empleado, fecha_evaluacion)
+
+        self.assertFalse(
+            IncidenciaAsistencia.objects.filter(
+                empleado=self.empleado,
+                fecha=fecha_evaluacion,
+                tipo__in=[
+                    IncidenciaAsistencia.TIPO_AVISO_BAJA_FALTAS,
+                    IncidenciaAsistencia.TIPO_BAJA_FALTAS,
+                ],
+            ).exists()
+        )
 
     def test_falta_sin_registro_se_concilia_con_vacaciones_aprobadas(self):
         fecha = date(2026, 6, 1)
@@ -219,6 +258,95 @@ class ReglasAsistenciaRRHHTests(TestCase):
         evaluar_dia_empleado(self.empleado, fecha)
         incidencia.refresh_from_db()
         self.assertEqual(incidencia.estado, IncidenciaAsistencia.ESTADO_CONCILIADO)
+
+    def test_comida_mayor_a_35_minutos_genera_incidencia_por_exceso(self):
+        fecha = date(2026, 6, 1)
+        self.crear_asistencia(
+            fecha,
+            time(8, 0),
+            salida=time(16, 0),
+            minutos=430,
+            salida_comida=time(12, 0),
+            regreso_comida=time(12, 50),
+            minutos_comida=50,
+        )
+
+        evaluar_dia_empleado(self.empleado, fecha)
+
+        incidencia = IncidenciaAsistencia.objects.get(
+            empleado=self.empleado,
+            fecha=fecha,
+            tipo=IncidenciaAsistencia.TIPO_COMIDA_EXCEDIDA,
+        )
+        self.assertEqual(incidencia.estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
+        self.assertEqual(incidencia.severidad, IncidenciaAsistencia.SEVERIDAD_MEDIA)
+        self.assertEqual(incidencia.minutos, 15)
+        self.assertEqual(incidencia.metadata["minutos_comida"], 50)
+        self.assertEqual(incidencia.metadata["exceso"], 15)
+
+    def test_comida_de_35_minutos_o_menos_no_genera_incidencia_por_exceso(self):
+        fecha = date(2026, 6, 1)
+        self.crear_asistencia(
+            fecha,
+            time(8, 0),
+            salida=time(16, 0),
+            minutos=445,
+            salida_comida=time(12, 0),
+            regreso_comida=time(12, 35),
+            minutos_comida=35,
+        )
+
+        evaluar_dia_empleado(self.empleado, fecha)
+
+        self.assertFalse(
+            IncidenciaAsistencia.objects.filter(
+                empleado=self.empleado,
+                fecha=fecha,
+                tipo=IncidenciaAsistencia.TIPO_COMIDA_EXCEDIDA,
+            ).exists()
+        )
+
+    def test_incidencia_editada_manual_no_se_pisa_ni_se_resuelve_por_recalculo(self):
+        fecha = date(2026, 6, 1)
+        asistencia = self.crear_asistencia(
+            fecha,
+            time(8, 0),
+            salida=time(16, 0),
+            minutos=430,
+            salida_comida=time(12, 0),
+            regreso_comida=time(12, 50),
+            minutos_comida=50,
+        )
+        incidencia = IncidenciaAsistencia.objects.create(
+            empleado=self.empleado,
+            fecha=fecha,
+            tipo=IncidenciaAsistencia.TIPO_COMIDA_EXCEDIDA,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+            severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+            asistencia=asistencia,
+            minutos=99,
+            detalle="Ajuste manual de RRHH.",
+            metadata={"manual": True},
+            editado_manual=True,
+        )
+
+        evaluar_dia_empleado(self.empleado, fecha)
+        incidencia.refresh_from_db()
+        self.assertEqual(incidencia.severidad, IncidenciaAsistencia.SEVERIDAD_ALTA)
+        self.assertEqual(incidencia.minutos, 99)
+        self.assertEqual(incidencia.detalle, "Ajuste manual de RRHH.")
+        self.assertEqual(incidencia.metadata, {"manual": True})
+
+        asistencia.salida_comida = None
+        asistencia.regreso_comida = None
+        asistencia.minutos_comida = 0
+        asistencia.minutos_trabajados = 480
+        asistencia.save(update_fields=["salida_comida", "regreso_comida", "minutos_comida", "minutos_trabajados"])
+
+        evaluar_dia_empleado(self.empleado, fecha)
+        incidencia.refresh_from_db()
+        self.assertEqual(incidencia.estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
+        self.assertEqual(incidencia.detalle, "Ajuste manual de RRHH.")
 
     def test_comida_de_35_minutos_no_genera_jornada_incompleta_si_esta_registrada(self):
         fecha = date(2026, 6, 1)

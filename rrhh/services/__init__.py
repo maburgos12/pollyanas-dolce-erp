@@ -5,6 +5,8 @@ from decimal import Decimal
 
 from django.db import transaction
 
+from core.access import can_manage_rrhh
+
 from rrhh.models import AsistenciaEmpleado, HoraExtra, NominaLinea, NominaPeriodo
 
 TIEMPO_COMIDA_MINUTOS = 35
@@ -14,6 +16,16 @@ def usuario_jefe_directo_de_empleado(empleado):
     if not empleado or not empleado.jefe_directo_id:
         return None
     return getattr(empleado.jefe_directo, "usuario_erp", None)
+
+
+def can_edit_incidencia(user, incidencia) -> bool:
+    if not user or not getattr(user, "is_authenticated", False) or not incidencia:
+        return False
+    if can_manage_rrhh(user):
+        return True
+    empleado = getattr(incidencia, "empleado", None)
+    jefe = usuario_jefe_directo_de_empleado(empleado)
+    return getattr(jefe, "id", None) == user.id
 
 
 def asistencia_descuenta_comida(asistencia: AsistenciaEmpleado) -> bool:

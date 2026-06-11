@@ -17,7 +17,7 @@ from .models import (
     SolicitudVacaciones,
     Turno,
 )
-from .services import calcular_horas_extra, generar_horas_extra_automatico, minutos_jornada_programada
+from .services import TIEMPO_COMIDA_MINUTOS, calcular_horas_extra, generar_horas_extra_automatico, minutos_jornada_programada
 from .services_vacaciones import es_dia_laborable
 
 
@@ -26,7 +26,7 @@ VENTANA_FALTAS_DIAS = 30
 RETARDOS_POR_FALTA = 3
 FALTAS_AVISO_BAJA = 3
 FALTAS_BAJA = 4
-MARCAS_TOLERANCIA_POR_RETARDO = 15
+MARCAS_TOLERANCIA_POR_RETARDO = 3
 
 
 @dataclass(frozen=True)
@@ -118,27 +118,36 @@ def _upsert_incidencia(
     detalle: str = "",
     metadata: dict | None = None,
 ) -> tuple[IncidenciaAsistencia, bool, bool]:
-    incidencia, creada = IncidenciaAsistencia.objects.update_or_create(
+    defaults = {
+        "estado": estado,
+        "severidad": severidad,
+        "asistencia": asistencia,
+        "permiso": permiso,
+        "solicitud_vacaciones": solicitud_vacaciones,
+        "hora_extra": hora_extra,
+        "minutos": minutos,
+        "goce_sueldo": goce_sueldo,
+        "ventana_inicio": ventana_inicio,
+        "ventana_fin": ventana_fin,
+        "conteo_retardos_15d": conteo_retardos_15d,
+        "conteo_faltas_30d": conteo_faltas_30d,
+        "detalle": detalle,
+        "metadata": metadata or {},
+    }
+    incidencia, creada = IncidenciaAsistencia.objects.get_or_create(
         empleado=empleado,
         fecha=fecha,
         tipo=tipo,
-        defaults={
-            "estado": estado,
-            "severidad": severidad,
-            "asistencia": asistencia,
-            "permiso": permiso,
-            "solicitud_vacaciones": solicitud_vacaciones,
-            "hora_extra": hora_extra,
-            "minutos": minutos,
-            "goce_sueldo": goce_sueldo,
-            "ventana_inicio": ventana_inicio,
-            "ventana_fin": ventana_fin,
-            "conteo_retardos_15d": conteo_retardos_15d,
-            "conteo_faltas_30d": conteo_faltas_30d,
-            "detalle": detalle,
-            "metadata": metadata or {},
-        },
+        defaults=defaults,
     )
+    if creada:
+        return incidencia, True, False
+    if incidencia.editado_manual:
+        return incidencia, False, False
+
+    for field, value in defaults.items():
+        setattr(incidencia, field, value)
+    incidencia.save(update_fields=[*defaults.keys(), "actualizado_en"])
     return incidencia, creada, not creada
 
 
@@ -162,10 +171,7 @@ def _faltas_vigentes(empleado: Empleado, fecha: date) -> int:
         empleado=empleado,
         fecha__gte=desde,
         fecha__lte=fecha,
-        tipo__in=[
-            IncidenciaAsistencia.TIPO_FALTA,
-            IncidenciaAsistencia.TIPO_FALTA_RETARDOS,
-        ],
+        tipo=IncidenciaAsistencia.TIPO_FALTA,
         estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
     ).count()
 
@@ -314,6 +320,43 @@ def _evaluar_jornada(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple
         goce_sueldo=getattr(permiso, "goce_sueldo", None),
         detalle="Jornada incompleta conciliada con permiso." if permiso else "Jornada incompleta sin permiso asociado.",
         metadata={"minutos_jornada": minutos_jornada, "minutos_trabajados": minutos_trabajados},
+    )
+    creados += int(creada)
+    actualizados += int(actualizada)
+    return creados, actualizados
+
+
+def _evaluar_comida(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple[int, int]:
+    creados = 0
+    actualizados = 0
+    if not asistencia.salida_comida or not asistencia.regreso_comida:
+        return creados, actualizados
+
+    minutos_comida = int(asistencia.minutos_comida or 0)
+    if minutos_comida <= TIEMPO_COMIDA_MINUTOS:
+        return creados, actualizados
+
+    exceso = minutos_comida - TIEMPO_COMIDA_MINUTOS
+    permiso = _permiso_aprobado_en_rango(
+        asistencia.empleado,
+        asistencia.fecha,
+        inicio=asistencia.salida_comida,
+        fin=asistencia.regreso_comida,
+    )
+    tipo = IncidenciaAsistencia.TIPO_COMIDA_EXCEDIDA
+    touched.add(tipo)
+    _, creada, actualizada = _upsert_incidencia(
+        empleado=asistencia.empleado,
+        fecha=asistencia.fecha,
+        tipo=tipo,
+        estado=IncidenciaAsistencia.ESTADO_CONCILIADO if permiso else IncidenciaAsistencia.ESTADO_PENDIENTE,
+        severidad=IncidenciaAsistencia.SEVERIDAD_MEDIA,
+        asistencia=asistencia,
+        permiso=permiso,
+        minutos=exceso,
+        goce_sueldo=getattr(permiso, "goce_sueldo", None),
+        detalle="Comida excedida conciliada con permiso." if permiso else "Comida excedida sin permiso asociado.",
+        metadata={"minutos_comida": minutos_comida, "exceso": exceso},
     )
     creados += int(creada)
     actualizados += int(actualizada)
@@ -475,6 +518,9 @@ def evaluar_dia_empleado(empleado: Empleado, fecha: date) -> ResultadoEvaluacion
         creados_jornada, actualizados_jornada = _evaluar_jornada(asistencia, touched)
         creados += creados_jornada
         actualizados += actualizados_jornada
+        creados_comida, actualizados_comida = _evaluar_comida(asistencia, touched)
+        creados += creados_comida
+        actualizados += actualizados_comida
         creados_he, actualizados_he = _evaluar_hora_extra(asistencia, touched)
         creados += creados_he
         actualizados += actualizados_he
@@ -486,6 +532,7 @@ def evaluar_dia_empleado(empleado: Empleado, fecha: date) -> ResultadoEvaluacion
     stale = IncidenciaAsistencia.objects.filter(
         empleado=empleado,
         fecha=fecha,
+        editado_manual=False,
     ).exclude(tipo__in=touched)
     resueltos = stale.exclude(estado=IncidenciaAsistencia.ESTADO_RESUELTO).update(
         estado=IncidenciaAsistencia.ESTADO_RESUELTO,

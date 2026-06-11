@@ -1402,6 +1402,8 @@ class IncidenciaAsistencia(models.Model):
     TIPO_FALTA_RETARDOS = "falta_retardos"
     TIPO_JORNADA_INCOMPLETA = "jornada_incompleta"
     TIPO_HORA_EXTRA_PENDIENTE = "hora_extra_pendiente"
+    TIPO_COMIDA_EXCEDIDA = "comida_excedida"
+    TIPO_SUSPENSION = "suspension"
     TIPO_AVISO_BAJA_FALTAS = "aviso_baja_faltas"
     TIPO_BAJA_FALTAS = "baja_faltas"
     TIPO_CHOICES = [
@@ -1412,6 +1414,8 @@ class IncidenciaAsistencia(models.Model):
         (TIPO_FALTA_RETARDOS, "Falta por retardos"),
         (TIPO_JORNADA_INCOMPLETA, "Jornada incompleta"),
         (TIPO_HORA_EXTRA_PENDIENTE, "Hora extra pendiente"),
+        (TIPO_COMIDA_EXCEDIDA, "Comida excedida"),
+        (TIPO_SUSPENSION, "Suspensión"),
         (TIPO_AVISO_BAJA_FALTAS, "Aviso por faltas"),
         (TIPO_BAJA_FALTAS, "Baja por faltas"),
     ]
@@ -1477,6 +1481,7 @@ class IncidenciaAsistencia(models.Model):
     conteo_faltas_30d = models.PositiveSmallIntegerField(default=0)
     detalle = models.TextField(blank=True, default="")
     metadata = models.JSONField(default=dict, blank=True)
+    editado_manual = models.BooleanField(default=False)
     creado_en = models.DateTimeField(auto_now_add=True)
     actualizado_en = models.DateTimeField(auto_now=True)
 
@@ -1488,6 +1493,24 @@ class IncidenciaAsistencia(models.Model):
 
     def __str__(self) -> str:
         return f"{self.empleado} · {self.fecha} · {self.get_tipo_display()}"
+
+
+class IncidenciaAsistenciaBitacora(models.Model):
+    incidencia = models.ForeignKey(IncidenciaAsistencia, on_delete=models.CASCADE, related_name="bitacora")
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    campo = models.CharField(max_length=80)
+    valor_anterior = models.TextField(blank=True)
+    valor_nuevo = models.TextField(blank=True)
+    comentario = models.TextField()
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-creado_en"]
+        verbose_name = "Bitácora de incidencia de asistencia"
+        verbose_name_plural = "Bitácora de incidencias de asistencia"
+
+    def __str__(self) -> str:
+        return f"{self.incidencia} · {self.campo}"
 
 
 class ImportacionChecador(models.Model):
