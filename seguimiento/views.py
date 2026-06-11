@@ -1529,7 +1529,13 @@ def _actividad_evento(actividad: ActividadCalendario, request_user) -> dict:
     }
 
 
-def _item_evento(item: SeguimientoItem) -> dict:
+def _seguimiento_url_calendario(item: SeguimientoItem, request_user) -> str:
+    if can_review_seguimiento_global(request_user):
+        return f"/seguimiento/panel/{item.pk}/"
+    return f"/seguimiento/{item.pk}/"
+
+
+def _item_evento(item: SeguimientoItem, request_user) -> dict:
     fecha, hora = _fecha_hora_local(item.fecha_limite)
     responsable = _nombre_usuario_legible(item.responsable_user) or getattr(item.responsable_empleado, "nombre", "")
     completado = item.estatus in {SeguimientoItem.ESTATUS_COMPLETADO, SeguimientoItem.ESTATUS_CANCELADO}
@@ -1543,14 +1549,14 @@ def _item_evento(item: SeguimientoItem) -> dict:
         "hora_fin": None,
         "estatus": item.estatus,
         "vencido": bool(fecha and fecha < timezone.localdate() and not completado),
-        "url": f"/seguimiento/{item.pk}/",
+        "url": _seguimiento_url_calendario(item, request_user),
         "responsable": responsable or None,
         "descripcion": "",
         "editable": False,
     }
 
 
-def _checklist_evento(check: SeguimientoChecklistItem) -> dict:
+def _checklist_evento(check: SeguimientoChecklistItem, request_user) -> dict:
     fecha, hora = _fecha_hora_local(check.vence)
     item = check.seguimiento
     responsable = _nombre_usuario_legible(item.responsable_user) or getattr(item.responsable_empleado, "nombre", "")
@@ -1564,7 +1570,7 @@ def _checklist_evento(check: SeguimientoChecklistItem) -> dict:
         "hora_fin": None,
         "estatus": "COMPLETADO" if check.completado else (check.estatus_origen or "PENDIENTE"),
         "vencido": bool(fecha and fecha < timezone.localdate() and not check.completado),
-        "url": f"/seguimiento/{item.pk}/",
+        "url": _seguimiento_url_calendario(item, request_user),
         "responsable": responsable or None,
         "descripcion": "",
         "editable": False,
@@ -1689,8 +1695,8 @@ def calendario_eventos(request):
         actividades_qs = actividades_qs.filter(usuario__is_active=True)
 
     eventos = []
-    eventos.extend(_item_evento(item) for item in items_qs)
-    eventos.extend(_checklist_evento(check) for check in checklist_qs)
+    eventos.extend(_item_evento(item, request.user) for item in items_qs)
+    eventos.extend(_checklist_evento(check, request.user) for check in checklist_qs)
     eventos.extend(_actividad_evento(actividad, request.user) for actividad in actividades_qs)
     eventos = [evento for evento in eventos if evento.get("fecha")]
     eventos.sort(key=lambda event: (event["fecha"], event.get("hora") or "99:99", event["titulo"].lower()))
