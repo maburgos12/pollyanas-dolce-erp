@@ -132,6 +132,91 @@ class ImportadorBancarioTests(TestCase):
         self.assertEqual(preview.movimientos[1].saldo, Decimal("1700.00"))
         self.assertEqual(preview.errores, [])
 
+    def test_generar_preview_reads_bbva_maestra_pyme_pdf_statement(self):
+        archivo = SimpleUploadedFile(
+            "00741744000120753084CH.pdf",
+            _minimal_text_pdf(
+                [
+                    "Estado de Cuenta",
+                    "MAESTRA PYME BBVA",
+                    "Periodo DEL 01/05/2026 AL 31/05/2026",
+                    "Detalle de Movimientos Realizados",
+                    "FECHA SALDO",
+                    "OPER LIQ COD. DESCRIPCIÓN REFERENCIA CARGOS ABONOS OPERACIÓN LIQUIDACIÓN",
+                    "04/MAY 01/MAY Y45 MORA SPEI NORMABANXICO 0.27 6,160.73 6,160.73",
+                    "Ref. COMP SPEI",
+                    "07/MAY 07/MAY S39 SERV BANCA INTERNET 250.00",
+                    "Ref. ADMON RENTA",
+                    "08/MAY 08/MAY T20 SPEI RECIBIDOBAJIO 4,000.00",
+                    "0164054TRASPASO PAGO FONACOT Ref. 0145607982 030",
+                    "00030741900036812905",
+                ]
+            ),
+            content_type="application/pdf",
+        )
+
+        preview = generar_preview(cuenta=self.cuenta, uploaded_file=archivo)
+
+        self.assertEqual(preview.fuente, ImportacionBancaria.FUENTE_MANUAL_PDF)
+        self.assertEqual(len(preview.movimientos), 3)
+        self.assertEqual(preview.movimientos[0].fecha.date().isoformat(), "2026-05-04")
+        self.assertEqual(preview.movimientos[0].tipo, MovimientoBancario.TIPO_ABONO)
+        self.assertEqual(preview.movimientos[0].monto, Decimal("0.27"))
+        self.assertEqual(preview.movimientos[0].saldo, Decimal("6160.73"))
+        self.assertEqual(preview.movimientos[1].tipo, MovimientoBancario.TIPO_CARGO)
+        self.assertEqual(preview.movimientos[1].monto, Decimal("250.00"))
+        self.assertEqual(preview.movimientos[1].referencia, "Ref. ADMON RENTA")
+        self.assertEqual(preview.movimientos[2].tipo, MovimientoBancario.TIPO_ABONO)
+        self.assertEqual(preview.movimientos[2].monto, Decimal("4000.00"))
+        self.assertIn("0145607982", preview.movimientos[2].referencia)
+        self.assertEqual(preview.errores, [])
+
+    def test_generar_preview_reads_american_express_pdf_statement(self):
+        amex, _ = CuentaBancaria.objects.update_or_create(
+            banco=CuentaBancaria.BANCO_AMEX,
+            defaults={
+                "nombre_display": "American Express Business Gold",
+                "id_site_syncfy": "",
+                "origen": CuentaBancaria.ORIGEN_MANUAL,
+                "numero_cuenta": "01005",
+            },
+        )
+        archivo = SimpleUploadedFile(
+            "9_may_2026_-_8_jun_2026.pdf",
+            _minimal_text_pdf(
+                [
+                    "americanexpress.com.mx",
+                    "American Express",
+                    "Tarjetahabiente 3401-061022-01005 de Corte de Corte",
+                    "MAURICIO ANTONIO BURGOS FONSECA 08-Jun-2026 08-Jul-2026",
+                    "Fecha y Detalle de las operaciones Importe en MN.",
+                    "27 de Mayo GRACIAS POR SU PAGO EN LINEA 49,600.00",
+                    "CR",
+                    "12 de Mayo TELEFONOS DE MEXICO SAB CIUDAD DE MEXIC 6,552.00",
+                    "RFCTME840315KT6 /REF101899993457",
+                    "20 de Mayo OPENAI *CHATGPT SUBSCR SAN FRANCISCO 3,552.14",
+                    "Dólar U.S.A. 200.00",
+                    "Resumen de Planes de Pagos Diferidos con Intereses y Meses sin Intereses",
+                    "AMAZON MX MSI MKT*AMAZO MEXICO 12 deEne 10,199.00 0.00% 1,699.80 5 de6 1,699.84",
+                ]
+            ),
+            content_type="application/pdf",
+        )
+
+        preview = generar_preview(cuenta=amex, uploaded_file=archivo)
+
+        self.assertEqual(preview.fuente, ImportacionBancaria.FUENTE_MANUAL_PDF)
+        self.assertEqual(len(preview.movimientos), 3)
+        self.assertEqual(preview.movimientos[0].fecha.date().isoformat(), "2026-05-27")
+        self.assertEqual(preview.movimientos[0].tipo, MovimientoBancario.TIPO_ABONO)
+        self.assertEqual(preview.movimientos[0].monto, Decimal("49600.00"))
+        self.assertEqual(preview.movimientos[1].tipo, MovimientoBancario.TIPO_CARGO)
+        self.assertEqual(preview.movimientos[1].monto, Decimal("6552.00"))
+        self.assertEqual(preview.movimientos[1].referencia, "101899993457")
+        self.assertEqual(preview.movimientos[2].tipo, MovimientoBancario.TIPO_CARGO)
+        self.assertEqual(preview.movimientos[2].monto, Decimal("3552.14"))
+        self.assertEqual(preview.errores, [])
+
     def test_generar_preview_normalizes_xml_spreadsheet_table(self):
         archivo = SimpleUploadedFile(
             "estado_banbajio.xml",

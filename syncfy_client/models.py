@@ -4,14 +4,23 @@ from django.db import models
 class CuentaBancaria(models.Model):
     BANCO_BANBAJIO = "banbajio"
     BANCO_BBVA = "bbva"
+    BANCO_AMEX = "amex"
+    ORIGEN_SYNCFY = "syncfy"
+    ORIGEN_MANUAL = "manual"
     BANCO_CHOICES = [
         (BANCO_BANBAJIO, "BanBajio Empresas"),
         (BANCO_BBVA, "BBVA Empresas"),
+        (BANCO_AMEX, "American Express"),
+    ]
+    ORIGEN_CHOICES = [
+        (ORIGEN_SYNCFY, "Syncfy"),
+        (ORIGEN_MANUAL, "Carga manual"),
     ]
 
     banco = models.CharField(max_length=20, choices=BANCO_CHOICES, unique=True)
     nombre_display = models.CharField(max_length=100)
     id_site_syncfy = models.CharField(max_length=50)
+    origen = models.CharField(max_length=20, choices=ORIGEN_CHOICES, default=ORIGEN_SYNCFY)
     id_credential = models.CharField(max_length=100, null=True, blank=True)
     id_account = models.CharField(max_length=100, null=True, blank=True)
     numero_cuenta = models.CharField(max_length=32, null=True, blank=True)

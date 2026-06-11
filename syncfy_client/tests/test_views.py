@@ -56,6 +56,7 @@ class SyncfyBancosViewTests(TestCase):
         self.assertContains(response, "BBVA Empresas")
         self.assertContains(response, "66cdeccb04d89a0ea654d887")
         self.assertContains(response, "token-123")
+        self.assertNotContains(response, "American Express Business Gold")
 
     def test_guardar_credential_updates_expected_bank(self):
         self.client.force_login(self.admin)

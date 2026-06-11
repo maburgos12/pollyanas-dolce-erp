@@ -25,6 +25,49 @@ MAX_PREVIEW_ROWS = 50
 MAX_IMPORT_ROWS = 3000
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 FORMATOS_SOPORTADOS = {"csv", "xlsx", "xlsm", "xls", "xml", "pdf"}
+PDF_MONTHS = {
+    "ENE": 1,
+    "ENERO": 1,
+    "FEB": 2,
+    "FEBRERO": 2,
+    "MAR": 3,
+    "MARZO": 3,
+    "ABR": 4,
+    "ABRIL": 4,
+    "MAY": 5,
+    "MAYO": 5,
+    "JUN": 6,
+    "JUNIO": 6,
+    "JUL": 7,
+    "JULIO": 7,
+    "AGO": 8,
+    "AGOSTO": 8,
+    "SEP": 9,
+    "SEPT": 9,
+    "SEPTIEMBRE": 9,
+    "OCT": 10,
+    "OCTUBRE": 10,
+    "NOV": 11,
+    "NOVIEMBRE": 11,
+    "DIC": 12,
+    "DICIEMBRE": 12,
+}
+PDF_MONTH_ABBR = {
+    "JAN": 1,
+    "FEB": 2,
+    "MAR": 3,
+    "APR": 4,
+    "MAY": 5,
+    "JUN": 6,
+    "JUL": 7,
+    "AUG": 8,
+    "SEP": 9,
+    "OCT": 10,
+    "NOV": 11,
+    "DEC": 12,
+}
+BBVA_ABONO_CODES = {"T20", "W02", "Y45"}
+BBVA_CARGO_CODES = {"P14", "R01", "R15", "S39", "S40", "T17"}
 
 
 class ImportacionBancariaError(ValueError):
@@ -610,10 +653,14 @@ def _read_pdf_dataframe(content: bytes) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     try:
         with pdfplumber.open(io.BytesIO(content)) as pdf:
+            pages_text = [page.extract_text(x_tolerance=1, y_tolerance=3) or "" for page in pdf.pages]
+            rows.extend(_pdf_rows_from_bbva_maestra(pages_text))
+            rows.extend(_pdf_rows_from_amex_business(pages_text))
+            if rows:
+                return pd.DataFrame(rows)
             for page_number, page in enumerate(pdf.pages, start=1):
                 rows.extend(_pdf_rows_from_tables(page, page_number=page_number))
-                text = page.extract_text(x_tolerance=1, y_tolerance=3) or ""
-                rows.extend(_pdf_rows_from_text(text, page_number=page_number))
+                rows.extend(_pdf_rows_from_text(pages_text[page_number - 1], page_number=page_number))
     except Exception as exc:  # noqa: BLE001
         raise ImportacionBancariaError("No se pudo leer el PDF del estado de cuenta.") from exc
 
@@ -623,6 +670,176 @@ def _read_pdf_dataframe(content: bytes) -> pd.DataFrame:
             "Si el archivo es escaneado, descarga una version con texto seleccionable o usa CSV/Excel."
         )
     return pd.DataFrame(rows)
+
+
+def _pdf_rows_from_bbva_maestra(pages_text: list[str]) -> list[dict[str, Any]]:
+    full_text = "\n".join(pages_text)
+    if "MAESTRA PYME BBVA" not in full_text or "DETALLE DE MOVIMIENTOS" not in _normalize_text(full_text):
+        return []
+
+    year = _bbva_pdf_year(full_text)
+    parsed_rows: list[dict[str, Any]] = []
+    row_pattern = re.compile(
+        r"^(?P<oper_day>\d{1,2})/(?P<oper_month>[A-ZÁÉÍÓÚÑ]{3})\s+"
+        r"(?P<liq_day>\d{1,2})/(?P<liq_month>[A-ZÁÉÍÓÚÑ]{3})\s+"
+        r"(?P<code>[A-Z0-9]{3})\s+"
+        r"(?P<description>.+?)\s+"
+        r"(?P<amount>\d{1,3}(?:,\d{3})*\.\d{2})"
+        r"(?:\s+(?P<saldo_operacion>\d{1,3}(?:,\d{3})*\.\d{2})\s+"
+        r"(?P<saldo_liquidacion>\d{1,3}(?:,\d{3})*\.\d{2}))?$"
+    )
+
+    for page_number, text in enumerate(pages_text, start=1):
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        for line_number, line in enumerate(lines, start=1):
+            match = row_pattern.match(line)
+            if not match:
+                continue
+            month = _pdf_month_number(match.group("oper_month"))
+            if not month:
+                continue
+            row = {
+                "fecha": f"{year}-{month:02d}-{int(match.group('oper_day')):02d}",
+                "descripcion": f"{match.group('code')} {match.group('description')}",
+                "referencia": _bbva_pdf_referencia(lines, start_index=line_number),
+                "pagina_pdf": page_number,
+                "linea_pdf": line_number,
+                "formato_pdf": "bbva_maestra_pyme",
+                "codigo_operacion": match.group("code"),
+                "fecha_liquidacion": _bbva_pdf_fecha_liquidacion(match=match, year=year),
+            }
+            amount = match.group("amount")
+            if _bbva_pdf_tipo(match.group("code"), match.group("description")) == MovimientoBancario.TIPO_ABONO:
+                row["abono"] = amount
+            else:
+                row["cargo"] = amount
+            saldo = match.group("saldo_operacion") or match.group("saldo_liquidacion")
+            if saldo:
+                row["saldo"] = saldo
+            parsed_rows.append(row)
+    return parsed_rows
+
+
+def _pdf_rows_from_amex_business(pages_text: list[str]) -> list[dict[str, Any]]:
+    full_text = "\n".join(pages_text)
+    normalized_full_text = _normalize_text(full_text)
+    if "AMERICAN EXPRESS" not in normalized_full_text or "FECHA Y DETALLE DE LAS OPERACIONES" not in normalized_full_text:
+        return []
+
+    cutoff_year, cutoff_month = _amex_pdf_cutoff(full_text)
+    parsed_rows: list[dict[str, Any]] = []
+    row_pattern = re.compile(
+        r"^(?P<day>\d{1,2})\s+de\s*(?P<month>[A-Za-zÁÉÍÓÚÑáéíóúñ]+)\s+"
+        r"(?P<description>.+?)\s+"
+        r"(?P<amount>\d{1,3}(?:,\d{3})*\.\d{2})$"
+    )
+
+    skip_section = False
+    for page_number, text in enumerate(pages_text, start=1):
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        for line_index, line in enumerate(lines):
+            normalized = _normalize_text(line)
+            if normalized.startswith("RESUMEN DE PLANES DE PAGOS DIFERIDOS"):
+                skip_section = True
+            if "INFORMACION AL TARJETAHABIENTE" in normalized:
+                skip_section = False
+            if skip_section:
+                continue
+
+            match = row_pattern.match(line)
+            if not match:
+                continue
+            description = match.group("description").strip()
+            if _normalize_text(description).startswith("TOTAL "):
+                continue
+            month = _pdf_month_number(match.group("month"))
+            if not month:
+                continue
+            year = cutoff_year - 1 if cutoff_month == 1 and month == 12 else cutoff_year
+            next_line = lines[line_index + 1].strip() if line_index + 1 < len(lines) else ""
+            next_next_line = lines[line_index + 2].strip() if line_index + 2 < len(lines) else ""
+            row = {
+                "fecha": f"{year}-{month:02d}-{int(match.group('day')):02d}",
+                "descripcion": description,
+                "referencia": _amex_pdf_referencia(next_line, next_next_line),
+                "pagina_pdf": page_number,
+                "linea_pdf": line_index + 1,
+                "formato_pdf": "american_express_business",
+            }
+            if next_line == "CR":
+                row["abono"] = match.group("amount")
+                row["raw_tipo"] = "CR"
+            else:
+                row["cargo"] = match.group("amount")
+            parsed_rows.append(row)
+    return parsed_rows
+
+
+def _bbva_pdf_year(text: str) -> int:
+    match = re.search(r"Periodo\s+DEL\s+\d{1,2}/\d{1,2}/(?P<year>20\d{2})", text, flags=re.IGNORECASE)
+    if match:
+        return int(match.group("year"))
+    match = re.search(r"Fecha de Corte\s+\d{1,2}/\d{1,2}/(?P<year>20\d{2})", text, flags=re.IGNORECASE)
+    return int(match.group("year")) if match else timezone.localdate().year
+
+
+def _bbva_pdf_fecha_liquidacion(*, match: re.Match[str], year: int) -> str:
+    month = _pdf_month_number(match.group("liq_month"))
+    if not month:
+        return ""
+    return f"{year}-{month:02d}-{int(match.group('liq_day')):02d}"
+
+
+def _bbva_pdf_tipo(code: str, description: str) -> str:
+    if code in BBVA_ABONO_CODES:
+        return MovimientoBancario.TIPO_ABONO
+    if code in BBVA_CARGO_CODES:
+        return MovimientoBancario.TIPO_CARGO
+    return _pdf_tipo_from_line(body=f"{code} {description}", trailing="", amount="1.00")
+
+
+def _bbva_pdf_referencia(lines: list[str], *, start_index: int) -> str:
+    parts: list[str] = []
+    for line in lines[start_index : start_index + 6]:
+        normalized = _normalize_text(line)
+        if re.match(r"^\d{1,2}/[A-ZÁÉÍÓÚÑ]{3}\b", line):
+            break
+        if normalized.startswith(
+            (
+                "BBVA MEXICO",
+                "AV PASEO",
+                "TOTAL DE MOVIMIENTOS",
+                "ESTIMADO CLIENTE",
+                "SU ESTADO DE CUENTA",
+                "TAMBIEN LE INFORMAMOS",
+                "CON BBVA",
+                "LA GAT REAL",
+            )
+        ):
+            break
+        parts.append(line)
+    return " ".join(parts).strip()
+
+
+def _amex_pdf_cutoff(text: str) -> tuple[int, int]:
+    match = re.search(r"(?P<day>\d{2})-(?P<month>[A-Za-z]{3})-(?P<year>20\d{2})", text)
+    if not match:
+        return timezone.localdate().year, timezone.localdate().month
+    month = PDF_MONTH_ABBR.get(match.group("month").upper(), timezone.localdate().month)
+    return int(match.group("year")), month
+
+
+def _amex_pdf_referencia(*lines: str) -> str:
+    for line in lines:
+        match = re.search(r"/REF\s*([A-Za-z0-9-]+)", line)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def _pdf_month_number(value: str) -> int | None:
+    normalized = _normalize_header(value).upper().replace("_", "")
+    return PDF_MONTHS.get(normalized)
 
 
 def _pdf_rows_from_tables(page, *, page_number: int) -> list[dict[str, Any]]:

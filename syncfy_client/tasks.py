@@ -72,7 +72,12 @@ def sincronizar_movimientos_bancarios(self):
     if not getattr(settings, "SYNCFY_ENABLED", False):
         return {"status": "deshabilitada"}
 
-    cuentas = list(CuentaBancaria.objects.filter(activa=True).order_by("banco"))
+    cuentas = list(
+        CuentaBancaria.objects.filter(
+            activa=True,
+            origen=CuentaBancaria.ORIGEN_SYNCFY,
+        ).order_by("banco")
+    )
     if not cuentas:
         LogSyncfy.objects.create(
             nivel=LogSyncfy.NIVEL_WARN,
