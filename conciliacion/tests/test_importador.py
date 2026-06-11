@@ -45,6 +45,28 @@ class ImportadorBancarioTests(TestCase):
         self.assertEqual(preview.movimientos[1].monto, Decimal("300.00"))
         self.assertEqual(preview.errores, [])
 
+    def test_generar_preview_normalizes_banbajio_detallado_csv_without_header(self):
+        archivo = SimpleUploadedFile(
+            "ExcelDetallado_41064189_20260610200219.csv",
+            (
+                '         ,          ,                          ,Saldo Inicial      ,     ,     ,                  ,                  ,"0.00",\n'
+                '41064189,31/05/2026,030741900036812905,                               ,IVA Comision por Emision de Chequera,2182,2.08,0,"84,041.06",54875114\n'
+                '41064189,31/05/2026,030741900036812905,9425978001,Deposito Negocios Afiliados por 830.00 mxn,2180,0,830.00,"84,871.06",4066700006001\n'
+            ).encode("latin-1"),
+            content_type="text/csv",
+        )
+
+        preview = generar_preview(cuenta=self.cuenta, uploaded_file=archivo)
+
+        self.assertEqual(len(preview.movimientos), 2)
+        self.assertEqual(preview.movimientos[0].tipo, MovimientoBancario.TIPO_CARGO)
+        self.assertEqual(preview.movimientos[0].monto, Decimal("2.08"))
+        self.assertEqual(preview.movimientos[0].saldo, Decimal("84041.06"))
+        self.assertEqual(preview.movimientos[1].tipo, MovimientoBancario.TIPO_ABONO)
+        self.assertEqual(preview.movimientos[1].monto, Decimal("830.00"))
+        self.assertEqual(preview.movimientos[1].referencia, "9425978001")
+        self.assertEqual(preview.errores, [])
+
     def test_generar_preview_normalizes_banbajio_xml(self):
         archivo = SimpleUploadedFile(
             "estado_banbajio.xml",

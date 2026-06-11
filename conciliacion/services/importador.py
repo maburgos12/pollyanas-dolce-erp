@@ -235,13 +235,81 @@ def sugerir_cfdis_para_movimientos(movimientos: list[MovimientoBancario]) -> dic
 def _read_dataframe(content: bytes, suffix: str) -> pd.DataFrame:
     buffer = io.BytesIO(content)
     if suffix == "csv":
-        try:
-            return pd.read_csv(buffer)
-        except UnicodeDecodeError:
-            return pd.read_csv(io.BytesIO(content), encoding="latin-1")
+        return _read_csv_dataframe(content)
     if suffix == "xml":
         return _read_xml_dataframe(content)
     return pd.read_excel(buffer)
+
+
+def _read_csv_dataframe(content: bytes) -> pd.DataFrame:
+    dataframe = _read_csv_with_header(content)
+    if _dataframe_has_bank_columns(dataframe):
+        return dataframe
+    detailed = _read_bajio_detallado_csv(content)
+    if not detailed.empty:
+        return detailed
+    return dataframe
+
+
+def _read_csv_with_header(content: bytes) -> pd.DataFrame:
+    try:
+        return pd.read_csv(io.BytesIO(content))
+    except UnicodeDecodeError:
+        return pd.read_csv(io.BytesIO(content), encoding="latin-1")
+
+
+def _dataframe_has_bank_columns(dataframe: pd.DataFrame) -> bool:
+    normalized = {_normalize_header(column) for column in dataframe.columns}
+    has_date = bool(normalized & {"fecha", "fecha_operacion", "fecha_de_operacion", "fecha_movimiento", "date"})
+    has_description = bool(normalized & {"descripcion", "concepto", "detalle", "movimiento", "operacion", "description"})
+    has_amount = bool(
+        normalized
+        & {
+            "cargo",
+            "cargos",
+            "importe_cargo",
+            "retiro",
+            "retiros",
+            "abono",
+            "abonos",
+            "importe_abono",
+            "deposito",
+            "depositos",
+            "monto",
+            "importe",
+            "amount",
+        }
+    )
+    return has_date and has_description and has_amount
+
+
+def _read_bajio_detallado_csv(content: bytes) -> pd.DataFrame:
+    try:
+        raw = pd.read_csv(io.BytesIO(content), header=None, encoding="latin-1")
+    except UnicodeDecodeError:
+        raw = pd.read_csv(io.BytesIO(content), header=None)
+    if raw.shape[1] < 10:
+        return pd.DataFrame()
+    raw = raw.iloc[:, :10].copy()
+    raw.columns = [
+        "cuenta_origen",
+        "fecha",
+        "cuenta_bancaria",
+        "referencia",
+        "descripcion",
+        "secuencia",
+        "cargo",
+        "abono",
+        "saldo",
+        "folio",
+    ]
+    raw = raw[raw["fecha"].apply(_looks_like_fecha_bancaria)]
+    raw = raw[raw["descripcion"].fillna("").astype(str).str.strip() != ""]
+    return raw.reset_index(drop=True)
+
+
+def _looks_like_fecha_bancaria(value: Any) -> bool:
+    return bool(re.match(r"^\d{1,2}/\d{1,2}/\d{4}$", str(value or "").strip()))
 
 
 def _read_xml_dataframe(content: bytes) -> pd.DataFrame:
