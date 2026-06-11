@@ -1139,7 +1139,7 @@ class CalendarioTests(TestCase):
         self.assertEqual(eventos[0]["titulo"], "Actividad B")
 
     def test_dg_ve_todo_y_filtra_por_colaborador(self):
-        SeguimientoItem.objects.create(
+        item = SeguimientoItem.objects.create(
             tipo=SeguimientoItem.TIPO_MINUTA,
             titulo="Minuta A",
             responsable_user=self.user_a,
@@ -1155,6 +1155,22 @@ class CalendarioTests(TestCase):
         self.assertEqual(len(response_all.json()["eventos"]), 3)
         self.assertEqual(response_a.status_code, 200)
         self.assertEqual({evento["titulo"] for evento in response_a.json()["eventos"]}, {"Minuta A", "Actividad A"})
+        evento_minuta = next(evento for evento in response_a.json()["eventos"] if evento["titulo"] == "Minuta A")
+        self.assertEqual(evento_minuta["url"], f"/seguimiento/panel/{item.pk}/")
+
+    def test_colaborador_mantiene_url_personal_de_seguimiento(self):
+        item = SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_COMPROMISO,
+            titulo="Compromiso propio",
+            responsable_user=self.user_a,
+            fecha_limite=self._dt(self.hoy),
+        )
+
+        response = self._eventos(self.user_a)
+
+        self.assertEqual(response.status_code, 200)
+        evento = next(evento for evento in response.json()["eventos"] if evento["titulo"] == "Compromiso propio")
+        self.assertEqual(evento["url"], f"/seguimiento/{item.pk}/")
 
     def test_item_por_responsable_empleado_usuario_erp_aparece(self):
         empleado = Empleado.objects.create(
