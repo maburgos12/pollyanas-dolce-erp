@@ -694,6 +694,40 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertIsNone(checks[0].completado_por)
         self.assertIsNone(checks[0].completado_at)
 
+    def test_importador_trunca_titulo_de_checklist_largo_y_preserva_texto(self):
+        command = ImportarAgenteDGCommand()
+        counters = {"created": 0, "updated": 0, "skipped": 0}
+        texto_largo = (
+            "TURBOLINO CRUCERO: Sensor de flama ya esta muy tostado, es por eso que el horno "
+            "batalla para encender, se esta intentando conseguir para ponerle justo el que lleva, "
+            "de no encontrarse se le puede hacer una adaptacion con otro sensor encontrado."
+        )
+
+        command._upsert_item(
+            {
+                "id": 78,
+                "titulo": "Refacciones de hornos",
+                "descripcion": "Validar refacciones",
+                "expected_deliverable": "",
+                "status": "OPEN",
+                "due_at": timezone.now() + timedelta(days=5),
+                "user_email": self.user.email,
+                "user_name": self.user.get_full_name(),
+                "user_id": 4,
+                "area_name": "Junta",
+            },
+            "minute_agreements",
+            SeguimientoItem.TIPO_MINUTA,
+            counters,
+            checklist=[{"titulo": texto_largo, "descripcion": "", "completado": False}],
+        )
+
+        item = SeguimientoItem.objects.get(titulo="Refacciones de hornos")
+        check = item.checklist.get()
+        self.assertLessEqual(len(check.titulo), 220)
+        self.assertTrue(check.titulo.endswith("..."))
+        self.assertEqual(check.descripcion, texto_largo)
+
     def test_superusuario_conserva_bonos_en_menu(self):
         admin = get_user_model().objects.create_superuser(username="admin-seguimiento", password="x")
 
