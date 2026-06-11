@@ -855,6 +855,48 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertNotContains(desfases, "Búsqueda de camisas")
         self.assertEqual(desfases.context["vencidos"], 0)
 
+    def test_importador_minuta_preserva_avance_checklist_de_app(self):
+        command = ImportarAgenteDGCommand()
+        counters = {"created": 0, "updated": 0, "skipped": 0}
+        checklist_items = [
+            {"text": "Búsqueda de camisas para área administrativa", "completed": True, "completed_at": "2026-06-11T04:39:31Z"},
+            {"text": "Cotización de camisas", "completed": True, "completed_at": "2026-06-11T04:39:31Z"},
+            {"text": "Aprobación por parte de DG", "completed": True, "completed_at": "2026-06-11T04:39:31Z"},
+            {"text": "Solicitud de compra", "completed": True, "completed_at": "2026-06-11T04:39:31Z"},
+            {"text": "Compra entregada", "completed": False, "completed_at": None},
+        ]
+
+        command._upsert_item(
+            {
+                "id": 73,
+                "titulo": "Búsqueda de camisas",
+                "descripcion": "Pendiente entrega",
+                "checklist_items_json": json.dumps(checklist_items),
+                "status": "OPEN",
+                "due_at": timezone.now() + timedelta(days=5),
+                "user_email": self.user.email,
+                "user_name": self.user.get_full_name(),
+                "user_id": 4,
+                "area_name": "Junta",
+            },
+            "minute_agreements",
+            SeguimientoItem.TIPO_MINUTA,
+            counters,
+        )
+
+        item = SeguimientoItem.objects.prefetch_related("checklist").get(
+            metadata__source="agente_dg",
+            metadata__source_table="minute_agreements",
+            metadata__source_id=73,
+        )
+        checks = list(item.checklist.all())
+        self.assertEqual(len(checks), 5)
+        self.assertEqual(sum(check.completado for check in checks), 4)
+        self.assertTrue(checks[3].completado)
+        self.assertEqual(checks[3].titulo, "Solicitud de compra")
+        self.assertFalse(checks[4].completado)
+        self.assertEqual(checks[4].titulo, "Compra entregada")
+
     def test_webhook_parcial_preserva_checklist_existente(self):
         command = ImportarAgenteDGCommand()
         counters = {"created": 0, "updated": 0, "skipped": 0}
