@@ -10,6 +10,7 @@ from rest_framework.response import Response
 
 from rrhh.models import Empleado, NominaPeriodo
 from rrhh.bonos_permisos import BasePermisosEquipoViewSet, _empleado_payload, _permiso_payload
+from rrhh.bonos_horas_extra import BaseHorasExtraEquipoViewSet
 from core.access import can_manage_submodule, can_view_submodule, is_bonos_produccion_capture_only
 from core.audit import log_event
 from recetas.utils.normalizacion import normalizar_nombre
@@ -393,3 +394,13 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
             ).values_list("empleado_id", flat=True)
             return self._con_personal_autorizable(Empleado.objects.filter(id__in=empleados_periodo))
         return self._con_personal_autorizable(empleados_elegibles_bonos_produccion())
+
+
+class HorasExtraProduccionEquipoViewSet(BaseHorasExtraEquipoViewSet, PermisosProduccionEquipoViewSet):
+    permission_classes = [IsAuthenticated, CanAccessBonosProduccion]
+
+    def empleados_queryset(self):
+        return PermisosProduccionEquipoViewSet.empleados_queryset(self)
+
+    def can_gestionar_empleado(self, empleado):
+        return can_manage_submodule(self.request.user, "produccion", "bonos") or super().can_gestionar_empleado(empleado)

@@ -8,7 +8,7 @@ from django.test import Client, TestCase, override_settings
 
 from core.access import ROLE_PRODUCCION, ROLE_RRHH
 from core.navigation import NAV_GROUPS
-from rrhh.models import Empleado, NominaLinea, NominaPeriodo, PermisoSalida, PermisoSalidaCambio
+from rrhh.models import Empleado, HoraExtra, NominaLinea, NominaPeriodo, PermisoSalida, PermisoSalidaCambio
 
 from .models import (
     AREA_EMBETUNADO,
@@ -338,7 +338,7 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-produccion-pwa-v12", sw_content)
+        self.assertIn("pollyanas-bonos-produccion-pwa-v14", sw_content)
         self.assertIn('cache: "no-store"', sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-produccion/dashboard/")', sw_content)
 
@@ -687,6 +687,76 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_RECHAZADO)
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_RECHAZADO)
         self.assertEqual(permiso.autorizado_jefe_por, user)
+
+    def test_horas_extra_produccion_crea_y_autoriza_en_rrhh(self):
+        user = get_user_model().objects.create_user(username="jefe-produccion-he")
+        user.groups.add(Group.objects.get_or_create(name=ROLE_PRODUCCION)[0])
+        user.groups.add(Group.objects.get_or_create(name=ROLE_RRHH)[0])
+        self.client.force_login(user)
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
+        jefe = Empleado.objects.create(nombre="Jefe Produccion HE", departamento=Empleado.DEP_PRODUCCION, usuario_erp=user)
+        empleado = Empleado.objects.create(
+            nombre="Empleado Hornos HE",
+            area="PRODUCCION",
+            jefe_directo=jefe,
+            participa_bonos_produccion=True,
+            salario_diario=Decimal("400.00"),
+        )
+        BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado, area=AREA_HORNOS)
+
+        creado = self.client.post(
+            "/api/bonos-produccion/horas-extra/",
+            json.dumps(
+                {
+                    "empleado": empleado.id,
+                    "mes": 5,
+                    "anio": 2026,
+                    "area": AREA_HORNOS,
+                    "fecha": "2026-05-21",
+                    "horas": "2.50",
+                    "notas": "Cierre de produccion",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(creado.status_code, 201)
+        hora_extra = HoraExtra.objects.get(pk=creado.json()["id"])
+        self.assertEqual(hora_extra.empleado, empleado)
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_PENDIENTE)
+        self.assertEqual(hora_extra.jefe_directo, user)
+        self.assertTrue(creado.json()["puede_autorizar"])
+
+        duplicado = self.client.post(
+            "/api/bonos-produccion/horas-extra/",
+            json.dumps(
+                {
+                    "empleado": empleado.id,
+                    "mes": 5,
+                    "anio": 2026,
+                    "area": AREA_HORNOS,
+                    "fecha": "2026-05-21",
+                    "horas": "1.00",
+                    "notas": "Duplicado",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(duplicado.status_code, 400)
+
+        autorizado = self.client.post(f"/api/bonos-produccion/horas-extra/{hora_extra.id}/autorizar/")
+
+        self.assertEqual(autorizado.status_code, 200)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_AUTORIZADO)
+        self.assertEqual(hora_extra.autorizado_por, user)
+        self.assertEqual(hora_extra.monto_calculado, Decimal("250.00"))
+
+        rechazar_autorizada = self.client.post(f"/api/bonos-produccion/horas-extra/{hora_extra.id}/rechazar/")
+        self.assertEqual(rechazar_autorizada.status_code, 400)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_AUTORIZADO)
 
     def test_jefe_directo_corrige_y_elimina_permiso_aprobado_con_auditoria(self):
         user = get_user_model().objects.create_user(username="jefe-produccion-audit")

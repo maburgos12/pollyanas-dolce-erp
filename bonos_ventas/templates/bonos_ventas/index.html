@@ -512,7 +512,7 @@ function App(){
 
   const bonosFiltrados = filtrarBonosPorGrupo(bonos,filtroSuc);
   const totalPagar = bonosFiltrados.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
-  const showBonusContext = tab !== 'permisos';
+  const showBonusContext = !['permisos','horas_extra'].includes(tab);
 
   return h('div',null,
     // HEADER
@@ -537,7 +537,7 @@ function App(){
 
     // TABS
     h('div',{className:'tabs-wrap'},
-      [['config','Configuración'],['captura','Captura diaria'],['permisos','Permisos'],['ventas','Ventas por categoría'],['resumen','Resumen mensual'],['ajustes','Ajustes']].map(([id,lbl])=>
+      [['config','Configuración'],['captura','Captura diaria'],['permisos','Permisos'],['horas_extra','Horas extra'],['ventas','Ventas por categoría'],['resumen','Resumen mensual'],['ajustes','Ajustes']].map(([id,lbl])=>
         h('button',{key:id,className:`tab-btn ${tab===id?'on':''}`,onClick:()=>setTab(id)},lbl)
       )
     ),
@@ -582,6 +582,7 @@ function App(){
       tab==='config' && h(ConfigTab,{bonos:bonosFiltrados,sucursales,filtroSuc,setFiltroSuc}),
       tab==='captura' && h(CapturaTab,{bonos:bonosFiltrados,mes,anio,periodo,showStatus}),
       tab==='permisos' && h(PermisosTab,{bonos,sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatus}),
+      tab==='horas_extra' && h(HorasExtraTab,{sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatus}),
       tab==='ventas' && h(VentasTab,{ventas,periodo,syncPos,cargar,showStatus}),
       tab==='resumen' && h(ResumenTab,{bonos:bonosFiltrados,sucursales,mes,anio}),
       tab==='ajustes' && h(AjustesTab,{bonos:bonosFiltrados,cargar,showStatus})
@@ -990,6 +991,116 @@ function PermisosTab({bonos,sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatu
         )
       ),
       previewPermiso&&h(PermisoPrintModal,{permiso:previewPermiso,onClose:()=>setPreviewPermiso(null),contextLabel:contextoPermiso(previewPermiso)})
+    )
+  );
+}
+
+function HorasExtraTab({sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatus}){
+  const [empleados,setEmpleados]=React.useState([]);
+  const [horasExtra,setHorasExtra]=React.useState([]);
+  const [selected,setSelected]=React.useState(null);
+  const [fecha,setFecha]=React.useState(new Date().toISOString().slice(0,10));
+  const [horas,setHoras]=React.useState('1.00');
+  const [notas,setNotas]=React.useState('');
+  const [loading,setLoading]=React.useState(false);
+  const equipo=empleados;
+  React.useEffect(()=>{cargarHorasExtra();},[mes,anio,filtroSuc]);
+  React.useEffect(()=>{if(!selected&&equipo.length)setSelected(equipo[0]);else if(selected&&!equipo.some(e=>e.id===selected.id))setSelected(equipo[0]||null);},[equipo.map(e=>e.id).join(','),selected?.id]);
+  function cargarHorasExtra(){
+    setLoading(true);
+    const qs=new URLSearchParams({mes:String(mes),anio:String(anio)});
+    if(filtroSuc)qs.set('sucursal',filtroSuc);
+    api(`/api/bonos-ventas/horas-extra/?${qs.toString()}`)
+      .then(d=>{setEmpleados(d.empleados||[]);setHorasExtra(d.horas_extra||[]);setLoading(false);})
+      .catch(err=>{showStatus(err.message,'err');setLoading(false);});
+  }
+  function estadoLabel(item){
+    if(item.estado==='autorizado')return'Autorizada';
+    if(item.estado==='rechazado')return'Rechazada';
+    if(item.estado==='pagado')return'Pagada';
+    return'Pendiente';
+  }
+  function badgeClass(item){
+    if(item.estado==='autorizado'||item.estado==='pagado')return'ok';
+    if(item.estado==='rechazado')return'bad';
+    return'pending';
+  }
+  function fmtFecha(value){
+    return new Date(`${value}T12:00:00`).toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit',year:'numeric'});
+  }
+  function submitHoraExtra(){
+    if(!selected){showStatus('Selecciona una empleada.','err');return;}
+    if(!Number(horas)||Number(horas)<=0){showStatus('Captura horas extra mayores a cero.','err');return;}
+    if(!notas.trim()){showStatus('Captura el motivo de la hora extra.','err');return;}
+    api('/api/bonos-ventas/horas-extra/',{method:'POST',body:JSON.stringify({
+      empleado:selected.id,
+      mes,
+      anio,
+      sucursal:filtroSuc,
+      fecha,
+      horas,
+      notas,
+    })}).then(()=>{showStatus('Hora extra enviada a RRHH','ok');setNotas('');setHoras('1.00');cargarHorasExtra();}).catch(err=>showStatus(err.message,'err'));
+  }
+  function accion(item,kind){
+    api(`/api/bonos-ventas/horas-extra/${item.id}/${kind}/`,{method:'POST',body:'{}'})
+      .then(()=>{showStatus(kind==='autorizar'?'Hora extra autorizada':'Hora extra rechazada','ok');cargarHorasExtra();})
+      .catch(err=>showStatus(err.message,'err'));
+  }
+  const pendientes=horasExtra.filter(hx=>hx.estado==='pendiente').length;
+  const autorizadas=horasExtra.filter(hx=>hx.estado==='autorizado'||hx.estado==='pagado').length;
+  const rechazadas=horasExtra.filter(hx=>hx.estado==='rechazado').length;
+  return h('div',null,
+    h('div',{className:'periodo-bar'},
+      h('span',{className:'periodo-label'},'Sucursal:'),
+      h('select',{value:filtroSuc,onChange:e=>setFiltroSuc(e.target.value),style:{padding:'6px 10px',border:'1px solid var(--line)',borderRadius:6,font:'inherit',fontSize:13,background:'var(--card)'}},
+        h('option',{value:''},'Todas'),
+        sucursales.map(([id,nom])=>h('option',{key:id,value:id},nom))
+      )
+    ),
+    h('div',{className:'metrics'},
+      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Pendientes'),h('div',{className:'val wine'},pendientes)),
+      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Autorizadas'),h('div',{className:'val'},autorizadas)),
+      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Rechazadas'),h('div',{className:'val gold'},rechazadas))
+    ),
+    h('div',{className:'perm-layout'},
+      h('div',{className:'card'},
+        h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},'Nueva hora extra')),
+        h('div',{className:'card-body'},
+          h('div',{className:'preview-note'},'La solicitud queda registrada en Capital Humano y visible en RRHH · Horas extra.'),
+          h('div',{style:{height:12}}),
+          h(EmployeeSearchList,{items:equipo,selected,onSelect:setSelected,placeholder:'Buscar empleada del equipo...',metaText:e=>e.sucursal_nombre||'Ventas'}),
+          h('div',{className:'div'}),
+          h('div',{className:'form-grid'},
+            h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+              h('div',{className:'field'},h('label',null,'Fecha'),h('input',{className:'form-control',type:'date',value:fecha,onChange:e=>setFecha(e.target.value)})),
+              h('div',{className:'field'},h('label',null,'Horas'),h('input',{className:'form-control',type:'number',min:'0.25',step:'0.25',value:horas,onChange:e=>setHoras(e.target.value)}))
+            ),
+            h('div',{className:'field'},h('label',null,'Motivo'),h('textarea',{className:'form-control',rows:3,value:notas,onChange:e=>setNotas(e.target.value),placeholder:'Ej. cierre, inventario, evento, apoyo de sucursal...'})),
+            h('button',{className:'btn btn-wine',onClick:submitHoraExtra},'Enviar a RRHH')
+          )
+        )
+      ),
+      h('div',{className:'card'},
+        h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},'Horas extra del equipo'),h('span',{className:'badge suc'},'Ventas')),
+        h('div',{className:'card-body'},
+          loading?h('div',{className:'empty'},'Cargando horas extra...'):
+          horasExtra.length?h('div',{className:'permission-list'},
+            horasExtra.map(item=>h('div',{key:item.id,className:'permission-item'},
+              h('div',{className:'permission-top'},
+                h('div',null,h('div',{className:'permission-title'},item.empleado_nombre),h('div',{className:'permission-meta'},`${fmtFecha(item.fecha)} · ${item.horas} h · Jefe: ${item.jefe_directo_nombre||'Sin asignar'}`)),
+                h('span',{className:`badge ${badgeClass(item)}`},estadoLabel(item))
+              ),
+              h('div',{className:'permission-reason'},item.notas||'Sin motivo capturado'),
+              h('div',{className:'permission-meta'},`Monto calculado: ${money(item.monto_calculado||0)}`),
+              item.puede_autorizar&&h('div',{className:'permission-actions'},
+                h('button',{className:'btn btn-ghost btn-sm',onClick:()=>accion(item,'rechazar')},'Rechazar'),
+                h('button',{className:'btn btn-wine btn-sm',onClick:()=>accion(item,'autorizar')},'Autorizar')
+              )
+            ))
+          ):h('div',{className:'empty'},'Sin horas extra registradas para este equipo.')
+        )
+      )
     )
   );
 }

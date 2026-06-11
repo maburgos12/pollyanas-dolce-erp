@@ -549,6 +549,10 @@ def evaluar_dia_empleado(empleado: Empleado, fecha: date) -> ResultadoEvaluacion
     actualizados = 0
     resueltos = 0
 
+    if empleado.fecha_ingreso and fecha < empleado.fecha_ingreso:
+        resueltos = _resolver_incidencias_stale(empleado, fecha, touched)
+        return ResultadoEvaluacionAsistencia(evaluados=1, resueltos=resueltos)
+
     asistencia = (
         AsistenciaEmpleado.objects.select_related("empleado", "turno")
         .filter(empleado=empleado, fecha=fecha)

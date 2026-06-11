@@ -12,6 +12,7 @@ from core.access import can_manage_submodule, can_view_submodule
 from core.audit import log_event
 from rrhh.models import Empleado, NominaPeriodo
 from rrhh.bonos_permisos import BasePermisosEquipoViewSet, _empleado_payload, _permiso_payload
+from rrhh.bonos_horas_extra import BaseHorasExtraEquipoViewSet
 
 from .empleados import empleados_elegibles_bonos_ventas
 from .models import (
@@ -290,3 +291,13 @@ class PermisosVentasEquipoViewSet(BasePermisosEquipoViewSet):
             except Sucursal.DoesNotExist:
                 return Empleado.objects.none()
         return qs
+
+
+class HorasExtraVentasEquipoViewSet(BaseHorasExtraEquipoViewSet, PermisosVentasEquipoViewSet):
+    permission_classes = [IsAuthenticated, CanAccessBonosVentas]
+
+    def empleados_queryset(self):
+        return PermisosVentasEquipoViewSet.empleados_queryset(self)
+
+    def can_gestionar_empleado(self, empleado):
+        return can_manage_submodule(self.request.user, "ventas", "bonos") or super().can_gestionar_empleado(empleado)
