@@ -270,6 +270,21 @@
     gap: 8px;
   }
 
+  .calendar-inline-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .calendar-inline-options label {
+    display: inline-flex;
+    gap: 7px;
+    align-items: center;
+    margin: 0;
+    font-weight: 800;
+  }
+
   .calendar-full-field {
     grid-column: 1 / -1;
   }
@@ -348,6 +363,7 @@
         </select>
       {% endif %}
       <button type="button" class="btn btn-primary" data-action="new">Nueva actividad</button>
+      <button type="button" class="btn btn-secondary" data-action="new-meeting">Crear reunión</button>
     </div>
   </div>
 
@@ -383,10 +399,20 @@
     <form id="calendar-form">
       {% csrf_token %}
       <input type="hidden" name="actividad_id" id="actividad-id">
+      <input type="hidden" name="tipo" id="actividad-tipo" value="ACTIVIDAD">
       <div class="form-grid-2">
         <div class="form-group">
           <label for="actividad-titulo">Título</label>
           <input class="input-field" type="text" id="actividad-titulo" name="titulo" maxlength="220" required>
+        </div>
+        <div class="form-group calendar-meeting-field calendar-hidden">
+          <label for="actividad-invitado">Colaborador</label>
+          <select class="input-field" id="actividad-invitado" name="invitado_user">
+            <option value="">Sin colaborador específico</option>
+            {% for usuario in usuarios_reunion %}
+              <option value="{{ usuario.id }}">{{ usuario.get_full_name|default:usuario.username }}</option>
+            {% endfor %}
+          </select>
         </div>
         <div class="form-group">
           <label for="actividad-fecha">Fecha</label>
@@ -403,6 +429,27 @@
         <div class="form-group calendar-full-field">
           <label for="actividad-descripcion">Descripción</label>
           <textarea class="input-field" id="actividad-descripcion" name="descripcion" rows="4"></textarea>
+        </div>
+        <div class="form-group calendar-full-field calendar-meeting-field calendar-hidden">
+          <div class="calendar-inline-options">
+            <label for="actividad-direccion-general">
+              <input type="checkbox" id="actividad-direccion-general" name="direccion_general" value="1">
+              Incluir Dirección General
+            </label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="actividad-periodicidad">Repetir</label>
+          <select class="input-field" id="actividad-periodicidad" name="periodicidad">
+            <option value="NINGUNA">No se repite</option>
+            <option value="DIARIA">Diario</option>
+            <option value="SEMANAL">Semanal</option>
+            <option value="MENSUAL">Mensual</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="actividad-repeticiones">Ocurrencias</label>
+          <input class="input-field" type="number" id="actividad-repeticiones" name="repeticiones" min="2" max="26" value="2" disabled>
         </div>
       </div>
       <p class="text-danger calendar-hidden" id="calendar-form-error"></p>
@@ -438,6 +485,12 @@
     formTitle: byId('calendar-form-title'),
     formError: byId('calendar-form-error'),
     userFilter: byId('calendar-user-filter'),
+    eventType: byId('actividad-tipo'),
+    meetingFields: document.querySelectorAll('.calendar-meeting-field'),
+    invitedUser: byId('actividad-invitado'),
+    direccionGeneral: byId('actividad-direccion-general'),
+    periodicidad: byId('actividad-periodicidad'),
+    repeticiones: byId('actividad-repeticiones'),
   };
 
   function pad(value) {
@@ -514,7 +567,7 @@
     const type = String(event.tipo || '').toLowerCase();
     const classes = ['calendar-chip'];
     if (event.fuente === 'actividad') {
-      classes.push('is-actividad');
+      classes.push(event.tipo === 'REUNION' ? 'is-proyecto' : 'is-actividad');
     } else if (event.fuente === 'checklist') {
       classes.push('is-paso');
     } else if (type === 'minuta') {
@@ -527,7 +580,7 @@
     if (event.vencido) {
       classes.push('is-vencido');
     }
-    if (event.estatus === 'COMPLETADA' || event.estatus === 'COMPLETADO') {
+    if (event.finalizado || event.estatus === 'COMPLETADA' || event.estatus === 'COMPLETADO') {
       classes.push('is-completed');
     }
     return classes.join(' ');
@@ -540,7 +593,11 @@
     button.textContent = `${event.hora ? event.hora + ' · ' : ''}${event.titulo}`;
     button.addEventListener('click', (ev) => {
       ev.stopPropagation();
-      showDetail(event);
+      if (event.url) {
+        window.location.href = event.url;
+      } else {
+        showDetail(event);
+      }
     });
     return button;
   }
@@ -707,7 +764,7 @@
     els.detail.appendChild(title);
     const meta = document.createElement('p');
     meta.className = 'muted';
-    meta.textContent = `${event.tipo} · ${event.fecha}${event.hora ? ' · ' + event.hora : ''}${event.hora_fin ? ' - ' + event.hora_fin : ''}`;
+    meta.textContent = `${event.source_label || event.tipo} · ${event.fecha}${event.hora ? ' · ' + event.hora : ''}${event.hora_fin ? ' - ' + event.hora_fin : ''}`;
     els.detail.appendChild(meta);
     const status = document.createElement('p');
     status.textContent = `Estatus: ${event.estatus || 'Pendiente'}`;
@@ -716,6 +773,16 @@
       const responsible = document.createElement('p');
       responsible.textContent = `Responsable: ${event.responsable}`;
       els.detail.appendChild(responsible);
+    }
+    if (event.invitado) {
+      const invited = document.createElement('p');
+      invited.textContent = `Con: ${event.invitado}`;
+      els.detail.appendChild(invited);
+    }
+    if (event.direccion_general) {
+      const dg = document.createElement('p');
+      dg.textContent = 'Incluye Dirección General';
+      els.detail.appendChild(dg);
     }
     if (event.descripcion) {
       const desc = document.createElement('p');
@@ -764,17 +831,41 @@
     els.detail.appendChild(actions);
   }
 
-  function openForm(event) {
+  function setFormType(tipo) {
+    const isMeeting = tipo === 'REUNION';
+    els.eventType.value = tipo;
+    els.meetingFields.forEach((field) => field.classList.toggle('calendar-hidden', !isMeeting));
+    els.formTitle.textContent = isMeeting ? 'Crear reunión' : 'Nueva actividad';
+  }
+
+  function syncRecurrence() {
+    const repeats = els.periodicidad.value !== 'NINGUNA';
+    els.repeticiones.disabled = !repeats;
+  }
+
+  function openForm(event, tipo) {
     els.form.reset();
     els.formError.textContent = '';
     els.formError.classList.add('calendar-hidden');
     byId('actividad-id').value = event && event.id ? event.id.replace('act-', '') : '';
+    const eventType = event && event.tipo === 'REUNION' ? 'REUNION' : (tipo || 'ACTIVIDAD');
+    setFormType(eventType);
     byId('actividad-titulo').value = event && event.titulo ? event.titulo : '';
     byId('actividad-fecha').value = event && event.fecha ? event.fecha : dateKey(state.cursor);
     byId('actividad-hora-inicio').value = event && event.hora ? event.hora : '';
     byId('actividad-hora-fin').value = event && event.hora_fin ? event.hora_fin : '';
     byId('actividad-descripcion').value = event && event.descripcion ? event.descripcion : '';
-    els.formTitle.textContent = event && event.id ? 'Editar actividad' : 'Nueva actividad';
+    if (els.invitedUser && event && event.invitado_user_id) {
+      els.invitedUser.value = String(event.invitado_user_id);
+    }
+    if (els.direccionGeneral && event) {
+      els.direccionGeneral.checked = Boolean(event.direccion_general);
+    }
+    if (event && event.id) {
+      els.periodicidad.value = 'NINGUNA';
+      els.formTitle.textContent = eventType === 'REUNION' ? 'Editar reunión' : 'Editar actividad';
+    }
+    syncRecurrence();
     els.formPanel.classList.remove('calendar-hidden');
     byId('actividad-titulo').focus();
   }
@@ -834,7 +925,9 @@
         }
         loadEvents();
       } else if (action === 'new') {
-        openForm({fecha: dateKey(state.cursor)});
+        openForm({fecha: dateKey(state.cursor)}, 'ACTIVIDAD');
+      } else if (action === 'new-meeting') {
+        openForm({fecha: dateKey(state.cursor)}, 'REUNION');
       } else if (action === 'cancel-form') {
         closeForm();
       }
@@ -855,6 +948,8 @@
     });
   }
 
+  els.periodicidad.addEventListener('change', syncRecurrence);
+  syncRecurrence();
   loadEvents();
 })();
 </script>
