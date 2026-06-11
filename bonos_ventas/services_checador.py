@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 from django.db import transaction
+from django.db.models import Q
 
 from rrhh.models import AsistenciaEmpleado, IncidenciaAsistencia
 
@@ -133,6 +134,71 @@ def sincronizar_asistencia_desde_checador(periodo: ConfigBonoVentasPeriodo) -> d
                     registro.tiene_puntualidad = tiene_puntualidad
                     registro.save(update_fields=["tiene_asistencia", "tiene_puntualidad"])
                     resultado["registros_actualizados"] += 1
+            recalcular_desde_registros(bono)
+            resultado["bonos_sincronizados"] += 1
+
+    return resultado
+
+
+def _periodos_para_fecha(fecha: date):
+    return ConfigBonoVentasPeriodo.objects.filter(
+        (
+            (Q(fecha_inicio__isnull=True) | Q(fecha_fin__isnull=True))
+            & Q(mes=fecha.month, anio=fecha.year)
+        )
+        | Q(fecha_inicio__lte=fecha, fecha_fin__gte=fecha)
+    )
+
+
+def sincronizar_empleado_dia_desde_checador(empleado_id: int, fecha: date) -> dict:
+    resultado = {
+        "bonos_sincronizados": 0,
+        "bonos_omitidos": 0,
+        "registros_creados": 0,
+        "registros_actualizados": 0,
+    }
+
+    asistencias = _cargar_asistencias([empleado_id], fecha, fecha)
+    incidencias = _cargar_incidencias([empleado_id], fecha, fecha)
+    tiene_asistencia, tiene_puntualidad = _evaluar_dia(
+        empleado_id,
+        fecha,
+        asistencias,
+        incidencias,
+    )
+    estatus_borrador = getattr(BonoVentasEmpleado, "ESTATUS_BORRADOR", ESTATUS_BORRADOR)
+
+    for periodo in _periodos_para_fecha(fecha):
+        bono = (
+            periodo.bonos.select_related("empleado")
+            .filter(empleado_id=empleado_id)
+            .first()
+        )
+        if bono is None:
+            continue
+        if bono.estatus != estatus_borrador:
+            resultado["bonos_omitidos"] += 1
+            continue
+
+        with transaction.atomic():
+            registro, created = RegistroDiarioVentas.objects.get_or_create(
+                bono=bono,
+                dia=fecha.day,
+                defaults={
+                    "tiene_asistencia": tiene_asistencia,
+                    "tiene_puntualidad": tiene_puntualidad,
+                },
+            )
+            if created:
+                resultado["registros_creados"] += 1
+            elif (
+                registro.tiene_asistencia != tiene_asistencia
+                or registro.tiene_puntualidad != tiene_puntualidad
+            ):
+                registro.tiene_asistencia = tiene_asistencia
+                registro.tiene_puntualidad = tiene_puntualidad
+                registro.save(update_fields=["tiene_asistencia", "tiene_puntualidad"])
+                resultado["registros_actualizados"] += 1
             recalcular_desde_registros(bono)
             resultado["bonos_sincronizados"] += 1
 

@@ -10,7 +10,7 @@ from core.models import Sucursal
 from rrhh.models import AsistenciaEmpleado, Empleado, IncidenciaAsistencia
 
 from .models import BonoVentasEmpleado, ConfigBonoVentasPeriodo, RegistroDiarioVentas
-from .services_checador import sincronizar_asistencia_desde_checador
+from .services_checador import sincronizar_asistencia_desde_checador, sincronizar_empleado_dia_desde_checador
 
 
 TZ = ZoneInfo("America/Mazatlan")
@@ -198,3 +198,28 @@ class SyncChecadorVentasTests(TestCase):
         self.assertEqual(resultado["bonos_omitidos"], 1)
         self.assertTrue(registro.tiene_asistencia)
         self.assertTrue(registro.tiene_puntualidad)
+
+    def test_sync_empleado_dia_crea_solo_el_registro_del_dia_afectado(self):
+        fecha = date(2026, 6, 11)
+        _periodo, empleado, bono = self.crear_bono(fecha)
+        self.crear_asistencia(empleado, fecha)
+
+        resultado = sincronizar_empleado_dia_desde_checador(empleado.id, fecha)
+
+        self.assertEqual(resultado["bonos_sincronizados"], 1)
+        self.assertEqual(resultado["registros_creados"], 1)
+        self.assertEqual(RegistroDiarioVentas.objects.filter(bono=bono).count(), 1)
+        registro = RegistroDiarioVentas.objects.get(bono=bono, dia=11)
+        self.assertTrue(registro.tiene_asistencia)
+        self.assertTrue(registro.tiene_puntualidad)
+
+    def test_sync_empleado_dia_no_modifica_bono_cerrado(self):
+        fecha = date(2026, 6, 12)
+        _periodo, empleado, bono = self.crear_bono(fecha, estatus="CERRADO")
+        self.crear_asistencia(empleado, fecha)
+
+        resultado = sincronizar_empleado_dia_desde_checador(empleado.id, fecha)
+
+        self.assertEqual(resultado["bonos_sincronizados"], 0)
+        self.assertEqual(resultado["bonos_omitidos"], 1)
+        self.assertFalse(RegistroDiarioVentas.objects.filter(bono=bono, dia=12).exists())
