@@ -1,6 +1,11 @@
 from django.contrib import admin
 
-from conciliacion.models import ConceptoConciliacion, ImportacionBancaria
+from conciliacion.models import (
+    CfdiSucursalResolucion,
+    ConceptoConciliacion,
+    ImportacionBancaria,
+    SucursalIdentificadorFiscal,
+)
 
 
 @admin.register(ConceptoConciliacion)
@@ -78,6 +83,23 @@ class ConceptoConciliacionAdmin(admin.ModelAdmin):
             },
         ),
     )
+
+
+@admin.register(SucursalIdentificadorFiscal)
+class SucursalIdentificadorFiscalAdmin(admin.ModelAdmin):
+    list_display = ("sucursal", "patron", "tipo", "prioridad", "activo")
+    list_filter = ("tipo", "activo", "sucursal")
+    search_fields = ("sucursal__codigo", "sucursal__nombre", "patron", "descripcion")
+    readonly_fields = ("creado_en", "actualizado_en")
+
+
+@admin.register(CfdiSucursalResolucion)
+class CfdiSucursalResolucionAdmin(admin.ModelAdmin):
+    list_display = ("cfdi", "sucursal", "fuente", "confianza", "revisado", "actualizado_en")
+    list_filter = ("fuente", "sucursal", "revisado", "confianza")
+    search_fields = ("cfdi__uuid", "cfdi__rfc_receptor", "cfdi__nombre_receptor", "texto_detectado")
+    readonly_fields = ("creado_en", "actualizado_en")
+    autocomplete_fields = ("cfdi", "sucursal")
 
 
 @admin.register(ImportacionBancaria)
