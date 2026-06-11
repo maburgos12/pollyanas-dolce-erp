@@ -4,8 +4,11 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
+from django.contrib.auth.models import Group, User
 from django.test import TestCase
+from django.urls import reverse
 
+from core.access import ROLE_BONOS_PRODUCCION_CAPTURA
 from rrhh.models import AsistenciaEmpleado, Empleado, IncidenciaAsistencia
 
 from .models import AREA_HORNOS, BonoProduccionEmpleado, ConfigBonoPeriodo, RegistroDiarioProduccion
@@ -91,13 +94,52 @@ class SyncChecadorProduccionTests(TestCase):
         fecha = date(2026, 6, 4)
         periodo, empleado, bono = self.crear_bono(fecha)
         self.crear_asistencia(empleado, fecha)
-        self.crear_incidencia(empleado, fecha, IncidenciaAsistencia.TIPO_SUSPENSION)
+        self.crear_incidencia(
+            empleado,
+            fecha,
+            IncidenciaAsistencia.TIPO_SUSPENSION,
+            estado=IncidenciaAsistencia.ESTADO_CONCILIADO,
+        )
 
         sincronizar_asistencia_desde_checador(periodo)
 
         registro = RegistroDiarioProduccion.objects.get(bono=bono, dia=4)
         self.assertFalse(registro.tiene_asistencia)
         self.assertFalse(registro.tiene_puntualidad)
+
+    def test_suspension_resuelta_no_quita_asistencia_ni_puntualidad(self):
+        fecha = date(2026, 6, 8)
+        periodo, empleado, bono = self.crear_bono(fecha)
+        self.crear_asistencia(empleado, fecha)
+        self.crear_incidencia(
+            empleado,
+            fecha,
+            IncidenciaAsistencia.TIPO_SUSPENSION,
+            estado=IncidenciaAsistencia.ESTADO_RESUELTO,
+        )
+
+        sincronizar_asistencia_desde_checador(periodo)
+
+        registro = RegistroDiarioProduccion.objects.get(bono=bono, dia=8)
+        self.assertTrue(registro.tiene_asistencia)
+        self.assertTrue(registro.tiene_puntualidad)
+
+    def test_incidencia_conciliada_no_quita_puntualidad(self):
+        fecha = date(2026, 6, 9)
+        periodo, empleado, bono = self.crear_bono(fecha)
+        self.crear_asistencia(empleado, fecha)
+        self.crear_incidencia(
+            empleado,
+            fecha,
+            IncidenciaAsistencia.TIPO_RETARDO,
+            estado=IncidenciaAsistencia.ESTADO_CONCILIADO,
+        )
+
+        sincronizar_asistencia_desde_checador(periodo)
+
+        registro = RegistroDiarioProduccion.objects.get(bono=bono, dia=9)
+        self.assertTrue(registro.tiene_asistencia)
+        self.assertTrue(registro.tiene_puntualidad)
 
     def test_registro_existente_conserva_campos_manuales(self):
         fecha = date(2026, 6, 5)
@@ -157,3 +199,14 @@ class SyncChecadorProduccionTests(TestCase):
         self.assertEqual(resultado["bonos_omitidos"], 1)
         self.assertTrue(registro.tiene_asistencia)
         self.assertTrue(registro.tiene_puntualidad)
+
+    def test_usuario_solo_captura_no_puede_sync_checador_por_api(self):
+        fecha = date(2026, 6, 10)
+        periodo, _empleado, _bono = self.crear_bono(fecha)
+        user = User.objects.create_user(username="captura", password="test")
+        user.groups.add(Group.objects.get_or_create(name=ROLE_BONOS_PRODUCCION_CAPTURA)[0])
+        self.client.force_login(user)
+
+        response = self.client.post(reverse("bonoproduccion-periodo-sync-checador", args=[periodo.id]), {})
+
+        self.assertEqual(response.status_code, 403)

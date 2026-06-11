@@ -10,7 +10,7 @@ from rest_framework.response import Response
 
 from rrhh.models import Empleado, NominaPeriodo
 from rrhh.bonos_permisos import BasePermisosEquipoViewSet, _empleado_payload, _permiso_payload
-from core.access import can_view_submodule, is_bonos_produccion_capture_only
+from core.access import can_manage_submodule, can_view_submodule, is_bonos_produccion_capture_only
 from core.audit import log_event
 from recetas.utils.normalizacion import normalizar_nombre
 
@@ -109,6 +109,11 @@ class ConfigBonoPeriodoViewSet(viewsets.ModelViewSet):
     def sync_checador(self, request, pk=None):
         from .services_checador import sincronizar_asistencia_desde_checador
 
+        if not can_manage_submodule(request.user, "produccion", "bonos"):
+            return Response(
+                {"detail": "No tienes permisos para recalcular desde checador."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         periodo = self.get_object()
         resultado = sincronizar_asistencia_desde_checador(periodo)
         return Response(resultado, status=status.HTTP_200_OK)

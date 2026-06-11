@@ -65,9 +65,16 @@ def _evaluar_dia(
 ) -> tuple[bool, bool]:
     key = (empleado_id, fecha)
     incidencias_dia = incidencias.get(key, set())
-    tipos_dia = {tipo for tipo, _estado in incidencias_dia}
+    tipos_pendientes = {
+        tipo for tipo, estado in incidencias_dia
+        if estado == IncidenciaAsistencia.ESTADO_PENDIENTE
+    }
+    tiene_suspension_activa = (
+        IncidenciaAsistencia.TIPO_SUSPENSION,
+        IncidenciaAsistencia.ESTADO_CONCILIADO,
+    ) in incidencias_dia
 
-    if IncidenciaAsistencia.TIPO_SUSPENSION in tipos_dia:
+    if tiene_suspension_activa:
         return False, False
     if key not in asistencias:
         return False, False
@@ -77,7 +84,7 @@ def _evaluar_dia(
         IncidenciaAsistencia.ESTADO_PENDIENTE,
     ) in incidencias_dia
     tiene_asistencia = not falta_pendiente
-    tiene_puntualidad = not bool(tipos_dia & TIPOS_LLEGADA_TARDE)
+    tiene_puntualidad = not bool(tipos_pendientes & TIPOS_LLEGADA_TARDE)
     return tiene_asistencia, tiene_puntualidad
 
 

@@ -8,7 +8,7 @@ from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 
 from core.models import Sucursal
-from core.access import can_view_submodule
+from core.access import can_manage_submodule, can_view_submodule
 from core.audit import log_event
 from rrhh.models import Empleado, NominaPeriodo
 from rrhh.bonos_permisos import BasePermisosEquipoViewSet, _empleado_payload, _permiso_payload
@@ -96,6 +96,11 @@ class ConfigBonoVentasPeriodoViewSet(viewsets.ModelViewSet):
     def sync_checador(self, request, pk=None):
         from .services_checador import sincronizar_asistencia_desde_checador
 
+        if not can_manage_submodule(request.user, "ventas", "bonos"):
+            return Response(
+                {"detail": "No tienes permisos para recalcular desde checador."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         periodo = self.get_object()
         resultado = sincronizar_asistencia_desde_checador(periodo)
         return Response(resultado, status=status.HTTP_200_OK)
