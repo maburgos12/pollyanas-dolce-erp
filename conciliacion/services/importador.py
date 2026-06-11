@@ -284,6 +284,7 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
     abonos = _aggregate_tipo_movimiento(movimientos_qs, MovimientoBancario.TIPO_ABONO)
     dias_banco = _resumen_diario_movimientos(movimientos_qs)
     fuentes = _resumen_fuentes_movimientos(movimientos_qs)
+    cuentas = _resumen_cuentas_movimientos(movimientos_qs)
 
     cfdi_emitidos = _aggregate_tipo_cfdi(cfdi_qs, CfdiDescargado.TIPO_EMITIDO)
     cfdi_recibidos = _aggregate_tipo_cfdi(cfdi_qs, CfdiDescargado.TIPO_RECIBIDO)
@@ -327,6 +328,7 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
         "movimientos_cargos": cargos,
         "movimientos_abonos": abonos,
         "movimientos_fuentes": fuentes,
+        "movimientos_cuentas": cuentas,
         "movimientos_diarios": dias_banco,
         "movimientos_rows": movimientos_periodo,
         "candidatos": candidatos,
@@ -778,6 +780,36 @@ def _resumen_diario_movimientos(queryset) -> list[dict[str, Any]]:
             item["cargos_total"] += total
         item["total_conteo"] += conteo
     return list(resumen.values())
+
+
+def _resumen_cuentas_movimientos(queryset) -> list[dict[str, Any]]:
+    cuentas = []
+    for cuenta in CuentaBancaria.objects.filter(activa=True).order_by("banco", "nombre_display"):
+        data = queryset.filter(cuenta=cuenta).aggregate(
+            movimientos=Count("id"),
+            cargos=Count("id", filter=Q(tipo=MovimientoBancario.TIPO_CARGO)),
+            abonos=Count("id", filter=Q(tipo=MovimientoBancario.TIPO_ABONO)),
+            cargos_total=Sum("monto", filter=Q(tipo=MovimientoBancario.TIPO_CARGO)),
+            abonos_total=Sum("monto", filter=Q(tipo=MovimientoBancario.TIPO_ABONO)),
+            fecha_min=Min("fecha_transaccion"),
+            fecha_max=Max("fecha_transaccion"),
+        )
+        cuentas.append(
+            {
+                "cuenta_id": cuenta.pk,
+                "banco": cuenta.banco,
+                "nombre": cuenta.nombre_display,
+                "numero_cuenta": cuenta.numero_cuenta,
+                "movimientos": data["movimientos"] or 0,
+                "cargos": data["cargos"] or 0,
+                "abonos": data["abonos"] or 0,
+                "cargos_total": data["cargos_total"] or Decimal("0.00"),
+                "abonos_total": data["abonos_total"] or Decimal("0.00"),
+                "fecha_min": data["fecha_min"],
+                "fecha_max": data["fecha_max"],
+            }
+        )
+    return cuentas
 
 
 def _resumen_fuentes_movimientos(queryset) -> list[dict[str, Any]]:

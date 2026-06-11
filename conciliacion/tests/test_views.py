@@ -162,6 +162,67 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertContains(response, "Credito clientes pendiente")
         self.assertContains(response, "$600.00")
 
+    def test_get_bancaria_shows_all_accounts_and_filters_movements(self):
+        banbajio = CuentaBancaria.objects.create(
+            banco=CuentaBancaria.BANCO_BANBAJIO,
+            nombre_display="BanBajio Empresas",
+            id_site_syncfy="site-banbajio",
+            numero_cuenta="410641890201",
+        )
+        amex, _ = CuentaBancaria.objects.update_or_create(
+            banco=CuentaBancaria.BANCO_AMEX,
+            defaults={
+                "nombre_display": "American Express Business Gold",
+                "id_site_syncfy": "site-amex",
+                "numero_cuenta": "01005",
+            },
+        )
+        MovimientoBancario.objects.create(
+            id_transaction="banbajio-mayo",
+            cuenta=banbajio,
+            descripcion="DEPOSITO SUCURSAL MATRIZ",
+            monto=Decimal("2500.00"),
+            tipo=MovimientoBancario.TIPO_ABONO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 31, 12, 0)),
+            fecha_refresh=timezone.now(),
+        )
+        MovimientoBancario.objects.create(
+            id_transaction="bbva-mayo",
+            cuenta=self.cuenta,
+            descripcion="TRANSFERENCIA CLIENTE MAYORISTA",
+            monto=Decimal("8300.00"),
+            tipo=MovimientoBancario.TIPO_ABONO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 23, 12, 0)),
+            fecha_refresh=timezone.now(),
+        )
+        MovimientoBancario.objects.create(
+            id_transaction="amex-mayo",
+            cuenta=amex,
+            descripcion="AMERICAN EXPRESS CARGO",
+            monto=Decimal("1900.00"),
+            tipo=MovimientoBancario.TIPO_CARGO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 12, 12, 0)),
+            fecha_refresh=timezone.now(),
+        )
+
+        response = self.client.get("/conciliacion/bancaria/?periodo=2026-05")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Cuentas cargadas del periodo")
+        self.assertContains(response, "BanBajio Empresas")
+        self.assertContains(response, "BBVA Empresas")
+        self.assertContains(response, "American Express Business Gold")
+        self.assertContains(response, "Mesa de movimientos")
+        self.assertContains(response, "Filtrar movimientos")
+        self.assertContains(response, "Mostrando 1-3 de 3 movimientos")
+
+        filtered = self.client.get(f"/conciliacion/bancaria/?periodo=2026-05&cuenta={amex.pk}")
+
+        self.assertEqual(filtered.status_code, 200)
+        self.assertContains(filtered, "Mostrando 1-1 de 1 movimientos")
+        self.assertContains(filtered, "AMERICAN EXPRESS CARGO")
+        self.assertNotContains(filtered, "TRANSFERENCIA CLIENTE MAYORISTA")
+
     def test_preview_and_confirm_import_movements(self):
         archivo = SimpleUploadedFile(
             "bbva.csv",

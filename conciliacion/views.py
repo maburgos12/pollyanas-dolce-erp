@@ -3,6 +3,8 @@ from __future__ import annotations
 from django.contrib import messages
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
+from django.db.models import Q
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_http_methods
@@ -15,14 +17,16 @@ from conciliacion.services.importador import (
     periodo_default_conciliacion,
     resumen_periodo_conciliacion,
     resumen_conciliacion,
+    sugerir_cfdis_para_movimientos,
 )
 from core.access import is_admin_or_dg
 from core.audit import log_event
 from sat_client.models import CfdiDescargado, LogDescargaSat
-from syncfy_client.models import CuentaBancaria
+from syncfy_client.models import CuentaBancaria, MovimientoBancario
 
 
 SESSION_PREVIEW_KEY = "conciliacion_bancaria_preview"
+MOVIMIENTOS_PAGE_SIZE = 100
 
 
 def _assert_conciliacion_access(request: HttpRequest) -> None:
@@ -58,6 +62,7 @@ def conciliacion_bancaria_view(request: HttpRequest) -> HttpResponse:
     contexto = resumen_conciliacion()
     periodo_year, periodo_month = _periodo_from_request(request)
     periodo_resumen = resumen_periodo_conciliacion(year=periodo_year, month=periodo_month)
+    movimientos_trabajo = _movimientos_trabajo_context(request, periodo_resumen)
     sat_ultimo_log = LogDescargaSat.objects.order_by("-creado_en").first()
     sat_descarga_enabled = getattr(settings, "SAT_DESCARGA_ENABLED", False)
     if sat_ultimo_log and sat_ultimo_log.nivel == LogDescargaSat.NIVEL_ERROR:
@@ -80,7 +85,11 @@ def conciliacion_bancaria_view(request: HttpRequest) -> HttpResponse:
             "periodo_resumen": periodo_resumen,
             "preview": preview,
             "preview_rows": preview.movimientos[:50] if preview else [],
-            "movimiento_rows": _movimiento_rows(periodo_resumen["movimientos_rows"], periodo_resumen["candidatos"]),
+            "movimiento_rows": movimientos_trabajo["rows"],
+            "movimientos_page": movimientos_trabajo["page"],
+            "movimientos_total_filtrado": movimientos_trabajo["total"],
+            "movimientos_filtros": movimientos_trabajo["filtros"],
+            "movimientos_querystring": movimientos_trabajo["querystring"],
         }
     )
     return render(request, "conciliacion/bancaria.html", contexto)
@@ -157,6 +166,46 @@ def _handle_confirm(request: HttpRequest) -> None:
             f"{importacion.movimientos_duplicados} duplicados."
         ),
     )
+
+
+def _movimientos_trabajo_context(request: HttpRequest, periodo_resumen: dict) -> dict:
+    qs = MovimientoBancario.objects.select_related("cuenta").filter(
+        fecha_transaccion__date__gte=periodo_resumen["periodo_inicio"],
+        fecha_transaccion__date__lte=periodo_resumen["periodo_fin"],
+    )
+    cuenta = str(request.GET.get("cuenta") or "").strip()
+    tipo = str(request.GET.get("tipo") or "").strip()
+    busqueda = str(request.GET.get("q") or "").strip()
+
+    if cuenta and cuenta.isdigit():
+        qs = qs.filter(cuenta_id=cuenta)
+    else:
+        cuenta = ""
+    if tipo in {MovimientoBancario.TIPO_ABONO, MovimientoBancario.TIPO_CARGO}:
+        qs = qs.filter(tipo=tipo)
+    else:
+        tipo = ""
+    if busqueda:
+        qs = qs.filter(
+            Q(descripcion__icontains=busqueda)
+            | Q(cuenta__nombre_display__icontains=busqueda)
+            | Q(cuenta__numero_cuenta__icontains=busqueda)
+        )
+
+    qs = qs.order_by("-fecha_transaccion", "cuenta__banco", "id")
+    paginator = Paginator(qs, MOVIMIENTOS_PAGE_SIZE)
+    page = paginator.get_page(request.GET.get("page") or 1)
+    movimientos = list(page.object_list)
+    candidatos = sugerir_cfdis_para_movimientos([mov for mov in movimientos if not mov.conciliado])
+    query = request.GET.copy()
+    query.pop("page", None)
+    return {
+        "rows": _movimiento_rows(movimientos, candidatos),
+        "page": page,
+        "total": paginator.count,
+        "filtros": {"cuenta": cuenta, "tipo": tipo, "q": busqueda},
+        "querystring": query.urlencode(),
+    }
 
 
 def _movimiento_rows(movimientos, candidatos: dict[int, list]) -> list[dict]:

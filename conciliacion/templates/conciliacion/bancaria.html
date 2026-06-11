@@ -54,7 +54,9 @@
   .conc-period-bar { display: flex; justify-content: space-between; gap: 12px; align-items: end; flex-wrap: wrap; }
   .conc-period-form { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
   .conc-period-form label { display: grid; gap: 5px; color: var(--conc-secondary); font-weight: 800; font-size: .82rem; }
-  .conc-period-form input[type="month"] { border: 1px solid var(--conc-control-border); border-radius: 8px; padding: 9px; background: var(--conc-surface); color: var(--conc-text); }
+  .conc-period-form input[type="month"],
+  .conc-period-form input[type="search"],
+  .conc-period-form select { border: 1px solid var(--conc-control-border); border-radius: 8px; padding: 9px; background: var(--conc-surface); color: var(--conc-text); }
   .conc-mini-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
   .conc-mini-card { border: 1px solid var(--conc-border); border-radius: 8px; padding: 12px; background: var(--conc-muted-surface); min-width: 0; }
   .conc-mini-card span { display: block; color: var(--conc-muted); font-size: .74rem; font-weight: 900; text-transform: uppercase; }
@@ -79,6 +81,9 @@
   .conc-chip.is-warn { background: var(--conc-warn-bg); color: var(--conc-warn-text); }
   .conc-chip.is-info { background: var(--conc-info-bg); color: var(--conc-info-text); }
   .conc-chip.is-muted { background: var(--conc-muted-chip); color: var(--conc-secondary); }
+  .conc-link { color: var(--conc-info-text); font-weight: 900; text-decoration: none; }
+  .conc-link:hover { text-decoration: underline; }
+  .conc-pagination { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
   .conc-empty { color: var(--conc-muted); padding: 20px; text-align: center; }
   .conc-errors { margin: 10px 0 0; padding-left: 18px; color: var(--conc-danger); }
   @media (max-width: 900px) {
@@ -184,6 +189,49 @@
       <div class="conc-mini-card">
         <span>CFDI SAT del mes</span>
         <strong>{{ periodo_resumen.cfdi_total|intcomma }}</strong>
+      </div>
+    </div>
+
+    <div class="conc-subpanel conc-section-gap">
+      <h3>Cuentas cargadas del periodo</h3>
+      <p class="conc-note">Cada banco o tarjeta aparece separado para revisar si falta un archivo o si la tabla esta filtrada.</p>
+      <div class="table-responsive">
+        <table class="conc-table">
+          <thead>
+            <tr>
+              <th>Cuenta</th>
+              <th>Rango</th>
+              <th>Movs.</th>
+              <th>Cargos</th>
+              <th class="conc-money">Total cargos</th>
+              <th>Abonos</th>
+              <th class="conc-money">Total abonos</th>
+              <th>Accion</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for cuenta in periodo_resumen.movimientos_cuentas %}
+            <tr>
+              <td>{{ cuenta.nombre }}{% if cuenta.numero_cuenta %} · ...{{ cuenta.numero_cuenta|slice:"-4:" }}{% endif %}</td>
+              <td>
+                {% if cuenta.fecha_min and cuenta.fecha_max %}
+                  {{ cuenta.fecha_min|date:"Y-m-d" }} a {{ cuenta.fecha_max|date:"Y-m-d" }}
+                {% else %}
+                  Sin fechas
+                {% endif %}
+              </td>
+              <td>{{ cuenta.movimientos|intcomma }}</td>
+              <td>{{ cuenta.cargos|intcomma }}</td>
+              <td class="conc-money">${{ cuenta.cargos_total|floatformat:2|intcomma }}</td>
+              <td>{{ cuenta.abonos|intcomma }}</td>
+              <td class="conc-money">${{ cuenta.abonos_total|floatformat:2|intcomma }}</td>
+              <td><a class="conc-link" href="?periodo={{ periodo_resumen.periodo_value }}&cuenta={{ cuenta.cuenta_id }}#mesa-movimientos">Ver movimientos</a></td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="8" class="conc-empty">Sin cuentas con movimientos en este periodo.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
     </div>
 
@@ -555,9 +603,46 @@
     </div>
   </div>
 
-  <div class="conc-panel">
-    <h2>Movimientos del periodo y posibles facturas relacionadas</h2>
-    <p class="conc-note">Se muestran hasta 50 movimientos del mes seleccionado, ordenados del mas reciente al mas antiguo.</p>
+  <div class="conc-panel" id="mesa-movimientos">
+    <div class="conc-period-bar">
+      <div>
+        <h2>Mesa de movimientos</h2>
+        {% if movimientos_total_filtrado %}
+          <p class="conc-note">
+            Mostrando {{ movimientos_page.start_index|intcomma }}-{{ movimientos_page.end_index|intcomma }} de {{ movimientos_total_filtrado|intcomma }} movimientos.
+          </p>
+        {% else %}
+          <p class="conc-note">No hay movimientos con los filtros actuales.</p>
+        {% endif %}
+      </div>
+      <form class="conc-period-form" method="get" action="#mesa-movimientos">
+        <input type="hidden" name="periodo" value="{{ periodo_resumen.periodo_value }}">
+        <label>
+          Cuenta
+          <select name="cuenta">
+            <option value="">Todas</option>
+            {% for cuenta in cuentas %}
+            <option value="{{ cuenta.pk }}" {% if cuenta.pk|stringformat:"s" == movimientos_filtros.cuenta %}selected{% endif %}>
+              {{ cuenta.nombre_display }}{% if cuenta.numero_cuenta %} · ...{{ cuenta.numero_cuenta|slice:"-4:" }}{% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          Tipo
+          <select name="tipo">
+            <option value="">Todos</option>
+            <option value="abono" {% if movimientos_filtros.tipo == "abono" %}selected{% endif %}>Abonos</option>
+            <option value="cargo" {% if movimientos_filtros.tipo == "cargo" %}selected{% endif %}>Cargos</option>
+          </select>
+        </label>
+        <label>
+          Buscar
+          <input type="search" name="q" value="{{ movimientos_filtros.q }}" placeholder="Descripcion o cuenta">
+        </label>
+        <button class="btn btn-secondary" type="submit">Filtrar movimientos</button>
+      </form>
+    </div>
     <div class="table-responsive">
       <table class="conc-table">
         <thead>
@@ -592,6 +677,19 @@
         </tbody>
       </table>
     </div>
+    {% if movimientos_page.paginator.num_pages > 1 %}
+    <div class="conc-pagination">
+      <div class="conc-note">Pagina {{ movimientos_page.number }} de {{ movimientos_page.paginator.num_pages }}</div>
+      <div class="conc-actions">
+        {% if movimientos_page.has_previous %}
+        <a class="btn btn-secondary" href="?{{ movimientos_querystring }}&page={{ movimientos_page.previous_page_number }}#mesa-movimientos">Anterior</a>
+        {% endif %}
+        {% if movimientos_page.has_next %}
+        <a class="btn btn-secondary" href="?{{ movimientos_querystring }}&page={{ movimientos_page.next_page_number }}#mesa-movimientos">Siguiente</a>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
   </div>
 
   <div class="conc-panel">
