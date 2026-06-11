@@ -106,6 +106,32 @@ class ImportadorBancarioTests(TestCase):
         self.assertEqual(preview.movimientos[1].monto, Decimal("300.00"))
         self.assertEqual(preview.errores, [])
 
+    def test_generar_preview_reads_text_pdf_statement(self):
+        archivo = SimpleUploadedFile(
+            "bbva_estado.pdf",
+            _minimal_text_pdf(
+                [
+                    "Estado de cuenta BBVA",
+                    "09/06/2026 SPEI RECIBIDO REF ABC123 1,500.50 2,000.00",
+                    "10/06/2026 PAGO PROVEEDOR REF DEF456 300.00 1,700.00",
+                ]
+            ),
+            content_type="application/pdf",
+        )
+
+        preview = generar_preview(cuenta=self.cuenta, uploaded_file=archivo)
+
+        self.assertEqual(preview.fuente, ImportacionBancaria.FUENTE_MANUAL_PDF)
+        self.assertEqual(len(preview.movimientos), 2)
+        self.assertEqual(preview.movimientos[0].tipo, MovimientoBancario.TIPO_ABONO)
+        self.assertEqual(preview.movimientos[0].monto, Decimal("1500.50"))
+        self.assertEqual(preview.movimientos[0].saldo, Decimal("2000.00"))
+        self.assertEqual(preview.movimientos[0].referencia, "ABC123")
+        self.assertEqual(preview.movimientos[1].tipo, MovimientoBancario.TIPO_CARGO)
+        self.assertEqual(preview.movimientos[1].monto, Decimal("300.00"))
+        self.assertEqual(preview.movimientos[1].saldo, Decimal("1700.00"))
+        self.assertEqual(preview.errores, [])
+
     def test_generar_preview_normalizes_xml_spreadsheet_table(self):
         archivo = SimpleUploadedFile(
             "estado_banbajio.xml",
@@ -248,3 +274,42 @@ class ImportadorBancarioTests(TestCase):
         movimiento = MovimientoBancario.objects.get()
         self.assertTrue(movimiento.id_transaction.startswith("manual:"))
         self.assertEqual(movimiento.extra_raw["source"], ImportacionBancaria.FUENTE_MANUAL_CSV)
+
+
+def _minimal_text_pdf(lines: list[str]) -> bytes:
+    def escape(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+    text_commands = ["BT", "/F1 10 Tf", "50 760 Td"]
+    for index, line in enumerate(lines):
+        if index:
+            text_commands.append("0 -16 Td")
+        text_commands.append(f"({escape(line)}) Tj")
+    text_commands.append("ET")
+    stream = "\n".join(text_commands).encode("latin-1")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"\nendstream",
+    ]
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for index, obj in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf.extend(f"{index} 0 obj\n".encode("ascii"))
+        pdf.extend(obj)
+        pdf.extend(b"\nendobj\n")
+    startxref = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    pdf.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    pdf.extend(
+        (
+            f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+            f"startxref\n{startxref}\n%%EOF\n"
+        ).encode("ascii")
+    )
+    return bytes(pdf)
