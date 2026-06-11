@@ -10,7 +10,7 @@ from maestros.models import Insumo, UnidadMedida
 from pos_bridge.models import PointExtractionLog, PointProduct, PointRecipeExtractionRun, PointRecipeNode, PointSyncJob
 from pos_bridge.services.product_recipe_sync_service import PointProductRecipeSyncService, PointRecipeSyncResult
 from pos_bridge.services.sync_service import PointSyncService
-from recetas.models import LineaReceta, Receta
+from recetas.models import LineaReceta, Receta, RecetaPresentacionDerivada
 
 
 class FakePointHttpClient:
@@ -666,6 +666,48 @@ class PointProductRecipeSyncServiceTests(TestCase):
         node_ciruela = PointRecipeNode.objects.get(point_code="01CC07")
         self.assertEqual(str(node_ciruela.yield_quantity), "5.172000")
         self.assertEqual(node_ciruela.yield_unit.codigo, "kg")
+
+    def test_derived_slice_excludes_servilleta_from_direct_costing(self):
+        parent = Receta.objects.create(
+            nombre="Pastel de Ciruela Mediano",
+            codigo_point="0112",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="parent-ciruela-mediano",
+        )
+        slice_recipe = Receta.objects.create(
+            nombre="Pastel de Ciruela R",
+            codigo_point="0114",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="slice-ciruela-rebanada",
+        )
+        RecetaPresentacionDerivada.objects.create(
+            receta_padre=parent,
+            receta_derivada=slice_recipe,
+            tipo_derivado=RecetaPresentacionDerivada.TIPO_REBANADA,
+            unidades_por_padre="10.000000",
+            requiere_componentes_directos=True,
+            activo=True,
+        )
+        service = PointProductRecipeSyncService(http_client_factory=lambda: FakePointHttpClient({}))
+
+        self.assertTrue(
+            service._should_exclude_derived_slice_consumable(
+                receta=slice_recipe,
+                row={"Codigo_Articulo": "068", "Articulo": "SERVILLETA"},
+            )
+        )
+        self.assertTrue(
+            service._should_exclude_derived_slice_consumable(
+                receta=slice_recipe,
+                row={"Codigo_Articulo": "999", "Articulo": "Servilleta"},
+            )
+        )
+        self.assertFalse(
+            service._should_exclude_derived_slice_consumable(
+                receta=parent,
+                row={"Codigo_Articulo": "068", "Articulo": "SERVILLETA"},
+            )
+        )
 
     def test_sync_creates_direct_catalog_inputs_for_unmapped_bom_rows(self):
         payload = {
