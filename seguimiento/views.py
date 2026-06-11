@@ -9,9 +9,10 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils.dateparse import parse_date
+from django.utils.dateparse import parse_date, parse_time
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
@@ -30,6 +31,7 @@ from core.notificaciones import (
 )
 
 from .models import (
+    ActividadCalendario,
     SeguimientoChecklistItem,
     SeguimientoComentario,
     SeguimientoEvidencia,
@@ -1493,3 +1495,261 @@ def aprobar_paso_colaborador(request, pk, check_id):
         {"seguimiento_id": item.pk, "writeback": wb_activo, "tiene_motivo": bool(motivo)},
     )
     return redirect("seguimiento:mi_seguimiento")
+
+
+def _nombre_usuario_legible(user) -> str:
+    if not user:
+        return ""
+    return user.get_full_name() or user.username
+
+
+def _fecha_hora_local(value):
+    if not value:
+        return None, None
+    local_value = timezone.localtime(value)
+    return local_value.date(), local_value.strftime("%H:%M")
+
+
+def _actividad_evento(actividad: ActividadCalendario, request_user) -> dict:
+    completada = actividad.estatus == ActividadCalendario.ESTATUS_COMPLETADA
+    return {
+        "id": f"act-{actividad.pk}",
+        "fuente": "actividad",
+        "tipo": "ACTIVIDAD",
+        "titulo": actividad.titulo,
+        "fecha": actividad.fecha.isoformat(),
+        "hora": actividad.hora_inicio.strftime("%H:%M") if actividad.hora_inicio else None,
+        "hora_fin": actividad.hora_fin.strftime("%H:%M") if actividad.hora_fin else None,
+        "estatus": actividad.estatus,
+        "vencido": actividad.fecha < timezone.localdate() and not completada,
+        "url": None,
+        "responsable": _nombre_usuario_legible(actividad.usuario),
+        "descripcion": actividad.descripcion,
+        "editable": actividad.usuario_id == request_user.id,
+    }
+
+
+def _item_evento(item: SeguimientoItem) -> dict:
+    fecha, hora = _fecha_hora_local(item.fecha_limite)
+    responsable = _nombre_usuario_legible(item.responsable_user) or getattr(item.responsable_empleado, "nombre", "")
+    completado = item.estatus in {SeguimientoItem.ESTATUS_COMPLETADO, SeguimientoItem.ESTATUS_CANCELADO}
+    return {
+        "id": f"item-{item.pk}",
+        "fuente": "seguimiento",
+        "tipo": item.tipo,
+        "titulo": item.titulo,
+        "fecha": fecha.isoformat() if fecha else "",
+        "hora": hora,
+        "hora_fin": None,
+        "estatus": item.estatus,
+        "vencido": bool(fecha and fecha < timezone.localdate() and not completado),
+        "url": f"/seguimiento/{item.pk}/",
+        "responsable": responsable or None,
+        "descripcion": "",
+        "editable": False,
+    }
+
+
+def _checklist_evento(check: SeguimientoChecklistItem) -> dict:
+    fecha, hora = _fecha_hora_local(check.vence)
+    item = check.seguimiento
+    responsable = _nombre_usuario_legible(item.responsable_user) or getattr(item.responsable_empleado, "nombre", "")
+    return {
+        "id": f"paso-{check.pk}",
+        "fuente": "checklist",
+        "tipo": "PASO",
+        "titulo": check.titulo,
+        "fecha": fecha.isoformat() if fecha else "",
+        "hora": hora,
+        "hora_fin": None,
+        "estatus": "COMPLETADO" if check.completado else (check.estatus_origen or "PENDIENTE"),
+        "vencido": bool(fecha and fecha < timezone.localdate() and not check.completado),
+        "url": f"/seguimiento/{item.pk}/",
+        "responsable": responsable or None,
+        "descripcion": "",
+        "editable": False,
+    }
+
+
+def _validar_rango_calendario(request):
+    start = parse_date((request.GET.get("start") or "").strip())
+    end = parse_date((request.GET.get("end") or "").strip())
+    if not start or not end:
+        return None, None, JsonResponse({"error": "Parámetros start y end requeridos en formato YYYY-MM-DD."}, status=400)
+    if end < start:
+        return None, None, JsonResponse({"error": "El rango de fechas no es válido."}, status=400)
+    if (end - start).days > 62:
+        return None, None, JsonResponse({"error": "El rango máximo permitido es de 62 días."}, status=400)
+    return start, end, None
+
+
+def _day_bounds(start, end):
+    tz = timezone.get_current_timezone()
+    start_dt = timezone.make_aware(datetime.combine(start, datetime.min.time()), tz)
+    end_dt = timezone.make_aware(datetime.combine(end, datetime.max.time()), tz)
+    return start_dt, end_dt
+
+
+def _parse_hora_calendario(raw: str, campo: str):
+    raw = (raw or "").strip()
+    if not raw:
+        return None, None
+    hora = parse_time(raw)
+    if hora is None:
+        return None, f"La hora de {campo} no es válida."
+    return hora, None
+
+
+def _datos_actividad_post(request):
+    titulo = (request.POST.get("titulo") or "").strip()
+    descripcion = (request.POST.get("descripcion") or "").strip()
+    fecha = parse_date((request.POST.get("fecha") or "").strip())
+    hora_inicio, error_inicio = _parse_hora_calendario(request.POST.get("hora_inicio") or "", "inicio")
+    hora_fin, error_fin = _parse_hora_calendario(request.POST.get("hora_fin") or "", "fin")
+
+    if not titulo:
+        return None, "El título es obligatorio."
+    if not fecha:
+        return None, "La fecha es obligatoria."
+    if error_inicio:
+        return None, error_inicio
+    if error_fin:
+        return None, error_fin
+    if hora_inicio and hora_fin and hora_fin <= hora_inicio:
+        return None, "La hora de fin debe ser posterior a la hora de inicio."
+    return {
+        "titulo": titulo,
+        "descripcion": descripcion,
+        "fecha": fecha,
+        "hora_inicio": hora_inicio,
+        "hora_fin": hora_fin,
+    }, None
+
+
+@login_required
+def calendario(request):
+    es_dg = can_review_seguimiento_global(request.user)
+    contexto = {"es_dg": es_dg}
+    if es_dg:
+        User = get_user_model()
+        contexto["colaboradores"] = (
+            User.objects.filter(is_active=True)
+            .filter(
+                Q(seguimiento_items__isnull=False)
+                | Q(seguimiento_participaciones__isnull=False)
+                | Q(actividades_calendario__isnull=False)
+            )
+            .distinct()
+            .order_by("first_name", "last_name", "username")
+        )
+    return render(request, "seguimiento/calendario.html", contexto)
+
+
+@login_required
+def calendario_eventos(request):
+    start, end, error_response = _validar_rango_calendario(request)
+    if error_response:
+        return error_response
+
+    es_dg = can_review_seguimiento_global(request.user)
+    usuario_objetivo = None
+    if es_dg and (request.GET.get("usuario") or "").strip():
+        usuario_objetivo = get_object_or_404(get_user_model(), pk=request.GET.get("usuario"), is_active=True)
+    elif not es_dg:
+        usuario_objetivo = request.user
+
+    start_dt, end_dt = _day_bounds(start, end)
+    if usuario_objetivo:
+        items_qs = _items_del_usuario(usuario_objetivo)
+    else:
+        items_qs = SeguimientoItem.objects.select_related("responsable_user", "responsable_empleado").prefetch_related("checklist")
+
+    items_qs = (
+        items_qs.filter(fecha_limite__gte=start_dt, fecha_limite__lte=end_dt)
+        .exclude(estatus=SeguimientoItem.ESTATUS_CANCELADO)
+        .distinct()
+    )
+    checklist_qs = (
+        SeguimientoChecklistItem.objects.filter(
+            seguimiento__in=items_qs.values("pk"),
+            vence__gte=start_dt,
+            vence__lte=end_dt,
+        )
+        .select_related("seguimiento__responsable_user", "seguimiento__responsable_empleado")
+        .distinct()
+    )
+    actividades_qs = (
+        ActividadCalendario.objects.filter(activo=True, fecha__gte=start, fecha__lte=end)
+        .select_related("usuario")
+        .order_by("fecha", "hora_inicio", "id")
+    )
+    if usuario_objetivo:
+        actividades_qs = actividades_qs.filter(usuario=usuario_objetivo)
+    else:
+        actividades_qs = actividades_qs.filter(usuario__is_active=True)
+
+    eventos = []
+    eventos.extend(_item_evento(item) for item in items_qs)
+    eventos.extend(_checklist_evento(check) for check in checklist_qs)
+    eventos.extend(_actividad_evento(actividad, request.user) for actividad in actividades_qs)
+    eventos = [evento for evento in eventos if evento.get("fecha")]
+    eventos.sort(key=lambda event: (event["fecha"], event.get("hora") or "99:99", event["titulo"].lower()))
+    return JsonResponse({"eventos": eventos})
+
+
+@login_required
+@require_POST
+def actividad_crear(request):
+    datos, error = _datos_actividad_post(request)
+    if error:
+        return JsonResponse({"error": error}, status=400)
+    actividad = ActividadCalendario.objects.create(usuario=request.user, **datos)
+    log_event(
+        request.user,
+        "seguimiento.calendario.crear",
+        "ActividadCalendario",
+        actividad.pk,
+        {"fecha": actividad.fecha.isoformat()},
+    )
+    return JsonResponse({"evento": _actividad_evento(actividad, request.user)})
+
+
+@login_required
+@require_POST
+def actividad_editar(request, pk):
+    actividad = get_object_or_404(ActividadCalendario, pk=pk, usuario=request.user, activo=True)
+    datos, error = _datos_actividad_post(request)
+    if error:
+        return JsonResponse({"error": error}, status=400)
+    for campo, valor in datos.items():
+        setattr(actividad, campo, valor)
+    actividad.save(update_fields=["titulo", "descripcion", "fecha", "hora_inicio", "hora_fin", "updated_at"])
+    return JsonResponse({"evento": _actividad_evento(actividad, request.user)})
+
+
+@login_required
+@require_POST
+def actividad_completar(request, pk):
+    actividad = get_object_or_404(ActividadCalendario, pk=pk, usuario=request.user, activo=True)
+    if actividad.estatus == ActividadCalendario.ESTATUS_COMPLETADA:
+        actividad.estatus = ActividadCalendario.ESTATUS_PENDIENTE
+    else:
+        actividad.estatus = ActividadCalendario.ESTATUS_COMPLETADA
+    actividad.save(update_fields=["estatus", "updated_at"])
+    return JsonResponse({"evento": _actividad_evento(actividad, request.user)})
+
+
+@login_required
+@require_POST
+def actividad_eliminar(request, pk):
+    actividad = get_object_or_404(ActividadCalendario, pk=pk, usuario=request.user, activo=True)
+    actividad.activo = False
+    actividad.save(update_fields=["activo", "updated_at"])
+    log_event(
+        request.user,
+        "seguimiento.calendario.eliminar",
+        "ActividadCalendario",
+        actividad.pk,
+        {"fecha": actividad.fecha.isoformat()},
+    )
+    return JsonResponse({"ok": True})

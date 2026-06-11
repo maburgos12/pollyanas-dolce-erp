@@ -108,6 +108,10 @@ def empleado_de_usuario(user):
     if not user or not user.is_authenticated:
         return None
 
+    empleado = Empleado.objects.filter(activo=True, usuario_erp=user).first()
+    if empleado:
+        return empleado
+
     email = (getattr(user, "email", "") or "").strip()
     if email:
         empleado = Empleado.objects.filter(activo=True, email__iexact=email).first()
