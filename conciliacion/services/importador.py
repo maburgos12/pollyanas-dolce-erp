@@ -10,12 +10,12 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import pandas as pd
-from django.db.models import Count, Max, Min, Sum
+from django.db.models import Count, Max, Min, Q, Sum
 from django.db.models.functions import TruncDate
 from django.db import transaction
 from django.utils import timezone
 
-from conciliacion.models import ImportacionBancaria
+from conciliacion.models import CfdiSucursalResolucion, ImportacionBancaria
 from sat_client.models import CfdiDescargado
 from syncfy_client.models import CuentaBancaria, MovimientoBancario
 
@@ -243,6 +243,7 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
 
     cfdi_emitidos = _aggregate_tipo_cfdi(cfdi_qs, CfdiDescargado.TIPO_EMITIDO)
     cfdi_recibidos = _aggregate_tipo_cfdi(cfdi_qs, CfdiDescargado.TIPO_RECIBIDO)
+    cfdi_sucursales = _resumen_cfdi_sucursales(inicio=inicio, fin=fin)
 
     movimientos_periodo = list(movimientos_qs.order_by("-fecha_transaccion")[:50])
     candidatos = sugerir_cfdis_para_movimientos([mov for mov in movimientos_periodo if not mov.conciliado])
@@ -265,6 +266,7 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
         "cfdi_total": cfdi_qs.count(),
         "cfdi_emitidos": cfdi_emitidos,
         "cfdi_recibidos": cfdi_recibidos,
+        "cfdi_sucursales": cfdi_sucursales,
         "cfdi_rows": list(cfdi_qs.order_by("-fecha_emision")[:20]),
     }
 
@@ -306,6 +308,50 @@ def _aggregate_tipo_movimiento(queryset, tipo: str) -> dict[str, Any]:
 def _aggregate_tipo_cfdi(queryset, tipo_cfdi: str) -> dict[str, Any]:
     data = queryset.filter(tipo_cfdi=tipo_cfdi).aggregate(conteo=Count("id"), total=Sum("total"))
     return {"conteo": data["conteo"] or 0, "total": data["total"] or Decimal("0.00")}
+
+
+def _resumen_cfdi_sucursales(*, inicio: datetime, fin: datetime) -> dict[str, Any]:
+    resoluciones_qs = CfdiSucursalResolucion.objects.select_related("sucursal", "cfdi").filter(
+        cfdi__fecha_emision__gte=inicio,
+        cfdi__fecha_emision__lt=fin,
+        cfdi__tipo_cfdi=CfdiDescargado.TIPO_EMITIDO,
+    )
+    rows = (
+        resoluciones_qs.filter(sucursal__isnull=False)
+        .values("sucursal__codigo", "sucursal__nombre")
+        .annotate(
+            cfdis=Count("id"),
+            total=Sum("cfdi__total"),
+            efectivo=Sum("cfdi__total", filter=Q(cfdi__forma_pago="01")),
+            tarjeta=Sum("cfdi__total", filter=Q(cfdi__forma_pago__in=["04", "28", "29"])),
+            transferencia=Sum("cfdi__total", filter=Q(cfdi__forma_pago="03")),
+        )
+        .order_by("sucursal__codigo")
+    )
+    sucursales = []
+    for row in rows:
+        sucursales.append(
+            {
+                "codigo": row["sucursal__codigo"],
+                "nombre": row["sucursal__nombre"],
+                "cfdis": row["cfdis"] or 0,
+                "total": row["total"] or Decimal("0.00"),
+                "efectivo": row["efectivo"] or Decimal("0.00"),
+                "tarjeta": row["tarjeta"] or Decimal("0.00"),
+                "transferencia": row["transferencia"] or Decimal("0.00"),
+            }
+        )
+
+    pendientes = resoluciones_qs.filter(sucursal__isnull=True).aggregate(
+        cfdis=Count("id"),
+        total=Sum("cfdi__total"),
+    )
+    return {
+        "sucursales": sucursales,
+        "resueltos": sum(item["cfdis"] for item in sucursales),
+        "pendientes": pendientes["cfdis"] or 0,
+        "pendientes_total": pendientes["total"] or Decimal("0.00"),
+    }
 
 
 def _resumen_diario_movimientos(queryset) -> list[dict[str, Any]]:
