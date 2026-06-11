@@ -34,7 +34,11 @@ class ReglasAsistenciaRRHHTests(TestCase):
             hora_salida=time(16, 0),
             tolerancia_minutos=10,
         )
-        self.empleado = Empleado.objects.create(nombre="Empleado Reglas", salario_diario=Decimal("400.00"))
+        self.empleado = Empleado.objects.create(
+            nombre="Empleado Reglas",
+            salario_diario=Decimal("400.00"),
+            fecha_ingreso=date(2026, 1, 1),
+        )
 
     def crear_asistencia(
         self,
@@ -75,6 +79,40 @@ class ReglasAsistenciaRRHHTests(TestCase):
         self.assertEqual(falta.estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
         self.assertEqual(falta.minutos, 11)
         self.assertIn("se considera falta", falta.detalle)
+
+    def test_no_genera_faltas_antes_de_fecha_de_ingreso(self):
+        self.empleado.fecha_ingreso = date(2026, 6, 10)
+        self.empleado.save(update_fields=["fecha_ingreso"])
+        fecha = date(2026, 6, 5)
+
+        resultado = evaluar_dia_empleado(self.empleado, fecha)
+
+        self.assertEqual(resultado.creados, 0)
+        self.assertFalse(
+            IncidenciaAsistencia.objects.filter(
+                empleado=self.empleado,
+                fecha=fecha,
+                tipo=IncidenciaAsistencia.TIPO_FALTA,
+            ).exists()
+        )
+
+    def test_resuelve_falta_automatica_si_fecha_queda_antes_del_ingreso(self):
+        fecha = date(2026, 6, 5)
+        falta = IncidenciaAsistencia.objects.create(
+            empleado=self.empleado,
+            fecha=fecha,
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+            severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+        )
+        self.empleado.fecha_ingreso = date(2026, 6, 10)
+        self.empleado.save(update_fields=["fecha_ingreso"])
+
+        resultado = evaluar_dia_empleado(self.empleado, fecha)
+
+        self.assertEqual(resultado.resueltos, 1)
+        falta.refresh_from_db()
+        self.assertEqual(falta.estado, IncidenciaAsistencia.ESTADO_RESUELTO)
 
     def test_retardo_se_concilia_con_permiso_aprobado(self):
         fecha = date(2026, 6, 1)

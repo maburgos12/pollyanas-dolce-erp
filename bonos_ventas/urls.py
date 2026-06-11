@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     BonoVentasEmpleadoViewSet,
     ConfigBonoVentasPeriodoViewSet,
+    HorasExtraVentasEquipoViewSet,
     PermisosVentasEquipoViewSet,
     RegistroDiarioVentasViewSet,
     VentaCategoriaSucursalViewSet,
@@ -16,6 +17,7 @@ router.register("ventas-categoria", VentaCategoriaSucursalViewSet, basename="bon
 router.register("bonos", BonoVentasEmpleadoViewSet, basename="bonoventas-bono")
 router.register("registros-diarios", RegistroDiarioVentasViewSet, basename="bonoventas-registro")
 router.register("permisos", PermisosVentasEquipoViewSet, basename="bonoventas-permiso")
+router.register("horas-extra", HorasExtraVentasEquipoViewSet, basename="bonoventas-hora-extra")
 
 urlpatterns = [
     path("dashboard/", bonos_ventas_dashboard, name="bonos-ventas-dashboard"),

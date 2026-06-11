@@ -11,7 +11,7 @@ from core.access import ROLE_RRHH, ROLE_VENTAS
 from core.navigation import NAV_GROUPS
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointDailySale, PointProduct
-from rrhh.models import Empleado, NominaLinea, NominaPeriodo, PermisoSalida
+from rrhh.models import Empleado, HoraExtra, NominaLinea, NominaPeriodo, PermisoSalida
 
 from .models import BonoVentasEmpleado, ConfigBonoVentasPeriodo, RegistroDiarioVentas, VentaCategoriaSucursal
 from .services import sync_ventas_categorias
@@ -154,7 +154,7 @@ class BonosVentasTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-ventas-pwa-v11", sw_content)
+        self.assertIn("pollyanas-bonos-ventas-pwa-v13", sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-ventas/dashboard/")', sw_content)
 
     def test_api_ventas_acepta_post_con_sesion_y_csrf(self):
@@ -505,3 +505,52 @@ class BonosVentasTests(TestCase):
         self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_PREAUTORIZADO)
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_APROBADO)
         self.assertEqual(permiso.autorizado_jefe_por, user)
+
+    def test_horas_extra_ventas_crea_y_autoriza_en_rrhh(self):
+        Empleado.objects.all().delete()
+        user = get_user_model().objects.create_user(username="jefe-ventas-he")
+        user.groups.add(Group.objects.get_or_create(name=ROLE_VENTAS)[0])
+        user.groups.add(Group.objects.get_or_create(name=ROLE_RRHH)[0])
+        self.client.force_login(user)
+        sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
+        periodo = ConfigBonoVentasPeriodo.objects.create(mes=5, anio=2026)
+        jefe = Empleado.objects.create(nombre="Jefe Ventas HE", departamento=Empleado.DEP_VENTAS, usuario_erp=user)
+        empleado = Empleado.objects.create(
+            nombre="Empleado Ventas HE",
+            area="VENTAS",
+            sucursal="Payán",
+            jefe_directo=jefe,
+            salario_diario=Decimal("400.00"),
+        )
+        BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal)
+
+        creado = self.client.post(
+            "/api/bonos-ventas/horas-extra/",
+            json.dumps(
+                {
+                    "empleado": empleado.id,
+                    "mes": 5,
+                    "anio": 2026,
+                    "sucursal": sucursal.id,
+                    "fecha": "2026-05-20",
+                    "horas": "1.50",
+                    "notas": "Cierre de sucursal",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(creado.status_code, 201)
+        hora_extra = HoraExtra.objects.get(pk=creado.json()["id"])
+        self.assertEqual(hora_extra.empleado, empleado)
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_PENDIENTE)
+        self.assertEqual(hora_extra.jefe_directo, user)
+        self.assertTrue(creado.json()["puede_autorizar"])
+
+        autorizado = self.client.post(f"/api/bonos-ventas/horas-extra/{hora_extra.id}/autorizar/")
+
+        self.assertEqual(autorizado.status_code, 200)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_AUTORIZADO)
+        self.assertEqual(hora_extra.autorizado_por, user)
+        self.assertEqual(hora_extra.monto_calculado, Decimal("150.00"))
