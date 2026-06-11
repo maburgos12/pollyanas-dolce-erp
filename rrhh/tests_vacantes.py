@@ -7,14 +7,26 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.models import Notificacion, Sucursal
-from rrhh.models import Empleado, VacanteCobertura, VacanteMovimiento, VacanteRRHH, VacanteSeguimiento
+from rrhh.models import (
+    AltaPendienteEmpleado,
+    CandidatoVacante,
+    Empleado,
+    VacanteCobertura,
+    VacanteMovimiento,
+    VacanteRRHH,
+    VacanteSeguimiento,
+)
 from rrhh.services_vacantes import (
+    agregar_candidato,
     agregar_seguimiento_vacante,
     aprobar_vacante_autorizacion,
+    avanzar_etapa_candidato,
     can_autorizar_vacante,
     can_solicitar_vacantes,
     can_ver_vacante,
+    consumir_alta_pendiente,
     cubrir_vacante,
+    crear_alta_pendiente_desde_candidato,
     crear_solicitud_vacante,
     devolver_vacante_correccion,
     enviar_vacante_autorizacion,
@@ -113,6 +125,152 @@ class VacantesSolicitudServiceTests(TestCase):
         self.assertEqual(vacante.fecha_cubierta, date(2026, 6, 3))
         self.assertEqual(vacante.empleado_cubrio, empleado)
         self.assertEqual(VacanteMovimiento.objects.filter(vacante=vacante).count(), 5)
+
+    def test_crear_alta_pendiente_desde_candidato_no_crea_empleado_y_reusa_pendiente(self):
+        vacante = crear_solicitud_vacante(
+            area="ventas",
+            puesto="cajera",
+            fecha_solicitada=date(2026, 5, 28),
+            fecha_necesaria=date(2026, 6, 5),
+            solicitado_por=self.solicitante,
+            creado_por=self.solicitante,
+            sucursal=self.sucursal,
+            departamento=Empleado.DEP_VENTAS,
+            estado_inicial=VacanteRRHH.ESTADO_RECLUTAMIENTO,
+        )
+        candidato = agregar_candidato(
+            vacante,
+            self.rrhh_user,
+            nombre="Candidata Nueva",
+            telefono="6670000000",
+            email="candidata@example.com",
+        )
+        avanzar_etapa_candidato(candidato, self.rrhh_user, CandidatoVacante.ETAPA_SELECCIONADO, "Aceptada")
+
+        pendiente = crear_alta_pendiente_desde_candidato(candidato, self.rrhh_user, "Preparar alta")
+        misma_pendiente = crear_alta_pendiente_desde_candidato(candidato, self.rrhh_user, "Preparar alta otra vez")
+
+        self.assertEqual(pendiente, misma_pendiente)
+        self.assertEqual(AltaPendienteEmpleado.objects.count(), 1)
+        self.assertEqual(Empleado.objects.filter(nombre="Candidata Nueva").count(), 0)
+        self.assertEqual(pendiente.vacante, vacante)
+        self.assertEqual(pendiente.candidato, candidato)
+        self.assertEqual(pendiente.nombre, "Candidata Nueva")
+        self.assertEqual(pendiente.telefono, "6670000000")
+        self.assertEqual(pendiente.email, "candidata@example.com")
+        self.assertEqual(pendiente.sucursal, self.sucursal.nombre)
+        self.assertEqual(pendiente.departamento, Empleado.DEP_VENTAS)
+        self.assertEqual(pendiente.area, "VENTAS")
+        self.assertEqual(pendiente.puesto, "CAJERA")
+        self.assertEqual(pendiente.fecha_ingreso_sugerida, date(2026, 6, 5))
+
+    def test_crear_alta_pendiente_requiere_rrhh(self):
+        vacante = crear_solicitud_vacante(
+            area="ventas",
+            puesto="cajera",
+            fecha_solicitada=date(2026, 5, 28),
+            solicitado_por=self.solicitante,
+            creado_por=self.solicitante,
+            departamento=Empleado.DEP_VENTAS,
+            estado_inicial=VacanteRRHH.ESTADO_RECLUTAMIENTO,
+        )
+        candidato = CandidatoVacante.objects.create(
+            vacante=vacante,
+            nombre="Candidata Nueva",
+            etapa_actual=CandidatoVacante.ETAPA_SELECCIONADO,
+        )
+
+        with self.assertRaises(PermissionDenied):
+            crear_alta_pendiente_desde_candidato(candidato, self.solicitante)
+
+    def test_crear_alta_pendiente_rechaza_vacante_fuera_de_reclutamiento(self):
+        vacante = crear_solicitud_vacante(
+            area="ventas",
+            puesto="cajera",
+            fecha_solicitada=date(2026, 5, 28),
+            solicitado_por=self.solicitante,
+            creado_por=self.solicitante,
+            departamento=Empleado.DEP_VENTAS,
+            estado_inicial=VacanteRRHH.ESTADO_PAUSADA,
+        )
+        candidato = CandidatoVacante.objects.create(
+            vacante=vacante,
+            nombre="Candidata Pausada",
+            etapa_actual=CandidatoVacante.ETAPA_SELECCIONADO,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "vacantes en reclutamiento"):
+            crear_alta_pendiente_desde_candidato(candidato, self.rrhh_user)
+
+    def test_consumir_alta_pendiente_liga_candidato_empleado_y_cubre_vacante(self):
+        vacante = crear_solicitud_vacante(
+            area="ventas",
+            puesto="cajera",
+            fecha_solicitada=date(2026, 5, 28),
+            fecha_necesaria=date(2026, 6, 5),
+            solicitado_por=self.solicitante,
+            creado_por=self.solicitante,
+            departamento=Empleado.DEP_VENTAS,
+            estado_inicial=VacanteRRHH.ESTADO_RECLUTAMIENTO,
+        )
+        candidato = agregar_candidato(vacante, self.rrhh_user, nombre="Candidata Nueva")
+        avanzar_etapa_candidato(candidato, self.rrhh_user, CandidatoVacante.ETAPA_SELECCIONADO)
+        pendiente = crear_alta_pendiente_desde_candidato(candidato, self.rrhh_user)
+        empleado = Empleado.objects.create(nombre="Candidata Nueva", departamento=Empleado.DEP_VENTAS)
+
+        cobertura = consumir_alta_pendiente(pendiente, empleado, self.rrhh_user)
+        candidato.refresh_from_db()
+        pendiente.refresh_from_db()
+        vacante.refresh_from_db()
+
+        self.assertEqual(candidato.empleado, empleado)
+        self.assertEqual(candidato.etapa_actual, CandidatoVacante.ETAPA_CONTRATADO)
+        self.assertEqual(pendiente.estado, AltaPendienteEmpleado.ESTADO_CONVERTIDA)
+        self.assertEqual(pendiente.empleado, empleado)
+        self.assertEqual(cobertura.empleado, empleado)
+        self.assertEqual(vacante.estado, VacanteRRHH.ESTADO_CUBIERTA)
+        self.assertEqual(vacante.empleado_cubrio, empleado)
+
+    def test_cubrir_vacante_revalida_estado_bajo_lock(self):
+        vacante = crear_solicitud_vacante(
+            area="ventas",
+            puesto="cajera",
+            fecha_solicitada=date(2026, 5, 28),
+            solicitado_por=self.solicitante,
+            creado_por=self.solicitante,
+            departamento=Empleado.DEP_VENTAS,
+            estado_inicial=VacanteRRHH.ESTADO_RECLUTAMIENTO,
+        )
+        stale_vacante = VacanteRRHH.objects.get(pk=vacante.pk)
+        VacanteRRHH.objects.filter(pk=vacante.pk).update(estado=VacanteRRHH.ESTADO_CUBIERTA)
+        empleado = Empleado.objects.create(nombre="Cajera Nueva", departamento=Empleado.DEP_VENTAS)
+
+        with self.assertRaisesMessage(ValidationError, "autorizada"):
+            cubrir_vacante(stale_vacante, empleado, self.rrhh_user)
+
+    def test_cubrir_vacante_con_dos_plazas_cierra_hasta_segunda_cobertura(self):
+        vacante = crear_solicitud_vacante(
+            area="ventas",
+            puesto="cajera",
+            fecha_solicitada=date(2026, 5, 28),
+            solicitado_por=self.solicitante,
+            creado_por=self.solicitante,
+            departamento=Empleado.DEP_VENTAS,
+            cantidad_solicitada=2,
+            estado_inicial=VacanteRRHH.ESTADO_RECLUTAMIENTO,
+        )
+        primera = Empleado.objects.create(nombre="Cajera Uno", departamento=Empleado.DEP_VENTAS)
+        segunda = Empleado.objects.create(nombre="Cajera Dos", departamento=Empleado.DEP_VENTAS)
+
+        cubrir_vacante(vacante, primera, self.rrhh_user, fecha_cobertura=date(2026, 6, 3))
+        vacante.refresh_from_db()
+        self.assertEqual(vacante.estado, VacanteRRHH.ESTADO_RECLUTAMIENTO)
+        self.assertEqual(vacante.coberturas.count(), 1)
+
+        cubrir_vacante(vacante, segunda, self.rrhh_user, fecha_cobertura=date(2026, 6, 4))
+        vacante.refresh_from_db()
+        self.assertEqual(vacante.estado, VacanteRRHH.ESTADO_CUBIERTA)
+        self.assertEqual(vacante.coberturas.count(), 2)
 
     def test_autorizador_operativo_puede_usar_nivel_jefatura_sin_puesto_jefatura(self):
         empleado = self.jefe_ventas.empleado_rrhh
@@ -352,6 +510,161 @@ class VacantesSolicitudViewTests(TestCase):
         self.assertRedirects(response, reverse("rrhh:rrhh_vacante_detalle", kwargs={"pk": vacante.pk}))
         vacante.refresh_from_db()
         self.assertEqual(vacante.estado, VacanteRRHH.ESTADO_AUTORIZADA)
+
+    def test_detalle_envia_candidato_a_alta_pendiente(self):
+        vacante = crear_solicitud_vacante(
+            area="ventas",
+            puesto="cajera",
+            fecha_solicitada=date(2026, 5, 28),
+            solicitado_por=self.rrhh_user,
+            creado_por=self.rrhh_user,
+            departamento=Empleado.DEP_VENTAS,
+            estado_inicial=VacanteRRHH.ESTADO_RECLUTAMIENTO,
+        )
+        candidato = CandidatoVacante.objects.create(
+            vacante=vacante,
+            nombre="Candidata Alta",
+            telefono="6671112233",
+            etapa_actual=CandidatoVacante.ETAPA_SELECCIONADO,
+        )
+        self.client.force_login(self.rrhh_user)
+
+        response = self.client.post(
+            reverse("rrhh:rrhh_vacante_accion", kwargs={"pk": vacante.pk}),
+            {
+                "action": "enviar_alta_pendiente",
+                "candidato_id": str(candidato.id),
+                "comentario": "Lista para alta",
+            },
+        )
+
+        pendiente = AltaPendienteEmpleado.objects.get(candidato=candidato)
+        self.assertRedirects(response, f"{reverse('rrhh:empleados')}?alta_pendiente={pendiente.id}")
+        self.assertEqual(Empleado.objects.filter(nombre="Candidata Alta").count(), 0)
+
+    def test_empleados_muestra_y_prerellena_alta_pendiente(self):
+        vacante = crear_solicitud_vacante(
+            area="ventas",
+            puesto="cajera",
+            fecha_solicitada=date(2026, 5, 28),
+            fecha_necesaria=date(2026, 6, 5),
+            solicitado_por=self.rrhh_user,
+            creado_por=self.rrhh_user,
+            sucursal=self.sucursal,
+            departamento=Empleado.DEP_VENTAS,
+            estado_inicial=VacanteRRHH.ESTADO_RECLUTAMIENTO,
+        )
+        candidato = CandidatoVacante.objects.create(
+            vacante=vacante,
+            nombre="Candidata Alta",
+            telefono="6671112233",
+            email="alta@example.com",
+            etapa_actual=CandidatoVacante.ETAPA_SELECCIONADO,
+        )
+        pendiente = crear_alta_pendiente_desde_candidato(candidato, self.rrhh_user)
+        self.client.force_login(self.rrhh_user)
+
+        response = self.client.get(f"{reverse('rrhh:empleados')}?alta_pendiente={pendiente.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Altas pendientes")
+        self.assertContains(response, "Candidata Alta")
+        self.assertContains(response, 'name="alta_pendiente_id" value="')
+        self.assertContains(response, 'value="Candidata Alta"')
+        self.assertContains(response, 'value="6671112233"')
+        self.assertContains(response, 'value="alta@example.com"')
+
+    def test_empleados_guarda_alta_pendiente_y_permite_alta_manual(self):
+        vacante = crear_solicitud_vacante(
+            area="ventas",
+            puesto="cajera",
+            fecha_solicitada=date(2026, 5, 28),
+            fecha_necesaria=date(2026, 6, 5),
+            solicitado_por=self.rrhh_user,
+            creado_por=self.rrhh_user,
+            departamento=Empleado.DEP_VENTAS,
+            estado_inicial=VacanteRRHH.ESTADO_RECLUTAMIENTO,
+        )
+        candidato = CandidatoVacante.objects.create(
+            vacante=vacante,
+            nombre="Candidata Alta",
+            etapa_actual=CandidatoVacante.ETAPA_SELECCIONADO,
+        )
+        pendiente = crear_alta_pendiente_desde_candidato(candidato, self.rrhh_user)
+        self.client.force_login(self.rrhh_user)
+
+        response = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "create",
+                "alta_pendiente_id": str(pendiente.id),
+                "codigo": "9001",
+                "nombre": "Candidata Alta",
+                "fecha_ingreso": "2026-06-05",
+                "salario_diario": "300.00",
+            },
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        empleado = Empleado.objects.get(codigo="9001")
+        candidato.refresh_from_db()
+        pendiente.refresh_from_db()
+        vacante.refresh_from_db()
+        self.assertEqual(candidato.empleado, empleado)
+        self.assertEqual(pendiente.estado, AltaPendienteEmpleado.ESTADO_CONVERTIDA)
+        self.assertEqual(vacante.estado, VacanteRRHH.ESTADO_CUBIERTA)
+
+        manual = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "create",
+                "codigo": "9002",
+                "nombre": "Alta Manual",
+                "salario_diario": "300.00",
+            },
+            follow=True,
+        )
+        self.assertEqual(manual.status_code, 200)
+        self.assertTrue(Empleado.objects.filter(codigo="9002", nombre="Alta Manual").exists())
+
+    def test_empleados_no_deja_empleado_huerfano_si_alta_pendiente_ya_no_es_valida(self):
+        vacante = crear_solicitud_vacante(
+            area="ventas",
+            puesto="cajera",
+            fecha_solicitada=date(2026, 5, 28),
+            solicitado_por=self.rrhh_user,
+            creado_por=self.rrhh_user,
+            departamento=Empleado.DEP_VENTAS,
+            estado_inicial=VacanteRRHH.ESTADO_RECLUTAMIENTO,
+        )
+        candidato = CandidatoVacante.objects.create(
+            vacante=vacante,
+            nombre="Candidata Cancelada",
+            etapa_actual=CandidatoVacante.ETAPA_SELECCIONADO,
+        )
+        pendiente = crear_alta_pendiente_desde_candidato(candidato, self.rrhh_user)
+        VacanteRRHH.objects.filter(pk=vacante.pk).update(estado=VacanteRRHH.ESTADO_CANCELADA)
+        self.client.force_login(self.rrhh_user)
+
+        response = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "create",
+                "alta_pendiente_id": str(pendiente.id),
+                "codigo": "9010",
+                "nombre": "Candidata Cancelada",
+                "salario_diario": "300.00",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Empleado.objects.filter(codigo="9010").exists())
+        candidato.refresh_from_db()
+        pendiente.refresh_from_db()
+        self.assertIsNone(candidato.empleado)
+        self.assertEqual(candidato.etapa_actual, CandidatoVacante.ETAPA_SELECCIONADO)
+        self.assertEqual(pendiente.estado, AltaPendienteEmpleado.ESTADO_PENDIENTE)
 
     def test_direccion_general_ve_vacante_operativa_sin_autorizarla(self):
         vacante = crear_solicitud_vacante(

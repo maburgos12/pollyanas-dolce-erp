@@ -18,7 +18,15 @@ from core.access import (
 from core.models import Notificacion
 from core.notificaciones import crear_notificaciones, usuarios_direccion_general, usuarios_por_grupo
 
-from .models import CandidatoVacante, Empleado, VacanteCobertura, VacanteMovimiento, VacanteRRHH, VacanteSeguimiento
+from .models import (
+    AltaPendienteEmpleado,
+    CandidatoVacante,
+    Empleado,
+    VacanteCobertura,
+    VacanteMovimiento,
+    VacanteRRHH,
+    VacanteSeguimiento,
+)
 from .services_niveles import empleado_es_liderazgo, jefatura_q, liderazgo_q
 
 
@@ -317,6 +325,15 @@ def cubrir_vacante(
         raise ValidationError("La vacante debe estar autorizada antes de registrar cobertura.")
     with transaction.atomic():
         vacante = VacanteRRHH.objects.select_for_update().get(pk=vacante.pk)
+        if vacante.estado not in {
+            VacanteRRHH.ESTADO_RECLUTAMIENTO,
+            VacanteRRHH.ESTADO_AUTORIZADA,
+        }:
+            raise ValidationError("La vacante debe estar autorizada antes de registrar cobertura.")
+        if vacante.coberturas.count() >= vacante.cantidad_solicitada:
+            raise ValidationError("La vacante ya tiene cubierta la cantidad solicitada.")
+        if VacanteCobertura.objects.filter(vacante=vacante, empleado=empleado).exists():
+            raise ValidationError("Este empleado ya cubre esta vacante.")
         cobertura = VacanteCobertura.objects.create(
             vacante=vacante,
             empleado=empleado,
@@ -340,6 +357,111 @@ def cubrir_vacante(
             nota or f"Cobertura registrada con {empleado.nombre}.",
         )
     notificar_vacante_cubierta(vacante, actor=user)
+    return cobertura
+
+
+def crear_alta_pendiente_desde_candidato(
+    candidato: CandidatoVacante,
+    user,
+    comentario: str = "",
+) -> AltaPendienteEmpleado:
+    _require_rrhh(user)
+    if candidato.empleado_id:
+        raise ValidationError("Este candidato ya está ligado a un empleado.")
+    if candidato.etapa_actual not in {
+        CandidatoVacante.ETAPA_SELECCIONADO,
+        CandidatoVacante.ETAPA_DOCUMENTOS,
+        CandidatoVacante.ETAPA_PRUEBA,
+    }:
+        raise ValidationError("Solo candidatos seleccionados, en documentos o prueba pueden enviarse a alta.")
+
+    with transaction.atomic():
+        candidato = CandidatoVacante.objects.select_for_update().get(pk=candidato.pk)
+        if candidato.empleado_id:
+            raise ValidationError("Este candidato ya está ligado a un empleado.")
+        if candidato.etapa_actual not in {
+            CandidatoVacante.ETAPA_SELECCIONADO,
+            CandidatoVacante.ETAPA_DOCUMENTOS,
+            CandidatoVacante.ETAPA_PRUEBA,
+        }:
+            raise ValidationError("Solo candidatos seleccionados, en documentos o prueba pueden enviarse a alta.")
+        vacante = VacanteRRHH.objects.select_for_update().get(pk=candidato.vacante_id)
+        if vacante.estado != VacanteRRHH.ESTADO_RECLUTAMIENTO:
+            raise ValidationError("Solo se pueden preparar altas pendientes de vacantes en reclutamiento.")
+        pendiente = AltaPendienteEmpleado.objects.filter(
+            candidato=candidato,
+            estado=AltaPendienteEmpleado.ESTADO_PENDIENTE,
+        ).first()
+        if pendiente:
+            return pendiente
+
+        pendiente = AltaPendienteEmpleado.objects.create(
+            vacante=vacante,
+            candidato=candidato,
+            nombre=candidato.nombre,
+            telefono=candidato.telefono,
+            email=candidato.email,
+            sucursal=vacante.sucursal.nombre if vacante.sucursal_id else "",
+            departamento=vacante.departamento,
+            area=vacante.area,
+            puesto=vacante.puesto,
+            fecha_ingreso_sugerida=vacante.fecha_necesaria,
+            nota=(comentario or "").strip(),
+            creado_por=user,
+        )
+        VacanteSeguimiento.objects.create(
+            vacante=vacante,
+            candidato_obj=candidato,
+            etapa=VacanteSeguimiento.ETAPA_DOCUMENTOS,
+            candidato=candidato.nombre,
+            comentario=(comentario or "Candidato enviado a alta pendiente de empleado.").strip(),
+            creado_por=user,
+        )
+    return pendiente
+
+
+def consumir_alta_pendiente(
+    alta: AltaPendienteEmpleado,
+    empleado: Empleado,
+    user,
+    *,
+    fecha_cobertura: date | None = None,
+    nota: str = "",
+) -> VacanteCobertura:
+    _require_rrhh(user)
+    with transaction.atomic():
+        alta = (
+            AltaPendienteEmpleado.objects.select_for_update()
+            .select_related("candidato", "vacante")
+            .get(pk=alta.pk)
+        )
+        if alta.estado != AltaPendienteEmpleado.ESTADO_PENDIENTE:
+            raise ValidationError("Esta alta pendiente ya fue procesada.")
+        candidato = CandidatoVacante.objects.select_for_update().get(pk=alta.candidato_id)
+        if candidato.empleado_id and candidato.empleado_id != empleado.id:
+            raise ValidationError("Este candidato ya está ligado a otro empleado.")
+        if candidato.etapa_actual not in {
+            CandidatoVacante.ETAPA_SELECCIONADO,
+            CandidatoVacante.ETAPA_DOCUMENTOS,
+            CandidatoVacante.ETAPA_PRUEBA,
+        }:
+            raise ValidationError("El candidato ya no está en una etapa válida para alta.")
+
+        candidato.empleado = empleado
+        candidato.etapa_actual = CandidatoVacante.ETAPA_CONTRATADO
+        candidato.save(update_fields=["empleado", "etapa_actual", "actualizado_en"])
+
+        cobertura = cubrir_vacante(
+            alta.vacante,
+            empleado,
+            user,
+            fecha_cobertura=fecha_cobertura or alta.fecha_ingreso_sugerida,
+            nota=nota or f"Alta creada desde candidato {candidato.nombre}.",
+        )
+        alta.empleado = empleado
+        alta.estado = AltaPendienteEmpleado.ESTADO_CONVERTIDA
+        alta.convertida_en = timezone.now()
+        alta.save(update_fields=["empleado", "estado", "convertida_en", "actualizado_en"])
     return cobertura
 
 

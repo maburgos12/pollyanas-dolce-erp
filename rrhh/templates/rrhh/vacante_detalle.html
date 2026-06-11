@@ -450,6 +450,15 @@
             <input type="text" name="comentario" placeholder="Nota sobre este cambio (opcional)" maxlength="300">
             <button class="btn btn-sm btn-primary" type="submit">Actualizar etapa</button>
           </form>
+          {% if cand.etapa_actual == 'seleccionado' or cand.etapa_actual == 'documentos' or cand.etapa_actual == 'prueba' %}
+          <form class="cand-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="enviar_alta_pendiente">
+            <input type="hidden" name="candidato_id" value="{{ cand.id }}">
+            <input type="text" name="comentario" placeholder="Nota para alta (opcional)" maxlength="300">
+            <button class="btn btn-sm btn-secondary" type="submit">Enviar a alta</button>
+          </form>
+          {% endif %}
         </div>
         {% endif %}
 

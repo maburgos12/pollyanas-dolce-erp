@@ -8,6 +8,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 
 from core.models import Sucursal
 
@@ -24,6 +25,7 @@ from .services_vacantes import (
     can_solicitar_vacantes,
     can_ver_vacante,
     cubrir_vacante,
+    crear_alta_pendiente_desde_candidato,
     crear_solicitud_vacante,
     devolver_vacante_correccion,
     enviar_vacante_autorizacion,
@@ -266,6 +268,11 @@ def vacante_accion(request, pk: int):
             candidato = get_object_or_404(CandidatoVacante, pk=request.POST.get("candidato_id"), vacante=vacante)
             avanzar_etapa_candidato(candidato, request.user, request.POST.get("nueva_etapa") or "", comentario)
             messages.success(request, f"Etapa de {candidato.nombre} actualizada.")
+        elif action == "enviar_alta_pendiente":
+            candidato = get_object_or_404(CandidatoVacante, pk=request.POST.get("candidato_id"), vacante=vacante)
+            pendiente = crear_alta_pendiente_desde_candidato(candidato, request.user, comentario)
+            messages.success(request, f"Alta pendiente preparada para {pendiente.nombre}.")
+            return redirect(f"{reverse('rrhh:empleados')}?alta_pendiente={pendiente.id}")
         elif action == "seguimiento":
             agregar_seguimiento_vacante(
                 vacante,

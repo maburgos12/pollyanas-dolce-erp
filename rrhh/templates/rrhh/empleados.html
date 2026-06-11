@@ -845,6 +845,47 @@
   </article>
   {% endif %}
 
+  {% if can_manage_rrhh and altas_pendientes %}
+  <article class="rrhh-card">
+    <div class="rrhh-card-header">
+      <div>
+        <div class="rrhh-card-title">Altas pendientes</div>
+        <div class="rrhh-card-subtitle">Candidatos aceptados desde Vacantes. Selecciona una alta para prerrellenar el formulario normal de empleado.</div>
+      </div>
+    </div>
+    <div class="rrhh-card-body identity-list">
+      {% for alta in altas_pendientes %}
+      <div class="identity-item">
+        <div>
+          <div class="identity-grid">
+            <div class="identity-kv">
+              <div class="identity-label">Candidato</div>
+              <div class="identity-value">{{ alta.nombre }}</div>
+            </div>
+            <div class="identity-kv">
+              <div class="identity-label">Vacante</div>
+              <div class="identity-value">{{ alta.vacante.folio }}</div>
+            </div>
+            <div class="identity-kv">
+              <div class="identity-label">Puesto</div>
+              <div class="identity-value">{{ alta.puesto|default:"-" }}</div>
+            </div>
+            <div class="identity-kv">
+              <div class="identity-label">Sucursal</div>
+              <div class="identity-value">{{ alta.sucursal|default:"-" }}</div>
+            </div>
+          </div>
+          {% if alta_pendiente_seleccionada and alta.id == alta_pendiente_seleccionada.id %}
+          <div class="identity-warning">Alta seleccionada. Revisa los datos prerrellenados y completa lo necesario antes de guardar.</div>
+          {% endif %}
+        </div>
+        <a class="btn btn-primary btn-small" href="{% url 'rrhh:empleados' %}?alta_pendiente={{ alta.id }}">Seleccionar alta</a>
+      </div>
+      {% endfor %}
+    </div>
+  </article>
+  {% endif %}
+
   <section class="rrhh-layout">
     <article class="rrhh-card">
       <div class="rrhh-card-header">
@@ -858,10 +899,13 @@
         <form method="post" enctype="multipart/form-data" data-has-user="false">
           {% csrf_token %}
           <input type="hidden" name="action" value="create">
+          {% if alta_pendiente_seleccionada %}
+          <input type="hidden" name="alta_pendiente_id" value="{{ alta_pendiente_seleccionada.id }}">
+          {% endif %}
           <div class="rrhh-form-grid">
             <div class="rrhh-field span-2">
               <label for="nombre">Nombre completo</label>
-              <input id="nombre" class="input-field" type="text" name="nombre" required>
+              <input id="nombre" class="input-field" type="text" name="nombre" value="{{ alta_prefill.nombre|default:'' }}" required>
             </div>
             <div class="rrhh-field">
               <label for="codigo">Código de empleado / ID checador</label>
@@ -886,6 +930,7 @@
                 <option value="">Sin definir</option>
                 {% for value,label,departamento_origen,departamento_actual,puesto_operativo in area_division_choices %}
                   <option value="{{ value }}"
+                          {% if value == alta_prefill.area %}selected{% endif %}
                           data-departamento-origen="{{ departamento_origen }}"
                           data-departamento-actual="{{ departamento_actual }}"
                           data-puesto-operativo="{{ puesto_operativo }}">{{ label }}</option>
@@ -895,7 +940,7 @@
             </div>
             <div class="rrhh-field">
               <label for="puesto">Puesto descriptivo</label>
-              <input id="puesto" class="input-field" type="text" name="puesto">
+              <input id="puesto" class="input-field" type="text" name="puesto" value="{{ alta_prefill.puesto|default:'' }}">
               <div class="rrhh-help">Texto libre para expediente o nómina. No controla bonos.</div>
             </div>
             <div class="rrhh-field">
@@ -903,7 +948,7 @@
               <select id="departamento_origen" class="input-field" name="departamento_origen" data-departamento-origen-select>
                 <option value="">Sin definir</option>
                 {% for value,label in departamento_choices %}
-                  <option value="{{ value }}">{{ label }}</option>
+                  <option value="{{ value }}" {% if value == alta_prefill.departamento_origen %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
               </select>
               <div class="rrhh-help">De dónde viene naturalmente el puesto. Ej. Logística para repartidores o envíos.</div>
@@ -913,7 +958,7 @@
               <select id="departamento" class="input-field" name="departamento">
                 <option value="">Sin definir</option>
                 {% for value,label in departamento_choices %}
-                  <option value="{{ value }}">{{ label }}</option>
+                  <option value="{{ value }}" {% if value == alta_prefill.departamento %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
               </select>
               <div class="rrhh-help">Quién lo supervisa hoy y en qué estructura aparece actualmente.</div>
@@ -923,7 +968,7 @@
               <select id="puesto_operativo" class="input-field" name="puesto_operativo" data-catalog-select data-catalog-field="puesto_operativo" data-searchable-select="true">
                 <option value="">Sin definir</option>
                 {% for value,label in puesto_operativo_choices %}
-                  <option value="{{ value }}">{{ label }}</option>
+                  <option value="{{ value }}" {% if value == alta_prefill.puesto_operativo %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
               </select>
               <div class="rrhh-help">Lista controlada para reglas internas. Normalmente se llena sola al elegir área/división.</div>
@@ -932,7 +977,7 @@
               <label for="nivel_organizacional">Nivel organizacional</label>
               <select id="nivel_organizacional" class="input-field" name="nivel_organizacional" data-searchable-select="true">
                 {% for value,label in nivel_organizacional_choices %}
-                  <option value="{{ value }}" {% if value == "COLABORADOR" %}selected{% endif %}>{{ label }}</option>
+                  <option value="{{ value }}" {% if value == alta_prefill.nivel_organizacional or not alta_prefill.nivel_organizacional and value == "COLABORADOR" %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
               </select>
               <div class="rrhh-help">Autoridad real: colaborador, encargada, supervisión, jefatura o dirección.</div>
@@ -966,7 +1011,7 @@
             </div>
             <div class="rrhh-field">
               <label for="fecha_ingreso">Ingreso</label>
-              <input id="fecha_ingreso" class="input-field" type="date" name="fecha_ingreso">
+              <input id="fecha_ingreso" class="input-field" type="date" name="fecha_ingreso" value="{{ alta_prefill.fecha_ingreso|default:'' }}">
             </div>
             <div class="rrhh-field">
               <label for="salario_diario">Salario diario</label>
@@ -974,15 +1019,15 @@
             </div>
             <div class="rrhh-field">
               <label for="telefono">Teléfono</label>
-              <input id="telefono" class="input-field" type="text" name="telefono">
+              <input id="telefono" class="input-field" type="text" name="telefono" value="{{ alta_prefill.telefono|default:'' }}">
             </div>
             <div class="rrhh-field">
               <label for="email">Correo</label>
-              <input id="email" class="input-field" type="email" name="email">
+              <input id="email" class="input-field" type="email" name="email" value="{{ alta_prefill.email|default:'' }}">
             </div>
             <div class="rrhh-field span-2">
               <label for="sucursal">Sucursal</label>
-              <input id="sucursal" class="input-field" type="text" name="sucursal">
+              <input id="sucursal" class="input-field" type="text" name="sucursal" value="{{ alta_prefill.sucursal|default:'' }}">
             </div>
             <div class="rrhh-access-panel" data-access-block>
               <div>
