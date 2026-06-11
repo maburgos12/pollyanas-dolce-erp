@@ -200,6 +200,47 @@
       </div>
     </div>
 
+    <div class="conc-subpanel" style="margin-top:14px;">
+      <h3>CFDI emitidos por sucursal</h3>
+      <p class="conc-note">
+        Sucursales detectadas desde los conceptos del XML. Los pendientes quedan separados para revision fiscal.
+      </p>
+      <div class="table-responsive">
+        <table class="conc-table">
+          <thead>
+            <tr>
+              <th>Sucursal</th>
+              <th>CFDI</th>
+              <th class="conc-money">Total</th>
+              <th class="conc-money">Efectivo</th>
+              <th class="conc-money">Tarjeta</th>
+              <th class="conc-money">Transferencia</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in periodo_resumen.cfdi_sucursales.sucursales %}
+            <tr>
+              <td>{{ row.nombre }}</td>
+              <td>{{ row.cfdis|intcomma }}</td>
+              <td class="conc-money">${{ row.total|floatformat:2|intcomma }}</td>
+              <td class="conc-money">${{ row.efectivo|floatformat:2|intcomma }}</td>
+              <td class="conc-money">${{ row.tarjeta|floatformat:2|intcomma }}</td>
+              <td class="conc-money">${{ row.transferencia|floatformat:2|intcomma }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6" class="conc-empty">Sin CFDI con sucursal resuelta en este periodo.</td></tr>
+            {% endfor %}
+            <tr>
+              <td><strong>Pendiente de clasificar</strong></td>
+              <td>{{ periodo_resumen.cfdi_sucursales.pendientes|intcomma }}</td>
+              <td class="conc-money">${{ periodo_resumen.cfdi_sucursales.pendientes_total|floatformat:2|intcomma }}</td>
+              <td colspan="3"><span class="conc-note">Requiere revisar concepto, cliente o regla fiscal.</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="conc-split" style="margin-top:14px;">
       <div class="conc-subpanel">
         <h3>Archivos que alimentan el periodo</h3>

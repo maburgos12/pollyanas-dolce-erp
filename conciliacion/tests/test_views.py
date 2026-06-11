@@ -8,7 +8,8 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from conciliacion.models import ImportacionBancaria
+from conciliacion.models import CfdiSucursalResolucion, ImportacionBancaria
+from core.models import Sucursal
 from sat_client.models import CfdiDescargado, LogDescargaSat
 from syncfy_client.models import CuentaBancaria, MovimientoBancario
 
@@ -78,6 +79,25 @@ class ConciliacionBancariaViewTests(TestCase):
             tipo_cfdi=CfdiDescargado.TIPO_RECIBIDO,
             fecha_emision=timezone.make_aware(datetime(2026, 5, 15, 10, 0)),
         )
+        matriz = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz")
+        cfdi_emitido = CfdiDescargado.objects.create(
+            uuid="22222222-2222-2222-2222-222222222222",
+            rfc_emisor="GEF211230KR2",
+            rfc_receptor="XAXX010101000",
+            subtotal=Decimal("500.00"),
+            total=Decimal("500.00"),
+            tipo_comprobante="I",
+            tipo_cfdi=CfdiDescargado.TIPO_EMITIDO,
+            forma_pago="01",
+            fecha_emision=timezone.make_aware(datetime(2026, 5, 16, 10, 0)),
+        )
+        CfdiSucursalResolucion.objects.create(
+            cfdi=cfdi_emitido,
+            sucursal=matriz,
+            fuente=CfdiSucursalResolucion.FUENTE_XML_CONCEPTO,
+            confianza=95,
+            texto_detectado="VENTAS DEL DIA",
+        )
 
         response = self.client.get("/conciliacion/bancaria/?periodo=2026-05")
 
@@ -88,6 +108,9 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertContains(response, "2026-05-31")
         self.assertContains(response, "CFDI SAT del periodo")
         self.assertContains(response, "11111111-1111-1111-1111-111111111111")
+        self.assertContains(response, "CFDI emitidos por sucursal")
+        self.assertContains(response, "Matriz")
+        self.assertContains(response, "$500.00")
 
     def test_preview_and_confirm_import_movements(self):
         archivo = SimpleUploadedFile(
