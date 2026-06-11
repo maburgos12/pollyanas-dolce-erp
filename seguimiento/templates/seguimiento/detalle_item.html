@@ -211,6 +211,18 @@
         <div class="bi-metric-value">{{ item.origen|default:"ERP" }}</div>
       </div>
       <div class="bi-metric">
+        <div class="bi-metric-label">Estado app</div>
+        <div class="bi-metric-value">{{ item.estado_app_label }}</div>
+      </div>
+      <div class="bi-metric">
+        <div class="bi-metric-label">Estado ERP</div>
+        <div class="bi-metric-value">{{ item.get_estatus_display }}</div>
+      </div>
+      <div class="bi-metric">
+        <div class="bi-metric-label">Última sync</div>
+        <div class="bi-metric-value">{% if item.source_synced_at %}{{ item.source_synced_at|slice:":16" }}{% else %}—{% endif %}</div>
+      </div>
+      <div class="bi-metric">
         <div class="bi-metric-label">Checks</div>
         <div class="bi-metric-value">{{ checklist_done }}/{{ checklist_total }} · {{ progreso_pct }}%</div>
       </div>
@@ -247,6 +259,10 @@
       {% elif item.tiene_desfase_agente_dg %}
       <p class="seg-timeline-meta" style="margin:0; color:#7a5b14; font-weight:800;">
         Aprobación local anterior pendiente de sincronizar con app.pollyanasdolce.com.
+      </p>
+      {% elif item.es_historico_agente_dg %}
+      <p class="seg-timeline-meta" style="margin:0; color:#236d53; font-weight:800;">
+        Registro histórico importado desde app.pollyanasdolce.com; no cuenta como pendiente ni vencido.
       </p>
       {% endif %}
       {% if ultimo_comentario_dg %}

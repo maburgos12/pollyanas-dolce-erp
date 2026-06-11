@@ -27,7 +27,9 @@ from .models import (
 )
 from .services import empleado_de_usuario
 from .management.commands.importar_agente_dg_seguimiento import Command as ImportarAgenteDGCommand
+from .management.commands.importar_agente_dg_seguimiento import MINUTE_QUERY
 from .management.commands.importar_agente_dg_seguimiento import _status_agente_a_erp
+from .services import upsert_agente_dg_payload
 
 
 def _agente_dg_signature(payload: dict, secret: str) -> tuple[str, str]:
@@ -330,7 +332,7 @@ class SeguimientoColaboradorTests(TestCase):
         self.item.checklist.all().delete()
         self.client.force_login(dg_user)
 
-        response = self.client.get("/seguimiento/panel/?tipo=MINUTA&vista=tabla&tab=MINUTA")
+        response = self.client.get("/seguimiento/panel/?bucket=desfases&tipo=MINUTA&vista=tabla&tab=MINUTA")
 
         self.assertContains(response, "Sin checklist")
         self.assertContains(response, "Desfase app")
@@ -727,6 +729,174 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertLessEqual(len(check.titulo), 220)
         self.assertTrue(check.titulo.endswith("..."))
         self.assertEqual(check.descripcion, texto_largo)
+
+    def test_minute_query_incluye_archivadas_cerradas(self):
+        self.assertIn("m.archived_at IS NULL", MINUTE_QUERY)
+        self.assertIn("m.archived_at", MINUTE_QUERY)
+        self.assertIn("COMPLETED", MINUTE_QUERY)
+        self.assertIn("CLOSED", MINUTE_QUERY)
+        self.assertIn("CANCELLED", MINUTE_QUERY)
+
+    def test_importador_minuta_archivada_completed_entra_como_historial(self):
+        command = ImportarAgenteDGCommand()
+        counters = {"created": 0, "updated": 0, "skipped": 0}
+        archived_at = timezone.now() - timedelta(days=12)
+
+        command._upsert_item(
+            {
+                "id": 125,
+                "titulo": "Cotización cerrada histórica",
+                "descripcion": "Minuta finalizada en la app.",
+                "expected_deliverable": "",
+                "status": "COMPLETED",
+                "archived_at": archived_at,
+                "due_at": timezone.now() - timedelta(days=30),
+                "user_email": self.user.email,
+                "user_name": self.user.get_full_name(),
+                "user_id": 4,
+                "area_name": "Junta",
+            },
+            "minute_agreements",
+            SeguimientoItem.TIPO_MINUTA,
+            counters,
+            checklist=[],
+        )
+
+        item = SeguimientoItem.objects.get(metadata__source_table="minute_agreements", metadata__source_id=125)
+        self.assertEqual(item.estatus, SeguimientoItem.ESTATUS_COMPLETADO)
+        self.assertFalse(item.esta_vencido)
+        self.assertEqual(item.aprobado_at, archived_at)
+        self.assertEqual(item.metadata["source_status"], "COMPLETED")
+        self.assertIn("source_archived_at", item.metadata)
+
+    def test_panel_dg_manda_archivada_completed_a_historico_sin_vencido(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.historico", password="test12345")
+        dg_user.groups.add(dg_group)
+        command = ImportarAgenteDGCommand()
+        counters = {"created": 0, "updated": 0, "skipped": 0}
+        command._upsert_item(
+            {
+                "id": 126,
+                "titulo": "Minuta archivada sin retraso operativo",
+                "descripcion": "Histórico",
+                "status": "COMPLETED",
+                "archived_at": timezone.now() - timedelta(days=3),
+                "due_at": timezone.now() - timedelta(days=10),
+                "user_email": self.user.email,
+                "user_name": self.user.get_full_name(),
+                "user_id": 4,
+                "area_name": "Junta",
+            },
+            "minute_agreements",
+            SeguimientoItem.TIPO_MINUTA,
+            counters,
+            checklist=[],
+        )
+        self.client.force_login(dg_user)
+
+        activos = self.client.get("/seguimiento/panel/?bucket=activos&tab=MINUTA&vista=tabla")
+        historico = self.client.get("/seguimiento/panel/?bucket=historico&tab=MINUTA&vista=tabla")
+
+        self.assertNotContains(activos, "Minuta archivada sin retraso operativo")
+        self.assertContains(historico, "Minuta archivada sin retraso operativo")
+        self.assertEqual(historico.context["vencidos"], 0)
+        self.assertEqual(historico.context["completados"], 1)
+        self.assertNotContains(historico, "Desfase app")
+
+    def test_importador_open_no_borra_aprobado_at_y_panel_lo_aisla_en_desfases(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.desfase", password="test12345")
+        dg_user.groups.add(dg_group)
+        aprobado_at = timezone.now() - timedelta(days=2)
+        item = SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            titulo="Búsqueda de camisas",
+            responsable_user=self.user,
+            area="Junta",
+            fecha_limite=timezone.now() - timedelta(days=1),
+            estatus=SeguimientoItem.ESTATUS_COMPLETADO,
+            aprobado_at=aprobado_at,
+            origen="Agente DG",
+            referencia_externa="minute_agreements:73",
+            metadata={"source": "agente_dg", "source_table": "minute_agreements", "source_id": 73, "source_status": "COMPLETED"},
+        )
+        command = ImportarAgenteDGCommand()
+        counters = {"created": 0, "updated": 0, "skipped": 0}
+
+        command._upsert_item(
+            {
+                "id": 73,
+                "titulo": "Búsqueda de camisas",
+                "descripcion": "Pendiente en app",
+                "status": "OPEN",
+                "due_at": timezone.now() - timedelta(days=1),
+                "user_email": self.user.email,
+                "user_name": self.user.get_full_name(),
+                "user_id": 4,
+                "area_name": "Junta",
+            },
+            "minute_agreements",
+            SeguimientoItem.TIPO_MINUTA,
+            counters,
+            checklist=[],
+        )
+        item.refresh_from_db()
+        self.client.force_login(dg_user)
+
+        activos = self.client.get("/seguimiento/panel/?bucket=activos&tab=MINUTA&vista=tabla")
+        desfases = self.client.get("/seguimiento/panel/?bucket=desfases&tab=MINUTA&vista=tabla")
+
+        self.assertEqual(item.estatus, SeguimientoItem.ESTATUS_PENDIENTE)
+        self.assertEqual(item.aprobado_at, aprobado_at)
+        self.assertEqual(item.metadata["source_status"], "OPEN")
+        self.assertNotContains(activos, "Búsqueda de camisas")
+        self.assertContains(desfases, "Búsqueda de camisas")
+        self.assertContains(desfases, "Desfase app")
+        self.assertEqual(desfases.context["vencidos"], 0)
+
+    def test_webhook_parcial_preserva_checklist_existente(self):
+        command = ImportarAgenteDGCommand()
+        counters = {"created": 0, "updated": 0, "skipped": 0}
+        command._upsert_item(
+            {
+                "id": 601,
+                "titulo": "Proyecto con pasos preservados",
+                "descripcion": "Proyecto",
+                "status": "IN_PROGRESS",
+                "target_date": timezone.now() + timedelta(days=5),
+                "user_email": self.user.email,
+                "user_name": self.user.get_full_name(),
+                "user_id": 4,
+                "area_name": "Proyecto",
+            },
+            "minute_projects",
+            SeguimientoItem.TIPO_PROYECTO,
+            counters,
+            checklist=[{"titulo": "Paso existente", "descripcion": "", "completado": False}],
+        )
+
+        upsert_agente_dg_payload(
+            {
+                "source_table": "minute_projects",
+                "source_id": 601,
+                "record": {
+                    "id": 601,
+                    "titulo": "Proyecto con pasos preservados",
+                    "descripcion": "Proyecto actualizado",
+                    "status": "IN_PROGRESS",
+                    "target_date": timezone.now() + timedelta(days=6),
+                    "user_email": self.user.email,
+                    "user_name": self.user.get_full_name(),
+                    "user_id": 4,
+                    "area_name": "Proyecto",
+                },
+            }
+        )
+
+        item = SeguimientoItem.objects.get(metadata__source_table="minute_projects", metadata__source_id=601)
+        self.assertEqual(item.checklist.count(), 1)
+        self.assertEqual(item.checklist.get().titulo, "Paso existente")
 
     def test_superusuario_conserva_bonos_en_menu(self):
         admin = get_user_model().objects.create_superuser(username="admin-seguimiento", password="x")

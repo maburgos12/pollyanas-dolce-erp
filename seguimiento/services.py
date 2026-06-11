@@ -50,6 +50,7 @@ AGENTE_DG_SOURCE_TABLE_TYPES = {
     "minute_projects": SeguimientoItem.TIPO_PROYECTO,
 }
 CHECKLIST_TITULO_MAX_LENGTH = 220
+_PRESERVE_CHECKLIST = object()
 
 
 def _truncate_for_charfield(value: str, max_length: int) -> str:
@@ -57,6 +58,15 @@ def _truncate_for_charfield(value: str, max_length: int) -> str:
     if len(value) <= max_length:
         return value
     return value[: max_length - 3].rstrip() + "..."
+
+
+def _json_datetime(value) -> str:
+    if not value:
+        return ""
+    dt_value = agente_dg_as_datetime(value)
+    if dt_value:
+        return dt_value.isoformat()
+    return str(value)
 
 
 def _tokens(value: str) -> set[str]:
@@ -337,6 +347,9 @@ class AgenteDGSeguimientoImporter:
             "source_user_email": row.get("user_email") or "",
             "source_user_name": row.get("user_name") or "",
             "source_status": str(row.get("status") or ""),
+            "source_archived_at": _json_datetime(row.get("archived_at")),
+            "source_completed_at": _json_datetime(row.get("completed_at")),
+            "synced_at": timezone.now().isoformat(),
             "source_participants": participant_payload,
         }
         # Solo minutas y proyectos pasan por aprobación del DG. Los compromisos son
@@ -378,9 +391,20 @@ class AgenteDGSeguimientoImporter:
             item = SeguimientoItem.objects.create(**defaults)
             counters["created"] += 1
 
+        cierre_fuente = agente_dg_status_a_erp(row.get("status")) in {
+            SeguimientoItem.ESTATUS_COMPLETADO,
+            SeguimientoItem.ESTATUS_CANCELADO,
+        }
+        cierre_at = agente_dg_as_datetime(row.get("archived_at") or row.get("completed_at"))
+        if cierre_fuente and cierre_at and not item.aprobado_at:
+            item.aprobado_at = cierre_at
+            item.save(update_fields=["aprobado_at", "updated_at"])
+
         item.participantes_user.set(participant_users)
         item.participantes_empleado.set(participant_empleados)
 
+        if checklist is _PRESERVE_CHECKLIST:
+            return
         checklist_payload = checklist
         if checklist_payload is None:
             checklist_payload = [
@@ -496,13 +520,16 @@ def upsert_agente_dg_payload(payload: dict) -> dict[str, int]:
         record["id"] = source_id
 
     importer = AgenteDGSeguimientoImporter()
+    checklist = payload.get("checklist", _PRESERVE_CHECKLIST)
+    if checklist is _PRESERVE_CHECKLIST and "checklist_items_json" in record:
+        checklist = None
     with transaction.atomic():
         importer._upsert_item(
             record,
             source_table,
             AGENTE_DG_SOURCE_TABLE_TYPES[source_table],
             counters,
-            checklist=payload.get("checklist"),
+            checklist=checklist,
             participants=payload.get("participants"),
         )
     return counters
