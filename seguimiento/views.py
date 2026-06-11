@@ -1516,13 +1516,16 @@ def _actividad_evento(actividad: ActividadCalendario, request_user) -> dict:
         "id": f"act-{actividad.pk}",
         "fuente": "actividad",
         "tipo": "ACTIVIDAD",
+        "source_label": "Actividad personal",
         "titulo": actividad.titulo,
         "fecha": actividad.fecha.isoformat(),
         "hora": actividad.hora_inicio.strftime("%H:%M") if actividad.hora_inicio else None,
         "hora_fin": actividad.hora_fin.strftime("%H:%M") if actividad.hora_fin else None,
         "estatus": actividad.estatus,
+        "finalizado": completada,
         "vencido": actividad.fecha < timezone.localdate() and not completada,
         "url": None,
+        "accion_label": "Editar actividad",
         "responsable": _nombre_usuario_legible(actividad.usuario),
         "descripcion": actividad.descripcion,
         "editable": actividad.usuario_id == request_user.id,
@@ -1539,19 +1542,25 @@ def _item_evento(item: SeguimientoItem, request_user) -> dict:
     fecha, hora = _fecha_hora_local(item.fecha_limite)
     responsable = _nombre_usuario_legible(item.responsable_user) or getattr(item.responsable_empleado, "nombre", "")
     completado = item.estatus in {SeguimientoItem.ESTATUS_COMPLETADO, SeguimientoItem.ESTATUS_CANCELADO}
+    source = _agente_dg_source(item)
     return {
         "id": f"item-{item.pk}",
         "fuente": "seguimiento",
         "tipo": item.tipo,
+        "source_label": item.get_tipo_display(),
         "titulo": item.titulo,
         "fecha": fecha.isoformat() if fecha else "",
         "hora": hora,
         "hora_fin": None,
         "estatus": item.estatus,
+        "finalizado": completado,
         "vencido": bool(fecha and fecha < timezone.localdate() and not completado),
         "url": _seguimiento_url_calendario(item, request_user),
+        "accion_label": "Ver seguimiento",
         "responsable": responsable or None,
-        "descripcion": "",
+        "descripcion": item.entregable_esperado or item.descripcion,
+        "source_table": source[0] if source else "",
+        "source_id": source[1] if source else None,
         "editable": False,
     }
 
@@ -1560,19 +1569,25 @@ def _checklist_evento(check: SeguimientoChecklistItem, request_user) -> dict:
     fecha, hora = _fecha_hora_local(check.vence)
     item = check.seguimiento
     responsable = _nombre_usuario_legible(item.responsable_user) or getattr(item.responsable_empleado, "nombre", "")
+    source = _agente_dg_source(item)
     return {
         "id": f"paso-{check.pk}",
         "fuente": "checklist",
         "tipo": "PASO",
+        "source_label": "Paso",
         "titulo": check.titulo,
         "fecha": fecha.isoformat() if fecha else "",
         "hora": hora,
         "hora_fin": None,
         "estatus": "COMPLETADO" if check.completado else (check.estatus_origen or "PENDIENTE"),
+        "finalizado": check.completado,
         "vencido": bool(fecha and fecha < timezone.localdate() and not check.completado),
         "url": _seguimiento_url_calendario(item, request_user),
+        "accion_label": "Ver seguimiento",
         "responsable": responsable or None,
-        "descripcion": "",
+        "descripcion": check.entregable or item.entregable_esperado,
+        "source_table": source[0] if source else "",
+        "source_id": source[1] if source else None,
         "editable": False,
     }
 

@@ -128,6 +128,10 @@
     border-color: var(--vino);
   }
 
+  .calendar-day.has-events {
+    box-shadow: 0 1px 0 rgba(0, 0, 0, .02);
+  }
+
   .calendar-day-header {
     display: flex;
     align-items: center;
@@ -142,6 +146,10 @@
     color: var(--texto-light);
     font-size: .76rem;
     font-weight: 800;
+  }
+
+  .calendar-day-count.has-pending {
+    color: var(--vino);
   }
 
   .calendar-events {
@@ -181,6 +189,36 @@
   .calendar-chip.is-actividad { border-left-color: var(--amarillo); }
   .calendar-chip.is-vencido { border-color: var(--rojo); }
   .calendar-chip.is-completed { opacity: .68; }
+  .calendar-chip.is-review { border-left-color: var(--dorado); }
+
+  .calendar-status {
+    display: inline-flex;
+    width: fit-content;
+    min-height: 24px;
+    align-items: center;
+    border-radius: var(--radius-sm);
+    padding: 3px 8px;
+    background: rgba(120, 27, 71, .08);
+    color: var(--vino);
+    font-size: .72rem;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .calendar-status.is-done {
+    background: rgba(46, 125, 50, .12);
+    color: #236d53;
+  }
+
+  .calendar-status.is-overdue {
+    background: rgba(192, 57, 43, .12);
+    color: var(--rojo);
+  }
+
+  .calendar-status.is-review {
+    background: rgba(184, 137, 74, .16);
+    color: #7b5324;
+  }
 
   .calendar-more {
     border: 0;
@@ -260,6 +298,116 @@
     gap: 8px;
   }
 
+  .calendar-day-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 8vh 18px 32px;
+    background: rgba(28, 22, 25, .48);
+  }
+
+  .calendar-day-modal.calendar-hidden {
+    display: none;
+  }
+
+  .calendar-day-dialog {
+    width: min(760px, 100%);
+    max-height: 84vh;
+    overflow: auto;
+    border: 1px solid rgba(120, 27, 71, .16);
+    border-radius: var(--radius-sm);
+    background: var(--blanco, #fff);
+    box-shadow: 0 18px 56px rgba(28, 22, 25, .22);
+  }
+
+  .calendar-day-dialog-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    border-bottom: 1px solid var(--gris-suave);
+    padding: 18px;
+  }
+
+  .calendar-day-dialog-header h2 {
+    margin: 0;
+    color: var(--texto);
+    font-size: 1.1rem;
+    font-weight: 900;
+  }
+
+  .calendar-day-dialog-body {
+    display: grid;
+    gap: 14px;
+    padding: 18px;
+  }
+
+  .calendar-day-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .calendar-day-section {
+    display: grid;
+    gap: 8px;
+  }
+
+  .calendar-day-section h3 {
+    margin: 0;
+    color: var(--texto);
+    font-size: .86rem;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .calendar-event-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    border: 1px solid var(--gris-suave);
+    border-left: 5px solid var(--vino);
+    border-radius: var(--radius-sm);
+    padding: 10px;
+    background: var(--blanco, #fff);
+    color: var(--texto);
+    text-align: left;
+    text-decoration: none;
+  }
+
+  .calendar-event-row:hover {
+    border-color: rgba(120, 27, 71, .35);
+  }
+
+  .calendar-event-row.is-minuta { border-left-color: var(--vino); }
+  .calendar-event-row.is-proyecto { border-left-color: var(--dorado); }
+  .calendar-event-row.is-compromiso { border-left-color: var(--verde); }
+  .calendar-event-row.is-paso { border-left-color: var(--rosa); }
+  .calendar-event-row.is-actividad { border-left-color: var(--amarillo); }
+  .calendar-event-row.is-vencido { border-color: var(--rojo); }
+  .calendar-event-row.is-completed { opacity: .72; }
+
+  .calendar-event-title {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .calendar-event-title strong,
+  .calendar-event-title span {
+    overflow-wrap: anywhere;
+  }
+
+  .calendar-event-meta {
+    color: var(--texto-light);
+    font-size: .78rem;
+    font-weight: 800;
+  }
+
   .calendar-hidden {
     display: none;
   }
@@ -315,6 +463,18 @@
 
     .calendar-toolbar-group .btn {
       flex: 1 1 auto;
+    }
+
+    .calendar-day-modal {
+      padding: 12px;
+    }
+
+    .calendar-day-dialog {
+      max-height: calc(100vh - 24px);
+    }
+
+    .calendar-event-row {
+      grid-template-columns: minmax(0, 1fr);
     }
   }
 </style>
@@ -412,6 +572,19 @@
       </div>
     </form>
   </aside>
+
+  <div class="calendar-day-modal calendar-hidden" id="calendar-day-modal" role="dialog" aria-modal="true" aria-labelledby="calendar-day-modal-title">
+    <div class="calendar-day-dialog">
+      <div class="calendar-day-dialog-header">
+        <div>
+          <h2 id="calendar-day-modal-title">Pendientes del día</h2>
+          <p class="muted" id="calendar-day-modal-subtitle"></p>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" data-action="close-day-modal" aria-label="Cerrar">Cerrar</button>
+      </div>
+      <div class="calendar-day-dialog-body" id="calendar-day-modal-body"></div>
+    </div>
+  </div>
 </section>
 
 <script>
@@ -438,6 +611,10 @@
     formTitle: byId('calendar-form-title'),
     formError: byId('calendar-form-error'),
     userFilter: byId('calendar-user-filter'),
+    dayModal: byId('calendar-day-modal'),
+    dayModalTitle: byId('calendar-day-modal-title'),
+    dayModalSubtitle: byId('calendar-day-modal-subtitle'),
+    dayModalBody: byId('calendar-day-modal-body'),
   };
 
   function pad(value) {
@@ -527,10 +704,61 @@
     if (event.vencido) {
       classes.push('is-vencido');
     }
-    if (event.estatus === 'COMPLETADA' || event.estatus === 'COMPLETADO') {
+    if (event.finalizado || event.estatus === 'COMPLETADA' || event.estatus === 'COMPLETADO') {
       classes.push('is-completed');
     }
+    if (event.estatus === 'EN_REVISION' || event.estatus === 'SUBMITTED') {
+      classes.push('is-review');
+    }
     return classes.join(' ');
+  }
+
+  function eventRowClass(event) {
+    return eventClass(event).replace('calendar-chip', 'calendar-event-row');
+  }
+
+  function statusLabel(event) {
+    if (event.finalizado) {
+      return 'Finalizado';
+    }
+    if (event.vencido) {
+      return 'Vencido';
+    }
+    if (event.estatus === 'EN_REVISION' || event.estatus === 'SUBMITTED') {
+      return 'En revisión';
+    }
+    if (event.estatus === 'EN_PROCESO' || event.estatus === 'IN_PROGRESS') {
+      return 'En proceso';
+    }
+    return 'Pendiente';
+  }
+
+  function statusClass(event) {
+    const classes = ['calendar-status'];
+    if (event.finalizado) {
+      classes.push('is-done');
+    } else if (event.vencido) {
+      classes.push('is-overdue');
+    } else if (event.estatus === 'EN_REVISION' || event.estatus === 'SUBMITTED') {
+      classes.push('is-review');
+    }
+    return classes.join(' ');
+  }
+
+  function sourceLabel(event) {
+    return event.source_label || event.tipo || 'Pendiente';
+  }
+
+  function eventMeta(event) {
+    const parts = [];
+    if (event.hora) {
+      parts.push(event.hora + (event.hora_fin ? `-${event.hora_fin}` : ''));
+    }
+    parts.push(sourceLabel(event));
+    if (event.responsable) {
+      parts.push(event.responsable);
+    }
+    return parts.join(' · ');
   }
 
   function chip(event) {
@@ -540,9 +768,39 @@
     button.textContent = `${event.hora ? event.hora + ' · ' : ''}${event.titulo}`;
     button.addEventListener('click', (ev) => {
       ev.stopPropagation();
-      showDetail(event);
+      if (event.url) {
+        window.location.href = event.url;
+      } else {
+        showDetail(event);
+      }
     });
     return button;
+  }
+
+  function eventRow(event) {
+    const element = event.url ? document.createElement('a') : document.createElement('button');
+    if (event.url) {
+      element.href = event.url;
+    } else {
+      element.type = 'button';
+      element.addEventListener('click', () => showDetail(event));
+    }
+    element.className = eventRowClass(event);
+    const title = document.createElement('div');
+    title.className = 'calendar-event-title';
+    const strong = document.createElement('strong');
+    strong.textContent = event.titulo;
+    const meta = document.createElement('span');
+    meta.className = 'calendar-event-meta';
+    meta.textContent = eventMeta(event);
+    title.appendChild(strong);
+    title.appendChild(meta);
+    const status = document.createElement('span');
+    status.className = statusClass(event);
+    status.textContent = statusLabel(event);
+    element.appendChild(title);
+    element.appendChild(status);
+    return element;
   }
 
   function renderWeekdays() {
@@ -573,10 +831,14 @@
       if (key === today) {
         day.classList.add('is-today');
       }
+      if (events.length) {
+        day.classList.add('has-events');
+      }
       day.addEventListener('click', () => showDay(key, events));
       const header = document.createElement('div');
       header.className = 'calendar-day-header';
-      header.innerHTML = `<span>${date.getDate()}</span><span class="calendar-day-count">${events.length || ''}</span>`;
+      const abiertos = events.filter((event) => !event.finalizado).length;
+      header.innerHTML = `<span>${date.getDate()}</span><span class="calendar-day-count ${abiertos ? 'has-pending' : ''}">${events.length ? `${abiertos}/${events.length}` : ''}</span>`;
       const body = document.createElement('div');
       body.className = 'calendar-events';
       events.slice(0, 3).forEach((event) => body.appendChild(chip(event)));
@@ -642,6 +904,11 @@
     }
   }
 
+  function closeDayModal() {
+    els.dayModal.classList.add('calendar-hidden');
+    els.dayModalBody.innerHTML = '';
+  }
+
   function render() {
     els.title.textContent = monthLabel();
     const isMonth = state.vista === 'mes';
@@ -680,24 +947,69 @@
   }
 
   function showDay(key, events) {
-    els.detail.innerHTML = '';
     const date = parseKey(key);
-    const title = document.createElement('h2');
-    title.textContent = `${date.getDate()} ${monthNames[date.getMonth()]}`;
-    els.detail.appendChild(title);
+    const sortedEvents = [...events].sort(compareEvents);
+    const abiertos = sortedEvents.filter((event) => !event.finalizado).length;
+    const vencidos = sortedEvents.filter((event) => event.vencido).length;
+    const finalizados = sortedEvents.filter((event) => event.finalizado).length;
+
+    els.dayModalTitle.textContent = `${weekDays[(date.getDay() + 6) % 7]} ${date.getDate()} ${monthNames[date.getMonth()]} ${date.getFullYear()}`;
+    els.dayModalSubtitle.textContent = sortedEvents.length
+      ? `${abiertos} pendiente(s), ${finalizados} finalizado(s), ${vencidos} vencido(s)`
+      : 'Sin pendientes registrados para este día.';
+    els.dayModalBody.innerHTML = '';
+
+    const summary = document.createElement('div');
+    summary.className = 'calendar-day-summary';
+    [
+      ['Pendientes', abiertos],
+      ['Finalizados', finalizados],
+      ['Vencidos', vencidos],
+      ['Total', sortedEvents.length],
+    ].forEach(([label, value]) => {
+      const chipEl = document.createElement('span');
+      chipEl.className = 'calendar-legend-chip';
+      chipEl.textContent = `${label}: ${value}`;
+      summary.appendChild(chipEl);
+    });
+    els.dayModalBody.appendChild(summary);
+
     if (!events.length) {
       const empty = document.createElement('p');
       empty.className = 'muted';
-      empty.textContent = 'Sin eventos registrados.';
-      els.detail.appendChild(empty);
+      empty.textContent = 'Sin pendientes ni actividades para mostrar.';
+      els.dayModalBody.appendChild(empty);
     }
-    events.forEach((event) => els.detail.appendChild(chip(event)));
+
+    const groups = new Map();
+    sortedEvents.forEach((event) => {
+      const label = sourceLabel(event);
+      if (!groups.has(label)) {
+        groups.set(label, []);
+      }
+      groups.get(label).push(event);
+    });
+    groups.forEach((groupEvents, label) => {
+      const section = document.createElement('section');
+      section.className = 'calendar-day-section';
+      const heading = document.createElement('h3');
+      heading.textContent = label;
+      section.appendChild(heading);
+      groupEvents.forEach((event) => section.appendChild(eventRow(event)));
+      els.dayModalBody.appendChild(section);
+    });
+
     const action = document.createElement('button');
     action.type = 'button';
     action.className = 'btn btn-primary';
     action.textContent = 'Nueva actividad';
-    action.addEventListener('click', () => openForm({fecha: key}));
-    els.detail.appendChild(action);
+    action.addEventListener('click', () => {
+      closeDayModal();
+      openForm({fecha: key});
+    });
+    els.dayModalBody.appendChild(action);
+
+    els.dayModal.classList.remove('calendar-hidden');
   }
 
   function showDetail(event) {
@@ -712,6 +1024,10 @@
     const status = document.createElement('p');
     status.textContent = `Estatus: ${event.estatus || 'Pendiente'}`;
     els.detail.appendChild(status);
+    const source = document.createElement('p');
+    source.className = 'muted';
+    source.textContent = `Fuente: ${sourceLabel(event)}`;
+    els.detail.appendChild(source);
     if (event.responsable) {
       const responsible = document.createElement('p');
       responsible.textContent = `Responsable: ${event.responsable}`;
@@ -758,7 +1074,7 @@
       const link = document.createElement('a');
       link.className = 'btn btn-secondary';
       link.href = event.url;
-      link.textContent = 'Ver seguimiento';
+      link.textContent = event.accion_label || 'Ver seguimiento';
       actions.appendChild(link);
     }
     els.detail.appendChild(actions);
@@ -837,8 +1153,22 @@
         openForm({fecha: dateKey(state.cursor)});
       } else if (action === 'cancel-form') {
         closeForm();
+      } else if (action === 'close-day-modal') {
+        closeDayModal();
       }
     });
+  });
+
+  els.dayModal.addEventListener('click', (event) => {
+    if (event.target === els.dayModal) {
+      closeDayModal();
+    }
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !els.dayModal.classList.contains('calendar-hidden')) {
+      closeDayModal();
+    }
   });
 
   document.querySelectorAll('[data-view]').forEach((button) => {

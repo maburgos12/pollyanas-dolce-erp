@@ -1171,6 +1171,36 @@ class CalendarioTests(TestCase):
         self.assertEqual(response.status_code, 200)
         evento = next(evento for evento in response.json()["eventos"] if evento["titulo"] == "Compromiso propio")
         self.assertEqual(evento["url"], f"/seguimiento/{item.pk}/")
+        self.assertEqual(evento["source_label"], "Compromiso")
+        self.assertEqual(evento["accion_label"], "Ver seguimiento")
+        self.assertFalse(evento["finalizado"])
+
+    def test_completados_siguen_visibles_como_finalizados(self):
+        item = SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_PROYECTO,
+            titulo="Proyecto cerrado",
+            responsable_user=self.user_a,
+            fecha_limite=self._dt(self.hoy),
+            estatus=SeguimientoItem.ESTATUS_COMPLETADO,
+        )
+        check = SeguimientoChecklistItem.objects.create(
+            seguimiento=item,
+            titulo="Paso cerrado",
+            vence=self._dt(self.hoy, time(11, 0)),
+            completado=True,
+            completado_por=self.user_a,
+            completado_at=timezone.now(),
+        )
+
+        response = self._eventos(self.user_a)
+
+        self.assertEqual(response.status_code, 200)
+        eventos = {evento["id"]: evento for evento in response.json()["eventos"]}
+        self.assertTrue(eventos[f"item-{item.pk}"]["finalizado"])
+        self.assertEqual(eventos[f"item-{item.pk}"]["source_label"], "Proyecto")
+        self.assertFalse(eventos[f"item-{item.pk}"]["vencido"])
+        self.assertTrue(eventos[f"paso-{check.pk}"]["finalizado"])
+        self.assertEqual(eventos[f"paso-{check.pk}"]["source_label"], "Paso")
 
     def test_item_por_responsable_empleado_usuario_erp_aparece(self):
         empleado = Empleado.objects.create(
