@@ -17,6 +17,11 @@ from django.db import transaction
 from django.utils import timezone
 
 from conciliacion.models import CfdiSucursalResolucion, ImportacionBancaria
+from conciliacion.services.reglas_fiscales import (
+    matriz_reglas_conciliacion,
+    regla_para_movimiento,
+    resumen_matriz_reglas,
+)
 from sat_client.models import CfdiDescargado, CfdiPagoRelacionado
 from syncfy_client.models import CuentaBancaria, MovimientoBancario
 
@@ -341,6 +346,8 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
         "estado_cierre": estado_cierre,
         "resumen_ejecutivo": resumen_ejecutivo,
         "trabajo_conciliacion": trabajo_conciliacion,
+        "matriz_reglas": matriz_reglas_conciliacion(),
+        "matriz_reglas_resumen": resumen_matriz_reglas(),
         "cfdi_rows": list(cfdi_qs.order_by("-fecha_emision")[:20]),
     }
 
@@ -389,7 +396,9 @@ def _trabajo_conciliacion_periodo(
                 "sat_total": row["sat_total"],
                 "diferencia": row["diferencia"],
                 "estado": row["estado"],
-                "accion": _accion_conciliacion(row["estado"], row["banco_total"], row["sat_total"]),
+                "accion": row.get("accion")
+                or _accion_conciliacion(row["estado"], row["banco_total"], row["sat_total"]),
+                "metodo": row.get("metodo", ""),
             }
         )
 
@@ -405,6 +414,7 @@ def _trabajo_conciliacion_periodo(
             "diferencia": diferencia_proveedores,
             "estado": estado_proveedores,
             "accion": _accion_conciliacion(estado_proveedores, movimientos_cargos["total"], cfdi_recibidos["total"]),
+            "metodo": "Cargos contra CFDI recibidos, comisiones, nomina, fiscal o soporte contable.",
         }
     )
 
@@ -420,6 +430,7 @@ def _trabajo_conciliacion_periodo(
             "diferencia": credito_total,
             "estado": "revision" if credito_total else "ok",
             "accion": "Revisar saldos PPD" if credito_total else "Sin saldo pendiente",
+            "metodo": "Complementos de pago y saldos insolutos de facturas a credito.",
         }
     )
     return rows
@@ -498,6 +509,10 @@ def _fmt_int(value: int) -> str:
 def sugerir_cfdis_para_movimientos(movimientos: list[MovimientoBancario]) -> dict[int, list[CfdiDescargado]]:
     sugerencias: dict[int, list[CfdiDescargado]] = {}
     for movimiento in movimientos:
+        regla = regla_para_movimiento(movimiento)
+        if not regla.permite_match_directo:
+            sugerencias[movimiento.pk] = []
+            continue
         fecha = movimiento.fecha_transaccion.date()
         tipo_cfdi = CfdiDescargado.TIPO_EMITIDO if movimiento.tipo == MovimientoBancario.TIPO_ABONO else CfdiDescargado.TIPO_RECIBIDO
         qs = (
@@ -688,12 +703,21 @@ def _resumen_comparativo_canales(*, movimientos_qs, cfdi_qs) -> list[dict[str, A
         "transferencia": "Transferencias de clientes",
         "otros_abonos": "Otros abonos",
     }
+    reglas = {
+        "efectivo": regla_para_movimiento(_MovimientoParaRegla("DEPOSITO EN EFECTIVO", MovimientoBancario.TIPO_ABONO)),
+        "tarjeta": regla_para_movimiento(
+            _MovimientoParaRegla("NEGOCIOS AFILIADOS OPTBLUE AMEX", MovimientoBancario.TIPO_ABONO)
+        ),
+        "transferencia": regla_para_movimiento(_MovimientoParaRegla("SPEI TRANSFERENCIA", MovimientoBancario.TIPO_ABONO)),
+        "otros_abonos": regla_para_movimiento(_MovimientoParaRegla("", MovimientoBancario.TIPO_ABONO)),
+    }
 
     rows = []
     for canal in ["efectivo", "tarjeta", "transferencia", "otros_abonos"]:
         banco_total = banco[canal]["total"]
         sat_total = sat[canal]["total"]
         diferencia = banco_total - sat_total
+        regla = reglas[canal]
         rows.append(
             {
                 "canal": canal,
@@ -704,9 +728,18 @@ def _resumen_comparativo_canales(*, movimientos_qs, cfdi_qs) -> list[dict[str, A
                 "sat_total": sat_total,
                 "diferencia": diferencia,
                 "estado": _estado_diferencia(diferencia),
+                "metodo": regla.metodo,
+                "accion": regla.siguiente_revision,
+                "permite_match_directo": regla.permite_match_directo,
             }
         )
     return rows
+
+
+@dataclass(frozen=True)
+class _MovimientoParaRegla:
+    descripcion: str
+    tipo: str
 
 
 def _aggregate_cfdi_formas(queryset, formas_pago: list[str]) -> dict[str, Any]:

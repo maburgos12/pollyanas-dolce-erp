@@ -153,6 +153,54 @@
   <div class="conc-panel">
     <div class="conc-period-bar">
       <div>
+        <h2>Matriz de reglas de conciliacion fiscal</h2>
+        <p class="conc-note">
+          Paquete fiscal dirigido a conciliacion: separa ventas en efectivo, tarjetas, transferencias, credito, gastos, nomina, impuestos y balance.
+        </p>
+      </div>
+      <div class="conc-status-line">
+        <span class="conc-chip is-info">{{ periodo_resumen.matriz_reglas_resumen.total|intcomma }} reglas</span>
+        <span class="conc-chip is-ok">{{ periodo_resumen.matriz_reglas_resumen.directas|intcomma }} con match directo</span>
+        <span class="conc-chip is-warn">{{ periodo_resumen.matriz_reglas_resumen.requieren_bolsa|intcomma }} por bolsa o soporte</span>
+      </div>
+    </div>
+    <p class="conc-note">
+      Base operativa: Anexo 20, catalogo c_FormaPago, CFDI global, complemento de pagos, CFDI de nomina y reglas internas de Pollyana's Dolce.
+    </p>
+    <div class="table-responsive">
+      <table class="conc-table">
+        <thead>
+          <tr>
+            <th>Flujo</th>
+            <th>SAT</th>
+            <th>Banco</th>
+            <th>Metodo</th>
+            <th>Revision</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for regla in periodo_resumen.matriz_reglas %}
+          <tr>
+            <td>
+              <strong>{{ regla.flujo }}</strong><br>
+              <span class="conc-chip {{ regla.tono }}">{{ regla.mesa_label }}</span>
+            </td>
+            <td>{{ regla.sat }}</td>
+            <td>{{ regla.banco }}</td>
+            <td>{{ regla.metodo }}</td>
+            <td>{{ regla.siguiente_revision }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="5" class="conc-empty">Sin reglas fiscales configuradas.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="conc-panel">
+    <div class="conc-period-bar">
+      <div>
         <h2>Revision del periodo: {{ periodo_resumen.periodo_label }}</h2>
         <p class="conc-note">
           Este bloque muestra lo cargado para el mes seleccionado. La tabla de abajo ya no representa solo los ultimos movimientos globales.
@@ -311,6 +359,7 @@
               <th class="conc-money">SAT</th>
               <th class="conc-money">Diferencia</th>
               <th>Estado</th>
+              <th>Metodo</th>
               <th>Siguiente accion</th>
             </tr>
           </thead>
@@ -330,10 +379,11 @@
                   <span class="conc-chip is-warn">Pendiente</span>
                 {% endif %}
               </td>
+              <td>{{ row.metodo }}</td>
               <td>{{ row.accion }}</td>
             </tr>
             {% empty %}
-            <tr><td colspan="6" class="conc-empty">Sin datos para armar el trabajo de conciliacion.</td></tr>
+            <tr><td colspan="7" class="conc-empty">Sin datos para armar el trabajo de conciliacion.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -388,7 +438,7 @@
     <div class="conc-subpanel" style="margin-top:14px;">
       <h3>Banco contra SAT por canal</h3>
       <p class="conc-note">
-        Compara abonos del estado de cuenta contra CFDI emitidos. La diferencia se calcula como banco menos SAT.
+        Compara abonos del estado de cuenta contra CFDI emitidos segun la regla fiscal de cada canal. La diferencia se calcula como banco menos SAT.
       </p>
       <div class="table-responsive">
         <table class="conc-table">
@@ -401,6 +451,7 @@
               <th class="conc-money">Total SAT</th>
               <th class="conc-money">Diferencia</th>
               <th>Estado</th>
+              <th>Metodo</th>
             </tr>
           </thead>
           <tbody>
@@ -421,9 +472,10 @@
                   <span class="conc-chip is-muted">Pendiente</span>
                 {% endif %}
               </td>
+              <td>{{ row.metodo }}</td>
             </tr>
             {% empty %}
-            <tr><td colspan="7" class="conc-empty">Sin datos suficientes para comparar banco contra SAT.</td></tr>
+            <tr><td colspan="8" class="conc-empty">Sin datos suficientes para comparar banco contra SAT.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -652,7 +704,8 @@
             <th>Descripcion</th>
             <th>Tipo</th>
             <th class="conc-money">Monto</th>
-            <th>Factura sugerida</th>
+            <th>Regla fiscal</th>
+            <th>Siguiente revision</th>
           </tr>
         </thead>
         <tbody>
@@ -664,15 +717,19 @@
             <td><span class="conc-chip {% if row.movimiento.tipo == 'abono' %}is-ok{% else %}is-warn{% endif %}">{{ row.movimiento.tipo }}</span></td>
             <td class="conc-money">${{ row.movimiento.monto|floatformat:2|intcomma }}</td>
             <td>
+              <span class="conc-chip {{ row.regla.tono }}">{{ row.regla.mesa_label }}</span>
+              <div class="conc-note">{{ row.regla.mesa_detalle }}</div>
+            </td>
+            <td>
               {% if row.candidatos %}
                 <span class="conc-chip is-info">{{ row.candidatos|length }} posible CFDI</span>
               {% else %}
-                <span class="conc-note">Sin coincidencia por monto y fecha</span>
+                <span class="conc-note">{{ row.regla.siguiente_revision }}</span>
               {% endif %}
             </td>
           </tr>
           {% empty %}
-          <tr><td colspan="6" class="conc-empty">Sin movimientos importados.</td></tr>
+          <tr><td colspan="7" class="conc-empty">Sin movimientos importados.</td></tr>
           {% endfor %}
         </tbody>
       </table>
