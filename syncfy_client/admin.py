@@ -13,10 +13,19 @@ class CuentaBancariaAdmin(admin.ModelAdmin):
 
 @admin.register(MovimientoBancario)
 class MovimientoBancarioAdmin(admin.ModelAdmin):
-    list_display = ("cuenta", "fecha_transaccion", "tipo", "monto", "moneda", "conciliado", "descripcion")
-    list_filter = ("cuenta__banco", "tipo", "moneda", "conciliado", "fecha_transaccion")
-    search_fields = ("id_transaction", "descripcion", "cuenta__numero_cuenta")
-    readonly_fields = ("descargado_en", "extra_raw")
+    list_display = (
+        "cuenta",
+        "fecha_transaccion",
+        "tipo",
+        "monto",
+        "moneda",
+        "conciliado",
+        "tipo_conciliacion",
+        "descripcion",
+    )
+    list_filter = ("cuenta__banco", "tipo", "moneda", "conciliado", "tipo_conciliacion", "fecha_transaccion")
+    search_fields = ("id_transaction", "descripcion", "cuenta__numero_cuenta", "nota_conciliacion")
+    readonly_fields = ("descargado_en", "extra_raw", "conciliado_en")
     date_hierarchy = "fecha_transaccion"
 
 

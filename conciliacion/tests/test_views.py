@@ -228,6 +228,9 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertContains(response, "American Express Business Gold")
         self.assertContains(response, "Mesa de movimientos")
         self.assertContains(response, "Regla fiscal")
+        self.assertContains(response, "Que es este movimiento?")
+        self.assertContains(response, "Traspaso entre cuentas propias")
+        self.assertContains(response, "Disposicion / pago linea de credito")
         self.assertContains(response, "Filtrar movimientos")
         self.assertContains(response, "Mostrando 1-3 de 3 movimientos")
 
@@ -257,3 +260,79 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertEqual(confirm_response.status_code, 302)
         self.assertEqual(MovimientoBancario.objects.count(), 1)
         self.assertEqual(ImportacionBancaria.objects.count(), 1)
+
+    def test_post_conciliar_movimiento_marks_credit_line_without_cfdi(self):
+        movimiento = MovimientoBancario.objects.create(
+            id_transaction="linea-credito-1",
+            cuenta=self.cuenta,
+            descripcion="DISPOSICION LINEA DE CREDITO",
+            monto=Decimal("50000.00"),
+            tipo=MovimientoBancario.TIPO_ABONO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 10, 12, 0)),
+            fecha_refresh=timezone.now(),
+        )
+
+        response = self.client.post(
+            "/conciliacion/bancaria/",
+            {
+                "action": "conciliar_movimiento",
+                "periodo": "2026-05",
+                "movimiento_id": str(movimiento.pk),
+                "tipo_conciliacion": MovimientoBancario.CONCILIACION_LINEA_CREDITO,
+                "nota_conciliacion": "Disposicion autorizada",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        movimiento.refresh_from_db()
+        self.assertTrue(movimiento.conciliado)
+        self.assertEqual(movimiento.tipo_conciliacion, MovimientoBancario.CONCILIACION_LINEA_CREDITO)
+        self.assertEqual(movimiento.nota_conciliacion, "Disposicion autorizada")
+        self.assertEqual(movimiento.conciliado_por, self.user)
+
+    def test_post_conciliar_movimiento_pairs_transfer_between_accounts(self):
+        otra_cuenta = CuentaBancaria.objects.create(
+            banco=CuentaBancaria.BANCO_BANBAJIO,
+            nombre_display="BanBajio Empresas",
+            id_site_syncfy="site-banbajio",
+            numero_cuenta="410641890201",
+        )
+        cargo = MovimientoBancario.objects.create(
+            id_transaction="traspaso-cargo",
+            cuenta=self.cuenta,
+            descripcion="TRASPASO A BANBAJIO",
+            monto=Decimal("12500.00"),
+            tipo=MovimientoBancario.TIPO_CARGO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 10, 12, 0)),
+            fecha_refresh=timezone.now(),
+        )
+        abono = MovimientoBancario.objects.create(
+            id_transaction="traspaso-abono",
+            cuenta=otra_cuenta,
+            descripcion="TRASPASO DE BBVA",
+            monto=Decimal("12500.00"),
+            tipo=MovimientoBancario.TIPO_ABONO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 10, 12, 5)),
+            fecha_refresh=timezone.now(),
+        )
+
+        response = self.client.post(
+            "/conciliacion/bancaria/",
+            {
+                "action": "conciliar_movimiento",
+                "periodo": "2026-05",
+                "movimiento_id": str(cargo.pk),
+                "tipo_conciliacion": MovimientoBancario.CONCILIACION_TRASPASO,
+                "contraparte_id": str(abono.pk),
+                "nota_conciliacion": "Movimiento entre cuentas propias",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        cargo.refresh_from_db()
+        abono.refresh_from_db()
+        self.assertTrue(cargo.conciliado)
+        self.assertTrue(abono.conciliado)
+        self.assertEqual(cargo.movimiento_relacionado, abono)
+        self.assertEqual(abono.movimiento_relacionado, cargo)
+        self.assertEqual(cargo.tipo_conciliacion, MovimientoBancario.CONCILIACION_TRASPASO)

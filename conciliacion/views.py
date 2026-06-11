@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 from django.contrib import messages
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
@@ -7,6 +9,7 @@ from django.core.paginator import Paginator
 from django.db.models import Q
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from conciliacion.services.importador import (
@@ -51,6 +54,9 @@ def conciliacion_bancaria_view(request: HttpRequest) -> HttpResponse:
         elif action == "confirm":
             _handle_confirm(request)
             return redirect("conciliacion:bancaria")
+        elif action == "conciliar_movimiento":
+            redirect_url = _handle_conciliar_movimiento(request)
+            return redirect(redirect_url)
 
     if preview is None:
         preview_payload = request.session.get(SESSION_PREVIEW_KEY)
@@ -169,6 +175,115 @@ def _handle_confirm(request: HttpRequest) -> None:
     )
 
 
+def _handle_conciliar_movimiento(request: HttpRequest) -> str:
+    periodo = str(request.POST.get("periodo") or "").strip()
+    redirect_url = f"/conciliacion/bancaria/?periodo={periodo}#mesa-movimientos" if periodo else "/conciliacion/bancaria/#mesa-movimientos"
+    movimiento_id = str(request.POST.get("movimiento_id") or "").strip()
+    tipo_conciliacion = str(request.POST.get("tipo_conciliacion") or "").strip()
+    nota = str(request.POST.get("nota_conciliacion") or "").strip()
+
+    if tipo_conciliacion not in dict(MovimientoBancario.CONCILIACION_CHOICES):
+        messages.error(request, "Selecciona una accion de conciliacion valida.")
+        return redirect_url
+    try:
+        movimiento = MovimientoBancario.objects.select_related("cuenta").get(pk=movimiento_id)
+    except (MovimientoBancario.DoesNotExist, ValueError):
+        messages.error(request, "Movimiento bancario no encontrado.")
+        return redirect_url
+
+    if tipo_conciliacion == MovimientoBancario.CONCILIACION_CFDI:
+        cfdi_uuid = str(request.POST.get("cfdi_uuid") or "").strip()
+        try:
+            cfdi = CfdiDescargado.objects.get(uuid=cfdi_uuid)
+        except CfdiDescargado.DoesNotExist:
+            messages.error(request, "Selecciona un CFDI valido para relacionar.")
+            return redirect_url
+        _marcar_movimiento_conciliado(
+            movimiento,
+            tipo_conciliacion=tipo_conciliacion,
+            user=request.user,
+            nota=nota,
+            cfdi=cfdi,
+        )
+        cfdi.conciliado = True
+        cfdi.save(update_fields=["conciliado"])
+        messages.success(request, "Movimiento conciliado contra CFDI.")
+        return redirect_url
+
+    if tipo_conciliacion == MovimientoBancario.CONCILIACION_TRASPASO:
+        contraparte_id = str(request.POST.get("contraparte_id") or "").strip()
+        try:
+            contraparte = MovimientoBancario.objects.select_related("cuenta").get(pk=contraparte_id)
+        except (MovimientoBancario.DoesNotExist, ValueError):
+            messages.error(request, "Selecciona el cargo o abono contraparte del traspaso.")
+            return redirect_url
+        if not _es_contraparte_valida(movimiento, contraparte):
+            messages.error(request, "La contraparte debe ser otro movimiento con monto igual y tipo opuesto.")
+            return redirect_url
+        _marcar_movimiento_conciliado(
+            movimiento,
+            tipo_conciliacion=tipo_conciliacion,
+            user=request.user,
+            nota=nota,
+            movimiento_relacionado=contraparte,
+        )
+        _marcar_movimiento_conciliado(
+            contraparte,
+            tipo_conciliacion=tipo_conciliacion,
+            user=request.user,
+            nota=nota or f"Contraparte de movimiento {movimiento.pk}",
+            movimiento_relacionado=movimiento,
+        )
+        messages.success(request, "Traspaso entre cuentas conciliado con su contraparte.")
+        return redirect_url
+
+    _marcar_movimiento_conciliado(
+        movimiento,
+        tipo_conciliacion=tipo_conciliacion,
+        user=request.user,
+        nota=nota,
+    )
+    messages.success(request, "Movimiento clasificado y marcado como conciliado.")
+    return redirect_url
+
+
+def _marcar_movimiento_conciliado(
+    movimiento: MovimientoBancario,
+    *,
+    tipo_conciliacion: str,
+    user,
+    nota: str = "",
+    cfdi: CfdiDescargado | None = None,
+    movimiento_relacionado: MovimientoBancario | None = None,
+) -> None:
+    movimiento.conciliado = True
+    movimiento.tipo_conciliacion = tipo_conciliacion
+    movimiento.nota_conciliacion = nota
+    movimiento.cfdi_relacionado = cfdi
+    movimiento.movimiento_relacionado = movimiento_relacionado
+    movimiento.conciliado_por = user if getattr(user, "is_authenticated", False) else None
+    movimiento.conciliado_en = timezone.now()
+    movimiento.save(
+        update_fields=[
+            "conciliado",
+            "tipo_conciliacion",
+            "nota_conciliacion",
+            "cfdi_relacionado",
+            "movimiento_relacionado",
+            "conciliado_por",
+            "conciliado_en",
+        ]
+    )
+
+
+def _es_contraparte_valida(movimiento: MovimientoBancario, contraparte: MovimientoBancario) -> bool:
+    return (
+        movimiento.pk != contraparte.pk
+        and movimiento.tipo != contraparte.tipo
+        and movimiento.monto == contraparte.monto
+    )
+
+
 def _movimientos_trabajo_context(request: HttpRequest, periodo_resumen: dict) -> dict:
     qs = MovimientoBancario.objects.select_related("cuenta").filter(
         fecha_transaccion__date__gte=periodo_resumen["periodo_inicio"],
@@ -211,12 +326,35 @@ def _movimientos_trabajo_context(request: HttpRequest, periodo_resumen: dict) ->
 
 def _movimiento_rows(movimientos, candidatos: dict[int, list]) -> list[dict]:
     rows = []
+    contrapartes = _contrapartes_por_movimiento(movimientos)
     for movimiento in movimientos:
         rows.append(
             {
                 "movimiento": movimiento,
                 "candidatos": candidatos.get(movimiento.pk, []),
+                "contrapartes": contrapartes.get(movimiento.pk, []),
                 "regla": regla_para_movimiento(movimiento),
             }
         )
     return rows
+
+
+def _contrapartes_por_movimiento(movimientos) -> dict[int, list[MovimientoBancario]]:
+    result = {}
+    for movimiento in movimientos:
+        opposite = MovimientoBancario.TIPO_ABONO if movimiento.tipo == MovimientoBancario.TIPO_CARGO else MovimientoBancario.TIPO_CARGO
+        start = movimiento.fecha_transaccion - timedelta(days=5)
+        end = movimiento.fecha_transaccion + timedelta(days=5)
+        result[movimiento.pk] = list(
+            MovimientoBancario.objects.select_related("cuenta")
+            .filter(
+                conciliado=False,
+                tipo=opposite,
+                monto=movimiento.monto,
+                fecha_transaccion__gte=start,
+                fecha_transaccion__lte=end,
+            )
+            .exclude(pk=movimiento.pk)
+            .order_by("fecha_transaccion", "cuenta__banco")[:5]
+        )
+    return result
