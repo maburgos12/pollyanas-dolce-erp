@@ -249,6 +249,8 @@ def _read_xml_dataframe(content: bytes) -> pd.DataFrame:
         root = ET.fromstring(content)
     except ET.ParseError as exc:
         raise ImportacionBancariaError("XML invalido.") from exc
+    if _is_bajio_statement_cfdi(root):
+        return _read_bajio_statement_cfdi_dataframe(root)
     if _is_cfdi_xml(root):
         raise ImportacionBancariaError(
             "Este XML es un CFDI/factura, no un estado de cuenta bancario. "
@@ -287,6 +289,56 @@ def _read_xml_table_dataframe(root: ET.Element) -> pd.DataFrame:
         if len(rows) > len(best_rows):
             best_rows = rows
     return pd.DataFrame(best_rows)
+
+
+def _is_bajio_statement_cfdi(root: ET.Element) -> bool:
+    if _normalize_header(_xml_tag(root.tag)) != "comprobante":
+        return False
+    has_bajio_addenda = any(_normalize_header(_xml_tag(element.tag)) == "estado_de_cuenta_bajio" for element in root.iter())
+    emisor_rfc = ""
+    for element in root.iter():
+        if _normalize_header(_xml_tag(element.tag)) == "emisor":
+            emisor_rfc = _xml_attr(element, "Rfc")
+            break
+    return has_bajio_addenda and emisor_rfc == "BBA940707IE1"
+
+
+def _read_bajio_statement_cfdi_dataframe(root: ET.Element) -> pd.DataFrame:
+    root_fecha = _xml_attr(root, "Fecha")
+    rows: list[dict[str, Any]] = []
+    for concepto in root.iter():
+        if _normalize_header(_xml_tag(concepto.tag)) != "concepto":
+            continue
+        descripcion = _xml_attr(concepto, "Descripcion")
+        importe = _xml_attr(concepto, "Importe")
+        referencia = _xml_attr(concepto, "NoIdentificacion")
+        if not descripcion or not importe:
+            continue
+        impuesto = Decimal("0")
+        for child in concepto.iter():
+            if _normalize_header(_xml_tag(child.tag)) == "traslado":
+                impuesto += _decimal(_xml_attr(child, "Importe") or "0")
+        rows.append(
+            {
+                "fecha": _fecha_bajio_no_identificacion(referencia) or root_fecha,
+                "descripcion": descripcion,
+                "cargo": str(_decimal(importe) + impuesto),
+                "referencia": referencia,
+                "moneda": _xml_attr(root, "Moneda") or "MXN",
+                "raw_tipo": "cfdi_bajio_estado_cuenta",
+                "importe_base": importe,
+                "impuesto": str(impuesto),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _fecha_bajio_no_identificacion(value: str) -> str:
+    match = re.search(r"(20\d{2})(\d{2})(\d{2})", str(value or ""))
+    if not match:
+        return ""
+    year, month, day = match.groups()
+    return f"{year}-{month}-{day}"
 
 
 def _is_cfdi_xml(root: ET.Element) -> bool:

@@ -154,6 +154,45 @@ class ImportadorBancarioTests(TestCase):
         with self.assertRaisesMessage(ImportacionBancariaError, "Este XML es un CFDI/factura"):
             generar_preview(cuenta=self.cuenta, uploaded_file=archivo)
 
+    def test_generar_preview_reads_banbajio_statement_cfdi_addenda_concepts(self):
+        archivo = SimpleUploadedFile(
+            "2031_041064189_2.xml",
+            (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" '
+                'Version="4.0" Fecha="2026-06-01T21:52:20" SubTotal="64.23" '
+                'Total="74.51" Moneda="MXN" TipoDeComprobante="I" Sello="abc" Certificado="xyz">'
+                '<cfdi:Emisor Rfc="BBA940707IE1" Nombre="BANCO DEL BAJIO"/>'
+                '<cfdi:Receptor Rfc="GEF211230KR2" Nombre="GRUPO EMPRESARIAL FONSMA"/>'
+                '<cfdi:Conceptos>'
+                '<cfdi:Concepto NoIdentificacion="0120260501001856124006001000000000002" '
+                'Descripcion="COMISION APLICACION DE TASAS DE DESCUENTO DE CR; VENTAS AL DETALLE" '
+                'Importe="47.36">'
+                '<cfdi:Impuestos><cfdi:Traslados><cfdi:Traslado Importe="7.58"/></cfdi:Traslados></cfdi:Impuestos>'
+                '</cfdi:Concepto>'
+                '<cfdi:Concepto NoIdentificacion="0120260502001856293006001000000000002" '
+                'Descripcion="COMISION APLICACION DE TASAS DE DESCUENTO DE DB; VENTAS AL DETALLE" '
+                'Importe="16.87">'
+                '<cfdi:Impuestos><cfdi:Traslados><cfdi:Traslado Importe="2.70"/></cfdi:Traslados></cfdi:Impuestos>'
+                '</cfdi:Concepto>'
+                '</cfdi:Conceptos>'
+                '<cfdi:Addenda><EstadoDeCuentaBajio numeroCuenta="0410641890201" periodo="01 de Mayo de 2026 al 31 de Mayo de 2026"/></cfdi:Addenda>'
+                '</cfdi:Comprobante>'
+            ).encode("utf-8"),
+            content_type="application/xml",
+        )
+
+        preview = generar_preview(cuenta=self.cuenta, uploaded_file=archivo)
+
+        self.assertEqual(len(preview.movimientos), 2)
+        self.assertEqual(preview.movimientos[0].tipo, MovimientoBancario.TIPO_CARGO)
+        self.assertEqual(preview.movimientos[0].fecha.date().isoformat(), "2026-05-01")
+        self.assertEqual(preview.movimientos[0].monto, Decimal("54.94"))
+        self.assertEqual(preview.movimientos[1].tipo, MovimientoBancario.TIPO_CARGO)
+        self.assertEqual(preview.movimientos[1].fecha.date().isoformat(), "2026-05-02")
+        self.assertEqual(preview.movimientos[1].monto, Decimal("19.57"))
+        self.assertEqual(preview.errores, [])
+
     def test_generar_preview_keeps_iso_dates_in_year_month_day_order(self):
         archivo = SimpleUploadedFile(
             "banbajio.csv",
