@@ -1274,6 +1274,44 @@ class CalendarioTests(TestCase):
         self.assertEqual(actividad.titulo, "Actividad editada")
         self.assertEqual(actividad.estatus, ActividadCalendario.ESTATUS_COMPLETADA)
 
+    def test_crear_reunion_recurrente_notifica_y_se_muestra_a_invitado(self):
+        UserProfile.objects.create(user=self.user_b, telefono="6687654321")
+        self.client.force_login(self.user_a)
+
+        with patch("seguimiento.views.send_mail") as send_mail_mock, patch("seguimiento.views._enviar_whatsapp_maya") as whatsapp_mock:
+            response = self.client.post(
+                "/seguimiento/calendario/actividades/",
+                {
+                    "tipo": "REUNION",
+                    "titulo": "Reunión semanal DG",
+                    "fecha": self.hoy.isoformat(),
+                    "hora_inicio": "09:00",
+                    "hora_fin": "09:30",
+                    "invitado_user": str(self.user_b.pk),
+                    "direccion_general": "1",
+                    "periodicidad": "SEMANAL",
+                    "repeticiones": "3",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["creadas"], 3)
+        self.assertEqual(ActividadCalendario.objects.filter(tipo=ActividadCalendario.TIPO_REUNION).count(), 3)
+        self.assertTrue(Notificacion.objects.filter(usuario=self.user_b, titulo__startswith="Reunión:").exists())
+        self.assertTrue(Notificacion.objects.filter(usuario=self.dg, titulo__startswith="Reunión:").exists())
+        send_mail_mock.assert_called()
+        whatsapp_mock.assert_called_once()
+
+        response_invitado = self._eventos(self.user_b)
+        response_creador = self._eventos(self.user_a)
+
+        evento_invitado = next(evento for evento in response_invitado.json()["eventos"] if evento["titulo"] == "Reunión semanal DG")
+        evento_creador = next(evento for evento in response_creador.json()["eventos"] if evento["titulo"] == "Reunión semanal DG")
+        self.assertEqual(evento_invitado["source_label"], "Reunión DG")
+        self.assertEqual(evento_invitado["invitado"], "Usuario B")
+        self.assertTrue(evento_invitado["direccion_general"])
+        self.assertEqual(evento_creador["source_label"], "Reunión DG")
+
     def test_validaciones_endpoint_eventos(self):
         self.client.force_login(self.user_a)
 

@@ -109,9 +109,9 @@
 
   .calendar-day {
     min-height: 132px;
-    border: 1px solid var(--gris-suave);
+    border: 1px solid #d8cfd4;
     border-radius: var(--radius-sm);
-    background: var(--blanco, #fff);
+    background: linear-gradient(180deg, #fff 0%, #fffafc 100%);
     padding: 8px;
     display: grid;
     grid-template-rows: auto 1fr;
@@ -129,7 +129,8 @@
   }
 
   .calendar-day.has-events {
-    box-shadow: 0 1px 0 rgba(0, 0, 0, .02);
+    border-color: #c9b8c1;
+    box-shadow: inset 0 0 0 1px rgba(120, 27, 71, .04), 0 1px 2px rgba(28, 22, 25, .04);
   }
 
   .calendar-day-header {
@@ -159,10 +160,10 @@
   }
 
   .calendar-chip {
-    border: 1px solid var(--gris-suave);
+    border: 1px solid #d5c9cf;
     border-left: 4px solid var(--vino);
     border-radius: var(--radius-sm);
-    background: var(--blanco, #fff);
+    background: #fff;
     color: var(--texto);
     width: 100%;
     min-width: 0;
@@ -186,7 +187,8 @@
   .calendar-chip.is-proyecto { border-left-color: var(--dorado); }
   .calendar-chip.is-compromiso { border-left-color: var(--verde); }
   .calendar-chip.is-paso { border-left-color: var(--rosa); }
-  .calendar-chip.is-actividad { border-left-color: var(--amarillo); }
+  .calendar-chip.is-actividad { border-left-color: #2f7d7b; }
+  .calendar-chip.is-reunion { border-left-color: #315f8f; }
   .calendar-chip.is-vencido { border-color: var(--rojo); }
   .calendar-chip.is-completed { opacity: .68; }
   .calendar-chip.is-review { border-left-color: var(--dorado); }
@@ -387,7 +389,8 @@
   .calendar-event-row.is-proyecto { border-left-color: var(--dorado); }
   .calendar-event-row.is-compromiso { border-left-color: var(--verde); }
   .calendar-event-row.is-paso { border-left-color: var(--rosa); }
-  .calendar-event-row.is-actividad { border-left-color: var(--amarillo); }
+  .calendar-event-row.is-actividad { border-left-color: #2f7d7b; }
+  .calendar-event-row.is-reunion { border-left-color: #315f8f; }
   .calendar-event-row.is-vencido { border-color: var(--rojo); }
   .calendar-event-row.is-completed { opacity: .72; }
 
@@ -416,6 +419,21 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+  }
+
+  .calendar-inline-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .calendar-inline-options label {
+    display: inline-flex;
+    gap: 7px;
+    align-items: center;
+    margin: 0;
+    font-weight: 800;
   }
 
   .calendar-full-field {
@@ -508,6 +526,7 @@
         </select>
       {% endif %}
       <button type="button" class="btn btn-primary" data-action="new">Nueva actividad</button>
+      <button type="button" class="btn btn-secondary" data-action="new-meeting">Crear reunión</button>
     </div>
   </div>
 
@@ -543,10 +562,20 @@
     <form id="calendar-form">
       {% csrf_token %}
       <input type="hidden" name="actividad_id" id="actividad-id">
+      <input type="hidden" name="tipo" id="actividad-tipo" value="ACTIVIDAD">
       <div class="form-grid-2">
         <div class="form-group">
           <label for="actividad-titulo">Título</label>
           <input class="input-field" type="text" id="actividad-titulo" name="titulo" maxlength="220" required>
+        </div>
+        <div class="form-group calendar-meeting-field calendar-hidden">
+          <label for="actividad-invitado">Colaborador</label>
+          <select class="input-field" id="actividad-invitado" name="invitado_user">
+            <option value="">Sin colaborador específico</option>
+            {% for usuario in usuarios_reunion %}
+              <option value="{{ usuario.id }}">{{ usuario.get_full_name|default:usuario.username }}</option>
+            {% endfor %}
+          </select>
         </div>
         <div class="form-group">
           <label for="actividad-fecha">Fecha</label>
@@ -563,6 +592,27 @@
         <div class="form-group calendar-full-field">
           <label for="actividad-descripcion">Descripción</label>
           <textarea class="input-field" id="actividad-descripcion" name="descripcion" rows="4"></textarea>
+        </div>
+        <div class="form-group calendar-full-field calendar-meeting-field calendar-hidden">
+          <div class="calendar-inline-options">
+            <label for="actividad-direccion-general">
+              <input type="checkbox" id="actividad-direccion-general" name="direccion_general" value="1">
+              Incluir Dirección General
+            </label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="actividad-periodicidad">Repetir</label>
+          <select class="input-field" id="actividad-periodicidad" name="periodicidad">
+            <option value="NINGUNA">No se repite</option>
+            <option value="DIARIA">Diario</option>
+            <option value="SEMANAL">Semanal</option>
+            <option value="MENSUAL">Mensual</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="actividad-repeticiones">Ocurrencias</label>
+          <input class="input-field" type="number" id="actividad-repeticiones" name="repeticiones" min="2" max="26" value="2" disabled>
         </div>
       </div>
       <p class="text-danger calendar-hidden" id="calendar-form-error"></p>
@@ -615,6 +665,12 @@
     dayModalTitle: byId('calendar-day-modal-title'),
     dayModalSubtitle: byId('calendar-day-modal-subtitle'),
     dayModalBody: byId('calendar-day-modal-body'),
+    eventType: byId('actividad-tipo'),
+    meetingFields: document.querySelectorAll('.calendar-meeting-field'),
+    invitedUser: byId('actividad-invitado'),
+    direccionGeneral: byId('actividad-direccion-general'),
+    periodicidad: byId('actividad-periodicidad'),
+    repeticiones: byId('actividad-repeticiones'),
   };
 
   function pad(value) {
@@ -691,7 +747,7 @@
     const type = String(event.tipo || '').toLowerCase();
     const classes = ['calendar-chip'];
     if (event.fuente === 'actividad') {
-      classes.push('is-actividad');
+      classes.push(event.tipo === 'REUNION' ? 'is-reunion' : 'is-actividad');
     } else if (event.fuente === 'checklist') {
       classes.push('is-paso');
     } else if (type === 'minuta') {
@@ -757,6 +813,12 @@
     parts.push(sourceLabel(event));
     if (event.responsable) {
       parts.push(event.responsable);
+    }
+    if (event.invitado) {
+      parts.push(`Con ${event.invitado}`);
+    }
+    if (event.direccion_general) {
+      parts.push('Dirección General');
     }
     return parts.join(' · ');
   }
@@ -1084,13 +1146,23 @@
     els.form.reset();
     els.formError.textContent = '';
     els.formError.classList.add('calendar-hidden');
+    const tipo = event && event.tipo === 'REUNION' ? 'REUNION' : (event && event.tipo ? event.tipo : 'ACTIVIDAD');
+    updateFormMode(tipo);
     byId('actividad-id').value = event && event.id ? event.id.replace('act-', '') : '';
     byId('actividad-titulo').value = event && event.titulo ? event.titulo : '';
     byId('actividad-fecha').value = event && event.fecha ? event.fecha : dateKey(state.cursor);
     byId('actividad-hora-inicio').value = event && event.hora ? event.hora : '';
     byId('actividad-hora-fin').value = event && event.hora_fin ? event.hora_fin : '';
     byId('actividad-descripcion').value = event && event.descripcion ? event.descripcion : '';
-    els.formTitle.textContent = event && event.id ? 'Editar actividad' : 'Nueva actividad';
+    if (tipo === 'REUNION') {
+      byId('actividad-invitado').value = event && event.invitado_user_id ? String(event.invitado_user_id) : '';
+      byId('actividad-direccion-general').checked = Boolean(event && event.direccion_general);
+    }
+    byId('actividad-periodicidad').value = 'NINGUNA';
+    updateRecurrenceState();
+    els.formTitle.textContent = event && event.id
+      ? (tipo === 'REUNION' ? 'Editar reunión' : 'Editar actividad')
+      : (tipo === 'REUNION' ? 'Crear reunión' : 'Nueva actividad');
     els.formPanel.classList.remove('calendar-hidden');
     byId('actividad-titulo').focus();
   }
@@ -1150,7 +1222,9 @@
         }
         loadEvents();
       } else if (action === 'new') {
-        openForm({fecha: dateKey(state.cursor)});
+        openForm({fecha: dateKey(state.cursor), tipo: 'ACTIVIDAD'});
+      } else if (action === 'new-meeting') {
+        openForm({fecha: dateKey(state.cursor), tipo: 'REUNION'});
       } else if (action === 'cancel-form') {
         closeForm();
       } else if (action === 'close-day-modal') {
@@ -1184,6 +1258,26 @@
       loadEvents();
     });
   }
+
+  function updateFormMode(tipo) {
+    const isMeeting = tipo === 'REUNION';
+    els.eventType.value = tipo;
+    els.meetingFields.forEach((field) => field.classList.toggle('calendar-hidden', !isMeeting));
+    if (!isMeeting) {
+      els.invitedUser.value = '';
+      els.direccionGeneral.checked = false;
+    }
+  }
+
+  function updateRecurrenceState() {
+    const repeats = els.periodicidad.value !== 'NINGUNA';
+    els.repeticiones.disabled = !repeats;
+    if (!repeats) {
+      els.repeticiones.value = '2';
+    }
+  }
+
+  els.periodicidad.addEventListener('change', updateRecurrenceState);
 
   loadEvents();
 })();

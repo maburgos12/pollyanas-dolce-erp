@@ -13,6 +13,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from core.models import Notificacion
+from core.access import can_review_seguimiento_global
 from core.notificaciones import crear_notificacion
 from rrhh.models import Empleado
 
@@ -74,13 +75,16 @@ def _conteos_recordatorio_usuario(user, hoy, manana) -> dict[str, int]:
         vence__lte=end_dt,
         completado=False,
     ).count()
+    actividad_filters = Q(usuario=user) | Q(creado_por=user) | Q(invitado_user=user)
+    if can_review_seguimiento_global(user):
+        actividad_filters |= Q(direccion_general=True)
     actividades_count = ActividadCalendario.objects.filter(
-        usuario=user,
+        actividad_filters,
         activo=True,
         estatus=ActividadCalendario.ESTATUS_PENDIENTE,
         fecha__gte=hoy,
         fecha__lte=manana,
-    ).count()
+    ).distinct().count()
     return {
         "seguimientos": items_count,
         "pasos": pasos_count,
