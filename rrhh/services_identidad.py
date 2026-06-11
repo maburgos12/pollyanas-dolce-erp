@@ -209,3 +209,32 @@ def vincular_identidad_pendiente(
     pendiente.resuelto_en = timezone.now()
     pendiente.save(update_fields=["empleado_sugerido", "estado", "resuelto_por", "resuelto_en", "actualizado_en"])
     return empleado
+
+
+def cerrar_identidad_por_codigo_existente(
+    pendiente: EmpleadoIdentidadPendiente,
+    *,
+    user=None,
+) -> Empleado:
+    empleado = buscar_empleado_por_codigo(pendiente.codigo_externo)
+    if not empleado:
+        raise ValueError("El código todavía no está ligado a ningún empleado.")
+    return vincular_identidad_pendiente(pendiente, empleado, user=user)
+
+
+def descartar_identidad_pendiente(
+    pendiente: EmpleadoIdentidadPendiente,
+    *,
+    user=None,
+    notas: str = "",
+) -> EmpleadoIdentidadPendiente:
+    notas = (notas or "").strip()
+    if notas:
+        pendiente.notas = "\n\n".join(
+            filter(None, [pendiente.notas.strip(), f"Descartado por RRHH: {notas}"])
+        )
+    pendiente.estado = EmpleadoIdentidadPendiente.ESTADO_DESCARTADO
+    pendiente.resuelto_por = user
+    pendiente.resuelto_en = timezone.now()
+    pendiente.save(update_fields=["notas", "estado", "resuelto_por", "resuelto_en", "actualizado_en"])
+    return pendiente
