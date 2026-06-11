@@ -52,12 +52,29 @@ plugin `codex@openai-codex` (comandos `/codex:rescue`, `/codex:review`,
 - Commit / PR / deploy SIEMPRE los hace Claude siguiendo el protocolo de abajo.
 
 ### Codex = talacha pesada (lo que más consume tokens)
-- Delegar con `/codex:rescue --background --write` cuando el trabajo sea:
-  implementación mecánica repetida, refactor masivo en muchos archivos, baterías
-  de tests, migración de patrones, normalización de datos, debugging largo.
-- Codex trabaja sobre el working tree real → SIEMPRE en rama aislada, nunca
-  directo sobre algo que pueda tocar producción sin revisar.
-- Revisión de diffs antes de PR/deploy: `/codex:review` (read-only).
+Delegar a Codex cuando el trabajo sea: implementación mecánica repetida, refactor
+masivo en muchos archivos, baterías de tests, migración de patrones, normalización
+de datos, o debugging largo. Codex trabaja sobre el working tree real → SIEMPRE en
+rama aislada, nunca directo sobre algo que pueda tocar producción sin revisar.
+
+**Cómo delega Claude (mecanismo real — esto es lo que de verdad dispara Codex):**
+- Claude NO "teclea" `/codex:rescue`. Esos slash-commands los escribe Mauricio.
+- Cuando Claude decide delegar por su cuenta, invoca la herramienta **Agent** con
+  `subagent_type: "codex:codex-rescue"` y le pasa la tarea como prompt. Ese
+  subagente reenvía el trabajo al runtime de Codex (write-capable por defecto).
+- Si Claude solo describe el reparto pero hace el trabajo él mismo, NO está
+  cumpliendo esta regla. El acto de delegar = una llamada a Agent(codex:codex-rescue).
+
+**Cómo lo dispara Mauricio (garantizado, sin depender del criterio de Claude):**
+- `/codex:rescue <tarea>` → Codex implementa. `/codex:review` → Codex revisa (read-only).
+
+**Trampas que impiden que la regla aplique (verificar si "no funciona"):**
+- El plugin `codex@openai-codex` debe estar instalado y cargado en ESA sesión
+  (`/codex:setup` → `ready: true`; si se acaba de instalar, `/reload-plugins`).
+- Claude debe haberse abierto desde `pastelerias_erp_sprint1/` (este CLAUDE.md).
+  Desde otra carpeta carga otro CLAUDE.md que no tiene esta regla.
+- Esta regla debe estar mergeada en `main`; si solo vive en una rama, otras
+  sesiones no la ven.
 
 ### Lo que NO se delega a Codex
 - Lógica que pisa datos de nómina/RRHH/ventas (ver "Datos de usuarios — NUNCA pisar").
