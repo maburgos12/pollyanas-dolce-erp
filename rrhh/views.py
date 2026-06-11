@@ -406,6 +406,7 @@ RRHH_MODULE_TABS = [
     {"label": "Catálogos", "url_name": "rrhh:rrhh_catalogos", "key": "catalogos", "submodule": "catalogos"},
     {"label": "Empleados", "url_name": "rrhh:empleados", "key": "empleados", "submodule": "empleados"},
     {"label": "Permisos", "url_name": "rrhh:rrhh_permisos_list", "key": "permisos", "submodule": "permisos"},
+    {"label": "Suspensiones", "url_name": "rrhh:rrhh_suspensiones", "key": "suspensiones", "submodule": "permisos"},
     {"label": "Vacaciones", "url_name": "rrhh:rrhh_vacaciones_list", "key": "vacaciones", "submodule": "vacaciones"},
     {"label": "Horas extra", "url_name": "rrhh:rrhh_he_list", "key": "horas_extra", "submodule": "horas_extra"},
     {"label": "Asistencias", "url_name": "rrhh:rrhh_asistencias", "key": "asistencias", "submodule": "asistencias"},

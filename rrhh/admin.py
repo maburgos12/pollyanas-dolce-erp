@@ -21,6 +21,7 @@ from .models import (
     PlantillaAutorizada,
     Prestamo,
     PrestamoCuota,
+    SuspensionEmpleado,
     Turno,
     VacanteCobertura,
     VacanteMovimiento,
@@ -362,6 +363,13 @@ class PermisoSalidaCambioAdmin(admin.ModelAdmin):
 
     def has_change_permission(self, request, obj=None):
         return False
+
+
+@admin.register(SuspensionEmpleado)
+class SuspensionEmpleadoAdmin(admin.ModelAdmin):
+    list_display = ("empleado", "fecha_inicio", "fecha_fin", "estado", "con_goce", "aplicada_por")
+    list_filter = ("estado", "con_goce", "fecha_inicio")
+    search_fields = ("empleado__nombre", "empleado__codigo", "motivo", "comentario_cancelacion")
 
 
 @admin.register(Turno)

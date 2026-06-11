@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Sum
 from django.utils import timezone
@@ -1184,6 +1185,47 @@ class PermisoSalidaCambio(models.Model):
 
     def __str__(self) -> str:
         return f"{self.folio} · {self.get_accion_display()}"
+
+
+class SuspensionEmpleado(models.Model):
+    ESTADO_ACTIVA = "activa"
+    ESTADO_CANCELADA = "cancelada"
+    ESTADO_CHOICES = [
+        (ESTADO_ACTIVA, "Activa"),
+        (ESTADO_CANCELADA, "Cancelada"),
+    ]
+
+    empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.CASCADE, related_name="suspensiones")
+    fecha_inicio = models.DateField()
+    fecha_fin = models.DateField()
+    motivo = models.TextField()
+    con_goce = models.BooleanField(default=False)
+    estado = models.CharField(max_length=12, choices=ESTADO_CHOICES, default=ESTADO_ACTIVA)
+    aplicada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="suspensiones_aplicadas",
+    )
+    comentario_cancelacion = models.TextField(blank=True, default="")
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-fecha_inicio"]
+        verbose_name = "Suspensión"
+        verbose_name_plural = "Suspensiones"
+
+    @property
+    def dias_naturales(self) -> int:
+        return (self.fecha_fin - self.fecha_inicio).days + 1
+
+    def clean(self):
+        if self.fecha_inicio and self.fecha_fin and self.fecha_fin < self.fecha_inicio:
+            raise ValidationError({"fecha_fin": "La fecha final no puede ser anterior a la fecha inicial."})
+
+    def __str__(self) -> str:
+        return f"{self.empleado} · {self.fecha_inicio} a {self.fecha_fin}"
 
 
 class ReglamentoLaboral(models.Model):

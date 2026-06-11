@@ -15,6 +15,7 @@ from .models import (
     IncidenciaAsistencia,
     PermisoSalida,
     SolicitudVacaciones,
+    SuspensionEmpleado,
     Turno,
 )
 from .services import TIEMPO_COMIDA_MINUTOS, calcular_horas_extra, generar_horas_extra_automatico, minutos_jornada_programada
@@ -90,6 +91,19 @@ def _vacaciones_aprobadas_en_fecha(empleado: Empleado, fecha: date) -> Solicitud
         SolicitudVacaciones.objects.filter(
             empleado=empleado,
             estado=SolicitudVacaciones.ESTADO_APROBADA,
+            fecha_inicio__lte=fecha,
+            fecha_fin__gte=fecha,
+        )
+        .order_by("fecha_inicio")
+        .first()
+    )
+
+
+def _suspension_activa_en_fecha(empleado: Empleado, fecha: date) -> SuspensionEmpleado | None:
+    return (
+        SuspensionEmpleado.objects.filter(
+            empleado=empleado,
+            estado=SuspensionEmpleado.ESTADO_ACTIVA,
             fecha_inicio__lte=fecha,
             fecha_fin__gte=fecha,
         )
@@ -427,6 +441,28 @@ def _evaluar_falta_sin_registro(empleado: Empleado, fecha: date, touched: set[st
     return int(creada), int(actualizada)
 
 
+def _evaluar_suspension(
+    empleado: Empleado,
+    fecha: date,
+    suspension: SuspensionEmpleado,
+    touched: set[str],
+) -> tuple[int, int]:
+    tipo = IncidenciaAsistencia.TIPO_SUSPENSION
+    touched.add(tipo)
+    _, creada, actualizada = _upsert_incidencia(
+        empleado=empleado,
+        fecha=fecha,
+        tipo=tipo,
+        estado=IncidenciaAsistencia.ESTADO_CONCILIADO,
+        severidad=IncidenciaAsistencia.SEVERIDAD_MEDIA,
+        minutos=0,
+        goce_sueldo=suspension.con_goce,
+        detalle="Día de suspensión disciplinaria.",
+        metadata={"suspension_id": suspension.id, "con_goce": bool(suspension.con_goce)},
+    )
+    return int(creada), int(actualizada)
+
+
 def _evaluar_escalamientos(empleado: Empleado, fecha: date, touched: set[str]) -> tuple[int, int]:
     creados = 0
     actualizados = 0
@@ -493,6 +529,19 @@ def _evaluar_escalamientos(empleado: Empleado, fecha: date, touched: set[str]) -
     return creados, actualizados
 
 
+def _resolver_incidencias_stale(empleado: Empleado, fecha: date, touched: set[str]) -> int:
+    stale = IncidenciaAsistencia.objects.filter(
+        empleado=empleado,
+        fecha=fecha,
+        editado_manual=False,
+    ).exclude(tipo__in=touched)
+    return stale.exclude(estado=IncidenciaAsistencia.ESTADO_RESUELTO).update(
+        estado=IncidenciaAsistencia.ESTADO_RESUELTO,
+        severidad=IncidenciaAsistencia.SEVERIDAD_INFO,
+        detalle="Incidencia resuelta por reevaluacion automatica.",
+    )
+
+
 @transaction.atomic
 def evaluar_dia_empleado(empleado: Empleado, fecha: date) -> ResultadoEvaluacionAsistencia:
     touched: set[str] = set()
@@ -508,6 +557,21 @@ def evaluar_dia_empleado(empleado: Empleado, fecha: date) -> ResultadoEvaluacion
     if not asistencia:
         if not es_dia_laborable(fecha):
             return ResultadoEvaluacionAsistencia(evaluados=1)
+
+    suspension = _suspension_activa_en_fecha(empleado, fecha)
+    if suspension:
+        creados_suspension, actualizados_suspension = _evaluar_suspension(empleado, fecha, suspension, touched)
+        creados += creados_suspension
+        actualizados += actualizados_suspension
+        resueltos = _resolver_incidencias_stale(empleado, fecha, touched)
+        return ResultadoEvaluacionAsistencia(
+            evaluados=1,
+            creados=creados,
+            actualizados=actualizados,
+            resueltos=resueltos,
+        )
+
+    if not asistencia:
         creados_falta, actualizados_falta = _evaluar_falta_sin_registro(empleado, fecha, touched)
         creados += creados_falta
         actualizados += actualizados_falta
@@ -529,16 +593,7 @@ def evaluar_dia_empleado(empleado: Empleado, fecha: date) -> ResultadoEvaluacion
     creados += creados_escalamiento
     actualizados += actualizados_escalamiento
 
-    stale = IncidenciaAsistencia.objects.filter(
-        empleado=empleado,
-        fecha=fecha,
-        editado_manual=False,
-    ).exclude(tipo__in=touched)
-    resueltos = stale.exclude(estado=IncidenciaAsistencia.ESTADO_RESUELTO).update(
-        estado=IncidenciaAsistencia.ESTADO_RESUELTO,
-        severidad=IncidenciaAsistencia.SEVERIDAD_INFO,
-        detalle="Incidencia resuelta por reevaluacion automatica.",
-    )
+    resueltos = _resolver_incidencias_stale(empleado, fecha, touched)
 
     return ResultadoEvaluacionAsistencia(evaluados=1, creados=creados, actualizados=actualizados, resueltos=resueltos)
 

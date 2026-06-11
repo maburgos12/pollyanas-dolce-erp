@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block title %}RRHH · Suspensiones{% endblock %}
+{% block page_title %}RRHH · Suspensiones{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+{% if messages %}
+  {% for message in messages %}
+    <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'success' %}alert-success{% elif message.tags == 'info' %}alert-info{% else %}alert-info{% endif %}">
+      {{ message }}
+    </div>
+  {% endfor %}
+{% endif %}
+
+<section class="card">
+  <div class="card-header">
+    <h2>Alta de suspensión</h2>
+  </div>
+  <form method="post" action="{% url 'rrhh:rrhh_suspension_crear' %}">
+    {% csrf_token %}
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label for="empleado">Empleado</label>
+        <select class="input-field" id="empleado" name="empleado" required>
+          <option value="">Seleccionar empleado</option>
+          {% for empleado in empleados %}
+            <option value="{{ empleado.id }}">{{ empleado.nombre }}{% if empleado.codigo %} · {{ empleado.codigo }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="fecha_inicio">Fecha inicio</label>
+        <input class="input-field" id="fecha_inicio" type="date" name="fecha_inicio" required>
+      </div>
+      <div class="form-group">
+        <label for="fecha_fin">Fecha fin</label>
+        <input class="input-field" id="fecha_fin" type="date" name="fecha_fin" required>
+      </div>
+      <div class="form-group">
+        <label for="con_goce">Con goce de sueldo</label>
+        <input id="con_goce" type="checkbox" name="con_goce">
+      </div>
+      <div class="form-group">
+        <label for="motivo">Motivo</label>
+        <textarea class="input-field" id="motivo" name="motivo" required></textarea>
+      </div>
+    </div>
+    <button class="btn btn-primary" style="background:var(--vino);border-color:var(--vino);" type="submit">Crear suspensión</button>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2>Suspensiones</h2>
+  </div>
+  <form method="get">
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label for="filtro_empleado">Empleado</label>
+        <select class="input-field" id="filtro_empleado" name="empleado">
+          <option value="">Todos</option>
+          {% for empleado in empleados %}
+            <option value="{{ empleado.id }}" {% if empleado_id == empleado.id|stringformat:"s" %}selected{% endif %}>{{ empleado.nombre }}{% if empleado.codigo %} · {{ empleado.codigo }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="estado">Estado</label>
+        <select class="input-field" id="estado" name="estado">
+          <option value="">Todos</option>
+          {% for value, label in estado_choices %}
+            <option value="{{ value }}" {% if estado == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <button class="btn btn-primary" style="background:var(--vino);border-color:var(--vino);" type="submit">Filtrar</button>
+    <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_suspensiones' %}">Limpiar</a>
+  </form>
+
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Empleado</th>
+          <th>Inicio</th>
+          <th>Fin</th>
+          <th>Días</th>
+          <th>Goce</th>
+          <th>Estado</th>
+          <th>Aplicada por</th>
+          <th>Motivo</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for suspension in suspensiones %}
+          <tr>
+            <td>{{ suspension.empleado.nombre }}{% if suspension.empleado.codigo %} · {{ suspension.empleado.codigo }}{% endif %}</td>
+            <td>{{ suspension.fecha_inicio|date:"Y-m-d" }}</td>
+            <td>{{ suspension.fecha_fin|date:"Y-m-d" }}</td>
+            <td>{{ suspension.dias_naturales }}</td>
+            <td>{% if suspension.con_goce %}Sí{% else %}No{% endif %}</td>
+            <td>
+              {% if suspension.estado == "activa" %}
+                <span class="badge bg-warning">Activa</span>
+              {% else %}
+                <span class="badge bg-danger">Cancelada</span>
+              {% endif %}
+            </td>
+            <td>{{ suspension.aplicada_por.get_full_name|default:suspension.aplicada_por.username|default:"-" }}</td>
+            <td>{{ suspension.motivo }}</td>
+            <td>
+              {% if suspension.estado == "activa" %}
+                <details>
+                  <summary class="btn btn-sm btn-secondary">Cancelar</summary>
+                  <form method="post" action="{% url 'rrhh:rrhh_suspension_cancelar' suspension.id %}">
+                    {% csrf_token %}
+                    <div class="form-group">
+                      <label for="comentario_cancelacion_{{ suspension.id }}">Comentario</label>
+                      <textarea class="input-field" id="comentario_cancelacion_{{ suspension.id }}" name="comentario_cancelacion" required></textarea>
+                    </div>
+                    <button class="btn btn-sm btn-primary" style="background:var(--vino);border-color:var(--vino);" type="submit">Confirmar cancelación</button>
+                  </form>
+                </details>
+              {% else %}
+                -
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="9">Sin suspensiones registradas.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
