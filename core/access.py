@@ -100,6 +100,7 @@ ACCESS_SUBMODULES = {
         ("minutas", "Minutas"),
         ("proyectos", "Proyectos"),
         ("compromisos", "Compromisos"),
+        ("calendario", "Calendario"),
     ],
     "logistica": [
         ("dashboard", "Dashboard"),

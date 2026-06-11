@@ -245,3 +245,38 @@ class SeguimientoProrrogaSolicitud(models.Model):
 
     def __str__(self) -> str:
         return f"{self.seguimiento_id} · {self.fecha_solicitada:%d/%m/%Y}"
+
+
+class ActividadCalendario(models.Model):
+    ESTATUS_PENDIENTE = "PENDIENTE"
+    ESTATUS_COMPLETADA = "COMPLETADA"
+    ESTATUS_CHOICES = [
+        (ESTATUS_PENDIENTE, "Pendiente"),
+        (ESTATUS_COMPLETADA, "Completada"),
+    ]
+
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="actividades_calendario",
+    )
+    titulo = models.CharField(max_length=220)
+    descripcion = models.TextField(blank=True, default="")
+    fecha = models.DateField(db_index=True)
+    hora_inicio = models.TimeField(null=True, blank=True)
+    hora_fin = models.TimeField(null=True, blank=True)
+    estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default=ESTATUS_PENDIENTE)
+    activo = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["fecha", "hora_inicio", "id"]
+        indexes = [
+            models.Index(fields=["usuario", "fecha", "activo"], name="seg_act_cal_user_fecha_idx"),
+        ]
+        verbose_name = "Actividad de calendario"
+        verbose_name_plural = "Actividades de calendario"
+
+    def __str__(self) -> str:
+        return self.titulo

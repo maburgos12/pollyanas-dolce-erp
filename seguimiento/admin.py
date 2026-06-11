@@ -1,6 +1,7 @@
 from django.contrib import admin
 
 from .models import (
+    ActividadCalendario,
     SeguimientoChecklistItem,
     SeguimientoComentario,
     SeguimientoEvidencia,
@@ -43,3 +44,11 @@ class SeguimientoProrrogaSolicitudAdmin(admin.ModelAdmin):
     list_filter = ("estatus", "fecha_solicitada")
     search_fields = ("seguimiento__titulo", "usuario__username", "motivo")
     autocomplete_fields = ("seguimiento", "usuario", "resuelto_por")
+
+
+@admin.register(ActividadCalendario)
+class ActividadCalendarioAdmin(admin.ModelAdmin):
+    list_display = ("titulo", "usuario", "fecha", "hora_inicio", "estatus", "activo")
+    list_filter = ("estatus", "activo", "fecha")
+    search_fields = ("titulo", "descripcion", "usuario__username")
+    autocomplete_fields = ("usuario",)

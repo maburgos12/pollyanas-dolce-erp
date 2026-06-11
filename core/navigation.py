@@ -10,6 +10,7 @@ NAV_GROUPS = [
             ("seguimiento", "minutas", "Minutas", "/seguimiento/minutas/", ["/seguimiento/minutas/"]),
             ("seguimiento", "proyectos", "Proyectos", "/seguimiento/proyectos/", ["/seguimiento/proyectos/"]),
             ("seguimiento", "compromisos", "Compromisos", "/seguimiento/compromisos/", ["/seguimiento/compromisos/"]),
+            ("seguimiento", "calendario", "Mi calendario", "/seguimiento/calendario/", ["/seguimiento/calendario/"]),
         ],
     },
     {

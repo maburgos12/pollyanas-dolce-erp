@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import json
 import os
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from io import StringIO
 from unittest.mock import patch
 
@@ -15,10 +15,12 @@ from django.utils import timezone
 from django_celery_beat.models import PeriodicTask
 
 from core.access import ROLE_DG, can_view_submodule
+from core.models import Notificacion, UserProfile
 from core.navigation import build_nav_groups
 from rrhh.models import Empleado
 
 from .models import (
+    ActividadCalendario,
     SeguimientoChecklistItem,
     SeguimientoComentario,
     SeguimientoEvidencia,
@@ -1067,3 +1069,208 @@ class SeguimientoColaboradorTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertFalse(SeguimientoItem.objects.filter(metadata__source_table="commitments", metadata__source_id=43).exists())
+
+
+@override_settings(SECURE_SSL_REDIRECT=False)
+class CalendarioTests(TestCase):
+    def setUp(self):
+        self.group, _ = Group.objects.get_or_create(name="PRODUCCION")
+        self.dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        self.user_a = get_user_model().objects.create_user(
+            username="usuario.a",
+            email="a@pollyanasdolce.com",
+            first_name="Usuario",
+            last_name="A",
+            password="test12345",
+        )
+        self.user_a.groups.add(self.group)
+        self.user_b = get_user_model().objects.create_user(
+            username="usuario.b",
+            email="b@pollyanasdolce.com",
+            first_name="Usuario",
+            last_name="B",
+            password="test12345",
+        )
+        self.user_b.groups.add(self.group)
+        self.dg = get_user_model().objects.create_user(username="dg.calendario", password="test12345")
+        self.dg.groups.add(self.dg_group)
+        self.hoy = timezone.localdate()
+        self.manana = self.hoy + timedelta(days=1)
+
+    def _dt(self, fecha, hora=time(10, 0)):
+        return timezone.make_aware(datetime.combine(fecha, hora), timezone.get_current_timezone())
+
+    def _eventos(self, user, usuario_param=None):
+        self.client.force_login(user)
+        params = {
+            "start": self.hoy.isoformat(),
+            "end": (self.hoy + timedelta(days=7)).isoformat(),
+        }
+        if usuario_param is not None:
+            params["usuario"] = str(usuario_param)
+        return self.client.get("/seguimiento/calendario/eventos/", params)
+
+    def test_scope_colaborador_ve_solo_su_item_y_actividad(self):
+        SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_COMPROMISO,
+            titulo="Compromiso A",
+            responsable_user=self.user_a,
+            fecha_limite=self._dt(self.hoy),
+        )
+        ActividadCalendario.objects.create(usuario=self.user_a, titulo="Actividad A", fecha=self.hoy)
+
+        response_a = self._eventos(self.user_a)
+        response_b = self._eventos(self.user_b)
+
+        self.assertEqual(response_a.status_code, 200)
+        self.assertEqual(len(response_a.json()["eventos"]), 2)
+        self.assertEqual(response_b.status_code, 200)
+        self.assertEqual(response_b.json()["eventos"], [])
+
+    def test_colaborador_ignora_usuario_param_y_ve_solo_lo_suyo(self):
+        ActividadCalendario.objects.create(usuario=self.user_a, titulo="Actividad A", fecha=self.hoy)
+        ActividadCalendario.objects.create(usuario=self.user_b, titulo="Actividad B", fecha=self.hoy)
+
+        response = self._eventos(self.user_b, usuario_param=self.user_a.pk)
+
+        self.assertEqual(response.status_code, 200)
+        eventos = response.json()["eventos"]
+        self.assertEqual(len(eventos), 1)
+        self.assertEqual(eventos[0]["titulo"], "Actividad B")
+
+    def test_dg_ve_todo_y_filtra_por_colaborador(self):
+        SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            titulo="Minuta A",
+            responsable_user=self.user_a,
+            fecha_limite=self._dt(self.hoy, time(9, 0)),
+        )
+        ActividadCalendario.objects.create(usuario=self.user_a, titulo="Actividad A", fecha=self.hoy)
+        ActividadCalendario.objects.create(usuario=self.user_b, titulo="Actividad B", fecha=self.hoy)
+
+        response_all = self._eventos(self.dg)
+        response_a = self._eventos(self.dg, usuario_param=self.user_a.pk)
+
+        self.assertEqual(response_all.status_code, 200)
+        self.assertEqual(len(response_all.json()["eventos"]), 3)
+        self.assertEqual(response_a.status_code, 200)
+        self.assertEqual({evento["titulo"] for evento in response_a.json()["eventos"]}, {"Minuta A", "Actividad A"})
+
+    def test_item_por_responsable_empleado_usuario_erp_aparece(self):
+        empleado = Empleado.objects.create(
+            nombre="Empleado Calendario",
+            email="empleado.calendario@pollyanasdolce.com",
+            area="PRODUCCION",
+            puesto="Supervisor",
+            usuario_erp=self.user_a,
+        )
+        SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_PROYECTO,
+            titulo="Proyecto por empleado",
+            responsable_empleado=empleado,
+            fecha_limite=self._dt(self.hoy),
+        )
+
+        response = self._eventos(self.user_a)
+
+        self.assertEqual(response.status_code, 200)
+        eventos = response.json()["eventos"]
+        self.assertEqual(len(eventos), 1)
+        self.assertEqual(eventos[0]["titulo"], "Proyecto por empleado")
+
+    def test_crud_actividad_respeta_ownership_y_soft_delete(self):
+        ajena = ActividadCalendario.objects.create(usuario=self.user_a, titulo="Ajena", fecha=self.hoy)
+        propia = ActividadCalendario.objects.create(usuario=self.user_b, titulo="Propia", fecha=self.hoy)
+        self.client.force_login(self.user_b)
+
+        editar_ajena = self.client.post(
+            f"/seguimiento/calendario/actividades/{ajena.pk}/",
+            {"titulo": "Intento", "fecha": self.hoy.isoformat()},
+        )
+        completar_ajena = self.client.post(f"/seguimiento/calendario/actividades/{ajena.pk}/completar/")
+        eliminar_ajena = self.client.post(f"/seguimiento/calendario/actividades/{ajena.pk}/eliminar/")
+        eliminar_propia = self.client.post(f"/seguimiento/calendario/actividades/{propia.pk}/eliminar/")
+
+        self.assertEqual(editar_ajena.status_code, 404)
+        self.assertEqual(completar_ajena.status_code, 404)
+        self.assertEqual(eliminar_ajena.status_code, 404)
+        self.assertEqual(eliminar_propia.status_code, 200)
+        propia.refresh_from_db()
+        self.assertFalse(propia.activo)
+
+    def test_crud_crear_editar_completar_valida_campos(self):
+        self.client.force_login(self.user_a)
+        sin_titulo = self.client.post("/seguimiento/calendario/actividades/", {"fecha": self.hoy.isoformat()})
+        sin_fecha = self.client.post("/seguimiento/calendario/actividades/", {"titulo": "Actividad"})
+        hora_invalida = self.client.post(
+            "/seguimiento/calendario/actividades/",
+            {"titulo": "Actividad", "fecha": self.hoy.isoformat(), "hora_inicio": "16:00", "hora_fin": "15:00"},
+        )
+        crear = self.client.post(
+            "/seguimiento/calendario/actividades/",
+            {"titulo": "Actividad", "fecha": self.hoy.isoformat(), "hora_inicio": "09:00", "hora_fin": "10:00"},
+        )
+
+        self.assertEqual(sin_titulo.status_code, 400)
+        self.assertEqual(sin_fecha.status_code, 400)
+        self.assertEqual(hora_invalida.status_code, 400)
+        self.assertEqual(crear.status_code, 200)
+        actividad = ActividadCalendario.objects.get(usuario=self.user_a)
+        editar = self.client.post(
+            f"/seguimiento/calendario/actividades/{actividad.pk}/",
+            {"titulo": "Actividad editada", "fecha": self.manana.isoformat()},
+        )
+        completar = self.client.post(f"/seguimiento/calendario/actividades/{actividad.pk}/completar/")
+
+        self.assertEqual(editar.status_code, 200)
+        self.assertEqual(completar.status_code, 200)
+        actividad.refresh_from_db()
+        self.assertEqual(actividad.titulo, "Actividad editada")
+        self.assertEqual(actividad.estatus, ActividadCalendario.ESTATUS_COMPLETADA)
+
+    def test_validaciones_endpoint_eventos(self):
+        self.client.force_login(self.user_a)
+
+        sin_rango = self.client.get("/seguimiento/calendario/eventos/")
+        rango_largo = self.client.get(
+            "/seguimiento/calendario/eventos/",
+            {"start": self.hoy.isoformat(), "end": (self.hoy + timedelta(days=63)).isoformat()},
+        )
+        rango_invertido = self.client.get(
+            "/seguimiento/calendario/eventos/",
+            {"start": self.manana.isoformat(), "end": self.hoy.isoformat()},
+        )
+
+        self.assertEqual(sin_rango.status_code, 400)
+        self.assertEqual(rango_largo.status_code, 400)
+        self.assertEqual(rango_invertido.status_code, 400)
+
+    def test_recordatorios_crean_notificacion_y_canales(self):
+        SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_COMPROMISO,
+            titulo="Vence hoy",
+            responsable_user=self.user_a,
+            fecha_limite=self._dt(self.hoy),
+        )
+        ActividadCalendario.objects.create(usuario=self.user_a, titulo="Actividad mañana", fecha=self.manana)
+        UserProfile.objects.create(user=self.user_a, telefono="6681234567")
+
+        with patch("seguimiento.tasks.send_mail") as send_mail_mock, patch("seguimiento.tasks._enviar_whatsapp_maya") as whatsapp_mock:
+            from seguimiento.tasks import recordatorios_calendario
+
+            result = recordatorios_calendario()
+
+        self.assertEqual(result["usuarios_notificados"], 1)
+        self.assertEqual(result["correos"], 1)
+        self.assertEqual(result["whatsapps"], 1)
+        self.assertTrue(Notificacion.objects.filter(usuario=self.user_a, tipo=Notificacion.TIPO_SEGUIMIENTO).exists())
+        self.assertFalse(Notificacion.objects.filter(usuario=self.user_b).exists())
+        send_mail_mock.assert_called_once()
+        whatsapp_mock.assert_called_once()
+
+    def test_navegacion_incluye_calendario_para_usuario_con_rol(self):
+        groups = build_nav_groups(self.user_a, "/seguimiento/calendario/")
+        labels = [item["label"] for group in groups for item in group["items"]]
+
+        self.assertIn("Mi calendario", labels)
+        self.assertTrue(can_view_submodule(self.user_a, "seguimiento", "calendario"))
