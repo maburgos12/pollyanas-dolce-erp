@@ -305,11 +305,21 @@ def _read_bajio_detallado_csv(content: bytes) -> pd.DataFrame:
     ]
     raw = raw[raw["fecha"].apply(_looks_like_fecha_bancaria)]
     raw = raw[raw["descripcion"].fillna("").astype(str).str.strip() != ""]
+    raw = raw[raw.apply(_bajio_detallado_has_amount, axis=1)]
     return raw.reset_index(drop=True)
 
 
 def _looks_like_fecha_bancaria(value: Any) -> bool:
     return bool(re.match(r"^\d{1,2}/\d{1,2}/\d{4}$", str(value or "").strip()))
+
+
+def _bajio_detallado_has_amount(row) -> bool:
+    try:
+        cargo = _decimal(row.get("cargo"))
+        abono = _decimal(row.get("abono"))
+    except ImportacionBancariaError:
+        return False
+    return cargo != 0 or abono != 0
 
 
 def _read_xml_dataframe(content: bytes) -> pd.DataFrame:
