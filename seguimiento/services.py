@@ -216,6 +216,40 @@ def agente_dg_checklist_from_json(raw_value: str | None) -> list[str]:
     return []
 
 
+def agente_dg_checklist_payload_from_json(raw_value: str | None) -> list[dict]:
+    if not raw_value:
+        return []
+    try:
+        payload = json.loads(raw_value)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(payload, list):
+        return []
+
+    items = []
+    for item in payload:
+        if isinstance(item, str):
+            titulo = item.strip()
+            completado = False
+            completado_at = None
+        elif isinstance(item, dict):
+            titulo = (item.get("title") or item.get("text") or item.get("texto") or item.get("label") or "").strip()
+            completado = bool(item.get("completed") or item.get("completado") or item.get("done") or item.get("checked"))
+            completado_at = item.get("completed_at") or item.get("completado_at")
+        else:
+            continue
+        if titulo:
+            items.append(
+                {
+                    "titulo": titulo,
+                    "descripcion": "",
+                    "completado": completado,
+                    "completado_at": completado_at,
+                }
+            )
+    return items
+
+
 def _texto_a_puntos(texto: str) -> list[str]:
     """Desglosa un entregable en puntos: por líneas o por separadores '-' / '•'."""
     if not texto:
@@ -410,10 +444,7 @@ class AgenteDGSeguimientoImporter:
             return
         checklist_payload = checklist
         if checklist_payload is None:
-            checklist_payload = [
-                {"titulo": title, "descripcion": "", "completado": False}
-                for title in agente_dg_checklist_from_json(row.get("checklist_items_json"))
-            ]
+            checklist_payload = agente_dg_checklist_payload_from_json(row.get("checklist_items_json"))
         self._sync_checklist(item, checklist_payload)
 
     def _resolve_participants(self, participants):
@@ -498,11 +529,15 @@ class AgenteDGSeguimientoImporter:
             if check:
                 for key, value in defaults.items():
                     setattr(check, key, value)
-                if not check.completado:
+                if check.completado:
+                    check.completado_at = agente_dg_as_datetime(payload.get("completado_at") or payload.get("completed_at")) or check.completado_at or timezone.now()
+                else:
                     check.completado_por = None
                     check.completado_at = None
                 check.save()
             else:
+                if defaults["completado"]:
+                    defaults["completado_at"] = agente_dg_as_datetime(payload.get("completado_at") or payload.get("completed_at")) or timezone.now()
                 SeguimientoChecklistItem.objects.create(seguimiento=item, orden=index, **defaults)
         item.checklist.exclude(orden__in=desired_orders).delete()
 
