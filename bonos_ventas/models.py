@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.db import models, transaction
+from django.utils import timezone
 
 from core.models import Sucursal
 from rrhh.models import Empleado, NominaLinea, NominaPeriodo
@@ -202,11 +203,18 @@ class BonoVentasEmpleado(models.Model):
     def _es_repartidor(self) -> bool:
         return (self.empleado.puesto_operativo or "").strip().upper() == "REPARTIDOR"
 
+    def _periodo_en_curso(self) -> bool:
+        hoy = timezone.localdate()
+        if self.periodo.fecha_inicio and self.periodo.fecha_fin:
+            return self.periodo.fecha_inicio <= hoy <= self.periodo.fecha_fin
+        return False
+
     def recalcular(self) -> None:
         cfg = self.periodo
         base = _money(cfg.bono_base)
         dias_base = self._dias_base()
-        dias_laborables = int(cfg.dias_laborables or dias_base or 0)
+        dias_laborables_cfg = int(cfg.dias_laborables or dias_base or 0)
+        dias_laborables = int(dias_base or 0) if self._periodo_en_curso() and dias_base else dias_laborables_cfg
         dias_asistencia = int(self.dias_asistencia or self.dias_trabajados or 0)
         self.pasa_asistencia = (dias_laborables - dias_asistencia) <= cfg.limite_asistencia
         self.pasa_uniforme = (dias_base - int(self.dias_uniforme or 0)) <= cfg.limite_uniforme

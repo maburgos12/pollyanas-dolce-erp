@@ -1,6 +1,7 @@
 import json
 from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -172,24 +173,31 @@ class BonosVentasTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
 
-    def test_recalcular_presentacion_usa_dias_laborables_como_base_de_asistencia(self):
+    def test_recalcular_periodo_parcial_no_castiga_dias_futuros(self):
         sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
         empleado = Empleado.objects.create(nombre="Empleado Ventas", area="VENTAS")
-        periodo = ConfigBonoVentasPeriodo.objects.create(mes=5, anio=2026, dias_laborables=23)
+        periodo = ConfigBonoVentasPeriodo.objects.create(
+            mes=6,
+            anio=2026,
+            dias_laborables=31,
+            fecha_inicio=date(2026, 5, 28),
+            fecha_fin=date(2026, 6, 27),
+        )
         bono = BonoVentasEmpleado.objects.create(
             periodo=periodo,
             empleado=empleado,
             sucursal=sucursal,
-            dias_trabajados=15,
-            dias_asistencia=15,
-            dias_uniforme=15,
-            dias_puntualidad=15,
+            dias_trabajados=10,
+            dias_asistencia=10,
+            dias_uniforme=10,
+            dias_puntualidad=10,
         )
 
-        bono.recalcular()
+        with patch("bonos_ventas.models.timezone.localdate", return_value=date(2026, 6, 11)):
+            bono.recalcular()
 
-        self.assertFalse(bono.pasa_asistencia)
-        self.assertEqual(bono.sub1, Decimal("0.00"))
+        self.assertTrue(bono.pasa_asistencia)
+        self.assertEqual(bono.sub1, Decimal("225.00"))
 
     def test_una_falta_cancela_bono_ventas_con_limite_cero(self):
         sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
