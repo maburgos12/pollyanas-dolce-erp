@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import re
+import unicodedata
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, time, timedelta
@@ -244,6 +245,7 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
     cfdi_emitidos = _aggregate_tipo_cfdi(cfdi_qs, CfdiDescargado.TIPO_EMITIDO)
     cfdi_recibidos = _aggregate_tipo_cfdi(cfdi_qs, CfdiDescargado.TIPO_RECIBIDO)
     cfdi_sucursales = _resumen_cfdi_sucursales(inicio=inicio, fin=fin)
+    canales_comparativo = _resumen_comparativo_canales(movimientos_qs=movimientos_qs, cfdi_qs=cfdi_qs)
 
     movimientos_periodo = list(movimientos_qs.order_by("-fecha_transaccion")[:50])
     candidatos = sugerir_cfdis_para_movimientos([mov for mov in movimientos_periodo if not mov.conciliado])
@@ -267,6 +269,7 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
         "cfdi_emitidos": cfdi_emitidos,
         "cfdi_recibidos": cfdi_recibidos,
         "cfdi_sucursales": cfdi_sucursales,
+        "canales_comparativo": canales_comparativo,
         "cfdi_rows": list(cfdi_qs.order_by("-fecha_emision")[:20]),
     }
 
@@ -352,6 +355,90 @@ def _resumen_cfdi_sucursales(*, inicio: datetime, fin: datetime) -> dict[str, An
         "pendientes": pendientes["cfdis"] or 0,
         "pendientes_total": pendientes["total"] or Decimal("0.00"),
     }
+
+
+def _resumen_comparativo_canales(*, movimientos_qs, cfdi_qs) -> list[dict[str, Any]]:
+    banco = {
+        "efectivo": {"conteo": 0, "total": Decimal("0.00")},
+        "tarjeta": {"conteo": 0, "total": Decimal("0.00")},
+        "transferencia": {"conteo": 0, "total": Decimal("0.00")},
+        "otros_abonos": {"conteo": 0, "total": Decimal("0.00")},
+    }
+    for descripcion, monto in movimientos_qs.filter(tipo=MovimientoBancario.TIPO_ABONO).values_list("descripcion", "monto"):
+        canal = _clasificar_canal_banco(descripcion)
+        banco[canal]["conteo"] += 1
+        banco[canal]["total"] += monto or Decimal("0.00")
+
+    cfdi_emitidos = cfdi_qs.filter(tipo_cfdi=CfdiDescargado.TIPO_EMITIDO)
+    sat = {
+        "efectivo": _aggregate_cfdi_formas(cfdi_emitidos, ["01"]),
+        "tarjeta": _aggregate_cfdi_formas(cfdi_emitidos, ["04", "28", "29"]),
+        "transferencia": _aggregate_cfdi_formas(cfdi_emitidos, ["03"]),
+        "otros_abonos": _aggregate_cfdi_excluyendo_formas(cfdi_emitidos, ["01", "03", "04", "28", "29"]),
+    }
+    labels = {
+        "efectivo": "Efectivo en ventanilla",
+        "tarjeta": "Tarjetas y adquirentes",
+        "transferencia": "Transferencias de clientes",
+        "otros_abonos": "Otros abonos",
+    }
+
+    rows = []
+    for canal in ["efectivo", "tarjeta", "transferencia", "otros_abonos"]:
+        banco_total = banco[canal]["total"]
+        sat_total = sat[canal]["total"]
+        diferencia = banco_total - sat_total
+        rows.append(
+            {
+                "canal": canal,
+                "nombre": labels[canal],
+                "banco_conteo": banco[canal]["conteo"],
+                "banco_total": banco_total,
+                "sat_conteo": sat[canal]["conteo"],
+                "sat_total": sat_total,
+                "diferencia": diferencia,
+                "estado": _estado_diferencia(diferencia),
+            }
+        )
+    return rows
+
+
+def _aggregate_cfdi_formas(queryset, formas_pago: list[str]) -> dict[str, Any]:
+    data = queryset.filter(forma_pago__in=formas_pago).aggregate(conteo=Count("id"), total=Sum("total"))
+    return {"conteo": data["conteo"] or 0, "total": data["total"] or Decimal("0.00")}
+
+
+def _aggregate_cfdi_excluyendo_formas(queryset, formas_pago: list[str]) -> dict[str, Any]:
+    data = queryset.exclude(forma_pago__in=formas_pago).aggregate(conteo=Count("id"), total=Sum("total"))
+    return {"conteo": data["conteo"] or 0, "total": data["total"] or Decimal("0.00")}
+
+
+def _clasificar_canal_banco(descripcion: str) -> str:
+    texto = _normalize_text(descripcion)
+    if "DEPOSITO EN EFECTIVO" in texto:
+        return "efectivo"
+    if "NEGOCIOS AFILIADOS" in texto or "OPTBLUE" in texto or "AMEX" in texto:
+        return "tarjeta"
+    if "SPEI" in texto or "TRANSFER" in texto:
+        return "transferencia"
+    return "otros_abonos"
+
+
+def _normalize_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value or "")
+    without_accents = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    upper = without_accents.upper()
+    upper = re.sub(r"[^A-Z0-9]+", " ", upper)
+    return re.sub(r"\s+", " ", upper).strip()
+
+
+def _estado_diferencia(diferencia: Decimal) -> str:
+    abs_diff = abs(diferencia)
+    if abs_diff <= Decimal("1.00"):
+        return "ok"
+    if abs_diff <= Decimal("100.00"):
+        return "revision"
+    return "pendiente"
 
 
 def _resumen_diario_movimientos(queryset) -> list[dict[str, Any]]:
