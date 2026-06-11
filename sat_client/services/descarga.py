@@ -14,7 +14,7 @@ from lxml import etree
 if TYPE_CHECKING:
     from zeep.transports import Transport
 
-from sat_client.models import CfdiDescargado, SolicitudDescarga
+from sat_client.models import CfdiDescargado, CfdiPagoRelacionado, SolicitudDescarga
 from sat_client.services.base import (
     SAT_DOWNLOAD_NS,
     SatServiceError,
@@ -28,6 +28,18 @@ from sat_client.services.base import (
 from sat_client.services.firma import build_signed_sat_request
 
 DESCARGA_ACTION = "http://DescargaMasivaTerceros.sat.gob.mx/IDescargaMasivaTercerosService/Descargar"
+
+
+@dataclass(frozen=True)
+class CfdiPagoParsed:
+    uuid_relacionado: str
+    fecha_pago: object
+    monto: Decimal
+    moneda: str
+    forma_pago: str
+    num_parcialidad: str
+    importe_saldo_anterior: Decimal | None
+    importe_saldo_insoluto: Decimal | None
 
 
 @dataclass(frozen=True)
@@ -49,6 +61,7 @@ class CfdiParsed:
     fecha_emision: object
     fecha_timbrado: object | None
     estatus: str
+    pagos: tuple[CfdiPagoParsed, ...] = ()
 
 
 def _decimal(value: str | None, default: str = "0") -> Decimal:
@@ -71,6 +84,44 @@ def _child_by_local_name(root: etree._Element, name: str) -> etree._Element | No
         if etree.QName(child).localname == name:
             return child
     return None
+
+
+def _children_by_local_name(root: etree._Element, name: str) -> list[etree._Element]:
+    return [child for child in root.iter() if etree.QName(child).localname == name]
+
+
+def _optional_decimal(value: str | None) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    return Decimal(value)
+
+
+def _parse_pagos(root: etree._Element) -> tuple[CfdiPagoParsed, ...]:
+    pagos: list[CfdiPagoParsed] = []
+    for pago in _children_by_local_name(root, "Pago"):
+        fecha_pago = _datetime(pago.get("FechaPago"))
+        if fecha_pago is None:
+            continue
+        forma_pago = pago.get("FormaDePagoP") or ""
+        moneda = pago.get("MonedaP") or "MXN"
+        monto_pago = _decimal(pago.get("Monto"))
+        for docto in _children_by_local_name(pago, "DoctoRelacionado"):
+            uuid_relacionado = (docto.get("IdDocumento") or "").upper()
+            if not uuid_relacionado:
+                continue
+            pagos.append(
+                CfdiPagoParsed(
+                    uuid_relacionado=uuid_relacionado,
+                    fecha_pago=fecha_pago,
+                    monto=_decimal(docto.get("ImpPagado"), str(monto_pago)),
+                    moneda=docto.get("MonedaDR") or moneda,
+                    forma_pago=forma_pago,
+                    num_parcialidad=docto.get("NumParcialidad") or "",
+                    importe_saldo_anterior=_optional_decimal(docto.get("ImpSaldoAnt")),
+                    importe_saldo_insoluto=_optional_decimal(docto.get("ImpSaldoInsoluto")),
+                )
+            )
+    return tuple(pagos)
 
 
 def parse_cfdi_xml(xml_content: bytes | str) -> CfdiParsed:
@@ -107,6 +158,7 @@ def parse_cfdi_xml(xml_content: bytes | str) -> CfdiParsed:
         fecha_emision=fecha_emision,
         fecha_timbrado=_datetime(timbre.get("FechaTimbrado")),
         estatus="vigente",
+        pagos=_parse_pagos(root),
     )
 
 
@@ -139,7 +191,7 @@ def guardar_cfdis_xml(
     nuevos = 0
     for xml_content in xml_documents:
         parsed = parse_cfdi_xml(xml_content)
-        _, created = CfdiDescargado.objects.get_or_create(
+        cfdi, created = CfdiDescargado.objects.get_or_create(
             uuid=parsed.uuid,
             defaults={
                 "solicitud": solicitud,
@@ -169,6 +221,19 @@ def guardar_cfdis_xml(
                 else "",
             },
         )
+        cfdi.pagos_detalle.all().delete()
+        for pago in parsed.pagos:
+            CfdiPagoRelacionado.objects.create(
+                cfdi_pago=cfdi,
+                uuid_relacionado=pago.uuid_relacionado,
+                fecha_pago=pago.fecha_pago,
+                monto=pago.monto,
+                moneda=pago.moneda,
+                forma_pago=pago.forma_pago,
+                num_parcialidad=pago.num_parcialidad,
+                importe_saldo_anterior=pago.importe_saldo_anterior,
+                importe_saldo_insoluto=pago.importe_saldo_insoluto,
+            )
         total += 1
         if created:
             nuevos += 1

@@ -104,6 +104,41 @@ class CfdiDescargado(models.Model):
         return f"{self.uuid} ${self.total}"
 
 
+class CfdiPagoRelacionado(models.Model):
+    cfdi_pago = models.ForeignKey(
+        CfdiDescargado,
+        on_delete=models.CASCADE,
+        related_name="pagos_detalle",
+    )
+    uuid_relacionado = models.CharField(max_length=36, db_index=True)
+    fecha_pago = models.DateTimeField(db_index=True)
+    monto = models.DecimalField(max_digits=14, decimal_places=2)
+    moneda = models.CharField(max_length=10, default="MXN")
+    forma_pago = models.CharField(max_length=5, blank=True)
+    num_parcialidad = models.CharField(max_length=20, blank=True)
+    importe_saldo_anterior = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    importe_saldo_insoluto = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["fecha_pago", "uuid_relacionado"]
+        verbose_name = "Pago relacionado CFDI"
+        verbose_name_plural = "Pagos relacionados CFDI"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["cfdi_pago", "uuid_relacionado", "num_parcialidad"],
+                name="uniq_cfdi_pago_docto_parcialidad",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["fecha_pago", "monto"]),
+            models.Index(fields=["uuid_relacionado", "fecha_pago"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.cfdi_pago.uuid} -> {self.uuid_relacionado} ${self.monto}"
+
+
 class LogDescargaSat(models.Model):
     NIVEL_INFO = "INFO"
     NIVEL_WARN = "WARN"

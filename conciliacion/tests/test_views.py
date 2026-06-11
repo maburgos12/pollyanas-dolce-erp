@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from conciliacion.models import CfdiSucursalResolucion, ImportacionBancaria
 from core.models import Sucursal
-from sat_client.models import CfdiDescargado, LogDescargaSat
+from sat_client.models import CfdiDescargado, CfdiPagoRelacionado, LogDescargaSat
 from syncfy_client.models import CuentaBancaria, MovimientoBancario
 
 
@@ -98,6 +98,40 @@ class ConciliacionBancariaViewTests(TestCase):
             confianza=95,
             texto_detectado="VENTAS DEL DIA",
         )
+        cfdi_credito = CfdiDescargado.objects.create(
+            uuid="33333333-3333-3333-3333-333333333333",
+            rfc_emisor="GEF211230KR2",
+            rfc_receptor="CLI010101AAA",
+            subtotal=Decimal("1000.00"),
+            total=Decimal("1000.00"),
+            tipo_comprobante="I",
+            tipo_cfdi=CfdiDescargado.TIPO_EMITIDO,
+            metodo_pago="PPD",
+            forma_pago="99",
+            fecha_emision=timezone.make_aware(datetime(2026, 4, 20, 10, 0)),
+        )
+        cfdi_pago = CfdiDescargado.objects.create(
+            uuid="44444444-4444-4444-4444-444444444444",
+            rfc_emisor="GEF211230KR2",
+            rfc_receptor="CLI010101AAA",
+            subtotal=Decimal("0.00"),
+            total=Decimal("0.00"),
+            moneda="XXX",
+            tipo_comprobante="P",
+            tipo_cfdi=CfdiDescargado.TIPO_EMITIDO,
+            fecha_emision=timezone.make_aware(datetime(2026, 6, 3, 10, 0)),
+        )
+        CfdiPagoRelacionado.objects.create(
+            cfdi_pago=cfdi_pago,
+            uuid_relacionado=cfdi_credito.uuid,
+            fecha_pago=timezone.make_aware(datetime(2026, 5, 31, 18, 45)),
+            monto=Decimal("400.00"),
+            moneda="MXN",
+            forma_pago="03",
+            num_parcialidad="1",
+            importe_saldo_anterior=Decimal("1000.00"),
+            importe_saldo_insoluto=Decimal("600.00"),
+        )
 
         response = self.client.get("/conciliacion/bancaria/?periodo=2026-05")
 
@@ -115,6 +149,11 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertContains(response, "Efectivo en ventanilla")
         self.assertContains(response, "$1,250.00")
         self.assertContains(response, "$750.00")
+        self.assertContains(response, "Alcance fiscal de conciliacion")
+        self.assertContains(response, "Pagos cobrados del mes")
+        self.assertContains(response, "$400.00")
+        self.assertContains(response, "Credito clientes pendiente")
+        self.assertContains(response, "$600.00")
 
     def test_preview_and_confirm_import_movements(self):
         archivo = SimpleUploadedFile(
