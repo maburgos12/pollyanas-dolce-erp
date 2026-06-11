@@ -17,7 +17,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento, PlanMantenimiento
 from mantenimiento.models import SolicitudCancelacion, ProveedorServicio
 from core.access import can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
-from core.models import sucursales_operativas
+from core.models import Sucursal, sucursales_operativas
 from fallas.models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
 from logistica.models import ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
 from maestros.models import Proveedor
@@ -38,6 +38,16 @@ from .serializers import (
 )
 
 AUTH = [JWTAuthentication, TokenAuthentication, SessionAuthentication]
+
+INSTALACION_CATEGORIAS = [
+    "Instalaciones generales",
+    "Plomería",
+    "Pintura / obra civil",
+    "Eléctrico",
+    "Aire acondicionado",
+    "Baños",
+    "Impermeabilización",
+]
 
 
 class EsMantenimiento(BasePermission):
@@ -78,6 +88,13 @@ def _parse_decimal(raw):
         return None
 
 
+def _safe_int(value, default=0):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _guardar_evidencias_falla(bitacora, archivos, user):
     for archivo in archivos:
         if not archivo:
@@ -97,6 +114,32 @@ def _ensure_provider(nombre):
     ProveedorServicio.objects.get_or_create(nombre=nombre, defaults={"activo": True})
     proveedor, _created = Proveedor.objects.get_or_create(nombre=nombre, defaults={"activo": True})
     return proveedor
+
+
+def _get_installation_asset(sucursal, categoria, proveedor_obj=None):
+    categoria = categoria if categoria in INSTALACION_CATEGORIAS else INSTALACION_CATEGORIAS[0]
+    nombre = f"{categoria} - {sucursal.nombre}"
+    activo = Activo.objects.filter(nombre=nombre, sucursal=sucursal, categoria=categoria).first()
+    if activo:
+        updates = []
+        if not activo.activo:
+            activo.activo = True
+            updates.append("activo")
+        if proveedor_obj and activo.proveedor_mantenimiento_id != proveedor_obj.id:
+            activo.proveedor_mantenimiento = proveedor_obj
+            updates.append("proveedor_mantenimiento")
+        if updates:
+            activo.save(update_fields=updates)
+        return activo
+    return Activo.objects.create(
+        nombre=nombre,
+        categoria=categoria,
+        ubicacion=sucursal.nombre,
+        sucursal=sucursal,
+        proveedor_mantenimiento=proveedor_obj,
+        criticidad=Activo.CRITICIDAD_MEDIA,
+        estado=Activo.ESTADO_OPERATIVO,
+    )
 
 
 def _asset_catalog_values(field):
@@ -211,6 +254,10 @@ def _branch_falla_item(reporte):
 
 def _branch_order_item(orden):
     dias = _dias_abierto(orden.creado_en)
+    proveedor = orden.proveedor_servicio.nombre if orden.proveedor_servicio_id else orden.responsable
+    creado_por = ""
+    if orden.creado_por_id:
+        creado_por = orden.creado_por.get_full_name() or orden.creado_por.username
     return {
         "uid": f"orden:{orden.id}",
         "tipo": "orden",
@@ -228,12 +275,15 @@ def _branch_order_item(orden):
         "estatus_display": orden.get_estatus_display(),
         "descripcion": orden.descripcion,
         "fecha": orden.creado_en,
-        "proveedor": orden.responsable,
+        "fecha_programada": orden.fecha_programada,
+        "proveedor": proveedor,
         "costo_estimado": None,
         "costo_real": orden.costo_total,
         "dias_abierto": dias,
         "semaforo": _semaforo(dias),
-        "asignado": bool(orden.responsable),
+        "asignado": bool(proveedor),
+        "reportado_por": creado_por,
+        "ultimo_avance": orden.nota_trabajo,
     }
 
 
@@ -284,7 +334,7 @@ def _unified_items(origen=""):
             falla.bitacora_total = len(getattr(falla, "bitacora_reciente", []))
         ordenes = (
             OrdenMantenimiento.objects.filter(estatus__in=_order_open_statuses())
-            .select_related("activo_ref", "activo_ref__sucursal")
+            .select_related("activo_ref", "activo_ref__sucursal", "creado_por", "proveedor_servicio")
             .order_by("-creado_en")[:80]
         )
         items.extend(_branch_falla_item(row) for row in fallas)
@@ -311,6 +361,9 @@ def _item_stage(item):
     estatus = str(item.get("estatus") or "").lower()
     proveedor = bool(item.get("proveedor"))
     costo_estimado = item.get("costo_estimado") is not None
+    if item.get("tipo") == "orden" and estatus == "pendiente" and item.get("fecha_programada"):
+        if item["fecha_programada"] > timezone.localdate():
+            return "programado"
     if estatus in {"cerrado", "cancelado", "resuelto", "cerrada", "cancelada"}:
         return "validacion"
     if estatus in {"abierto", "pendiente"}:
@@ -749,6 +802,168 @@ def crear_falla(request):
 
 
 @login_required
+def crear_servicio_mantenimiento(request):
+    """Registra un servicio realizado o programa una orden puntual sin reporte previo."""
+    _require_mantenimiento(request.user)
+    if request.method != "POST":
+        return redirect("mantenimiento:dashboard")
+
+    from django.contrib import messages as msg
+    from django.utils.dateparse import parse_date
+
+    modo = (request.POST.get("modo_servicio") or "realizado").strip().lower()
+    if modo not in {"realizado", "pendiente"}:
+        modo = "realizado"
+
+    alcance = (request.POST.get("alcance") or "activo").strip().lower()
+    if alcance == "flota":
+        alcance = "unidad"
+    if alcance not in {"activo", "unidad", "instalacion"}:
+        alcance = "activo"
+
+    sucursal_id = _safe_int(request.POST.get("sucursal_id") or request.POST.get("sucursal"))
+    activo_id = _safe_int(request.POST.get("activo_id"))
+    unidad_id = _safe_int(request.POST.get("unidad_id"))
+    instalacion_categoria = (request.POST.get("instalacion_categoria") or INSTALACION_CATEGORIAS[0]).strip()
+    descripcion = (request.POST.get("descripcion") or "").strip()
+    fecha_raw = (request.POST.get("fecha_objetivo") or "").strip()
+    fecha_objetivo = parse_date(fecha_raw) if fecha_raw else None
+    if not fecha_objetivo and modo == "realizado":
+        fecha_objetivo = timezone.localdate()
+
+    errores = []
+    if not sucursal_id:
+        errores.append("Selecciona una sucursal.")
+    if alcance == "activo" and not activo_id:
+        errores.append("Selecciona un activo o equipo.")
+    if alcance == "unidad" and not unidad_id:
+        errores.append("Selecciona una unidad logística.")
+    if alcance == "instalacion" and instalacion_categoria not in INSTALACION_CATEGORIAS:
+        errores.append("Selecciona un tipo de instalación válido.")
+    if not descripcion:
+        errores.append("Describe el servicio o pendiente.")
+    if modo == "pendiente" and not fecha_objetivo:
+        errores.append("Indica la fecha objetivo del servicio pendiente.")
+    if errores:
+        for error in errores:
+            msg.error(request, error)
+        return redirect("mantenimiento:dashboard")
+
+    proveedor_nombre = (request.POST.get("proveedor_servicio") or "").strip()
+    responsable = (request.POST.get("responsable") or "").strip() or proveedor_nombre
+    nota_trabajo = (request.POST.get("nota_trabajo") or "").strip()
+    costo_total = _parse_decimal(request.POST.get("costo_total")) or Decimal("0")
+    cerrar_servicio = (request.POST.get("cerrar_servicio") or "").strip().lower() in {"1", "on", "true", "yes"}
+
+    factura_archivo = request.FILES.get("factura_archivo")
+    if factura_archivo and factura_archivo.size > 30 * 1024 * 1024:
+        msg.error(request, "El archivo supera el límite de 30 MB.")
+        return redirect("mantenimiento:dashboard")
+
+    sucursal = Sucursal.objects.filter(pk=sucursal_id, activa=True).first()
+    if not sucursal:
+        msg.error(request, "Selecciona una sucursal válida.")
+        return redirect("mantenimiento:dashboard")
+
+    if alcance == "unidad":
+        unidad = get_object_or_404(Unidad, pk=unidad_id, activa=True)
+        if unidad.sucursal_id != sucursal.id:
+            msg.error(request, "La unidad logística no pertenece a la sucursal seleccionada.")
+            return redirect("mantenimiento:dashboard")
+        tipo_servicio, _created = TipoServicioUnidad.objects.get_or_create(
+            nombre=descripcion[:100],
+            defaults={
+                "tipo_intervalo": TipoServicioUnidad.INTERVALO_TIEMPO,
+                "activo": True,
+                "notas": "Servicio puntual registrado desde mantenimiento.",
+            },
+        )
+        servicio = ServicioRealizadoUnidad(
+            unidad=unidad,
+            tipo_servicio=tipo_servicio,
+            fecha_servicio=fecha_objetivo if modo == "realizado" else timezone.localdate(),
+            proveedor=proveedor_nombre or responsable,
+            costo=costo_total if modo == "realizado" else None,
+            archivo_factura=factura_archivo if modo == "realizado" else None,
+            notas=nota_trabajo or descripcion,
+            registrado_por=request.user,
+        )
+        servicio.save()
+        if modo == "pendiente":
+            servicio.proxima_fecha = fecha_objetivo
+            servicio.save(update_fields=["proxima_fecha"])
+            msg.success(request, f"Servicio de unidad programado: {unidad.codigo} · {fecha_objetivo:%d/%m/%Y}.")
+        else:
+            msg.success(request, f"Servicio de unidad registrado: {unidad.codigo}.")
+        return redirect("mantenimiento:dashboard")
+
+    proveedor_obj = _ensure_provider(proveedor_nombre)
+    if alcance == "instalacion":
+        activo_obj = _get_installation_asset(sucursal, instalacion_categoria, proveedor_obj)
+    else:
+        activo_obj = get_object_or_404(Activo, pk=activo_id, activo=True)
+        if activo_obj.sucursal_id != sucursal.id:
+            msg.error(request, "El activo no pertenece a la sucursal seleccionada.")
+            return redirect("mantenimiento:dashboard")
+
+    tipo_raw = (request.POST.get("tipo") or "").strip().upper()
+    tipo_default = OrdenMantenimiento.TIPO_PREVENTIVO if modo == "pendiente" else OrdenMantenimiento.TIPO_CORRECTIVO
+    tipo = tipo_raw if tipo_raw in {value for value, _label in OrdenMantenimiento.TIPO_CHOICES} else tipo_default
+    prioridad_raw = (request.POST.get("prioridad") or "").strip().upper()
+    prioridad = (
+        prioridad_raw
+        if prioridad_raw in {value for value, _label in OrdenMantenimiento.PRIORIDAD_CHOICES}
+        else OrdenMantenimiento.PRIORIDAD_MEDIA
+    )
+    origen_raw = (request.POST.get("origen") or "").strip().upper()
+    origen_default = OrdenMantenimiento.ORIGEN_INICIATIVA if modo == "pendiente" else OrdenMantenimiento.ORIGEN_EMERGENCIA
+    origen = origen_raw if origen_raw in {value for value, _label in OrdenMantenimiento.ORIGEN_CHOICES} else origen_default
+
+    if modo == "pendiente":
+        estatus = OrdenMantenimiento.ESTATUS_PENDIENTE
+        fecha_inicio = None
+        fecha_cierre = None
+        costo_total = Decimal("0")
+    else:
+        estatus = OrdenMantenimiento.ESTATUS_CERRADA if cerrar_servicio else OrdenMantenimiento.ESTATUS_EN_PROCESO
+        fecha_inicio = fecha_objetivo
+        fecha_cierre = fecha_objetivo if cerrar_servicio else None
+
+    orden = OrdenMantenimiento.objects.create(
+        activo_ref=activo_obj,
+        tipo=tipo,
+        prioridad=prioridad,
+        estatus=estatus,
+        fecha_programada=fecha_objetivo or timezone.localdate(),
+        fecha_inicio=fecha_inicio,
+        fecha_cierre=fecha_cierre,
+        responsable=responsable,
+        descripcion=descripcion,
+        costo_otros=costo_total,
+        origen=origen,
+        nota_trabajo=nota_trabajo,
+        proveedor_servicio=proveedor_obj,
+        creado_por=request.user,
+    )
+    if factura_archivo:
+        orden.factura_archivo = factura_archivo
+        orden.save(update_fields=["factura_archivo"])
+
+    BitacoraMantenimiento.objects.create(
+        orden=orden,
+        usuario=request.user,
+        accion="SERVICIO_PROGRAMADO" if modo == "pendiente" else "SERVICIO_REGISTRADO",
+        comentario=nota_trabajo or descripcion,
+    )
+
+    if modo == "pendiente":
+        msg.success(request, f"Servicio puntual programado: {orden.folio} · {orden.fecha_programada:%d/%m/%Y}.")
+    else:
+        msg.success(request, f"Servicio sin orden previa registrado: {orden.folio}.")
+    return redirect("mantenimiento:dashboard")
+
+
+@login_required
 def dashboard(request):
     _require_mantenimiento(request.user)
     origen = (request.GET.get("origen") or "").strip().lower()
@@ -832,8 +1047,12 @@ def dashboard(request):
             "today": today,
             "plan_tipo_choices": PlanMantenimiento.TIPO_CHOICES,
             "plan_estatus_choices": PlanMantenimiento.ESTATUS_CHOICES,
+            "orden_tipo_choices": OrdenMantenimiento.TIPO_CHOICES,
+            "orden_prioridad_choices": OrdenMantenimiento.PRIORIDAD_CHOICES,
+            "orden_origen_choices": OrdenMantenimiento.ORIGEN_CHOICES,
             "activos_para_plan": list(Activo.objects.select_related("sucursal").filter(activo=True).order_by("sucursal__nombre", "nombre")[:400]),
             "unidades_para_servicio": list(Unidad.objects.filter(activa=True).select_related("sucursal").order_by("descripcion", "codigo")),
+            "instalacion_categorias": INSTALACION_CATEGORIAS,
             "proveedores_todos": list(ProveedorServicio.objects.order_by("nombre")),
             "proveedores_importables": _get_proveedores_importables(),
         },
