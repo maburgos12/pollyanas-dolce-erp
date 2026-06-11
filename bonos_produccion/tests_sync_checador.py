@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 from decimal import Decimal
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import Group, User
@@ -122,6 +123,50 @@ class SyncChecadorProduccionTests(TestCase):
             list(RegistroDiarioProduccion.objects.filter(bono=bono).values_list("dia", flat=True).order_by("dia")),
             [10, 11],
         )
+
+    def test_sync_no_genera_ni_conserva_registros_futuros_en_periodo_en_curso(self):
+        periodo = ConfigBonoPeriodo.objects.create(
+            mes=6,
+            anio=2026,
+            dias_laborables=27,
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 27),
+        )
+        empleado = Empleado.objects.create(
+            nombre="Empleado Futuro Produccion",
+            area="HORNOS",
+            fecha_ingreso=date(2026, 1, 1),
+        )
+        bono = BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado, area=AREA_HORNOS)
+        RegistroDiarioProduccion.objects.create(bono=bono, dia=12, tiene_asistencia=False, tiene_puntualidad=False)
+
+        with patch("bonos_produccion.services_checador.timezone.localdate", return_value=date(2026, 6, 11)):
+            resultado = sincronizar_asistencia_desde_checador(periodo)
+
+        self.assertEqual(resultado["registros_eliminados"], 1)
+        self.assertFalse(RegistroDiarioProduccion.objects.filter(bono=bono, dia__gt=11).exists())
+
+    def test_sync_dia_futuro_elimina_registro_existente_en_periodo_en_curso(self):
+        periodo = ConfigBonoPeriodo.objects.create(
+            mes=6,
+            anio=2026,
+            dias_laborables=27,
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 27),
+        )
+        empleado = Empleado.objects.create(
+            nombre="Empleado Futuro Dia Produccion",
+            area="HORNOS",
+            fecha_ingreso=date(2026, 1, 1),
+        )
+        bono = BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado, area=AREA_HORNOS)
+        RegistroDiarioProduccion.objects.create(bono=bono, dia=12, tiene_asistencia=False, tiene_puntualidad=False)
+
+        with patch("bonos_produccion.services_checador.timezone.localdate", return_value=date(2026, 6, 11)):
+            resultado = sincronizar_empleado_dia_desde_checador(empleado.id, date(2026, 6, 12))
+
+        self.assertEqual(resultado["registros_eliminados"], 1)
+        self.assertFalse(RegistroDiarioProduccion.objects.filter(bono=bono, dia=12).exists())
 
     def test_suspension_quita_asistencia_y_puntualidad(self):
         fecha = date(2026, 6, 4)
