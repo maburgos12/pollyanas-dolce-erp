@@ -22,6 +22,7 @@ from conciliacion.services.reglas_fiscales import (
     regla_para_movimiento,
     resumen_matriz_reglas,
 )
+from core.models import Sucursal
 from sat_client.models import CfdiDescargado, CfdiPagoRelacionado
 from syncfy_client.models import CuentaBancaria, MovimientoBancario
 
@@ -296,6 +297,7 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
     cfdi_sucursales = _resumen_cfdi_sucursales(inicio=inicio, fin=fin)
     alcance_fiscal = _resumen_alcance_fiscal(inicio=inicio, fin=fin)
     canales_comparativo = _resumen_comparativo_canales(movimientos_qs=movimientos_qs, cfdi_qs=cfdi_qs)
+    mesa_ingresos = _mesa_ingresos_sucursal(inicio=inicio, fin=fin, movimientos_qs=movimientos_qs)
     resumen_ejecutivo = _resumen_ejecutivo_periodo(
         movimientos_abonos=abonos,
         movimientos_cargos=cargos,
@@ -343,6 +345,7 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
         "cfdi_sucursales": cfdi_sucursales,
         "alcance_fiscal": alcance_fiscal,
         "canales_comparativo": canales_comparativo,
+        "mesa_ingresos": mesa_ingresos,
         "estado_cierre": estado_cierre,
         "resumen_ejecutivo": resumen_ejecutivo,
         "trabajo_conciliacion": trabajo_conciliacion,
@@ -734,6 +737,148 @@ def _resumen_comparativo_canales(*, movimientos_qs, cfdi_qs) -> list[dict[str, A
             }
         )
     return rows
+
+
+def _mesa_ingresos_sucursal(*, inicio: datetime, fin: datetime, movimientos_qs) -> dict[str, Any]:
+    sucursales = list(Sucursal.objects.filter(activa=True).only("codigo", "nombre").order_by("codigo"))
+    sucursales_lookup = _sucursales_lookup(sucursales)
+    rows: dict[tuple[str, str], dict[str, Any]] = {}
+
+    for descripcion, monto in movimientos_qs.filter(tipo=MovimientoBancario.TIPO_ABONO).values_list("descripcion", "monto"):
+        canal = _clasificar_canal_banco(descripcion)
+        sucursal = _clasificar_sucursal_texto(descripcion, sucursales_lookup)
+        row = _ingreso_row(rows, canal, sucursal)
+        row["banco_conteo"] += 1
+        row["banco_total"] += monto or Decimal("0.00")
+
+    resoluciones = (
+        CfdiSucursalResolucion.objects.select_related("sucursal", "cfdi")
+        .filter(
+            cfdi__fecha_emision__gte=inicio,
+            cfdi__fecha_emision__lt=fin,
+            cfdi__tipo_cfdi=CfdiDescargado.TIPO_EMITIDO,
+        )
+        .only("sucursal__codigo", "sucursal__nombre", "cfdi__forma_pago", "cfdi__total")
+    )
+    for resolucion in resoluciones:
+        canal = _clasificar_canal_sat(resolucion.cfdi.forma_pago)
+        sucursal = (
+            {"codigo": resolucion.sucursal.codigo, "nombre": resolucion.sucursal.nombre}
+            if resolucion.sucursal_id
+            else {"codigo": "", "nombre": "CFDI sin sucursal"}
+        )
+        row = _ingreso_row(rows, canal, sucursal)
+        row["sat_conteo"] += 1
+        row["sat_total"] += resolucion.cfdi.total or Decimal("0.00")
+
+    ordered = sorted(rows.values(), key=lambda item: (item["sucursal_codigo"] == "", item["sucursal"], item["canal_orden"]))
+    for row in ordered:
+        row["diferencia"] = row["banco_total"] - row["sat_total"]
+        row["estado"] = _estado_diferencia(row["diferencia"])
+        row["accion"] = _accion_mesa_ingresos(row)
+        row["movimientos_query"] = _query_mesa_ingresos(row)
+
+    pendientes = [row for row in ordered if row["estado"] != "ok"]
+    return {
+        "rows": ordered,
+        "pendientes": len(pendientes),
+        "total_banco": sum((row["banco_total"] for row in ordered), Decimal("0.00")),
+        "total_sat": sum((row["sat_total"] for row in ordered), Decimal("0.00")),
+    }
+
+
+def _ingreso_row(rows: dict[tuple[str, str], dict[str, Any]], canal: str, sucursal: dict[str, str]) -> dict[str, Any]:
+    canal_meta = _canal_meta(canal)
+    sucursal_codigo = sucursal.get("codigo") or ""
+    key = (canal, sucursal_codigo)
+    if key not in rows:
+        rows[key] = {
+            "canal": canal,
+            "canal_label": canal_meta["label"],
+            "canal_orden": canal_meta["orden"],
+            "sucursal_codigo": sucursal_codigo,
+            "sucursal": sucursal.get("nombre") or "Sin sucursal en banco",
+            "banco_conteo": 0,
+            "banco_total": Decimal("0.00"),
+            "sat_conteo": 0,
+            "sat_total": Decimal("0.00"),
+            "diferencia": Decimal("0.00"),
+            "estado": "pendiente",
+            "accion": "",
+            "movimientos_query": "",
+        }
+    return rows[key]
+
+
+def _canal_meta(canal: str) -> dict[str, Any]:
+    data = {
+        "efectivo": {"label": "Efectivo", "orden": 1},
+        "tarjeta": {"label": "Terminal bancaria", "orden": 2},
+        "transferencia": {"label": "Transferencia", "orden": 3},
+        "otros_abonos": {"label": "Otros abonos", "orden": 4},
+    }
+    return data.get(canal, data["otros_abonos"])
+
+
+def _sucursales_lookup(sucursales: list[Sucursal]) -> list[dict[str, str]]:
+    lookup = []
+    for sucursal in sucursales:
+        lookup.append(
+            {
+                "codigo": sucursal.codigo,
+                "nombre": sucursal.nombre,
+                "codigo_norm": _normalize_text(sucursal.codigo),
+                "nombre_norm": _normalize_text(sucursal.nombre),
+            }
+        )
+    return lookup
+
+
+def _clasificar_sucursal_texto(descripcion: str, sucursales: list[dict[str, str]]) -> dict[str, str]:
+    texto = _normalize_text(descripcion)
+    for sucursal in sucursales:
+        codigo = sucursal["codigo_norm"]
+        nombre = sucursal["nombre_norm"]
+        if (codigo and re.search(rf"\b{re.escape(codigo)}\b", texto)) or (
+            nombre and re.search(rf"\b{re.escape(nombre)}\b", texto)
+        ):
+            return {"codigo": sucursal["codigo"], "nombre": sucursal["nombre"]}
+    return {"codigo": "", "nombre": "Sin sucursal en banco"}
+
+
+def _clasificar_canal_sat(forma_pago: str | None) -> str:
+    forma = (forma_pago or "").strip()
+    if forma == "01":
+        return "efectivo"
+    if forma in {"04", "28", "29"}:
+        return "tarjeta"
+    if forma == "03":
+        return "transferencia"
+    return "otros_abonos"
+
+
+def _accion_mesa_ingresos(row: dict[str, Any]) -> str:
+    if row["estado"] == "ok":
+        return "Validar y cerrar"
+    if row["sat_total"] and not row["banco_total"]:
+        return "Buscar deposito bancario"
+    if row["banco_total"] and not row["sat_total"]:
+        return "Buscar CFDI de ingreso"
+    if not row["sucursal_codigo"]:
+        return "Identificar sucursal"
+    return "Revisar diferencia"
+
+
+def _query_mesa_ingresos(row: dict[str, Any]) -> str:
+    if row["sucursal_codigo"]:
+        return row["sucursal_codigo"]
+    if row["canal"] == "efectivo":
+        return "DEPOSITO EN EFECTIVO"
+    if row["canal"] == "tarjeta":
+        return "NEGOCIOS AFILIADOS"
+    if row["canal"] == "transferencia":
+        return "SPEI"
+    return ""
 
 
 @dataclass(frozen=True)

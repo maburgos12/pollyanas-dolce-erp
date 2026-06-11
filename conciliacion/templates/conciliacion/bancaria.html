@@ -436,6 +436,76 @@
     </div>
 
     <div class="conc-subpanel" style="margin-top:14px;">
+      <div class="conc-period-bar">
+        <div>
+          <h3>Mesa de ingresos para trabajar</h3>
+          <p class="conc-note">
+            Cruza lo facturado en SAT contra los abonos del banco por sucursal y forma de pago. Si el banco no trae sucursal clara, queda separado para identificarlo antes de cerrar.
+          </p>
+        </div>
+        <div class="conc-status-line">
+          <span class="conc-chip is-info">${{ periodo_resumen.mesa_ingresos.total_sat|floatformat:2|intcomma }} SAT</span>
+          <span class="conc-chip is-info">${{ periodo_resumen.mesa_ingresos.total_banco|floatformat:2|intcomma }} banco</span>
+          {% if periodo_resumen.mesa_ingresos.pendientes %}
+            <span class="conc-chip is-warn">{{ periodo_resumen.mesa_ingresos.pendientes|intcomma }} pendientes</span>
+          {% else %}
+            <span class="conc-chip is-ok">Sin pendientes</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="conc-table">
+          <thead>
+            <tr>
+              <th>Sucursal / canal</th>
+              <th>CFDI ingreso</th>
+              <th class="conc-money">SAT</th>
+              <th>Depositos</th>
+              <th class="conc-money">Banco</th>
+              <th class="conc-money">Diferencia</th>
+              <th>Estado</th>
+              <th>Trabajo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in periodo_resumen.mesa_ingresos.rows %}
+            <tr>
+              <td>
+                <strong>{{ row.sucursal }}</strong><br>
+                <span class="conc-chip is-info">{{ row.canal_label }}</span>
+              </td>
+              <td>{{ row.sat_conteo|intcomma }}</td>
+              <td class="conc-money">${{ row.sat_total|floatformat:2|intcomma }}</td>
+              <td>{{ row.banco_conteo|intcomma }}</td>
+              <td class="conc-money">${{ row.banco_total|floatformat:2|intcomma }}</td>
+              <td class="conc-money">${{ row.diferencia|floatformat:2|intcomma }}</td>
+              <td>
+                {% if row.estado == "ok" %}
+                  <span class="conc-chip is-ok">Cuadra</span>
+                {% elif row.estado == "revision" %}
+                  <span class="conc-chip is-warn">Revision menor</span>
+                {% else %}
+                  <span class="conc-chip is-muted">Pendiente</span>
+                {% endif %}
+              </td>
+              <td>
+                <strong>{{ row.accion }}</strong><br>
+                {% if row.movimientos_query %}
+                  <a class="conc-link" href="?periodo={{ periodo_resumen.periodo_value }}&tipo=abono&q={{ row.movimientos_query|urlencode }}#mesa-movimientos">Ver depositos</a>
+                {% else %}
+                  <a class="conc-link" href="?periodo={{ periodo_resumen.periodo_value }}&tipo=abono#mesa-movimientos">Ver abonos</a>
+                {% endif %}
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="8" class="conc-empty">No hay ingresos SAT ni abonos bancarios para trabajar en este periodo.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="conc-subpanel" style="margin-top:14px;">
       <h3>Banco contra SAT por canal</h3>
       <p class="conc-note">
         Compara abonos del estado de cuenta contra CFDI emitidos segun la regla fiscal de cada canal. La diferencia se calcula como banco menos SAT.
