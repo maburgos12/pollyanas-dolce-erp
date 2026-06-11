@@ -49,6 +49,14 @@ AGENTE_DG_SOURCE_TABLE_TYPES = {
     "minute_agreements": SeguimientoItem.TIPO_MINUTA,
     "minute_projects": SeguimientoItem.TIPO_PROYECTO,
 }
+CHECKLIST_TITULO_MAX_LENGTH = 220
+
+
+def _truncate_for_charfield(value: str, max_length: int) -> str:
+    value = (value or "").strip()
+    if len(value) <= max_length:
+        return value
+    return value[: max_length - 3].rstrip() + "..."
 
 
 def _tokens(value: str) -> set[str]:
@@ -433,9 +441,10 @@ class AgenteDGSeguimientoImporter:
         existing = {check.orden: check for check in item.checklist.all()}
         desired_orders = set()
         for index, payload in enumerate(checklist_payload, start=1):
-            titulo = (payload.get("titulo") or "").strip()
-            if not titulo:
+            titulo_completo = (payload.get("titulo") or "").strip()
+            if not titulo_completo:
                 continue
+            titulo = _truncate_for_charfield(titulo_completo, CHECKLIST_TITULO_MAX_LENGTH)
             desired_orders.add(index)
             check = existing.get(index)
             # Resolver el aprobador del ERP desde e-mail o nombre (datos del Agente DG)
@@ -446,7 +455,7 @@ class AgenteDGSeguimientoImporter:
             defaults = {
                 "titulo": titulo,
                 "origen_step_id": payload.get("origen_step_id"),
-                "descripcion": payload.get("descripcion") or "",
+                "descripcion": payload.get("descripcion") or (titulo_completo if titulo_completo != titulo else ""),
                 "completado": bool(payload.get("completado")),
                 "entregable": payload.get("entregable") or "",
                 "responsable_nombre": payload.get("responsable_nombre") or "",
