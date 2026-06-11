@@ -137,10 +137,12 @@ def _build_reporte_asistencia(fecha_inicio: date, fecha_fin: date, empleado_id: 
     resumenes = defaultdict(
         lambda: {
             "faltas": 0,
+            "falta_retardos": 0,
             "retardos": 0,
             "comida_excedida": 0,
             "jornada_incompleta": 0,
             "hora_extra": 0,
+            "avisos_baja": 0,
             "permisos": 0,
             "vacaciones": 0,
             "suspensiones": 0,
@@ -151,6 +153,8 @@ def _build_reporte_asistencia(fecha_inicio: date, fecha_fin: date, empleado_id: 
         resumen = resumenes[incidencia.empleado_id]
         if incidencia.tipo == IncidenciaAsistencia.TIPO_FALTA:
             resumen["faltas"] += 1
+        elif incidencia.tipo == IncidenciaAsistencia.TIPO_FALTA_RETARDOS:
+            resumen["falta_retardos"] += 1
         elif incidencia.tipo in {IncidenciaAsistencia.TIPO_RETARDO, IncidenciaAsistencia.TIPO_RETARDO_TOLERANCIA}:
             resumen["retardos"] += 1
         elif incidencia.tipo == IncidenciaAsistencia.TIPO_COMIDA_EXCEDIDA:
@@ -159,6 +163,8 @@ def _build_reporte_asistencia(fecha_inicio: date, fecha_fin: date, empleado_id: 
             resumen["jornada_incompleta"] += 1
         elif incidencia.tipo == IncidenciaAsistencia.TIPO_HORA_EXTRA_PENDIENTE:
             resumen["hora_extra"] += 1
+        elif incidencia.tipo in {IncidenciaAsistencia.TIPO_AVISO_BAJA_FALTAS, IncidenciaAsistencia.TIPO_BAJA_FALTAS}:
+            resumen["avisos_baja"] += 1
         elif incidencia.tipo == IncidenciaAsistencia.TIPO_SUSPENSION:
             resumen["suspensiones"] += 1
 
@@ -192,14 +198,19 @@ def _build_reporte_asistencia(fecha_inicio: date, fecha_fin: date, empleado_id: 
         fin = min(solicitud.fecha_fin, fecha_fin)
         resumenes[solicitud.empleado_id]["vacaciones"] += (fin - inicio).days + 1
 
+    empleado_especifico = empleado_id.isdigit()
     reportes = []
     total_incidencias = 0
     for empleado in empleados:
+        resumen = resumenes[empleado.id]
         filas = []
         for fecha in fechas:
             incidencia_dia = incidencias_por_dia.get((empleado.id, fecha), [])
             total_incidencias += len(incidencia_dia)
             asistencia = asistencias_por_dia.get((empleado.id, fecha))
+            # Solo días con evento: registro de checador o incidencia.
+            if not incidencia_dia and not asistencia:
+                continue
             filas.append(
                 {
                     "fecha": fecha,
@@ -207,6 +218,9 @@ def _build_reporte_asistencia(fecha_inicio: date, fecha_fin: date, empleado_id: 
                     "incidencias": incidencia_dia,
                 }
             )
+        # Omitir empleados sin actividad, salvo cuando se pidió uno específico.
+        if not empleado_especifico and not filas and not any(resumen.values()):
+            continue
         reportes.append(
             {
                 "empleado": empleado,
@@ -217,7 +231,7 @@ def _build_reporte_asistencia(fecha_inicio: date, fecha_fin: date, empleado_id: 
                     "sucursal": empleado.sucursal,
                     "departamento": empleado.get_departamento_display() if empleado.departamento else "",
                 },
-                "resumen": resumenes[empleado.id],
+                "resumen": resumen,
                 "filas": filas,
             }
         )
