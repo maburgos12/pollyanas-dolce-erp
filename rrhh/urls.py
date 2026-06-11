@@ -43,6 +43,11 @@ urlpatterns = [
     path("asistencias/", views.asistencias_view, name="rrhh_asistencias"),
     path("asistencias/monitor/", views_asistencia.monitor_sincronizacion, name="rrhh_monitor_sync"),
     path("reporte-asistencia/", views_asistencia.reporte_asistencia, name="rrhh_reporte_asistencia"),
+    path(
+        "reporte-asistencia/incidencia/<int:incidencia_id>/editar/",
+        views_asistencia.editar_incidencia,
+        name="rrhh_incidencia_editar",
+    ),
     path("importar-checador/", views.importar_checador, name="rrhh_importar"),
     path("horas-extra/", views.horas_extra_list, name="rrhh_he_list"),
     path("permisos/", views.permisos_list, name="rrhh_permisos_list"),

@@ -6,18 +6,30 @@ from datetime import date, datetime, time, timedelta
 from io import BytesIO
 from urllib.parse import urlencode
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.db.models import Q
 from django.http import HttpResponse
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.dateparse import parse_date
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 from openpyxl import Workbook
 
 from core.access import can_manage_rrhh, can_view_rrhh
 
-from .models import AsistenciaEmpleado, Empleado, IncidenciaAsistencia, PermisoSalida, SolicitudVacaciones
+from .models import (
+    AsistenciaEmpleado,
+    Empleado,
+    IncidenciaAsistencia,
+    IncidenciaAsistenciaBitacora,
+    PermisoSalida,
+    SolicitudVacaciones,
+)
+from .services import can_edit_incidencia
 from .views import _module_tabs
 
 
@@ -109,8 +121,18 @@ def _export_xlsx(rows: list[list]) -> HttpResponse:
     return response
 
 
-def _build_reporte_asistencia(fecha_inicio: date, fecha_fin: date, empleado_id: str, sucursal: str) -> tuple[list[dict], int]:
-    empleados_qs = Empleado.objects.filter(activo=True).order_by("nombre", "codigo")
+def _build_reporte_asistencia(
+    fecha_inicio: date,
+    fecha_fin: date,
+    empleado_id: str,
+    sucursal: str,
+    user=None,
+) -> tuple[list[dict], int]:
+    empleados_qs = (
+        Empleado.objects.filter(activo=True)
+        .select_related("jefe_directo__usuario_erp")
+        .order_by("nombre", "codigo")
+    )
     if empleado_id.isdigit():
         empleados_qs = empleados_qs.filter(id=int(empleado_id))
     if sucursal:
@@ -170,12 +192,15 @@ def _build_reporte_asistencia(fecha_inicio: date, fecha_fin: date, empleado_id: 
 
         incidencias_por_dia[(incidencia.empleado_id, incidencia.fecha)].append(
             {
+                "id": incidencia.id,
                 "tipo": incidencia.get_tipo_display(),
                 "estado": incidencia.get_estado_display(),
+                "estado_codigo": incidencia.estado,
                 "severidad": incidencia.get_severidad_display(),
                 "badge_class": _badge_class(incidencia.severidad),
                 "minutos": incidencia.minutos,
                 "detalle": incidencia.detalle,
+                "editado_manual": incidencia.editado_manual,
             }
         )
 
@@ -201,7 +226,10 @@ def _build_reporte_asistencia(fecha_inicio: date, fecha_fin: date, empleado_id: 
     empleado_especifico = empleado_id.isdigit()
     reportes = []
     total_incidencias = 0
+    puede_gestionar_rrhh = can_manage_rrhh(user) if user else False
     for empleado in empleados:
+        jefe_usuario_id = getattr(getattr(empleado, "jefe_directo", None), "usuario_erp_id", None)
+        puede_editar = bool(user and (puede_gestionar_rrhh or jefe_usuario_id == user.id))
         resumen = resumenes[empleado.id]
         filas = []
         for fecha in fechas:
@@ -233,9 +261,85 @@ def _build_reporte_asistencia(fecha_inicio: date, fecha_fin: date, empleado_id: 
                 },
                 "resumen": resumen,
                 "filas": filas,
+                "puede_editar": puede_editar,
             }
         )
     return reportes, total_incidencias
+
+
+def _redirect_reporte_asistencia_from_post(request):
+    params = {
+        "fecha_inicio": (request.POST.get("fecha_inicio") or "").strip(),
+        "fecha_fin": (request.POST.get("fecha_fin") or "").strip(),
+        "empleado": (request.POST.get("empleado") or "").strip(),
+        "sucursal": (request.POST.get("sucursal") or "").strip(),
+    }
+    query = urlencode({key: value for key, value in params.items() if value})
+    url = reverse("rrhh:rrhh_reporte_asistencia")
+    return redirect(f"{url}?{query}" if query else url)
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def editar_incidencia(request, incidencia_id):
+    incidencia = get_object_or_404(
+        IncidenciaAsistencia.objects.select_related("empleado", "empleado__jefe_directo__usuario_erp"),
+        pk=incidencia_id,
+    )
+    if not can_edit_incidencia(request.user, incidencia):
+        raise PermissionDenied("No tienes permisos para editar esta incidencia")
+
+    comentario = (request.POST.get("comentario") or "").strip()
+    if not comentario:
+        messages.error(request, "El comentario es obligatorio para editar una incidencia.")
+        return _redirect_reporte_asistencia_from_post(request)
+
+    estado = (request.POST.get("estado") or "").strip()
+    estados_validos = {value for value, _ in IncidenciaAsistencia.ESTADO_CHOICES}
+    if estado not in estados_validos:
+        messages.error(request, "El estado seleccionado no es válido.")
+        return _redirect_reporte_asistencia_from_post(request)
+
+    try:
+        minutos = int((request.POST.get("minutos") or "0").strip())
+    except ValueError:
+        messages.error(request, "Los minutos deben ser un número entero.")
+        return _redirect_reporte_asistencia_from_post(request)
+    if minutos < 0:
+        messages.error(request, "Los minutos no pueden ser negativos.")
+        return _redirect_reporte_asistencia_from_post(request)
+
+    detalle = (request.POST.get("detalle") or "").strip()
+    cambios = {
+        "estado": estado,
+        "minutos": minutos,
+        "detalle": detalle,
+    }
+    campos_actualizados = []
+    for campo, valor_nuevo in cambios.items():
+        valor_anterior = getattr(incidencia, campo)
+        if valor_anterior == valor_nuevo:
+            continue
+        IncidenciaAsistenciaBitacora.objects.create(
+            incidencia=incidencia,
+            usuario=request.user,
+            campo=campo,
+            valor_anterior=str(valor_anterior),
+            valor_nuevo=str(valor_nuevo),
+            comentario=comentario,
+        )
+        setattr(incidencia, campo, valor_nuevo)
+        campos_actualizados.append(campo)
+
+    if campos_actualizados:
+        incidencia.editado_manual = True
+        incidencia.save(update_fields=[*campos_actualizados, "editado_manual", "actualizado_en"])
+        messages.success(request, "Incidencia actualizada correctamente.")
+    else:
+        messages.info(request, "No hubo cambios para guardar.")
+
+    return _redirect_reporte_asistencia_from_post(request)
 
 
 @login_required
@@ -289,7 +393,13 @@ def reporte_asistencia(request):
 
     empleado_id = (request.GET.get("empleado") or "").strip()
     sucursal = (request.GET.get("sucursal") or "").strip()
-    reportes, total_incidencias = _build_reporte_asistencia(fecha_inicio, fecha_fin, empleado_id, sucursal)
+    reportes, total_incidencias = _build_reporte_asistencia(
+        fecha_inicio,
+        fecha_fin,
+        empleado_id,
+        sucursal,
+        request.user,
+    )
 
     export = (request.GET.get("export") or "").strip().lower()
     if export in {"csv", "xlsx"}:
@@ -319,6 +429,7 @@ def reporte_asistencia(request):
             "empleado_id": empleado_id,
             "sucursal": sucursal,
             "can_manage": can_manage_rrhh(request.user),
+            "incidencia_estado_choices": IncidenciaAsistencia.ESTADO_CHOICES,
             "total_incidencias": total_incidencias,
             "query_csv": query_csv,
             "query_xlsx": query_xlsx,

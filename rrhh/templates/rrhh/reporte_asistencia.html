@@ -10,6 +10,14 @@
   {% endfor %}
 </section>
 
+{% if messages %}
+  {% for message in messages %}
+    <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'success' %}alert-success{% elif message.tags == 'info' %}alert-info{% else %}alert-info{% endif %}">
+      {{ message }}
+    </div>
+  {% endfor %}
+{% endif %}
+
 <section class="card">
   <div class="card-header">
     <h2>Filtros</h2>
@@ -117,6 +125,7 @@
               <th>Estado</th>
               <th>Minutos</th>
               <th>Detalle</th>
+              <th>Acciones</th>
             </tr>
           </thead>
           <tbody>
@@ -129,6 +138,9 @@
                 <td>
                   {% for incidencia in fila.incidencias %}
                     <span class="badge {{ incidencia.badge_class }}">{{ incidencia.tipo }}</span>
+                    {% if incidencia.editado_manual %}
+                      <span class="badge" style="background:var(--dorado);color:#fff;">Editado</span>
+                    {% endif %}
                   {% empty %}
                     -
                   {% endfor %}
@@ -153,6 +165,47 @@
                   {% empty %}
                     -
                   {% endfor %}
+                </td>
+                <td>
+                  {% if reporte.puede_editar %}
+                    {% for incidencia in fila.incidencias %}
+                      <details>
+                        <summary class="btn btn-sm btn-secondary">Editar</summary>
+                        <form method="post" action="{% url 'rrhh:rrhh_incidencia_editar' incidencia.id %}">
+                          {% csrf_token %}
+                          <div class="form-group">
+                            <label for="estado_{{ incidencia.id }}">Estado</label>
+                            <select class="input-field" id="estado_{{ incidencia.id }}" name="estado">
+                              {% for valor_estado, etiqueta_estado in incidencia_estado_choices %}
+                                <option value="{{ valor_estado }}" {% if valor_estado == incidencia.estado_codigo %}selected{% endif %}>{{ etiqueta_estado }}</option>
+                              {% endfor %}
+                            </select>
+                          </div>
+                          <div class="form-group">
+                            <label for="minutos_{{ incidencia.id }}">Minutos</label>
+                            <input class="input-field" id="minutos_{{ incidencia.id }}" type="number" name="minutos" value="{{ incidencia.minutos }}" min="0">
+                          </div>
+                          <div class="form-group">
+                            <label for="detalle_{{ incidencia.id }}">Detalle</label>
+                            <input class="input-field" id="detalle_{{ incidencia.id }}" type="text" name="detalle" value="{{ incidencia.detalle }}">
+                          </div>
+                          <div class="form-group">
+                            <label for="comentario_{{ incidencia.id }}">Comentario</label>
+                            <textarea class="input-field" id="comentario_{{ incidencia.id }}" name="comentario" required placeholder="Motivo del cambio (obligatorio)"></textarea>
+                          </div>
+                          <input type="hidden" name="fecha_inicio" value="{{ fecha_inicio }}">
+                          <input type="hidden" name="fecha_fin" value="{{ fecha_fin }}">
+                          <input type="hidden" name="empleado" value="{{ empleado_id }}">
+                          <input type="hidden" name="sucursal" value="{{ sucursal }}">
+                          <button class="btn btn-sm btn-primary" style="background:var(--vino);border-color:var(--vino);" type="submit">Guardar</button>
+                        </form>
+                      </details>
+                    {% empty %}
+                      -
+                    {% endfor %}
+                  {% else %}
+                    -
+                  {% endif %}
                 </td>
               </tr>
             {% endfor %}
