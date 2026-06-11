@@ -1276,6 +1276,10 @@ class PointProductRecipeSyncService:
             yield_mode = PointRecipeNode.YIELD_VOLUME
         else:
             yield_mode = PointRecipeNode.YIELD_UNIT
+
+        purchase_conversion = self._decimal(detail.get("ConvUnidadCompra"))
+        if purchase_conversion is not None and purchase_conversion > 0:
+            return purchase_conversion, unit, unit_text, yield_mode
         return Decimal("1"), unit, unit_text, yield_mode
 
     def _upsert_recipe_record(

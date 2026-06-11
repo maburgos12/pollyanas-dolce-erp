@@ -599,6 +599,74 @@ class PointProductRecipeSyncServiceTests(TestCase):
         self.assertFalse(node_betun.lines.filter(classification="UNRESOLVED").exists())
         self.assertEqual(packaging.codigo_point, "C85-45")
 
+    def test_sync_uses_purchase_conversion_as_prepared_input_yield(self):
+        payload = {
+            "products": [
+                {
+                    "PK_Producto": 101,
+                    "Codigo": "PCMED",
+                    "Nombre": "Pastel Ciruela Mediano",
+                    "Familia": "Pastel",
+                    "Categoria": "Pastel Mediano",
+                    "hasReceta": True,
+                }
+            ],
+            "details": {
+                101: {
+                    "PK_Producto": 101,
+                    "Codigo": "PCMED",
+                    "Nombre": "Pastel Ciruela Mediano",
+                }
+            },
+            "boms": {
+                101: [
+                    {
+                        "PK_Articulo": 580,
+                        "Codigo_Articulo": "01CC07",
+                        "Articulo": "Ciruela Cocida",
+                        "Cantidad": "1.0",
+                        "Unidad_corto": "KG",
+                    }
+                ]
+            },
+            "articulos": [
+                {
+                    "PK_Articulo": 580,
+                    "Codigo_Articulo": "01CC07",
+                    "Nombre_Articulo": "Ciruela Cocida",
+                    "Categoria": "Betún, Cremas, Rellenos",
+                    "HasReceta": True,
+                }
+            ],
+            "articulo_details": {
+                580: {
+                    "PKInsumo": 580,
+                    "CodigoInsumo": "01CC07",
+                    "Nombre": "Ciruela Cocida",
+                    "UnidadBase": "KG",
+                    "UnidadCompra": "Unidad",
+                    "UnidadVenta": "Gr",
+                    "ConvUnidadCompra": 5.172,
+                    "ConvUnidadVenta": 1000,
+                    "Categoria": "Betún, Cremas, Rellenos",
+                    "BOM": [
+                        {"CodigoInsumo": "CIRUELA", "Nombre": "CIRUELA SECA", "Cantidad": "1", "UnidadVenta": "KG"},
+                    ],
+                }
+            },
+        }
+        service = PointProductRecipeSyncService(http_client_factory=lambda: FakePointHttpClient(payload))
+
+        result = service.sync(product_codes=["PCMED"])
+
+        self.assertEqual(result.summary["preparations_created"], 1)
+        receta_ciruela = Receta.objects.get(codigo_point="01CC07")
+        self.assertEqual(str(receta_ciruela.rendimiento_cantidad), "5.172000")
+        self.assertEqual(receta_ciruela.rendimiento_unidad.codigo, "kg")
+        node_ciruela = PointRecipeNode.objects.get(point_code="01CC07")
+        self.assertEqual(str(node_ciruela.yield_quantity), "5.172000")
+        self.assertEqual(node_ciruela.yield_unit.codigo, "kg")
+
     def test_sync_creates_direct_catalog_inputs_for_unmapped_bom_rows(self):
         payload = {
             "products": [
