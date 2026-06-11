@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from datetime import datetime
+from decimal import Decimal
+
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
-from conciliacion.models import ImportacionBancaria
-from sat_client.models import LogDescargaSat
+from conciliacion.models import CfdiSucursalResolucion, ImportacionBancaria
+from core.models import Sucursal
+from sat_client.models import CfdiDescargado, CfdiPagoRelacionado, LogDescargaSat
 from syncfy_client.models import CuentaBancaria, MovimientoBancario
 
 
@@ -30,6 +35,8 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Conciliacion bancaria")
         self.assertContains(response, "BBVA Empresas")
+        self.assertContains(response, "Formatos aceptados: PDF, XML, CSV, XLS, XLSX o XLSM")
+        self.assertNotContains(response, "accept=")
 
     @override_settings(SAT_DESCARGA_ENABLED=True)
     def test_get_bancaria_shows_sat_error_status_when_last_log_failed(self):
@@ -40,6 +47,113 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Descarga SAT con error")
         self.assertNotContains(response, "Descarga SAT activa")
+
+    def test_get_bancaria_shows_period_bank_and_sat_summary(self):
+        MovimientoBancario.objects.create(
+            id_transaction="mayo-1",
+            cuenta=self.cuenta,
+            descripcion="DEPOSITO EN EFECTIVO MAYO",
+            monto=Decimal("1250.00"),
+            tipo=MovimientoBancario.TIPO_ABONO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 1, 12, 0)),
+            fecha_refresh=timezone.now(),
+            extra_raw={"archivo_nombre": "mayo.csv"},
+        )
+        MovimientoBancario.objects.create(
+            id_transaction="mayo-31",
+            cuenta=self.cuenta,
+            descripcion="COMISION MAYO",
+            monto=Decimal("15.00"),
+            tipo=MovimientoBancario.TIPO_CARGO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 31, 12, 0)),
+            fecha_refresh=timezone.now(),
+            extra_raw={"archivo_nombre": "mayo.csv"},
+        )
+        CfdiDescargado.objects.create(
+            uuid="11111111-1111-1111-1111-111111111111",
+            rfc_emisor="AAA010101AAA",
+            rfc_receptor="GEF211230KR2",
+            subtotal=Decimal("1000.00"),
+            total=Decimal("1160.00"),
+            tipo_comprobante="I",
+            tipo_cfdi=CfdiDescargado.TIPO_RECIBIDO,
+            fecha_emision=timezone.make_aware(datetime(2026, 5, 15, 10, 0)),
+        )
+        matriz = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz")
+        cfdi_emitido = CfdiDescargado.objects.create(
+            uuid="22222222-2222-2222-2222-222222222222",
+            rfc_emisor="GEF211230KR2",
+            rfc_receptor="XAXX010101000",
+            subtotal=Decimal("500.00"),
+            total=Decimal("500.00"),
+            tipo_comprobante="I",
+            tipo_cfdi=CfdiDescargado.TIPO_EMITIDO,
+            forma_pago="01",
+            fecha_emision=timezone.make_aware(datetime(2026, 5, 16, 10, 0)),
+        )
+        CfdiSucursalResolucion.objects.create(
+            cfdi=cfdi_emitido,
+            sucursal=matriz,
+            fuente=CfdiSucursalResolucion.FUENTE_XML_CONCEPTO,
+            confianza=95,
+            texto_detectado="VENTAS DEL DIA",
+        )
+        cfdi_credito = CfdiDescargado.objects.create(
+            uuid="33333333-3333-3333-3333-333333333333",
+            rfc_emisor="GEF211230KR2",
+            rfc_receptor="CLI010101AAA",
+            subtotal=Decimal("1000.00"),
+            total=Decimal("1000.00"),
+            tipo_comprobante="I",
+            tipo_cfdi=CfdiDescargado.TIPO_EMITIDO,
+            metodo_pago="PPD",
+            forma_pago="99",
+            fecha_emision=timezone.make_aware(datetime(2026, 4, 20, 10, 0)),
+        )
+        cfdi_pago = CfdiDescargado.objects.create(
+            uuid="44444444-4444-4444-4444-444444444444",
+            rfc_emisor="GEF211230KR2",
+            rfc_receptor="CLI010101AAA",
+            subtotal=Decimal("0.00"),
+            total=Decimal("0.00"),
+            moneda="XXX",
+            tipo_comprobante="P",
+            tipo_cfdi=CfdiDescargado.TIPO_EMITIDO,
+            fecha_emision=timezone.make_aware(datetime(2026, 6, 3, 10, 0)),
+        )
+        CfdiPagoRelacionado.objects.create(
+            cfdi_pago=cfdi_pago,
+            uuid_relacionado=cfdi_credito.uuid,
+            fecha_pago=timezone.make_aware(datetime(2026, 5, 31, 18, 45)),
+            monto=Decimal("400.00"),
+            moneda="MXN",
+            forma_pago="03",
+            num_parcialidad="1",
+            importe_saldo_anterior=Decimal("1000.00"),
+            importe_saldo_insoluto=Decimal("600.00"),
+        )
+
+        response = self.client.get("/conciliacion/bancaria/?periodo=2026-05")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Revision del periodo: mayo 2026")
+        self.assertContains(response, "mayo.csv")
+        self.assertContains(response, "2026-05-01")
+        self.assertContains(response, "2026-05-31")
+        self.assertContains(response, "CFDI SAT del periodo")
+        self.assertContains(response, "11111111-1111-1111-1111-111111111111")
+        self.assertContains(response, "CFDI emitidos por sucursal")
+        self.assertContains(response, "Matriz")
+        self.assertContains(response, "$500.00")
+        self.assertContains(response, "Banco contra SAT por canal")
+        self.assertContains(response, "Efectivo en ventanilla")
+        self.assertContains(response, "$1,250.00")
+        self.assertContains(response, "$750.00")
+        self.assertContains(response, "Alcance fiscal de conciliacion")
+        self.assertContains(response, "Pagos cobrados del mes")
+        self.assertContains(response, "$400.00")
+        self.assertContains(response, "Credito clientes pendiente")
+        self.assertContains(response, "$600.00")
 
     def test_preview_and_confirm_import_movements(self):
         archivo = SimpleUploadedFile(

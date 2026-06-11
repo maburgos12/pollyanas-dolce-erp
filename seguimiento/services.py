@@ -49,6 +49,24 @@ AGENTE_DG_SOURCE_TABLE_TYPES = {
     "minute_agreements": SeguimientoItem.TIPO_MINUTA,
     "minute_projects": SeguimientoItem.TIPO_PROYECTO,
 }
+CHECKLIST_TITULO_MAX_LENGTH = 220
+_PRESERVE_CHECKLIST = object()
+
+
+def _truncate_for_charfield(value: str, max_length: int) -> str:
+    value = (value or "").strip()
+    if len(value) <= max_length:
+        return value
+    return value[: max_length - 3].rstrip() + "..."
+
+
+def _json_datetime(value) -> str:
+    if not value:
+        return ""
+    dt_value = agente_dg_as_datetime(value)
+    if dt_value:
+        return dt_value.isoformat()
+    return str(value)
 
 
 def _tokens(value: str) -> set[str]:
@@ -89,6 +107,10 @@ def _score_empleado_para_usuario(empleado: Empleado, user, user_tokens: set[str]
 def empleado_de_usuario(user):
     if not user or not user.is_authenticated:
         return None
+
+    empleado = Empleado.objects.filter(activo=True, usuario_erp=user).first()
+    if empleado:
+        return empleado
 
     email = (getattr(user, "email", "") or "").strip()
     if email:
@@ -193,9 +215,43 @@ def agente_dg_checklist_from_json(raw_value: str | None) -> list[str]:
             if isinstance(item, str):
                 values.append(item)
             elif isinstance(item, dict):
-                values.append(item.get("title") or item.get("texto") or item.get("label") or "")
+                values.append(item.get("title") or item.get("text") or item.get("texto") or item.get("label") or "")
         return [value.strip() for value in values if value and value.strip()]
     return []
+
+
+def agente_dg_checklist_payload_from_json(raw_value: str | None) -> list[dict]:
+    if not raw_value:
+        return []
+    try:
+        payload = json.loads(raw_value)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(payload, list):
+        return []
+
+    items = []
+    for item in payload:
+        if isinstance(item, str):
+            titulo = item.strip()
+            completado = False
+            completado_at = None
+        elif isinstance(item, dict):
+            titulo = (item.get("title") or item.get("text") or item.get("texto") or item.get("label") or "").strip()
+            completado = bool(item.get("completed") or item.get("completado") or item.get("done") or item.get("checked"))
+            completado_at = item.get("completed_at") or item.get("completado_at")
+        else:
+            continue
+        if titulo:
+            items.append(
+                {
+                    "titulo": titulo,
+                    "descripcion": "",
+                    "completado": completado,
+                    "completado_at": completado_at,
+                }
+            )
+    return items
 
 
 def _texto_a_puntos(texto: str) -> list[str]:
@@ -329,6 +385,9 @@ class AgenteDGSeguimientoImporter:
             "source_user_email": row.get("user_email") or "",
             "source_user_name": row.get("user_name") or "",
             "source_status": str(row.get("status") or ""),
+            "source_archived_at": _json_datetime(row.get("archived_at")),
+            "source_completed_at": _json_datetime(row.get("completed_at")),
+            "synced_at": timezone.now().isoformat(),
             "source_participants": participant_payload,
         }
         # Solo minutas y proyectos pasan por aprobación del DG. Los compromisos son
@@ -370,15 +429,26 @@ class AgenteDGSeguimientoImporter:
             item = SeguimientoItem.objects.create(**defaults)
             counters["created"] += 1
 
+        cierre_fuente = agente_dg_status_a_erp(row.get("status")) in {
+            SeguimientoItem.ESTATUS_COMPLETADO,
+            SeguimientoItem.ESTATUS_CANCELADO,
+        }
+        cierre_at = agente_dg_as_datetime(row.get("archived_at") or row.get("completed_at"))
+        if cierre_fuente and cierre_at and item.aprobado_at != cierre_at:
+            item.aprobado_at = cierre_at
+            item.save(update_fields=["aprobado_at", "updated_at"])
+        elif not cierre_fuente and item.aprobado_at:
+            item.aprobado_at = None
+            item.save(update_fields=["aprobado_at", "updated_at"])
+
         item.participantes_user.set(participant_users)
         item.participantes_empleado.set(participant_empleados)
 
+        if checklist is _PRESERVE_CHECKLIST:
+            return
         checklist_payload = checklist
         if checklist_payload is None:
-            checklist_payload = [
-                {"titulo": title, "descripcion": "", "completado": False}
-                for title in agente_dg_checklist_from_json(row.get("checklist_items_json"))
-            ]
+            checklist_payload = agente_dg_checklist_payload_from_json(row.get("checklist_items_json"))
         self._sync_checklist(item, checklist_payload)
 
     def _resolve_participants(self, participants):
@@ -433,9 +503,10 @@ class AgenteDGSeguimientoImporter:
         existing = {check.orden: check for check in item.checklist.all()}
         desired_orders = set()
         for index, payload in enumerate(checklist_payload, start=1):
-            titulo = (payload.get("titulo") or "").strip()
-            if not titulo:
+            titulo_completo = (payload.get("titulo") or "").strip()
+            if not titulo_completo:
                 continue
+            titulo = _truncate_for_charfield(titulo_completo, CHECKLIST_TITULO_MAX_LENGTH)
             desired_orders.add(index)
             check = existing.get(index)
             # Resolver el aprobador del ERP desde e-mail o nombre (datos del Agente DG)
@@ -446,7 +517,7 @@ class AgenteDGSeguimientoImporter:
             defaults = {
                 "titulo": titulo,
                 "origen_step_id": payload.get("origen_step_id"),
-                "descripcion": payload.get("descripcion") or "",
+                "descripcion": payload.get("descripcion") or (titulo_completo if titulo_completo != titulo else ""),
                 "completado": bool(payload.get("completado")),
                 "entregable": payload.get("entregable") or "",
                 "responsable_nombre": payload.get("responsable_nombre") or "",
@@ -462,11 +533,15 @@ class AgenteDGSeguimientoImporter:
             if check:
                 for key, value in defaults.items():
                     setattr(check, key, value)
-                if not check.completado:
+                if check.completado:
+                    check.completado_at = agente_dg_as_datetime(payload.get("completado_at") or payload.get("completed_at")) or check.completado_at or timezone.now()
+                else:
                     check.completado_por = None
                     check.completado_at = None
                 check.save()
             else:
+                if defaults["completado"]:
+                    defaults["completado_at"] = agente_dg_as_datetime(payload.get("completado_at") or payload.get("completed_at")) or timezone.now()
                 SeguimientoChecklistItem.objects.create(seguimiento=item, orden=index, **defaults)
         item.checklist.exclude(orden__in=desired_orders).delete()
 
@@ -487,13 +562,16 @@ def upsert_agente_dg_payload(payload: dict) -> dict[str, int]:
         record["id"] = source_id
 
     importer = AgenteDGSeguimientoImporter()
+    checklist = payload.get("checklist", _PRESERVE_CHECKLIST)
+    if checklist is _PRESERVE_CHECKLIST and "checklist_items_json" in record:
+        checklist = None
     with transaction.atomic():
         importer._upsert_item(
             record,
             source_table,
             AGENTE_DG_SOURCE_TABLE_TYPES[source_table],
             counters,
-            checklist=payload.get("checklist"),
+            checklist=checklist,
             participants=payload.get("participants"),
         )
     return counters

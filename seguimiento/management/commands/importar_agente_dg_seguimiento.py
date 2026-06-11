@@ -43,6 +43,7 @@ MINUTE_QUERY = """
         m.agreement_text AS descripcion,
         m.checklist_items_json,
         m.status,
+        m.archived_at,
         m.due_at,
         m.collaborator_user_id AS user_id,
         u.email AS user_email,
@@ -50,7 +51,9 @@ MINUTE_QUERY = """
         m.meeting_label AS area_name
     FROM minute_agreements m
     LEFT JOIN users u ON u.id = m.collaborator_user_id
-    WHERE m.archived_at IS NULL
+    WHERE
+        m.archived_at IS NULL
+        OR UPPER(COALESCE(m.status::text, '')) IN ('COMPLETED', 'CLOSED', 'CANCELLED', 'CANCELED')
     ORDER BY m.id
 """
 

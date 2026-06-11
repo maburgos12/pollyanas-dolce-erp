@@ -35,7 +35,7 @@ def bancos_view(request: HttpRequest) -> HttpResponse:
     except (SyncfyConfigurationError, SyncfyServiceError, ValueError) as exc:
         syncfy_error = str(exc)
 
-    cuentas = list(CuentaBancaria.objects.order_by("banco"))
+    cuentas = list(CuentaBancaria.objects.filter(origen=CuentaBancaria.ORIGEN_SYNCFY).order_by("banco"))
     return render(
         request,
         "syncfy_client/bancos.html",
@@ -51,7 +51,7 @@ def bancos_view(request: HttpRequest) -> HttpResponse:
 @require_POST
 def guardar_credential_view(request: HttpRequest, banco: str) -> JsonResponse:
     _assert_syncfy_access(request)
-    cuenta = get_object_or_404(CuentaBancaria, banco=banco)
+    cuenta = get_object_or_404(CuentaBancaria, banco=banco, origen=CuentaBancaria.ORIGEN_SYNCFY)
     payload = _json_payload(request)
     id_credential = str(payload.get("id_credential") or payload.get("idCredential") or "").strip()
     id_site = str(payload.get("id_site") or payload.get("idSite") or "").strip()
@@ -78,7 +78,7 @@ def sincronizar_credenciales_view(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"ok": False, "error": str(exc)}, status=502)
 
     actualizadas = 0
-    cuentas = list(CuentaBancaria.objects.order_by("banco"))
+    cuentas = list(CuentaBancaria.objects.filter(origen=CuentaBancaria.ORIGEN_SYNCFY).order_by("banco"))
     credenciales_por_banco: dict[str, dict[str, Any]] = {}
     for cuenta in cuentas:
         credencial = _elegir_credencial(cuenta.id_site_syncfy, credenciales)

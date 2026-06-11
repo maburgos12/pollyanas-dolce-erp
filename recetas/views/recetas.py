@@ -6039,6 +6039,7 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
             sku__in=sorted(sku_to_receta_id.keys()),
             precio__isnull=False,
             precio_activo=True,
+            active=True,
         ).values("sku", "precio")
         for product in catalog_products:
             receta_id = sku_to_receta_id.get((product["sku"] or "").strip())
@@ -6174,7 +6175,7 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
     familias_produccion = sorted({
         (categoria or "").strip()
         for categoria in PointProduct.objects.filter(
-            precio_activo=True, precio__isnull=False
+            active=True, precio_activo=True, precio__isnull=False
         ).values_list("category", flat=True)
         if (categoria or "").strip()
     })

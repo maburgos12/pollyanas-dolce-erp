@@ -5,7 +5,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils import timezone
 
 from recetas.utils.normalizacion import normalizar_nombre
@@ -785,6 +785,66 @@ class CandidatoVacante(models.Model):
     @property
     def activo(self) -> bool:
         return self.etapa_actual not in {self.ETAPA_CONTRATADO, self.ETAPA_DESCARTADO}
+
+
+class AltaPendienteEmpleado(models.Model):
+    ESTADO_PENDIENTE = "pendiente"
+    ESTADO_CONVERTIDA = "convertida"
+    ESTADO_CANCELADA = "cancelada"
+    ESTADO_CHOICES = [
+        (ESTADO_PENDIENTE, "Pendiente"),
+        (ESTADO_CONVERTIDA, "Convertida a empleado"),
+        (ESTADO_CANCELADA, "Cancelada"),
+    ]
+
+    vacante = models.ForeignKey("rrhh.VacanteRRHH", on_delete=models.PROTECT, related_name="altas_pendientes")
+    candidato = models.ForeignKey(
+        CandidatoVacante,
+        on_delete=models.PROTECT,
+        related_name="altas_pendientes",
+    )
+    empleado = models.ForeignKey(
+        Empleado,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="altas_desde_vacante",
+    )
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE, db_index=True)
+    nombre = models.CharField(max_length=180)
+    telefono = models.CharField(max_length=30, blank=True, default="")
+    email = models.EmailField(blank=True, default="")
+    sucursal = models.CharField(max_length=120, blank=True, default="")
+    departamento = models.CharField(max_length=40, choices=Empleado.DEP_CHOICES, blank=True, default="")
+    area = models.CharField(max_length=120, blank=True, default="")
+    puesto = models.CharField(max_length=120, blank=True, default="")
+    fecha_ingreso_sugerida = models.DateField(null=True, blank=True)
+    nota = models.TextField(blank=True, default="")
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="altas_pendientes_creadas",
+    )
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+    convertida_en = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-creado_en", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["candidato"],
+                condition=Q(estado="pendiente"),
+                name="rrhh_alta_pendiente_unica_por_candidato",
+            )
+        ]
+        verbose_name = "Alta pendiente de empleado"
+        verbose_name_plural = "Altas pendientes de empleados"
+
+    def __str__(self) -> str:
+        return f"{self.nombre} · {self.vacante.folio} · {self.get_estado_display()}"
 
 
 class VacanteSeguimiento(models.Model):

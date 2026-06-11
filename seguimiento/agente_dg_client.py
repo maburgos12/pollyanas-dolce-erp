@@ -1,9 +1,9 @@
 """Cliente HTTP del ERP hacia el Agente DG (app.pollyanasdolce.com).
 
-Fase 2 (write-back): permite que el ERP actualice un paso de proyecto en el Agente DG
-vía su API oficial (PATCH /api/minutas/project-steps/{id}), de modo que se disparen los
-efectos del propio sistema (WhatsApp, notificaciones, Google Calendar). NO se escribe
-directo a su base de datos.
+Fase 2 (write-back): permite que el ERP actualice acuerdos del Agente DG
+vía su API oficial, de modo que se disparen los efectos del propio sistema
+(WhatsApp, notificaciones, Google Calendar). NO se escribe directo a su base de
+datos.
 
 Configuración por variables de entorno (en el .env del ERP):
     AGENTE_DG_API_BASE_URL   p.ej. https://stg.pollyanasdolce.com (staging) o
@@ -100,6 +100,22 @@ def get_projects() -> list:
     return resp.json()
 
 
+def get_users() -> list:
+    """Lista usuarios del Agente DG para resolver colaboradores por e-mail."""
+    resp = _request("GET", "/api/users/")
+    if resp.status_code >= 400:
+        raise AgenteDGError(f"GET users falló: {resp.status_code} {resp.text[:160]}")
+    return resp.json()
+
+
+def create_minute_agreement(**fields) -> dict:
+    """Crea una minuta/acuerdo en app.pollyanasdolce.com."""
+    resp = _request("POST", "/api/minutas/", json=fields)
+    if resp.status_code >= 400:
+        raise AgenteDGError(f"POST minuta falló: {resp.status_code} {resp.text[:200]}")
+    return resp.json()
+
+
 def patch_step(step_id: int, **fields) -> dict:
     """Actualiza un paso de proyecto en el Agente DG.
 
@@ -111,4 +127,27 @@ def patch_step(step_id: int, **fields) -> dict:
     resp = _request("PATCH", f"/api/minutas/project-steps/{int(step_id)}", json=fields)
     if resp.status_code >= 400:
         raise AgenteDGError(f"PATCH step {step_id} falló: {resp.status_code} {resp.text[:200]}")
+    return resp.json()
+
+
+def patch_minute_agreement(minuta_id: int, **fields) -> dict:
+    """Actualiza una minuta/acuerdo en el Agente DG."""
+    if not minuta_id:
+        raise AgenteDGError("patch_minute_agreement requiere minuta_id")
+    resp = _request("PATCH", f"/api/minutas/{int(minuta_id)}", json=fields)
+    if resp.status_code >= 400:
+        raise AgenteDGError(f"PATCH minuta {minuta_id} falló: {resp.status_code} {resp.text[:200]}")
+    return resp.json()
+
+
+def patch_commitment_status(commitment_id: int, *, status: str, comment: str = "") -> dict:
+    """Actualiza el estatus de un compromiso en el Agente DG."""
+    if not commitment_id:
+        raise AgenteDGError("patch_commitment_status requiere commitment_id")
+    payload = {"status": status}
+    if comment:
+        payload["comment"] = comment
+    resp = _request("PATCH", f"/api/commitments/{int(commitment_id)}/status", json=payload)
+    if resp.status_code >= 400:
+        raise AgenteDGError(f"PATCH commitment {commitment_id} status falló: {resp.status_code} {resp.text[:200]}")
     return resp.json()

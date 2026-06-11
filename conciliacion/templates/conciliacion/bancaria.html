@@ -51,6 +51,17 @@
   .conc-help-item { border: 1px solid var(--conc-border); border-radius: 8px; padding: 12px; background: var(--conc-muted-surface); min-width: 0; }
   .conc-help-item p { margin: 0; color: var(--conc-secondary); font-size: .86rem; line-height: 1.45; }
   .conc-status-line { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+  .conc-period-bar { display: flex; justify-content: space-between; gap: 12px; align-items: end; flex-wrap: wrap; }
+  .conc-period-form { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
+  .conc-period-form label { display: grid; gap: 5px; color: var(--conc-secondary); font-weight: 800; font-size: .82rem; }
+  .conc-period-form input[type="month"] { border: 1px solid var(--conc-control-border); border-radius: 8px; padding: 9px; background: var(--conc-surface); color: var(--conc-text); }
+  .conc-mini-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+  .conc-mini-card { border: 1px solid var(--conc-border); border-radius: 8px; padding: 12px; background: var(--conc-muted-surface); min-width: 0; }
+  .conc-mini-card span { display: block; color: var(--conc-muted); font-size: .74rem; font-weight: 900; text-transform: uppercase; }
+  .conc-mini-card strong { display: block; margin-top: 5px; color: var(--conc-text); font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+  .conc-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+  .conc-subpanel { border: 1px solid var(--conc-border); border-radius: 8px; padding: 14px; background: var(--conc-surface); min-width: 0; }
+  .conc-subpanel h3 { margin: 0 0 10px; }
   .table-responsive { overflow-x: auto; border: 1px solid var(--conc-border); border-radius: 8px; }
   .conc-table { width: 100%; border-collapse: collapse; min-width: 760px; background: var(--conc-surface); }
   .conc-table th, .conc-table td { padding: 10px 12px; border-bottom: 1px solid var(--conc-border); text-align: left; vertical-align: top; }
@@ -68,6 +79,7 @@
     .conc-header, .conc-layout { display: grid; }
     .conc-kpis { grid-template-columns: 1fr; }
     .conc-help-grid { grid-template-columns: 1fr; }
+    .conc-mini-grid, .conc-split { grid-template-columns: 1fr; }
     .conc-actions .btn { width: 100%; justify-content: center; }
   }
 </style>
@@ -78,7 +90,7 @@
   <div class="conc-header">
     <div>
       <h1>Conciliacion bancaria</h1>
-      <p>Carga estados de cuenta de BanBajio o BBVA y comparalos contra las facturas descargadas del SAT antes de marcar pagos como conciliados.</p>
+      <p>Carga estados de cuenta de banco o tarjeta corporativa y comparalos contra las facturas descargadas del SAT antes de marcar pagos como conciliados.</p>
     </div>
   </div>
 
@@ -127,6 +139,238 @@
     </div>
   </div>
 
+  <div class="conc-panel">
+    <div class="conc-period-bar">
+      <div>
+        <h2>Revision del periodo: {{ periodo_resumen.periodo_label }}</h2>
+        <p class="conc-note">
+          Este bloque muestra lo cargado para el mes seleccionado. La tabla de abajo ya no representa solo los ultimos movimientos globales.
+        </p>
+      </div>
+      <form class="conc-period-form" method="get">
+        <label>
+          Mes
+          <input type="month" name="periodo" value="{{ periodo_resumen.periodo_value }}">
+        </label>
+        <button class="btn btn-secondary" type="submit">Ver periodo</button>
+      </form>
+    </div>
+
+    <div class="conc-mini-grid">
+      <div class="conc-mini-card">
+        <span>Movimientos del mes</span>
+        <strong>{{ periodo_resumen.movimientos_total|intcomma }}</strong>
+      </div>
+      <div class="conc-mini-card">
+        <span>Rango en banco</span>
+        <strong>
+          {% if periodo_resumen.movimientos_fecha_min and periodo_resumen.movimientos_fecha_max %}
+            {{ periodo_resumen.movimientos_fecha_min|date:"d M" }} - {{ periodo_resumen.movimientos_fecha_max|date:"d M" }}
+          {% else %}
+            Sin movimientos
+          {% endif %}
+        </strong>
+      </div>
+      <div class="conc-mini-card">
+        <span>Dias con movimiento</span>
+        <strong>{{ periodo_resumen.movimientos_dias|intcomma }}</strong>
+      </div>
+      <div class="conc-mini-card">
+        <span>CFDI SAT del mes</span>
+        <strong>{{ periodo_resumen.cfdi_total|intcomma }}</strong>
+      </div>
+    </div>
+
+    <div class="conc-mini-grid">
+      <div class="conc-mini-card">
+        <span>Cargos banco</span>
+        <strong>{{ periodo_resumen.movimientos_cargos.conteo|intcomma }} · ${{ periodo_resumen.movimientos_cargos.total|floatformat:2|intcomma }}</strong>
+      </div>
+      <div class="conc-mini-card">
+        <span>Abonos banco</span>
+        <strong>{{ periodo_resumen.movimientos_abonos.conteo|intcomma }} · ${{ periodo_resumen.movimientos_abonos.total|floatformat:2|intcomma }}</strong>
+      </div>
+      <div class="conc-mini-card">
+        <span>CFDI emitidos</span>
+        <strong>{{ periodo_resumen.cfdi_emitidos.conteo|intcomma }} · ${{ periodo_resumen.cfdi_emitidos.total|floatformat:2|intcomma }}</strong>
+      </div>
+      <div class="conc-mini-card">
+        <span>CFDI recibidos</span>
+        <strong>{{ periodo_resumen.cfdi_recibidos.conteo|intcomma }} · ${{ periodo_resumen.cfdi_recibidos.total|floatformat:2|intcomma }}</strong>
+      </div>
+    </div>
+
+    <div class="conc-subpanel" style="margin-top:14px;">
+      <h3>Alcance fiscal de conciliacion</h3>
+      <p class="conc-note">
+        Incluye complementos con fecha de pago dentro del mes, aunque el XML se timbre hasta el
+        {{ periodo_resumen.alcance_fiscal.complemento_fin|date:"Y-m-d" }}.
+      </p>
+      <div class="conc-mini-grid">
+        <div class="conc-mini-card">
+          <span>Pagos cobrados del mes</span>
+          <strong>{{ periodo_resumen.alcance_fiscal.pagos_emitidos.conteo|intcomma }} · ${{ periodo_resumen.alcance_fiscal.pagos_emitidos.total|floatformat:2|intcomma }}</strong>
+        </div>
+        <div class="conc-mini-card">
+          <span>Pagos a proveedores</span>
+          <strong>{{ periodo_resumen.alcance_fiscal.pagos_recibidos.conteo|intcomma }} · ${{ periodo_resumen.alcance_fiscal.pagos_recibidos.total|floatformat:2|intcomma }}</strong>
+        </div>
+        <div class="conc-mini-card">
+          <span>Credito clientes pendiente</span>
+          <strong>{{ periodo_resumen.alcance_fiscal.ppd_emitidos_abiertos.conteo|intcomma }} · ${{ periodo_resumen.alcance_fiscal.ppd_emitidos_abiertos.saldo|floatformat:2|intcomma }}</strong>
+        </div>
+        <div class="conc-mini-card">
+          <span>Credito proveedores pendiente</span>
+          <strong>{{ periodo_resumen.alcance_fiscal.ppd_recibidos_abiertos.conteo|intcomma }} · ${{ periodo_resumen.alcance_fiscal.ppd_recibidos_abiertos.saldo|floatformat:2|intcomma }}</strong>
+        </div>
+      </div>
+    </div>
+
+    <div class="conc-subpanel" style="margin-top:14px;">
+      <h3>Banco contra SAT por canal</h3>
+      <p class="conc-note">
+        Compara abonos del estado de cuenta contra CFDI emitidos. La diferencia se calcula como banco menos SAT.
+      </p>
+      <div class="table-responsive">
+        <table class="conc-table">
+          <thead>
+            <tr>
+              <th>Canal</th>
+              <th>Banco</th>
+              <th class="conc-money">Total banco</th>
+              <th>CFDI</th>
+              <th class="conc-money">Total SAT</th>
+              <th class="conc-money">Diferencia</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in periodo_resumen.canales_comparativo %}
+            <tr>
+              <td>{{ row.nombre }}</td>
+              <td>{{ row.banco_conteo|intcomma }}</td>
+              <td class="conc-money">${{ row.banco_total|floatformat:2|intcomma }}</td>
+              <td>{{ row.sat_conteo|intcomma }}</td>
+              <td class="conc-money">${{ row.sat_total|floatformat:2|intcomma }}</td>
+              <td class="conc-money">${{ row.diferencia|floatformat:2|intcomma }}</td>
+              <td>
+                {% if row.estado == "ok" %}
+                  <span class="conc-chip is-ok">Cuadra</span>
+                {% elif row.estado == "revision" %}
+                  <span class="conc-chip is-warn">Revision menor</span>
+                {% else %}
+                  <span class="conc-chip is-muted">Pendiente</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="7" class="conc-empty">Sin datos suficientes para comparar banco contra SAT.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="conc-subpanel" style="margin-top:14px;">
+      <h3>CFDI emitidos por sucursal</h3>
+      <p class="conc-note">
+        Sucursales detectadas desde los conceptos del XML. Los pendientes quedan separados para revision fiscal.
+      </p>
+      <div class="table-responsive">
+        <table class="conc-table">
+          <thead>
+            <tr>
+              <th>Sucursal</th>
+              <th>CFDI</th>
+              <th class="conc-money">Total</th>
+              <th class="conc-money">Efectivo</th>
+              <th class="conc-money">Tarjeta</th>
+              <th class="conc-money">Transferencia</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in periodo_resumen.cfdi_sucursales.sucursales %}
+            <tr>
+              <td>{{ row.nombre }}</td>
+              <td>{{ row.cfdis|intcomma }}</td>
+              <td class="conc-money">${{ row.total|floatformat:2|intcomma }}</td>
+              <td class="conc-money">${{ row.efectivo|floatformat:2|intcomma }}</td>
+              <td class="conc-money">${{ row.tarjeta|floatformat:2|intcomma }}</td>
+              <td class="conc-money">${{ row.transferencia|floatformat:2|intcomma }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6" class="conc-empty">Sin CFDI con sucursal resuelta en este periodo.</td></tr>
+            {% endfor %}
+            <tr>
+              <td><strong>Pendiente de clasificar</strong></td>
+              <td>{{ periodo_resumen.cfdi_sucursales.pendientes|intcomma }}</td>
+              <td class="conc-money">${{ periodo_resumen.cfdi_sucursales.pendientes_total|floatformat:2|intcomma }}</td>
+              <td colspan="3"><span class="conc-note">Requiere revisar concepto, cliente o regla fiscal.</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="conc-split" style="margin-top:14px;">
+      <div class="conc-subpanel">
+        <h3>Archivos que alimentan el periodo</h3>
+        <div class="table-responsive">
+          <table class="conc-table">
+            <thead>
+              <tr>
+                <th>Archivo</th>
+                <th>Movs.</th>
+                <th>Cargos</th>
+                <th>Abonos</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for fuente in periodo_resumen.movimientos_fuentes %}
+              <tr>
+                <td>{{ fuente.archivo }}</td>
+                <td>{{ fuente.conteo|intcomma }}</td>
+                <td>{{ fuente.cargos|intcomma }}</td>
+                <td>{{ fuente.abonos|intcomma }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="4" class="conc-empty">Sin archivos con movimientos en este periodo.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="conc-subpanel">
+        <h3>Dias cargados del estado de cuenta</h3>
+        <div class="table-responsive">
+          <table class="conc-table">
+            <thead>
+              <tr>
+                <th>Dia</th>
+                <th>Movs.</th>
+                <th class="conc-money">Cargos</th>
+                <th class="conc-money">Abonos</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for dia in periodo_resumen.movimientos_diarios %}
+              <tr>
+                <td>{{ dia.fecha|date:"Y-m-d" }}</td>
+                <td>{{ dia.total_conteo|intcomma }}</td>
+                <td class="conc-money">${{ dia.cargos_total|floatformat:2|intcomma }}</td>
+                <td class="conc-money">${{ dia.abonos_total|floatformat:2|intcomma }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="4" class="conc-empty">Sin movimientos bancarios para este periodo.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="conc-layout">
     <div class="conc-panel">
       <h2>Cargar estado de cuenta</h2>
@@ -143,10 +387,10 @@
           </select>
         </label>
         <label>
-          Archivo CSV o Excel
-          <input type="file" name="archivo" accept=".csv,.xls,.xlsx,.xlsm" required>
+          Archivo de estado de cuenta
+          <input type="file" name="archivo" required>
         </label>
-        <p class="conc-note">Columnas aceptadas: fecha, descripcion o concepto, cargo, abono, monto, referencia, saldo y moneda. Primero se muestra una revision previa; nada se guarda hasta confirmar.</p>
+        <p class="conc-note">Formatos aceptados: PDF, XML, CSV, XLS, XLSX o XLSM. Primero se muestra una revision previa; nada se guarda hasta confirmar.</p>
         <div class="conc-actions">
           <button class="btn btn-primary" type="submit">Revisar archivo</button>
         </div>
@@ -201,7 +445,8 @@
   </div>
 
   <div class="conc-panel">
-    <h2>Movimientos recientes y posibles facturas relacionadas</h2>
+    <h2>Movimientos del periodo y posibles facturas relacionadas</h2>
+    <p class="conc-note">Se muestran hasta 50 movimientos del mes seleccionado, ordenados del mas reciente al mas antiguo.</p>
     <div class="table-responsive">
       <table class="conc-table">
         <thead>
@@ -232,6 +477,39 @@
           </tr>
           {% empty %}
           <tr><td colspan="6" class="conc-empty">Sin movimientos importados.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="conc-panel">
+    <h2>CFDI SAT del periodo</h2>
+    <p class="conc-note">Muestra hasta 20 CFDI del mes seleccionado para confirmar que el SAT ya esta reflejado en el ERP.</p>
+    <div class="table-responsive">
+      <table class="conc-table">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Tipo</th>
+            <th>RFC emisor</th>
+            <th>RFC receptor</th>
+            <th class="conc-money">Total</th>
+            <th>UUID</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cfdi in periodo_resumen.cfdi_rows %}
+          <tr>
+            <td>{{ cfdi.fecha_emision|date:"Y-m-d" }}</td>
+            <td><span class="conc-chip {% if cfdi.tipo_cfdi == 'emitido' %}is-ok{% else %}is-info{% endif %}">{{ cfdi.tipo_cfdi }}</span></td>
+            <td>{{ cfdi.rfc_emisor }}</td>
+            <td>{{ cfdi.rfc_receptor }}</td>
+            <td class="conc-money">${{ cfdi.total|floatformat:2|intcomma }}</td>
+            <td>{{ cfdi.uuid }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6" class="conc-empty">Sin CFDI SAT para este periodo.</td></tr>
           {% endfor %}
         </tbody>
       </table>

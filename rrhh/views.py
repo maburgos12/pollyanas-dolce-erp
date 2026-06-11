@@ -25,6 +25,7 @@ from core.models import Sucursal
 
 from .models import (
     AsistenciaEmpleado,
+    AltaPendienteEmpleado,
     BonoEsquema,
     CatalogoFuncionOperativa,
     Empleado,
@@ -94,6 +95,7 @@ from .services_vacantes import (
     can_autorizar_vacante,
     can_solicitar_vacantes,
     can_ver_vacante,
+    consumir_alta_pendiente,
     crear_solicitud_vacante,
 )
 from recetas.utils.normalizacion import normalizar_nombre
@@ -1038,6 +1040,93 @@ def _rrhh_focus_summary(*, selected_focus: str, count: int) -> dict[str, object]
     }
 
 
+def _alta_pendiente_prefill(alta: AltaPendienteEmpleado | None) -> dict[str, str]:
+    if not alta:
+        return {}
+    fecha = alta.fecha_ingreso_sugerida.isoformat() if alta.fecha_ingreso_sugerida else ""
+    area = alta.area if alta.area in area_division_values() else ""
+    defaults = area_division_map().get(area, {})
+    return {
+        "id": str(alta.id),
+        "nombre": alta.nombre,
+        "telefono": alta.telefono,
+        "email": alta.email,
+        "sucursal": alta.sucursal,
+        "departamento": alta.departamento,
+        "departamento_origen": alta.departamento,
+        "area": area,
+        "puesto": alta.puesto,
+        "puesto_operativo": defaults.get("puesto_operativo", ""),
+        "fecha_ingreso": fecha,
+        "nivel_organizacional": defaults.get("nivel_organizacional", Empleado.NIVEL_COLABORADOR),
+    }
+
+
+def _crear_empleado_desde_post(
+    request,
+    *,
+    codigo: str,
+    nombre: str,
+    organizacion: dict,
+    jefe_directo_id: int | None,
+    alta_pendiente: AltaPendienteEmpleado | None = None,
+) -> Empleado:
+    with transaction.atomic():
+        empleado = Empleado.objects.create(
+            codigo=codigo,
+            nombre=nombre,
+            rfc=(request.POST.get("rfc") or "").strip(),
+            curp=(request.POST.get("curp") or "").strip(),
+            nss=(request.POST.get("nss") or "").strip(),
+            area=organizacion["area"],
+            puesto=(request.POST.get("puesto") or "").strip(),
+            departamento_origen=organizacion["departamento_origen"],
+            departamento=organizacion["departamento"],
+            puesto_operativo=organizacion["puesto_operativo"],
+            nivel_organizacional=organizacion["nivel_organizacional"],
+            jefe_directo_id=jefe_directo_id,
+            tipo_personal=(request.POST.get("tipo_personal") or Empleado.TIPO_POLLYANA).strip(),
+            participa_bonos_ventas=organizacion["participa_bonos_ventas"],
+            participa_bonos_produccion=organizacion["participa_bonos_produccion"],
+            tipo_contrato=(request.POST.get("tipo_contrato") or Empleado.CONTRATO_FIJO).strip(),
+            fecha_ingreso=_parse_date(request.POST.get("fecha_ingreso")) or timezone.localdate(),
+            salario_diario=_parse_decimal(request.POST.get("salario_diario")),
+            telefono=(request.POST.get("telefono") or "").strip(),
+            email=(request.POST.get("email") or "").strip(),
+            sucursal=(request.POST.get("sucursal") or "").strip(),
+        )
+        empleado.usuario_erp = _resolver_usuario_erp_desde_post(request, empleado)
+        if empleado.usuario_erp_id:
+            empleado.save(update_fields=["usuario_erp"])
+        sucursal_app_id = (request.POST.get("sucursal_app_id") or "").strip()
+        asegurar_identidad_operativa_empleado(
+            empleado,
+            sucursal_app_id=int(sucursal_app_id) if sucursal_app_id.isdigit() else None,
+        )
+        _sincronizar_logistica_desde_post(request, empleado)
+        sincronizar_esquemas_bono(empleado, request.POST, organizacion)
+        if alta_pendiente:
+            consumir_alta_pendiente(
+                alta_pendiente,
+                empleado,
+                request.user,
+                fecha_cobertura=empleado.fecha_ingreso,
+                nota="Alta registrada desde Capital Humano.",
+            )
+        log_event(
+            request.user,
+            "CREATE",
+            "rrhh.Empleado",
+            str(empleado.id),
+            {
+                "codigo": empleado.codigo,
+                "nombre": empleado.nombre,
+                "salario_diario": str(empleado.salario_diario),
+            },
+        )
+    return empleado
+
+
 @login_required
 def empleados(request):
     if not can_view_rrhh(request.user):
@@ -1049,6 +1138,16 @@ def empleados(request):
 
         action = (request.POST.get("action") or "create").strip()
         nombre = (request.POST.get("nombre") or "").strip()
+        alta_pendiente = None
+        alta_pendiente_id = (request.POST.get("alta_pendiente_id") or "").strip()
+        if action == "create" and alta_pendiente_id:
+            alta_pendiente = AltaPendienteEmpleado.objects.filter(
+                pk=int(alta_pendiente_id) if alta_pendiente_id.isdigit() else None,
+                estado=AltaPendienteEmpleado.ESTADO_PENDIENTE,
+            ).first()
+            if not alta_pendiente:
+                messages.error(request, "Selecciona un alta pendiente válida.")
+                return redirect("rrhh:empleados")
         if action == "vincular_identidad":
             pendiente = get_object_or_404(
                 EmpleadoIdentidadPendiente,
@@ -1191,61 +1290,22 @@ def empleados(request):
             except ValidationError as exc:
                 messages.error(request, exc.messages[0])
                 return redirect("rrhh:empleados")
-            empleado = Empleado.objects.create(
-                codigo=codigo,
-                nombre=nombre,
-                rfc=(request.POST.get("rfc") or "").strip(),
-                curp=(request.POST.get("curp") or "").strip(),
-                nss=(request.POST.get("nss") or "").strip(),
-                area=organizacion["area"],
-                puesto=(request.POST.get("puesto") or "").strip(),
-                departamento_origen=organizacion["departamento_origen"],
-                departamento=organizacion["departamento"],
-                puesto_operativo=organizacion["puesto_operativo"],
-                nivel_organizacional=organizacion["nivel_organizacional"],
-                jefe_directo_id=jefe_directo_id,
-                tipo_personal=(request.POST.get("tipo_personal") or Empleado.TIPO_POLLYANA).strip(),
-                participa_bonos_ventas=organizacion["participa_bonos_ventas"],
-                participa_bonos_produccion=organizacion["participa_bonos_produccion"],
-                tipo_contrato=(request.POST.get("tipo_contrato") or Empleado.CONTRATO_FIJO).strip(),
-                fecha_ingreso=request.POST.get("fecha_ingreso") or timezone.localdate(),
-                salario_diario=_parse_decimal(request.POST.get("salario_diario")),
-                telefono=(request.POST.get("telefono") or "").strip(),
-                email=(request.POST.get("email") or "").strip(),
-                sucursal=(request.POST.get("sucursal") or "").strip(),
-            )
             try:
-                empleado.usuario_erp = _resolver_usuario_erp_desde_post(request, empleado)
+                empleado = _crear_empleado_desde_post(
+                    request,
+                    codigo=codigo,
+                    nombre=nombre,
+                    organizacion=organizacion,
+                    jefe_directo_id=jefe_directo_id,
+                    alta_pendiente=alta_pendiente,
+                )
             except ValidationError as exc:
-                empleado.delete()
                 messages.error(request, exc.messages[0])
                 return redirect("rrhh:empleados")
-            if empleado.usuario_erp_id:
-                empleado.save(update_fields=["usuario_erp"])
-            sucursal_app_id = (request.POST.get("sucursal_app_id") or "").strip()
-            asegurar_identidad_operativa_empleado(
-                empleado,
-                sucursal_app_id=int(sucursal_app_id) if sucursal_app_id.isdigit() else None,
-            )
-            try:
-                _sincronizar_logistica_desde_post(request, empleado)
-            except ValidationError as exc:
-                empleado.delete()
-                messages.error(request, exc.messages[0])
-                return redirect("rrhh:empleados")
-            sincronizar_esquemas_bono(empleado, request.POST, organizacion)
-            log_event(
-                request.user,
-                "CREATE",
-                "rrhh.Empleado",
-                str(empleado.id),
-                {
-                    "codigo": empleado.codigo,
-                    "nombre": empleado.nombre,
-                    "salario_diario": str(empleado.salario_diario),
-                },
-            )
-            messages.success(request, f"Empleado {empleado.nombre} registrado.")
+            if alta_pendiente:
+                messages.success(request, f"Empleado {empleado.nombre} registrado desde alta pendiente y vacante actualizada.")
+            else:
+                messages.success(request, f"Empleado {empleado.nombre} registrado.")
             return redirect("rrhh:empleados")
 
     q = (request.GET.get("q") or "").strip()
@@ -1355,6 +1415,16 @@ def empleados(request):
         .filter(estado=EmpleadoIdentidadPendiente.ESTADO_PENDIENTE)
         .order_by("-actualizado_en")[:20]
     )
+    altas_pendientes_qs = (
+        AltaPendienteEmpleado.objects.select_related("vacante", "candidato", "creado_por")
+        .filter(estado=AltaPendienteEmpleado.ESTADO_PENDIENTE)
+        .order_by("-creado_en")
+    )
+    alta_pendiente_id = (request.GET.get("alta_pendiente") or "").strip()
+    alta_pendiente_seleccionada = None
+    if alta_pendiente_id.isdigit():
+        alta_pendiente_seleccionada = altas_pendientes_qs.filter(pk=int(alta_pendiente_id)).first()
+    altas_pendientes = list(altas_pendientes_qs[:20])
 
     context = {
         "module_tabs": _module_tabs("empleados", request.user),
@@ -1431,6 +1501,9 @@ def empleados(request):
         "bajas_recientes": EmpleadoBaja.objects.select_related("empleado").order_by("-fecha_baja")[:8],
         "plantillas": PlantillaAutorizada.objects.order_by("-anio", "-mes", "area")[:8],
         "identidades_pendientes": identidades_pendientes,
+        "altas_pendientes": altas_pendientes,
+        "alta_pendiente_seleccionada": alta_pendiente_seleccionada,
+        "alta_prefill": _alta_pendiente_prefill(alta_pendiente_seleccionada),
         "enterprise_chain": enterprise_chain,
         "critical_path_rows": _rrhh_critical_path_rows(enterprise_chain),
         "document_stage_rows": document_stage_rows,

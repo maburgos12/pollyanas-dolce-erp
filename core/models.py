@@ -74,6 +74,7 @@ class UserModuleAccess(models.Model):
         ("logistica", "Logística"),
         ("mantenimiento", "Mantenimiento"),
         ("seguimiento", "Seguimiento personal"),
+        ("seguimiento.calendario", "Seguimiento - Calendario"),
         ("fallas", "Fallas / Mantenimiento"),
         ("mermas", "Mermas"),
         ("mermas.captura", "Mermas - App sucursal"),

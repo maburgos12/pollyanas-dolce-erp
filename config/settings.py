@@ -358,6 +358,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "reportes.alerta_produccion_sin_registros",
         "schedule": crontab(hour=7, minute=0),
     },
+    "seguimiento-recordatorios-calendario": {
+        "task": "seguimiento.recordatorios_calendario",
+        "schedule": crontab(hour=7, minute=45),
+    },
     # --- Rentabilidad mensual automática ---
     "rentabilidad: recalculo mensual": {
         "task": "rentabilidad.tasks_rentabilidad.recalcular_rentabilidad_mensual",
