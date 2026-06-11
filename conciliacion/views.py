@@ -12,6 +12,8 @@ from conciliacion.services.importador import (
     PreviewImportacion,
     confirmar_importacion,
     generar_preview,
+    periodo_default_conciliacion,
+    resumen_periodo_conciliacion,
     resumen_conciliacion,
 )
 from core.access import is_admin_or_dg
@@ -54,6 +56,8 @@ def conciliacion_bancaria_view(request: HttpRequest) -> HttpResponse:
                 request.session.pop(SESSION_PREVIEW_KEY, None)
 
     contexto = resumen_conciliacion()
+    periodo_year, periodo_month = _periodo_from_request(request)
+    periodo_resumen = resumen_periodo_conciliacion(year=periodo_year, month=periodo_month)
     sat_ultimo_log = LogDescargaSat.objects.order_by("-creado_en").first()
     sat_descarga_enabled = getattr(settings, "SAT_DESCARGA_ENABLED", False)
     if sat_ultimo_log and sat_ultimo_log.nivel == LogDescargaSat.NIVEL_ERROR:
@@ -73,12 +77,26 @@ def conciliacion_bancaria_view(request: HttpRequest) -> HttpResponse:
             "sat_estado_label": sat_estado_label,
             "sat_estado_tone": sat_estado_tone,
             "sat_ultimo_log": sat_ultimo_log,
+            "periodo_resumen": periodo_resumen,
             "preview": preview,
             "preview_rows": preview.movimientos[:50] if preview else [],
-            "movimiento_rows": _movimiento_rows(contexto["ultimos_movimientos"], contexto["candidatos"]),
+            "movimiento_rows": _movimiento_rows(periodo_resumen["movimientos_rows"], periodo_resumen["candidatos"]),
         }
     )
     return render(request, "conciliacion/bancaria.html", contexto)
+
+
+def _periodo_from_request(request: HttpRequest) -> tuple[int, int]:
+    periodo = str(request.GET.get("periodo") or "")
+    if len(periodo) == 7 and periodo[4] == "-":
+        try:
+            year = int(periodo[:4])
+            month = int(periodo[5:])
+        except ValueError:
+            return periodo_default_conciliacion()
+        if 1 <= month <= 12:
+            return year, month
+    return periodo_default_conciliacion()
 
 
 def _handle_preview(request: HttpRequest) -> PreviewImportacion | None:

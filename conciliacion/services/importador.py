@@ -10,6 +10,8 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import pandas as pd
+from django.db.models import Count, Max, Min, Sum
+from django.db.models.functions import TruncDate
 from django.db import transaction
 from django.utils import timezone
 
@@ -212,6 +214,61 @@ def resumen_conciliacion() -> dict[str, Any]:
     }
 
 
+def periodo_default_conciliacion() -> tuple[int, int]:
+    ultimo_movimiento = MovimientoBancario.objects.order_by("-fecha_transaccion").first()
+    if ultimo_movimiento:
+        fecha = timezone.localtime(ultimo_movimiento.fecha_transaccion).date()
+        return fecha.year, fecha.month
+    hoy = timezone.localdate()
+    return hoy.year, hoy.month
+
+
+def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
+    inicio, fin = _periodo_bounds(year=year, month=month)
+    movimientos_qs = MovimientoBancario.objects.select_related("cuenta").filter(
+        fecha_transaccion__gte=inicio,
+        fecha_transaccion__lt=fin,
+    )
+    cfdi_qs = CfdiDescargado.objects.filter(fecha_emision__gte=inicio, fecha_emision__lt=fin)
+
+    movimientos_agregado = movimientos_qs.aggregate(
+        total=Count("id"),
+        fecha_min=Min("fecha_transaccion"),
+        fecha_max=Max("fecha_transaccion"),
+    )
+    cargos = _aggregate_tipo_movimiento(movimientos_qs, MovimientoBancario.TIPO_CARGO)
+    abonos = _aggregate_tipo_movimiento(movimientos_qs, MovimientoBancario.TIPO_ABONO)
+    dias_banco = _resumen_diario_movimientos(movimientos_qs)
+    fuentes = _resumen_fuentes_movimientos(movimientos_qs)
+
+    cfdi_emitidos = _aggregate_tipo_cfdi(cfdi_qs, CfdiDescargado.TIPO_EMITIDO)
+    cfdi_recibidos = _aggregate_tipo_cfdi(cfdi_qs, CfdiDescargado.TIPO_RECIBIDO)
+
+    movimientos_periodo = list(movimientos_qs.order_by("-fecha_transaccion")[:50])
+    candidatos = sugerir_cfdis_para_movimientos([mov for mov in movimientos_periodo if not mov.conciliado])
+
+    return {
+        "periodo_value": f"{year:04d}-{month:02d}",
+        "periodo_label": _periodo_label(year=year, month=month),
+        "periodo_inicio": inicio.date(),
+        "periodo_fin": (fin - timedelta(days=1)).date(),
+        "movimientos_total": movimientos_agregado["total"] or 0,
+        "movimientos_fecha_min": movimientos_agregado["fecha_min"],
+        "movimientos_fecha_max": movimientos_agregado["fecha_max"],
+        "movimientos_dias": len(dias_banco),
+        "movimientos_cargos": cargos,
+        "movimientos_abonos": abonos,
+        "movimientos_fuentes": fuentes,
+        "movimientos_diarios": dias_banco,
+        "movimientos_rows": movimientos_periodo,
+        "candidatos": candidatos,
+        "cfdi_total": cfdi_qs.count(),
+        "cfdi_emitidos": cfdi_emitidos,
+        "cfdi_recibidos": cfdi_recibidos,
+        "cfdi_rows": list(cfdi_qs.order_by("-fecha_emision")[:20]),
+    }
+
+
 def sugerir_cfdis_para_movimientos(movimientos: list[MovimientoBancario]) -> dict[int, list[CfdiDescargado]]:
     sugerencias: dict[int, list[CfdiDescargado]] = {}
     for movimiento in movimientos:
@@ -230,6 +287,104 @@ def sugerir_cfdis_para_movimientos(movimientos: list[MovimientoBancario]) -> dic
         )
         sugerencias[movimiento.pk] = list(qs)
     return sugerencias
+
+
+def _periodo_bounds(*, year: int, month: int) -> tuple[datetime, datetime]:
+    inicio = timezone.make_aware(datetime.combine(date(year, month, 1), time.min))
+    if month == 12:
+        fin = timezone.make_aware(datetime.combine(date(year + 1, 1, 1), time.min))
+    else:
+        fin = timezone.make_aware(datetime.combine(date(year, month + 1, 1), time.min))
+    return inicio, fin
+
+
+def _aggregate_tipo_movimiento(queryset, tipo: str) -> dict[str, Any]:
+    data = queryset.filter(tipo=tipo).aggregate(conteo=Count("id"), total=Sum("monto"))
+    return {"conteo": data["conteo"] or 0, "total": data["total"] or Decimal("0.00")}
+
+
+def _aggregate_tipo_cfdi(queryset, tipo_cfdi: str) -> dict[str, Any]:
+    data = queryset.filter(tipo_cfdi=tipo_cfdi).aggregate(conteo=Count("id"), total=Sum("total"))
+    return {"conteo": data["conteo"] or 0, "total": data["total"] or Decimal("0.00")}
+
+
+def _resumen_diario_movimientos(queryset) -> list[dict[str, Any]]:
+    rows = (
+        queryset.annotate(dia=TruncDate("fecha_transaccion"))
+        .values("dia", "tipo")
+        .annotate(conteo=Count("id"), total=Sum("monto"))
+        .order_by("dia", "tipo")
+    )
+    resumen: dict[date, dict[str, Any]] = {}
+    for row in rows:
+        dia = row["dia"]
+        if not dia:
+            continue
+        item = resumen.setdefault(
+            dia,
+            {
+                "fecha": dia,
+                "cargos_conteo": 0,
+                "cargos_total": Decimal("0.00"),
+                "abonos_conteo": 0,
+                "abonos_total": Decimal("0.00"),
+                "total_conteo": 0,
+            },
+        )
+        total = row["total"] or Decimal("0.00")
+        conteo = row["conteo"] or 0
+        if row["tipo"] == MovimientoBancario.TIPO_ABONO:
+            item["abonos_conteo"] += conteo
+            item["abonos_total"] += total
+        else:
+            item["cargos_conteo"] += conteo
+            item["cargos_total"] += total
+        item["total_conteo"] += conteo
+    return list(resumen.values())
+
+
+def _resumen_fuentes_movimientos(queryset) -> list[dict[str, Any]]:
+    fuentes: dict[str, dict[str, Any]] = {}
+    for extra_raw, tipo, monto in queryset.values_list("extra_raw", "tipo", "monto"):
+        raw = extra_raw if isinstance(extra_raw, dict) else {}
+        archivo = str(raw.get("archivo_nombre") or raw.get("source") or "Sin archivo registrado")
+        item = fuentes.setdefault(
+            archivo,
+            {
+                "archivo": archivo,
+                "conteo": 0,
+                "cargos": 0,
+                "abonos": 0,
+                "total_cargos": Decimal("0.00"),
+                "total_abonos": Decimal("0.00"),
+            },
+        )
+        item["conteo"] += 1
+        if tipo == MovimientoBancario.TIPO_ABONO:
+            item["abonos"] += 1
+            item["total_abonos"] += monto
+        else:
+            item["cargos"] += 1
+            item["total_cargos"] += monto
+    return sorted(fuentes.values(), key=lambda item: item["conteo"], reverse=True)
+
+
+def _periodo_label(*, year: int, month: int) -> str:
+    meses = [
+        "enero",
+        "febrero",
+        "marzo",
+        "abril",
+        "mayo",
+        "junio",
+        "julio",
+        "agosto",
+        "septiembre",
+        "octubre",
+        "noviembre",
+        "diciembre",
+    ]
+    return f"{meses[month - 1]} {year}"
 
 
 def _read_dataframe(content: bytes, suffix: str) -> pd.DataFrame:
