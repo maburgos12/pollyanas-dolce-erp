@@ -50,6 +50,7 @@ class ImportadorBancarioTests(TestCase):
             "ExcelDetallado_41064189_20260610200219.csv",
             (
                 '         ,          ,                          ,Saldo Inicial      ,     ,     ,                  ,                  ,"0.00",\n'
+                '41064189,30/05/2026,030741900036812905,2643314013215,IVA Comision informativa SPEI,2121,0.0,0,"49,365.12",300965487\n'
                 '41064189,31/05/2026,030741900036812905,                               ,IVA Comision por Emision de Chequera,2182,2.08,0,"84,041.06",54875114\n'
                 '41064189,31/05/2026,030741900036812905,9425978001,Deposito Negocios Afiliados por 830.00 mxn,2180,0,830.00,"84,871.06",4066700006001\n'
             ).encode("latin-1"),
