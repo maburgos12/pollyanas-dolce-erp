@@ -7,7 +7,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
 from conciliacion.models import ImportacionBancaria
-from conciliacion.services.importador import confirmar_importacion, generar_preview
+from conciliacion.services.importador import ImportacionBancariaError, confirmar_importacion, generar_preview
 from syncfy_client.models import CuentaBancaria, MovimientoBancario
 
 
@@ -132,6 +132,39 @@ class ImportadorBancarioTests(TestCase):
         self.assertEqual(preview.movimientos[1].tipo, MovimientoBancario.TIPO_CARGO)
         self.assertEqual(preview.movimientos[1].monto, Decimal("300.00"))
         self.assertEqual(preview.errores, [])
+
+    def test_generar_preview_rejects_cfdi_xml_as_bank_statement(self):
+        archivo = SimpleUploadedFile(
+            "factura_banbajio.xml",
+            (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" '
+                'Version="4.0" Fecha="2026-06-01T21:52:20" Total="28297.28" '
+                'Moneda="MXN" TipoDeComprobante="I" Sello="abc" Certificado="xyz">'
+                '<cfdi:Emisor Rfc="BBA940707IE1" Nombre="BANCO DEL BAJIO"/>'
+                '<cfdi:Receptor Rfc="GEF211230KR2" Nombre="GRUPO EMPRESARIAL FONSMA"/>'
+                '<cfdi:Conceptos>'
+                '<cfdi:Concepto Descripcion="COMISION EMI.CHEQ" Importe="13.00"/>'
+                "</cfdi:Conceptos>"
+                "</cfdi:Comprobante>"
+            ).encode("utf-8"),
+            content_type="application/xml",
+        )
+
+        with self.assertRaisesMessage(ImportacionBancariaError, "Este XML es un CFDI/factura"):
+            generar_preview(cuenta=self.cuenta, uploaded_file=archivo)
+
+    def test_generar_preview_keeps_iso_dates_in_year_month_day_order(self):
+        archivo = SimpleUploadedFile(
+            "banbajio.csv",
+            "Fecha,Concepto,Cargo,Abono\n2026-06-01T21:52:20,COMISION,13.00,\n".encode("utf-8"),
+            content_type="text/csv",
+        )
+
+        preview = generar_preview(cuenta=self.cuenta, uploaded_file=archivo)
+
+        self.assertEqual(preview.movimientos[0].fecha.date().isoformat(), "2026-06-01")
+        self.assertEqual(preview.movimientos[0].tipo, MovimientoBancario.TIPO_CARGO)
 
     def test_confirmar_importacion_is_idempotent_by_manual_hash(self):
         archivo = SimpleUploadedFile(

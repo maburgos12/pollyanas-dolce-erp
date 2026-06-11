@@ -249,6 +249,11 @@ def _read_xml_dataframe(content: bytes) -> pd.DataFrame:
         root = ET.fromstring(content)
     except ET.ParseError as exc:
         raise ImportacionBancariaError("XML invalido.") from exc
+    if _is_cfdi_xml(root):
+        raise ImportacionBancariaError(
+            "Este XML es un CFDI/factura, no un estado de cuenta bancario. "
+            "Para conciliar, descarga movimientos de la cuenta en CSV, XLS, XLSX o XML tabular."
+        )
 
     table_dataframe = _read_xml_table_dataframe(root)
     if not table_dataframe.empty:
@@ -282,6 +287,17 @@ def _read_xml_table_dataframe(root: ET.Element) -> pd.DataFrame:
         if len(rows) > len(best_rows):
             best_rows = rows
     return pd.DataFrame(best_rows)
+
+
+def _is_cfdi_xml(root: ET.Element) -> bool:
+    root_tag = _normalize_header(_xml_tag(root.tag))
+    if root_tag != "comprobante":
+        return False
+    namespace = str(root.tag).split("}", 1)[0].strip("{") if "}" in str(root.tag) else ""
+    if "sat.gob.mx/cfd" in namespace:
+        return True
+    attrs = {_normalize_header(key) for key in root.attrib}
+    return {"tipo_de_comprobante", "sello", "certificado"} & attrs != set()
 
 
 def _xml_row_values(row: ET.Element) -> list[str]:
@@ -529,7 +545,9 @@ def _parse_fecha(value: Any) -> datetime:
     elif isinstance(value, date):
         parsed = datetime.combine(value, time.min)
     else:
-        parsed_ts = pd.to_datetime(str(value), dayfirst=True, errors="coerce")
+        text = str(value).strip()
+        dayfirst = not bool(re.match(r"^\d{4}-\d{2}-\d{2}(?:[T\\s]|$)", text))
+        parsed_ts = pd.to_datetime(text, dayfirst=dayfirst, errors="coerce")
         if pd.isna(parsed_ts):
             raise ImportacionBancariaError("fecha invalida.")
         parsed = parsed_ts.to_pydatetime()
