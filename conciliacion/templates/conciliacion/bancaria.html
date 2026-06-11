@@ -59,6 +59,12 @@
   .conc-mini-card { border: 1px solid var(--conc-border); border-radius: 8px; padding: 12px; background: var(--conc-muted-surface); min-width: 0; }
   .conc-mini-card span { display: block; color: var(--conc-muted); font-size: .74rem; font-weight: 900; text-transform: uppercase; }
   .conc-mini-card strong { display: block; margin-top: 5px; color: var(--conc-text); font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+  .conc-status-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+  .conc-status-card { border: 1px solid var(--conc-border); border-radius: 8px; padding: 12px; background: var(--conc-muted-surface); min-width: 0; }
+  .conc-status-card strong { display: block; color: var(--conc-text); margin-top: 8px; font-size: .95rem; }
+  .conc-status-card span:last-child { display: block; margin-top: 4px; color: var(--conc-muted); font-size: .82rem; line-height: 1.35; }
+  .conc-alerts { margin: 12px 0 0; padding-left: 18px; color: var(--conc-secondary); line-height: 1.5; }
+  .conc-section-gap { margin-top: 14px; }
   .conc-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
   .conc-subpanel { border: 1px solid var(--conc-border); border-radius: 8px; padding: 14px; background: var(--conc-surface); min-width: 0; }
   .conc-subpanel h3 { margin: 0 0 10px; }
@@ -79,7 +85,7 @@
     .conc-header, .conc-layout { display: grid; }
     .conc-kpis { grid-template-columns: 1fr; }
     .conc-help-grid { grid-template-columns: 1fr; }
-    .conc-mini-grid, .conc-split { grid-template-columns: 1fr; }
+    .conc-mini-grid, .conc-status-grid, .conc-split { grid-template-columns: 1fr; }
     .conc-actions .btn { width: 100%; justify-content: center; }
   }
 </style>
@@ -178,6 +184,111 @@
       <div class="conc-mini-card">
         <span>CFDI SAT del mes</span>
         <strong>{{ periodo_resumen.cfdi_total|intcomma }}</strong>
+      </div>
+    </div>
+
+    <div class="conc-subpanel conc-section-gap">
+      <h3>Estado del cierre</h3>
+      <p class="conc-note">Lectura rapida del mes seleccionado antes de revisar movimiento por movimiento.</p>
+      <div class="conc-status-grid">
+        {% for item in periodo_resumen.estado_cierre.status %}
+        <div class="conc-status-card">
+          <span class="conc-chip {{ item.tone }}">{{ item.label }}</span>
+          <strong>{{ item.detalle }}</strong>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="conc-status-line">
+        <span class="conc-chip is-info">Siguiente accion</span>
+        <span class="conc-note">{{ periodo_resumen.estado_cierre.siguiente_accion }}</span>
+      </div>
+      {% if periodo_resumen.estado_cierre.alertas %}
+      <ul class="conc-alerts">
+        {% for alerta in periodo_resumen.estado_cierre.alertas %}
+        <li>{{ alerta }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+
+    <div class="conc-subpanel conc-section-gap">
+      <h3>Resumen ejecutivo</h3>
+      <div class="conc-mini-grid">
+        <div class="conc-mini-card">
+          <span>Abonos banco</span>
+          <strong>${{ periodo_resumen.resumen_ejecutivo.banco_abonos|floatformat:2|intcomma }}</strong>
+        </div>
+        <div class="conc-mini-card">
+          <span>Ventas SAT emitidas</span>
+          <strong>${{ periodo_resumen.resumen_ejecutivo.sat_ventas|floatformat:2|intcomma }}</strong>
+        </div>
+        <div class="conc-mini-card">
+          <span>Cargos banco</span>
+          <strong>${{ periodo_resumen.resumen_ejecutivo.banco_cargos|floatformat:2|intcomma }}</strong>
+        </div>
+        <div class="conc-mini-card">
+          <span>Gastos SAT recibidos</span>
+          <strong>${{ periodo_resumen.resumen_ejecutivo.sat_proveedores|floatformat:2|intcomma }}</strong>
+        </div>
+      </div>
+      <div class="conc-mini-grid">
+        <div class="conc-mini-card">
+          <span>Diferencia abonos vs ventas</span>
+          <strong>${{ periodo_resumen.resumen_ejecutivo.diferencia_abonos_ventas|floatformat:2|intcomma }}</strong>
+        </div>
+        <div class="conc-mini-card">
+          <span>Diferencia cargos vs gastos</span>
+          <strong>${{ periodo_resumen.resumen_ejecutivo.diferencia_cargos_proveedores|floatformat:2|intcomma }}</strong>
+        </div>
+        <div class="conc-mini-card">
+          <span>Pagos por credito cobrados</span>
+          <strong>${{ periodo_resumen.resumen_ejecutivo.pagos_cobrados|floatformat:2|intcomma }}</strong>
+        </div>
+        <div class="conc-mini-card">
+          <span>Credito pendiente</span>
+          <strong>${{ periodo_resumen.resumen_ejecutivo.credito_clientes_pendiente|floatformat:2|intcomma }}</strong>
+        </div>
+      </div>
+    </div>
+
+    <div class="conc-subpanel conc-section-gap">
+      <h3>Trabajo de conciliacion</h3>
+      <p class="conc-note">Ordena los puntos que se revisan en una conciliacion real: efectivo por sucursal, tarjetas, transferencias, gastos y credito.</p>
+      <div class="table-responsive">
+        <table class="conc-table">
+          <thead>
+            <tr>
+              <th>Concepto</th>
+              <th class="conc-money">Banco</th>
+              <th class="conc-money">SAT</th>
+              <th class="conc-money">Diferencia</th>
+              <th>Estado</th>
+              <th>Siguiente accion</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in periodo_resumen.trabajo_conciliacion %}
+            <tr>
+              <td>{{ row.concepto }}</td>
+              <td class="conc-money">${{ row.banco_total|floatformat:2|intcomma }}</td>
+              <td class="conc-money">${{ row.sat_total|floatformat:2|intcomma }}</td>
+              <td class="conc-money">${{ row.diferencia|floatformat:2|intcomma }}</td>
+              <td>
+                {% if row.estado == "ok" %}
+                  <span class="conc-chip is-ok">Cuadra</span>
+                {% elif row.estado == "revision" %}
+                  <span class="conc-chip is-warn">Revisar</span>
+                {% else %}
+                  <span class="conc-chip is-warn">Pendiente</span>
+                {% endif %}
+              </td>
+              <td>{{ row.accion }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6" class="conc-empty">Sin datos para armar el trabajo de conciliacion.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
     </div>
 
