@@ -34,6 +34,10 @@ def _fechas(inicio: date, fin: date) -> list[date]:
     return [inicio + timedelta(days=offset) for offset in range(dias + 1)]
 
 
+def _fecha_visible_en_periodo(periodo: ConfigBonoVentasPeriodo, fecha: date) -> bool:
+    return fecha.month == periodo.mes and fecha.year == periodo.anio
+
+
 def _cargar_asistencias(empleado_ids: list[int], inicio: date, fin: date) -> set[tuple[int, date]]:
     return set(
         AsistenciaEmpleado.objects.filter(
@@ -91,7 +95,7 @@ def _evaluar_dia(
 
 def sincronizar_asistencia_desde_checador(periodo: ConfigBonoVentasPeriodo) -> dict:
     inicio, fin = _rango_periodo(periodo)
-    dias = _fechas(inicio, fin)
+    dias = [fecha for fecha in _fechas(inicio, fin) if _fecha_visible_en_periodo(periodo, fecha)]
     estatus_borrador = getattr(BonoVentasEmpleado, "ESTATUS_BORRADOR", ESTATUS_BORRADOR)
     bonos_borrador = list(periodo.bonos.select_related("empleado").filter(estatus=estatus_borrador))
     bonos_omitidos = periodo.bonos.exclude(estatus=estatus_borrador).count()
@@ -146,7 +150,7 @@ def _periodos_para_fecha(fecha: date):
             (Q(fecha_inicio__isnull=True) | Q(fecha_fin__isnull=True))
             & Q(mes=fecha.month, anio=fecha.year)
         )
-        | Q(fecha_inicio__lte=fecha, fecha_fin__gte=fecha)
+        | Q(fecha_inicio__lte=fecha, fecha_fin__gte=fecha, mes=fecha.month, anio=fecha.year)
     )
 
 

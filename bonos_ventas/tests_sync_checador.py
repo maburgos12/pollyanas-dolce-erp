@@ -223,3 +223,41 @@ class SyncChecadorVentasTests(TestCase):
         self.assertEqual(resultado["bonos_sincronizados"], 0)
         self.assertEqual(resultado["bonos_omitidos"], 1)
         self.assertFalse(RegistroDiarioVentas.objects.filter(bono=bono, dia=12).exists())
+
+    def test_periodo_cruza_mes_no_convierte_mayo_en_dias_futuros_de_junio(self):
+        sucursal = Sucursal.objects.create(codigo="CRUCE", nombre="Sucursal Cruce", activa=True)
+        periodo = ConfigBonoVentasPeriodo.objects.create(
+            mes=6,
+            anio=2026,
+            dias_laborables=31,
+            fecha_inicio=date(2026, 5, 28),
+            fecha_fin=date(2026, 6, 27),
+        )
+        empleado = Empleado.objects.create(nombre="Empleado Cruce Mes", area="VENTAS", sucursal=sucursal.nombre)
+        bono = BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal)
+        self.crear_asistencia(empleado, date(2026, 5, 28))
+        self.crear_asistencia(empleado, date(2026, 6, 1))
+
+        resultado = sincronizar_asistencia_desde_checador(periodo)
+
+        self.assertEqual(resultado["registros_creados"], 27)
+        self.assertTrue(RegistroDiarioVentas.objects.filter(bono=bono, dia=1).exists())
+        self.assertFalse(RegistroDiarioVentas.objects.filter(bono=bono, dia=28).exists())
+
+    def test_sync_empleado_dia_no_impacta_periodo_junio_con_fecha_de_mayo(self):
+        sucursal = Sucursal.objects.create(codigo="MAY", nombre="Sucursal Mayo", activa=True)
+        periodo = ConfigBonoVentasPeriodo.objects.create(
+            mes=6,
+            anio=2026,
+            dias_laborables=31,
+            fecha_inicio=date(2026, 5, 28),
+            fecha_fin=date(2026, 6, 27),
+        )
+        empleado = Empleado.objects.create(nombre="Empleado Mayo", area="VENTAS", sucursal=sucursal.nombre)
+        bono = BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal)
+        self.crear_asistencia(empleado, date(2026, 5, 28))
+
+        resultado = sincronizar_empleado_dia_desde_checador(empleado.id, date(2026, 5, 28))
+
+        self.assertEqual(resultado["bonos_sincronizados"], 0)
+        self.assertFalse(RegistroDiarioVentas.objects.filter(bono=bono).exists())
