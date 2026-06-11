@@ -124,11 +124,27 @@ def _conversacion_context(comentarios):
 
 
 ACTIVE_AGENTE_DG_STATUSES = {"OPEN", "IN_PROGRESS", "WAITING_THIRD_PARTY", "POSTPONED", "BLOCKED", "PENDING", "OVERDUE", "DUE_SOON", "AT_RISK", "ACTIVE"}
-CLOSED_AGENTE_DG_STATUSES = {"COMPLETED", "CLOSED", "CANCELLED"}
+CLOSED_AGENTE_DG_STATUSES = {"REVIEWED", "CLOSED", "COMPLETED", "APPROVED", "ENTREGADO_A_TIEMPO", "ENTREGADO_TARDE"}
+CANCELLED_AGENTE_DG_STATUSES = {"CANCELLED", "CANCELED"}
+CLOSED_OR_CANCELLED_AGENTE_DG_STATUSES = CLOSED_AGENTE_DG_STATUSES | CANCELLED_AGENTE_DG_STATUSES
+PANEL_BUCKETS = {
+    "activos": "Activos",
+    "revision": "En revisión",
+    "desfases": "Desfases",
+    "historico": "Histórico finalizado",
+}
 
 
 def _source_status(item: SeguimientoItem) -> str:
     return str((item.metadata or {}).get("source_status") or "").strip().upper()
+
+
+def _source_archived_at(item: SeguimientoItem) -> str:
+    return str((item.metadata or {}).get("source_archived_at") or "").strip()
+
+
+def _source_synced_at(item: SeguimientoItem) -> str:
+    return str((item.metadata or {}).get("synced_at") or "").strip()
 
 
 def _tiene_desfase_agente_dg(item: SeguimientoItem) -> bool:
@@ -139,9 +155,19 @@ def _tiene_desfase_agente_dg(item: SeguimientoItem) -> bool:
         return True
     if source_status in ACTIVE_AGENTE_DG_STATUSES and item.estatus == SeguimientoItem.ESTATUS_COMPLETADO:
         return True
-    if source_status in CLOSED_AGENTE_DG_STATUSES and not item.esta_cerrado:
+    if source_status in CLOSED_OR_CANCELLED_AGENTE_DG_STATUSES and not item.esta_cerrado:
         return True
     return False
+
+
+def _bucket_panel_seguimiento(item: SeguimientoItem) -> str:
+    if item.tiene_desfase_agente_dg:
+        return "desfases"
+    if item.esta_cerrado or _source_status(item) in CLOSED_OR_CANCELLED_AGENTE_DG_STATUSES or _source_archived_at(item):
+        return "historico"
+    if item.estatus == SeguimientoItem.ESTATUS_EN_REVISION or getattr(item, "prorroga_pendiente", None):
+        return "revision"
+    return "activos"
 
 
 def _aplicar_estado_visual_seguimiento(item: SeguimientoItem, checks=None) -> None:
@@ -150,6 +176,13 @@ def _aplicar_estado_visual_seguimiento(item: SeguimientoItem, checks=None) -> No
     item.checklist_done = sum(1 for c in checks if c.completado)
     item.tiene_desfase_agente_dg = _tiene_desfase_agente_dg(item)
     item.source_status = _source_status(item)
+    item.source_archived_at = _source_archived_at(item)
+    item.source_synced_at = _source_synced_at(item)
+    item.estado_app_label = item.source_status or ("Archivado" if item.source_archived_at else "Sin estado app")
+    if item.source_archived_at and "Archivado" not in item.estado_app_label:
+        item.estado_app_label = f"{item.estado_app_label} · Archivado"
+    item.es_historico_agente_dg = bool(item.source_archived_at or item.source_status in CLOSED_OR_CANCELLED_AGENTE_DG_STATUSES)
+    item.es_vencido_visual = bool(item.esta_vencido and not item.tiene_desfase_agente_dg and not item.es_historico_agente_dg)
     if item.checklist_total:
         item.progreso_pct = round((item.checklist_done / item.checklist_total) * 100)
         item.avance_label = f"{item.progreso_pct}%"
@@ -162,6 +195,8 @@ def _aplicar_estado_visual_seguimiento(item: SeguimientoItem, checks=None) -> No
         item.progreso_pct = 0
         item.avance_label = "Sin checklist"
         item.avance_detalle = "Avance no medible"
+    item.visual_bucket = _bucket_panel_seguimiento(item)
+    item.visual_bucket_label = PANEL_BUCKETS[item.visual_bucket]
 
 
 def _agente_dg_user_id_para_erp_user(user) -> int | None:
@@ -917,6 +952,9 @@ def panel_dg(request):
     filtro_estatus = (request.GET.get("estatus") or "").strip().upper()
     filtro_colaborador = (request.GET.get("colaborador") or "").strip()
     filtro_vencidos = request.GET.get("vencidos") == "1"
+    active_bucket = (request.GET.get("bucket") or "activos").strip().lower()
+    if active_bucket not in PANEL_BUCKETS:
+        active_bucket = "activos"
 
     qs = (
         SeguimientoItem.objects.select_related("responsable_user", "responsable_empleado", "aprobado_por")
@@ -938,30 +976,51 @@ def panel_dg(request):
     if filtro_vencidos:
         qs = qs.filter(fecha_limite__lt=now).exclude(estatus__in=[SeguimientoItem.ESTATUS_COMPLETADO, SeguimientoItem.ESTATUS_CANCELADO])
 
-    items = list(qs)
+    items_base = list(qs)
 
-    for item in items:
+    for item in items_base:
         checks = list(item.checklist.all())
-        _aplicar_estado_visual_seguimiento(item, checks)
         item.prorroga_pendiente = next(
             (p for p in item.prorrogas.all() if p.estatus == SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE), None
         )
+        _aplicar_estado_visual_seguimiento(item, checks)
         item.ultima_actualizacion = item.updated_at
         item.responsable_nombre = (
             item.responsable_user.get_full_name() or item.responsable_user.username
             if item.responsable_user
             else (item.responsable_empleado.nombre if item.responsable_empleado else "Sin asignar")
         )
-        if item.esta_vencido:
+        if item.es_vencido_visual:
             item.urgencia = "danger"
         elif item.fecha_limite and item.fecha_limite <= now + timedelta(days=2) and not item.esta_cerrado:
             item.urgencia = "warn"
         else:
             item.urgencia = ""
 
+    vista = request.GET.get("vista", "tabla")
+
+    bucket_counts = {bucket: sum(1 for i in items_base if i.visual_bucket == bucket) for bucket in PANEL_BUCKETS}
+    bucket_nav = [
+        {"key": bucket, "label": label, "count": bucket_counts[bucket]}
+        for bucket, label in PANEL_BUCKETS.items()
+    ]
+    items = [i for i in items_base if i.visual_bucket == active_bucket]
+
+    active_tab = (request.GET.get("tab") or "").strip().upper()
+    items_for_type_counts = list(items)
+    if active_tab and active_tab in dict(SeguimientoItem.TIPO_CHOICES):
+        items = [i for i in items if i.tipo == active_tab]
+    else:
+        active_tab = ""
+
+    count_compromisos = sum(1 for i in items_for_type_counts if i.tipo == SeguimientoItem.TIPO_COMPROMISO)
+    count_minutas = sum(1 for i in items_for_type_counts if i.tipo == SeguimientoItem.TIPO_MINUTA)
+    count_proyectos = sum(1 for i in items_for_type_counts if i.tipo == SeguimientoItem.TIPO_PROYECTO)
+    count_todos_tipo = len(items_for_type_counts)
+
     total = len(items)
     abiertos = sum(1 for i in items if not i.esta_cerrado)
-    vencidos = sum(1 for i in items if i.esta_vencido)
+    vencidos = sum(1 for i in items if i.es_vencido_visual)
     en_revision = sum(1 for i in items if i.estatus == SeguimientoItem.ESTATUS_EN_REVISION)
     completados = sum(1 for i in items if i.estatus == SeguimientoItem.ESTATUS_COMPLETADO)
     prorrogas_pendientes = sum(1 for i in items if i.prorroga_pendiente)
@@ -978,7 +1037,7 @@ def panel_dg(request):
         por_colaborador[key]["items"].append(item)
         if not item.esta_cerrado:
             por_colaborador[key]["abiertos"] += 1
-        if item.esta_vencido:
+        if item.es_vencido_visual:
             por_colaborador[key]["vencidos"] += 1
         if item.estatus == SeguimientoItem.ESTATUS_EN_REVISION:
             por_colaborador[key]["en_revision"] += 1
@@ -988,33 +1047,6 @@ def panel_dg(request):
     colaboradores_resumen = sorted(
         por_colaborador.values(),
         key=lambda c: (-c["vencidos"], -c["en_revision"], -c["abiertos"]),
-    )
-
-    vista = request.GET.get("vista", "tabla")
-
-    # Tab activo por tipo (independiente del filtro_tipo del formulario)
-    active_tab = (request.GET.get("tab") or "").strip().upper()
-    if active_tab and active_tab in dict(SeguimientoItem.TIPO_CHOICES):
-        items = [i for i in items if i.tipo == active_tab]
-    else:
-        active_tab = ""
-
-    # Conteos para las tabs (sobre la lista completa sin filtro de tab)
-    all_items_for_counts = list(qs) if active_tab else items
-    count_compromisos = sum(1 for i in all_items_for_counts if i.tipo == SeguimientoItem.TIPO_COMPROMISO)
-    count_minutas = sum(1 for i in all_items_for_counts if i.tipo == SeguimientoItem.TIPO_MINUTA)
-    count_proyectos = sum(1 for i in all_items_for_counts if i.tipo == SeguimientoItem.TIPO_PROYECTO)
-
-    # Recalcular totales sobre la lista final (ya filtrada por tab)
-    total = len(items)
-    abiertos = sum(1 for i in items if not i.esta_cerrado)
-    vencidos = sum(1 for i in items if i.esta_vencido)
-    en_revision = sum(1 for i in items if i.estatus == SeguimientoItem.ESTATUS_EN_REVISION)
-    completados = sum(1 for i in items if i.estatus == SeguimientoItem.ESTATUS_COMPLETADO)
-    prorrogas_pendientes = sum(1 for i in items if i.prorroga_pendiente)
-    por_vencer_24h = sum(
-        1 for i in items
-        if i.fecha_limite and now <= i.fecha_limite <= now + timedelta(hours=24) and not i.esta_cerrado
     )
 
     # Sección "Requiere tu acción": en revisión + prórrogas pendientes (sin importar filtros).
@@ -1045,9 +1077,13 @@ def panel_dg(request):
         "colaboradores_resumen": colaboradores_resumen,
         "vista": vista,
         "active_tab": active_tab,
+        "active_bucket": active_bucket,
+        "bucket_nav": bucket_nav,
+        "bucket_counts": bucket_counts,
         "count_compromisos": count_compromisos,
         "count_minutas": count_minutas,
         "count_proyectos": count_proyectos,
+        "count_todos_tipo": count_todos_tipo,
         "total": total,
         "abiertos": abiertos,
         "vencidos": vencidos,

@@ -74,6 +74,8 @@
   .pill-bloqueado,
   .pill-cancelado   { background: rgba(229,57,53,.14);   color: #b71c1c; }
   .pill-desfase     { background: rgba(201,168,76,.20); color: #7a5b14; }
+  .pill-app         { background: rgba(47,108,119,.12); color: #2f6c77; }
+  .pill-historico   { background: rgba(76,175,80,.14); color: #236d53; }
 
   /* colab-item-label — nowrap en guardrails */
   .panel-dg-colab-item-label { flex: 1; min-width: 0; }
@@ -339,25 +341,34 @@
     </div>
     <input type="hidden" name="vista" value="{{ vista }}">
     <input type="hidden" name="tab" value="{{ active_tab }}">
+    <input type="hidden" name="bucket" value="{{ active_bucket }}">
   </form>
+
+  <!-- Tabs por estado operativo -->
+  <nav class="module-tabs rrhh-tabs" aria-label="Tipo de acuerdo" style="margin-bottom:14px;">
+    {% for bucket in bucket_nav %}
+    <a href="?bucket={{ bucket.key }}{% if filtro_tipo %}&tipo={{ filtro_tipo }}{% endif %}{% if filtro_estatus %}&estatus={{ filtro_estatus }}{% endif %}{% if filtro_colaborador %}&colaborador={{ filtro_colaborador }}{% endif %}{% if filtro_vencidos %}&vencidos=1{% endif %}&vista={{ vista }}&tab={{ active_tab }}"
+       class="module-tab {% if active_bucket == bucket.key %}active{% endif %}">{{ bucket.label }} ({{ bucket.count }})</a>
+    {% endfor %}
+  </nav>
 
   <!-- Tabs por tipo -->
   <nav class="module-tabs rrhh-tabs" aria-label="Tipo de acuerdo" style="margin-bottom:14px;">
-    <a href="?{% if filtro_tipo %}tipo={{ filtro_tipo }}&{% endif %}{% if filtro_estatus %}estatus={{ filtro_estatus }}&{% endif %}{% if filtro_colaborador %}colaborador={{ filtro_colaborador }}&{% endif %}{% if filtro_vencidos %}vencidos=1&{% endif %}vista={{ vista }}&tab="
-       class="module-tab {% if not active_tab %}active{% endif %}">Todos ({{ total }})</a>
-    <a href="?{% if filtro_estatus %}estatus={{ filtro_estatus }}&{% endif %}{% if filtro_colaborador %}colaborador={{ filtro_colaborador }}&{% endif %}{% if filtro_vencidos %}vencidos=1&{% endif %}vista={{ vista }}&tab=COMPROMISO"
+    <a href="?bucket={{ active_bucket }}{% if filtro_tipo %}&tipo={{ filtro_tipo }}{% endif %}{% if filtro_estatus %}&estatus={{ filtro_estatus }}{% endif %}{% if filtro_colaborador %}&colaborador={{ filtro_colaborador }}{% endif %}{% if filtro_vencidos %}&vencidos=1{% endif %}&vista={{ vista }}&tab="
+       class="module-tab {% if not active_tab %}active{% endif %}">Todos ({{ count_todos_tipo }})</a>
+    <a href="?bucket={{ active_bucket }}{% if filtro_estatus %}&estatus={{ filtro_estatus }}{% endif %}{% if filtro_colaborador %}&colaborador={{ filtro_colaborador }}{% endif %}{% if filtro_vencidos %}&vencidos=1{% endif %}&vista={{ vista }}&tab=COMPROMISO"
        class="module-tab {% if active_tab == 'COMPROMISO' %}active{% endif %}">Compromisos ({{ count_compromisos }})</a>
-    <a href="?{% if filtro_estatus %}estatus={{ filtro_estatus }}&{% endif %}{% if filtro_colaborador %}colaborador={{ filtro_colaborador }}&{% endif %}{% if filtro_vencidos %}vencidos=1&{% endif %}vista={{ vista }}&tab=MINUTA"
+    <a href="?bucket={{ active_bucket }}{% if filtro_estatus %}&estatus={{ filtro_estatus }}{% endif %}{% if filtro_colaborador %}&colaborador={{ filtro_colaborador }}{% endif %}{% if filtro_vencidos %}&vencidos=1{% endif %}&vista={{ vista }}&tab=MINUTA"
        class="module-tab {% if active_tab == 'MINUTA' %}active{% endif %}">Minutas ({{ count_minutas }})</a>
-    <a href="?{% if filtro_estatus %}estatus={{ filtro_estatus }}&{% endif %}{% if filtro_colaborador %}colaborador={{ filtro_colaborador }}&{% endif %}{% if filtro_vencidos %}vencidos=1&{% endif %}vista={{ vista }}&tab=PROYECTO"
+    <a href="?bucket={{ active_bucket }}{% if filtro_estatus %}&estatus={{ filtro_estatus }}{% endif %}{% if filtro_colaborador %}&colaborador={{ filtro_colaborador }}{% endif %}{% if filtro_vencidos %}&vencidos=1{% endif %}&vista={{ vista }}&tab=PROYECTO"
        class="module-tab {% if active_tab == 'PROYECTO' %}active{% endif %}">Proyectos ({{ count_proyectos }})</a>
   </nav>
 
   <!-- Vista tabs (tabla / colaborador) -->
   <div style="display:flex; gap:6px; margin-bottom:14px;">
-    <a href="?{% if filtro_tipo %}tipo={{ filtro_tipo }}&{% endif %}{% if filtro_estatus %}estatus={{ filtro_estatus }}&{% endif %}{% if filtro_colaborador %}colaborador={{ filtro_colaborador }}&{% endif %}{% if filtro_vencidos %}vencidos=1&{% endif %}tab={{ active_tab }}&vista=tabla"
+    <a href="?bucket={{ active_bucket }}{% if filtro_tipo %}&tipo={{ filtro_tipo }}{% endif %}{% if filtro_estatus %}&estatus={{ filtro_estatus }}{% endif %}{% if filtro_colaborador %}&colaborador={{ filtro_colaborador }}{% endif %}{% if filtro_vencidos %}&vencidos=1{% endif %}&tab={{ active_tab }}&vista=tabla"
        class="btn {% if vista == 'tabla' %}btn-primary{% else %}btn-secondary{% endif %} btn-sm">Tabla</a>
-    <a href="?{% if filtro_tipo %}tipo={{ filtro_tipo }}&{% endif %}{% if filtro_estatus %}estatus={{ filtro_estatus }}&{% endif %}{% if filtro_colaborador %}colaborador={{ filtro_colaborador }}&{% endif %}{% if filtro_vencidos %}vencidos=1&{% endif %}tab={{ active_tab }}&vista=colaborador"
+    <a href="?bucket={{ active_bucket }}{% if filtro_tipo %}&tipo={{ filtro_tipo }}{% endif %}{% if filtro_estatus %}&estatus={{ filtro_estatus }}{% endif %}{% if filtro_colaborador %}&colaborador={{ filtro_colaborador }}{% endif %}{% if filtro_vencidos %}&vencidos=1{% endif %}&tab={{ active_tab }}&vista=colaborador"
        class="btn {% if vista == 'colaborador' %}btn-primary{% else %}btn-secondary{% endif %} btn-sm">Por colaborador</a>
   </div>
 
@@ -383,9 +394,10 @@
       <div class="panel-dg-colab-items">
         {% for item in colab.items %}
         <a href="{% url 'seguimiento:detalle_dg' item.pk %}"
-           class="panel-dg-colab-item {% if item.esta_vencido %}is-vencido{% elif item.estatus == ESTATUS_EN_REVISION %}is-revision{% elif item.esta_cerrado %}is-done{% endif %}">
+           class="panel-dg-colab-item {% if item.es_vencido_visual %}is-vencido{% elif item.estatus == ESTATUS_EN_REVISION %}is-revision{% elif item.esta_cerrado %}is-done{% endif %}">
           <span class="panel-dg-colab-item-label">{{ item.titulo }}</span>
           {% if item.tiene_desfase_agente_dg %}<span class="bi-pill pill-desfase" style="flex-shrink:0; font-size:.68rem;">Desfase app</span>{% endif %}
+          {% if item.es_historico_agente_dg %}<span class="bi-pill pill-historico" style="flex-shrink:0; font-size:.68rem;">Histórico</span>{% endif %}
           <span class="bi-pill pill-{{ item.estatus|lower }}" style="flex-shrink:0; font-size:.72rem;">{{ item.get_estatus_display }}</span>
         </a>
         {% endfor %}
@@ -422,11 +434,13 @@
       </thead>
       <tbody>
         {% for item in items %}
-        <tr class="{% if item.esta_vencido %}is-vencido{% endif %}">
+        <tr class="{% if item.es_vencido_visual %}is-vencido{% endif %}">
           <td>
             <span class="panel-dg-cell-trunc panel-dg-cell-title" title="{{ item.titulo }}">{{ item.titulo }}</span>
             <span class="bi-pill" style="font-size:.7rem;">{{ item.get_tipo_display }}</span>
             {% if item.tiene_desfase_agente_dg %}<span class="bi-pill pill-desfase" style="font-size:.68rem;">Desfase app</span>{% endif %}
+            {% if item.es_historico_agente_dg %}<span class="bi-pill pill-historico" style="font-size:.68rem;">Histórico</span>{% endif %}
+            {% if item.source_status %}<span class="bi-pill pill-app" style="font-size:.68rem;" title="Estado app">{{ item.source_status }}</span>{% endif %}
             {% if item.prorroga_pendiente %}<span class="badge bg-warning" style="font-size:.68rem;">⏳ Prórroga</span>{% endif %}
           </td>
           <td><span class="panel-dg-cell-trunc">{{ item.responsable_nombre }}</span></td>
@@ -437,7 +451,7 @@
           </td>
           <td>
             <div class="panel-dg-progress {% if not item.checklist_total %}is-muted{% endif %}">
-              <div class="panel-dg-progress-fill {% if item.esta_vencido %}is-danger{% elif item.progreso_pct >= 100 %}is-done{% endif %}" style="--w:{{ item.progreso_pct }}%"></div>
+              <div class="panel-dg-progress-fill {% if item.es_vencido_visual %}is-danger{% elif item.progreso_pct >= 100 %}is-done{% endif %}" style="--w:{{ item.progreso_pct }}%"></div>
             </div>
             <span class="muted" style="font-size:.75rem;" title="{{ item.avance_detalle }}">{{ item.avance_label }}</span>
           </td>
