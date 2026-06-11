@@ -19,6 +19,7 @@ from core.access import can_manage_submodule, can_view_module, can_view_submodul
 
 from .empleados import bonos_produccion_elegibles_queryset
 from .models import AREA_PRODUCCION, AREAS_PRODUCCION, BonoProduccionEmpleado, ConfigBonoArea, ConfigBonoPeriodo
+from .services_checador import sincronizar_asistencia_desde_checador
 
 
 AREA_AMOUNT_FIELDS = {
@@ -116,6 +117,18 @@ def bonos_produccion_dashboard(request):
         if action == "recalcular":
             total = periodo.recalcular_todos()
             messages.success(request, f"Bonos recalculados: {total}.")
+            return _dashboard_redirect(mes, anio)
+
+        if action == "sync_checador":
+            resultado = sincronizar_asistencia_desde_checador(periodo)
+            messages.success(
+                request,
+                "Checador sincronizado: "
+                f"{resultado['bonos_sincronizados']} bonos, "
+                f"{resultado['registros_creados']} registros creados, "
+                f"{resultado['registros_actualizados']} actualizados, "
+                f"{resultado['bonos_omitidos']} omitidos.",
+            )
             return _dashboard_redirect(mes, anio)
 
         if action == "ajuste_bono":

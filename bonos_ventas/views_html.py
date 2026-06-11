@@ -21,6 +21,7 @@ from core.models import Sucursal
 from .empleados import empleados_elegibles_bonos_ventas
 from .models import BonoVentasEmpleado, CATEGORIAS_PRODUCTO, ConfigBonoVentasPeriodo, VentaCategoriaSucursal
 from .services import sync_dias_repartidor, sync_ventas_categorias
+from .services_checador import sincronizar_asistencia_desde_checador
 
 
 CATEGORY_WEIGHT_FIELDS = {
@@ -171,6 +172,18 @@ def bonos_ventas_dashboard(request):
         if action == "recalcular":
             total = _recalcular_periodo(periodo)
             messages.success(request, f"Bonos recalculados: {total}.")
+            return _dashboard_redirect(mes, anio)
+
+        if action == "sync_checador":
+            resultado = sincronizar_asistencia_desde_checador(periodo)
+            messages.success(
+                request,
+                "Checador sincronizado: "
+                f"{resultado['bonos_sincronizados']} bonos, "
+                f"{resultado['registros_creados']} registros creados, "
+                f"{resultado['registros_actualizados']} actualizados, "
+                f"{resultado['bonos_omitidos']} omitidos.",
+            )
             return _dashboard_redirect(mes, anio)
 
         if action == "ajuste_bono":
