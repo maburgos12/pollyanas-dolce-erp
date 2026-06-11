@@ -36,6 +36,58 @@ Si migrate falla por columna duplicada: `migrate <app> <numero> --fake` en la mi
 
 ---
 
+## División de trabajo Claude / Codex (regla permanente)
+
+Combinación deliberada por costo: Codex (plan alto) absorbe los tokens caros;
+Claude (plan limitado) se reserva para el criterio. Codex está integrado vía el
+plugin `codex@openai-codex` (comandos `/codex:rescue`, `/codex:review`,
+`/codex:adversarial-review`). Requisito: Codex CLI instalado y autenticado
+(`/codex:setup` debe reportar `ready: true`).
+
+### Claude = cerebro / orquestador
+- Diseño, decisiones de arquitectura y lógica de negocio (costeo, márgenes,
+  nómina, bonos, MRP — todo lo delicado o irreversible).
+- Preparar rama limpia desde `origin/main`, definir el contrato/approach.
+- Validación final: `check`, `migrate --check`, tests, navegador, deploy en VPS.
+- Commit / PR / deploy SIEMPRE los hace Claude siguiendo el protocolo de abajo.
+
+### Codex = talacha pesada (lo que más consume tokens)
+Delegar a Codex cuando el trabajo sea: implementación mecánica repetida, refactor
+masivo en muchos archivos, baterías de tests, migración de patrones, normalización
+de datos, o debugging largo. Codex trabaja sobre el working tree real → SIEMPRE en
+rama aislada, nunca directo sobre algo que pueda tocar producción sin revisar.
+
+**Cómo delega Claude (mecanismo real — esto es lo que de verdad dispara Codex):**
+- Claude NO "teclea" `/codex:rescue`. Esos slash-commands los escribe Mauricio.
+- Cuando Claude decide delegar por su cuenta, invoca la herramienta **Agent** con
+  `subagent_type: "codex:codex-rescue"` y le pasa la tarea como prompt. Ese
+  subagente reenvía el trabajo al runtime de Codex (write-capable por defecto).
+- Si Claude solo describe el reparto pero hace el trabajo él mismo, NO está
+  cumpliendo esta regla. El acto de delegar = una llamada a Agent(codex:codex-rescue).
+
+**Cómo lo dispara Mauricio (garantizado, sin depender del criterio de Claude):**
+- `/codex:rescue <tarea>` → Codex implementa. `/codex:review` → Codex revisa (read-only).
+
+**Trampas que impiden que la regla aplique (verificar si "no funciona"):**
+- El plugin `codex@openai-codex` debe estar instalado y cargado en ESA sesión
+  (`/codex:setup` → `ready: true`; si se acaba de instalar, `/reload-plugins`).
+- Claude debe haberse abierto desde `pastelerias_erp_sprint1/` (este CLAUDE.md).
+  Desde otra carpeta carga otro CLAUDE.md que no tiene esta regla.
+- Esta regla debe estar mergeada en `main`; si solo vive en una rama, otras
+  sesiones no la ven.
+
+### Lo que NO se delega a Codex
+- Lógica que pisa datos de nómina/RRHH/ventas (ver "Datos de usuarios — NUNCA pisar").
+- Migraciones, `.env`, puertos, `settings.py`, push a `main`.
+- La decisión de commitear/mergear/deployar: ese filtro final es de Claude.
+
+### Criterio de enrutamiento
+Tarea acotada y rápida → la hace Claude. Tarea voluminosa, repetitiva o de
+iteración larga → se delega a Codex. Ante la duda sobre algo delicado, lo
+diseña Claude y Codex solo ejecuta la parte mecánica.
+
+---
+
 ## Protocolo obligatorio — lo sigo siempre
 
 Aplica para cualquier solicitud de Mauricio que implique tocar código, datos,
