@@ -896,6 +896,10 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertEqual(checks[3].titulo, "Solicitud de compra")
         self.assertFalse(checks[4].completado)
         self.assertEqual(checks[4].titulo, "Compra entregada")
+        self.client.force_login(self.user)
+        response = self.client.get(f"/seguimiento/{item.pk}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "app.pollyanasdolce.com")
 
     def test_webhook_parcial_preserva_checklist_existente(self):
         command = ImportarAgenteDGCommand()
