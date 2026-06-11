@@ -17,7 +17,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from conciliacion.models import CfdiSucursalResolucion, ImportacionBancaria
-from sat_client.models import CfdiDescargado
+from sat_client.models import CfdiDescargado, CfdiPagoRelacionado
 from syncfy_client.models import CuentaBancaria, MovimientoBancario
 
 
@@ -288,6 +288,7 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
     cfdi_emitidos = _aggregate_tipo_cfdi(cfdi_qs, CfdiDescargado.TIPO_EMITIDO)
     cfdi_recibidos = _aggregate_tipo_cfdi(cfdi_qs, CfdiDescargado.TIPO_RECIBIDO)
     cfdi_sucursales = _resumen_cfdi_sucursales(inicio=inicio, fin=fin)
+    alcance_fiscal = _resumen_alcance_fiscal(inicio=inicio, fin=fin)
     canales_comparativo = _resumen_comparativo_canales(movimientos_qs=movimientos_qs, cfdi_qs=cfdi_qs)
 
     movimientos_periodo = list(movimientos_qs.order_by("-fecha_transaccion")[:50])
@@ -312,6 +313,7 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
         "cfdi_emitidos": cfdi_emitidos,
         "cfdi_recibidos": cfdi_recibidos,
         "cfdi_sucursales": cfdi_sucursales,
+        "alcance_fiscal": alcance_fiscal,
         "canales_comparativo": canales_comparativo,
         "cfdi_rows": list(cfdi_qs.order_by("-fecha_emision")[:20]),
     }
@@ -354,6 +356,91 @@ def _aggregate_tipo_movimiento(queryset, tipo: str) -> dict[str, Any]:
 def _aggregate_tipo_cfdi(queryset, tipo_cfdi: str) -> dict[str, Any]:
     data = queryset.filter(tipo_cfdi=tipo_cfdi).aggregate(conteo=Count("id"), total=Sum("total"))
     return {"conteo": data["conteo"] or 0, "total": data["total"] or Decimal("0.00")}
+
+
+def _resumen_alcance_fiscal(*, inicio: datetime, fin: datetime) -> dict[str, Any]:
+    complemento_fin_exclusivo = fin + timedelta(days=5)
+    return {
+        "periodo_inicio": inicio.date(),
+        "periodo_fin": (fin - timedelta(days=1)).date(),
+        "complemento_fin": (complemento_fin_exclusivo - timedelta(days=1)).date(),
+        "pagos_emitidos": _aggregate_pagos_relacionados(
+            tipo_cfdi=CfdiDescargado.TIPO_EMITIDO,
+            inicio=inicio,
+            fin=fin,
+            complemento_fin_exclusivo=complemento_fin_exclusivo,
+        ),
+        "pagos_recibidos": _aggregate_pagos_relacionados(
+            tipo_cfdi=CfdiDescargado.TIPO_RECIBIDO,
+            inicio=inicio,
+            fin=fin,
+            complemento_fin_exclusivo=complemento_fin_exclusivo,
+        ),
+        "ppd_emitidos_abiertos": _aggregate_ppd_abiertos(
+            tipo_cfdi=CfdiDescargado.TIPO_EMITIDO,
+            inicio=inicio,
+            fin=fin,
+        ),
+        "ppd_recibidos_abiertos": _aggregate_ppd_abiertos(
+            tipo_cfdi=CfdiDescargado.TIPO_RECIBIDO,
+            inicio=inicio,
+            fin=fin,
+        ),
+    }
+
+
+def _aggregate_pagos_relacionados(
+    *,
+    tipo_cfdi: str,
+    inicio: datetime,
+    fin: datetime,
+    complemento_fin_exclusivo: datetime,
+) -> dict[str, Any]:
+    data = CfdiPagoRelacionado.objects.filter(
+        cfdi_pago__tipo_cfdi=tipo_cfdi,
+        fecha_pago__gte=inicio,
+        fecha_pago__lt=fin,
+        cfdi_pago__fecha_emision__lt=complemento_fin_exclusivo,
+    ).aggregate(conteo=Count("id"), total=Sum("monto"))
+    return {"conteo": data["conteo"] or 0, "total": data["total"] or Decimal("0.00")}
+
+
+def _aggregate_ppd_abiertos(*, tipo_cfdi: str, inicio: datetime, fin: datetime) -> dict[str, Any]:
+    cfdis = list(
+        CfdiDescargado.objects.filter(
+            tipo_cfdi=tipo_cfdi,
+            tipo_comprobante="I",
+            metodo_pago="PPD",
+            fecha_emision__lt=inicio,
+        ).values("uuid", "total")
+    )
+    if not cfdis:
+        return {"conteo": 0, "total": Decimal("0.00"), "pagado": Decimal("0.00"), "saldo": Decimal("0.00")}
+
+    pagos = {
+        row["uuid_relacionado"]: row["pagado"] or Decimal("0.00")
+        for row in CfdiPagoRelacionado.objects.filter(
+            cfdi_pago__tipo_cfdi=tipo_cfdi,
+            uuid_relacionado__in=[item["uuid"] for item in cfdis],
+            fecha_pago__lt=fin,
+        )
+        .values("uuid_relacionado")
+        .annotate(pagado=Sum("monto"))
+    }
+    conteo = 0
+    total = Decimal("0.00")
+    pagado_total = Decimal("0.00")
+    saldo = Decimal("0.00")
+    for cfdi in cfdis:
+        cfdi_total = cfdi["total"] or Decimal("0.00")
+        pagado = pagos.get(cfdi["uuid"], Decimal("0.00"))
+        pendiente = cfdi_total - pagado
+        if pendiente > Decimal("0.00"):
+            conteo += 1
+            total += cfdi_total
+            pagado_total += pagado
+            saldo += pendiente
+    return {"conteo": conteo, "total": total, "pagado": pagado_total, "saldo": saldo}
 
 
 def _resumen_cfdi_sucursales(*, inicio: datetime, fin: datetime) -> dict[str, Any]:

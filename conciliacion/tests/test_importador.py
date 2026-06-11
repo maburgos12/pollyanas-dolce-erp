@@ -7,7 +7,13 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
 from conciliacion.models import ImportacionBancaria
-from conciliacion.services.importador import ImportacionBancariaError, confirmar_importacion, generar_preview
+from conciliacion.services.importador import (
+    ImportacionBancariaError,
+    confirmar_importacion,
+    generar_preview,
+    resumen_periodo_conciliacion,
+)
+from sat_client.models import CfdiDescargado, CfdiPagoRelacionado
 from syncfy_client.models import CuentaBancaria, MovimientoBancario
 
 
@@ -44,6 +50,51 @@ class ImportadorBancarioTests(TestCase):
         self.assertEqual(preview.movimientos[1].tipo, MovimientoBancario.TIPO_CARGO)
         self.assertEqual(preview.movimientos[1].monto, Decimal("300.00"))
         self.assertEqual(preview.errores, [])
+
+    def test_resumen_periodo_includes_payment_scope_and_prior_open_ppd(self):
+        factura_credito = CfdiDescargado.objects.create(
+            uuid="AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+            rfc_emisor="GEF211230KR2",
+            rfc_receptor="CLI010101AAA",
+            subtotal=Decimal("1000.00"),
+            total=Decimal("1000.00"),
+            tipo_comprobante="I",
+            tipo_cfdi=CfdiDescargado.TIPO_EMITIDO,
+            metodo_pago="PPD",
+            forma_pago="99",
+            fecha_emision="2026-04-20T10:00:00-07:00",
+        )
+        complemento = CfdiDescargado.objects.create(
+            uuid="99999999-9999-9999-9999-999999999999",
+            rfc_emisor="GEF211230KR2",
+            rfc_receptor="CLI010101AAA",
+            subtotal=Decimal("0.00"),
+            total=Decimal("0.00"),
+            moneda="XXX",
+            tipo_comprobante="P",
+            tipo_cfdi=CfdiDescargado.TIPO_EMITIDO,
+            fecha_emision="2026-06-03T10:00:00-07:00",
+        )
+        CfdiPagoRelacionado.objects.create(
+            cfdi_pago=complemento,
+            uuid_relacionado=factura_credito.uuid,
+            fecha_pago="2026-05-31T18:45:00-07:00",
+            monto=Decimal("400.00"),
+            moneda="MXN",
+            forma_pago="03",
+            num_parcialidad="1",
+            importe_saldo_anterior=Decimal("1000.00"),
+            importe_saldo_insoluto=Decimal("600.00"),
+        )
+
+        resumen = resumen_periodo_conciliacion(year=2026, month=5)
+
+        alcance = resumen["alcance_fiscal"]
+        self.assertEqual(alcance["pagos_emitidos"]["conteo"], 1)
+        self.assertEqual(alcance["pagos_emitidos"]["total"], Decimal("400.00"))
+        self.assertEqual(alcance["ppd_emitidos_abiertos"]["conteo"], 1)
+        self.assertEqual(alcance["ppd_emitidos_abiertos"]["saldo"], Decimal("600.00"))
+        self.assertEqual(alcance["complemento_fin"].isoformat(), "2026-06-05")
 
     def test_generar_preview_normalizes_banbajio_detallado_csv_without_header(self):
         archivo = SimpleUploadedFile(

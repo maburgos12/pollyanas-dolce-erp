@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from sat_client.models import CfdiDescargado, LogDescargaSat, SolicitudDescarga
+from sat_client.models import CfdiDescargado, CfdiPagoRelacionado, LogDescargaSat, SolicitudDescarga
 
 
 @admin.register(SolicitudDescarga)
@@ -35,6 +35,15 @@ class CfdiDescargadoAdmin(admin.ModelAdmin):
     search_fields = ("uuid", "rfc_emisor", "nombre_emisor", "rfc_receptor", "nombre_receptor")
     readonly_fields = ("descargado_en",)
     date_hierarchy = "fecha_emision"
+
+
+@admin.register(CfdiPagoRelacionado)
+class CfdiPagoRelacionadoAdmin(admin.ModelAdmin):
+    list_display = ("cfdi_pago", "uuid_relacionado", "fecha_pago", "monto", "forma_pago", "num_parcialidad")
+    list_filter = ("forma_pago", "moneda", "fecha_pago", "cfdi_pago__tipo_cfdi")
+    search_fields = ("cfdi_pago__uuid", "uuid_relacionado")
+    readonly_fields = ("creado_en",)
+    date_hierarchy = "fecha_pago"
 
 
 @admin.register(LogDescargaSat)

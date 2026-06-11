@@ -201,6 +201,32 @@
     </div>
 
     <div class="conc-subpanel" style="margin-top:14px;">
+      <h3>Alcance fiscal de conciliacion</h3>
+      <p class="conc-note">
+        Incluye complementos con fecha de pago dentro del mes, aunque el XML se timbre hasta el
+        {{ periodo_resumen.alcance_fiscal.complemento_fin|date:"Y-m-d" }}.
+      </p>
+      <div class="conc-mini-grid">
+        <div class="conc-mini-card">
+          <span>Pagos cobrados del mes</span>
+          <strong>{{ periodo_resumen.alcance_fiscal.pagos_emitidos.conteo|intcomma }} · ${{ periodo_resumen.alcance_fiscal.pagos_emitidos.total|floatformat:2|intcomma }}</strong>
+        </div>
+        <div class="conc-mini-card">
+          <span>Pagos a proveedores</span>
+          <strong>{{ periodo_resumen.alcance_fiscal.pagos_recibidos.conteo|intcomma }} · ${{ periodo_resumen.alcance_fiscal.pagos_recibidos.total|floatformat:2|intcomma }}</strong>
+        </div>
+        <div class="conc-mini-card">
+          <span>Credito clientes pendiente</span>
+          <strong>{{ periodo_resumen.alcance_fiscal.ppd_emitidos_abiertos.conteo|intcomma }} · ${{ periodo_resumen.alcance_fiscal.ppd_emitidos_abiertos.saldo|floatformat:2|intcomma }}</strong>
+        </div>
+        <div class="conc-mini-card">
+          <span>Credito proveedores pendiente</span>
+          <strong>{{ periodo_resumen.alcance_fiscal.ppd_recibidos_abiertos.conteo|intcomma }} · ${{ periodo_resumen.alcance_fiscal.ppd_recibidos_abiertos.saldo|floatformat:2|intcomma }}</strong>
+        </div>
+      </div>
+    </div>
+
+    <div class="conc-subpanel" style="margin-top:14px;">
       <h3>Banco contra SAT por canal</h3>
       <p class="conc-note">
         Compara abonos del estado de cuenta contra CFDI emitidos. La diferencia se calcula como banco menos SAT.
