@@ -97,13 +97,52 @@ class SyncChecadorVentasTests(TestCase):
         fecha = date(2026, 6, 4)
         periodo, empleado, bono = self.crear_bono(fecha)
         self.crear_asistencia(empleado, fecha)
-        self.crear_incidencia(empleado, fecha, IncidenciaAsistencia.TIPO_SUSPENSION)
+        self.crear_incidencia(
+            empleado,
+            fecha,
+            IncidenciaAsistencia.TIPO_SUSPENSION,
+            estado=IncidenciaAsistencia.ESTADO_CONCILIADO,
+        )
 
         sincronizar_asistencia_desde_checador(periodo)
 
         registro = RegistroDiarioVentas.objects.get(bono=bono, dia=4)
         self.assertFalse(registro.tiene_asistencia)
         self.assertFalse(registro.tiene_puntualidad)
+
+    def test_suspension_resuelta_no_quita_asistencia_ni_puntualidad(self):
+        fecha = date(2026, 6, 8)
+        periodo, empleado, bono = self.crear_bono(fecha)
+        self.crear_asistencia(empleado, fecha)
+        self.crear_incidencia(
+            empleado,
+            fecha,
+            IncidenciaAsistencia.TIPO_SUSPENSION,
+            estado=IncidenciaAsistencia.ESTADO_RESUELTO,
+        )
+
+        sincronizar_asistencia_desde_checador(periodo)
+
+        registro = RegistroDiarioVentas.objects.get(bono=bono, dia=8)
+        self.assertTrue(registro.tiene_asistencia)
+        self.assertTrue(registro.tiene_puntualidad)
+
+    def test_incidencia_conciliada_no_quita_puntualidad(self):
+        fecha = date(2026, 6, 9)
+        periodo, empleado, bono = self.crear_bono(fecha)
+        self.crear_asistencia(empleado, fecha)
+        self.crear_incidencia(
+            empleado,
+            fecha,
+            IncidenciaAsistencia.TIPO_RETARDO,
+            estado=IncidenciaAsistencia.ESTADO_CONCILIADO,
+        )
+
+        sincronizar_asistencia_desde_checador(periodo)
+
+        registro = RegistroDiarioVentas.objects.get(bono=bono, dia=9)
+        self.assertTrue(registro.tiene_asistencia)
+        self.assertTrue(registro.tiene_puntualidad)
 
     def test_registro_existente_conserva_campos_manuales(self):
         fecha = date(2026, 6, 5)
