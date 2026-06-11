@@ -52,7 +52,7 @@ class ConciliacionBancariaViewTests(TestCase):
         MovimientoBancario.objects.create(
             id_transaction="mayo-1",
             cuenta=self.cuenta,
-            descripcion="DEPOSITO MAYO",
+            descripcion="DEPOSITO EN EFECTIVO MAYO",
             monto=Decimal("1250.00"),
             tipo=MovimientoBancario.TIPO_ABONO,
             fecha_transaccion=timezone.make_aware(datetime(2026, 5, 1, 12, 0)),
@@ -111,6 +111,10 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertContains(response, "CFDI emitidos por sucursal")
         self.assertContains(response, "Matriz")
         self.assertContains(response, "$500.00")
+        self.assertContains(response, "Banco contra SAT por canal")
+        self.assertContains(response, "Efectivo en ventanilla")
+        self.assertContains(response, "$1,250.00")
+        self.assertContains(response, "$750.00")
 
     def test_preview_and_confirm_import_movements(self):
         archivo = SimpleUploadedFile(

@@ -201,6 +201,51 @@
     </div>
 
     <div class="conc-subpanel" style="margin-top:14px;">
+      <h3>Banco contra SAT por canal</h3>
+      <p class="conc-note">
+        Compara abonos del estado de cuenta contra CFDI emitidos. La diferencia se calcula como banco menos SAT.
+      </p>
+      <div class="table-responsive">
+        <table class="conc-table">
+          <thead>
+            <tr>
+              <th>Canal</th>
+              <th>Banco</th>
+              <th class="conc-money">Total banco</th>
+              <th>CFDI</th>
+              <th class="conc-money">Total SAT</th>
+              <th class="conc-money">Diferencia</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in periodo_resumen.canales_comparativo %}
+            <tr>
+              <td>{{ row.nombre }}</td>
+              <td>{{ row.banco_conteo|intcomma }}</td>
+              <td class="conc-money">${{ row.banco_total|floatformat:2|intcomma }}</td>
+              <td>{{ row.sat_conteo|intcomma }}</td>
+              <td class="conc-money">${{ row.sat_total|floatformat:2|intcomma }}</td>
+              <td class="conc-money">${{ row.diferencia|floatformat:2|intcomma }}</td>
+              <td>
+                {% if row.estado == "ok" %}
+                  <span class="conc-chip is-ok">Cuadra</span>
+                {% elif row.estado == "revision" %}
+                  <span class="conc-chip is-warn">Revision menor</span>
+                {% else %}
+                  <span class="conc-chip is-muted">Pendiente</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="7" class="conc-empty">Sin datos suficientes para comparar banco contra SAT.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="conc-subpanel" style="margin-top:14px;">
       <h3>CFDI emitidos por sucursal</h3>
       <p class="conc-note">
         Sucursales detectadas desde los conceptos del XML. Los pendientes quedan separados para revision fiscal.
