@@ -83,6 +83,56 @@ class ImportadorBancarioTests(TestCase):
         self.assertEqual(preview.movimientos[1].monto, Decimal("300.00"))
         self.assertEqual(preview.errores, [])
 
+    def test_generar_preview_normalizes_xml_spreadsheet_table(self):
+        archivo = SimpleUploadedFile(
+            "estado_banbajio.xml",
+            (
+                '<?xml version="1.0"?>'
+                '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" '
+                'xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">'
+                "<Worksheet>"
+                "<Table>"
+                "<Row><Cell><Data>Estado de cuenta BanBajio</Data></Cell></Row>"
+                "<Row>"
+                "<Cell><Data>Fecha</Data></Cell>"
+                "<Cell><Data>Concepto</Data></Cell>"
+                "<Cell><Data>Cargo</Data></Cell>"
+                "<Cell><Data>Abono</Data></Cell>"
+                "<Cell><Data>Saldo</Data></Cell>"
+                "<Cell><Data>Referencia</Data></Cell>"
+                "</Row>"
+                "<Row>"
+                "<Cell><Data>09/06/2026</Data></Cell>"
+                "<Cell><Data>SPEI RECIBIDO</Data></Cell>"
+                "<Cell><Data></Data></Cell>"
+                "<Cell><Data>1500.50</Data></Cell>"
+                "<Cell><Data>2000.00</Data></Cell>"
+                "<Cell><Data>ABC123</Data></Cell>"
+                "</Row>"
+                "<Row>"
+                "<Cell><Data>10/06/2026</Data></Cell>"
+                "<Cell><Data>PAGO PROVEEDOR</Data></Cell>"
+                "<Cell><Data>300.00</Data></Cell>"
+                "<Cell><Data></Data></Cell>"
+                "<Cell><Data>1700.00</Data></Cell>"
+                "<Cell><Data>DEF456</Data></Cell>"
+                "</Row>"
+                "</Table>"
+                "</Worksheet>"
+                "</Workbook>"
+            ).encode("utf-8"),
+            content_type="application/xml",
+        )
+
+        preview = generar_preview(cuenta=self.cuenta, uploaded_file=archivo)
+
+        self.assertEqual(len(preview.movimientos), 2)
+        self.assertEqual(preview.movimientos[0].tipo, MovimientoBancario.TIPO_ABONO)
+        self.assertEqual(preview.movimientos[0].monto, Decimal("1500.50"))
+        self.assertEqual(preview.movimientos[1].tipo, MovimientoBancario.TIPO_CARGO)
+        self.assertEqual(preview.movimientos[1].monto, Decimal("300.00"))
+        self.assertEqual(preview.errores, [])
+
     def test_confirmar_importacion_is_idempotent_by_manual_hash(self):
         archivo = SimpleUploadedFile(
             "bbva.csv",
