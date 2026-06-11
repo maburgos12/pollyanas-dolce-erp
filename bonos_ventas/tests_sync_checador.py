@@ -34,6 +34,7 @@ class SyncChecadorVentasTests(TestCase):
             nombre=f"Empleado Ventas {fecha.day}",
             area="VENTAS",
             sucursal=sucursal.nombre,
+            fecha_ingreso=date(2026, 1, 1),
         )
         bono = BonoVentasEmpleado.objects.create(
             periodo=periodo,
@@ -92,6 +93,36 @@ class SyncChecadorVentasTests(TestCase):
         registro = RegistroDiarioVentas.objects.get(bono=bono, dia=3)
         self.assertFalse(registro.tiene_asistencia)
         self.assertFalse(registro.tiene_puntualidad)
+
+    def test_sync_no_genera_ni_conserva_registros_antes_de_fecha_ingreso(self):
+        sucursal = Sucursal.objects.create(codigo="ING", nombre="Sucursal Ingreso", activa=True)
+        periodo = ConfigBonoVentasPeriodo.objects.create(
+            mes=6,
+            anio=2026,
+            dias_laborables=11,
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 11),
+        )
+        empleado = Empleado.objects.create(
+            nombre="Empleado Ingreso Ventas",
+            area="VENTAS",
+            sucursal=sucursal.nombre,
+            fecha_ingreso=date(2026, 6, 10),
+        )
+        bono = BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal)
+        RegistroDiarioVentas.objects.create(bono=bono, dia=1, tiene_asistencia=False, tiene_puntualidad=False)
+        self.crear_asistencia(empleado, date(2026, 6, 10))
+        self.crear_asistencia(empleado, date(2026, 6, 11))
+
+        resultado = sincronizar_asistencia_desde_checador(periodo)
+
+        self.assertEqual(resultado["registros_eliminados"], 1)
+        self.assertEqual(resultado["registros_creados"], 2)
+        self.assertFalse(RegistroDiarioVentas.objects.filter(bono=bono, dia__lt=10).exists())
+        self.assertEqual(
+            list(RegistroDiarioVentas.objects.filter(bono=bono).values_list("dia", flat=True).order_by("dia")),
+            [10, 11],
+        )
 
     def test_suspension_quita_asistencia_y_puntualidad(self):
         fecha = date(2026, 6, 4)
@@ -233,7 +264,12 @@ class SyncChecadorVentasTests(TestCase):
             fecha_inicio=date(2026, 5, 28),
             fecha_fin=date(2026, 6, 27),
         )
-        empleado = Empleado.objects.create(nombre="Empleado Cruce Mes", area="VENTAS", sucursal=sucursal.nombre)
+        empleado = Empleado.objects.create(
+            nombre="Empleado Cruce Mes",
+            area="VENTAS",
+            sucursal=sucursal.nombre,
+            fecha_ingreso=date(2026, 1, 1),
+        )
         bono = BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal)
         self.crear_asistencia(empleado, date(2026, 5, 28))
         self.crear_asistencia(empleado, date(2026, 6, 1))
@@ -253,7 +289,12 @@ class SyncChecadorVentasTests(TestCase):
             fecha_inicio=date(2026, 5, 28),
             fecha_fin=date(2026, 6, 27),
         )
-        empleado = Empleado.objects.create(nombre="Empleado Mayo", area="VENTAS", sucursal=sucursal.nombre)
+        empleado = Empleado.objects.create(
+            nombre="Empleado Mayo",
+            area="VENTAS",
+            sucursal=sucursal.nombre,
+            fecha_ingreso=date(2026, 1, 1),
+        )
         bono = BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal)
         self.crear_asistencia(empleado, date(2026, 5, 28))
 

@@ -32,7 +32,11 @@ class SyncChecadorProduccionTests(TestCase):
             fecha_inicio=fecha,
             fecha_fin=fecha,
         )
-        empleado = Empleado.objects.create(nombre=f"Empleado Produccion {fecha.day}", area="HORNOS")
+        empleado = Empleado.objects.create(
+            nombre=f"Empleado Produccion {fecha.day}",
+            area="HORNOS",
+            fecha_ingreso=date(2026, 1, 1),
+        )
         bono = BonoProduccionEmpleado.objects.create(
             periodo=periodo,
             empleado=empleado,
@@ -90,6 +94,34 @@ class SyncChecadorProduccionTests(TestCase):
         registro = RegistroDiarioProduccion.objects.get(bono=bono, dia=3)
         self.assertFalse(registro.tiene_asistencia)
         self.assertFalse(registro.tiene_puntualidad)
+
+    def test_sync_no_genera_ni_conserva_registros_antes_de_fecha_ingreso(self):
+        periodo = ConfigBonoPeriodo.objects.create(
+            mes=6,
+            anio=2026,
+            dias_laborables=11,
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 11),
+        )
+        empleado = Empleado.objects.create(
+            nombre="Empleado Ingreso Produccion",
+            area="HORNOS",
+            fecha_ingreso=date(2026, 6, 10),
+        )
+        bono = BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado, area=AREA_HORNOS)
+        RegistroDiarioProduccion.objects.create(bono=bono, dia=1, tiene_asistencia=False, tiene_puntualidad=False)
+        self.crear_asistencia(empleado, date(2026, 6, 10))
+        self.crear_asistencia(empleado, date(2026, 6, 11))
+
+        resultado = sincronizar_asistencia_desde_checador(periodo)
+
+        self.assertEqual(resultado["registros_eliminados"], 1)
+        self.assertEqual(resultado["registros_creados"], 2)
+        self.assertFalse(RegistroDiarioProduccion.objects.filter(bono=bono, dia__lt=10).exists())
+        self.assertEqual(
+            list(RegistroDiarioProduccion.objects.filter(bono=bono).values_list("dia", flat=True).order_by("dia")),
+            [10, 11],
+        )
 
     def test_suspension_quita_asistencia_y_puntualidad(self):
         fecha = date(2026, 6, 4)

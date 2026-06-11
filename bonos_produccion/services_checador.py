@@ -109,11 +109,16 @@ def sincronizar_asistencia_desde_checador(periodo: ConfigBonoPeriodo) -> dict:
         "bonos_omitidos": bonos_omitidos,
         "registros_creados": 0,
         "registros_actualizados": 0,
+        "registros_eliminados": 0,
     }
 
     for bono in bonos_borrador:
         with transaction.atomic():
             for fecha in dias:
+                if bono.empleado.fecha_ingreso and fecha < bono.empleado.fecha_ingreso:
+                    eliminados, _ = RegistroDiarioProduccion.objects.filter(bono=bono, dia=fecha.day).delete()
+                    resultado["registros_eliminados"] += eliminados
+                    continue
                 tiene_asistencia, tiene_puntualidad = _evaluar_dia(
                     bono.empleado_id,
                     fecha,
@@ -160,6 +165,7 @@ def sincronizar_empleado_dia_desde_checador(empleado_id: int, fecha: date) -> di
         "bonos_omitidos": 0,
         "registros_creados": 0,
         "registros_actualizados": 0,
+        "registros_eliminados": 0,
     }
 
     asistencias = _cargar_asistencias([empleado_id], fecha, fecha)
@@ -184,6 +190,12 @@ def sincronizar_empleado_dia_desde_checador(empleado_id: int, fecha: date) -> di
             continue
 
         with transaction.atomic():
+            if bono.empleado.fecha_ingreso and fecha < bono.empleado.fecha_ingreso:
+                eliminados, _ = RegistroDiarioProduccion.objects.filter(bono=bono, dia=fecha.day).delete()
+                resultado["registros_eliminados"] += eliminados
+                recalcular_desde_registros(bono)
+                resultado["bonos_sincronizados"] += 1
+                continue
             registro, created = RegistroDiarioProduccion.objects.get_or_create(
                 bono=bono,
                 dia=fecha.day,
