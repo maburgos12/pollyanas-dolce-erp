@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q, Sum
 from django.utils import timezone
@@ -1246,6 +1247,47 @@ class PermisoSalidaCambio(models.Model):
         return f"{self.folio} · {self.get_accion_display()}"
 
 
+class SuspensionEmpleado(models.Model):
+    ESTADO_ACTIVA = "activa"
+    ESTADO_CANCELADA = "cancelada"
+    ESTADO_CHOICES = [
+        (ESTADO_ACTIVA, "Activa"),
+        (ESTADO_CANCELADA, "Cancelada"),
+    ]
+
+    empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.CASCADE, related_name="suspensiones")
+    fecha_inicio = models.DateField()
+    fecha_fin = models.DateField()
+    motivo = models.TextField()
+    con_goce = models.BooleanField(default=False)
+    estado = models.CharField(max_length=12, choices=ESTADO_CHOICES, default=ESTADO_ACTIVA)
+    aplicada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="suspensiones_aplicadas",
+    )
+    comentario_cancelacion = models.TextField(blank=True, default="")
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-fecha_inicio"]
+        verbose_name = "Suspensión"
+        verbose_name_plural = "Suspensiones"
+
+    @property
+    def dias_naturales(self) -> int:
+        return (self.fecha_fin - self.fecha_inicio).days + 1
+
+    def clean(self):
+        if self.fecha_inicio and self.fecha_fin and self.fecha_fin < self.fecha_inicio:
+            raise ValidationError({"fecha_fin": "La fecha final no puede ser anterior a la fecha inicial."})
+
+    def __str__(self) -> str:
+        return f"{self.empleado} · {self.fecha_inicio} a {self.fecha_fin}"
+
+
 class ReglamentoLaboral(models.Model):
     ESTADO_BORRADOR = "borrador"
     ESTADO_VIGENTE = "vigente"
@@ -1452,6 +1494,125 @@ class MovimientoVacaciones(models.Model):
 
     def __str__(self) -> str:
         return f"{self.empleado} · {self.tipo} · {self.dias}"
+
+
+class IncidenciaAsistencia(models.Model):
+    TIPO_USO_TOLERANCIA = "uso_tolerancia"
+    TIPO_RETARDO = "retardo"
+    TIPO_RETARDO_TOLERANCIA = "retardo_tolerancia"
+    TIPO_FALTA = "falta"
+    TIPO_FALTA_RETARDOS = "falta_retardos"
+    TIPO_JORNADA_INCOMPLETA = "jornada_incompleta"
+    TIPO_HORA_EXTRA_PENDIENTE = "hora_extra_pendiente"
+    TIPO_COMIDA_EXCEDIDA = "comida_excedida"
+    TIPO_SUSPENSION = "suspension"
+    TIPO_AVISO_BAJA_FALTAS = "aviso_baja_faltas"
+    TIPO_BAJA_FALTAS = "baja_faltas"
+    TIPO_CHOICES = [
+        (TIPO_USO_TOLERANCIA, "Uso de tolerancia"),
+        (TIPO_RETARDO, "Retardo"),
+        (TIPO_RETARDO_TOLERANCIA, "Retardo por tolerancia recurrente"),
+        (TIPO_FALTA, "Falta"),
+        (TIPO_FALTA_RETARDOS, "Falta por retardos"),
+        (TIPO_JORNADA_INCOMPLETA, "Jornada incompleta"),
+        (TIPO_HORA_EXTRA_PENDIENTE, "Hora extra pendiente"),
+        (TIPO_COMIDA_EXCEDIDA, "Comida excedida"),
+        (TIPO_SUSPENSION, "Suspensión"),
+        (TIPO_AVISO_BAJA_FALTAS, "Aviso por faltas"),
+        (TIPO_BAJA_FALTAS, "Baja por faltas"),
+    ]
+
+    ESTADO_PENDIENTE = "pendiente"
+    ESTADO_CONCILIADO = "conciliado"
+    ESTADO_RESUELTO = "resuelto"
+    ESTADO_CHOICES = [
+        (ESTADO_PENDIENTE, "Pendiente"),
+        (ESTADO_CONCILIADO, "Conciliado"),
+        (ESTADO_RESUELTO, "Resuelto"),
+    ]
+
+    SEVERIDAD_INFO = "info"
+    SEVERIDAD_MEDIA = "media"
+    SEVERIDAD_ALTA = "alta"
+    SEVERIDAD_CRITICA = "critica"
+    SEVERIDAD_CHOICES = [
+        (SEVERIDAD_INFO, "Informativa"),
+        (SEVERIDAD_MEDIA, "Media"),
+        (SEVERIDAD_ALTA, "Alta"),
+        (SEVERIDAD_CRITICA, "Critica"),
+    ]
+
+    empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.CASCADE, related_name="incidencias_asistencia")
+    fecha = models.DateField(db_index=True)
+    tipo = models.CharField(max_length=32, choices=TIPO_CHOICES, db_index=True)
+    estado = models.CharField(max_length=16, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE, db_index=True)
+    severidad = models.CharField(max_length=12, choices=SEVERIDAD_CHOICES, default=SEVERIDAD_MEDIA)
+    asistencia = models.ForeignKey(
+        AsistenciaEmpleado,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="incidencias",
+    )
+    permiso = models.ForeignKey(
+        PermisoSalida,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="incidencias_asistencia",
+    )
+    solicitud_vacaciones = models.ForeignKey(
+        SolicitudVacaciones,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="incidencias_asistencia",
+    )
+    hora_extra = models.ForeignKey(
+        HoraExtra,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="incidencias_asistencia",
+    )
+    minutos = models.IntegerField(default=0)
+    goce_sueldo = models.BooleanField(null=True, blank=True)
+    ventana_inicio = models.DateField(null=True, blank=True)
+    ventana_fin = models.DateField(null=True, blank=True)
+    conteo_retardos_15d = models.PositiveSmallIntegerField(default=0)
+    conteo_faltas_30d = models.PositiveSmallIntegerField(default=0)
+    detalle = models.TextField(blank=True, default="")
+    metadata = models.JSONField(default=dict, blank=True)
+    editado_manual = models.BooleanField(default=False)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("empleado", "fecha", "tipo")]
+        ordering = ["-fecha", "empleado__nombre", "tipo"]
+        verbose_name = "Incidencia de asistencia"
+        verbose_name_plural = "Incidencias de asistencia"
+
+    def __str__(self) -> str:
+        return f"{self.empleado} · {self.fecha} · {self.get_tipo_display()}"
+
+
+class IncidenciaAsistenciaBitacora(models.Model):
+    incidencia = models.ForeignKey(IncidenciaAsistencia, on_delete=models.CASCADE, related_name="bitacora")
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    campo = models.CharField(max_length=80)
+    valor_anterior = models.TextField(blank=True)
+    valor_nuevo = models.TextField(blank=True)
+    comentario = models.TextField()
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-creado_en"]
+        verbose_name = "Bitácora de incidencia de asistencia"
+        verbose_name_plural = "Bitácora de incidencias de asistencia"
+
+    def __str__(self) -> str:
+        return f"{self.incidencia} · {self.campo}"
 
 
 class ImportacionChecador(models.Model):

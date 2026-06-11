@@ -502,6 +502,12 @@ function App(){
       .then(r=>{ showStatus(`Repartidores sincronizados: ${r.actualizados}`+(r.sin_repartidor_vinculado?` · ${r.sin_repartidor_vinculado} sin vínculo`:''),'ok'); cargar(); })
       .catch(err=>showStatus(err.message,'err'));
   }
+  function syncChecador(){
+    if(!periodo) return;
+    api(`/api/bonos-ventas/periodos/${periodo.id}/sync-checador/`,{method:'POST',body:'{}'})
+      .then(r=>{ showStatus(`Checador: ${r.bonos_sincronizados} bonos · ${r.registros_creados} creados · ${r.registros_actualizados} actualizados · ${r.bonos_omitidos} omitidos`,'ok'); cargar(); })
+      .catch(err=>showStatus(err.message,'err'));
+  }
   function showStatus(msg,type='ok'){ setStatus(msg); setStatusType(type); setTimeout(()=>setStatus(''),4000); }
 
   const bonosFiltrados = filtrarBonosPorGrupo(bonos,filtroSuc);
@@ -555,6 +561,7 @@ function App(){
         !periodo && h('button',{className:'btn btn-wine btn-sm',onClick:crearPeriodo},'Crear período'),
         periodo && h('button',{className:'btn btn-ghost btn-sm',onClick:inicializar},'Inicializar empleados'),
         periodo && h('button',{className:'btn btn-ghost btn-sm',onClick:syncRepartidores},'Sincronizar repartidores'),
+        periodo && h('button',{className:'btn btn-ghost btn-sm',onClick:syncChecador},'Recalcular desde checador'),
         periodo && h('div',{style:{marginLeft:'auto',display:'flex',gap:8,alignItems:'center'}},
           h('span',{style:{fontSize:12,color:'var(--sub)',fontWeight:700}},'Sucursal:'),
           h('select',{value:filtroSuc,onChange:e=>setFiltroSuc(e.target.value),style:{padding:'5px 10px',border:'1px solid var(--line)',borderRadius:6,font:'inherit',fontSize:13}},

@@ -1,7 +1,16 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from . import api_receptor, api_views, views, views_asistencia, views_documentos, views_prestamos, views_vacantes
+from . import (
+    api_receptor,
+    api_views,
+    views,
+    views_asistencia,
+    views_documentos,
+    views_prestamos,
+    views_suspensiones,
+    views_vacantes,
+)
 from .views_html import asignacion_sucursal_view, asignacion_sucursales_api, usuarios_sucursal_view, usuarios_sucursal_update
 
 app_name = "rrhh"
@@ -42,9 +51,22 @@ urlpatterns = [
     path("empleados/<int:empleado_pk>/documentos/<int:doc_pk>/eliminar/", views_documentos.empleado_documento_eliminar, name="rrhh_documento_eliminar"),
     path("asistencias/", views.asistencias_view, name="rrhh_asistencias"),
     path("asistencias/monitor/", views_asistencia.monitor_sincronizacion, name="rrhh_monitor_sync"),
+    path("reporte-asistencia/", views_asistencia.reporte_asistencia, name="rrhh_reporte_asistencia"),
+    path(
+        "reporte-asistencia/incidencia/<int:incidencia_id>/editar/",
+        views_asistencia.editar_incidencia,
+        name="rrhh_incidencia_editar",
+    ),
     path("importar-checador/", views.importar_checador, name="rrhh_importar"),
     path("horas-extra/", views.horas_extra_list, name="rrhh_he_list"),
     path("permisos/", views.permisos_list, name="rrhh_permisos_list"),
+    path("suspensiones/", views_suspensiones.rrhh_suspensiones, name="rrhh_suspensiones"),
+    path("suspensiones/crear/", views_suspensiones.crear_suspension, name="rrhh_suspension_crear"),
+    path(
+        "suspensiones/<int:suspension_id>/cancelar/",
+        views_suspensiones.cancelar_suspension,
+        name="rrhh_suspension_cancelar",
+    ),
     path("vacaciones/", views.vacaciones_list, name="rrhh_vacaciones_list"),
     path("reglamento-interno/", views.reglamento_interno, name="rrhh_reglamento_interno"),
     path("prestamos/", views_prestamos.prestamos_lista, name="rrhh_prestamos_lista"),

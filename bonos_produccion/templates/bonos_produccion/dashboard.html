@@ -108,6 +108,13 @@
           <input type="hidden" name="anio" value="{{ anio }}">
           <button class="bonos-btn" type="submit" {% if not can_manage %}disabled{% endif %}>Recalcular período</button>
         </form>
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="sync_checador">
+          <input type="hidden" name="mes" value="{{ mes }}">
+          <input type="hidden" name="anio" value="{{ anio }}">
+          <button class="bonos-btn" type="submit" {% if not can_manage %}disabled{% endif %}>Recalcular desde checador</button>
+        </form>
         {% endif %}
       </div>
     </div>

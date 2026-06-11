@@ -5,13 +5,53 @@ from decimal import Decimal
 
 from django.db import transaction
 
+from core.access import can_manage_rrhh
+
 from rrhh.models import AsistenciaEmpleado, HoraExtra, NominaLinea, NominaPeriodo
+
+TIEMPO_COMIDA_MINUTOS = 35
 
 
 def usuario_jefe_directo_de_empleado(empleado):
     if not empleado or not empleado.jefe_directo_id:
         return None
     return getattr(empleado.jefe_directo, "usuario_erp", None)
+
+
+def can_edit_incidencia(user, incidencia) -> bool:
+    if not user or not getattr(user, "is_authenticated", False) or not incidencia:
+        return False
+    if can_manage_rrhh(user):
+        return True
+    empleado = getattr(incidencia, "empleado", None)
+    jefe = usuario_jefe_directo_de_empleado(empleado)
+    return getattr(jefe, "id", None) == user.id
+
+
+def asistencia_descuenta_comida(asistencia: AsistenciaEmpleado) -> bool:
+    """
+    La comida solo descuenta jornada cuando el checador trae salida y regreso.
+    Point solo entrega entrada/salida, por lo que no se infiere comida.
+    """
+    if asistencia.fuente == AsistenciaEmpleado.FUENTE_POINT:
+        return False
+    return bool(asistencia.salida_comida and asistencia.regreso_comida)
+
+
+def minutos_jornada_programada(asistencia: AsistenciaEmpleado) -> int:
+    if not asistencia.turno:
+        return 0
+
+    turno = asistencia.turno
+    inicio = datetime.combine(asistencia.fecha, turno.hora_entrada)
+    fin = datetime.combine(asistencia.fecha, turno.hora_salida)
+    if fin <= inicio:
+        fin += timedelta(days=1)
+
+    minutos_jornada = int((fin - inicio).total_seconds() // 60)
+    if asistencia_descuenta_comida(asistencia):
+        minutos_jornada = max(minutos_jornada - TIEMPO_COMIDA_MINUTOS, 0)
+    return minutos_jornada
 
 
 def calcular_horas_extra(asistencia: AsistenciaEmpleado) -> Decimal:
@@ -22,15 +62,9 @@ def calcular_horas_extra(asistencia: AsistenciaEmpleado) -> Decimal:
     if not asistencia.turno or not asistencia.entrada or not asistencia.salida:
         return Decimal("0")
 
-    turno = asistencia.turno
-    inicio = datetime.combine(asistencia.fecha, turno.hora_entrada)
-    fin = datetime.combine(asistencia.fecha, turno.hora_salida)
-    if fin <= inicio:
-        fin += timedelta(days=1)
-
-    minutos_jornada = int((fin - inicio).total_seconds() // 60)
+    minutos_jornada = minutos_jornada_programada(asistencia)
     excedente = int(asistencia.minutos_trabajados or 0) - minutos_jornada
-    if excedente > int(turno.tolerancia_minutos or 0):
+    if excedente > int(asistencia.turno.tolerancia_minutos or 0):
         return Decimal(str(round(excedente / 60, 2))).quantize(Decimal("0.01"))
     return Decimal("0")
 

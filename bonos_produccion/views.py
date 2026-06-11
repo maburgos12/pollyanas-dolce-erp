@@ -31,6 +31,7 @@ from .serializers import (
     ConfigBonoPeriodoSerializer,
     RegistroDiarioSerializer,
 )
+from .services_recalculo import recalcular_desde_registros as _recalcular_desde_registros
 
 
 class CanAccessBonosProduccion(BasePermission):
@@ -63,19 +64,6 @@ def _empleado_de_usuario(user) -> Empleado | None:
         if user_tokens.issubset(set(empleado_name.split())):
             return empleado
     return None
-
-
-def _recalcular_desde_registros(bono: BonoProduccionEmpleado) -> None:
-    registros = bono.registros.all()
-    asistencias = registros.filter(tiene_asistencia=True)
-    bono.dias_trabajados = asistencias.count()
-    bono.dias_uniforme = asistencias.filter(tiene_uniforme=True).count()
-    bono.dias_puntualidad = asistencias.filter(tiene_puntualidad=True).count()
-    bono.dias_asistencia = bono.dias_trabajados
-    bono.dias_produccion = asistencias.filter(tiene_produccion=True).count()
-    bono.total_embetunados = sum(r.cantidad_embetunados for r in asistencias)
-    bono.recalcular()
-    bono.save()
 
 
 class ConfigBonoPeriodoViewSet(viewsets.ModelViewSet):
@@ -116,6 +104,14 @@ class ConfigBonoPeriodoViewSet(viewsets.ModelViewSet):
             if created:
                 creados += 1
         return Response({"creados": creados, "total": considerados}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="sync-checador")
+    def sync_checador(self, request, pk=None):
+        from .services_checador import sincronizar_asistencia_desde_checador
+
+        periodo = self.get_object()
+        resultado = sincronizar_asistencia_desde_checador(periodo)
+        return Response(resultado, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="aplicar-a-nomina")
     def aplicar_a_nomina(self, request, pk=None):

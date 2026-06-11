@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+
+{% block title %}RRHH · Reporte asistencia{% endblock %}
+{% block page_title %}RRHH · Reporte asistencia{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+{% if messages %}
+  {% for message in messages %}
+    <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'success' %}alert-success{% elif message.tags == 'info' %}alert-info{% else %}alert-info{% endif %}">
+      {{ message }}
+    </div>
+  {% endfor %}
+{% endif %}
+
+<section class="card">
+  <div class="card-header">
+    <h2>Filtros</h2>
+  </div>
+  <form method="get">
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label for="fecha_inicio">Fecha inicio</label>
+        <input class="input-field" id="fecha_inicio" type="date" name="fecha_inicio" value="{{ fecha_inicio }}">
+      </div>
+      <div class="form-group">
+        <label for="fecha_fin">Fecha fin</label>
+        <input class="input-field" id="fecha_fin" type="date" name="fecha_fin" value="{{ fecha_fin }}">
+      </div>
+      <div class="form-group">
+        <label for="empleado">Empleado</label>
+        <select class="input-field" id="empleado" name="empleado">
+          <option value="">Todos los empleados activos</option>
+          {% for empleado in empleados %}
+            <option value="{{ empleado.id }}" {% if empleado_id == empleado.id|stringformat:"s" %}selected{% endif %}>
+              {{ empleado.nombre }}{% if empleado.codigo %} · {{ empleado.codigo }}{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="sucursal">Sucursal</label>
+        <input class="input-field" id="sucursal" type="text" name="sucursal" value="{{ sucursal }}" placeholder="Todas">
+      </div>
+    </div>
+    <div>
+      <button class="btn btn-primary" style="background:var(--vino);border-color:var(--vino);" type="submit">Filtrar</button>
+      <a class="btn btn-secondary" href="?{{ query_csv }}">Exportar CSV</a>
+      <a class="btn btn-secondary" href="?{{ query_xlsx }}">Exportar XLSX</a>
+    </div>
+  </form>
+</section>
+
+{% if not reportes %}
+  <div class="alert alert-info">Sin actividad en el rango seleccionado.</div>
+{% else %}
+  {% for reporte in reportes %}
+    <section class="card">
+      <div class="card-header">
+        <div>
+          <h2>{{ reporte.datos.nombre }}{% if reporte.datos.codigo %} ({{ reporte.datos.codigo }}){% endif %}</h2>
+          <p class="muted">
+            {{ reporte.datos.puesto|default:"Sin puesto" }} · {{ reporte.datos.sucursal|default:"Sin sucursal" }} · {{ reporte.datos.departamento|default:"Sin departamento" }}
+          </p>
+        </div>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-number">{{ reporte.resumen.faltas }}</div>
+          <div class="kpi-label">Faltas</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-number">{{ reporte.resumen.falta_retardos }}</div>
+          <div class="kpi-label">Falta x retardos</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-number">{{ reporte.resumen.retardos }}</div>
+          <div class="kpi-label">Retardos</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-number">{{ reporte.resumen.comida_excedida }}</div>
+          <div class="kpi-label">Comida excedida</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-number">{{ reporte.resumen.jornada_incompleta }}</div>
+          <div class="kpi-label">Jornada incompleta</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-number">{{ reporte.resumen.hora_extra }}</div>
+          <div class="kpi-label">Hora extra</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-number">{{ reporte.resumen.avisos_baja }}</div>
+          <div class="kpi-label">Avisos / baja</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-number">{{ reporte.resumen.permisos }}</div>
+          <div class="kpi-label">Permisos</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-number">{{ reporte.resumen.vacaciones }}</div>
+          <div class="kpi-label">Vacaciones</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-number">{{ reporte.resumen.suspensiones }}</div>
+          <div class="kpi-label">Suspensiones</div>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Entrada</th>
+              <th>Salida</th>
+              <th>Min. comida</th>
+              <th>Incidencias</th>
+              <th>Estado</th>
+              <th>Minutos</th>
+              <th>Detalle</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for fila in reporte.filas %}
+              <tr>
+                <td>{{ fila.fecha|date:"Y-m-d" }}</td>
+                <td>{{ fila.asistencia.entrada|date:"H:i"|default:"-" }}</td>
+                <td>{{ fila.asistencia.salida|date:"H:i"|default:"-" }}</td>
+                <td>{{ fila.asistencia.minutos_comida|default:"-" }}</td>
+                <td>
+                  {% for incidencia in fila.incidencias %}
+                    <span class="badge {{ incidencia.badge_class }}">{{ incidencia.tipo }}</span>
+                    {% if incidencia.editado_manual %}
+                      <span class="badge" style="background:var(--dorado);color:#fff;">Editado</span>
+                    {% endif %}
+                  {% empty %}
+                    -
+                  {% endfor %}
+                </td>
+                <td>
+                  {% for incidencia in fila.incidencias %}
+                    <div>{{ incidencia.estado }}</div>
+                  {% empty %}
+                    -
+                  {% endfor %}
+                </td>
+                <td>
+                  {% for incidencia in fila.incidencias %}
+                    <div>{{ incidencia.minutos }}</div>
+                  {% empty %}
+                    -
+                  {% endfor %}
+                </td>
+                <td>
+                  {% for incidencia in fila.incidencias %}
+                    <div>{{ incidencia.detalle|default:"-" }}</div>
+                  {% empty %}
+                    -
+                  {% endfor %}
+                </td>
+                <td>
+                  {% if reporte.puede_editar %}
+                    {% for incidencia in fila.incidencias %}
+                      <details>
+                        <summary class="btn btn-sm btn-secondary">Editar</summary>
+                        <form method="post" action="{% url 'rrhh:rrhh_incidencia_editar' incidencia.id %}">
+                          {% csrf_token %}
+                          <div class="form-group">
+                            <label for="estado_{{ incidencia.id }}">Estado</label>
+                            <select class="input-field" id="estado_{{ incidencia.id }}" name="estado">
+                              {% for valor_estado, etiqueta_estado in incidencia_estado_choices %}
+                                <option value="{{ valor_estado }}" {% if valor_estado == incidencia.estado_codigo %}selected{% endif %}>{{ etiqueta_estado }}</option>
+                              {% endfor %}
+                            </select>
+                          </div>
+                          <div class="form-group">
+                            <label for="minutos_{{ incidencia.id }}">Minutos</label>
+                            <input class="input-field" id="minutos_{{ incidencia.id }}" type="number" name="minutos" value="{{ incidencia.minutos }}" min="0">
+                          </div>
+                          <div class="form-group">
+                            <label for="detalle_{{ incidencia.id }}">Detalle</label>
+                            <input class="input-field" id="detalle_{{ incidencia.id }}" type="text" name="detalle" value="{{ incidencia.detalle }}">
+                          </div>
+                          <div class="form-group">
+                            <label for="comentario_{{ incidencia.id }}">Comentario</label>
+                            <textarea class="input-field" id="comentario_{{ incidencia.id }}" name="comentario" required placeholder="Motivo del cambio (obligatorio)"></textarea>
+                          </div>
+                          <input type="hidden" name="fecha_inicio" value="{{ fecha_inicio }}">
+                          <input type="hidden" name="fecha_fin" value="{{ fecha_fin }}">
+                          <input type="hidden" name="empleado" value="{{ empleado_id }}">
+                          <input type="hidden" name="sucursal" value="{{ sucursal }}">
+                          <button class="btn btn-sm btn-primary" style="background:var(--vino);border-color:var(--vino);" type="submit">Guardar</button>
+                        </form>
+                      </details>
+                    {% empty %}
+                      -
+                    {% endfor %}
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endfor %}
+{% endif %}
+{% endblock %}

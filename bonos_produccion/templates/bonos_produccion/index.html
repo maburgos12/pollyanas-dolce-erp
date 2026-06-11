@@ -424,6 +424,12 @@ function App(){
     api(`/api/bonos-produccion/periodos/${periodo.id}/inicializar-bonos/`,{method:'POST',body:'{}'})
       .then(r=>{showStatus(`${r.creados} empleados inicializados`,'ok');cargarTodo();}).catch(err=>showStatus(err.message,'err'));
   }
+  function syncChecador(){
+    if(!periodo)return;
+    api(`/api/bonos-produccion/periodos/${periodo.id}/sync-checador/`,{method:'POST',body:'{}'})
+      .then(r=>{showStatus(`Checador: ${r.bonos_sincronizados} bonos · ${r.registros_creados} creados · ${r.registros_actualizados} actualizados · ${r.bonos_omitidos} omitidos`,'ok');cargarTodo();})
+      .catch(err=>showStatus(err.message,'err'));
+  }
   function guardarDia(dia,patch){
     if(!selectedBono)return;
     const ex=registros.find(r=>+r.dia===dia);
@@ -466,7 +472,8 @@ function App(){
         h('span',{className:'periodo-label'},'Periodo:'),
         periodo?h('span',{className:'periodo-id'},`ID ${periodo.id} · ${periodo.dias_laborables} dias lab.`):h('span',{style:{color:'var(--faint)',fontSize:13}},'Sin periodo para este mes'),
         !periodo&&h('button',{className:'btn btn-wine btn-sm',onClick:crearPeriodo},'Crear periodo'),
-        periodo&&h('button',{className:'btn btn-ghost btn-sm',onClick:inicializar},'Inicializar empleados')
+        periodo&&h('button',{className:'btn btn-ghost btn-sm',onClick:inicializar},'Inicializar empleados'),
+        periodo&&h('button',{className:'btn btn-ghost btn-sm',onClick:syncChecador},'Recalcular desde checador')
       ),
       showBonusContext&&h('div',{className:'metrics'},
         h('div',{className:'metric-card'},h('div',{className:'lbl'},'Total a pagar'),h('div',{className:'val gold'},money(totalGlobal))),

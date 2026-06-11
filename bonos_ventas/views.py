@@ -28,23 +28,13 @@ from .serializers import (
     VentaCategoriaSucursalSerializer,
 )
 from .services import sync_dias_repartidor, sync_ventas_categorias
+from .services_recalculo import recalcular_desde_registros as _recalcular_desde_registros
 
 
 class CanAccessBonosVentas(BasePermission):
     def has_permission(self, request, view):
         user = request.user
         return bool(user and user.is_authenticated and can_view_submodule(user, "ventas", "bonos"))
-
-
-def _recalcular_desde_registros(bono: BonoVentasEmpleado) -> None:
-    registros = bono.registros.all()
-    asistencias = registros.filter(tiene_asistencia=True)
-    bono.dias_trabajados = asistencias.count()
-    bono.dias_asistencia = bono.dias_trabajados
-    bono.dias_uniforme = asistencias.filter(tiene_uniforme=True).count()
-    bono.dias_puntualidad = asistencias.filter(tiene_puntualidad=True).count()
-    bono.recalcular()
-    bono.save()
 
 
 class ConfigBonoVentasPeriodoViewSet(viewsets.ModelViewSet):
@@ -101,6 +91,14 @@ class ConfigBonoVentasPeriodoViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=True, methods=["post"], url_path="sync-checador")
+    def sync_checador(self, request, pk=None):
+        from .services_checador import sincronizar_asistencia_desde_checador
+
+        periodo = self.get_object()
+        resultado = sincronizar_asistencia_desde_checador(periodo)
+        return Response(resultado, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="aplicar-a-nomina")
     def aplicar_a_nomina(self, request, pk=None):
