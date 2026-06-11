@@ -249,6 +249,8 @@
   .ps-control select,
   .ps-control .ps-num { height: 38px; padding: 0 10px; border: 1px solid var(--mm-border); border-radius: 8px; background: #fdf9fb; color: #2c2026; font: inherit; font-size: 13px; }
   .ps-control .ps-num { max-width: 8rem; }
+  .ps-control-scenario { min-width: 132px; }
+  .ps-control-scenario .ps-hint { min-height: 14px; }
   .ps-control-fams { flex: 1; min-width: 280px; }
   .ps-fam-tools { display: flex; gap: 10px; }
   .ps-link { border: none; background: none; color: var(--mm-wine); cursor: pointer; font-size: 12px; font-weight: 700; padding: 0; text-decoration: underline; }
@@ -259,6 +261,7 @@
   .ps-summary { display: flex; flex-wrap: wrap; gap: 18px; padding: 0 18px 14px; color: var(--mm-muted); font-size: 12.5px; }
   .ps-summary strong { color: var(--mm-ink); font-size: 15px; }
   .ps-summary .is-alert strong { color: var(--mm-red); }
+  .ps-error { margin: 0 18px 14px; padding: 10px 12px; border: 1px solid var(--mm-red-border); border-radius: 8px; background: var(--mm-red-bg); color: var(--mm-red); font-size: 12.5px; font-weight: 700; }
   .ps-result { padding: 0 0 6px; }
   .ps-result .mm-table-wrap { max-height: 60vh; }
   .ps-spark { display: inline-flex; align-items: flex-end; gap: 2px; height: 22px; }
@@ -301,7 +304,7 @@
       </p>
     </div>
     <div class="pd-action-row mm-actions">
-      <button type="button" class="btn btn-primary" id="ps-open">💡 Precio sugerido</button>
+      <button type="button" class="btn btn-primary" id="ps-open">💡 Piso rentable</button>
       <a class="btn btn-secondary" href="{% url 'recetas:costeo_dashboard' %}">Costeo semanal</a>
       <a class="btn btn-secondary" href="{% url 'recetas:recetas_list' %}">Recetas</a>
       <a class="btn btn-secondary btn-export" href="?{{ export_query }}">Exportar CSV</a>
@@ -311,8 +314,8 @@
   <section class="ps-panel" id="ps-panel" hidden>
     <div class="ps-head">
       <div>
-        <h2 class="ps-title">💡 Precio mínimo rentable</h2>
-        <p class="ps-sub">Productos activos de Point. El precio sugerido usa la meta correspondiente a su fuente de costo: fabricación completa, solo materia prima o reventa.</p>
+        <h2 class="ps-title">💡 Piso rentable</h2>
+        <p class="ps-sub">Productos activos de Point. El piso rentable usa el escenario capturado para fabricación completa, solo materia prima y reventa.</p>
       </div>
       <button type="button" class="ps-close" id="ps-close" aria-label="Cerrar">✕</button>
     </div>
@@ -324,6 +327,21 @@
           <option value="6" selected>Últimos 6 meses</option>
           <option value="12">Últimos 12 meses</option>
         </select>
+      </div>
+      <div class="ps-control ps-control-scenario">
+        <label for="ps-costo-prod">Costo prod. objetivo</label>
+        <input class="ps-num" id="ps-costo-prod" type="number" min="10" max="99" step="0.1" value="35" inputmode="decimal">
+        <span class="ps-hint">% del precio · solo MP</span>
+      </div>
+      <div class="ps-control ps-control-scenario">
+        <label for="ps-margen-fab">Margen fabricación</label>
+        <input class="ps-num" id="ps-margen-fab" type="number" min="1" max="90" step="0.1" value="55" inputmode="decimal">
+        <span class="ps-hint">% sobre venta</span>
+      </div>
+      <div class="ps-control ps-control-scenario">
+        <label for="ps-margen-reventa">Margen reventa</label>
+        <input class="ps-num" id="ps-margen-reventa" type="number" min="1" max="90" step="0.1" value="30" inputmode="decimal">
+        <span class="ps-hint">% sobre venta</span>
       </div>
       <div class="ps-control ps-control-fams">
         <label>Familias Point <span class="ps-hint">(vacío = todas)</span></label>
@@ -340,7 +358,7 @@
         </div>
       </div>
       <div class="ps-control ps-control-actions">
-        <button type="button" class="btn btn-primary" id="ps-calc">Calcular precio sugerido</button>
+        <button type="button" class="btn btn-primary" id="ps-calc">Calcular piso rentable</button>
         <div class="ps-export-box">
           <a class="btn btn-secondary btn-export" id="ps-export" href="#" hidden>Exportar Excel</a>
         </div>
@@ -348,7 +366,7 @@
     </div>
     <div class="ps-summary" id="ps-summary" hidden></div>
     <div class="ps-result" id="ps-result">
-      <div class="mm-empty"><div class="mm-empty-title">Elige meses y familias</div><div>Luego presiona “Calcular precio sugerido”.</div></div>
+      <div class="mm-empty"><div class="mm-empty-title">Elige meses, escenario y familias</div><div>Luego presiona “Calcular piso rentable”.</div></div>
     </div>
   </section>
 
@@ -620,6 +638,9 @@
   var openBtn = document.getElementById("ps-open");
   var closeBtn = document.getElementById("ps-close");
   var mesesSel = document.getElementById("ps-meses");
+  var costoProdInput = document.getElementById("ps-costo-prod");
+  var margenFabInput = document.getElementById("ps-margen-fab");
+  var margenReventaInput = document.getElementById("ps-margen-reventa");
   var famGrid = document.getElementById("ps-fam-grid");
   var calcBtn = document.getElementById("ps-calc");
   var exportLink = document.getElementById("ps-export");
@@ -632,9 +653,21 @@
       .map(function (cb) { return cb.value; });
   }
 
+  function readPct(input, min, max, label) {
+    var raw = (input.value || "").replace(",", ".").trim();
+    var value = parseFloat(raw);
+    if (!raw || Number.isNaN(value) || value < min || value > max) {
+      throw new Error(label + " debe estar entre " + min + "% y " + max + "%.");
+    }
+    return value.toFixed(1);
+  }
+
   function buildQuery() {
     var params = new URLSearchParams();
     params.set("meses", mesesSel.value);
+    params.set("costo_produccion_pct", readPct(costoProdInput, 10, 99, "Costo producción objetivo"));
+    params.set("margen_venta_pct", readPct(margenFabInput, 1, 90, "Margen fabricación"));
+    params.set("margen_reventa_pct", readPct(margenReventaInput, 1, 90, "Margen reventa"));
     selectedFamilies().forEach(function (f) { params.append("familia", f); });
     return params.toString();
   }
@@ -709,7 +742,7 @@
     summary.hidden = false;
     summary.innerHTML =
       '<div><strong>' + data.total + '</strong> productos activos</div>' +
-      '<div title="Fabricado completo: costo con componentes productivos; solo MP: sin mano de obra/indirectos cargados; reventa: producto comprado/accesorio">Meta <strong>' + data.margen_meta_fab + '%</strong> fabricación · <strong>' + data.margen_meta_mp + '%</strong> solo MP · <strong>' + data.margen_meta_reventa + '%</strong> reventa</div>' +
+      '<div title="Costo producción objetivo aplica a solo MP; el margen solo MP es su complemento contra precio de venta">Escenario <strong>' + data.costo_produccion_pct + '%</strong> costo prod. · <strong>' + data.margen_meta_fab + '%</strong> fabricación · <strong>' + data.margen_meta_reventa + '%</strong> reventa</div>' +
       '<div class="' + (data.criticos ? "is-alert" : "") + '"><strong>' + data.criticos + '</strong> pierden dinero</div>' +
       '<div class="' + (data.requieren_ajuste ? "is-alert" : "") + '"><strong>' + data.requieren_ajuste + '</strong> requieren ajuste</div>' +
       '<div title="Costo de fabricación completo / solo materia prima"><strong>' + data.fab_completo + '</strong> fab. completo · <strong>' + data.mp_fallback + '</strong> solo MP</div>' +
@@ -718,7 +751,7 @@
       '<div>Periodo: ' + data.periodo_inicio + ' a ' + data.periodo_fin + '</div>';
 
     if (data.fab_completo === 0 && data.mp_fallback > 0) {
-      summary.innerHTML += '<div class="is-alert" style="flex-basis:100%">⚠ Hoy el costo es <strong>solo materia prima</strong> (mano de obra/indirectos/empaque no cargados). El margen mostrado es sobre materia prima, no fabricación completa.</div>';
+      summary.innerHTML += '<div class="is-alert" style="flex-basis:100%">⚠ Hoy el costo es <strong>solo materia prima</strong> en muchos productos. Costo producción objetivo ' + data.costo_produccion_pct + '% equivale a margen solo MP ' + data.margen_meta_mp + '%; no es rentabilidad final completa.</div>';
     }
 
     if (!data.rows.length) {
@@ -732,7 +765,7 @@
       '<th>Fuente costo</th><th class="is-center">Costo (tendencia)</th>' +
       '<th class="is-right">Costo inicial</th><th class="is-right">Costo último</th><th class="is-right">Var.</th>' +
       '<th class="is-right">Precio actual</th><th class="is-right">Margen</th>' +
-      '<th class="is-right">Precio sugerido</th><th class="is-right">Falta subir</th>' +
+      '<th class="is-right">Piso rentable</th><th class="is-right">Brecha contra piso</th>' +
       '<th class="is-center">Estado</th>' +
       '</tr></thead><tbody>';
 
@@ -777,18 +810,34 @@
   }
 
   function calcular() {
-    var query = buildQuery();
+    var query;
+    try {
+      query = buildQuery();
+    } catch (err) {
+      summary.hidden = true;
+      exportLink.hidden = true;
+      result.innerHTML = '<div class="ps-error">' + esc(err.message) + '</div>';
+      return;
+    }
     result.innerHTML = '<div class="ps-loading">Calculando…</div>';
     summary.hidden = true;
     exportLink.hidden = true;
     fetch(ENDPOINT + "?" + query, { headers: { "X-Requested-With": "XMLHttpRequest" } })
       .then(function (resp) {
-        if (!resp.ok) throw new Error("HTTP " + resp.status);
-        return resp.json();
+        return resp.json().then(function (data) {
+          if (!resp.ok) {
+            var details = data && data.param_errors
+              ? Object.keys(data.param_errors).map(function (key) { return data.param_errors[key]; }).join(" ")
+              : "HTTP " + resp.status;
+            throw new Error(details);
+          }
+          return data;
+        });
       })
       .then(render)
       .catch(function (err) {
-        result.innerHTML = '<div class="mm-empty"><div class="mm-empty-title">Error al calcular</div><div>' + err.message + '</div></div>';
+        result.innerHTML = '<div class="mm-empty"><div class="mm-empty-title">Error al calcular</div><div>' + esc(err.message) + '</div></div>';
+        exportLink.hidden = true;
       });
   }
 

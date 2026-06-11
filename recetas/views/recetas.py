@@ -6,7 +6,7 @@ from math import exp, sqrt
 from datetime import date, datetime, timedelta
 from calendar import monthrange
 from collections import defaultdict
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from typing import Dict, Any, List
 from urllib.parse import urlencode
 from uuid import uuid4
@@ -6230,14 +6230,83 @@ COSTO_SIN = "SIN_COSTO"               # sin costo en ninguna fuente
 MARGEN_META_FAB_PCT = Decimal("55")
 MARGEN_META_MP_PCT = Decimal("65")
 MARGEN_META_REVENTA_PCT = Decimal("30")
+COSTO_PRODUCCION_OBJETIVO_PCT = Decimal("100") - MARGEN_META_MP_PCT
 
 
-def _margen_meta_por_fuente(fuente: str) -> Decimal:
+def _fmt_pct(value: Decimal) -> str:
+    return format(value.normalize(), "f")
+
+
+def _clean_pct(value: Decimal) -> Decimal:
+    value = value.quantize(Decimal("0.1"))
+    if value == value.to_integral_value():
+        return value.quantize(Decimal("1"))
+    return value
+
+
+def _parse_pct_param(
+    request: HttpRequest,
+    *,
+    param: str,
+    default: Decimal,
+    min_value: Decimal,
+    max_value: Decimal,
+) -> tuple[Decimal, str | None]:
+    raw = request.GET.get(param)
+    if raw in (None, ""):
+        return default, None
+    try:
+        value = Decimal(str(raw).replace(",", "."))
+    except (InvalidOperation, ValueError):
+        return default, "Debe ser un porcentaje numérico."
+    if value < min_value or value > max_value:
+        return default, f"Debe estar entre {_fmt_pct(min_value)}% y {_fmt_pct(max_value)}%."
+    return _clean_pct(value), None
+
+
+def _precio_sugerido_config(request: HttpRequest) -> tuple[dict[str, Decimal], dict[str, str]]:
+    costo_prod_pct, costo_error = _parse_pct_param(
+        request,
+        param="costo_produccion_pct",
+        default=COSTO_PRODUCCION_OBJETIVO_PCT,
+        min_value=Decimal("10"),
+        max_value=Decimal("99"),
+    )
+    margen_fab_pct, fab_error = _parse_pct_param(
+        request,
+        param="margen_venta_pct",
+        default=MARGEN_META_FAB_PCT,
+        min_value=Decimal("1"),
+        max_value=Decimal("90"),
+    )
+    margen_reventa_pct, reventa_error = _parse_pct_param(
+        request,
+        param="margen_reventa_pct",
+        default=MARGEN_META_REVENTA_PCT,
+        min_value=Decimal("1"),
+        max_value=Decimal("90"),
+    )
+    errors = {
+        key: error for key, error in {
+            "costo_produccion_pct": costo_error,
+            "margen_venta_pct": fab_error,
+            "margen_reventa_pct": reventa_error,
+        }.items() if error
+    }
+    return {
+        "costo_produccion_pct": costo_prod_pct,
+        "margen_meta_fab": margen_fab_pct,
+        "margen_meta_mp": _clean_pct(Decimal("100") - costo_prod_pct),
+        "margen_meta_reventa": margen_reventa_pct,
+    }, errors
+
+
+def _margen_meta_por_fuente(fuente: str, config: dict[str, Decimal]) -> Decimal:
     if fuente == COSTO_MP_FALLBACK:
-        return MARGEN_META_MP_PCT
+        return config["margen_meta_mp"]
     if fuente == COSTO_REVENTA:
-        return MARGEN_META_REVENTA_PCT
-    return MARGEN_META_FAB_PCT
+        return config["margen_meta_reventa"]
+    return config["margen_meta_fab"]
 
 
 def _precio_sugerido_excel_response(
@@ -6249,10 +6318,11 @@ def _precio_sugerido_excel_response(
     start_period: date,
     current_period: date,
     familias_sel: list[str],
+    precio_config: dict[str, Decimal],
 ) -> HttpResponse:
     wb = Workbook()
     ws = wb.active
-    ws.title = "Precio sugerido"
+    ws.title = "Piso rentable"
 
     brand = "8B2252"
     brand_dark = "5F1638"
@@ -6295,7 +6365,10 @@ def _precio_sugerido_excel_response(
     ws["A6"].alignment = Alignment(horizontal="left")
     ws.merge_cells("A7:T7")
     ws["A7"] = (
-        "Margen meta: 55% fabricación completa · 65% solo materia prima · 30% reventa. "
+        f"Escenario: costo producción {_fmt_pct(precio_config['costo_produccion_pct'])}% del precio "
+        f"(solo MP => margen {_fmt_pct(precio_config['margen_meta_mp'])}%) · "
+        f"margen fabricación {_fmt_pct(precio_config['margen_meta_fab'])}% · "
+        f"margen reventa {_fmt_pct(precio_config['margen_meta_reventa'])}%. "
         "Archivo listo para imprimir con texto y tabla alineados al mismo margen."
     )
     ws["A7"].font = Font(size=10, color="5B4A52")
@@ -6326,7 +6399,7 @@ def _precio_sugerido_excel_response(
         f"Costo inicial ({meses}m)", "Costo ultimo mes", "Variacion costo %",
         "MP", "Mano obra", "Indirectos", "Empaque",
         "Precio actual", "Fuente precio", "Margen actual %", "Margen meta %",
-        "Utilidad por unidad", "Precio sugerido", "Falta subir %", "Estado",
+        "Utilidad por unidad", "Piso rentable", "Brecha contra piso %", "Estado",
     ]
     header_row = 12
     for col, header in enumerate(headers, start=1):
@@ -6456,7 +6529,7 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
       - SIN_COSTO: no hay costo en ninguna fuente.
     Catálogo, precio vigente y familia salen de Point (fuente de verdad). Los
     sabores (addons) se combinan en su base; el margen meta depende de la fuente
-    de costo; el precio sugerido es un piso (no recomienda bajar precios sanos)."""
+    de costo; el piso rentable no recomienda bajar precios sanos."""
     if not can_view_recetas(request.user):
         raise PermissionDenied
 
@@ -6471,6 +6544,9 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
     export_format = (request.GET.get("export") or "").lower()
     export_csv = export_format == "csv"
     export_xlsx = export_format in {"xlsx", "excel"}
+    precio_config, param_errors = _precio_sugerido_config(request)
+    if param_errors:
+        return JsonResponse({"error": "Parámetros inválidos.", "param_errors": param_errors}, status=400)
 
     today = timezone.localdate()
     start_period = _ventana_meses_inicio(today, meses)
@@ -6666,8 +6742,8 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             precio_actual = price_stats.get(receta.id, (Decimal("0"), 0))[0]
             precio_fuente = "POS_MEDIANA" if precio_actual > 0 else "SIN_PRECIO"
 
-        # Margen meta según la fuente de costo.
-        margen_meta_row = _margen_meta_por_fuente(fuente)
+        # Margen meta según la fuente de costo y el escenario capturado.
+        margen_meta_row = _margen_meta_por_fuente(fuente, precio_config)
 
         margen = None
         utilidad = None
@@ -6824,7 +6900,7 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             f"Costo inicial ({meses}m)", "Costo ultimo mes", "Variacion costo %",
             "MP", "Mano obra", "Indirectos", "Empaque",
             "Precio actual", "Fuente precio", "Margen actual %", "Margen meta %", "Utilidad por unidad",
-            "Precio sugerido", "Falta subir %", "Estado",
+            "Piso rentable", "Brecha contra piso %", "Estado",
         ])
         for row in rows:
             bd = row["breakdown"] or {}
@@ -6854,6 +6930,7 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             start_period=start_period,
             current_period=current_period,
             familias_sel=familias_sel,
+            precio_config=precio_config,
         )
 
     def _s(value):
@@ -6895,9 +6972,10 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
 
     return JsonResponse({
         "meses": meses,
-        "margen_meta_fab": str(MARGEN_META_FAB_PCT),
-        "margen_meta_mp": str(MARGEN_META_MP_PCT),
-        "margen_meta_reventa": str(MARGEN_META_REVENTA_PCT),
+        "costo_produccion_pct": str(precio_config["costo_produccion_pct"]),
+        "margen_meta_fab": str(precio_config["margen_meta_fab"]),
+        "margen_meta_mp": str(precio_config["margen_meta_mp"]),
+        "margen_meta_reventa": str(precio_config["margen_meta_reventa"]),
         "periodo_inicio": start_period.isoformat(),
         "periodo_fin": current_period.isoformat(),
         "familias_point": familias_point,
