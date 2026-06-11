@@ -45,6 +45,9 @@
   .conc-form label { display: grid; gap: 5px; color: var(--conc-secondary); font-weight: 800; font-size: .86rem; }
   .conc-form select,
   .conc-form input[type="file"] { width: 100%; border: 1px solid var(--conc-control-border); border-radius: 8px; padding: 9px; background: var(--conc-surface); color: var(--conc-text); }
+  .conc-inline-form { display: grid; gap: 6px; min-width: 280px; }
+  .conc-inline-form select,
+  .conc-inline-form input { width: 100%; border: 1px solid var(--conc-control-border); border-radius: 8px; padding: 7px; background: var(--conc-surface); color: var(--conc-text); }
   .conc-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
   .conc-note { color: var(--conc-muted); font-size: .86rem; line-height: 1.45; }
   .conc-help-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
@@ -776,6 +779,8 @@
             <th class="conc-money">Monto</th>
             <th>Regla fiscal</th>
             <th>Siguiente revision</th>
+            <th>Estado</th>
+            <th>Conciliar</th>
           </tr>
         </thead>
         <tbody>
@@ -797,9 +802,61 @@
                 <span class="conc-note">{{ row.regla.siguiente_revision }}</span>
               {% endif %}
             </td>
+            <td>
+              {% if row.movimiento.conciliado %}
+                <span class="conc-chip is-ok">Conciliado</span>
+                <div class="conc-note">
+                  {{ row.movimiento.get_tipo_conciliacion_display|default:"Sin tipo" }}
+                  {% if row.movimiento.movimiento_relacionado_id %}<br>Contra mov. #{{ row.movimiento.movimiento_relacionado_id }}{% endif %}
+                  {% if row.movimiento.cfdi_relacionado_id %}<br>CFDI {{ row.movimiento.cfdi_relacionado.uuid }}{% endif %}
+                  {% if row.movimiento.nota_conciliacion %}<br>{{ row.movimiento.nota_conciliacion }}{% endif %}
+                </div>
+              {% else %}
+                <span class="conc-chip is-warn">Pendiente</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if row.movimiento.conciliado %}
+                <span class="conc-note">Ya cerrado.</span>
+              {% else %}
+                <form class="conc-inline-form" method="post">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="conciliar_movimiento">
+                  <input type="hidden" name="periodo" value="{{ periodo_resumen.periodo_value }}">
+                  <input type="hidden" name="movimiento_id" value="{{ row.movimiento.pk }}">
+                  <select name="tipo_conciliacion" required>
+                    <option value="">Que es este movimiento?</option>
+                    <option value="cfdi">Va contra CFDI</option>
+                    <option value="traspaso_cuentas">Traspaso entre cuentas propias</option>
+                    <option value="linea_credito">Disposicion / pago linea de credito</option>
+                    <option value="comision_bancaria">Comision bancaria</option>
+                    <option value="fiscal">Impuesto / devolucion SAT</option>
+                    <option value="soporte">Soporte sin CFDI</option>
+                  </select>
+                  {% if row.candidatos %}
+                  <select name="cfdi_uuid">
+                    <option value="">CFDI candidato</option>
+                    {% for cfdi in row.candidatos %}
+                    <option value="{{ cfdi.uuid }}">{{ cfdi.fecha_emision|date:"Y-m-d" }} · ${{ cfdi.total|floatformat:2|intcomma }} · {{ cfdi.uuid }}</option>
+                    {% endfor %}
+                  </select>
+                  {% endif %}
+                  {% if row.contrapartes %}
+                  <select name="contraparte_id">
+                    <option value="">Contraparte para traspaso</option>
+                    {% for contraparte in row.contrapartes %}
+                    <option value="{{ contraparte.pk }}">{{ contraparte.fecha_transaccion|date:"Y-m-d" }} · {{ contraparte.cuenta.nombre_display }} · {{ contraparte.tipo }} · ${{ contraparte.monto|floatformat:2|intcomma }}</option>
+                    {% endfor %}
+                  </select>
+                  {% endif %}
+                  <input type="text" name="nota_conciliacion" placeholder="Nota o evidencia">
+                  <button class="btn btn-secondary" type="submit">Aplicar</button>
+                </form>
+              {% endif %}
+            </td>
           </tr>
           {% empty %}
-          <tr><td colspan="7" class="conc-empty">Sin movimientos importados.</td></tr>
+          <tr><td colspan="9" class="conc-empty">Sin movimientos importados.</td></tr>
           {% endfor %}
         </tbody>
       </table>
