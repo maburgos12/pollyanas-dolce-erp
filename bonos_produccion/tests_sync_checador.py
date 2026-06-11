@@ -10,9 +10,10 @@ from django.urls import reverse
 
 from core.access import ROLE_BONOS_PRODUCCION_CAPTURA
 from rrhh.models import AsistenciaEmpleado, Empleado, IncidenciaAsistencia
+from rrhh.services_bonos_checador import programar_sincronizacion_bonos_desde_checador
 
 from .models import AREA_HORNOS, BonoProduccionEmpleado, ConfigBonoPeriodo, RegistroDiarioProduccion
-from .services_checador import sincronizar_asistencia_desde_checador
+from .services_checador import sincronizar_asistencia_desde_checador, sincronizar_empleado_dia_desde_checador
 
 
 TZ = ZoneInfo("America/Mazatlan")
@@ -210,3 +211,51 @@ class SyncChecadorProduccionTests(TestCase):
         response = self.client.post(reverse("bonoproduccion-periodo-sync-checador", args=[periodo.id]), {})
 
         self.assertEqual(response.status_code, 403)
+
+    def test_sync_empleado_dia_crea_solo_el_registro_del_dia_afectado(self):
+        fecha = date(2026, 6, 11)
+        _periodo, empleado, bono = self.crear_bono(fecha)
+        self.crear_asistencia(empleado, fecha)
+
+        resultado = sincronizar_empleado_dia_desde_checador(empleado.id, fecha)
+
+        self.assertEqual(resultado["bonos_sincronizados"], 1)
+        self.assertEqual(resultado["registros_creados"], 1)
+        self.assertEqual(RegistroDiarioProduccion.objects.filter(bono=bono).count(), 1)
+        registro = RegistroDiarioProduccion.objects.get(bono=bono, dia=11)
+        self.assertTrue(registro.tiene_asistencia)
+        self.assertTrue(registro.tiene_puntualidad)
+
+    def test_sync_empleado_dia_no_modifica_bono_cerrado(self):
+        fecha = date(2026, 6, 12)
+        _periodo, empleado, bono = self.crear_bono(fecha, estatus=BonoProduccionEmpleado.ESTATUS_CERRADO)
+        self.crear_asistencia(empleado, fecha)
+
+        resultado = sincronizar_empleado_dia_desde_checador(empleado.id, fecha)
+
+        self.assertEqual(resultado["bonos_sincronizados"], 0)
+        self.assertEqual(resultado["bonos_omitidos"], 1)
+        self.assertFalse(RegistroDiarioProduccion.objects.filter(bono=bono, dia=12).exists())
+
+    def test_puente_rrhh_programa_sync_bonos_al_confirmar_checada(self):
+        fecha = date(2026, 6, 13)
+        _periodo, empleado, bono = self.crear_bono(fecha)
+        self.crear_asistencia(empleado, fecha)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            programar_sincronizacion_bonos_desde_checador(empleado.id, fecha)
+
+        registro = RegistroDiarioProduccion.objects.get(bono=bono, dia=13)
+        self.assertTrue(registro.tiene_asistencia)
+        self.assertTrue(registro.tiene_puntualidad)
+
+    def test_sync_empleado_dia_respeta_rango_personalizado_del_periodo(self):
+        fecha_periodo = date(2026, 6, 14)
+        fecha_fuera = date(2026, 6, 15)
+        _periodo, empleado, bono = self.crear_bono(fecha_periodo)
+        self.crear_asistencia(empleado, fecha_fuera)
+
+        resultado = sincronizar_empleado_dia_desde_checador(empleado.id, fecha_fuera)
+
+        self.assertEqual(resultado["bonos_sincronizados"], 0)
+        self.assertFalse(RegistroDiarioProduccion.objects.filter(bono=bono, dia=15).exists())

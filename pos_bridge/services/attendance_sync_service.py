@@ -22,6 +22,7 @@ from pos_bridge.utils.logger import get_job_logger, get_pos_bridge_logger
 from rrhh.models import AsistenciaEmpleado, Empleado, Turno
 from rrhh.services import generar_horas_extra_automatico
 from rrhh.services_asistencia_reglas import evaluar_dia_empleado
+from rrhh.services_bonos_checador import programar_sincronizacion_bonos_desde_checador
 
 
 @dataclass(frozen=True)
@@ -460,6 +461,8 @@ class PointAttendanceSyncService:
             evaluar_dia_empleado(asistencia.empleado, asistencia.fecha)
         except Exception as exc:
             self.logger.warning("Error evaluando reglas RRHH para asistencia Point %s: %s", asistencia.id, exc)
+        else:
+            programar_sincronizacion_bonos_desde_checador(asistencia.empleado_id, asistencia.fecha)
         if match_method in {"name", "name_tokens"}:
             return asistencia, "created_by_name" if created else "updated_by_name"
         return asistencia, "created" if created else "updated"
