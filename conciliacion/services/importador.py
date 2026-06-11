@@ -290,6 +290,27 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
     cfdi_sucursales = _resumen_cfdi_sucursales(inicio=inicio, fin=fin)
     alcance_fiscal = _resumen_alcance_fiscal(inicio=inicio, fin=fin)
     canales_comparativo = _resumen_comparativo_canales(movimientos_qs=movimientos_qs, cfdi_qs=cfdi_qs)
+    resumen_ejecutivo = _resumen_ejecutivo_periodo(
+        movimientos_abonos=abonos,
+        movimientos_cargos=cargos,
+        cfdi_emitidos=cfdi_emitidos,
+        cfdi_recibidos=cfdi_recibidos,
+        alcance_fiscal=alcance_fiscal,
+    )
+    trabajo_conciliacion = _trabajo_conciliacion_periodo(
+        canales_comparativo=canales_comparativo,
+        movimientos_cargos=cargos,
+        cfdi_recibidos=cfdi_recibidos,
+        alcance_fiscal=alcance_fiscal,
+    )
+    estado_cierre = _estado_cierre_periodo(
+        movimientos_total=movimientos_agregado["total"] or 0,
+        movimientos_dias=len(dias_banco),
+        cfdi_total=cfdi_qs.count(),
+        cfdi_sucursales=cfdi_sucursales,
+        alcance_fiscal=alcance_fiscal,
+        trabajo_conciliacion=trabajo_conciliacion,
+    )
 
     movimientos_periodo = list(movimientos_qs.order_by("-fecha_transaccion")[:50])
     candidatos = sugerir_cfdis_para_movimientos([mov for mov in movimientos_periodo if not mov.conciliado])
@@ -315,8 +336,161 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
         "cfdi_sucursales": cfdi_sucursales,
         "alcance_fiscal": alcance_fiscal,
         "canales_comparativo": canales_comparativo,
+        "estado_cierre": estado_cierre,
+        "resumen_ejecutivo": resumen_ejecutivo,
+        "trabajo_conciliacion": trabajo_conciliacion,
         "cfdi_rows": list(cfdi_qs.order_by("-fecha_emision")[:20]),
     }
+
+
+def _resumen_ejecutivo_periodo(
+    *,
+    movimientos_abonos: dict[str, Any],
+    movimientos_cargos: dict[str, Any],
+    cfdi_emitidos: dict[str, Any],
+    cfdi_recibidos: dict[str, Any],
+    alcance_fiscal: dict[str, Any],
+) -> dict[str, Any]:
+    banco_abonos = movimientos_abonos["total"]
+    banco_cargos = movimientos_cargos["total"]
+    sat_ventas = cfdi_emitidos["total"]
+    sat_proveedores = cfdi_recibidos["total"]
+    return {
+        "banco_abonos": banco_abonos,
+        "banco_cargos": banco_cargos,
+        "sat_ventas": sat_ventas,
+        "sat_proveedores": sat_proveedores,
+        "diferencia_abonos_ventas": banco_abonos - sat_ventas,
+        "diferencia_cargos_proveedores": banco_cargos - sat_proveedores,
+        "pagos_cobrados": alcance_fiscal["pagos_emitidos"]["total"],
+        "pagos_proveedores": alcance_fiscal["pagos_recibidos"]["total"],
+        "credito_clientes_pendiente": alcance_fiscal["ppd_emitidos_abiertos"]["saldo"],
+        "credito_proveedores_pendiente": alcance_fiscal["ppd_recibidos_abiertos"]["saldo"],
+    }
+
+
+def _trabajo_conciliacion_periodo(
+    *,
+    canales_comparativo: list[dict[str, Any]],
+    movimientos_cargos: dict[str, Any],
+    cfdi_recibidos: dict[str, Any],
+    alcance_fiscal: dict[str, Any],
+) -> list[dict[str, Any]]:
+    rows = []
+    for row in canales_comparativo:
+        rows.append(
+            {
+                "concepto": row["nombre"],
+                "banco_conteo": row["banco_conteo"],
+                "banco_total": row["banco_total"],
+                "sat_conteo": row["sat_conteo"],
+                "sat_total": row["sat_total"],
+                "diferencia": row["diferencia"],
+                "estado": row["estado"],
+                "accion": _accion_conciliacion(row["estado"], row["banco_total"], row["sat_total"]),
+            }
+        )
+
+    diferencia_proveedores = movimientos_cargos["total"] - cfdi_recibidos["total"]
+    estado_proveedores = _estado_diferencia(diferencia_proveedores)
+    rows.append(
+        {
+            "concepto": "Proveedores, comisiones y gastos",
+            "banco_conteo": movimientos_cargos["conteo"],
+            "banco_total": movimientos_cargos["total"],
+            "sat_conteo": cfdi_recibidos["conteo"],
+            "sat_total": cfdi_recibidos["total"],
+            "diferencia": diferencia_proveedores,
+            "estado": estado_proveedores,
+            "accion": _accion_conciliacion(estado_proveedores, movimientos_cargos["total"], cfdi_recibidos["total"]),
+        }
+    )
+
+    credito_total = alcance_fiscal["ppd_emitidos_abiertos"]["saldo"] + alcance_fiscal["ppd_recibidos_abiertos"]["saldo"]
+    pagos_total = alcance_fiscal["pagos_emitidos"]["total"] + alcance_fiscal["pagos_recibidos"]["total"]
+    rows.append(
+        {
+            "concepto": "Credito y complementos de pago",
+            "banco_conteo": 0,
+            "banco_total": Decimal("0.00"),
+            "sat_conteo": alcance_fiscal["pagos_emitidos"]["conteo"] + alcance_fiscal["pagos_recibidos"]["conteo"],
+            "sat_total": pagos_total,
+            "diferencia": credito_total,
+            "estado": "revision" if credito_total else "ok",
+            "accion": "Revisar saldos PPD" if credito_total else "Sin saldo pendiente",
+        }
+    )
+    return rows
+
+
+def _estado_cierre_periodo(
+    *,
+    movimientos_total: int,
+    movimientos_dias: int,
+    cfdi_total: int,
+    cfdi_sucursales: dict[str, Any],
+    alcance_fiscal: dict[str, Any],
+    trabajo_conciliacion: list[dict[str, Any]],
+) -> dict[str, Any]:
+    diferencias_fuertes = sum(1 for row in trabajo_conciliacion if row["estado"] == "pendiente")
+    status = [
+        {
+            "label": "Bancos cargados" if movimientos_total else "Bancos pendientes",
+            "detalle": f"{_fmt_int(movimientos_total)} movimientos en {_fmt_int(movimientos_dias)} dias",
+            "tone": "is-ok" if movimientos_total else "is-warn",
+        },
+        {
+            "label": "SAT del mes cargado" if cfdi_total else "SAT del mes pendiente",
+            "detalle": f"{_fmt_int(cfdi_total)} CFDI del periodo",
+            "tone": "is-ok" if cfdi_total else "is-warn",
+        },
+        {
+            "label": "Complementos revisados",
+            "detalle": (
+                f"{_fmt_int(alcance_fiscal['pagos_emitidos']['conteo'] + alcance_fiscal['pagos_recibidos']['conteo'])} pagos "
+                f"hasta {alcance_fiscal['complemento_fin']:%Y-%m-%d}"
+            ),
+            "tone": "is-info",
+        },
+        {
+            "label": "Sucursales identificadas" if not cfdi_sucursales["pendientes"] else "Sucursales por revisar",
+            "detalle": f"{_fmt_int(cfdi_sucursales['resueltos'])} resueltos · {_fmt_int(cfdi_sucursales['pendientes'])} pendientes",
+            "tone": "is-ok" if not cfdi_sucursales["pendientes"] else "is-warn",
+        },
+    ]
+    alertas = []
+    if not movimientos_total:
+        alertas.append("Falta cargar el estado de cuenta del mes.")
+    if not cfdi_total:
+        alertas.append("Falta descargar o reflejar CFDI SAT del mes.")
+    if cfdi_sucursales["pendientes"]:
+        alertas.append("Hay CFDI emitidos sin sucursal identificada.")
+    if diferencias_fuertes:
+        alertas.append("Hay diferencias relevantes entre banco y SAT por revisar.")
+    if alcance_fiscal["ppd_recibidos_abiertos"]["saldo"] or alcance_fiscal["ppd_emitidos_abiertos"]["saldo"]:
+        alertas.append("Hay facturas a credito que requieren complementos o seguimiento de pago.")
+    return {
+        "status": status,
+        "alertas": alertas,
+        "diferencias_fuertes": diferencias_fuertes,
+        "siguiente_accion": alertas[0] if alertas else "Periodo listo para conciliacion manual detallada.",
+    }
+
+
+def _accion_conciliacion(estado: str, banco_total: Decimal, sat_total: Decimal) -> str:
+    if estado == "ok":
+        return "Validar detalle"
+    if banco_total == Decimal("0.00") and sat_total:
+        return "Buscar deposito o pago"
+    if banco_total and sat_total == Decimal("0.00"):
+        return "Buscar factura SAT"
+    if estado == "revision":
+        return "Revisar diferencia menor"
+    return "Revisar diferencia"
+
+
+def _fmt_int(value: int) -> str:
+    return f"{value:,}"
 
 
 def sugerir_cfdis_para_movimientos(movimientos: list[MovimientoBancario]) -> dict[int, list[CfdiDescargado]]:
