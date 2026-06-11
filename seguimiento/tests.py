@@ -804,7 +804,7 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertEqual(historico.context["completados"], 1)
         self.assertNotContains(historico, "Desfase app")
 
-    def test_importador_open_no_borra_aprobado_at_y_panel_lo_aisla_en_desfases(self):
+    def test_importador_open_limpia_aprobado_at_y_panel_lo_mantiene_activo(self):
         dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
         dg_user = get_user_model().objects.create_user(username="mauricio.desfase", password="test12345")
         dg_user.groups.add(dg_group)
@@ -848,11 +848,11 @@ class SeguimientoColaboradorTests(TestCase):
         desfases = self.client.get("/seguimiento/panel/?bucket=desfases&tab=MINUTA&vista=tabla")
 
         self.assertEqual(item.estatus, SeguimientoItem.ESTATUS_PENDIENTE)
-        self.assertEqual(item.aprobado_at, aprobado_at)
+        self.assertIsNone(item.aprobado_at)
         self.assertEqual(item.metadata["source_status"], "OPEN")
-        self.assertNotContains(activos, "Búsqueda de camisas")
-        self.assertContains(desfases, "Búsqueda de camisas")
-        self.assertContains(desfases, "Desfase app")
+        self.assertContains(activos, "Búsqueda de camisas")
+        self.assertNotContains(activos, "Desfase app")
+        self.assertNotContains(desfases, "Búsqueda de camisas")
         self.assertEqual(desfases.context["vencidos"], 0)
 
     def test_webhook_parcial_preserva_checklist_existente(self):

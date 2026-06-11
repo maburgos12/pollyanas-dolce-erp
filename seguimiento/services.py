@@ -396,8 +396,11 @@ class AgenteDGSeguimientoImporter:
             SeguimientoItem.ESTATUS_CANCELADO,
         }
         cierre_at = agente_dg_as_datetime(row.get("archived_at") or row.get("completed_at"))
-        if cierre_fuente and cierre_at and not item.aprobado_at:
+        if cierre_fuente and cierre_at and item.aprobado_at != cierre_at:
             item.aprobado_at = cierre_at
+            item.save(update_fields=["aprobado_at", "updated_at"])
+        elif not cierre_fuente and item.aprobado_at:
+            item.aprobado_at = None
             item.save(update_fields=["aprobado_at", "updated_at"])
 
         item.participantes_user.set(participant_users)
