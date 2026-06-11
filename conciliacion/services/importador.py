@@ -24,7 +24,7 @@ from syncfy_client.models import CuentaBancaria, MovimientoBancario
 MAX_PREVIEW_ROWS = 50
 MAX_IMPORT_ROWS = 3000
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
-FORMATOS_SOPORTADOS = {"csv", "xlsx", "xlsm", "xls", "xml"}
+FORMATOS_SOPORTADOS = {"csv", "xlsx", "xlsm", "xls", "xml", "pdf"}
 
 
 class ImportacionBancariaError(ValueError):
@@ -119,7 +119,7 @@ def generar_preview(*, cuenta: CuentaBancaria, uploaded_file) -> PreviewImportac
     nombre = str(uploaded_file.name or "estado_cuenta")
     suffix = nombre.rsplit(".", 1)[-1].lower() if "." in nombre else ""
     if suffix not in FORMATOS_SOPORTADOS:
-        raise ImportacionBancariaError("Formato no soportado. Usa XML, CSV, XLSX, XLSM o XLS.")
+        raise ImportacionBancariaError("Formato no soportado. Usa PDF, XML, CSV, XLSX, XLSM o XLS.")
 
     dataframe = _read_dataframe(content, suffix)
     if dataframe.empty:
@@ -526,6 +526,8 @@ def _read_dataframe(content: bytes, suffix: str) -> pd.DataFrame:
         return _read_csv_dataframe(content)
     if suffix == "xml":
         return _read_xml_dataframe(content)
+    if suffix == "pdf":
+        return _read_pdf_dataframe(content)
     return pd.read_excel(buffer)
 
 
@@ -595,6 +597,130 @@ def _read_bajio_detallado_csv(content: bytes) -> pd.DataFrame:
     raw = raw[raw["descripcion"].fillna("").astype(str).str.strip() != ""]
     raw = raw[raw.apply(_bajio_detallado_has_amount, axis=1)]
     return raw.reset_index(drop=True)
+
+
+def _read_pdf_dataframe(content: bytes) -> pd.DataFrame:
+    try:
+        import pdfplumber
+    except ImportError as exc:
+        raise ImportacionBancariaError(
+            "No se puede leer PDF porque falta la libreria pdfplumber en el servidor."
+        ) from exc
+
+    rows: list[dict[str, Any]] = []
+    try:
+        with pdfplumber.open(io.BytesIO(content)) as pdf:
+            for page_number, page in enumerate(pdf.pages, start=1):
+                rows.extend(_pdf_rows_from_tables(page, page_number=page_number))
+                text = page.extract_text(x_tolerance=1, y_tolerance=3) or ""
+                rows.extend(_pdf_rows_from_text(text, page_number=page_number))
+    except Exception as exc:  # noqa: BLE001
+        raise ImportacionBancariaError("No se pudo leer el PDF del estado de cuenta.") from exc
+
+    if not rows:
+        raise ImportacionBancariaError(
+            "No se encontraron movimientos legibles en el PDF. "
+            "Si el archivo es escaneado, descarga una version con texto seleccionable o usa CSV/Excel."
+        )
+    return pd.DataFrame(rows)
+
+
+def _pdf_rows_from_tables(page, *, page_number: int) -> list[dict[str, Any]]:
+    parsed_rows: list[dict[str, Any]] = []
+    for table in page.extract_tables() or []:
+        if not table:
+            continue
+        header_idx = _pdf_header_index(table)
+        if header_idx is None:
+            continue
+        headers = [_normalize_header(cell or "") for cell in table[header_idx]]
+        for row_idx, values in enumerate(table[header_idx + 1 :], start=header_idx + 2):
+            row = {
+                headers[index]: _clean_value(value)
+                for index, value in enumerate(values)
+                if index < len(headers) and headers[index]
+            }
+            if _looks_like_bank_row(row):
+                row["pagina_pdf"] = page_number
+                row["fila_pdf"] = row_idx
+                parsed_rows.append(row)
+    return parsed_rows
+
+
+def _pdf_header_index(table: list[list[Any]]) -> int | None:
+    best_idx = None
+    best_score = 0
+    for index, row in enumerate(table[:12]):
+        normalized = [_normalize_header(cell or "") for cell in row]
+        score = _xml_header_score(normalized)
+        if score > best_score:
+            best_idx = index
+            best_score = score
+    return best_idx if best_score >= 3 else None
+
+
+def _pdf_rows_from_text(text: str, *, page_number: int) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        row = _pdf_row_from_line(line)
+        if row:
+            row["pagina_pdf"] = page_number
+            row["linea_pdf"] = line_number
+            rows.append(row)
+    return rows
+
+
+def _pdf_row_from_line(line: str) -> dict[str, Any] | None:
+    clean = re.sub(r"\s+", " ", str(line or "").strip())
+    if not clean:
+        return None
+
+    date_match = re.match(r"^(?P<fecha>\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2})\s+(?P<body>.+)$", clean)
+    if not date_match:
+        return None
+
+    body = date_match.group("body")
+    amounts = list(re.finditer(r"(?<![A-Z0-9])[-+]?\$?\s*\d{1,3}(?:,\d{3})*(?:\.\d{2})(?![A-Z0-9])", body))
+    if not amounts:
+        return None
+
+    amount_match = amounts[-2] if len(amounts) >= 2 else amounts[-1]
+    descripcion = body[: amount_match.start()].strip(" -")
+    trailing = body[amount_match.end() :].strip()
+    if not descripcion:
+        return None
+
+    amount_text = amount_match.group()
+    tipo = _pdf_tipo_from_line(body=body, trailing=trailing, amount=amount_text)
+    row = {
+        "fecha": date_match.group("fecha"),
+        "descripcion": descripcion,
+        "referencia": _pdf_referencia_from_text(body),
+    }
+    if tipo == MovimientoBancario.TIPO_ABONO:
+        row["abono"] = amount_text
+    else:
+        row["cargo"] = amount_text
+    if trailing:
+        row["saldo"] = trailing.split(" ", 1)[0]
+    return row
+
+
+def _pdf_tipo_from_line(*, body: str, trailing: str, amount: str) -> str:
+    normalized = _normalize_text(f"{body} {trailing}")
+    amount_value = _decimal_or_none(amount)
+    if amount_value is not None and amount_value < 0:
+        return MovimientoBancario.TIPO_CARGO
+    if any(token in normalized for token in ["ABONO", "DEPOSITO", "PAGO RECIBIDO", "SPEI RECIBIDO", "CREDITO"]):
+        return MovimientoBancario.TIPO_ABONO
+    if any(token in normalized for token in ["CARGO", "RETIRO", "PAGO", "COMISION", "IVA", "COMPRA"]):
+        return MovimientoBancario.TIPO_CARGO
+    return MovimientoBancario.TIPO_CARGO
+
+
+def _pdf_referencia_from_text(text: str) -> str:
+    match = re.search(r"\b(?:REF|REFERENCIA|AUT|AUTORIZACION|FOLIO)[:\s-]*([A-Z0-9-]{4,})", text, flags=re.IGNORECASE)
+    return match.group(1) if match else ""
 
 
 def _looks_like_fecha_bancaria(value: Any) -> bool:
@@ -874,6 +1000,8 @@ def _xml_attr(element: ET.Element, name: str) -> str:
 def _fuente_manual(suffix: str) -> str:
     if suffix == "csv":
         return ImportacionBancaria.FUENTE_MANUAL_CSV
+    if suffix == "pdf":
+        return ImportacionBancaria.FUENTE_MANUAL_PDF
     return ImportacionBancaria.FUENTE_MANUAL_EXCEL
 
 
@@ -912,11 +1040,23 @@ def _normalizar_movimiento(*, row: dict[str, Any], fila: int) -> MovimientoNorma
     if not descripcion:
         raise ImportacionBancariaError("falta descripcion/concepto.")
 
-    cargo = _decimal_or_none(_first(row, "cargo", "cargos", "importe_cargo", "retiro", "retiros", "debe"))
+    cargo = _decimal_or_none(_first_decimal_value(row, "cargo", "cargos", "importe_cargo", "retiro", "retiros", "debe"))
     abono = _decimal_or_none(
-        _first(row, "abono", "abonos", "importe_abono", "deposito", "depositos", "credito", "creditos", "haber")
+        _first_decimal_value(
+            row,
+            "abono",
+            "abonos",
+            "importe_abono",
+            "deposito",
+            "depositos",
+            "credito",
+            "creditos",
+            "haber",
+        )
     )
-    monto_directo = _decimal_or_none(_first(row, "monto", "importe", "importe_movimiento", "amount", "valor", "importe_total"))
+    monto_directo = _decimal_or_none(
+        _first_decimal_value(row, "monto", "importe", "importe_movimiento", "amount", "valor", "importe_total")
+    )
     if cargo is not None or abono is not None:
         firmado = (abono or Decimal("0")) - (cargo or Decimal("0"))
     elif monto_directo is not None:
@@ -934,7 +1074,7 @@ def _normalizar_movimiento(*, row: dict[str, Any], fila: int) -> MovimientoNorma
         tipo=tipo,
         moneda=str(_first(row, "moneda", "currency") or "MXN").strip()[:10] or "MXN",
         referencia=referencia[:120],
-        saldo=_decimal_or_none(_first(row, "saldo", "balance")),
+        saldo=_decimal_or_none(_first_decimal_value(row, "saldo", "balance")),
         fila=fila,
         raw={str(key): _stringify(value) for key, value in row.items()},
     )
@@ -1003,6 +1143,25 @@ def _first(row: dict[str, Any], *keys: str) -> Any:
         for row_key, value in row.items():
             if str(row_key).endswith(suffix) and value not in (None, ""):
                 return value
+    return None
+
+
+def _first_decimal_value(row: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        normalized = _normalize_header(key)
+        candidates: list[Any] = []
+        if normalized in row and row[normalized] not in (None, ""):
+            candidates.append(row[normalized])
+        suffix = f"_{normalized}"
+        for row_key, value in row.items():
+            if str(row_key).endswith(suffix) and value not in (None, ""):
+                candidates.append(value)
+        for value in candidates:
+            try:
+                _decimal(value)
+            except ImportacionBancariaError:
+                continue
+            return value
     return None
 
 

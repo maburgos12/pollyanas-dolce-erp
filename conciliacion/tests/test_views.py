@@ -35,7 +35,7 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Conciliacion bancaria")
         self.assertContains(response, "BBVA Empresas")
-        self.assertContains(response, "Formatos aceptados: XML, CSV, XLS, XLSX o XLSM")
+        self.assertContains(response, "Formatos aceptados: PDF, XML, CSV, XLS, XLSX o XLSM")
         self.assertNotContains(response, "accept=")
 
     @override_settings(SAT_DESCARGA_ENABLED=True)

@@ -173,9 +173,11 @@ class CfdiSucursalResolucion(models.Model):
 class ImportacionBancaria(models.Model):
     FUENTE_MANUAL_CSV = "manual_csv"
     FUENTE_MANUAL_EXCEL = "manual_excel"
+    FUENTE_MANUAL_PDF = "manual_pdf"
     FUENTE_CHOICES = [
         (FUENTE_MANUAL_CSV, "Carga manual CSV"),
         (FUENTE_MANUAL_EXCEL, "Carga manual Excel"),
+        (FUENTE_MANUAL_PDF, "Carga manual PDF"),
     ]
 
     ESTADO_PREVIEW = "preview"
