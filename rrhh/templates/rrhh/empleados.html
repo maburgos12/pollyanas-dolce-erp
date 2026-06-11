@@ -183,9 +183,9 @@
     border-radius: 8px;
     padding: 10px 12px;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
     gap: 12px;
-    align-items: center;
+    align-items: stretch;
   }
 
   .identity-title {
@@ -202,7 +202,7 @@
   .identity-grid {
     display: grid;
     gap: 6px;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
   }
 
   .identity-kv {
@@ -238,6 +238,73 @@
     color: var(--texto-light);
     font-size: 12px;
     margin-top: 4px;
+  }
+
+  .identity-review {
+    border-top: 1px solid var(--rosa);
+    padding-top: 10px;
+  }
+
+  .identity-review summary {
+    color: var(--vino);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 900;
+  }
+
+  .identity-review-panel {
+    display: grid;
+    gap: 10px;
+    margin-top: 10px;
+  }
+
+  .identity-review-copy {
+    color: var(--texto-light);
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  .identity-actions-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+  }
+
+  .identity-resolution-form {
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .identity-resolution-form label {
+    color: var(--texto);
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .identity-resolution-form select,
+  .identity-resolution-form textarea {
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    color: var(--texto);
+    font: inherit;
+    min-width: 0;
+    padding: 8px 10px;
+    width: 100%;
+  }
+
+  .identity-resolution-form textarea {
+    min-height: 78px;
+    resize: vertical;
+  }
+
+  .identity-action-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
   }
 
   .rrhh-layout {
@@ -820,25 +887,72 @@
             <div class="identity-kv">
               <div class="identity-label">Empleado sugerido</div>
               <div class="identity-value">
-                {% if pendiente.empleado_sugerido %}
+                {% if pendiente.empleado_codigo_existente %}
+                  {{ pendiente.empleado_codigo_existente.nombre }}{% if pendiente.empleado_codigo_existente.codigo %} · {{ pendiente.empleado_codigo_existente.codigo }}{% endif %}
+                {% elif pendiente.empleado_sugerido %}
                   {{ pendiente.empleado_sugerido.nombre }}{% if pendiente.empleado_sugerido.codigo %} · {{ pendiente.empleado_sugerido.codigo }}{% endif %}
                 {% else %}
                   Sin sugerencia automática
                 {% endif %}
               </div>
             </div>
+            <div class="identity-kv">
+              <div class="identity-label">Diagnóstico</div>
+              <div class="identity-value">{{ pendiente.revision_estado }}</div>
+            </div>
           </div>
-          <div class="identity-warning">Al vincular, este código queda como ID operativo del empleado para próximas cargas. No crea otro empleado.</div>
+          <div class="identity-warning">{{ pendiente.revision_detalle }} Al vincular, este código queda como ID operativo del empleado para próximas cargas. No crea otro empleado.</div>
         </div>
-        {% if pendiente.empleado_sugerido %}
-        <form method="post">
-          {% csrf_token %}
-          <input type="hidden" name="action" value="vincular_identidad">
-          <input type="hidden" name="pendiente_id" value="{{ pendiente.id }}">
-          <input type="hidden" name="empleado_id" value="{{ pendiente.empleado_sugerido_id }}">
-          <button class="btn btn-primary btn-small" type="submit">Vincular código</button>
-        </form>
-        {% endif %}
+        <details class="identity-review" {% if pendiente.empleado_codigo_existente %}open{% endif %}>
+          <summary>Abrir conciliación</summary>
+          <div class="identity-review-panel">
+            <div class="identity-review-copy">
+              Revisa el código recibido contra la ficha de RRHH. Aceptar vínculo actualiza el ID operativo del empleado seleccionado; descartar cierra el caso sin tocar personas ni usuarios.
+              {% if pendiente.notas %}<br>Nota actual: {{ pendiente.notas }}{% endif %}
+            </div>
+            <div class="identity-actions-grid">
+              {% if pendiente.empleado_codigo_existente %}
+              <form class="identity-resolution-form" method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="cerrar_identidad_codigo">
+                <input type="hidden" name="pendiente_id" value="{{ pendiente.id }}">
+                <label>Código ya ligado</label>
+                <div class="identity-review-copy">{{ pendiente.empleado_codigo_existente.nombre }} ya tiene el código {{ pendiente.codigo_externo }} en RRHH.</div>
+                <div class="identity-action-row">
+                  <button class="btn btn-primary btn-small" type="submit">Cerrar conciliado</button>
+                </div>
+              </form>
+              {% endif %}
+              <form class="identity-resolution-form" method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="vincular_identidad">
+                <input type="hidden" name="pendiente_id" value="{{ pendiente.id }}">
+                <label for="identidad-empleado-{{ pendiente.id }}">Empleado correcto</label>
+                <select id="identidad-empleado-{{ pendiente.id }}" name="empleado_id" required>
+                  <option value="">Seleccionar empleado...</option>
+                  {% for empleado_opcion in empleados_identidad_opciones %}
+                    <option value="{{ empleado_opcion.id }}" {% if empleado_opcion.id == pendiente.empleado_preseleccionado_id %}selected{% endif %}>
+                      {{ empleado_opcion.nombre }}{% if empleado_opcion.codigo %} · {{ empleado_opcion.codigo }}{% endif %}
+                    </option>
+                  {% endfor %}
+                </select>
+                <div class="identity-action-row">
+                  <button class="btn btn-primary btn-small" type="submit">Aceptar vínculo</button>
+                </div>
+              </form>
+              <form class="identity-resolution-form" method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="descartar_identidad">
+                <input type="hidden" name="pendiente_id" value="{{ pendiente.id }}">
+                <label for="identidad-nota-{{ pendiente.id }}">Motivo de descarte</label>
+                <textarea id="identidad-nota-{{ pendiente.id }}" name="notas_resolucion" placeholder="Ej. código duplicado en origen, persona no corresponde o dato enviado por error."></textarea>
+                <div class="identity-action-row">
+                  <button class="btn btn-secondary btn-small" type="submit">Descartar</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </details>
       </div>
       {% endfor %}
     </div>

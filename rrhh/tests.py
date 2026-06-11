@@ -1443,6 +1443,96 @@ class RRHHViewsTests(TestCase):
         self.assertEqual(empleado.rfc, "DEMO-010101-AA1")
         self.assertEqual(empleado.area, "ALMACEN")
 
+    def test_identidad_pendiente_codigo_existente_se_cierra_desde_conciliacion(self):
+        empleado = Empleado.objects.create(nombre="ANAYA BERNAL CARLOS EZEQUIEL", codigo="347")
+        pendiente = EmpleadoIdentidadPendiente.objects.create(
+            fuente=EmpleadoIdentidadPendiente.FUENTE_HIKVISION,
+            codigo_externo="347",
+            nombre_externo="CARLOS EZEQUIEL ANAYA BERNAL",
+        )
+
+        resp = self.client.get(reverse("rrhh:empleados"), secure=True)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Código ya está en RRHH")
+        self.assertContains(resp, "Cerrar conciliado")
+
+        resp_post = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "cerrar_identidad_codigo",
+                "pendiente_id": str(pendiente.id),
+            },
+            follow=True,
+            secure=True,
+        )
+
+        self.assertEqual(resp_post.status_code, 200)
+        pendiente.refresh_from_db()
+        self.assertEqual(pendiente.estado, EmpleadoIdentidadPendiente.ESTADO_VINCULADO)
+        self.assertEqual(pendiente.empleado_sugerido, empleado)
+        self.assertEqual(pendiente.resuelto_por, self.user)
+        self.assertIsNotNone(pendiente.resuelto_en)
+        self.assertContains(resp_post, "ya conciliado")
+
+    def test_identidad_pendiente_permite_vinculo_manual_sin_sugerencia(self):
+        empleado = Empleado.objects.create(nombre="Empleado Revisión Manual", codigo="EMP-2606-001")
+        pendiente = EmpleadoIdentidadPendiente.objects.create(
+            fuente=EmpleadoIdentidadPendiente.FUENTE_HIKVISION,
+            codigo_externo="348",
+            nombre_externo="NOMBRE EXTERNO SIN MATCH",
+        )
+
+        resp = self.client.get(reverse("rrhh:empleados"), secure=True)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Revisión manual")
+        self.assertContains(resp, "Aceptar vínculo")
+
+        resp_post = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "vincular_identidad",
+                "pendiente_id": str(pendiente.id),
+                "empleado_id": str(empleado.id),
+            },
+            follow=True,
+            secure=True,
+        )
+
+        self.assertEqual(resp_post.status_code, 200)
+        empleado.refresh_from_db()
+        pendiente.refresh_from_db()
+        self.assertEqual(empleado.codigo, "348")
+        self.assertEqual(pendiente.estado, EmpleadoIdentidadPendiente.ESTADO_VINCULADO)
+        self.assertEqual(pendiente.empleado_sugerido, empleado)
+        self.assertContains(resp_post, "Conciliación cerrada")
+
+    def test_identidad_pendiente_permite_descartar_con_nota(self):
+        pendiente = EmpleadoIdentidadPendiente.objects.create(
+            fuente=EmpleadoIdentidadPendiente.FUENTE_HIKVISION,
+            codigo_externo="999",
+            nombre_externo="DATO ENVIADO POR ERROR",
+        )
+
+        resp_post = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "descartar_identidad",
+                "pendiente_id": str(pendiente.id),
+                "notas_resolucion": "No corresponde a personal activo.",
+            },
+            follow=True,
+            secure=True,
+        )
+
+        self.assertEqual(resp_post.status_code, 200)
+        pendiente.refresh_from_db()
+        self.assertEqual(pendiente.estado, EmpleadoIdentidadPendiente.ESTADO_DESCARTADO)
+        self.assertEqual(pendiente.resuelto_por, self.user)
+        self.assertIn("No corresponde a personal activo.", pendiente.notas)
+        self.assertContains(resp_post, "descartado")
+
     def test_empleados_baja_expone_datos_para_autollenado(self):
         empleado = Empleado.objects.create(
             nombre="Empleado Baja Autollenado",

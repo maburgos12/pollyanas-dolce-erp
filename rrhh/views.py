@@ -75,6 +75,9 @@ from .services_catalogos import (
 )
 from .services_identidad import (
     asegurar_identidad_operativa_empleado,
+    buscar_empleado_por_codigo,
+    cerrar_identidad_por_codigo_existente,
+    descartar_identidad_pendiente,
     normalizar_codigo_empleado,
     vincular_identidad_pendiente,
 )
@@ -1154,13 +1157,43 @@ def empleados(request):
                 pk=request.POST.get("pendiente_id"),
                 estado=EmpleadoIdentidadPendiente.ESTADO_PENDIENTE,
             )
-            empleado = get_object_or_404(Empleado, pk=request.POST.get("empleado_id"))
+            empleado_id = (request.POST.get("empleado_id") or "").strip()
+            if not empleado_id.isdigit():
+                messages.error(request, "Selecciona el empleado correcto para conciliar el código.")
+                return redirect("rrhh:empleados")
+            empleado = get_object_or_404(Empleado, pk=int(empleado_id))
             try:
                 vincular_identidad_pendiente(pendiente, empleado, user=request.user)
             except ValueError as exc:
                 messages.error(request, str(exc))
             else:
-                messages.success(request, f"Código {pendiente.codigo_externo} vinculado a {empleado.nombre}.")
+                messages.success(
+                    request,
+                    f"Conciliación cerrada: código {pendiente.codigo_externo} vinculado a {empleado.nombre}.",
+                )
+            return redirect("rrhh:empleados")
+        if action == "cerrar_identidad_codigo":
+            pendiente = get_object_or_404(
+                EmpleadoIdentidadPendiente,
+                pk=request.POST.get("pendiente_id"),
+                estado=EmpleadoIdentidadPendiente.ESTADO_PENDIENTE,
+            )
+            try:
+                empleado = cerrar_identidad_por_codigo_existente(pendiente, user=request.user)
+            except ValueError as exc:
+                messages.error(request, str(exc))
+            else:
+                messages.success(request, f"Código {pendiente.codigo_externo} ya conciliado con {empleado.nombre}.")
+            return redirect("rrhh:empleados")
+        if action == "descartar_identidad":
+            pendiente = get_object_or_404(
+                EmpleadoIdentidadPendiente,
+                pk=request.POST.get("pendiente_id"),
+                estado=EmpleadoIdentidadPendiente.ESTADO_PENDIENTE,
+            )
+            notas = (request.POST.get("notas_resolucion") or "").strip()
+            descartar_identidad_pendiente(pendiente, user=request.user, notas=notas)
+            messages.success(request, f"Código {pendiente.codigo_externo} descartado de la bandeja de conciliación.")
             return redirect("rrhh:empleados")
         if action == "baja":
             empleado = None
@@ -1410,10 +1443,26 @@ def empleados(request):
             except Exception:
                 empleado.repartidor_logistica = None
 
-    identidades_pendientes = (
+    identidades_pendientes = list(
         EmpleadoIdentidadPendiente.objects.select_related("empleado_sugerido")
         .filter(estado=EmpleadoIdentidadPendiente.ESTADO_PENDIENTE)
         .order_by("-actualizado_en")[:20]
+    )
+    for pendiente in identidades_pendientes:
+        empleado_codigo = buscar_empleado_por_codigo(pendiente.codigo_externo)
+        pendiente.empleado_codigo_existente = empleado_codigo
+        pendiente.empleado_preseleccionado_id = empleado_codigo.id if empleado_codigo else pendiente.empleado_sugerido_id
+        if empleado_codigo:
+            pendiente.revision_estado = "Código ya está en RRHH"
+            pendiente.revision_detalle = "Cierra el pendiente como conciliado; no crea ni modifica otra persona."
+        elif pendiente.empleado_sugerido_id:
+            pendiente.revision_estado = "Sugerencia por nombre"
+            pendiente.revision_detalle = "Capital Humano debe confirmar antes de reemplazar el código operativo."
+        else:
+            pendiente.revision_estado = "Revisión manual"
+            pendiente.revision_detalle = "Selecciona el empleado correcto o descarta el código si no corresponde."
+    empleados_identidad_opciones = (
+        Empleado.objects.filter(activo=True).order_by("nombre").only("id", "nombre", "codigo")
     )
     altas_pendientes_qs = (
         AltaPendienteEmpleado.objects.select_related("vacante", "candidato", "creado_por")
@@ -1501,6 +1550,7 @@ def empleados(request):
         "bajas_recientes": EmpleadoBaja.objects.select_related("empleado").order_by("-fecha_baja")[:8],
         "plantillas": PlantillaAutorizada.objects.order_by("-anio", "-mes", "area")[:8],
         "identidades_pendientes": identidades_pendientes,
+        "empleados_identidad_opciones": empleados_identidad_opciones,
         "altas_pendientes": altas_pendientes,
         "alta_pendiente_seleccionada": alta_pendiente_seleccionada,
         "alta_prefill": _alta_pendiente_prefill(alta_pendiente_seleccionada),
