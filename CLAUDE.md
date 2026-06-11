@@ -76,6 +76,19 @@ rama aislada, nunca directo sobre algo que pueda tocar producción sin revisar.
 - Esta regla debe estar mergeada en `main`; si solo vive en una rama, otras
   sesiones no la ven.
 
+**Reglas de aislamiento y aviso (aprendidas en producción — NO ignorar):**
+- **Nunca cambiar de rama en el working tree donde Codex está corriendo.** Codex
+  lee/edita esos archivos en vivo; un `git checkout` le quita el piso y el job
+  muere huérfano (estado `running` falso, reporte perdido). Delegar SIEMPRE en un
+  `git worktree` dedicado y no tocar esa carpeta hasta que Codex termine. Ojo:
+  este repo tiene muchas sesiones/worktrees en paralelo que pueden mover la rama
+  del working tree principal solas.
+- **Los jobs en `--background` NO avisan al terminar.** Se consultan a mano con
+  `/codex:status` y se traen con `/codex:result` (o `codex-companion.mjs
+  status|result`). Para tener aviso automático + reporte completo, correr Codex
+  en `--wait` dentro de un background task del harness (ese sí notifica al salir),
+  o montar un poller. Si un job quedó huérfano, limpiarlo con `/codex:cancel`.
+
 ### Lo que NO se delega a Codex
 - Lógica que pisa datos de nómina/RRHH/ventas (ver "Datos de usuarios — NUNCA pisar").
 - Migraciones, `.env`, puertos, `settings.py`, push a `main`.
