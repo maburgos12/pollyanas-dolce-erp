@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+
+{% block title %}Mantenimiento · Nuevo reporte de unidad{% endblock %}
+{% block page_title %}Mantenimiento · Nuevo reporte de unidad{% endblock %}
+
+{% block extra_css %}
+<style>
+  .mant-report-shell{display:grid;gap:16px}
+  .mant-report-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .mant-report-head h1{margin:0;color:#42292e;font-size:28px;line-height:1.15}
+  .mant-report-head p{margin:6px 0 0;color:#77656d;font-weight:700}
+  .tipo-grid{display:grid;gap:8px;grid-template-columns:repeat(3,minmax(0,1fr))}
+  .tipo-opt{position:relative}
+  .tipo-opt input[type="radio"]{position:absolute;opacity:0;width:0;height:0}
+  .tipo-btn{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:8px;cursor:pointer;border:1.5px solid var(--rosa-deep);background:#fff;font-size:13px;font-weight:800;color:var(--texto);transition:border-color .15s,background .15s}
+  .tipo-opt input:checked + .tipo-btn{border-color:var(--vino);background:#fdf0f5;color:var(--vino)}
+  .tipo-icon{font-size:16px;line-height:1}
+  .sev-grid{display:flex;gap:10px}
+  .sev-opt{position:relative;flex:1}
+  .sev-opt input[type="radio"]{position:absolute;opacity:0;width:0;height:0}
+  .sev-btn{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 10px;border-radius:8px;cursor:pointer;border:2px solid var(--rosa-deep);background:#fff;font-size:13px;font-weight:900;text-align:center;width:100%;transition:border-color .15s,background .15s,box-shadow .15s}
+  .sev-opt input:checked + .sev-btn{box-shadow:0 0 0 3px currentColor}
+  .sev-opt.ok input:checked + .sev-btn{border-color:#1f7554;background:#e5f5ee;color:#1f7554}
+  .sev-opt.warn input:checked + .sev-btn{border-color:#9a6a00;background:#fff4d8;color:#9a6a00}
+  .sev-opt.crit input:checked + .sev-btn{border-color:#bc3b56;background:#ffe8ec;color:#bc3b56}
+  .foto-zone{border:2px dashed var(--rosa-deep);border-radius:8px;padding:20px;text-align:center;cursor:pointer;background:#fff;transition:border-color .15s,background .15s}
+  .foto-zone:hover{border-color:var(--vino);background:#fdf0f5}
+  .foto-zone input[type="file"]{display:none}
+  .foto-preview{display:none;margin-top:10px}
+  .foto-preview img{max-height:140px;border-radius:8px;border:1px solid var(--rosa-deep);object-fit:cover}
+  @media(max-width:760px){.tipo-grid{grid-template-columns:repeat(2,1fr)}.sev-grid{flex-wrap:wrap}.sev-opt{min-width:30%}}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="mant-report-shell">
+  <section class="module-tabs report-tabs" aria-label="Submódulos Mantenimiento">
+    <a href="{% url 'mantenimiento:dashboard' %}" class="module-tab">Dashboard</a>
+    <a href="{% url 'mantenimiento:dashboard' %}#tab-seguimiento" class="module-tab active">Seguimiento</a>
+    <a href="{% url 'mantenimiento:app' %}" class="module-tab">App móvil</a>
+  </section>
+
+  <section class="card">
+    <div class="mant-report-head">
+      <div>
+        <h1>Nuevo reporte de unidad</h1>
+        <p>Levanta desde Mantenimiento el reporte que no se capturó desde la app del repartidor.</p>
+      </div>
+      <a class="btn btn-secondary" href="{% url 'mantenimiento:dashboard' %}#tab-seguimiento">Volver</a>
+    </div>
+
+    <form method="post" enctype="multipart/form-data" novalidate style="margin-top:18px">
+      {% csrf_token %}
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label for="id_unidad">Unidad <span class="text-danger">*</span></label>
+          <select class="input-field" id="id_unidad" name="unidad" required>
+            <option value="">Selecciona unidad</option>
+            {% for u in unidades %}
+              <option value="{{ u.id }}" {% if prev.unidad == u.id|stringformat:"s" %}selected{% endif %}>
+                {{ u.codigo }}{% if u.placa %} · {{ u.placa }}{% endif %}{% if u.descripcion %} - {{ u.descripcion }}{% endif %}
+              </option>
+            {% endfor %}
+          </select>
+          {% if errors.unidad %}<p class="text-danger">{{ errors.unidad }}</p>{% endif %}
+        </div>
+
+        <div class="form-group">
+          <label for="id_repartidor">Repartidor asociado</label>
+          <select class="input-field" id="id_repartidor" name="repartidor">
+            <option value="">Sin repartidor asociado</option>
+            {% for r in repartidores %}
+              <option value="{{ r.id }}" {% if prev.repartidor == r.id|stringformat:"s" %}selected{% endif %}>{{ r }}</option>
+            {% endfor %}
+          </select>
+          <p class="muted">Opcional. Úsalo cuando el mantenimiento corresponde a una ruta o repartidor específico.</p>
+          {% if errors.repartidor %}<p class="text-danger">{{ errors.repartidor }}</p>{% endif %}
+        </div>
+
+        <div class="form-group full">
+          <label>Tipo de reporte <span class="text-danger">*</span></label>
+          <div class="tipo-grid">
+            {% for value, label in tipo_choices %}
+              <div class="tipo-opt">
+                <input type="radio" id="tipo_{{ value }}" name="tipo" value="{{ value }}"
+                  {% if prev.tipo == value or not prev.tipo and value == "falla" %}checked{% endif %} required>
+                <label class="tipo-btn" for="tipo_{{ value }}">
+                  <span class="tipo-icon">
+                    {% if value == "falla" %}🔧{% elif value == "mantenimiento" %}🛠{% elif value == "accidente" %}⚠️{% elif value == "llanta" %}🔩{% elif value == "documentos" %}📄{% else %}📋{% endif %}
+                  </span>
+                  {{ label }}
+                </label>
+              </div>
+            {% endfor %}
+          </div>
+          {% if errors.tipo %}<p class="text-danger">{{ errors.tipo }}</p>{% endif %}
+        </div>
+
+        <div class="form-group full">
+          <label>Severidad <span class="text-danger">*</span></label>
+          <div class="sev-grid">
+            <div class="sev-opt ok">
+              <input type="radio" id="sev_informativo" name="severidad" value="informativo"
+                {% if prev.severidad == "informativo" or not prev.severidad %}checked{% endif %}>
+              <label class="sev-btn" for="sev_informativo"><span>🟢</span>Informativo</label>
+            </div>
+            <div class="sev-opt warn">
+              <input type="radio" id="sev_urgente" name="severidad" value="urgente"
+                {% if prev.severidad == "urgente" %}checked{% endif %}>
+              <label class="sev-btn" for="sev_urgente"><span>🟡</span>Urgente</label>
+            </div>
+            <div class="sev-opt crit">
+              <input type="radio" id="sev_critico" name="severidad" value="critico"
+                {% if prev.severidad == "critico" %}checked{% endif %}>
+              <label class="sev-btn" for="sev_critico"><span>🔴</span>Crítico</label>
+            </div>
+          </div>
+          {% if errors.severidad %}<p class="text-danger">{{ errors.severidad }}</p>{% endif %}
+        </div>
+
+        <div class="form-group full">
+          <label for="id_descripcion">Descripción <span class="text-danger">*</span></label>
+          <textarea class="input-field" id="id_descripcion" name="descripcion" rows="4"
+            placeholder="Describe el problema con detalle: síntomas, cuándo se detectó, condiciones observadas..."
+            required>{{ prev.descripcion|default:"" }}</textarea>
+          {% if errors.descripcion %}<p class="text-danger">{{ errors.descripcion }}</p>{% endif %}
+        </div>
+
+        <div class="form-group">
+          <label for="id_kilometraje">Kilometraje actual</label>
+          <input class="input-field" id="id_kilometraje" name="kilometraje" type="number" min="0"
+            placeholder="Ej: 84500" value="{{ prev.kilometraje|default:'' }}">
+          <p class="muted">Opcional. Registra el odómetro si lo tienes disponible.</p>
+          {% if errors.kilometraje %}<p class="text-danger">{{ errors.kilometraje }}</p>{% endif %}
+        </div>
+
+        <div class="form-group">
+          <label>Foto de evidencia</label>
+          <div class="foto-zone" id="foto-zone" onclick="document.getElementById('id_foto').click()">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--vino)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+              <circle cx="12" cy="13" r="4"/>
+            </svg>
+            <p class="muted" style="margin:4px 0 0;">JPG / PNG · máx. 10 MB</p>
+            <input id="id_foto" name="foto" type="file" accept="image/*" onchange="previewFoto(this)">
+          </div>
+          {% if errors.foto %}<p class="text-danger">{{ errors.foto }}</p>{% endif %}
+          <div class="foto-preview" id="foto-preview">
+            <img id="foto-img" src="" alt="Vista previa">
+            <p class="muted" id="foto-name"></p>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn btn-primary" style="background:var(--vino);border-color:var(--vino);" type="submit">Crear reporte</button>
+        <a class="btn btn-secondary" href="{% url 'mantenimiento:dashboard' %}#tab-seguimiento">Cancelar</a>
+      </div>
+    </form>
+  </section>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function previewFoto(input) {
+  const preview = document.getElementById("foto-preview");
+  const img = document.getElementById("foto-img");
+  const name = document.getElementById("foto-name");
+  if (input.files && input.files[0]) {
+    const reader = new FileReader();
+    reader.onload = e => {
+      img.src = e.target.result;
+      preview.style.display = "block";
+      name.textContent = input.files[0].name;
+    };
+    reader.readAsDataURL(input.files[0]);
+  }
+}
+</script>
+{% endblock %}
