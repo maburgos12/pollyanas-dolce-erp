@@ -272,6 +272,8 @@ class BonosProduccionTests(TestCase):
         self.assertIn("Teclea nombre o apellido", content)
         self.assertIn("Vista previa tamaño carta", content)
         self.assertIn("Imprimir / PDF", content)
+        self.assertIn("label:'Area',value:contextLabel", content)
+        self.assertNotIn("Monto calculado", content)
         self.assertIn("Permiso ${lastPermiso.folio} registrado", content)
         self.assertIn("Imprimir / guardar PDF", content)
         self.assertIn("ReactDOM.createPortal", content)
@@ -338,7 +340,7 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-produccion-pwa-v16", sw_content)
+        self.assertIn("pollyanas-bonos-produccion-pwa-v17", sw_content)
         self.assertIn('cache: "no-store"', sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-produccion/dashboard/")', sw_content)
 
