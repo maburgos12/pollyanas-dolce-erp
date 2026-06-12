@@ -965,8 +965,10 @@ class BonosProduccionTests(TestCase):
         )
         roxana = Empleado.objects.create(
             nombre="RIVAS SOLIS ROXANA",
+            area="ADMINISTRACION",
+            departamento="PRODUCCION",
             puesto="Supervisora de Producción",
-            puesto_operativo="SUPERVISION_PRODUCCION",
+            nivel_organizacional=Empleado.NIVEL_SUPERVISION,
             jefe_directo=carolina,
         )
         julissa = Empleado.objects.create(
@@ -993,6 +995,8 @@ class BonosProduccionTests(TestCase):
         self.assertIn(julissa.id, empleados_ids)
         self.assertIn(roxana.id, empleados_ids)
         self.assertIn(operativo.id, empleados_ids)
+        roxana_payload = next(row for row in listado.json()["empleados"] if row["id"] == roxana.id)
+        self.assertEqual(roxana_payload["area"], AREA_PRODUCCION)
         primeros = [row["id"] for row in listado.json()["empleados"][:2]]
         self.assertEqual(primeros, [roxana.id, julissa.id])
 
@@ -1018,6 +1022,25 @@ class BonosProduccionTests(TestCase):
         permiso = PermisoSalida.objects.get(pk=creado.json()["id"])
         self.assertEqual(permiso.empleado, roxana)
 
+        hora_extra = self.client.post(
+            "/api/bonos-produccion/horas-extra/",
+            json.dumps(
+                {
+                    "empleado": roxana.id,
+                    "mes": 5,
+                    "anio": 2026,
+                    "area": "ADMINISTRACION",
+                    "fecha": "2026-05-22",
+                    "horas": "1.50",
+                    "notas": "Cierre supervisora",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(hora_extra.status_code, 201)
+        self.assertEqual(HoraExtra.objects.get(pk=hora_extra.json()["id"]).empleado, roxana)
+
     def test_permisos_produccion_superusuario_ve_area_sin_bono_periodo(self):
         user = get_user_model().objects.create_superuser(username="test.dg.permisos", password="x")
         self.client.force_login(user)
@@ -1027,7 +1050,7 @@ class BonosProduccionTests(TestCase):
             area="ADMINISTRACION",
             departamento="PRODUCCION",
             puesto="Jefe de Producción",
-            puesto_operativo="JEFATURA",
+            nivel_organizacional=Empleado.NIVEL_JEFATURA,
         )
         roxana = Empleado.objects.create(
             nombre="RIVAS SOLIS ROXANA",
