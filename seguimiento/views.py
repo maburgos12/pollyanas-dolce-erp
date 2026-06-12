@@ -9,6 +9,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
+from django.core.mail import send_mail
 from django.http import JsonResponse
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
@@ -19,6 +20,8 @@ from django.views.decorators.http import require_POST
 from core.access import can_review_seguimiento_global
 from core.audit import log_event
 from core.notificaciones import (
+    PUBLIC_BASE_URL,
+    crear_notificaciones,
     notificar_paso_aprobado_por_colaborador,
     notificar_paso_devuelto_por_colaborador,
     notificar_seguimiento_aprobado,
@@ -28,6 +31,7 @@ from core.notificaciones import (
     notificar_seguimiento_entrega,
     notificar_seguimiento_feedback_responsable,
     notificar_seguimiento_prorroga,
+    usuarios_direccion_general,
 )
 
 from .models import (
@@ -39,6 +43,7 @@ from .models import (
     SeguimientoProrrogaSolicitud,
 )
 from .services import empleado_de_usuario, upsert_agente_dg_payload
+from .tasks import _enviar_whatsapp_maya
 
 logger = logging.getLogger(__name__)
 
@@ -1510,22 +1515,40 @@ def _fecha_hora_local(value):
     return local_value.date(), local_value.strftime("%H:%M")
 
 
+def _actividad_source_label(actividad: ActividadCalendario) -> str:
+    if actividad.tipo == ActividadCalendario.TIPO_REUNION:
+        return "Reunión DG" if actividad.direccion_general else "Reunión"
+    return "Actividad personal"
+
+
 def _actividad_evento(actividad: ActividadCalendario, request_user) -> dict:
     completada = actividad.estatus == ActividadCalendario.ESTATUS_COMPLETADA
+    responsable = _nombre_usuario_legible(actividad.usuario)
+    invitado = _nombre_usuario_legible(actividad.invitado_user)
+    creador = _nombre_usuario_legible(actividad.creado_por)
+    editable = actividad.usuario_id == request_user.id or actividad.creado_por_id == request_user.id
     return {
         "id": f"act-{actividad.pk}",
         "fuente": "actividad",
-        "tipo": "ACTIVIDAD",
+        "tipo": actividad.tipo,
+        "source_label": _actividad_source_label(actividad),
         "titulo": actividad.titulo,
         "fecha": actividad.fecha.isoformat(),
         "hora": actividad.hora_inicio.strftime("%H:%M") if actividad.hora_inicio else None,
         "hora_fin": actividad.hora_fin.strftime("%H:%M") if actividad.hora_fin else None,
         "estatus": actividad.estatus,
+        "finalizado": completada,
         "vencido": actividad.fecha < timezone.localdate() and not completada,
         "url": None,
-        "responsable": _nombre_usuario_legible(actividad.usuario),
+        "accion_label": "Editar reunión" if actividad.tipo == ActividadCalendario.TIPO_REUNION else "Editar actividad",
+        "responsable": responsable,
+        "invitado": invitado,
+        "invitado_user_id": actividad.invitado_user_id,
+        "creador": creador,
+        "creado_por_id": actividad.creado_por_id,
+        "direccion_general": actividad.direccion_general,
         "descripcion": actividad.descripcion,
-        "editable": actividad.usuario_id == request_user.id,
+        "editable": editable,
     }
 
 
@@ -1539,19 +1562,25 @@ def _item_evento(item: SeguimientoItem, request_user) -> dict:
     fecha, hora = _fecha_hora_local(item.fecha_limite)
     responsable = _nombre_usuario_legible(item.responsable_user) or getattr(item.responsable_empleado, "nombre", "")
     completado = item.estatus in {SeguimientoItem.ESTATUS_COMPLETADO, SeguimientoItem.ESTATUS_CANCELADO}
+    source = _agente_dg_source(item)
     return {
         "id": f"item-{item.pk}",
         "fuente": "seguimiento",
         "tipo": item.tipo,
+        "source_label": item.get_tipo_display(),
         "titulo": item.titulo,
         "fecha": fecha.isoformat() if fecha else "",
         "hora": hora,
         "hora_fin": None,
         "estatus": item.estatus,
+        "finalizado": completado,
         "vencido": bool(fecha and fecha < timezone.localdate() and not completado),
         "url": _seguimiento_url_calendario(item, request_user),
+        "accion_label": "Ver seguimiento",
         "responsable": responsable or None,
-        "descripcion": "",
+        "descripcion": item.entregable_esperado or item.descripcion,
+        "source_table": source[0] if source else "",
+        "source_id": source[1] if source else None,
         "editable": False,
     }
 
@@ -1560,19 +1589,25 @@ def _checklist_evento(check: SeguimientoChecklistItem, request_user) -> dict:
     fecha, hora = _fecha_hora_local(check.vence)
     item = check.seguimiento
     responsable = _nombre_usuario_legible(item.responsable_user) or getattr(item.responsable_empleado, "nombre", "")
+    source = _agente_dg_source(item)
     return {
         "id": f"paso-{check.pk}",
         "fuente": "checklist",
         "tipo": "PASO",
+        "source_label": "Paso",
         "titulo": check.titulo,
         "fecha": fecha.isoformat() if fecha else "",
         "hora": hora,
         "hora_fin": None,
         "estatus": "COMPLETADO" if check.completado else (check.estatus_origen or "PENDIENTE"),
+        "finalizado": check.completado,
         "vencido": bool(fecha and fecha < timezone.localdate() and not check.completado),
         "url": _seguimiento_url_calendario(item, request_user),
+        "accion_label": "Ver seguimiento",
         "responsable": responsable or None,
-        "descripcion": "",
+        "descripcion": check.entregable or item.entregable_esperado,
+        "source_table": source[0] if source else "",
+        "source_id": source[1] if source else None,
         "editable": False,
     }
 
@@ -1606,44 +1641,160 @@ def _parse_hora_calendario(raw: str, campo: str):
     return hora, None
 
 
+def _sumar_meses(fecha, meses: int):
+    month = fecha.month - 1 + meses
+    year = fecha.year + month // 12
+    month = month % 12 + 1
+    day = min(fecha.day, [31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1])
+    return fecha.replace(year=year, month=month, day=day)
+
+
+def _fechas_recurrentes(fecha, periodicidad: str, repeticiones: int):
+    if periodicidad == "NINGUNA":
+        return [fecha]
+    fechas = []
+    for index in range(repeticiones):
+        if periodicidad == "DIARIA":
+            fechas.append(fecha + timedelta(days=index))
+        elif periodicidad == "SEMANAL":
+            fechas.append(fecha + timedelta(days=index * 7))
+        elif periodicidad == "MENSUAL":
+            fechas.append(_sumar_meses(fecha, index))
+    return fechas or [fecha]
+
+
+def _periodicidad_post(request):
+    periodicidad = (request.POST.get("periodicidad") or "NINGUNA").strip().upper()
+    if periodicidad not in {"NINGUNA", "DIARIA", "SEMANAL", "MENSUAL"}:
+        return None, None, "La periodicidad no es válida."
+    if periodicidad == "NINGUNA":
+        return periodicidad, 1, None
+    try:
+        repeticiones = int(request.POST.get("repeticiones") or "1")
+    except ValueError:
+        return None, None, "El número de repeticiones no es válido."
+    if repeticiones < 2 or repeticiones > 26:
+        return None, None, "La recurrencia debe estar entre 2 y 26 ocurrencias."
+    return periodicidad, repeticiones, None
+
+
 def _datos_actividad_post(request):
     titulo = (request.POST.get("titulo") or "").strip()
     descripcion = (request.POST.get("descripcion") or "").strip()
     fecha = parse_date((request.POST.get("fecha") or "").strip())
     hora_inicio, error_inicio = _parse_hora_calendario(request.POST.get("hora_inicio") or "", "inicio")
     hora_fin, error_fin = _parse_hora_calendario(request.POST.get("hora_fin") or "", "fin")
+    tipo = (request.POST.get("tipo") or ActividadCalendario.TIPO_ACTIVIDAD).strip().upper()
+    direccion_general = bool(request.POST.get("direccion_general"))
+    invitado_user = None
+    invitado_id = (request.POST.get("invitado_user") or "").strip()
 
     if not titulo:
         return None, "El título es obligatorio."
     if not fecha:
         return None, "La fecha es obligatoria."
+    if tipo not in {ActividadCalendario.TIPO_ACTIVIDAD, ActividadCalendario.TIPO_REUNION}:
+        return None, "El tipo de evento no es válido."
     if error_inicio:
         return None, error_inicio
     if error_fin:
         return None, error_fin
     if hora_inicio and hora_fin and hora_fin <= hora_inicio:
         return None, "La hora de fin debe ser posterior a la hora de inicio."
+    if invitado_id:
+        invitado_user = get_user_model().objects.filter(pk=invitado_id, is_active=True).first()
+        if not invitado_user:
+            return None, "El colaborador seleccionado no es válido."
+    if tipo == ActividadCalendario.TIPO_REUNION and not invitado_user and not direccion_general:
+        return None, "Selecciona un colaborador o Dirección General para la reunión."
     return {
+        "tipo": tipo,
         "titulo": titulo,
         "descripcion": descripcion,
         "fecha": fecha,
         "hora_inicio": hora_inicio,
         "hora_fin": hora_fin,
+        "direccion_general": direccion_general,
+        "invitado_user": invitado_user,
     }, None
+
+
+def _actividad_editable_qs(user):
+    return ActividadCalendario.objects.filter(
+        Q(usuario=user) | Q(creado_por=user) | Q(creado_por__isnull=True, usuario=user),
+        activo=True,
+    ).distinct()
+
+
+def _destinatarios_reunion(actividad: ActividadCalendario):
+    destinatarios = []
+    if actividad.invitado_user_id:
+        destinatarios.append(actividad.invitado_user)
+    if actividad.direccion_general:
+        destinatarios.extend(usuarios_direccion_general())
+    return destinatarios
+
+
+def _from_email_calendario() -> str:
+    return getattr(settings, "DEFAULT_FROM_EMAIL", "") or getattr(settings, "EMAIL_HOST_USER", "")
+
+
+def _notificar_reunion_calendario(actividad: ActividadCalendario, *, actor, total_ocurrencias: int = 1) -> int:
+    if actividad.tipo != ActividadCalendario.TIPO_REUNION:
+        return 0
+    destinatarios = _destinatarios_reunion(actividad)
+    if not destinatarios:
+        return 0
+    fecha = actividad.fecha.strftime("%d/%m/%Y")
+    hora = actividad.hora_inicio.strftime("%H:%M") if actividad.hora_inicio else "sin hora definida"
+    extra = f"\nSe crearon {total_ocurrencias} ocurrencias." if total_ocurrencias > 1 else ""
+    mensaje = f"{actor.get_full_name() or actor.username} creó una reunión para {fecha} a las {hora}.{extra}"
+    creadas = crear_notificaciones(
+        destinatarios,
+        titulo=f"Reunión: {actividad.titulo[:80]}",
+        mensaje=mensaje,
+        url="/seguimiento/calendario/",
+        tipo="seguimiento",
+        prioridad="alta",
+        actor=actor,
+        objeto_tipo="seguimiento.ActividadCalendario",
+        objeto_id=actividad.pk,
+        excluir=actor,
+    )
+    for user in destinatarios:
+        if user.id == actor.id:
+            continue
+        if user.email:
+            send_mail(
+                f"Reunión: {actividad.titulo[:80]}",
+                f"{mensaje}\n\nAbrir calendario: {PUBLIC_BASE_URL}/seguimiento/calendario/",
+                _from_email_calendario(),
+                [user.email],
+                fail_silently=True,
+            )
+        telefono = (getattr(getattr(user, "userprofile", None), "telefono", "") or "").strip()
+        if telefono:
+            _enviar_whatsapp_maya(telefono, f"Reunión: {actividad.titulo}. {mensaje}")
+    return creadas
 
 
 @login_required
 def calendario(request):
     es_dg = can_review_seguimiento_global(request.user)
-    contexto = {"es_dg": es_dg}
+    User = get_user_model()
+    contexto = {
+        "es_dg": es_dg,
+        "usuarios_reunion": User.objects.filter(is_active=True).order_by("first_name", "last_name", "username"),
+    }
     if es_dg:
-        User = get_user_model()
         contexto["colaboradores"] = (
             User.objects.filter(is_active=True)
             .filter(
                 Q(seguimiento_items__isnull=False)
                 | Q(seguimiento_participaciones__isnull=False)
                 | Q(actividades_calendario__isnull=False)
+                | Q(actividades_calendario_creadas__isnull=False)
+                | Q(actividades_calendario_invitado__isnull=False)
             )
             .distinct()
             .order_by("first_name", "last_name", "username")
@@ -1686,11 +1837,16 @@ def calendario_eventos(request):
     )
     actividades_qs = (
         ActividadCalendario.objects.filter(activo=True, fecha__gte=start, fecha__lte=end)
-        .select_related("usuario")
+        .select_related("usuario", "creado_por", "invitado_user")
         .order_by("fecha", "hora_inicio", "id")
     )
     if usuario_objetivo:
-        actividades_qs = actividades_qs.filter(usuario=usuario_objetivo)
+        actividad_filters = (
+            Q(usuario=usuario_objetivo) | Q(creado_por=usuario_objetivo) | Q(invitado_user=usuario_objetivo)
+        )
+        if can_review_seguimiento_global(usuario_objetivo):
+            actividad_filters |= Q(direccion_general=True)
+        actividades_qs = actividades_qs.filter(actividad_filters).distinct()
     else:
         actividades_qs = actividades_qs.filter(usuario__is_active=True)
 
@@ -1709,34 +1865,61 @@ def actividad_crear(request):
     datos, error = _datos_actividad_post(request)
     if error:
         return JsonResponse({"error": error}, status=400)
-    actividad = ActividadCalendario.objects.create(usuario=request.user, **datos)
+    periodicidad, repeticiones, error = _periodicidad_post(request)
+    if error:
+        return JsonResponse({"error": error}, status=400)
+    fechas = _fechas_recurrentes(datos.pop("fecha"), periodicidad, repeticiones)
+    usuario = datos.get("invitado_user") or request.user
+    actividades = [
+        ActividadCalendario.objects.create(usuario=usuario, creado_por=request.user, fecha=fecha, **datos)
+        for fecha in fechas
+    ]
+    actividad = actividades[0]
+    creadas = _notificar_reunion_calendario(actividad, actor=request.user, total_ocurrencias=len(actividades))
     log_event(
         request.user,
         "seguimiento.calendario.crear",
         "ActividadCalendario",
         actividad.pk,
-        {"fecha": actividad.fecha.isoformat()},
+        {"fecha": actividad.fecha.isoformat(), "tipo": actividad.tipo, "ocurrencias": len(actividades), "notificaciones": creadas},
+    )
+    return JsonResponse({"evento": _actividad_evento(actividad, request.user), "creadas": len(actividades)})
+
+
+@login_required
+@require_POST
+def actividad_editar(request, pk):
+    actividad = get_object_or_404(_actividad_editable_qs(request.user), pk=pk)
+    datos, error = _datos_actividad_post(request)
+    if error:
+        return JsonResponse({"error": error}, status=400)
+    for campo, valor in datos.items():
+        setattr(actividad, campo, valor)
+    if not actividad.creado_por_id:
+        actividad.creado_por = request.user
+    actividad.usuario = actividad.invitado_user or request.user
+    actividad.save(
+        update_fields=[
+            "tipo",
+            "titulo",
+            "descripcion",
+            "fecha",
+            "hora_inicio",
+            "hora_fin",
+            "direccion_general",
+            "invitado_user",
+            "creado_por",
+            "usuario",
+            "updated_at",
+        ]
     )
     return JsonResponse({"evento": _actividad_evento(actividad, request.user)})
 
 
 @login_required
 @require_POST
-def actividad_editar(request, pk):
-    actividad = get_object_or_404(ActividadCalendario, pk=pk, usuario=request.user, activo=True)
-    datos, error = _datos_actividad_post(request)
-    if error:
-        return JsonResponse({"error": error}, status=400)
-    for campo, valor in datos.items():
-        setattr(actividad, campo, valor)
-    actividad.save(update_fields=["titulo", "descripcion", "fecha", "hora_inicio", "hora_fin", "updated_at"])
-    return JsonResponse({"evento": _actividad_evento(actividad, request.user)})
-
-
-@login_required
-@require_POST
 def actividad_completar(request, pk):
-    actividad = get_object_or_404(ActividadCalendario, pk=pk, usuario=request.user, activo=True)
+    actividad = get_object_or_404(_actividad_editable_qs(request.user), pk=pk)
     if actividad.estatus == ActividadCalendario.ESTATUS_COMPLETADA:
         actividad.estatus = ActividadCalendario.ESTATUS_PENDIENTE
     else:
@@ -1748,7 +1931,7 @@ def actividad_completar(request, pk):
 @login_required
 @require_POST
 def actividad_eliminar(request, pk):
-    actividad = get_object_or_404(ActividadCalendario, pk=pk, usuario=request.user, activo=True)
+    actividad = get_object_or_404(_actividad_editable_qs(request.user), pk=pk)
     actividad.activo = False
     actividad.save(update_fields=["activo", "updated_at"])
     log_event(
