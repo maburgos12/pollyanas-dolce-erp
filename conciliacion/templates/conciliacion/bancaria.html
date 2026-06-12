@@ -740,6 +740,11 @@
           <p class="conc-note">No hay movimientos con los filtros actuales.</p>
         {% endif %}
       </div>
+      <div class="conc-actions">
+        <a class="btn btn-primary" href="{{ paquete_url }}">Paquete de auditoria</a>
+        <a class="btn btn-secondary" href="{{ paquete_url }}&export=xlsx">XLSX auditoria</a>
+        <a class="btn btn-secondary" href="{{ paquete_url }}&export=contabilidad_csv">CSV contabilidad</a>
+      </div>
       <form class="conc-period-form" method="get" action="#mesa-movimientos">
         <input type="hidden" name="periodo" value="{{ periodo_resumen.periodo_value }}">
         <label>

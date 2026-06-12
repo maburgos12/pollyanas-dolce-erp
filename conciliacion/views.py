@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 import csv
-from datetime import timedelta
+from calendar import monthrange
+from io import BytesIO
+from datetime import date, timedelta
 
 from django.contrib import messages
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db.models import Count, Q, Sum
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 from conciliacion.services.importador import (
     ImportacionBancariaError,
@@ -68,6 +73,21 @@ def movimiento_conciliacion_detalle_view(request: HttpRequest, movimiento_id: in
     )
 
 
+@require_http_methods(["GET"])
+def paquete_conciliacion_view(request: HttpRequest) -> HttpResponse:
+    if not request.user.is_authenticated:
+        return redirect("/login/?next=/conciliacion/bancaria/paquete/")
+    _assert_conciliacion_access(request)
+    year, month = _periodo_from_request(request)
+    paquete = _paquete_conciliacion(year=year, month=month)
+    export = request.GET.get("export")
+    if export == "xlsx":
+        return _export_paquete_xlsx(paquete)
+    if export == "contabilidad_csv":
+        return _export_paquete_contabilidad_csv(paquete)
+    return render(request, "conciliacion/paquete_auditoria.html", {"paquete": paquete})
+
+
 @require_http_methods(["GET", "POST"])
 def conciliacion_bancaria_view(request: HttpRequest) -> HttpResponse:
     if not request.user.is_authenticated:
@@ -118,6 +138,7 @@ def conciliacion_bancaria_view(request: HttpRequest) -> HttpResponse:
             "sat_estado_tone": sat_estado_tone,
             "sat_ultimo_log": sat_ultimo_log,
             "periodo_resumen": periodo_resumen,
+            "paquete_url": f"/conciliacion/bancaria/paquete/?periodo={periodo_resumen['periodo_value']}",
             "preview": preview,
             "preview_rows": preview.movimientos[:50] if preview else [],
             "movimiento_rows": movimientos_trabajo["rows"],
@@ -141,6 +162,10 @@ def _periodo_from_request(request: HttpRequest) -> tuple[int, int]:
         if 1 <= month <= 12:
             return year, month
     return periodo_default_conciliacion()
+
+
+def _periodo_dates(year: int, month: int) -> tuple[date, date]:
+    return date(year, month, 1), date(year, month, monthrange(year, month)[1])
 
 
 def _handle_preview(request: HttpRequest) -> PreviewImportacion | None:
@@ -265,6 +290,198 @@ def _export_documento_conciliacion_csv(documento: dict) -> HttpResponse:
     writer.writeheader()
     writer.writerow(documento["contpaq"])
     return response
+
+
+def _paquete_conciliacion(*, year: int, month: int) -> dict:
+    inicio, fin = _periodo_dates(year, month)
+    movimientos = list(
+        MovimientoBancario.objects.select_related(
+            "cuenta",
+            "cfdi_relacionado",
+            "movimiento_relacionado__cuenta",
+            "conciliado_por",
+        )
+        .filter(fecha_transaccion__date__gte=inicio, fecha_transaccion__date__lte=fin)
+        .order_by("fecha_transaccion", "cuenta__banco", "id")
+    )
+    documentos = [_documento_conciliacion(mov) for mov in movimientos]
+    cfdis = list(
+        CfdiDescargado.objects.filter(fecha_emision__date__gte=inicio, fecha_emision__date__lte=fin)
+        .order_by("fecha_emision", "uuid")
+    )
+    movimientos_qs = MovimientoBancario.objects.filter(fecha_transaccion__date__gte=inicio, fecha_transaccion__date__lte=fin)
+    cfdis_qs = CfdiDescargado.objects.filter(fecha_emision__date__gte=inicio, fecha_emision__date__lte=fin)
+    excepciones = [doc for doc in documentos if doc["evidencia_pendiente"] or not doc["movimiento"].conciliado]
+    return {
+        "periodo_value": f"{year:04d}-{month:02d}",
+        "periodo_label": inicio.strftime("%B %Y"),
+        "periodo_inicio": inicio,
+        "periodo_fin": fin,
+        "movimientos": documentos,
+        "cfdis": cfdis,
+        "excepciones": excepciones,
+        "resumen": {
+            "movimientos_total": movimientos_qs.count(),
+            "movimientos_conciliados": movimientos_qs.filter(conciliado=True).count(),
+            "movimientos_pendientes": movimientos_qs.filter(conciliado=False).count(),
+            "monto_total": movimientos_qs.aggregate(total=Sum("monto"))["total"] or 0,
+            "cfdis_total": cfdis_qs.count(),
+            "cfdis_conciliados": cfdis_qs.filter(conciliado=True).count(),
+            "cfdis_pendientes": cfdis_qs.filter(conciliado=False).count(),
+            "excepciones": len(excepciones),
+        },
+        "por_cuenta": list(
+            movimientos_qs.values("cuenta__nombre_display", "cuenta__banco")
+            .annotate(movimientos=Count("id"), monto=Sum("monto"), conciliados=Count("id", filter=Q(conciliado=True)))
+            .order_by("cuenta__banco", "cuenta__nombre_display")
+        ),
+        "por_tipo": list(
+            movimientos_qs.values("tipo_conciliacion")
+            .annotate(movimientos=Count("id"), monto=Sum("monto"))
+            .order_by("tipo_conciliacion")
+        ),
+    }
+
+
+def _export_paquete_contabilidad_csv(paquete: dict) -> HttpResponse:
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="conciliacion_{paquete["periodo_value"]}_contabilidad.csv"'
+    fieldnames = list(_paquete_movimiento_row(paquete["movimientos"][0]).keys()) if paquete["movimientos"] else ["Periodo"]
+    writer = csv.DictWriter(response, fieldnames=fieldnames)
+    writer.writeheader()
+    for documento in paquete["movimientos"]:
+        writer.writerow(_paquete_movimiento_row(documento))
+    return response
+
+
+def _export_paquete_xlsx(paquete: dict) -> HttpResponse:
+    workbook = Workbook()
+    resumen = workbook.active
+    resumen.title = "Resumen"
+    _write_key_values(
+        resumen,
+        [
+            ("Periodo", paquete["periodo_value"]),
+            ("Fecha inicial", paquete["periodo_inicio"].isoformat()),
+            ("Fecha final", paquete["periodo_fin"].isoformat()),
+            ("Movimientos", paquete["resumen"]["movimientos_total"]),
+            ("Conciliados", paquete["resumen"]["movimientos_conciliados"]),
+            ("Pendientes", paquete["resumen"]["movimientos_pendientes"]),
+            ("CFDI SAT", paquete["resumen"]["cfdis_total"]),
+            ("CFDI pendientes", paquete["resumen"]["cfdis_pendientes"]),
+            ("Excepciones / soporte pendiente", paquete["resumen"]["excepciones"]),
+        ],
+    )
+    _write_table(resumen, 13, ["Cuenta", "Banco", "Movimientos", "Conciliados", "Monto"], [
+        [
+            row["cuenta__nombre_display"],
+            row["cuenta__banco"],
+            row["movimientos"],
+            row["conciliados"],
+            row["monto"],
+        ]
+        for row in paquete["por_cuenta"]
+    ])
+
+    movimientos_sheet = workbook.create_sheet("Movimientos")
+    movimiento_rows = [_paquete_movimiento_row(documento) for documento in paquete["movimientos"]]
+    _write_dict_table(movimientos_sheet, movimiento_rows)
+
+    excepciones_sheet = workbook.create_sheet("Excepciones")
+    excepcion_rows = [_paquete_excepcion_row(documento) for documento in paquete["excepciones"]]
+    _write_dict_table(excepciones_sheet, excepcion_rows)
+
+    cfdi_sheet = workbook.create_sheet("CFDI")
+    _write_dict_table(cfdi_sheet, [_paquete_cfdi_row(cfdi) for cfdi in paquete["cfdis"]])
+
+    for sheet in workbook.worksheets:
+        _autosize_sheet(sheet)
+    output = BytesIO()
+    workbook.save(output)
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="paquete_conciliacion_{paquete["periodo_value"]}.xlsx"'
+    return response
+
+
+def _paquete_movimiento_row(documento: dict) -> dict[str, str]:
+    movimiento = documento["movimiento"]
+    return {
+        "Folio": documento["folio"],
+        "Fecha": movimiento.fecha_transaccion.strftime("%Y-%m-%d"),
+        "Banco": movimiento.cuenta.get_banco_display(),
+        "Cuenta": movimiento.cuenta.numero_cuenta or "",
+        "TipoBanco": movimiento.tipo,
+        "Importe": f"{movimiento.monto:.2f}",
+        "DescripcionBanco": movimiento.descripcion,
+        "ClaveRastreo": documento["clave_rastreo"],
+        "CuentaDestino": documento["cuenta_destino"],
+        "ReglaAutomatica": documento["regla"].mesa_label,
+        "ConciliacionAplicada": documento["tipo_conciliacion"],
+        "Estado": "Conciliado" if movimiento.conciliado else "Pendiente",
+        "MovimientoRelacionado": str(movimiento.movimiento_relacionado_id or ""),
+        "CFDI": movimiento.cfdi_relacionado.uuid if movimiento.cfdi_relacionado_id else "",
+        "PendientesEvidencia": " | ".join(documento["evidencia_pendiente"]),
+        "Nota": movimiento.nota_conciliacion,
+    }
+
+
+def _paquete_excepcion_row(documento: dict) -> dict[str, str]:
+    row = _paquete_movimiento_row(documento)
+    row["MotivoExcepcion"] = " | ".join(documento["evidencia_pendiente"]) or "Movimiento no conciliado"
+    return row
+
+
+def _paquete_cfdi_row(cfdi: CfdiDescargado) -> dict[str, str]:
+    return {
+        "UUID": cfdi.uuid,
+        "Fecha": cfdi.fecha_emision.strftime("%Y-%m-%d"),
+        "TipoCFDI": cfdi.get_tipo_cfdi_display(),
+        "TipoComprobante": cfdi.tipo_comprobante,
+        "RFCEmisor": cfdi.rfc_emisor,
+        "NombreEmisor": cfdi.nombre_emisor or "",
+        "RFCReceptor": cfdi.rfc_receptor,
+        "NombreReceptor": cfdi.nombre_receptor or "",
+        "Total": f"{cfdi.total:.2f}",
+        "Conciliado": "Si" if cfdi.conciliado else "No",
+    }
+
+
+def _write_key_values(sheet, rows: list[tuple[str, object]]) -> None:
+    sheet["A1"] = "Paquete mensual de conciliacion"
+    sheet["A1"].font = Font(bold=True, size=14)
+    for idx, (key, value) in enumerate(rows, start=3):
+        sheet.cell(row=idx, column=1, value=key).font = Font(bold=True)
+        sheet.cell(row=idx, column=2, value=value)
+
+
+def _write_table(sheet, start_row: int, headers: list[str], rows: list[list[object]]) -> None:
+    for col, header in enumerate(headers, start=1):
+        cell = sheet.cell(row=start_row, column=col, value=header)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor="E2E8F0")
+    for row_idx, row in enumerate(rows, start=start_row + 1):
+        for col_idx, value in enumerate(row, start=1):
+            sheet.cell(row=row_idx, column=col_idx, value=value)
+
+
+def _write_dict_table(sheet, rows: list[dict[str, str]]) -> None:
+    if not rows:
+        sheet["A1"] = "Sin registros"
+        return
+    headers = list(rows[0].keys())
+    _write_table(sheet, 1, headers, [[row.get(header, "") for header in headers] for row in rows])
+
+
+def _autosize_sheet(sheet) -> None:
+    for column in sheet.columns:
+        max_length = 0
+        letter = get_column_letter(column[0].column)
+        for cell in column:
+            max_length = max(max_length, len(str(cell.value or "")))
+        sheet.column_dimensions[letter].width = min(max(max_length + 2, 12), 48)
 
 
 def _extraer_clave_rastreo(descripcion: str) -> str:
