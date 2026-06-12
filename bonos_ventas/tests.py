@@ -119,6 +119,8 @@ class BonosVentasTests(TestCase):
         self.assertIn("Teclea nombre o apellido", content)
         self.assertIn("Vista previa tamaño carta", content)
         self.assertIn("Imprimir / PDF", content)
+        self.assertIn("label:'Sucursal',value:contextLabel", content)
+        self.assertNotIn("Monto calculado", content)
         self.assertIn("Permiso ${lastPermiso.folio} registrado", content)
         self.assertIn("Imprimir / guardar PDF", content)
         self.assertIn("Sincronizar repartidores", content)
@@ -154,7 +156,7 @@ class BonosVentasTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-ventas-pwa-v14", sw_content)
+        self.assertIn("pollyanas-bonos-ventas-pwa-v15", sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-ventas/dashboard/")', sw_content)
 
     def test_api_ventas_acepta_post_con_sesion_y_csrf(self):

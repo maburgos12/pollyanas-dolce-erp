@@ -344,7 +344,7 @@ function HoraExtraPrintPage({item,contextLabel}){
       h('div',{className:'print-section-title'},'Datos del colaborador'),
       h('div',{className:'print-grid'},
         h(PrintField,{label:'Empleado',value:item.empleado_nombre}),
-        h(PrintField,{label:'Area / sucursal',value:contextLabel}),
+        h(PrintField,{label:'Area',value:contextLabel}),
         h(PrintField,{label:'Puesto',value:item.puesto||'—'}),
         h(PrintField,{label:'Jefe directo',value:item.jefe_directo_nombre||'Sin asignar'})
       )
@@ -354,7 +354,6 @@ function HoraExtraPrintPage({item,contextLabel}){
       h('div',{className:'print-grid'},
         h(PrintField,{label:'Fecha',value:new Date(`${item.fecha}T12:00:00`).toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit',year:'numeric'})}),
         h(PrintField,{label:'Horas solicitadas',value:`${item.horas} h`}),
-        h(PrintField,{label:'Monto calculado',value:money(item.monto_calculado||0)}),
         h(PrintField,{label:'Estado',value:item.estado_label||estadoLabel})
       )
     ),
@@ -912,7 +911,6 @@ function HorasExtraTab({area,setArea,mes,anio,showStatus}){
               ),
               h('div',{className:'permission-meta'},`${AREA_LABELS[item.area]||item.area||'Produccion'} · ${item.folio||`HE-${item.id}`}`),
               h('div',{className:'permission-reason'},item.notas||'Sin motivo capturado'),
-              h('div',{className:'permission-meta'},`Monto calculado: ${money(item.monto_calculado||0)}`),
               h('div',{className:'permission-actions'},
                 h('button',{className:'btn btn-ghost btn-sm',onClick:()=>setPreviewHoraExtra(item)},'Vista carta'),
                 h('button',{className:'btn btn-ghost btn-sm',onClick:()=>imprimirHoraExtra(item)},'Imprimir / PDF'),
