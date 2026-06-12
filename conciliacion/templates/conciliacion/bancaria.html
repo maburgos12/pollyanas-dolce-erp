@@ -814,6 +814,7 @@
                   {% if row.movimiento.tipo_conciliacion == "traspaso_cuentas" and not row.movimiento.movimiento_relacionado_id %}<br>Sin contraparte importada ligada.{% endif %}
                   {% if row.movimiento.cfdi_relacionado_id %}<br>CFDI {{ row.movimiento.cfdi_relacionado.uuid }}{% endif %}
                   {% if row.movimiento.nota_conciliacion %}<br>{{ row.movimiento.nota_conciliacion }}{% endif %}
+                  <br><a class="conc-link" href="{% url 'conciliacion:movimiento_detalle' row.movimiento.pk %}">Ver documento</a>
                 </div>
               {% else %}
                 <span class="conc-chip is-warn">Pendiente</span>

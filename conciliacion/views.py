@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from datetime import timedelta
 
 from django.contrib import messages
@@ -8,7 +9,7 @@ from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.http import HttpRequest, HttpResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
@@ -38,6 +39,33 @@ def _assert_conciliacion_access(request: HttpRequest) -> None:
         raise PermissionDenied("Debes iniciar sesion.")
     if not is_admin_or_dg(request.user):
         raise PermissionDenied("No tienes permisos para conciliacion bancaria.")
+
+
+@require_http_methods(["GET"])
+def movimiento_conciliacion_detalle_view(request: HttpRequest, movimiento_id: int) -> HttpResponse:
+    if not request.user.is_authenticated:
+        return redirect(f"/login/?next=/conciliacion/bancaria/movimiento/{movimiento_id}/")
+    _assert_conciliacion_access(request)
+    movimiento = get_object_or_404(
+        MovimientoBancario.objects.select_related(
+            "cuenta",
+            "cfdi_relacionado",
+            "movimiento_relacionado__cuenta",
+            "conciliado_por",
+        ),
+        pk=movimiento_id,
+    )
+    documento = _documento_conciliacion(movimiento)
+    if request.GET.get("export") == "contabilidad_csv":
+        return _export_documento_conciliacion_csv(documento)
+    return render(
+        request,
+        "conciliacion/movimiento_detalle.html",
+        {
+            "documento": documento,
+            "movimiento": movimiento,
+        },
+    )
 
 
 @require_http_methods(["GET", "POST"])
@@ -173,6 +201,84 @@ def _handle_confirm(request: HttpRequest) -> None:
             f"{importacion.movimientos_duplicados} duplicados."
         ),
     )
+
+
+def _documento_conciliacion(movimiento: MovimientoBancario) -> dict:
+    regla = regla_para_movimiento(movimiento)
+    cfdi = movimiento.cfdi_relacionado
+    contraparte = movimiento.movimiento_relacionado
+    raw = movimiento.extra_raw or {}
+    raw_payload = raw.get("raw") if isinstance(raw.get("raw"), dict) else {}
+    clave_rastreo = (
+        raw.get("referencia")
+        or raw_payload.get("referencia")
+        or _extraer_clave_rastreo(movimiento.descripcion)
+        or ""
+    )
+    cuenta_destino = raw_payload.get("cuenta_bancaria") or _extraer_cuenta_beneficiario(movimiento.descripcion)
+    evidencia_pendiente = []
+    if movimiento.tipo_conciliacion == MovimientoBancario.CONCILIACION_TRASPASO and not contraparte:
+        evidencia_pendiente.append("Abono contraparte no importado o no ligado.")
+    if movimiento.tipo_conciliacion == MovimientoBancario.CONCILIACION_CFDI and not cfdi:
+        evidencia_pendiente.append("CFDI no ligado.")
+    if movimiento.tipo_conciliacion in {
+        MovimientoBancario.CONCILIACION_REVISION,
+        MovimientoBancario.CONCILIACION_SOPORTE,
+    }:
+        evidencia_pendiente.append("Requiere soporte documental externo para auditoria.")
+    return {
+        "id": movimiento.pk,
+        "folio": f"CONC-{movimiento.fecha_transaccion:%Y%m%d}-{movimiento.pk}",
+        "movimiento": movimiento,
+        "regla": regla,
+        "tipo_conciliacion": movimiento.get_tipo_conciliacion_display() or "Sin clasificar",
+        "clave_rastreo": clave_rastreo,
+        "cuenta_destino": cuenta_destino,
+        "cfdi": cfdi,
+        "contraparte": contraparte,
+        "evidencia_pendiente": evidencia_pendiente,
+        "contpaq": _contpaq_row(movimiento, clave_rastreo, cuenta_destino),
+    }
+
+
+def _contpaq_row(movimiento: MovimientoBancario, clave_rastreo: str, cuenta_destino: str) -> dict[str, str]:
+    return {
+        "Fecha": movimiento.fecha_transaccion.strftime("%Y-%m-%d"),
+        "Banco": movimiento.cuenta.get_banco_display(),
+        "Cuenta": movimiento.cuenta.numero_cuenta or "",
+        "Tipo": movimiento.tipo,
+        "Importe": f"{movimiento.monto:.2f}",
+        "Descripcion": movimiento.descripcion,
+        "ClaveRastreo": clave_rastreo,
+        "CuentaDestino": cuenta_destino,
+        "ConciliacionAplicada": movimiento.get_tipo_conciliacion_display() or "",
+        "MovimientoRelacionado": str(movimiento.movimiento_relacionado_id or ""),
+        "CFDI": movimiento.cfdi_relacionado.uuid if movimiento.cfdi_relacionado_id else "",
+        "Nota": movimiento.nota_conciliacion,
+    }
+
+
+def _export_documento_conciliacion_csv(documento: dict) -> HttpResponse:
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{documento["folio"]}_contabilidad.csv"'
+    writer = csv.DictWriter(response, fieldnames=list(documento["contpaq"].keys()))
+    writer.writeheader()
+    writer.writerow(documento["contpaq"])
+    return response
+
+
+def _extraer_clave_rastreo(descripcion: str) -> str:
+    marker = "Clave de Rastreo:"
+    if marker not in descripcion:
+        return ""
+    return descripcion.split(marker, 1)[1].split("|", 1)[0].split("Concepto", 1)[0].strip()
+
+
+def _extraer_cuenta_beneficiario(descripcion: str) -> str:
+    marker = "Cuenta Beneficiario:"
+    if marker not in descripcion:
+        return ""
+    return descripcion.split(marker, 1)[1].split(" ", 1)[0].strip()
 
 
 def _handle_conciliar_movimiento(request: HttpRequest) -> str:
