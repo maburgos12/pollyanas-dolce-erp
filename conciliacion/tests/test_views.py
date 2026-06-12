@@ -463,7 +463,8 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertContains(response, "Paquete de auditoria 2026-05")
         self.assertContains(response, "Descargar XLSX")
         self.assertContains(response, "Descargar CSV contabilidad")
-        self.assertContains(response, "Descargar CSV CONTPAQi")
+        self.assertContains(response, "CSV Contabilidad Desktop")
+        self.assertContains(response, "CONTPAQi Contabilidad Desktop y Nominas Desktop")
         self.assertContains(response, "Por cuenta bancaria")
         self.assertContains(response, "Excepciones y soporte pendiente")
 
@@ -493,12 +494,16 @@ class ConciliacionBancariaViewTests(TestCase):
             workbook.sheetnames,
             [
                 "Resumen",
-                "Movimientos",
+                "Movimientos_Banco",
+                "CFDI_Relacionados",
+                "Poliza_Sugerida",
+                "Auxiliar_Cuentas",
+                "Traspasos_Propios",
+                "Tarjetas_Credito",
+                "Lineas_Credito",
+                "Nomina",
                 "Excepciones",
-                "CFDI",
-                "CONTPAQi_Documentos",
-                "CONTPAQi_Poliza",
-                "CONTPAQi_Traspasos",
+                "Evidencia_Pendiente",
             ],
         )
         self.assertEqual(workbook["Resumen"]["A1"].value, "Paquete mensual de conciliacion")
@@ -528,9 +533,9 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertIn("Cerrado con pendientes", body)
         self.assertIn("BB2643314013215", body)
 
-    def test_get_paquete_auditoria_exports_contpaqi_csv(self):
+    def test_get_paquete_auditoria_exports_contabilidad_desktop_csv(self):
         MovimientoBancario.objects.create(
-            id_transaction="paquete-contpaqi",
+            id_transaction="paquete-contabilidad-desktop",
             cuenta=self.cuenta,
             descripcion=(
                 "SPEI Enviado: | Beneficiario: GRUPO EMPRESARIAL FONSMA | "
@@ -544,16 +549,16 @@ class ConciliacionBancariaViewTests(TestCase):
             tipo_conciliacion=MovimientoBancario.CONCILIACION_TRASPASO,
         )
 
-        response = self.client.get("/conciliacion/bancaria/paquete/?periodo=2026-05&export=contpaqi_csv")
+        response = self.client.get("/conciliacion/bancaria/paquete/?periodo=2026-05&export=contabilidad_desktop_csv")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
-        self.assertIn("conciliacion_2026-05_contpaqi_documentos.csv", response["Content-Disposition"])
+        self.assertIn("conciliacion_2026-05_contpaqi_contabilidad.csv", response["Content-Disposition"])
         body = response.content.decode("utf-8")
-        self.assertIn("Documento", body)
-        self.assertIn("TipoDocumento", body)
-        self.assertIn("BeneficiarioPagador", body)
-        self.assertIn("ExpedienteCompleto", body)
+        self.assertIn("FechaPoliza", body)
+        self.assertIn("TipoPolizaSugerida", body)
+        self.assertIn("FolioMovimientoERP", body)
+        self.assertIn("CuentaContrapartidaSugerida", body)
         self.assertIn("Cerrado con pendientes", body)
-        self.assertIn("Traspaso", body)
+        self.assertIn("Diario", body)
         self.assertIn("BB2643314013215", body)
