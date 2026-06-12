@@ -370,6 +370,16 @@ class PrecioSugeridoViewTests(TestCase):
         self.assertIn('data-source="reventa"', html)
         self.assertIn("Guardar metas", html)
 
+    def test_monitor_muestra_familias_point_activas_aunque_no_tengan_precio(self):
+        p = self._point("PMINI1", "Pastel Mini Demo", precio=0, categoria="Pastel Mini")
+        p.precio = None
+        p.save(update_fields=["precio"])
+
+        resp = self.client.get(reverse("recetas:monitor_margenes"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Pastel Mini", resp.content.decode())
+
     def test_guardar_politicas_base_desde_panel_actualiza_calculo(self):
         r = self._receta("SoloMP Panel", "MMPANEL1")
         self._point("MMPANEL1", "SoloMP Panel", precio=200)
