@@ -813,17 +813,19 @@
             </td>
             <td>
               {% if row.movimiento.conciliado %}
-                <span class="conc-chip is-ok">Conciliado</span>
+                <span class="conc-chip {{ row.documento.estado_expediente.tono }}">{{ row.documento.estado_expediente.label }}</span>
                 <div class="conc-note">
                   <strong>{{ row.movimiento.get_tipo_conciliacion_display|default:"Sin tipo" }}</strong>
+                  <br>{{ row.documento.relacion_contable.tipo }}
                   {% if row.movimiento.movimiento_relacionado_id %}<br>Contra mov. #{{ row.movimiento.movimiento_relacionado_id }}{% endif %}
                   {% if row.movimiento.tipo_conciliacion == "traspaso_cuentas" and not row.movimiento.movimiento_relacionado_id %}<br>Sin contraparte importada ligada.{% endif %}
                   {% if row.movimiento.cfdi_relacionado_id %}<br>CFDI {{ row.movimiento.cfdi_relacionado.uuid }}{% endif %}
                   {% if row.movimiento.nota_conciliacion %}<br>{{ row.movimiento.nota_conciliacion }}{% endif %}
-                  <br><a class="conc-link" href="{% url 'conciliacion:movimiento_detalle' row.movimiento.pk %}">Ver documento</a>
+                  <br><a class="conc-link" href="{% url 'conciliacion:movimiento_detalle' row.movimiento.pk %}">Abrir expediente</a>
                 </div>
               {% else %}
                 <span class="conc-chip is-warn">Pendiente</span>
+                <div class="conc-note">Sin expediente contable aplicado.</div>
               {% endif %}
             </td>
             <td>

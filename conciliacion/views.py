@@ -253,6 +253,8 @@ def _documento_conciliacion(movimiento: MovimientoBancario) -> dict:
         MovimientoBancario.CONCILIACION_SOPORTE,
     }:
         evidencia_pendiente.append("Requiere soporte documental externo para auditoria.")
+    estado_expediente = _estado_expediente(movimiento, evidencia_pendiente)
+    relacion_contable = _relacion_contable(movimiento, cfdi, contraparte, cuenta_destino)
     return {
         "id": movimiento.pk,
         "folio": f"CONC-{movimiento.fecha_transaccion:%Y%m%d}-{movimiento.pk}",
@@ -264,11 +266,116 @@ def _documento_conciliacion(movimiento: MovimientoBancario) -> dict:
         "cfdi": cfdi,
         "contraparte": contraparte,
         "evidencia_pendiente": evidencia_pendiente,
-        "contpaq": _contpaq_row(movimiento, clave_rastreo, cuenta_destino),
+        "estado_expediente": estado_expediente,
+        "relacion_contable": relacion_contable,
+        "contpaq": _contpaq_row(movimiento, clave_rastreo, cuenta_destino, estado_expediente, relacion_contable),
     }
 
 
-def _contpaq_row(movimiento: MovimientoBancario, clave_rastreo: str, cuenta_destino: str) -> dict[str, str]:
+def _estado_expediente(movimiento: MovimientoBancario, evidencia_pendiente: list[str]) -> dict[str, str | bool]:
+    if not movimiento.conciliado:
+        return {
+            "label": "Pendiente de conciliar",
+            "tono": "is-warn",
+            "detalle": "Aun no hay conciliacion aplicada.",
+            "completo": False,
+        }
+    if evidencia_pendiente:
+        return {
+            "label": "Cerrado con pendientes",
+            "tono": "is-warn",
+            "detalle": "Tiene clasificacion aplicada, pero falta evidencia o relacion para auditoria.",
+            "completo": False,
+        }
+    return {
+        "label": "Conciliado con expediente",
+        "tono": "is-ok",
+        "detalle": "La ficha muestra la relacion contable usada para cerrar el movimiento.",
+        "completo": True,
+    }
+
+
+def _relacion_contable(
+    movimiento: MovimientoBancario,
+    cfdi: CfdiDescargado | None,
+    contraparte: MovimientoBancario | None,
+    cuenta_destino: str,
+) -> dict[str, str]:
+    if movimiento.tipo_conciliacion == MovimientoBancario.CONCILIACION_CFDI:
+        return {
+            "tipo": "Banco contra CFDI",
+            "documento": cfdi.uuid if cfdi else "CFDI pendiente de ligar",
+            "criterio": "Documento bancario ligado al XML fiscal que soporta ingreso, egreso o pago.",
+        }
+    if movimiento.tipo_conciliacion == MovimientoBancario.CONCILIACION_INGRESO_FACTURADO:
+        return {
+            "tipo": "Banco contra factura de ingresos",
+            "documento": "CFDI de ingreso por sucursal/canal",
+            "criterio": "Ingreso bancario declarado con factura de ingresos emitida por la sucursal o canal de venta.",
+        }
+    if movimiento.tipo_conciliacion == MovimientoBancario.CONCILIACION_TRASPASO:
+        destino = cuenta_destino or (contraparte.cuenta.numero_cuenta if contraparte else "")
+        return {
+            "tipo": "Traspaso entre cuentas propias",
+            "documento": f"Contraparte bancaria #{contraparte.pk}" if contraparte else "Contraparte no importada",
+            "criterio": f"Salida y entrada entre bancos propios; no se trata como gasto. Cuenta destino: {destino or 'pendiente'}.",
+        }
+    if movimiento.tipo_conciliacion == MovimientoBancario.CONCILIACION_LINEA_CREDITO:
+        return {
+            "tipo": "Linea de credito",
+            "documento": "Contrato / tabla de amortizacion / referencia bancaria",
+            "criterio": "Disposicion o pago de financiamiento; se revisa contra pasivo, no contra gasto operativo.",
+        }
+    if movimiento.tipo_conciliacion == MovimientoBancario.CONCILIACION_TARJETA_CREDITO:
+        return {
+            "tipo": "Tarjeta de credito",
+            "documento": "Estado de cuenta / pago de tarjeta / CFDI soporte",
+            "criterio": "Movimiento de tarjeta corporativa que requiere relacion con cargos, pago o CFDI soporte.",
+        }
+    if movimiento.tipo_conciliacion == MovimientoBancario.CONCILIACION_COMISION:
+        return {
+            "tipo": "Comision bancaria",
+            "documento": "Estado de cuenta / CFDI del banco cuando aplique",
+            "criterio": "Cargo bancario por comision, terminal o IVA asociado.",
+        }
+    if movimiento.tipo_conciliacion == MovimientoBancario.CONCILIACION_FISCAL:
+        return {
+            "tipo": "Movimiento fiscal",
+            "documento": "Declaracion / acuse / linea de captura",
+            "criterio": "Pago, devolucion o ajuste fiscal revisado contra soporte SAT.",
+        }
+    if movimiento.tipo_conciliacion == MovimientoBancario.CONCILIACION_NOMINA:
+        return {
+            "tipo": "Nomina",
+            "documento": "CFDI nomina / dispersion / periodo",
+            "criterio": "Salida bancaria conciliada contra nomina timbrada o dispersion autorizada.",
+        }
+    if movimiento.tipo_conciliacion == MovimientoBancario.CONCILIACION_SOPORTE:
+        return {
+            "tipo": "Soporte sin CFDI",
+            "documento": "Soporte externo pendiente",
+            "criterio": "Clasificacion temporal; requiere documento externo para sostener auditoria.",
+        }
+    if movimiento.tipo_conciliacion == MovimientoBancario.CONCILIACION_REVISION:
+        return {
+            "tipo": "Revision operativa",
+            "documento": "Revision administrativa pendiente",
+            "criterio": "No debe cerrarse como conciliacion final sin documento o explicacion completa.",
+        }
+    return {
+        "tipo": "Sin clasificar",
+        "documento": "Pendiente",
+        "criterio": "Seleccionar que representa el movimiento antes de cerrarlo.",
+    }
+
+
+def _contpaq_row(
+    movimiento: MovimientoBancario,
+    clave_rastreo: str,
+    cuenta_destino: str,
+    estado_expediente: dict[str, str | bool],
+    relacion_contable: dict[str, str],
+) -> dict[str, str]:
     return {
         "Fecha": movimiento.fecha_transaccion.strftime("%Y-%m-%d"),
         "Banco": movimiento.cuenta.get_banco_display(),
@@ -279,6 +386,10 @@ def _contpaq_row(movimiento: MovimientoBancario, clave_rastreo: str, cuenta_dest
         "ClaveRastreo": clave_rastreo,
         "CuentaDestino": cuenta_destino,
         "ConciliacionAplicada": movimiento.get_tipo_conciliacion_display() or "",
+        "EstadoExpediente": str(estado_expediente["label"]),
+        "ExpedienteCompleto": "Si" if estado_expediente["completo"] else "No",
+        "RelacionContable": relacion_contable["tipo"],
+        "DocumentoRelacionado": relacion_contable["documento"],
         "MovimientoRelacionado": str(movimiento.movimiento_relacionado_id or ""),
         "CFDI": movimiento.cfdi_relacionado.uuid if movimiento.cfdi_relacionado_id else "",
         "Nota": movimiento.nota_conciliacion,
@@ -449,7 +560,10 @@ def _paquete_movimiento_row(documento: dict) -> dict[str, str]:
         "CuentaDestino": documento["cuenta_destino"],
         "ReglaAutomatica": documento["regla"].mesa_label,
         "ConciliacionAplicada": documento["tipo_conciliacion"],
-        "Estado": "Conciliado" if movimiento.conciliado else "Pendiente",
+        "EstadoExpediente": documento["estado_expediente"]["label"],
+        "ExpedienteCompleto": "Si" if documento["estado_expediente"]["completo"] else "No",
+        "RelacionContable": documento["relacion_contable"]["tipo"],
+        "DocumentoRelacionado": documento["relacion_contable"]["documento"],
         "MovimientoRelacionado": str(movimiento.movimiento_relacionado_id or ""),
         "CFDI": movimiento.cfdi_relacionado.uuid if movimiento.cfdi_relacionado_id else "",
         "PendientesEvidencia": " | ".join(documento["evidencia_pendiente"]),
@@ -495,7 +609,9 @@ def _contpaqi_documento_row(documento: dict) -> dict[str, str]:
         "UUIDRelacionado": cfdi.uuid if cfdi else "",
         "RFCRelacionado": _rfc_relacionado(cfdi) if cfdi else "",
         "ConciliacionAplicada": documento["tipo_conciliacion"],
-        "EstatusConciliacion": "Conciliado" if movimiento.conciliado else "Pendiente",
+        "EstatusConciliacion": documento["estado_expediente"]["label"],
+        "ExpedienteCompleto": "Si" if documento["estado_expediente"]["completo"] else "No",
+        "RelacionContable": documento["relacion_contable"]["tipo"],
         "PendienteEvidencia": " | ".join(documento["evidencia_pendiente"]),
         "Concepto": movimiento.descripcion,
     }
@@ -514,6 +630,7 @@ def _contpaqi_poliza_row(documento: dict) -> dict[str, str]:
         "CuentaContrapartidaSugerida": _cuenta_contrapartida_sugerida(movimiento),
         "UUIDRelacionado": movimiento.cfdi_relacionado.uuid if movimiento.cfdi_relacionado_id else "",
         "Referencia": documento["clave_rastreo"],
+        "EstadoExpediente": documento["estado_expediente"]["label"],
         "Nota": movimiento.nota_conciliacion,
     }
 
@@ -753,7 +870,12 @@ def _es_contraparte_valida(movimiento: MovimientoBancario, contraparte: Movimien
 
 
 def _movimientos_trabajo_context(request: HttpRequest, periodo_resumen: dict) -> dict:
-    qs = MovimientoBancario.objects.select_related("cuenta").filter(
+    qs = MovimientoBancario.objects.select_related(
+        "cuenta",
+        "cfdi_relacionado",
+        "movimiento_relacionado__cuenta",
+        "conciliado_por",
+    ).filter(
         fecha_transaccion__date__gte=periodo_resumen["periodo_inicio"],
         fecha_transaccion__date__lte=periodo_resumen["periodo_fin"],
     )
@@ -802,6 +924,7 @@ def _movimiento_rows(movimientos, candidatos: dict[int, list]) -> list[dict]:
                 "candidatos": candidatos.get(movimiento.pk, []),
                 "contrapartes": contrapartes.get(movimiento.pk, []),
                 "regla": regla_para_movimiento(movimiento),
+                "documento": _documento_conciliacion(movimiento),
             }
         )
     return rows
