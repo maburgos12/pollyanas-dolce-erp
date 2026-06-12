@@ -154,7 +154,7 @@ class BonosVentasTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-ventas-pwa-v13", sw_content)
+        self.assertIn("pollyanas-bonos-ventas-pwa-v14", sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-ventas/dashboard/")', sw_content)
 
     def test_api_ventas_acepta_post_con_sesion_y_csrf(self):
@@ -546,6 +546,44 @@ class BonosVentasTests(TestCase):
         self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_PENDIENTE)
         self.assertEqual(hora_extra.jefe_directo, user)
         self.assertTrue(creado.json()["puede_autorizar"])
+        self.assertTrue(creado.json()["puede_editar"])
+        self.assertTrue(creado.json()["puede_eliminar"])
+
+        corregido = self.client.post(
+            f"/api/bonos-ventas/horas-extra/{hora_extra.id}/editar/",
+            json.dumps(
+                {
+                    "fecha": "2026-05-21",
+                    "horas": "2.00",
+                    "notas": "Cierre corregido",
+                    "motivo_cambio": "Faltaba media hora",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(corregido.status_code, 200)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.fecha.isoformat(), "2026-05-21")
+        self.assertEqual(hora_extra.horas, Decimal("2.00"))
+        self.assertIn("Faltaba media hora", hora_extra.notas)
+
+        hora_cancelada = HoraExtra.objects.create(
+            empleado=empleado,
+            fecha="2026-05-22",
+            horas=Decimal("1.00"),
+            jefe_directo=user,
+            notas="Duplicada",
+        )
+        eliminado = self.client.post(
+            f"/api/bonos-ventas/horas-extra/{hora_cancelada.id}/eliminar/",
+            json.dumps({"motivo_cambio": "Solicitud duplicada"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(eliminado.status_code, 200)
+        hora_cancelada.refresh_from_db()
+        self.assertEqual(hora_cancelada.estado, HoraExtra.ESTADO_CANCELADO)
 
         autorizado = self.client.post(f"/api/bonos-ventas/horas-extra/{hora_extra.id}/autorizar/")
 
@@ -553,4 +591,4 @@ class BonosVentasTests(TestCase):
         hora_extra.refresh_from_db()
         self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_AUTORIZADO)
         self.assertEqual(hora_extra.autorizado_por, user)
-        self.assertEqual(hora_extra.monto_calculado, Decimal("150.00"))
+        self.assertEqual(hora_extra.monto_calculado, Decimal("200.00"))

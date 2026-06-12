@@ -338,7 +338,7 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-produccion-pwa-v14", sw_content)
+        self.assertIn("pollyanas-bonos-produccion-pwa-v15", sw_content)
         self.assertIn('cache: "no-store"', sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-produccion/dashboard/")', sw_content)
 
@@ -726,6 +726,9 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_PENDIENTE)
         self.assertEqual(hora_extra.jefe_directo, user)
         self.assertTrue(creado.json()["puede_autorizar"])
+        self.assertTrue(creado.json()["puede_editar"])
+        self.assertTrue(creado.json()["puede_eliminar"])
+        self.assertIn("folio", creado.json())
 
         duplicado = self.client.post(
             "/api/bonos-produccion/horas-extra/",
@@ -745,18 +748,77 @@ class BonosProduccionTests(TestCase):
 
         self.assertEqual(duplicado.status_code, 400)
 
+        sin_motivo = self.client.post(
+            f"/api/bonos-produccion/horas-extra/{hora_extra.id}/editar/",
+            json.dumps({"fecha": "2026-05-22", "horas": "3.00", "notas": "Cierre corregido"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(sin_motivo.status_code, 400)
+
+        corregida = self.client.post(
+            f"/api/bonos-produccion/horas-extra/{hora_extra.id}/editar/",
+            json.dumps(
+                {
+                    "fecha": "2026-05-22",
+                    "horas": "3.00",
+                    "notas": "Cierre corregido",
+                    "motivo_cambio": "Se capturo fecha incorrecta",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(corregida.status_code, 200)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.fecha.isoformat(), "2026-05-22")
+        self.assertEqual(hora_extra.horas, Decimal("3.00"))
+        self.assertIn("Se capturo fecha incorrecta", hora_extra.notas)
+
+        hora_cancelada = HoraExtra.objects.create(
+            empleado=empleado,
+            fecha="2026-05-23",
+            horas=Decimal("1.00"),
+            jefe_directo=user,
+            notas="Solicitud duplicada",
+        )
+        eliminado = self.client.post(
+            f"/api/bonos-produccion/horas-extra/{hora_cancelada.id}/eliminar/",
+            json.dumps({"motivo_cambio": "Solicitud duplicada"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(eliminado.status_code, 200)
+        hora_cancelada.refresh_from_db()
+        self.assertEqual(hora_cancelada.estado, HoraExtra.ESTADO_CANCELADO)
+        self.assertIn("Solicitud duplicada", hora_cancelada.notas)
+
         autorizado = self.client.post(f"/api/bonos-produccion/horas-extra/{hora_extra.id}/autorizar/")
 
         self.assertEqual(autorizado.status_code, 200)
         hora_extra.refresh_from_db()
         self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_AUTORIZADO)
         self.assertEqual(hora_extra.autorizado_por, user)
-        self.assertEqual(hora_extra.monto_calculado, Decimal("250.00"))
+        self.assertEqual(hora_extra.monto_calculado, Decimal("300.00"))
 
         rechazar_autorizada = self.client.post(f"/api/bonos-produccion/horas-extra/{hora_extra.id}/rechazar/")
         self.assertEqual(rechazar_autorizada.status_code, 400)
         hora_extra.refresh_from_db()
         self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_AUTORIZADO)
+
+        editar_autorizada = self.client.post(
+            f"/api/bonos-produccion/horas-extra/{hora_extra.id}/editar/",
+            json.dumps(
+                {
+                    "fecha": "2026-05-22",
+                    "horas": "2.00",
+                    "notas": "No debe editar",
+                    "motivo_cambio": "Prueba",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(editar_autorizada.status_code, 400)
 
     def test_jefe_directo_corrige_y_elimina_permiso_aprobado_con_auditoria(self):
         user = get_user_model().objects.create_user(username="jefe-produccion-audit")

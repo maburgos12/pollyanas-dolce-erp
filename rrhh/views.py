@@ -2575,6 +2575,7 @@ def horas_extra_list(request):
         ("autorizado", "Autorizado", horas_extra.filter(estado=HoraExtra.ESTADO_AUTORIZADO)),
         ("rechazado", "Rechazado", horas_extra.filter(estado=HoraExtra.ESTADO_RECHAZADO)),
         ("pagado", "Pagado", horas_extra.filter(estado=HoraExtra.ESTADO_PAGADO)),
+        ("cancelado", "Cancelado", horas_extra.filter(estado=HoraExtra.ESTADO_CANCELADO)),
     ]
     return render(
         request,

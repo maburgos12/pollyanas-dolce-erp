@@ -390,6 +390,58 @@ function PermisoPrintModal({permiso,onClose,contextLabel}){
     )
   ), document.body);
 }
+function HoraExtraPrintPage({item,contextLabel}){
+  const estadoLabel={pendiente:'Pendiente',autorizado:'Autorizada',rechazado:'Rechazada',pagado:'Pagada',cancelado:'Eliminada'}[item.estado]||item.estado;
+  return h('section',{className:'print-page'},
+    h('div',{className:'print-head'},
+      h('div',null,h('div',{className:'print-brand'},"Pollyana's Dolce"),h('div',{className:'print-foot'},'Capital Humano · Control de horas extra')),
+      h('div',null,h('div',{className:'print-doc-title'},'Solicitud de horas extra'),h('div',{className:'print-folio'},item.folio||`HE-${item.id}`))
+    ),
+    h('div',{className:'print-section'},
+      h('div',{className:'print-section-title'},'Datos del colaborador'),
+      h('div',{className:'print-grid'},
+        h(PrintField,{label:'Empleado',value:item.empleado_nombre}),
+        h(PrintField,{label:'Area / sucursal',value:contextLabel}),
+        h(PrintField,{label:'Puesto',value:item.puesto||'—'}),
+        h(PrintField,{label:'Jefe directo',value:item.jefe_directo_nombre||'Sin asignar'})
+      )
+    ),
+    h('div',{className:'print-section'},
+      h('div',{className:'print-section-title'},'Detalle de horas extra'),
+      h('div',{className:'print-grid'},
+        h(PrintField,{label:'Fecha',value:new Date(`${item.fecha}T12:00:00`).toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit',year:'numeric'})}),
+        h(PrintField,{label:'Horas solicitadas',value:`${item.horas} h`}),
+        h(PrintField,{label:'Monto calculado',value:money(item.monto_calculado||0)}),
+        h(PrintField,{label:'Estado',value:item.estado_label||estadoLabel})
+      )
+    ),
+    h('div',{className:'print-section'},
+      h('div',{className:'print-section-title'},'Motivo'),
+      h('div',{className:'print-reason'},item.notas||'—')
+    ),
+    h('div',{className:'signature-grid'},
+      h('div',{className:'signature-line'},`Firma empleado · ${item.empleado_nombre||''}`),
+      h('div',{className:'signature-line'},'Firma jefe directo')
+    ),
+    h('div',{className:'print-foot'},'Documento generado desde Bonos. Capital Humano conserva el registro en RRHH.')
+  );
+}
+function HoraExtraPrintModal({item,onClose,contextLabel}){
+  if(!item)return null;
+  const printNow=()=>setTimeout(()=>window.print(),50);
+  return ReactDOM.createPortal(h('div',{className:'print-modal'},
+    h('div',{className:'print-dialog'},
+      h('div',{className:'print-dialog-hdr'},
+        h('div',{className:'print-dialog-title'},'Vista previa tamaño carta'),
+        h('div',{className:'print-actions'},
+          h('button',{className:'btn btn-ghost btn-sm',onClick:onClose},'Cerrar'),
+          h('button',{className:'btn btn-wine btn-sm',onClick:printNow},'Imprimir / PDF')
+        )
+      ),
+      h('div',{className:'print-preview'},h(HoraExtraPrintPage,{item,contextLabel}))
+    )
+  ), document.body);
+}
 
 function ReportModal({title,onClose,children}){
   const printNow=()=>setTimeout(()=>window.print(),50);
@@ -1003,6 +1055,9 @@ function HorasExtraTab({sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatus}){
   const [horas,setHoras]=React.useState('1.00');
   const [notas,setNotas]=React.useState('');
   const [loading,setLoading]=React.useState(false);
+  const [previewHoraExtra,setPreviewHoraExtra]=React.useState(null);
+  const [lastHoraExtra,setLastHoraExtra]=React.useState(null);
+  const [editHoraExtra,setEditHoraExtra]=React.useState(null);
   const equipo=empleados;
   React.useEffect(()=>{cargarHorasExtra();},[mes,anio,filtroSuc]);
   React.useEffect(()=>{if(!selected&&equipo.length)setSelected(equipo[0]);else if(selected&&!equipo.some(e=>e.id===selected.id))setSelected(equipo[0]||null);},[equipo.map(e=>e.id).join(','),selected?.id]);
@@ -1018,11 +1073,12 @@ function HorasExtraTab({sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatus}){
     if(item.estado==='autorizado')return'Autorizada';
     if(item.estado==='rechazado')return'Rechazada';
     if(item.estado==='pagado')return'Pagada';
+    if(item.estado==='cancelado')return'Eliminada';
     return'Pendiente';
   }
   function badgeClass(item){
     if(item.estado==='autorizado'||item.estado==='pagado')return'ok';
-    if(item.estado==='rechazado')return'bad';
+    if(item.estado==='rechazado'||item.estado==='cancelado')return'bad';
     return'pending';
   }
   function fmtFecha(value){
@@ -1040,12 +1096,46 @@ function HorasExtraTab({sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatus}){
       fecha,
       horas,
       notas,
-    })}).then(()=>{showStatus('Hora extra enviada a RRHH','ok');setNotas('');setHoras('1.00');cargarHorasExtra();}).catch(err=>showStatus(err.message,'err'));
+    })}).then(item=>{showStatus('Hora extra enviada a RRHH','ok');setNotas('');setHoras('1.00');setLastHoraExtra(item);setPreviewHoraExtra(item);cargarHorasExtra();}).catch(err=>showStatus(err.message,'err'));
+  }
+  function imprimirHoraExtra(item){
+    setPreviewHoraExtra(item);
+    setTimeout(()=>window.print(),160);
   }
   function accion(item,kind){
     api(`/api/bonos-ventas/horas-extra/${item.id}/${kind}/`,{method:'POST',body:'{}'})
       .then(()=>{showStatus(kind==='autorizar'?'Hora extra autorizada':'Hora extra rechazada','ok');cargarHorasExtra();})
       .catch(err=>showStatus(err.message,'err'));
+  }
+  function abrirEdicion(item){
+    setEditHoraExtra({id:item.id,fecha:item.fecha,horas:item.horas,notas:item.notas||'',motivoCambio:'',error:''});
+  }
+  function setEditError(msg){
+    setEditHoraExtra(prev=>prev?({...prev,error:msg}):prev);
+    showStatus(msg,'err');
+  }
+  function guardarEdicion(){
+    if(!editHoraExtra)return;
+    if(!Number(editHoraExtra.horas)||Number(editHoraExtra.horas)<=0){setEditError('Captura horas extra mayores a cero.');return;}
+    if(!editHoraExtra.notas.trim()){setEditError('Captura el motivo de la hora extra.');return;}
+    if(!editHoraExtra.motivoCambio.trim()){setEditError('Escribe el motivo de correccion para poder guardar.');return;}
+    api(`/api/bonos-ventas/horas-extra/${editHoraExtra.id}/editar/`,{method:'POST',body:JSON.stringify({
+      fecha:editHoraExtra.fecha,
+      horas:editHoraExtra.horas,
+      notas:editHoraExtra.notas,
+      motivo_cambio:editHoraExtra.motivoCambio,
+    })}).then(()=>{showStatus('Hora extra actualizada','ok');setEditHoraExtra(null);cargarHorasExtra();}).catch(err=>setEditError(err.message));
+  }
+  function eliminarHoraExtra(item){
+    const motivo=window.prompt(`Motivo para eliminar la hora extra ${item.folio||item.id}`);
+    if(motivo===null)return;
+    if(!motivo.trim()){showStatus('Explica por que se elimina la hora extra.','err');return;}
+    api(`/api/bonos-ventas/horas-extra/${item.id}/eliminar/`,{method:'POST',body:JSON.stringify({motivo_cambio:motivo})})
+      .then(()=>{showStatus('Hora extra eliminada','ok');cargarHorasExtra();})
+      .catch(err=>showStatus(err.message,'err'));
+  }
+  function contextoHoraExtra(item){
+    return item.sucursal_nombre||'Ventas';
   }
   const pendientes=horasExtra.filter(hx=>hx.estado==='pendiente').length;
   const autorizadas=horasExtra.filter(hx=>hx.estado==='autorizado'||hx.estado==='pagado').length;
@@ -1068,6 +1158,14 @@ function HorasExtraTab({sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatus}){
         h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},'Nueva hora extra')),
         h('div',{className:'card-body'},
           h('div',{className:'preview-note'},'La solicitud queda registrada en Capital Humano y visible en RRHH · Horas extra.'),
+          lastHoraExtra&&h('div',{className:'print-success'},
+            h('div',{className:'print-success-title'},`Hora extra ${lastHoraExtra.folio||lastHoraExtra.id} registrada`),
+            h('div',{className:'print-success-text'},'Ya puedes imprimirla o guardarla como PDF en hoja tamaño carta.'),
+            h('div',{className:'print-success-actions'},
+              h('button',{className:'btn btn-ghost btn-sm',type:'button',onClick:()=>setPreviewHoraExtra(lastHoraExtra)},'Vista carta'),
+              h('button',{className:'btn btn-wine btn-sm',type:'button',onClick:()=>imprimirHoraExtra(lastHoraExtra)},'Imprimir / guardar PDF')
+            )
+          ),
           h('div',{style:{height:12}}),
           h(EmployeeSearchList,{items:equipo,selected,onSelect:setSelected,placeholder:'Buscar empleada del equipo...',metaText:e=>e.sucursal_nombre||'Ventas'}),
           h('div',{className:'div'}),
@@ -1089,18 +1187,35 @@ function HorasExtraTab({sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatus}){
             horasExtra.map(item=>h('div',{key:item.id,className:'permission-item'},
               h('div',{className:'permission-top'},
                 h('div',null,h('div',{className:'permission-title'},item.empleado_nombre),h('div',{className:'permission-meta'},`${fmtFecha(item.fecha)} · ${item.horas} h · Jefe: ${item.jefe_directo_nombre||'Sin asignar'}`)),
-                h('span',{className:`badge ${badgeClass(item)}`},estadoLabel(item))
+                h('span',{className:`badge ${badgeClass(item)}`},item.estado_label||estadoLabel(item))
               ),
+              h('div',{className:'permission-meta'},`${item.sucursal_nombre||'Ventas'} · ${item.folio||`HE-${item.id}`}`),
               h('div',{className:'permission-reason'},item.notas||'Sin motivo capturado'),
               h('div',{className:'permission-meta'},`Monto calculado: ${money(item.monto_calculado||0)}`),
-              item.puede_autorizar&&h('div',{className:'permission-actions'},
-                h('button',{className:'btn btn-ghost btn-sm',onClick:()=>accion(item,'rechazar')},'Rechazar'),
-                h('button',{className:'btn btn-wine btn-sm',onClick:()=>accion(item,'autorizar')},'Autorizar')
+              h('div',{className:'permission-actions'},
+                h('button',{className:'btn btn-ghost btn-sm',onClick:()=>setPreviewHoraExtra(item)},'Vista carta'),
+                h('button',{className:'btn btn-ghost btn-sm',onClick:()=>imprimirHoraExtra(item)},'Imprimir / PDF'),
+                item.puede_editar&&h('button',{className:'btn btn-ghost btn-sm',onClick:()=>editHoraExtra&&editHoraExtra.id===item.id?setEditHoraExtra(null):abrirEdicion(item)},editHoraExtra&&editHoraExtra.id===item.id?'Cancelar':'Editar'),
+                item.puede_eliminar&&h('button',{className:'btn btn-ghost btn-sm',onClick:()=>eliminarHoraExtra(item)},'Eliminar'),
+                item.puede_autorizar&&h('button',{className:'btn btn-ghost btn-sm',onClick:()=>accion(item,'rechazar')},'Rechazar'),
+                item.puede_autorizar&&h('button',{className:'btn btn-wine btn-sm',onClick:()=>accion(item,'autorizar')},'Autorizar')
+              ),
+              editHoraExtra&&editHoraExtra.id===item.id&&h('div',{className:'form-grid',style:{marginTop:10,padding:12,background:'var(--rosa)',borderRadius:8}},
+                h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+                  h('div',{className:'field'},h('label',null,'Fecha'),h('input',{className:'form-control',type:'date',value:editHoraExtra.fecha,onChange:e=>setEditHoraExtra(prev=>({...prev,fecha:e.target.value,error:''}))})),
+                  h('div',{className:'field'},h('label',null,'Horas'),h('input',{className:'form-control',type:'number',min:'0.25',step:'0.25',value:editHoraExtra.horas,onChange:e=>setEditHoraExtra(prev=>({...prev,horas:e.target.value,error:''}))}))
+                ),
+                h('div',{className:'field'},h('label',null,'Motivo'),h('textarea',{className:'form-control',rows:2,value:editHoraExtra.notas,onChange:e=>setEditHoraExtra(prev=>({...prev,notas:e.target.value,error:''}))})),
+                h('div',{className:'field'},h('label',null,'Motivo de correccion'),h('textarea',{className:'form-control',rows:2,value:editHoraExtra.motivoCambio,placeholder:'Ej. Se capturo mal la fecha / horas / solicitud duplicada',onChange:e=>setEditHoraExtra(prev=>({...prev,motivoCambio:e.target.value,error:''}))})),
+                editHoraExtra.error&&h('div',{className:'permission-edit-error'},editHoraExtra.error),
+                h('button',{className:'btn btn-wine btn-sm',onClick:guardarEdicion},'Guardar cambios')
               )
             ))
           ):h('div',{className:'empty'},'Sin horas extra registradas para este equipo.')
         )
       )
+      ,
+      previewHoraExtra&&h(HoraExtraPrintModal,{item:previewHoraExtra,onClose:()=>setPreviewHoraExtra(null),contextLabel:contextoHoraExtra(previewHoraExtra)})
     )
   );
 }
