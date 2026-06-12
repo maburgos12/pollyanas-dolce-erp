@@ -6176,7 +6176,7 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
     familias_produccion = sorted({
         (categoria or "").strip()
         for categoria in PointProduct.objects.filter(
-            active=True, precio_activo=True, precio__isnull=False
+            active=True, precio_activo=True
         ).values_list("category", flat=True)
         if (categoria or "").strip()
     })
