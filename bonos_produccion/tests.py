@@ -1041,6 +1041,12 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(hora_extra.status_code, 201)
         self.assertEqual(HoraExtra.objects.get(pk=hora_extra.json()["id"]).empleado, roxana)
 
+        listado_horas = self.client.get("/api/bonos-produccion/horas-extra/?mes=5&anio=2026&area=PRODUCCION")
+
+        self.assertEqual(listado_horas.status_code, 200)
+        roxana_horas_payload = next(row for row in listado_horas.json()["empleados"] if row["id"] == roxana.id)
+        self.assertEqual(roxana_horas_payload["area"], AREA_PRODUCCION)
+
     def test_permisos_produccion_superusuario_ve_area_sin_bono_periodo(self):
         user = get_user_model().objects.create_superuser(username="test.dg.permisos", password="x")
         self.client.force_login(user)

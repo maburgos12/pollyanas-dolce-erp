@@ -416,5 +416,10 @@ class HorasExtraProduccionEquipoViewSet(BaseHorasExtraEquipoViewSet, PermisosPro
     def empleados_queryset(self):
         return PermisosProduccionEquipoViewSet.empleados_queryset(self)
 
+    def empleado_payload(self, empleado):
+        payload = _empleado_payload(empleado)
+        payload["area"] = self._area_payload_empleado(empleado)
+        return payload
+
     def can_gestionar_empleado(self, empleado):
         return can_manage_submodule(self.request.user, "produccion", "bonos") or super().can_gestionar_empleado(empleado)
