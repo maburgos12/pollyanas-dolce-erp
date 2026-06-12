@@ -338,7 +338,7 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-produccion-pwa-v15", sw_content)
+        self.assertIn("pollyanas-bonos-produccion-pwa-v16", sw_content)
         self.assertIn('cache: "no-store"', sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-produccion/dashboard/")', sw_content)
 
@@ -856,7 +856,7 @@ class BonosProduccionTests(TestCase):
         self.assertFalse(permiso_payload["puede_preautorizar"])
 
         sin_motivo = self.client.post(
-            f"/api/bonos-produccion/permisos/{permiso.id}/editar/",
+            f"/api/bonos-produccion/permisos/{permiso.id}/editar/?mes=5&anio=2026&area=TODAS",
             json.dumps(
                 {
                     "tipo": PermisoSalida.TIPO_PERMISO_HORA,
@@ -873,7 +873,7 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(PermisoSalidaCambio.objects.count(), 0)
 
         corregido = self.client.post(
-            f"/api/bonos-produccion/permisos/{permiso.id}/editar/",
+            f"/api/bonos-produccion/permisos/{permiso.id}/editar/?mes=5&anio=2026&area=TODAS",
             json.dumps(
                 {
                     "tipo": PermisoSalida.TIPO_PERMISO_HORA,
@@ -897,7 +897,7 @@ class BonosProduccionTests(TestCase):
         self.assertIn("goce_sueldo", cambio.cambios)
 
         eliminado = self.client.post(
-            f"/api/bonos-produccion/permisos/{permiso.id}/eliminar/",
+            f"/api/bonos-produccion/permisos/{permiso.id}/eliminar/?mes=5&anio=2026&area=TODAS",
             json.dumps({"motivo_cambio": "Permiso duplicado"}),
             content_type="application/json",
         )
