@@ -105,6 +105,16 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
     def _empleados(self):
         return self.empleados_queryset().filter(activo=True).order_by("nombre")
 
+    def empleado_payload(self, empleado: Empleado) -> dict:
+        return {
+            "id": empleado.id,
+            "codigo": empleado.codigo,
+            "empleado_nombre": empleado.nombre,
+            "area": empleado.area,
+            "puesto": empleado.puesto,
+            "sucursal_nombre": empleado.sucursal,
+        }
+
     def _horas_extra(self):
         empleado_ids = self._empleados().values_list("id", flat=True)
         qs = (
@@ -128,17 +138,7 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
         horas_extra = list(self._horas_extra())
         return Response(
             {
-                "empleados": [
-                    {
-                        "id": empleado.id,
-                        "codigo": empleado.codigo,
-                        "empleado_nombre": empleado.nombre,
-                        "area": empleado.area,
-                        "puesto": empleado.puesto,
-                        "sucursal_nombre": empleado.sucursal,
-                    }
-                    for empleado in empleados
-                ],
+                "empleados": [self.empleado_payload(empleado) for empleado in empleados],
                 "horas_extra": [
                     _hora_extra_payload(
                         hora_extra,
