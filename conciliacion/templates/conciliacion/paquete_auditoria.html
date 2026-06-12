@@ -30,13 +30,13 @@
   <div class="audit-head">
     <div>
       <h1>Paquete de auditoria {{ paquete.periodo_value }}</h1>
-      <p class="audit-note">Resumen mensual para revisar cierre bancario, evidencia, excepciones y archivo de trabajo contable.</p>
+      <p class="audit-note">Resumen mensual para revisar cierre bancario, evidencia, excepciones y paquete de trabajo para CONTPAQi Contabilidad Desktop y Nominas Desktop.</p>
     </div>
     <div class="audit-actions">
       <a class="audit-btn" href="{% url 'conciliacion:bancaria' %}?periodo={{ paquete.periodo_value }}#mesa-movimientos">Volver a mesa</a>
       <a class="audit-btn" href="?periodo={{ paquete.periodo_value }}&export=xlsx">Descargar XLSX</a>
       <a class="audit-btn" href="?periodo={{ paquete.periodo_value }}&export=contabilidad_csv">Descargar CSV contabilidad</a>
-      <a class="audit-btn" href="?periodo={{ paquete.periodo_value }}&export=contpaqi_csv">Descargar CSV CONTPAQi</a>
+      <a class="audit-btn" href="?periodo={{ paquete.periodo_value }}&export=contabilidad_desktop_csv">CSV Contabilidad Desktop</a>
     </div>
   </div>
 
@@ -117,7 +117,7 @@
 
   <section class="audit-section">
     <h2>Entregables</h2>
-    <p class="audit-note">El XLSX incluye hojas Resumen, Movimientos, Excepciones, CFDI y layouts de trabajo CONTPAQi para documentos bancarios, poliza sugerida y traspasos. Los CSV sirven para mapear contra la plantilla real del contador.</p>
+    <p class="audit-note">El XLSX incluye hojas para poliza sugerida, movimientos banco, CFDI relacionados, auxiliar de cuentas, traspasos propios, tarjetas de credito, lineas de credito, nomina, excepciones y evidencia pendiente. Este paquete esta pensado para CONTPAQi Contabilidad Desktop y Nominas Desktop; no asume CONTPAQi Bancos ni API nube.</p>
   </section>
 </div>
 {% endblock %}
