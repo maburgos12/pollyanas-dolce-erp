@@ -469,6 +469,20 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertContains(response, "Excepciones y soporte pendiente")
 
     def test_get_paquete_auditoria_exports_xlsx(self):
+        cfdi = CfdiDescargado.objects.create(
+            uuid="66666666-6666-6666-6666-666666666666",
+            rfc_emisor="GEF211230KR2",
+            rfc_receptor="XAXX010101000",
+            nombre_receptor="PUBLICO EN GENERAL",
+            subtotal=Decimal("2500.00"),
+            total=Decimal("2500.00"),
+            tipo_comprobante="I",
+            tipo_cfdi=CfdiDescargado.TIPO_EMITIDO,
+            metodo_pago="PUE",
+            forma_pago="04",
+            fecha_emision=timezone.make_aware(datetime(2026, 5, 10, 10, 0)),
+            conciliado=True,
+        )
         MovimientoBancario.objects.create(
             id_transaction="paquete-xlsx",
             cuenta=self.cuenta,
@@ -479,6 +493,7 @@ class ConciliacionBancariaViewTests(TestCase):
             fecha_refresh=timezone.now(),
             conciliado=True,
             tipo_conciliacion=MovimientoBancario.CONCILIACION_INGRESO_FACTURADO,
+            cfdi_relacionado=cfdi,
         )
 
         response = self.client.get("/conciliacion/bancaria/paquete/?periodo=2026-05&export=xlsx")
@@ -496,6 +511,7 @@ class ConciliacionBancariaViewTests(TestCase):
                 "Resumen",
                 "Movimientos_Banco",
                 "CFDI_Relacionados",
+                "Banco_vs_Factura",
                 "Poliza_Sugerida",
                 "Auxiliar_Cuentas",
                 "Traspasos_Propios",
@@ -507,6 +523,15 @@ class ConciliacionBancariaViewTests(TestCase):
             ],
         )
         self.assertEqual(workbook["Resumen"]["A1"].value, "Paquete mensual de conciliacion")
+        banco_vs_factura = workbook["Banco_vs_Factura"]
+        headers = [cell.value for cell in banco_vs_factura[1]]
+        row = [cell.value for cell in banco_vs_factura[2]]
+        self.assertIn("UUIDFacturaCFDI", headers)
+        self.assertIn("ImporteBanco", headers)
+        self.assertIn("DiferenciaBancoFactura", headers)
+        self.assertEqual(row[headers.index("UUIDFacturaCFDI")], cfdi.uuid)
+        self.assertEqual(row[headers.index("RFCReceptor")], "XAXX010101000")
+        self.assertEqual(row[headers.index("DiferenciaBancoFactura")], "0.00")
 
     def test_get_paquete_auditoria_exports_accounting_csv(self):
         MovimientoBancario.objects.create(

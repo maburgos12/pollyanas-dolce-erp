@@ -514,6 +514,9 @@ def _export_paquete_xlsx(paquete: dict) -> HttpResponse:
     cfdi_sheet = workbook.create_sheet("CFDI_Relacionados")
     _write_dict_table(cfdi_sheet, [_paquete_cfdi_row(cfdi) for cfdi in paquete["cfdis"]])
 
+    banco_factura_sheet = workbook.create_sheet("Banco_vs_Factura")
+    _write_dict_table(banco_factura_sheet, [_banco_factura_row(documento) for documento in paquete["movimientos"]])
+
     poliza_sheet = workbook.create_sheet("Poliza_Sugerida")
     _write_dict_table(poliza_sheet, [_poliza_sugerida_row(documento) for documento in paquete["movimientos"]])
 
@@ -622,6 +625,39 @@ def _paquete_cfdi_row(cfdi: CfdiDescargado) -> dict[str, str]:
         "NombreReceptor": cfdi.nombre_receptor or "",
         "Total": f"{cfdi.total:.2f}",
         "Conciliado": "Si" if cfdi.conciliado else "No",
+    }
+
+
+def _banco_factura_row(documento: dict) -> dict[str, str]:
+    movimiento = documento["movimiento"]
+    cfdi = documento["cfdi"]
+    diferencia = movimiento.monto - cfdi.total if cfdi else None
+    return {
+        "FolioMovimientoERP": documento["folio"],
+        "FechaBanco": movimiento.fecha_transaccion.strftime("%Y-%m-%d"),
+        "Banco": movimiento.cuenta.get_banco_display(),
+        "CuentaBanco": movimiento.cuenta.numero_cuenta or "",
+        "TipoBanco": movimiento.tipo,
+        "ImporteBanco": f"{movimiento.monto:.2f}",
+        "DescripcionBanco": movimiento.descripcion,
+        "ClaveRastreo": documento["clave_rastreo"],
+        "ConciliacionAplicada": documento["tipo_conciliacion"],
+        "EstadoExpediente": documento["estado_expediente"]["label"],
+        "TieneFacturaCFDI": "Si" if cfdi else "No",
+        "UUIDFacturaCFDI": cfdi.uuid if cfdi else "",
+        "FechaFactura": cfdi.fecha_emision.strftime("%Y-%m-%d") if cfdi else "",
+        "TipoCFDI": cfdi.get_tipo_cfdi_display() if cfdi else "",
+        "RFCEmisor": cfdi.rfc_emisor if cfdi else "",
+        "NombreEmisor": cfdi.nombre_emisor or "" if cfdi else "",
+        "RFCReceptor": cfdi.rfc_receptor if cfdi else "",
+        "NombreReceptor": cfdi.nombre_receptor or "" if cfdi else "",
+        "TotalFactura": f"{cfdi.total:.2f}" if cfdi else "",
+        "DiferenciaBancoFactura": f"{diferencia:.2f}" if diferencia is not None else "",
+        "MetodoPago": cfdi.metodo_pago or "" if cfdi else "",
+        "FormaPago": cfdi.forma_pago or "" if cfdi else "",
+        "DocumentoRelacionado": documento["relacion_contable"]["documento"],
+        "PendientesEvidencia": " | ".join(documento["evidencia_pendiente"]),
+        "NotaConciliacion": movimiento.nota_conciliacion,
     }
 
 
