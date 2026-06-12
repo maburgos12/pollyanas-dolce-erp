@@ -36,6 +36,7 @@
       <a class="audit-btn" href="{% url 'conciliacion:bancaria' %}?periodo={{ paquete.periodo_value }}#mesa-movimientos">Volver a mesa</a>
       <a class="audit-btn" href="?periodo={{ paquete.periodo_value }}&export=xlsx">Descargar XLSX</a>
       <a class="audit-btn" href="?periodo={{ paquete.periodo_value }}&export=contabilidad_csv">Descargar CSV contabilidad</a>
+      <a class="audit-btn" href="?periodo={{ paquete.periodo_value }}&export=contpaqi_csv">Descargar CSV CONTPAQi</a>
     </div>
   </div>
 
@@ -116,7 +117,7 @@
 
   <section class="audit-section">
     <h2>Entregables</h2>
-    <p class="audit-note">El XLSX incluye hojas Resumen, Movimientos, Excepciones y CFDI. El CSV contiene el detalle de movimientos para mapear a plantilla contable/CONTPAQi.</p>
+    <p class="audit-note">El XLSX incluye hojas Resumen, Movimientos, Excepciones, CFDI y layouts de trabajo CONTPAQi para documentos bancarios, poliza sugerida y traspasos. Los CSV sirven para mapear contra la plantilla real del contador.</p>
   </section>
 </div>
 {% endblock %}

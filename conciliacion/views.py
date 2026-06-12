@@ -85,6 +85,8 @@ def paquete_conciliacion_view(request: HttpRequest) -> HttpResponse:
         return _export_paquete_xlsx(paquete)
     if export == "contabilidad_csv":
         return _export_paquete_contabilidad_csv(paquete)
+    if export == "contpaqi_csv":
+        return _export_paquete_contpaqi_csv(paquete)
     return render(request, "conciliacion/paquete_auditoria.html", {"paquete": paquete})
 
 
@@ -354,6 +356,17 @@ def _export_paquete_contabilidad_csv(paquete: dict) -> HttpResponse:
     return response
 
 
+def _export_paquete_contpaqi_csv(paquete: dict) -> HttpResponse:
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="conciliacion_{paquete["periodo_value"]}_contpaqi_documentos.csv"'
+    rows = [_contpaqi_documento_row(documento) for documento in paquete["movimientos"]]
+    fieldnames = list(rows[0].keys()) if rows else ["Periodo"]
+    writer = csv.DictWriter(response, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(rows)
+    return response
+
+
 def _export_paquete_xlsx(paquete: dict) -> HttpResponse:
     workbook = Workbook()
     resumen = workbook.active
@@ -393,6 +406,22 @@ def _export_paquete_xlsx(paquete: dict) -> HttpResponse:
 
     cfdi_sheet = workbook.create_sheet("CFDI")
     _write_dict_table(cfdi_sheet, [_paquete_cfdi_row(cfdi) for cfdi in paquete["cfdis"]])
+
+    contpaqi_doc_sheet = workbook.create_sheet("CONTPAQi_Documentos")
+    _write_dict_table(contpaqi_doc_sheet, [_contpaqi_documento_row(documento) for documento in paquete["movimientos"]])
+
+    contpaqi_poliza_sheet = workbook.create_sheet("CONTPAQi_Poliza")
+    _write_dict_table(contpaqi_poliza_sheet, [_contpaqi_poliza_row(documento) for documento in paquete["movimientos"]])
+
+    contpaqi_traspasos_sheet = workbook.create_sheet("CONTPAQi_Traspasos")
+    _write_dict_table(
+        contpaqi_traspasos_sheet,
+        [
+            _contpaqi_traspaso_row(documento)
+            for documento in paquete["movimientos"]
+            if documento["movimiento"].tipo_conciliacion == MovimientoBancario.CONCILIACION_TRASPASO
+        ],
+    )
 
     for sheet in workbook.worksheets:
         _autosize_sheet(sheet)
@@ -447,6 +476,113 @@ def _paquete_cfdi_row(cfdi: CfdiDescargado) -> dict[str, str]:
         "Total": f"{cfdi.total:.2f}",
         "Conciliado": "Si" if cfdi.conciliado else "No",
     }
+
+
+def _contpaqi_documento_row(documento: dict) -> dict[str, str]:
+    movimiento = documento["movimiento"]
+    cfdi = documento["cfdi"]
+    return {
+        "Documento": documento["folio"],
+        "FechaAplicacion": movimiento.fecha_transaccion.strftime("%Y-%m-%d"),
+        "CuentaBancaria": movimiento.cuenta.numero_cuenta or "",
+        "Banco": movimiento.cuenta.get_banco_display(),
+        "TipoDocumento": _tipo_documento_contpaqi(movimiento),
+        "BeneficiarioPagador": _beneficiario_pagador(movimiento),
+        "Referencia": documento["clave_rastreo"],
+        "CuentaOrigenDestino": documento["cuenta_destino"],
+        "Importe": f"{movimiento.monto:.2f}",
+        "MetodoPago": _metodo_pago_contpaqi(movimiento),
+        "UUIDRelacionado": cfdi.uuid if cfdi else "",
+        "RFCRelacionado": _rfc_relacionado(cfdi) if cfdi else "",
+        "ConciliacionAplicada": documento["tipo_conciliacion"],
+        "EstatusConciliacion": "Conciliado" if movimiento.conciliado else "Pendiente",
+        "PendienteEvidencia": " | ".join(documento["evidencia_pendiente"]),
+        "Concepto": movimiento.descripcion,
+    }
+
+
+def _contpaqi_poliza_row(documento: dict) -> dict[str, str]:
+    movimiento = documento["movimiento"]
+    return {
+        "FechaPoliza": movimiento.fecha_transaccion.strftime("%Y-%m-%d"),
+        "TipoPolizaSugerida": _tipo_poliza_sugerida(movimiento),
+        "FolioDocumentoBancario": documento["folio"],
+        "ConceptoPoliza": f"{documento['tipo_conciliacion']} | {documento['clave_rastreo'] or movimiento.descripcion[:40]}",
+        "CargoBanco": f"{movimiento.monto:.2f}" if movimiento.tipo == MovimientoBancario.TIPO_ABONO else "0.00",
+        "AbonoBanco": f"{movimiento.monto:.2f}" if movimiento.tipo == MovimientoBancario.TIPO_CARGO else "0.00",
+        "CuentaContableBanco": "",
+        "CuentaContrapartidaSugerida": _cuenta_contrapartida_sugerida(movimiento),
+        "UUIDRelacionado": movimiento.cfdi_relacionado.uuid if movimiento.cfdi_relacionado_id else "",
+        "Referencia": documento["clave_rastreo"],
+        "Nota": movimiento.nota_conciliacion,
+    }
+
+
+def _contpaqi_traspaso_row(documento: dict) -> dict[str, str]:
+    movimiento = documento["movimiento"]
+    contraparte = documento["contraparte"]
+    return {
+        "Folio": documento["folio"],
+        "Fecha": movimiento.fecha_transaccion.strftime("%Y-%m-%d"),
+        "CuentaSalida": movimiento.cuenta.numero_cuenta or "",
+        "CuentaEntrada": documento["cuenta_destino"] or (contraparte.cuenta.numero_cuenta if contraparte else ""),
+        "BancoSalida": movimiento.cuenta.get_banco_display(),
+        "BancoEntrada": contraparte.cuenta.get_banco_display() if contraparte else "",
+        "Importe": f"{movimiento.monto:.2f}",
+        "ClaveRastreo": documento["clave_rastreo"],
+        "MovimientoContraparte": str(contraparte.pk if contraparte else ""),
+        "Pendiente": "Abono contraparte no importado" if not contraparte else "",
+        "Descripcion": movimiento.descripcion,
+    }
+
+
+def _tipo_documento_contpaqi(movimiento: MovimientoBancario) -> str:
+    if movimiento.tipo_conciliacion == MovimientoBancario.CONCILIACION_TRASPASO:
+        return "Traspaso"
+    if movimiento.tipo == MovimientoBancario.TIPO_ABONO:
+        return "Ingreso"
+    return "Egreso"
+
+
+def _metodo_pago_contpaqi(movimiento: MovimientoBancario) -> str:
+    if "SPEI" in (movimiento.descripcion or "").upper() or movimiento.tipo_conciliacion == MovimientoBancario.CONCILIACION_TRASPASO:
+        return "Transferencia"
+    if movimiento.tipo_conciliacion == MovimientoBancario.CONCILIACION_TARJETA_CREDITO:
+        return "Tarjeta credito"
+    return ""
+
+
+def _tipo_poliza_sugerida(movimiento: MovimientoBancario) -> str:
+    if movimiento.tipo_conciliacion == MovimientoBancario.CONCILIACION_TRASPASO:
+        return "Diario"
+    if movimiento.tipo == MovimientoBancario.TIPO_ABONO:
+        return "Ingreso"
+    return "Egreso"
+
+
+def _beneficiario_pagador(movimiento: MovimientoBancario) -> str:
+    descripcion = movimiento.descripcion or ""
+    for marker in ("Beneficiario:", "Pagador:"):
+        if marker in descripcion:
+            return descripcion.split(marker, 1)[1].split("|", 1)[0].strip()
+    return ""
+
+
+def _rfc_relacionado(cfdi: CfdiDescargado) -> str:
+    return cfdi.rfc_receptor if cfdi.tipo_cfdi == CfdiDescargado.TIPO_EMITIDO else cfdi.rfc_emisor
+
+
+def _cuenta_contrapartida_sugerida(movimiento: MovimientoBancario) -> str:
+    mapping = {
+        MovimientoBancario.CONCILIACION_TRASPASO: "Banco contraparte",
+        MovimientoBancario.CONCILIACION_INGRESO_FACTURADO: "Ingresos por ventas",
+        MovimientoBancario.CONCILIACION_COMISION: "Comisiones bancarias",
+        MovimientoBancario.CONCILIACION_FISCAL: "Impuestos",
+        MovimientoBancario.CONCILIACION_NOMINA: "Nomina",
+        MovimientoBancario.CONCILIACION_TARJETA_CREDITO: "Tarjeta credito",
+        MovimientoBancario.CONCILIACION_CFDI: "Proveedor/cliente CFDI",
+    }
+    return mapping.get(movimiento.tipo_conciliacion, "Revision contable")
 
 
 def _write_key_values(sheet, rows: list[tuple[str, object]]) -> None:
