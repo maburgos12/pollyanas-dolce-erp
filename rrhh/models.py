@@ -1027,11 +1027,13 @@ class HoraExtra(models.Model):
     ESTADO_AUTORIZADO = "autorizado"
     ESTADO_RECHAZADO = "rechazado"
     ESTADO_PAGADO = "pagado"
+    ESTADO_CANCELADO = "cancelado"
     ESTADO_CHOICES = [
         (ESTADO_PENDIENTE, "Pendiente autorización"),
         (ESTADO_AUTORIZADO, "Autorizado"),
         (ESTADO_RECHAZADO, "Rechazado"),
         (ESTADO_PAGADO, "Pagado en nómina"),
+        (ESTADO_CANCELADO, "Cancelado"),
     ]
 
     empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.CASCADE, related_name="horas_extra")
