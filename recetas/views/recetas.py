@@ -6812,6 +6812,28 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
         "criticos": 0, "requieren_ajuste": 0, "combinados": 0,
     }
 
+    def _contabilizar_row(row: dict[str, Any]) -> None:
+        fuente = row["costo_fuente"]
+        estado = row["estado"]
+        if fuente == COSTO_FAB_COMPLETO:
+            cnt["fab"] += 1
+        elif fuente == COSTO_MP_FALLBACK:
+            cnt["mp"] += 1
+        elif fuente == COSTO_REVENTA:
+            cnt["reventa"] += 1
+
+        if row["tiene_sabores"]:
+            cnt["combinados"] += 1
+        if estado == "SIN_COSTO":
+            cnt["sin_costo"] += 1
+        elif estado == "SIN_PRECIO":
+            cnt["sin_precio"] += 1
+        elif estado == "CRITICO":
+            cnt["criticos"] += 1
+            cnt["requieren_ajuste"] += 1
+        elif estado == "AJUSTE":
+            cnt["requieren_ajuste"] += 1
+
     for receta in recetas:
         sku = (receta.codigo_point or "").strip()
         familia_point = categoria_por_sku.get(sku, "")
@@ -6840,8 +6862,6 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
         costo_completo = (costo_ult + addon_cost).quantize(Decimal("0.01"))
         costo_inicial = (costo_ini + addon_cost).quantize(Decimal("0.01"))
         tiene_sabores = addon_cost > 0
-        if tiene_sabores:
-            cnt["combinados"] += 1
         n_sabores = len([
             addon for addon in addons_por_base.get(receta.id, [])
             if unidades_by.get(addon["id"], Decimal("0")) > 0 and _costo_addon(addon["id"]) > 0
@@ -6880,17 +6900,12 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
 
         if fuente == COSTO_SIN or costo_completo <= 0:
             estado = "SIN_COSTO"
-            cnt["sin_costo"] += 1
         elif precio_actual <= 0:
             estado = "SIN_PRECIO"
-            cnt["sin_precio"] += 1
         elif precio_actual < costo_completo:
             estado = "CRITICO"
-            cnt["criticos"] += 1
-            cnt["requieren_ajuste"] += 1
         elif margen is not None and margen < margen_meta_row:
             estado = "AJUSTE"
-            cnt["requieren_ajuste"] += 1
         else:
             estado = "OK"
 
@@ -6903,14 +6918,7 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             politica=politica_margen,
         )
 
-        if fuente == COSTO_FAB_COMPLETO:
-            cnt["fab"] += 1
-        elif fuente == COSTO_MP_FALLBACK:
-            cnt["mp"] += 1
-        elif fuente == COSTO_REVENTA:
-            cnt["reventa"] += 1
-
-        rows.append({
+        base_row = {
             "receta_id": receta.id,
             "nombre": receta.nombre,
             "codigo_point": sku,
@@ -6941,8 +6949,9 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             "accion_sugerida_label": ACCION_LABELS[accion_sugerida],
             "serie": [float(s) for s in serie],
             "_margen_sort": margen if margen is not None else Decimal("9999"),
-        })
+        }
 
+        combo_rows: list[dict[str, Any]] = []
         if not es_reventa and fuente != COSTO_SIN:
             for addon in addons_por_base.get(receta.id, []):
                 addon_id = addon["id"]
@@ -6968,14 +6977,10 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
                     combo_falta_subir = ((combo_sugerido - combo_precio) / combo_precio * Decimal("100")).quantize(Decimal("0.1"))
                 if combo_precio <= 0:
                     combo_estado = "SIN_PRECIO"
-                    cnt["sin_precio"] += 1
                 elif combo_precio < combo_costo:
                     combo_estado = "CRITICO"
-                    cnt["criticos"] += 1
-                    cnt["requieren_ajuste"] += 1
                 elif combo_margen is not None and combo_margen < margen_meta_row:
                     combo_estado = "AJUSTE"
-                    cnt["requieren_ajuste"] += 1
                 else:
                     combo_estado = "OK"
 
@@ -6988,13 +6993,7 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
                     politica=politica_margen,
                 )
 
-                if fuente == COSTO_FAB_COMPLETO:
-                    cnt["fab"] += 1
-                elif fuente == COSTO_MP_FALLBACK:
-                    cnt["mp"] += 1
-                cnt["combinados"] += 1
-
-                rows.append({
+                combo_rows.append({
                     "receta_id": receta.id,
                     "nombre": f"{receta.nombre} + {addon['nombre'] or addon_sku}",
                     "codigo_point": f"{sku} + {addon_sku}" if addon_sku else sku,
@@ -7026,6 +7025,13 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
                     "serie": [float(s) for s in serie],
                     "_margen_sort": combo_margen if combo_margen is not None else Decimal("9999"),
                 })
+
+        # En precio sugerido el producto comercial correcto es el total base+addon.
+        # Si hay combinaciones válidas, no duplicar la base sola en el reporte.
+        rows_a_publicar = combo_rows or [base_row]
+        for row in rows_a_publicar:
+            rows.append(row)
+            _contabilizar_row(row)
 
     estado_orden = {"CRITICO": 0, "AJUSTE": 1, "OK": 2, "SIN_PRECIO": 3, "SIN_COSTO": 4}
     rows.sort(key=lambda item: (

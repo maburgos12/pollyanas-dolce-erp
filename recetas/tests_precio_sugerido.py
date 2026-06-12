@@ -236,10 +236,7 @@ class PrecioSugeridoViewTests(TestCase):
         )
         data = self._fetch()
         self.assertIsNone(self._row(data, addon))  # addon excluido
-        row = self._row_by_name(data, "Pay de Queso Grande")
-        self.assertIsNotNone(row)
-        self.assertEqual(row["costo_completo"], "178.00")
-        self.assertFalse(row["tiene_sabores"])
+        self.assertIsNone(self._row_by_name(data, "Pay de Queso Grande"))  # base excluida si hay producto completo
 
         combo = self._row_by_name(data, "Pay de Queso Grande + Sabor Fresa Grande")
         self.assertIsNotNone(combo)
