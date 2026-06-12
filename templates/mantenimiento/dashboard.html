@@ -73,9 +73,11 @@
   .mant-field.full{grid-column:1/-1}
   .mant-asset-create{grid-column:1/-1;display:grid;gap:10px;border:1px solid rgba(139,34,82,.14);border-radius:12px;background:#fffafc;padding:12px}
   .mant-asset-create[hidden]{display:none}
-  .mant-asset-create-title{color:#8B2252;font-size:13px;font-weight:900}
-  .mant-asset-create-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
-  @media(max-width:1180px){.mant-breakdown{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr 1fr}}
+	  .mant-asset-create-title{color:#8B2252;font-size:13px;font-weight:900}
+	  .mant-asset-create-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+	  .mant-check-field{display:flex;align-items:center;gap:10px}
+	  .mant-check-field input{width:auto;min-height:0}
+	  @media(max-width:1180px){.mant-breakdown{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr 1fr}}
   .mant-semaforo{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:900;border-radius:999px;padding:3px 8px}
   .mant-semaforo::before{content:"";width:8px;height:8px;border-radius:50%;flex:0 0 8px}
   .mant-semaforo.verde{background:#e8f6ee;color:#166534}.mant-semaforo.verde::before{background:#22c55e}
@@ -207,7 +209,9 @@
           <p class="bi-copy">Todos los reportes abiertos — sucursales, equipos y flota — en una sola vista. Usa "Trabajar" para avanzar cada caso.</p>
         </div>
         <div class="bi-panel-actions">
-          <button class="btn btn-primary btn-sm" type="button" id="btnNuevaFalla" style="background:#8B2252;border-color:#8B2252;">+ Nueva falla</button>
+          <button class="btn btn-primary btn-sm" type="button" id="btnServicioRealizado" style="background:#8B2252;border-color:#8B2252;">+ Servicio sin orden</button>
+          <button class="btn btn-secondary btn-sm" type="button" id="btnServicioPendiente">+ Programar servicio</button>
+          <button class="btn btn-secondary btn-sm" type="button" id="btnNuevaFalla">+ Falla / imprevisto</button>
         </div>
       </div>
       <div class="mant-origin-tabs" style="margin-bottom:14px" aria-label="Filtro de origen">
@@ -243,10 +247,14 @@
                     {% endif %}
                     <div>
                       <div class="mant-ticket-title">{{ item.referencia }} · {{ item.titulo }}</div>
-                      <div class="mant-ticket-meta">
-                        {{ item.ubicacion|default:"Sin ubicación" }}{% if item.activo %} · {{ item.activo }}{% endif %}<br>
-                        {% if item.reportado_por %}Reportó: {{ item.reportado_por }} · {% endif %}{{ item.fecha|date:"d/m/Y H:i" }}
-                      </div>
+	                      <div class="mant-ticket-meta">
+	                        {{ item.ubicacion|default:"Sin ubicación" }}{% if item.activo %} · {{ item.activo }}{% endif %}<br>
+	                        {% if item.tipo == "orden" and item.fecha_programada %}
+	                          Programado: {{ item.fecha_programada|date:"d/m/Y" }}{% if item.reportado_por %} · Creó: {{ item.reportado_por }}{% endif %}
+	                        {% else %}
+	                          {% if item.reportado_por %}Reportó: {{ item.reportado_por }} · {% endif %}{{ item.fecha|date:"d/m/Y H:i" }}
+	                        {% endif %}
+	                      </div>
                     </div>
                   </div>
                   <div class="mant-ticket-desc">{{ item.descripcion|truncatechars:180 }}</div>
@@ -500,7 +508,7 @@
   <aside class="mant-drawer-panel">
     <div class="mant-drawer-head">
       <div>
-        <h2 id="modalNuevaFallaTitulo">Nueva falla</h2>
+        <h2 id="modalNuevaFallaTitulo">Falla / imprevisto</h2>
         <p>Captura directa desde el panel de mantenimiento</p>
       </div>
       <button class="btn btn-secondary btn-sm" type="button" data-close-nueva-falla>Cerrar</button>
@@ -556,7 +564,116 @@
           <input class="mant-input" name="foto_evidencia" type="file" accept="image/*" style="padding:8px">
         </label>
       </div>
-      <button class="btn btn-primary" type="submit" style="background:#8B2252;border-color:#8B2252;">Crear reporte de falla</button>
+      <button class="btn btn-primary" type="submit" style="background:#8B2252;border-color:#8B2252;">Crear caso</button>
+    </form>
+  </aside>
+</div>
+
+<!-- Modal servicio sin orden / pendiente puntual -->
+<div class="mant-drawer" id="modalOrdenServicio" role="dialog" aria-modal="true" aria-labelledby="modalOrdenServicioTitulo">
+  <aside class="mant-drawer-panel">
+    <div class="mant-drawer-head">
+      <div>
+        <h2 id="modalOrdenServicioTitulo">Servicio de mantenimiento</h2>
+        <p id="modalOrdenServicioSubtitulo">Captura directa desde mantenimiento</p>
+      </div>
+      <button class="btn btn-secondary btn-sm" type="button" data-close-orden-servicio>Cerrar</button>
+    </div>
+    <form class="mant-form" method="post" action="{% url 'mantenimiento:crear-servicio' %}" enctype="multipart/form-data">
+      {% csrf_token %}
+      <input type="hidden" name="modo_servicio" id="ordenServicioModo" value="realizado">
+      <div class="mant-form-grid">
+        <label class="mant-field full">Aplica a
+          <select class="mant-input" name="alcance" id="ordenServicioAlcance">
+            <option value="activo">Equipo / activo</option>
+            <option value="instalacion">Instalación / sucursal</option>
+            <option value="flota">Flota</option>
+          </select>
+        </label>
+        <label class="mant-field full">Sucursal <span style="color:#E53935">*</span>
+          <select class="mant-input" name="sucursal_id" id="ordenServicioSucursal" required>
+            <option value="">Seleccionar sucursal...</option>
+            {% for sucursal in sucursales_list %}
+              <option value="{{ sucursal.id }}">{{ sucursal.nombre }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="mant-field full" id="ordenServicioActivoField">Activo / equipo <span style="color:#E53935">*</span>
+          <select class="mant-input" name="activo_id" id="ordenServicioActivo" required>
+            <option value="">Selecciona primero una sucursal...</option>
+            {% for activo in activos_para_plan %}
+              <option value="{{ activo.id }}" data-sucursal="{{ activo.sucursal_id|default:'' }}" data-categoria="{{ activo.categoria }}">{{ activo.codigo }} · {{ activo.nombre }}{% if activo.sucursal %} · {{ activo.sucursal.nombre }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="mant-field full" id="ordenServicioInstalacionField" hidden>Tipo de instalación <span style="color:#E53935">*</span>
+          <select class="mant-input" name="instalacion_categoria" id="ordenServicioInstalacion">
+            {% for categoria in instalacion_categorias %}
+              <option value="{{ categoria }}">{{ categoria }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="mant-field full" id="ordenServicioUnidadField" hidden>Unidad logística <span style="color:#E53935">*</span>
+          <select class="mant-input" name="unidad_id" id="ordenServicioUnidad">
+            <option value="">Selecciona primero una sucursal...</option>
+            {% for unidad in unidades_para_servicio %}
+              <option value="{{ unidad.id }}" data-sucursal="{{ unidad.sucursal_id|default:'' }}">{{ unidad.descripcion|default:unidad.codigo }}{% if unidad.sucursal %} · {{ unidad.sucursal.nombre }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="mant-field" data-activo-only>Tipo
+          <select class="mant-input" name="tipo" id="ordenServicioTipo">
+            {% for value,label in orden_tipo_choices %}
+              <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="mant-field" data-activo-only>Prioridad
+          <select class="mant-input" name="prioridad" id="ordenServicioPrioridad">
+            {% for value,label in orden_prioridad_choices %}
+              <option value="{{ value }}" {% if value == 'MEDIA' %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="mant-field" data-activo-only>Origen
+          <select class="mant-input" name="origen" id="ordenServicioOrigen">
+            {% for value,label in orden_origen_choices %}
+              <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="mant-field" id="ordenServicioFechaLabel">Fecha del servicio <span style="color:#E53935">*</span>
+          <input class="mant-input" name="fecha_objetivo" id="ordenServicioFecha" type="date" value="{{ today|date:'Y-m-d' }}" required>
+        </label>
+        <label class="mant-field">Proveedor / taller
+          <input class="mant-input" name="proveedor_servicio" id="ordenServicioProveedor" list="orden-servicio-proveedores" placeholder="Servicio interno / sin proveedor">
+          <datalist id="orden-servicio-proveedores">
+            {% for proveedor in provider_options %}
+              <option value="{{ proveedor.nombre }}">
+            {% endfor %}
+          </datalist>
+        </label>
+        <label class="mant-field">Responsable
+          <input class="mant-input" name="responsable" id="ordenServicioResponsable" placeholder="Técnico o encargado">
+        </label>
+        <label class="mant-field full">Servicio / pendiente <span style="color:#E53935">*</span>
+          <textarea class="mant-input" name="descripcion" id="ordenServicioDescripcion" required placeholder="Ej. Cambiar empaque de puerta del horno antes de que pierda temperatura"></textarea>
+        </label>
+        <label class="mant-field" data-realizado-only>Costos / importe final
+          <input class="mant-input" name="costo_total" id="ordenServicioCosto" type="number" min="0" step="0.01" placeholder="0.00">
+        </label>
+        <label class="mant-field" data-realizado-only>Factura / remisión
+          <input class="mant-input" name="factura_archivo" id="ordenServicioFactura" type="file" accept=".pdf,image/*" style="padding:8px">
+        </label>
+        <label class="mant-field full">Nota de trabajo
+          <textarea class="mant-input" name="nota_trabajo" id="ordenServicioNota" placeholder="Resultado, refacciones, condiciones o seguimiento acordado"></textarea>
+        </label>
+        <label class="mant-field full mant-check-field" id="ordenServicioCierreBlock">
+          <input type="checkbox" name="cerrar_servicio" id="ordenServicioCerrar" value="1" checked>
+          Cerrar servicio al guardar
+        </label>
+      </div>
+      <button class="btn btn-primary" type="submit" id="ordenServicioSubmit" style="background:#8B2252;border-color:#8B2252;">Guardar servicio</button>
     </form>
   </aside>
 </div>
@@ -1045,12 +1162,13 @@
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
-      drawer.classList.remove("is-open");
-      document.getElementById("modalNuevaFalla").classList.remove("is-open");
-      document.getElementById("mantCancelarModal").classList.remove("is-open");
-    }
-  });
-})();
+	      drawer.classList.remove("is-open");
+	      document.getElementById("modalNuevaFalla").classList.remove("is-open");
+	      document.getElementById("modalOrdenServicio").classList.remove("is-open");
+	      document.getElementById("mantCancelarModal").classList.remove("is-open");
+	    }
+	  });
+	})();
 
 // Modal cancelación / solicitud cancelación
 (() => {
@@ -1107,6 +1225,170 @@
   // Auto-hide django messages after 4s
   document.querySelectorAll(".alert").forEach((el) => {
     setTimeout(() => el.style.display = "none", 4000);
+	  });
+	})();
+
+// Modal servicio sin orden / pendiente puntual
+(() => {
+  const modal = document.getElementById("modalOrdenServicio");
+  const btnRealizado = document.getElementById("btnServicioRealizado");
+  const btnPendiente = document.getElementById("btnServicioPendiente");
+  if (!modal || !btnRealizado || !btnPendiente) return;
+
+  const modoInput = document.getElementById("ordenServicioModo");
+  const titulo = document.getElementById("modalOrdenServicioTitulo");
+  const subtitulo = document.getElementById("modalOrdenServicioSubtitulo");
+  const fechaLabel = document.getElementById("ordenServicioFechaLabel");
+  const fecha = document.getElementById("ordenServicioFecha");
+  const tipo = document.getElementById("ordenServicioTipo");
+  const origen = document.getElementById("ordenServicioOrigen");
+  const alcance = document.getElementById("ordenServicioAlcance");
+  const sucursal = document.getElementById("ordenServicioSucursal");
+  const activo = document.getElementById("ordenServicioActivo");
+  const instalacion = document.getElementById("ordenServicioInstalacion");
+  const unidad = document.getElementById("ordenServicioUnidad");
+  const activoField = document.getElementById("ordenServicioActivoField");
+  const instalacionField = document.getElementById("ordenServicioInstalacionField");
+  const unidadField = document.getElementById("ordenServicioUnidadField");
+  const cierreBlock = document.getElementById("ordenServicioCierreBlock");
+  const cerrar = document.getElementById("ordenServicioCerrar");
+  const submit = document.getElementById("ordenServicioSubmit");
+  const realizadoOnly = modal.querySelectorAll("[data-realizado-only]");
+  const activoOnly = modal.querySelectorAll("[data-activo-only]");
+  const instalacionCategorias = new Set([
+    {% for categoria in instalacion_categorias %}"{{ categoria|escapejs }}"{% if not forloop.last %},{% endif %}{% endfor %}
+  ]);
+
+  function setSelectValue(select, value) {
+    if (!select) return;
+    for (let option of select.options) {
+      option.selected = option.value === value;
+    }
+  }
+
+  function clearForm() {
+    sucursal.value = "";
+    activo.value = "";
+    unidad.value = "";
+    if (instalacion) instalacion.selectedIndex = 0;
+    document.getElementById("ordenServicioProveedor").value = "";
+    document.getElementById("ordenServicioResponsable").value = "";
+    document.getElementById("ordenServicioDescripcion").value = "";
+    document.getElementById("ordenServicioCosto").value = "";
+    document.getElementById("ordenServicioFactura").value = "";
+    document.getElementById("ordenServicioNota").value = "";
+    setSelectValue(document.getElementById("ordenServicioPrioridad"), "MEDIA");
+    filtrarPorSucursal();
+  }
+
+  function filtrarOpciones(select, emptyText, predicate) {
+    if (!select) return 0;
+    let visibles = 0;
+    Array.from(select.options).forEach((option, index) => {
+      if (index === 0) {
+        option.textContent = sucursal.value ? emptyText : "Selecciona primero una sucursal...";
+        option.hidden = false;
+        option.disabled = false;
+        return;
+      }
+      const visible = Boolean(sucursal.value) && predicate(option);
+      option.hidden = !visible;
+      option.disabled = !visible;
+      if (!visible && option.selected) option.selected = false;
+      if (visible) visibles += 1;
+    });
+    if (sucursal.value && visibles === 0) {
+      select.options[0].textContent = emptyText;
+    }
+    if (!select.value) select.options[0].selected = true;
+    return visibles;
+  }
+
+  function filtrarPorSucursal() {
+    const sucursalId = sucursal.value;
+    const activosVisibles = filtrarOpciones(
+      activo,
+      "No hay equipos activos en esta sucursal",
+      (option) => option.dataset.sucursal === sucursalId && !instalacionCategorias.has(option.dataset.categoria || "")
+    );
+    const unidadesVisibles = filtrarOpciones(
+      unidad,
+      "No hay unidades activas en esta sucursal",
+      (option) => option.dataset.sucursal === sucursalId
+    );
+    if (alcance.value === "activo") {
+      activo.disabled = !sucursalId || activosVisibles === 0;
+    }
+    if (alcance.value === "unidad" || alcance.value === "flota") {
+      unidad.disabled = !sucursalId || unidadesVisibles === 0;
+    }
+  }
+
+  function setAlcance(value) {
+    const esUnidad = value === "unidad" || value === "flota";
+    const esInstalacion = value === "instalacion";
+    activoField.hidden = esUnidad || esInstalacion;
+    instalacionField.hidden = !esInstalacion;
+    unidadField.hidden = !esUnidad;
+    activo.required = !esUnidad && !esInstalacion;
+    instalacion.required = esInstalacion;
+    unidad.required = esUnidad;
+    activo.disabled = esUnidad || esInstalacion;
+    instalacion.disabled = !esInstalacion;
+    unidad.disabled = !esUnidad;
+    activoOnly.forEach((field) => {
+      field.style.display = esUnidad ? "none" : "grid";
+      field.querySelectorAll("input,select,textarea").forEach((input) => {
+        input.disabled = esUnidad;
+      });
+    });
+    filtrarPorSucursal();
+    document.getElementById("ordenServicioDescripcion").placeholder = esUnidad
+      ? "Ej. Cambio de aceite de unidad GS-01 o revisar llanta antes de ruta larga"
+      : esInstalacion
+        ? "Ej. Reparar fuga en baño, pintar pared o cambiar contacto eléctrico de la sucursal"
+        : "Ej. Cambiar empaque de puerta del horno antes de que pierda temperatura";
+  }
+
+  function setModo(modo) {
+    const esPendiente = modo === "pendiente";
+    modoInput.value = modo;
+    clearForm();
+    setAlcance(alcance.value);
+    titulo.textContent = esPendiente ? "Programar servicio puntual" : "Servicio sin orden previa";
+    subtitulo.textContent = esPendiente ? "Pendiente no periódico" : "Servicio ya realizado";
+    fechaLabel.childNodes[0].textContent = esPendiente ? "Fecha objetivo " : "Fecha del servicio ";
+    fecha.value = esPendiente ? "" : "{{ today|date:'Y-m-d' }}";
+    fecha.required = true;
+    setSelectValue(tipo, esPendiente ? "PREVENTIVO" : "CORRECTIVO");
+    setSelectValue(origen, esPendiente ? "INICIATIVA" : "EMERGENCIA");
+    cierreBlock.style.display = esPendiente ? "none" : "flex";
+    cerrar.checked = !esPendiente;
+    cerrar.disabled = esPendiente;
+    realizadoOnly.forEach((field) => {
+      field.style.display = esPendiente ? "none" : "grid";
+      field.querySelectorAll("input,select,textarea").forEach((input) => {
+        input.disabled = esPendiente;
+      });
+    });
+    submit.textContent = esPendiente ? "Programar servicio" : "Guardar servicio";
+  }
+
+  function open(modo) {
+    setModo(modo);
+    modal.classList.add("is-open");
+    setTimeout(() => alcance.focus(), 120);
+  }
+
+  alcance.addEventListener("change", () => setAlcance(alcance.value));
+  sucursal.addEventListener("change", filtrarPorSucursal);
+  btnRealizado.addEventListener("click", () => open("realizado"));
+  btnPendiente.addEventListener("click", () => open("pendiente"));
+  document.querySelectorAll("[data-close-orden-servicio]").forEach((button) => {
+    button.addEventListener("click", () => modal.classList.remove("is-open"));
+  });
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) modal.classList.remove("is-open");
   });
 })();
 
