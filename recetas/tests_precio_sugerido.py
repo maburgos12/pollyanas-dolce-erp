@@ -359,3 +359,36 @@ class PrecioSugeridoViewTests(TestCase):
         self.assertEqual(row["estado"], "AJUSTE")
         self.assertEqual(row["precio_sugerido"], "225.00")
         self.assertEqual(row["accion_sugerida"], "ALTO_RIESGO_COMPETITIVO")
+
+    def test_monitor_muestra_inputs_para_editar_metas(self):
+        resp = self.client.get(reverse("recetas:monitor_margenes"))
+
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertIn('data-source="fab"', html)
+        self.assertIn('data-source="mp"', html)
+        self.assertIn('data-source="reventa"', html)
+        self.assertIn("Guardar metas", html)
+
+    def test_guardar_politicas_base_desde_panel_actualiza_calculo(self):
+        r = self._receta("SoloMP Panel", "MMPANEL1")
+        self._point("MMPANEL1", "SoloMP Panel", precio=200)
+        self._mp_hist(r, 80)
+
+        resp = self.client.post(
+            reverse("recetas:monitor_margenes_politicas_precio"),
+            data=json.dumps({
+                "fab": {"margen_meta_pct": "50", "subida_maxima_pct": "30"},
+                "mp": {"margen_meta_pct": "55", "subida_maxima_pct": "25"},
+                "reventa": {"margen_meta_pct": "30", "subida_maxima_pct": "15"},
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.content)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["politicas_base"]["mp"]["margen_meta_pct"], "55")
+        row = self._row(self._fetch(), r)
+        self.assertEqual(row["margen_meta"], "55")
+        self.assertEqual(row["estado"], "OK")

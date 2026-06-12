@@ -28,6 +28,7 @@ urlpatterns = [
     path("costeo/simulador/borradores/<int:draft_id>.json", views.costeo_simulador_draft_detail, name="costeo_simulador_draft_detail"),
     path("monitor-margenes/", views.monitor_margenes, name="monitor_margenes"),
     path("monitor-margenes/precio-sugerido.json", views.monitor_margenes_precio_sugerido, name="monitor_margenes_precio_sugerido"),
+    path("monitor-margenes/politicas-precio.json", views.monitor_margenes_politicas_precio, name="monitor_margenes_politicas_precio"),
     path("costeo/snapshot/", views.costeo_dashboard_snapshot, name="costeo_dashboard_snapshot"),
     path("recetas/sync/grupo/", views.recetas_sync_group, name="recetas_sync_group"),
     path("recetas/sync/todo/", views.recetas_sync_all, name="recetas_sync_all"),
