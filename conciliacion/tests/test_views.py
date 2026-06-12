@@ -398,7 +398,11 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertContains(response, "Documento de conciliacion")
         self.assertContains(response, "CONC-20260530")
         self.assertContains(response, "BB2643314013215")
+        self.assertContains(response, "Estado expediente")
+        self.assertContains(response, "Cerrado con pendientes")
+        self.assertContains(response, "Relacion contable")
         self.assertContains(response, "Traspaso entre cuentas")
+        self.assertContains(response, "no se trata como gasto")
         self.assertContains(response, "Traspaso propio sin abono contraparte importado o ligado")
         self.assertContains(response, "Exportar CSV contabilidad")
 
@@ -423,6 +427,8 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertIn("contabilidad.csv", response["Content-Disposition"])
         body = response.content.decode("utf-8")
         self.assertIn("ClaveRastreo", body)
+        self.assertIn("EstadoExpediente", body)
+        self.assertIn("RelacionContable", body)
         self.assertIn("BB2643314013215", body)
         self.assertIn("Traspaso entre cuentas", body)
 
@@ -518,6 +524,8 @@ class ConciliacionBancariaViewTests(TestCase):
         body = response.content.decode("utf-8")
         self.assertIn("Folio", body)
         self.assertIn("ClaveRastreo", body)
+        self.assertIn("EstadoExpediente", body)
+        self.assertIn("Cerrado con pendientes", body)
         self.assertIn("BB2643314013215", body)
 
     def test_get_paquete_auditoria_exports_contpaqi_csv(self):
@@ -545,5 +553,7 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertIn("Documento", body)
         self.assertIn("TipoDocumento", body)
         self.assertIn("BeneficiarioPagador", body)
+        self.assertIn("ExpedienteCompleto", body)
+        self.assertIn("Cerrado con pendientes", body)
         self.assertIn("Traspaso", body)
         self.assertIn("BB2643314013215", body)
