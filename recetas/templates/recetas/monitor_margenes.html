@@ -694,6 +694,15 @@
     return '<span class="ps-src ps-src-sin">Sin costo</span>';
   }
 
+  function accionChip(row) {
+    var label = esc(row.accion_sugerida_label || row.accion_sugerida || "—");
+    if (row.accion_sugerida === "SUBIR") return '<span class="mm-badge is-yellow" title="El precio actual queda por debajo de la meta configurada">Subir</span>';
+    if (row.accion_sugerida === "MANTENER") return '<span class="mm-badge is-green" title="Cumple la meta configurada">Mantener</span>';
+    if (row.accion_sugerida === "REVISAR_COSTO") return '<span class="mm-badge is-muted" title="Antes de mover precio, revisar que el costo completo este cargado">Revisar costo</span>';
+    if (row.accion_sugerida === "ALTO_RIESGO_COMPETITIVO") return '<span class="mm-badge is-red" title="La subida rebasa el limite competitivo configurado">Alto riesgo competitivo</span>';
+    return '<span class="mm-badge is-muted">' + label + '</span>';
+  }
+
   function costoTitle(row) {
     if (row.breakdown) {
       var b = row.breakdown;
@@ -733,7 +742,7 @@
       '<th class="is-right">Costo inicial</th><th class="is-right">Costo último</th><th class="is-right">Var.</th>' +
       '<th class="is-right">Precio actual</th><th class="is-right">Margen</th>' +
       '<th class="is-right">Precio sugerido</th><th class="is-right">Falta subir</th>' +
-      '<th class="is-center">Estado</th>' +
+      '<th class="is-center">Estado</th><th class="is-center">Acción sugerida</th>' +
       '</tr></thead><tbody>';
 
     data.rows.forEach(function (row) {
@@ -767,6 +776,7 @@
         '<td class="is-right ps-suggest">' + (row.precio_sugerido ? money(row.precio_sugerido) : "—") + '</td>' +
         '<td class="is-right">' + faltaTxt + '</td>' +
         '<td class="is-center">' + estadoChip(row.estado) + '</td>' +
+        '<td class="is-center" title="' + esc(row.politica_margen_label || "") + '">' + accionChip(row) + '</td>' +
         '</tr>';
     });
     html += "</tbody></table></div>";

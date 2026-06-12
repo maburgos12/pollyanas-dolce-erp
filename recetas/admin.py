@@ -10,6 +10,7 @@ from .models import (
     LineaReceta,
     PlanProduccion,
     PlanProduccionItem,
+    PoliticaMargenPrecio,
     PronosticoVenta,
     Receta,
     RecetaCodigoPointAlias,
@@ -236,6 +237,23 @@ class CostoDriverAdmin(admin.ModelAdmin):
     list_filter = ("scope", "activo")
     search_fields = ("nombre", "receta__nombre", "familia")
     autocomplete_fields = ("receta",)
+
+
+@admin.register(PoliticaMargenPrecio)
+class PoliticaMargenPrecioAdmin(admin.ModelAdmin):
+    list_display = (
+        "familia_point",
+        "fuente_costo",
+        "margen_meta_pct",
+        "subida_maxima_pct",
+        "precio_max_competitivo",
+        "prioridad",
+        "activo",
+        "actualizado_en",
+    )
+    list_filter = ("fuente_costo", "activo")
+    search_fields = ("familia_point", "notas")
+    ordering = ("prioridad", "familia_point", "fuente_costo")
 
 
 @admin.register(RecetaCostoVersion)

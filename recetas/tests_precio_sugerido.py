@@ -21,7 +21,7 @@ from django.urls import reverse
 from openpyxl import load_workbook
 
 from core.models import Sucursal
-from recetas.models import Receta, RecetaAgrupacionAddon, RecetaCostoVersion
+from recetas.models import PoliticaMargenPrecio, Receta, RecetaAgrupacionAddon, RecetaCostoVersion
 from pos_bridge.models import PointProduct
 from reportes.models import (
     ProductoCostoOperativoMensual,
@@ -322,3 +322,40 @@ class PrecioSugeridoViewTests(TestCase):
         # sugerido = 19.87 / (1 - 0.30) = 28.39 -> redondeo techo $5 = 30
         self.assertEqual(row["precio_sugerido"], "30.00")
         self.assertIsNone(row["falta_subir_pct"])
+
+    def test_politica_familia_fuente_sobrescribe_meta_mp(self):
+        PoliticaMargenPrecio.objects.create(
+            fuente_costo=PoliticaMargenPrecio.FUENTE_MP_FALLBACK,
+            familia_point="Pastel Mediano",
+            margen_meta_pct=Decimal("55.00"),
+            subida_maxima_pct=Decimal("25.00"),
+            prioridad=1,
+        )
+        r = self._receta("SoloMP Familiar", "MMF1")
+        self._point("MMF1", "SoloMP Familiar", precio=200, categoria="Pastel Mediano")
+        self._mp_hist(r, 80)
+
+        row = self._row(self._fetch(), r)
+
+        self.assertEqual(row["margen_meta"], "55")
+        self.assertEqual(row["estado"], "OK")
+        self.assertEqual(row["accion_sugerida"], "MANTENER")
+        self.assertEqual(row["precio_sugerido"], "180.00")
+
+    def test_subida_mayor_a_politica_marca_alto_riesgo_competitivo(self):
+        PoliticaMargenPrecio.objects.create(
+            fuente_costo=PoliticaMargenPrecio.FUENTE_FAB_COMPLETO,
+            familia_point="Pastel Mediano",
+            margen_meta_pct=Decimal("55.00"),
+            subida_maxima_pct=Decimal("10.00"),
+            prioridad=1,
+        )
+        r = self._receta("Fab Riesgo", "RIESGO1")
+        self._point("RIESGO1", "Fab Riesgo", precio=150, categoria="Pastel Mediano")
+        self._operativo(r, fab=100, mp=60, mo=20, ind=10, emp=10)
+
+        row = self._row(self._fetch(), r)
+
+        self.assertEqual(row["estado"], "AJUSTE")
+        self.assertEqual(row["precio_sugerido"], "225.00")
+        self.assertEqual(row["accion_sugerida"], "ALTO_RIESGO_COMPETITIVO")

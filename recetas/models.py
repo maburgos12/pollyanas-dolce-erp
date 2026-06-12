@@ -129,6 +129,56 @@ class Receta(models.Model):
         return self.nombre
 
 
+class PoliticaMargenPrecio(models.Model):
+    FUENTE_TODAS = "TODAS"
+    FUENTE_FAB_COMPLETO = "FAB_COMPLETO"
+    FUENTE_MP_FALLBACK = "MP_FALLBACK"
+    FUENTE_REVENTA = "REVENTA_HISTORICO"
+    FUENTE_CHOICES = [
+        (FUENTE_TODAS, "Todas"),
+        (FUENTE_FAB_COMPLETO, "Fabricacion completa"),
+        (FUENTE_MP_FALLBACK, "Solo materia prima"),
+        (FUENTE_REVENTA, "Reventa"),
+    ]
+
+    fuente_costo = models.CharField(max_length=30, choices=FUENTE_CHOICES, default=FUENTE_TODAS, db_index=True)
+    familia_point = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Categoria/familia de Point. Vacio aplica a todas.",
+    )
+    margen_meta_pct = models.DecimalField(max_digits=6, decimal_places=2)
+    subida_maxima_pct = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Si la sugerencia rebasa esta subida vs precio actual, se marca como alto riesgo competitivo.",
+    )
+    precio_max_competitivo = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Tope manual observado de mercado para esta familia/fuente.",
+    )
+    prioridad = models.PositiveIntegerField(default=100, db_index=True)
+    activo = models.BooleanField(default=True, db_index=True)
+    notas = models.TextField(blank=True, default="")
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Politica de margen y precio"
+        verbose_name_plural = "Politicas de margen y precio"
+        ordering = ["prioridad", "familia_point", "fuente_costo"]
+
+    def __str__(self) -> str:
+        familia = self.familia_point or "Todas las familias"
+        return f"{familia} · {self.get_fuente_costo_display()} · {self.margen_meta_pct}%"
+
+
 class RecetaEquivalencia(models.Model):
     receta_porcion = models.OneToOneField(
         Receta,
