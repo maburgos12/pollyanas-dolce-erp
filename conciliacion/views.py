@@ -212,10 +212,19 @@ def _handle_conciliar_movimiento(request: HttpRequest) -> str:
 
     if tipo_conciliacion == MovimientoBancario.CONCILIACION_TRASPASO:
         contraparte_id = str(request.POST.get("contraparte_id") or "").strip()
+        if not contraparte_id:
+            _marcar_movimiento_conciliado(
+                movimiento,
+                tipo_conciliacion=tipo_conciliacion,
+                user=request.user,
+                nota=nota or "Traspaso entre cuentas propias sin contraparte importada o localizada.",
+            )
+            messages.success(request, "Movimiento marcado como traspaso entre cuentas sin contraparte ligada.")
+            return redirect_url
         try:
             contraparte = MovimientoBancario.objects.select_related("cuenta").get(pk=contraparte_id)
         except (MovimientoBancario.DoesNotExist, ValueError):
-            messages.error(request, "Selecciona el cargo o abono contraparte del traspaso.")
+            messages.error(request, "Selecciona una contraparte valida o deja el campo vacio si no esta importada.")
             return redirect_url
         if not _es_contraparte_valida(movimiento, contraparte):
             messages.error(request, "La contraparte debe ser otro movimiento con monto igual y tipo opuesto.")

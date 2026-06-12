@@ -777,7 +777,7 @@
             <th>Descripcion</th>
             <th>Tipo</th>
             <th class="conc-money">Monto</th>
-            <th>Regla fiscal</th>
+            <th>Regla automatica</th>
             <th>Siguiente revision</th>
             <th>Estado</th>
             <th>Conciliar</th>
@@ -794,6 +794,9 @@
             <td>
               <span class="conc-chip {{ row.regla.tono }}">{{ row.regla.mesa_label }}</span>
               <div class="conc-note">{{ row.regla.mesa_detalle }}</div>
+              {% if row.movimiento.conciliado and row.movimiento.tipo_conciliacion %}
+                <div class="conc-note">No es el cierre final. Ver conciliacion aplicada.</div>
+              {% endif %}
             </td>
             <td>
               {% if row.candidatos %}
@@ -806,8 +809,9 @@
               {% if row.movimiento.conciliado %}
                 <span class="conc-chip is-ok">Conciliado</span>
                 <div class="conc-note">
-                  {{ row.movimiento.get_tipo_conciliacion_display|default:"Sin tipo" }}
+                  <strong>{{ row.movimiento.get_tipo_conciliacion_display|default:"Sin tipo" }}</strong>
                   {% if row.movimiento.movimiento_relacionado_id %}<br>Contra mov. #{{ row.movimiento.movimiento_relacionado_id }}{% endif %}
+                  {% if row.movimiento.tipo_conciliacion == "traspaso_cuentas" and not row.movimiento.movimiento_relacionado_id %}<br>Sin contraparte importada ligada.{% endif %}
                   {% if row.movimiento.cfdi_relacionado_id %}<br>CFDI {{ row.movimiento.cfdi_relacionado.uuid }}{% endif %}
                   {% if row.movimiento.nota_conciliacion %}<br>{{ row.movimiento.nota_conciliacion }}{% endif %}
                 </div>
@@ -816,47 +820,41 @@
               {% endif %}
             </td>
             <td>
-              {% if row.movimiento.conciliado %}
-                <span class="conc-note">Ya cerrado.</span>
-              {% else %}
-                <form class="conc-inline-form" method="post">
-                  {% csrf_token %}
-                  <input type="hidden" name="action" value="conciliar_movimiento">
-                  <input type="hidden" name="periodo" value="{{ periodo_resumen.periodo_value }}">
-                  <input type="hidden" name="movimiento_id" value="{{ row.movimiento.pk }}">
-                  <select name="tipo_conciliacion" required>
-                    <option value="">Que es este movimiento?</option>
-                    <option value="cfdi">Va contra CFDI</option>
-                    <option value="ingreso_facturado">Ingreso ya facturado por sucursal/canal</option>
-                    <option value="traspaso_cuentas">Traspaso entre cuentas propias</option>
-                    <option value="linea_credito">Disposicion / pago linea de credito</option>
-                    <option value="tarjeta_credito">Pago / movimiento tarjeta de credito</option>
-                    <option value="comision_bancaria">Comision bancaria</option>
-                    <option value="fiscal">Impuesto / devolucion SAT</option>
-                    <option value="nomina">Nomina</option>
-                    <option value="revision_operativa">Cerrar como revision operativa</option>
-                    <option value="soporte">Soporte sin CFDI</option>
-                  </select>
-                  {% if row.candidatos %}
-                  <select name="cfdi_uuid">
-                    <option value="">CFDI candidato</option>
-                    {% for cfdi in row.candidatos %}
-                    <option value="{{ cfdi.uuid }}">{{ cfdi.fecha_emision|date:"Y-m-d" }} · ${{ cfdi.total|floatformat:2|intcomma }} · {{ cfdi.uuid }}</option>
-                    {% endfor %}
-                  </select>
-                  {% endif %}
-                  {% if row.contrapartes %}
-                  <select name="contraparte_id">
-                    <option value="">Contraparte para traspaso</option>
-                    {% for contraparte in row.contrapartes %}
-                    <option value="{{ contraparte.pk }}">{{ contraparte.fecha_transaccion|date:"Y-m-d" }} · {{ contraparte.cuenta.nombre_display }} · {{ contraparte.tipo }} · ${{ contraparte.monto|floatformat:2|intcomma }}</option>
-                    {% endfor %}
-                  </select>
-                  {% endif %}
-                  <input type="text" name="nota_conciliacion" placeholder="Nota o evidencia">
-                  <button class="btn btn-secondary" type="submit">Aplicar</button>
-                </form>
-              {% endif %}
+              <form class="conc-inline-form" method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="conciliar_movimiento">
+                <input type="hidden" name="periodo" value="{{ periodo_resumen.periodo_value }}">
+                <input type="hidden" name="movimiento_id" value="{{ row.movimiento.pk }}">
+                <select name="tipo_conciliacion" required>
+                  <option value="">Que es este movimiento?</option>
+                  <option value="cfdi" {% if row.movimiento.tipo_conciliacion == "cfdi" %}selected{% endif %}>Va contra CFDI</option>
+                  <option value="ingreso_facturado" {% if row.movimiento.tipo_conciliacion == "ingreso_facturado" %}selected{% endif %}>Ingreso ya facturado por sucursal/canal</option>
+                  <option value="traspaso_cuentas" {% if row.movimiento.tipo_conciliacion == "traspaso_cuentas" %}selected{% endif %}>Traspaso entre cuentas propias</option>
+                  <option value="linea_credito" {% if row.movimiento.tipo_conciliacion == "linea_credito" %}selected{% endif %}>Disposicion / pago linea de credito</option>
+                  <option value="tarjeta_credito" {% if row.movimiento.tipo_conciliacion == "tarjeta_credito" %}selected{% endif %}>Pago / movimiento tarjeta de credito</option>
+                  <option value="comision_bancaria" {% if row.movimiento.tipo_conciliacion == "comision_bancaria" %}selected{% endif %}>Comision bancaria</option>
+                  <option value="fiscal" {% if row.movimiento.tipo_conciliacion == "fiscal" %}selected{% endif %}>Impuesto / devolucion SAT</option>
+                  <option value="nomina" {% if row.movimiento.tipo_conciliacion == "nomina" %}selected{% endif %}>Nomina</option>
+                  <option value="revision_operativa" {% if row.movimiento.tipo_conciliacion == "revision_operativa" %}selected{% endif %}>Cerrar como revision operativa</option>
+                  <option value="soporte" {% if row.movimiento.tipo_conciliacion == "soporte" %}selected{% endif %}>Soporte sin CFDI</option>
+                </select>
+                {% if row.candidatos %}
+                <select name="cfdi_uuid">
+                  <option value="">CFDI candidato</option>
+                  {% for cfdi in row.candidatos %}
+                  <option value="{{ cfdi.uuid }}" {% if row.movimiento.cfdi_relacionado_id == cfdi.pk %}selected{% endif %}>{{ cfdi.fecha_emision|date:"Y-m-d" }} · ${{ cfdi.total|floatformat:2|intcomma }} · {{ cfdi.uuid }}</option>
+                  {% endfor %}
+                </select>
+                {% endif %}
+                <select name="contraparte_id">
+                  <option value="">Sin contraparte importada / no aplica</option>
+                  {% for contraparte in row.contrapartes %}
+                  <option value="{{ contraparte.pk }}" {% if row.movimiento.movimiento_relacionado_id == contraparte.pk %}selected{% endif %}>{{ contraparte.fecha_transaccion|date:"Y-m-d" }} · {{ contraparte.cuenta.nombre_display }} · {{ contraparte.tipo }} · ${{ contraparte.monto|floatformat:2|intcomma }}</option>
+                  {% endfor %}
+                </select>
+                <input type="text" name="nota_conciliacion" value="{{ row.movimiento.nota_conciliacion }}" placeholder="Nota o evidencia">
+                <button class="btn btn-secondary" type="submit">{% if row.movimiento.conciliado %}Actualizar{% else %}Aplicar{% endif %}</button>
+              </form>
             </td>
           </tr>
           {% empty %}
