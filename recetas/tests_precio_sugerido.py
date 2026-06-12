@@ -279,7 +279,7 @@ class PrecioSugeridoViewTests(TestCase):
             resp["Content-Type"],
         )
         wb = load_workbook(BytesIO(resp.content))
-        ws = wb["Precio sugerido"]
+        ws = wb["Piso rentable"]
         self.assertEqual(ws["A5"].value, "Pollyana's Dolce - Precio minimo rentable")
         family_headers = [
             cell.value for row in ws.iter_rows(min_row=13, max_col=1) for cell in row
@@ -289,15 +289,46 @@ class PrecioSugeridoViewTests(TestCase):
         self.assertIn("Familia: Pay Grande (1 productos)", family_headers)
         self.assertTrue(any(drawing.anchor._from.row == 0 for drawing in ws._images))
 
+    def test_export_xlsx_refleja_escenario_custom(self):
+        r = self._receta("Pastel custom", "XPC1")
+        self._point("XPC1", "Pastel custom", precio=300)
+        self._operativo(r, fab=100, mp=60, mo=20, ind=10, emp=10)
+
+        resp = self.client.get(
+            reverse("recetas:monitor_margenes_precio_sugerido"),
+            {
+                "meses": 6, "export": "xlsx",
+                "costo_produccion_pct": "40",
+                "margen_venta_pct": "60",
+                "margen_reventa_pct": "25",
+            },
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        ws = load_workbook(BytesIO(resp.content))["Piso rentable"]
+        self.assertIn("costo producción 40%", ws["A7"].value)
+        self.assertIn("margen fabricación 60%", ws["A7"].value)
+        self.assertIn("margen reventa 25%", ws["A7"].value)
+
     # ---- margen meta por fuente ----
     def test_margen_meta_55_para_fab_completo(self):
         r = self._receta("Fab", "MF1")
         self._point("MF1", "Fab", precio=500)
         self._operativo(r, fab=100, mp=60, mo=20, ind=10, emp=10)
         data = self._fetch()
+        self.assertEqual(data["costo_produccion_pct"], "35")
         self.assertEqual(data["margen_meta_fab"], "55")
         self.assertEqual(data["margen_meta_mp"], "65")
         self.assertEqual(self._row(data, r)["margen_meta"], "55")
+
+    def test_margen_fabricacion_custom_cambia_estado_y_piso(self):
+        r = self._receta("Fab Custom", "MFC1")
+        self._point("MFC1", "Fab Custom", precio=240)
+        self._operativo(r, fab=100, mp=60, mo=20, ind=10, emp=10)
+        row = self._row(self._fetch(margen_venta_pct="60"), r)
+        self.assertEqual(row["margen_meta"], "60")
+        self.assertEqual(row["estado"], "AJUSTE")
+        self.assertEqual(row["precio_sugerido"], "250.00")
 
     def test_mp_fallback_usa_margen_meta_65(self):
         # Solo MP: meta 65%. Precio 200, costo 80 -> margen 60% (>=55 pero <65) -> AJUSTE.
@@ -309,6 +340,32 @@ class PrecioSugeridoViewTests(TestCase):
         self.assertEqual(row["estado"], "AJUSTE")
         # sugerido = 80 / (1 - 0.65) = 228.57 -> redondeo techo $5 = 230
         self.assertEqual(row["precio_sugerido"], "230.00")
+
+    def test_costo_produccion_custom_deriva_margen_mp(self):
+        r = self._receta("SoloMP Custom", "MMC1")
+        self._point("MMC1", "SoloMP Custom", precio=200)
+        self._mp_hist(r, 80)
+        data = self._fetch(costo_produccion_pct="40")
+        row = self._row(data, r)
+        self.assertEqual(data["costo_produccion_pct"], "40")
+        self.assertEqual(data["margen_meta_mp"], "60")
+        self.assertEqual(row["margen_meta"], "60")
+        self.assertEqual(row["estado"], "OK")
+        self.assertEqual(row["precio_sugerido"], "200.00")
+
+    def test_combo_con_sabor_hereda_margen_mp_custom(self):
+        base = self._receta("Pay Base", "CB1")
+        self._point("CB1", "Pay Base", precio=500)
+        self._mp_hist(base, 178)
+        addon = self._receta("Sabor Nuez", "SNUEZ")
+        self._operativo(addon, fab=73, mp=73, unidades=800)
+        RecetaAgrupacionAddon.objects.create(
+            base_receta=base, addon_receta=addon, addon_codigo_point="SNUEZ",
+            addon_nombre_point="Sabor Nuez", status=RecetaAgrupacionAddon.STATUS_APPROVED,
+        )
+        combo = self._row_by_name(self._fetch(costo_produccion_pct="40"), "Pay Base + Sabor Nuez")
+        self.assertEqual(combo["margen_meta"], "60")
+        self.assertEqual(combo["precio_sugerido"], "630.00")
 
     def test_reventa_usa_margen_meta_30_y_no_fuerza_markup_fabricado(self):
         r = self._receta("Caja carton", "CAJA1", modo=Receta.MODO_COSTEO_REVENTA)
@@ -322,3 +379,22 @@ class PrecioSugeridoViewTests(TestCase):
         # sugerido = 19.87 / (1 - 0.30) = 28.39 -> redondeo techo $5 = 30
         self.assertEqual(row["precio_sugerido"], "30.00")
         self.assertIsNone(row["falta_subir_pct"])
+
+    def test_margen_reventa_custom(self):
+        r = self._receta("Caja custom", "CAJA2", modo=Receta.MODO_COSTEO_REVENTA)
+        p = self._point("CAJA2", "Caja custom", precio=45, categoria="Accesorios")
+        self._reventa_hist(p, Decimal("30"))
+        data = self._fetch(margen_reventa_pct="40")
+        row = self._row(data, r)
+        self.assertEqual(data["margen_meta_reventa"], "40")
+        self.assertEqual(row["margen_meta"], "40")
+        self.assertEqual(row["precio_sugerido"], "50.00")
+
+    def test_parametro_porcentaje_invalido_responde_400(self):
+        resp = self.client.get(
+            reverse("recetas:monitor_margenes_precio_sugerido"),
+            {"meses": 6, "costo_produccion_pct": "5"},
+        )
+        self.assertEqual(resp.status_code, 400)
+        payload = json.loads(resp.content)
+        self.assertIn("costo_produccion_pct", payload["param_errors"])
