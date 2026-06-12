@@ -229,8 +229,11 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertContains(response, "Mesa de movimientos")
         self.assertContains(response, "Regla fiscal")
         self.assertContains(response, "Que es este movimiento?")
+        self.assertContains(response, "Ingreso ya facturado por sucursal/canal")
         self.assertContains(response, "Traspaso entre cuentas propias")
         self.assertContains(response, "Disposicion / pago linea de credito")
+        self.assertContains(response, "Pago / movimiento tarjeta de credito")
+        self.assertContains(response, "Cerrar como revision operativa")
         self.assertContains(response, "Filtrar movimientos")
         self.assertContains(response, "Mostrando 1-3 de 3 movimientos")
 

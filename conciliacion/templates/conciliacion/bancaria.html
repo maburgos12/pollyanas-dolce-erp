@@ -827,10 +827,14 @@
                   <select name="tipo_conciliacion" required>
                     <option value="">Que es este movimiento?</option>
                     <option value="cfdi">Va contra CFDI</option>
+                    <option value="ingreso_facturado">Ingreso ya facturado por sucursal/canal</option>
                     <option value="traspaso_cuentas">Traspaso entre cuentas propias</option>
                     <option value="linea_credito">Disposicion / pago linea de credito</option>
+                    <option value="tarjeta_credito">Pago / movimiento tarjeta de credito</option>
                     <option value="comision_bancaria">Comision bancaria</option>
                     <option value="fiscal">Impuesto / devolucion SAT</option>
+                    <option value="nomina">Nomina</option>
+                    <option value="revision_operativa">Cerrar como revision operativa</option>
                     <option value="soporte">Soporte sin CFDI</option>
                   </select>
                   {% if row.candidatos %}

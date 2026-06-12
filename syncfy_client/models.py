@@ -44,17 +44,25 @@ class MovimientoBancario(models.Model):
     TIPO_ABONO = "abono"
     TIPO_CHOICES = [(TIPO_CARGO, "Cargo"), (TIPO_ABONO, "Abono")]
     CONCILIACION_CFDI = "cfdi"
+    CONCILIACION_INGRESO_FACTURADO = "ingreso_facturado"
     CONCILIACION_TRASPASO = "traspaso_cuentas"
     CONCILIACION_LINEA_CREDITO = "linea_credito"
+    CONCILIACION_TARJETA_CREDITO = "tarjeta_credito"
     CONCILIACION_COMISION = "comision_bancaria"
     CONCILIACION_FISCAL = "fiscal"
+    CONCILIACION_NOMINA = "nomina"
+    CONCILIACION_REVISION = "revision_operativa"
     CONCILIACION_SOPORTE = "soporte"
     CONCILIACION_CHOICES = [
         (CONCILIACION_CFDI, "CFDI"),
+        (CONCILIACION_INGRESO_FACTURADO, "Ingreso facturado"),
         (CONCILIACION_TRASPASO, "Traspaso entre cuentas"),
         (CONCILIACION_LINEA_CREDITO, "Linea de credito"),
+        (CONCILIACION_TARJETA_CREDITO, "Tarjeta de credito"),
         (CONCILIACION_COMISION, "Comision bancaria"),
         (CONCILIACION_FISCAL, "Fiscal"),
+        (CONCILIACION_NOMINA, "Nomina"),
+        (CONCILIACION_REVISION, "Revision operativa"),
         (CONCILIACION_SOPORTE, "Soporte sin CFDI"),
     ]
 
