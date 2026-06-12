@@ -227,13 +227,14 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertContains(response, "BBVA Empresas")
         self.assertContains(response, "American Express Business Gold")
         self.assertContains(response, "Mesa de movimientos")
-        self.assertContains(response, "Regla fiscal")
+        self.assertContains(response, "Regla automatica")
         self.assertContains(response, "Que es este movimiento?")
         self.assertContains(response, "Ingreso ya facturado por sucursal/canal")
         self.assertContains(response, "Traspaso entre cuentas propias")
         self.assertContains(response, "Disposicion / pago linea de credito")
         self.assertContains(response, "Pago / movimiento tarjeta de credito")
         self.assertContains(response, "Cerrar como revision operativa")
+        self.assertContains(response, "Sin contraparte importada / no aplica")
         self.assertContains(response, "Filtrar movimientos")
         self.assertContains(response, "Mostrando 1-3 de 3 movimientos")
 
@@ -339,3 +340,32 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertEqual(cargo.movimiento_relacionado, abono)
         self.assertEqual(abono.movimiento_relacionado, cargo)
         self.assertEqual(cargo.tipo_conciliacion, MovimientoBancario.CONCILIACION_TRASPASO)
+
+    def test_post_conciliar_movimiento_allows_transfer_without_imported_counterpart(self):
+        cargo = MovimientoBancario.objects.create(
+            id_transaction="traspaso-sin-contraparte",
+            cuenta=self.cuenta,
+            descripcion="SPEI A CUENTA PROPIA BBVA",
+            monto=Decimal("100000.00"),
+            tipo=MovimientoBancario.TIPO_CARGO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 30, 12, 0)),
+            fecha_refresh=timezone.now(),
+        )
+
+        response = self.client.post(
+            "/conciliacion/bancaria/",
+            {
+                "action": "conciliar_movimiento",
+                "periodo": "2026-05",
+                "movimiento_id": str(cargo.pk),
+                "tipo_conciliacion": MovimientoBancario.CONCILIACION_TRASPASO,
+                "nota_conciliacion": "Traspaso a BBVA sin abono importado",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        cargo.refresh_from_db()
+        self.assertTrue(cargo.conciliado)
+        self.assertEqual(cargo.tipo_conciliacion, MovimientoBancario.CONCILIACION_TRASPASO)
+        self.assertIsNone(cargo.movimiento_relacionado)
+        self.assertEqual(cargo.nota_conciliacion, "Traspaso a BBVA sin abono importado")
