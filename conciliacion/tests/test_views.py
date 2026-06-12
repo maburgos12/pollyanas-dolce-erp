@@ -369,3 +369,57 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertEqual(cargo.tipo_conciliacion, MovimientoBancario.CONCILIACION_TRASPASO)
         self.assertIsNone(cargo.movimiento_relacionado)
         self.assertEqual(cargo.nota_conciliacion, "Traspaso a BBVA sin abono importado")
+
+    def test_get_movimiento_detalle_shows_conciliation_document(self):
+        movimiento = MovimientoBancario.objects.create(
+            id_transaction="spei-propio-detalle",
+            cuenta=self.cuenta,
+            descripcion=(
+                "SPEI Enviado: | Institucion Receptora: BBVA MEXICO | "
+                "Beneficiario: GRUPO EMPRESARIAL FONSMA | Cuenta Beneficiario: 012733001207530844 "
+                "Clave de Rastreo: BB2643314013215 Concepto del Pago: T"
+            ),
+            monto=Decimal("100000.00"),
+            tipo=MovimientoBancario.TIPO_CARGO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 30, 12, 0)),
+            fecha_refresh=timezone.now(),
+            conciliado=True,
+            tipo_conciliacion=MovimientoBancario.CONCILIACION_TRASPASO,
+            nota_conciliacion="Traspaso a BBVA sin abono importado",
+            conciliado_por=self.user,
+            conciliado_en=timezone.now(),
+        )
+
+        response = self.client.get(f"/conciliacion/bancaria/movimiento/{movimiento.pk}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Documento de conciliacion")
+        self.assertContains(response, "CONC-20260530")
+        self.assertContains(response, "BB2643314013215")
+        self.assertContains(response, "Traspaso entre cuentas")
+        self.assertContains(response, "Traspaso propio sin abono contraparte importado o ligado")
+        self.assertContains(response, "Exportar CSV contabilidad")
+
+    def test_get_movimiento_detalle_exports_accounting_csv(self):
+        movimiento = MovimientoBancario.objects.create(
+            id_transaction="spei-propio-export",
+            cuenta=self.cuenta,
+            descripcion="SPEI Enviado Clave de Rastreo: BB2643314013215 Concepto del Pago: T",
+            monto=Decimal("100000.00"),
+            tipo=MovimientoBancario.TIPO_CARGO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 30, 12, 0)),
+            fecha_refresh=timezone.now(),
+            conciliado=True,
+            tipo_conciliacion=MovimientoBancario.CONCILIACION_TRASPASO,
+            nota_conciliacion="Traspaso a cuenta propia",
+        )
+
+        response = self.client.get(f"/conciliacion/bancaria/movimiento/{movimiento.pk}/?export=contabilidad_csv")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
+        self.assertIn("contabilidad.csv", response["Content-Disposition"])
+        body = response.content.decode("utf-8")
+        self.assertIn("ClaveRastreo", body)
+        self.assertIn("BB2643314013215", body)
+        self.assertIn("Traspaso entre cuentas", body)
