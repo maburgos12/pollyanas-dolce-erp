@@ -243,7 +243,7 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
             BonoProduccionEmpleado.objects.filter(periodo__mes=mes, periodo__anio=anio)
         ).select_related("empleado")
         area = self._context_param("area")
-        if area:
+        if area and area != "TODAS":
             area_normalizada = normalizar_area_produccion(area)
             areas_validas = {code for code, _ in AREAS_PRODUCCION}
             if area_normalizada not in areas_validas:
@@ -328,7 +328,7 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
         if bonos_periodo is None:
             return super().list(request)
         area = self._context_param("area")
-        area_normalizada = normalizar_area_produccion(area) if area else None
+        area_normalizada = normalizar_area_produccion(area) if area and area != "TODAS" else None
         bonos = list(bonos_periodo.filter(empleado__activo=True).order_by("area", "empleado__nombre"))
         area_bono_por_empleado = {bono.empleado_id: bono.area for bono in bonos}
         empleados = []
@@ -368,7 +368,7 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
         area = self._context_param("area")
         mes = self._context_param("mes")
         anio = self._context_param("anio")
-        if area:
+        if area and area != "TODAS":
             area_normalizada = normalizar_area_produccion(area)
             if area_normalizada not in areas_validas:
                 return Empleado.objects.none()
