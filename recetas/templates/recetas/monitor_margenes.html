@@ -250,6 +250,14 @@
   .ps-control .ps-num { height: 38px; padding: 0 10px; border: 1px solid var(--mm-border); border-radius: 8px; background: #fdf9fb; color: #2c2026; font: inherit; font-size: 13px; }
   .ps-control .ps-num { max-width: 8rem; }
   .ps-control-fams { flex: 1; min-width: 280px; }
+  .ps-policy-box { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 10px; padding: 14px 18px 0; }
+  .ps-policy-card { border: 1px solid var(--mm-border); border-radius: 8px; background: #fffafd; padding: 10px; }
+  .ps-policy-title { color: var(--mm-wine); font-size: 12px; font-weight: 800; margin-bottom: 8px; }
+  .ps-policy-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .ps-policy-fields label { display: flex; flex-direction: column; gap: 4px; color: #6f3150; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+  .ps-policy-fields input { height: 34px; padding: 0 8px; border: 1px solid var(--mm-border); border-radius: 7px; background: #fff; color: #2c2026; font: inherit; font-size: 13px; }
+  .ps-policy-actions { display: flex; align-items: center; gap: 10px; padding: 10px 18px 0; }
+  .ps-policy-status { color: var(--mm-muted); font-size: 12px; }
   .ps-fam-tools { display: flex; gap: 10px; }
   .ps-link { border: none; background: none; color: var(--mm-wine); cursor: pointer; font-size: 12px; font-weight: 700; padding: 0; text-decoration: underline; }
   .ps-fam-grid { display: flex; flex-wrap: wrap; gap: 6px; max-height: 132px; overflow: auto; padding: 4px; border: 1px solid var(--mm-soft); border-radius: 8px; }
@@ -316,6 +324,47 @@
       </div>
       <button type="button" class="ps-close" id="ps-close" aria-label="Cerrar">✕</button>
     </div>
+    <div class="ps-policy-box" id="ps-policy-box" data-can-edit="{{ puede_editar_politicas_precio|yesno:'1,0' }}">
+      <div class="ps-policy-card">
+        <div class="ps-policy-title">Fabricación completa</div>
+        <div class="ps-policy-fields">
+          <label>Meta %
+            <input class="ps-policy-input" data-source="fab" data-field="margen_meta_pct" type="number" step="0.01" min="0" max="95" value="{{ politicas_precio_base.fab.margen_meta_pct }}">
+          </label>
+          <label>Riesgo subida %
+            <input class="ps-policy-input" data-source="fab" data-field="subida_maxima_pct" type="number" step="0.01" min="0" max="500" value="{{ politicas_precio_base.fab.subida_maxima_pct|default_if_none:'' }}">
+          </label>
+        </div>
+      </div>
+      <div class="ps-policy-card">
+        <div class="ps-policy-title">Solo materia prima</div>
+        <div class="ps-policy-fields">
+          <label>Meta %
+            <input class="ps-policy-input" data-source="mp" data-field="margen_meta_pct" type="number" step="0.01" min="0" max="95" value="{{ politicas_precio_base.mp.margen_meta_pct }}">
+          </label>
+          <label>Riesgo subida %
+            <input class="ps-policy-input" data-source="mp" data-field="subida_maxima_pct" type="number" step="0.01" min="0" max="500" value="{{ politicas_precio_base.mp.subida_maxima_pct|default_if_none:'' }}">
+          </label>
+        </div>
+      </div>
+      <div class="ps-policy-card">
+        <div class="ps-policy-title">Reventa</div>
+        <div class="ps-policy-fields">
+          <label>Meta %
+            <input class="ps-policy-input" data-source="reventa" data-field="margen_meta_pct" type="number" step="0.01" min="0" max="95" value="{{ politicas_precio_base.reventa.margen_meta_pct }}">
+          </label>
+          <label>Riesgo subida %
+            <input class="ps-policy-input" data-source="reventa" data-field="subida_maxima_pct" type="number" step="0.01" min="0" max="500" value="{{ politicas_precio_base.reventa.subida_maxima_pct|default_if_none:'' }}">
+          </label>
+        </div>
+      </div>
+    </div>
+    {% if puede_editar_politicas_precio %}
+    <div class="ps-policy-actions">
+      <button type="button" class="btn btn-secondary" id="ps-policy-save">Guardar metas</button>
+      <span class="ps-policy-status" id="ps-policy-status">Cambios aplican al recalcular.</span>
+    </div>
+    {% endif %}
     <div class="ps-controls">
       <div class="ps-control">
         <label for="ps-meses">Meses a revisar</label>
@@ -616,15 +665,23 @@
 <script>
 (function () {
   var ENDPOINT = "{% url 'recetas:monitor_margenes_precio_sugerido' %}";
+  var POLICY_ENDPOINT = "{% url 'recetas:monitor_margenes_politicas_precio' %}";
   var panel = document.getElementById("ps-panel");
   var openBtn = document.getElementById("ps-open");
   var closeBtn = document.getElementById("ps-close");
   var mesesSel = document.getElementById("ps-meses");
   var famGrid = document.getElementById("ps-fam-grid");
   var calcBtn = document.getElementById("ps-calc");
+  var policySaveBtn = document.getElementById("ps-policy-save");
+  var policyStatus = document.getElementById("ps-policy-status");
   var exportLink = document.getElementById("ps-export");
   var summary = document.getElementById("ps-summary");
   var result = document.getElementById("ps-result");
+
+  function csrfToken() {
+    var match = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+    return match ? decodeURIComponent(match[1]) : "";
+  }
 
   function selectedFamilies() {
     return Array.prototype.slice
@@ -637,6 +694,24 @@
     params.set("meses", mesesSel.value);
     selectedFamilies().forEach(function (f) { params.append("familia", f); });
     return params.toString();
+  }
+
+  function collectPolicies() {
+    var payload = { fab: {}, mp: {}, reventa: {} };
+    document.querySelectorAll(".ps-policy-input").forEach(function (input) {
+      payload[input.dataset.source][input.dataset.field] = input.value;
+    });
+    return payload;
+  }
+
+  function applyPolicies(policies) {
+    Object.keys(policies || {}).forEach(function (source) {
+      var config = policies[source] || {};
+      Object.keys(config).forEach(function (field) {
+        var input = document.querySelector('.ps-policy-input[data-source="' + source + '"][data-field="' + field + '"]');
+        if (input) input.value = config[field] == null ? "" : config[field];
+      });
+    });
   }
 
   function money(value) {
@@ -802,12 +877,46 @@
       });
   }
 
+  function guardarPoliticas() {
+    if (!policySaveBtn) return;
+    policySaveBtn.disabled = true;
+    if (policyStatus) policyStatus.textContent = "Guardando metas...";
+    fetch(POLICY_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken": csrfToken(),
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      body: JSON.stringify(collectPolicies())
+    })
+      .then(function (resp) {
+        return resp.json().then(function (data) {
+          if (!resp.ok || !data.ok) throw new Error(data.error || ("HTTP " + resp.status));
+          return data;
+        });
+      })
+      .then(function (data) {
+        applyPolicies(data.politicas_base);
+        if (policyStatus) policyStatus.textContent = "Metas guardadas. Recalculando...";
+        calcular();
+        if (policyStatus) policyStatus.textContent = "Metas guardadas.";
+      })
+      .catch(function (err) {
+        if (policyStatus) policyStatus.textContent = err.message;
+      })
+      .finally(function () {
+        policySaveBtn.disabled = false;
+      });
+  }
+
   if (openBtn) openBtn.addEventListener("click", function () {
     panel.hidden = false;
     panel.scrollIntoView({ behavior: "smooth", block: "start" });
   });
   if (closeBtn) closeBtn.addEventListener("click", function () { panel.hidden = true; });
   if (calcBtn) calcBtn.addEventListener("click", calcular);
+  if (policySaveBtn) policySaveBtn.addEventListener("click", guardarPoliticas);
 
   var famAll = document.getElementById("ps-fam-all");
   var famNone = document.getElementById("ps-fam-none");

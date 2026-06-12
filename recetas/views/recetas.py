@@ -6198,6 +6198,8 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
             "total_cost": total_cost,
             "total_price": total_price,
             "familias_produccion": familias_produccion,
+            "politicas_precio_base": _base_policy_payload(),
+            "puede_editar_politicas_precio": request.user.is_superuser,
         },
     )
 
@@ -6344,6 +6346,80 @@ def _fmt_decimal(value: Decimal | None) -> str | None:
     if "." in text:
         text = text.rstrip("0").rstrip(".")
     return text
+
+
+def _base_policy_payload() -> dict[str, dict[str, str | None]]:
+    politicas = _politicas_margen_precio()
+    config = {}
+    for key, fuente in {
+        "fab": COSTO_FAB_COMPLETO,
+        "mp": COSTO_MP_FALLBACK,
+        "reventa": COSTO_REVENTA,
+    }.items():
+        politica = _resolver_politica_margen(politicas, fuente=fuente, familia_point="")
+        config[key] = {
+            "margen_meta_pct": _fmt_decimal(politica["margen_meta"]),
+            "subida_maxima_pct": _fmt_decimal(politica["subida_maxima_pct"]),
+            "precio_max_competitivo": _fmt_decimal(politica["precio_max_competitivo"]),
+        }
+    return config
+
+
+def _decimal_from_payload(value: Any, *, field_name: str, minimum: Decimal, maximum: Decimal) -> Decimal | None:
+    if value in ("", None):
+        return None
+    try:
+        parsed = Decimal(str(value))
+    except Exception as exc:
+        raise ValueError(f"{field_name} no es numérico") from exc
+    if parsed < minimum or parsed > maximum:
+        raise ValueError(f"{field_name} debe estar entre {minimum} y {maximum}")
+    return parsed.quantize(Decimal("0.01"))
+
+
+@login_required
+@require_POST
+def monitor_margenes_politicas_precio(request: HttpRequest) -> JsonResponse:
+    if not request.user.is_superuser:
+        raise PermissionDenied
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+        fuentes = {
+            "fab": (COSTO_FAB_COMPLETO, "Fabricacion completa"),
+            "mp": (COSTO_MP_FALLBACK, "Solo materia prima"),
+            "reventa": (COSTO_REVENTA, "Reventa"),
+        }
+        for key, (fuente, label) in fuentes.items():
+            row = payload.get(key) or {}
+            margen = _decimal_from_payload(
+                row.get("margen_meta_pct"),
+                field_name=f"Margen {label}",
+                minimum=Decimal("0"),
+                maximum=Decimal("95"),
+            )
+            subida = _decimal_from_payload(
+                row.get("subida_maxima_pct"),
+                field_name=f"Riesgo {label}",
+                minimum=Decimal("0"),
+                maximum=Decimal("500"),
+            )
+            if margen is None:
+                raise ValueError(f"Margen {label} es requerido")
+            PoliticaMargenPrecio.objects.update_or_create(
+                fuente_costo=fuente,
+                familia_point="",
+                defaults={
+                    "margen_meta_pct": margen,
+                    "subida_maxima_pct": subida,
+                    "prioridad": 100,
+                    "activo": True,
+                },
+            )
+    except ValueError as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+
+    return JsonResponse({"ok": True, "politicas_base": _base_policy_payload()})
 
 
 def _precio_sugerido_excel_response(
