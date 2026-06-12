@@ -237,9 +237,9 @@ def _documento_conciliacion(movimiento: MovimientoBancario) -> dict:
     raw = movimiento.extra_raw or {}
     raw_payload = raw.get("raw") if isinstance(raw.get("raw"), dict) else {}
     clave_rastreo = (
-        raw.get("referencia")
+        _extraer_clave_rastreo(movimiento.descripcion)
+        or raw.get("referencia")
         or raw_payload.get("referencia")
-        or _extraer_clave_rastreo(movimiento.descripcion)
         or ""
     )
     cuenta_destino = raw_payload.get("cuenta_bancaria") or _extraer_cuenta_beneficiario(movimiento.descripcion)

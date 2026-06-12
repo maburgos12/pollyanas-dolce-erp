@@ -519,6 +519,7 @@ class ConciliacionBancariaViewTests(TestCase):
             fecha_refresh=timezone.now(),
             conciliado=True,
             tipo_conciliacion=MovimientoBancario.CONCILIACION_TRASPASO,
+            extra_raw={"referencia": "2643314013215"},
         )
 
         response = self.client.get("/conciliacion/bancaria/paquete/?periodo=2026-05&export=contabilidad_csv")
@@ -547,6 +548,7 @@ class ConciliacionBancariaViewTests(TestCase):
             fecha_refresh=timezone.now(),
             conciliado=True,
             tipo_conciliacion=MovimientoBancario.CONCILIACION_TRASPASO,
+            extra_raw={"referencia": "2643314013215"},
         )
 
         response = self.client.get("/conciliacion/bancaria/paquete/?periodo=2026-05&export=contabilidad_desktop_csv")
