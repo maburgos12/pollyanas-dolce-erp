@@ -3,7 +3,12 @@ from django.contrib import admin
 from conciliacion.models import (
     CfdiSucursalResolucion,
     ConceptoConciliacion,
+    ContraparteConciliacion,
+    CuentaBancariaPropia,
+    CuentaContableConciliacion,
     ImportacionBancaria,
+    InstrumentoFinancieroConciliacion,
+    ReglaClasificacionMovimiento,
     SucursalIdentificadorFiscal,
 )
 
@@ -83,6 +88,78 @@ class ConceptoConciliacionAdmin(admin.ModelAdmin):
             },
         ),
     )
+
+
+@admin.register(CuentaContableConciliacion)
+class CuentaContableConciliacionAdmin(admin.ModelAdmin):
+    list_display = ("codigo", "nombre", "tipo", "naturaleza", "agrupador_sat", "cuenta_contpaqi", "activa")
+    list_filter = ("tipo", "naturaleza", "activa")
+    search_fields = ("codigo", "nombre", "agrupador_sat", "cuenta_contpaqi")
+    readonly_fields = ("creado_en", "actualizado_en")
+
+
+@admin.register(CuentaBancariaPropia)
+class CuentaBancariaPropiaAdmin(admin.ModelAdmin):
+    list_display = ("alias", "cuenta_bancaria", "empresa_rfc", "ultimos_digitos", "cuenta_contable", "activa")
+    list_filter = ("activa", "empresa_rfc", "cuenta_bancaria__banco")
+    search_fields = (
+        "alias",
+        "empresa_rfc",
+        "clabe",
+        "ultimos_digitos",
+        "cuenta_bancaria__nombre_display",
+        "cuenta_bancaria__numero_cuenta",
+    )
+    autocomplete_fields = ("cuenta_bancaria", "cuenta_contable")
+    readonly_fields = ("creado_en", "actualizado_en")
+
+
+@admin.register(ContraparteConciliacion)
+class ContraparteConciliacionAdmin(admin.ModelAdmin):
+    list_display = ("tipo", "nombre", "rfc", "cuenta_contable", "activa")
+    list_filter = ("tipo", "activa")
+    search_fields = ("nombre", "rfc", "palabras_clave")
+    autocomplete_fields = ("cuenta_contable",)
+    readonly_fields = ("creado_en", "actualizado_en")
+
+
+@admin.register(InstrumentoFinancieroConciliacion)
+class InstrumentoFinancieroConciliacionAdmin(admin.ModelAdmin):
+    list_display = ("tipo", "nombre", "institucion", "numero_referencia", "cuenta_contable_pasivo", "activo")
+    list_filter = ("tipo", "institucion", "activo")
+    search_fields = ("nombre", "institucion", "numero_referencia", "patrones_descripcion")
+    autocomplete_fields = (
+        "contraparte",
+        "cuenta_bancaria_pago",
+        "cuenta_contable_pasivo",
+        "cuenta_contable_intereses",
+    )
+    readonly_fields = ("creado_en", "actualizado_en")
+
+
+@admin.register(ReglaClasificacionMovimiento)
+class ReglaClasificacionMovimientoAdmin(admin.ModelAdmin):
+    list_display = (
+        "nombre",
+        "concepto",
+        "tipo_movimiento",
+        "prioridad",
+        "contraparte_tipo",
+        "instrumento_tipo",
+        "requiere_cuenta_propia_destino",
+        "confianza_base",
+        "activa",
+    )
+    list_filter = (
+        "tipo_movimiento",
+        "contraparte_tipo",
+        "instrumento_tipo",
+        "requiere_cuenta_propia_destino",
+        "activa",
+    )
+    search_fields = ("nombre", "concepto__codigo", "concepto__nombre", "patrones_descripcion")
+    autocomplete_fields = ("concepto", "cuenta_debe_sugerida", "cuenta_haber_sugerida")
+    readonly_fields = ("creado_en", "actualizado_en")
 
 
 @admin.register(SucursalIdentificadorFiscal)
