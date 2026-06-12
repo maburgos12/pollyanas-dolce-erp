@@ -207,7 +207,10 @@
           <p class="bi-copy">Todos los reportes abiertos — sucursales, equipos y flota — en una sola vista. Usa "Trabajar" para avanzar cada caso.</p>
         </div>
         <div class="bi-panel-actions">
-          <button class="btn btn-primary btn-sm" type="button" id="btnNuevaFalla" style="background:#8B2252;border-color:#8B2252;">+ Nueva falla</button>
+          <button class="btn btn-primary btn-sm" type="button" id="btnNuevaFalla" style="background:#8B2252;border-color:#8B2252;">+ Falla / imprevisto</button>
+          <button class="btn btn-secondary btn-sm" type="button" onclick="abrirModalServicio('', 'realizado')">+ Servicio sin orden</button>
+          <button class="btn btn-secondary btn-sm" type="button" onclick="abrirModalPlan()">+ Programar servicio</button>
+          <a class="btn btn-secondary btn-sm" href="{% url 'mantenimiento:crear-reporte-unidad' %}">Nuevo reporte de unidad</a>
         </div>
       </div>
       <div class="mant-origin-tabs" style="margin-bottom:14px" aria-label="Filtro de origen">
