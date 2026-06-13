@@ -260,6 +260,9 @@ class LogisticaViewsTests(TestCase):
         ruta = RutaEntrega.objects.get(nombre="Ruta con orden")
         paradas = list(ruta.paradas.order_by("orden").values_list("punto_id", "orden"))
         self.assertEqual(paradas, [(punto_norte.id, 1), (punto_sur.id, 2)])
+        self.assertEqual(ruta.ruta_programada_fuente, "FALLBACK")
+        self.assertGreater(ruta.ruta_programada_distancia_metros, 0)
+        self.assertGreater(ruta.km_estimado, 0)
 
     def test_rutas_create_deduplicates_repeated_route_points(self):
         punto = PuntoLogistico.objects.create(
@@ -1094,6 +1097,8 @@ class LogisticaControlRutasTests(TestCase):
         ruta = RutaEntrega.objects.get(nombre="Ruta API Ordenada")
         paradas = list(ruta.paradas.order_by("orden").values_list("punto_id", "orden"))
         self.assertEqual(paradas, [(self.punto.id, 1), (punto_sur.id, 2)])
+        self.assertEqual(ruta.ruta_programada_fuente, "FALLBACK")
+        self.assertGreater(ruta.ruta_programada_distancia_metros, 0)
 
     def test_api_no_crea_ruta_directamente_cerrada(self):
         self.client.force_login(self.user)

@@ -37,6 +37,7 @@ from .models import (
     TipoServicioUnidad,
     Unidad,
 )
+from .services_google_routes import recalcular_ruta_programada
 from .services_rutas_control import distancia_metros, resumen_control_rutas
 
 
@@ -1386,6 +1387,7 @@ def rutas(request):
                 )
                 for orden, (_, __, punto) in enumerate(puntos_ordenados, start=1):
                     ParadaRuta.objects.create(ruta=ruta, punto=punto, orden=orden)
+            recalcular_ruta_programada(ruta)
             if (request.POST.get("estatus") or "").strip().upper() == RutaEntrega.ESTATUS_EN_RUTA:
                 messages.warning(request, "La ruta se creó como planeada. Agrega paradas antes de liberarla para seguimiento.")
             if puntos_duplicados:
@@ -1689,6 +1691,7 @@ def ruta_detail(request, pk: int):
                 )
             ruta.recompute_route_control()
             ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
+            recalcular_ruta_programada(ruta)
             log_event(
                 request.user,
                 "CREATE",
@@ -1720,6 +1723,7 @@ def ruta_detail(request, pk: int):
                         target.save(update_fields=["orden", "actualizado_en"])
                         parada.orden = target_order
                         parada.save(update_fields=["orden", "actualizado_en"])
+                    recalcular_ruta_programada(ruta)
                     log_event(
                         request.user,
                         "UPDATE",
@@ -1751,6 +1755,7 @@ def ruta_detail(request, pk: int):
                     item.save(update_fields=["orden", "actualizado_en"])
                 ruta.recompute_route_control()
                 ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
+                recalcular_ruta_programada(ruta)
                 log_event(
                     request.user,
                     "DELETE",
