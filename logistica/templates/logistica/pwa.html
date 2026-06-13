@@ -297,19 +297,13 @@
       }
 
       .footer {
-        position: fixed;
-        right: 0;
-        bottom: 0;
-        left: 0;
-        max-width: 430px;
-        margin: 0 auto;
+        margin: 22px auto 0;
         border-top: 1px solid var(--border);
-        background: rgba(15, 15, 20, 0.94);
+        background: transparent;
         color: var(--text-muted);
         text-align: center;
         font-size: 12px;
-        padding: 13px 16px calc(13px + env(safe-area-inset-bottom));
-        pointer-events: none;
+        padding: 13px 16px 0;
       }
 
       .screen-title {
@@ -1035,54 +1029,222 @@
       .fuel-save-row .primary-btn {
         width: min(100%, 300px);
       }
-      .route-card-pwa {
+      /* Hallmark · PWA component: route operations · tone: utilitarian warm · states: default · focus · active · disabled · warning · success */
+      .route-card-pwa,
+      .route-hero,
+      .route-action-panel {
+        --route-pwa-panel: #14141d;
+        --route-pwa-panel-strong: #101018;
+        --route-pwa-border: #2a2a38;
+        --route-pwa-text: #f3edf4;
+        --route-pwa-muted: #b9adbd;
+        --route-pwa-gold: #d8b75f;
+        --route-pwa-wine: #9f1d52;
+        --route-pwa-success: #51b56f;
+        --route-pwa-danger: #e64f64;
+        --route-pwa-warning: #e6b84f;
         display: grid;
         gap: 12px;
         padding: 16px;
       }
+      .route-hero {
+        border: 1px solid rgba(201, 168, 76, .36);
+        border-radius: 18px;
+        background:
+          linear-gradient(145deg, rgba(139, 34, 82, .28), rgba(20, 20, 29, .92) 46%),
+          var(--route-pwa-panel);
+        color: var(--route-pwa-text);
+        box-shadow: 0 18px 45px rgba(0, 0, 0, .24);
+      }
       .route-head {
-        display: flex;
-        justify-content: space-between;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
         gap: 12px;
         align-items: flex-start;
       }
       .route-head h2 {
         margin: 0;
-        color: var(--gold);
+        color: var(--route-pwa-text);
+        font-size: 22px;
+        line-height: 1.12;
+        overflow-wrap: anywhere;
+      }
+      .route-folio {
+        margin: 5px 0 0;
+        color: var(--route-pwa-gold);
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: .03em;
+        text-transform: uppercase;
       }
       .route-chip {
-        border: 1px solid var(--border);
+        display: inline-flex;
+        min-height: 30px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid rgba(201, 168, 76, .44);
         border-radius: 999px;
+        background: rgba(201, 168, 76, .10);
+        color: var(--route-pwa-gold);
+        font-size: 12px;
+        font-weight: 900;
         padding: 5px 10px;
-        color: var(--text-muted);
+        white-space: nowrap;
+      }
+      .route-progress-card {
+        display: grid;
+        gap: 8px;
+        border: 1px solid rgba(255, 255, 255, .08);
+        border-radius: 14px;
+        background: rgba(15, 15, 20, .72);
+        padding: 12px;
+      }
+      .route-progress-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        color: var(--route-pwa-muted);
+        font-size: 12px;
+        font-weight: 900;
+      }
+      .route-progress-track {
+        height: 9px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: var(--route-pwa-border);
+      }
+      .route-progress-fill {
+        height: 100%;
+        width: var(--route-progress, 0%);
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--route-pwa-success), var(--route-pwa-gold));
+      }
+      .route-signal-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .route-signal {
+        min-height: 72px;
+        border: 1px solid var(--route-pwa-border);
+        border-radius: 13px;
+        background: var(--route-pwa-panel);
+        padding: 10px;
+      }
+      .route-signal b {
+        display: block;
+        color: var(--route-pwa-text);
+        font-size: 13px;
+      }
+      .route-signal span {
+        display: block;
+        margin-top: 4px;
+        color: var(--route-pwa-muted);
         font-size: 12px;
         font-weight: 800;
       }
+      .route-signal.ok { border-color: rgba(81, 181, 111, .78); }
+      .route-signal.warn { border-color: rgba(230, 184, 79, .72); background: #1e1a10; }
+      .route-signal.bad { border-color: rgba(230, 79, 100, .68); background: #241419; }
+      .route-hero .unit-line,
+      .route-event .muted {
+        color: var(--route-pwa-muted) !important;
+      }
+      .route-actions-main {
+        display: grid;
+        gap: 10px;
+      }
+      .route-actions-main .primary-btn,
+      .route-actions-main .secondary-btn {
+        width: 100%;
+      }
+      .route-actions-main .primary-btn:focus-visible,
+      .route-actions-main .secondary-btn:focus-visible,
+      .route-stop:focus-visible {
+        outline: 2px solid rgba(201, 168, 76, .55);
+        outline-offset: 2px;
+      }
+      .route-actions-main .primary-btn:active,
+      .route-actions-main .secondary-btn:active {
+        transform: scale(.98);
+      }
+      .route-desvio-field {
+        display: grid;
+        gap: 7px;
+        border: 1px solid rgba(230, 184, 79, .55);
+        border-radius: 14px;
+        background: #1e1a10;
+        padding: 12px;
+      }
+      .route-desvio-field label {
+        color: var(--gold);
+      }
+      .route-stop-list,
+      .route-event-list {
+        display: grid;
+        gap: 10px;
+      }
       .route-stop {
         display: grid;
-        gap: 4px;
-        border: 1px solid var(--border);
-        border-radius: 10px;
+        grid-template-columns: 34px minmax(0, 1fr);
+        gap: 10px;
+        align-items: start;
+        border: 1px solid var(--route-pwa-border);
+        border-radius: 14px;
         padding: 12px;
-        background: #14141d;
+        background: var(--route-pwa-panel);
+        color: var(--route-pwa-text);
       }
       .route-stop.visited {
-        border-color: var(--success);
+        border-color: rgba(81, 181, 111, .70);
+        background: #122219;
+      }
+      .route-stop-number {
+        display: grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 999px;
+        background: #252535;
+        color: var(--route-pwa-gold);
+        font-weight: 900;
+      }
+      .route-stop.visited .route-stop-number {
+        background: var(--route-pwa-success);
+        color: #08130c;
       }
       .route-stop strong {
-        color: var(--text);
+        display: block;
+        color: var(--route-pwa-text);
+        line-height: 1.2;
+        overflow-wrap: anywhere;
+      }
+      .route-stop-meta {
+        display: block;
+        margin-top: 5px;
+        color: var(--route-pwa-muted);
+        font-size: 12px;
+        font-weight: 800;
       }
       .route-event {
-        border-left: 4px solid var(--warning);
+        border-left: 4px solid var(--route-pwa-warning);
         padding: 10px 12px;
-        background: #14141d;
-        border-radius: 8px;
+        background: var(--route-pwa-panel);
+        color: var(--route-pwa-text);
+        border-radius: 10px;
       }
       .route-event.ok {
-        border-left-color: var(--success);
+        border-left-color: var(--route-pwa-success);
       }
       .route-event.critica {
-        border-left-color: var(--danger);
+        border-left-color: var(--route-pwa-danger);
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        .route-actions-main .primary-btn,
+        .route-actions-main .secondary-btn,
+        .route-progress-fill {
+          transition: transform 120ms ease-out, width 220ms ease-out;
+        }
       }
     </style>
     <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
@@ -1871,26 +2033,65 @@
         draft.desvio_motivo = value.slice(0, 160);
       }
 
+      function routeProgressValue(ruta, paradas) {
+        const total = paradas?.length || 0;
+        if (total) {
+          const visitadas = paradas.filter((parada) => parada.estado === "VISITADA").length;
+          return Math.round((visitadas / total) * 100);
+        }
+        return Math.round(Number(ruta?.cumplimiento_porcentaje || 0));
+      }
+
+      function routeStopCounts(paradas) {
+        const total = paradas?.length || 0;
+        const visitadas = (paradas || []).filter((parada) => parada.estado === "VISITADA").length;
+        return { total, visitadas, pendientes: Math.max(total - visitadas, 0) };
+      }
+
+      function renderRutaSignals({ turnoOk, unidadOk, ubicacionLista, pendientesOffline, draft, rutaData }) {
+        const gpsTone = ubicacionLista ? "ok" : draft.geoStatus === "denied" || draft.geoStatus === "unavailable" ? "bad" : "warn";
+        const gpsLabel = ubicacionLista ? "Lista para registrar" : draft.geoStatus === "loading" ? "Obteniendo señal" : "Pendiente";
+        const turnoTone = turnoOk && unidadOk ? "ok" : "warn";
+        const turnoLabel = turnoOk ? (unidadOk ? "Unidad correcta" : "Unidad distinta") : "Sin turno abierto";
+        const queueTone = pendientesOffline ? "warn" : "ok";
+        const queueLabel = pendientesOffline ? `${pendientesOffline} pendiente${pendientesOffline === 1 ? "" : "s"}` : "Sin pendientes";
+        const lastSignal = rutaData?.ultima_ubicacion?.timestamp_servidor ? formatDate(rutaData.ultima_ubicacion.timestamp_servidor) : "Sin señal previa";
+        return `
+          <div class="route-signal-grid" aria-label="Estado operativo de la ruta">
+            <div class="route-signal ${gpsTone}"><b>GPS</b><span>${escapeHtml(gpsLabel)}${draft.precision_metros ? ` · ${escapeHtml(draft.precision_metros)} m` : ""}</span></div>
+            <div class="route-signal ${turnoTone}"><b>Turno</b><span>${escapeHtml(turnoLabel)}</span></div>
+            <div class="route-signal ${queueTone}"><b>Sin conexión</b><span>${escapeHtml(queueLabel)}</span></div>
+            <div class="route-signal"><b>Última señal</b><span>${escapeHtml(lastSignal)}</span></div>
+          </div>
+        `;
+      }
+
       function renderParadasRuta(paradas) {
         if (!paradas?.length) return `<p class="unit-line">Esta ruta no tiene paradas configuradas.</p>`;
-        return paradas.map((parada) => `
-          <section class="route-stop ${parada.estado === "VISITADA" ? "visited" : ""}">
-            <strong>${escapeHtml(parada.orden)}. ${escapeHtml(parada.punto_nombre_snapshot || parada.punto?.nombre || "Punto")}</strong>
-            <span>${escapeHtml(parada.punto?.tipo_display || parada.punto?.tipo || "")} · Radio ${escapeHtml(parada.radio_geocerca_metros || parada.punto?.radio_geocerca_metros || "-")} m</span>
-            <span>${escapeHtml(parada.estado_display || parada.estado || "")}${parada.hora_llegada_real ? ` · ${formatDate(parada.hora_llegada_real)}` : ""}</span>
-          </section>
-        `).join("");
+        return `<div class="route-stop-list">` + paradas.map((parada) => {
+          const visited = parada.estado === "VISITADA";
+          return `
+            <section class="route-stop ${visited ? "visited" : ""}" tabindex="0">
+              <span class="route-stop-number">${visited ? "OK" : escapeHtml(parada.orden)}</span>
+              <div>
+                <strong>${escapeHtml(parada.punto_nombre_snapshot || parada.punto?.nombre || "Punto")}</strong>
+                <span class="route-stop-meta">${escapeHtml(parada.punto?.tipo_display || parada.punto?.tipo || "Punto")} · Geocerca ${escapeHtml(parada.radio_geocerca_metros || parada.punto?.radio_geocerca_metros || "-")} m</span>
+                <span class="route-stop-meta">${escapeHtml(parada.estado_display || parada.estado || "")}${parada.hora_llegada_real ? ` · llegada ${formatDate(parada.hora_llegada_real)}` : ""}</span>
+              </div>
+            </section>
+          `;
+        }).join("") + `</div>`;
       }
 
       function renderEventosRuta(eventos) {
         if (!eventos?.length) return `<p class="muted">Sin eventos registrados en esta ruta.</p>`;
-        return eventos.slice(0, 5).map((evento) => `
+        return `<div class="route-event-list">` + eventos.slice(0, 5).map((evento) => `
           <section class="route-event ${escapeHtml(evento.severidad || "")}">
             <strong>${escapeHtml(evento.tipo_display || evento.tipo || "Evento")}</strong><br>
             ${escapeHtml(evento.descripcion || "")}
             <br><span class="muted">${formatDate(evento.creado_en)}</span>
           </section>
-        `).join("");
+        `).join("") + `</div>`;
       }
 
       async function renderRutaActiva(message = "") {
@@ -1928,40 +2129,61 @@
         const turnoOk = Boolean(turnoActivo?.id);
         const unidadOk = turnoOk && String(turnoActivo.unidad) === String(ruta.unidad_operativa);
         const pendientesOffline = loadRutaTrackingQueue().length;
+        const paradas = rutaData.paradas || [];
+        const counts = routeStopCounts(paradas);
+        const progress = routeProgressValue(ruta, paradas);
         state.trackingQueueCount = pendientesOffline;
         render(shell(`
           <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
           <h1 class="screen-title" style="margin-top:16px;">Mi ruta</h1>
           ${message ? `<p class="${message.startsWith("✅") ? "success" : "error"}">${escapeHtml(message)}</p>` : ""}
-          <section class="card route-card-pwa">
+          <section class="route-hero">
             <div class="route-head">
               <div>
                 <h2>${escapeHtml(ruta.nombre || ruta.folio)}</h2>
-                <p class="muted">${escapeHtml(ruta.folio)} · ${escapeHtml(ruta.estatus_display || ruta.estatus || "")}</p>
+                <p class="route-folio">${escapeHtml(ruta.folio)} · ${escapeHtml(ruta.estatus_display || ruta.estatus || "")}</p>
               </div>
-              <span class="route-chip">${escapeHtml(ruta.cumplimiento_porcentaje || "0")}%</span>
+              <span class="route-chip">${escapeHtml(progress)}%</span>
             </div>
-            <p class="unit-line">${escapeHtml(ruta.unidad_operativa_codigo || "Unidad")} · ${rutaData.paradas?.length || 0} parada${(rutaData.paradas?.length || 0) === 1 ? "" : "s"}</p>
+            <div class="route-progress-card">
+              <div class="route-progress-top">
+                <span>${escapeHtml(counts.visitadas)} visitada${counts.visitadas === 1 ? "" : "s"} de ${escapeHtml(counts.total)}</span>
+                <span>${escapeHtml(counts.pendientes)} pendiente${counts.pendientes === 1 ? "" : "s"}</span>
+              </div>
+              <div class="route-progress-track" aria-label="Avance de ruta ${escapeHtml(progress)}%">
+                <div class="route-progress-fill" style="--route-progress:${escapeHtml(progress)}%;"></div>
+              </div>
+            </div>
+            <p class="unit-line">${escapeHtml(ruta.unidad_operativa_codigo || "Unidad asignada")} · ${counts.total} parada${counts.total === 1 ? "" : "s"} programada${counts.total === 1 ? "" : "s"}</p>
+            ${renderRutaSignals({ turnoOk, unidadOk, ubicacionLista, pendientesOffline, draft, rutaData })}
+          </section>
+
+          <section class="card route-action-panel">
             ${turnoOk ? "" : `<div class="daily-banner warning">Inicia turno en Bitácora antes de registrar seguimiento.</div>`}
             ${turnoOk && !unidadOk ? `<div class="daily-banner warning">Tu turno activo no corresponde a la unidad asignada a esta ruta.</div>` : ""}
             ${pendientesOffline ? `<div class="daily-banner warning">${pendientesOffline} seguimiento${pendientesOffline === 1 ? "" : "s"} pendiente${pendientesOffline === 1 ? "" : "s"} por enviar. Se reintentará automáticamente al recuperar conexión.</div>` : ""}
-            <button class="primary-btn" type="button" onclick="capturarUbicacionRuta()" ${draft.geoStatus === "loading" ? "disabled" : ""}>${ubicacionLista ? "Actualizar ubicación" : "Capturar ubicación"}</button>
-            ${ubicacionLista ? `<button class="secondary-btn" type="button" onclick="toggleDesvioRuta()">${draft.fuera_de_ruta_confirmado ? "Desvío pendiente de registrar" : "Marcar desvío/incidencia"}</button>` : ""}
-            ${draft.fuera_de_ruta_confirmado ? `<input class="input-field" type="text" maxlength="160" placeholder="Motivo breve obligatorio" value="${escapeHtml(draft.desvio_motivo)}" oninput="updateDesvioMotivo(this.value)">` : ""}
-            ${draft.fuera_de_ruta_confirmado ? `<p class="muted">El desvío se guardará como evidencia al tocar Registrar seguimiento.</p>` : ""}
-            ${draft.precision_metros ? `<p class="muted">Precisión GPS: ${escapeHtml(draft.precision_metros)} m</p>` : ""}
-            <button class="primary-btn" type="button" onclick="registrarTrackingRuta()" ${turnoOk && unidadOk && ubicacionLista && !draft.guardando ? "" : "disabled"}>${draft.guardando ? "Guardando..." : "Registrar seguimiento"}</button>
-            ${rutaData.ultima_ubicacion ? `<p class="muted">Última señal: ${formatDate(rutaData.ultima_ubicacion.timestamp_servidor)}</p>` : `<p class="muted">Sin señales registradas todavía.</p>`}
+            <div class="route-actions-main">
+              <button class="primary-btn" type="button" onclick="capturarUbicacionRuta()" ${draft.geoStatus === "loading" ? "disabled" : ""}>${ubicacionLista ? "Actualizar ubicación GPS" : "Capturar ubicación GPS"}</button>
+              ${ubicacionLista ? `<button class="secondary-btn" type="button" onclick="toggleDesvioRuta()">${draft.fuera_de_ruta_confirmado ? "Cancelar desvío" : "Reportar desvío"}</button>` : ""}
+              ${draft.fuera_de_ruta_confirmado ? `
+                <div class="route-desvio-field">
+                  <label for="desvio-motivo">Motivo breve obligatorio</label>
+                  <input id="desvio-motivo" class="input-field" type="text" maxlength="160" placeholder="Ej. cierre de calle, instrucción de supervisor" value="${escapeHtml(draft.desvio_motivo)}" oninput="updateDesvioMotivo(this.value)">
+                  <p class="muted">Se guardará como evidencia al registrar seguimiento.</p>
+                </div>
+              ` : ""}
+              <button class="primary-btn" type="button" onclick="registrarTrackingRuta()" ${turnoOk && unidadOk && ubicacionLista && !draft.guardando ? "" : "disabled"}>${draft.guardando ? "Guardando..." : "Registrar seguimiento"}</button>
+            </div>
           </section>
           <section class="card route-card-pwa">
-            <h2 style="margin:0;color:var(--gold);">Paradas</h2>
-            ${renderParadasRuta(rutaData.paradas || [])}
+            <h2 style="margin:0;color:var(--gold);">Paradas de reparto</h2>
+            ${renderParadasRuta(paradas)}
           </section>
           <section class="card route-card-pwa">
             <h2 style="margin:0;color:var(--gold);">Eventos recientes</h2>
             ${renderEventosRuta(rutaData.eventos || [])}
           </section>
-          ${geoOverlay(draft, "capturarUbicacionRuta")}
+          ${draft.geoStatus === "idle" ? "" : geoOverlay(draft, "capturarUbicacionRuta")}
         `));
       }
 
@@ -3470,7 +3692,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=route-control-v9").catch(() => {});
+          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=route-control-v10").catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {

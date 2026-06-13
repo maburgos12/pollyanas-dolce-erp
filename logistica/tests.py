@@ -848,8 +848,22 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v9", pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v9-route-control", sw_js)
+        self.assertIn("route-control-v10", pwa_html)
+        self.assertIn("pollyanas-logistica-pwa-v10-route-ui", sw_js)
+
+    def test_pwa_mi_ruta_declara_prototipo_operativo(self):
+        from pathlib import Path
+
+        base_dir = Path(__file__).resolve().parent
+        pwa_html = (base_dir / "templates" / "logistica" / "pwa.html").read_text(encoding="utf-8")
+
+        self.assertIn("route-hero", pwa_html)
+        self.assertIn("route-signal-grid", pwa_html)
+        self.assertIn("route-progress-card", pwa_html)
+        self.assertIn("Capturar ubicación GPS", pwa_html)
+        self.assertIn("Reportar desvío", pwa_html)
+        self.assertIn("Paradas de reparto", pwa_html)
+        self.assertIn('draft.geoStatus === "idle" ? "" : geoOverlay(draft, "capturarUbicacionRuta")', pwa_html)
 
     def test_puntos_logisticos_crea_punto_manual(self):
         self.client.force_login(self.user)
