@@ -584,6 +584,40 @@ class LogisticaControlRutasTests(TestCase):
         evento = EventoRuta.objects.get(ruta=self.ruta, tipo=EventoRuta.TIPO_DESVIO, severidad=EventoRuta.SEVERIDAD_CRITICA)
         self.assertEqual(evento.metadata["motivo"], "Entrega urgente")
 
+    def test_registrar_ubicacion_fuera_de_geocerca_crea_desvio_automatico_sin_confirmacion(self):
+        ubicacion = registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={
+                "latitud": "25.590000",
+                "longitud": "-108.490000",
+            },
+        )
+
+        self.assertTrue(ubicacion.fuera_de_geocerca)
+        evento = EventoRuta.objects.get(ruta=self.ruta, tipo=EventoRuta.TIPO_DESVIO, severidad=EventoRuta.SEVERIDAD_CRITICA)
+        self.assertEqual(evento.metadata["origen"], "automatico_geocerca")
+        self.assertEqual(evento.metadata["motivo"], "Desvío detectado automáticamente por GPS fuera de geocerca.")
+
+    def test_tracking_api_rechaza_desvio_confirmado_sin_motivo(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_tracking", kwargs={"ruta_id": self.ruta.id}),
+            json.dumps(
+                {
+                    "latitud": "25.590000",
+                    "longitud": "-108.490000",
+                    "fuera_de_ruta_confirmado": True,
+                    "desvio_motivo": "   ",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_DESVIO).exists())
+
     def test_tracking_api_rechaza_coordenadas_invalidas(self):
         self.client.force_login(self.user)
 
@@ -729,6 +763,20 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Control interno de rutas")
         self.assertContains(response, "Rutas del día")
+
+    def test_pwa_tracking_declara_cola_offline_reintento_y_cache_versionado(self):
+        from pathlib import Path
+
+        base_dir = Path(__file__).resolve().parent
+        pwa_html = (base_dir / "templates" / "logistica" / "pwa.html").read_text(encoding="utf-8")
+        sw_js = (base_dir / "static" / "logistica" / "pwa" / "sw.js").read_text(encoding="utf-8")
+
+        self.assertIn("pd_logistica_tracking_queue", pwa_html)
+        self.assertIn("enqueueRutaTracking", pwa_html)
+        self.assertIn("flushRutaTrackingQueue", pwa_html)
+        self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
+        self.assertIn("route-control-v9", pwa_html)
+        self.assertIn("pollyanas-logistica-pwa-v9-route-control", sw_js)
 
     def test_puntos_logisticos_crea_punto_manual(self):
         self.client.force_login(self.user)

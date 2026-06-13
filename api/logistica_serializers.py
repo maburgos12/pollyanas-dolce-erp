@@ -261,6 +261,8 @@ class UbicacionRutaCreateSerializer(serializers.Serializer):
             if hasattr(exc, "message_dict"):
                 raise serializers.ValidationError(exc.message_dict)
             raise
+        if attrs.get("fuera_de_ruta_confirmado") is True and not (attrs.get("desvio_motivo") or "").strip():
+            raise serializers.ValidationError({"desvio_motivo": "Indica un motivo breve para confirmar el desvío."})
         return attrs
 
 
