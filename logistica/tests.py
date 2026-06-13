@@ -20,6 +20,13 @@ from logistica.tasks import _emails_de_grupo, detectar_gps_perdido_rutas
 from api.logistica_views import _can_operate_pwa
 
 
+VALID_GIF = (
+    b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!"
+    b"\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00"
+    b"\x00\x02\x02D\x01\x00;"
+)
+
+
 class LogisticaGroupAliasCompatibilityTests(TestCase):
     def test_emails_de_grupo_legacy_dg_uses_canonical_group(self):
         user = User.objects.create_user(
@@ -340,6 +347,8 @@ class LogisticaPwaApiTests(TestCase):
         self.sucursal = Sucursal.objects.create(codigo="QA-LOG", nombre="QA Logística", activa=True)
         self.unidad = Unidad.objects.create(codigo="QA-LOG-1", descripcion="Unidad QA", sucursal=self.sucursal)
         self.repartidor = Repartidor.objects.create(user=self.user, sucursal=self.sucursal, unidad_asignada=self.unidad)
+        self.repartidor.licencia_expiracion = timezone.localdate() + timezone.timedelta(days=30)
+        self.repartidor.save(update_fields=["licencia_expiracion"])
         self.client.force_login(self.user)
 
     def test_bitacora_activa_without_open_shift_returns_null_not_404(self):
@@ -361,6 +370,57 @@ class LogisticaPwaApiTests(TestCase):
         self.assertEqual(perfil.json()["user"]["username"], self.user.username)
 
         self.client.logout()
+
+    def test_bitacora_salida_bloquea_unidad_distinta_si_hay_ruta_activa(self):
+        unidad_ruta = Unidad.objects.create(codigo="QA-RUTA", descripcion="Unidad ruta", sucursal=self.sucursal)
+        RutaEntrega.objects.create(
+            nombre="Ruta Unidad Correcta",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_EN_RUTA,
+            repartidor=self.repartidor,
+            unidad_operativa=unidad_ruta,
+        )
+
+        response = self.client.post(
+            reverse("api_logistica_bitacora_salida"),
+            {
+                "unidad": self.unidad.id,
+                "km_salida": "1000",
+                "nivel_gas_salida": "lleno",
+                "latitud_salida": "25.570000",
+                "longitud_salida": "-108.470000",
+                "foto_tablero_salida": SimpleUploadedFile("tablero.gif", VALID_GIF, content_type="image/gif"),
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "unidad_ruta_distinta")
+        self.assertEqual(response.json()["unidad_requerida"]["codigo"], "QA-RUTA")
+        self.assertFalse(BitacoraSalidaLlegada.objects.filter(repartidor=self.repartidor).exists())
+
+    def test_bitacora_salida_permite_unidad_asignada_a_ruta_activa(self):
+        RutaEntrega.objects.create(
+            nombre="Ruta Unidad Correcta",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_EN_RUTA,
+            repartidor=self.repartidor,
+            unidad_operativa=self.unidad,
+        )
+
+        response = self.client.post(
+            reverse("api_logistica_bitacora_salida"),
+            {
+                "unidad": self.unidad.id,
+                "km_salida": "1000",
+                "nivel_gas_salida": "lleno",
+                "latitud_salida": "25.570000",
+                "longitud_salida": "-108.470000",
+                "foto_tablero_salida": SimpleUploadedFile("tablero.gif", VALID_GIF, content_type="image/gif"),
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["unidad"], self.unidad.id)
 
     def test_occasional_driver_with_repartidor_profile_can_operate_without_repartidor_group(self):
         user = User.objects.create_user(username="conductora.ocasional", password="pass123")
@@ -951,6 +1011,8 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking({ ruta_id: rutaId, payload });", pwa_html)
         self.assertIn("sessionStorage.getItem(ACCESS_TOKEN_KEY)", pwa_html)
         self.assertIn("sessionStorage.setItem(ACCESS_TOKEN_KEY, data.access)", pwa_html)
+        self.assertIn('error.error === "unidad_ruta_distinta"', pwa_html)
+        self.assertIn('await showScreen("ruta_activa")', pwa_html)
         self.assertNotIn('localStorage.setItem("pd_logistica_refresh"', pwa_html)
         self.assertNotIn("localStorage.setItem(REFRESH_TOKEN_KEY", pwa_html)
 
