@@ -19,6 +19,7 @@ from core.models import Sucursal, UserModuleAccess
 from crm.models import Cliente, PedidoCliente
 from logistica.models import BitacoraSalidaLlegada, EntregaRuta, EventoRuta, ParadaRuta, PuntoLogistico, Repartidor, RutaEntrega, Unidad
 from logistica.services_rutas_control import distancia_metros, registrar_ubicacion_ruta, resumen_control_rutas
+from logistica.services_tiempos_ruta import resumen_tiempos_ruta
 from logistica.tasks import _emails_de_grupo
 from api.logistica_views import _can_operate_pwa
 
@@ -262,6 +263,7 @@ class LogisticaViewsTests(TestCase):
         self.assertEqual(paradas, [(punto_norte.id, 1), (punto_sur.id, 2)])
         self.assertEqual(ruta.ruta_programada_fuente, "FALLBACK")
         self.assertGreater(ruta.ruta_programada_distancia_metros, 0)
+        self.assertGreater(ruta.ruta_programada_duracion_segundos, 0)
         self.assertGreater(ruta.km_estimado, 0)
 
     def test_rutas_create_deduplicates_repeated_route_points(self):
@@ -448,6 +450,51 @@ class LogisticaControlRutasTests(TestCase):
 
     def test_distancia_metros_detecta_punto_cercano(self):
         self.assertLess(distancia_metros("25.570010", "-108.470010", self.punto.latitud, self.punto.longitud), 5)
+
+    def test_resumen_tiempos_ruta_usa_promedio_historico_en_punto(self):
+        llegada = timezone.now() - timezone.timedelta(hours=2)
+        ruta_historica = RutaEntrega.objects.create(nombre="Ruta Histórica", fecha_ruta=timezone.localdate() - timezone.timedelta(days=1))
+        ParadaRuta.objects.create(
+            ruta=ruta_historica,
+            punto=self.punto,
+            orden=1,
+            hora_llegada_real=llegada,
+            hora_salida_real=llegada + timezone.timedelta(minutes=24),
+            estado=ParadaRuta.ESTADO_VISITADA,
+        )
+        self.ruta.ruta_programada_duracion_segundos = 1800
+        self.ruta.save(update_fields=["ruta_programada_duracion_segundos", "updated_at"])
+
+        resumen = resumen_tiempos_ruta(self.ruta)
+
+        self.assertEqual(resumen.transito_programado_minutos, 30)
+        self.assertEqual(resumen.surtido_estimado_minutos, 24)
+        self.assertEqual(resumen.total_operativo_estimado_minutos, 54)
+        self.assertEqual(resumen.paradas[0].promedio_surtido_minutos, 24)
+
+    def test_ruta_detail_muestra_tiempos_de_transito_y_surtido(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        llegada = timezone.now() - timezone.timedelta(hours=2)
+        ruta_historica = RutaEntrega.objects.create(nombre="Ruta Histórica Detail", fecha_ruta=timezone.localdate() - timezone.timedelta(days=1))
+        ParadaRuta.objects.create(
+            ruta=ruta_historica,
+            punto=self.punto,
+            orden=1,
+            hora_llegada_real=llegada,
+            hora_salida_real=llegada + timezone.timedelta(minutes=24),
+            estado=ParadaRuta.ESTADO_VISITADA,
+        )
+        self.ruta.ruta_programada_duracion_segundos = 1800
+        self.ruta.save(update_fields=["ruta_programada_duracion_segundos", "updated_at"])
+
+        response = self.client.get(reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Tránsito programado")
+        self.assertContains(response, "Promedio surtido")
+        self.assertContains(response, "24 min")
+        self.assertContains(response, "54")
 
     def test_registrar_ubicacion_marca_geocerca_visitada(self):
         ubicacion = registrar_ubicacion_ruta(

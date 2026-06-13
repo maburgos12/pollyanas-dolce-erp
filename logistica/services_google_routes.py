@@ -45,10 +45,12 @@ def _fallback_route(coords: list[tuple[float, float]]) -> RutaProgramadaResult:
     distancia = 0
     for origin, destination in zip(coords, coords[1:]):
         distancia += distancia_metros(Decimal(str(origin[0])), Decimal(str(origin[1])), Decimal(str(destination[0])), Decimal(str(destination[1])))
+    velocidad_kmh = max(int(getattr(settings, "LOGISTICA_FALLBACK_SPEED_KMH", 35) or 35), 1)
+    duracion_segundos = int(round((distancia / 1000) / velocidad_kmh * 3600)) if distancia else 0
     return RutaProgramadaResult(
         polyline=_fallback_polyline(coords),
         distancia_metros=distancia,
-        duracion_segundos=0,
+        duracion_segundos=duracion_segundos,
         fuente="FALLBACK",
     )
 
