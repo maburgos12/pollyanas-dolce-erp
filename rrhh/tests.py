@@ -19,6 +19,7 @@ from rrhh.models import (
     EmpleadoBaja,
     EmpleadoIdentidadPendiente,
     HoraExtra,
+    IncidenciaAsistencia,
     NominaConceptoLinea,
     NominaImportacion,
     NominaLinea,
@@ -2584,6 +2585,95 @@ class RRHHViewsTests(TestCase):
         resp = self.client.get(reverse("rrhh:empleados"))
         self.assertEqual(resp.status_code, 302)
         self.assertIn("/login/", resp.url)
+
+
+class ReporteAsistenciaFechaIngresoTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="paula-fecha-ingreso", is_superuser=True, is_staff=True)
+        self.client.force_login(self.user)
+
+    def test_reporte_no_castiga_faltas_previas_a_fecha_ingreso(self):
+        from datetime import date
+
+        empleado = Empleado.objects.create(
+            nombre="ANAYA BERNAL CARLOS EZEQUIEL",
+            codigo="347",
+            fecha_ingreso=date(2026, 6, 10),
+            activo=True,
+            sucursal="Produccion",
+        )
+        IncidenciaAsistencia.objects.create(
+            empleado=empleado,
+            fecha=date(2026, 6, 9),
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+            estado=IncidenciaAsistencia.ESTADO_RESUELTO,
+            severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+            detalle="Incidencia resuelta por reevaluacion automatica.",
+        )
+        IncidenciaAsistencia.objects.create(
+            empleado=empleado,
+            fecha=date(2026, 6, 11),
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+            severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+            detalle="Sin registro posterior al ingreso.",
+        )
+
+        response = self.client.get(
+            reverse("rrhh:rrhh_reporte_asistencia"),
+            {
+                "fecha_inicio": "2026-06-01",
+                "fecha_fin": "2026-06-11",
+                "empleado": str(empleado.id),
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        reporte = response.context["reportes"][0]
+        self.assertEqual(reporte["resumen"]["faltas"], 1)
+        filas_pre_ingreso = [fila for fila in reporte["filas"] if fila["fecha"] < empleado.fecha_ingreso]
+        self.assertEqual(len(filas_pre_ingreso), 9)
+        self.assertTrue(all(fila["estado_laboral"] == "pre_ingreso" for fila in filas_pre_ingreso))
+        self.assertContains(response, "No laborado (previo ingreso)")
+        self.assertContains(response, "Sin registro posterior al ingreso.")
+        self.assertNotContains(response, "Incidencia resuelta por reevaluacion automatica.")
+
+    def test_export_reporte_marca_pre_ingreso_como_no_laborado(self):
+        from datetime import date
+
+        empleado = Empleado.objects.create(
+            nombre="ANAYA BERNAL CARLOS EZEQUIEL",
+            codigo="347",
+            fecha_ingreso=date(2026, 6, 10),
+            activo=True,
+            sucursal="Produccion",
+        )
+        IncidenciaAsistencia.objects.create(
+            empleado=empleado,
+            fecha=date(2026, 6, 9),
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+            estado=IncidenciaAsistencia.ESTADO_RESUELTO,
+            severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+            detalle="No debe exportar como falta.",
+        )
+
+        response = self.client.get(
+            reverse("rrhh:rrhh_reporte_asistencia"),
+            {
+                "fecha_inicio": "2026-06-09",
+                "fecha_fin": "2026-06-10",
+                "empleado": str(empleado.id),
+                "export": "csv",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+        self.assertIn("No laborado (previo ingreso)", content)
+        self.assertIn("No aplica", content)
+        self.assertNotIn("No debe exportar como falta.", content)
 
 
 class ListaRayaImportTests(TestCase):
