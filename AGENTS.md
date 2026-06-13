@@ -199,6 +199,10 @@ No abrir una segunda tarea hasta que la primera esté deployada y validada en pr
 2. `git pull origin main` en VPS
 3. `docker compose restart web` en VPS
 4. Verificar que el resultado es visible en producción
+5. Borrar la rama de trabajo local y remota cuando ya esté mergeada, deployada
+   y validada, para que no se atraviese ni aparezca como opción en otros hilos:
+   `git branch -D <rama>` y `git push origin --delete <rama>`; después correr
+   `git fetch --prune origin`.
 
 ### Ramas — control de desorden
 - Una rama = una tarea = un módulo. Si la tarea crece, abrir rama nueva.
@@ -255,6 +259,9 @@ Flujo estándar para cambios de código:
 6. Ejecutar `migrate`, `collectstatic`, build o restart solo cuando aplique.
 7. Validar el resultado final en producción o en el ambiente objetivo con
    evidencia concreta.
+8. Si el cambio ya quedó mergeado, deployado y validado, borrar la rama local y
+   remota de la tarea y podar referencias (`git fetch --prune origin`) para que
+   no aparezca atravesada en otros hilos.
 
 Para UI, PWA, permisos, navegación o flujos visibles, validar con navegador real
 o con el usuario real afectado. Revisar también consola, Network/XHR, logs,

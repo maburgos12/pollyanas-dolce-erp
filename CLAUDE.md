@@ -235,6 +235,10 @@ No pasar a una segunda tarea hasta que la primera esté deployada y validada en 
 2. `git pull origin main` en VPS
 3. `docker compose restart web` en VPS
 4. Verificar resultado visible en producción
+5. Borrar la rama de trabajo local y remota cuando ya esté mergeada, deployada
+   y validada, para que no se atraviese ni aparezca como opción en otros hilos:
+   `git branch -D <rama>` y `git push origin --delete <rama>`; después correr
+   `git fetch --prune origin`.
 
 ### Datos de usuarios — NUNCA pisar
 `bono_extra`, `ajuste_positivo`, `ajuste_negativo` son datos de nómina real capturados
