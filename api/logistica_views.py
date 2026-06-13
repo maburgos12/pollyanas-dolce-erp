@@ -1185,7 +1185,9 @@ class LogisticaRutaTrackingView(_LogisticaBaseView):
         except ValidationError as exc:
             return Response({"detail": exc.message if hasattr(exc, "message") else exc.messages}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response(UbicacionRutaSerializer(ubicacion).data, status=status.HTTP_201_CREATED)
+        data = UbicacionRutaSerializer(ubicacion).data
+        data["alertas_tracking"] = getattr(ubicacion, "_alertas_tracking", [])
+        return Response(data, status=status.HTTP_201_CREATED)
 
 
 class LogisticaRutaEventosView(_LogisticaBaseView):

@@ -1256,6 +1256,7 @@
       const PHOTO_MAX_AGE_MS = 5 * 60 * 1000;
       const PHOTO_CAPTURE_SESSION_MS = 10 * 60 * 1000;
       const TRACKING_QUEUE_KEY = "pd_logistica_tracking_queue";
+      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 90 * 1000;
       const app = document.getElementById("app");
       const state = {
         token: localStorage.getItem("pd_logistica_access") || "",
@@ -1272,6 +1273,12 @@
         rutaActiva: null,
         rutaTrackingDraft: null,
         trackingQueueCount: 0,
+        routeAutoTrackingTimer: null,
+        routeAutoTrackingRutaId: null,
+        routeAutoTrackingBusy: false,
+        routeAutoTrackingLastSentAt: "",
+        routeAutoTrackingStatus: "idle",
+        routeTrackingFailedCount: 0,
         unidades: [],
         inspeccionDraft: null,
         lavadoDraft: null,
@@ -1496,6 +1503,8 @@
           draft[latField] = position.coords.latitude.toFixed(6);
           draft[lngField] = position.coords.longitude.toFixed(6);
           draft.precision_metros = Number.isFinite(position.coords.accuracy) ? Number(position.coords.accuracy.toFixed(2)) : null;
+          draft.timestamp_dispositivo = new Date(position.timestamp || Date.now()).toISOString();
+          draft.client_event_id = newClientEventId();
           draft.geoStatus = "ready";
           draft.geoLabel = "📍 Ubicación registrada";
           renderFn();
@@ -1507,6 +1516,28 @@
           draft.geoLabel = "Se requiere ubicación para continuar";
           renderFn();
         }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+      }
+
+      function newClientEventId() {
+        return window.crypto?.randomUUID ? window.crypto.randomUUID() : `gps-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      }
+
+      function captureRoutePosition() {
+        return new Promise((resolve, reject) => {
+          if (!navigator.geolocation) {
+            reject(new Error("GPS no disponible"));
+            return;
+          }
+          navigator.geolocation.getCurrentPosition((position) => {
+            resolve({
+              latitud: position.coords.latitude.toFixed(6),
+              longitud: position.coords.longitude.toFixed(6),
+              precision_metros: Number.isFinite(position.coords.accuracy) ? Number(position.coords.accuracy.toFixed(2)) : null,
+              timestamp_dispositivo: new Date(position.timestamp || Date.now()).toISOString(),
+              client_event_id: newClientEventId()
+            });
+          }, reject, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+        });
       }
 
       function marcarInicioCapturaFoto(input) {
@@ -1684,6 +1715,9 @@
 
       function enqueueRutaTracking(item) {
         const rows = loadRutaTrackingQueue();
+        if (item.payload?.client_event_id && rows.some((row) => row.payload?.client_event_id === item.payload.client_event_id)) {
+          return rows;
+        }
         rows.push({
           ...item,
           queued_at: new Date().toISOString(),
@@ -1700,6 +1734,7 @@
           return 0;
         }
         const remaining = [];
+        let failed = 0;
         for (const item of pending) {
           try {
             const response = await apiFetch(`/rutas/${item.ruta_id}/tracking/`, {
@@ -1708,14 +1743,79 @@
               body: JSON.stringify(item.payload)
             });
             if (!response.ok) {
-              remaining.push({ ...item, attempts: Number(item.attempts || 0) + 1 });
+              if ([400, 403, 404, 409].includes(response.status)) {
+                failed += 1;
+              } else {
+                remaining.push({ ...item, attempts: Number(item.attempts || 0) + 1 });
+              }
             }
           } catch (error) {
             remaining.push({ ...item, attempts: Number(item.attempts || 0) + 1 });
           }
         }
+        state.routeTrackingFailedCount = failed;
         saveRutaTrackingQueue(remaining);
         return remaining.length;
+      }
+
+      function stopRutaAutoTracking() {
+        if (state.routeAutoTrackingTimer) {
+          window.clearInterval(state.routeAutoTrackingTimer);
+        }
+        state.routeAutoTrackingTimer = null;
+        state.routeAutoTrackingRutaId = null;
+        state.routeAutoTrackingBusy = false;
+        state.routeAutoTrackingStatus = "idle";
+      }
+
+      async function enviarTrackingAutomaticoRuta(rutaId) {
+        if (!rutaId || state.routeAutoTrackingBusy || state.pantallaActual !== "ruta_activa") return;
+        state.routeAutoTrackingBusy = true;
+        state.routeAutoTrackingStatus = "capturando";
+        try {
+          const positionPayload = await captureRoutePosition();
+          const payload = {
+            ...positionPayload,
+            tracking_origen: "automatico_pwa",
+            fuera_de_ruta_confirmado: false,
+            desvio_motivo: ""
+          };
+          const response = await apiFetch(`/rutas/${rutaId}/tracking/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          if (response.ok) {
+            state.routeAutoTrackingLastSentAt = new Date().toISOString();
+            state.routeAutoTrackingStatus = "enviado";
+          } else if ([400, 403, 404, 409].includes(response.status)) {
+            state.routeAutoTrackingStatus = "rechazado_api";
+            state.routeTrackingFailedCount += 1;
+          } else {
+            enqueueRutaTracking({ ruta_id: rutaId, payload });
+            state.routeAutoTrackingStatus = "pendiente_offline";
+          }
+        } catch (error) {
+          state.routeAutoTrackingStatus = error?.code === 1 ? "gps_denegado" : "pendiente_offline";
+        } finally {
+          state.routeAutoTrackingBusy = false;
+          if (state.pantallaActual === "ruta_activa") {
+            renderRutaActiva();
+          }
+        }
+      }
+
+      function ensureRutaAutoTracking(rutaId, enabled) {
+        if (!enabled || !rutaId) {
+          stopRutaAutoTracking();
+          return;
+        }
+        if (state.routeAutoTrackingRutaId === rutaId && state.routeAutoTrackingTimer) return;
+        stopRutaAutoTracking();
+        state.routeAutoTrackingRutaId = rutaId;
+        state.routeAutoTrackingStatus = "activo";
+        enviarTrackingAutomaticoRuta(rutaId);
+        state.routeAutoTrackingTimer = window.setInterval(() => enviarTrackingAutomaticoRuta(rutaId), ROUTE_AUTO_TRACKING_INTERVAL_MS);
       }
 
       function setTokens(data) {
@@ -1785,6 +1885,7 @@
 
       async function showScreen(nombre) {
         state.pantallaActual = nombre;
+        if (nombre !== "ruta_activa") stopRutaAutoTracking();
         if (nombre === "login") return renderLogin();
         if (!state.perfil) await loadPerfil();
         if (nombre === "dashboard") return renderDashboard();
@@ -2055,13 +2156,26 @@
         const turnoLabel = turnoOk ? (unidadOk ? "Unidad correcta" : "Unidad distinta") : "Sin turno abierto";
         const queueTone = pendientesOffline ? "warn" : "ok";
         const queueLabel = pendientesOffline ? `${pendientesOffline} pendiente${pendientesOffline === 1 ? "" : "s"}` : "Sin pendientes";
+        const autoStatus = state.routeAutoTrackingStatus || "idle";
+        const autoTone = ["enviado", "activo", "capturando"].includes(autoStatus) ? "ok" : autoStatus === "idle" ? "warn" : "bad";
+        const autoLabel = {
+          idle: "Esperando ruta",
+          activo: "Activo cada 90 s",
+          capturando: "Capturando GPS",
+          enviado: state.routeAutoTrackingLastSentAt ? `Último ${formatDate(state.routeAutoTrackingLastSentAt)}` : "Enviado",
+          pendiente_offline: "Pendiente local",
+          rechazado_api: "Rechazado por control",
+          gps_denegado: "Permiso bloqueado"
+        }[autoStatus] || autoStatus;
         const lastSignal = rutaData?.ultima_ubicacion?.timestamp_servidor ? formatDate(rutaData.ultima_ubicacion.timestamp_servidor) : "Sin señal previa";
         return `
           <div class="route-signal-grid" aria-label="Estado operativo de la ruta">
+            <div class="route-signal ${autoTone}"><b>Auto-tracking</b><span>${escapeHtml(autoLabel)}</span></div>
             <div class="route-signal ${gpsTone}"><b>GPS</b><span>${escapeHtml(gpsLabel)}${draft.precision_metros ? ` · ${escapeHtml(draft.precision_metros)} m` : ""}</span></div>
             <div class="route-signal ${turnoTone}"><b>Turno</b><span>${escapeHtml(turnoLabel)}</span></div>
             <div class="route-signal ${queueTone}"><b>Sin conexión</b><span>${escapeHtml(queueLabel)}</span></div>
             <div class="route-signal"><b>Última señal</b><span>${escapeHtml(lastSignal)}</span></div>
+            <div class="route-signal ${state.routeTrackingFailedCount ? "bad" : "ok"}"><b>Rechazos</b><span>${state.routeTrackingFailedCount ? `${state.routeTrackingFailedCount} por revisar` : "Sin rechazos"}</span></div>
           </div>
         `;
       }
@@ -2109,6 +2223,7 @@
         }
         const draft = ensureRutaTrackingDraft();
         if (!rutaData?.ruta?.id) {
+          stopRutaAutoTracking();
           return render(shell(`
             <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
             <h1 class="screen-title" style="margin-top:16px;">Mi ruta</h1>
@@ -2185,6 +2300,7 @@
           </section>
           ${draft.geoStatus === "idle" ? "" : geoOverlay(draft, "capturarUbicacionRuta")}
         `));
+        ensureRutaAutoTracking(ruta.id, turnoOk && unidadOk);
       }
 
       async function registrarTrackingRuta() {
@@ -2199,11 +2315,14 @@
           latitud: draft.latitud,
           longitud: draft.longitud,
           precision_metros: draft.precision_metros,
+          timestamp_dispositivo: draft.timestamp_dispositivo || new Date().toISOString(),
+          client_event_id: draft.client_event_id || newClientEventId(),
+          tracking_origen: "manual_pwa",
           fuera_de_ruta_confirmado: draft.fuera_de_ruta_confirmado,
           desvio_motivo: draft.desvio_motivo
         };
         draft.guardando = true;
-        renderRutaActiva();
+        await renderRutaActiva();
         let response;
         try {
           response = await apiFetch(`/rutas/${rutaId}/tracking/`, {
@@ -3692,7 +3811,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=route-control-v10").catch(() => {});
+          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=route-control-v11").catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {

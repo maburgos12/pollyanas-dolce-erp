@@ -121,12 +121,13 @@ def crear_evento_ruta_once(
     metadata: dict | None = None,
     ventana_minutos: int = 15,
 ) -> EventoRuta | None:
-    since = timezone.now() - timezone.timedelta(minutes=ventana_minutos)
-    duplicate = EventoRuta.objects.filter(ruta=ruta, tipo=tipo, creado_en__gte=since)
-    if parada:
-        duplicate = duplicate.filter(parada=parada)
-    if duplicate.exists():
-        return None
+    if ventana_minutos > 0:
+        since = timezone.now() - timezone.timedelta(minutes=ventana_minutos)
+        duplicate = EventoRuta.objects.filter(ruta=ruta, tipo=tipo, creado_en__gte=since)
+        if parada:
+            duplicate = duplicate.filter(parada=parada)
+        if duplicate.exists():
+            return None
     return EventoRuta.objects.create(
         ruta=ruta,
         tipo=tipo,
@@ -142,10 +143,50 @@ def crear_evento_ruta_once(
     )
 
 
+def _timestamp_dispositivo_confiable(timestamp_dispositivo) -> tuple[bool, str]:
+    if not timestamp_dispositivo:
+        return True, ""
+    now = timezone.now()
+    age_seconds = (now - timestamp_dispositivo).total_seconds()
+    if age_seconds > 5 * 60:
+        return False, f"Ubicación capturada hace {int(age_seconds // 60)} minutos."
+    if age_seconds < -2 * 60:
+        return False, "El reloj del dispositivo viene adelantado respecto al servidor."
+    return True, ""
+
+
+def _precision_confiable(precision_metros) -> tuple[bool, str]:
+    if precision_metros is None:
+        return True, ""
+    if Decimal(str(precision_metros)) > Decimal("100"):
+        return False, f"Precisión GPS baja: {precision_metros} m."
+    return True, ""
+
+
+def _salto_fisico_confiable(ruta: RutaEntrega, latitud, longitud, timestamp_dispositivo) -> tuple[bool, str, int | None]:
+    previous = ruta.ubicaciones.order_by("-timestamp_servidor", "-id").first()
+    if not previous:
+        return True, "", None
+    distance = distancia_metros(previous.latitud, previous.longitud, latitud, longitud)
+    previous_time = previous.timestamp_dispositivo or previous.timestamp_servidor
+    current_time = timestamp_dispositivo or timezone.now()
+    delta_seconds = (current_time - previous_time).total_seconds()
+    if delta_seconds <= 0 and distance > 80:
+        return False, "La ubicación llegó fuera de secuencia respecto a la señal anterior.", distance
+    if delta_seconds <= 0:
+        return True, "", distance
+    speed_kmh = (distance / 1000) / (delta_seconds / 3600)
+    if distance > 500 and speed_kmh > 120:
+        return False, f"Salto GPS improbable: {distance} m en {int(delta_seconds)} s.", distance
+    return True, "", distance
+
+
 @transaction.atomic
 def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_registro: str | None = None) -> UbicacionRuta:
     if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
         raise ValidationError("La ruta debe estar en estatus En ruta para registrar seguimiento.")
+    if ruta.fecha_ruta != timezone.localdate():
+        raise ValidationError("La ruta activa no corresponde al día operativo actual.")
     if not ruta.repartidor_id:
         raise ValidationError("La ruta debe tener un repartidor asignado antes de aceptar seguimiento.")
     if not ruta.unidad_operativa_id:
@@ -164,6 +205,27 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
         ruta.save(update_fields=["bitacora_salida", "hora_inicio_real", "updated_at"])
 
     latitud, longitud = validar_coordenadas(payload.get("latitud"), payload.get("longitud"))
+    timestamp_dispositivo = _payload_value(payload, "timestamp_dispositivo")
+    duplicate = None
+    if timestamp_dispositivo:
+        duplicate = UbicacionRuta.objects.filter(
+            ruta=ruta,
+            repartidor=repartidor,
+            latitud=latitud,
+            longitud=longitud,
+            timestamp_dispositivo=timestamp_dispositivo,
+        ).order_by("-id").first()
+    if duplicate:
+        duplicate._alertas_tracking = ["duplicado_cliente"]
+        return duplicate
+
+    tracking_origen = payload.get("tracking_origen") or "automatico_geocerca"
+    automatico_pwa = tracking_origen == "automatico_pwa"
+    timestamp_ok, timestamp_reason = _timestamp_dispositivo_confiable(timestamp_dispositivo)
+    precision_ok, precision_reason = _precision_confiable(_payload_value(payload, "precision_metros"))
+    salto_ok, salto_reason, salto_distancia = _salto_fisico_confiable(ruta, latitud, longitud, timestamp_dispositivo)
+    alertas_tracking = []
+
     ubicacion = UbicacionRuta.objects.create(
         ruta=ruta,
         repartidor=repartidor,
@@ -173,12 +235,58 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
         precision_metros=_payload_value(payload, "precision_metros"),
         velocidad_kmh=_payload_value(payload, "velocidad_kmh"),
         bateria_porcentaje=_payload_value(payload, "bateria_porcentaje"),
-        timestamp_dispositivo=_payload_value(payload, "timestamp_dispositivo"),
+        timestamp_dispositivo=timestamp_dispositivo,
         ip_registro=ip_registro,
     )
 
+    if not timestamp_ok:
+        alertas_tracking.append("ubicacion_tardia")
+        crear_evento_ruta_once(
+            ruta=ruta,
+            tipo=EventoRuta.TIPO_UBICACION_TARDIA,
+            severidad=EventoRuta.SEVERIDAD_ALERTA,
+            descripcion=timestamp_reason,
+            user=user,
+            ubicacion=ubicacion,
+            latitud=ubicacion.latitud,
+            longitud=ubicacion.longitud,
+            metadata={"origen": tracking_origen},
+            ventana_minutos=10,
+        )
+    if not precision_ok:
+        alertas_tracking.append("precision_baja")
+        crear_evento_ruta_once(
+            ruta=ruta,
+            tipo=EventoRuta.TIPO_GPS_PRECISION_BAJA,
+            severidad=EventoRuta.SEVERIDAD_ALERTA,
+            descripcion=precision_reason,
+            user=user,
+            ubicacion=ubicacion,
+            latitud=ubicacion.latitud,
+            longitud=ubicacion.longitud,
+            metadata={"origen": tracking_origen, "precision_metros": str(ubicacion.precision_metros)},
+            ventana_minutos=10,
+        )
+    if not salto_ok:
+        alertas_tracking.append("salto_imposible")
+        crear_evento_ruta_once(
+            ruta=ruta,
+            tipo=EventoRuta.TIPO_SALTO_IMPOSIBLE,
+            severidad=EventoRuta.SEVERIDAD_CRITICA,
+            descripcion=salto_reason,
+            user=user,
+            ubicacion=ubicacion,
+            latitud=ubicacion.latitud,
+            longitud=ubicacion.longitud,
+            distancia_metros_value=salto_distancia,
+            metadata={"origen": tracking_origen},
+            ventana_minutos=10,
+        )
+
+    ubicacion_confiable = timestamp_ok and precision_ok and salto_ok
+
     resultado = evaluar_geocercas(ruta, ubicacion.latitud, ubicacion.longitud)
-    if resultado.parada and resultado.dentro:
+    if resultado.parada and resultado.dentro and ubicacion_confiable:
         if resultado.parada.estado != ParadaRuta.ESTADO_VISITADA:
             resultado.parada.estado = ParadaRuta.ESTADO_VISITADA
             resultado.parada.hora_llegada_real = timezone.now()
@@ -204,28 +312,41 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
         ubicacion.save(update_fields=["fuera_de_geocerca"])
         confirmado = payload.get("fuera_de_ruta_confirmado") is True
         motivo = (payload.get("desvio_motivo") or "").strip()
-        crear_evento_ruta_once(
-            ruta=ruta,
-            tipo=EventoRuta.TIPO_DESVIO,
-            severidad=EventoRuta.SEVERIDAD_CRITICA,
-            descripcion=(
+        if confirmado or not automatico_pwa:
+            descripcion_desvio = (
                 "Desvío confirmado fuera del corredor autorizado de la ruta."
                 if confirmado
-                else "Desvío detectado automáticamente por GPS fuera de geocerca."
-            ),
-            user=user,
-            parada=resultado.parada,
-            ubicacion=ubicacion,
-            latitud=ubicacion.latitud,
-            longitud=ubicacion.longitud,
-            distancia_metros_value=resultado.distancia_metros,
-            metadata={
-                "punto_mas_cercano": resultado.parada.punto_nombre_snapshot if resultado.parada else None,
-                "motivo": motivo or "Desvío detectado automáticamente por GPS fuera de geocerca.",
-                "origen": "repartidor_confirmado" if confirmado else "automatico_geocerca",
-            },
-        )
+                else (
+                    "Desvío detectado automáticamente por GPS fuera de geocerca."
+                    if tracking_origen == "automatico_geocerca"
+                    else "Desvío detectado por registro manual fuera de geocerca."
+                )
+            )
+            motivo_desvio = motivo or (
+                "Desvío detectado automáticamente por GPS fuera de geocerca."
+                if tracking_origen == "automatico_geocerca"
+                else "Registro fuera de geocerca."
+            )
+            crear_evento_ruta_once(
+                ruta=ruta,
+                tipo=EventoRuta.TIPO_DESVIO,
+                severidad=EventoRuta.SEVERIDAD_CRITICA,
+                descripcion=descripcion_desvio,
+                user=user,
+                parada=resultado.parada,
+                ubicacion=ubicacion,
+                latitud=ubicacion.latitud,
+                longitud=ubicacion.longitud,
+                distancia_metros_value=resultado.distancia_metros,
+                metadata={
+                    "punto_mas_cercano": resultado.parada.punto_nombre_snapshot if resultado.parada else None,
+                    "motivo": motivo_desvio,
+                    "origen": "repartidor_confirmado" if confirmado else tracking_origen,
+                },
+                ventana_minutos=0 if confirmado else 15,
+            )
 
+    ubicacion._alertas_tracking = alertas_tracking
     return ubicacion
 
 
