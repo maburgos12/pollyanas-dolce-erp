@@ -1055,31 +1055,63 @@ def control_rutas(request):
         raise PermissionDenied("No tienes permisos para ver control de rutas")
 
     fecha_raw = (request.GET.get("fecha") or "").strip()
+    query = (request.GET.get("q") or "").strip()
+    evento_tipo = (request.GET.get("evento") or "").strip().upper()
+    tipos_evento_validos = {choice[0] for choice in EventoRuta.TIPO_CHOICES}
+    if evento_tipo not in tipos_evento_validos:
+        evento_tipo = ""
     fecha = _parse_date(fecha_raw) or timezone.localdate()
     control = resumen_control_rutas(fecha=fecha, limit=80)
-    eventos = (
-        EventoRuta.objects.select_related("ruta", "parada__punto", "creado_por")
+    rutas_control = control["rutas"]
+    if query:
+        rutas_control = [
+            row
+            for row in rutas_control
+            if query.lower()
+            in " ".join(
+                [
+                    row["ruta"].nombre or "",
+                    row["ruta"].folio or "",
+                    str(row["ruta"].repartidor or ""),
+                    str(row["ruta"].unidad_operativa or ""),
+                    row["ruta"].chofer or "",
+                    row["ruta"].unidad or "",
+                ]
+            ).lower()
+        ]
+    ruta_ids = [row["ruta"].id for row in rutas_control]
+    eventos_qs = EventoRuta.objects.select_related("ruta", "parada__punto", "creado_por").filter(ruta__fecha_ruta=fecha)
+    if query:
+        eventos_qs = eventos_qs.filter(ruta_id__in=ruta_ids)
+    eventos_metricas_qs = eventos_qs
+    if evento_tipo:
+        eventos_qs = eventos_qs.filter(tipo=evento_tipo)
+    eventos = eventos_qs.order_by("-creado_en", "-id")[:80]
+    paradas_pendientes = (
+        ParadaRuta.objects.select_related("ruta", "punto")
         .filter(ruta__fecha_ruta=fecha)
-        .order_by("-creado_en", "-id")[:80]
+        .exclude(estado=ParadaRuta.ESTADO_VISITADA)
     )
-    paradas_pendientes = ParadaRuta.objects.select_related("ruta", "punto").filter(ruta__fecha_ruta=fecha).exclude(
-        estado=ParadaRuta.ESTADO_VISITADA
-    )
-    geocercas_programadas = sum(row["paradas_total"] for row in control["rutas"])
-    geocercas_visitadas = sum(row["paradas_visitadas"] for row in control["rutas"])
+    if query:
+        paradas_pendientes = paradas_pendientes.filter(ruta_id__in=ruta_ids)
+    geocercas_programadas = sum(row["paradas_total"] for row in rutas_control)
+    geocercas_visitadas = sum(row["paradas_visitadas"] for row in rutas_control)
     context = {
         "module_tabs": _module_tabs("control_rutas", request.user),
         "fecha": fecha,
         "fecha_iso": fecha.isoformat(),
-        "control": control,
+        "control": {**control, "rutas": rutas_control},
         "eventos": eventos,
         "paradas_pendientes": paradas_pendientes[:60],
         "can_manage_logistica": can_manage_submodule(request.user, "logistica", "rutas"),
+        "query": query,
+        "evento_tipo": evento_tipo,
+        "evento_choices": EventoRuta.TIPO_CHOICES,
         "metricas": {
-            "rutas": len(control["rutas"]),
-            "desvios": control["desvios"],
-            "gps_perdido": control["gps_perdido"],
-            "eventos_criticos": control["eventos_criticos"],
+            "rutas": len(rutas_control),
+            "desvios": eventos_metricas_qs.filter(tipo=EventoRuta.TIPO_DESVIO).count(),
+            "gps_perdido": eventos_metricas_qs.filter(tipo=EventoRuta.TIPO_GPS_PERDIDO).count(),
+            "eventos_criticos": eventos_metricas_qs.filter(severidad=EventoRuta.SEVERIDAD_CRITICA).count(),
             "geocercas_programadas": geocercas_programadas,
             "geocercas_visitadas": geocercas_visitadas,
             "paradas_pendientes": paradas_pendientes.count(),
