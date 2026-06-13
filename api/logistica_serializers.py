@@ -245,14 +245,18 @@ class UbicacionRutaSerializer(serializers.ModelSerializer):
 
 
 class UbicacionRutaCreateSerializer(serializers.Serializer):
+    TRACKING_ORIGEN_CHOICES = ["manual_pwa", "automatico_pwa"]
+
     latitud = serializers.DecimalField(max_digits=9, decimal_places=6)
     longitud = serializers.DecimalField(max_digits=9, decimal_places=6)
     precision_metros = serializers.DecimalField(max_digits=8, decimal_places=2, min_value=Decimal("0"), required=False, allow_null=True)
     velocidad_kmh = serializers.DecimalField(max_digits=8, decimal_places=2, min_value=Decimal("0"), required=False, allow_null=True)
     bateria_porcentaje = serializers.IntegerField(min_value=0, max_value=100, required=False, allow_null=True)
     timestamp_dispositivo = serializers.DateTimeField(required=False, allow_null=True)
+    client_event_id = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
     fuera_de_ruta_confirmado = serializers.BooleanField(required=False, default=False)
     desvio_motivo = serializers.CharField(required=False, allow_blank=True, default="")
+    tracking_origen = serializers.ChoiceField(choices=TRACKING_ORIGEN_CHOICES, required=False, default="manual_pwa")
 
     def validate(self, attrs):
         try:

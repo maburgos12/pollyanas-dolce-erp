@@ -390,6 +390,9 @@ class EventoRuta(models.Model):
     TIPO_DESVIO = "DESVIO"
     TIPO_PARADA_LARGA = "PARADA_LARGA"
     TIPO_GPS_PERDIDO = "GPS_PERDIDO"
+    TIPO_GPS_PRECISION_BAJA = "GPS_PRECISION_BAJA"
+    TIPO_UBICACION_TARDIA = "UBICACION_TARDIA"
+    TIPO_SALTO_IMPOSIBLE = "SALTO_IMPOSIBLE"
     TIPO_INCIDENCIA_MANUAL = "INCIDENCIA_MANUAL"
     TIPO_CIERRE = "CIERRE"
     TIPO_CHOICES = [
@@ -398,6 +401,9 @@ class EventoRuta(models.Model):
         (TIPO_DESVIO, "Desvío"),
         (TIPO_PARADA_LARGA, "Parada larga"),
         (TIPO_GPS_PERDIDO, "GPS perdido"),
+        (TIPO_GPS_PRECISION_BAJA, "GPS con precisión baja"),
+        (TIPO_UBICACION_TARDIA, "Ubicación tardía"),
+        (TIPO_SALTO_IMPOSIBLE, "Salto GPS imposible"),
         (TIPO_INCIDENCIA_MANUAL, "Incidencia manual"),
         (TIPO_CIERRE, "Cierre"),
     ]

@@ -599,6 +599,95 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(evento.metadata["origen"], "automatico_geocerca")
         self.assertEqual(evento.metadata["motivo"], "Desvío detectado automáticamente por GPS fuera de geocerca.")
 
+    def test_tracking_automatico_fuera_de_geocerca_no_crea_desvio_critico(self):
+        ubicacion = registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={
+                "latitud": "25.590000",
+                "longitud": "-108.490000",
+                "timestamp_dispositivo": timezone.now(),
+                "tracking_origen": "automatico_pwa",
+            },
+        )
+
+        self.assertTrue(ubicacion.fuera_de_geocerca)
+        self.assertFalse(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_DESVIO).exists())
+
+    def test_tracking_precision_baja_no_marca_parada_visitada(self):
+        ubicacion = registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={
+                "latitud": "25.570010",
+                "longitud": "-108.470010",
+                "precision_metros": "180",
+                "timestamp_dispositivo": timezone.now(),
+                "tracking_origen": "automatico_pwa",
+            },
+        )
+
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
+        self.assertIn("precision_baja", ubicacion._alertas_tracking)
+        self.assertTrue(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_GPS_PRECISION_BAJA).exists())
+
+    def test_tracking_ubicacion_tardia_crea_alerta_y_no_marca_parada(self):
+        ubicacion = registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={
+                "latitud": "25.570010",
+                "longitud": "-108.470010",
+                "timestamp_dispositivo": timezone.now() - timezone.timedelta(minutes=12),
+                "tracking_origen": "automatico_pwa",
+            },
+        )
+
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
+        self.assertIn("ubicacion_tardia", ubicacion._alertas_tracking)
+        self.assertTrue(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_UBICACION_TARDIA).exists())
+
+    def test_tracking_salto_imposible_crea_alerta(self):
+        registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={
+                "latitud": "25.570010",
+                "longitud": "-108.470010",
+                "timestamp_dispositivo": timezone.now(),
+            },
+        )
+        ubicacion = registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={
+                "latitud": "25.900000",
+                "longitud": "-108.900000",
+                "timestamp_dispositivo": timezone.now() + timezone.timedelta(seconds=10),
+                "tracking_origen": "automatico_pwa",
+            },
+        )
+
+        self.assertIn("salto_imposible", ubicacion._alertas_tracking)
+        self.assertTrue(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_SALTO_IMPOSIBLE).exists())
+
+    def test_tracking_payload_duplicado_por_timestamp_no_duplica_ubicacion(self):
+        timestamp = timezone.now()
+        payload = {
+            "latitud": "25.570010",
+            "longitud": "-108.470010",
+            "timestamp_dispositivo": timestamp,
+            "tracking_origen": "automatico_pwa",
+        }
+
+        primera = registrar_ubicacion_ruta(user=self.user, ruta=self.ruta, payload=payload)
+        segunda = registrar_ubicacion_ruta(user=self.user, ruta=self.ruta, payload=payload)
+
+        self.assertEqual(primera.id, segunda.id)
+        self.assertEqual(self.ruta.ubicaciones.count(), 1)
+
     def test_tracking_api_rechaza_desvio_confirmado_sin_motivo(self):
         self.client.force_login(self.user)
 
@@ -816,8 +905,11 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v10", pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v10-route-ui", sw_js)
+        self.assertIn("route-control-v11", pwa_html)
+        self.assertIn("pollyanas-logistica-pwa-v11-auto-tracking", sw_js)
+        self.assertIn("ROUTE_AUTO_TRACKING_INTERVAL_MS", pwa_html)
+        self.assertIn("automatico_pwa", pwa_html)
+        self.assertIn("Auto-tracking", pwa_html)
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
