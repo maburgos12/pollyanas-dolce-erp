@@ -17,11 +17,18 @@
   .ops-focus-card strong { display:block; font-size:24px; color:var(--vino); }
   .ops-chip-row { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
   .ops-chip { display:inline-flex; align-items:center; padding:5px 10px; border-radius:999px; background:rgba(139,34,82,.08); color:var(--vino); font-size:12px; font-weight:600; }
+  .route-create-form { display:grid; gap:12px; }
+  .route-create-grid { display:grid; gap:10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .route-point-list { display:grid; gap:8px; max-height:260px; overflow:auto; padding:8px; border:1px solid var(--rosa); border-radius:10px; background:#fff; }
+  .route-point-option { display:grid; grid-template-columns: auto minmax(0, 1fr); gap:8px; align-items:start; padding:8px; border:1px solid #f1d9e4; border-radius:8px; }
+  .route-point-option strong { display:block; color:var(--vino); }
+  .route-point-option span { display:block; color:#64748b; font-size:12px; }
+  .route-create-note { padding:10px 12px; border-radius:8px; background:#fff7e6; border:1px solid #ffd58a; color:#5d3b00; font-weight:700; }
   @media (max-width: 1080px) {
     .ops-topline, .ops-focus-grid, .ops-grid-2 { grid-template-columns: 1fr 1fr; }
   }
   @media (max-width: 760px) {
-    .ops-topline, .ops-focus-grid, .ops-grid-2 { grid-template-columns: 1fr; }
+    .ops-topline, .ops-focus-grid, .ops-grid-2, .route-create-grid { grid-template-columns: 1fr; }
   }
 </style>
 <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
@@ -68,30 +75,48 @@
 
   <section class="ops-grid-2">
     <article class="card">
-      <div class="card-header">Nueva ruta de entrega</div>
+      <div class="card-header">Planear ruta del día</div>
       {% if can_manage_logistica %}
-      <form method="post" class="filters" style="margin-bottom:0;">
+      <form method="post" class="route-create-form" style="margin-bottom:0;">
         {% csrf_token %}
-        <input class="input-field" type="text" name="nombre" placeholder="Ej. Ruta Norte" required>
-        <input class="input-field" type="date" name="fecha_ruta" value="{% now 'Y-m-d' %}">
-        <select class="input-field" name="repartidor">
-          <option value="">Repartidor operativo...</option>
-          {% for repartidor in repartidores %}
-          <option value="{{ repartidor.id }}">{{ repartidor }}{% if repartidor.unidad_asignada %} · {{ repartidor.unidad_asignada.codigo }}{% endif %}</option>
-          {% endfor %}
-        </select>
-        <select class="input-field" name="unidad_operativa">
-          <option value="">Unidad operativa...</option>
-          {% for unidad in unidades %}
-          <option value="{{ unidad.id }}">{{ unidad.codigo }} · {{ unidad.placa|default:unidad.descripcion }}</option>
-          {% endfor %}
-        </select>
-        <input class="input-field" type="text" name="chofer" placeholder="Chofer manual (compatibilidad)">
-        <input class="input-field" type="text" name="unidad" placeholder="Unidad manual (compatibilidad)">
+        <div class="route-create-grid">
+          <input class="input-field" type="text" name="nombre" placeholder="Ej. Ruta CEDIS - Sucursales" required>
+          <input class="input-field" type="date" name="fecha_ruta" value="{% now 'Y-m-d' %}">
+          <select class="input-field" name="repartidor">
+            <option value="">Repartidor operativo...</option>
+            {% for repartidor in repartidores %}
+            <option value="{{ repartidor.id }}">{{ repartidor }}{% if repartidor.unidad_asignada %} · {{ repartidor.unidad_asignada.codigo }}{% endif %}</option>
+            {% endfor %}
+          </select>
+          <select class="input-field" name="unidad_operativa">
+            <option value="">Unidad operativa...</option>
+            {% for unidad in unidades %}
+            <option value="{{ unidad.id }}">{{ unidad.codigo }} · {{ unidad.placa|default:unidad.descripcion }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <strong style="display:block; color:var(--vino); margin-bottom:6px;">Sucursales o puntos a visitar</strong>
+          {% if puntos_creacion %}
+          <div class="route-point-list">
+            {% for punto in puntos_creacion %}
+            <label class="route-point-option">
+              <input type="checkbox" name="puntos_ruta" value="{{ punto.id }}">
+              <span>
+                <strong>{{ punto.nombre }}</strong>
+                {{ punto.get_tipo_display }}{% if punto.sucursal %} · {{ punto.sucursal }}{% endif %} · geocerca {{ punto.radio_geocerca_metros }} m
+              </span>
+            </label>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="route-create-note">Primero crea puntos logísticos con coordenadas para poder planear rutas.</div>
+          {% endif %}
+        </div>
+        <input class="input-field" type="text" name="notas" placeholder="Notas internas de carga, horarios o prioridad">
         <input type="hidden" name="estatus" value="PLANEADA">
-        <div class="input-field" style="display:flex; align-items:center; color:#64748b;">Se crea como planeada; se libera desde el detalle.</div>
-        <input class="input-field" type="number" min="0" step="0.01" name="km_estimado" placeholder="KM estimado">
-        <button class="btn btn-primary" type="submit">Crear ruta</button>
+        <div class="route-create-note">Se crea como planeada con paradas. El KM se ajusta después en el detalle si hace falta.</div>
+        <button class="btn btn-primary" type="submit" {% if not puntos_creacion %}disabled{% endif %}>Crear ruta planeada</button>
       </form>
       {% else %}
       <p class="muted">Tu rol es de consulta. No puedes crear rutas.</p>
@@ -137,7 +162,7 @@
             <th class="text-end">Entregas</th>
             <th class="text-end">Completadas</th>
             <th class="text-end">Incidencias</th>
-            <th class="text-end">Monto estimado</th>
+            <th class="text-end">Valor pedidos</th>
             <th>Estatus</th>
             <th>Detalle</th>
           </tr>

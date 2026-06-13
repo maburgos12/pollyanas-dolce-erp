@@ -37,7 +37,7 @@
       <article class="ops-summary-card"><span class="muted">Ruta</span><strong style="font-size:22px;">{{ ruta.nombre }}</strong><div>{{ ruta.folio }}</div></article>
       <article class="ops-summary-card"><span class="muted">Fecha</span><strong style="font-size:22px;">{{ ruta.fecha_ruta|date:"Y-m-d" }}</strong><div>{{ ruta.get_estatus_display }}</div></article>
       <article class="ops-summary-card"><span class="muted">Repartidor / unidad</span><strong style="font-size:22px;">{{ ruta.repartidor|default:ruta.chofer|default:"-" }}</strong><div>{{ ruta.unidad_operativa|default:ruta.unidad|default:"Sin unidad" }}</div></article>
-      <article class="ops-summary-card"><span class="muted">Monto estimado</span><strong>${{ ruta.monto_estimado_total|floatformat:2|intcomma }}</strong><div>{{ ruta.total_entregas|intcomma }} entregas visibles</div></article>
+      <article class="ops-summary-card"><span class="muted">Paradas</span><strong>{{ paradas|length|intcomma }}</strong><div>Valor pedidos ${{ ruta.monto_estimado_total|floatformat:2|intcomma }}</div></article>
     </div>
     <div class="table-responsive" style="margin-top:14px;">
       <table class="table table-striped">
@@ -94,7 +94,7 @@
             <input class="input-field" id="id_unidad_manual" type="text" name="unidad" value="{{ ruta.unidad }}" placeholder="Compatibilidad">
           </div>
           <div class="route-plan-field">
-            <label for="id_km_estimado">KM estimado</label>
+            <label for="id_km_estimado">KM estimado opcional</label>
             <input class="input-field" id="id_km_estimado" type="number" min="0" step="0.01" name="km_estimado" value="{{ ruta.km_estimado }}">
           </div>
           <div class="route-plan-field">
