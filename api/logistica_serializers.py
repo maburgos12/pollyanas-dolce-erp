@@ -91,6 +91,31 @@ class LogisticaRutaSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class LogisticaRutaParadaCreateSerializer(serializers.Serializer):
+    punto_id = serializers.IntegerField()
+    orden = serializers.IntegerField(min_value=1, required=False)
+
+
+class LogisticaRutaCreateSerializer(serializers.Serializer):
+    nombre = serializers.CharField()
+    fecha_ruta = serializers.DateField()
+    repartidor = serializers.PrimaryKeyRelatedField(queryset=Repartidor.objects.all())
+    unidad_operativa = serializers.PrimaryKeyRelatedField(queryset=Unidad.objects.filter(activa=True))
+    chofer = serializers.CharField(required=False, allow_blank=True, default="")
+    unidad = serializers.CharField(required=False, allow_blank=True, default="")
+    estatus = serializers.ChoiceField(choices=RutaEntrega.ESTATUS_CHOICES, required=False, default=RutaEntrega.ESTATUS_PLANEADA)
+    km_estimado = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, default=Decimal("0"))
+    notas = serializers.CharField(required=False, allow_blank=True, default="")
+    paradas = LogisticaRutaParadaCreateSerializer(many=True)
+
+    def validate(self, attrs):
+        if attrs.get("estatus", RutaEntrega.ESTATUS_PLANEADA) != RutaEntrega.ESTATUS_PLANEADA:
+            raise serializers.ValidationError({"estatus": "Crea la ruta como planeada y libérala desde el flujo de planeación."})
+        if not attrs.get("paradas"):
+            raise serializers.ValidationError({"paradas": "Selecciona al menos una sucursal o punto para planear la ruta del día."})
+        return attrs
+
+
 class LogisticaEntregaSerializer(serializers.ModelSerializer):
     pedido_folio = serializers.CharField(source="pedido.folio", read_only=True)
 

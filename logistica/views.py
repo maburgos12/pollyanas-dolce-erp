@@ -1349,7 +1349,13 @@ def rutas(request):
             puntos = PuntoLogistico.objects.filter(pk__in=puntos_ruta_ids, activo=True)
             puntos_by_id = {str(punto.id): punto for punto in puntos}
             puntos_ordenados = []
+            puntos_duplicados = 0
+            puntos_vistos = set()
             for posicion_formulario, value in enumerate(puntos_ruta_ids, start=1):
+                if value in puntos_vistos:
+                    puntos_duplicados += 1
+                    continue
+                puntos_vistos.add(value)
                 punto = puntos_by_id.get(value)
                 if not punto:
                     continue
@@ -1382,6 +1388,8 @@ def rutas(request):
                     ParadaRuta.objects.create(ruta=ruta, punto=punto, orden=orden)
             if (request.POST.get("estatus") or "").strip().upper() == RutaEntrega.ESTATUS_EN_RUTA:
                 messages.warning(request, "La ruta se creó como planeada. Agrega paradas antes de liberarla para seguimiento.")
+            if puntos_duplicados:
+                messages.info(request, "Se ignoraron puntos repetidos; cada sucursal o punto quedó una sola vez en la ruta.")
             log_event(
                 request.user,
                 "CREATE",

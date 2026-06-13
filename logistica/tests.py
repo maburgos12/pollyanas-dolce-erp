@@ -247,6 +247,31 @@ class LogisticaViewsTests(TestCase):
         paradas = list(ruta.paradas.order_by("orden").values_list("punto_id", "orden"))
         self.assertEqual(paradas, [(punto_norte.id, 1), (punto_sur.id, 2)])
 
+    def test_rutas_create_deduplicates_repeated_route_points(self):
+        punto = PuntoLogistico.objects.create(
+            nombre="Sucursal Repetida",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.570000",
+            longitud="-108.470000",
+            radio_geocerca_metros=120,
+        )
+
+        resp_post = self.client.post(
+            reverse("logistica:rutas"),
+            {
+                "nombre": "Ruta sin duplicados",
+                "fecha_ruta": "2026-02-24",
+                "puntos_ruta": [str(punto.id), str(punto.id)],
+                f"punto_orden_{punto.id}": "1",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp_post.status_code, 200)
+        self.assertContains(resp_post, "Se ignoraron puntos repetidos")
+        ruta = RutaEntrega.objects.get(nombre="Ruta sin duplicados")
+        self.assertEqual(ruta.paradas.filter(punto=punto).count(), 1)
+
     def test_ruta_detail_add_entrega(self):
         cliente = Cliente.objects.create(nombre="Cliente Logística")
         pedido = PedidoCliente.objects.create(cliente=cliente, descripcion="Pastel para entrega")
@@ -1002,6 +1027,59 @@ class LogisticaControlRutasTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertFalse(RutaEntrega.objects.filter(nombre="Ruta API Directa").exists())
+
+    def test_api_no_crea_ruta_sin_paradas(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.post(
+            reverse("api_logistica_rutas"),
+            json.dumps({
+                "nombre": "Ruta API Vacía",
+                "fecha_ruta": timezone.localdate().isoformat(),
+                "repartidor": self.repartidor.id,
+                "unidad_operativa": self.unidad.id,
+                "paradas": [],
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(RutaEntrega.objects.filter(nombre="Ruta API Vacía").exists())
+
+    def test_api_crea_ruta_con_paradas_ordenadas_y_deduplicadas(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        self.ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
+        self.ruta.save(update_fields=["estatus", "updated_at"])
+        punto_sur = PuntoLogistico.objects.create(
+            nombre="Sucursal API Sur",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.560000",
+            longitud="-108.460000",
+            radio_geocerca_metros=120,
+        )
+
+        response = self.client.post(
+            reverse("api_logistica_rutas"),
+            json.dumps({
+                "nombre": "Ruta API Ordenada",
+                "fecha_ruta": timezone.localdate().isoformat(),
+                "repartidor": self.repartidor.id,
+                "unidad_operativa": self.unidad.id,
+                "paradas": [
+                    {"punto_id": punto_sur.id, "orden": 2},
+                    {"punto_id": self.punto.id, "orden": 1},
+                    {"punto_id": punto_sur.id, "orden": 3},
+                ],
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        ruta = RutaEntrega.objects.get(nombre="Ruta API Ordenada")
+        paradas = list(ruta.paradas.order_by("orden").values_list("punto_id", "orden"))
+        self.assertEqual(paradas, [(self.punto.id, 1), (punto_sur.id, 2)])
 
     def test_api_no_crea_ruta_directamente_cerrada(self):
         self.client.force_login(self.user)
