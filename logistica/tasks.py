@@ -4,6 +4,7 @@ from celery import shared_task
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
+from django.db import transaction
 from django.utils import timezone
 from django.utils.html import strip_tags
 
@@ -16,9 +17,11 @@ from .models import (
     DocumentoUnidad,
     LavadoUnidad,
     ReporteUnidad,
+    RutaEntrega,
     ServicioRealizadoUnidad,
     Unidad,
 )
+from .services_rutas_control import detectar_gps_perdido
 
 
 def _emails_de_grupo(nombre_grupo: str) -> list[str]:
@@ -42,6 +45,30 @@ def _emails_de_usuarios(usuarios) -> list[str]:
 
 def _from_email() -> str:
     return getattr(settings, "DEFAULT_FROM_EMAIL", "") or getattr(settings, "EMAIL_HOST_USER", "")
+
+
+@shared_task
+def detectar_gps_perdido_rutas(umbral_minutos: int = 10):
+    fecha = timezone.localdate()
+    rutas = RutaEntrega.objects.filter(
+        fecha_ruta=fecha,
+        estatus=RutaEntrega.ESTATUS_EN_RUTA,
+    ).order_by("id")
+    revisadas = rutas.count()
+    eventos = []
+
+    for ruta in rutas:
+        with transaction.atomic():
+            ruta_bloqueada = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
+            evento = detectar_gps_perdido(ruta_bloqueada, umbral_minutos=umbral_minutos)
+        if evento:
+            eventos.append(evento.id)
+
+    return {
+        "fecha": fecha.isoformat(),
+        "rutas_revisadas": revisadas,
+        "eventos_gps_perdido": len(set(eventos)),
+    }
 
 
 @shared_task
