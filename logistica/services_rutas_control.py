@@ -202,24 +202,29 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
     elif ruta.paradas.exists():
         ubicacion.fuera_de_geocerca = True
         ubicacion.save(update_fields=["fuera_de_geocerca"])
-        if payload.get("fuera_de_ruta_confirmado") is True:
-            motivo = (payload.get("desvio_motivo") or "").strip()
-            crear_evento_ruta_once(
-                ruta=ruta,
-                tipo=EventoRuta.TIPO_DESVIO,
-                severidad=EventoRuta.SEVERIDAD_CRITICA,
-                descripcion="Desvío confirmado fuera del corredor autorizado de la ruta.",
-                user=user,
-                parada=resultado.parada,
-                ubicacion=ubicacion,
-                latitud=ubicacion.latitud,
-                longitud=ubicacion.longitud,
-                distancia_metros_value=resultado.distancia_metros,
-                metadata={
-                    "punto_mas_cercano": resultado.parada.punto_nombre_snapshot if resultado.parada else None,
-                    "motivo": motivo,
-                },
-            )
+        confirmado = payload.get("fuera_de_ruta_confirmado") is True
+        motivo = (payload.get("desvio_motivo") or "").strip()
+        crear_evento_ruta_once(
+            ruta=ruta,
+            tipo=EventoRuta.TIPO_DESVIO,
+            severidad=EventoRuta.SEVERIDAD_CRITICA,
+            descripcion=(
+                "Desvío confirmado fuera del corredor autorizado de la ruta."
+                if confirmado
+                else "Desvío detectado automáticamente por GPS fuera de geocerca."
+            ),
+            user=user,
+            parada=resultado.parada,
+            ubicacion=ubicacion,
+            latitud=ubicacion.latitud,
+            longitud=ubicacion.longitud,
+            distancia_metros_value=resultado.distancia_metros,
+            metadata={
+                "punto_mas_cercano": resultado.parada.punto_nombre_snapshot if resultado.parada else None,
+                "motivo": motivo or "Desvío detectado automáticamente por GPS fuera de geocerca.",
+                "origen": "repartidor_confirmado" if confirmado else "automatico_geocerca",
+            },
+        )
 
     return ubicacion
 
