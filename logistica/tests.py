@@ -763,6 +763,47 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Control interno de rutas")
         self.assertContains(response, "Rutas del día")
+        self.assertContains(response, "Vista operativa preliminar")
+        self.assertContains(response, "Filtrar")
+
+    def test_control_rutas_filtra_por_ruta_repartidor_o_unidad(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.get(reverse("logistica:control_rutas"), {"q": "Control"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Ruta Control")
+        self.assertContains(response, "Filtro activo: Control")
+
+        response = self.client.get(reverse("logistica:control_rutas"), {"q": "No existe"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Ruta Control")
+        self.assertContains(response, "No hay rutas programadas para esta fecha.")
+
+    def test_control_rutas_filtra_evidencia_por_tipo(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        EventoRuta.objects.create(
+            ruta=self.ruta,
+            tipo=EventoRuta.TIPO_SALIDA,
+            severidad=EventoRuta.SEVERIDAD_INFO,
+            descripcion="Salida visible",
+        )
+        EventoRuta.objects.create(
+            ruta=self.ruta,
+            tipo=EventoRuta.TIPO_DESVIO,
+            severidad=EventoRuta.SEVERIDAD_CRITICA,
+            descripcion="Desvio filtrado",
+        )
+
+        response = self.client.get(reverse("logistica:control_rutas"), {"evento": EventoRuta.TIPO_DESVIO})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Desvio filtrado")
+        self.assertNotContains(response, "Salida visible")
+        self.assertContains(response, f'value="{EventoRuta.TIPO_DESVIO}" selected')
 
     def test_pwa_tracking_declara_cola_offline_reintento_y_cache_versionado(self):
         from pathlib import Path

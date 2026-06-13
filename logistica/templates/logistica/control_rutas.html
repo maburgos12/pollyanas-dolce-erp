@@ -132,7 +132,7 @@
 
   .route-search {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 38px;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
   }
 
@@ -150,9 +150,44 @@
   }
 
   .route-search button {
+    padding: 0 12px;
     color: var(--route-vino);
     font-weight: 900;
     cursor: pointer;
+  }
+
+  .route-search button:focus-visible,
+  .route-search input:focus-visible,
+  .evidence-filter:focus-visible,
+  .route-actions .btn:focus-visible,
+  .control-route-card .btn:focus-visible {
+    outline: 2px solid rgba(139, 23, 64, .38);
+    outline-offset: 2px;
+  }
+
+  .route-search button:active,
+  .route-actions .btn:active,
+  .control-route-card .btn:active {
+    transform: scale(.98);
+  }
+
+  .active-filter-note {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 9px 10px;
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    border-radius: 7px;
+    color: #7c2d12;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .active-filter-note a {
+    color: var(--route-vino);
+    font-weight: 900;
   }
 
   .panel-title-row {
@@ -392,17 +427,25 @@
     gap: 8px;
   }
 
-  .map-control-stack button {
-    width: 38px;
-    height: 38px;
+  .map-control-stack span {
+    display: grid;
+    place-items: center;
+    min-width: 38px;
+    min-height: 38px;
     border: 1px solid var(--route-line);
     border-radius: 7px;
-    background: var(--route-paper);
-    color: var(--route-ink);
-    font-size: 18px;
+    background: rgba(255, 255, 255, .72);
+    color: var(--route-muted);
+    font-size: 12px;
     font-weight: 900;
-    cursor: pointer;
     box-shadow: 0 8px 18px rgba(32, 32, 39, .10);
+  }
+
+  .map-static-note {
+    width: 126px;
+    padding: 8px 10px;
+    line-height: 1.25;
+    text-align: left;
   }
 
   .route-line-programmed,
@@ -524,12 +567,21 @@
   }
 
   .evidence-filter {
+    width: 100%;
     min-height: 38px;
     border: 1px solid var(--route-line);
     border-radius: 7px;
     background: var(--route-paper);
     padding: 0 10px;
     color: var(--route-ink);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .route-search button,
+    .route-actions .btn,
+    .control-route-card .btn {
+      transition: transform 120ms ease-out, border-color 120ms ease-out, box-shadow 120ms ease-out;
+    }
   }
 
   .timeline {
@@ -834,10 +886,18 @@
 
   <section class="route-workbench" aria-label="Panel de monitoreo de rutas">
     <aside class="route-list-panel" aria-label="Rutas activas">
-      <div class="route-search">
-        <input type="search" placeholder="Buscar ruta o repartidor..." aria-label="Buscar ruta o repartidor">
-        <button type="button" aria-label="Filtrar rutas">F</button>
+      <form class="route-search" method="get">
+        <input type="hidden" name="fecha" value="{{ fecha_iso }}">
+        {% if evento_tipo %}<input type="hidden" name="evento" value="{{ evento_tipo }}">{% endif %}
+        <input type="search" name="q" value="{{ query }}" placeholder="Buscar ruta o repartidor..." aria-label="Buscar ruta, folio, repartidor o unidad">
+        <button type="submit">Filtrar</button>
+      </form>
+      {% if query or evento_tipo %}
+      <div class="active-filter-note">
+        <span>Filtro activo{% if query %}: {{ query }}{% endif %}</span>
+        <a href="?fecha={{ fecha_iso }}">Limpiar</a>
       </div>
+      {% endif %}
       <div class="panel-title-row">
         <h2>Rutas del día</h2>
         <span>{{ metricas.rutas }} visibles</span>
@@ -888,9 +948,7 @@
         <span class="legend-item"><i class="legend-dot warn"></i>Desvío detectado</span>
       </div>
       <div class="map-control-stack" aria-hidden="true">
-        <button type="button" tabindex="-1">+</button>
-        <button type="button" tabindex="-1">-</button>
-        <button type="button" tabindex="-1">□</button>
+        <span class="map-static-note">Vista operativa preliminar</span>
       </div>
 
       {% for parada in paradas_pendientes|slice:":6" %}
@@ -921,9 +979,16 @@
         <a class="evidence-tab active" href="#evidencia-dia">Evidencia</a>
         <a class="evidence-tab" href="{% url 'logistica:puntos_logisticos' %}">Geocercas</a>
       </nav>
-      <select class="evidence-filter" aria-label="Filtrar eventos">
-        <option>Ver eventos del día</option>
-      </select>
+      <form method="get">
+        <input type="hidden" name="fecha" value="{{ fecha_iso }}">
+        {% if query %}<input type="hidden" name="q" value="{{ query }}">{% endif %}
+        <select class="evidence-filter" name="evento" aria-label="Filtrar eventos" onchange="this.form.submit()">
+          <option value="">Ver eventos del día</option>
+          {% for value, label in evento_choices %}
+          <option value="{{ value }}" {% if evento_tipo == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </form>
 
       <section id="evidencia-dia" class="timeline">
         {% for evento in eventos|slice:":8" %}
