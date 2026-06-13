@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from django.conf import settings
 from django.contrib.auth.models import Group, User
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
 from django.test import SimpleTestCase, TestCase
@@ -785,6 +786,32 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(ParadaRuta.objects.filter(pk=self.parada.id).exists())
         self.assertContains(response, "planeación queda congelada")
+
+    def test_ruta_en_ruta_no_permite_actualizar_entrega_oculta(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        entrega = EntregaRuta.objects.create(ruta=self.ruta, secuencia=1, cliente_nombre="Cliente", estatus=EntregaRuta.ESTATUS_PENDIENTE)
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {"action": "entrega_status", "entrega_id": entrega.id, "estatus": EntregaRuta.ESTATUS_ENTREGADA},
+            follow=True,
+        )
+
+        entrega.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(entrega.estatus, EntregaRuta.ESTATUS_PENDIENTE)
+        self.assertContains(response, "planeación queda congelada")
+
+    def test_ruta_model_clean_rechaza_en_ruta_sin_estructura(self):
+        ruta = RutaEntrega(nombre="Ruta Inválida", fecha_ruta=timezone.localdate(), estatus=RutaEntrega.ESTATUS_EN_RUTA)
+
+        with self.assertRaises(ValidationError) as ctx:
+            ruta.full_clean()
+
+        self.assertIn("repartidor", ctx.exception.message_dict)
+        self.assertIn("unidad_operativa", ctx.exception.message_dict)
+        self.assertIn("estatus", ctx.exception.message_dict)
 
     def test_ruta_status_bloquea_segunda_ruta_activa_mismo_repartidor(self):
         self.client.force_login(self.user)

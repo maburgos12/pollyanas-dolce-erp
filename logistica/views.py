@@ -70,6 +70,16 @@ def _parse_date(raw: str | None):
         return None
 
 
+def _ruta_status_choices_for(ruta: RutaEntrega):
+    if ruta.estatus == RutaEntrega.ESTATUS_PLANEADA:
+        allowed = {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA, RutaEntrega.ESTATUS_CANCELADA}
+    elif ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA:
+        allowed = {RutaEntrega.ESTATUS_EN_RUTA, RutaEntrega.ESTATUS_COMPLETADA, RutaEntrega.ESTATUS_CANCELADA}
+    else:
+        allowed = {ruta.estatus}
+    return [choice for choice in RutaEntrega.ESTATUS_CHOICES if choice[0] in allowed]
+
+
 def _module_tabs(active: str, user=None) -> list[dict]:
     tabs = [
         {"key": "dashboard", "label": "Dashboard", "url_name": "logistica:home", "active": active == "dashboard"},
@@ -1532,7 +1542,7 @@ def ruta_detail(request, pk: int):
 
         action = (request.POST.get("action") or "").strip().lower()
         ruta_cerrada = ruta.estatus in {RutaEntrega.ESTATUS_COMPLETADA, RutaEntrega.ESTATUS_CANCELADA}
-        estructura_actions = {"update_plan", "add_parada", "move_parada", "delete_parada", "add_entrega", "delete_entrega"}
+        estructura_actions = {"update_plan", "add_parada", "move_parada", "delete_parada", "add_entrega", "entrega_status", "delete_entrega"}
         if ruta_cerrada and action != "ruta_status":
             messages.error(request, "La ruta ya está cerrada o cancelada; no se puede editar su planeación ni evidencia.")
             return redirect("logistica:ruta_detail", pk=ruta.id)
@@ -1545,10 +1555,18 @@ def ruta_detail(request, pk: int):
             pedido_id = (request.POST.get("pedido_id") or "").strip()
             if pedido_id.isdigit():
                 pedido = PedidoCliente.objects.filter(pk=int(pedido_id)).first()
+            try:
+                secuencia = int(request.POST.get("secuencia") or 1)
+            except (TypeError, ValueError):
+                messages.error(request, "La secuencia de entrega debe ser un número.")
+                return redirect("logistica:ruta_detail", pk=ruta.id)
+            if secuencia < 1:
+                messages.error(request, "La secuencia de entrega debe ser mayor a cero.")
+                return redirect("logistica:ruta_detail", pk=ruta.id)
 
             entrega = EntregaRuta.objects.create(
                 ruta=ruta,
-                secuencia=int(request.POST.get("secuencia") or 1),
+                secuencia=secuencia,
                 pedido=pedido,
                 cliente_nombre=(request.POST.get("cliente_nombre") or "").strip(),
                 direccion=(request.POST.get("direccion") or "").strip(),
@@ -1981,7 +1999,7 @@ def ruta_detail(request, pk: int):
         "ruta": ruta,
         "entregas": entregas_qs,
         "pedidos": pedidos_disponibles,
-        "estatus_ruta_choices": RutaEntrega.ESTATUS_CHOICES,
+        "estatus_ruta_choices": _ruta_status_choices_for(ruta),
         "estatus_entrega_choices": EntregaRuta.ESTATUS_CHOICES,
         "repartidores": Repartidor.objects.select_related("user", "user__empleado_rrhh", "unidad_asignada").order_by("user__first_name", "user__username"),
         "unidades": Unidad.objects.filter(activa=True).order_by("codigo"),
