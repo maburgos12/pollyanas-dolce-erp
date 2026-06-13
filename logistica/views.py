@@ -1336,25 +1336,38 @@ def rutas(request):
             raise PermissionDenied("No tienes permisos para gestionar Logística")
 
         nombre = (request.POST.get("nombre") or "").strip()
+        puntos_ruta_ids = [value for value in request.POST.getlist("puntos_ruta") if str(value).isdigit()]
         if not nombre:
             messages.error(request, "El nombre de ruta es obligatorio.")
+        elif not puntos_ruta_ids:
+            messages.error(request, "Selecciona al menos una sucursal o punto para planear la ruta del día.")
         else:
             repartidor_id = (request.POST.get("repartidor") or "").strip()
             unidad_id = (request.POST.get("unidad_operativa") or "").strip()
             repartidor = Repartidor.objects.filter(pk=int(repartidor_id)).first() if repartidor_id.isdigit() else None
             unidad_operativa = Unidad.objects.filter(pk=int(unidad_id), activa=True).first() if unidad_id.isdigit() else None
-            ruta = RutaEntrega.objects.create(
-                nombre=nombre,
-                fecha_ruta=request.POST.get("fecha_ruta") or timezone.localdate(),
-                chofer=(request.POST.get("chofer") or "").strip() or (str(repartidor) if repartidor else ""),
-                unidad=(request.POST.get("unidad") or "").strip() or (str(unidad_operativa) if unidad_operativa else ""),
-                repartidor=repartidor,
-                unidad_operativa=unidad_operativa,
-                estatus=RutaEntrega.ESTATUS_PLANEADA,
-                km_estimado=_parse_decimal(request.POST.get("km_estimado")),
-                notas=(request.POST.get("notas") or "").strip(),
-                created_by=request.user,
-            )
+            puntos = PuntoLogistico.objects.filter(pk__in=puntos_ruta_ids, activo=True)
+            puntos_by_id = {str(punto.id): punto for punto in puntos}
+            puntos_ordenados = [puntos_by_id[value] for value in puntos_ruta_ids if value in puntos_by_id]
+            if not puntos_ordenados:
+                messages.error(request, "Los puntos seleccionados no están activos. Revisa el catálogo de puntos logísticos.")
+                return redirect("logistica:rutas")
+
+            with transaction.atomic():
+                ruta = RutaEntrega.objects.create(
+                    nombre=nombre,
+                    fecha_ruta=request.POST.get("fecha_ruta") or timezone.localdate(),
+                    chofer=(request.POST.get("chofer") or "").strip() or (str(repartidor) if repartidor else ""),
+                    unidad=(request.POST.get("unidad") or "").strip() or (str(unidad_operativa) if unidad_operativa else ""),
+                    repartidor=repartidor,
+                    unidad_operativa=unidad_operativa,
+                    estatus=RutaEntrega.ESTATUS_PLANEADA,
+                    km_estimado=_parse_decimal(request.POST.get("km_estimado")),
+                    notas=(request.POST.get("notas") or "").strip(),
+                    created_by=request.user,
+                )
+                for orden, punto in enumerate(puntos_ordenados, start=1):
+                    ParadaRuta.objects.create(ruta=ruta, punto=punto, orden=orden)
             if (request.POST.get("estatus") or "").strip().upper() == RutaEntrega.ESTATUS_EN_RUTA:
                 messages.warning(request, "La ruta se creó como planeada. Agrega paradas antes de liberarla para seguimiento.")
             log_event(
@@ -1369,7 +1382,7 @@ def rutas(request):
                     "estatus": ruta.estatus,
                 },
             )
-            messages.success(request, f"Ruta {ruta.folio} creada.")
+            messages.success(request, f"Ruta {ruta.folio} creada con {len(puntos_ordenados)} paradas.")
             return redirect("logistica:ruta_detail", pk=ruta.id)
 
     q = (request.GET.get("q") or "").strip()
@@ -1476,6 +1489,7 @@ def rutas(request):
         "estatus_choices": RutaEntrega.ESTATUS_CHOICES,
         "repartidores": Repartidor.objects.select_related("user", "user__empleado_rrhh", "unidad_asignada").order_by("user__first_name", "user__username"),
         "unidades": Unidad.objects.filter(activa=True).order_by("codigo"),
+        "puntos_creacion": PuntoLogistico.objects.filter(activo=True).select_related("sucursal").order_by("tipo", "nombre"),
         "totales": {
             "rutas": rutas_total,
             "hoy": rutas_hoy,

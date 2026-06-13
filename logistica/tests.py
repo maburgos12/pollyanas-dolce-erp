@@ -154,10 +154,20 @@ class LogisticaViewsTests(TestCase):
         self.assertContains(resp, "Ruta o pedido")
 
     def test_rutas_view_and_create(self):
+        sucursal = Sucursal.objects.create(nombre="Sucursal Centro", codigo="SC01")
+        punto = PuntoLogistico.objects.create(
+            nombre="Sucursal Centro",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            sucursal=sucursal,
+            latitud="25.570000",
+            longitud="-108.470000",
+            radio_geocerca_metros=120,
+        )
         resp = self.client.get(reverse("logistica:rutas"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Logística · Rutas")
-        self.assertContains(resp, "Nueva ruta de entrega")
+        self.assertContains(resp, "Planear ruta del día")
+        self.assertContains(resp, "Sucursales o puntos a visitar")
         self.assertContains(resp, "Filtro operativo")
         self.assertContains(resp, "Rutas de entrega")
         self.assertNotContains(resp, "Centro de mando ERP")
@@ -176,6 +186,7 @@ class LogisticaViewsTests(TestCase):
                 "chofer": "Mario",
                 "unidad": "Van 1",
                 "km_estimado": "18.5",
+                "puntos_ruta": [str(punto.id)],
             },
             follow=True,
         )
@@ -183,22 +194,30 @@ class LogisticaViewsTests(TestCase):
         self.assertContains(resp_post, "Detalle de ruta")
         self.assertContains(resp_post, "Agregar entrega")
         self.assertContains(resp_post, "Entregas de ruta")
+        self.assertContains(resp_post, "Sucursal Centro")
+        ruta = RutaEntrega.objects.get(nombre="Ruta Centro")
+        self.assertTrue(ruta.paradas.filter(punto=punto, orden=1).exists())
         self.assertNotContains(resp_post, "Centro de mando ERP")
         self.assertNotContains(resp_post, "Cadena documental ERP")
         self.assertNotContains(resp_post, "Mesa de gobierno ERP")
 
+    def test_rutas_create_requires_route_points(self):
+        resp_post = self.client.post(
+            reverse("logistica:rutas"),
+            {
+                "nombre": "Ruta sin paradas",
+                "fecha_ruta": "2026-02-24",
+            },
+            follow=True,
+        )
+        self.assertEqual(resp_post.status_code, 200)
+        self.assertContains(resp_post, "Selecciona al menos una sucursal o punto")
+        self.assertFalse(RutaEntrega.objects.filter(nombre="Ruta sin paradas").exists())
+
     def test_ruta_detail_add_entrega(self):
         cliente = Cliente.objects.create(nombre="Cliente Logística")
         pedido = PedidoCliente.objects.create(cliente=cliente, descripcion="Pastel para entrega")
-        self.client.post(
-            reverse("logistica:rutas"),
-            {"nombre": "Ruta Norte", "fecha_ruta": "2026-02-24"},
-            follow=True,
-        )
-
-        from logistica.models import RutaEntrega
-
-        ruta = RutaEntrega.objects.first()
+        ruta = RutaEntrega.objects.create(nombre="Ruta Norte", fecha_ruta="2026-02-24")
         resp = self.client.post(
             reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
             {
@@ -227,14 +246,7 @@ class LogisticaViewsTests(TestCase):
     def test_rutas_view_can_focus_enterprise_subset(self):
         cliente = Cliente.objects.create(nombre="Cliente Focus")
         pedido = PedidoCliente.objects.create(cliente=cliente, descripcion="Entrega foco")
-        self.client.post(
-            reverse("logistica:rutas"),
-            {"nombre": "Ruta Focus", "fecha_ruta": "2026-02-24"},
-            follow=True,
-        )
-        from logistica.models import RutaEntrega
-
-        ruta = RutaEntrega.objects.first()
+        ruta = RutaEntrega.objects.create(nombre="Ruta Focus", fecha_ruta="2026-02-24")
         self.client.post(
             reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
             {
