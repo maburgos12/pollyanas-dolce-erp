@@ -1,8 +1,10 @@
 import json
+from io import StringIO
 
 from django.contrib.auth.models import Group, User
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
@@ -26,6 +28,18 @@ class LogisticaGroupAliasCompatibilityTests(TestCase):
         user.groups.add(Group.objects.get_or_create(name="DG")[0])
 
         self.assertEqual(_emails_de_grupo("dg"), ["dg.logistica@example.com"])
+
+
+class LogisticaSeedPuntosPollyanasTests(TestCase):
+    def test_seed_puntos_logisticos_pollyanas_es_idempotente(self):
+        output = StringIO()
+        call_command("seed_puntos_logisticos_pollyanas", stdout=output)
+        call_command("seed_puntos_logisticos_pollyanas", stdout=output)
+
+        self.assertEqual(Sucursal.objects.filter(codigo__in=["MATRIZ", "GUAMUCHIL"]).count(), 2)
+        self.assertEqual(PuntoLogistico.objects.filter(tipo=PuntoLogistico.TIPO_SUCURSAL, activo=True).count(), 9)
+        self.assertTrue(PuntoLogistico.objects.filter(nombre="Sucursal Matriz", radio_geocerca_metros=120).exists())
+        self.assertTrue(PuntoLogistico.objects.filter(nombre="Sucursal Guamuchil", notas__contains="Blvd. Rosales 627").exists())
 
 
 class LogisticaViewsTests(TestCase):
