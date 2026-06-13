@@ -319,8 +319,8 @@
   <section class="ps-panel" id="ps-panel" hidden>
     <div class="ps-head">
       <div>
-        <h2 class="ps-title">💡 Precio mínimo rentable</h2>
-        <p class="ps-sub">Productos activos de Point. El precio sugerido usa la meta correspondiente a su fuente de costo: fabricación completa, solo materia prima o reventa.</p>
+        <h2 class="ps-title">💡 Precio mínimo y recomendado</h2>
+        <p class="ps-sub">Productos activos de Point. El mínimo rentable sale de costo vs meta; el recomendado comercial respeta el tope de subida para no mover el precio de golpe.</p>
       </div>
       <button type="button" class="ps-close" id="ps-close" aria-label="Cerrar">✕</button>
     </div>
@@ -331,7 +331,7 @@
           <label>Meta %
             <input class="ps-policy-input" data-source="fab" data-field="margen_meta_pct" type="number" step="0.01" min="0" max="95" value="{{ politicas_precio_base.fab.margen_meta_pct }}">
           </label>
-          <label>Riesgo subida %
+          <label>Subida máx. %
             <input class="ps-policy-input" data-source="fab" data-field="subida_maxima_pct" type="number" step="0.01" min="0" max="500" value="{{ politicas_precio_base.fab.subida_maxima_pct|default_if_none:'' }}">
           </label>
         </div>
@@ -342,7 +342,7 @@
           <label>Meta %
             <input class="ps-policy-input" data-source="mp" data-field="margen_meta_pct" type="number" step="0.01" min="0" max="95" value="{{ politicas_precio_base.mp.margen_meta_pct }}">
           </label>
-          <label>Riesgo subida %
+          <label>Subida máx. %
             <input class="ps-policy-input" data-source="mp" data-field="subida_maxima_pct" type="number" step="0.01" min="0" max="500" value="{{ politicas_precio_base.mp.subida_maxima_pct|default_if_none:'' }}">
           </label>
         </div>
@@ -353,7 +353,7 @@
           <label>Meta %
             <input class="ps-policy-input" data-source="reventa" data-field="margen_meta_pct" type="number" step="0.01" min="0" max="95" value="{{ politicas_precio_base.reventa.margen_meta_pct }}">
           </label>
-          <label>Riesgo subida %
+          <label>Subida máx. %
             <input class="ps-policy-input" data-source="reventa" data-field="subida_maxima_pct" type="number" step="0.01" min="0" max="500" value="{{ politicas_precio_base.reventa.subida_maxima_pct|default_if_none:'' }}">
           </label>
         </div>
@@ -389,7 +389,7 @@
         </div>
       </div>
       <div class="ps-control ps-control-actions">
-        <button type="button" class="btn btn-primary" id="ps-calc">Calcular precio sugerido</button>
+        <button type="button" class="btn btn-primary" id="ps-calc">Calcular precios</button>
         <div class="ps-export-box">
           <a class="btn btn-secondary btn-export" id="ps-export" href="#" hidden>Exportar Excel</a>
         </div>
@@ -397,7 +397,7 @@
     </div>
     <div class="ps-summary" id="ps-summary" hidden></div>
     <div class="ps-result" id="ps-result">
-      <div class="mm-empty"><div class="mm-empty-title">Elige meses y familias</div><div>Luego presiona “Calcular precio sugerido”.</div></div>
+      <div class="mm-empty"><div class="mm-empty-title">Elige meses y familias</div><div>Luego presiona “Calcular precios”.</div></div>
     </div>
   </section>
 
@@ -720,6 +720,12 @@
     return "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
+  function qty(value) {
+    if (value === null || value === undefined) return "—";
+    var n = parseFloat(value);
+    return n.toLocaleString("es-MX", { maximumFractionDigits: 0 });
+  }
+
   function pct(value, withSign) {
     if (value === null || value === undefined) return "—";
     var n = parseFloat(value);
@@ -772,6 +778,7 @@
   function accionChip(row) {
     var label = esc(row.accion_sugerida_label || row.accion_sugerida || "—");
     if (row.accion_sugerida === "SUBIR") return '<span class="mm-badge is-yellow" title="El precio actual queda por debajo de la meta configurada">Subir</span>';
+    if (row.accion_sugerida === "SUBIR_GRADUAL") return '<span class="mm-badge is-yellow" title="El minimo rentable rebasa el tope comercial; aplicar el recomendado y revisar la siguiente corrida">Subir gradual</span>';
     if (row.accion_sugerida === "MANTENER") return '<span class="mm-badge is-green" title="Cumple la meta configurada">Mantener</span>';
     if (row.accion_sugerida === "REVISAR_COSTO") return '<span class="mm-badge is-muted" title="Antes de mover precio, revisar que el costo completo este cargado">Revisar costo</span>';
     if (row.accion_sugerida === "ALTO_RIESGO_COMPETITIVO") return '<span class="mm-badge is-red" title="La subida rebasa el limite competitivo configurado">Alto riesgo competitivo</span>';
@@ -787,6 +794,22 @@
     }
     if (row.tiene_sabores) return "Costo + sabores (" + row.n_sabores + ") combinados = $" + parseFloat(row.costo_completo).toFixed(2);
     return "Costo del último mes de la ventana";
+  }
+
+  function comparativaTitle(row) {
+    var partes = [
+      "Costo " + money(row.costo_completo),
+      "Precio actual " + money(row.precio_actual),
+      "Margen actual " + pct(row.margen_actual),
+      "Meta " + row.margen_meta + "%",
+      "Minimo rentable " + money(row.precio_minimo_rentable || row.precio_sugerido),
+      "Recomendado comercial " + money(row.precio_recomendado),
+      "Margen recomendado " + pct(row.margen_recomendado),
+      "Ventas 90d " + qty(row.ventas_90d_qty) + " pzas / " + money(row.ventas_90d_neto)
+    ];
+    if (row.brecha_precio_minimo) partes.push("Brecha vs minimo " + money(row.brecha_precio_minimo));
+    if (row.subida_maxima_pct) partes.push("Tope subida configurado " + row.subida_maxima_pct + "%");
+    return partes.join(" · ");
   }
 
   function render(data) {
@@ -812,11 +835,11 @@
     }
 
     var html = '<div class="mm-table-wrap"><table class="mm-table"><thead><tr>' +
-      '<th>Producto</th><th>Código Point</th><th>Familia Point</th><th>Tipo</th>' +
+      '<th>Producto</th><th>Código Point</th><th>Familia Point</th><th class="is-right">Ventas 90d</th><th>Tipo</th>' +
       '<th>Fuente costo</th><th class="is-center">Costo (tendencia)</th>' +
       '<th class="is-right">Costo inicial</th><th class="is-right">Costo último</th><th class="is-right">Var.</th>' +
       '<th class="is-right">Precio actual</th><th class="is-right">Margen</th>' +
-      '<th class="is-right">Precio sugerido</th><th class="is-right">Falta subir</th>' +
+      '<th class="is-right">Mínimo rentable</th><th class="is-right">Recomendado</th><th class="is-right">Subida recom.</th><th class="is-right">Brecha</th>' +
       '<th class="is-center">Estado</th><th class="is-center">Acción sugerida</th>' +
       '</tr></thead><tbody>';
 
@@ -832,14 +855,18 @@
       var precioTxt = row.precio_actual
         ? money(row.precio_actual) + (row.precio_fuente === "POS_MEDIANA" ? ' <span class="ps-hint" title="Mediana de ventas POS (sin precio de menú vigente)">POS</span>' : '')
         : '<span class="mm-family">Sin precio</span>';
-      var faltaTxt = row.falta_subir_pct !== null
-        ? '<span class="ps-up">+' + parseFloat(row.falta_subir_pct).toFixed(1) + '%</span>'
+      var subidaRecomTxt = row.subida_recomendada_pct !== null
+        ? '<span class="ps-up">+' + parseFloat(row.subida_recomendada_pct).toFixed(1) + '%</span>'
+        : '<span class="ps-hint">—</span>';
+      var brechaTxt = row.brecha_precio_minimo
+        ? '<span class="ps-up">' + money(row.brecha_precio_minimo) + '</span>'
         : '<span class="ps-hint">—</span>';
       var rowClass = row.estado === "CRITICO" ? "ps-row-critico" : (row.estado === "AJUSTE" ? "ps-row-alert" : "");
       html += '<tr class="' + rowClass + '">' +
         '<td><span class="mm-recipe-name">' + esc(row.nombre) + '</span></td>' +
         '<td><span class="mm-code">' + esc(row.codigo_point || "—") + '</span></td>' +
         '<td><span class="mm-family">' + esc(row.familia_point || "—") + '</span></td>' +
+        '<td class="is-right" title="' + esc("Venta neta 90d: " + money(row.ventas_90d_neto) + " · ASP: " + money(row.ventas_90d_asp) + " · SKU fuente: " + (row.ventas_90d_fuente || "—")) + '">' + qty(row.ventas_90d_qty) + '</td>' +
         '<td>' + tipoChip + '</td>' +
         '<td>' + fuenteChip(row.costo_fuente) + '</td>' +
         '<td class="is-center">' + sparkline(row.serie) + '</td>' +
@@ -848,8 +875,10 @@
         '<td class="is-right ' + varClass + '">' + pct(row.variacion_costo_pct, true) + '</td>' +
         '<td class="is-right">' + precioTxt + '</td>' +
         '<td class="is-right"><span class="mm-margin-value ' + marginClass(row.margen_actual, parseFloat(row.margen_meta)) + '" title="Meta ' + row.margen_meta + '%">' + pct(row.margen_actual) + '</span></td>' +
-        '<td class="is-right ps-suggest">' + (row.precio_sugerido ? money(row.precio_sugerido) : "—") + '</td>' +
-        '<td class="is-right">' + faltaTxt + '</td>' +
+        '<td class="is-right ps-suggest" title="' + esc(comparativaTitle(row)) + '">' + (row.precio_minimo_rentable ? money(row.precio_minimo_rentable) : "—") + '</td>' +
+        '<td class="is-right ps-suggest" title="' + esc(comparativaTitle(row)) + '">' + (row.precio_recomendado ? money(row.precio_recomendado) : "—") + '</td>' +
+        '<td class="is-right">' + subidaRecomTxt + '</td>' +
+        '<td class="is-right">' + brechaTxt + '</td>' +
         '<td class="is-center">' + estadoChip(row.estado) + '</td>' +
         '<td class="is-center" title="' + esc(row.politica_margen_label || "") + '">' + accionChip(row) + '</td>' +
         '</tr>';
