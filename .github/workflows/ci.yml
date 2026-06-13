@@ -25,6 +25,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_erp
       SECRET_KEY: ci-secret-key-temporal
+      APP_ENV: local
       DEBUG: "True"
       APP_ENV: local
       ALLOWED_HOSTS: localhost,127.0.0.1
