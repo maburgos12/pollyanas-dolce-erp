@@ -1855,6 +1855,7 @@
           return render(shell(`
             <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
             <h1 class="screen-title" style="margin-top:16px;">Mi ruta</h1>
+            ${message ? `<p class="${message.startsWith("✅") ? "success" : "error"}">${escapeHtml(message)}</p>` : ""}
             <section class="card route-card-pwa">
               <div class="route-head">
                 <div>
@@ -1915,21 +1916,27 @@
         }
         draft.guardando = true;
         renderRutaActiva();
-        const response = await apiFetch(`/rutas/${rutaId}/tracking/`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            latitud: draft.latitud,
-            longitud: draft.longitud,
-            precision_metros: draft.precision_metros,
-            fuera_de_ruta_confirmado: draft.fuera_de_ruta_confirmado,
-            desvio_motivo: draft.desvio_motivo
-          })
-        });
-        draft.guardando = false;
-        if (!response.ok) {
-          const error = await response.json().catch(() => ({}));
-          return renderRutaActiva(apiErrorMessage(error, "No se pudo registrar seguimiento."));
+        let response;
+        try {
+          response = await apiFetch(`/rutas/${rutaId}/tracking/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              latitud: draft.latitud,
+              longitud: draft.longitud,
+              precision_metros: draft.precision_metros,
+              fuera_de_ruta_confirmado: draft.fuera_de_ruta_confirmado,
+              desvio_motivo: draft.desvio_motivo
+            })
+          });
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            return renderRutaActiva(apiErrorMessage(error, "No se pudo registrar seguimiento."));
+          }
+        } catch (error) {
+          return renderRutaActiva("No se pudo registrar seguimiento. Revisa conexión e intenta de nuevo.");
+        } finally {
+          draft.guardando = false;
         }
         state.rutaTrackingDraft = null;
         await renderRutaActiva("✅ Seguimiento registrado.");

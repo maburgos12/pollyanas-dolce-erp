@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models import Count, Q, Sum
 from django.utils import timezone
@@ -94,6 +95,23 @@ class RutaEntrega(models.Model):
 
     def __str__(self) -> str:
         return self.folio or self.nombre
+
+    def clean(self):
+        super().clean()
+        if self.estatus not in {self.ESTATUS_EN_RUTA, self.ESTATUS_COMPLETADA}:
+            return
+
+        errors = {}
+        if not self.repartidor_id:
+            errors["repartidor"] = "La ruta debe tener repartidor antes de iniciar seguimiento."
+        if not self.unidad_operativa_id:
+            errors["unidad_operativa"] = "La ruta debe tener unidad operativa antes de iniciar seguimiento."
+        if self.pk and not self.paradas.exists():
+            errors["estatus"] = "La ruta debe tener al menos una parada antes de iniciar seguimiento."
+        if not self.pk:
+            errors["estatus"] = "Crea la ruta como planeada y agrega paradas antes de iniciar seguimiento."
+        if errors:
+            raise ValidationError(errors)
 
     def _generate_folio(self) -> str:
         now = timezone.localtime()
