@@ -11,6 +11,7 @@ from django.db import transaction
 from seguimiento.models import SeguimientoItem
 from seguimiento.services import (
     AgenteDGSeguimientoImporter,
+    _PRESERVE_CHECKLIST,
     agente_dg_as_datetime as _as_datetime,
     agente_dg_checklist_from_json as _checklist_from_json,
     agente_dg_status_a_erp as _status_agente_a_erp,
@@ -157,12 +158,9 @@ class Command(AgenteDGSeguimientoImporter, BaseCommand):
             for row in minutes:
                 self._upsert_item(row, "minute_agreements", SeguimientoItem.TIPO_MINUTA, counters)
             for row in projects:
-                self._upsert_item(
-                    row,
-                    "minute_projects",
-                    SeguimientoItem.TIPO_PROYECTO,
-                    counters,
-                    checklist=[
+                checklist = _PRESERVE_CHECKLIST
+                if steps:
+                    checklist = [
                         {
                             "titulo": step["title"],
                             "origen_step_id": step.get("id"),
@@ -181,7 +179,13 @@ class Command(AgenteDGSeguimientoImporter, BaseCommand):
                             "checklist_items_json": step.get("checklist_items_json") or "",
                         }
                         for step in project_steps.get(row["id"], [])
-                    ],
+                    ]
+                self._upsert_item(
+                    row,
+                    "minute_projects",
+                    SeguimientoItem.TIPO_PROYECTO,
+                    counters,
+                    checklist=checklist,
                     participants=project_participants.get(row["id"], []),
                 )
             if options["dry_run"]:
