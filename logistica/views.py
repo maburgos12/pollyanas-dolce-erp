@@ -1065,6 +1065,8 @@ def control_rutas(request):
     paradas_pendientes = ParadaRuta.objects.select_related("ruta", "punto").filter(ruta__fecha_ruta=fecha).exclude(
         estado=ParadaRuta.ESTADO_VISITADA
     )
+    geocercas_programadas = sum(row["paradas_total"] for row in control["rutas"])
+    geocercas_visitadas = sum(row["paradas_visitadas"] for row in control["rutas"])
     context = {
         "module_tabs": _module_tabs("control_rutas", request.user),
         "fecha": fecha,
@@ -1078,6 +1080,9 @@ def control_rutas(request):
             "desvios": control["desvios"],
             "gps_perdido": control["gps_perdido"],
             "eventos_criticos": control["eventos_criticos"],
+            "geocercas_programadas": geocercas_programadas,
+            "geocercas_visitadas": geocercas_visitadas,
+            "paradas_pendientes": paradas_pendientes.count(),
         },
     }
     return render(request, "logistica/control_rutas.html", context)
