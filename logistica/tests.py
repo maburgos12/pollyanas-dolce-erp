@@ -182,6 +182,39 @@ class LogisticaViewsTests(TestCase):
         self.assertContains(resp_post, "Selecciona al menos una sucursal o punto")
         self.assertFalse(RutaEntrega.objects.filter(nombre="Ruta sin paradas").exists())
 
+    def test_rutas_create_respects_visit_order(self):
+        punto_sur = PuntoLogistico.objects.create(
+            nombre="Sucursal Sur",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.560000",
+            longitud="-108.460000",
+            radio_geocerca_metros=120,
+        )
+        punto_norte = PuntoLogistico.objects.create(
+            nombre="Sucursal Norte",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.580000",
+            longitud="-108.480000",
+            radio_geocerca_metros=120,
+        )
+
+        resp_post = self.client.post(
+            reverse("logistica:rutas"),
+            {
+                "nombre": "Ruta con orden",
+                "fecha_ruta": "2026-02-24",
+                "puntos_ruta": [str(punto_sur.id), str(punto_norte.id)],
+                f"punto_orden_{punto_sur.id}": "2",
+                f"punto_orden_{punto_norte.id}": "1",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp_post.status_code, 200)
+        ruta = RutaEntrega.objects.get(nombre="Ruta con orden")
+        paradas = list(ruta.paradas.order_by("orden").values_list("punto_id", "orden"))
+        self.assertEqual(paradas, [(punto_norte.id, 1), (punto_sur.id, 2)])
+
     def test_ruta_detail_add_entrega(self):
         cliente = Cliente.objects.create(nombre="Cliente Logística")
         pedido = PedidoCliente.objects.create(cliente=cliente, descripcion="Pastel para entrega")
