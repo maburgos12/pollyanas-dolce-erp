@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Logística · Control de rutas{% endblock %}
+{% block page_title %}Logística · Control de rutas{% endblock %}
+
+{% block extra_css %}
+<style>
+  .route-control-shell { display:grid; gap:18px; }
+  .route-control-shell .module-tabs { display:flex; flex-wrap:wrap; gap:8px; overflow-x:auto; }
+  .control-toolbar { display:flex; justify-content:space-between; gap:12px; align-items:flex-end; flex-wrap:wrap; }
+  .control-toolbar form { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:0; }
+  .control-metrics { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }
+  .control-metric { background:#fff; border:1px solid #e4d4d9; border-left:4px solid var(--vino); border-radius:8px; padding:14px 16px; min-height:92px; }
+  .control-metric strong { display:block; color:var(--vino); font-size:30px; line-height:1; margin-bottom:8px; }
+  .control-grid { display:grid; grid-template-columns:minmax(0, .9fr) minmax(0, 1.1fr); gap:18px; align-items:start; }
+  .route-card { border:1px solid #e3d7dc; border-radius:8px; padding:14px; background:#fff; display:grid; gap:10px; }
+  .route-card + .route-card { margin-top:12px; }
+  .route-card.is-alert { border-color:#d82424; box-shadow:0 12px 28px rgba(216,36,36,.08); }
+  .route-card-header { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
+  .route-title { font-weight:800; color:#2f2930; }
+  .route-meta { color:#635b62; font-size:13px; }
+  .progress-track { height:8px; background:#ece7e9; border-radius:999px; overflow:hidden; }
+  .progress-track progress { width:100%; height:8px; appearance:none; display:block; border:0; }
+  .progress-track progress::-webkit-progress-bar { background:#ece7e9; border-radius:999px; }
+  .progress-track progress::-webkit-progress-value { background:#2f9e44; border-radius:999px; }
+  .progress-track progress::-moz-progress-bar { background:#2f9e44; border-radius:999px; }
+  .evidence-list { display:grid; gap:12px; }
+  .event-row { display:grid; grid-template-columns:74px minmax(0, 1fr); gap:12px; padding:12px; border:1px solid #e6dfe2; border-radius:8px; background:#fff; }
+  .event-row strong { display:block; color:#2f2930; }
+  .event-time { color:#635b62; font-weight:700; font-size:13px; }
+  .event-row.critica { border-left:4px solid #d82424; }
+  .event-row.alerta { border-left:4px solid #f08c00; }
+  .event-row.ok { border-left:4px solid #2f9e44; }
+  .event-row.info { border-left:4px solid #3264c8; }
+  .mini-map { position:relative; min-height:360px; border:1px solid #d8dde3; border-radius:8px; overflow:hidden; background:linear-gradient(135deg, #f8f9fa 0%, #f8f9fa 18%, #eef2f6 18%, #eef2f6 20%, #fff 20%, #fff 48%, #eef2f6 48%, #eef2f6 51%, #f8f9fa 51%, #f8f9fa 100%); }
+  .mini-map::before { content:""; position:absolute; inset:0; background:repeating-linear-gradient(35deg, transparent 0 38px, rgba(98,119,139,.13) 39px 41px), repeating-linear-gradient(115deg, transparent 0 54px, rgba(98,119,139,.10) 55px 57px); }
+  .mini-route { position:absolute; left:12%; top:55%; width:70%; height:0; border-top:4px solid #1769c2; transform:rotate(-12deg); transform-origin:left center; }
+  .mini-route.alt { left:34%; top:38%; width:34%; transform:rotate(44deg); border-color:#f08c00; }
+  .map-pin { position:absolute; width:18px; height:18px; border-radius:999px; background:var(--vino); border:3px solid #fff; box-shadow:0 4px 10px rgba(0,0,0,.22); }
+  .map-pin:nth-child(3) { left:12%; top:52%; }
+  .map-pin:nth-child(4) { left:43%; top:42%; }
+  .map-pin:nth-child(5) { left:73%; top:30%; }
+  .map-pin:nth-child(6) { left:62%; top:66%; }
+  .map-alert { position:absolute; right:28px; top:46%; background:#fff; border:1px solid #f0b0b0; border-left:4px solid #d82424; border-radius:8px; padding:12px 14px; box-shadow:0 14px 28px rgba(0,0,0,.12); max-width:250px; }
+  .pending-list { display:grid; gap:8px; }
+  .pending-row { display:flex; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid #eee5e9; }
+  @media (max-width: 1080px) {
+    .control-metrics, .control-grid { grid-template-columns:1fr 1fr; }
+  }
+  @media (max-width: 760px) {
+    .control-metrics, .control-grid { grid-template-columns:1fr; }
+    .event-row { grid-template-columns:1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="route-control-shell">
+  <section class="module-tabs report-tabs" aria-label="Submódulos Logística">
+    {% for tab in module_tabs %}
+      <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+    {% endfor %}
+  </section>
+
+  <section class="card">
+    <div class="control-toolbar">
+      <div>
+        <div class="card-header">Control interno de rutas</div>
+        <p class="muted">Seguimiento operativo para supervisión, evidencia y cumplimiento interno.</p>
+      </div>
+      <form method="get">
+        <input class="input-field" type="date" name="fecha" value="{{ fecha_iso }}">
+        <button class="btn btn-primary" type="submit">Actualizar</button>
+      </form>
+    </div>
+  </section>
+
+  <section class="control-metrics">
+    <article class="control-metric"><span>Rutas monitoreadas</span><strong>{{ metricas.rutas }}</strong><div class="muted">{{ fecha|date:"Y-m-d" }}</div></article>
+    <article class="control-metric"><span>Desvíos</span><strong>{{ metricas.desvios }}</strong><div class="muted">Eventos detectados</div></article>
+    <article class="control-metric"><span>GPS perdido</span><strong>{{ metricas.gps_perdido }}</strong><div class="muted">Sin señal reportada</div></article>
+    <article class="control-metric"><span>Críticos</span><strong>{{ metricas.eventos_criticos }}</strong><div class="muted">Requieren revisión</div></article>
+  </section>
+
+  <section class="control-grid">
+    <div>
+      <article class="card">
+        <div class="card-header">Rutas del día</div>
+        {% for row in control.rutas %}
+        <div class="route-card {% if row.eventos_alerta %}is-alert{% endif %}">
+          <div class="route-card-header">
+            <div>
+              <div class="route-title">{{ row.ruta.nombre }}</div>
+              <div class="route-meta">{{ row.ruta.folio }} · {{ row.ruta.get_estatus_display }}</div>
+            </div>
+            <a class="btn btn-secondary btn-small" href="{% url 'logistica:ruta_detail' row.ruta.id %}">Abrir</a>
+          </div>
+          <div class="route-meta">
+            Repartidor: {{ row.ruta.repartidor|default:row.ruta.chofer|default:"Sin asignar" }} ·
+            Unidad: {{ row.ruta.unidad_operativa|default:row.ruta.unidad|default:"Sin asignar" }}
+          </div>
+          <div>
+            <div class="route-meta">Cumplimiento {{ row.ruta.cumplimiento_porcentaje|floatformat:0 }}% · {{ row.paradas_visitadas }}/{{ row.paradas_total }} geocercas</div>
+            <div class="progress-track"><progress value="{{ row.ruta.cumplimiento_porcentaje|floatformat:0 }}" max="100">{{ row.ruta.cumplimiento_porcentaje|floatformat:0 }}%</progress></div>
+          </div>
+          <div class="route-meta">
+            {% if row.ultima_ubicacion %}
+              Última señal {{ row.ultima_ubicacion.timestamp_servidor|naturaltime }} · {{ row.eventos_alerta }} alertas reales
+            {% else %}
+              Sin señal registrada · {{ row.eventos_alerta }} alertas reales
+            {% endif %}
+          </div>
+        </div>
+        {% empty %}
+        <p class="muted">No hay rutas programadas para esta fecha.</p>
+        {% endfor %}
+      </article>
+
+      <article class="card mt-3">
+        <div class="card-header">Geocercas pendientes</div>
+        <div class="pending-list">
+          {% for parada in paradas_pendientes %}
+          <div class="pending-row">
+            <span>{{ parada.ruta.folio }} · {{ parada.punto_nombre_snapshot }}</span>
+            <strong>{{ parada.get_estado_display }}</strong>
+          </div>
+          {% empty %}
+          <p class="muted">No hay geocercas pendientes visibles.</p>
+          {% endfor %}
+        </div>
+      </article>
+    </div>
+
+    <div>
+      <article class="card">
+        <div class="card-header">Resumen visual</div>
+        <div class="mini-map" aria-label="Representación visual del control de rutas">
+          <div class="mini-route"></div>
+          <div class="mini-route alt"></div>
+          <div class="map-pin"></div>
+          <div class="map-pin"></div>
+          <div class="map-pin"></div>
+          <div class="map-pin"></div>
+          {% if metricas.desvios %}
+          <div class="map-alert"><strong>Desvío detectado</strong><br><span class="muted">{{ metricas.desvios }} evento{{ metricas.desvios|pluralize }} fuera de ruta.</span></div>
+          {% endif %}
+        </div>
+      </article>
+
+      <article class="card mt-3">
+        <div class="card-header">Evidencia del día</div>
+        <div class="evidence-list">
+          {% for evento in eventos %}
+          <div class="event-row {{ evento.severidad }}">
+            <div class="event-time">{{ evento.creado_en|date:"H:i" }}</div>
+            <div>
+              <strong>{{ evento.get_tipo_display }}</strong>
+              <div>{{ evento.descripcion }}</div>
+              <div class="muted">{{ evento.ruta.folio }}{% if evento.parada %} · {{ evento.parada.punto_nombre_snapshot }}{% endif %}{% if evento.distancia_metros %} · {{ evento.distancia_metros }} m{% endif %}</div>
+            </div>
+          </div>
+          {% empty %}
+          <p class="muted">Sin eventos de evidencia para esta fecha.</p>
+          {% endfor %}
+        </div>
+      </article>
+    </div>
+  </section>
+</div>
+{% endblock %}
