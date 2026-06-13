@@ -8,6 +8,18 @@ ERP operativo de Pollyana's Dolce, cadena de pastelerías en Sinaloa, México.
 - Producción: https://erp.pollyanasdolce.com
 - Rama principal: main
 
+## Contexto de producto y diseño
+Para cualquier tarea de UI, frontend, diseño visual, experiencia de usuario,
+branding, tienda online o marketing, leer primero:
+- `PRODUCT.md`: estrategia del producto, usuarios, principios, anti-referencias
+  y accesibilidad.
+- `DESIGN_STACK.md`: enrutamiento de skills entre `impeccable`, `hallmark`,
+  `emil-design-eng` y los skills de Leon.
+
+No duplicar las reglas completas de diseño en este archivo. `AGENTS.md` conserva
+el protocolo operativo del ERP; `DESIGN_STACK.md` es la fuente compartida para
+ejecución de diseño.
+
 ## Servidor de producción
 - Host: 68.183.165.47
 - Usuario: root
