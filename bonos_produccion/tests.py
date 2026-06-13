@@ -274,6 +274,8 @@ class BonosProduccionTests(TestCase):
         self.assertIn("Imprimir / PDF", content)
         self.assertIn("label:'Area',value:contextLabel", content)
         self.assertNotIn("Monto calculado", content)
+        self.assertIn("grid-template-columns:repeat(2,minmax(0,1fr))", content)
+        self.assertIn("margin:28px auto 0", content)
         self.assertIn("Permiso ${lastPermiso.folio} registrado", content)
         self.assertIn("Imprimir / guardar PDF", content)
         self.assertIn("ReactDOM.createPortal", content)
@@ -340,7 +342,7 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-produccion-pwa-v17", sw_content)
+        self.assertIn("pollyanas-bonos-produccion-pwa-v18", sw_content)
         self.assertIn('cache: "no-store"', sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-produccion/dashboard/")', sw_content)
 
