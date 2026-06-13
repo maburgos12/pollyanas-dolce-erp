@@ -39,6 +39,7 @@ from .models import (
 )
 from .services_google_routes import recalcular_ruta_programada
 from .services_rutas_control import distancia_metros, resumen_control_rutas
+from .services_tiempos_ruta import resumen_tiempos_ruta
 
 
 def _parse_decimal(raw: str | None) -> Decimal:
@@ -2031,6 +2032,7 @@ def ruta_detail(request, pk: int):
         ruta_id=ruta.id,
     )
     governance_rows = _logistica_governance_rows(document_stage_rows, owner_default="Logística / Operación")
+    tiempos_ruta = resumen_tiempos_ruta(ruta)
 
     context = {
         "module_tabs": _module_tabs("rutas", request.user),
@@ -2044,6 +2046,8 @@ def ruta_detail(request, pk: int):
         "unidades": Unidad.objects.filter(activa=True).order_by("codigo"),
         "puntos_logisticos": PuntoLogistico.objects.filter(activo=True).select_related("sucursal").order_by("tipo", "nombre"),
         "paradas": ruta.paradas.select_related("punto", "punto__sucursal").order_by("orden", "id"),
+        "paradas_tiempos": tiempos_ruta.paradas,
+        "tiempos_ruta": tiempos_ruta,
         "enterprise_chain": enterprise_chain,
         "critical_path_rows": _logistica_critical_path_rows(enterprise_chain),
         "document_stage_rows": document_stage_rows,

@@ -61,6 +61,12 @@
         </tbody>
       </table>
     </div>
+    <div class="ops-summary" style="margin-top:14px;">
+      <article class="ops-summary-card"><span class="muted">Tránsito programado</span><strong>{{ tiempos_ruta.transito_programado_minutos }}</strong><div>minutos en ruta</div></article>
+      <article class="ops-summary-card"><span class="muted">Promedio en puntos</span><strong>{{ tiempos_ruta.surtido_estimado_minutos }}</strong><div>minutos de surtido</div></article>
+      <article class="ops-summary-card"><span class="muted">Total esperado</span><strong>{{ tiempos_ruta.total_operativo_estimado_minutos }}</strong><div>tránsito + surtido</div></article>
+      <article class="ops-summary-card"><span class="muted">Fuente</span><strong style="font-size:22px;">{{ ruta.ruta_programada_fuente|default:"Pendiente" }}</strong><div>Google o respaldo interno</div></article>
+    </div>
   </section>
 
   <section class="ops-grid-2">
@@ -199,18 +205,23 @@
             <th>Tipo</th>
             <th>Radio</th>
             <th>Hora estimada</th>
+            <th>Promedio surtido</th>
+            <th>Permanencia real</th>
             <th>Estado</th>
             {% if can_manage_logistica and ruta.estatus == "PLANEADA" %}<th>Acciones</th>{% endif %}
           </tr>
         </thead>
         <tbody>
-          {% for parada in paradas %}
+          {% for row in paradas_tiempos %}
+          {% with parada=row.parada %}
           <tr>
             <td>{{ parada.orden }}</td>
             <td>{{ parada.punto_nombre_snapshot }}</td>
             <td>{{ parada.punto.get_tipo_display }}</td>
             <td>{{ parada.radio_geocerca_metros }} m</td>
             <td>{% if parada.hora_estimada %}{{ parada.hora_estimada|date:"Y-m-d H:i" }}{% else %}-{% endif %}</td>
+            <td>{% if row.promedio_surtido_minutos is not None %}{{ row.promedio_surtido_minutos }} min{% else %}Sin historial{% endif %}</td>
+            <td>{% if row.permanencia_real_minutos is not None %}{{ row.permanencia_real_minutos }} min{% else %}-{% endif %}</td>
             <td>{{ parada.get_estado_display }}</td>
             {% if can_manage_logistica and ruta.estatus == "PLANEADA" %}
             <td>
@@ -239,8 +250,9 @@
             </td>
             {% endif %}
           </tr>
+          {% endwith %}
           {% empty %}
-          <tr><td colspan="{% if can_manage_logistica and ruta.estatus == 'PLANEADA' %}7{% else %}6{% endif %}" class="muted">Sin paradas. Agrega puntos logísticos para validar llegada por GPS.</td></tr>
+          <tr><td colspan="{% if can_manage_logistica and ruta.estatus == 'PLANEADA' %}9{% else %}8{% endif %}" class="muted">Sin paradas. Agrega puntos logísticos para validar llegada por GPS.</td></tr>
           {% endfor %}
         </tbody>
       </table>
