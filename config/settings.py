@@ -330,6 +330,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "logistica.tasks.escalar_tickets_sin_respuesta",
         "schedule": 60 * 60,
     },
+    "logistica-detectar-gps-perdido-cada-5-min": {
+        "task": "logistica.tasks.detectar_gps_perdido_rutas",
+        "schedule": 5 * 60,
+        "kwargs": {"umbral_minutos": 10},
+    },
     # --- Sync diario de ventas Point ---
     "pos_bridge: sync ventas diario": {
         "task": "pos_bridge.daily_sales_sync",

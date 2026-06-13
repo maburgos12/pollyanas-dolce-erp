@@ -16,7 +16,7 @@ from crm.models import Cliente, PedidoCliente
 from logistica.models import BitacoraSalidaLlegada, EntregaRuta, EventoRuta, ParadaRuta, PuntoLogistico, Repartidor, RutaEntrega, Unidad
 from logistica.services_rutas_control import distancia_metros, registrar_ubicacion_ruta, resumen_control_rutas
 from logistica.services_tiempos_ruta import resumen_tiempos_ruta
-from logistica.tasks import _emails_de_grupo
+from logistica.tasks import _emails_de_grupo, detectar_gps_perdido_rutas
 from api.logistica_views import _can_operate_pwa
 
 
@@ -822,7 +822,7 @@ class LogisticaControlRutasTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
 
-    def test_resumen_control_materializa_gps_perdido(self):
+    def test_resumen_control_no_materializa_gps_perdido(self):
         ubicacion = registrar_ubicacion_ruta(
             user=self.user,
             ruta=self.ruta,
@@ -833,15 +833,47 @@ class LogisticaControlRutasTests(TestCase):
 
         resumen_control_rutas(fecha=self.ruta.fecha_ruta)
 
-        self.assertTrue(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_GPS_PERDIDO).exists())
+        self.assertFalse(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_GPS_PERDIDO).exists())
 
-    def test_resumen_control_materializa_gps_perdido_sin_primera_senal(self):
+    def test_task_detecta_gps_perdido_por_ultima_senal_y_es_idempotente(self):
+        ubicacion = registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={"latitud": "25.570010", "longitud": "-108.470010"},
+        )
+        UbicacionRuta = ubicacion.__class__
+        UbicacionRuta.objects.filter(pk=ubicacion.pk).update(timestamp_servidor=timezone.now() - timezone.timedelta(minutes=20))
+
+        resultado = detectar_gps_perdido_rutas(umbral_minutos=10)
+        detectar_gps_perdido_rutas(umbral_minutos=10)
+
+        evento = EventoRuta.objects.get(ruta=self.ruta, tipo=EventoRuta.TIPO_GPS_PERDIDO)
+        self.assertEqual(resultado["eventos_gps_perdido"], 1)
+        self.assertEqual(evento.ubicacion_id, ubicacion.id)
+        self.assertEqual(evento.metadata["detectado_por"], "celery")
+        self.assertEqual(evento.metadata["ultima_ubicacion_id"], ubicacion.id)
+
+    def test_task_detecta_gps_perdido_sin_primera_senal_y_es_idempotente(self):
         self.ruta.hora_inicio_real = timezone.now() - timezone.timedelta(minutes=20)
         self.ruta.save(update_fields=["hora_inicio_real", "updated_at"])
 
-        resumen_control_rutas(fecha=self.ruta.fecha_ruta)
+        resultado = detectar_gps_perdido_rutas(umbral_minutos=10)
+        detectar_gps_perdido_rutas(umbral_minutos=10)
 
-        self.assertTrue(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_GPS_PERDIDO).exists())
+        evento = EventoRuta.objects.get(ruta=self.ruta, tipo=EventoRuta.TIPO_GPS_PERDIDO)
+        self.assertEqual(resultado["eventos_gps_perdido"], 1)
+        self.assertTrue(evento.metadata["sin_primera_senal"])
+        self.assertEqual(evento.metadata["detectado_por"], "celery")
+
+    def test_task_gps_perdido_ignora_ruta_completada(self):
+        self.ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
+        self.ruta.hora_inicio_real = timezone.now() - timezone.timedelta(minutes=20)
+        self.ruta.save(update_fields=["estatus", "hora_inicio_real", "updated_at"])
+
+        resultado = detectar_gps_perdido_rutas(umbral_minutos=10)
+
+        self.assertEqual(resultado["rutas_revisadas"], 0)
+        self.assertFalse(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_GPS_PERDIDO).exists())
 
     def test_control_rutas_view_renderiza_panel_interno(self):
         self.client.force_login(self.user)
@@ -905,11 +937,17 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v11", pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v11-auto-tracking", sw_js)
+        self.assertIn("route-control-v12", pwa_html)
+        self.assertIn("pollyanas-logistica-pwa-v12-tracking-secure", sw_js)
         self.assertIn("ROUTE_AUTO_TRACKING_INTERVAL_MS", pwa_html)
         self.assertIn("automatico_pwa", pwa_html)
         self.assertIn("Auto-tracking", pwa_html)
+        self.assertIn("let payload = null;", pwa_html)
+        self.assertIn("enqueueRutaTracking({ ruta_id: rutaId, payload });", pwa_html)
+        self.assertIn("sessionStorage.getItem(ACCESS_TOKEN_KEY)", pwa_html)
+        self.assertIn("sessionStorage.setItem(ACCESS_TOKEN_KEY, data.access)", pwa_html)
+        self.assertNotIn('localStorage.setItem("pd_logistica_refresh"', pwa_html)
+        self.assertNotIn("localStorage.setItem(REFRESH_TOKEN_KEY", pwa_html)
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path

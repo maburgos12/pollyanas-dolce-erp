@@ -351,6 +351,9 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
 
 
 def detectar_gps_perdido(ruta: RutaEntrega, *, umbral_minutos: int = 10) -> EventoRuta | None:
+    if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
+        return None
+
     latest = ruta.ubicaciones.order_by("-timestamp_servidor").first()
     if not latest:
         inicio = ruta.hora_inicio_real
@@ -359,15 +362,33 @@ def detectar_gps_perdido(ruta: RutaEntrega, *, umbral_minutos: int = 10) -> Even
         minutes = (timezone.now() - inicio).total_seconds() / 60
         if minutes < umbral_minutos:
             return None
+        if EventoRuta.objects.filter(
+            ruta=ruta,
+            tipo=EventoRuta.TIPO_GPS_PERDIDO,
+            ubicacion__isnull=True,
+            latitud__isnull=True,
+            longitud__isnull=True,
+            metadata__sin_primera_senal=True,
+        ).exists():
+            return None
         return crear_evento_ruta_once(
             ruta=ruta,
             tipo=EventoRuta.TIPO_GPS_PERDIDO,
             severidad=EventoRuta.SEVERIDAD_ALERTA,
             descripcion=f"Sin primera señal GPS por {int(minutes)} minutos desde la salida.",
+            metadata={
+                "detectado_por": "celery",
+                "umbral_minutos": umbral_minutos,
+                "minutos_sin_senal": int(minutes),
+                "sin_primera_senal": True,
+                "inicio_sin_senal": inicio.isoformat(),
+            },
             ventana_minutos=umbral_minutos,
         )
     minutes = (timezone.now() - latest.timestamp_servidor).total_seconds() / 60
     if minutes < umbral_minutos:
+        return None
+    if EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_GPS_PERDIDO, ubicacion=latest).exists():
         return None
     return crear_evento_ruta_once(
         ruta=ruta,
@@ -377,6 +398,14 @@ def detectar_gps_perdido(ruta: RutaEntrega, *, umbral_minutos: int = 10) -> Even
         ubicacion=latest,
         latitud=latest.latitud,
         longitud=latest.longitud,
+        metadata={
+            "detectado_por": "celery",
+            "umbral_minutos": umbral_minutos,
+            "minutos_sin_senal": int(minutes),
+            "ultima_ubicacion_id": latest.id,
+            "ultima_senal_servidor": latest.timestamp_servidor.isoformat(),
+            "sin_primera_senal": False,
+        },
         ventana_minutos=umbral_minutos,
     )
 
@@ -391,8 +420,6 @@ def resumen_control_rutas(*, fecha=None, limit: int = 50) -> dict:
     )
     rows = []
     for ruta in rutas:
-        if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA:
-            detectar_gps_perdido(ruta)
         latest = ruta.ubicaciones.order_by("-timestamp_servidor").first()
         eventos_abiertos = ruta.eventos.filter(severidad__in=[EventoRuta.SEVERIDAD_ALERTA, EventoRuta.SEVERIDAD_CRITICA]).count()
         rows.append(

@@ -1254,11 +1254,15 @@
       const PHOTO_MAX_AGE_MS = 5 * 60 * 1000;
       const PHOTO_CAPTURE_SESSION_MS = 10 * 60 * 1000;
       const TRACKING_QUEUE_KEY = "pd_logistica_tracking_queue";
+      const ACCESS_TOKEN_KEY = "pd_logistica_access";
+      const REFRESH_TOKEN_KEY = "pd_logistica_refresh";
       const ROUTE_AUTO_TRACKING_INTERVAL_MS = 90 * 1000;
       const app = document.getElementById("app");
+      localStorage.removeItem(ACCESS_TOKEN_KEY);
+      localStorage.removeItem(REFRESH_TOKEN_KEY);
       const state = {
-        token: localStorage.getItem("pd_logistica_access") || "",
-        refreshToken: localStorage.getItem("pd_logistica_refresh") || "",
+        token: sessionStorage.getItem(ACCESS_TOKEN_KEY) || "",
+        refreshToken: "",
         perfil: null,
         pantallaActual: "login",
         reportes: [],
@@ -1685,7 +1689,7 @@
             if (refreshed.ok) {
               const data = await refreshed.json();
               state.token = data.access;
-              localStorage.setItem("pd_logistica_access", data.access);
+              sessionStorage.setItem(ACCESS_TOKEN_KEY, data.access);
               return apiFetch(path, { ...options, _retry: true });
             }
           }
@@ -1770,9 +1774,10 @@
         if (!rutaId || state.routeAutoTrackingBusy || state.pantallaActual !== "ruta_activa") return;
         state.routeAutoTrackingBusy = true;
         state.routeAutoTrackingStatus = "capturando";
+        let payload = null;
         try {
           const positionPayload = await captureRoutePosition();
-          const payload = {
+          payload = {
             ...positionPayload,
             tracking_origen: "automatico_pwa",
             fuera_de_ruta_confirmado: false,
@@ -1794,6 +1799,9 @@
             state.routeAutoTrackingStatus = "pendiente_offline";
           }
         } catch (error) {
+          if (payload && error?.message !== "Sesión expirada") {
+            enqueueRutaTracking({ ruta_id: rutaId, payload });
+          }
           state.routeAutoTrackingStatus = error?.code === 1 ? "gps_denegado" : "pendiente_offline";
         } finally {
           state.routeAutoTrackingBusy = false;
@@ -1818,9 +1826,8 @@
 
       function setTokens(data) {
         state.token = data.access;
-        state.refreshToken = data.refresh;
-        localStorage.setItem("pd_logistica_access", data.access);
-        localStorage.setItem("pd_logistica_refresh", data.refresh);
+        state.refreshToken = data.refresh || "";
+        sessionStorage.setItem(ACCESS_TOKEN_KEY, data.access);
       }
 
       async function useDjangoSessionToken() {
@@ -1836,8 +1843,9 @@
         state.token = "";
         state.refreshToken = "";
         state.perfil = null;
-        localStorage.removeItem("pd_logistica_access");
-        localStorage.removeItem("pd_logistica_refresh");
+        sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+        localStorage.removeItem(ACCESS_TOKEN_KEY);
+        localStorage.removeItem(REFRESH_TOKEN_KEY);
         if (render) window.location.href = "/logout/";
       }
 
@@ -3809,7 +3817,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=route-control-v11").catch(() => {});
+          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=route-control-v12").catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {
