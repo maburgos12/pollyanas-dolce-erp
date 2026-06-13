@@ -381,6 +381,8 @@
                 <form method="post" action="{% url 'seguimiento:marcar_paso' item.pk check.pk %}">{% csrf_token %}<input type="hidden" name="accion" value="iniciar"><button class="btn btn-primary btn-sm" type="submit">Iniciar</button></form>
               {% endif %}
             </div>
+            {% elif check.origen_step_id %}
+            <span class="muted" style="font-size:.8rem;">Paso sincronizado con app.pollyanasdolce.com; no acepta cambios locales.</span>
             {% else %}
             {# Comportamiento local (sin write-back) #}
             {% if check.pk == siguiente_check_id %}
