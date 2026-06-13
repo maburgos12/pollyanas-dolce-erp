@@ -38,6 +38,7 @@ from logistica.models import (
     RutaEntrega,
     Unidad,
 )
+from logistica.services_google_routes import recalcular_ruta_programada
 from logistica.services_rutas_control import registrar_ubicacion_ruta, resumen_control_rutas
 from rrhh.services_identidad import nombre_operativo_usuario
 
@@ -909,6 +910,7 @@ class LogisticaRutasView(_LogisticaBaseView):
             )
             for orden, (_, __, punto_id) in enumerate(paradas_payload, start=1):
                 ParadaRuta.objects.create(ruta=ruta, punto=puntos_by_id[punto_id], orden=orden)
+        recalcular_ruta_programada(ruta)
         log_event(
             request.user,
             "CREATE",

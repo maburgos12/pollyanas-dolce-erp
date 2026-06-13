@@ -45,6 +45,18 @@
           <tr><th>Folio</th><td>{{ ruta.folio }}</td><th>Estatus</th><td>{{ ruta.get_estatus_display }}</td></tr>
           <tr><th>Repartidor</th><td>{{ ruta.repartidor|default:"Sin asignar" }}</td><th>Unidad operativa</th><td>{{ ruta.unidad_operativa|default:"Sin asignar" }}</td></tr>
           <tr><th>Chofer manual</th><td>{{ ruta.chofer|default:"-" }}</td><th>Unidad manual</th><td>{{ ruta.unidad|default:"-" }}</td></tr>
+          <tr>
+            <th>Ruta programada</th>
+            <td>
+              {% if ruta.ruta_programada_distancia_metros %}
+                {{ ruta.ruta_programada_distancia_metros|intcomma }} m
+              {% else %}
+                Sin cálculo
+              {% endif %}
+            </td>
+            <th>Fuente ruteo</th>
+            <td>{{ ruta.ruta_programada_fuente|default:"Pendiente" }}</td>
+          </tr>
           <tr><th>Notas</th><td colspan="3">{{ ruta.notas|default:"-" }}</td></tr>
         </tbody>
       </table>

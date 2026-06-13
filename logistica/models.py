@@ -57,6 +57,11 @@ class RutaEntrega(models.Model):
     hora_inicio_real = models.DateTimeField(null=True, blank=True)
     hora_cierre_real = models.DateTimeField(null=True, blank=True)
     cumplimiento_porcentaje = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0"))
+    ruta_programada_polyline = models.TextField(blank=True, default="")
+    ruta_programada_distancia_metros = models.PositiveIntegerField(default=0)
+    ruta_programada_duracion_segundos = models.PositiveIntegerField(default=0)
+    ruta_programada_fuente = models.CharField(max_length=20, blank=True, default="")
+    ruta_programada_actualizada_en = models.DateTimeField(null=True, blank=True)
 
     total_entregas = models.PositiveIntegerField(default=0)
     entregas_completadas = models.PositiveIntegerField(default=0)

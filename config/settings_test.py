@@ -5,6 +5,7 @@ import os
 
 DEBUG = True
 SECRET_KEY = SECRET_KEY or "test-key"
+GOOGLE_SERVER_API_KEY = ""
 # Ruta oficial de pruebas:
 # este proyecto incluye migraciones y SQL de PostgreSQL (por ejemplo MATERIALIZED VIEW en reportes),
 # por lo que SQLite no es un backend honesto para la suite general.
