@@ -74,6 +74,14 @@ class CommercialHistorySpec:
 
 
 @dataclass(frozen=True, slots=True)
+class CuratedLineSpec:
+    insumo_name: str
+    quantity: Decimal
+    unit_code: str
+    codigo_point: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class CommercialSkuInterpretation:
     sku_actual: str
     producto_actual: str
@@ -153,8 +161,8 @@ CURATED_ADDON_SPECS: dict[str, dict[str, object]] = {
             ("ETIQUETA CH", Decimal("1"), "pza"),
             ("Rebanada Triangular RP25", Decimal("1"), "pza"),
             ("Fresa", Decimal("50"), "g"),
-            ("Galleta Para Pay", Decimal("3.750000"), "g"),
-            ("Mermelada Fresa", Decimal("35"), "ml"),
+            CuratedLineSpec("Galleta Pay", Decimal("3.750000"), "g", "01GP13"),
+            CuratedLineSpec("Mermelada Fresa Liquida", Decimal("35"), "ml", "01MF06"),
         ],
     },
     "SGALLETACAJETAG": {
@@ -163,7 +171,7 @@ CURATED_ADDON_SPECS: dict[str, dict[str, object]] = {
         "lines": [
             ("ETIQUETA G", Decimal("1"), "pza"),
             ("Etiqueta Rectangular Aviso", Decimal("1"), "pza"),
-            ("Galleta Para Pay", Decimal("30"), "g"),
+            CuratedLineSpec("Galleta Pay", Decimal("30"), "g", "01GP13"),
             ("Dulce de Leche", Decimal("280"), "g"),
         ],
     },
@@ -173,7 +181,7 @@ CURATED_ADDON_SPECS: dict[str, dict[str, object]] = {
         "lines": [
             ("ETIQUETA G", Decimal("1"), "pza"),
             ("Etiqueta Rectangular Aviso", Decimal("1"), "pza"),
-            ("Galleta Para Pay", Decimal("25"), "g"),
+            CuratedLineSpec("Galleta Pay", Decimal("25"), "g", "01GP13"),
             ("Dulce de Leche", Decimal("150"), "g"),
         ],
     },
@@ -184,7 +192,7 @@ CURATED_ADDON_SPECS: dict[str, dict[str, object]] = {
             ("CUCHARA CH", Decimal("1"), "pza"),
             ("ETIQUETA CH", Decimal("1"), "pza"),
             ("Rebanada Triangular RP25", Decimal("1"), "pza"),
-            ("Galleta Para Pay", Decimal("3.750000"), "g"),
+            CuratedLineSpec("Galleta Pay", Decimal("3.750000"), "g", "01GP13"),
             ("Dulce de Leche", Decimal("35"), "g"),
         ],
     },
@@ -539,6 +547,13 @@ def _find_insumo_by_name(name: str) -> Insumo | None:
     return Insumo.objects.filter(nombre__iexact=cleaned).order_by("id").first()
 
 
+def _find_insumo_by_point_code(code: str) -> Insumo | None:
+    cleaned = (code or "").strip()
+    if not cleaned:
+        return None
+    return Insumo.objects.filter(codigo_point__iexact=cleaned).order_by("id").first()
+
+
 def _find_unit(unit_code: str, *, insumo: Insumo | None) -> UnidadMedida | None:
     cleaned = (unit_code or "").strip()
     if not cleaned:
@@ -603,19 +618,30 @@ def _addon_embeds_base(
     return False
 
 
-def _sync_curated_recipe_lines(receta: Receta, line_specs: list[tuple[str, Decimal, str]]) -> list[str]:
+def _coerce_curated_line_spec(raw: object) -> CuratedLineSpec:
+    if isinstance(raw, CuratedLineSpec):
+        return raw
+    name, quantity, unit_code = raw  # type: ignore[misc]
+    return CuratedLineSpec(str(name), Decimal(str(quantity)), str(unit_code))
+
+
+def _sync_curated_recipe_lines(receta: Receta, line_specs: list[object]) -> list[str]:
     warnings: list[str] = []
     if _active_recipe_line_count(receta) > 0:
         return warnings
 
-    for posicion, (insumo_name, quantity, unit_code) in enumerate(line_specs, start=1):
-        insumo = _find_insumo_by_name(insumo_name)
+    for posicion, raw_spec in enumerate(line_specs, start=1):
+        spec = _coerce_curated_line_spec(raw_spec)
+        insumo = _find_insumo_by_point_code(spec.codigo_point) if spec.codigo_point else None
         if insumo is None:
-            warnings.append(f"No se encontró el insumo '{insumo_name}' para {receta.nombre}.")
+            insumo = _find_insumo_by_name(spec.insumo_name)
+        if insumo is None:
+            label = f"{spec.codigo_point} | {spec.insumo_name}" if spec.codigo_point else spec.insumo_name
+            warnings.append(f"No se encontró el insumo '{label}' para {receta.nombre}.")
             continue
-        unit = _find_unit(unit_code, insumo=insumo)
+        unit = _find_unit(spec.unit_code, insumo=insumo)
         if unit is None:
-            warnings.append(f"No se encontró la unidad '{unit_code}' para {receta.nombre}.")
+            warnings.append(f"No se encontró la unidad '{spec.unit_code}' para {receta.nombre}.")
             continue
         LineaReceta.objects.update_or_create(
             receta=receta,
@@ -625,7 +651,7 @@ def _sync_curated_recipe_lines(receta: Receta, line_specs: list[tuple[str, Decim
                 "etapa": "COMPOSICION_COMERCIAL",
                 "insumo": insumo,
                 "insumo_texto": insumo.nombre,
-                "cantidad": Decimal(str(quantity)),
+                "cantidad": Decimal(str(spec.quantity)),
                 "unidad_texto": unit.codigo,
                 "unidad": unit,
                 "costo_linea_excel": None,

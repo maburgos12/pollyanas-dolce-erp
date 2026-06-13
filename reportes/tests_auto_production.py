@@ -866,6 +866,64 @@ class ProjectionSupplyContextTests(TestCase):
         self.assertEqual(insumo_row["estimated_spend"], Decimal("375.00"))
         self.assertEqual(context["summary"]["estimated_spend"], Decimal("375.00"))
 
+    def test_projection_supply_treats_purchased_lotus_as_material_not_preparation(self):
+        lotus = Insumo.objects.create(
+            codigo_point="660734",
+            nombre="GALLETA LOTUS BISCOFF 250 GRS INSUMO",
+            nombre_normalizado="galleta lotus biscoff 250 grs insumo",
+            unidad_base=self.unit_kg,
+            proveedor_principal=self.provider,
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            activo=True,
+        )
+        CostoInsumo.objects.create(
+            insumo=lotus,
+            proveedor=self.provider,
+            fecha=self.target_date,
+            costo_unitario=Decimal("226.67"),
+            source_hash="projection-lotus-purchase-cost",
+        )
+        LineaReceta.objects.create(
+            receta=self.recipe,
+            posicion=2,
+            insumo=lotus,
+            insumo_texto=lotus.nombre,
+            cantidad=Decimal("0.0078125"),
+            unidad_texto="kg",
+            unidad=self.unit_kg,
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+
+        context = build_projection_supply_context(
+            target_date=self.target_date,
+            forecast_context={
+                "target_label": "Forecast Lotus",
+                "summary": {"forecast_units": Decimal("10")},
+                "rows": [
+                    {
+                        "branch_id": self.branch.id,
+                        "branch_code": self.branch.codigo,
+                        "branch_name": self.branch.nombre,
+                        "recipe_id": self.recipe.id,
+                        "recipe_name": self.recipe.nombre,
+                        "forecast_qty": Decimal("10"),
+                        "buffer_units": Decimal("0"),
+                    }
+                ],
+            },
+        )
+
+        lotus_row = next(row for row in context["insumos"] if row["insumo_id"] == lotus.id)
+        self.assertEqual(lotus_row["article_class_label"], "Materia prima")
+        self.assertEqual(lotus_row["unit_cost"], Decimal("226.67"))
+        self.assertFalse(
+            any(
+                issue["code"] == "PREPARACION_NO_ENCONTRADA"
+                and issue["insumo_id"] == lotus.id
+                for issue in context["issues"]
+            )
+        )
+
     def test_projection_supply_uses_costed_preparation_for_internal_input(self):
         prep_recipe = Receta.objects.create(
             nombre="Batida Proyección",

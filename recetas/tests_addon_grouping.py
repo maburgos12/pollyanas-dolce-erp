@@ -233,8 +233,16 @@ class RecetaAddonGroupingTests(TestCase):
         spoon = Insumo.objects.create(nombre="CUCHARA CH", unidad_base=self.unit_pza, activo=True)
         label_ch = Insumo.objects.create(nombre="ETIQUETA CH", unidad_base=self.unit_pza, activo=True)
         triangle = Insumo.objects.create(nombre="Rebanada Triangular RP25", unidad_base=self.unit_pza, activo=True)
-        cookie = Insumo.objects.create(nombre="Galleta Para Pay", unidad_base=self.unit_g, activo=True)
-        jam = Insumo.objects.create(nombre="Mermelada Fresa", unidad_base=unit_ml, activo=True)
+        Insumo.objects.create(nombre="Galleta Para Pay", unidad_base=self.unit_g, activo=True)
+        Insumo.objects.create(nombre="Mermelada Fresa", unidad_base=unit_ml, activo=True)
+        cookie = Insumo.objects.create(
+            nombre="Galleta Pay", codigo_point="01GP13", unidad_base=self.unit_g, activo=True,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        jam = Insumo.objects.create(
+            nombre="Mermelada Fresa Liquida", codigo_point="01MF06", unidad_base=unit_ml, activo=True,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
         fresh_strawberry = Insumo.objects.create(nombre="Fresa", unidad_base=self.unit_g, activo=True)
         derived_base = Receta.objects.create(
             nombre="Pay de Queso Rebanada",
@@ -319,6 +327,12 @@ class RecetaAddonGroupingTests(TestCase):
         self.assertEqual(
             addon_recipe.lineas.exclude(match_status=LineaReceta.STATUS_REJECTED).count(),
             6,
+        )
+        self.assertTrue(
+            addon_recipe.lineas.filter(insumo__codigo_point="01GP13", insumo__nombre="Galleta Pay").exists()
+        )
+        self.assertTrue(
+            addon_recipe.lineas.filter(insumo__codigo_point="01MF06", insumo__nombre="Mermelada Fresa Liquida").exists()
         )
 
     def test_classify_commercial_recipe_distinguishes_history_complement_and_direct(self):
@@ -534,6 +548,14 @@ class RecetaAddonGroupingTests(TestCase):
         ]:
             Insumo.objects.create(nombre=insumo_name, unidad_base=unit, activo=True)
         Insumo.objects.create(nombre="Mermelada Fresa", unidad_base=unit_ml, activo=True)
+        Insumo.objects.create(
+            nombre="Galleta Pay", codigo_point="01GP13", unidad_base=self.unit_g, activo=True,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        Insumo.objects.create(
+            nombre="Mermelada Fresa Liquida", codigo_point="01MF06", unidad_base=unit_ml, activo=True,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
 
         ensure_curated_commercial_mappings()
         ensure_curated_commercial_mappings()
@@ -546,3 +568,5 @@ class RecetaAddonGroupingTests(TestCase):
             addon_recipe.lineas.exclude(match_status=LineaReceta.STATUS_REJECTED).count(),
             6,
         )
+        self.assertTrue(addon_recipe.lineas.filter(insumo__codigo_point="01GP13").exists())
+        self.assertTrue(addon_recipe.lineas.filter(insumo__codigo_point="01MF06").exists())
