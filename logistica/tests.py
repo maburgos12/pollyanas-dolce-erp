@@ -9,7 +9,7 @@ from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import IntegrityError, transaction
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -73,6 +73,19 @@ class LogisticaSeedPuntosPollyanasTests(TestCase):
         self.assertEqual(PuntoLogistico.objects.filter(tipo=PuntoLogistico.TIPO_SUCURSAL, activo=True).count(), 9)
         self.assertTrue(PuntoLogistico.objects.filter(nombre="Sucursal Matriz", radio_geocerca_metros=120).exists())
         self.assertTrue(PuntoLogistico.objects.filter(nombre="Sucursal Guamuchil", notas__contains="Blvd. Rosales 627").exists())
+
+
+class LogisticaSeedRepartidoresTests(TestCase):
+    def test_seed_repartidores_pwa_asigna_jorge_a_matriz_por_default(self):
+        matriz = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        Sucursal.objects.create(codigo="COLOSIO", nombre="Colosio", activa=True)
+
+        output = StringIO()
+        call_command("seed_repartidores_pwa", stdout=output)
+
+        repartidor = Repartidor.objects.select_related("sucursal", "user").get(user__username="compras.jorge@pollyanasdolce.com")
+        self.assertEqual(repartidor.sucursal, matriz)
+        self.assertEqual(repartidor.sucursal.codigo, "MATRIZ")
 
 
 class LogisticaViewsTests(TestCase):
@@ -451,6 +464,29 @@ class LogisticaControlRutasTests(TestCase):
     def test_distancia_metros_detecta_punto_cercano(self):
         self.assertLess(distancia_metros("25.570010", "-108.470010", self.punto.latitud, self.punto.longitud), 5)
 
+    @override_settings(LOGISTICA_FALLBACK_SPEED_KMH=36)
+    def test_ruta_programada_fallback_calcula_tiempo_por_velocidad_configurada(self):
+        punto_2 = PuntoLogistico.objects.create(
+            sucursal=self.sucursal,
+            nombre="Sucursal Control Dos",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.580000",
+            longitud="-108.480000",
+            radio_geocerca_metros=120,
+        )
+        ruta = RutaEntrega.objects.create(nombre="Ruta Fallback Tiempo", fecha_ruta=timezone.localdate())
+        ParadaRuta.objects.create(ruta=ruta, punto=self.punto, orden=1)
+        ParadaRuta.objects.create(ruta=ruta, punto=punto_2, orden=2)
+
+        from logistica.services_google_routes import recalcular_ruta_programada
+
+        recalcular_ruta_programada(ruta)
+        ruta.refresh_from_db()
+
+        self.assertEqual(ruta.ruta_programada_fuente, "FALLBACK")
+        self.assertGreater(ruta.ruta_programada_distancia_metros, 0)
+        self.assertEqual(ruta.ruta_programada_duracion_segundos, int(round((ruta.ruta_programada_distancia_metros / 1000) / 36 * 3600)))
+
     def test_resumen_tiempos_ruta_usa_promedio_historico_en_punto(self):
         llegada = timezone.now() - timezone.timedelta(hours=2)
         ruta_historica = RutaEntrega.objects.create(nombre="Ruta Histórica", fecha_ruta=timezone.localdate() - timezone.timedelta(days=1))
@@ -470,6 +506,26 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(resumen.transito_programado_minutos, 30)
         self.assertEqual(resumen.surtido_estimado_minutos, 24)
         self.assertEqual(resumen.total_operativo_estimado_minutos, 54)
+        self.assertEqual(resumen.paradas[0].promedio_surtido_minutos, 24)
+
+    def test_resumen_tiempos_no_contamina_promedio_con_parada_actual(self):
+        llegada = timezone.now() - timezone.timedelta(hours=2)
+        ruta_historica = RutaEntrega.objects.create(nombre="Ruta Histórica Promedio", fecha_ruta=timezone.localdate() - timezone.timedelta(days=1))
+        ParadaRuta.objects.create(
+            ruta=ruta_historica,
+            punto=self.punto,
+            orden=1,
+            hora_llegada_real=llegada,
+            hora_salida_real=llegada + timezone.timedelta(minutes=24),
+            estado=ParadaRuta.ESTADO_VISITADA,
+        )
+        self.parada.hora_llegada_real = llegada + timezone.timedelta(hours=1)
+        self.parada.hora_salida_real = self.parada.hora_llegada_real + timezone.timedelta(minutes=60)
+        self.parada.save(update_fields=["hora_llegada_real", "hora_salida_real", "actualizado_en"])
+
+        resumen = resumen_tiempos_ruta(self.ruta)
+
+        self.assertEqual(resumen.paradas[0].permanencia_real_minutos, 60)
         self.assertEqual(resumen.paradas[0].promedio_surtido_minutos, 24)
 
     def test_ruta_detail_muestra_tiempos_de_transito_y_surtido(self):
@@ -1141,6 +1197,10 @@ class LogisticaControlRutasTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 201)
+        data = response.json()
+        self.assertEqual(data["ruta_programada_fuente"], "FALLBACK")
+        self.assertGreater(data["ruta_programada_distancia_metros"], 0)
+        self.assertGreater(data["ruta_programada_duracion_segundos"], 0)
         ruta = RutaEntrega.objects.get(nombre="Ruta API Ordenada")
         paradas = list(ruta.paradas.order_by("orden").values_list("punto_id", "orden"))
         self.assertEqual(paradas, [(self.punto.id, 1), (punto_sur.id, 2)])
