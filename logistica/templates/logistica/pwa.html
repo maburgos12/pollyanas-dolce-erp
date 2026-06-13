@@ -1033,6 +1033,55 @@
       .fuel-save-row .primary-btn {
         width: min(100%, 300px);
       }
+      .route-card-pwa {
+        display: grid;
+        gap: 12px;
+        padding: 16px;
+      }
+      .route-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: flex-start;
+      }
+      .route-head h2 {
+        margin: 0;
+        color: var(--gold);
+      }
+      .route-chip {
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 5px 10px;
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 800;
+      }
+      .route-stop {
+        display: grid;
+        gap: 4px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px;
+        background: #14141d;
+      }
+      .route-stop.visited {
+        border-color: var(--success);
+      }
+      .route-stop strong {
+        color: var(--text);
+      }
+      .route-event {
+        border-left: 4px solid var(--warning);
+        padding: 10px 12px;
+        background: #14141d;
+        border-radius: 8px;
+      }
+      .route-event.ok {
+        border-left-color: var(--success);
+      }
+      .route-event.critica {
+        border-left-color: var(--danger);
+      }
     </style>
     <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
   </head>
@@ -1055,6 +1104,8 @@
         combustibleAlerta: null,
         bitacoras: [],
         bitacoraSalida: null,
+        rutaActiva: null,
+        rutaTrackingDraft: null,
         unidades: [],
         inspeccionDraft: null,
         lavadoDraft: null,
@@ -1278,12 +1329,14 @@
         navigator.geolocation.getCurrentPosition((position) => {
           draft[latField] = position.coords.latitude.toFixed(6);
           draft[lngField] = position.coords.longitude.toFixed(6);
+          draft.precision_metros = Number.isFinite(position.coords.accuracy) ? Number(position.coords.accuracy.toFixed(2)) : null;
           draft.geoStatus = "ready";
           draft.geoLabel = "📍 Ubicación registrada";
           renderFn();
         }, (error) => {
           draft[latField] = "";
           draft[lngField] = "";
+          draft.precision_metros = null;
           draft.geoStatus = error.code === 1 ? "denied" : "unavailable";
           draft.geoLabel = "Se requiere ubicación para continuar";
           renderFn();
@@ -1417,7 +1470,8 @@
           historial: `<svg viewBox="0 0 32 32"><path class="soft" d="M10 7h12v18H10z"/><path class="gold-stroke" d="M13 12h6M13 16h6M13 20h4"/><path class="stroke" d="M8 10h2M8 15h2M8 20h2"/></svg>`,
           inspeccion: `<svg viewBox="0 0 32 32"><path class="soft" d="M9 6h14v20H9z"/><path class="gold-stroke" d="m12 14 2 2 5-6"/><path class="stroke" d="M12 20h8M13 6h6M13 26h6"/></svg>`,
           lavado: `<svg viewBox="0 0 32 32"><path class="gold-stroke" d="M11 7c2.2 2.5 3.3 4.7 3.3 6.4a3.3 3.3 0 0 1-6.6 0C7.7 11.7 8.8 9.5 11 7Z"/><path class="soft" d="M21 12c2 2.2 3 4.1 3 5.7a3 3 0 0 1-6 0c0-1.6 1-3.5 3-5.7Z"/><path class="stroke" d="M8 25h17"/></svg>`,
-          bitacora: `<svg viewBox="0 0 32 32"><path class="soft" d="M9 6h14v20H9z"/><path class="gold-stroke" d="m12 13 2 2 4-5M12 21h8"/><path class="stroke" d="M12 17h8M21 6v20"/></svg>`
+          bitacora: `<svg viewBox="0 0 32 32"><path class="soft" d="M9 6h14v20H9z"/><path class="gold-stroke" d="m12 13 2 2 4-5M12 21h8"/><path class="stroke" d="M12 17h8M21 6v20"/></svg>`,
+          ruta: `<svg viewBox="0 0 32 32"><path class="soft" d="M8 22c5-7 11-7 16-12"/><path class="gold-stroke" d="M10 22h.1M16 16h.1M23 10h.1"/><path class="stroke" d="M8 22c5-7 11-7 16-12"/></svg>`
         };
         return `<span class="app-glyph" aria-hidden="true">${icons[name] || icons.reporte}</span>`;
       }
@@ -1474,7 +1528,7 @@
       function pantallaInicial() {
         const params = new URLSearchParams(window.location.search);
         const pantalla = params.get("pantalla") || "dashboard";
-        const permitidas = new Set(["dashboard", "nuevo_reporte", "mis_reportes", "inspeccion_vehiculo", "lavado", "bitacora_salida"]);
+        const permitidas = new Set(["dashboard", "nuevo_reporte", "mis_reportes", "inspeccion_vehiculo", "lavado", "bitacora_salida", "ruta_activa"]);
         return permitidas.has(pantalla) ? pantalla : "dashboard";
       }
 
@@ -1521,6 +1575,7 @@
         if (nombre === "mi_unidad") return renderMiUnidad();
         if (nombre === "bitacora") return renderBitacora();
         if (nombre === "bitacora_salida") return renderBitacoraSalida();
+        if (nombre === "ruta_activa") return renderRutaActiva();
         if (nombre === "inspeccion_vehiculo") return renderInspeccionVehiculo();
         if (nombre === "lavado") return renderLavadoUnidad();
         if (nombre === "ayuda") return renderAyuda();
@@ -1587,6 +1642,16 @@
         }
         state.bitacoraSalida = response.ok ? await response.json() : null;
         return state.bitacoraSalida;
+      }
+
+      async function loadRutaActiva() {
+        const response = await apiFetch("/rutas/activa/");
+        if (response.status === 204) {
+          state.rutaActiva = null;
+          return state.rutaActiva;
+        }
+        state.rutaActiva = response.ok ? await response.json() : null;
+        return state.rutaActiva;
       }
 
       async function loadResumenSemanal() {
@@ -1684,15 +1749,24 @@
         await loadResumenSemanal();
         await loadCombustibleAlerta();
         let turnoActivo = null;
+        let rutaActiva = null;
         try {
           turnoActivo = await loadTurnoActivo();
         } catch (error) {
           turnoActivo = null;
         }
+        try {
+          rutaActiva = await loadRutaActiva();
+        } catch (error) {
+          rutaActiva = null;
+        }
         const abiertos = state.reportes.filter((r) => r.estatus !== "cerrado").length;
         const turnoBadge = turnoActivo?.id
           ? `<span class="badge turno abierto">ABIERTO</span>`
           : `<span class="badge turno">Sin turno</span>`;
+        const rutaBadge = rutaActiva?.ruta?.id
+          ? `<span class="badge turno abierto">ACTIVA</span>`
+          : `<span class="badge turno">Sin ruta</span>`;
         render(shell(`
           ${resumenSemanalCard()}
           ${combustibleAlertaModal()}
@@ -1703,9 +1777,162 @@
             <button class="dash-btn" onclick="showScreen('mis_reportes')">${appGlyph("historial")}<span>Mis Reportes</span>${abiertos ? `<span class="badge">${abiertos}</span>` : ""}</button>
             <button class="dash-btn" onclick="showScreen('inspeccion_vehiculo')">${appGlyph("inspeccion")}<span>Inspección</span></button>
             <button class="dash-btn" onclick="showScreen('lavado')">${appGlyph("lavado")}<span>Lavado</span></button>
+            <button class="dash-btn" onclick="showScreen('ruta_activa')">${appGlyph("ruta")}<span>Mi ruta</span>${rutaBadge}</button>
             <button class="dash-btn" onclick="showScreen('bitacora_salida')">${appGlyph("bitacora")}<span>Bitácora</span>${turnoBadge}</button>
           </div>
         `));
+      }
+
+      function ensureRutaTrackingDraft() {
+        if (!state.rutaTrackingDraft) {
+          state.rutaTrackingDraft = {
+            latitud: "",
+            longitud: "",
+            precision_metros: null,
+            fuera_de_ruta_confirmado: false,
+            desvio_motivo: "",
+            geoStatus: "idle",
+            geoLabel: "",
+            guardando: false
+          };
+        }
+        return state.rutaTrackingDraft;
+      }
+
+      function capturarUbicacionRuta() {
+        const draft = ensureRutaTrackingDraft();
+        requestLocation(draft, renderRutaActiva, "latitud", "longitud");
+      }
+
+      function toggleDesvioRuta() {
+        const draft = ensureRutaTrackingDraft();
+        draft.fuera_de_ruta_confirmado = !draft.fuera_de_ruta_confirmado;
+        renderRutaActiva();
+      }
+
+      function updateDesvioMotivo(value) {
+        const draft = ensureRutaTrackingDraft();
+        draft.desvio_motivo = value.slice(0, 160);
+      }
+
+      function renderParadasRuta(paradas) {
+        if (!paradas?.length) return `<p class="unit-line">Esta ruta no tiene paradas configuradas.</p>`;
+        return paradas.map((parada) => `
+          <section class="route-stop ${parada.estado === "VISITADA" ? "visited" : ""}">
+            <strong>${escapeHtml(parada.orden)}. ${escapeHtml(parada.punto_nombre_snapshot || parada.punto?.nombre || "Punto")}</strong>
+            <span>${escapeHtml(parada.punto?.tipo_display || parada.punto?.tipo || "")} · Radio ${escapeHtml(parada.radio_geocerca_metros || parada.punto?.radio_geocerca_metros || "-")} m</span>
+            <span>${escapeHtml(parada.estado_display || parada.estado || "")}${parada.hora_llegada_real ? ` · ${formatDate(parada.hora_llegada_real)}` : ""}</span>
+          </section>
+        `).join("");
+      }
+
+      function renderEventosRuta(eventos) {
+        if (!eventos?.length) return `<p class="muted">Sin eventos registrados en esta ruta.</p>`;
+        return eventos.slice(0, 5).map((evento) => `
+          <section class="route-event ${escapeHtml(evento.severidad || "")}">
+            <strong>${escapeHtml(evento.tipo_display || evento.tipo || "Evento")}</strong><br>
+            ${escapeHtml(evento.descripcion || "")}
+            <br><span class="muted">${formatDate(evento.creado_en)}</span>
+          </section>
+        `).join("");
+      }
+
+      async function renderRutaActiva(message = "") {
+        let rutaData = null;
+        let turnoActivo = null;
+        try {
+          rutaData = await loadRutaActiva();
+        } catch (error) {
+          rutaData = null;
+        }
+        try {
+          turnoActivo = await loadTurnoActivo();
+        } catch (error) {
+          turnoActivo = null;
+        }
+        const draft = ensureRutaTrackingDraft();
+        if (!rutaData?.ruta?.id) {
+          return render(shell(`
+            <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
+            <h1 class="screen-title" style="margin-top:16px;">Mi ruta</h1>
+            <section class="card route-card-pwa">
+              <div class="route-head">
+                <div>
+                  <h2>Sin ruta activa</h2>
+                  <p class="muted">Cuando logística libere una ruta para ti, aparecerá aquí.</p>
+                </div>
+              </div>
+              <button class="secondary-btn" onclick="showScreen('dashboard')">Volver al inicio</button>
+            </section>
+          `));
+        }
+        const ruta = rutaData.ruta;
+        const ubicacionLista = isGeoReady(draft);
+        const turnoOk = Boolean(turnoActivo?.id);
+        const unidadOk = turnoOk && String(turnoActivo.unidad) === String(ruta.unidad_operativa);
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
+          <h1 class="screen-title" style="margin-top:16px;">Mi ruta</h1>
+          ${message ? `<p class="${message.startsWith("✅") ? "success" : "error"}">${escapeHtml(message)}</p>` : ""}
+          <section class="card route-card-pwa">
+            <div class="route-head">
+              <div>
+                <h2>${escapeHtml(ruta.nombre || ruta.folio)}</h2>
+                <p class="muted">${escapeHtml(ruta.folio)} · ${escapeHtml(ruta.estatus_display || ruta.estatus || "")}</p>
+              </div>
+              <span class="route-chip">${escapeHtml(ruta.cumplimiento_porcentaje || "0")}%</span>
+            </div>
+            <p class="unit-line">${escapeHtml(ruta.unidad_operativa_codigo || "Unidad")} · ${rutaData.paradas?.length || 0} parada${(rutaData.paradas?.length || 0) === 1 ? "" : "s"}</p>
+            ${turnoOk ? "" : `<div class="daily-banner warning">Inicia turno en Bitácora antes de registrar seguimiento.</div>`}
+            ${turnoOk && !unidadOk ? `<div class="daily-banner warning">Tu turno activo no corresponde a la unidad asignada a esta ruta.</div>` : ""}
+            <button class="primary-btn" type="button" onclick="capturarUbicacionRuta()" ${draft.geoStatus === "loading" ? "disabled" : ""}>${ubicacionLista ? "Actualizar ubicación" : "Capturar ubicación"}</button>
+            ${ubicacionLista ? `<button class="secondary-btn" type="button" onclick="toggleDesvioRuta()">${draft.fuera_de_ruta_confirmado ? "Desvío pendiente de registrar" : "Marcar desvío/incidencia"}</button>` : ""}
+            ${draft.fuera_de_ruta_confirmado ? `<input class="input-field" type="text" maxlength="160" placeholder="Motivo breve obligatorio" value="${escapeHtml(draft.desvio_motivo)}" oninput="updateDesvioMotivo(this.value)">` : ""}
+            ${draft.fuera_de_ruta_confirmado ? `<p class="muted">El desvío se guardará como evidencia al tocar Registrar seguimiento.</p>` : ""}
+            ${draft.precision_metros ? `<p class="muted">Precisión GPS: ${escapeHtml(draft.precision_metros)} m</p>` : ""}
+            <button class="primary-btn" type="button" onclick="registrarTrackingRuta()" ${turnoOk && unidadOk && ubicacionLista && !draft.guardando ? "" : "disabled"}>${draft.guardando ? "Guardando..." : "Registrar seguimiento"}</button>
+            ${rutaData.ultima_ubicacion ? `<p class="muted">Última señal: ${formatDate(rutaData.ultima_ubicacion.timestamp_servidor)}</p>` : `<p class="muted">Sin señales registradas todavía.</p>`}
+          </section>
+          <section class="card route-card-pwa">
+            <h2 style="margin:0;color:var(--gold);">Paradas</h2>
+            ${renderParadasRuta(rutaData.paradas || [])}
+          </section>
+          <section class="card route-card-pwa">
+            <h2 style="margin:0;color:var(--gold);">Eventos recientes</h2>
+            ${renderEventosRuta(rutaData.eventos || [])}
+          </section>
+          ${geoOverlay(draft, "capturarUbicacionRuta")}
+        `));
+      }
+
+      async function registrarTrackingRuta() {
+        const draft = ensureRutaTrackingDraft();
+        const rutaId = state.rutaActiva?.ruta?.id;
+        if (!rutaId) return renderRutaActiva("No hay ruta activa.");
+        if (!isGeoReady(draft)) return renderRutaActiva("Captura ubicación antes de registrar seguimiento.");
+        if (draft.fuera_de_ruta_confirmado && !String(draft.desvio_motivo || "").trim()) {
+          return renderRutaActiva("Indica un motivo breve para registrar el desvío.");
+        }
+        draft.guardando = true;
+        renderRutaActiva();
+        const response = await apiFetch(`/rutas/${rutaId}/tracking/`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            latitud: draft.latitud,
+            longitud: draft.longitud,
+            precision_metros: draft.precision_metros,
+            fuera_de_ruta_confirmado: draft.fuera_de_ruta_confirmado,
+            desvio_motivo: draft.desvio_motivo
+          })
+        });
+        draft.guardando = false;
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          return renderRutaActiva(apiErrorMessage(error, "No se pudo registrar seguimiento."));
+        }
+        state.rutaTrackingDraft = null;
+        await renderRutaActiva("✅ Seguimiento registrado.");
       }
 
       function renderAyuda() {
@@ -3170,7 +3397,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=network-first-shell").catch(() => {});
+          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=route-control-v8").catch(() => {});
         }
 
         try {

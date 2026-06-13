@@ -29,9 +29,33 @@ class RutaEntrega(models.Model):
     fecha_ruta = models.DateField(default=timezone.localdate)
     chofer = models.CharField(max_length=120, blank=True, default="")
     unidad = models.CharField(max_length=120, blank=True, default="")
+    repartidor = models.ForeignKey(
+        "Repartidor",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="rutas_asignadas",
+    )
+    unidad_operativa = models.ForeignKey(
+        "Unidad",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="rutas_asignadas",
+    )
+    bitacora_salida = models.ForeignKey(
+        "BitacoraSalidaLlegada",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="rutas_operativas",
+    )
     estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default=ESTATUS_PLANEADA)
     km_estimado = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
     notas = models.TextField(blank=True, default="")
+    hora_inicio_real = models.DateTimeField(null=True, blank=True)
+    hora_cierre_real = models.DateTimeField(null=True, blank=True)
+    cumplimiento_porcentaje = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0"))
 
     total_entregas = models.PositiveIntegerField(default=0)
     entregas_completadas = models.PositiveIntegerField(default=0)
@@ -50,6 +74,23 @@ class RutaEntrega(models.Model):
 
     class Meta:
         ordering = ["-fecha_ruta", "-id"]
+        indexes = [
+            models.Index(fields=["estatus", "fecha_ruta"]),
+            models.Index(fields=["repartidor", "estatus"]),
+            models.Index(fields=["unidad_operativa", "estatus"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["repartidor"],
+                condition=Q(estatus="EN_RUTA", repartidor__isnull=False),
+                name="rutaentrega_unica_en_ruta_repartidor",
+            ),
+            models.UniqueConstraint(
+                fields=["unidad_operativa"],
+                condition=Q(estatus="EN_RUTA", unidad_operativa__isnull=False),
+                name="rutaentrega_unica_en_ruta_unidad",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.folio or self.nombre
@@ -88,6 +129,15 @@ class RutaEntrega(models.Model):
         self.entregas_completadas = int(agg.get("completadas") or 0)
         self.entregas_incidencia = int(agg.get("incidencia") or 0)
         self.monto_estimado_total = agg.get("monto") or Decimal("0")
+
+    def recompute_route_control(self):
+        paradas = self.paradas.all()
+        total = paradas.count()
+        if not total:
+            self.cumplimiento_porcentaje = Decimal("0")
+            return
+        visitadas = paradas.filter(estado=ParadaRuta.ESTADO_VISITADA).count()
+        self.cumplimiento_porcentaje = (Decimal(visitadas) / Decimal(total) * Decimal("100")).quantize(Decimal("0.01"))
 
 
 class EntregaRuta(models.Model):
@@ -141,6 +191,249 @@ class EntregaRuta(models.Model):
         if self.estatus != self.ESTATUS_ENTREGADA and self.entregado_at:
             self.entregado_at = None
         super().save(*args, **kwargs)
+
+
+class PuntoLogistico(models.Model):
+    TIPO_CEDIS = "CEDIS"
+    TIPO_SUCURSAL = "SUCURSAL"
+    TIPO_PROVEEDOR = "PROVEEDOR"
+    TIPO_TALLER = "TALLER"
+    TIPO_BANCO = "BANCO"
+    TIPO_AUTORIZADO = "AUTORIZADO"
+    TIPO_CHOICES = [
+        (TIPO_CEDIS, "CEDIS"),
+        (TIPO_SUCURSAL, "Sucursal"),
+        (TIPO_PROVEEDOR, "Proveedor"),
+        (TIPO_TALLER, "Taller"),
+        (TIPO_BANCO, "Banco"),
+        (TIPO_AUTORIZADO, "Punto autorizado"),
+    ]
+
+    sucursal = models.ForeignKey(
+        Sucursal,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="puntos_logisticos",
+    )
+    nombre = models.CharField(max_length=160)
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default=TIPO_SUCURSAL)
+    latitud = models.DecimalField(max_digits=9, decimal_places=6)
+    longitud = models.DecimalField(max_digits=9, decimal_places=6)
+    radio_geocerca_metros = models.PositiveIntegerField(default=80)
+    activo = models.BooleanField(default=True)
+    notas = models.TextField(blank=True, default="")
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tipo", "nombre"]
+        verbose_name = "Punto logístico"
+        verbose_name_plural = "Puntos logísticos"
+        indexes = [
+            models.Index(fields=["tipo", "activo"]),
+            models.Index(fields=["sucursal", "activo"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=Q(latitud__gte=Decimal("-90")) & Q(latitud__lte=Decimal("90")),
+                name="puntologistico_latitud_rango",
+            ),
+            models.CheckConstraint(
+                check=Q(longitud__gte=Decimal("-180")) & Q(longitud__lte=Decimal("180")),
+                name="puntologistico_longitud_rango",
+            ),
+            models.CheckConstraint(
+                check=Q(radio_geocerca_metros__gte=20) & Q(radio_geocerca_metros__lte=1000),
+                name="puntologistico_radio_rango",
+            ),
+            models.CheckConstraint(
+                check=~(Q(latitud=Decimal("0")) & Q(longitud=Decimal("0"))),
+                name="puntologistico_no_cero_cero",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.nombre
+
+
+class ParadaRuta(models.Model):
+    ESTADO_PENDIENTE = "PENDIENTE"
+    ESTADO_VISITADA = "VISITADA"
+    ESTADO_OMITIDA = "OMITIDA"
+    ESTADO_FUERA_RADIO = "FUERA_RADIO"
+    ESTADO_CHOICES = [
+        (ESTADO_PENDIENTE, "Pendiente"),
+        (ESTADO_VISITADA, "Visitada"),
+        (ESTADO_OMITIDA, "Omitida"),
+        (ESTADO_FUERA_RADIO, "Fuera de radio"),
+    ]
+
+    ruta = models.ForeignKey(RutaEntrega, on_delete=models.CASCADE, related_name="paradas")
+    punto = models.ForeignKey(PuntoLogistico, on_delete=models.PROTECT, related_name="paradas_ruta")
+    orden = models.PositiveIntegerField(default=1)
+    punto_nombre_snapshot = models.CharField(max_length=160, blank=True, default="", editable=False)
+    latitud_geocerca = models.DecimalField(max_digits=9, decimal_places=6, editable=False)
+    longitud_geocerca = models.DecimalField(max_digits=9, decimal_places=6, editable=False)
+    radio_geocerca_metros = models.PositiveIntegerField(editable=False)
+    hora_estimada = models.DateTimeField(null=True, blank=True)
+    hora_llegada_real = models.DateTimeField(null=True, blank=True)
+    hora_salida_real = models.DateTimeField(null=True, blank=True)
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE)
+    distancia_llegada_metros = models.PositiveIntegerField(null=True, blank=True)
+    notas = models.TextField(blank=True, default="")
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["ruta", "orden", "id"]
+        unique_together = [("ruta", "orden")]
+        verbose_name = "Parada de ruta"
+        verbose_name_plural = "Paradas de ruta"
+        indexes = [
+            models.Index(fields=["ruta", "estado"]),
+            models.Index(fields=["punto", "estado"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.ruta.folio} · {self.orden} · {self.punto_nombre_snapshot or self.punto.nombre}"
+
+    def save(self, *args, **kwargs):
+        if self.punto_id:
+            if not self.punto_nombre_snapshot:
+                self.punto_nombre_snapshot = self.punto.nombre
+            if self.latitud_geocerca is None:
+                self.latitud_geocerca = self.punto.latitud
+            if self.longitud_geocerca is None:
+                self.longitud_geocerca = self.punto.longitud
+            if not self.radio_geocerca_metros:
+                self.radio_geocerca_metros = self.punto.radio_geocerca_metros
+        super().save(*args, **kwargs)
+
+
+class UbicacionRuta(models.Model):
+    ruta = models.ForeignKey(RutaEntrega, on_delete=models.CASCADE, related_name="ubicaciones")
+    repartidor = models.ForeignKey("Repartidor", on_delete=models.PROTECT, related_name="ubicaciones_ruta")
+    unidad = models.ForeignKey("Unidad", on_delete=models.PROTECT, related_name="ubicaciones_ruta")
+    latitud = models.DecimalField(max_digits=9, decimal_places=6)
+    longitud = models.DecimalField(max_digits=9, decimal_places=6)
+    precision_metros = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    velocidad_kmh = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    bateria_porcentaje = models.PositiveIntegerField(null=True, blank=True)
+    timestamp_dispositivo = models.DateTimeField(null=True, blank=True)
+    timestamp_servidor = models.DateTimeField(default=timezone.now, db_index=True)
+    ip_registro = models.GenericIPAddressField(null=True, blank=True)
+    fuera_de_geocerca = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["-timestamp_servidor", "-id"]
+        verbose_name = "Ubicación de ruta"
+        verbose_name_plural = "Ubicaciones de ruta"
+        indexes = [
+            models.Index(fields=["ruta", "timestamp_servidor"]),
+            models.Index(fields=["repartidor", "timestamp_servidor"]),
+            models.Index(fields=["fuera_de_geocerca", "timestamp_servidor"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=Q(latitud__gte=Decimal("-90")) & Q(latitud__lte=Decimal("90")),
+                name="ubicacionruta_latitud_rango",
+            ),
+            models.CheckConstraint(
+                check=Q(longitud__gte=Decimal("-180")) & Q(longitud__lte=Decimal("180")),
+                name="ubicacionruta_longitud_rango",
+            ),
+            models.CheckConstraint(
+                check=~(Q(latitud=Decimal("0")) & Q(longitud=Decimal("0"))),
+                name="ubicacionruta_no_cero_cero",
+            ),
+            models.CheckConstraint(
+                check=Q(precision_metros__isnull=True) | Q(precision_metros__gte=Decimal("0")),
+                name="ubicacionruta_precision_no_negativa",
+            ),
+            models.CheckConstraint(
+                check=Q(velocidad_kmh__isnull=True) | Q(velocidad_kmh__gte=Decimal("0")),
+                name="ubicacionruta_velocidad_no_negativa",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.ruta.folio} · {self.timestamp_servidor:%Y-%m-%d %H:%M}"
+
+
+class EventoRuta(models.Model):
+    TIPO_SALIDA = "SALIDA"
+    TIPO_LLEGADA_GEOFENCE = "LLEGADA_GEOFENCE"
+    TIPO_DESVIO = "DESVIO"
+    TIPO_PARADA_LARGA = "PARADA_LARGA"
+    TIPO_GPS_PERDIDO = "GPS_PERDIDO"
+    TIPO_INCIDENCIA_MANUAL = "INCIDENCIA_MANUAL"
+    TIPO_CIERRE = "CIERRE"
+    TIPO_CHOICES = [
+        (TIPO_SALIDA, "Salida"),
+        (TIPO_LLEGADA_GEOFENCE, "Llegada a geocerca"),
+        (TIPO_DESVIO, "Desvío"),
+        (TIPO_PARADA_LARGA, "Parada larga"),
+        (TIPO_GPS_PERDIDO, "GPS perdido"),
+        (TIPO_INCIDENCIA_MANUAL, "Incidencia manual"),
+        (TIPO_CIERRE, "Cierre"),
+    ]
+
+    SEVERIDAD_INFO = "info"
+    SEVERIDAD_OK = "ok"
+    SEVERIDAD_ALERTA = "alerta"
+    SEVERIDAD_CRITICA = "critica"
+    SEVERIDAD_CHOICES = [
+        (SEVERIDAD_INFO, "Informativo"),
+        (SEVERIDAD_OK, "Cumplimiento"),
+        (SEVERIDAD_ALERTA, "Alerta"),
+        (SEVERIDAD_CRITICA, "Crítica"),
+    ]
+
+    ruta = models.ForeignKey(RutaEntrega, on_delete=models.CASCADE, related_name="eventos")
+    parada = models.ForeignKey(ParadaRuta, on_delete=models.SET_NULL, null=True, blank=True, related_name="eventos")
+    ubicacion = models.ForeignKey(UbicacionRuta, on_delete=models.SET_NULL, null=True, blank=True, related_name="eventos")
+    tipo = models.CharField(max_length=30, choices=TIPO_CHOICES)
+    severidad = models.CharField(max_length=10, choices=SEVERIDAD_CHOICES, default=SEVERIDAD_INFO)
+    descripcion = models.TextField()
+    latitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    distancia_metros = models.PositiveIntegerField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="eventos_ruta_creados",
+    )
+    creado_en = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ["-creado_en", "-id"]
+        verbose_name = "Evento de ruta"
+        verbose_name_plural = "Eventos de ruta"
+        indexes = [
+            models.Index(fields=["ruta", "tipo", "creado_en"]),
+            models.Index(fields=["severidad", "creado_en"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=Q(latitud__isnull=True) | (Q(latitud__gte=Decimal("-90")) & Q(latitud__lte=Decimal("90"))),
+                name="eventoruta_latitud_rango",
+            ),
+            models.CheckConstraint(
+                check=Q(longitud__isnull=True) | (Q(longitud__gte=Decimal("-180")) & Q(longitud__lte=Decimal("180"))),
+                name="eventoruta_longitud_rango",
+            ),
+            models.CheckConstraint(
+                check=Q(latitud__isnull=True) | Q(longitud__isnull=True) | ~(Q(latitud=Decimal("0")) & Q(longitud=Decimal("0"))),
+                name="eventoruta_no_cero_cero",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.ruta.folio} · {self.get_tipo_display()}"
 
 
 class Unidad(models.Model):

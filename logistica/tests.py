@@ -1,12 +1,17 @@
+import json
+
 from django.contrib.auth.models import Group, User
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.access import ACCESS_MANAGE
+from core.access import ACCESS_MANAGE, ACCESS_VIEW
 from core.models import Sucursal, UserModuleAccess
 from crm.models import Cliente, PedidoCliente
-from logistica.models import EntregaRuta, Repartidor, RutaEntrega, Unidad
+from logistica.models import BitacoraSalidaLlegada, EntregaRuta, EventoRuta, ParadaRuta, PuntoLogistico, Repartidor, RutaEntrega, Unidad
+from logistica.services_rutas_control import distancia_metros, registrar_ubicacion_ruta, resumen_control_rutas
 from logistica.tasks import _emails_de_grupo
 from api.logistica_views import _can_operate_pwa
 
@@ -286,3 +291,687 @@ class LogisticaPwaApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Logística")
+
+
+class LogisticaControlRutasTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="ruta.control", password="pass123")
+        self.user.groups.add(Group.objects.get_or_create(name="repartidor")[0])
+        self.user.groups.add(Group.objects.get_or_create(name="LOGISTICA")[0])
+        self.sucursal = Sucursal.objects.create(codigo="CTRL-LOG", nombre="Control Logística", activa=True)
+        self.unidad = Unidad.objects.create(codigo="CTRL-01", descripcion="Unidad control", sucursal=self.sucursal)
+        self.repartidor = Repartidor.objects.create(user=self.user, sucursal=self.sucursal, unidad_asignada=self.unidad)
+        self.bitacora = BitacoraSalidaLlegada.objects.create(
+            repartidor=self.repartidor,
+            unidad=self.unidad,
+            km_salida=1000,
+            nivel_gas_salida="lleno",
+            foto_tablero_salida=SimpleUploadedFile("tablero.gif", b"gif", content_type="image/gif"),
+        )
+        self.ruta = RutaEntrega.objects.create(
+            nombre="Ruta Control",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_EN_RUTA,
+            repartidor=self.repartidor,
+            unidad_operativa=self.unidad,
+            bitacora_salida=self.bitacora,
+        )
+        self.punto = PuntoLogistico.objects.create(
+            sucursal=self.sucursal,
+            nombre="Sucursal Control",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.570000",
+            longitud="-108.470000",
+            radio_geocerca_metros=120,
+        )
+        self.parada = ParadaRuta.objects.create(ruta=self.ruta, punto=self.punto, orden=1)
+
+    def test_distancia_metros_detecta_punto_cercano(self):
+        self.assertLess(distancia_metros("25.570010", "-108.470010", self.punto.latitud, self.punto.longitud), 5)
+
+    def test_registrar_ubicacion_marca_geocerca_visitada(self):
+        ubicacion = registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={
+                "latitud": "25.570010",
+                "longitud": "-108.470010",
+                "precision_metros": 0,
+                "velocidad_kmh": 0,
+                "bateria_porcentaje": 0,
+            },
+            ip_registro="127.0.0.1",
+        )
+
+        self.parada.refresh_from_db()
+        self.ruta.refresh_from_db()
+        self.assertFalse(ubicacion.fuera_de_geocerca)
+        self.assertEqual(ubicacion.precision_metros, 0)
+        self.assertEqual(ubicacion.velocidad_kmh, 0)
+        self.assertEqual(ubicacion.bateria_porcentaje, 0)
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
+        self.assertEqual(self.ruta.cumplimiento_porcentaje, 100)
+        self.assertTrue(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE).exists())
+
+    def test_parada_conserva_geocerca_planeada_si_punto_maestro_cambia(self):
+        self.assertEqual(self.parada.punto_nombre_snapshot, "Sucursal Control")
+        self.assertEqual(self.parada.radio_geocerca_metros, 120)
+
+        self.punto.nombre = "Sucursal Control Reubicada"
+        self.punto.latitud = "25.900000"
+        self.punto.longitud = "-108.900000"
+        self.punto.radio_geocerca_metros = 20
+        self.punto.save(update_fields=["nombre", "latitud", "longitud", "radio_geocerca_metros", "actualizado_en"])
+
+        ubicacion = registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={"latitud": "25.570010", "longitud": "-108.470010"},
+        )
+
+        self.parada.refresh_from_db()
+        self.assertFalse(ubicacion.fuera_de_geocerca)
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
+        self.assertEqual(self.parada.punto_nombre_snapshot, "Sucursal Control")
+        evento = EventoRuta.objects.get(ruta=self.ruta, tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE)
+        self.assertIn("Sucursal Control", evento.descripcion)
+        self.assertNotIn("Reubicada", evento.descripcion)
+
+    def test_registrar_ubicacion_fuera_de_geocerca_crea_desvio(self):
+        ubicacion = registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={
+                "latitud": "25.590000",
+                "longitud": "-108.490000",
+                "fuera_de_ruta_confirmado": True,
+                "desvio_motivo": "Entrega urgente",
+            },
+        )
+
+        self.assertTrue(ubicacion.fuera_de_geocerca)
+        evento = EventoRuta.objects.get(ruta=self.ruta, tipo=EventoRuta.TIPO_DESVIO, severidad=EventoRuta.SEVERIDAD_CRITICA)
+        self.assertEqual(evento.metadata["motivo"], "Entrega urgente")
+
+    def test_tracking_api_rechaza_coordenadas_invalidas(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_tracking", kwargs={"ruta_id": self.ruta.id}),
+            json.dumps({"latitud": "120.000000", "longitud": "-108.470010"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_tracking_api_rechaza_precision_negativa(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_tracking", kwargs={"ruta_id": self.ruta.id}),
+            json.dumps({"latitud": "25.570010", "longitud": "-108.470010", "precision_metros": "-1"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_tracking_api_rechaza_ruta_de_otro_repartidor(self):
+        other_user = User.objects.create_user(username="otro.repartidor", password="pass123")
+        other_user.groups.add(Group.objects.get_or_create(name="repartidor")[0])
+        Repartidor.objects.create(user=other_user, sucursal=self.sucursal, unidad_asignada=self.unidad)
+        self.client.force_login(other_user)
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_tracking", kwargs={"ruta_id": self.ruta.id}),
+            '{"latitud": "25.570010", "longitud": "-108.470010"}',
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_api_ruta_activa_devuelve_paradas_del_repartidor(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("api_logistica_ruta_activa"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["ruta"]["id"], self.ruta.id)
+        self.assertEqual(response.json()["paradas"][0]["id"], self.parada.id)
+        self.assertEqual(response.json()["paradas"][0]["punto_nombre_snapshot"], "Sucursal Control")
+
+    def test_tracking_api_registra_ubicacion_de_ruta_activa(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_tracking", kwargs={"ruta_id": self.ruta.id}),
+            '{"latitud": "25.570010", "longitud": "-108.470010", "velocidad_kmh": 0}',
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
+        self.assertFalse(response.json()["fuera_de_geocerca"])
+
+    def test_tracking_api_no_expone_gps_historico_a_consulta_general(self):
+        viewer = User.objects.create_user(username="visor.rutas", password="pass123")
+        UserModuleAccess.objects.create(user=viewer, module="logistica", access=ACCESS_VIEW)
+        self.client.force_login(viewer)
+
+        response = self.client.get(reverse("api_logistica_ruta_tracking", kwargs={"ruta_id": self.ruta.id}))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_eventos_api_rechaza_eventos_automaticos_manuales(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_eventos", kwargs={"ruta_id": self.ruta.id}),
+            json.dumps({"tipo": EventoRuta.TIPO_SALIDA, "severidad": EventoRuta.SEVERIDAD_INFO, "descripcion": "Salida manual"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_eventos_api_rechaza_evento_manual_en_ruta_cerrada(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        self.ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
+        self.ruta.save(update_fields=["estatus", "updated_at"])
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_eventos", kwargs={"ruta_id": self.ruta.id}),
+            json.dumps({"tipo": EventoRuta.TIPO_INCIDENCIA_MANUAL, "severidad": EventoRuta.SEVERIDAD_ALERTA, "descripcion": "Evento tardío"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_eventos_api_rechaza_coordenadas_invalidas(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_eventos", kwargs={"ruta_id": self.ruta.id}),
+            json.dumps(
+                {
+                    "tipo": EventoRuta.TIPO_INCIDENCIA_MANUAL,
+                    "severidad": EventoRuta.SEVERIDAD_ALERTA,
+                    "descripcion": "Incidencia manual",
+                    "latitud": "0.000000",
+                    "longitud": "0.000000",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_resumen_control_materializa_gps_perdido(self):
+        ubicacion = registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={"latitud": "25.570010", "longitud": "-108.470010"},
+        )
+        UbicacionRuta = ubicacion.__class__
+        UbicacionRuta.objects.filter(pk=ubicacion.pk).update(timestamp_servidor=timezone.now() - timezone.timedelta(minutes=20))
+
+        resumen_control_rutas(fecha=self.ruta.fecha_ruta)
+
+        self.assertTrue(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_GPS_PERDIDO).exists())
+
+    def test_resumen_control_materializa_gps_perdido_sin_primera_senal(self):
+        self.ruta.hora_inicio_real = timezone.now() - timezone.timedelta(minutes=20)
+        self.ruta.save(update_fields=["hora_inicio_real", "updated_at"])
+
+        resumen_control_rutas(fecha=self.ruta.fecha_ruta)
+
+        self.assertTrue(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_GPS_PERDIDO).exists())
+
+    def test_control_rutas_view_renderiza_panel_interno(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.get(reverse("logistica:control_rutas"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Control interno de rutas")
+        self.assertContains(response, "Rutas del día")
+
+    def test_puntos_logisticos_crea_punto_manual(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.post(
+            reverse("logistica:puntos_logisticos"),
+            {
+                "nombre": "Sucursal Nueva",
+                "tipo": PuntoLogistico.TIPO_SUCURSAL,
+                "sucursal": self.sucursal.id,
+                "latitud": "25.571000",
+                "longitud": "-108.471000",
+                "radio_geocerca_metros": "90",
+                "activo": "on",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(PuntoLogistico.objects.filter(nombre="Sucursal Nueva", radio_geocerca_metros=90).exists())
+        self.assertContains(response, "Puntos existentes")
+
+    def test_punto_logistico_edit_y_toggle(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        punto_libre = PuntoLogistico.objects.create(
+            sucursal=self.sucursal,
+            nombre="Punto Libre",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.573000",
+            longitud="-108.473000",
+            radio_geocerca_metros=80,
+        )
+
+        response = self.client.post(
+            reverse("logistica:punto_logistico_edit", kwargs={"pk": punto_libre.id}),
+            {
+                "nombre": "Sucursal Control Editada",
+                "tipo": PuntoLogistico.TIPO_SUCURSAL,
+                "sucursal": self.sucursal.id,
+                "latitud": "25.575000",
+                "longitud": "-108.475000",
+                "radio_geocerca_metros": "150",
+                "activo": "on",
+                "notas": "Entrada por estacionamiento",
+            },
+            follow=True,
+        )
+
+        punto_libre.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(punto_libre.nombre, "Sucursal Control Editada")
+        self.assertEqual(punto_libre.radio_geocerca_metros, 150)
+        self.assertTrue(punto_libre.activo)
+
+        toggle = self.client.post(reverse("logistica:punto_logistico_toggle", kwargs={"pk": punto_libre.id}), follow=True)
+        punto_libre.refresh_from_db()
+        self.assertEqual(toggle.status_code, 200)
+        self.assertFalse(punto_libre.activo)
+
+    def test_punto_logistico_no_desactiva_si_esta_en_ruta_abierta(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.post(reverse("logistica:punto_logistico_toggle", kwargs={"pk": self.punto.id}), follow=True)
+
+        self.punto.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(self.punto.activo)
+        self.assertContains(response, "No se puede desactivar")
+
+    def test_punto_logistico_edit_no_desactiva_si_esta_en_ruta_abierta(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.post(
+            reverse("logistica:punto_logistico_edit", kwargs={"pk": self.punto.id}),
+            {
+                "nombre": self.punto.nombre,
+                "tipo": self.punto.tipo,
+                "sucursal": self.sucursal.id,
+                "latitud": self.punto.latitud,
+                "longitud": self.punto.longitud,
+                "radio_geocerca_metros": self.punto.radio_geocerca_metros,
+            },
+        )
+
+        self.punto.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(self.punto.activo)
+        self.assertContains(response, "No se puede desactivar")
+
+    def test_punto_logistico_rechaza_radio_invalido(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.post(
+            reverse("logistica:puntos_logisticos"),
+            {
+                "nombre": "Punto Inválido",
+                "tipo": PuntoLogistico.TIPO_SUCURSAL,
+                "latitud": "25.571000",
+                "longitud": "-108.471000",
+                "radio_geocerca_metros": "abc",
+                "activo": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "El radio debe ser un número entero.")
+        self.assertFalse(PuntoLogistico.objects.filter(nombre="Punto Inválido").exists())
+
+    def test_punto_logistico_rechaza_coordenadas_fuera_de_rango(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.post(
+            reverse("logistica:puntos_logisticos"),
+            {
+                "nombre": "Punto Fuera",
+                "tipo": PuntoLogistico.TIPO_SUCURSAL,
+                "latitud": "120.000000",
+                "longitud": "-108.471000",
+                "radio_geocerca_metros": "80",
+                "activo": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "La latitud debe estar entre -90 y 90.")
+        self.assertFalse(PuntoLogistico.objects.filter(nombre="Punto Fuera").exists())
+
+    def test_punto_logistico_rechaza_punto_activo_demasiado_cercano(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.post(
+            reverse("logistica:puntos_logisticos"),
+            {
+                "nombre": "Sucursal Duplicada",
+                "tipo": PuntoLogistico.TIPO_SUCURSAL,
+                "sucursal": self.sucursal.id,
+                "latitud": "25.570010",
+                "longitud": "-108.470010",
+                "radio_geocerca_metros": "80",
+                "activo": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Ya existe un punto activo")
+        self.assertFalse(PuntoLogistico.objects.filter(nombre="Sucursal Duplicada").exists())
+
+    def test_ruta_detail_planea_paradas_y_libera_ruta(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        self.ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
+        self.ruta.save(update_fields=["estatus", "updated_at"])
+        ruta = RutaEntrega.objects.create(nombre="Ruta Manual", fecha_ruta=timezone.localdate())
+
+        blocked = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
+            {"action": "ruta_status", "estatus": RutaEntrega.ESTATUS_EN_RUTA},
+            follow=True,
+        )
+        ruta.refresh_from_db()
+        self.assertEqual(blocked.status_code, 200)
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
+        self.assertContains(blocked, "No se puede liberar la ruta")
+
+        self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
+            {
+                "action": "update_plan",
+                "nombre": "Ruta Manual",
+                "fecha_ruta": timezone.localdate().isoformat(),
+                "repartidor": self.repartidor.id,
+                "unidad_operativa": self.unidad.id,
+                "km_estimado": "12.5",
+            },
+            follow=True,
+        )
+        self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
+            {"action": "add_parada", "punto": self.punto.id, "orden": "1"},
+            follow=True,
+        )
+        released = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
+            {"action": "ruta_status", "estatus": RutaEntrega.ESTATUS_EN_RUTA},
+            follow=True,
+        )
+
+        ruta.refresh_from_db()
+        self.assertEqual(released.status_code, 200)
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
+        self.assertEqual(ruta.repartidor, self.repartidor)
+        self.assertEqual(ruta.unidad_operativa, self.unidad)
+        self.assertTrue(ruta.paradas.filter(punto=self.punto).exists())
+        self.assertTrue(EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_SALIDA).exists())
+
+    def test_ruta_en_ruta_no_permite_editar_paradas(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {"action": "delete_parada", "parada_id": self.parada.id},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(ParadaRuta.objects.filter(pk=self.parada.id).exists())
+        self.assertContains(response, "planeación queda congelada")
+
+    def test_ruta_status_bloquea_segunda_ruta_activa_mismo_repartidor(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        ruta = RutaEntrega.objects.create(
+            nombre="Ruta Duplicada",
+            fecha_ruta=timezone.localdate(),
+            repartidor=self.repartidor,
+            unidad_operativa=self.unidad,
+        )
+        ParadaRuta.objects.create(ruta=ruta, punto=self.punto, orden=1)
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
+            {"action": "ruta_status", "estatus": RutaEntrega.ESTATUS_EN_RUTA},
+            follow=True,
+        )
+
+        ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
+        self.assertContains(response, "el repartidor ya tiene otra ruta en curso")
+
+    def test_ruta_status_bloquea_completar_con_paradas_pendientes(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {"action": "ruta_status", "estatus": RutaEntrega.ESTATUS_COMPLETADA},
+            follow=True,
+        )
+
+        self.ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
+        self.assertContains(response, "hay paradas pendientes")
+
+    def test_ruta_status_no_reabre_ruta_cerrada(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        self.ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
+        self.ruta.save(update_fields=["estatus", "updated_at"])
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {"action": "ruta_status", "estatus": RutaEntrega.ESTATUS_PLANEADA},
+            follow=True,
+        )
+
+        self.ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
+        self.assertContains(response, "no puede reabrirse")
+
+    def test_ruta_status_no_regresa_en_ruta_a_planeada(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {"action": "ruta_status", "estatus": RutaEntrega.ESTATUS_PLANEADA},
+            follow=True,
+        )
+
+        self.ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
+        self.assertContains(response, "no puede regresar a planeada")
+
+    def test_ruta_status_no_completa_ruta_planeada_vacia(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        ruta = RutaEntrega.objects.create(nombre="Ruta Vacía", fecha_ruta=timezone.localdate())
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
+            {"action": "ruta_status", "estatus": RutaEntrega.ESTATUS_COMPLETADA},
+            follow=True,
+        )
+
+        ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
+        self.assertContains(response, "Solo puedes completar una ruta que ya está en seguimiento")
+
+    def test_api_ruta_status_no_reabre_ruta_cerrada(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        self.ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
+        self.ruta.save(update_fields=["estatus", "updated_at"])
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_estatus", kwargs={"ruta_id": self.ruta.id}),
+            json.dumps({"estatus": RutaEntrega.ESTATUS_PLANEADA}),
+            content_type="application/json",
+        )
+
+        self.ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
+
+    def test_api_ruta_status_no_regresa_en_ruta_a_planeada(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_estatus", kwargs={"ruta_id": self.ruta.id}),
+            json.dumps({"estatus": RutaEntrega.ESTATUS_PLANEADA}),
+            content_type="application/json",
+        )
+
+        self.ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
+
+    def test_db_bloquea_dos_rutas_en_ruta_mismo_repartidor(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                RutaEntrega.objects.create(
+                    nombre="Ruta Activa Duplicada",
+                    fecha_ruta=timezone.localdate(),
+                    estatus=RutaEntrega.ESTATUS_EN_RUTA,
+                    repartidor=self.repartidor,
+                    unidad_operativa=self.unidad,
+                )
+
+    def test_api_no_crea_ruta_directamente_en_ruta(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.post(
+            reverse("api_logistica_rutas"),
+            json.dumps({
+                "nombre": "Ruta API Directa",
+                "fecha_ruta": timezone.localdate().isoformat(),
+                "estatus": RutaEntrega.ESTATUS_EN_RUTA,
+                "repartidor": self.repartidor.id,
+                "unidad_operativa": self.unidad.id,
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(RutaEntrega.objects.filter(nombre="Ruta API Directa").exists())
+
+    def test_api_no_crea_ruta_directamente_cerrada(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.post(
+            reverse("api_logistica_rutas"),
+            json.dumps(
+                {
+                    "nombre": "Ruta API Cerrada",
+                    "fecha_ruta": timezone.localdate().isoformat(),
+                    "estatus": RutaEntrega.ESTATUS_COMPLETADA,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(RutaEntrega.objects.filter(nombre="Ruta API Cerrada").exists())
+
+    def test_api_no_agrega_entrega_a_ruta_en_ruta(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_entregas", kwargs={"ruta_id": self.ruta.id}),
+            json.dumps({"secuencia": 1, "cliente_nombre": "Cliente", "direccion": "Sucursal"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_ruta_detail_reordena_paradas_sin_integrity_error(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        self.ruta.estatus = RutaEntrega.ESTATUS_PLANEADA
+        self.ruta.save(update_fields=["estatus", "updated_at"])
+        punto_2 = PuntoLogistico.objects.create(
+            sucursal=self.sucursal,
+            nombre="Sucursal Segunda",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.572000",
+            longitud="-108.472000",
+            radio_geocerca_metros=100,
+        )
+        parada_2 = ParadaRuta.objects.create(ruta=self.ruta, punto=punto_2, orden=2)
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {"action": "move_parada", "parada_id": parada_2.id, "direction": "up"},
+            follow=True,
+        )
+
+        self.parada.refresh_from_db()
+        parada_2.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(parada_2.orden, 1)
+        self.assertEqual(self.parada.orden, 2)
+
+    def test_punto_logistico_toggle_no_activa_duplicado_cercano(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        punto_inactivo = PuntoLogistico.objects.create(
+            nombre="Punto Inactivo Cercano",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.570010",
+            longitud="-108.470010",
+            radio_geocerca_metros=80,
+            activo=False,
+        )
+
+        response = self.client.post(reverse("logistica:punto_logistico_toggle", kwargs={"pk": punto_inactivo.id}), follow=True)
+
+        punto_inactivo.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(punto_inactivo.activo)
+        self.assertContains(response, "No se puede activar")
