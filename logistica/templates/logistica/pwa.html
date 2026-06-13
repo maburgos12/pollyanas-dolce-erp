@@ -3649,10 +3649,19 @@
             state.bitacoraSalida = error.bitacora || state.bitacoraSalida;
             return renderBitacoraSalida(`⚠️ Tienes un turno abierto en ${error.bitacora?.unidad_codigo || "otra unidad"}.`);
           }
+          if (error.error === "unidad_ruta_distinta") {
+            return renderBitacoraSalida(error.mensaje || "Tienes una ruta activa en otra unidad. Inicia turno con la unidad asignada.");
+          }
           return renderBitacoraSalida(apiErrorMessage(error, "No se pudo iniciar el turno."));
         }
         const creado = await response.json();
         state.bitacoraSalidaDraft = null;
+        state.bitacoraSalida = creado;
+        const rutaData = await loadRutaActiva().catch(() => null);
+        if (rutaData?.ruta?.id && String(rutaData.ruta.unidad_operativa) === String(creado.unidad)) {
+          await showScreen("ruta_activa");
+          return;
+        }
         await renderBitacoraSalida(`✅ Turno iniciado · Folio: ${creado.folio}`);
       }
 

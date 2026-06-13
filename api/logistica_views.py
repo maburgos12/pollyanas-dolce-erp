@@ -154,6 +154,19 @@ def _licencia_turno_bloqueo(repartidor: Repartidor) -> dict | None:
     return None
 
 
+def _ruta_activa_dia_para_repartidor(repartidor: Repartidor) -> RutaEntrega | None:
+    return (
+        RutaEntrega.objects.select_related("unidad_operativa", "repartidor__user", "bitacora_salida")
+        .filter(
+            repartidor=repartidor,
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_EN_RUTA,
+        )
+        .order_by("-id")
+        .first()
+    )
+
+
 def _gas_rank(value: str | None) -> int | None:
     return {"vacio": 0, "1/4": 1, "1/2": 2, "3/4": 3, "lleno": 4}.get(value or "")
 
@@ -565,6 +578,27 @@ class LogisticaBitacoraSalidaView(_LogisticaBaseView):
                     "error": "validacion",
                     "mensaje": _serializer_error_message(serializer.errors),
                     "detalles": serializer.errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        ruta_activa = _ruta_activa_dia_para_repartidor(repartidor)
+        unidad = serializer.validated_data.get("unidad")
+        if ruta_activa and ruta_activa.unidad_operativa_id and unidad and unidad.id != ruta_activa.unidad_operativa_id:
+            unidad_requerida = ruta_activa.unidad_operativa
+            return Response(
+                {
+                    "error": "unidad_ruta_distinta",
+                    "mensaje": (
+                        f"Tienes ruta activa en {unidad_requerida.codigo}. "
+                        "Inicia turno con esa unidad para avanzar en la ruta."
+                    ),
+                    "ruta_id": ruta_activa.id,
+                    "ruta_folio": ruta_activa.folio,
+                    "unidad_requerida": {
+                        "id": unidad_requerida.id,
+                        "codigo": unidad_requerida.codigo,
+                        "descripcion": unidad_requerida.descripcion,
+                    },
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -1086,12 +1120,7 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
         if not repartidor:
             return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
 
-        ruta = (
-            RutaEntrega.objects.select_related("repartidor__user", "unidad_operativa", "bitacora_salida")
-            .filter(repartidor=repartidor, estatus=RutaEntrega.ESTATUS_EN_RUTA)
-            .order_by("-fecha_ruta", "-id")
-            .first()
-        )
+        ruta = _ruta_activa_dia_para_repartidor(repartidor)
         if not ruta:
             return Response(status=status.HTTP_204_NO_CONTENT)
 
