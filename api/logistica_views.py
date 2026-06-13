@@ -31,6 +31,7 @@ from logistica.models import (
     InspeccionVehiculo,
     LavadoUnidad,
     ParadaRuta,
+    PuntoLogistico,
     Repartidor,
     ReporteUnidad,
     ReporteUnidadReafirmacion,
@@ -61,6 +62,7 @@ from .logistica_serializers import (
     LogisticaReportePatchSerializer,
     LogisticaReporteReafirmacionSerializer,
     LogisticaReporteSerializer,
+    LogisticaRutaCreateSerializer,
     LogisticaRutaSerializer,
     LogisticaUnidadSerializer,
     ParadaRutaSerializer,
@@ -870,17 +872,49 @@ class LogisticaRutasView(_LogisticaBaseView):
         if not can_manage_submodule(request.user, "logistica", "rutas"):
             return Response({"detail": "No tienes permisos para crear rutas."}, status=status.HTTP_403_FORBIDDEN)
 
-        serializer = LogisticaRutaSerializer(data=request.data)
+        serializer = LogisticaRutaCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        if serializer.validated_data.get("estatus", RutaEntrega.ESTATUS_PLANEADA) != RutaEntrega.ESTATUS_PLANEADA:
-            return Response({"detail": "Crea la ruta como planeada y libérala desde el flujo de planeación."}, status=status.HTTP_400_BAD_REQUEST)
-        ruta = serializer.save(created_by=request.user)
+        payload = serializer.validated_data
+
+        seen_puntos = set()
+        paradas_payload = []
+        for posicion, parada in enumerate(payload["paradas"], start=1):
+            punto_id = parada["punto_id"]
+            if punto_id in seen_puntos:
+                continue
+            seen_puntos.add(punto_id)
+            paradas_payload.append((parada.get("orden") or posicion, posicion, punto_id))
+        paradas_payload.sort(key=lambda item: (item[0], item[1]))
+        if not paradas_payload:
+            return Response({"detail": "Selecciona al menos una sucursal o punto para planear la ruta del día."}, status=status.HTTP_400_BAD_REQUEST)
+
+        puntos = PuntoLogistico.objects.filter(pk__in=[item[2] for item in paradas_payload], activo=True)
+        puntos_by_id = {punto.id: punto for punto in puntos}
+        missing = [punto_id for _, __, punto_id in paradas_payload if punto_id not in puntos_by_id]
+        if missing:
+            return Response({"detail": "Todos los puntos de ruta deben existir y estar activos."}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            ruta = RutaEntrega.objects.create(
+                nombre=payload["nombre"],
+                fecha_ruta=payload["fecha_ruta"],
+                chofer=(payload.get("chofer") or "").strip() or str(payload["repartidor"]),
+                unidad=(payload.get("unidad") or "").strip() or str(payload["unidad_operativa"]),
+                repartidor=payload["repartidor"],
+                unidad_operativa=payload["unidad_operativa"],
+                estatus=RutaEntrega.ESTATUS_PLANEADA,
+                km_estimado=payload.get("km_estimado") or Decimal("0"),
+                notas=payload.get("notas") or "",
+                created_by=request.user,
+            )
+            for orden, (_, __, punto_id) in enumerate(paradas_payload, start=1):
+                ParadaRuta.objects.create(ruta=ruta, punto=puntos_by_id[punto_id], orden=orden)
         log_event(
             request.user,
             "CREATE",
             "logistica.RutaEntrega",
             str(ruta.id),
-            {"folio": ruta.folio, "nombre": ruta.nombre},
+            {"folio": ruta.folio, "nombre": ruta.nombre, "paradas": len(paradas_payload)},
         )
         return Response(LogisticaRutaSerializer(ruta).data, status=status.HTTP_201_CREATED)
 
