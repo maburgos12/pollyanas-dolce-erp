@@ -1348,7 +1348,19 @@ def rutas(request):
             unidad_operativa = Unidad.objects.filter(pk=int(unidad_id), activa=True).first() if unidad_id.isdigit() else None
             puntos = PuntoLogistico.objects.filter(pk__in=puntos_ruta_ids, activo=True)
             puntos_by_id = {str(punto.id): punto for punto in puntos}
-            puntos_ordenados = [puntos_by_id[value] for value in puntos_ruta_ids if value in puntos_by_id]
+            puntos_ordenados = []
+            for posicion_formulario, value in enumerate(puntos_ruta_ids, start=1):
+                punto = puntos_by_id.get(value)
+                if not punto:
+                    continue
+                try:
+                    orden_usuario = int(request.POST.get(f"punto_orden_{value}") or posicion_formulario)
+                except (TypeError, ValueError):
+                    orden_usuario = posicion_formulario
+                if orden_usuario < 1:
+                    orden_usuario = posicion_formulario
+                puntos_ordenados.append((orden_usuario, posicion_formulario, punto))
+            puntos_ordenados.sort(key=lambda item: (item[0], item[1]))
             if not puntos_ordenados:
                 messages.error(request, "Los puntos seleccionados no están activos. Revisa el catálogo de puntos logísticos.")
                 return redirect("logistica:rutas")
@@ -1366,7 +1378,7 @@ def rutas(request):
                     notas=(request.POST.get("notas") or "").strip(),
                     created_by=request.user,
                 )
-                for orden, punto in enumerate(puntos_ordenados, start=1):
+                for orden, (_, __, punto) in enumerate(puntos_ordenados, start=1):
                     ParadaRuta.objects.create(ruta=ruta, punto=punto, orden=orden)
             if (request.POST.get("estatus") or "").strip().upper() == RutaEntrega.ESTATUS_EN_RUTA:
                 messages.warning(request, "La ruta se creó como planeada. Agrega paradas antes de liberarla para seguimiento.")
@@ -1382,7 +1394,7 @@ def rutas(request):
                     "estatus": ruta.estatus,
                 },
             )
-            messages.success(request, f"Ruta {ruta.folio} creada con {len(puntos_ordenados)} paradas.")
+            messages.success(request, f"Ruta {ruta.folio} creada con {len(puntos_ordenados)} paradas ordenadas.")
             return redirect("logistica:ruta_detail", pk=ruta.id)
 
     q = (request.GET.get("q") or "").strip()
