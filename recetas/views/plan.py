@@ -113,6 +113,7 @@ MIX_MIN_EFFECTIVE_RECENT_SAMPLES = Decimal("4")
 MIX_MAX_CHANGE_PCT = Decimal("0.20")
 MIX_ALPHA_MAX = Decimal("0.35")
 CALCULO_INSUMOS_SESSION_KEY = "calculo_insumos_preview"
+CALCULO_INSUMOS_DRAFT_SESSION_KEY = "calculo_insumos_draft"
 CALCULO_INSUMOS_MAX_UPLOAD_BYTES = 3 * 1024 * 1024
 CALCULO_INSUMOS_MAX_ROWS = 2000
 
@@ -12942,6 +12943,54 @@ def _calculo_insumos_plan_id_from_request(request: HttpRequest) -> int | None:
     return plan_id if plan_id > 0 else None
 
 
+def _calculo_insumos_plan_scoped_payload(payload: dict[str, Any] | None, plan_id: int | None) -> dict[str, Any] | None:
+    if not payload:
+        return None
+    payload_plan_id = _to_int_safe(payload.get("plan_id"), default=0) or None
+    if plan_id and payload_plan_id and payload_plan_id != plan_id:
+        return None
+    return payload
+
+
+def _calculo_insumos_draft_payload(request: HttpRequest, *, plan_id: int | None = None) -> dict[str, Any]:
+    payload = _calculo_insumos_plan_scoped_payload(
+        request.session.get(CALCULO_INSUMOS_DRAFT_SESSION_KEY),
+        plan_id,
+    )
+    if payload is not None:
+        return payload
+    return {
+        "plan_id": int(plan_id) if plan_id else None,
+        "source_rows": [],
+    }
+
+
+def _save_calculo_insumos_draft(request: HttpRequest, rows: list[dict[str, Any]], *, plan_id: int | None = None) -> None:
+    request.session[CALCULO_INSUMOS_DRAFT_SESSION_KEY] = {
+        "plan_id": int(plan_id) if plan_id else None,
+        "source_rows": rows,
+        "updated_at": timezone.localtime().isoformat(timespec="seconds"),
+    }
+    request.session.modified = True
+
+
+def _same_calculo_insumos_rows(left: list[dict[str, Any]], right: list[dict[str, Any]]) -> bool:
+    left_norm = [_normalize_calculo_insumos_row(row) for row in left]
+    right_norm = [_normalize_calculo_insumos_row(row) for row in right]
+    return left_norm == right_norm
+
+
+def _attach_calculo_insumos_visual_rows(supply: dict[str, Any] | None) -> None:
+    if not supply:
+        return
+    top_rows = _calculo_top_insumo_rows(supply, limit=8)
+    max_spend = max((_to_calculo_float(row.get("estimated_spend")) for row in top_rows), default=0.0)
+    for row in top_rows:
+        spend = _to_calculo_float(row.get("estimated_spend"))
+        row["spend_share_pct"] = round((spend / max_spend) * 100, 2) if max_spend else 0
+    supply["top_insumo_rows"] = top_rows
+
+
 def _calculo_insumos_blocking_observations(payload: dict[str, Any], supply: dict[str, Any] | None) -> list[dict[str, str]]:
     blockers: list[dict[str, str]] = []
     for row in payload.get("unresolved_rows") or []:
@@ -12973,22 +13022,31 @@ def _calculo_insumos_blocking_observations(payload: dict[str, Any], supply: dict
 
 
 def _calculo_insumos_context_from_session(request: HttpRequest, *, plan_id: int | None = None) -> dict[str, Any] | None:
-    payload = request.session.get(CALCULO_INSUMOS_SESSION_KEY)
-    if not payload:
-        return None
-    payload_plan_id = _to_int_safe(payload.get("plan_id"), default=0) or None
-    if plan_id and payload_plan_id and payload_plan_id != plan_id:
+    payload = _calculo_insumos_plan_scoped_payload(
+        request.session.get(CALCULO_INSUMOS_SESSION_KEY),
+        plan_id,
+    )
+    draft_payload = _calculo_insumos_draft_payload(request, plan_id=plan_id)
+    draft_rows = list(draft_payload.get("source_rows") or [])
+    if not payload and not draft_rows:
         return None
     supply = None
-    if payload.get("rows"):
+    if payload and payload.get("rows"):
         supply = build_projection_supply_context_from_forecast_preview(payload, escenario="base")
         _decorate_supply_context_for_display(supply)
-    blocking_observations = _calculo_insumos_blocking_observations(payload, supply)
+        _attach_calculo_insumos_visual_rows(supply)
+    blocking_observations = _calculo_insumos_blocking_observations(payload or {}, supply)
+    preview_source_rows = list((payload or {}).get("source_rows") or [])
+    draft_is_calculated = bool(payload and draft_rows and _same_calculo_insumos_rows(draft_rows, preview_source_rows))
     return {
         "preview": payload,
-        "source_rows": payload.get("source_rows") or [],
-        "unresolved_rows": payload.get("unresolved_rows") or [],
-        "skipped_rows": payload.get("skipped_rows") or [],
+        "source_rows": preview_source_rows or draft_rows,
+        "draft_rows": draft_rows,
+        "draft_count": len(draft_rows),
+        "draft_is_calculated": draft_is_calculated,
+        "draft_has_pending_changes": bool(draft_rows and not draft_is_calculated),
+        "unresolved_rows": (payload or {}).get("unresolved_rows") or [],
+        "skipped_rows": (payload or {}).get("skipped_rows") or [],
         "supply": supply,
         "blocking_observations": blocking_observations,
         "export_ready": bool(supply) and not blocking_observations,
@@ -16657,8 +16715,8 @@ def calculo_insumos_guardar(request: HttpRequest) -> HttpResponse:
         messages.error(request, "La cantidad a producir debe ser mayor a 0.")
         return redirect(next_url)
 
-    payload = request.session.get(CALCULO_INSUMOS_SESSION_KEY) or {}
-    rows = list(payload.get("source_rows") or [])
+    draft = _calculo_insumos_draft_payload(request, plan_id=plan_id)
+    rows = list(draft.get("source_rows") or [])
     rows.append(
         {
             "receta_id": str(receta.id),
@@ -16669,10 +16727,37 @@ def calculo_insumos_guardar(request: HttpRequest) -> HttpResponse:
             "notas": (request.POST.get("notas") or "").strip(),
         }
     )
+    _save_calculo_insumos_draft(request, rows, plan_id=plan_id)
+    messages.success(request, f"Producto agregado a la lista manual. Hay {len(rows)} renglones por calcular.")
+    return redirect(next_url)
+
+
+@login_required
+@permission_required("recetas.change_planproduccion", raise_exception=True)
+@require_POST
+def calculo_insumos_calcular(request: HttpRequest) -> HttpResponse:
+    next_url = _calculo_insumos_redirect_url(request)
+    plan_id = _calculo_insumos_plan_id_from_request(request)
+    draft = _calculo_insumos_draft_payload(request, plan_id=plan_id)
+    rows = list(draft.get("source_rows") or [])
+    if not rows:
+        existing = _calculo_insumos_plan_scoped_payload(
+            request.session.get(CALCULO_INSUMOS_SESSION_KEY),
+            plan_id,
+        )
+        rows = list((existing or {}).get("source_rows") or [])
+    if not rows:
+        messages.warning(request, "Agrega productos a la lista manual antes de calcular insumos.")
+        return redirect(next_url)
+
     preview = _build_calculo_insumos_preview(rows, "Captura manual", plan_id=plan_id)
     request.session[CALCULO_INSUMOS_SESSION_KEY] = preview
-    request.session.modified = True
-    messages.success(request, f"Cálculo actualizado con {len(preview.get('rows') or [])} productos.")
+    _save_calculo_insumos_draft(request, preview.get("source_rows") or rows, plan_id=plan_id)
+    messages.success(request, f"BOM generado con {len(preview.get('rows') or [])} productos resueltos.")
+    if preview.get("unresolved_rows"):
+        messages.warning(request, f"{len(preview['unresolved_rows'])} renglones no encontraron receta equivalente.")
+    if preview.get("skipped_rows"):
+        messages.warning(request, f"{len(preview['skipped_rows'])} renglones fueron omitidos por cantidad inválida.")
     return redirect(next_url)
 
 
@@ -16698,14 +16783,19 @@ def calculo_insumos_importar(request: HttpRequest) -> HttpResponse:
 
     modo = (request.POST.get("modo") or "replace").strip().lower()
     if modo == "accumulate":
-        existing = request.session.get(CALCULO_INSUMOS_SESSION_KEY) or {}
+        existing = _calculo_insumos_plan_scoped_payload(
+            request.session.get(CALCULO_INSUMOS_SESSION_KEY),
+            plan_id,
+        ) or {}
         existing_plan_id = _to_int_safe(existing.get("plan_id"), default=0) or None
-        existing_rows = existing.get("source_rows") or []
+        draft = _calculo_insumos_draft_payload(request, plan_id=plan_id)
+        existing_rows = existing.get("source_rows") or draft.get("source_rows") or []
         if existing_plan_id and plan_id and existing_plan_id != plan_id:
             existing_rows = []
         rows = list(existing_rows) + rows
     preview = _build_calculo_insumos_preview(rows, uploaded.name or "Archivo de producción", plan_id=plan_id)
     request.session[CALCULO_INSUMOS_SESSION_KEY] = preview
+    request.session.pop(CALCULO_INSUMOS_DRAFT_SESSION_KEY, None)
     request.session.modified = True
     messages.success(request, f"Cálculo generado: {len(preview.get('rows') or [])} productos resueltos.")
     if preview.get("unresolved_rows"):
@@ -16737,6 +16827,7 @@ def calculo_insumos_desde_proyeccion(request: HttpRequest) -> HttpResponse:
     source_label = f"Proyección {escenario.upper()} · {payload.get('target_label') or payload.get('periodo') or 'sin rango'}"
     preview = _build_calculo_insumos_preview(rows, source_label, plan_id=plan_id)
     request.session[CALCULO_INSUMOS_SESSION_KEY] = preview
+    request.session.pop(CALCULO_INSUMOS_DRAFT_SESSION_KEY, None)
     request.session.modified = True
     messages.success(request, f"Proyección cargada al cálculo de insumos: {len(preview.get('rows') or [])} productos resueltos.")
     if preview.get("unresolved_rows"):
@@ -16751,6 +16842,7 @@ def calculo_insumos_desde_proyeccion(request: HttpRequest) -> HttpResponse:
 @require_POST
 def calculo_insumos_limpiar(request: HttpRequest) -> HttpResponse:
     request.session.pop(CALCULO_INSUMOS_SESSION_KEY, None)
+    request.session.pop(CALCULO_INSUMOS_DRAFT_SESSION_KEY, None)
     request.session.modified = True
     messages.success(request, "Cálculo de insumos limpiado.")
     return redirect(_calculo_insumos_redirect_url(request))
@@ -18397,6 +18489,7 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
         for key in ("mrp_periodo", "mrp_periodo_tipo", "mrp_focus_kind", "mrp_focus_key")
     )
     load_calculo_insumos_workspace = load_all_sections or active_section == "calculo_insumos"
+    show_plan_workspace = active_section != "calculo_insumos"
     load_dg_dashboard = load_all_sections or active_section == "dg" or any(
         request.GET.get(key)
         for key in ("dg_start_date", "dg_end_date", "dg_group_by")
@@ -18744,6 +18837,7 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
             "load_calculo_insumos_workspace": load_calculo_insumos_workspace,
             "load_dg_dashboard": load_dg_dashboard,
             "load_plan_diagnostics": load_plan_diagnostics,
+            "show_plan_workspace": show_plan_workspace,
             "planes": planes[:30],
             "plan_status_dashboard": plan_status_dashboard,
             "plan_status_cards": plan_status_cards,

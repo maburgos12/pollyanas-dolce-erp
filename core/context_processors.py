@@ -35,7 +35,7 @@ from core.navigation import build_nav_groups
 
 def ui_access(request):
     user = getattr(request, "user", None)
-    current_path = getattr(request, "path", "")
+    current_path = request.get_full_path() if hasattr(request, "get_full_path") else getattr(request, "path", "")
     can_view_fallas = can_view_module(user, "fallas")
     can_view_mermas = can_view_module(user, "mermas")
     return {

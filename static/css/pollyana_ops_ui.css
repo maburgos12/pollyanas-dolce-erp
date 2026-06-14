@@ -976,7 +976,9 @@ a.btn:active,
 }
 
 .calc-insumos-entry,
+.calc-insumos-draft,
 .calc-insumos-kpis article,
+.calc-insumos-results-board,
 .calc-insumos-section,
 .calc-insumos-rules,
 .calc-insumos-empty {
@@ -1046,6 +1048,37 @@ a.btn:active,
   grid-column: 1 / -1;
 }
 
+.calc-insumos-draft {
+  display: grid;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--pd-surface);
+}
+
+.calc-insumos-draft.is-pending .calc-insumos-section-head {
+  background: color-mix(in srgb, var(--pd-gold) 14%, var(--pd-surface));
+}
+
+.calc-insumos-draft.is-calculated .calc-insumos-section-head {
+  background: color-mix(in srgb, var(--pd-success) 10%, var(--pd-surface));
+}
+
+.calc-insumos-draft-body {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.calc-insumos-draft-action {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.calc-insumos-draft-action .btn {
+  min-height: 44px;
+  min-width: min(100%, 14rem);
+}
+
 .calc-insumos-kpis {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1081,6 +1114,138 @@ a.btn:active,
 
 .calc-insumos-kpis strong.is-warning {
   color: var(--calc-warning);
+}
+
+.calc-insumos-results-board {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(14rem, 0.55fr);
+  gap: 1rem;
+  align-items: start;
+  min-width: 0;
+  margin-inline: 1.5rem;
+  padding: 1.125rem;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--pd-wine-strong) 9%, transparent), transparent 44%),
+    var(--pd-surface);
+}
+
+.calc-insumos-results-copy {
+  display: grid;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.calc-insumos-results-copy span,
+.calc-insumos-results-total span,
+.calc-insumos-cost-bars-head span {
+  color: var(--calc-muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.calc-insumos-results-copy h3 {
+  margin: 0;
+  color: var(--calc-wine-dark);
+  font-size: 1.3rem;
+  line-height: 1.15;
+}
+
+.calc-insumos-results-copy p {
+  max-width: 58rem;
+  margin: 0;
+  color: var(--calc-body);
+  line-height: 1.45;
+}
+
+.calc-insumos-results-total {
+  display: grid;
+  gap: 0.45rem;
+  justify-items: start;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--calc-line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--pd-paper) 72%, var(--pd-surface));
+}
+
+.calc-insumos-results-total strong {
+  color: var(--calc-wine);
+  font-size: 1.6rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.calc-insumos-cost-bars {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 0.75rem;
+  min-width: 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--calc-line);
+}
+
+.calc-insumos-cost-bars-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.calc-insumos-cost-bars-head strong {
+  color: var(--calc-wine);
+}
+
+.calc-insumos-cost-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(7rem, auto);
+  gap: 0.5rem 1rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.calc-insumos-cost-row > div {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.calc-insumos-cost-row strong {
+  color: var(--calc-ink);
+  overflow-wrap: anywhere;
+}
+
+.calc-insumos-cost-row span {
+  color: var(--calc-muted);
+  font-size: 0.84rem;
+}
+
+.calc-insumos-cost-row em {
+  color: var(--calc-wine);
+  font-style: normal;
+  font-weight: 900;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.calc-insumos-cost-row progress {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 0.55rem;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: var(--calc-row-bg);
+}
+
+.calc-insumos-cost-row progress::-webkit-progress-bar {
+  background: var(--calc-row-bg);
+}
+
+.calc-insumos-cost-row progress::-webkit-progress-value {
+  background: linear-gradient(90deg, var(--calc-wine), var(--pd-gold));
+}
+
+.calc-insumos-cost-row progress::-moz-progress-bar {
+  background: linear-gradient(90deg, var(--calc-wine), var(--pd-gold));
 }
 
 .calc-insumos-section,
@@ -1201,7 +1366,8 @@ a.btn:active,
 @media (max-width: 1120px) {
   .calc-insumos-entry-grid,
   .calc-insumos-forecast-bridge,
-  .calc-insumos-kpis {
+  .calc-insumos-kpis,
+  .calc-insumos-results-board {
     grid-template-columns: 1fr;
   }
 
@@ -1217,7 +1383,8 @@ a.btn:active,
   .calc-insumos-brand,
   .calc-insumos-titleblock,
   .calc-insumos-total,
-  .calc-insumos-actions {
+  .calc-insumos-actions,
+  .calc-insumos-results-total {
     grid-column: auto;
     grid-row: auto;
   }
@@ -1278,6 +1445,7 @@ a.btn:active,
   .calc-insumos-entry-grid,
   .calc-insumos-forecast-bridge,
   .calc-insumos-kpis,
+  .calc-insumos-results-board,
   .calc-insumos-section,
   .calc-insumos-rules,
   .calc-insumos-empty {
@@ -1285,6 +1453,7 @@ a.btn:active,
   }
 
   .calc-insumos-section,
+  .calc-insumos-results-board,
   .calc-insumos-rules,
   .calc-insumos-empty {
     padding-inline: 0.875rem;
