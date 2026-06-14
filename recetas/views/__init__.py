@@ -28,7 +28,7 @@ from .plan import (
     _resolve_sucursal_for_sales, _ui_to_model_alcance,
     # public views
     forecast_preview_export, forecast_supply_export, forecast_vs_solicitud_export, forecast_backtest_export,
-    calculo_insumos_plantilla, calculo_insumos_guardar, calculo_insumos_importar,
+    calculo_insumos_plantilla, calculo_insumos_guardar, calculo_insumos_calcular, calculo_insumos_importar,
     calculo_insumos_desde_proyeccion, calculo_insumos_limpiar, calculo_insumos_export,
     pronosticos_descargar_plantilla, pronosticos_importar,
     ventas_historicas_descargar_plantilla, ventas_historicas_importar,

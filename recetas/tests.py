@@ -4364,9 +4364,54 @@ class SolicitudVentasForecastTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         session = self.client.session
+        self.assertNotIn("calculo_insumos_preview", session)
+        draft = session["calculo_insumos_draft"]
+        self.assertEqual(draft["source_rows"][0]["cantidad"], "1.000")
+        self.assertEqual(draft["source_rows"][0]["producto"], "Pastel Solicitud")
+
+        response = self.client.post(reverse("recetas:calculo_insumos_calcular"))
+        self.assertEqual(response.status_code, 302)
+        session = self.client.session
         preview = session["calculo_insumos_preview"]
         self.assertEqual(preview["rows"][0]["forecast_qty"], 1.0)
         self.assertEqual(preview["source_rows"][0]["cantidad"], "1.000")
+
+    def test_calculo_insumos_muestra_lista_manual_antes_de_calcular(self):
+        self.client.post(
+            reverse("recetas:calculo_insumos_guardar"),
+            {
+                "receta_id": str(self.receta.id),
+                "cantidad": "3.000",
+                "notas": "lista grande",
+            },
+        )
+
+        response = self.client.get(reverse("recetas:plan_produccion"), {"seccion": "calculo_insumos"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Borrador manual por calcular")
+        self.assertContains(response, "Calcular lista")
+        self.assertNotContains(response, "Azúcar Cálculo Insumos")
+        self.assertIsNone(response.context["calculo_insumos_context"]["supply"])
+
+    def test_calculo_insumos_no_mezcla_planes_recientes_ni_detalle_operacion(self):
+        plan = PlanProduccion.objects.create(
+            nombre="Plan visible en operación",
+            fecha_produccion=date(2026, 4, 2),
+            creado_por=self.user,
+        )
+        PlanProduccionItem.objects.create(plan=plan, receta=self.receta, cantidad=Decimal("5"))
+
+        response = self.client.get(
+            reverse("recetas:plan_produccion"),
+            {"seccion": "calculo_insumos", "plan_id": str(plan.id)},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Cálculo de insumos")
+        self.assertNotContains(response, "Planes recientes")
+        self.assertNotContains(response, "Productos del plan")
+        self.assertNotContains(response, "Plan visible en operación")
 
     def test_calculo_insumos_usa_proyeccion_actual_por_escenario(self):
         session = self.client.session
@@ -4473,7 +4518,8 @@ class SolicitudVentasForecastTests(TestCase):
         response = self.client.get(reverse("recetas:plan_produccion"), {"seccion": "calculo_insumos"})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Modo consulta")
-        self.assertNotContains(response, "Agregar y recalcular")
+        self.assertNotContains(response, "Agregar a lista")
+        self.assertNotContains(response, "Calcular lista")
         self.assertNotContains(response, "Importar y calcular")
 
     def test_calculo_insumos_exporta_xlsx_con_reglas_y_unidades_visibles(self):

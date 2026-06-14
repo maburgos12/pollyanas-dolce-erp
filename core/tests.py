@@ -174,6 +174,12 @@ class NavigationActiveStateTests(TestCase):
         self.assertIsNotNone(item)
         self.assertEqual(item["url"], "/recetas/plan-produccion/?seccion=calculo_insumos#calculo-insumos")
 
+    def test_calculo_insumos_query_activates_own_navigation_item(self):
+        self.assertEqual(
+            self._active_labels("/recetas/plan-produccion/?seccion=calculo_insumos&plan_id=46"),
+            ["Cálculo de insumos"],
+        )
+
     def test_recetas_catalog_does_not_capture_plan_routes(self):
         self.assertEqual(self._active_labels("/recetas/"), ["Recetas"])
 

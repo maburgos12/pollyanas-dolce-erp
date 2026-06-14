@@ -68,6 +68,7 @@ urlpatterns = [
     path("plan-produccion/<int:plan_id>/items/<int:item_id>/eliminar/", views.plan_produccion_item_delete, name="plan_produccion_item_delete"),
     path("plan-produccion/calculo-insumos/plantilla/", views.calculo_insumos_plantilla, name="calculo_insumos_plantilla"),
     path("plan-produccion/calculo-insumos/guardar/", views.calculo_insumos_guardar, name="calculo_insumos_guardar"),
+    path("plan-produccion/calculo-insumos/calcular/", views.calculo_insumos_calcular, name="calculo_insumos_calcular"),
     path("plan-produccion/calculo-insumos/importar/", views.calculo_insumos_importar, name="calculo_insumos_importar"),
     path("plan-produccion/calculo-insumos/desde-proyeccion/", views.calculo_insumos_desde_proyeccion, name="calculo_insumos_desde_proyeccion"),
     path("plan-produccion/calculo-insumos/limpiar/", views.calculo_insumos_limpiar, name="calculo_insumos_limpiar"),

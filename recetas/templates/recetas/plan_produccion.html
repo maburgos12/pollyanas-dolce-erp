@@ -1255,8 +1255,8 @@
       <div class="calc-insumos-workzone">
       <div class="calc-insumos-zone-head">
         <span>Entrada del plan</span>
-        <h3>Captura manual o carga por archivo</h3>
-        <p>Agrega productos uno por uno o importa la plantilla para recalcular el BOM con el mismo motor del ERP.</p>
+        <h3>Captura manual, archivo o proyección</h3>
+        <p>Arma una lista manual y calcúlala cuando esté completa, o importa la plantilla para generar el BOM en una sola carga.</p>
       </div>
       {% if forecast_preview %}
       <section class="calc-insumos-forecast-bridge">
@@ -1306,7 +1306,7 @@
               <label class="form-label" for="calculo-insumos-notas">Notas</label>
               <input class="form-control" id="calculo-insumos-notas" name="notas" placeholder="Opcional">
             </div>
-            <button class="btn btn-primary" type="submit">Agregar y recalcular</button>
+            <button class="btn btn-primary" type="submit">Agregar a lista</button>
           </form>
         </div>
         <div class="calc-insumos-entry">
@@ -1331,6 +1331,50 @@
           </form>
         </div>
       </section>
+      {% if calculo_insumos_context.draft_rows %}
+      <section class="calc-insumos-draft {% if calculo_insumos_context.draft_has_pending_changes %}is-pending{% else %}is-calculated{% endif %}">
+        <div class="calc-insumos-section-head">
+          <div>
+            <span>{% if calculo_insumos_context.draft_has_pending_changes %}Pendiente de cálculo{% else %}Lista manual{% endif %}</span>
+            <h3>{% if calculo_insumos_context.draft_has_pending_changes %}Borrador manual por calcular{% else %}Lista manual calculada{% endif %}</h3>
+          </div>
+          <strong>{{ calculo_insumos_context.draft_count }} renglones</strong>
+        </div>
+        <div class="calc-insumos-draft-body">
+          <div class="table-responsive calc-insumos-table">
+            <table class="table align-middle">
+              <thead>
+                <tr>
+                  <th>Código Point</th>
+                  <th>Producto ERP</th>
+                  <th class="text-end">Cantidad</th>
+                  <th>Notas</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in calculo_insumos_context.draft_rows %}
+                <tr>
+                  <td>{{ row.codigo_point|default:"-" }}</td>
+                  <td><strong>{{ row.producto|default:"-" }}</strong></td>
+                  <td class="text-end">{{ row.cantidad|default:"0" }}</td>
+                  <td class="muted">{{ row.notas|default:"-" }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if perms.recetas.change_planproduccion %}
+          <form class="calc-insumos-draft-action" method="post" action="{% url 'recetas:calculo_insumos_calcular' %}">
+            {% csrf_token %}
+            {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
+            <button class="btn btn-primary" type="submit">
+              {% if calculo_insumos_context.supply %}Recalcular lista{% else %}Calcular lista{% endif %}
+            </button>
+          </form>
+          {% endif %}
+        </div>
+      </section>
+      {% endif %}
       {% else %}
       <section class="calc-insumos-empty calc-insumos-readonly">
         <strong>Modo consulta</strong>
@@ -1364,6 +1408,36 @@
         </strong>
         <small>Control ERP</small>
       </article>
+    </section>
+
+    <section class="calc-insumos-results-board">
+      <div class="calc-insumos-results-copy">
+        <span>Resultado calculado</span>
+        <h3>BOM consolidado para compras</h3>
+        <p>Lectura lista para compras: cantidades en kg, L o piezas según corresponda, costo vigente del ERP y trazabilidad contra los productos capturados.</p>
+      </div>
+      <div class="calc-insumos-results-total">
+        <span>Total compra requerida</span>
+        <strong>${{ calculo_insumos_context.supply.summary.estimated_spend|floatformat:2|intcomma }}</strong>
+      </div>
+      {% if calculo_insumos_context.supply.top_insumo_rows %}
+      <div class="calc-insumos-cost-bars" aria-label="Top insumos por costo">
+        <div class="calc-insumos-cost-bars-head">
+          <span>Prioridad de compra</span>
+          <strong>Top insumos por costo</strong>
+        </div>
+        {% for row in calculo_insumos_context.supply.top_insumo_rows %}
+        <article class="calc-insumos-cost-row">
+          <div>
+            <strong>{{ row.insumo_nombre }}</strong>
+            <span>{{ row.codigo_point|default:"Sin código" }} · {{ row.display_required_qty|floatformat:3|intcomma }} {{ row.display_unidad_codigo|default:row.unidad_codigo }}</span>
+          </div>
+          <em>${{ row.estimated_spend|floatformat:2|intcomma }}</em>
+          <progress value="{{ row.spend_share_pct|floatformat:0 }}" max="100"></progress>
+        </article>
+        {% endfor %}
+      </div>
+      {% endif %}
     </section>
 
     <section class="calc-insumos-section">
@@ -1912,6 +1986,7 @@
   </div>
   {% endif %}
   {% endif %}
+  {% if show_plan_workspace %}
   <div class="card-header">Planes recientes</div>
   {% if load_dg_dashboard %}
   <div class="kpi-mini pd-mb-3">
@@ -1967,9 +2042,10 @@
       </tbody>
     </table>
   </div>
+  {% endif %}
 </div>
 
-{% if plan_actual %}
+{% if show_plan_workspace and plan_actual %}
 <div class="card">
   <div class="d-flex justify-content-between align-items-center">
     <div>
