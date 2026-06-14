@@ -544,14 +544,14 @@ def _find_insumo_by_name(name: str) -> Insumo | None:
     cleaned = (name or "").strip()
     if not cleaned:
         return None
-    return Insumo.objects.filter(nombre__iexact=cleaned).order_by("id").first()
+    return Insumo.objects.filter(nombre__iexact=cleaned, activo=True).order_by("id").first()
 
 
 def _find_insumo_by_point_code(code: str) -> Insumo | None:
     cleaned = (code or "").strip()
     if not cleaned:
         return None
-    return Insumo.objects.filter(codigo_point__iexact=cleaned).order_by("id").first()
+    return Insumo.objects.filter(codigo_point__iexact=cleaned, activo=True).order_by("id").first()
 
 
 def _find_unit(unit_code: str, *, insumo: Insumo | None) -> UnidadMedida | None:

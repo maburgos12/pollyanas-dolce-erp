@@ -2100,7 +2100,7 @@ def _export_master_duplicates_xlsx(groups: list[dict[str, object]]) -> HttpRespo
     return response
 
 
-def _merge_insumo_into_target(source: Insumo, target: Insumo) -> dict[str, int]:
+def _merge_insumo_into_target(source: Insumo, target: Insumo, acted_by=None) -> dict[str, int]:
     if source.id == target.id:
         return {
             "aliases_updated": 0,
@@ -2188,6 +2188,8 @@ def _merge_insumo_into_target(source: Insumo, target: Insumo) -> dict[str, int]:
         target.codigo_point = source.codigo_point
     if source.nombre_point and not target.nombre_point:
         target.nombre_point = source.nombre_point
+    source.activo = False
+    source.save(update_fields=["activo"])
     target.save(
         update_fields=[
             "proveedor_principal",
@@ -2196,9 +2198,6 @@ def _merge_insumo_into_target(source: Insumo, target: Insumo) -> dict[str, int]:
             "nombre_point",
         ]
     )
-
-    source.activo = False
-    source.save(update_fields=["activo"])
 
     return {
         "aliases_updated": alias_count,
@@ -2756,7 +2755,7 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                 messages.error(request, "Origen y destino no pueden ser el mismo insumo.")
             else:
                 with transaction.atomic():
-                    merge_stats = _merge_insumo_into_target(source, target)
+                    merge_stats = _merge_insumo_into_target(source, target, acted_by=request.user)
                     ok_alias, alias_norm, _ = _upsert_alias(source.nombre, target)
                     if ok_alias:
                         _remove_pending_name_from_session(request, alias_norm)
@@ -2814,7 +2813,7 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                     }
                     with transaction.atomic():
                         for source in sources:
-                            merge_stats = _merge_insumo_into_target(source, target)
+                            merge_stats = _merge_insumo_into_target(source, target, acted_by=request.user)
                             totals["sources_resolved"] += 1
                             for k, v in merge_stats.items():
                                 totals[k] += int(v or 0)
