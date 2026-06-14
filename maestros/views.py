@@ -3026,7 +3026,7 @@ def insumo_resolve_duplicate(request):
     )
 
     with transaction.atomic():
-        merge_stats = _merge_insumo_into_target(source, target)
+        merge_stats = _merge_insumo_into_target(source, target, acted_by=request.user)
         ok_alias, alias_norm, _ = _upsert_alias(source.nombre, target)
         if ok_alias:
             _remove_pending_name_from_session(request, alias_norm)
@@ -3117,7 +3117,7 @@ def insumo_resolve_duplicate_group(request):
 
     with transaction.atomic():
         for source in sources:
-            merge_stats = _merge_insumo_into_target(source, target)
+            merge_stats = _merge_insumo_into_target(source, target, acted_by=request.user)
             totals["sources_resolved"] += 1
             for key, value in merge_stats.items():
                 totals[key] += int(value or 0)

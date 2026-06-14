@@ -1,6 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.db.models import Q
 
+from maestros.utils.canonical_catalog import canonical_insumo
 from recetas.models import LineaReceta, Receta
 from recetas.utils.matching import clasificar_match, match_insumo
 from recetas.utils.normalizacion import normalizar_nombre
@@ -121,6 +122,7 @@ class Command(BaseCommand):
 
             ingrediente_norm = normalizar_nombre(ingrediente)
             insumo, score, method = match_insumo(ingrediente)
+            insumo = canonical_insumo(insumo)
             status = clasificar_match(score)
 
             if auto_ignore_meta and self._is_meta_line(linea, ingrediente_norm):
@@ -138,6 +140,7 @@ class Command(BaseCommand):
                 unidad = linea.unidad or _unit_from_text(linea.unidad_texto)
                 before_exists = bool(linea.insumo_id)
                 insumo = _get_or_create_component_insumo(ingrediente, unidad)
+                insumo = canonical_insumo(insumo) or insumo
                 score = 100.0
                 method = "AUTO_COMPONENTE"
                 status = LineaReceta.STATUS_AUTO

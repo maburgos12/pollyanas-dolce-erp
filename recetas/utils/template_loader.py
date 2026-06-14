@@ -11,7 +11,7 @@ from openpyxl import load_workbook
 from django.db import transaction
 
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
-from maestros.utils.canonical_catalog import latest_costo_canonico
+from maestros.utils.canonical_catalog import canonical_insumo, latest_costo_canonico
 from recetas.models import LineaReceta, Receta
 from recetas.utils.costeo_versionado import asegurar_version_costeo
 from recetas.utils.matching import clasificar_match, match_insumo
@@ -371,6 +371,7 @@ def import_template(filepath: str, replace_existing: bool = False) -> TemplateIm
                 insumo, score, method = match_cache[ingrediente]
             else:
                 insumo, score, method = match_insumo(ingrediente)
+                insumo = canonical_insumo(insumo)
                 match_cache[ingrediente] = (insumo, score, method)
             status = clasificar_match(score)
             if unidad_texto in unit_cache:
@@ -386,6 +387,7 @@ def import_template(filepath: str, replace_existing: bool = False) -> TemplateIm
                 costo_linea_value=costo_linea_value,
             ):
                 insumo = _get_or_create_component_insumo(ingrediente, unidad)
+                insumo = canonical_insumo(insumo) or insumo
                 score = 100.0
                 method = "AUTO_COMPONENTE"
                 status = LineaReceta.STATUS_AUTO

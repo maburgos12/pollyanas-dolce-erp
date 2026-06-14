@@ -1,6 +1,7 @@
 from typing import Optional, Tuple
 from rapidfuzz import fuzz, process
 from maestros.models import Insumo, InsumoAlias
+from maestros.utils.canonical_catalog import canonical_insumo
 from .normalizacion import normalizar_nombre
 
 PRESENTATION_TOKENS = (
@@ -34,26 +35,26 @@ def match_insumo(nombre_origen: str, score_threshold: float = 75.0) -> Tuple[Opt
     required_presentations = _extract_presentation_tokens(nombre_norm)
 
     # 0) Alias exacto.
-    alias = InsumoAlias.objects.select_related("insumo").filter(nombre_normalizado=nombre_norm).first()
+    alias = InsumoAlias.objects.select_related("insumo").filter(nombre_normalizado=nombre_norm, insumo__activo=True).first()
     if alias and alias.insumo_id:
-        return (alias.insumo, 100.0, "ALIAS")
+        return (canonical_insumo(alias.insumo) or alias.insumo, 100.0, "ALIAS")
 
     # 1) Exact
-    insumo = Insumo.objects.filter(nombre_normalizado=nombre_norm).first()
+    insumo = Insumo.objects.filter(nombre_normalizado=nombre_norm, activo=True).first()
     if insumo:
-        return (insumo, 100.0, "EXACT")
+        return (canonical_insumo(insumo) or insumo, 100.0, "EXACT")
 
     # 2) Contains solo para términos suficientemente específicos.
     # Evita falsos positivos como "pan" -> "pan de muerto".
     tokens = nombre_norm.split()
     allow_contains = len(tokens) >= 2 and len(nombre_norm) >= 8
     if allow_contains:
-        insumo = Insumo.objects.filter(nombre_normalizado__icontains=nombre_norm).first()
+        insumo = Insumo.objects.filter(nombre_normalizado__icontains=nombre_norm, activo=True).first()
         if insumo:
-            return (insumo, 95.0, "CONTAINS")
+            return (canonical_insumo(insumo) or insumo, 95.0, "CONTAINS")
 
     # 3) Fuzzy
-    nombres = list(Insumo.objects.values_list("nombre_normalizado", flat=True))
+    nombres = list(Insumo.objects.filter(activo=True).values_list("nombre_normalizado", flat=True))
     if not nombres:
         return (None, 0.0, "NO_MATCH")
     if required_presentations:
@@ -71,8 +72,8 @@ def match_insumo(nombre_origen: str, score_threshold: float = 75.0) -> Tuple[Opt
 
     best_name, score, _ = best
     if score >= score_threshold:
-        insumo = Insumo.objects.filter(nombre_normalizado=best_name).first()
-        return (insumo, float(score), "FUZZY")
+        insumo = Insumo.objects.filter(nombre_normalizado=best_name, activo=True).first()
+        return (canonical_insumo(insumo) or insumo, float(score), "FUZZY")
 
     return (None, float(score), "NO_MATCH")
 

@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
 from unidecode import unidecode
 
@@ -71,6 +72,13 @@ class Insumo(models.Model):
         verbose_name = "Insumo"
         verbose_name_plural = "Insumos"
         indexes = [models.Index(fields=["nombre_normalizado"])]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["codigo_point"],
+                condition=Q(activo=True) & ~Q(codigo_point=""),
+                name="uniq_active_insumo_codigo_point",
+            )
+        ]
 
     def save(self, *args, **kwargs):
         self.nombre_normalizado = " ".join(unidecode((self.nombre or "")).lower().strip().split())
