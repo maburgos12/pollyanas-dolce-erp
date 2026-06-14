@@ -32,14 +32,16 @@
 
 <section class="inv-panel">
   <h2>Gastos registrados</h2>
-  <table class="inv-table">
-    <thead><tr><th>Fecha</th><th>Categoría</th><th>Descripción</th><th>Proveedor</th><th class="num">Total</th></tr></thead>
-    <tbody>
-      {% for gasto in gastos %}
-        <tr><td>{{ gasto.fecha|date:"Y-m-d" }}</td><td>{{ gasto.get_categoria_display }}</td><td>{{ gasto.descripcion }}</td><td>{{ gasto.proveedor_nombre|default:"-" }}</td><td class="num">${{ gasto.monto_total|floatformat:2|intcomma }}</td></tr>
-      {% empty %}
-        <tr><td colspan="5">Sin gastos registrados.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="investment-table-wrap">
+    <table class="inv-table">
+      <thead><tr><th>Fecha</th><th>Categoría</th><th>Descripción</th><th>Proveedor</th><th class="num">Total</th></tr></thead>
+      <tbody>
+        {% for gasto in gastos %}
+          <tr><td>{{ gasto.fecha|date:"Y-m-d" }}</td><td>{{ gasto.get_categoria_display }}</td><td>{{ gasto.descripcion }}</td><td>{{ gasto.proveedor_nombre|default:"-" }}</td><td class="num">${{ gasto.monto_total|floatformat:2|intcomma }}</td></tr>
+        {% empty %}
+          <tr><td colspan="5">Sin gastos registrados.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>

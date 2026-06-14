@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load humanize %}
+{% load static humanize %}
 
 {% block title %}Reportes - {{ project.nombre_proyecto }}{% endblock %}
 {% block page_title %}Reportes · {{ project.nombre_proyecto }}{% endblock %}
@@ -7,44 +7,79 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="/static/css/template_modules/reportes-templates-reportes-inversiones-detalle.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="{% static 'css/investment_projects.css' %}?v=20260614d">
 {% endblock %}
 
 {% block content %}
-<div class="inv-shell">
-  <nav class="module-tabs">
+<div class="investment-shell investment-detail-shell">
+  <nav class="module-tabs investment-module-tabs" aria-label="Reportes">
     {% for tab in module_tabs %}
       <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
     {% endfor %}
   </nav>
 
-  <header class="inv-header">
-    <div>
-      <h1 class="inv-title">{{ project.nombre_proyecto }}</h1>
-      <div class="inv-actions pd-u-38c2bb3a5b">
-        <span class="inv-pill">{{ project.get_tipo_proyecto_display }}</span>
-        <span class="inv-pill">{{ project.get_estatus_display }}</span>
-        <span class="inv-pill">Apertura {% if project.fecha_apertura %}{{ project.fecha_apertura|date:"Y-m-d" }}{% else %}pendiente{% endif %}</span>
-        <span class="inv-pill">Responsable {% if project.responsable %}{{ project.responsable.get_full_name|default:project.responsable.username }}{% else %}sin asignar{% endif %}</span>
+  <section class="investment-header investment-detail-header">
+    <article class="investment-hero investment-detail-hero">
+      <div class="investment-kicker">Proyecto de inversión</div>
+      <h1 class="investment-title">{{ project.nombre_proyecto }}</h1>
+      <p class="investment-copy">Ficha ejecutiva para capturar presupuesto, operación mensual, financiamiento y recuperación sin mezclar supuestos con datos reales.</p>
+      <div class="investment-meta">
+        <span class="investment-pill">{{ project.get_tipo_proyecto_display }}</span>
+        <span class="investment-status-pill is-warning">{{ project.get_estatus_display }}</span>
+        <span class="investment-pill">Apertura {% if project.fecha_apertura %}{{ project.fecha_apertura|date:"Y-m-d" }}{% else %}pendiente{% endif %}</span>
+        <span class="investment-pill">Responsable {% if project.responsable %}{{ project.responsable.get_full_name|default:project.responsable.username }}{% else %}sin asignar{% endif %}</span>
       </div>
-    </div>
-    <div class="inv-actions">
-      <form method="post">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="refresh_project">
-        <button class="inv-button secondary" type="submit">Actualizar métricas</button>
-      </form>
-      <details class="inv-dropdown">
-        <summary class="inv-button">Reportes</summary>
-        <div class="inv-dropdown-menu">
-          <a href="{% url 'reportes:proyecto_viabilidad_export_excel' project.pk %}">Viabilidad XLSX</a>
-          <a href="{% url 'reportes:proyecto_inversion_detail' project.pk %}?report=summary&export=xlsx">Legacy resumen XLSX</a>
-          <a href="{% url 'reportes:proyecto_inversion_detail' project.pk %}?report=summary&export=pdf">Legacy resumen PDF</a>
+    </article>
+    <aside class="investment-side investment-detail-actions">
+      <div class="investment-panel-head">
+        <div>
+          <div class="investment-kicker">Acciones</div>
+          <h2 class="investment-panel-title">Cierre y reportes</h2>
         </div>
-      </details>
-    </div>
-  </header>
+      </div>
+      <div class="investment-actions">
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="refresh_project">
+          <button class="investment-button is-ghost" type="submit">Actualizar métricas</button>
+        </form>
+        <details class="inv-dropdown">
+          <summary class="investment-button">Reportes</summary>
+          <div class="inv-dropdown-menu">
+            <a href="{% url 'reportes:proyecto_viabilidad_export_excel' project.pk %}">Viabilidad XLSX</a>
+            <a href="{% url 'reportes:proyecto_inversion_detail' project.pk %}?report=summary&export=xlsx">Legacy resumen XLSX</a>
+            <a href="{% url 'reportes:proyecto_inversion_detail' project.pk %}?report=summary&export=pdf">Legacy resumen PDF</a>
+          </div>
+        </details>
+      </div>
+      <div class="investment-muted">Las proyecciones marcadas como preliminares usan supuestos capturados. El seguimiento operativo se alimenta de snapshots reales cuando la sucursal ya opera.</div>
+    </aside>
+  </section>
 
-  <nav class="inv-tabs" aria-label="Tabs del proyecto">
+  <section class="investment-kpis investment-detail-summary" aria-label="Resumen del proyecto">
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Inversión planeada</div>
+      <div class="investment-kpi-value">${{ project.monto_inversion_planeado|floatformat:0|intcomma }}</div>
+      <div class="investment-kpi-note">CAPEX presupuestado</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Inversión real</div>
+      <div class="investment-kpi-value">${{ project.monto_inversion_real|floatformat:0|intcomma }}</div>
+      <div class="investment-kpi-note">Gastos registrados</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Deuda</div>
+      <div class="investment-kpi-value">${{ project.deuda_asociada|floatformat:0|intcomma }}</div>
+      <div class="investment-kpi-note">Pago mensual ${{ project.pago_mensual_deuda_estimado|floatformat:0|intcomma }}</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Ventas base</div>
+      <div class="investment-kpi-value">${{ supuestos_op.ventas_base|default:0|floatformat:0|intcomma }}</div>
+      <div class="investment-kpi-note">Supuesto mensual</div>
+    </article>
+  </section>
+
+  <nav class="investment-section-nav inv-tabs" aria-label="Tabs del proyecto">
     <a class="inv-tab{% if tab_activo == 'ficha' %} active{% endif %}" href="?tab=ficha">Ficha</a>
     <a class="inv-tab{% if tab_activo == 'inversion' %} active{% endif %}" href="?tab=inversion">Inversión</a>
     <a class="inv-tab{% if tab_activo == 'mercado' %} active{% endif %}" href="?tab=mercado">Mercado</a>
@@ -76,7 +111,7 @@
     if (flujoCtx && flujoAcum.length) {
       new Chart(flujoCtx, {
         type: "line",
-        data: { labels: flujoAcum.map((_, idx) => `M${idx * 3}`), datasets: [{ label: "Flujo acumulado", data: flujoAcum, borderColor: "#8B2252", backgroundColor: "rgba(139,34,82,.12)", tension: .25, fill: true }] },
+        data: { labels: flujoAcum.map((_, idx) => `M${idx * 3}`), datasets: [{ label: "Flujo acumulado", data: flujoAcum, borderColor: "#17324d", backgroundColor: "rgba(23,50,77,.10)", tension: .25, fill: true }] },
         options: { responsive: true, maintainAspectRatio: false }
       });
     }
@@ -84,7 +119,7 @@
     if (ventasCtx && snapshotRows.length) {
       new Chart(ventasCtx, {
         type: "line",
-        data: { labels: snapshotRows.map((r) => r.periodo), datasets: [{ label: "Ventas", data: snapshotRows.map((r) => r.ventas), borderColor: "#8B2252" }, { label: "Recuperación", data: snapshotRows.map((r) => r.recuperacion_acumulada), borderColor: "#C9A84C" }] },
+        data: { labels: snapshotRows.map((r) => r.periodo), datasets: [{ label: "Ventas", data: snapshotRows.map((r) => r.ventas), borderColor: "#17324d" }, { label: "Recuperación", data: snapshotRows.map((r) => r.recuperacion_acumulada), borderColor: "#b88632" }] },
         options: { responsive: true, maintainAspectRatio: false }
       });
     }

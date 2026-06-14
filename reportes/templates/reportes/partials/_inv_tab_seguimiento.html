@@ -2,33 +2,35 @@
 <section class="inv-panel">
   <h2>Seguimiento</h2>
   {% if snapshots %}
-    <div class="inv-panel chart-box"><canvas id="ventasSeguimientoChart"></canvas></div>
-    <table class="inv-table">
-      <thead><tr><th>Periodo</th><th class="num">Ventas</th><th class="num">Utilidad op.</th><th class="num">Gastos</th><th class="num">Flujo libre</th><th class="num">Recuperación</th><th class="num">Saldo</th><th class="num">ROI</th><th>Fuente</th><th class="num">Conf.</th><th>Salud</th></tr></thead>
-      <tbody>
-        {% for snap in snapshots %}
-          <tr>
-            <td>{{ snap.periodo|date:"Y-m" }}</td>
-            <td class="num">${{ snap.ventas_mensuales|default:0|floatformat:2|intcomma }}</td>
-            <td class="num">${{ snap.utilidad_operativa|default:0|floatformat:2|intcomma }}</td>
-            <td class="num">${{ snap.gastos_operativos|default:0|floatformat:2|intcomma }}</td>
-            <td class="num">${{ snap.flujo_libre|default:0|floatformat:2|intcomma }}</td>
-            <td class="num">${{ snap.recuperacion_acumulada|default:0|floatformat:2|intcomma }}</td>
-            <td class="num">${{ snap.saldo_pendiente|default:0|floatformat:2|intcomma }}</td>
-            <td class="num">{{ snap.roi_acumulado|default:0|floatformat:2|intcomma }}%</td>
-            <td>{{ snap.get_data_source_display }}{% if snap.es_parcial %} · parcial{% endif %}</td>
-            <td class="num">{{ snap.confidence_score|default:0 }}%</td>
-            <td>{{ snap.health_status }}</td>
-          </tr>
-          {% if snap.fuentes.data_gaps %}
+    <div class="investment-chart-card chart-box"><canvas id="ventasSeguimientoChart"></canvas></div>
+    <div class="investment-table-wrap">
+      <table class="inv-table">
+        <thead><tr><th>Periodo</th><th class="num">Ventas</th><th class="num">Utilidad op.</th><th class="num">Gastos</th><th class="num">Flujo libre</th><th class="num">Recuperación</th><th class="num">Saldo</th><th class="num">ROI</th><th>Fuente</th><th class="num">Conf.</th><th>Salud</th></tr></thead>
+        <tbody>
+          {% for snap in snapshots %}
             <tr>
-              <td></td>
-              <td colspan="10" class="inv-copy">Pendientes: {{ snap.fuentes.data_gaps|join:" · " }}</td>
+              <td>{{ snap.periodo|date:"Y-m" }}</td>
+              <td class="num">${{ snap.ventas_mensuales|default:0|floatformat:2|intcomma }}</td>
+              <td class="num">${{ snap.utilidad_operativa|default:0|floatformat:2|intcomma }}</td>
+              <td class="num">${{ snap.gastos_operativos|default:0|floatformat:2|intcomma }}</td>
+              <td class="num">${{ snap.flujo_libre|default:0|floatformat:2|intcomma }}</td>
+              <td class="num">${{ snap.recuperacion_acumulada|default:0|floatformat:2|intcomma }}</td>
+              <td class="num">${{ snap.saldo_pendiente|default:0|floatformat:2|intcomma }}</td>
+              <td class="num">{{ snap.roi_acumulado|default:0|floatformat:2|intcomma }}%</td>
+              <td>{{ snap.get_data_source_display }}{% if snap.es_parcial %} · parcial{% endif %}</td>
+              <td class="num">{{ snap.confidence_score|default:0 }}%</td>
+              <td>{{ snap.health_status }}</td>
             </tr>
-          {% endif %}
-        {% endfor %}
-      </tbody>
-    </table>
+            {% if snap.fuentes.data_gaps %}
+              <tr>
+                <td></td>
+                <td colspan="10" class="inv-copy">Pendientes: {{ snap.fuentes.data_gaps|join:" · " }}</td>
+              </tr>
+            {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   {% else %}
     <p class="inv-copy">Sin datos operativos aún. Disponible cuando la sucursal abra y existan snapshots mensuales.</p>
   {% endif %}
