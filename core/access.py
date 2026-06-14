@@ -86,6 +86,7 @@ ACCESS_SUBMODULES = {
     ],
     "produccion": [
         ("plan", "Plan de producción"),
+        ("calculo_insumos", "Cálculo de insumos"),
         ("reabasto_cedis", "Reabasto CEDIS"),
         ("consolidado_cedis", "Consolidado CEDIS"),
         ("cedis_semanal", "Producción CEDIS semanal"),

@@ -166,6 +166,14 @@ class NavigationActiveStateTests(TestCase):
     def test_plan_produccion_does_not_also_activate_recetas_catalog(self):
         self.assertEqual(self._active_labels("/recetas/plan-produccion/"), ["Plan de producción"])
 
+    def test_calculo_insumos_is_visible_in_produccion_navigation(self):
+        with patch("core.navigation.can_view_submodule", return_value=True):
+            groups = build_nav_groups(SimpleNamespace(is_authenticated=True, is_superuser=True, is_staff=False), "/dashboard/")
+        produccion = next(group for group in groups if group["key"] == "produccion")
+        item = next((item for item in produccion["items"] if item["label"] == "Cálculo de insumos"), None)
+        self.assertIsNotNone(item)
+        self.assertEqual(item["url"], "/recetas/plan-produccion/?seccion=calculo_insumos#calculo-insumos")
+
     def test_recetas_catalog_does_not_capture_plan_routes(self):
         self.assertEqual(self._active_labels("/recetas/"), ["Recetas"])
 
