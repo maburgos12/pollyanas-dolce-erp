@@ -108,6 +108,13 @@ def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, eje
         if branch is None or branch.id not in paradas_by_branch:
             omitidas += 1
             continue
+        if (
+            RutaCargaChecklistLinea.objects.filter(source_hash=line.source_hash)
+            .exclude(checklist=checklist)
+            .exists()
+        ):
+            omitidas += 1
+            continue
         parada = paradas_by_branch[branch.id]
         defaults = {
             "parada": parada,

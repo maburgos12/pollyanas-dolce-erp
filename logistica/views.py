@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Max, Q, Sum
 from django.shortcuts import get_object_or_404, redirect, render
@@ -38,6 +38,7 @@ from .models import (
     Unidad,
 )
 from .services_google_routes import recalcular_ruta_programada
+from .services_carga_ruta import checklist_bloquea_salida, sincronizar_recepcion_desde_point
 from .services_rutas_control import distancia_metros, resumen_control_rutas
 from .services_tiempos_ruta import resumen_tiempos_ruta
 
@@ -80,6 +81,62 @@ def _ruta_status_choices_for(ruta: RutaEntrega):
     else:
         allowed = {ruta.estatus}
     return [choice for choice in RutaEntrega.ESTATUS_CHOICES if choice[0] in allowed]
+
+
+def _recepcion_point_rows(checklist) -> list[dict]:
+    if checklist is None:
+        return []
+
+    rows = []
+    lineas = checklist.lineas.select_related("parada", "point_transfer_line").order_by("parada__orden", "item_name", "id")
+    for linea in lineas:
+        point_line = linea.point_transfer_line
+        esperado = Decimal(str(linea.cantidad_enviada_esperada or 0))
+        cargado_validado = linea.cantidad_cargada is not None
+        cargado = Decimal(str(linea.cantidad_cargada or 0)) if cargado_validado else None
+        referencia_recepcion = cargado if cargado is not None else esperado
+        recibido = Decimal(str(point_line.received_quantity or 0)) if point_line else Decimal("0")
+        if not cargado_validado:
+            estado_label = "Carga sin validar"
+            estado_tone = "warning"
+            recibido_display = recibido if point_line and point_line.is_received else None
+        elif not point_line:
+            estado_label = "Sin transferencia Point"
+            estado_tone = "danger"
+            recibido_display = None
+        elif not point_line.is_received:
+            estado_label = "Pendiente en Point"
+            estado_tone = "warning"
+            recibido_display = recibido
+        elif recibido == referencia_recepcion:
+            estado_label = "Recibido correcto"
+            estado_tone = "success"
+            recibido_display = recibido
+        elif recibido == Decimal("0"):
+            estado_label = "Recibido cero"
+            estado_tone = "danger"
+            recibido_display = recibido
+        else:
+            estado_label = "Diferencia"
+            estado_tone = "danger"
+            recibido_display = recibido
+
+        rows.append(
+            {
+                "linea": linea,
+                "parada": linea.parada,
+                "point_line": point_line,
+                "esperado": esperado,
+                "cargado": cargado,
+                "cargado_validado": cargado_validado,
+                "recibido": recibido_display,
+                "estado_label": estado_label,
+                "estado_tone": estado_tone,
+                "received_at": point_line.received_at if point_line else None,
+                "received_by": point_line.received_by if point_line else "",
+            }
+        )
+    return rows
 
 
 def _module_tabs(active: str, user=None) -> list[dict]:
@@ -1841,6 +1898,39 @@ def ruta_detail(request, pk: int):
                     messages.success(request, "Entrega eliminada.")
             return redirect("logistica:ruta_detail", pk=ruta.id)
 
+        if action == "sync_recepcion_point":
+            try:
+                resumen = sincronizar_recepcion_desde_point(ruta=ruta, user=request.user)
+            except ValidationError as exc:
+                messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+            else:
+                diferencias_point = ruta.paradas.filter(
+                    entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA]
+                ).count()
+                if resumen.lineas_recibidas and diferencias_point:
+                    messages.warning(
+                        request,
+                        (
+                            "Recepción Point sincronizada con diferencias: "
+                            f"{resumen.lineas_recibidas} línea(s) recibidas, "
+                            f"{diferencias_point} parada(s) requieren revisión antes de cerrar."
+                        ),
+                    )
+                elif resumen.lineas_recibidas:
+                    messages.success(
+                        request,
+                        (
+                            "Recepción Point sincronizada: "
+                            f"{resumen.lineas_recibidas} línea(s) recibidas, "
+                            f"{resumen.paradas_actualizadas} parada(s) actualizadas."
+                        ),
+                    )
+                elif resumen.lineas_pendientes_point:
+                    messages.warning(request, "Point todavía no marca recepción para las líneas de esta ruta.")
+                else:
+                    messages.warning(request, "No hay checklist de carga o transferencias Point ligadas a esta ruta.")
+            return redirect("logistica:ruta_detail", pk=ruta.id)
+
         if action == "ruta_status":
             estatus_nuevo = (request.POST.get("estatus") or "").strip().upper()
             if estatus_nuevo in {c[0] for c in RutaEntrega.ESTATUS_CHOICES}:
@@ -1878,6 +1968,9 @@ def ruta_detail(request, pk: int):
                         .exists()
                     ):
                         blockers.append("la unidad ya tiene otra ruta en curso")
+                    checklist_blocker = checklist_bloquea_salida(ruta)
+                    if checklist_blocker:
+                        blockers.append(checklist_blocker)
                     if blockers:
                         messages.error(request, "No se puede liberar la ruta: " + ", ".join(blockers) + ".")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
@@ -1893,6 +1986,9 @@ def ruta_detail(request, pk: int):
                         return redirect("logistica:ruta_detail", pk=ruta.id)
                     if ruta.paradas.filter(entrega_estado=ParadaRuta.ENTREGA_PENDIENTE).exists():
                         messages.error(request, "No se puede completar la ruta: hay paradas sin entrega confirmada.")
+                        return redirect("logistica:ruta_detail", pk=ruta.id)
+                    if ruta.paradas.filter(entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA]).exists():
+                        messages.error(request, "No se puede completar la ruta: hay diferencias o entregas no recibidas por resolver.")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
                 from_status = ruta.estatus
                 if from_status != estatus_nuevo:
@@ -2073,6 +2169,8 @@ def ruta_detail(request, pk: int):
     )
     governance_rows = _logistica_governance_rows(document_stage_rows, owner_default="Logística / Operación")
     tiempos_ruta = resumen_tiempos_ruta(ruta)
+    checklist_carga = getattr(ruta, "checklist_carga", None)
+    recepcion_point_rows = _recepcion_point_rows(checklist_carga)
 
     context = {
         "module_tabs": _module_tabs("rutas", request.user),
@@ -2088,6 +2186,8 @@ def ruta_detail(request, pk: int):
         "paradas": ruta.paradas.select_related("punto", "punto__sucursal").order_by("orden", "id"),
         "paradas_tiempos": tiempos_ruta.paradas,
         "tiempos_ruta": tiempos_ruta,
+        "checklist_carga": checklist_carga,
+        "recepcion_point_rows": recepcion_point_rows,
         "enterprise_chain": enterprise_chain,
         "critical_path_rows": _logistica_critical_path_rows(enterprise_chain),
         "document_stage_rows": document_stage_rows,
