@@ -87,6 +87,23 @@
         return option.textContent.trim();
     }
 
+    function accessibleLabel(select) {
+        var labelText = select.getAttribute("aria-label") || "";
+        if (!labelText && select.id) {
+            var labels = Array.prototype.slice.call(document.querySelectorAll("label"));
+            var explicitLabel = labels.filter(function (label) {
+                return label.getAttribute("for") === select.id;
+            })[0];
+            if (explicitLabel) labelText = explicitLabel.textContent.trim();
+        }
+        if (!labelText) {
+            var group = select.closest(".form-group");
+            var groupLabel = group ? group.querySelector("label") : null;
+            if (groupLabel) labelText = groupLabel.textContent.trim();
+        }
+        return labelText || "Buscar y seleccionar";
+    }
+
     function enhanceSelect(select) {
         if (!shouldEnhance(select)) return null;
 
@@ -110,6 +127,7 @@
         input.setAttribute("aria-autocomplete", "list");
         input.setAttribute("aria-expanded", "false");
         input.setAttribute("aria-controls", uid);
+        input.setAttribute("aria-label", accessibleLabel(select));
         input.placeholder = select.getAttribute("placeholder") || select.dataset.placeholder || "Buscar y seleccionar";
         input.required = originalRequired;
         input.value = selectedLabel(select);

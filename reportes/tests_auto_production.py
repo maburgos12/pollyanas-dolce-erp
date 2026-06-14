@@ -14,7 +14,14 @@ from core.models import Sucursal
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
 from inventario.stock_trace import TRACE_MANUAL_SYNC, build_stock_trace
 from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
-from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob
+from pos_bridge.models import (
+    PointBranch,
+    PointInventorySnapshot,
+    PointProduct,
+    PointRecipeExtractionRun,
+    PointRecipeNode,
+    PointSyncJob,
+)
 from recetas.models import LineaReceta, Receta, RecetaAgrupacionAddon, RecetaCostoVersion
 from recetas.utils.costeo_snapshot import resolve_line_snapshot_cost, resolve_preparation_recipe_for_insumo
 from reportes.auto_production_service import (
@@ -1251,6 +1258,244 @@ class ProjectionSupplyContextTests(TestCase):
         self.assertNotIn("Betún Mantequilla Proyección", purchase_by_name)
         self.assertEqual(context["summary"]["estimated_spend"], Decimal("156.00"))
         self.assertEqual(context["summary"]["prepared_insumos"], 1)
+
+    def test_projection_supply_prefers_point_yield_for_internal_preparation(self):
+        unit_ml = UnidadMedida.objects.create(
+            codigo="ml-point-prj",
+            nombre="Mililitro Point proyección",
+            tipo=UnidadMedida.TIPO_VOLUMEN,
+            factor_to_base=Decimal("1"),
+        )
+        unit_lt = UnidadMedida.objects.create(
+            codigo="lt-point-prj",
+            nombre="Litro Point proyección",
+            tipo=UnidadMedida.TIPO_VOLUMEN,
+            factor_to_base=Decimal("1000"),
+        )
+        agua = Insumo.objects.create(
+            nombre="Agua Point Proyección",
+            nombre_normalizado="agua point proyeccion",
+            unidad_base=unit_ml,
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            proveedor_principal=self.provider,
+        )
+        CostoInsumo.objects.create(
+            insumo=agua,
+            proveedor=self.provider,
+            fecha=self.target_date,
+            costo_unitario=Decimal("0.50"),
+            source_hash="projection-agua-point-yield-cost",
+        )
+        prep_recipe = Receta.objects.create(
+            nombre="Mermelada Fresa Liquida Point Test",
+            codigo_point="01MF06-POINT-TEST",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("1"),
+            rendimiento_unidad=unit_lt,
+            familia="Rellenos",
+            categoria="Fresa",
+            hash_contenido="hash-point-yield-stale-erp",
+        )
+        mermelada = Insumo.objects.create(
+            nombre="Mermelada Fresa Liquida Point Test",
+            codigo_point=prep_recipe.codigo_point,
+            nombre_normalizado="mermelada fresa liquida point test",
+            unidad_base=unit_lt,
+            tipo_item=Insumo.TIPO_INTERNO,
+            categoria="Rellenos",
+        )
+        LineaReceta.objects.create(
+            receta=prep_recipe,
+            posicion=1,
+            insumo=agua,
+            insumo_texto=agua.nombre,
+            cantidad=Decimal("9500"),
+            unidad=unit_ml,
+            unidad_texto="ml",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        product_recipe = Receta.objects.create(
+            nombre="Pay Fresa Point Yield Test",
+            codigo_point="PAY-FRESA-POINT-YIELD",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pay",
+            categoria="Fresa",
+            hash_contenido="hash-product-point-yield",
+        )
+        LineaReceta.objects.create(
+            receta=product_recipe,
+            posicion=1,
+            insumo=mermelada,
+            insumo_texto=mermelada.nombre,
+            cantidad=Decimal("1"),
+            unidad=unit_lt,
+            unidad_texto="lt",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        run = PointRecipeExtractionRun.objects.create(workspace="projection-test")
+        PointRecipeNode.objects.create(
+            run=run,
+            identity_key="INSUMO:01MF06-POINT-TEST",
+            source_type=PointRecipeNode.SOURCE_INSUMO,
+            node_kind=PointRecipeNode.KIND_PREPARED_INPUT,
+            point_code=prep_recipe.codigo_point,
+            point_name=prep_recipe.nombre,
+            yield_mode=PointRecipeNode.YIELD_VOLUME,
+            yield_quantity=Decimal("9.5"),
+            yield_unit=unit_lt,
+            erp_recipe=prep_recipe,
+            erp_insumo=mermelada,
+        )
+        newer_unlinked_run = PointRecipeExtractionRun.objects.create(workspace="projection-test-newer")
+        PointRecipeNode.objects.create(
+            run=newer_unlinked_run,
+            identity_key="INSUMO:01MF06-POINT-TEST-UNLINKED",
+            source_type=PointRecipeNode.SOURCE_INSUMO,
+            node_kind=PointRecipeNode.KIND_PREPARED_INPUT,
+            point_code=prep_recipe.codigo_point,
+            point_name=prep_recipe.nombre,
+            yield_mode=PointRecipeNode.YIELD_VOLUME,
+            yield_quantity=Decimal("1"),
+            yield_unit=unit_lt,
+        )
+
+        context = build_projection_supply_context(
+            target_date=self.target_date,
+            forecast_context={
+                "target_label": "Forecast rendimiento Point",
+                "summary": {"forecast_units": Decimal("1")},
+                "rows": [
+                    {
+                        "branch_id": self.branch.id,
+                        "branch_code": self.branch.codigo,
+                        "branch_name": self.branch.nombre,
+                        "recipe_id": product_recipe.id,
+                        "recipe_name": product_recipe.nombre,
+                        "forecast_qty": Decimal("1"),
+                        "buffer_units": Decimal("0"),
+                    }
+                ],
+            },
+        )
+
+        agua_row = next(row for row in context["insumos"] if row["insumo_id"] == agua.id)
+        self.assertEqual(agua_row["required_gross_qty"], Decimal("1000.000"))
+        self.assertEqual(agua_row["codigo_point"], agua.codigo_point or "")
+        self.assertEqual(context["summary"]["estimated_spend"], Decimal("500.00"))
+
+    def test_projection_supply_falls_back_to_erp_yield_when_point_unit_is_incompatible(self):
+        unit_ml = UnidadMedida.objects.create(
+            codigo="ml-point-fallback",
+            nombre="Mililitro Point fallback",
+            tipo=UnidadMedida.TIPO_VOLUMEN,
+            factor_to_base=Decimal("1"),
+        )
+        unit_lt = UnidadMedida.objects.create(
+            codigo="lt-point-fallback",
+            nombre="Litro Point fallback",
+            tipo=UnidadMedida.TIPO_VOLUMEN,
+            factor_to_base=Decimal("1000"),
+        )
+        unit_kg = UnidadMedida.objects.create(
+            codigo="kg-point-fallback",
+            nombre="Kilogramo Point fallback",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        agua = Insumo.objects.create(
+            nombre="Agua Fallback Point",
+            nombre_normalizado="agua fallback point",
+            unidad_base=unit_ml,
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            proveedor_principal=self.provider,
+        )
+        CostoInsumo.objects.create(
+            insumo=agua,
+            proveedor=self.provider,
+            fecha=self.target_date,
+            costo_unitario=Decimal("0.50"),
+            source_hash="projection-agua-point-fallback-cost",
+        )
+        prep_recipe = Receta.objects.create(
+            nombre="Mermelada Unidad Incompatible Point",
+            codigo_point="01MF06-POINT-FALLBACK",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("1"),
+            rendimiento_unidad=unit_lt,
+            hash_contenido="hash-point-yield-fallback-erp",
+        )
+        mermelada = Insumo.objects.create(
+            nombre="Mermelada Unidad Incompatible Point",
+            codigo_point=prep_recipe.codigo_point,
+            nombre_normalizado="mermelada unidad incompatible point",
+            unidad_base=unit_lt,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        LineaReceta.objects.create(
+            receta=prep_recipe,
+            posicion=1,
+            insumo=agua,
+            insumo_texto=agua.nombre,
+            cantidad=Decimal("9500"),
+            unidad=unit_ml,
+            unidad_texto="ml",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        product_recipe = Receta.objects.create(
+            nombre="Pay Fresa Fallback Point",
+            codigo_point="PAY-FRESA-POINT-FALLBACK",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-product-point-fallback",
+        )
+        LineaReceta.objects.create(
+            receta=product_recipe,
+            posicion=1,
+            insumo=mermelada,
+            insumo_texto=mermelada.nombre,
+            cantidad=Decimal("1"),
+            unidad=unit_lt,
+            unidad_texto="lt",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        run = PointRecipeExtractionRun.objects.create(workspace="projection-test-fallback")
+        PointRecipeNode.objects.create(
+            run=run,
+            identity_key="INSUMO:01MF06-POINT-FALLBACK",
+            source_type=PointRecipeNode.SOURCE_INSUMO,
+            node_kind=PointRecipeNode.KIND_PREPARED_INPUT,
+            point_code=prep_recipe.codigo_point,
+            point_name=prep_recipe.nombre,
+            yield_mode=PointRecipeNode.YIELD_WEIGHT,
+            yield_quantity=Decimal("9.5"),
+            yield_unit=unit_kg,
+            erp_recipe=prep_recipe,
+            erp_insumo=mermelada,
+        )
+
+        context = build_projection_supply_context(
+            target_date=self.target_date,
+            forecast_context={
+                "target_label": "Forecast rendimiento Point incompatible",
+                "summary": {"forecast_units": Decimal("1")},
+                "rows": [
+                    {
+                        "branch_id": self.branch.id,
+                        "branch_code": self.branch.codigo,
+                        "branch_name": self.branch.nombre,
+                        "recipe_id": product_recipe.id,
+                        "recipe_name": product_recipe.nombre,
+                        "forecast_qty": Decimal("1"),
+                        "buffer_units": Decimal("0"),
+                    }
+                ],
+            },
+        )
+
+        purchase_by_id = {row["insumo_id"]: row for row in context["insumos"]}
+        self.assertIn(agua.id, purchase_by_id)
+        self.assertNotIn(mermelada.id, purchase_by_id)
+        self.assertEqual(purchase_by_id[agua.id]["required_gross_qty"], Decimal("9500.000"))
+        self.assertIn("RENDIMIENTO_POINT_UNIDAD_INCOMPATIBLE", {row["code"] for row in context["issues"]})
 
     def test_preparation_resolver_prefers_point_code_over_stale_derived_id(self):
         wrong_prep = Receta.objects.create(

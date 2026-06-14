@@ -7,7 +7,7 @@ from io import BytesIO, StringIO
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import Group, Permission
 from django.core.cache import cache
 from django.core.management import call_command
 from django.core.management.base import CommandError
@@ -4261,6 +4261,323 @@ class SolicitudVentasForecastTests(TestCase):
         self.assertEqual(ws["D2"].value, "Harina Forecast Supply XLSX")
         self.assertEqual(ws["E2"].value, 12)
         self.assertEqual(ws["H2"].value, 120)
+
+    def test_calculo_insumos_importa_csv_y_muestra_bom(self):
+        unidad = UnidadMedida.objects.create(codigo="g", nombre="Gramo cálculo insumos", tipo=UnidadMedida.TIPO_MASA)
+        proveedor = Proveedor.objects.create(nombre="Proveedor Cálculo Insumos")
+        azucar = Insumo.objects.create(
+            nombre="Azúcar Cálculo Insumos",
+            codigo_point="AZ-CALC-01",
+            nombre_normalizado="azucar calculo insumos",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+        )
+        CostoInsumo.objects.create(
+            insumo=azucar,
+            proveedor=proveedor,
+            fecha=date(2026, 4, 1),
+            costo_unitario=Decimal("0.02"),
+            source_hash="calculo-insumos-cost",
+        )
+        LineaReceta.objects.create(
+            receta=self.receta,
+            posicion=1,
+            insumo=azucar,
+            insumo_texto=azucar.nombre,
+            cantidad=Decimal("500"),
+            unidad=unidad,
+            unidad_texto="g",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        csv_data = (
+            "pastel,presentacion,cantidad\n"
+            "Pastel Solicitud,,4\n"
+        ).encode("utf-8")
+        upload = SimpleUploadedFile("calculo_insumos.csv", csv_data, content_type="text/csv")
+
+        response = self.client.post(reverse("recetas:calculo_insumos_importar"), {"archivo": upload})
+        self.assertEqual(response.status_code, 302)
+        response = self.client.get(reverse("recetas:plan_produccion"), {"seccion": "calculo_insumos"})
+        self.assertEqual(response.status_code, 200)
+        context = response.context["calculo_insumos_context"]
+        self.assertIsNotNone(context)
+        supply = context["supply"]
+        self.assertEqual(supply["summary"]["estimated_spend"], Decimal("40.00"))
+        row = supply["insumos"][0]
+        self.assertEqual(row["codigo_point"], "AZ-CALC-01")
+        self.assertEqual(row["display_required_qty"], Decimal("2.000"))
+        self.assertEqual(row["display_unidad_codigo"], "kg")
+        self.assertContains(response, "Cálculo de insumos")
+        self.assertContains(response, "Azúcar Cálculo Insumos")
+        self.assertContains(response, "$40.00")
+
+    def test_calculo_insumos_importa_csv_excel_espanol_con_miles(self):
+        unidad = UnidadMedida.objects.create(codigo="g-miles", nombre="Gramo cálculo miles", tipo=UnidadMedida.TIPO_MASA)
+        proveedor = Proveedor.objects.create(nombre="Proveedor Cálculo Miles")
+        azucar = Insumo.objects.create(
+            nombre="Azúcar Cálculo Miles",
+            nombre_normalizado="azucar calculo miles",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+        )
+        CostoInsumo.objects.create(
+            insumo=azucar,
+            proveedor=proveedor,
+            fecha=date(2026, 4, 1),
+            costo_unitario=Decimal("0.01"),
+            source_hash="calculo-insumos-miles-cost",
+        )
+        LineaReceta.objects.create(
+            receta=self.receta,
+            posicion=1,
+            insumo=azucar,
+            insumo_texto=azucar.nombre,
+            cantidad=Decimal("1"),
+            unidad=unidad,
+            unidad_texto="g",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        csv_data = (
+            "codigo_point;producto;presentacion;cantidad\n"
+            "P-SOL-01;Pastel Solicitud;;1,000\n"
+        ).encode("utf-8")
+        upload = SimpleUploadedFile("calculo_insumos.csv", csv_data, content_type="text/csv")
+
+        response = self.client.post(reverse("recetas:calculo_insumos_importar"), {"archivo": upload})
+        self.assertEqual(response.status_code, 302)
+        response = self.client.get(reverse("recetas:plan_produccion"), {"seccion": "calculo_insumos"})
+        context = response.context["calculo_insumos_context"]
+        self.assertEqual(context["preview"]["rows"][0]["forecast_qty"], 1000.0)
+        self.assertEqual(context["supply"]["insumos"][0]["required_gross_qty"], Decimal("1000.000"))
+
+    def test_calculo_insumos_captura_manual_respeta_decimal_con_punto(self):
+        response = self.client.post(
+            reverse("recetas:calculo_insumos_guardar"),
+            {
+                "receta_id": str(self.receta.id),
+                "cantidad": "1.000",
+                "notas": "decimal manual",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        session = self.client.session
+        preview = session["calculo_insumos_preview"]
+        self.assertEqual(preview["rows"][0]["forecast_qty"], 1.0)
+        self.assertEqual(preview["source_rows"][0]["cantidad"], "1.000")
+
+    def test_calculo_insumos_usa_proyeccion_actual_por_escenario(self):
+        session = self.client.session
+        session["pronostico_estadistico_preview"] = {
+            "target_start": "2026-04-01",
+            "target_end": "2026-04-30",
+            "target_label": "Abril 2026",
+            "alcance": "mes",
+            "periodo": "2026-04",
+            "sucursal_nombre": "MATRIZ - Matriz",
+            "escenario": "base",
+            "totals": {
+                "forecast_total": 10.0,
+                "forecast_low_total": 8.0,
+                "forecast_high_total": 12.0,
+                "recetas_count": 1,
+            },
+            "rows": [
+                {
+                    "receta_id": self.receta.id,
+                    "receta": self.receta.nombre,
+                    "codigo_point": self.receta.codigo_point,
+                    "forecast_qty": 10.0,
+                    "forecast_low": 8.0,
+                    "forecast_high": 12.0,
+                }
+            ],
+        }
+        session.save()
+
+        response = self.client.post(reverse("recetas:calculo_insumos_desde_proyeccion"), {"escenario": "alto"})
+
+        self.assertEqual(response.status_code, 302)
+        preview = self.client.session["calculo_insumos_preview"]
+        self.assertEqual(preview["source_label"], "Proyección ALTO · Abril 2026")
+        self.assertEqual(preview["rows"][0]["forecast_qty"], 12.0)
+        self.assertEqual(preview["source_rows"][0]["codigo_point"], "P-SOL-01")
+
+    def test_calculo_insumos_muestra_puente_con_proyeccion_activa(self):
+        session = self.client.session
+        session["pronostico_estadistico_preview"] = {
+            "target_start": "2026-04-01",
+            "target_end": "2026-04-30",
+            "target_label": "Abril 2026",
+            "alcance": "mes",
+            "periodo": "2026-04",
+            "sucursal_nombre": "MATRIZ - Matriz",
+            "escenario": "base",
+            "totals": {"forecast_total": 10.0, "recetas_count": 1},
+            "rows": [
+                {
+                    "receta_id": self.receta.id,
+                    "receta": self.receta.nombre,
+                    "codigo_point": self.receta.codigo_point,
+                    "forecast_qty": 10.0,
+                    "forecast_low": 8.0,
+                    "forecast_high": 12.0,
+                }
+            ],
+        }
+        session.save()
+
+        response = self.client.get(reverse("recetas:plan_produccion"), {"seccion": "calculo_insumos"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Proyección activa")
+        self.assertContains(response, "Usar proyección actual")
+
+    def test_calculo_insumos_rechaza_preparacion_interna_en_captura(self):
+        preparacion = Receta.objects.create(
+            nombre="Mermelada Captura Directa",
+            codigo_point="PREP-CALC-01",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("9.5"),
+            hash_contenido="hash-prep-calc-directa",
+        )
+
+        response = self.client.get(reverse("recetas:plan_produccion"), {"seccion": "calculo_insumos"})
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Mermelada Captura Directa")
+
+        csv_data = (
+            "codigo_point,producto,cantidad\n"
+            "PREP-CALC-01,Mermelada Captura Directa,1\n"
+        ).encode("utf-8")
+        upload = SimpleUploadedFile("calculo_insumos.csv", csv_data, content_type="text/csv")
+        response = self.client.post(reverse("recetas:calculo_insumos_importar"), {"archivo": upload})
+        self.assertEqual(response.status_code, 302)
+        response = self.client.get(reverse("recetas:plan_produccion"), {"seccion": "calculo_insumos"})
+        context = response.context["calculo_insumos_context"]
+        self.assertEqual(len(context["unresolved_rows"]), 1)
+        self.assertIn("producto final", context["unresolved_rows"][0]["motivo"])
+        self.assertNotEqual(preparacion.tipo, Receta.TIPO_PRODUCTO_FINAL)
+
+    def test_calculo_insumos_oculta_acciones_mutables_sin_permiso_change(self):
+        readonly = get_user_model().objects.create_user(
+            username="readonly_calc_insumos",
+            email="readonly_calc_insumos@example.com",
+            password="test12345",
+        )
+        readonly.user_permissions.add(Permission.objects.get(content_type__app_label="recetas", codename="view_planproduccion"))
+        self.client.force_login(readonly)
+
+        response = self.client.get(reverse("recetas:plan_produccion"), {"seccion": "calculo_insumos"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Modo consulta")
+        self.assertNotContains(response, "Agregar y recalcular")
+        self.assertNotContains(response, "Importar y calcular")
+
+    def test_calculo_insumos_exporta_xlsx_con_reglas_y_unidades_visibles(self):
+        unidad = UnidadMedida.objects.create(codigo="g", nombre="Gramo cálculo XLSX", tipo=UnidadMedida.TIPO_MASA)
+        proveedor = Proveedor.objects.create(nombre="Proveedor Cálculo XLSX")
+        azucar = Insumo.objects.create(
+            nombre="Azúcar Cálculo XLSX",
+            codigo_point="AZ-XLSX-01",
+            nombre_normalizado="azucar calculo xlsx",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+        )
+        CostoInsumo.objects.create(
+            insumo=azucar,
+            proveedor=proveedor,
+            fecha=date(2026, 4, 1),
+            costo_unitario=Decimal("0.03"),
+            source_hash="calculo-insumos-xlsx-cost",
+        )
+        LineaReceta.objects.create(
+            receta=self.receta,
+            posicion=1,
+            insumo=azucar,
+            insumo_texto=azucar.nombre,
+            cantidad=Decimal("250"),
+            unidad=unidad,
+            unidad_texto="g",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        session = self.client.session
+        session["calculo_insumos_preview"] = {
+            "target_start": "2026-04-01",
+            "target_end": "2026-04-01",
+            "target_label": "Cálculo prueba",
+            "alcance": "calculo_insumos",
+            "periodo": "2026-04",
+            "sucursal_nombre": "Producción",
+            "source_label": "Prueba",
+            "source_rows": [],
+            "unresolved_rows": [],
+            "skipped_rows": [],
+            "totals": {"forecast_total": 8.0, "recetas_count": 1},
+            "rows": [
+                {
+                    "receta_id": self.receta.id,
+                    "receta": self.receta.nombre,
+                    "codigo_point": self.receta.codigo_point,
+                    "forecast_qty": 8.0,
+                    "forecast_low": 8.0,
+                    "forecast_high": 8.0,
+                }
+            ],
+        }
+        session.save()
+
+        response = self.client.get(reverse("recetas:calculo_insumos_export"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        wb = load_workbook(BytesIO(response.content), data_only=True)
+        self.assertIn("Resumen", wb.sheetnames)
+        self.assertIn("BOM compras", wb.sheetnames)
+        self.assertIn("Detalle producción", wb.sheetnames)
+        self.assertIn("Resumen datos", wb.sheetnames)
+        self.assertIn("BOM consolidado", wb.sheetnames)
+        self.assertIn("Reglas calculo", wb.sheetnames)
+        panel = wb["Resumen"]
+        self.assertEqual(panel["A1"].value, "Pollyana's Dolce")
+        self.assertEqual(panel["D1"].value, "BOM requerido de insumos y materia prima")
+        self.assertEqual(panel["A5"].value, 60)
+        ws = wb["BOM consolidado"]
+        self.assertEqual(ws["A2"].value, "AZ-XLSX-01")
+        self.assertEqual(ws["E2"].value, "Azúcar Cálculo XLSX")
+        self.assertEqual(ws["F2"].value, 2)
+        self.assertEqual(ws["G2"].value, "kg")
+        self.assertEqual(ws["I2"].value, 60)
+
+    def test_calculo_insumos_export_bloquea_observaciones_criticas(self):
+        session = self.client.session
+        session["calculo_insumos_preview"] = {
+            "target_start": "2026-04-01",
+            "target_end": "2026-04-01",
+            "target_label": "Cálculo bloqueado",
+            "alcance": "calculo_insumos",
+            "periodo": "2026-04",
+            "sucursal_nombre": "Producción",
+            "source_label": "Prueba",
+            "source_rows": [],
+            "unresolved_rows": [{"codigo_point": "SIN-CODIGO", "producto": "Producto sin match", "motivo": "Sin producto final equivalente"}],
+            "skipped_rows": [],
+            "totals": {"forecast_total": 0.0, "recetas_count": 0},
+            "rows": [],
+        }
+        session.save()
+
+        response = self.client.get(reverse("recetas:calculo_insumos_export"))
+        self.assertEqual(response.status_code, 302)
+        self.assertNotEqual(
+            response.get("Content-Type"),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
 
     def test_comparativo_pronostico_vs_solicitud_escenario_bajo(self):
         for month_idx, qty in [(11, "60"), (12, "72"), (1, "81"), (2, "78"), (3, "90")]:

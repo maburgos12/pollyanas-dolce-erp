@@ -664,6 +664,636 @@ a.btn:active,
   margin-top: var(--pd-space-3);
 }
 
+.plan-produccion-shell .toolbar[aria-label="Secciones del plan de producción"] {
+  flex-wrap: wrap;
+  gap: 8px;
+  overflow-x: visible;
+  white-space: normal;
+}
+
+.plan-produccion-shell .toolbar[aria-label="Secciones del plan de producción"] .btn {
+  display: inline-flex;
+  justify-content: center;
+  min-height: 40px;
+  flex-shrink: 1;
+  white-space: nowrap;
+}
+
+/* Cálculo de insumos: workbench operativo de producción. */
+.calc-insumos-report {
+  --calc-wine: var(--pd-wine-strong);
+  --calc-wine-dark: var(--pd-ink);
+  --calc-gold: var(--pd-gold);
+  --calc-sage: var(--pd-success);
+  --calc-ink: var(--pd-ink);
+  --calc-paper: var(--pd-paper);
+  --calc-white: var(--pd-surface);
+  --calc-muted: var(--pd-muted);
+  --calc-body: var(--pd-ink-soft);
+  --calc-warning: var(--pd-warning);
+  --calc-line: var(--pd-border-strong);
+  --calc-ease-out: var(--pd-ease);
+  --calc-ease-in-out: var(--pd-ease);
+  --calc-hero-bg: var(--pd-surface);
+  --calc-report-bg: linear-gradient(180deg, var(--pd-paper), var(--pd-surface));
+  --calc-hero-border: color-mix(in srgb, var(--pd-surface) 22%, transparent);
+  --calc-hero-muted: color-mix(in srgb, var(--pd-surface) 72%, transparent);
+  --calc-hero-text: var(--pd-surface);
+  --calc-hero-panel: color-mix(in srgb, var(--pd-paper) 10%, transparent);
+  --calc-shadow-hero: 0 4px 8px color-mix(in srgb, var(--pd-ink) 16%, transparent);
+  --calc-shadow-card: var(--pd-shadow-low);
+  --calc-panel-bg: color-mix(in srgb, var(--pd-surface) 86%, transparent);
+  --calc-soft-bg: color-mix(in srgb, var(--pd-paper) 78%, transparent);
+  --calc-main-bg: color-mix(in srgb, var(--pd-wine-strong) 8%, transparent);
+  --calc-alert-bg: color-mix(in srgb, var(--pd-gold) 16%, transparent);
+  --calc-row-bg: color-mix(in srgb, var(--pd-paper) 64%, transparent);
+  display: grid;
+  gap: 1.25rem;
+  width: 100%;
+  min-width: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  color: var(--calc-ink);
+}
+
+.calc-insumos-workbench {
+  display: grid;
+  grid-template-columns: 1fr;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--calc-line);
+  border-radius: 8px;
+  background: var(--pd-surface);
+  box-shadow: none;
+}
+
+.calc-insumos-command {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(14rem, auto);
+  align-items: center;
+  gap: 1rem;
+  min-width: 0;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--calc-line);
+  background: var(--calc-hero-bg);
+  color: var(--calc-ink);
+}
+
+.calc-insumos-workzone {
+  display: grid;
+  align-content: start;
+  gap: 1.125rem;
+  min-width: 0;
+  padding: 1.25rem;
+  background: var(--pd-surface);
+}
+
+.calc-insumos-zone-head {
+  display: grid;
+  gap: 0.375rem;
+  padding: 0 0 1rem;
+  border-bottom: 1px solid var(--calc-line);
+}
+
+.calc-insumos-zone-head span {
+  color: var(--calc-wine);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.calc-insumos-zone-head h3 {
+  margin: 0;
+  color: var(--calc-wine-dark);
+  font-family: var(--pd-font-body);
+  font-size: 1.32rem;
+  font-weight: 900;
+  line-height: 1.16;
+}
+
+.calc-insumos-zone-head p {
+  max-width: 44rem;
+  margin: 0;
+  color: var(--calc-body);
+  line-height: 1.45;
+}
+
+.calc-insumos-brand,
+.calc-insumos-titleblock,
+.calc-insumos-total {
+  min-width: 0;
+}
+
+.calc-insumos-brand,
+.calc-insumos-titleblock {
+  grid-column: 1;
+}
+
+.calc-insumos-total {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.calc-insumos-brand {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.calc-insumos-mark {
+  color: var(--calc-wine);
+  font-family: var(--pd-font-display);
+  font-size: 1.08rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.calc-insumos-eyebrow,
+.calc-insumos-titleblock p,
+.calc-insumos-total span,
+.calc-insumos-kpis span,
+.calc-insumos-kpis small,
+.calc-insumos-section-head span {
+  letter-spacing: 0;
+}
+
+.calc-insumos-eyebrow {
+  color: var(--calc-muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.calc-insumos-titleblock {
+  display: grid;
+  align-content: center;
+  gap: 0.25rem;
+}
+
+.calc-insumos-titleblock h2 {
+  margin: 0;
+  color: var(--calc-wine-dark);
+  font-family: var(--pd-font-body);
+  font-size: 1.6rem;
+  font-weight: 900;
+  line-height: 1.12;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+.calc-insumos-titleblock p {
+  max-width: 42rem;
+  margin: 0;
+  color: var(--calc-body);
+  font-size: 0.94rem;
+  line-height: 1.45;
+}
+
+.calc-insumos-total {
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 0.5rem;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--calc-line);
+  border-radius: 8px;
+  background: var(--calc-soft-bg);
+}
+
+.calc-insumos-total span {
+  color: var(--calc-muted);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.calc-insumos-total strong {
+  color: var(--calc-wine);
+  font-size: 1.55rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.calc-insumos-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+  align-items: stretch;
+  justify-content: flex-end;
+  grid-column: 1 / -1;
+}
+
+.calc-insumos-actions .btn {
+  min-height: 44px;
+  white-space: nowrap;
+}
+
+.calc-insumos-actions .inline-form {
+  display: contents;
+}
+
+.calc-insumos-command .btn-secondary {
+  border-color: var(--calc-line);
+  background: var(--pd-surface);
+  color: var(--calc-wine);
+}
+
+.calc-insumos-command .btn-primary {
+  border-color: var(--pd-gold);
+  background: var(--pd-gold);
+  color: var(--pd-ink);
+}
+
+.calc-insumos-entry-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  min-width: 0;
+}
+
+.calc-insumos-forecast-bridge {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: center;
+  min-width: 0;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--calc-line);
+  border-radius: 8px;
+  background: var(--calc-soft-bg);
+}
+
+.calc-insumos-forecast-bridge > div {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.calc-insumos-forecast-bridge span {
+  color: var(--calc-wine);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.calc-insumos-forecast-bridge strong {
+  color: var(--calc-ink);
+  font-size: 1rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.calc-insumos-forecast-bridge small {
+  color: var(--calc-muted);
+  font-size: 0.84rem;
+}
+
+.calc-insumos-forecast-bridge form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.calc-insumos-forecast-bridge .form-select {
+  width: auto;
+  min-width: 8rem;
+}
+
+.calc-insumos-entry,
+.calc-insumos-kpis article,
+.calc-insumos-section,
+.calc-insumos-rules,
+.calc-insumos-empty {
+  border: 1px solid var(--calc-line);
+  border-radius: 8px;
+  background: var(--calc-panel-bg);
+  box-shadow: none;
+}
+
+.calc-insumos-entry {
+  min-width: 0;
+  padding: 1.25rem;
+}
+
+.calc-insumos-entry-head,
+.calc-insumos-section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.875rem;
+  align-items: flex-start;
+}
+
+.calc-insumos-entry-head {
+  margin-bottom: 1rem;
+}
+
+.calc-insumos-entry-head h3,
+.calc-insumos-section-head h3 {
+  margin: 0;
+  color: var(--calc-wine-dark);
+  font-family: var(--pd-font-body);
+  font-size: 1.12rem;
+  font-weight: 900;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.calc-insumos-form {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.calc-insumos-form .form-group {
+  min-width: 0;
+}
+
+.calc-insumos-form .form-control,
+.calc-insumos-form .form-select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  outline: 2px solid transparent;
+  outline-offset: 1px;
+  transition: border-color 160ms var(--calc-ease-out), box-shadow 160ms var(--calc-ease-out), background-color 160ms var(--calc-ease-out);
+}
+
+.calc-insumos-form .btn {
+  min-height: 44px;
+  width: 100%;
+  white-space: nowrap;
+}
+
+.calc-insumos-form .form-group:nth-child(4),
+.calc-insumos-form .btn {
+  grid-column: 1 / -1;
+}
+
+.calc-insumos-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  min-width: 0;
+  padding-inline: 1.5rem;
+}
+
+.calc-insumos-kpis article {
+  display: grid;
+  gap: 0.5rem;
+  padding: 1.125rem;
+}
+
+.calc-insumos-kpis span,
+.calc-insumos-kpis small,
+.calc-insumos-section-head span {
+  color: var(--calc-muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.calc-insumos-kpis strong {
+  color: var(--calc-wine);
+  font-size: 1.75rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.calc-insumos-kpis strong.is-success {
+  color: var(--calc-sage);
+}
+
+.calc-insumos-kpis strong.is-warning {
+  color: var(--calc-warning);
+}
+
+.calc-insumos-section,
+.calc-insumos-rules,
+.calc-insumos-empty {
+  min-width: 0;
+  margin-inline: 1.5rem;
+}
+
+.calc-insumos-section-head {
+  padding: 1rem 1.125rem;
+  border-bottom: 1px solid var(--calc-line);
+  background: var(--calc-soft-bg);
+}
+
+.calc-insumos-section-head strong {
+  color: var(--calc-wine);
+  font-size: 1rem;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.calc-insumos-section-main .calc-insumos-section-head {
+  background: var(--calc-main-bg);
+}
+
+.calc-insumos-section-alert .calc-insumos-section-head {
+  background: var(--calc-alert-bg);
+}
+
+.calc-insumos-table {
+  margin: 0;
+  border: 0;
+  border-radius: 0 0 8px 8px;
+}
+
+.plan-produccion-shell .calc-insumos-table table {
+  min-width: 860px;
+}
+
+.calc-insumos-row-detail {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--calc-muted);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.calc-insumos-table thead th {
+  background: var(--calc-wine);
+  color: var(--calc-hero-text);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.calc-insumos-table tbody tr:nth-child(even) {
+  background: var(--calc-row-bg);
+}
+
+.calc-insumos-rules {
+  padding: 1.125rem;
+  margin-bottom: 1.5rem;
+}
+
+.calc-insumos-rules .calc-insumos-section-head {
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--calc-line);
+  background: transparent;
+}
+
+.calc-insumos-rules ol {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding-left: 24px;
+}
+
+.calc-insumos-rules li {
+  padding-left: 6px;
+  color: var(--calc-body);
+  line-height: 1.45;
+}
+
+.calc-insumos-empty {
+  display: grid;
+  gap: 0.5rem;
+  padding: 1.5rem;
+  color: var(--calc-muted);
+}
+
+.calc-insumos-empty strong {
+  color: var(--calc-wine);
+  font-family: var(--pd-font-body);
+  font-size: 1.28rem;
+}
+
+.calc-insumos-report .btn {
+  transition: background-color 160ms var(--calc-ease-out), border-color 160ms var(--calc-ease-out), color 160ms var(--calc-ease-out);
+}
+
+.calc-insumos-report .btn:active {
+  transform: scale(0.98);
+}
+
+.calc-insumos-report .btn:focus-visible,
+.calc-insumos-form .form-control:focus-visible,
+.calc-insumos-form .form-select:focus-visible {
+  outline: 2px solid var(--calc-gold);
+  outline-offset: 2px;
+}
+
+.calc-insumos-form .form-control:focus,
+.calc-insumos-form .form-select:focus {
+  border-color: var(--calc-wine);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pd-wine-strong) 12%, transparent);
+}
+
+@media (max-width: 1120px) {
+  .calc-insumos-entry-grid,
+  .calc-insumos-forecast-bridge,
+  .calc-insumos-kpis {
+    grid-template-columns: 1fr;
+  }
+
+  .calc-insumos-brand {
+    padding-bottom: 1rem;
+  }
+
+  .calc-insumos-command {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .calc-insumos-brand,
+  .calc-insumos-titleblock,
+  .calc-insumos-total,
+  .calc-insumos-actions {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .calc-insumos-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .plan-produccion-shell .toolbar[aria-label="Secciones del plan de producción"] .btn {
+    flex: 1 1 calc(50% - 8px);
+    min-width: 0;
+  }
+
+  .plan-produccion-shell .toolbar[aria-label="Secciones del plan de producción"] .btn:nth-child(3),
+  .plan-produccion-shell .toolbar[aria-label="Secciones del plan de producción"] .btn:nth-child(6) {
+    flex-basis: 100%;
+  }
+
+  .calc-insumos-report {
+    gap: 0.875rem;
+  }
+
+  .calc-insumos-command,
+  .calc-insumos-workzone {
+    padding: 1rem;
+  }
+
+  .calc-insumos-command {
+    grid-template-columns: 1fr;
+  }
+
+  .calc-insumos-brand,
+  .calc-insumos-titleblock,
+  .calc-insumos-total,
+  .calc-insumos-actions {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .calc-insumos-mark {
+    font-size: 1.08rem;
+  }
+
+  .calc-insumos-titleblock h2 {
+    font-size: 1.42rem;
+  }
+
+  .calc-insumos-actions .btn,
+  .calc-insumos-form .form-control,
+  .calc-insumos-form .form-select,
+  .calc-insumos-form .btn {
+    min-height: 48px;
+  }
+
+  .calc-insumos-actions,
+  .calc-insumos-entry-grid,
+  .calc-insumos-forecast-bridge,
+  .calc-insumos-kpis,
+  .calc-insumos-section,
+  .calc-insumos-rules,
+  .calc-insumos-empty {
+    margin-inline: 0;
+  }
+
+  .calc-insumos-section,
+  .calc-insumos-rules,
+  .calc-insumos-empty {
+    padding-inline: 0.875rem;
+  }
+
+  .calc-insumos-form {
+    grid-template-columns: 1fr;
+  }
+
+  .calc-insumos-forecast-bridge form {
+    justify-content: stretch;
+  }
+
+  .calc-insumos-forecast-bridge .form-select,
+  .calc-insumos-forecast-bridge .btn {
+    width: 100%;
+  }
+
+  .calc-insumos-section-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 .pd-text-right-narrow {
   max-width: 260px;
   text-align: right;
