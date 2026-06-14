@@ -16,7 +16,7 @@
   <div class="kpi-grid kpi-mini">
     <article class="kpi-card">
       <div class="kpi-label">Responsable principal</div>
-      <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
+      <div class="pd-owner">{{ erp_command_center.owner }}</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
@@ -28,7 +28,7 @@
     </article>
     <article class="kpi-card">
       <div class="kpi-label">Siguiente paso</div>
-      <div class="muted" style="margin:8px 0 10px;">{{ erp_command_center.next_step }}</div>
+      <div class="muted pd-inline-strong-spaced">{{ erp_command_center.next_step }}</div>
       <a class="btn btn-secondary btn-small" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
     </article>
   </div>
@@ -40,7 +40,7 @@
     <table class="table">
       <tbody>
         <tr>
-          <td style="width:28%;"><strong>Documento</strong></td>
+          <td class="pd-doc-cell"><strong>Documento</strong></td>
           <td>Maestro de activos físicos con ubicación, criticidad, proveedor y estado operativo.</td>
         </tr>
         <tr>
@@ -138,9 +138,9 @@
       <article class="enterprise-pill-card {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
         <div class="enterprise-pill-title">{{ item.step }} · {{ item.title }}</div>
         <div class="enterprise-pill-text">{{ item.detail }}</div>
-        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="margin-top:10px;">{{ item.count }}</div>
+        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %} pd-kpi-action">{{ item.count }}</div>
         <div class="muted">{{ item.status }}</div>
-        <div style="margin-top:10px;">
+        <div class="pd-kpi-action">
           <a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a>
         </div>
       </article>
@@ -271,9 +271,9 @@
     </article>
     <article class="kpi-card">
       <div class="kpi-label">Siguiente prioridad</div>
-      <div style="font-weight:700; margin:8px 0 6px;">{{ enterprise_maturity_summary.next_priority_title }}</div>
+      <div class="pd-inline-strong-spaced">{{ enterprise_maturity_summary.next_priority_title }}</div>
       <div class="muted">{{ enterprise_maturity_summary.next_priority_detail }}</div>
-      <div style="margin-top:10px;">
+      <div class="pd-kpi-action">
         <a class="btn btn-secondary btn-small" href="{{ enterprise_maturity_summary.next_priority_url }}">{{ enterprise_maturity_summary.next_priority_cta }}</a>
       </div>
     </article>
@@ -316,9 +316,9 @@
       <article class="enterprise-pill-card {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
         <div class="enterprise-pill-title">{{ item.label }}</div>
         <div class="enterprise-pill-text">{{ item.detail }}</div>
-        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="margin-top:10px;">{{ item.count }}</div>
+        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %} pd-kpi-action">{{ item.count }}</div>
         <div class="muted">{{ item.status }}</div>
-        <div style="margin-top:10px;">
+        <div class="pd-kpi-action">
           <a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a>
         </div>
       </article>
@@ -354,7 +354,7 @@
             <td>{{ row.owner }}</td>
             <td>{{ row.status }}</td>
             <td class="text-end">{{ row.count }}</td>
-            <td style="min-width:160px;">
+            <td class="pd-progress-dynamic-cell">
               <div class="erp-progress">
                 <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="width: {{ row.completion }}%;"></div>
               </div>
@@ -378,7 +378,7 @@
   <form method="post">
     {% csrf_token %}
     <input type="hidden" name="action" value="create_activo">
-    <div class="row" style="display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:10px;">
+    <div class="row pd-grid-form-4">
       <div>
         <label>Nombre</label>
         <input type="text" name="nombre" required>
@@ -432,18 +432,18 @@
         <label>Horas uso promedio mes</label>
         <input type="number" step="0.01" min="0" name="horas_uso_promedio_mes" value="0">
       </div>
-      <div style="grid-column: span 2;">
+      <div class="pd-grid-span-2">
         <label>Notas</label>
         <input type="text" name="notas" placeholder="Observaciones del equipo">
       </div>
-      <div style="display:flex;align-items:end;">
-        <label style="display:flex;align-items:center;gap:8px;">
+      <div class="pd-align-end">
+        <label class="pd-inline-check">
           <input type="checkbox" name="activo" value="1" checked>
           Activo habilitado
         </label>
       </div>
     </div>
-    <div style="margin-top:12px;">
+    <div class="pd-kpi-action">
       <button class="btn btn-primary" type="submit">Guardar activo</button>
     </div>
   </form>
@@ -451,14 +451,14 @@
 
 <section class="card">
   <div class="card-header">Carga histórica de activos y servicios</div>
-  <div class="quick-actions" style="margin-bottom:10px;">
+  <div class="quick-actions pd-mb-3">
     <a class="btn btn-secondary" href="{% url 'activos:activos' %}?export=template_bitacora_csv">Descargar plantilla CSV</a>
     <a class="btn btn-secondary" href="{% url 'activos:activos' %}?export=template_bitacora_xlsx">Descargar plantilla XLSX</a>
   </div>
   <form method="post" enctype="multipart/form-data">
     {% csrf_token %}
     <input type="hidden" name="action" value="import_bitacora">
-    <div class="row" style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;align-items:end;">
+    <div class="row pd-grid-form-3">
       <div>
         <label>Archivo histórico (.xlsx, .csv)</label>
         <input type="file" name="archivo_bitacora" accept=".xlsx,.csv" required>
@@ -467,21 +467,21 @@
         <label>Pestaña (opcional)</label>
         <input type="text" name="sheet_name" placeholder="Pestaña1">
       </div>
-      <div style="display:flex;gap:12px;align-items:center;">
-        <label style="display:flex;align-items:center;gap:6px;">
+      <div class="pd-inline-check-group">
+        <label class="pd-inline-check">
           <input type="checkbox" name="dry_run" value="1">
           Simular
         </label>
-        <label style="display:flex;align-items:center;gap:6px;">
+        <label class="pd-inline-check">
           <input type="checkbox" name="skip_servicios" value="1">
           Sin servicios
         </label>
       </div>
     </div>
-    <div class="quick-actions" style="margin-top:10px;">
+    <div class="quick-actions pd-kpi-action">
       <button class="btn btn-primary" type="submit">Cargar historial</button>
     </div>
-    <p class="form-help" style="margin-top:8px;">
+    <p class="form-help pd-mt-2">
       Formato esperado: nombre, marca, modelo, serie, fecha/costo servicio 1, fecha/costo servicio 2.
     </p>
   </form>
@@ -490,8 +490,8 @@
 
 <section class="card">
   <div class="card-header">Últimas importaciones de bitácora</div>
-  <form method="get" style="margin-bottom:10px;">
-    <div class="row" style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:10px;align-items:end;">
+  <form method="get" class="pd-mb-3">
+    <div class="row pd-grid-form-4-auto">
       <div>
         <label>Buscar (archivo / usuario)</label>
         <input type="text" name="import_q" value="{{ import_filters.import_q }}" placeholder="Ej. bitacora_febrero.csv">
@@ -518,7 +518,7 @@
       </div>
     </div>
   </form>
-  <div class="quick-actions" style="margin-bottom:10px;">
+  <div class="quick-actions pd-mb-3">
     <a class="btn btn-secondary" href="{% url 'activos:activos' %}?export=import_runs_csv&import_q={{ import_filters.import_q|urlencode }}&import_mode={{ import_filters.import_mode|urlencode }}&import_format={{ import_filters.import_format|urlencode }}">Export historial CSV</a>
     <a class="btn btn-secondary" href="{% url 'activos:activos' %}?export=import_runs_xlsx&import_q={{ import_filters.import_q|urlencode }}&import_mode={{ import_filters.import_mode|urlencode }}&import_format={{ import_filters.import_format|urlencode }}">Export historial XLSX</a>
   </div>
@@ -533,8 +533,8 @@
             <th>Modo</th>
             <th>Formato</th>
             <th>Válidas</th>
-            <th>Activos (+ / ↻)</th>
-            <th>Servicios (+ / =)</th>
+            <th>Activos creados / actualizados</th>
+            <th>Servicios creados / omitidos</th>
           </tr>
         </thead>
         <tbody>
@@ -561,7 +561,7 @@
 <section class="card">
   <div class="card-header">Catálogo de activos</div>
   <form method="get">
-    <div class="row" style="display:grid;grid-template-columns:repeat(6,minmax(160px,1fr));gap:10px;align-items:end;">
+    <div class="row pd-grid-form-6">
       <div>
         <label>Buscar</label>
         <input type="text" name="q" value="{{ filters.q }}" placeholder="Código, nombre, categoría...">
@@ -606,18 +606,18 @@
       </div>
     </div>
   </form>
-  <div class="kpi-grid" style="margin-top:14px;">
+  <div class="kpi-grid pd-mt-4">
     {% for card in enterprise_cards %}
       <article class="kpi-card">
         <div class="kpi-number {% if card.tone == 'danger' %}is-danger{% else %}is-warning{% endif %}">{{ card.count }}</div>
         <div class="kpi-label">{{ card.label }}</div>
-        <div style="margin-top:10px;">
+        <div class="pd-kpi-action">
           <a class="btn btn-secondary" href="{% url 'activos:activos' %}?master_gap={{ card.key }}">Abrir</a>
         </div>
       </article>
     {% endfor %}
   </div>
-  <div class="quick-actions" style="margin-top:10px;">
+  <div class="quick-actions pd-kpi-action">
     <a
       class="btn btn-secondary"
       href="{% url 'activos:activos' %}?export=depuracion_csv&q={{ filters.q|urlencode }}&estado={{ filters.estado|urlencode }}&criticidad={{ filters.criticidad|urlencode }}&solo_activos={{ filters.solo_activos|urlencode }}"
@@ -632,7 +632,7 @@
     </a>
   </div>
 
-  <div class="table-responsive" style="margin-top:12px;">
+  <div class="table-responsive pd-table-spaced">
     <table class="table table-striped">
       <thead>
         <tr>
@@ -663,19 +663,19 @@
             <td>
               <span class="badge badge-{% if enterprise.status_tone == 'success' %}success{% elif enterprise.status_tone == 'danger' %}danger{% else %}warning{% endif %}">{{ enterprise.status_label }}</span>
               {% if enterprise.gaps %}
-                <div class="text-muted" style="margin-top:6px;">{{ enterprise.gaps.0.label }}</div>
+                <div class="text-muted pd-mt-2">{{ enterprise.gaps.0.label }}</div>
               {% endif %}
             </td>
             <td>{{ enterprise.next_action }}</td>
             <td>{% if a.activo %}<span class="badge badge-success">Sí</span>{% else %}<span class="badge badge-danger">No</span>{% endif %}</td>
             <td>
               {% if can_manage_activos %}
-                <div class="quick-actions" style="gap:6px;flex-wrap:wrap;">
+                <div class="quick-actions pd-flex-actions-wrap">
                   <form method="post">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="set_estado">
                     <input type="hidden" name="activo_id" value="{{ a.id }}">
-                    <select name="estado" style="min-width:150px;">
+                    <select name="estado" class="pd-input-wide">
                       {% for v, l in estado_choices %}
                         <option value="{{ v }}" {% if a.estado == v %}selected{% endif %}>{{ l }}</option>
                       {% endfor %}
