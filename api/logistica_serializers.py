@@ -16,10 +16,13 @@ from logistica.models import (
     InspeccionVehiculo,
     LavadoUnidad,
     ParadaRuta,
+    ParadaEntregaEvidencia,
     PuntoLogistico,
     Repartidor,
     ReporteUnidad,
     ReporteUnidadReafirmacion,
+    RutaCargaChecklist,
+    RutaCargaChecklistLinea,
     RutaEntrega,
     UbicacionRuta,
     Unidad,
@@ -268,6 +271,124 @@ class UbicacionRutaCreateSerializer(serializers.Serializer):
         if attrs.get("fuera_de_ruta_confirmado") is True and not (attrs.get("desvio_motivo") or "").strip():
             raise serializers.ValidationError({"desvio_motivo": "Indica un motivo breve para confirmar el desvío."})
         return attrs
+
+
+class RutaCargaChecklistLineaSerializer(serializers.ModelSerializer):
+    parada_nombre = serializers.CharField(source="parada.punto_nombre_snapshot", read_only=True)
+    parada_orden = serializers.IntegerField(source="parada.orden", read_only=True)
+    estatus_display = serializers.CharField(source="get_estatus_display", read_only=True)
+    motivo_diferencia_display = serializers.CharField(source="get_motivo_diferencia_display", read_only=True)
+    validado_por_nombre = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RutaCargaChecklistLinea
+        fields = [
+            "id",
+            "checklist",
+            "parada",
+            "parada_nombre",
+            "parada_orden",
+            "transfer_external_id",
+            "detail_external_id",
+            "source_hash",
+            "item_code",
+            "item_name",
+            "unit",
+            "cantidad_solicitada",
+            "cantidad_enviada_esperada",
+            "cantidad_cargada",
+            "estatus",
+            "estatus_display",
+            "motivo_diferencia",
+            "motivo_diferencia_display",
+            "notas",
+            "validado_por_nombre",
+            "validado_en",
+        ]
+        read_only_fields = fields
+
+    def get_validado_por_nombre(self, obj):
+        if not obj.validado_por_id:
+            return ""
+        return nombre_operativo_usuario(obj.validado_por)
+
+
+class RutaCargaChecklistSerializer(serializers.ModelSerializer):
+    estatus_display = serializers.CharField(source="get_estatus_display", read_only=True)
+    lineas = RutaCargaChecklistLineaSerializer(many=True, read_only=True)
+    total_lineas = serializers.SerializerMethodField()
+    lineas_confirmadas = serializers.SerializerMethodField()
+    lineas_pendientes = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RutaCargaChecklist
+        fields = [
+            "id",
+            "ruta",
+            "estatus",
+            "estatus_display",
+            "sincronizado_en",
+            "confirmado_en",
+            "motivo_override",
+            "notas",
+            "total_lineas",
+            "lineas_confirmadas",
+            "lineas_pendientes",
+            "lineas",
+        ]
+        read_only_fields = fields
+
+    def get_total_lineas(self, obj):
+        return obj.lineas.count()
+
+    def get_lineas_confirmadas(self, obj):
+        return obj.lineas.exclude(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).count()
+
+    def get_lineas_pendientes(self, obj):
+        return obj.lineas.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).count()
+
+
+class RutaCargaLineaValidarSerializer(serializers.Serializer):
+    cantidad_cargada = serializers.DecimalField(max_digits=18, decimal_places=3, min_value=Decimal("0"))
+    motivo_diferencia = serializers.ChoiceField(
+        choices=RutaCargaChecklistLinea.MOTIVO_CHOICES,
+        required=False,
+        allow_blank=True,
+        default="",
+    )
+    notas = serializers.CharField(required=False, allow_blank=True, default="")
+    client_event_id = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
+
+
+class ParadaEntregaEvidenciaSerializer(serializers.ModelSerializer):
+    tipo_display = serializers.CharField(source="get_tipo_display", read_only=True)
+    capturado_por_nombre = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ParadaEntregaEvidencia
+        fields = [
+            "id",
+            "ruta",
+            "parada",
+            "linea_carga",
+            "tipo",
+            "tipo_display",
+            "cantidad_entregada",
+            "foto",
+            "comentario",
+            "latitud",
+            "longitud",
+            "precision_metros",
+            "client_event_id",
+            "capturado_por_nombre",
+            "capturado_en",
+        ]
+        read_only_fields = fields
+
+    def get_capturado_por_nombre(self, obj):
+        if not obj.capturado_por_id:
+            return ""
+        return nombre_operativo_usuario(obj.capturado_por)
 
 
 class EventoRutaSerializer(serializers.ModelSerializer):

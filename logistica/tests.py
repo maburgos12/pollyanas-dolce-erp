@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 from io import StringIO
 
 from django.contrib.auth.models import Group, User
@@ -13,11 +14,24 @@ from django.utils import timezone
 from core.access import ACCESS_MANAGE, ACCESS_VIEW
 from core.models import Sucursal, UserModuleAccess
 from crm.models import Cliente, PedidoCliente
-from logistica.models import BitacoraSalidaLlegada, EntregaRuta, EventoRuta, ParadaRuta, PuntoLogistico, Repartidor, RutaEntrega, Unidad
+from logistica.models import (
+    BitacoraSalidaLlegada,
+    EntregaRuta,
+    EventoRuta,
+    ParadaRuta,
+    PuntoLogistico,
+    Repartidor,
+    RutaCargaChecklist,
+    RutaCargaChecklistLinea,
+    RutaEntrega,
+    Unidad,
+)
+from logistica.services_carga_ruta import sincronizar_checklist_carga_desde_point
 from logistica.services_rutas_control import distancia_metros, registrar_ubicacion_ruta, resumen_control_rutas
 from logistica.services_tiempos_ruta import resumen_tiempos_ruta
 from logistica.tasks import _emails_de_grupo, detectar_gps_perdido_rutas
 from api.logistica_views import _can_operate_pwa
+from pos_bridge.models import PointBranch, PointTransferLine
 
 
 VALID_GIF = (
@@ -488,6 +502,45 @@ class LogisticaControlRutasTests(TestCase):
             radio_geocerca_metros=120,
         )
         self.parada = ParadaRuta.objects.create(ruta=self.ruta, punto=self.punto, orden=1)
+
+    def _crear_transferencia_point_abierta(self, *, sucursal=None, item_name="Pastel Snicker chico", source_hash="transfer-snicker-1"):
+        sucursal = sucursal or self.sucursal
+        origin = PointBranch.objects.create(external_id=f"CEDIS-{source_hash}", name="CEDIS", erp_branch=None)
+        destination = PointBranch.objects.create(external_id=f"SUC-{source_hash}", name=sucursal.nombre, erp_branch=sucursal)
+        return PointTransferLine.objects.create(
+            origin_branch=origin,
+            destination_branch=destination,
+            erp_origin_branch=None,
+            erp_destination_branch=sucursal,
+            transfer_external_id=f"T-{source_hash}",
+            detail_external_id=f"D-{source_hash}",
+            source_hash=source_hash,
+            registered_at=timezone.now(),
+            sent_at=timezone.now(),
+            item_name=item_name,
+            item_code="SNICK-CH",
+            unit="pz",
+            requested_quantity="5.000",
+            sent_quantity="5.000",
+            received_quantity="0.000",
+            is_open=True,
+            is_received=False,
+            is_cancelled=False,
+            is_finalized=False,
+        )
+
+    def _crear_ruta_planeada_para_carga(self):
+        self.ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
+        self.ruta.save(update_fields=["estatus", "updated_at"])
+        ruta = RutaEntrega.objects.create(
+            nombre="Ruta Carga Point",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_PLANEADA,
+            repartidor=self.repartidor,
+            unidad_operativa=self.unidad,
+        )
+        parada = ParadaRuta.objects.create(ruta=ruta, punto=self.punto, orden=1)
+        return ruta, parada
 
     def test_distancia_metros_detecta_punto_cercano(self):
         self.assertLess(distancia_metros("25.570010", "-108.470010", self.punto.latitud, self.punto.longitud), 5)
@@ -997,8 +1050,8 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v13", pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v13-route-card-retention", sw_js)
+        self.assertIn("route-control-v14", pwa_html)
+        self.assertIn("pollyanas-logistica-pwa-v14-carga-checklist", sw_js)
         self.assertIn("ROUTE_AUTO_TRACKING_INTERVAL_MS", pwa_html)
         self.assertIn("TRACKING_QUEUE_TTL_MS", pwa_html)
         self.assertIn("normalizeRutaTrackingQueue", pwa_html)
@@ -1416,6 +1469,61 @@ class LogisticaControlRutasTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertFalse(RutaEntrega.objects.filter(nombre="Ruta API Directa").exists())
+
+    def test_checklist_carga_se_genera_desde_transferencia_point_abierta(self):
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        transferencia = self._crear_transferencia_point_abierta()
+
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        self.assertEqual(resumen.creadas, 1)
+        linea = RutaCargaChecklistLinea.objects.get(checklist=resumen.checklist)
+        self.assertEqual(linea.parada, parada)
+        self.assertEqual(linea.point_transfer_line, transferencia)
+        self.assertEqual(linea.item_name, "Pastel Snicker chico")
+        self.assertEqual(linea.cantidad_enviada_esperada, Decimal(str(transferencia.sent_quantity)))
+        self.assertEqual(linea.source_hash, transferencia.source_hash)
+
+    def test_api_ruta_status_bloquea_salida_si_checklist_carga_pendiente(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        self._crear_transferencia_point_abierta()
+        sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_estatus", kwargs={"ruta_id": ruta.id}),
+            json.dumps({"estatus": RutaEntrega.ESTATUS_EN_RUTA}),
+            content_type="application/json",
+        )
+
+        ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
+        self.assertIn("confirma la carga", response.json()["detail"])
+
+    def test_api_repartidor_valida_linea_carga_e_idempotencia(self):
+        self.client.force_login(self.user)
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        self._crear_transferencia_point_abierta()
+        checklist = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False).checklist
+        linea = checklist.lineas.get()
+
+        url = reverse("api_logistica_ruta_carga_linea_validar", kwargs={"ruta_id": ruta.id, "linea_id": linea.id})
+        payload = {
+            "cantidad_cargada": "5.000",
+            "client_event_id": "evt-carga-1",
+        }
+        response = self.client.post(url, json.dumps(payload), content_type="application/json")
+        second = self.client.post(url, json.dumps(payload), content_type="application/json")
+
+        linea.refresh_from_db()
+        checklist.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_CARGADA)
+        self.assertEqual(linea.client_event_id, "evt-carga-1")
+        self.assertEqual(checklist.estatus, RutaCargaChecklist.ESTATUS_CONFIRMADA)
 
     def test_api_no_crea_ruta_sin_paradas(self):
         self.client.force_login(self.user)
