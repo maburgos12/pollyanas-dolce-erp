@@ -4,49 +4,7 @@
 {% block page_title %}RRHH · Permisos{% endblock %}
 
 {% block extra_css %}
-<style>
-  .permisos-page { display: grid; gap: 16px; }
-  .permisos-head {
-    background: #fff;
-    border: 1px solid var(--rosa);
-    border-radius: 8px;
-    display: grid;
-    gap: 14px;
-    grid-template-columns: minmax(0, 1fr) minmax(360px, .7fr);
-    padding: 18px;
-  }
-  .permisos-title { color: var(--vino); font-family: "Playfair Display", serif; font-size: 25px; font-weight: 800; }
-  .permisos-copy { color: var(--texto-light); margin-top: 4px; max-width: 760px; }
-  .permisos-stats { display: grid; gap: 10px; grid-template-columns: repeat(5, minmax(0, 1fr)); }
-  .permisos-stat { background: #fbf6f8; border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; }
-  .permisos-stat strong { color: var(--vino); display: block; font-size: 22px; line-height: 1; }
-  .permisos-stat span { color: var(--texto-light); font-size: 11px; font-weight: 900; text-transform: uppercase; }
-  .permisos-board { display: grid; gap: 14px; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: start; }
-  .permisos-col { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; min-height: 220px; padding: 12px; }
-  .permisos-col h2 { color: var(--vino); font-size: 16px; margin: 0 0 12px; }
-  .permiso-card { border: 1px solid var(--rosa); border-radius: 8px; display: grid; gap: 8px; margin-bottom: 10px; padding: 12px; }
-  .permiso-main { color: var(--texto); font-weight: 900; }
-  .permiso-meta { color: var(--texto-light); font-size: 13px; }
-  .permiso-row { display: flex; flex-wrap: wrap; gap: 6px; }
-  .permiso-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }
-  .permiso-badge.gold { background: rgba(201, 168, 76, .18); color: #6f5415; }
-  .permiso-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-  .permisos-table-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 16px; }
-  .permisos-table-card h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
-  .permisos-table { min-width: 1060px; width: 100%; border-collapse: collapse; }
-  .permisos-table th, .permisos-table td { border-bottom: 1px solid var(--rosa); padding: 10px; text-align: left; vertical-align: top; }
-  .permisos-table th { color: var(--vino); font-size: 12px; text-transform: uppercase; }
-  @media (max-width: 1280px) {
-    .permisos-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  }
-  @media (max-width: 900px) {
-    .permisos-head { grid-template-columns: 1fr; }
-  }
-  @media (max-width: 680px) {
-    .permisos-board,
-    .permisos-stats { grid-template-columns: 1fr; }
-  }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-permisos-list.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}

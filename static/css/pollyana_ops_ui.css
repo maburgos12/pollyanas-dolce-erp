@@ -1806,6 +1806,28 @@ a.btn:active,
   color: var(--pd-warning);
 }
 
+.pd-alert-compact {
+  margin-top: var(--pd-space-3);
+  margin-bottom: 0;
+}
+
+.pd-expired-text,
+.pd-margin-label.is-danger {
+  color: var(--pd-danger);
+}
+
+.pd-margin-label {
+  font-weight: 700;
+}
+
+.pd-margin-label.is-warning {
+  color: var(--pd-warning);
+}
+
+.pd-margin-label.is-success {
+  color: var(--pd-success);
+}
+
 .pd-hidden {
   display: none;
 }

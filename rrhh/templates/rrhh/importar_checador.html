@@ -4,71 +4,7 @@
 {% block page_title %}Checador{% endblock %}
 
 {% block extra_css %}
-<style>
-  .ch-page { display: grid; gap: 18px; }
-  .ch-hero {
-    background: #fff;
-    border: 1px solid var(--rosa);
-    border-radius: 8px;
-    padding: 20px;
-    display: grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(260px, .8fr);
-    gap: 18px;
-    align-items: start;
-  }
-  .ch-kicker {
-    color: var(--vino);
-    font-size: 12px;
-    font-weight: 900;
-    letter-spacing: .08em;
-    text-transform: uppercase;
-  }
-  .ch-title { color: var(--texto); font-family: "Playfair Display", serif; font-size: 28px; margin: 3px 0 6px; }
-  .ch-copy { color: var(--texto-suave); margin: 0; max-width: 760px; }
-  .ch-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
-  .ch-layout { display: grid; grid-template-columns: minmax(320px, .8fr) minmax(0, 1.2fr); gap: 18px; align-items: start; }
-  .ch-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 18px; }
-  .ch-card h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
-  .ch-fields { display: grid; gap: 12px; }
-  .ch-field { display: grid; gap: 6px; font-weight: 800; }
-  .ch-field input { font-weight: 600; }
-  .ch-file {
-    background: rgba(139, 34, 82, .04);
-    border: 1px dashed var(--vino);
-    border-radius: 8px;
-    padding: 14px;
-  }
-  .ch-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-  .ch-kpi { background: rgba(139, 34, 82, .04); border: 1px solid var(--rosa); border-radius: 8px; padding: 14px; }
-  .ch-kpi-value { color: var(--vino); font-size: 28px; font-weight: 900; line-height: 1; }
-  .ch-kpi-label { color: var(--texto-suave); font-size: 12px; font-weight: 900; margin-top: 6px; text-transform: uppercase; }
-  .ch-table { width: 100%; border-collapse: collapse; }
-  .ch-table th, .ch-table td { border-bottom: 1px solid var(--rosa); padding: 9px; text-align: left; vertical-align: top; }
-  .ch-table th { color: var(--vino); font-size: 12px; text-transform: uppercase; }
-  .ch-table tr:last-child td { border-bottom: 0; }
-  .ch-format { margin-top: 14px; }
-  .ch-history { margin-top: 0; }
-  .ch-badge {
-    display: inline-flex;
-    align-items: center;
-    border-radius: 999px;
-    background: rgba(201, 168, 76, .18);
-    color: #8a6b10;
-    font-size: 11px;
-    font-weight: 900;
-    padding: 4px 9px;
-    text-transform: uppercase;
-  }
-  .ch-status { display: grid; gap: 8px; }
-  .ch-status-row { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--rosa); padding: 8px 0; }
-  .ch-status-row:last-child { border-bottom: 0; }
-  .ch-status-row span:first-child { color: var(--texto-suave); font-weight: 800; }
-  .ch-status-row span:last-child { color: var(--texto); font-weight: 900; text-align: right; }
-  @media (max-width: 1050px) {
-    .ch-hero, .ch-layout { grid-template-columns: 1fr; }
-    .ch-kpis { grid-template-columns: 1fr; }
-  }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-importar-checador.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}

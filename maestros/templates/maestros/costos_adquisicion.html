@@ -4,37 +4,7 @@
 {% block page_title %}Costos de adquisición — Todos los productos{% endblock %}
 
 {% block extra_css %}
-<style>
-  .kpi-strip  { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:18px; }
-  .kpi-chip   { padding:7px 16px; border-radius:20px; font-size:13px; font-weight:700;
-                text-decoration:none; border:2px solid transparent; }
-  .kpi-chip:hover { opacity:.85; }
-  .kpi-chip.active { border-color:var(--texto); }
-  .chip-all   { background:var(--gris-suave); color:var(--texto); }
-  .chip-sin   { background:#ffebee; color:#c62828; }
-  .chip-con   { background:#e8f5e9; color:#2e7d32; }
-
-  .badge-RECETA         { background:#e3f2fd; color:#1565c0; }
-  .badge-POINT_ALMACEN  { background:#f3e5f5; color:#6a1b9a; }
-  .badge-MANUAL         { background:#e8f5e9; color:#2e7d32; }
-  .badge-sin            { background:#ffebee; color:#c62828; }
-  .badge-anticipo       { background:#fff8e1; color:#f57f17; }
-
-  .tipo-fabricado { color:#1565c0; font-size:11px; }
-  .tipo-reventa   { color:#6a1b9a; font-size:11px; }
-
-  .edit-form { display:none; background:#f9f9f9; padding:8px 12px; border-radius:8px; margin-top:6px; }
-  .edit-form.open { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  .cost-table th { white-space:nowrap; position:sticky; top:0; background:#fff; z-index:1; }
-  .cost-table td { vertical-align:middle; }
-
-  .chip-urgente { background:#fff3e0; color:#e65100; }
-  .filter-bar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
-  .trend-up   { color:#c62828; font-size:11px; }
-  .trend-dn   { color:#2e7d32; font-size:11px; }
-  .ventas-ref { font-size:11px; color:var(--texto-light); }
-  .pvta-approx { font-style:italic; }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/maestros-templates-maestros-costos-adquisicion.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
@@ -53,29 +23,29 @@
   {% if vendidos_sin_costo %}
   <a href="?estado=vendidos_sin_costo&periodo={{ filtro_periodo }}"
      class="kpi-chip chip-urgente {% if filtro_estado == 'vendidos_sin_costo' %}active{% endif %}">
-    🔥 Vendidos sin costo <strong>{{ vendidos_sin_costo }}</strong>
+    Prioridad: vendidos sin costo <strong>{{ vendidos_sin_costo }}</strong>
   </a>
   {% endif %}
   <a href="?q={{ filtro_q }}&estado=sin_costo" class="kpi-chip chip-sin {% if filtro_estado == 'sin_costo' %}active{% endif %}">
-    ⚠ Sin costo <strong>{{ sin_costo }}</strong>
+    Sin costo <strong>{{ sin_costo }}</strong>
   </a>
   <a href="?q={{ filtro_q }}&estado=con_costo" class="kpi-chip chip-con {% if filtro_estado == 'con_costo' %}active{% endif %}">
-    ✓ Con costo <strong>{{ con_costo }}</strong>
+    Con costo <strong>{{ con_costo }}</strong>
   </a>
 </div>
 
 {# ── Filtros ───────────────────────────────────────────────── #}
 <div class="filter-bar">
-  <form method="get" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-    <input type="text" name="q" value="{{ filtro_q }}" class="form-control"
-           style="width:200px" placeholder="Buscar producto...">
-    <select name="tipo" class="form-control" style="width:150px">
+  <form method="get" class="pd-u-8844ccdd1d">
+    <input type="text" name="q" value="{{ filtro_q }}" class="form-control pd-u-d4a09a0d6e"
+           placeholder="Buscar producto...">
+    <select name="tipo" class="form-control pd-u-821e4857c2">
       <option value="">Todos los tipos</option>
       <option value="reventa" {% if filtro_tipo == 'reventa' %}selected{% endif %}>Reventa</option>
       <option value="fabricado" {% if filtro_tipo == 'fabricado' %}selected{% endif %}>Fabricado</option>
     </select>
     {% if filtro_estado == 'vendidos_sin_costo' %}
-    <select name="periodo" class="form-control" style="width:150px">
+    <select name="periodo" class="form-control pd-u-821e4857c2">
       <option value="mes" {% if filtro_periodo == 'mes' %}selected{% endif %}>Este mes</option>
       <option value="30d" {% if filtro_periodo == '30d' %}selected{% endif %}>Últimos 30 días</option>
       <option value="90d" {% if filtro_periodo == '90d' %}selected{% endif %}>Últimos 90 días</option>
@@ -83,17 +53,17 @@
     {% endif %}
     {% if filtro_estado %}<input type="hidden" name="estado" value="{{ filtro_estado }}">{% endif %}
     <button type="submit" class="btn btn-secondary btn-sm">Filtrar</button>
-    <a href="{% url 'maestros:costos_adquisicion' %}" class="btn btn-sm" style="background:#f0f0f0">Limpiar</a>
+    <a href="{% url 'maestros:costos_adquisicion' %}" class="btn btn-sm pd-u-81d667ff3e">Limpiar</a>
   </form>
 </div>
 {% if filtro_estado == 'vendidos_sin_costo' %}
-<div class="muted" style="font-size:12px;margin-bottom:10px;color:#e65100">
+<div class="muted pd-u-f15d183027">
   Mostrando {{ rows|length }} producto{{ rows|length|pluralize }} vendidos sin costo desde {{ periodo_desde|date:"d/m/Y" }},
   ordenados por ingreso en riesgo. El precio de referencia usa el precio de venta de Point; si no existe, el promedio del período.
 </div>
 {% endif %}
 
-<div class="muted" style="font-size:12px;margin-bottom:10px">
+<div class="muted pd-u-37a9b5421b">
   <strong>Fabricados</strong>: costo viene de la receta (automático). &nbsp;·&nbsp;
   <strong>Reventa</strong>: costo desde Point ALMACEN (sync diario) o captura manual. &nbsp;·&nbsp;
   Los costos <em>sin registro</em> afectan el margen de rentabilidad.
@@ -101,16 +71,16 @@
 
 {# ── Tabla ─────────────────────────────────────────────────── #}
 <div class="table-wrapper">
-  <table class="table table-striped cost-table" style="font-size:13px">
+  <table class="table table-striped cost-table pd-u-9e6595fb01">
     <thead>
       <tr>
         <th>Producto</th>
         <th>Categoría</th>
         <th>Tipo</th>
         {% if filtro_estado == 'vendidos_sin_costo' %}
-        <th style="text-align:right">Ventas período</th>
+        <th class="pd-u-a527bac1ee">Ventas período</th>
         {% endif %}
-        <th style="text-align:right">Costo vigente</th>
+        <th class="pd-u-a527bac1ee">Costo vigente</th>
         <th>Fuente</th>
         <th>Fecha</th>
         {% if can_manage %}<th></th>{% endif %}
@@ -120,48 +90,48 @@
       {% for r in rows %}
       <tr id="row-{{ r.id }}">
         <td><strong>{{ r.nombre }}</strong></td>
-        <td style="font-size:11px;color:var(--texto-light)">{{ r.categoria }}</td>
+        <td class="pd-u-6e891a9251">{{ r.categoria }}</td>
         <td>
           <span class="tipo-{{ r.tipo }}">
             {% if r.tipo == 'fabricado' %}Fabricado{% else %}Reventa{% endif %}
           </span>
         </td>
         {% if filtro_estado == 'vendidos_sin_costo' %}
-        <td style="text-align:right;font-size:12px">
-          <span style="font-weight:700">${{ r.ventas_monto|floatformat:0|intcomma }}</span>
+        <td class="pd-u-a469c81613">
+          <span class="pd-u-758a887326">${{ r.ventas_monto|floatformat:0|intcomma }}</span>
           <span class="ventas-ref"> · {{ r.ventas_cantidad|floatformat:0|intcomma }} uds</span>
         </td>
         {% endif %}
-        <td style="text-align:right;font-weight:700">
+        <td class="pd-u-4f234ab9be">
           {% if r.tiene_costo %}
             ${{ r.costo_vigente|floatformat:4 }}
           {% else %}
-            <span style="color:var(--rojo)">—</span>
+            <span class="pd-u-97bfda1a5a">—</span>
           {% endif %}
         </td>
         <td>
           {% if r.es_anticipo %}
-            <span class="badge badge-anticipo" style="font-size:11px"
+            <span class="badge badge-anticipo pd-u-e48b05836a"
                   title="Tarjeta de regalo / vale — pasivo contable hasta redención. No requiere costo de adquisición.">
               Anticipo/Pasivo
             </span>
           {% elif r.fuente == 'RECETA' %}
-            <span class="badge badge-RECETA" style="font-size:11px">Receta</span>
+            <span class="badge badge-RECETA pd-u-e48b05836a">Receta</span>
           {% elif r.fuente == 'POINT_ALMACEN' %}
-            <span class="badge badge-POINT_ALMACEN" style="font-size:11px">Point auto</span>
+            <span class="badge badge-POINT_ALMACEN pd-u-e48b05836a">Point auto</span>
           {% elif r.fuente == 'MANUAL' %}
-            <span class="badge badge-MANUAL" style="font-size:11px">Manual</span>
+            <span class="badge badge-MANUAL pd-u-e48b05836a">Manual</span>
           {% else %}
-            <span class="badge badge-sin" style="font-size:11px">Sin costo</span>
+            <span class="badge badge-sin pd-u-e48b05836a">Sin costo</span>
           {% endif %}
         </td>
-        <td style="font-size:11px;color:var(--texto-light)">
+        <td class="pd-u-6e891a9251">
           {{ r.fecha_costo|date:"d/m/Y"|default:"—" }}
         </td>
         {% if can_manage %}
         <td>
           {% if r.editable %}
-          <button class="btn btn-sm btn-secondary" style="font-size:11px"
+          <button class="btn btn-sm btn-secondary pd-u-e48b05836a"
                   onclick="toggleEdit({{ r.id }}, '{{ r.nombre|escapejs }}', {{ r.costo_vigente|default:0 }}, {{ r.precio_venta|default:'null' }})">
             Editar costo
           </button>
@@ -170,14 +140,14 @@
         {% endif %}
       </tr>
       {% if can_manage and r.editable %}
-      <tr id="editrow-{{ r.id }}" style="display:none">
-        <td colspan="{% if filtro_estado == 'vendidos_sin_costo' %}8{% else %}7{% endif %}" style="padding:4px 12px">
+      <tr id="editrow-{{ r.id }}" class="pd-u-c8be1ccba6">
+        <td colspan="{% if filtro_estado == 'vendidos_sin_costo' %}8{% else %}7{% endif %}" class="pd-u-7f49f1cd3f">
           <form method="post" class="edit-form open" id="editform-{{ r.id }}">
             {% csrf_token %}
             <input type="hidden" name="producto_id" value="{{ r.id }}">
-            <span style="font-weight:700;font-size:13px">{{ r.nombre|truncatechars:30 }}</span>
+            <span class="pd-u-cbf92eb859">{{ r.nombre|truncatechars:30 }}</span>
             {% if r.precio_venta %}
-            <span id="pvta-{{ r.id }}" style="font-size:11px;color:var(--texto-light);white-space:nowrap"
+            <span id="pvta-{{ r.id }}" class="pd-u-68e966aac9"
                   title="{% if r.precio_venta_fuente == 'ventas' %}Precio promedio del período (Point sin precio cargado){% else %}Precio de venta en Point{% endif %}">
               {% if r.precio_venta_fuente == 'ventas' %}
                 ~P.vta: ${{ r.precio_venta|floatformat:2|intcomma }} <em class="pvta-approx">(prom.)</em>
@@ -186,15 +156,15 @@
               {% endif %}
             </span>
             {% endif %}
-            <input type="number" name="costo_unitario" id="costo-{{ r.id }}" class="form-control"
-                   step="0.0001" min="0" style="width:130px" placeholder="Costo unitario"
+            <input type="number" name="costo_unitario" id="costo-{{ r.id }}" class="form-control pd-u-29dbf95ce3"
+                   step="0.0001" min="0" placeholder="Costo unitario"
                    value="{{ r.costo_vigente|default:'' }}"
                    oninput="calcMargen({{ r.id }}, {{ r.precio_venta|default:'null' }})">
-            <span id="margen-{{ r.id }}" style="font-size:11px;white-space:nowrap;min-width:70px"></span>
-            <input type="text" name="proveedor_nombre" class="form-control"
-                   style="width:160px" placeholder="Proveedor (opcional)">
+            <span id="margen-{{ r.id }}" class="pd-u-c2a6791ed4"></span>
+            <input type="text" name="proveedor_nombre" class="form-control pd-u-7cbe5ecfa6"
+                   placeholder="Proveedor (opcional)">
             <button type="submit" class="btn btn-primary btn-sm">Guardar</button>
-            <button type="button" class="btn btn-sm" style="background:#f0f0f0"
+            <button type="button" class="btn btn-sm pd-u-81d667ff3e"
                     onclick="toggleEdit({{ r.id }})">Cancelar</button>
           </form>
         </td>
@@ -207,7 +177,7 @@
   </table>
 </div>
 
-<div class="muted" style="font-size:11px;margin-top:6px">
+<div class="muted pd-u-c16101fce3">
   El sync automático de Point captura costos diariamente a las 09:15.
   Los costos manuales tienen prioridad en la consulta de rentabilidad. &nbsp;·&nbsp;
   <strong>~P.vta (prom.)</strong>: precio promedio vendido del período — solo referencia para validar margen.
@@ -239,8 +209,8 @@ function calcMargen(id, precioVenta) {
   const costo = parseFloat(inp.value);
   if (isNaN(costo) || costo <= 0) { el.textContent = ''; return; }
   const margen = ((precioVenta - costo) / precioVenta * 100);
-  const color  = margen < 10 ? '#c62828' : margen < 25 ? '#e65100' : '#2e7d32';
-  el.innerHTML = `<span style="color:${color};font-weight:700">${margen.toFixed(1)}% margen</span>`;
+  const tone = margen < 10 ? 'is-danger' : margen < 25 ? 'is-warning' : 'is-success';
+  el.innerHTML = `<span class="pd-margin-label ${tone}">${margen.toFixed(1)}% margen</span>`;
 }
 </script>
 {% endblock %}

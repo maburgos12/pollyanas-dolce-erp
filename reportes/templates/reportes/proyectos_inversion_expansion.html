@@ -205,7 +205,7 @@
         </div>
 
         {% if calibration_context.data_gaps %}
-        <div class="investment-alert-stack" style="margin-top:1rem;">
+        <div class="investment-alert-stack pd-u-0cf8f93b0e">
           {% for gap in calibration_context.data_gaps %}
           <div class="investment-alert"><strong>Brecha</strong><span>{{ gap }}</span></div>
           {% endfor %}
@@ -213,7 +213,7 @@
         {% endif %}
 
         {% if calibration_result %}
-        <div class="investment-chart-card investment-chart-card--summary" style="margin-top:1rem;">
+        <div class="investment-chart-card investment-chart-card--summary pd-u-0cf8f93b0e">
           <div class="investment-kpi-label">Resultado de recalibración</div>
           {% if calibration_result.applied %}
           <div class="investment-kpi-value">+{{ calibration_result.improvement_pct|default:0|floatformat:2|intcomma }}%</div>
@@ -225,7 +225,7 @@
         </div>
         {% endif %}
 
-        <div class="investment-grid-2" style="margin-top:1rem;">
+        <div class="investment-grid-2 pd-u-0cf8f93b0e">
           <article class="investment-form-card">
             <div class="investment-panel-head">
               <div>
@@ -303,7 +303,7 @@
                 <button class="investment-button" type="submit">Guardar ajustes</button>
               </div>
             </form>
-            <form method="post" style="margin-top:0.85rem;">
+            <form method="post" class="pd-u-9cc337615c">
               {% csrf_token %}
               <input type="hidden" name="action" value="run_calibration">
               <button class="investment-button is-ghost" type="submit">Recalibrar</button>
@@ -332,7 +332,7 @@
           </article>
         </div>
 
-        <div class="investment-table-wrap" style="margin-top:1rem;">
+        <div class="investment-table-wrap pd-u-0cf8f93b0e">
           <table class="investment-table">
             <thead>
               <tr>
@@ -457,7 +457,7 @@
         </form>
 
         {% if opening_recommendation %}
-        <div class="investment-chart-card investment-chart-card--summary" style="margin-top:1rem;">
+        <div class="investment-chart-card investment-chart-card--summary pd-u-0cf8f93b0e">
           <div class="investment-kpi-label">Recomendación automática</div>
           <div class="investment-kpi-value">{{ opening_recommendation.decision }}</div>
           <div class="investment-kpi-note">{{ opening_recommendation.explanation }}</div>

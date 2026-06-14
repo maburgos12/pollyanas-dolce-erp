@@ -1,0 +1,33 @@
+/* Extracted from mermas/templates/mermas/dashboard.html */
+.mermas-page { max-width: 1720px; }
+    .mermas-header { margin-bottom: var(--pd-space-4); }
+    .mermas-actions { display: flex; gap: var(--pd-space-2); flex-wrap: wrap; justify-content: flex-end; }
+    .mermas-btn { display: inline-flex; align-items: center; justify-content: center; min-height: var(--pd-control-height); padding: 0 var(--pd-space-4); border-radius: var(--pd-radius-md); border: 1px solid var(--pd-border); text-decoration: none; color: var(--pd-ink); background: var(--pd-surface); font-weight: 900; white-space:normal; }
+    .mermas-btn.primary { background: var(--pd-wine); border-color: var(--pd-wine); color: var(--pd-surface); }
+    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--pd-space-3); margin-bottom: var(--pd-space-3); }
+    .metric-card, .panel { background: var(--pd-surface); border: 1px solid var(--pd-border); border-radius: var(--pd-radius-lg); box-shadow: var(--pd-shadow-low); }
+    .metric-card { min-height: 82px; padding: var(--pd-space-3) var(--pd-space-4); }
+    .metric-label { color: var(--pd-wine); font-size: .72rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; }
+    .metric-value { margin-top: var(--pd-space-2); color: var(--pd-wine); font-family: var(--pd-font-number); font-variant-numeric: tabular-nums; font-feature-settings: var(--pd-numeric-features); font-size: clamp(1.55rem, 2vw, 2rem); font-weight: 900; line-height: 1; }
+    .panel { padding: var(--pd-space-4); min-width: 0; }
+    .panel h2 { margin: 0 0 var(--pd-space-3); font-size: 1.05rem; color: var(--pd-ink); letter-spacing: 0; }
+    .panel-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--pd-space-3); margin-bottom: var(--pd-space-3); }
+    .panel + .panel { margin-top: var(--pd-space-3); }
+    .filters { display: flex; gap: var(--pd-space-2); align-items: end; flex-wrap: wrap; margin-bottom: var(--pd-space-3); }
+    .filters label { display: grid; gap: var(--pd-space-1); color: var(--pd-muted); font-size: .8rem; font-weight: 900; }
+    .filters select { min-width: 190px; min-height: var(--pd-control-height); border: 1px solid var(--pd-border); border-radius: var(--pd-radius-md); padding: 0 var(--pd-space-3); background: var(--pd-surface); }
+    .data-table { width: 100%; border-collapse: collapse; }
+    .data-table th, .data-table td { padding: var(--pd-space-3) var(--pd-space-2); border-bottom: 1px solid var(--pd-border); text-align: left; vertical-align: middle; }
+    .data-table th { color: var(--pd-wine); font-size: .72rem; font-weight: 900; text-transform: uppercase; letter-spacing: .04em; }
+    .data-table td { color: var(--pd-ink); font-size: .9rem; }
+    .data-table a { color: var(--pd-wine); font-weight: 900; }
+    .data-table tbody tr:last-child td { border-bottom: 0; }
+    .badge { display: inline-flex; align-items: center; padding: 4px 8px; border-radius: 999px; background: var(--pd-surface-subtle); color: var(--pd-muted); font-weight: 900; font-size: .75rem; }
+    .badge.warn { background: var(--pd-warning-soft); color: var(--pd-warning); }
+    .badge.bad { background: var(--pd-danger-soft); color: var(--pd-danger); }
+    .empty { color: var(--pd-muted); padding: var(--pd-space-1) 0; }
+    @media (max-width: 980px) {
+        .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .panel-grid { grid-template-columns: 1fr; }
+        .mermas-actions { justify-content: flex-start; }
+    }

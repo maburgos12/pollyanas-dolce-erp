@@ -7,88 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<style>
-  .fallas-toolbar{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
-  .fallas-toolbar select,.fallas-toolbar button,.fallas-modal select,.fallas-modal input,.fallas-modal textarea{min-height:42px;border:1px solid var(--border-soft,#e5dce1);border-radius:10px;padding:8px 10px;font:inherit}
-  .fallas-table{width:100%;border-collapse:collapse}
-  .fallas-table th,.fallas-table td{padding:10px 10px;border-bottom:1px solid color-mix(in srgb, var(--pd-wine) 10%, transparent);text-align:left;vertical-align:middle}
-  .fallas-table th{color:var(--pd-wine);font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:800}
-  .fallas-table tr:hover td{background:color-mix(in srgb, var(--pd-wine) 3%, transparent)}
-  .fallas-table-wrap{max-width:100%;overflow:auto;margin-top:14px;-webkit-overflow-scrolling:touch}
-  .fallas-badge{display:inline-flex;align-items:center;min-height:24px;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700}
-  .fallas-category-layout{display:grid;grid-template-columns:minmax(260px,.8fr) minmax(0,1.4fr);gap:18px;align-items:start}
-  .fallas-category-form{display:grid;gap:10px}
-  .fallas-check{display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700}
-  .fallas-check input{width:auto;min-height:0}
-  .fallas-file-input{min-height:40px;border:1px solid var(--pd-border);border-radius:8px;padding:8px 10px;font:inherit;width:100%}
-  .p-critica{background:var(--pd-danger-soft);color:var(--pd-danger);border:1px solid color-mix(in srgb, var(--pd-danger) 28%, transparent)}
-  .p-alta{background:var(--pd-warning-soft);color:var(--pd-warning);border:1px solid color-mix(in srgb, var(--pd-warning) 32%, transparent)}
-  .p-media{background:var(--pd-gold-soft);color:var(--pd-warning);border:1px solid color-mix(in srgb, var(--pd-gold) 42%, transparent)}
-  .p-baja{background:var(--pd-info-soft);color:var(--pd-info);border:1px solid color-mix(in srgb, var(--pd-info) 26%, transparent)}
-  .p-verde{background:var(--pd-success-soft);color:var(--pd-success);border:1px solid color-mix(in srgb, var(--pd-success) 28%, transparent)}
-  .fallas-modal-backdrop{position:fixed;inset:0;z-index:20;display:none;background:rgba(24,12,18,.56);padding:24px;overflow:auto}
-  .fallas-modal-backdrop.is-open{display:flex;align-items:flex-start;justify-content:center}
-  .fallas-modal{width:min(900px,100%);margin:40px 0;background:var(--pd-surface);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.28);overflow:hidden}
-  .fallas-modal-sm{max-width:460px}
-  .fallas-modal-head{display:flex;justify-content:space-between;gap:12px;align-items:center;background:var(--pd-wine);color:var(--pd-surface);padding:16px 20px}
-  .fallas-modal-body{padding:20px}
-  .fallas-detail-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:18px}
-  .fallas-modal-actions{display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;border-top:1px solid var(--pd-border);background:var(--pd-surface-subtle)}
-  /* Thumbnail en tabla */
-  .thumb-cell{width:48px}
-  .thumb-img{width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid color-mix(in srgb, var(--pd-wine) 15%, transparent);cursor:pointer;transition:transform .15s}
-  .thumb-img:hover{transform:scale(1.08)}
-  .thumb-none{width:44px;height:44px;background:var(--pd-wine-soft);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--pd-muted-soft);font-size:18px}
-  /* Asignación */
-  .asign-row{display:flex;align-items:center;gap:8px;margin-top:6px}
-  .asign-row select{flex:1;min-height:38px;border:1px solid var(--border-soft,#e5dce1);border-radius:8px;padding:6px 10px;font:inherit}
-  /* KPI charts mini */
-  .kpi-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
-  .kpi-chart-card{background:var(--pd-surface);border:1px solid color-mix(in srgb, var(--pd-wine) 10%, transparent);border-radius:10px;padding:14px}
-  .kpi-chart-title{font-size:11px;font-weight:800;color:var(--pd-wine);text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px}
-  .bar-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
-  .bar-label{font-size:12px;color:var(--pd-ink-soft);min-width:120px;overflow-wrap:anywhere}
-  .bar-track{flex:1;height:8px;background:var(--pd-wine-soft);border-radius:4px;overflow:hidden}
-  .bar-fill{height:100%;background:var(--pd-wine);border-radius:4px;transition:width .5s ease}
-  .bar-count{font-size:11px;font-weight:800;color:var(--pd-wine);min-width:20px;text-align:right}
-  /* Estado vacío */
-  .fallas-empty{padding:48px 24px;text-align:center}
-  .fallas-empty-icon{font-size:40px;margin-bottom:12px;opacity:.35}
-  .fallas-empty-title{font-size:16px;font-weight:800;color:var(--pd-wine);margin-bottom:6px}
-  .fallas-empty-sub{font-size:13px;color:var(--pd-muted-soft);margin-bottom:18px}
-  /* Estatus badges */
-  .e-abierto{background:var(--pd-danger-soft);color:var(--pd-danger);border:1px solid color-mix(in srgb, var(--pd-danger) 28%, transparent)}
-  .e-revision{background:var(--pd-gold-soft);color:var(--pd-warning);border:1px solid color-mix(in srgb, var(--pd-gold) 42%, transparent)}
-  .e-proceso{background:var(--pd-info-soft);color:var(--pd-info);border:1px solid color-mix(in srgb, var(--pd-info) 26%, transparent)}
-  .e-resuelto{background:var(--pd-success-soft);color:var(--pd-success);border:1px solid color-mix(in srgb, var(--pd-success) 28%, transparent)}
-  .e-cerrado{background:var(--pd-surface-subtle);color:var(--pd-ink-soft);border:1px solid var(--pd-border)}
-  .e-cancelado{background:var(--pd-paper-flat);color:var(--pd-muted-soft);border:1px solid var(--pd-border)}
-  .fallas-panel-flat{margin:0}
-  .fallas-form-title{margin:0 0 12px;color:var(--pd-wine);font-weight:800}
-  .fallas-table-id{color:var(--pd-wine)}
-  .fallas-table-sm{font-size:12px}
-  .fallas-table-md{font-size:13px}
-  .fallas-inline-subtle{font-size:11px}
-  .fallas-detail-pair{margin:0 0 6px}
-  .fallas-detail-copy{font-size:13px;color:var(--pd-muted)}
-  .fallas-detail-badges{display:flex;gap:16px;margin-top:8px}
-  .fallas-evidence-img{width:100%;max-height:220px;object-fit:cover;border-radius:10px;border:1px solid color-mix(in srgb, var(--pd-wine) 15%, transparent)}
-  .fallas-evidence-empty{height:120px;background:var(--pd-wine-soft);border-radius:10px;display:flex;align-items:center;justify-content:center;color:var(--pd-muted-soft);font-size:32px}
-  .fallas-metric-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}
-  .fallas-metric-mini{background:var(--pd-wine-soft);border-radius:8px;padding:8px 10px;text-align:center}
-  .fallas-metric-label{font-size:10px;color:var(--pd-muted-soft);text-transform:uppercase;letter-spacing:.04em}
-  .fallas-metric-value{color:var(--pd-wine);font-size:18px;font-weight:800}
-  .fallas-location{font-size:11px;color:var(--pd-muted-soft);margin-top:8px}
-  .fallas-divider{margin:16px 0;border:0;border-top:1px solid var(--pd-border)}
-  .fallas-log-title{margin:0 0 10px;color:var(--pd-wine);font-size:15px;font-weight:800}
-  .fallas-bitacora-meta{color:var(--pd-muted-soft);font-size:11px;margin-left:6px}
-  .fallas-bitacora-line{font-size:12px;margin-top:2px}
-  .fallas-select-full,.fallas-input-full{width:100%;min-height:40px;border:1px solid var(--pd-border);border-radius:8px;padding:8px 10px;font:inherit}
-  @media(max-width:820px){
-    .fallas-toolbar,.fallas-detail-grid,.fallas-category-layout,.kpi-charts{grid-template-columns:1fr}
-    .fallas-table{min-width:700px}
-  }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/fallas-templates-fallas-dashboard.css?v=20260614-ui100-v1">
 <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
 {% endblock %}
 
@@ -350,7 +269,7 @@ function renderBarChart(containerId, items, labelKey) {
   container.innerHTML = items.slice(0, 6).map(item => `
     <div class="bar-row">
       <div class="bar-label" title="${esc(item[labelKey])}">${esc(item[labelKey])}</div>
-      <div class="bar-track"><div class="bar-fill" style="width:${Math.round((item.total / max) * 100)}%"></div></div>
+      <div class="bar-track"><div class="bar-fill pd-js-width" data-pd-width="${Math.round((item.total / max) * 100)}%"></div></div>
       <div class="bar-count">${item.total}</div>
     </div>`).join("");
 }
@@ -383,7 +302,7 @@ async function cargarReportes() {
     document.getElementById("tabla-body").innerHTML = `
       <tr><td colspan="10">
         <div class="fallas-empty">
-          <div class="fallas-empty-icon">🔧</div>
+          <div class="fallas-empty-icon">Falla</div>
           <div class="fallas-empty-title">Sin reportes de fallas</div>
           <div class="fallas-empty-sub">No hay registros con los filtros seleccionados.</div>
           <a href="{% url 'fallas:pwa-reporte' %}" class="btn btn-primary">Registrar falla</a>
@@ -396,7 +315,7 @@ async function cargarReportes() {
     const fecha = new Date(rep.fecha_reporte).toLocaleString("es-MX", {day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"});
     const thumb = rep.foto_evidencia
       ? `<img src="${rep.foto_evidencia}" class="thumb-img" onclick="abrirDetalle(${rep.id})" alt="Evidencia" loading="lazy">`
-      : `<div class="thumb-none">📷</div>`;
+      : `<div class="thumb-none">Foto</div>`;
     return `<tr>
       <td><strong class="fallas-table-id">#${rep.id}</strong></td>
       <td class="thumb-cell">${thumb}</td>
@@ -458,7 +377,7 @@ async function abrirDetalle(id) {
       <div>
         ${rep.foto_evidencia
           ? `<a href="${rep.foto_evidencia}" target="_blank" rel="noopener"><img src="${rep.foto_evidencia}" alt="Evidencia" class="fallas-evidence-img"></a>`
-          : `<div class="fallas-evidence-empty">📷</div>`}
+          : `<div class="fallas-evidence-empty">Sin foto</div>`}
         <div class="fallas-metric-grid">
           <div class="fallas-metric-mini">
             <div class="fallas-metric-label">Respuesta</div>
@@ -469,7 +388,7 @@ async function abrirDetalle(id) {
             <div class="fallas-metric-value">${rep.tiempo_resolucion_horas != null ? rep.tiempo_resolucion_horas+"h" : "—"}</div>
           </div>
         </div>
-        ${rep.latitud ? `<p class="fallas-location">📍 ${rep.latitud}, ${rep.longitud}</p>` : ""}
+        ${rep.latitud ? `<p class="fallas-location">Ubicación: ${rep.latitud}, ${rep.longitud}</p>` : ""}
       </div>
     </div>
     ${PUEDE_GESTIONAR ? `

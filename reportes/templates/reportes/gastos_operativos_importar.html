@@ -7,52 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/investment_projects.css' %}?v=20260406b">
-<style>
-  .opex-shell { display:grid; gap:1.4rem; }
-  .opex-shell .investment-copy { margin:0; }
-  .opex-upload-layout { display:grid; gap:1.2rem; grid-template-columns:minmax(0,1.35fr) minmax(320px,.85fr); }
-  .opex-dropzone {
-    position:relative;
-    display:grid;
-    gap:.8rem;
-    padding:1.6rem;
-    border:2px dashed rgba(23,50,77,.18);
-    border-radius:24px;
-    background:linear-gradient(180deg, rgba(255,255,255,.98), rgba(246,248,251,.95));
-  }
-  .opex-dropzone.is-dragover { border-color:rgba(31,111,93,.45); background:rgba(31,111,93,.06); }
-  .opex-dropzone input[type="file"] { position:absolute; inset:0; opacity:0; cursor:pointer; }
-  .opex-dropzone strong { color:var(--inv-ink); font-size:1.15rem; }
-  .opex-dropzone p, .opex-upload-note { color:var(--inv-muted); margin:0; }
-  .opex-summary-grid { display:grid; gap:1rem; grid-template-columns:repeat(4,minmax(0,1fr)); }
-  .opex-summary-card {
-    background:#fff; border:1px solid var(--inv-line); border-radius:22px; padding:1rem 1.1rem;
-    box-shadow:0 14px 28px rgba(21,37,56,.05);
-  }
-  .opex-summary-card strong { display:block; font-size:1.55rem; color:var(--inv-ink); margin-top:.35rem; }
-  .opex-rule-list, .opex-error-list { display:grid; gap:.65rem; margin:0; padding:0; list-style:none; }
-  .opex-rule-item, .opex-error-item {
-    padding:.8rem .9rem; border-radius:16px; background:rgba(23,50,77,.06); color:var(--inv-muted);
-  }
-  .opex-table td, .opex-table th { vertical-align:top; }
-  .opex-history-meta { display:grid; gap:.2rem; }
-  .opex-chip-stack { display:flex; flex-wrap:wrap; gap:.4rem; }
-  .opex-help-grid { display:grid; gap:.8rem; }
-  .opex-empty { padding:1.1rem; border:1px dashed var(--inv-line); border-radius:18px; color:var(--inv-muted); }
-  .opex-manual-toolbar { display:flex; justify-content:space-between; gap:1rem; flex-wrap:wrap; align-items:end; margin-bottom:1rem; }
-  .opex-manual-filter { display:flex; gap:.75rem; flex-wrap:wrap; align-items:end; }
-  .opex-manual-table { width:100%; border-collapse:collapse; }
-  .opex-manual-table th, .opex-manual-table td { padding:.65rem; border-bottom:1px solid #E5E7EB; vertical-align:top; }
-  .opex-manual-table th { font-size:.8rem; color:#6B7280; text-transform:uppercase; letter-spacing:.04em; }
-  .opex-manual-table select, .opex-manual-table input { width:100%; padding:.55rem; border:1px solid #D1D5DB; border-radius:8px; background:#fff; }
-  .opex-row-actions { display:flex; gap:.5rem; justify-content:flex-end; }
-  .opex-delete-btn { background:#fff; color:#9F1239; border:1px solid rgba(159,18,57,.24); padding:.5rem .7rem; border-radius:10px; font-weight:600; }
-  .opex-remove-row { background:#fff; color:#6B7280; border:1px solid #D1D5DB; padding:.5rem .7rem; border-radius:10px; font-weight:600; }
-  .opex-inline-actions { display:flex; gap:.75rem; flex-wrap:wrap; align-items:center; margin-top:1rem; }
-  @media (max-width: 1080px) {
-    .opex-upload-layout, .opex-summary-grid { grid-template-columns:1fr; }
-  }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/reportes-templates-reportes-gastos-operativos-importar.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
@@ -109,25 +64,25 @@
     </article>
   </section>
 
-  <section class="investment-panel" style="margin-bottom: 2rem;">
+  <section class="investment-panel pd-u-008a31c6f7">
     <div class="investment-panel-head">
       <div>
         <div class="investment-kicker">Captura manual</div>
-        <h2 class="investment-panel-title">✏️ Captura manual de gastos operativos</h2>
+        <h2 class="investment-panel-title">Editar Captura manual de gastos operativos</h2>
       </div>
     </div>
     <div class="opex-manual-toolbar">
       <div class="investment-muted">Registro directo en ERP sin tocar la importación por Excel.</div>
       <form method="get" class="opex-manual-filter">
         <div>
-          <label style="font-size: .85rem; font-weight: 600; color: #374151;">Periodo visible</label>
-          <select name="manual_periodo" style="min-width:180px; padding:.5rem; border:1px solid #D1D5DB; border-radius:8px; margin-top:.3rem;">
+          <label class="pd-u-839241376b">Periodo visible</label>
+          <select name="manual_periodo" class="pd-u-c0440a8d1e">
             {% for p in periodos_recientes %}
             <option value="{{ p }}" {% if manual_selected_period == p %}selected{% endif %}>{{ p }}</option>
             {% endfor %}
           </select>
         </div>
-        <button type="submit" class="investment-button" style="padding:.7rem 1.1rem;">Ver periodo</button>
+        <button type="submit" class="investment-button pd-u-bc0d61f3f7">Ver periodo</button>
       </form>
     </div>
     <form method="post" action="{% url 'reportes:gastos_operativos_captura_manual' %}">
@@ -185,14 +140,14 @@
       </table>
       <div class="opex-inline-actions">
         <button type="button" class="investment-action-link is-ghost" id="add-manual-row">Agregar fila</button>
-        <button type="submit" style="background:#8B2252; color:#fff; border:none; padding:.6rem 1.5rem; border-radius:8px; font-weight:600; cursor:pointer;">
+        <button type="submit" class="pd-u-162cbfd2dd">
           Guardar filas manuales
         </button>
       </div>
     </form>
   </section>
 
-  <section class="investment-panel" style="margin-bottom: 2rem;">
+  <section class="investment-panel pd-u-008a31c6f7">
     <div class="investment-panel-head">
       <div>
         <div class="investment-kicker">Registros manuales</div>
@@ -336,7 +291,7 @@
                 <span class="investment-muted">Sin sucursales</span>
                 {% endfor %}
               </div>
-              <div class="opex-chip-stack" style="margin-top:.35rem;">
+              <div class="opex-chip-stack pd-u-0286603c00">
                 {% for period in row.covered_periods %}
                 <span class="investment-pill">{{ period }}</span>
                 {% empty %}

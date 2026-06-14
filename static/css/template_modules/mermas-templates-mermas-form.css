@@ -1,0 +1,34 @@
+/* Extracted from mermas/templates/mermas/form.html */
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@700;800&display=swap');
+    .merma-app-body .sidebar { display: none; }
+    .merma-app-body .layout-wrapper { display: block; }
+    .merma-app-body .main-content { margin-left: 0; width: 100%; min-height: 100vh; background: #0f0f14; font-family: "Nunito", system-ui, sans-serif; color: #e8e0d5; }
+    .merma-shell { max-width: 540px; margin: 0 auto; padding: 14px 14px 120px; }
+    .app-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .app-header h1 { margin: 0; font-family: "Playfair Display", Georgia, serif; font-size: 1.55rem; color: #f4eadc; letter-spacing: 0; }
+    .app-header span { color: #b8ab9a; font-size: .9rem; }
+    .app-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
+    .form-block { background: #1a1a24; border: 1px solid #2a2a38; border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 12px 28px rgba(0,0,0,.18); }
+    .form-block h2 { margin: 0 0 12px; font-family: "Playfair Display", Georgia, serif; font-size: 1.08rem; color: #e8e0d5; letter-spacing: 0; }
+    .field { display: grid; gap: 6px; margin-bottom: 12px; }
+    .field label { color: #d7c8b8; font-size: .86rem; font-weight: 900; }
+    .field input, .field select, .field textarea { width: 100%; min-height: 48px; border: 1px solid #2a2a38; border-radius: 10px; padding: 10px 12px; font: inherit; background: #0f0f14; color: #e8e0d5; }
+    .field input::placeholder, .field textarea::placeholder { color: #857a70; }
+    .field textarea { min-height: 82px; resize: vertical; }
+    .product-grid-header { display: grid; grid-template-columns: minmax(0, 1fr) 110px 54px; gap: 8px; margin-bottom: 8px; color: #d7c8b8; font-size: .86rem; font-weight: 900; }
+    .product-grid-header span:last-child { color: transparent; }
+    .product-row { display: grid; grid-template-columns: minmax(0, 1fr) 110px 54px; gap: 8px; align-items: center; margin-bottom: 10px; }
+    .product-row .field { margin-bottom: 0; }
+    .product-row .field label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space:normal; border: 0; }
+    .icon-btn { width: 54px; height: 48px; border: 1px solid #2a2a38; border-radius: 10px; background: #15151d; color: #e8e0d5; font-weight: 900; align-self: center; }
+    .add-btn { width: 100%; min-height: 48px; border-radius: 10px; border: 1px dashed #C9A84C; background: #15151d; color: #e8e0d5; font-weight: 900; }
+    .sticky-submit { position: fixed; left: 0; right: 0; bottom: 0; background: rgba(15,15,20,.96); border-top: 1px solid #2a2a38; padding: 12px 14px; backdrop-filter: blur(14px); }
+    .sticky-submit-inner { max-width: 540px; margin: 0 auto; display: grid; gap: 8px; }
+    .primary-btn { min-height: 52px; border: 0; border-radius: 10px; background: #8B2252; color: #fff; font-weight: 900; box-shadow: 0 10px 20px rgba(139,34,82,.28); }
+    .secondary-link { text-align: center; color: #C9A84C; text-decoration: none; font-weight: 900; }
+    .messages { margin-bottom: 10px; }
+    .message { padding: 10px 12px; border-radius: 10px; background: #3a1829; color: #f8dce9; border: 1px solid #8B2252; font-weight: 800; }
+    @media (max-width: 420px) {
+        .product-grid-header, .product-row { grid-template-columns: minmax(0, 1fr) 86px 44px; }
+        .icon-btn { width: 44px; }
+    }

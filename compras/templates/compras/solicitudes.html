@@ -164,7 +164,7 @@
     </form>
     <details class="compras-command__details">
       <summary>Carga masiva de solicitudes</summary>
-      <div class="toolbar" style="margin: 12px 0;">
+      <div class="toolbar pd-u-a79f0861f7">
         <a class="btn btn-secondary" href="{% url 'compras:solicitudes_importar_plantilla' %}?format=xlsx">Descargar plantilla XLSX</a>
         <a class="btn btn-secondary" href="{% url 'compras:solicitudes_importar_plantilla' %}?format=csv">Descargar plantilla CSV</a>
       </div>
@@ -192,7 +192,7 @@
   <section class="card">
     {% include "components/section_header.html" with title="Maestro ERP" %}
     {% if enterprise_board.master_blocker_class_cards %}
-    <div class="card-header" style="padding:16px 0 8px 0;border:0;">Bloqueos del maestro por clase</div>
+    <div class="card-header pd-u-e001e3a03d">Bloqueos del maestro por clase</div>
     <div class="kpi-mini">
       {% for item in enterprise_board.master_blocker_class_cards %}
       <article class="kpi-card">
@@ -204,7 +204,7 @@
     </div>
     {% endif %}
     {% if enterprise_board.master_blocker_missing_cards %}
-    <div class="card-header" style="padding:16px 0 8px 0;border:0;">Bloqueos del maestro por dato faltante</div>
+    <div class="card-header pd-u-e001e3a03d">Bloqueos del maestro por dato faltante</div>
     <div class="kpi-mini">
       {% for item in enterprise_board.master_blocker_missing_cards %}
       <article class="kpi-card">
@@ -216,7 +216,7 @@
     </div>
     {% endif %}
     {% if enterprise_board.master_blocker_detail_rows %}
-    <div class="card-header" style="padding:16px 0 8px 0;border:0;">Detalle del maestro bloqueando solicitudes</div>
+    <div class="card-header pd-u-e001e3a03d">Detalle del maestro bloqueando solicitudes</div>
     <div class="table-responsive">
       <table class="table table-striped">
         <thead>

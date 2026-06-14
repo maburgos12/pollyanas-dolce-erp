@@ -33,7 +33,7 @@
   <div class="kpi-mini">
     <div class="kpi-card">
       <div class="kpi-label">Responsable principal</div>
-      <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
+      <div class="pd-u-4304c62622">{{ erp_command_center.owner }}</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
@@ -45,7 +45,7 @@
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Siguiente paso</div>
-      <div class="muted" style="margin:8px 0 10px;">{{ erp_command_center.next_step }}</div>
+      <div class="muted pd-u-332dbeaac1">{{ erp_command_center.next_step }}</div>
       <a class="btn btn-secondary btn-sm" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
     </div>
   </div>
@@ -292,9 +292,9 @@
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Siguiente prioridad</div>
-      <div style="font-weight:700; margin:8px 0 6px;">{{ maturity_summary.next_priority_title }}</div>
+      <div class="pd-u-06a806e885">{{ maturity_summary.next_priority_title }}</div>
       <div class="muted">{{ maturity_summary.next_priority_detail }}</div>
-      <div style="margin-top:10px;">
+      <div class="pd-u-d8a81eac84">
         <a class="btn btn-secondary btn-sm" href="{{ maturity_summary.next_priority_url }}">{{ maturity_summary.next_priority_cta }}</a>
       </div>
     </div>
@@ -367,9 +367,9 @@
             <td>{{ row.owner }}</td>
             <td>{{ row.status }}</td>
             <td class="text-end">{{ row.count }}</td>
-            <td style="min-width:160px;">
+            <td class="pd-u-1cf294634a">
               <div class="erp-progress">
-                <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="width: {{ row.completion }}%;"></div>
+                <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %} pd-js-width" data-pd-width="{{ row.completion }}%"></div>
               </div>
               <div class="muted mt-1">{{ row.completion }}%</div>
             </td>

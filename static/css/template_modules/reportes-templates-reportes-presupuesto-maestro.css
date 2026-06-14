@@ -1,0 +1,160 @@
+/* Extracted from reportes/templates/reportes/presupuesto_maestro.html */
+.budget-master-shell { display:grid; gap:1rem; }
+  .budget-master-toolbar {
+    display:flex;
+    gap:.75rem;
+    align-items:end;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    padding:1rem;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#fff;
+  }
+  .budget-master-controls { display:flex; gap:.7rem; align-items:end; flex-wrap:wrap; }
+  .budget-master-field { display:grid; gap:.25rem; min-width:145px; }
+  .budget-master-field label { font-size:.78rem; color:var(--muted); font-weight:700; text-transform:uppercase; }
+  .budget-master-field input,
+  .budget-master-field select {
+    height:38px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:0 .65rem;
+    background:#fff;
+  }
+  .budget-master-actions { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+  .budget-master-button {
+    height:38px;
+    border:0;
+    border-radius:6px;
+    padding:0 .85rem;
+    background:#17324d;
+    color:#fff;
+    font-weight:700;
+    cursor:pointer;
+  }
+  .budget-master-button.is-ghost {
+    border:1px solid var(--line);
+    background:#fff;
+    color:#17324d;
+  }
+  .budget-master-summary {
+    display:grid;
+    grid-template-columns:repeat(4, minmax(0, 1fr));
+    gap:.75rem;
+  }
+  .budget-master-kpi {
+    padding:1rem;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#fff;
+  }
+  .budget-master-kpi span { display:block; color:var(--muted); font-size:.78rem; font-weight:700; text-transform:uppercase; }
+  .budget-master-kpi strong { display:block; margin-top:.25rem; font-size:1.25rem; color:#17324d; }
+  .budget-master-table-wrap {
+    overflow:auto;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#fff;
+  }
+  .budget-master-table {
+    width:100%;
+    border-collapse:separate;
+    border-spacing:0;
+    min-width:1180px;
+  }
+  .budget-master-table th,
+  .budget-master-table td {
+    padding:.55rem .65rem;
+    border-bottom:1px solid var(--line);
+    border-right:1px solid var(--line);
+    vertical-align:middle;
+    white-space:normal;
+  }
+  .budget-master-table th {
+    position:sticky;
+    top:0;
+    background:#f8fafc;
+    color:#44546a;
+    font-size:.75rem;
+    text-transform:uppercase;
+    z-index:1;
+  }
+  .budget-master-table th:first-child,
+  .budget-master-table td:first-child {
+    position:sticky;
+    left:0;
+    background:#fff;
+    z-index:2;
+    min-width:260px;
+  }
+  .budget-master-table th:first-child { background:#f8fafc; z-index:3; }
+  .budget-master-cell {
+    width:112px;
+    height:34px;
+    border:1px solid transparent;
+    border-radius:6px;
+    padding:0 .45rem;
+    text-align:right;
+    background:#f7f9fb;
+    font-variant-numeric:tabular-nums;
+  }
+  .budget-master-cell:focus {
+    outline:2px solid rgba(23,50,77,.25);
+    border-color:#17324d;
+    background:#fff;
+  }
+  .budget-master-cell.is-saving { background:#fff7d6; }
+  .budget-master-cell.is-saved { background:#e9f8ee; }
+  .budget-master-area-row td {
+    background:#eef3f7;
+    color:#17324d;
+    font-weight:800;
+  }
+  .budget-master-total-row td {
+    background:#f8fafc;
+    color:#17324d;
+    font-weight:800;
+  }
+  .budget-master-row.is-income td { background:#f3fbf6; }
+  .budget-master-row.is-income td:first-child { background:#e9f8ee; }
+  .budget-master-row.is-expense td,
+  .budget-master-row.is-cost td,
+  .budget-master-row.is-capex td { background:#fff7f7; }
+  .budget-master-row.is-expense td:first-child,
+  .budget-master-row.is-cost td:first-child,
+  .budget-master-row.is-capex td:first-child { background:#feecec; }
+  .budget-master-type.is-income { color:#16794a; }
+  .budget-master-type.is-expense,
+  .budget-master-type.is-cost,
+  .budget-master-type.is-capex { color:#b42318; }
+  .budget-master-type { color:var(--muted); font-size:.8rem; }
+  .budget-master-consolidado {
+    display:grid;
+    gap:.65rem;
+    padding:1rem;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#fff;
+  }
+  .budget-master-var { font-weight:800; }
+  .budget-master-var.success { color:#157347; }
+  .budget-master-var.warning { color:#997404; }
+  .budget-master-var.danger { color:#b02a37; }
+  .budget-master-import {
+    display:flex;
+    gap:.5rem;
+    align-items:end;
+    flex-wrap:wrap;
+    padding:1rem;
+    border:1px dashed var(--line);
+    border-radius:8px;
+    background:#fbfcfe;
+  }
+  @media (max-width: 980px) {
+    .budget-master-summary { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 640px) {
+    .budget-master-summary { grid-template-columns:1fr; }
+    .budget-master-field { min-width:100%; }
+  }

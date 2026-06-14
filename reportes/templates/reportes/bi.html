@@ -877,12 +877,12 @@
             <div class="bi-branch-bars">
               <div class="bi-branch-bar">
                 <div class="bi-branch-bar-label">Peso en venta</div>
-                <div class="bi-bar-track"><div class="bi-bar-fill is-wine" style="width: {{ row.sales_share_pct|default:0|floatformat:1 }}%;"></div></div>
+                <div class="bi-bar-track"><div class="bi-bar-fill is-wine pd-js-width" data-pd-width="{{ row.sales_share_pct|default:0|floatformat:1 }}%"></div></div>
                 <div class="bi-branch-bar-value">{% if row.sales_share_pct is not None %}{{ row.sales_share_pct|floatformat:1 }}%{% else %}N/D{% endif %}</div>
               </div>
               <div class="bi-branch-bar">
                 <div class="bi-branch-bar-label">Peso en contribución</div>
-                <div class="bi-bar-track"><div class="bi-bar-fill is-green" style="width: {{ row.contribution_share_pct|default:0|floatformat:1 }}%;"></div></div>
+                <div class="bi-bar-track"><div class="bi-bar-fill is-green pd-js-width" data-pd-width="{{ row.contribution_share_pct|default:0|floatformat:1 }}%"></div></div>
                 <div class="bi-branch-bar-value">{% if row.contribution_share_pct is not None %}{{ row.contribution_share_pct|floatformat:1 }}%{% else %}N/D{% endif %}</div>
               </div>
             </div>
@@ -1649,7 +1649,7 @@
               <div class="bi-bar-row">
                 <span>${row.label}</span>
                 <div class="bi-bar-track">
-                  <div class="bi-bar-fill ${row.tone || "is-wine"}" style="width:${Math.max(4, Math.abs(asNumber(row.value)) / max * 100)}%"></div>
+                  <div class="bi-bar-fill ${row.tone || pd-js-width"is-wine"}" data-pd-width="${Math.max(4, Math.abs(asNumber(row.value)) / max * 100)}%"></div>
                 </div>
                 <strong>${row.display}</strong>
               </div>

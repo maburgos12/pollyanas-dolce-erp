@@ -4,43 +4,7 @@
 {% block page_title %}RRHH · Vacantes{% endblock %}
 
 {% block extra_css %}
-<style>
-  .vacantes-page { display: grid; gap: 16px; }
-  .vacantes-head {
-    align-items: start;
-    background: #fff;
-    border: 1px solid var(--rosa);
-    border-radius: 8px;
-    display: grid;
-    gap: 14px;
-    grid-template-columns: minmax(0, 1fr) auto;
-    padding: 18px;
-  }
-  .vacantes-title { color: var(--vino); font-family: "Playfair Display", serif; font-size: 25px; font-weight: 800; }
-  .vacantes-copy { color: var(--texto-light); margin-top: 4px; max-width: 760px; }
-  .vacantes-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
-  .vacantes-stats { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(120px, 1fr)); }
-  .vacantes-stat { background: #fbf6f8; border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; }
-  .vacantes-stat strong { color: var(--vino); display: block; font-size: 22px; line-height: 1; }
-  .vacantes-stat span { color: var(--texto-light); font-size: 12px; font-weight: 800; text-transform: uppercase; }
-  .vacantes-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 16px; }
-  .vacantes-card h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
-  .vacantes-filters { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
-  .vacantes-table { min-width: 1080px; width: 100%; border-collapse: collapse; }
-  .vacantes-table th, .vacantes-table td { border-bottom: 1px solid var(--rosa); padding: 10px; text-align: left; vertical-align: top; }
-  .vacantes-table th { color: var(--vino); font-size: 12px; text-transform: uppercase; }
-  .vacantes-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }
-  .vacantes-muted { color: var(--texto-light); font-size: 13px; }
-  .vacantes-link { color: var(--vino); font-weight: 900; text-decoration: none; }
-  @media (max-width: 1100px) {
-    .vacantes-head { grid-template-columns: 1fr; }
-    .vacantes-actions { justify-content: flex-start; }
-    .vacantes-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  }
-  @media (max-width: 680px) {
-    .vacantes-stats { grid-template-columns: 1fr; }
-  }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-vacantes.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}

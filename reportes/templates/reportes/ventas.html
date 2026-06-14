@@ -617,7 +617,7 @@
               <div class="bi-bar-row">
                 <span>${row.label}</span>
                 <div class="bi-bar-track">
-                  <div class="bi-bar-fill ${row.tone || "is-wine"}" style="width:${Math.max(4, Math.abs(asNumber(row.value)) / max * 100)}%"></div>
+                  <div class="bi-bar-fill ${row.tone || pd-js-width"is-wine"}" data-pd-width="${Math.max(4, Math.abs(asNumber(row.value)) / max * 100)}%"></div>
                 </div>
                 <strong>${row.display || row.delta_label || ""}</strong>
               </div>

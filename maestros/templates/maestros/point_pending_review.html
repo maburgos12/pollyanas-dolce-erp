@@ -101,7 +101,7 @@
               <td>
                 {{ p.fuzzy_sugerencia|default:"—" }}
                 {% if p.canonical_target %}
-                <div class="text-muted" style="font-size:.82rem;margin-top:3px;">
+                <div class="text-muted pd-u-f73df2361e">
                   Maestro: <strong>{{ p.canonical_target.nombre }}</strong>
                   {% if p.canonical_target_variants > 1 %}
                   <span class="badge bg-warning">{{ p.canonical_target_variants }} variantes</span>
@@ -119,7 +119,7 @@
         </table>
       </div>
 
-      <div class="recipes-filters" style="margin-top:12px;flex-wrap:wrap;">
+      <div class="recipes-filters pd-u-c2a8a8123e">
         {% if tipo == "INSUMO" %}
         <select class="form-select" name="insumo_id">
           <option value="">Liberar seleccionados contra artículo maestro...</option>
@@ -134,7 +134,7 @@
           <span>Crear equivalencia automática</span>
         </label>
         <button class="btn btn-primary" type="submit" name="action" value="resolve_insumos">Liberar insumos</button>
-        <input class="form-control" type="number" name="auto_score_min" min="0" max="100" step="0.1" value="90" placeholder="Nivel auto" style="max-width:110px;">
+        <input class="form-control pd-u-c3d602f588" type="number" name="auto_score_min" min="0" max="100" step="0.1" value="90" placeholder="Nivel auto">
         <button class="btn btn-secondary" type="submit" name="action" value="resolve_sugerencias_insumos">Liberar propuestas</button>
         <button class="btn btn-secondary" type="submit" name="action" value="mark_historical_selected">Marcar histórico</button>
         <button class="btn btn-secondary" type="submit" name="action" value="mark_seasonal_selected">Marcar temporada</button>
@@ -197,7 +197,7 @@
             <td>
               {{ p.fuzzy_sugerencia|default:"—" }}
               {% if p.canonical_target %}
-              <div class="text-muted" style="font-size:.82rem;margin-top:3px;">
+              <div class="text-muted pd-u-f73df2361e">
                 Maestro: <strong>{{ p.canonical_target.nombre }}</strong>
                 {% if p.canonical_target_variants > 1 %}
                 <span class="badge bg-warning">{{ p.canonical_target_variants }} variantes</span>

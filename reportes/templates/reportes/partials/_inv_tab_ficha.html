@@ -15,10 +15,10 @@
       <div><label class="inv-label">Fecha apertura</label><input class="inv-input" type="date" name="fecha_apertura" value="{% if project.fecha_apertura %}{{ project.fecha_apertura|date:'Y-m-d' }}{% endif %}"></div>
       <div><label class="inv-label">Sucursal relacionada</label><select class="inv-select" name="sucursal_relacionada_id"><option value="">Sin relación</option>{% for sucursal in sucursales %}<option value="{{ sucursal.id }}"{% if project.sucursal_relacionada_id == sucursal.id %} selected{% endif %}>{{ sucursal.nombre }}</option>{% endfor %}</select></div>
       <div><label class="inv-label">Competidores conocidos</label><input class="inv-input" name="competidores_conocidos" value="{{ ubicacion.competidores_conocidos|default:'' }}"></div>
-      <div style="grid-column:1/-1"><label class="inv-label">Descripción de ubicación</label><textarea class="inv-textarea" name="descripcion_ubicacion">{{ ubicacion.descripcion|default:'' }}</textarea></div>
-      <div style="grid-column:1/-1"><label class="inv-label">Observaciones</label><textarea class="inv-textarea" name="observaciones">{{ project.observaciones }}</textarea></div>
+      <div class="pd-u-97294b207c"><label class="inv-label">Descripción de ubicación</label><textarea class="inv-textarea" name="descripcion_ubicacion">{{ ubicacion.descripcion|default:'' }}</textarea></div>
+      <div class="pd-u-97294b207c"><label class="inv-label">Observaciones</label><textarea class="inv-textarea" name="observaciones">{{ project.observaciones }}</textarea></div>
     </div>
-    <div class="inv-actions" style="margin-top:1rem"><button class="inv-button" type="submit">Guardar ficha</button></div>
+    <div class="inv-actions pd-u-0cf8f93b0e"><button class="inv-button" type="submit">Guardar ficha</button></div>
   </form>
 </section>
 

@@ -6,38 +6,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@syncfy/authentication-widget@{{ widget_version }}/dist/syncfy-authentication-widget.css">
-<style>
-  .syncfy-page { display: grid; gap: 16px; }
-  .syncfy-header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
-  .syncfy-header h1 { margin: 0; color: #1f2937; font-size: 1.65rem; letter-spacing: 0; }
-  .syncfy-header p { margin: 4px 0 0; color: #64748b; max-width: 780px; }
-  .syncfy-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-  .syncfy-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
-  .syncfy-bank { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; display: grid; gap: 12px; }
-  .syncfy-bank-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
-  .syncfy-bank h2 { margin: 0; color: #111827; font-size: 1.05rem; letter-spacing: 0; }
-  .syncfy-bank small { color: #64748b; word-break: break-all; }
-  .syncfy-status { display: inline-flex; align-items: center; min-height: 28px; padding: 4px 9px; border-radius: 999px; font-weight: 800; font-size: .78rem; }
-  .syncfy-status.is-ready { background: #dcfce7; color: #166534; }
-  .syncfy-status.is-linked { background: #dbeafe; color: #1d4ed8; }
-  .syncfy-status.is-pending { background: #fef3c7; color: #92400e; }
-  .syncfy-status.is-error { background: #fee2e2; color: #991b1b; }
-  .syncfy-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .syncfy-meta div { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; min-width: 0; }
-  .syncfy-meta span { display: block; color: #64748b; font-size: .78rem; font-weight: 800; text-transform: uppercase; }
-  .syncfy-meta strong { display: block; margin-top: 3px; color: #111827; word-break: break-all; }
-  .syncfy-widget-shell { min-height: 560px; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
-  #syncfy-widget { min-height: 560px; }
-  .syncfy-message { border-radius: 8px; padding: 10px 12px; font-weight: 800; }
-  .syncfy-message.is-error { background: #fee2e2; color: #991b1b; }
-  .syncfy-message.is-info { background: #e0f2fe; color: #075985; }
-  .syncfy-message:empty { display: none; }
-  @media (max-width: 760px) {
-    .syncfy-header { display: grid; }
-    .syncfy-actions { justify-content: stretch; }
-    .syncfy-actions .btn { width: 100%; justify-content: center; }
-  }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/syncfy-client-templates-syncfy-client-bancos.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}

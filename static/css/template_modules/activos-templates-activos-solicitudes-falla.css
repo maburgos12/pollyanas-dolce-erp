@@ -1,0 +1,31 @@
+/* Extracted from activos/templates/activos/solicitudes_falla.html */
+.falla-card {
+  background: #fff8f0;
+  border: 2px solid var(--amarillo);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 12px;
+}
+.falla-card.critica { border-color: var(--rojo); background: #fff0f0; }
+.urgencia-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.urgencia-CRITICA { background: var(--rojo); color: #fff; }
+.urgencia-ALTA    { background: #ff6b35; color: #fff; }
+.urgencia-MEDIA   { background: var(--amarillo); color: #3D2B2B; }
+.urgencia-BAJA    { background: var(--verde); color: #fff; }
+.mobile-form-group { margin-bottom: 16px; }
+.mobile-form-group label { display: block; font-weight: 700; margin-bottom: 6px; color: var(--texto); }
+.mobile-form-group select,
+.mobile-form-group textarea,
+.mobile-form-group input { width: 100%; font-size: 1rem; padding: 12px; border-radius: 8px; border: 1.5px solid #d0c0c0; background: #fff; }
+.mobile-form-group textarea { min-height: 100px; resize: vertical; }
+.btn-grande { width: 100%; padding: 16px; font-size: 1.1rem; font-weight: 700; border-radius: 10px; }
+.falla-folio { font-family: monospace; font-weight: 700; color: var(--vino); }
+.falla-equipo { font-size: 1.05rem; font-weight: 700; margin: 4px 0; }
+.falla-meta { font-size: 0.85rem; color: var(--texto-light); margin-top: 6px; }

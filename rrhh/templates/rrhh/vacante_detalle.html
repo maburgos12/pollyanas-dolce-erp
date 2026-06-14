@@ -4,161 +4,7 @@
 {% block page_title %}RRHH · {{ vacante.folio }}{% endblock %}
 
 {% block extra_css %}
-<style>
-  .vd { display: grid; gap: 16px; }
-  .vd-panel { background: #fff; border: 1px solid var(--rosa); border-radius: 10px; padding: 20px; }
-  .vd-panel h2 { color: var(--vino); font-family: "Playfair Display", serif; font-size: 17px; margin: 0 0 14px; }
-
-  /* Cabecera */
-  .vd-head { display: grid; gap: 12px; grid-template-columns: 1fr auto; align-items: start; }
-  .vd-title { color: var(--vino); font-family: "Playfair Display", serif; font-size: 22px; font-weight: 800; }
-  .vd-subtitle { color: var(--texto-light); font-size: 13px; margin-top: 3px; }
-  .vd-estado-badge { background: #f7edf2; border-radius: 999px; color: var(--vino);
-    font-size: 12px; font-weight: 900; padding: 6px 12px; }
-
-  /* Pasos del proceso */
-  .vd-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; margin-bottom: 14px; }
-  .vd-step { border-top: 4px solid #e8d8e4; border-radius: 0 0 4px 4px; padding: 8px 6px 6px; }
-  .vd-step .step-num { color: var(--texto-light); font-size: 10px; font-weight: 900; text-transform: uppercase; }
-  .vd-step .step-label { color: var(--texto); font-size: 12px; font-weight: 700; margin-top: 3px; }
-  .vd-step.done { border-color: #66bb6a; }
-  .vd-step.done .step-label { color: #2e7d32; }
-  .vd-step.current { border-color: var(--vino); }
-  .vd-step.current .step-label { color: var(--vino); }
-  .vd-step.attention { border-color: #fb8c00; }
-  .vd-step.attention .step-label { color: #e65100; }
-  .vd-step.blocked { border-color: #e53935; }
-  .vd-step.blocked .step-label { color: #b71c1c; }
-  .vd-step.pending .step-label { color: var(--texto-light); }
-
-  .vd-flow-meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-  .vd-kv { background: var(--gris-suave); border-radius: 6px; padding: 10px 12px; }
-  .vd-kv span { color: var(--texto-light); display: block; font-size: 10px; font-weight: 900; text-transform: uppercase; }
-  .vd-kv strong { color: var(--texto); display: block; font-size: 13px; margin-top: 3px; }
-
-  /* Grid de datos */
-  .vd-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-  .vd-grid .vd-kv { background: var(--gris-suave); }
-  @media (max-width: 900px) { .vd-grid { grid-template-columns: repeat(2, 1fr); } .vd-flow-meta { grid-template-columns: 1fr; } }
-  @media (max-width: 500px) { .vd-grid { grid-template-columns: 1fr; } .vd-head { grid-template-columns: 1fr; } }
-
-  /* Bloque acción requerida */
-  .vd-accion-banner {
-    background: linear-gradient(135deg, #f7edf2 0%, #fff 100%);
-    border: 2px solid var(--vino); border-radius: 10px; padding: 18px 20px;
-  }
-  .vd-accion-banner h2 { color: var(--vino); font-size: 15px; margin: 0 0 4px; }
-  .vd-accion-quien { color: var(--texto-light); font-size: 13px; margin-bottom: 14px; }
-  .vd-action-blocks { display: grid; gap: 12px; }
-  .vd-action-block { border-top: 1px solid var(--rosa); padding-top: 12px; }
-  .vd-action-block:first-child { border-top: none; padding-top: 0; }
-  .vd-action-block h3 { color: var(--texto); font-size: 13px; font-weight: 900; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .03em; }
-  .vd-action-desc { color: var(--texto-light); font-size: 13px; margin: 0 0 10px; }
-  .vd-field-label { color: var(--texto-light); display: block; font-size: 11px; font-weight: 900; margin-bottom: 4px; text-transform: uppercase; }
-  .vd-cover-row { display: grid; grid-template-columns: 2fr 1fr 2fr; gap: 10px; }
-  .vd-cover-row select,
-  .vd-cover-row input { width: 100%; }
-  .vd-action-block-secondary { background: var(--gris-suave); border-radius: 6px; margin-top: 4px; padding: 12px; }
-  .vd-action-block-secondary h3 { color: var(--texto-light); }
-  .vd-action-forms { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
-  .vd-action-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-  .vd-action-form input[type="text"],
-  .vd-action-form select,
-  .vd-action-form input[type="date"] { min-width: 160px; }
-  @media (max-width: 800px) { .vd-cover-row { grid-template-columns: 1fr; } }
-
-  /* Seguimiento — chips de etapa */
-  .seg-etapas { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
-  .seg-chip {
-    align-items: center; background: var(--gris-suave); border: 2px solid transparent;
-    border-radius: 999px; cursor: pointer; display: flex; gap: 6px;
-    font-size: 12px; font-weight: 700; padding: 6px 14px; transition: all .15s;
-    user-select: none;
-  }
-  .seg-chip:hover { background: var(--rosa); border-color: var(--vino); color: var(--vino); }
-  .seg-chip.active { background: var(--vino); border-color: var(--vino); color: #fff; }
-  .seg-chip.chip-contratado.active { background: #2e7d32; border-color: #2e7d32; }
-  .seg-chip.chip-descartado.active { background: #b71c1c; border-color: #b71c1c; }
-
-  .seg-form-fields { display: none; }
-  .seg-form-fields.visible { display: grid; gap: 10px; }
-  .seg-form-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
-  .seg-form-row.full { grid-template-columns: 1fr; }
-  .seg-form-label { color: var(--texto-light); display: block; font-size: 11px; font-weight: 900; margin-bottom: 3px; text-transform: uppercase; }
-  .seg-form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
-
-  /* Timeline de seguimiento */
-  .seg-timeline { display: grid; gap: 0; }
-  .seg-item { display: grid; grid-template-columns: 28px 1fr; gap: 0 12px; padding-bottom: 14px; position: relative; }
-  .seg-item:last-child { padding-bottom: 0; }
-  .seg-item:last-child .seg-line { display: none; }
-  .seg-dot-col { display: flex; flex-direction: column; align-items: center; }
-  .seg-dot { border-radius: 50%; flex-shrink: 0; height: 12px; margin-top: 3px; width: 12px; }
-  .seg-line { background: var(--rosa); flex: 1; margin-top: 3px; width: 2px; }
-  .seg-content { padding-bottom: 4px; }
-  .seg-etapa-label { font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: .03em; }
-  .seg-candidato { color: var(--texto); font-size: 13px; font-weight: 700; margin-top: 2px; }
-  .seg-nota { color: var(--texto-light); font-size: 13px; margin-top: 2px; }
-  .seg-meta { color: var(--texto-light); font-size: 11px; margin-top: 3px; }
-
-  /* Colores por etapa */
-  .dot-postulante    { background: #90caf9; } .label-postulante    { color: #1565c0; }
-  .dot-entrevista_tel { background: #80cbc4; } .label-entrevista_tel { color: #00695c; }
-  .dot-filtro        { background: #ffcc80; } .label-filtro        { color: #e65100; }
-  .dot-entrevista_pres { background: #ce93d8; } .label-entrevista_pres { color: #6a1b9a; }
-  .dot-seleccionado  { background: #f48fb1; } .label-seleccionado  { color: #880e4f; }
-  .dot-documentos    { background: #fff176; } .label-documentos    { color: #f57f17; }
-  .dot-prueba        { background: #a5d6a7; } .label-prueba        { color: #1b5e20; }
-  .dot-contratado    { background: #66bb6a; } .label-contratado    { color: #1b5e20; }
-  .dot-descartado    { background: #ef9a9a; } .label-descartado    { color: #b71c1c; }
-  .dot-comentario    { background: #b0bec5; } .label-comentario    { color: #455a64; }
-  .dot-busqueda      { background: #90caf9; } .label-busqueda      { color: #1565c0; }
-  .dot-contacto      { background: #80cbc4; } .label-contacto      { color: #00695c; }
-  .dot-entrevista    { background: #ce93d8; } .label-entrevista    { color: #6a1b9a; }
-  .dot-oferta        { background: #ffcc80; } .label-oferta        { color: #e65100; }
-
-  /* Candidatos */
-  .cand-add-details { margin-bottom: 16px; }
-  .cand-add-summary {
-    align-items: center; color: var(--vino); cursor: pointer; display: flex;
-    font-size: 13px; font-weight: 900; gap: 6px; list-style: none; padding: 8px 0;
-  }
-  .cand-add-summary::-webkit-details-marker { display: none; }
-  .cand-add-form { background: var(--gris-suave); border-radius: 8px; margin-top: 8px; padding: 14px; }
-  .cand-add-grid { display: grid; grid-template-columns: 2fr 1fr 2fr 1fr; gap: 10px; }
-  @media (max-width: 900px) { .cand-add-grid { grid-template-columns: 1fr 1fr; } }
-  @media (max-width: 500px) { .cand-add-grid { grid-template-columns: 1fr; } }
-
-  .cand-list { display: grid; gap: 10px; }
-  .cand-card { border: 1px solid var(--rosa); border-radius: 8px; overflow: hidden; }
-  .cand-card-head { align-items: flex-start; display: flex; gap: 12px; justify-content: space-between; padding: 12px 14px; }
-  .cand-info { flex: 1; min-width: 0; }
-  .cand-nombre { color: var(--texto); display: block; font-size: 14px; font-weight: 700; }
-  .cand-meta { color: var(--texto-light); display: block; font-size: 12px; margin-top: 2px; }
-  .cand-notas { color: var(--texto-light); display: block; font-size: 12px; font-style: italic; margin-top: 3px; }
-  .cand-badge { border-radius: 999px; font-size: 11px; font-weight: 900; padding: 4px 10px; }
-  .cand-badge-entrevista_pres { background: #ede7f6; color: #4527a0; }
-  .cand-badge-seleccionado   { background: #fff8e1; color: #e65100; }
-  .cand-badge-documentos     { background: #e8f5e9; color: #1b5e20; }
-  .cand-badge-prueba         { background: #e3f2fd; color: #0d47a1; }
-  .cand-badge-contratado     { background: #e8f5e9; color: #1b5e20; }
-  .cand-badge-descartado     { background: #fce4ec; color: #b71c1c; }
-  .cand-etapa-contratado .cand-card-head { background: #f1f8f1; }
-  .cand-etapa-descartado { opacity: .65; }
-  .cand-actions { border-top: 1px solid var(--rosa); display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; padding: 10px 14px; background: #fffafb; }
-  .cand-action-form { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; }
-  .cand-action-form select { min-width: 180px; }
-  .cand-action-form input[type="text"] { min-width: 200px; }
-  .cand-timeline { border-top: 1px dashed var(--rosa); padding: 8px 14px; display: grid; gap: 6px; }
-  .cand-seg-item { align-items: baseline; display: flex; gap: 8px; font-size: 12px; }
-  .seg-dot-sm { border-radius: 50%; flex-shrink: 0; height: 8px; margin-top: 3px; width: 8px; }
-
-  /* Coberturas e historial */
-  .vd-list { display: grid; gap: 8px; }
-  .vd-list-item { border-bottom: 1px solid var(--rosa); display: grid; gap: 2px; padding: 8px 0; }
-  .vd-list-item:last-child { border-bottom: none; }
-  .vd-muted { color: var(--texto-light); font-size: 13px; }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-vacante-detalle.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
@@ -170,7 +16,7 @@
 
 {% if messages %}
   {% for msg in messages %}
-    <div class="alert alert-{{ msg.tags|default:'info' }}" style="margin-bottom:12px;">{{ msg }}</div>
+    <div class="alert alert-{{ msg.tags|default:'info' }} pd-u-3ef1fa1aa1">{{ msg }}</div>
   {% endfor %}
 {% endif %}
 
@@ -212,7 +58,7 @@
   {# ── Acción requerida (solo si hay algo que hacer) ── #}
   {% if show_rrhh_review_actions or show_reenviar_revision or show_authorize_actions or show_recruitment_action or show_cover_action or show_pause_action or show_cancel_action %}
   <div class="vd-accion-banner">
-    <h2>⚡ Acción requerida</h2>
+    <h2>Acción requerida</h2>
     <p class="vd-accion-quien">Responsable: <strong>{{ workflow.responsable }}</strong> · {{ workflow.siguiente }}</p>
     <div class="vd-action-blocks">
 
@@ -254,12 +100,12 @@
           <form class="vd-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
             {% csrf_token %}<input type="hidden" name="action" value="aprobar">
             <input type="text" name="comentario" placeholder="Comentario (opcional)">
-            <button class="btn btn-primary" type="submit">✓ Aprobar</button>
+            <button class="btn btn-primary" type="submit">OK Aprobar</button>
           </form>
           <form class="vd-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
             {% csrf_token %}<input type="hidden" name="action" value="rechazar">
             <input type="text" name="comentario" placeholder="Motivo del rechazo">
-            <button class="btn btn-secondary" type="submit">✕ Rechazar</button>
+            <button class="btn btn-secondary" type="submit">X Rechazar</button>
           </form>
         </div>
       </div>
@@ -281,7 +127,7 @@
       <div class="vd-action-block">
         <h3>Registrar cobertura</h3>
         <p class="vd-action-desc">Ya encontraste al candidato. Selecciona al empleado que cubre esta plaza para cerrar la vacante.</p>
-        <form method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}" style="display:grid;gap:10px;">
+        <form method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}" class="pd-u-c90bcffeab">
           {% csrf_token %}<input type="hidden" name="action" value="cubrir">
           <div class="vd-cover-row">
             <div>
@@ -302,7 +148,7 @@
               <input type="text" name="comentario" placeholder="Ej. contrato temporal, periodo de prueba..." >
             </div>
           </div>
-          <div><button class="btn btn-primary" type="submit">✓ Confirmar cobertura</button></div>
+          <div><button class="btn btn-primary" type="submit">OK Confirmar cobertura</button></div>
         </form>
       </div>
       {% endif %}
@@ -322,7 +168,7 @@
           <form class="vd-action-form" method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}">
             {% csrf_token %}<input type="hidden" name="action" value="cancelar">
             <input type="text" name="comentario" placeholder="Motivo de cancelación">
-            <button class="btn btn-secondary" type="submit">✕ Cancelar solicitud</button>
+            <button class="btn btn-secondary" type="submit">X Cancelar solicitud</button>
           </form>
           {% endif %}
         </div>
@@ -347,13 +193,13 @@
       <div class="vd-kv"><span>Capturó</span><strong>{{ vacante.creado_por.get_full_name|default:vacante.creado_por.username|default:"—" }}</strong></div>
     </div>
     {% if vacante.motivo_solicitud %}
-    <div style="margin-top:14px;">
-      <div style="font-size:11px;font-weight:900;color:var(--texto-light);text-transform:uppercase;margin-bottom:5px;">Justificación</div>
-      <p style="margin:0;font-size:14px;color:var(--texto);">{{ vacante.motivo_solicitud }}</p>
+    <div class="pd-u-88b9d5c614">
+      <div class="pd-u-a796b2a246">Justificación</div>
+      <p class="pd-u-9da64f13f4">{{ vacante.motivo_solicitud }}</p>
     </div>
     {% endif %}
     {% if vacante.sugerencias %}
-    <p class="vd-muted" style="margin-top:8px;">{{ vacante.sugerencias }}</p>
+    <p class="vd-muted pd-u-b1ecc496e0">{{ vacante.sugerencias }}</p>
     {% endif %}
   </div>
 
@@ -407,11 +253,11 @@
             </select>
           </div>
         </div>
-        <div style="margin-top:8px">
+        <div class="pd-u-b1ecc496e0">
           <label class="vd-field-label">Notas iniciales (opcional)</label>
           <input type="text" name="comentario" placeholder="Ej. referido por Paula, tiene experiencia en..." maxlength="300">
         </div>
-        <div style="margin-top:10px">
+        <div class="pd-u-d8a81eac84">
           <button class="btn btn-primary btn-sm" type="submit">Agregar candidato</button>
         </div>
       </form>
@@ -470,9 +316,9 @@
           <div class="cand-seg-item">
             <div class="seg-dot seg-dot-sm dot-{{ seg.etapa }}"></div>
             <div>
-              <span class="seg-etapa-label label-{{ seg.etapa }}" style="font-size:11px;">{{ seg.get_etapa_display }}</span>
+              <span class="seg-etapa-label label-{{ seg.etapa }} pd-u-e48b05836a">{{ seg.get_etapa_display }}</span>
               · <span class="vd-muted">{{ seg.comentario }}</span>
-              <span class="vd-muted" style="font-size:11px;"> · {{ seg.fecha|date:"d/m/Y" }}</span>
+              <span class="vd-muted pd-u-e48b05836a"> · {{ seg.fecha|date:"d/m/Y" }}</span>
             </div>
           </div>
           {% endfor %}
@@ -483,7 +329,7 @@
       {% endfor %}
     </div>
     {% else %}
-    <p class="vd-muted" style="margin-top:12px;">Aún no hay candidatos registrados. Agrega el primero con el botón de arriba.</p>
+    <p class="vd-muted pd-u-9374e84210">Aún no hay candidatos registrados. Agrega el primero con el botón de arriba.</p>
     {% endif %}
   </div>
   {% endif %}
@@ -495,7 +341,7 @@
     <h2>Notas generales del proceso</h2>
 
     {% if show_tracking_form %}
-    <form method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}" style="margin-bottom:16px;">
+    <form method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}" class="pd-u-79a1c5a5db">
       {% csrf_token %}
       <input type="hidden" name="action" value="seguimiento">
       <input type="hidden" name="etapa" value="comentario">
@@ -509,7 +355,7 @@
           <input type="date" name="fecha" value="{% now 'Y-m-d' %}">
         </div>
       </div>
-      <div class="seg-form-actions" style="margin-top:8px;">
+      <div class="seg-form-actions pd-u-b1ecc496e0">
         <button class="btn btn-secondary btn-sm" type="submit">Guardar nota</button>
       </div>
     </form>
@@ -538,13 +384,13 @@
 
   {# ── Registrar cobertura (al final del flujo de reclutamiento) ── #}
   {% if can_manage_vacantes and vacante.estado == 'reclutamiento' %}
-  <div class="vd-panel" style="border-color: var(--vino);">
+  <div class="vd-panel pd-u-9ffad9552c">
     <h2>¿Ya tienes al candidato? Registra la cobertura</h2>
-    <p style="color:var(--texto-light);font-size:13px;margin:0 0 14px;">
+    <p class="pd-u-30f7bf62ad">
       Completa este paso una vez que el candidato seleccionado va a incorporarse.
       Esto cierra la vacante.
     </p>
-    <form method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}" style="display:grid;gap:10px;">
+    <form method="post" action="{% url 'rrhh:rrhh_vacante_accion' vacante.id %}" class="pd-u-c90bcffeab">
       {% csrf_token %}<input type="hidden" name="action" value="cubrir">
       <div class="vd-cover-row">
         <div>
@@ -565,7 +411,7 @@
           <input type="text" name="comentario" placeholder="Ej. contrato temporal, periodo de prueba...">
         </div>
       </div>
-      <div><button class="btn btn-primary" type="submit">✓ Confirmar cobertura y cerrar vacante</button></div>
+      <div><button class="btn btn-primary" type="submit">OK Confirmar cobertura y cerrar vacante</button></div>
     </form>
   </div>
   {% endif %}

@@ -17,7 +17,7 @@
   <div class="kpi-grid kpi-mini">
     <article class="kpi-card">
       <div class="kpi-label">Responsable principal</div>
-      <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
+      <div class="pd-u-4304c62622">{{ erp_command_center.owner }}</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
@@ -29,7 +29,7 @@
     </article>
     <article class="kpi-card">
       <div class="kpi-label">Siguiente paso</div>
-      <div class="muted" style="margin:8px 0 10px;">{{ erp_command_center.next_step }}</div>
+      <div class="muted pd-u-332dbeaac1">{{ erp_command_center.next_step }}</div>
       <a class="btn btn-secondary btn-small" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
     </article>
   </div>
@@ -41,7 +41,7 @@
     <table class="table">
       <tbody>
         <tr>
-          <td style="width:28%;"><strong>Documento</strong></td>
+          <td class="pd-u-e5897dceea"><strong>Documento</strong></td>
           <td>Órdenes preventivas y correctivas con prioridad, responsable, costo y cierre técnico.</td>
         </tr>
         <tr>
@@ -116,9 +116,9 @@
       <article class="enterprise-pill-card {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
         <div class="enterprise-pill-title">{{ item.step }} · {{ item.title }}</div>
         <div class="enterprise-pill-text">{{ item.detail }}</div>
-        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="margin-top:10px;">{{ item.count }}</div>
+        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %} pd-u-d8a81eac84">{{ item.count }}</div>
         <div class="muted">{{ item.status }}</div>
-        <div style="margin-top:10px;">
+        <div class="pd-u-d8a81eac84">
           <a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a>
         </div>
       </article>
@@ -249,9 +249,9 @@
     </article>
     <article class="kpi-card">
       <div class="kpi-label">Siguiente prioridad</div>
-      <div style="font-weight:700; margin:8px 0 6px;">{{ enterprise_maturity_summary.next_priority_title }}</div>
+      <div class="pd-u-06a806e885">{{ enterprise_maturity_summary.next_priority_title }}</div>
       <div class="muted">{{ enterprise_maturity_summary.next_priority_detail }}</div>
-      <div style="margin-top:10px;">
+      <div class="pd-u-d8a81eac84">
         <a class="btn btn-secondary btn-small" href="{{ enterprise_maturity_summary.next_priority_url }}">{{ enterprise_maturity_summary.next_priority_cta }}</a>
       </div>
     </article>
@@ -294,9 +294,9 @@
       <article class="enterprise-pill-card {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
         <div class="enterprise-pill-title">{{ item.label }}</div>
         <div class="enterprise-pill-text">{{ item.detail }}</div>
-        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="margin-top:10px;">{{ item.count }}</div>
+        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %} pd-u-d8a81eac84">{{ item.count }}</div>
         <div class="muted">{{ item.status }}</div>
-        <div style="margin-top:10px;">
+        <div class="pd-u-d8a81eac84">
           <a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a>
         </div>
       </article>
@@ -332,9 +332,9 @@
             <td>{{ row.owner }}</td>
             <td>{{ row.status }}</td>
             <td class="text-end">{{ row.count }}</td>
-            <td style="min-width:160px;">
+            <td class="pd-u-1cf294634a">
               <div class="erp-progress">
-                <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="width: {{ row.completion }}%;"></div>
+                <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %} pd-js-width" data-pd-width="{{ row.completion }}%"></div>
               </div>
               <div class="muted mt-1">{{ row.completion }}%</div>
             </td>
@@ -369,17 +369,17 @@
       <article class="enterprise-pill-card {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
         <div class="enterprise-pill-title">{{ item.label }}</div>
         <div class="enterprise-pill-text">{{ item.detail }}</div>
-        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="margin-top:10px;">{{ item.count }}</div>
-        <div style="margin-top:10px;">
+        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %} pd-u-d8a81eac84">{{ item.count }}</div>
+        <div class="pd-u-d8a81eac84">
           <a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a>
         </div>
       </article>
     {% endfor %}
   </div>
   {% if focus_summary %}
-    <div class="notice-card notice-card-warning" style="margin-top:12px;">
+    <div class="notice-card notice-card-warning pd-u-9374e84210">
       <strong>Vista enfocada:</strong> {{ focus_summary.label }}. {{ focus_summary.detail }}
-      <div style="margin-top:8px;">
+      <div class="pd-u-b1ecc496e0">
         <a class="btn btn-secondary btn-small" href="{{ focus_summary.clear_url }}">Quitar foco</a>
       </div>
     </div>
@@ -392,7 +392,7 @@
   <form method="post">
     {% csrf_token %}
     <input type="hidden" name="action" value="create_orden">
-    <div class="row" style="display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:10px;">
+    <div class="row pd-u-6136e5cbe4">
       <div>
         <label>Activo</label>
         <select name="activo_id" required>
@@ -435,12 +435,12 @@
         <label>Responsable</label>
         <input type="text" name="responsable" maxlength="120" placeholder="Nombre responsable">
       </div>
-      <div style="grid-column: span 2;">
+      <div class="pd-u-1f61f29863">
         <label>Descripción</label>
         <input type="text" name="descripcion" maxlength="255" placeholder="Detalle del mantenimiento">
       </div>
     </div>
-    <div style="margin-top: 12px;">
+    <div class="pd-u-9c9cee2093">
       <button type="submit" class="btn btn-primary">Crear orden</button>
     </div>
   </form>
@@ -451,7 +451,7 @@
   <form method="post">
     {% csrf_token %}
     <input type="hidden" name="action" value="update_costos">
-    <div class="row" style="display:grid;grid-template-columns:repeat(5,minmax(160px,1fr));gap:10px;align-items:end;">
+    <div class="row pd-u-83b35046ef">
       <div>
         <label>Orden</label>
         <select name="orden_id" required>
@@ -473,14 +473,14 @@
         <label>Otros costos</label>
         <input type="number" step="0.01" min="0" name="costo_otros" value="0">
       </div>
-      <div style="display:flex;align-items:center;gap:8px;">
-        <label style="display:flex;align-items:center;gap:8px;">
+      <div class="pd-u-27231daefd">
+        <label class="pd-u-27231daefd">
           <input type="checkbox" name="cerrar_orden" value="1">
           Cerrar orden
         </label>
       </div>
     </div>
-    <div style="margin-top: 12px;">
+    <div class="pd-u-9c9cee2093">
       <button type="submit" class="btn btn-primary">Guardar costos</button>
     </div>
   </form>
@@ -491,7 +491,7 @@
   <form method="post" enctype="multipart/form-data">
     {% csrf_token %}
     <input type="hidden" name="action" value="update_factura">
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;align-items:end;">
+    <div class="pd-u-088e1d31a8">
       <div>
         <label>Orden</label>
         <select name="orden_id" required>
@@ -507,16 +507,16 @@
       </div>
       <div>
         <label>Archivo de factura (PDF / imagen)</label>
-        <input type="file" name="factura_archivo" accept=".pdf,image/*" style="padding:8px;">
+        <input type="file" name="factura_archivo" accept=".pdf,image/*" class="pd-u-44cd1236df">
       </div>
       <div>
         <label>Nota del trabajo</label>
         <input type="text" name="nota_trabajo" placeholder="Descripción breve del trabajo">
       </div>
     </div>
-    <div style="margin-top:12px;">
+    <div class="pd-u-9374e84210">
       <button type="submit" class="btn btn-primary">Guardar factura</button>
-      <span class="muted" style="margin-left:12px;font-size:.85rem;">
+      <span class="muted pd-u-37bb8a806b">
         Para notas largas usa la vista de evidencias de la orden.
       </span>
     </div>
@@ -526,18 +526,18 @@
 
 <section class="card">
   <div class="card-header">Órdenes registradas</div>
-  <div class="kpi-grid" style="margin-bottom:10px;">
+  <div class="kpi-grid pd-u-af3fee87a1">
     {% for card in enterprise_cards %}
       <article class="kpi-card">
         <div class="kpi-number {% if card.tone == 'danger' %}is-danger{% else %}is-warning{% endif %}">{{ card.count }}</div>
         <div class="kpi-label">{{ card.label }}</div>
-        <div style="margin-top:10px;">
+        <div class="pd-u-d8a81eac84">
           <a class="btn btn-secondary" href="?estatus={{ estado|urlencode }}&enterprise_gap={{ card.key|urlencode }}">Abrir</a>
         </div>
       </article>
     {% endfor %}
   </div>
-  <div class="quick-actions" style="margin-bottom:10px;">
+  <div class="quick-actions pd-u-af3fee87a1">
     <a href="?estatus=abiertas" class="btn btn-secondary">Abiertas</a>
     <a href="?estatus=PENDIENTE" class="btn btn-secondary">Pendientes</a>
     <a href="?estatus=EN_PROCESO" class="btn btn-secondary">En proceso</a>
@@ -546,8 +546,8 @@
     <a href="?estatus={{ estado|urlencode }}&enterprise_gap={{ enterprise_gap|urlencode }}&export=csv" class="btn btn-secondary">Export CSV</a>
     <a href="?estatus={{ estado|urlencode }}&enterprise_gap={{ enterprise_gap|urlencode }}&export=xlsx" class="btn btn-secondary">Export XLSX</a>
   </div>
-  <form method="get" style="margin-bottom:10px;">
-    <div class="row" style="display:grid;grid-template-columns:minmax(220px,320px) auto;gap:10px;align-items:end;">
+  <form method="get" class="pd-u-af3fee87a1">
+    <div class="row pd-u-471ccadd32">
       <div>
         <label>Bloqueo ERP</label>
         <select name="enterprise_gap">
@@ -595,7 +595,7 @@
             <td>{{ enterprise.next_action }}</td>
             <td>
               {% if can_manage_activos %}
-                <div class="quick-actions" style="gap:6px;">
+                <div class="quick-actions pd-u-d45c7097fc">
                   <form method="post" action="{% url 'activos:orden_estatus' o.id 'EN_PROCESO' %}">
                     {% csrf_token %}
                     <button class="btn btn-secondary" type="submit">En proceso</button>

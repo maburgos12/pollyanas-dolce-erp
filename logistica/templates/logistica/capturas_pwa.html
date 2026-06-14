@@ -5,36 +5,7 @@
 {% block page_title %}Logística · Capturas PWA{% endblock %}
 
 {% block extra_css %}
-<style>
-  .capture-shell { display: grid; gap: 18px; }
-  .capture-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
-  .capture-filter { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-  .capture-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-  .capture-kpi { border: 1px solid #f0c9d9; border-radius: 14px; padding: 16px; background: #fff; }
-  .capture-kpi strong { display: block; color: #8B2252; font-family: "Playfair Display", serif; font-size: 32px; line-height: 1; }
-  .capture-kpi span { color: #6f5963; font-weight: 800; }
-  .capture-grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
-  .capture-section-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
-  .capture-section-head h2 { margin: 0; font-family: "Playfair Display", serif; color: #3a2b30; }
-  .capture-table td, .capture-table th { vertical-align: top; }
-  .capture-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 5px 10px; font-size: 12px; font-weight: 900; }
-  .capture-badge.ok { background: #e5f5ee; color: #1f7554; }
-  .capture-badge.warn { background: #fff4d8; color: #9a6a00; }
-  .capture-badge.danger { background: #ffe8ec; color: #bc3b56; }
-  .capture-badge.info { background: #e9f0ff; color: #305caa; }
-  .capture-evidence { display: flex; flex-wrap: wrap; gap: 6px; }
-  .capture-evidence a { border: 1px solid #e8b7cb; border-radius: 10px; color: #8B2252; font-weight: 800; padding: 6px 9px; text-decoration: none; }
-  .capture-muted { color: #77656d; font-size: 13px; }
-  .capture-empty { padding: 18px; border: 1px dashed #e8b7cb; border-radius: 14px; color: #77656d; }
-  .capture-pager { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
-  @media (max-width: 900px) {
-    .capture-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  }
-  @media (max-width: 640px) {
-    .capture-kpis { grid-template-columns: 1fr; }
-    .capture-head, .capture-filter, .capture-pager { align-items: stretch; flex-direction: column; }
-  }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/logistica-templates-logistica-capturas-pwa.css?v=20260614-ui100-v1">
 <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
 {% endblock %}
 
@@ -52,7 +23,7 @@
         <div class="card-header">Capturas desde la PWA</div>
         <p class="muted">Bitácoras, inspecciones, reportes y evidencias generadas desde el celular.</p>
       </div>
-      <a class="btn btn-primary" style="background:#8B2252;border-color:#8B2252;" href="{% url 'logistica:pwa_app' %}" target="_blank" rel="noopener">Abrir PWA</a>
+      <a class="btn btn-primary pd-u-8e46cb0687" href="{% url 'logistica:pwa_app' %}" target="_blank" rel="noopener">Abrir PWA</a>
     </div>
     <form class="capture-filter" method="get">
       <input class="input-field" type="text" name="q" value="{{ query }}" placeholder="Buscar por unidad, placa, repartidor o descripción">

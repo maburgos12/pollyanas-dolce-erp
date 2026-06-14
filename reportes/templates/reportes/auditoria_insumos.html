@@ -5,71 +5,7 @@
 {% block page_title %}Reportes · Auditoría Insumos{% endblock %}
 
 {% block extra_css %}
-<style>
-  .insumo-audit-shell { display:grid; gap:1rem; }
-  .audit-toolbar, .audit-kpi, .audit-panel {
-    background:#fff;
-    border:1px solid var(--line);
-    border-radius:8px;
-  }
-  .audit-toolbar {
-    display:flex;
-    justify-content:space-between;
-    flex-wrap:wrap;
-    gap:.75rem;
-    padding:1rem;
-    align-items:end;
-  }
-  .audit-controls { display:flex; flex-wrap:wrap; gap:.7rem; align-items:end; }
-  .audit-field { display:grid; gap:.25rem; min-width:150px; }
-  .audit-field label { color:var(--muted); font-size:.78rem; font-weight:700; text-transform:uppercase; }
-  .audit-field input, .audit-field select {
-    height:38px;
-    border:1px solid var(--line);
-    border-radius:6px;
-    padding:0 .65rem;
-    background:#fff;
-  }
-  .audit-button {
-    height:38px;
-    border:0;
-    border-radius:6px;
-    padding:0 .9rem;
-    background:#17324d;
-    color:#fff;
-    font-weight:700;
-    text-decoration:none;
-    display:inline-flex;
-    align-items:center;
-  }
-  .audit-button.secondary { background:#526173; }
-  .audit-kpis { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:.75rem; }
-  .audit-kpi { padding:1rem; }
-  .audit-kpi span { display:block; color:var(--muted); font-size:.78rem; font-weight:700; text-transform:uppercase; }
-  .audit-kpi strong { display:block; margin-top:.25rem; color:#17324d; font-size:1.2rem; }
-  .audit-panel { overflow:auto; }
-  .audit-panel h2 { margin:0; padding:1rem 1rem .5rem; color:#17324d; font-size:1rem; }
-  .audit-table { width:100%; min-width:1120px; border-collapse:separate; border-spacing:0; }
-  .audit-table th, .audit-table td {
-    padding:.55rem .65rem;
-    border-top:1px solid var(--line);
-    white-space:nowrap;
-    text-align:left;
-  }
-  .audit-table th { background:#f8fafc; color:#44546a; font-size:.75rem; text-transform:uppercase; }
-  .audit-num { text-align:right !important; }
-  .audit-badge { font-weight:800; }
-  .audit-badge.OK { color:#16794a; }
-  .audit-badge.MERMA { color:#b7791f; }
-  .audit-badge.FALTANTE { color:#b42318; }
-  .audit-badge.SIN_DATOS { color:#667085; }
-  .stock-ok { color:#16794a; font-weight:800; }
-  .stock-bajo { color:#b7791f; font-weight:800; }
-  .stock-critico { color:#b42318; font-weight:800; }
-  @media (max-width: 900px) {
-    .audit-kpis { grid-template-columns:1fr 1fr; }
-  }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/reportes-templates-reportes-auditoria-insumos.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}

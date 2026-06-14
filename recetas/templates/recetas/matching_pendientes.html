@@ -53,7 +53,7 @@
   <div class="kpi-grid kpi-mini">
     <article class="kpi-card">
       <div class="kpi-label">Responsable principal</div>
-      <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
+      <div class="pd-u-4304c62622">{{ erp_command_center.owner }}</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
@@ -65,8 +65,8 @@
     </article>
     <article class="kpi-card">
       <div class="kpi-label">Siguiente paso</div>
-      <div class="muted" style="margin-top:8px;">{{ erp_command_center.next_step }}</div>
-      <div style="margin-top:10px;">
+      <div class="muted pd-u-b1ecc496e0">{{ erp_command_center.next_step }}</div>
+      <div class="pd-u-d8a81eac84">
         <a class="btn btn-secondary" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
       </div>
     </article>

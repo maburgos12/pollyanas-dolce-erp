@@ -52,7 +52,7 @@
             <label for="cmp_fecha_inicio_hasta">Hasta</label>
             <input id="cmp_fecha_inicio_hasta" type="date" name="fecha_inicio_hasta" value="{% if comparison_filters.fecha_inicio_hasta %}{{ comparison_filters.fecha_inicio_hasta|date:'Y-m-d' }}{% endif %}">
           </div>
-          <div class="investment-field" style="grid-column:1 / -1;">
+          <div class="investment-field pd-u-804ac9edc8">
             <label for="cmp_sort_by">Ordenar por</label>
             <select id="cmp_sort_by" name="sort_by">
               {% for key, label in sort_options %}

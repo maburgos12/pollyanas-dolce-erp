@@ -1,0 +1,135 @@
+/* Extracted from recetas/templates/recetas/reabasto_cedis.html */
+.page-reabasto-cedis .reabasto-shell {
+    gap: 14px;
+  }
+
+  .page-reabasto-cedis .reabasto-card {
+    padding: 18px;
+  }
+
+  .page-reabasto-cedis .reabasto-top {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+    gap: 16px;
+    align-items: start;
+  }
+
+  .page-reabasto-cedis .reabasto-title {
+    margin: 0 0 6px;
+    font-size: 32px;
+    line-height: 1.08;
+  }
+
+  .page-reabasto-cedis .reabasto-route {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 14px;
+  }
+
+  .page-reabasto-cedis .reabasto-route-item,
+  .page-reabasto-cedis .reabasto-filter,
+  .page-reabasto-cedis .reabasto-metric,
+  .page-reabasto-cedis .reabasto-action-box {
+    border: 1px solid rgba(110, 32, 58, .12);
+    border-radius: 10px;
+    background: #fff;
+  }
+
+  .page-reabasto-cedis .reabasto-route-item {
+    padding: 10px 12px;
+  }
+
+  .page-reabasto-cedis .reabasto-route-item strong {
+    display: block;
+    color: var(--vino);
+    margin-bottom: 3px;
+  }
+
+  .page-reabasto-cedis .reabasto-filter {
+    padding: 12px;
+  }
+
+  .page-reabasto-cedis .reabasto-filter .form-group + .form-group {
+    margin-top: 10px;
+  }
+
+  .page-reabasto-cedis .reabasto-filter-actions,
+  .page-reabasto-cedis .reabasto-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .page-reabasto-cedis .reabasto-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .page-reabasto-cedis .reabasto-metric {
+    padding: 12px;
+    min-height: 88px;
+  }
+
+  .page-reabasto-cedis .reabasto-metric-value {
+    display: block;
+    font-size: 24px;
+    line-height: 1.1;
+    font-weight: 800;
+    color: var(--vino);
+    overflow-wrap: anywhere;
+  }
+
+  .page-reabasto-cedis .reabasto-decision {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .page-reabasto-cedis .reabasto-decision-title {
+    margin: 0 0 4px;
+    font-size: 20px;
+    line-height: 1.2;
+    color: var(--vino);
+  }
+
+  .page-reabasto-cedis .reabasto-status-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .page-reabasto-cedis .reabasto-action-box {
+    padding: 12px;
+  }
+
+  .page-reabasto-cedis .reabasto-action-box .kpi-number {
+    font-size: 24px;
+  }
+
+  .page-reabasto-cedis .reabasto-details {
+    margin: 0;
+  }
+
+  .page-reabasto-cedis .reabasto-details .erp-advanced-body {
+    gap: 12px;
+  }
+
+  .page-reabasto-cedis .reabasto-compact-table th,
+  .page-reabasto-cedis .reabasto-compact-table td {
+    white-space: normal;
+  }
+
+  @media (max-width: 980px) {
+    .page-reabasto-cedis .reabasto-top,
+    .page-reabasto-cedis .reabasto-route,
+    .page-reabasto-cedis .reabasto-metrics,
+    .page-reabasto-cedis .reabasto-status-grid,
+    .page-reabasto-cedis .reabasto-decision {
+      grid-template-columns: 1fr;
+    }
+  }

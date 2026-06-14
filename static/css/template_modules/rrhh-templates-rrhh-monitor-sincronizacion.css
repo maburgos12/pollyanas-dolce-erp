@@ -1,0 +1,28 @@
+/* Extracted from rrhh/templates/rrhh/monitor_sincronizacion.html */
+.monitor-page { display: grid; gap: 18px; }
+  .monitor-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .monitor-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 18px; }
+  .monitor-value { color: var(--vino); font-size: 30px; font-weight: 900; line-height: 1; }
+  .monitor-label { color: var(--texto); font-weight: 800; margin-top: 8px; }
+  .monitor-section { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 18px; }
+  .monitor-title { color: var(--vino); font-size: 16px; font-weight: 900; margin: 0 0 12px; }
+  .monitor-table { width: 100%; border-collapse: collapse; }
+  .monitor-table th, .monitor-table td { border-bottom: 1px solid var(--rosa); padding: 10px; text-align: left; }
+  .monitor-table th { color: var(--vino); font-size: 12px; text-transform: uppercase; }
+  .badge-source, .badge-falta {
+    display: inline-flex;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 900;
+    padding: 4px 9px;
+    text-transform: uppercase;
+  }
+  .badge-hikconnect_api { background: rgba(201, 168, 76, .18); color: #9b780f; }
+  .badge-hikconnect_excel { background: rgba(139, 34, 82, .14); color: var(--vino); }
+  .badge-manual { background: #eee; color: #555; }
+  .badge-point { background: #e8f3ff; color: #23527c; }
+  .badge-falta { background: #fde2e2; color: #b42318; }
+  @media (max-width: 900px) {
+    .monitor-grid { grid-template-columns: 1fr; }
+    .monitor-table { font-size: 13px; }
+  }

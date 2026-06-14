@@ -1,0 +1,86 @@
+/* Extracted from inventario/templates/inventario/captura_diaria.html */
+.captura-grid { display: grid; grid-template-columns: 380px 1fr; gap: 20px; align-items: start; }
+  .form-card { position: sticky; top: 20px; }
+  .tab-btns { display: flex; gap: 4px; margin-bottom: 16px; }
+  .tab-btn { flex: 1; padding: 10px; border: 2px solid transparent; border-radius: 8px; cursor: pointer;
+             font-weight: 700; font-size: 14px; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
+  .tab-btn.entrada { background: var(--pd-success-soft); color: var(--pd-success); border-color: color-mix(in srgb, var(--pd-success) 32%, var(--pd-border)); }
+  .tab-btn.salida  { background: var(--pd-danger-soft); color: var(--pd-danger); border-color: color-mix(in srgb, var(--pd-danger) 28%, var(--pd-border)); }
+  .tab-btn.entrada.active { background: var(--pd-success); color: var(--pd-surface); }
+  .tab-btn.salida.active  { background: var(--pd-danger); color: var(--pd-surface); }
+  .insumo-search { position: relative; }
+  .insumo-search input { width: 100%; }
+  .insumo-dropdown { display: none; position: absolute; z-index: 100; background: var(--pd-surface);
+                     border: 1px solid var(--pd-border); border-radius: 8px; max-height: 260px;
+                     overflow-y: auto; width: 100%; box-shadow: var(--pd-shadow-mid); }
+  .insumo-dropdown.open { display: block; }
+  .insumo-opt { padding: 8px 12px; cursor: pointer; border-bottom: 1px solid var(--pd-border); font-size: 13px; }
+  .insumo-opt:hover { background: var(--rosa); }
+  .insumo-opt .opt-stock { font-size: 11px; color: var(--texto-light); }
+  .stock-table th { white-space:normal; }
+  .alerta-critico { background: var(--pd-danger-soft) !important; }
+  .alerta-reorden { background: var(--pd-warning-soft) !important; }
+  .alerta-exceso  { background: var(--pd-success-soft) !important; }
+  .badge-critico { background: var(--rojo); color: var(--pd-surface); }
+  .badge-reorden { background: var(--pd-warning-soft); color: var(--pd-warning); }
+  .badge-exceso  { background: var(--verde); color: var(--pd-surface); }
+  .badge-ok      { background: var(--pd-surface-subtle); color: var(--pd-muted); }
+  .dias-cobertura { font-weight: 700; }
+  .dias-ok    { color: var(--verde); }
+  .dias-bajo  { color: var(--amarillo); }
+  .dias-crit  { color: var(--rojo); }
+  .mov-list { max-height: 320px; overflow-y: auto; }
+  .mov-row { display: flex; gap: 8px; align-items: center; padding: 6px 0;
+             border-bottom: 1px solid var(--pd-border); font-size: 13px; }
+  .mov-tipo-e { color: var(--verde); font-weight: 700; }
+  .mov-tipo-s { color: var(--rojo); font-weight: 700; }
+  .filter-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .kpi-strip { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .kpi-chip { padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 700; }
+  .captura-topbar { margin-bottom: 16px; }
+  .captura-reorden-badge { color: var(--pd-warning); }
+  .captura-form-body { padding: 16px; }
+  .captura-muted-xs { font-size: 12px; }
+  .captura-submit {
+    height: 44px;
+    font-weight: 700;
+  }
+  .captura-submit.is-entrada {
+    background: var(--pd-success);
+    border-color: var(--pd-success);
+  }
+  .captura-submit.is-salida {
+    background: var(--pd-danger);
+    border-color: var(--pd-danger);
+  }
+  .captura-section { margin-top: 20px; }
+  .captura-card-body { padding: 12px; }
+  .captura-section-title {
+    margin-bottom: 8px;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .captura-mov-name { flex: 1; font-size: 12px; }
+  .captura-mov-qty { font-weight: 700; }
+  .captura-mov-unit { font-size: 11px; }
+  .captura-filter-form { display: flex; gap: 10px; flex-wrap: wrap; }
+  .captura-filter-control { width: 200px; }
+  .captura-clean { background: var(--pd-surface-subtle); }
+  .captura-stock-table { font-size: 13px; }
+  .captura-num { text-align: right; }
+  .captura-num-strong { text-align: right; font-weight: 700; }
+  .captura-num-muted { text-align: right; color: var(--texto-light); }
+  .captura-cell-sm { font-size: 11px; }
+  .captura-mov-type { width: 60px; }
+  .captura-mov-date { width: 100px; font-size: 11px; color: var(--texto-light); }
+  .captura-mov-product { flex: 1; }
+  .captura-mov-total { min-width: 60px; text-align: right; font-weight: 700; }
+  .captura-mov-notes {
+    display: -webkit-box;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 11px;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+  }

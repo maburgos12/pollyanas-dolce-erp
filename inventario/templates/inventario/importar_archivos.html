@@ -156,7 +156,7 @@
       {% endif %}
     </div>
 
-    <div class="form-group" style="display:flex; flex-direction:column; justify-content:flex-end;">
+    <div class="form-group pd-u-4622e01a3f">
       {% if drive_sync_mode.forced %}
       <small class="muted"><strong>Modo temporal activo:</strong> solo se lee marzo 2026 (inventario).</small>
       {% else %}
@@ -164,13 +164,13 @@
       {% endif %}
     </div>
 
-    <div class="form-group" style="grid-column: 1 / -1;">
+    <div class="form-group pd-u-d5b43342a2">
       <label>Fuentes a importar</label>
       <div class="quick-actions">
         {% if drive_sync_mode.forced %}
           {% for value, label in sources %}
             {% if value == "inventario" %}
-            <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+            <label class="btn btn-secondary pd-u-c850abf2ee">
               <input type="checkbox" name="sources" value="{{ value }}" checked readonly onclick="return false;">
               <span>{{ label }} (fijo)</span>
             </label>
@@ -178,7 +178,7 @@
           {% endfor %}
         {% else %}
           {% for value, label in sources %}
-            <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+            <label class="btn btn-secondary pd-u-c850abf2ee">
               <input type="checkbox" name="sources" value="{{ value }}" checked>
               <span>{{ label }}</span>
             </label>
@@ -192,18 +192,18 @@
       <input class="input-field" type="number" name="fuzzy_threshold" min="80" max="100" value="{{ defaults.fuzzy_threshold }}">
     </div>
 
-    <div class="form-group" style="display:flex; flex-direction:column; justify-content:flex-end; gap:8px;">
-      <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+    <div class="form-group pd-u-fae5730541">
+      <label class="btn btn-secondary pd-u-c850abf2ee">
         <input type="checkbox" name="create_missing_insumos" {% if defaults.create_missing_insumos %}checked{% endif %}>
         <span>Crear insumos faltantes</span>
       </label>
-      <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+      <label class="btn btn-secondary pd-u-c850abf2ee">
         <input type="checkbox" name="create_aliases" {% if defaults.create_aliases %}checked{% endif %}>
         <span>Crear alias automáticos</span>
       </label>
     </div>
 
-    <div style="grid-column: 1 / -1; display:flex; justify-content:flex-end;">
+    <div class="pd-u-3e4355d00c">
       <button class="btn btn-primary" type="submit">Sincronizar ahora</button>
     </div>
   </form>
@@ -217,16 +217,16 @@
     {% csrf_token %}
     <input type="hidden" name="action" value="upload">
 
-    <div class="form-group" style="grid-column: 1 / -1;">
+    <div class="form-group pd-u-d5b43342a2">
       <label>Archivos .xlsx</label>
       <input class="input-field" type="file" name="archivos" accept=".xlsx" multiple required>
     </div>
 
-    <div class="form-group" style="grid-column: 1 / -1;">
+    <div class="form-group pd-u-d5b43342a2">
       <label>Fuentes a importar</label>
       <div class="quick-actions">
         {% for value, label in sources %}
-          <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+          <label class="btn btn-secondary pd-u-c850abf2ee">
             <input type="checkbox" name="sources" value="{{ value }}" checked>
             <span>{{ label }}</span>
           </label>
@@ -239,18 +239,18 @@
       <input class="input-field" type="number" name="fuzzy_threshold" min="80" max="100" value="{{ defaults.fuzzy_threshold }}">
     </div>
 
-    <div class="form-group" style="display:flex; flex-direction:column; justify-content:flex-end; gap:8px;">
-      <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+    <div class="form-group pd-u-fae5730541">
+      <label class="btn btn-secondary pd-u-c850abf2ee">
         <input type="checkbox" name="create_missing_insumos" {% if defaults.create_missing_insumos %}checked{% endif %}>
         <span>Crear insumos faltantes</span>
       </label>
-      <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+      <label class="btn btn-secondary pd-u-c850abf2ee">
         <input type="checkbox" name="create_aliases" {% if defaults.create_aliases %}checked{% endif %}>
         <span>Crear alias automáticos</span>
       </label>
     </div>
 
-    <div style="grid-column: 1 / -1; display:flex; justify-content:flex-end;">
+    <div class="pd-u-3e4355d00c">
       <button class="btn btn-secondary" type="submit">Procesar carga externa</button>
     </div>
   </form>
@@ -427,7 +427,7 @@
         {% endfor %}
       </select>
     </div>
-    <div style="grid-column:1/-1; display:flex; justify-content:flex-end;">
+    <div class="pd-u-9d7e0b29ae">
       <button class="btn btn-primary" type="submit">Guardar referencia</button>
     </div>
   </form>

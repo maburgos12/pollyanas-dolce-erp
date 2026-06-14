@@ -49,7 +49,7 @@
       </div>
     </div>
     <div>
-      <button class="btn btn-primary" style="background:var(--vino);border-color:var(--vino);" type="submit">Filtrar</button>
+      <button class="btn btn-primary pd-u-d0ee3ca9de" type="submit">Filtrar</button>
       <a class="btn btn-secondary" href="?{{ query_csv }}">Exportar CSV</a>
       <a class="btn btn-secondary" href="?{{ query_xlsx }}">Exportar XLSX</a>
     </div>
@@ -142,7 +142,7 @@
                     {% for incidencia in fila.incidencias %}
                       <span class="badge {{ incidencia.badge_class }}">{{ incidencia.tipo }}</span>
                       {% if incidencia.editado_manual %}
-                        <span class="badge" style="background:var(--dorado);color:#fff;">Editado</span>
+                        <span class="badge pd-u-2f5da2b12a">Editado</span>
                       {% endif %}
                     {% empty %}
                       -
@@ -215,7 +215,7 @@
                           <input type="hidden" name="fecha_fin" value="{{ fecha_fin }}">
                           <input type="hidden" name="empleado" value="{{ empleado_id }}">
                           <input type="hidden" name="sucursal" value="{{ sucursal }}">
-                          <button class="btn btn-sm btn-primary" style="background:var(--vino);border-color:var(--vino);" type="submit">Guardar</button>
+                          <button class="btn btn-sm btn-primary pd-u-d0ee3ca9de" type="submit">Guardar</button>
                         </form>
                       </details>
                     {% empty %}

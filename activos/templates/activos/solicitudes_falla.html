@@ -4,38 +4,7 @@
 {% block page_title %}Activos · Reportar Falla{% endblock %}
 
 {% block extra_css %}
-<style>
-.falla-card {
-  background: #fff8f0;
-  border: 2px solid var(--amarillo);
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 12px;
-}
-.falla-card.critica { border-color: var(--rojo); background: #fff0f0; }
-.urgencia-badge {
-  display: inline-block;
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-.urgencia-CRITICA { background: var(--rojo); color: #fff; }
-.urgencia-ALTA    { background: #ff6b35; color: #fff; }
-.urgencia-MEDIA   { background: var(--amarillo); color: #3D2B2B; }
-.urgencia-BAJA    { background: var(--verde); color: #fff; }
-.mobile-form-group { margin-bottom: 16px; }
-.mobile-form-group label { display: block; font-weight: 700; margin-bottom: 6px; color: var(--texto); }
-.mobile-form-group select,
-.mobile-form-group textarea,
-.mobile-form-group input { width: 100%; font-size: 1rem; padding: 12px; border-radius: 8px; border: 1.5px solid #d0c0c0; background: #fff; }
-.mobile-form-group textarea { min-height: 100px; resize: vertical; }
-.btn-grande { width: 100%; padding: 16px; font-size: 1.1rem; font-weight: 700; border-radius: 10px; }
-.falla-folio { font-family: monospace; font-weight: 700; color: var(--vino); }
-.falla-equipo { font-size: 1.05rem; font-weight: 700; margin: 4px 0; }
-.falla-meta { font-size: 0.85rem; color: var(--texto-light); margin-top: 6px; }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/activos-templates-activos-solicitudes-falla.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
@@ -47,16 +16,16 @@
 
 {% if messages %}
   {% for msg in messages %}
-    <div class="alert alert-{{ msg.tags|default:'info' }}" style="margin-bottom:12px;">{{ msg }}</div>
+    <div class="alert alert-{{ msg.tags|default:'info' }} pd-u-3ef1fa1aa1">{{ msg }}</div>
   {% endfor %}
 {% endif %}
 
 <!-- Formulario de reporte — mobile-first -->
 <section class="card card-form-narrow">
-  <div class="card-header" style="background:linear-gradient(135deg,#E53935,#b71c1c);color:#fff;">
-    ⚠️ Reportar falla de equipo
+  <div class="card-header pd-u-81591015d4">
+    Atención Reportar falla de equipo
   </div>
-  <form method="post" style="padding: 4px 0;">
+  <form method="post" class="pd-u-f839358b29">
     {% csrf_token %}
 
     <div class="mobile-form-group">
@@ -88,42 +57,42 @@
       <input type="text" name="nombre_reportante" placeholder="Nombre de quien reporta" value="{{ request.user.get_full_name }}">
     </div>
 
-    <button type="submit" class="btn btn-primary btn-grande" style="background:var(--rojo);border-color:var(--rojo);">
+    <button type="submit" class="btn btn-primary btn-grande pd-u-5a2c26bdaf">
       Enviar reporte de falla
     </button>
   </form>
 </section>
 
 <!-- Fallas abiertas -->
-<section class="card" style="margin-top:20px;">
+<section class="card pd-u-9eb125f52f">
   <div class="card-header">
     Fallas abiertas ({{ abiertas|length }})
   </div>
   {% if abiertas %}
     {% for sf in abiertas %}
       <div class="falla-card {% if sf.urgencia == 'CRITICA' %}critica{% endif %}">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
+        <div class="pd-u-64224bb311">
           <div>
             <span class="falla-folio">{{ sf.folio }}</span>
-            <span class="urgencia-badge urgencia-{{ sf.urgencia }}" style="margin-left:8px;">{{ sf.urgencia }}</span>
+            <span class="urgencia-badge urgencia-{{ sf.urgencia }} pd-u-6170d94c81">{{ sf.urgencia }}</span>
           </div>
           <span class="badge {% if sf.estatus == 'ABIERTA' %}bg-danger{% else %}bg-warning{% endif %}">{{ sf.get_estatus_display }}</span>
         </div>
         <div class="falla-equipo">{{ sf.activo_ref.nombre }}{% if sf.activo_ref.sucursal %} · {{ sf.activo_ref.sucursal.nombre }}{% endif %}</div>
-        <p style="margin:8px 0 4px;">{{ sf.descripcion }}</p>
+        <p class="pd-u-8bc6a73a8e">{{ sf.descripcion }}</p>
         <div class="falla-meta">
           Reportado por {{ sf.nombre_reportante|default:sf.reportado_por }} · {{ sf.fecha_reporte|date:"d/m/Y H:i" }}
         </div>
       </div>
     {% endfor %}
   {% else %}
-    <p class="muted" style="padding:16px;">No hay fallas abiertas en este momento.</p>
+    <p class="muted pd-u-cf37034751">No hay fallas abiertas en este momento.</p>
   {% endif %}
 </section>
 
 <!-- Fallas recientes atendidas -->
 {% if recientes %}
-<section class="card" style="margin-top:16px;">
+<section class="card pd-u-8a359a76eb">
   <div class="card-header">Fallas atendidas recientemente</div>
   <div class="table-wrapper">
     <div class="table-responsive">

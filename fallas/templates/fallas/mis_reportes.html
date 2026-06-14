@@ -7,60 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<style>
-  .fallas-card{background:#fff;border:1px solid rgba(139,34,82,.16);border-radius:18px;padding:24px;box-shadow:0 18px 42px rgba(139,34,82,.08)}
-  .fallas-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}
-  .fallas-title{font-family:"Playfair Display",serif;font-size:34px;margin:4px 0;color:#3f2633}
-  .fallas-muted{color:#7a6871;margin:0}
-  .fallas-filter{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}
-  .fallas-input{width:100%;min-height:42px;border:1px solid rgba(139,34,82,.22);border-radius:12px;padding:8px 10px;font:inherit;background:#fff}
-  .fallas-table-wrap{overflow:auto;border:1px solid rgba(139,34,82,.10);border-radius:14px}
-  .fallas-table{width:100%;border-collapse:collapse;min-width:900px}
-  .fallas-table th,.fallas-table td{padding:12px;border-bottom:1px solid rgba(139,34,82,.10);text-align:left;vertical-align:top}
-  .fallas-table th{background:#f7e7ee;color:#8B2252;font-size:12px;text-transform:uppercase;letter-spacing:.05em}
-  .fallas-badge{display:inline-flex;border-radius:999px;padding:4px 10px;font-size:12px;font-weight:900}
-  .p-critica,.e-abierto{background:#fef2f2;color:#991b1b;border:1px solid #fca5a5}
-  .p-alta,.e-en_revision,.e-en_proceso{background:#fff7ed;color:#c2410c;border:1px solid #fdba74}
-  .p-media{background:#fffbeb;color:#92400e;border:1px solid #fde68a}
-  .p-baja,.e-resuelto{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
-  .e-cerrado{background:#f0fdf4;color:#166534;border:1px solid #86efac}
-  .e-cancelado{background:#f3f4f6;color:#374151;border:1px solid #d1d5db}
-  .btn-wine{background:#8B2252;border:1px solid #8B2252;color:#fff;border-radius:12px;padding:10px 14px;font-weight:900;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;min-height:42px}
-  .btn-soft{background:#fff;border:1px solid rgba(139,34,82,.22);color:#8B2252;border-radius:12px;padding:10px 14px;font-weight:900;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;min-height:42px}
-  .btn-danger-soft{background:#fff;border:1px solid rgba(153,27,27,.28);color:#991b1b;border-radius:12px;padding:10px 14px;font-weight:900;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;min-height:42px}
-  .fallas-actions{display:flex;gap:8px;flex-wrap:wrap}
-  .fallas-actions form{margin:0}
-  .fallas-progress-note{display:block;margin-top:5px;color:#6f6170;font-size:12px;line-height:1.35}
-  .fallas-progress-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
-  .fallas-chip{display:inline-flex;align-items:center;border-radius:999px;background:#f7edf2;color:#8B2252;border:1px solid rgba(139,34,82,.14);font-size:11px;font-weight:900;padding:3px 8px}
-  .fallas-action-note{display:block;color:#7a6871;font-size:12px;line-height:1.25}
-  .fallas-thumb{width:58px;height:44px;object-fit:cover;border-radius:8px;border:1px solid rgba(139,34,82,.18)}
-  .fallas-empty{padding:36px;text-align:center;color:#7a6871}
-  .pagination{display:flex;gap:10px;justify-content:center;align-items:center;margin-top:16px}
-  .fallas-drawer{position:fixed;inset:0;z-index:1300;display:none;background:rgba(31,18,26,.46)}
-  .fallas-drawer.is-open{display:flex;justify-content:flex-end}
-  .fallas-drawer-panel{width:min(620px,100%);height:100%;background:#fff;box-shadow:-16px 0 45px rgba(0,0,0,.18);padding:22px;overflow-y:auto}
-  .fallas-drawer-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;border-bottom:1px solid #f0e1e8;padding-bottom:14px;margin-bottom:16px}
-  .fallas-drawer-head h2{margin:0;color:#42292e;font-size:24px}
-  .fallas-drawer-head p{margin:5px 0 0;color:#6f6170}
-  .fallas-detail-block{border:1px solid rgba(139,34,82,.12);border-radius:14px;padding:14px;margin-bottom:14px;background:#fffafc}
-  .fallas-detail-title{margin:0 0 8px;color:#8B2252;font-size:13px;text-transform:uppercase;letter-spacing:.04em;font-weight:900}
-  .fallas-detail-grid{display:grid;grid-template-columns:120px minmax(0,1fr);gap:12px}
-  .fallas-detail-photo{width:120px;aspect-ratio:1;object-fit:cover;border-radius:10px;border:1px solid rgba(139,34,82,.18)}
-  .fallas-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-  .fallas-fact{background:#fff;border:1px solid rgba(139,34,82,.09);border-radius:10px;padding:8px 10px}
-  .fallas-fact span{display:block;color:#8b7180;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.04em}
-  .fallas-fact strong{display:block;margin-top:2px;color:#3f2633;font-size:13px}
-  .fallas-timeline{display:grid;gap:10px}
-  .fallas-timeline-item{border-left:3px solid #8B2252;background:#fff;border-radius:0 10px 10px 0;padding:10px 12px}
-  .fallas-timeline-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;color:#6f6170;font-size:12px}
-  .fallas-timeline-top strong{color:#3f2633}
-  .fallas-timeline-comment{margin-top:6px;color:#3f2633;line-height:1.45}
-  .fallas-evidence-list{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
-  .fallas-evidence-link{display:inline-flex;align-items:center;min-height:34px;border-radius:10px;border:1px solid rgba(139,34,82,.18);padding:7px 10px;color:#8B2252;background:#fff;text-decoration:none;font-weight:900;font-size:12px}
-  @media(max-width:760px){.fallas-head,.fallas-filter{grid-template-columns:1fr;display:grid}.fallas-head .btn-wine{width:100%}}
-  @media(max-width:760px){.fallas-detail-grid,.fallas-facts{grid-template-columns:1fr}.fallas-detail-photo{width:100%;max-height:220px;aspect-ratio:auto}}
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/fallas-templates-fallas-mis-reportes.css?v=20260614-ui100-v1">
 <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
 {% endblock %}
 
@@ -177,7 +124,7 @@
             {% if reporte.foto_evidencia %}
               <a href="{{ reporte.foto_evidencia.url }}" target="_blank" rel="noopener"><img class="fallas-detail-photo" src="{{ reporte.foto_evidencia.url }}" alt="Evidencia original"></a>
             {% else %}
-              <div class="fallas-detail-photo" style="display:flex;align-items:center;justify-content:center;color:#9d6d82;background:#fff">Sin foto</div>
+              <div class="fallas-detail-photo pd-u-5a112477bd">Sin foto</div>
             {% endif %}
           </div>
           <div>
@@ -189,7 +136,7 @@
               {% if reporte.asignado_a %}<div class="fallas-fact"><span>Asignado a</span><strong>{{ reporte.asignado_a.get_full_name|default:reporte.asignado_a.username }}</strong></div>{% endif %}
               {% if reporte.cerrado_por %}<div class="fallas-fact"><span>Cerró</span><strong>{{ reporte.cerrado_por.get_full_name|default:reporte.cerrado_por.username }}</strong></div>{% endif %}
             </div>
-            <p style="margin:12px 0 0;color:#3f2633;line-height:1.45">{{ reporte.descripcion }}</p>
+            <p class="pd-u-25dd9d9b4f">{{ reporte.descripcion }}</p>
           </div>
         </div>
       </section>
@@ -203,7 +150,7 @@
                 <strong>{{ evento.usuario.get_full_name|default:evento.usuario.username }}</strong>
                 <span>{{ evento.timestamp|date:"d/m/Y H:i" }}</span>
               </div>
-              <div style="margin-top:6px">
+              <div class="pd-u-2fd7789b39">
                 {% if evento.estatus_nuevo %}<span class="fallas-badge e-{{ evento.estatus_nuevo }}">{{ evento.get_estatus_nuevo_display }}</span>{% endif %}
               </div>
               <div class="fallas-timeline-comment">{{ evento.comentario|default:"Seguimiento actualizado." }}</div>

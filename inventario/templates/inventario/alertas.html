@@ -70,29 +70,29 @@
       <article class="kpi-card">
         <div class="kpi-number {% if sales_demand_signal.tone == 'danger' %}is-danger{% elif sales_demand_signal.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ sales_demand_signal.status }}</div>
         <div class="kpi-label">Semáforo comercial</div>
-        <div class="muted" style="margin-top:8px;">{{ sales_demand_signal.detail }}</div>
+        <div class="muted pd-u-b1ecc496e0">{{ sales_demand_signal.detail }}</div>
       </article>
       <article class="kpi-card">
         <div class="kpi-number">{{ sales_demand_signal.days_count }}</div>
         <div class="kpi-label">Días recientes</div>
-        <div class="muted" style="margin-top:8px;">{{ sales_demand_signal.recipes_count }} productos vendidos</div>
+        <div class="muted pd-u-b1ecc496e0">{{ sales_demand_signal.recipes_count }} productos vendidos</div>
       </article>
       <article class="kpi-card">
         <div class="kpi-number">{{ sales_demand_signal.units_total|floatformat:0|intcomma }}</div>
         <div class="kpi-label">Unidades observadas</div>
-        <div class="muted" style="margin-top:8px;">{{ sales_demand_signal.insumos_count }} insumos impactados</div>
+        <div class="muted pd-u-b1ecc496e0">{{ sales_demand_signal.insumos_count }} insumos impactados</div>
       </article>
       <article class="kpi-card">
         <div class="kpi-number">{{ sales_demand_signal.years_observed }}</div>
         <div class="kpi-label">Años observados</div>
-        <div class="muted" style="margin-top:8px;">{{ sales_demand_signal.comparable_years }} temporadas comparables</div>
+        <div class="muted pd-u-b1ecc496e0">{{ sales_demand_signal.comparable_years }} temporadas comparables</div>
       </article>
       <article class="kpi-card">
         <div class="kpi-label">Productos líderes</div>
         {% for row in sales_demand_signal.top_products %}
-        <div class="muted" style="margin-top:6px;">{{ row.receta__nombre }} · {{ row.total|floatformat:0|intcomma }}</div>
+        <div class="muted pd-u-2fd7789b39">{{ row.receta__nombre }} · {{ row.total|floatformat:0|intcomma }}</div>
         {% empty %}
-        <div class="muted" style="margin-top:6px;">Sin ventas recientes ligadas a estos artículos.</div>
+        <div class="muted pd-u-2fd7789b39">Sin ventas recientes ligadas a estos artículos.</div>
         {% endfor %}
       </article>
     </div>
@@ -100,7 +100,7 @@
     <div class="alert {% if sales_demand_gate.tone == 'danger' %}alert-danger{% elif sales_demand_gate.tone == 'warning' %}alert-warning{% else %}alert-success{% endif %} mt-3">
       <strong>Control de demanda comercial:</strong>
       {{ sales_demand_gate.detail }}
-      <span class="muted" style="margin-left:8px;">{{ sales_demand_gate.next_step }}</span>
+      <span class="muted pd-u-6170d94c81">{{ sales_demand_gate.next_step }}</span>
     </div>
     {% endif %}
   </section>
@@ -253,7 +253,7 @@
     {% if selected_master_focus_key %}
     <div class="alert alert-info mb-3">
       <strong>Vista enfocada:</strong> estás revisando el subconjunto del maestro bloqueado para esta pantalla.
-      <a class="btn btn-secondary btn-sm" href="{% url 'inventario:alertas' %}{% if nivel != 'alerta' %}?nivel={{ nivel }}{% endif %}" style="margin-left:8px;">Quitar foco</a>
+      <a class="btn btn-secondary btn-sm pd-u-6170d94c81" href="{% url 'inventario:alertas' %}{% if nivel != 'alerta' %}?nivel={{ nivel }}{% endif %}">Quitar foco</a>
     </div>
     {% endif %}
     <div class="toolbar mb-3">
@@ -319,13 +319,13 @@
             <td>
               {{ e.insumo.display_name }}
               {% if e.canonical_variant_count > 1 %}
-              <span class="badge bg-success" style="margin-left:8px;">Maestro · {{ e.canonical_variant_count }} variantes</span>
+              <span class="badge bg-success pd-u-6170d94c81">Maestro · {{ e.canonical_variant_count }} variantes</span>
               {% endif %}
               {% if e.canonical_pending %}
-              <span class="badge bg-warning text-dark" style="margin-left:8px;">{{ e.canonical_pending_label }}</span>
+              <span class="badge bg-warning text-dark pd-u-6170d94c81">{{ e.canonical_pending_label }}</span>
               {% endif %}
               {% if e.is_operational_blocker %}
-              <span class="badge bg-warning text-dark" style="margin-left:8px;">{{ e.operational_blocker_label }}</span>
+              <span class="badge bg-warning text-dark pd-u-6170d94c81">{{ e.operational_blocker_label }}</span>
               {% endif %}
             </td>
             <td>{% if e.insumo.unidad_base %}{{ e.insumo.unidad_base.codigo }}{% else %}-{% endif %}</td>

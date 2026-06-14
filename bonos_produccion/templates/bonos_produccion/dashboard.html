@@ -6,88 +6,7 @@
 {% block body_class %}page-bonos-produccion-dashboard{% endblock %}
 
 {% block extra_css %}
-<style>
-  .bonos-shell{width:min(100%,1720px);margin:0 auto;padding:0 0 2rem;display:grid;gap:clamp(.9rem,1.4vw,1.25rem)}
-  .bonos-hero{background:#fff;border:1px solid #ede6f0;border-radius:10px;padding:1.15rem 1.25rem;box-shadow:0 1px 3px rgba(0,0,0,.06);display:grid;grid-template-columns:minmax(0,1.5fr) minmax(300px,.75fr);gap:1rem;align-items:end}
-  .bonos-kicker{font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#8b2252;font-weight:800}
-  .bonos-title{font-size:1.55rem;font-weight:900;margin:.15rem 0;color:#1c1520}
-  .bonos-copy{color:#6b5f70;max-width:62rem;margin:0}
-  .bonos-actions{display:flex;gap:.55rem;flex-wrap:wrap;margin-top:.9rem}
-  .bonos-btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;border-radius:8px;border:1px solid #e7ddeb;padding:.6rem .85rem;font-weight:800;text-decoration:none;background:#fff;color:#1c1520;cursor:pointer}
-  .bonos-btn.primary{background:#8b2252;color:#fff;border-color:#8b2252}
-  .bonos-btn:disabled{opacity:.55;cursor:not-allowed}
-  .period-filter{display:grid;grid-template-columns:1fr 1fr auto;gap:.55rem;align-items:end}
-  .bonos-field{display:grid;gap:.3rem}
-  .bonos-field label{font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#6b5f70}
-  .bonos-field input,.bonos-field textarea,.bonos-field select{width:100%;border:1px solid #e7ddeb;border-radius:8px;padding:.58rem .65rem;font:inherit;background:#fbf8fb}
-  .kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem}
-  .kpi-card,.bonos-card{background:#fff;border:1px solid #ede6f0;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
-  .kpi-card{padding:.95rem 1rem}
-  .kpi-label{font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:#6b5f70;font-weight:800}
-  .kpi-value{font-size:1.45rem;font-weight:900;color:#1c1520;margin-top:.15rem}
-  .kpi-value.wine{color:#8b2252}.kpi-value.gold{color:#c9a84c}
-  .bonos-card-h{padding:.9rem 1rem;border-bottom:1px solid #ede6f0;display:flex;justify-content:space-between;gap:1rem;align-items:center;flex-wrap:wrap}
-  .bonos-card-title{font-weight:900;text-transform:uppercase;letter-spacing:.06em}
-  .bonos-card-body{padding:1rem}
-  .config-grid{display:grid;grid-template-columns:repeat(6,minmax(128px,1fr));gap:.75rem}
-  .area-grid{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:.75rem}
-  .area-chip{padding:.85rem;border:1px solid #ede6f0;border-radius:10px;background:#fbf8fb}
-  .area-chip span{display:block;color:#6b5f70;font-size:.72rem;font-weight:800;text-transform:uppercase}
-  .area-chip strong{display:block;font-size:1.05rem;margin-top:.15rem}
-  .rule-config{display:block;margin-top:1rem}
-  .rule-selector{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:.6rem;margin-bottom:.85rem}
-  .rule-tab{border:1px solid #e7ddeb;background:#fff;border-radius:10px;padding:.75rem .85rem;text-align:left;font:inherit;cursor:pointer;color:#1c1520;display:flex;align-items:center;justify-content:space-between;gap:.75rem;min-height:68px}
-  .rule-tab strong{display:block;font-size:.96rem;font-weight:900}
-  .rule-tab span{display:block;margin-top:0;font-size:.78rem;font-weight:800;color:#6b5f70;text-align:right;line-height:1.25}
-  .rule-tab.active{border-color:#8b2252;background:#8b2252;color:#fff}
-  .rule-tab.active span{color:#f4edf4}
-  .rule-panel-stack{display:block;width:100%;clear:both}
-  .rule-panel{display:block;width:100%;max-width:100%;border:1px solid #ede6f0;border-radius:10px;background:#fff;overflow:hidden}
-  .rule-panel[hidden]{display:none!important}
-  .rule-panel-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.9rem 1rem;border-bottom:1px solid #ede6f0}
-  .rule-panel-title{font-size:1rem;font-weight:900}
-  .rule-panel-meta{font-size:.82rem;font-weight:800;color:#6b5f70}
-  .rule-body{padding:1rem;display:grid;gap:.9rem}
-  .rule-concepts{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.75rem;width:100%}
-  .rule-row{border:1px solid #ede6f0;border-radius:10px;background:#fbf8fb;padding:.8rem;display:grid;grid-template-columns:1fr 1fr;gap:.65rem;align-items:end}
-  .rule-row .status-pill{grid-column:1 / -1}
-  .rule-row.rule-disabled{display:none}
-  .check-row{display:flex;align-items:center;gap:.45rem;font-size:.82rem;font-weight:800;color:#6b5f70}
-  .cancel-rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.75rem;margin-top:.75rem;padding:.85rem;border:1px solid #e0d4e8;border-radius:10px;background:#fdf8fb}
-  .cancel-rules-title{grid-column:1 / -1;font-size:.72rem;font-weight:900;text-transform:uppercase;letter-spacing:.06em;color:#8b2252;margin-bottom:.1rem}
-  .cancel-rule{display:grid;gap:.5rem}
-  .cancel-check{display:flex;align-items:center;gap:.45rem;font-size:.82rem;font-weight:800;color:#6b5f70;cursor:pointer}
-  .filter-bar{display:grid;grid-template-columns:minmax(240px,1fr) auto;gap:.75rem;align-items:center}
-  .area-filter{display:flex;gap:.45rem;flex-wrap:wrap}
-  .area-filter button{border:1px solid #e7ddeb;background:#fff;border-radius:999px;padding:.45rem .75rem;font:inherit;font-weight:800;color:#6b5f70;cursor:pointer}
-  .area-filter button.active{background:#8b2252;border-color:#8b2252;color:#fff}
-  .search-input{border:1px solid #e7ddeb;border-radius:999px;padding:.7rem .95rem;font:inherit;background:#fbf8fb}
-  .employee-list{display:grid;gap:.65rem;margin-top:1rem}
-  .employee-card{border:1px solid #ede6f0;border-radius:10px;background:#fff;overflow:hidden}
-  .employee-card[hidden]{display:none}
-  .employee-card summary{display:grid;grid-template-columns:minmax(240px,1fr) 120px 120px 110px;gap:.75rem;align-items:center;padding:.85rem 1rem;cursor:pointer}
-  .employee-card summary::marker{content:""}
-  .employee-name{font-weight:900}.employee-meta{font-size:.78rem;color:#6b5f70}
-  .employee-total{font-weight:900;color:#8b2252;text-align:right}
-  .employee-body{border-top:1px solid #ede6f0;padding:1rem;display:grid;gap:.8rem}
-  .adjust-grid{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:.75rem}
-  .money-grid{display:grid;grid-template-columns:repeat(3,minmax(130px,1fr));gap:.75rem}
-  .status-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:.28rem .6rem;font-size:.72rem;font-weight:900;white-space:nowrap}
-  .status-pill.ok{background:#dcfce7;color:#166534}.status-pill.bad{background:#fee2e2;color:#991b1b}.status-pill.neutral{background:#f4edf4;color:#8b2252}
-  .status-pill.cerrado{background:#fee2e2;color:#991b1b}
-  .status-pill.cierra-hoy{background:#fef9c3;color:#854d0e}
-  .status-pill.activo{background:#dcfce7;color:#166534}
-  .empty-state{padding:1rem;border:1px dashed #e7ddeb;border-radius:10px;color:#6b5f70;background:#fbf8fb}
-  .rango-corte{background:#fdf5f9;border:1px solid #e8d5e3;border-radius:10px;padding:.9rem;margin-bottom:.85rem}
-  .rango-corte-title{font-size:.72rem;font-weight:900;text-transform:uppercase;letter-spacing:.07em;color:#8b2252;margin-bottom:.6rem}
-  .rango-corte-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.65rem;align-items:end}
-  .rango-corte-info{margin-top:.6rem;font-size:.78rem;color:#6b5f70;background:#fff;border-radius:8px;padding:.45rem .75rem;border:1px solid #ede6f0;display:flex;gap:1rem;flex-wrap:wrap;align-items:center}
-  .rango-corte-info .warn{color:#8b2252;font-weight:800}
-  .btn-sm{padding:.35rem .65rem;font-size:.78rem}
-  @media(max-width:1180px){.rule-selector{grid-template-columns:repeat(3,minmax(140px,1fr))}.rule-concepts{grid-template-columns:repeat(2,minmax(170px,1fr))}.config-grid{grid-template-columns:repeat(3,1fr)}.employee-card summary{grid-template-columns:1fr 100px 100px}}
-  @media(max-width:900px){.bonos-hero{grid-template-columns:1fr}.kpi-grid,.area-grid{grid-template-columns:repeat(2,1fr)}.filter-bar{grid-template-columns:1fr}.adjust-grid,.money-grid{grid-template-columns:repeat(2,1fr)}}
-  @media(max-width:620px){.period-filter,.kpi-grid,.area-grid,.config-grid,.rule-selector,.rule-concepts,.adjust-grid,.money-grid{grid-template-columns:1fr}.employee-card summary{grid-template-columns:1fr}.employee-total{text-align:left}}
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/bonos-produccion-templates-bonos-produccion-dashboard.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
@@ -136,8 +55,8 @@
     <article class="kpi-card"><div class="kpi-label">Empleados</div><div class="kpi-value">{{ bonos|length|intcomma }}</div></article>
     <article class="kpi-card"><div class="kpi-label">Pasan todo</div><div class="kpi-value wine">{{ passing|intcomma }}</div></article>
     <article class="kpi-card"><div class="kpi-label">Días laborables</div><div class="kpi-value">{% if periodo %}{{ periodo.dias_laborables }}{% else %}-{% endif %}</div></article>
-    {% if periodo_estado == "cerrado" %}<article class="kpi-card"><div class="kpi-label">Estado</div><div class="kpi-value" style="font-size:1rem"><span class="status-pill cerrado">⬛ Período cerrado</span></div></article>
-    {% elif periodo_estado == "cierra_hoy" %}<article class="kpi-card"><div class="kpi-label">Estado</div><div class="kpi-value" style="font-size:1rem"><span class="status-pill cierra-hoy">⚠ Cierra hoy</span></div></article>
+    {% if periodo_estado == "cerrado" %}<article class="kpi-card"><div class="kpi-label">Estado</div><div class="kpi-value pd-u-f2ea5fc13d"><span class="status-pill cerrado">Período cerrado</span></div></article>
+    {% elif periodo_estado == "cierra_hoy" %}<article class="kpi-card"><div class="kpi-label">Estado</div><div class="kpi-value pd-u-f2ea5fc13d"><span class="status-pill cierra-hoy">Cierra hoy</span></div></article>
     {% endif %}
   </section>
 
@@ -147,11 +66,11 @@
       {% if not periodo %}
         <span class="status-pill bad">Sin período creado</span>
       {% elif periodo_estado == "cerrado" %}
-        <span class="status-pill cerrado">⬛ Período cerrado</span>
+        <span class="status-pill cerrado">Período cerrado</span>
       {% elif periodo_estado == "cierra_hoy" %}
-        <span class="status-pill cierra-hoy">⚠ Cierra hoy</span>
+        <span class="status-pill cierra-hoy">Cierra hoy</span>
       {% else %}
-        <span class="status-pill activo">● Activo</span>
+        <span class="status-pill activo">Activo</span>
       {% endif %}
     </div>
     <div class="bonos-card-body">
@@ -167,13 +86,13 @@
             <div class="bonos-field"><label>Fin del corte</label><input id="bp-fecha-fin" name="fecha_fin" type="date" value="{% if periodo and periodo.fecha_fin %}{{ periodo.fecha_fin|date:'Y-m-d' }}{% endif %}" oninput="bpActualizarRango()"></div>
             <div class="bonos-field">
               <label>Días laborables</label>
-              <div style="display:flex;gap:.45rem;align-items:center">
-                <input id="bp-dias-lab" name="dias_laborables" type="number" min="1" value="{% if periodo %}{{ periodo.dias_laborables }}{% else %}{{ defaults.dias_laborables }}{% endif %}" style="flex:1">
+              <div class="pd-u-742f7bdaf0">
+                <input id="bp-dias-lab" name="dias_laborables" type="number" min="1" value="{% if periodo %}{{ periodo.dias_laborables }}{% else %}{{ defaults.dias_laborables }}{% endif %}" class="pd-u-7623f05545">
                 <button type="button" class="bonos-btn btn-sm" onclick="bpSugerirDias()" title="Calcula total de días del rango">Sugerir</button>
               </div>
             </div>
           </div>
-          <div class="rango-corte-info" id="bp-rango-info" style="display:none"></div>
+          <div class="rango-corte-info pd-u-c8be1ccba6" id="bp-rango-info"></div>
         </div>
         <div class="config-grid">
           <div class="bonos-field"><label>Monto hornos</label><input name="monto_hornos" type="number" step="0.01" value="{% if periodo %}{{ periodo.monto_hornos }}{% else %}{{ defaults.monto_hornos }}{% endif %}"></div>
@@ -402,9 +321,9 @@ function bpActualizarRango(){
   var totalCal=Math.round((fin-ini)/864e5)+1;
   var cruzaMeses=ini.getMonth()!==fin.getMonth()||ini.getFullYear()!==fin.getFullYear();
   info.style.display='flex';
-  info.innerHTML='<span>📆 <strong>'+bpFmtShort(ini)+' → '+bpFmtShort(fin)+' '+fin.getFullYear()+'</strong></span>'
+  info.innerHTML='<span>Fecha <strong>'+bpFmtShort(ini)+' → '+bpFmtShort(fin)+' '+fin.getFullYear()+'</strong></span>'
     +'<span>'+totalCal+' días calendario</span>'
-    +(cruzaMeses?'<span class="warn">⚠ Cruza meses</span>':'');
+    +(cruzaMeses?'<span class="warn">Cruza meses</span>':'');
 }
 function bpSugerirDias(){
   var ini=bpParseFecha(document.getElementById('bp-fecha-ini').value);
