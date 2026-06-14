@@ -1275,6 +1275,39 @@
         font-size: 12px;
         font-weight: 800;
       }
+      .route-status-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .route-status-pill {
+        display: inline-flex;
+        min-height: 26px;
+        align-items: center;
+        border: 1px solid var(--route-pwa-border);
+        border-radius: 999px;
+        background: #1f1f2d;
+        color: var(--route-pwa-muted);
+        font-size: 11px;
+        font-weight: 900;
+        padding: 5px 8px;
+      }
+      .route-status-pill.ok {
+        border-color: rgba(81, 181, 111, .70);
+        background: #122219;
+        color: #9fe3b0;
+      }
+      .route-status-pill.warn {
+        border-color: rgba(230, 184, 79, .72);
+        background: #1e1a10;
+        color: #f0d684;
+      }
+      .route-status-pill.bad {
+        border-color: rgba(230, 79, 100, .68);
+        background: #241419;
+        color: #f3a2ad;
+      }
       .route-event {
         border-left: 4px solid var(--route-pwa-warning);
         padding: 10px 12px;
@@ -2260,10 +2293,43 @@
         `;
       }
 
+      function entregaTone(estado) {
+        if (estado === "ENTREGADA") return "ok";
+        if (estado === "CON_DIFERENCIA" || estado === "NO_ENTREGADA") return "bad";
+        return "warn";
+      }
+
+      function entregaLabel(parada) {
+        const estado = parada?.entrega_estado || "PENDIENTE";
+        const label = parada?.entrega_estado_display || {
+          PENDIENTE: "Recepción Point pendiente",
+          ENTREGADA: "Recibido en Point",
+          CON_DIFERENCIA: "Point recibió con diferencia",
+          NO_ENTREGADA: "Point sin recepción"
+        }[estado] || estado;
+        return parada?.entrega_confirmada_en ? `${label} · ${formatDate(parada.entrega_confirmada_en)}` : label;
+      }
+
+      function pointRecepcionTone(linea) {
+        const estado = linea?.point_recepcion_estado || "PENDIENTE_POINT";
+        if (estado === "RECIBIDO_OK") return "ok";
+        if (estado === "RECIBIDO_DIFERENCIA" || estado === "RECIBIDO_CERO") return "bad";
+        return "warn";
+      }
+
+      function pointRecepcionLabel(linea) {
+        if (!linea?.point_is_received) return "Point pendiente";
+        const cantidad = linea.point_received_quantity ?? "0";
+        const unit = linea.unit || "";
+        const fecha = linea.point_received_at ? ` · ${formatDate(linea.point_received_at)}` : "";
+        return `Point recibió ${cantidad} ${unit}${fecha}`;
+      }
+
       function renderParadasRuta(paradas) {
         if (!paradas?.length) return `<p class="unit-line">Esta ruta no tiene paradas configuradas.</p>`;
         return `<div class="route-stop-list">` + paradas.map((parada) => {
           const visited = parada.estado === "VISITADA";
+          const entrega = parada.entrega_estado || "PENDIENTE";
           return `
             <section class="route-stop ${visited ? "visited" : ""}" tabindex="0">
               <span class="route-stop-number">${visited ? "OK" : escapeHtml(parada.orden)}</span>
@@ -2271,6 +2337,10 @@
                 <strong>${escapeHtml(parada.punto_nombre_snapshot || parada.punto?.nombre || "Punto")}</strong>
                 <span class="route-stop-meta">${escapeHtml(parada.punto?.tipo_display || parada.punto?.tipo || "Punto")} · Geocerca ${escapeHtml(parada.radio_geocerca_metros || parada.punto?.radio_geocerca_metros || "-")} m</span>
                 <span class="route-stop-meta">${escapeHtml(parada.estado_display || parada.estado || "")}${parada.hora_llegada_real ? ` · llegada ${formatDate(parada.hora_llegada_real)}` : ""}</span>
+                <span class="route-stop-meta">${escapeHtml(parada.entrega_notas || "La ruta puede continuar; cierre final espera recepción Point.")}</span>
+                <div class="route-status-row">
+                  <span class="route-status-pill ${entregaTone(entrega)}">${escapeHtml(entregaLabel(parada))}</span>
+                </div>
               </div>
             </section>
           `;
@@ -2341,6 +2411,10 @@
                       <strong>${escapeHtml(linea.item_name || "Producto")}</strong>
                       <span class="route-stop-meta">${escapeHtml(linea.parada_nombre || "Parada")} · esperado ${escapeHtml(linea.cantidad_enviada_esperada || "0")} ${escapeHtml(linea.unit || "")}</span>
                       <span class="route-stop-meta">${escapeHtml(linea.estatus_display || linea.estatus || "")}${diferencia ? ` · ${escapeHtml(linea.motivo_diferencia_display || linea.motivo_diferencia || "")}` : ""}</span>
+                      <div class="route-status-row">
+                        <span class="route-status-pill ${linea.cantidad_cargada !== null && linea.cantidad_cargada !== undefined ? "ok" : "warn"}">Cargado ${escapeHtml(linea.cantidad_cargada ?? "pendiente")} ${escapeHtml(linea.unit || "")}</span>
+                        <span class="route-status-pill ${pointRecepcionTone(linea)}">${escapeHtml(pointRecepcionLabel(linea))}</span>
+                      </div>
                       ${pendiente ? `
                         <div class="form-salida" style="margin-top:10px;">
                           <label for="carga_${linea.id}">Cantidad real</label>
@@ -4016,7 +4090,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=route-control-v16").catch(() => {});
+          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=route-control-v17").catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {

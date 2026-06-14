@@ -291,6 +291,11 @@ class RutaCargaChecklistLineaSerializer(serializers.ModelSerializer):
     estatus_display = serializers.CharField(source="get_estatus_display", read_only=True)
     motivo_diferencia_display = serializers.CharField(source="get_motivo_diferencia_display", read_only=True)
     validado_por_nombre = serializers.SerializerMethodField()
+    point_is_received = serializers.SerializerMethodField()
+    point_received_quantity = serializers.SerializerMethodField()
+    point_received_at = serializers.SerializerMethodField()
+    point_received_by = serializers.SerializerMethodField()
+    point_recepcion_estado = serializers.SerializerMethodField()
 
     class Meta:
         model = RutaCargaChecklistLinea
@@ -316,6 +321,11 @@ class RutaCargaChecklistLineaSerializer(serializers.ModelSerializer):
             "notas",
             "validado_por_nombre",
             "validado_en",
+            "point_is_received",
+            "point_received_quantity",
+            "point_received_at",
+            "point_received_by",
+            "point_recepcion_estado",
         ]
         read_only_fields = fields
 
@@ -323,6 +333,43 @@ class RutaCargaChecklistLineaSerializer(serializers.ModelSerializer):
         if not obj.validado_por_id:
             return ""
         return nombre_operativo_usuario(obj.validado_por)
+
+    def _point_line(self, obj):
+        return getattr(obj, "point_transfer_line", None)
+
+    def get_point_is_received(self, obj):
+        point_line = self._point_line(obj)
+        return bool(point_line and point_line.is_received)
+
+    def get_point_received_quantity(self, obj):
+        point_line = self._point_line(obj)
+        if not point_line or not point_line.is_received:
+            return None
+        return str(point_line.received_quantity)
+
+    def get_point_received_at(self, obj):
+        point_line = self._point_line(obj)
+        if not point_line or not point_line.received_at:
+            return None
+        return point_line.received_at
+
+    def get_point_received_by(self, obj):
+        point_line = self._point_line(obj)
+        if not point_line or not point_line.is_received:
+            return ""
+        return point_line.received_by
+
+    def get_point_recepcion_estado(self, obj):
+        point_line = self._point_line(obj)
+        if not point_line or not point_line.is_received:
+            return "PENDIENTE_POINT"
+        esperado = Decimal(str(obj.cantidad_cargada if obj.cantidad_cargada is not None else obj.cantidad_enviada_esperada or 0))
+        recibido = Decimal(str(point_line.received_quantity or 0))
+        if recibido == esperado:
+            return "RECIBIDO_OK"
+        if recibido == 0:
+            return "RECIBIDO_CERO"
+        return "RECIBIDO_DIFERENCIA"
 
 
 class RutaCargaChecklistSerializer(serializers.ModelSerializer):

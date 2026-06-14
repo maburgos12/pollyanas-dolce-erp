@@ -1143,8 +1143,8 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v16", pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v16-dashboard-ruta-compacta", sw_js)
+        self.assertIn("route-control-v17", pwa_html)
+        self.assertIn("pollyanas-logistica-pwa-v17-recepcion-point", sw_js)
         self.assertIn("ROUTE_AUTO_TRACKING_INTERVAL_MS", pwa_html)
         self.assertIn("TRACKING_QUEUE_TTL_MS", pwa_html)
         self.assertIn("normalizeRutaTrackingQueue", pwa_html)
@@ -1176,6 +1176,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("Capturar ubicación GPS", pwa_html)
         self.assertIn("Reportar desvío", pwa_html)
         self.assertIn("Paradas de reparto", pwa_html)
+        self.assertIn("Recepción Point pendiente", pwa_html)
+        self.assertIn("Point recibió", pwa_html)
+        self.assertIn("La ruta puede continuar; cierre final espera recepción Point.", pwa_html)
         self.assertIn('draft.geoStatus === "idle" ? "" : geoOverlay(draft, "capturarUbicacionRuta")', pwa_html)
 
     def test_puntos_logisticos_crea_punto_manual(self):
@@ -1700,6 +1703,19 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.json()["lineas_recibidas"], 1)
         self.assertEqual(response.json()["paradas"][0]["entrega_estado"], ParadaRuta.ENTREGA_ENTREGADA)
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+
+    def test_api_ruta_activa_expone_recepcion_point_por_producto(self):
+        self.client.force_login(self.user)
+        self._crear_linea_carga_con_transferencia_recibida()
+
+        response = self.client.get(reverse("api_logistica_ruta_activa"))
+
+        self.assertEqual(response.status_code, 200)
+        linea = response.json()["checklist_carga"]["lineas"][0]
+        self.assertTrue(linea["point_is_received"])
+        self.assertEqual(linea["point_received_quantity"], "5.000")
+        self.assertEqual(linea["point_recepcion_estado"], "RECIBIDO_OK")
+        self.assertIn("entrega_estado", response.json()["paradas"][0])
 
     def test_db_bloquea_dos_rutas_en_ruta_mismo_repartidor(self):
         with self.assertRaises(IntegrityError):
