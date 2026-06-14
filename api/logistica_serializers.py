@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework import serializers
@@ -9,19 +11,31 @@ from logistica.models import (
     BitacoraSalidaLlegada,
     CargaCombustibleUnidad,
     EntregaRuta,
+    EventoRuta,
     InspeccionDiaria,
     InspeccionVehiculo,
     LavadoUnidad,
+    ParadaRuta,
+    ParadaEntregaEvidencia,
+    PuntoLogistico,
     Repartidor,
     ReporteUnidad,
     ReporteUnidadReafirmacion,
+    RutaCargaChecklist,
+    RutaCargaChecklistLinea,
     RutaEntrega,
+    UbicacionRuta,
     Unidad,
 )
+from logistica.services_rutas_control import validar_coordenadas
 from rrhh.services_identidad import nombre_operativo_usuario
 
 
 class LogisticaRutaSerializer(serializers.ModelSerializer):
+    repartidor_nombre = serializers.SerializerMethodField()
+    unidad_operativa_codigo = serializers.CharField(source="unidad_operativa.codigo", read_only=True)
+    estatus_display = serializers.CharField(source="get_estatus_display", read_only=True)
+
     class Meta:
         model = RutaEntrega
         fields = [
@@ -31,9 +45,23 @@ class LogisticaRutaSerializer(serializers.ModelSerializer):
             "fecha_ruta",
             "chofer",
             "unidad",
+            "repartidor",
+            "repartidor_nombre",
+            "unidad_operativa",
+            "unidad_operativa_codigo",
+            "bitacora_salida",
             "estatus",
+            "estatus_display",
             "km_estimado",
             "notas",
+            "hora_inicio_real",
+            "hora_cierre_real",
+            "cumplimiento_porcentaje",
+            "ruta_programada_polyline",
+            "ruta_programada_distancia_metros",
+            "ruta_programada_duracion_segundos",
+            "ruta_programada_fuente",
+            "ruta_programada_actualizada_en",
             "total_entregas",
             "entregas_completadas",
             "entregas_incidencia",
@@ -44,6 +72,18 @@ class LogisticaRutaSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "folio",
+            "repartidor_nombre",
+            "unidad_operativa_codigo",
+            "estatus_display",
+            "bitacora_salida",
+            "hora_inicio_real",
+            "hora_cierre_real",
+            "cumplimiento_porcentaje",
+            "ruta_programada_polyline",
+            "ruta_programada_distancia_metros",
+            "ruta_programada_duracion_segundos",
+            "ruta_programada_fuente",
+            "ruta_programada_actualizada_en",
             "total_entregas",
             "entregas_completadas",
             "entregas_incidencia",
@@ -51,6 +91,42 @@ class LogisticaRutaSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+    def get_repartidor_nombre(self, obj):
+        if not obj.repartidor_id:
+            return ""
+        return nombre_operativo_usuario(obj.repartidor.user)
+
+    def validate(self, attrs):
+        unidad_operativa = attrs.get("unidad_operativa") or getattr(self.instance, "unidad_operativa", None)
+        if unidad_operativa and not unidad_operativa.activa:
+            raise serializers.ValidationError({"unidad_operativa": "La unidad operativa debe estar activa."})
+        return attrs
+
+
+class LogisticaRutaParadaCreateSerializer(serializers.Serializer):
+    punto_id = serializers.IntegerField()
+    orden = serializers.IntegerField(min_value=1, required=False)
+
+
+class LogisticaRutaCreateSerializer(serializers.Serializer):
+    nombre = serializers.CharField()
+    fecha_ruta = serializers.DateField()
+    repartidor = serializers.PrimaryKeyRelatedField(queryset=Repartidor.objects.all())
+    unidad_operativa = serializers.PrimaryKeyRelatedField(queryset=Unidad.objects.filter(activa=True))
+    chofer = serializers.CharField(required=False, allow_blank=True, default="")
+    unidad = serializers.CharField(required=False, allow_blank=True, default="")
+    estatus = serializers.ChoiceField(choices=RutaEntrega.ESTATUS_CHOICES, required=False, default=RutaEntrega.ESTATUS_PLANEADA)
+    km_estimado = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, default=Decimal("0"))
+    notas = serializers.CharField(required=False, allow_blank=True, default="")
+    paradas = LogisticaRutaParadaCreateSerializer(many=True)
+
+    def validate(self, attrs):
+        if attrs.get("estatus", RutaEntrega.ESTATUS_PLANEADA) != RutaEntrega.ESTATUS_PLANEADA:
+            raise serializers.ValidationError({"estatus": "Crea la ruta como planeada y libérala desde el flujo de planeación."})
+        if not attrs.get("paradas"):
+            raise serializers.ValidationError({"paradas": "Selecciona al menos una sucursal o punto para planear la ruta del día."})
+        return attrs
 
 
 class LogisticaEntregaSerializer(serializers.ModelSerializer):
@@ -93,6 +169,286 @@ class LogisticaEntregaCreateSerializer(serializers.Serializer):
     estatus = serializers.ChoiceField(choices=EntregaRuta.ESTATUS_CHOICES, required=False, default=EntregaRuta.ESTATUS_PENDIENTE)
     monto_estimado = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=0)
     comentario = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class PuntoLogisticoSerializer(serializers.ModelSerializer):
+    sucursal_nombre = serializers.CharField(source="sucursal.nombre", read_only=True)
+    tipo_display = serializers.CharField(source="get_tipo_display", read_only=True)
+
+    class Meta:
+        model = PuntoLogistico
+        fields = [
+            "id",
+            "sucursal",
+            "sucursal_nombre",
+            "nombre",
+            "tipo",
+            "tipo_display",
+            "latitud",
+            "longitud",
+            "radio_geocerca_metros",
+            "activo",
+            "notas",
+        ]
+        read_only_fields = ["id", "sucursal_nombre"]
+
+
+class ParadaRutaSerializer(serializers.ModelSerializer):
+    punto = PuntoLogisticoSerializer(read_only=True)
+    estado_display = serializers.CharField(source="get_estado_display", read_only=True)
+
+    class Meta:
+        model = ParadaRuta
+        fields = [
+            "id",
+            "ruta",
+            "punto",
+            "orden",
+            "punto_nombre_snapshot",
+            "latitud_geocerca",
+            "longitud_geocerca",
+            "radio_geocerca_metros",
+            "hora_estimada",
+            "hora_llegada_real",
+            "hora_salida_real",
+            "estado",
+            "estado_display",
+            "distancia_llegada_metros",
+            "notas",
+        ]
+        read_only_fields = fields
+
+
+class UbicacionRutaSerializer(serializers.ModelSerializer):
+    repartidor_nombre = serializers.SerializerMethodField()
+    unidad_codigo = serializers.CharField(source="unidad.codigo", read_only=True)
+
+    class Meta:
+        model = UbicacionRuta
+        fields = [
+            "id",
+            "ruta",
+            "repartidor",
+            "repartidor_nombre",
+            "unidad",
+            "unidad_codigo",
+            "latitud",
+            "longitud",
+            "precision_metros",
+            "velocidad_kmh",
+            "bateria_porcentaje",
+            "timestamp_dispositivo",
+            "timestamp_servidor",
+            "fuera_de_geocerca",
+        ]
+        read_only_fields = fields
+
+    def get_repartidor_nombre(self, obj):
+        return nombre_operativo_usuario(obj.repartidor.user)
+
+
+class UbicacionRutaCreateSerializer(serializers.Serializer):
+    TRACKING_ORIGEN_CHOICES = ["manual_pwa", "automatico_pwa"]
+
+    latitud = serializers.DecimalField(max_digits=9, decimal_places=6)
+    longitud = serializers.DecimalField(max_digits=9, decimal_places=6)
+    precision_metros = serializers.DecimalField(max_digits=8, decimal_places=2, min_value=Decimal("0"), required=False, allow_null=True)
+    velocidad_kmh = serializers.DecimalField(max_digits=8, decimal_places=2, min_value=Decimal("0"), required=False, allow_null=True)
+    bateria_porcentaje = serializers.IntegerField(min_value=0, max_value=100, required=False, allow_null=True)
+    timestamp_dispositivo = serializers.DateTimeField(required=False, allow_null=True)
+    client_event_id = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
+    fuera_de_ruta_confirmado = serializers.BooleanField(required=False, default=False)
+    desvio_motivo = serializers.CharField(required=False, allow_blank=True, default="")
+    tracking_origen = serializers.ChoiceField(choices=TRACKING_ORIGEN_CHOICES, required=False, default="manual_pwa")
+
+    def validate(self, attrs):
+        try:
+            validar_coordenadas(attrs.get("latitud"), attrs.get("longitud"))
+        except Exception as exc:
+            if hasattr(exc, "message_dict"):
+                raise serializers.ValidationError(exc.message_dict)
+            raise
+        if attrs.get("fuera_de_ruta_confirmado") is True and not (attrs.get("desvio_motivo") or "").strip():
+            raise serializers.ValidationError({"desvio_motivo": "Indica un motivo breve para confirmar el desvío."})
+        return attrs
+
+
+class RutaCargaChecklistLineaSerializer(serializers.ModelSerializer):
+    parada_nombre = serializers.CharField(source="parada.punto_nombre_snapshot", read_only=True)
+    parada_orden = serializers.IntegerField(source="parada.orden", read_only=True)
+    estatus_display = serializers.CharField(source="get_estatus_display", read_only=True)
+    motivo_diferencia_display = serializers.CharField(source="get_motivo_diferencia_display", read_only=True)
+    validado_por_nombre = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RutaCargaChecklistLinea
+        fields = [
+            "id",
+            "checklist",
+            "parada",
+            "parada_nombre",
+            "parada_orden",
+            "transfer_external_id",
+            "detail_external_id",
+            "source_hash",
+            "item_code",
+            "item_name",
+            "unit",
+            "cantidad_solicitada",
+            "cantidad_enviada_esperada",
+            "cantidad_cargada",
+            "estatus",
+            "estatus_display",
+            "motivo_diferencia",
+            "motivo_diferencia_display",
+            "notas",
+            "validado_por_nombre",
+            "validado_en",
+        ]
+        read_only_fields = fields
+
+    def get_validado_por_nombre(self, obj):
+        if not obj.validado_por_id:
+            return ""
+        return nombre_operativo_usuario(obj.validado_por)
+
+
+class RutaCargaChecklistSerializer(serializers.ModelSerializer):
+    estatus_display = serializers.CharField(source="get_estatus_display", read_only=True)
+    lineas = RutaCargaChecklistLineaSerializer(many=True, read_only=True)
+    total_lineas = serializers.SerializerMethodField()
+    lineas_confirmadas = serializers.SerializerMethodField()
+    lineas_pendientes = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RutaCargaChecklist
+        fields = [
+            "id",
+            "ruta",
+            "estatus",
+            "estatus_display",
+            "sincronizado_en",
+            "confirmado_en",
+            "motivo_override",
+            "notas",
+            "total_lineas",
+            "lineas_confirmadas",
+            "lineas_pendientes",
+            "lineas",
+        ]
+        read_only_fields = fields
+
+    def get_total_lineas(self, obj):
+        return obj.lineas.count()
+
+    def get_lineas_confirmadas(self, obj):
+        return obj.lineas.exclude(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).count()
+
+    def get_lineas_pendientes(self, obj):
+        return obj.lineas.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).count()
+
+
+class RutaCargaLineaValidarSerializer(serializers.Serializer):
+    cantidad_cargada = serializers.DecimalField(max_digits=18, decimal_places=3, min_value=Decimal("0"))
+    motivo_diferencia = serializers.ChoiceField(
+        choices=RutaCargaChecklistLinea.MOTIVO_CHOICES,
+        required=False,
+        allow_blank=True,
+        default="",
+    )
+    notas = serializers.CharField(required=False, allow_blank=True, default="")
+    client_event_id = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
+
+
+class ParadaEntregaEvidenciaSerializer(serializers.ModelSerializer):
+    tipo_display = serializers.CharField(source="get_tipo_display", read_only=True)
+    capturado_por_nombre = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ParadaEntregaEvidencia
+        fields = [
+            "id",
+            "ruta",
+            "parada",
+            "linea_carga",
+            "tipo",
+            "tipo_display",
+            "cantidad_entregada",
+            "foto",
+            "comentario",
+            "latitud",
+            "longitud",
+            "precision_metros",
+            "client_event_id",
+            "capturado_por_nombre",
+            "capturado_en",
+        ]
+        read_only_fields = fields
+
+    def get_capturado_por_nombre(self, obj):
+        if not obj.capturado_por_id:
+            return ""
+        return nombre_operativo_usuario(obj.capturado_por)
+
+
+class EventoRutaSerializer(serializers.ModelSerializer):
+    tipo_display = serializers.CharField(source="get_tipo_display", read_only=True)
+    severidad_display = serializers.CharField(source="get_severidad_display", read_only=True)
+    punto_nombre = serializers.CharField(source="parada.punto_nombre_snapshot", read_only=True)
+    creado_por_nombre = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EventoRuta
+        fields = [
+            "id",
+            "ruta",
+            "parada",
+            "punto_nombre",
+            "ubicacion",
+            "tipo",
+            "tipo_display",
+            "severidad",
+            "severidad_display",
+            "descripcion",
+            "latitud",
+            "longitud",
+            "distancia_metros",
+            "metadata",
+            "creado_por",
+            "creado_por_nombre",
+            "creado_en",
+        ]
+        read_only_fields = fields
+
+    def get_creado_por_nombre(self, obj):
+        if not obj.creado_por_id:
+            return ""
+        return nombre_operativo_usuario(obj.creado_por)
+
+
+class EventoRutaCreateSerializer(serializers.Serializer):
+    tipo = serializers.ChoiceField(choices=EventoRuta.TIPO_CHOICES, default=EventoRuta.TIPO_INCIDENCIA_MANUAL)
+    severidad = serializers.ChoiceField(choices=EventoRuta.SEVERIDAD_CHOICES, default=EventoRuta.SEVERIDAD_ALERTA)
+    descripcion = serializers.CharField()
+    parada_id = serializers.IntegerField(required=False, allow_null=True)
+    latitud = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
+    longitud = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
+    metadata = serializers.JSONField(required=False, default=dict)
+
+    def validate(self, attrs):
+        latitud = attrs.get("latitud")
+        longitud = attrs.get("longitud")
+        if latitud is None and longitud is None:
+            return attrs
+        if latitud is None or longitud is None:
+            raise serializers.ValidationError("Latitud y longitud deben capturarse juntas.")
+        try:
+            validar_coordenadas(latitud, longitud)
+        except Exception as exc:
+            if hasattr(exc, "message_dict"):
+                raise serializers.ValidationError(exc.message_dict)
+            raise
+        return attrs
 
 
 class LogisticaUnidadSerializer(serializers.ModelSerializer):

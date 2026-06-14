@@ -248,6 +248,10 @@
 
       .dash-btn {
         position: relative;
+        display: grid;
+        grid-template-rows: auto 1fr;
+        justify-items: start;
+        gap: 10px;
         min-height: 86px;
         border: 2px solid var(--border);
         border-radius: 12px;
@@ -255,11 +259,88 @@
         color: var(--text);
         font-size: 16px;
         font-weight: 800;
-        padding: 14px 10px;
+        text-align: left;
+        padding: 14px;
       }
 
       .dash-btn:hover, .dash-btn:focus {
         border-color: var(--wine);
+      }
+
+      .dash-btn > span:not(.badge):not(.app-glyph) {
+        align-self: end;
+        line-height: 1.05;
+      }
+
+      .app-glyph {
+        display: grid;
+        place-items: center;
+        width: 42px;
+        height: 42px;
+        border: 1px solid rgba(201, 168, 76, .26);
+        border-radius: 13px;
+        background: #21151f;
+        color: var(--gold);
+      }
+
+      .app-glyph svg {
+        width: 26px;
+        height: 26px;
+        overflow: visible;
+      }
+
+      .app-glyph .soft {
+        fill: rgba(201, 168, 76, .12);
+      }
+
+      .app-glyph .stroke,
+      .app-glyph .gold-stroke {
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2.2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .app-glyph .gold-fill {
+        fill: currentColor;
+      }
+
+      .route-dashboard-card {
+        grid-column: 1 / -1;
+        grid-template-columns: auto minmax(0, 1fr);
+        grid-template-rows: auto;
+        align-items: center;
+        min-height: 102px;
+        border-color: rgba(201, 168, 76, .36);
+        background:
+          linear-gradient(135deg, rgba(139, 34, 82, .34), rgba(26, 26, 36, .94) 52%),
+          var(--surface);
+        box-shadow: 0 16px 34px rgba(0, 0, 0, .22);
+      }
+
+      .route-dashboard-card > span:not(.badge):not(.app-glyph) {
+        align-self: center;
+        color: var(--text);
+        font-size: 18px;
+        line-height: 1.1;
+      }
+
+      .route-dashboard-card .app-glyph {
+        width: 52px;
+        height: 52px;
+        border-color: rgba(201, 168, 76, .42);
+        background: #2b1725;
+      }
+
+      .route-dashboard-card .app-glyph svg {
+        width: 32px;
+        height: 32px;
+      }
+
+      .route-dashboard-card .badge.turno {
+        top: 13px;
+        right: 13px;
       }
 
       .badge {
@@ -295,19 +376,13 @@
       }
 
       .footer {
-        position: fixed;
-        right: 0;
-        bottom: 0;
-        left: 0;
-        max-width: 430px;
-        margin: 0 auto;
+        margin: 22px auto 0;
         border-top: 1px solid var(--border);
-        background: rgba(15, 15, 20, 0.94);
+        background: transparent;
         color: var(--text-muted);
         text-align: center;
         font-size: 12px;
-        padding: 13px 16px calc(13px + env(safe-area-inset-bottom));
-        pointer-events: none;
+        padding: 13px 16px 0;
       }
 
       .screen-title {
@@ -1033,6 +1108,223 @@
       .fuel-save-row .primary-btn {
         width: min(100%, 300px);
       }
+      /* Hallmark · PWA component: route operations · tone: utilitarian warm · states: default · focus · active · disabled · warning · success */
+      .route-card-pwa,
+      .route-hero,
+      .route-action-panel {
+        --route-pwa-panel: #14141d;
+        --route-pwa-panel-strong: #101018;
+        --route-pwa-border: #2a2a38;
+        --route-pwa-text: #f3edf4;
+        --route-pwa-muted: #b9adbd;
+        --route-pwa-gold: #d8b75f;
+        --route-pwa-wine: #9f1d52;
+        --route-pwa-success: #51b56f;
+        --route-pwa-danger: #e64f64;
+        --route-pwa-warning: #e6b84f;
+        display: grid;
+        gap: 12px;
+        padding: 16px;
+      }
+      .route-hero {
+        border: 1px solid rgba(201, 168, 76, .36);
+        border-radius: 18px;
+        background:
+          linear-gradient(145deg, rgba(139, 34, 82, .28), rgba(20, 20, 29, .92) 46%),
+          var(--route-pwa-panel);
+        color: var(--route-pwa-text);
+        box-shadow: 0 18px 45px rgba(0, 0, 0, .24);
+      }
+      .route-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: flex-start;
+      }
+      .route-head h2 {
+        margin: 0;
+        color: var(--route-pwa-text);
+        font-size: 22px;
+        line-height: 1.12;
+        overflow-wrap: anywhere;
+      }
+      .route-folio {
+        margin: 5px 0 0;
+        color: var(--route-pwa-gold);
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: .03em;
+        text-transform: uppercase;
+      }
+      .route-chip {
+        display: inline-flex;
+        min-height: 30px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid rgba(201, 168, 76, .44);
+        border-radius: 999px;
+        background: rgba(201, 168, 76, .10);
+        color: var(--route-pwa-gold);
+        font-size: 12px;
+        font-weight: 900;
+        padding: 5px 10px;
+        white-space: nowrap;
+      }
+      .route-progress-card {
+        display: grid;
+        gap: 8px;
+        border: 1px solid rgba(255, 255, 255, .08);
+        border-radius: 14px;
+        background: rgba(15, 15, 20, .72);
+        padding: 12px;
+      }
+      .route-progress-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        color: var(--route-pwa-muted);
+        font-size: 12px;
+        font-weight: 900;
+      }
+      .route-progress-track {
+        height: 9px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: var(--route-pwa-border);
+      }
+      .route-progress-fill {
+        height: 100%;
+        width: var(--route-progress, 0%);
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--route-pwa-success), var(--route-pwa-gold));
+      }
+      .route-signal-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .route-signal {
+        min-height: 72px;
+        border: 1px solid var(--route-pwa-border);
+        border-radius: 13px;
+        background: var(--route-pwa-panel);
+        padding: 10px;
+      }
+      .route-signal b {
+        display: block;
+        color: var(--route-pwa-text);
+        font-size: 13px;
+      }
+      .route-signal span {
+        display: block;
+        margin-top: 4px;
+        color: var(--route-pwa-muted);
+        font-size: 12px;
+        font-weight: 800;
+      }
+      .route-signal.ok { border-color: rgba(81, 181, 111, .78); }
+      .route-signal.warn { border-color: rgba(230, 184, 79, .72); background: #1e1a10; }
+      .route-signal.bad { border-color: rgba(230, 79, 100, .68); background: #241419; }
+      .route-hero .unit-line,
+      .route-event .muted {
+        color: var(--route-pwa-muted) !important;
+      }
+      .route-actions-main {
+        display: grid;
+        gap: 10px;
+      }
+      .route-actions-main .primary-btn,
+      .route-actions-main .secondary-btn {
+        width: 100%;
+      }
+      .route-actions-main .primary-btn:focus-visible,
+      .route-actions-main .secondary-btn:focus-visible,
+      .route-stop:focus-visible {
+        outline: 2px solid rgba(201, 168, 76, .55);
+        outline-offset: 2px;
+      }
+      .route-actions-main .primary-btn:active,
+      .route-actions-main .secondary-btn:active {
+        transform: scale(.98);
+      }
+      .route-desvio-field {
+        display: grid;
+        gap: 7px;
+        border: 1px solid rgba(230, 184, 79, .55);
+        border-radius: 14px;
+        background: #1e1a10;
+        padding: 12px;
+      }
+      .route-desvio-field label {
+        color: var(--gold);
+      }
+      .route-stop-list,
+      .route-event-list {
+        display: grid;
+        gap: 10px;
+      }
+      .route-stop {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr);
+        gap: 10px;
+        align-items: start;
+        border: 1px solid var(--route-pwa-border);
+        border-radius: 14px;
+        padding: 12px;
+        background: var(--route-pwa-panel);
+        color: var(--route-pwa-text);
+      }
+      .route-stop.visited {
+        border-color: rgba(81, 181, 111, .70);
+        background: #122219;
+      }
+      .route-stop-number {
+        display: grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 999px;
+        background: #252535;
+        color: var(--route-pwa-gold);
+        font-weight: 900;
+      }
+      .route-stop.visited .route-stop-number {
+        background: var(--route-pwa-success);
+        color: #08130c;
+      }
+      .route-stop strong {
+        display: block;
+        color: var(--route-pwa-text);
+        line-height: 1.2;
+        overflow-wrap: anywhere;
+      }
+      .route-stop-meta {
+        display: block;
+        margin-top: 5px;
+        color: var(--route-pwa-muted);
+        font-size: 12px;
+        font-weight: 800;
+      }
+      .route-event {
+        border-left: 4px solid var(--route-pwa-warning);
+        padding: 10px 12px;
+        background: var(--route-pwa-panel);
+        color: var(--route-pwa-text);
+        border-radius: 10px;
+      }
+      .route-event.ok {
+        border-left-color: var(--route-pwa-success);
+      }
+      .route-event.critica {
+        border-left-color: var(--route-pwa-danger);
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        .route-actions-main .primary-btn,
+        .route-actions-main .secondary-btn,
+        .route-progress-fill {
+          transition: transform 120ms ease-out, width 220ms ease-out;
+        }
+      }
     </style>
     <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
   </head>
@@ -1042,10 +1334,17 @@
       const API = "/api/logistica";
       const PHOTO_MAX_AGE_MS = 5 * 60 * 1000;
       const PHOTO_CAPTURE_SESSION_MS = 10 * 60 * 1000;
+      const TRACKING_QUEUE_KEY = "pd_logistica_tracking_queue";
+      const TRACKING_QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
+      const ACCESS_TOKEN_KEY = "pd_logistica_access";
+      const REFRESH_TOKEN_KEY = "pd_logistica_refresh";
+      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 90 * 1000;
       const app = document.getElementById("app");
+      localStorage.removeItem(ACCESS_TOKEN_KEY);
+      localStorage.removeItem(REFRESH_TOKEN_KEY);
       const state = {
-        token: localStorage.getItem("pd_logistica_access") || "",
-        refreshToken: localStorage.getItem("pd_logistica_refresh") || "",
+        token: sessionStorage.getItem(ACCESS_TOKEN_KEY) || "",
+        refreshToken: "",
         perfil: null,
         pantallaActual: "login",
         reportes: [],
@@ -1055,6 +1354,16 @@
         combustibleAlerta: null,
         bitacoras: [],
         bitacoraSalida: null,
+        rutaActiva: null,
+        rutaTrackingDraft: null,
+        rutaCargaDraft: {},
+        trackingQueueCount: 0,
+        routeAutoTrackingTimer: null,
+        routeAutoTrackingRutaId: null,
+        routeAutoTrackingBusy: false,
+        routeAutoTrackingLastSentAt: "",
+        routeAutoTrackingStatus: "idle",
+        routeTrackingFailedCount: 0,
         unidades: [],
         inspeccionDraft: null,
         lavadoDraft: null,
@@ -1278,16 +1587,42 @@
         navigator.geolocation.getCurrentPosition((position) => {
           draft[latField] = position.coords.latitude.toFixed(6);
           draft[lngField] = position.coords.longitude.toFixed(6);
+          draft.precision_metros = Number.isFinite(position.coords.accuracy) ? Number(position.coords.accuracy.toFixed(2)) : null;
+          draft.timestamp_dispositivo = new Date(position.timestamp || Date.now()).toISOString();
+          draft.client_event_id = newClientEventId();
           draft.geoStatus = "ready";
           draft.geoLabel = "📍 Ubicación registrada";
           renderFn();
         }, (error) => {
           draft[latField] = "";
           draft[lngField] = "";
+          draft.precision_metros = null;
           draft.geoStatus = error.code === 1 ? "denied" : "unavailable";
           draft.geoLabel = "Se requiere ubicación para continuar";
           renderFn();
         }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+      }
+
+      function newClientEventId() {
+        return window.crypto?.randomUUID ? window.crypto.randomUUID() : `gps-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      }
+
+      function captureRoutePosition() {
+        return new Promise((resolve, reject) => {
+          if (!navigator.geolocation) {
+            reject(new Error("GPS no disponible"));
+            return;
+          }
+          navigator.geolocation.getCurrentPosition((position) => {
+            resolve({
+              latitud: position.coords.latitude.toFixed(6),
+              longitud: position.coords.longitude.toFixed(6),
+              precision_metros: Number.isFinite(position.coords.accuracy) ? Number(position.coords.accuracy.toFixed(2)) : null,
+              timestamp_dispositivo: new Date(position.timestamp || Date.now()).toISOString(),
+              client_event_id: newClientEventId()
+            });
+          }, reject, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+        });
       }
 
       function marcarInicioCapturaFoto(input) {
@@ -1417,7 +1752,8 @@
           historial: `<svg viewBox="0 0 32 32"><path class="soft" d="M10 7h12v18H10z"/><path class="gold-stroke" d="M13 12h6M13 16h6M13 20h4"/><path class="stroke" d="M8 10h2M8 15h2M8 20h2"/></svg>`,
           inspeccion: `<svg viewBox="0 0 32 32"><path class="soft" d="M9 6h14v20H9z"/><path class="gold-stroke" d="m12 14 2 2 5-6"/><path class="stroke" d="M12 20h8M13 6h6M13 26h6"/></svg>`,
           lavado: `<svg viewBox="0 0 32 32"><path class="gold-stroke" d="M11 7c2.2 2.5 3.3 4.7 3.3 6.4a3.3 3.3 0 0 1-6.6 0C7.7 11.7 8.8 9.5 11 7Z"/><path class="soft" d="M21 12c2 2.2 3 4.1 3 5.7a3 3 0 0 1-6 0c0-1.6 1-3.5 3-5.7Z"/><path class="stroke" d="M8 25h17"/></svg>`,
-          bitacora: `<svg viewBox="0 0 32 32"><path class="soft" d="M9 6h14v20H9z"/><path class="gold-stroke" d="m12 13 2 2 4-5M12 21h8"/><path class="stroke" d="M12 17h8M21 6v20"/></svg>`
+          bitacora: `<svg viewBox="0 0 32 32"><path class="soft" d="M9 6h14v20H9z"/><path class="gold-stroke" d="m12 13 2 2 4-5M12 21h8"/><path class="stroke" d="M12 17h8M21 6v20"/></svg>`,
+          ruta: `<svg viewBox="0 0 32 32"><path class="soft" d="M16 4c-4.4 0-8 3.5-8 7.8 0 5.8 8 14.2 8 14.2s8-8.4 8-14.2C24 7.5 20.4 4 16 4Z"/><path class="stroke" d="M16 4c-4.4 0-8 3.5-8 7.8 0 5.8 8 14.2 8 14.2s8-8.4 8-14.2C24 7.5 20.4 4 16 4Z"/><circle class="gold-fill" cx="16" cy="12" r="2.8"/><path class="stroke" d="M7 27c3-1.6 6.2-1.6 9 0s6 1.6 9 0"/></svg>`
         };
         return `<span class="app-glyph" aria-hidden="true">${icons[name] || icons.reporte}</span>`;
       }
@@ -1436,7 +1772,7 @@
             if (refreshed.ok) {
               const data = await refreshed.json();
               state.token = data.access;
-              localStorage.setItem("pd_logistica_access", data.access);
+              sessionStorage.setItem(ACCESS_TOKEN_KEY, data.access);
               return apiFetch(path, { ...options, _retry: true });
             }
           }
@@ -1446,11 +1782,154 @@
         return response;
       }
 
+      function loadRutaTrackingQueue() {
+        try {
+          const rows = JSON.parse(localStorage.getItem(TRACKING_QUEUE_KEY) || "[]");
+          return normalizeRutaTrackingQueue(Array.isArray(rows) ? rows : []);
+        } catch (error) {
+          return [];
+        }
+      }
+
+      function saveRutaTrackingQueue(rows) {
+        const boundedRows = normalizeRutaTrackingQueue(rows).slice(-25);
+        localStorage.setItem(TRACKING_QUEUE_KEY, JSON.stringify(boundedRows));
+        state.trackingQueueCount = boundedRows.length;
+        return boundedRows;
+      }
+
+      function normalizeRutaTrackingQueue(rows) {
+        const now = Date.now();
+        const currentUser = state.perfil?.username || "";
+        const today = localDateKey();
+        return rows.filter((row) => {
+          const queuedAt = Date.parse(row.queued_at || "");
+          if (!Number.isFinite(queuedAt) || now - queuedAt > TRACKING_QUEUE_TTL_MS) return false;
+          if (row.date_key && row.date_key !== today) return false;
+          if (currentUser && row.username && row.username !== currentUser) return false;
+          return Boolean(row.ruta_id && row.payload);
+        });
+      }
+
+      function purgeRutaTrackingQueue() {
+        saveRutaTrackingQueue(loadRutaTrackingQueue());
+      }
+
+      function enqueueRutaTracking(item) {
+        const rows = loadRutaTrackingQueue();
+        if (item.payload?.client_event_id && rows.some((row) => row.payload?.client_event_id === item.payload.client_event_id)) {
+          return rows;
+        }
+        rows.push({
+          ...item,
+          username: state.perfil?.username || "",
+          date_key: localDateKey(),
+          queued_at: new Date().toISOString(),
+          attempts: Number(item.attempts || 0)
+        });
+        return saveRutaTrackingQueue(rows);
+      }
+
+      async function flushRutaTrackingQueue() {
+        if (!state.token || !navigator.onLine) return loadRutaTrackingQueue().length;
+        const pending = loadRutaTrackingQueue();
+        if (!pending.length) {
+          state.trackingQueueCount = 0;
+          return 0;
+        }
+        const remaining = [];
+        let failed = 0;
+        for (const item of pending) {
+          try {
+            const response = await apiFetch(`/rutas/${item.ruta_id}/tracking/`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(item.payload)
+            });
+            if (!response.ok) {
+              if ([400, 403, 404, 409].includes(response.status)) {
+                failed += 1;
+              } else {
+                remaining.push({ ...item, attempts: Number(item.attempts || 0) + 1 });
+              }
+            }
+          } catch (error) {
+            remaining.push({ ...item, attempts: Number(item.attempts || 0) + 1 });
+          }
+        }
+        state.routeTrackingFailedCount = failed;
+        saveRutaTrackingQueue(remaining);
+        return remaining.length;
+      }
+
+      function stopRutaAutoTracking() {
+        if (state.routeAutoTrackingTimer) {
+          window.clearInterval(state.routeAutoTrackingTimer);
+        }
+        state.routeAutoTrackingTimer = null;
+        state.routeAutoTrackingRutaId = null;
+        state.routeAutoTrackingBusy = false;
+        state.routeAutoTrackingStatus = "idle";
+      }
+
+      async function enviarTrackingAutomaticoRuta(rutaId) {
+        if (!rutaId || state.routeAutoTrackingBusy || state.pantallaActual !== "ruta_activa") return;
+        state.routeAutoTrackingBusy = true;
+        state.routeAutoTrackingStatus = "capturando";
+        let payload = null;
+        try {
+          const positionPayload = await captureRoutePosition();
+          payload = {
+            ...positionPayload,
+            tracking_origen: "automatico_pwa",
+            fuera_de_ruta_confirmado: false,
+            desvio_motivo: ""
+          };
+          const response = await apiFetch(`/rutas/${rutaId}/tracking/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          if (response.ok) {
+            state.routeAutoTrackingLastSentAt = new Date().toISOString();
+            state.routeAutoTrackingStatus = "enviado";
+          } else if ([400, 403, 404, 409].includes(response.status)) {
+            state.routeAutoTrackingStatus = "rechazado_api";
+            state.routeTrackingFailedCount += 1;
+          } else {
+            enqueueRutaTracking({ ruta_id: rutaId, payload });
+            state.routeAutoTrackingStatus = "pendiente_offline";
+          }
+        } catch (error) {
+          if (payload && error?.message !== "Sesión expirada") {
+            enqueueRutaTracking({ ruta_id: rutaId, payload });
+          }
+          state.routeAutoTrackingStatus = error?.code === 1 ? "gps_denegado" : "pendiente_offline";
+        } finally {
+          state.routeAutoTrackingBusy = false;
+          if (state.pantallaActual === "ruta_activa") {
+            renderRutaActiva();
+          }
+        }
+      }
+
+      function ensureRutaAutoTracking(rutaId, enabled) {
+        if (!enabled || !rutaId) {
+          stopRutaAutoTracking();
+          return;
+        }
+        if (state.routeAutoTrackingRutaId === rutaId && state.routeAutoTrackingTimer) return;
+        stopRutaAutoTracking();
+        state.routeAutoTrackingRutaId = rutaId;
+        state.routeAutoTrackingStatus = "activo";
+        enviarTrackingAutomaticoRuta(rutaId);
+        state.routeAutoTrackingTimer = window.setInterval(() => enviarTrackingAutomaticoRuta(rutaId), ROUTE_AUTO_TRACKING_INTERVAL_MS);
+      }
+
       function setTokens(data) {
         state.token = data.access;
-        state.refreshToken = data.refresh;
-        localStorage.setItem("pd_logistica_access", data.access);
-        localStorage.setItem("pd_logistica_refresh", data.refresh);
+        state.refreshToken = data.refresh || "";
+        sessionStorage.setItem(ACCESS_TOKEN_KEY, data.access);
       }
 
       async function useDjangoSessionToken() {
@@ -1466,15 +1945,17 @@
         state.token = "";
         state.refreshToken = "";
         state.perfil = null;
-        localStorage.removeItem("pd_logistica_access");
-        localStorage.removeItem("pd_logistica_refresh");
+        sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+        localStorage.removeItem(ACCESS_TOKEN_KEY);
+        localStorage.removeItem(REFRESH_TOKEN_KEY);
+        localStorage.removeItem(TRACKING_QUEUE_KEY);
         if (render) window.location.href = "/logout/";
       }
 
       function pantallaInicial() {
         const params = new URLSearchParams(window.location.search);
         const pantalla = params.get("pantalla") || "dashboard";
-        const permitidas = new Set(["dashboard", "nuevo_reporte", "mis_reportes", "inspeccion_vehiculo", "lavado", "bitacora_salida"]);
+        const permitidas = new Set(["dashboard", "nuevo_reporte", "mis_reportes", "inspeccion_vehiculo", "lavado", "bitacora_salida", "ruta_activa"]);
         return permitidas.has(pantalla) ? pantalla : "dashboard";
       }
 
@@ -1513,6 +1994,7 @@
 
       async function showScreen(nombre) {
         state.pantallaActual = nombre;
+        if (nombre !== "ruta_activa") stopRutaAutoTracking();
         if (nombre === "login") return renderLogin();
         if (!state.perfil) await loadPerfil();
         if (nombre === "dashboard") return renderDashboard();
@@ -1521,6 +2003,7 @@
         if (nombre === "mi_unidad") return renderMiUnidad();
         if (nombre === "bitacora") return renderBitacora();
         if (nombre === "bitacora_salida") return renderBitacoraSalida();
+        if (nombre === "ruta_activa") return renderRutaActiva();
         if (nombre === "inspeccion_vehiculo") return renderInspeccionVehiculo();
         if (nombre === "lavado") return renderLavadoUnidad();
         if (nombre === "ayuda") return renderAyuda();
@@ -1565,6 +2048,7 @@
       async function loadPerfil() {
         const response = await apiFetch("/mi-perfil/");
         state.perfil = normalizePerfil(await response.json());
+        purgeRutaTrackingQueue();
       }
 
       async function loadReportes() {
@@ -1587,6 +2071,16 @@
         }
         state.bitacoraSalida = response.ok ? await response.json() : null;
         return state.bitacoraSalida;
+      }
+
+      async function loadRutaActiva() {
+        const response = await apiFetch("/rutas/activa/");
+        if (response.status === 204) {
+          state.rutaActiva = null;
+          return state.rutaActiva;
+        }
+        state.rutaActiva = response.ok ? await response.json() : null;
+        return state.rutaActiva;
       }
 
       async function loadResumenSemanal() {
@@ -1684,15 +2178,24 @@
         await loadResumenSemanal();
         await loadCombustibleAlerta();
         let turnoActivo = null;
+        let rutaActiva = null;
         try {
           turnoActivo = await loadTurnoActivo();
         } catch (error) {
           turnoActivo = null;
         }
+        try {
+          rutaActiva = await loadRutaActiva();
+        } catch (error) {
+          rutaActiva = null;
+        }
         const abiertos = state.reportes.filter((r) => r.estatus !== "cerrado").length;
         const turnoBadge = turnoActivo?.id
           ? `<span class="badge turno abierto">ABIERTO</span>`
           : `<span class="badge turno">Sin turno</span>`;
+        const rutaBadge = rutaActiva?.ruta?.id
+          ? `<span class="badge turno abierto">ACTIVA</span>`
+          : `<span class="badge turno">Sin ruta</span>`;
         render(shell(`
           ${resumenSemanalCard()}
           ${combustibleAlertaModal()}
@@ -1703,9 +2206,373 @@
             <button class="dash-btn" onclick="showScreen('mis_reportes')">${appGlyph("historial")}<span>Mis Reportes</span>${abiertos ? `<span class="badge">${abiertos}</span>` : ""}</button>
             <button class="dash-btn" onclick="showScreen('inspeccion_vehiculo')">${appGlyph("inspeccion")}<span>Inspección</span></button>
             <button class="dash-btn" onclick="showScreen('lavado')">${appGlyph("lavado")}<span>Lavado</span></button>
+            <button class="dash-btn route-dashboard-card" onclick="showScreen('ruta_activa')">${appGlyph("ruta")}<span>Mi ruta</span>${rutaBadge}</button>
             <button class="dash-btn" onclick="showScreen('bitacora_salida')">${appGlyph("bitacora")}<span>Bitácora</span>${turnoBadge}</button>
           </div>
         `));
+      }
+
+      function ensureRutaTrackingDraft() {
+        if (!state.rutaTrackingDraft) {
+          state.rutaTrackingDraft = {
+            latitud: "",
+            longitud: "",
+            precision_metros: null,
+            fuera_de_ruta_confirmado: false,
+            desvio_motivo: "",
+            geoStatus: "idle",
+            geoLabel: "",
+            guardando: false
+          };
+        }
+        return state.rutaTrackingDraft;
+      }
+
+      function capturarUbicacionRuta() {
+        const draft = ensureRutaTrackingDraft();
+        requestLocation(draft, renderRutaActiva, "latitud", "longitud");
+      }
+
+      function toggleDesvioRuta() {
+        const draft = ensureRutaTrackingDraft();
+        draft.fuera_de_ruta_confirmado = !draft.fuera_de_ruta_confirmado;
+        renderRutaActiva();
+      }
+
+      function updateDesvioMotivo(value) {
+        const draft = ensureRutaTrackingDraft();
+        draft.desvio_motivo = value.slice(0, 160);
+      }
+
+      function routeProgressValue(ruta, paradas) {
+        const total = paradas?.length || 0;
+        if (total) {
+          const visitadas = paradas.filter((parada) => parada.estado === "VISITADA").length;
+          return Math.round((visitadas / total) * 100);
+        }
+        return Math.round(Number(ruta?.cumplimiento_porcentaje || 0));
+      }
+
+      function routeStopCounts(paradas) {
+        const total = paradas?.length || 0;
+        const visitadas = (paradas || []).filter((parada) => parada.estado === "VISITADA").length;
+        return { total, visitadas, pendientes: Math.max(total - visitadas, 0) };
+      }
+
+      function renderRutaSignals({ turnoOk, unidadOk, ubicacionLista, pendientesOffline, draft, rutaData }) {
+        const gpsTone = ubicacionLista ? "ok" : draft.geoStatus === "denied" || draft.geoStatus === "unavailable" ? "bad" : "warn";
+        const gpsLabel = ubicacionLista ? "Lista para registrar" : draft.geoStatus === "loading" ? "Obteniendo señal" : "Pendiente";
+        const turnoTone = turnoOk && unidadOk ? "ok" : "warn";
+        const turnoLabel = turnoOk ? (unidadOk ? "Unidad correcta" : "Unidad distinta") : "Sin turno abierto";
+        const queueTone = pendientesOffline ? "warn" : "ok";
+        const queueLabel = pendientesOffline ? `${pendientesOffline} pendiente${pendientesOffline === 1 ? "" : "s"}` : "Sin pendientes";
+        const autoStatus = state.routeAutoTrackingStatus || "idle";
+        const autoTone = ["enviado", "activo", "capturando"].includes(autoStatus) ? "ok" : autoStatus === "idle" ? "warn" : "bad";
+        const autoLabel = {
+          idle: "Esperando ruta",
+          activo: "Activo cada 90 s",
+          capturando: "Capturando GPS",
+          enviado: state.routeAutoTrackingLastSentAt ? `Último ${formatDate(state.routeAutoTrackingLastSentAt)}` : "Enviado",
+          pendiente_offline: "Pendiente local",
+          rechazado_api: "Rechazado por control",
+          gps_denegado: "Permiso bloqueado"
+        }[autoStatus] || autoStatus;
+        const lastSignal = rutaData?.ultima_ubicacion?.timestamp_servidor ? formatDate(rutaData.ultima_ubicacion.timestamp_servidor) : "Sin señal previa";
+        return `
+          <div class="route-signal-grid" aria-label="Estado operativo de la ruta">
+            <div class="route-signal ${autoTone}"><b>Auto-tracking</b><span>${escapeHtml(autoLabel)}</span></div>
+            <div class="route-signal ${gpsTone}"><b>GPS</b><span>${escapeHtml(gpsLabel)}${draft.precision_metros ? ` · ${escapeHtml(draft.precision_metros)} m` : ""}</span></div>
+            <div class="route-signal ${turnoTone}"><b>Turno</b><span>${escapeHtml(turnoLabel)}</span></div>
+            <div class="route-signal ${queueTone}"><b>Sin conexión</b><span>${escapeHtml(queueLabel)}</span></div>
+            <div class="route-signal"><b>Última señal</b><span>${escapeHtml(lastSignal)}</span></div>
+            <div class="route-signal ${state.routeTrackingFailedCount ? "bad" : "ok"}"><b>Rechazos</b><span>${state.routeTrackingFailedCount ? `${state.routeTrackingFailedCount} por revisar` : "Sin rechazos"}</span></div>
+          </div>
+        `;
+      }
+
+      function renderParadasRuta(paradas) {
+        if (!paradas?.length) return `<p class="unit-line">Esta ruta no tiene paradas configuradas.</p>`;
+        return `<div class="route-stop-list">` + paradas.map((parada) => {
+          const visited = parada.estado === "VISITADA";
+          return `
+            <section class="route-stop ${visited ? "visited" : ""}" tabindex="0">
+              <span class="route-stop-number">${visited ? "OK" : escapeHtml(parada.orden)}</span>
+              <div>
+                <strong>${escapeHtml(parada.punto_nombre_snapshot || parada.punto?.nombre || "Punto")}</strong>
+                <span class="route-stop-meta">${escapeHtml(parada.punto?.tipo_display || parada.punto?.tipo || "Punto")} · Geocerca ${escapeHtml(parada.radio_geocerca_metros || parada.punto?.radio_geocerca_metros || "-")} m</span>
+                <span class="route-stop-meta">${escapeHtml(parada.estado_display || parada.estado || "")}${parada.hora_llegada_real ? ` · llegada ${formatDate(parada.hora_llegada_real)}` : ""}</span>
+              </div>
+            </section>
+          `;
+        }).join("") + `</div>`;
+      }
+
+      function renderEventosRuta(eventos) {
+        if (!eventos?.length) return `<p class="muted">Sin eventos registrados en esta ruta.</p>`;
+        return `<div class="route-event-list">` + eventos.slice(0, 5).map((evento) => `
+          <section class="route-event ${escapeHtml(evento.severidad || "")}">
+            <strong>${escapeHtml(evento.tipo_display || evento.tipo || "Evento")}</strong><br>
+            ${escapeHtml(evento.descripcion || "")}
+            <br><span class="muted">${formatDate(evento.creado_en)}</span>
+          </section>
+        `).join("") + `</div>`;
+      }
+
+      function cargaDraftFor(lineaId) {
+        state.rutaCargaDraft[lineaId] = state.rutaCargaDraft[lineaId] || { cantidad: "", motivo: "", notas: "", guardando: false };
+        return state.rutaCargaDraft[lineaId];
+      }
+
+      function updateCargaLinea(lineaId, field, value) {
+        const draft = cargaDraftFor(lineaId);
+        draft[field] = value;
+      }
+
+      function renderChecklistCarga(checklist) {
+        if (!checklist) return "";
+        const lineas = checklist.lineas || [];
+        const total = Number(checklist.total_lineas || lineas.length || 0);
+        const confirmadas = Number(checklist.lineas_confirmadas || 0);
+        const pendientes = Number(checklist.lineas_pendientes || Math.max(total - confirmadas, 0));
+        const pct = total ? Math.round((confirmadas / total) * 100) : 0;
+        const statusText = checklist.estatus_display || checklist.estatus || "Pendiente";
+        if (!total) {
+          return `
+            <section class="card route-card-pwa">
+              <h2 style="margin:0;color:var(--gold);">Carga de ruta</h2>
+              <p class="unit-line">Sin carga esperada sincronizada desde Point.</p>
+              <p class="muted">Logística debe sincronizar las transferencias abiertas antes de confirmar salida.</p>
+            </section>
+          `;
+        }
+        return `
+          <section class="card route-card-pwa">
+            <div class="route-head">
+              <div>
+                <h2 style="margin:0;color:var(--gold);">Carga de ruta</h2>
+                <p class="route-folio">${escapeHtml(statusText)} · ${confirmadas} de ${total} línea${total === 1 ? "" : "s"}</p>
+              </div>
+              <span class="route-chip">${pct}%</span>
+            </div>
+            <div class="route-progress-track" aria-label="Avance de carga ${pct}%">
+              <div class="route-progress-fill" style="--route-progress:${pct}%;"></div>
+            </div>
+            ${pendientes ? `<div class="daily-banner warning">Faltan ${pendientes} producto${pendientes === 1 ? "" : "s"} por revisar antes de salida.</div>` : `<p class="success">Carga revisada.</p>`}
+            <div class="route-stop-list">
+              ${lineas.map((linea) => {
+                const draft = cargaDraftFor(linea.id);
+                const pendiente = linea.estatus === "PENDIENTE";
+                const diferencia = ["PARCIAL", "FALTANTE", "SOBRANTE"].includes(linea.estatus);
+                const cantidadValue = draft.cantidad || linea.cantidad_cargada || linea.cantidad_enviada_esperada || "0";
+                return `
+                  <section class="route-stop ${pendiente ? "" : "visited"}">
+                    <span class="route-stop-number">${pendiente ? escapeHtml(linea.parada_orden || "") : "OK"}</span>
+                    <div>
+                      <strong>${escapeHtml(linea.item_name || "Producto")}</strong>
+                      <span class="route-stop-meta">${escapeHtml(linea.parada_nombre || "Parada")} · esperado ${escapeHtml(linea.cantidad_enviada_esperada || "0")} ${escapeHtml(linea.unit || "")}</span>
+                      <span class="route-stop-meta">${escapeHtml(linea.estatus_display || linea.estatus || "")}${diferencia ? ` · ${escapeHtml(linea.motivo_diferencia_display || linea.motivo_diferencia || "")}` : ""}</span>
+                      ${pendiente ? `
+                        <div class="form-salida" style="margin-top:10px;">
+                          <label for="carga_${linea.id}">Cantidad real</label>
+                          <input id="carga_${linea.id}" type="number" min="0" step="0.001" value="${escapeHtml(cantidadValue)}" oninput="updateCargaLinea(${linea.id}, 'cantidad', this.value)">
+                          <label for="motivo_${linea.id}">Motivo si hay diferencia</label>
+                          <select id="motivo_${linea.id}" onchange="updateCargaLinea(${linea.id}, 'motivo', this.value)">
+                            <option value="">Sin diferencia</option>
+                            <option value="stock_limitado">Stock limitado</option>
+                            <option value="sin_stock">No hay stock</option>
+                            <option value="produccion_no_lista">Producción aún no está lista</option>
+                            <option value="producto_danado">Producto dañado</option>
+                            <option value="cambio_autorizado">Cambio autorizado</option>
+                            <option value="otro">Otro</option>
+                          </select>
+                        </div>
+                        <button class="secondary-btn" type="button" onclick="validarCargaLinea(${linea.id})" ${draft.guardando ? "disabled" : ""}>${draft.guardando ? "Guardando..." : "Guardar revisión"}</button>
+                      ` : ""}
+                    </div>
+                  </section>
+                `;
+              }).join("")}
+            </div>
+          </section>
+        `;
+      }
+
+      async function renderRutaActiva(message = "") {
+        let rutaData = null;
+        let turnoActivo = null;
+        try {
+          rutaData = await loadRutaActiva();
+        } catch (error) {
+          rutaData = null;
+        }
+        try {
+          turnoActivo = await loadTurnoActivo();
+        } catch (error) {
+          turnoActivo = null;
+        }
+        const draft = ensureRutaTrackingDraft();
+        if (!rutaData?.ruta?.id) {
+          stopRutaAutoTracking();
+          return render(shell(`
+            <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
+            <h1 class="screen-title" style="margin-top:16px;">Mi ruta</h1>
+            ${message ? `<p class="${message.startsWith("✅") ? "success" : "error"}">${escapeHtml(message)}</p>` : ""}
+            <section class="card route-card-pwa">
+              <div class="route-head">
+                <div>
+                  <h2>Sin ruta activa</h2>
+                  <p class="muted">Cuando logística libere una ruta para ti, aparecerá aquí.</p>
+                </div>
+              </div>
+              <button class="secondary-btn" onclick="showScreen('dashboard')">Volver al inicio</button>
+            </section>
+          `));
+        }
+        const ruta = rutaData.ruta;
+        const rutaEnSeguimiento = ruta.estatus === "EN_RUTA";
+        const ubicacionLista = isGeoReady(draft);
+        const turnoOk = Boolean(turnoActivo?.id);
+        const unidadOk = turnoOk && String(turnoActivo.unidad) === String(ruta.unidad_operativa);
+        const pendientesOffline = loadRutaTrackingQueue().length;
+        const paradas = rutaData.paradas || [];
+        const counts = routeStopCounts(paradas);
+        const progress = routeProgressValue(ruta, paradas);
+        state.trackingQueueCount = pendientesOffline;
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
+          <h1 class="screen-title" style="margin-top:16px;">Mi ruta</h1>
+          ${message ? `<p class="${message.startsWith("✅") ? "success" : "error"}">${escapeHtml(message)}</p>` : ""}
+          <section class="route-hero">
+            <div class="route-head">
+              <div>
+                <h2>${escapeHtml(ruta.nombre || ruta.folio)}</h2>
+                <p class="route-folio">${escapeHtml(ruta.folio)} · ${escapeHtml(ruta.estatus_display || ruta.estatus || "")}</p>
+              </div>
+              <span class="route-chip">${escapeHtml(progress)}%</span>
+            </div>
+            <div class="route-progress-card">
+              <div class="route-progress-top">
+                <span>${escapeHtml(counts.visitadas)} visitada${counts.visitadas === 1 ? "" : "s"} de ${escapeHtml(counts.total)}</span>
+                <span>${escapeHtml(counts.pendientes)} pendiente${counts.pendientes === 1 ? "" : "s"}</span>
+              </div>
+              <div class="route-progress-track" aria-label="Avance de ruta ${escapeHtml(progress)}%">
+                <div class="route-progress-fill" style="--route-progress:${escapeHtml(progress)}%;"></div>
+              </div>
+            </div>
+            <p class="unit-line">${escapeHtml(ruta.unidad_operativa_codigo || "Unidad asignada")} · ${counts.total} parada${counts.total === 1 ? "" : "s"} programada${counts.total === 1 ? "" : "s"}</p>
+            ${renderRutaSignals({ turnoOk, unidadOk, ubicacionLista, pendientesOffline, draft, rutaData })}
+          </section>
+
+          ${renderChecklistCarga(rutaData.checklist_carga)}
+
+          <section class="card route-action-panel">
+            ${rutaEnSeguimiento ? "" : `<div class="daily-banner warning">Ruta en planeación. Revisa la carga; el GPS se activa cuando logística libere la ruta.</div>`}
+            ${turnoOk ? "" : `<div class="daily-banner warning">Inicia turno en Bitácora antes de registrar seguimiento.</div>`}
+            ${turnoOk && !unidadOk ? `<div class="daily-banner warning">Tu turno activo no corresponde a la unidad asignada a esta ruta.</div>` : ""}
+            ${pendientesOffline ? `<div class="daily-banner warning">${pendientesOffline} seguimiento${pendientesOffline === 1 ? "" : "s"} pendiente${pendientesOffline === 1 ? "" : "s"} por enviar. Se reintentará automáticamente al recuperar conexión.</div>` : ""}
+            <div class="route-actions-main">
+              <button class="primary-btn" type="button" onclick="capturarUbicacionRuta()" ${rutaEnSeguimiento && draft.geoStatus !== "loading" ? "" : "disabled"}>${ubicacionLista ? "Actualizar ubicación GPS" : "Capturar ubicación GPS"}</button>
+              ${ubicacionLista ? `<button class="secondary-btn" type="button" onclick="toggleDesvioRuta()">${draft.fuera_de_ruta_confirmado ? "Cancelar desvío" : "Reportar desvío"}</button>` : ""}
+              ${draft.fuera_de_ruta_confirmado ? `
+                <div class="route-desvio-field">
+                  <label for="desvio-motivo">Motivo breve obligatorio</label>
+                  <input id="desvio-motivo" class="input-field" type="text" maxlength="160" placeholder="Ej. cierre de calle, instrucción de supervisor" value="${escapeHtml(draft.desvio_motivo)}" oninput="updateDesvioMotivo(this.value)">
+                  <p class="muted">Se guardará como evidencia al registrar seguimiento.</p>
+                </div>
+              ` : ""}
+              <button class="primary-btn" type="button" onclick="registrarTrackingRuta()" ${rutaEnSeguimiento && turnoOk && unidadOk && ubicacionLista && !draft.guardando ? "" : "disabled"}>${draft.guardando ? "Guardando..." : "Registrar seguimiento"}</button>
+            </div>
+          </section>
+          <section class="card route-card-pwa">
+            <h2 style="margin:0;color:var(--gold);">Paradas de reparto</h2>
+            ${renderParadasRuta(paradas)}
+          </section>
+          <section class="card route-card-pwa">
+            <h2 style="margin:0;color:var(--gold);">Eventos recientes</h2>
+            ${renderEventosRuta(rutaData.eventos || [])}
+          </section>
+          ${draft.geoStatus === "idle" ? "" : geoOverlay(draft, "capturarUbicacionRuta")}
+        `));
+        ensureRutaAutoTracking(ruta.id, rutaEnSeguimiento && turnoOk && unidadOk);
+      }
+
+      async function validarCargaLinea(lineaId) {
+        const rutaId = state.rutaActiva?.ruta?.id;
+        if (!rutaId) return renderRutaActiva("No hay ruta para validar carga.");
+        const draft = cargaDraftFor(lineaId);
+        const cantidad = String(draft.cantidad || "").trim();
+        if (!cantidad) return renderRutaActiva("Captura la cantidad real cargada.");
+        draft.guardando = true;
+        await renderRutaActiva();
+        try {
+          const response = await apiFetch(`/rutas/${rutaId}/carga-checklist/lineas/${lineaId}/validar/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              cantidad_cargada: cantidad,
+              motivo_diferencia: draft.motivo || "",
+              notas: draft.notas || "",
+              client_event_id: newClientEventId()
+            })
+          });
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            return renderRutaActiva(apiErrorMessage(error, "No se pudo validar la carga."));
+          }
+          delete state.rutaCargaDraft[lineaId];
+          state.rutaActiva = null;
+          return renderRutaActiva("✅ Carga revisada.");
+        } catch (error) {
+          return renderRutaActiva(error?.message === "Sesión expirada" ? "Tu sesión expiró. Vuelve a iniciar sesión." : "No se pudo guardar la carga. Reintenta con señal.");
+        } finally {
+          draft.guardando = false;
+        }
+      }
+
+      async function registrarTrackingRuta() {
+        const draft = ensureRutaTrackingDraft();
+        const rutaId = state.rutaActiva?.ruta?.id;
+        if (!rutaId) return renderRutaActiva("No hay ruta activa.");
+        if (!isGeoReady(draft)) return renderRutaActiva("Captura ubicación antes de registrar seguimiento.");
+        if (draft.fuera_de_ruta_confirmado && !String(draft.desvio_motivo || "").trim()) {
+          return renderRutaActiva("Indica un motivo breve para registrar el desvío.");
+        }
+        const trackingPayload = {
+          latitud: draft.latitud,
+          longitud: draft.longitud,
+          precision_metros: draft.precision_metros,
+          timestamp_dispositivo: draft.timestamp_dispositivo || new Date().toISOString(),
+          client_event_id: draft.client_event_id || newClientEventId(),
+          tracking_origen: "manual_pwa",
+          fuera_de_ruta_confirmado: draft.fuera_de_ruta_confirmado,
+          desvio_motivo: draft.desvio_motivo
+        };
+        draft.guardando = true;
+        await renderRutaActiva();
+        let response;
+        try {
+          response = await apiFetch(`/rutas/${rutaId}/tracking/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(trackingPayload)
+          });
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            return renderRutaActiva(apiErrorMessage(error, "No se pudo registrar seguimiento."));
+          }
+        } catch (error) {
+          if (error?.message === "Sesión expirada") {
+            return renderRutaActiva("Tu sesión expiró. Vuelve a iniciar sesión para registrar seguimiento.");
+          }
+          enqueueRutaTracking({ ruta_id: rutaId, payload: trackingPayload });
+          state.rutaTrackingDraft = null;
+          return renderRutaActiva("Sin conexión: seguimiento guardado para reintento.");
+        } finally {
+          draft.guardando = false;
+        }
+        state.rutaTrackingDraft = null;
+        await flushRutaTrackingQueue();
+        await renderRutaActiva("✅ Seguimiento registrado.");
       }
 
       function renderAyuda() {
@@ -2897,10 +3764,19 @@
             state.bitacoraSalida = error.bitacora || state.bitacoraSalida;
             return renderBitacoraSalida(`⚠️ Tienes un turno abierto en ${error.bitacora?.unidad_codigo || "otra unidad"}.`);
           }
+          if (error.error === "unidad_ruta_distinta") {
+            return renderBitacoraSalida(error.mensaje || "Tienes una ruta activa en otra unidad. Inicia turno con la unidad asignada.");
+          }
           return renderBitacoraSalida(apiErrorMessage(error, "No se pudo iniciar el turno."));
         }
         const creado = await response.json();
         state.bitacoraSalidaDraft = null;
+        state.bitacoraSalida = creado;
+        const rutaData = await loadRutaActiva().catch(() => null);
+        if (rutaData?.ruta?.id && String(rutaData.ruta.unidad_operativa) === String(creado.unidad)) {
+          await showScreen("ruta_activa");
+          return;
+        }
         await renderBitacoraSalida(`✅ Turno iniciado · Folio: ${creado.folio}`);
       }
 
@@ -3170,11 +4046,22 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=network-first-shell").catch(() => {});
+          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=route-control-v14").catch(() => {});
         }
+        window.addEventListener("online", () => {
+          flushRutaTrackingQueue().then(() => {
+            if (state.pantallaActual === "ruta_activa") renderRutaActiva();
+          });
+        });
+        document.addEventListener("visibilitychange", () => {
+          if (document.hidden) stopRutaAutoTracking();
+          if (!document.hidden && state.pantallaActual === "ruta_activa") renderRutaActiva();
+        });
+        window.addEventListener("pagehide", () => stopRutaAutoTracking());
 
         try {
           if (await useDjangoSessionToken()) {
+            await flushRutaTrackingQueue();
             await abrirPantallaInicial();
             return;
           }
@@ -3184,6 +4071,7 @@
 
         if (state.token) {
           try {
+            await flushRutaTrackingQueue();
             await abrirPantallaInicial();
             return;
           } catch (error) {

@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import timedelta
 from decimal import Decimal
 
-from django.db import IntegrityError, transaction
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import IntegrityError, models, transaction
 from django.db.models import Count, Max, Q, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -17,7 +18,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from core.access import can_manage_logistica, can_view_logistica, can_view_module
+from core.access import can_manage_logistica, can_manage_submodule, can_view_logistica, can_view_module, can_view_submodule
 from core.audit import log_event
 from crm.models import PedidoCliente
 from logistica.models import (
@@ -25,15 +26,27 @@ from logistica.models import (
     BitacoraSalidaLlegada,
     CargaCombustibleUnidad,
     EntregaRuta,
+    EventoRuta,
     InspeccionDiaria,
     InspeccionVehiculo,
     LavadoUnidad,
+    ParadaRuta,
+    PuntoLogistico,
     Repartidor,
     ReporteUnidad,
     ReporteUnidadReafirmacion,
     RutaEntrega,
     Unidad,
 )
+from logistica.services_google_routes import recalcular_ruta_programada
+from logistica.services_carga_ruta import (
+    checklist_bloquea_salida,
+    obtener_checklist_carga,
+    registrar_evento_checklist_confirmado,
+    sincronizar_checklist_carga_desde_point,
+    validar_linea_carga,
+)
+from logistica.services_rutas_control import registrar_ubicacion_ruta, resumen_control_rutas
 from rrhh.services_identidad import nombre_operativo_usuario
 
 from .logistica_serializers import (
@@ -45,6 +58,8 @@ from .logistica_serializers import (
     LogisticaCargaCombustibleSerializer,
     LogisticaEntregaCreateSerializer,
     LogisticaEntregaSerializer,
+    EventoRutaCreateSerializer,
+    EventoRutaSerializer,
     LogisticaInspeccionVehiculoCreateSerializer,
     LogisticaInspeccionVehiculoSerializer,
     LogisticaInspeccionDiariaSerializer,
@@ -55,8 +70,15 @@ from .logistica_serializers import (
     LogisticaReportePatchSerializer,
     LogisticaReporteReafirmacionSerializer,
     LogisticaReporteSerializer,
+    LogisticaRutaCreateSerializer,
     LogisticaRutaSerializer,
     LogisticaUnidadSerializer,
+    ParadaRutaSerializer,
+    RutaCargaChecklistSerializer,
+    RutaCargaChecklistLineaSerializer,
+    RutaCargaLineaValidarSerializer,
+    UbicacionRutaCreateSerializer,
+    UbicacionRutaSerializer,
 )
 
 
@@ -140,6 +162,39 @@ def _licencia_turno_bloqueo(repartidor: Repartidor) -> dict | None:
             "licencia_expiracion": repartidor.licencia_expiracion.isoformat(),
         }
     return None
+
+
+def _ruta_activa_dia_para_repartidor(repartidor: Repartidor) -> RutaEntrega | None:
+    return (
+        RutaEntrega.objects.select_related("unidad_operativa", "repartidor__user", "bitacora_salida")
+        .filter(
+            repartidor=repartidor,
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_EN_RUTA,
+        )
+        .order_by("-id")
+        .first()
+    )
+
+
+def _ruta_operativa_dia_para_repartidor(repartidor: Repartidor) -> RutaEntrega | None:
+    return (
+        RutaEntrega.objects.select_related("unidad_operativa", "repartidor__user", "bitacora_salida")
+        .filter(
+            repartidor=repartidor,
+            fecha_ruta=timezone.localdate(),
+            estatus__in=[RutaEntrega.ESTATUS_EN_RUTA, RutaEntrega.ESTATUS_PLANEADA],
+        )
+        .order_by(
+            models.Case(
+                models.When(estatus=RutaEntrega.ESTATUS_EN_RUTA, then=0),
+                default=1,
+                output_field=models.IntegerField(),
+            ),
+            "-id",
+        )
+        .first()
+    )
 
 
 def _gas_rank(value: str | None) -> int | None:
@@ -556,6 +611,27 @@ class LogisticaBitacoraSalidaView(_LogisticaBaseView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        ruta_activa = _ruta_operativa_dia_para_repartidor(repartidor)
+        unidad = serializer.validated_data.get("unidad")
+        if ruta_activa and ruta_activa.unidad_operativa_id and unidad and unidad.id != ruta_activa.unidad_operativa_id:
+            unidad_requerida = ruta_activa.unidad_operativa
+            return Response(
+                {
+                    "error": "unidad_ruta_distinta",
+                    "mensaje": (
+                        f"Tienes ruta activa en {unidad_requerida.codigo}. "
+                        "Inicia turno con esa unidad para avanzar en la ruta."
+                    ),
+                    "ruta_id": ruta_activa.id,
+                    "ruta_folio": ruta_activa.folio,
+                    "unidad_requerida": {
+                        "id": unidad_requerida.id,
+                        "codigo": unidad_requerida.codigo,
+                        "descripcion": unidad_requerida.descripcion,
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         bitacora = serializer.save(ip_registro=request.META.get("REMOTE_ADDR"))
         return Response(LogisticaBitacoraSalidaLlegadaSerializer(bitacora).data, status=status.HTTP_201_CREATED)
 
@@ -826,7 +902,7 @@ class InspeccionDiariaCreateView(generics.CreateAPIView):
 
 class LogisticaRutasView(_LogisticaBaseView):
     def get(self, request):
-        if not can_view_logistica(request.user):
+        if not can_view_submodule(request.user, "logistica", "rutas"):
             return Response({"detail": "No tienes permisos para consultar Logística."}, status=status.HTTP_403_FORBIDDEN)
 
         q = (request.query_params.get("q") or "").strip()
@@ -858,25 +934,60 @@ class LogisticaRutasView(_LogisticaBaseView):
         )
 
     def post(self, request):
-        if not can_manage_logistica(request.user):
+        if not can_manage_submodule(request.user, "logistica", "rutas"):
             return Response({"detail": "No tienes permisos para crear rutas."}, status=status.HTTP_403_FORBIDDEN)
 
-        serializer = LogisticaRutaSerializer(data=request.data)
+        serializer = LogisticaRutaCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        ruta = serializer.save(created_by=request.user)
+        payload = serializer.validated_data
+
+        seen_puntos = set()
+        paradas_payload = []
+        for posicion, parada in enumerate(payload["paradas"], start=1):
+            punto_id = parada["punto_id"]
+            if punto_id in seen_puntos:
+                continue
+            seen_puntos.add(punto_id)
+            paradas_payload.append((parada.get("orden") or posicion, posicion, punto_id))
+        paradas_payload.sort(key=lambda item: (item[0], item[1]))
+        if not paradas_payload:
+            return Response({"detail": "Selecciona al menos una sucursal o punto para planear la ruta del día."}, status=status.HTTP_400_BAD_REQUEST)
+
+        puntos = PuntoLogistico.objects.filter(pk__in=[item[2] for item in paradas_payload], activo=True)
+        puntos_by_id = {punto.id: punto for punto in puntos}
+        missing = [punto_id for _, __, punto_id in paradas_payload if punto_id not in puntos_by_id]
+        if missing:
+            return Response({"detail": "Todos los puntos de ruta deben existir y estar activos."}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            ruta = RutaEntrega.objects.create(
+                nombre=payload["nombre"],
+                fecha_ruta=payload["fecha_ruta"],
+                chofer=(payload.get("chofer") or "").strip() or str(payload["repartidor"]),
+                unidad=(payload.get("unidad") or "").strip() or str(payload["unidad_operativa"]),
+                repartidor=payload["repartidor"],
+                unidad_operativa=payload["unidad_operativa"],
+                estatus=RutaEntrega.ESTATUS_PLANEADA,
+                km_estimado=payload.get("km_estimado") or Decimal("0"),
+                notas=payload.get("notas") or "",
+                created_by=request.user,
+            )
+            for orden, (_, __, punto_id) in enumerate(paradas_payload, start=1):
+                ParadaRuta.objects.create(ruta=ruta, punto=puntos_by_id[punto_id], orden=orden)
+        recalcular_ruta_programada(ruta)
         log_event(
             request.user,
             "CREATE",
             "logistica.RutaEntrega",
             str(ruta.id),
-            {"folio": ruta.folio, "nombre": ruta.nombre},
+            {"folio": ruta.folio, "nombre": ruta.nombre, "paradas": len(paradas_payload)},
         )
         return Response(LogisticaRutaSerializer(ruta).data, status=status.HTTP_201_CREATED)
 
 
 class LogisticaRutaEntregasView(_LogisticaBaseView):
     def get(self, request, ruta_id: int):
-        if not can_view_logistica(request.user):
+        if not can_view_submodule(request.user, "logistica", "rutas"):
             return Response({"detail": "No tienes permisos para consultar Logística."}, status=status.HTTP_403_FORBIDDEN)
 
         ruta = get_object_or_404(RutaEntrega, pk=ruta_id)
@@ -890,10 +1001,12 @@ class LogisticaRutaEntregasView(_LogisticaBaseView):
         )
 
     def post(self, request, ruta_id: int):
-        if not can_manage_logistica(request.user):
+        if not can_manage_submodule(request.user, "logistica", "rutas"):
             return Response({"detail": "No tienes permisos para crear entregas."}, status=status.HTTP_403_FORBIDDEN)
 
         ruta = get_object_or_404(RutaEntrega, pk=ruta_id)
+        if ruta.estatus != RutaEntrega.ESTATUS_PLANEADA:
+            return Response({"detail": "Solo puedes agregar entregas a rutas planeadas."}, status=status.HTTP_400_BAD_REQUEST)
         serializer = LogisticaEntregaCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         payload = serializer.validated_data
@@ -939,7 +1052,7 @@ class LogisticaRutaEntregasView(_LogisticaBaseView):
 
 class LogisticaRutaStatusView(_LogisticaBaseView):
     def post(self, request, ruta_id: int):
-        if not can_manage_logistica(request.user):
+        if not can_manage_submodule(request.user, "logistica", "rutas"):
             return Response({"detail": "No tienes permisos para cambiar estatus de ruta."}, status=status.HTTP_403_FORBIDDEN)
 
         ruta = get_object_or_404(RutaEntrega, pk=ruta_id)
@@ -947,10 +1060,80 @@ class LogisticaRutaStatusView(_LogisticaBaseView):
         valid = {choice[0] for choice in RutaEntrega.ESTATUS_CHOICES}
         if estatus_nuevo not in valid:
             return Response({"detail": "Estatus inválido."}, status=status.HTTP_400_BAD_REQUEST)
+        if ruta.estatus in {RutaEntrega.ESTATUS_COMPLETADA, RutaEntrega.ESTATUS_CANCELADA} and estatus_nuevo != ruta.estatus:
+            return Response({"detail": "La ruta ya está cerrada o cancelada y no puede reabrirse."}, status=status.HTTP_400_BAD_REQUEST)
+        if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA and estatus_nuevo == RutaEntrega.ESTATUS_PLANEADA:
+            return Response({"detail": "La ruta ya inició seguimiento y no puede regresar a planeada."}, status=status.HTTP_400_BAD_REQUEST)
+        if estatus_nuevo == RutaEntrega.ESTATUS_EN_RUTA:
+            blockers = []
+            if not ruta.repartidor_id:
+                blockers.append("asigna repartidor")
+            if not ruta.unidad_operativa_id:
+                blockers.append("asigna unidad operativa")
+            if not ruta.paradas.exists():
+                blockers.append("agrega al menos una parada")
+            if (
+                ruta.repartidor_id
+                and RutaEntrega.objects.filter(
+                    repartidor_id=ruta.repartidor_id,
+                    estatus=RutaEntrega.ESTATUS_EN_RUTA,
+                )
+                .exclude(pk=ruta.pk)
+                .exists()
+            ):
+                blockers.append("el repartidor ya tiene otra ruta en curso")
+            if (
+                ruta.unidad_operativa_id
+                and RutaEntrega.objects.filter(
+                    unidad_operativa_id=ruta.unidad_operativa_id,
+                    estatus=RutaEntrega.ESTATUS_EN_RUTA,
+                )
+                .exclude(pk=ruta.pk)
+                .exists()
+            ):
+                blockers.append("la unidad ya tiene otra ruta en curso")
+            checklist_blocker = checklist_bloquea_salida(ruta)
+            if checklist_blocker:
+                blockers.append(checklist_blocker)
+            if blockers:
+                return Response({"detail": "No se puede liberar la ruta: " + ", ".join(blockers) + "."}, status=status.HTTP_400_BAD_REQUEST)
+        if estatus_nuevo == RutaEntrega.ESTATUS_COMPLETADA:
+            if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
+                return Response({"detail": "Solo puedes completar una ruta que ya está en seguimiento."}, status=status.HTTP_400_BAD_REQUEST)
+            if not ruta.repartidor_id or not ruta.unidad_operativa_id or not ruta.paradas.exists():
+                return Response({"detail": "No se puede completar la ruta: falta repartidor, unidad o paradas."}, status=status.HTTP_400_BAD_REQUEST)
+            if ruta.paradas.filter(estado=ParadaRuta.ESTADO_PENDIENTE).exists():
+                return Response({"detail": "No se puede completar la ruta: hay paradas pendientes por visitar u omitir."}, status=status.HTTP_400_BAD_REQUEST)
 
         from_status = ruta.estatus
         ruta.estatus = estatus_nuevo
-        ruta.save(update_fields=["estatus", "updated_at"])
+        if estatus_nuevo == RutaEntrega.ESTATUS_EN_RUTA and not ruta.hora_inicio_real:
+            ruta.hora_inicio_real = timezone.now()
+        if estatus_nuevo == RutaEntrega.ESTATUS_COMPLETADA and not ruta.hora_cierre_real:
+            ruta.hora_cierre_real = timezone.now()
+        try:
+            ruta.save(update_fields=["estatus", "hora_inicio_real", "hora_cierre_real", "updated_at"])
+        except IntegrityError:
+            return Response(
+                {"detail": "No se puede liberar la ruta: el repartidor o la unidad ya tiene otra ruta en curso."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if estatus_nuevo == RutaEntrega.ESTATUS_EN_RUTA and not EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_SALIDA).exists():
+            EventoRuta.objects.create(
+                ruta=ruta,
+                tipo=EventoRuta.TIPO_SALIDA,
+                severidad=EventoRuta.SEVERIDAD_INFO,
+                descripcion="Ruta liberada para seguimiento operativo.",
+                creado_por=request.user,
+            )
+        if estatus_nuevo == RutaEntrega.ESTATUS_COMPLETADA and not EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_CIERRE).exists():
+            EventoRuta.objects.create(
+                ruta=ruta,
+                tipo=EventoRuta.TIPO_CIERRE,
+                severidad=EventoRuta.SEVERIDAD_INFO,
+                descripcion="Ruta completada y cerrada operativamente.",
+                creado_por=request.user,
+            )
         log_event(
             request.user,
             "UPDATE",
@@ -959,6 +1142,226 @@ class LogisticaRutaStatusView(_LogisticaBaseView):
             {"folio": ruta.folio, "from": from_status, "to": estatus_nuevo},
         )
         return Response(LogisticaRutaSerializer(ruta).data, status=status.HTTP_200_OK)
+
+
+class LogisticaRutaActivaView(_LogisticaBaseView):
+    def get(self, request):
+        if not _can_operate_pwa(request.user):
+            return Response({"detail": "No tienes permisos para consultar ruta activa."}, status=status.HTTP_403_FORBIDDEN)
+
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor:
+            return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
+
+        ruta = _ruta_operativa_dia_para_repartidor(repartidor)
+        if not ruta:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        checklist = obtener_checklist_carga(ruta)
+
+        return Response(
+            {
+                "ruta": LogisticaRutaSerializer(ruta).data,
+                "paradas": ParadaRutaSerializer(ruta.paradas.select_related("punto").order_by("orden", "id"), many=True).data,
+                "ultima_ubicacion": UbicacionRutaSerializer(ruta.ubicaciones.select_related("repartidor__user", "unidad").first()).data
+                if ruta.ubicaciones.exists()
+                else None,
+                "eventos": EventoRutaSerializer(ruta.eventos.select_related("parada__punto", "ubicacion", "creado_por")[:20], many=True).data,
+                "checklist_carga": RutaCargaChecklistSerializer(
+                    checklist,
+                    context={"request": request},
+                ).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class LogisticaRutaCargaChecklistView(_LogisticaBaseView):
+    def get(self, request, ruta_id: int):
+        ruta = get_object_or_404(RutaEntrega, pk=ruta_id)
+        repartidor = _get_repartidor_for_user(request.user)
+        can_view = can_view_submodule(request.user, "logistica", "rutas") or (
+            repartidor is not None and ruta.repartidor_id == repartidor.id
+        )
+        if not can_view:
+            return Response({"detail": "No tienes permisos para consultar la carga de esta ruta."}, status=status.HTTP_403_FORBIDDEN)
+        checklist = obtener_checklist_carga(ruta)
+        return Response(RutaCargaChecklistSerializer(checklist, context={"request": request}).data, status=status.HTTP_200_OK)
+
+
+class LogisticaRutaCargaChecklistSyncView(_LogisticaBaseView):
+    def post(self, request, ruta_id: int):
+        if not can_manage_submodule(request.user, "logistica", "rutas"):
+            return Response({"detail": "No tienes permisos para sincronizar carga desde Point."}, status=status.HTTP_403_FORBIDDEN)
+        ruta = get_object_or_404(RutaEntrega, pk=ruta_id)
+        try:
+            resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=request.user, ejecutar_sync=True)
+        except ValidationError as exc:
+            return Response({"detail": exc.message if hasattr(exc, "message") else exc.messages}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {
+                "checklist": RutaCargaChecklistSerializer(resumen.checklist, context={"request": request}).data,
+                "creadas": resumen.creadas,
+                "actualizadas": resumen.actualizadas,
+                "omitidas": resumen.omitidas,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class LogisticaRutaCargaLineaValidarView(_LogisticaBaseView):
+    def post(self, request, ruta_id: int, linea_id: int):
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor or not _can_operate_pwa(request.user):
+            return Response({"detail": "Solo repartidores registrados pueden validar carga."}, status=status.HTTP_403_FORBIDDEN)
+        ruta = get_object_or_404(RutaEntrega.objects.select_related("repartidor", "unidad_operativa"), pk=ruta_id)
+        serializer = RutaCargaLineaValidarSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = serializer.validated_data
+        try:
+            linea = validar_linea_carga(
+                user=request.user,
+                ruta=ruta,
+                repartidor=repartidor,
+                linea_id=linea_id,
+                cantidad_cargada=payload["cantidad_cargada"],
+                motivo_diferencia=payload.get("motivo_diferencia") or "",
+                notas=payload.get("notas") or "",
+                client_event_id=payload.get("client_event_id") or "",
+            )
+        except PermissionDenied as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        except ValidationError as exc:
+            return Response({"detail": exc.message if hasattr(exc, "message") else exc.messages}, status=status.HTTP_400_BAD_REQUEST)
+        checklist = linea.checklist
+        if checklist.estatus == checklist.ESTATUS_CONFIRMADA:
+            registrar_evento_checklist_confirmado(ruta=ruta, user=request.user)
+        return Response(
+            {
+                "linea": RutaCargaChecklistLineaSerializer(linea, context={"request": request}).data,
+                "checklist": RutaCargaChecklistSerializer(checklist, context={"request": request}).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class LogisticaRutasControlView(_LogisticaBaseView):
+    def get(self, request):
+        if not can_view_submodule(request.user, "logistica", "rutas"):
+            return Response({"detail": "No tienes permisos para consultar control de rutas."}, status=status.HTTP_403_FORBIDDEN)
+
+        limit = self._bounded_int(request.query_params.get("limit"), default=50, min_value=1, max_value=200)
+        fecha = timezone.localdate()
+        fecha_param = (request.query_params.get("fecha") or "").strip()
+        if fecha_param:
+            try:
+                fecha = timezone.datetime.fromisoformat(fecha_param).date()
+            except ValueError:
+                return Response({"detail": "Fecha inválida. Usa YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+
+        data = resumen_control_rutas(fecha=fecha, limit=limit)
+        return Response(
+            {
+                "fecha": data["fecha"].isoformat(),
+                "metricas": {
+                    "eventos_criticos": data["eventos_criticos"],
+                    "desvios": data["desvios"],
+                    "gps_perdido": data["gps_perdido"],
+                },
+                "rutas": [
+                    {
+                        "ruta": LogisticaRutaSerializer(row["ruta"]).data,
+                        "ultima_ubicacion": UbicacionRutaSerializer(row["ultima_ubicacion"]).data if row["ultima_ubicacion"] else None,
+                        "paradas_total": row["paradas_total"],
+                        "paradas_visitadas": row["paradas_visitadas"],
+                        "eventos_alerta": row["eventos_alerta"],
+                        "gps_minutos": row["gps_minutos"],
+                    }
+                    for row in data["rutas"]
+                ],
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class LogisticaRutaTrackingView(_LogisticaBaseView):
+    def get(self, request, ruta_id: int):
+        ruta = get_object_or_404(RutaEntrega, pk=ruta_id)
+        repartidor = _get_repartidor_for_user(request.user)
+        can_view_tracking = can_manage_submodule(request.user, "logistica", "rutas") or (
+            repartidor is not None and ruta.repartidor_id == repartidor.id
+        )
+        if not can_view_tracking:
+            return Response({"detail": "No tienes permisos para consultar seguimiento GPS de esta ruta."}, status=status.HTTP_403_FORBIDDEN)
+        return Response(
+            {
+                "ruta": LogisticaRutaSerializer(ruta).data,
+                "paradas": ParadaRutaSerializer(ruta.paradas.select_related("punto"), many=True).data,
+                "ubicaciones": UbicacionRutaSerializer(ruta.ubicaciones.select_related("repartidor__user", "unidad")[:200], many=True).data,
+                "eventos": EventoRutaSerializer(ruta.eventos.select_related("parada__punto", "ubicacion", "creado_por")[:200], many=True).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request, ruta_id: int):
+        if not _can_operate_pwa(request.user):
+            return Response({"detail": "No tienes permisos para registrar seguimiento de ruta."}, status=status.HTTP_403_FORBIDDEN)
+
+        ruta = get_object_or_404(RutaEntrega.objects.select_related("repartidor", "unidad_operativa", "bitacora_salida"), pk=ruta_id)
+        serializer = UbicacionRutaCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            ubicacion = registrar_ubicacion_ruta(
+                user=request.user,
+                ruta=ruta,
+                payload=serializer.validated_data,
+                ip_registro=request.META.get("REMOTE_ADDR"),
+            )
+        except PermissionDenied as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        except ValidationError as exc:
+            return Response({"detail": exc.message if hasattr(exc, "message") else exc.messages}, status=status.HTTP_400_BAD_REQUEST)
+
+        data = UbicacionRutaSerializer(ubicacion).data
+        data["alertas_tracking"] = getattr(ubicacion, "_alertas_tracking", [])
+        return Response(data, status=status.HTTP_201_CREATED)
+
+
+class LogisticaRutaEventosView(_LogisticaBaseView):
+    def post(self, request, ruta_id: int):
+        if not can_manage_submodule(request.user, "logistica", "rutas"):
+            return Response({"detail": "No tienes permisos para registrar eventos de ruta."}, status=status.HTTP_403_FORBIDDEN)
+
+        ruta = get_object_or_404(RutaEntrega, pk=ruta_id)
+        if ruta.estatus in {RutaEntrega.ESTATUS_COMPLETADA, RutaEntrega.ESTATUS_CANCELADA}:
+            return Response({"detail": "La ruta ya está cerrada o cancelada; no se pueden agregar eventos manuales."}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = EventoRutaCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = serializer.validated_data
+        if payload["tipo"] != EventoRuta.TIPO_INCIDENCIA_MANUAL:
+            return Response({"detail": "Los eventos automáticos no se registran manualmente desde este endpoint."}, status=status.HTTP_400_BAD_REQUEST)
+        parada = None
+        if payload.get("parada_id"):
+            parada = get_object_or_404(ParadaRuta, pk=payload["parada_id"], ruta=ruta)
+
+        evento = EventoRuta.objects.create(
+            ruta=ruta,
+            parada=parada,
+            tipo=payload.get("tipo") or EventoRuta.TIPO_INCIDENCIA_MANUAL,
+            severidad=payload.get("severidad") or EventoRuta.SEVERIDAD_ALERTA,
+            descripcion=payload["descripcion"],
+            latitud=payload.get("latitud"),
+            longitud=payload.get("longitud"),
+            metadata=payload.get("metadata") or {},
+            creado_por=request.user,
+        )
+        log_event(
+            request.user,
+            "CREATE",
+            "logistica.EventoRuta",
+            str(evento.id),
+            {"ruta": ruta.folio, "tipo": evento.tipo, "severidad": evento.severidad},
+        )
+        return Response(EventoRutaSerializer(evento).data, status=status.HTTP_201_CREATED)
 
 
 class LogisticaDashboardView(_LogisticaBaseView):

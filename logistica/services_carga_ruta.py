@@ -1,0 +1,230 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from decimal import Decimal
+
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
+from django.db.models import Q
+from django.utils import timezone
+
+from pos_bridge.models import PointTransferLine
+from pos_bridge.services.open_transfer_sync_service import OpenTransferSyncService, resolve_requesting_erp_branch
+
+from .models import (
+    EventoRuta,
+    ParadaRuta,
+    RutaCargaChecklist,
+    RutaCargaChecklistLinea,
+    RutaEntrega,
+)
+
+
+@dataclass(frozen=True)
+class ChecklistCargaResumen:
+    checklist: RutaCargaChecklist
+    creadas: int = 0
+    actualizadas: int = 0
+    omitidas: int = 0
+
+
+def _cantidad_esperada(line: PointTransferLine) -> Decimal:
+    sent = Decimal(str(line.sent_quantity or 0))
+    if sent > 0:
+        return sent
+    return Decimal(str(line.requested_quantity or 0))
+
+
+def _paradas_por_sucursal(ruta: RutaEntrega) -> dict[int, ParadaRuta]:
+    paradas = ruta.paradas.select_related("punto", "punto__sucursal").order_by("orden", "id")
+    result = {}
+    for parada in paradas:
+        if parada.punto.sucursal_id and parada.punto.sucursal_id not in result:
+            result[parada.punto.sucursal_id] = parada
+    return result
+
+
+def obtener_checklist_carga(ruta: RutaEntrega) -> RutaCargaChecklist:
+    checklist, _ = RutaCargaChecklist.objects.get_or_create(
+        ruta=ruta,
+        defaults={"estatus": RutaCargaChecklist.ESTATUS_PENDIENTE},
+    )
+    return checklist
+
+
+@transaction.atomic
+def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_sync: bool = True) -> ChecklistCargaResumen:
+    if ruta.estatus != RutaEntrega.ESTATUS_PLANEADA:
+        raise ValidationError("La carga solo se puede sincronizar mientras la ruta está planeada.")
+
+    paradas_by_branch = _paradas_por_sucursal(ruta)
+    if not paradas_by_branch:
+        raise ValidationError("La ruta no tiene paradas ligadas a sucursales para relacionar transferencias Point.")
+
+    sync_job = None
+    if ejecutar_sync:
+        sync_job = OpenTransferSyncService().sync_open_transfers(fecha=ruta.fecha_ruta, triggered_by=user)
+        if sync_job.status != sync_job.STATUS_SUCCESS:
+            raise ValidationError("No se pudo sincronizar Point para generar la carga esperada.")
+
+    checklist = obtener_checklist_carga(ruta)
+    checklist.point_sync_job = sync_job or checklist.point_sync_job
+    checklist.sincronizado_en = timezone.now()
+    if checklist.estatus == RutaCargaChecklist.ESTATUS_PENDIENTE:
+        checklist.estatus = RutaCargaChecklist.ESTATUS_EN_REVISION
+    checklist.save(update_fields=["point_sync_job", "sincronizado_en", "estatus", "actualizado_en"])
+
+    branch_ids = set(paradas_by_branch)
+    candidates = (
+        PointTransferLine.objects.select_related("erp_origin_branch", "erp_destination_branch", "origin_branch", "destination_branch")
+        .filter(is_open=True, is_cancelled=False, registered_at__date=ruta.fecha_ruta)
+        .filter(Q(erp_origin_branch_id__in=branch_ids) | Q(erp_destination_branch_id__in=branch_ids))
+        .order_by("transfer_external_id", "detail_external_id", "id")
+    )
+
+    creadas = 0
+    actualizadas = 0
+    omitidas = 0
+    for line in candidates:
+        branch = resolve_requesting_erp_branch(line)
+        if branch is None or branch.id not in paradas_by_branch:
+            omitidas += 1
+            continue
+        parada = paradas_by_branch[branch.id]
+        defaults = {
+            "parada": parada,
+            "point_transfer_line": line,
+            "transfer_external_id": line.transfer_external_id,
+            "detail_external_id": line.detail_external_id,
+            "item_code": line.item_code,
+            "item_name": line.item_name,
+            "unit": line.unit,
+            "erp_origin_branch": line.erp_origin_branch,
+            "erp_destination_branch": line.erp_destination_branch,
+            "cantidad_solicitada": line.requested_quantity,
+            "cantidad_enviada_esperada": _cantidad_esperada(line),
+        }
+        _, created = RutaCargaChecklistLinea.objects.update_or_create(
+            checklist=checklist,
+            source_hash=line.source_hash,
+            defaults=defaults,
+        )
+        if created:
+            creadas += 1
+        else:
+            actualizadas += 1
+
+    if not checklist.lineas.exists():
+        checklist.estatus = RutaCargaChecklist.ESTATUS_BLOQUEADA
+        checklist.notas = "No se encontraron transferencias abiertas de Point para las sucursales de esta ruta."
+        checklist.save(update_fields=["estatus", "notas", "actualizado_en"])
+
+    return ChecklistCargaResumen(checklist=checklist, creadas=creadas, actualizadas=actualizadas, omitidas=omitidas)
+
+
+def validar_usuario_puede_operar_checklist(*, user, ruta: RutaEntrega, repartidor) -> None:
+    if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
+        raise ValidationError("La ruta no permite confirmar carga en este estatus.")
+    if not repartidor or ruta.repartidor_id != repartidor.id:
+        raise PermissionDenied("No tienes permiso para confirmar carga de esta ruta.")
+
+
+@transaction.atomic
+def validar_linea_carga(
+    *,
+    user,
+    ruta: RutaEntrega,
+    repartidor,
+    linea_id: int,
+    cantidad_cargada,
+    motivo_diferencia: str = "",
+    notas: str = "",
+    client_event_id: str = "",
+) -> RutaCargaChecklistLinea:
+    validar_usuario_puede_operar_checklist(user=user, ruta=ruta, repartidor=repartidor)
+    checklist = obtener_checklist_carga(ruta)
+    linea = RutaCargaChecklistLinea.objects.select_for_update().select_related("checklist", "parada").get(
+        pk=linea_id,
+        checklist=checklist,
+    )
+
+    client_event_id = (client_event_id or "").strip()
+    if client_event_id and linea.client_event_id == client_event_id and linea.estatus != RutaCargaChecklistLinea.ESTATUS_PENDIENTE:
+        return linea
+
+    cantidad = Decimal(str(cantidad_cargada))
+    if cantidad < 0:
+        raise ValidationError("La cantidad cargada no puede ser negativa.")
+
+    esperada = Decimal(str(linea.cantidad_enviada_esperada or 0))
+    if cantidad == esperada:
+        estatus = RutaCargaChecklistLinea.ESTATUS_CARGADA
+        motivo_diferencia = ""
+    elif cantidad == 0:
+        estatus = RutaCargaChecklistLinea.ESTATUS_FALTANTE
+    elif cantidad < esperada:
+        estatus = RutaCargaChecklistLinea.ESTATUS_PARCIAL
+    else:
+        estatus = RutaCargaChecklistLinea.ESTATUS_SOBRANTE
+
+    if estatus != RutaCargaChecklistLinea.ESTATUS_CARGADA and not motivo_diferencia:
+        raise ValidationError("Selecciona el motivo de la diferencia antes de guardar.")
+
+    linea.cantidad_cargada = cantidad
+    linea.estatus = estatus
+    linea.motivo_diferencia = motivo_diferencia
+    linea.notas = notas or ""
+    linea.client_event_id = client_event_id
+    linea.validado_por = user
+    linea.validado_en = timezone.now()
+    linea.save(
+        update_fields=[
+            "cantidad_cargada",
+            "estatus",
+            "motivo_diferencia",
+            "notas",
+            "client_event_id",
+            "validado_por",
+            "validado_en",
+            "actualizado_en",
+        ]
+    )
+
+    pendientes = checklist.lineas.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists()
+    diferencias = checklist.lineas.exclude(
+        estatus__in=[RutaCargaChecklistLinea.ESTATUS_CARGADA, RutaCargaChecklistLinea.ESTATUS_NO_APLICA]
+    ).exists()
+    if pendientes:
+        checklist.estatus = RutaCargaChecklist.ESTATUS_EN_REVISION
+    elif diferencias:
+        checklist.estatus = RutaCargaChecklist.ESTATUS_CON_INCIDENCIA
+    else:
+        checklist.estatus = RutaCargaChecklist.ESTATUS_CONFIRMADA
+        checklist.confirmado_por = user
+        checklist.confirmado_en = timezone.now()
+    checklist.save(update_fields=["estatus", "confirmado_por", "confirmado_en", "actualizado_en"])
+    return linea
+
+
+def checklist_bloquea_salida(ruta: RutaEntrega) -> str | None:
+    checklist = getattr(ruta, "checklist_carga", None)
+    if not checklist or not checklist.lineas.exists():
+        return None
+    if checklist.estatus == RutaCargaChecklist.ESTATUS_CONFIRMADA:
+        return None
+    if checklist.estatus == RutaCargaChecklist.ESTATUS_CON_INCIDENCIA and checklist.motivo_override:
+        return None
+    return "confirma la carga de productos antes de liberar la ruta"
+
+
+def registrar_evento_checklist_confirmado(*, ruta: RutaEntrega, user) -> None:
+    if EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL, metadata__tipo="checklist_carga").exists():
+        return
+    EventoRuta.objects.create(
+        ruta=ruta,
+        tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+        severidad=EventoRuta.SEVERIDAD_INFO,
+        descripcion="Checklist de carga confirmado antes de salida.",
+        metadata={"tipo": "checklist_carga"},
+        creado_por=user,
+    )
