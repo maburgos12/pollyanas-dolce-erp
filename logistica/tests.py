@@ -1090,7 +1090,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Control interno de rutas")
         self.assertContains(response, "Rutas del día")
-        self.assertContains(response, "Vista operativa preliminar")
+        self.assertContains(response, "Vista esquemática, no evidencia GPS")
         self.assertContains(response, "Filtrar")
 
     def test_control_rutas_filtra_por_ruta_repartidor_o_unidad(self):
@@ -1632,11 +1632,25 @@ class LogisticaControlRutasTests(TestCase):
         self.ruta.refresh_from_db()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(retry.status_code, 200)
-        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
         self.assertEqual(self.parada.entrega_confirmada_por, self.user)
         self.assertEqual(ParadaEntregaEvidencia.objects.filter(parada=self.parada, client_event_id="evt-entrega-1").count(), 1)
-        self.assertEqual(self.ruta.cumplimiento_porcentaje, Decimal("100.00"))
+        self.assertEqual(self.ruta.cumplimiento_porcentaje, Decimal("0.00"))
+
+    def test_api_entrega_completa_exige_evidencia(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_parada_entrega", kwargs={"ruta_id": self.ruta.id, "parada_id": self.parada.id}),
+            json.dumps({"entrega_estado": ParadaRuta.ENTREGA_ENTREGADA, "evidencias": []}),
+            content_type="application/json",
+        )
+
+        self.parada.refresh_from_db()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
+        self.assertIn("evidencia", response.json()["detail"])
 
     def test_api_confirma_entrega_con_diferencia_exige_motivo(self):
         self.client.force_login(self.user)
@@ -1665,6 +1679,21 @@ class LogisticaControlRutasTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_api_mantenimiento_sin_repartidor_no_confirma_entrega_de_ruta(self):
+        mantenimiento = User.objects.create_user(username="mant.sin.repartidor", password="pass123")
+        UserModuleAccess.objects.create(user=mantenimiento, module="mantenimiento", access=ACCESS_VIEW)
+        self.client.force_login(mantenimiento)
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_parada_entrega", kwargs={"ruta_id": self.ruta.id, "parada_id": self.parada.id}),
+            json.dumps({"entrega_estado": ParadaRuta.ENTREGA_ENTREGADA, "evidencias": [{"comentario": "Intento"}]}),
+            content_type="application/json",
+        )
+
+        self.parada.refresh_from_db()
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
+
     def test_sincronizar_recepcion_desde_point_confirma_parada_recibida(self):
         self._crear_linea_carga_con_transferencia_recibida()
 
@@ -1676,11 +1705,28 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(resumen.paradas_actualizadas, 1)
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
         self.assertEqual(self.parada.entrega_confirmada_por, self.user)
-        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
-        self.assertEqual(self.ruta.cumplimiento_porcentaje, Decimal("100.00"))
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
+        self.assertEqual(self.ruta.cumplimiento_porcentaje, Decimal("0.00"))
         evidencia = ParadaEntregaEvidencia.objects.get(parada=self.parada)
         self.assertEqual(evidencia.cantidad_entregada, Decimal("5.000"))
         self.assertEqual(evidencia.metadata["origen"], "point_transfer")
+
+    def test_sincronizar_recepcion_importa_transferencia_point_recibida_post_salida(self):
+        transferencia = self._crear_transferencia_point_abierta(source_hash="transfer-post-salida")
+        transferencia.is_open = False
+        transferencia.is_received = True
+        transferencia.is_finalized = True
+        transferencia.received_quantity = Decimal("5.000")
+        transferencia.received_at = timezone.now()
+        transferencia.save(update_fields=["is_open", "is_received", "is_finalized", "received_quantity", "received_at", "updated_at"])
+
+        resumen = sincronizar_recepcion_desde_point(ruta=self.ruta, user=self.user, ejecutar_sync=False)
+
+        self.parada.refresh_from_db()
+        self.assertEqual(resumen.evidencias_creadas, 1)
+        self.assertTrue(RutaCargaChecklistLinea.objects.filter(checklist__ruta=self.ruta, source_hash=transferencia.source_hash).exists())
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
 
     def test_sincronizar_recepcion_desde_point_no_inventa_si_point_no_recibio(self):
         self._crear_linea_carga_con_transferencia_recibida(is_received=False, received_quantity="0.000")
@@ -1865,6 +1911,35 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(segundo.creadas, 0)
         self.assertEqual(segundo.omitidas, 1)
         self.assertEqual(RutaCargaChecklistLinea.objects.filter(source_hash=transferencia.source_hash).count(), 1)
+
+    def test_db_bloquea_source_hash_point_duplicado_entre_checklists(self):
+        ruta_uno, parada_uno = self._crear_ruta_planeada_para_carga()
+        ruta_dos, parada_dos = self._crear_ruta_planeada_para_carga()
+        checklist_uno = RutaCargaChecklist.objects.create(ruta=ruta_uno)
+        checklist_dos = RutaCargaChecklist.objects.create(ruta=ruta_dos)
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist_uno,
+            parada=parada_uno,
+            transfer_external_id="T-DUP",
+            detail_external_id="D-DUP-1",
+            source_hash="source-duplicado-global",
+            item_name="Pastel Snicker chico",
+            cantidad_solicitada="5.000",
+            cantidad_enviada_esperada="5.000",
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                RutaCargaChecklistLinea.objects.create(
+                    checklist=checklist_dos,
+                    parada=parada_dos,
+                    transfer_external_id="T-DUP",
+                    detail_external_id="D-DUP-2",
+                    source_hash="source-duplicado-global",
+                    item_name="Pastel Snicker chico",
+                    cantidad_solicitada="5.000",
+                    cantidad_enviada_esperada="5.000",
+                )
 
     def test_api_ruta_status_bloquea_salida_si_checklist_carga_pendiente(self):
         self.client.force_login(self.user)

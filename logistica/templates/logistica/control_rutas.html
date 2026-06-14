@@ -260,7 +260,7 @@
 
   .route-status.pending {
     background: #eef1f5;
-    color: #65717f;
+    color: #3f4a57;
   }
 
   .route-card-meta {
@@ -932,7 +932,7 @@
       {% endfor %}
     </aside>
 
-    <main class="route-map-panel" aria-label="Mapa operativo de rutas">
+    <main class="route-map-panel" aria-label="Vista esquemática de rutas">
       <div class="map-layer" aria-hidden="true">
         <div class="route-line-programmed one"></div>
         <div class="route-line-programmed two"></div>
@@ -943,12 +943,12 @@
       <div class="map-legend" aria-label="Leyenda del mapa">
         <span class="legend-item"><i class="legend-dot"></i>Sucursal</span>
         <span class="legend-item"><i class="legend-dot ring"></i>Geocerca</span>
-        <span class="legend-item"><i class="legend-line"></i>Ruta programada</span>
-        <span class="legend-item"><i class="legend-line actual"></i>Ruta recorrida</span>
+        <span class="legend-item"><i class="legend-line"></i>Secuencia planeada</span>
+        <span class="legend-item"><i class="legend-line actual"></i>Referencia visual</span>
         <span class="legend-item"><i class="legend-dot warn"></i>Desvío detectado</span>
       </div>
       <div class="map-control-stack" aria-hidden="true">
-        <span class="map-static-note">Vista operativa preliminar</span>
+        <span class="map-static-note">Vista esquemática, no evidencia GPS</span>
       </div>
 
       {% for parada in paradas_pendientes|slice:":6" %}
@@ -971,7 +971,6 @@
         <p class="muted mb-0">{{ metricas.desvios }} evento{{ metricas.desvios|pluralize }} fuera de ruta registrado en evidencia.</p>
       </aside>
       {% endif %}
-      <div class="map-scale">500 m</div>
     </main>
 
     <aside class="route-evidence-panel" aria-label="Evidencia y excepciones">

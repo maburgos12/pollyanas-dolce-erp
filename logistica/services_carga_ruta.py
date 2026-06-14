@@ -70,35 +70,20 @@ def obtener_checklist_carga(ruta: RutaEntrega) -> RutaCargaChecklist:
     return checklist
 
 
-@transaction.atomic
-def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_sync: bool = True) -> ChecklistCargaResumen:
-    if ruta.estatus != RutaEntrega.ESTATUS_PLANEADA:
-        raise ValidationError("La carga solo se puede sincronizar mientras la ruta está planeada.")
-
+def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCargaChecklist, solo_abiertas: bool = False) -> tuple[int, int, int]:
     paradas_by_branch = _paradas_por_sucursal(ruta)
     if not paradas_by_branch:
-        raise ValidationError("La ruta no tiene paradas ligadas a sucursales para relacionar transferencias Point.")
-
-    sync_job = None
-    if ejecutar_sync:
-        sync_job = OpenTransferSyncService().sync_open_transfers(fecha=ruta.fecha_ruta, triggered_by=user)
-        if sync_job.status != sync_job.STATUS_SUCCESS:
-            raise ValidationError("No se pudo sincronizar Point para generar la carga esperada.")
-
-    checklist = obtener_checklist_carga(ruta)
-    checklist.point_sync_job = sync_job or checklist.point_sync_job
-    checklist.sincronizado_en = timezone.now()
-    if checklist.estatus == RutaCargaChecklist.ESTATUS_PENDIENTE:
-        checklist.estatus = RutaCargaChecklist.ESTATUS_EN_REVISION
-    checklist.save(update_fields=["point_sync_job", "sincronizado_en", "estatus", "actualizado_en"])
+        return 0, 0, 0
 
     branch_ids = set(paradas_by_branch)
     candidates = (
         PointTransferLine.objects.select_related("erp_origin_branch", "erp_destination_branch", "origin_branch", "destination_branch")
-        .filter(is_open=True, is_cancelled=False, registered_at__date=ruta.fecha_ruta)
+        .filter(is_cancelled=False, registered_at__date=ruta.fecha_ruta)
         .filter(Q(erp_origin_branch_id__in=branch_ids) | Q(erp_destination_branch_id__in=branch_ids))
         .order_by("transfer_external_id", "detail_external_id", "id")
     )
+    if solo_abiertas:
+        candidates = candidates.filter(is_open=True)
 
     creadas = 0
     actualizadas = 0
@@ -138,6 +123,32 @@ def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, eje
             creadas += 1
         else:
             actualizadas += 1
+    return creadas, actualizadas, omitidas
+
+
+@transaction.atomic
+def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_sync: bool = True) -> ChecklistCargaResumen:
+    if ruta.estatus != RutaEntrega.ESTATUS_PLANEADA:
+        raise ValidationError("La carga solo se puede sincronizar mientras la ruta está planeada.")
+
+    paradas_by_branch = _paradas_por_sucursal(ruta)
+    if not paradas_by_branch:
+        raise ValidationError("La ruta no tiene paradas ligadas a sucursales para relacionar transferencias Point.")
+
+    sync_job = None
+    if ejecutar_sync:
+        sync_job = OpenTransferSyncService().sync_open_transfers(fecha=ruta.fecha_ruta, triggered_by=user)
+        if sync_job.status != sync_job.STATUS_SUCCESS:
+            raise ValidationError("No se pudo sincronizar Point para generar la carga esperada.")
+
+    checklist = obtener_checklist_carga(ruta)
+    checklist.point_sync_job = sync_job or checklist.point_sync_job
+    checklist.sincronizado_en = timezone.now()
+    if checklist.estatus == RutaCargaChecklist.ESTATUS_PENDIENTE:
+        checklist.estatus = RutaCargaChecklist.ESTATUS_EN_REVISION
+    checklist.save(update_fields=["point_sync_job", "sincronizado_en", "estatus", "actualizado_en"])
+
+    creadas, actualizadas, omitidas = _sincronizar_lineas_point_para_ruta(ruta=ruta, checklist=checklist, solo_abiertas=True)
 
     if not checklist.lineas.exists():
         checklist.estatus = RutaCargaChecklist.ESTATUS_BLOQUEADA
@@ -260,9 +271,7 @@ def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_
     if ruta.estatus not in {RutaEntrega.ESTATUS_EN_RUTA, RutaEntrega.ESTATUS_COMPLETADA}:
         raise ValidationError("La recepción Point solo aplica a rutas en seguimiento o completadas.")
 
-    checklist = getattr(ruta, "checklist_carga", None)
-    if not checklist or not checklist.lineas.exists():
-        return RecepcionPointResumen(ruta=ruta)
+    checklist = obtener_checklist_carga(ruta)
 
     if ejecutar_sync:
         sync_job = PointMovementSyncService().run_transfer_sync(
@@ -272,6 +281,11 @@ def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_
         )
         if sync_job.status != sync_job.STATUS_SUCCESS:
             raise ValidationError("No se pudo sincronizar Point para confirmar recepción de transferencias.")
+
+    _sincronizar_lineas_point_para_ruta(ruta=ruta, checklist=checklist)
+
+    if not checklist.lineas.exists():
+        return RecepcionPointResumen(ruta=ruta)
 
     source_hashes = list(checklist.lineas.exclude(source_hash="").values_list("source_hash", flat=True))
     point_lines = {
@@ -358,10 +372,6 @@ def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_
             f"Recepción Point: {lineas_recibidas} línea(s) recibidas. "
             f"Esperado/cargado {esperado_total}, recibido {recibido_total}."
         )
-        if parada.estado == ParadaRuta.ESTADO_PENDIENTE:
-            parada.estado = ParadaRuta.ESTADO_VISITADA
-            parada.hora_llegada_real = parada.hora_llegada_real or entrega_confirmada_en
-            update_fields.extend(["estado", "hora_llegada_real"])
         parada.save(update_fields=update_fields)
         paradas_actualizadas += 1
 

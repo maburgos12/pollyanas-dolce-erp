@@ -499,6 +499,11 @@ class RutaCargaChecklistLinea(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["checklist", "source_hash"], name="rutacarga_linea_source_unica"),
             models.UniqueConstraint(
+                fields=["source_hash"],
+                condition=~Q(source_hash=""),
+                name="rutacarga_linea_source_global_unica",
+            ),
+            models.UniqueConstraint(
                 fields=["checklist", "client_event_id"],
                 condition=~Q(client_event_id=""),
                 name="rutacarga_linea_evento_cliente_unico",

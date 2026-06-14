@@ -1109,10 +1109,19 @@ class LogisticaRutaStatusView(_LogisticaBaseView):
                 return Response({"detail": "No se puede completar la ruta: falta repartidor, unidad o paradas."}, status=status.HTTP_400_BAD_REQUEST)
             if ruta.paradas.filter(estado=ParadaRuta.ESTADO_PENDIENTE).exists():
                 return Response({"detail": "No se puede completar la ruta: hay paradas pendientes por visitar u omitir."}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                sincronizar_recepcion_desde_point(ruta=ruta, user=request.user, ejecutar_sync=False)
+                ruta.refresh_from_db()
+            except ValidationError as exc:
+                detail = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
+                return Response({"detail": detail}, status=status.HTTP_400_BAD_REQUEST)
             if ruta.paradas.filter(entrega_estado=ParadaRuta.ENTREGA_PENDIENTE).exists():
                 return Response({"detail": "No se puede completar la ruta: hay paradas sin entrega confirmada."}, status=status.HTTP_400_BAD_REQUEST)
             if ruta.paradas.filter(entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA]).exists():
                 return Response({"detail": "No se puede completar la ruta: hay diferencias o entregas no recibidas por resolver."}, status=status.HTTP_400_BAD_REQUEST)
+            checklist = getattr(ruta, "checklist_carga", None)
+            if checklist and checklist.lineas.filter(Q(point_transfer_line__isnull=True) | Q(point_transfer_line__is_received=False)).exists():
+                return Response({"detail": "No se puede completar la ruta: hay recepción Point pendiente."}, status=status.HTTP_400_BAD_REQUEST)
 
         from_status = ruta.estatus
         ruta.estatus = estatus_nuevo
@@ -1159,8 +1168,9 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
             return Response({"detail": "No tienes permisos para confirmar entregas de ruta."}, status=status.HTTP_403_FORBIDDEN)
 
         ruta = get_object_or_404(RutaEntrega.objects.select_related("repartidor", "unidad_operativa"), pk=ruta_id)
+        can_manage_rutas = can_manage_submodule(request.user, "logistica", "rutas")
         repartidor = _get_repartidor_for_user(request.user)
-        if repartidor is not None and ruta.repartidor_id != repartidor.id and not can_manage_submodule(request.user, "logistica", "rutas"):
+        if not can_manage_rutas and (repartidor is None or ruta.repartidor_id != repartidor.id):
             return Response({"detail": "No puedes confirmar entregas de una ruta asignada a otro repartidor."}, status=status.HTTP_403_FORBIDDEN)
         if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
             return Response({"detail": "Solo puedes confirmar entregas de una ruta en seguimiento."}, status=status.HTTP_400_BAD_REQUEST)
@@ -1170,6 +1180,8 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         serializer.is_valid(raise_exception=True)
         payload = serializer.validated_data
         evidencias_payload = payload.get("evidencias") or []
+        if payload["entrega_estado"] == ParadaRuta.ENTREGA_ENTREGADA and not evidencias_payload:
+            return Response({"detail": "Para confirmar entrega completa registra evidencia de producto recibido."}, status=status.HTTP_400_BAD_REQUEST)
         linea_ids = {item.get("linea_carga_id") for item in evidencias_payload if item.get("linea_carga_id")}
         lineas_by_id = {}
         if linea_ids:
@@ -1203,11 +1215,11 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
                 if client_event_id:
                     evidencia, _ = ParadaEntregaEvidencia.objects.get_or_create(
                         ruta=ruta,
+                        parada=parada,
                         capturado_por=request.user,
                         client_event_id=client_event_id,
                         defaults={
                             **defaults,
-                            "parada": parada,
                         },
                     )
                 else:
@@ -1223,18 +1235,12 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
             parada.entrega_confirmada_en = timezone.now()
             parada.entrega_confirmada_por = request.user
             parada.entrega_notas = payload.get("notas") or ""
-            if parada.estado == ParadaRuta.ESTADO_PENDIENTE:
-                parada.estado = ParadaRuta.ESTADO_VISITADA
-                if not parada.hora_llegada_real:
-                    parada.hora_llegada_real = parada.entrega_confirmada_en
             parada.save(
                 update_fields=[
                     "entrega_estado",
                     "entrega_confirmada_en",
                     "entrega_confirmada_por",
                     "entrega_notas",
-                    "estado",
-                    "hora_llegada_real",
                     "actualizado_en",
                 ]
             )

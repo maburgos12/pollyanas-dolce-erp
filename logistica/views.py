@@ -1984,11 +1984,21 @@ def ruta_detail(request, pk: int):
                     if ruta.paradas.filter(estado=ParadaRuta.ESTADO_PENDIENTE).exists():
                         messages.error(request, "No se puede completar la ruta: hay paradas pendientes por visitar u omitir.")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
+                    try:
+                        sincronizar_recepcion_desde_point(ruta=ruta, user=request.user, ejecutar_sync=False)
+                        ruta.refresh_from_db()
+                    except ValidationError as exc:
+                        messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+                        return redirect("logistica:ruta_detail", pk=ruta.id)
                     if ruta.paradas.filter(entrega_estado=ParadaRuta.ENTREGA_PENDIENTE).exists():
                         messages.error(request, "No se puede completar la ruta: hay paradas sin entrega confirmada.")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
                     if ruta.paradas.filter(entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA]).exists():
                         messages.error(request, "No se puede completar la ruta: hay diferencias o entregas no recibidas por resolver.")
+                        return redirect("logistica:ruta_detail", pk=ruta.id)
+                    checklist = getattr(ruta, "checklist_carga", None)
+                    if checklist and checklist.lineas.filter(Q(point_transfer_line__isnull=True) | Q(point_transfer_line__is_received=False)).exists():
+                        messages.error(request, "No se puede completar la ruta: hay recepción Point pendiente.")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
                 from_status = ruta.estatus
                 if from_status != estatus_nuevo:
