@@ -16,6 +16,18 @@ def purge_legacy_excel_recipe_insumos(apps, schema_editor):
     PointTransferLine = apps.get_model("pos_bridge", "PointTransferLine")
     FactInventarioDiario = apps.get_model("reportes", "FactInventarioDiario")
 
+    def move_or_drop_monthly_consumption(legacy, canonical):
+        for legacy_consumption in list(ConsumoInsumoMensual.objects.filter(insumo=legacy)):
+            canonical_exists = ConsumoInsumoMensual.objects.filter(
+                periodo=legacy_consumption.periodo,
+                insumo=canonical,
+            ).exists()
+            if canonical_exists:
+                legacy_consumption.delete()
+            else:
+                legacy_consumption.insumo = canonical
+                legacy_consumption.save(update_fields=["insumo"])
+
     for legacy_name, canonical_code in LEGACY_TO_CANONICAL.items():
         canonical = Insumo.objects.filter(codigo_point=canonical_code, activo=True).first()
         if not canonical:
@@ -25,7 +37,7 @@ def purge_legacy_excel_recipe_insumos(apps, schema_editor):
         for legacy in legacy_items:
             CostoInsumo.objects.filter(insumo=legacy).update(insumo=canonical)
             MovimientoInventario.objects.filter(insumo=legacy).update(insumo=canonical)
-            ConsumoInsumoMensual.objects.filter(insumo=legacy).update(insumo=canonical)
+            move_or_drop_monthly_consumption(legacy, canonical)
             PointTransferLine.objects.filter(insumo=legacy).update(insumo=canonical)
             FactInventarioDiario.objects.filter(insumo=legacy).update(insumo=canonical)
 
