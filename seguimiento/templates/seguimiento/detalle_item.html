@@ -95,7 +95,7 @@
   }
 
   .seg-dg-note {
-    border-left: 3px solid var(--dorado);
+    border: 1px solid color-mix(in srgb, var(--pd-gold) 32%, transparent);
     padding: 8px 10px;
     background: rgba(255, 252, 240, 0.92);
     border-radius: 8px;
@@ -172,16 +172,121 @@
     transition: width .4s ease;
     width: var(--seg-pct, 0%);
   }
-  .seg-progress-fill.is-danger { background: var(--rojo); }
-  .seg-progress-fill.is-success { background: var(--verde); }
-  .seg-progress-fill.is-plum { background: var(--vino); }
+	  .seg-progress-fill.is-danger { background: var(--rojo); }
+	  .seg-progress-fill.is-success { background: var(--verde); }
+	  .seg-progress-fill.is-plum { background: var(--vino); }
+  .seg-panel-gap { margin-bottom: 16px; }
+  .seg-back-row { margin-bottom: 14px; }
+  .seg-metric-strip { flex-wrap: wrap; }
+  .seg-description { margin: 12px 0 0; color: var(--texto-light); font-size: .92rem; }
+  .seg-entregable { margin: 10px 0 0; color: var(--pd-ink-soft); font-size: .92rem; font-weight: 800; }
+  .seg-progress-track { margin-top: 14px; }
+  .seg-status-panel {
+    border: 1px solid var(--pd-border);
+    background: var(--pd-surface);
+  }
+  .seg-status-panel.is-closed { border-color: color-mix(in srgb, var(--pd-success) 28%, transparent); background: var(--pd-success-soft); }
+  .seg-status-panel.is-review { border-color: color-mix(in srgb, var(--pd-gold) 32%, transparent); background: var(--pd-gold-soft); }
+  .seg-conversation-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+  .seg-meta-flat { margin:0; }
+  .seg-meta-warning { margin:0; color:var(--pd-warning); font-weight:800; }
+  .seg-meta-success { margin:0; color:var(--pd-success); font-weight:800; }
+  .seg-dg-meta { font-size:.82rem; }
+  .seg-note-copy { margin:6px 0 0; }
+  .seg-muted-copy { margin:0; font-size:.9rem; }
+  .seg-summary-link { cursor:pointer; list-style:none; font-size:.84rem; font-weight:800; color:var(--vino); }
+  .seg-note-stack { display:grid; gap:8px; margin-top:8px; }
+  .seg-check-help { margin:-4px 0 10px; font-size:.82rem; }
+  .seg-check-stack { display:grid; gap:8px; }
+  .seg-check-item {
+    border:1px solid color-mix(in srgb, var(--pd-wine) 10%, transparent);
+    border-radius:10px;
+  }
+  .seg-check-item.is-complete { background: var(--pd-success-soft); }
+  .seg-check-summary { cursor:pointer; list-style:none; display:flex; align-items:center; gap:10px; padding:10px 12px; }
+  .seg-check-number { font-weight:800; }
+  .seg-step-icon { font-size:1.05rem; }
+  .seg-check-title { flex:1; font-weight:700; overflow:hidden; }
+  .seg-check-state { font-size:.76rem; }
+  .seg-check-body { padding:2px 14px 14px 40px; display:grid; gap:8px; }
+  .seg-check-meta { font-size:.8rem; display:flex; flex-wrap:wrap; gap:4px 14px; }
+  .seg-check-description { color:var(--texto); font-size:.92rem; white-space:pre-line; }
+  .seg-check-inline { font-size:.86rem; }
+  .seg-check-inline-sm { font-size:.8rem; }
+  .seg-inline-strong { font-weight:700; }
+  .seg-subcheck-box {
+    border:1px dashed color-mix(in srgb, var(--pd-wine) 18%, transparent);
+    border-radius:10px;
+    padding:8px 10px;
+  }
+  .seg-subcheck-title {
+    margin-bottom:6px;
+    font-size:.72rem;
+    font-weight:800;
+    letter-spacing:.04em;
+    text-transform:uppercase;
+  }
+  .seg-subcheck-stack { display:grid; gap:4px; }
+  .seg-subcheck-row { display:flex; align-items:center; gap:8px; font-size:.88rem; }
+  .seg-subcheck-toggle { background:none; border:0; cursor:pointer; font-size:1rem; line-height:1; padding:0; }
+  .seg-subcheck-name { flex:1; overflow:hidden; }
+  .seg-subcheck-state { font-size:.7rem; }
+  .seg-complete-meta { font-size:.8rem; }
+  .seg-action-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .seg-alert-actions { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  .seg-evidence-row {
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+    padding:8px 10px;
+    border:1px solid color-mix(in srgb, var(--pd-success) 18%, transparent);
+    border-radius:10px;
+    background:var(--pd-success-soft);
+  }
+  .seg-evidence-link { flex-shrink:0; }
+  .seg-evidence-main { flex:1; overflow:hidden; }
+  .seg-evidence-name { font-size:.9rem; }
+  .seg-evidence-comment { font-size:.82rem; }
+  .seg-review-copy { margin:0; color:var(--texto-light); font-size:.9rem; }
+  .seg-form-grid { display:grid; gap:10px; }
+  .seg-review-card {
+    padding:12px 14px;
+    border:1px solid color-mix(in srgb, var(--pd-gold) 28%, transparent);
+    border-radius:12px;
+    background:var(--pd-gold-soft);
+  }
+  .seg-review-title { margin-bottom:6px; font-size:.95rem; font-weight:700; }
+  .seg-review-meta { margin-bottom:8px; display:flex; flex-wrap:wrap; gap:4px 14px; font-size:.8rem; }
+  .seg-inline-details { display:inline-block; }
+  .seg-popover {
+    position:absolute;
+    z-index:10;
+    margin-top:4px;
+    padding:12px 14px;
+    border:1px solid color-mix(in srgb, var(--pd-gold) 35%, transparent);
+    border-radius:10px;
+    background:var(--blanco);
+    box-shadow:var(--pd-shadow-mid);
+  }
+  .seg-popover-label { display:block; margin-bottom:4px; font-size:.8rem; font-weight:700; }
+  .seg-popover-textarea { font-size:.82rem; resize:vertical; }
+  .seg-popover-submit { margin-top:8px; }
+  .seg-timeline-copy { margin:4px 0 0; color:var(--texto-light); font-size:.88rem; }
+  .seg-timeline-actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:8px; align-items:center; }
+  .seg-edit-summary { cursor:pointer; list-style:none; display:inline-flex; align-items:center; gap:6px; color:var(--vino); font-size:.82rem; font-weight:700; }
+  .seg-edit-form { margin-top:8px; display:grid; gap:8px; }
+  .seg-danger-action { color:var(--rojo); border-color:color-mix(in srgb, var(--pd-danger) 30%, transparent); }
+  .seg-secondary-stack { display:grid; gap:12px; }
+  .seg-date-input { border:1px solid color-mix(in srgb, var(--pd-wine) 14%, transparent); border-radius:12px; padding:10px; font:inherit; }
+  .seg-inline-badge { margin-left: 8px; }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="module-shell bi-shell seg-detalle-shell">
 
-  <div style="margin-bottom:14px;">
+  <div class="seg-back-row">
     <a href="{% url 'seguimiento:mi_seguimiento' %}" class="btn btn-secondary btn-sm">← Mi trabajo</a>
   </div>
 
@@ -194,8 +299,8 @@
   </div>
 
   <!-- Metadata -->
-  <div class="bi-panel" style="margin-bottom:16px;">
-    <div class="bi-metric-strip" style="flex-wrap:wrap;">
+  <div class="bi-panel seg-panel-gap">
+    <div class="bi-metric-strip seg-metric-strip">
       <div class="bi-metric">
         <div class="bi-metric-label">Fecha límite</div>
         <div class="bi-metric-value {% if item.esta_vencido %}danger{% endif %}">
@@ -229,63 +334,63 @@
     </div>
 
     {% if item.descripcion %}
-    <p style="margin:12px 0 0; color:var(--texto-light); font-size:.92rem;">{{ item.descripcion }}</p>
+    <p class="seg-description">{{ item.descripcion }}</p>
     {% endif %}
     {% if item.entregable_esperado %}
-    <p style="margin:10px 0 0; font-weight:800; font-size:.92rem; color:#4f4249;">
+    <p class="seg-entregable">
       Entregable esperado: {{ item.entregable_esperado }}
     </p>
     {% endif %}
 
     {% if checklist_total %}
-    <div class="bi-progress-track" style="margin-top:14px;" aria-label="Avance">
+    <div class="bi-progress-track seg-progress-track" aria-label="Avance">
       <span class="seg-progress-fill {% if item.esta_vencido %}is-danger{% elif progreso_pct >= 100 %}is-success{% else %}is-plum{% endif %}" style="--seg-pct:{{ progreso_pct }}%"></span>
     </div>
     {% endif %}
   </div>
 
   <!-- Conversación y cierre -->
-  <div class="bi-panel" style="margin-bottom:16px; border-left:4px solid {% if item.esta_cerrado %}var(--verde){% elif ultimo_comentario_dg %}var(--dorado){% else %}rgba(139,34,82,.22){% endif %};">
+  <div class="bi-panel seg-panel-gap seg-status-panel{% if item.esta_cerrado %} is-closed{% elif ultimo_comentario_dg %} is-review{% endif %}">
     <p class="seg-section-title">Conversación y cierre</p>
     <div class="seg-conversation-card {% if item.esta_cerrado %}is-closed{% endif %}">
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+      <div class="seg-conversation-head">
         <strong>{% if item.esta_cerrado %}Cierre establecido{% elif item.estatus == estatus_en_revision %}En revisión{% else %}Seguimiento abierto{% endif %}</strong>
         <span class="seg-badge-status {{ item.estatus|lower }}">{{ item.get_estatus_display }}</span>
       </div>
       {% if item.aprobado_at and item.esta_cerrado %}
-      <p class="seg-timeline-meta" style="margin:0;">
+      <p class="seg-timeline-meta seg-meta-flat">
         Cerrado el {{ item.aprobado_at|date:"d/m/Y H:i" }}{% if item.aprobado_por %} por {{ item.aprobado_por.get_full_name|default:item.aprobado_por.username }}{% endif %}.
       </p>
       {% elif item.tiene_desfase_agente_dg %}
-      <p class="seg-timeline-meta" style="margin:0; color:#7a5b14; font-weight:800;">
+      <p class="seg-timeline-meta seg-meta-warning">
         Aprobación local anterior pendiente de sincronizar con app.pollyanasdolce.com.
       </p>
       {% elif item.es_historico_agente_dg %}
-      <p class="seg-timeline-meta" style="margin:0; color:#236d53; font-weight:800;">
+      <p class="seg-timeline-meta seg-meta-success">
         Registro histórico importado desde app.pollyanasdolce.com; no cuenta como pendiente ni vencido.
       </p>
       {% endif %}
       {% if ultimo_comentario_dg %}
       <div class="seg-dg-note">
         <strong>{{ ultimo_comentario_dg.usuario.get_full_name|default:ultimo_comentario_dg.usuario.username }}</strong>
-        <span class="muted" style="font-size:.82rem;"> · {{ ultimo_comentario_dg.created_at|date:"d/m/Y H:i" }}</span>
-        <p style="margin:6px 0 0;">{{ ultimo_comentario_dg.comentario }}</p>
+        <span class="muted seg-dg-meta"> · {{ ultimo_comentario_dg.created_at|date:"d/m/Y H:i" }}</span>
+        <p class="seg-note-copy">{{ ultimo_comentario_dg.comentario }}</p>
       </div>
       {% elif comentarios %}
-      <p class="muted" style="margin:0; font-size:.9rem;">Hay actividad registrada abajo en el historial.</p>
+      <p class="muted seg-muted-copy">Hay actividad registrada abajo en el historial.</p>
       {% else %}
-      <p class="muted" style="margin:0; font-size:.9rem;">Sin conversación registrada todavía.</p>
+      <p class="muted seg-muted-copy">Sin conversación registrada todavía.</p>
       {% endif %}
       {% if comentarios_dg|length > 1 %}
       <details>
-        <summary style="cursor:pointer; list-style:none; font-size:.84rem; font-weight:800; color:var(--vino);">Ver retroalimentaciones anteriores de DG</summary>
-        <div style="display:grid; gap:8px; margin-top:8px;">
+        <summary class="seg-summary-link">Ver retroalimentaciones anteriores de DG</summary>
+        <div class="seg-note-stack">
           {% for com in comentarios_dg %}
           {% if com.pk != ultimo_comentario_dg.pk %}
           <div class="seg-dg-note">
             <strong>{{ com.usuario.get_full_name|default:com.usuario.username }}</strong>
-            <span class="muted" style="font-size:.82rem;"> · {{ com.created_at|date:"d/m/Y H:i" }}</span>
-            <p style="margin:6px 0 0;">{{ com.comentario }}</p>
+            <span class="muted seg-dg-meta"> · {{ com.created_at|date:"d/m/Y H:i" }}</span>
+            <p class="seg-note-copy">{{ com.comentario }}</p>
           </div>
           {% endif %}
           {% endfor %}
@@ -297,23 +402,23 @@
 
   <!-- Proceso / Checklist -->
   {% if checks %}
-  <div class="bi-panel" style="margin-bottom:16px;">
+  <div class="bi-panel seg-panel-gap">
     <p class="seg-section-title">Proceso{% if es_vista_dg %} · solo lectura{% endif %}</p>
-    <p class="muted" style="margin:-4px 0 10px; font-size:.82rem;">
+    <p class="muted seg-check-help">
       {% if es_vista_dg %}Avance del colaborador. Toca un paso para ver su detalle. El responsable marca cada paso en orden.
       {% else %}Toca un paso para ver su detalle. Marca los pasos en orden: solo el siguiente está disponible.{% endif %}
     </p>
-    <div style="display:grid; gap:8px;">
+    <div class="seg-check-stack">
       {% for check in checks %}
-      <details {% if not es_vista_dg and check.pk == siguiente_check_id %}open{% endif %} style="border:1px solid rgba(139,34,82,.10); border-radius:10px;{% if check.completado %} background:rgba(76,175,80,.06);{% endif %}">
-        <summary style="cursor:pointer; list-style:none; display:flex; align-items:center; gap:10px; padding:10px 12px;">
-          <span class="muted" style="font-weight:800;">{{ forloop.counter }}.</span>
-          <span style="font-size:1.05rem;">{% if check.completado %}✅{% elif es_vista_dg %}⬜{% elif check.pk == siguiente_check_id %}⭕{% else %}🔒{% endif %}</span>
-          <span style="flex:1; font-weight:700; overflow:hidden;">{{ check.titulo }}</span>
-          <span class="muted" style="font-size:.76rem;">{% if check.completado %}Hecho{% elif not es_vista_dg and check.pk == siguiente_check_id %}En turno{% else %}Pendiente{% endif %} ▾</span>
+      <details class="seg-check-item{% if check.completado %} is-complete{% endif %}" {% if not es_vista_dg and check.pk == siguiente_check_id %}open{% endif %}>
+        <summary class="seg-check-summary">
+          <span class="muted seg-check-number">{{ forloop.counter }}.</span>
+          <span class="seg-step-icon">{% if check.completado %}✓{% elif es_vista_dg %}□{% elif check.pk == siguiente_check_id %}○{% else %}•{% endif %}</span>
+          <span class="seg-check-title">{{ check.titulo }}</span>
+          <span class="muted seg-check-state">{% if check.completado %}Hecho{% elif not es_vista_dg and check.pk == siguiente_check_id %}En turno{% else %}Pendiente{% endif %} ▾</span>
         </summary>
-        <div style="padding:2px 14px 14px 40px; display:grid; gap:8px;">
-          <div class="muted" style="font-size:.8rem; display:flex; flex-wrap:wrap; gap:4px 14px;">
+        <div class="seg-check-body">
+          <div class="muted seg-check-meta">
             {% if check.tipo %}<span>Tipo: <strong>{{ check.tipo|title }}</strong></span>{% endif %}
             {% if check.responsable_nombre %}<span>Responsable: <strong>{{ check.responsable_nombre }}</strong></span>{% endif %}
             {% if check.vence %}<span>Vence: <strong>{{ check.vence|date:"d/m/Y H:i" }}</strong></span>{% endif %}
@@ -322,36 +427,36 @@
           </div>
 
           {% if check.descripcion %}
-          <div style="color:var(--texto); font-size:.92rem; white-space:pre-line;">{{ check.descripcion }}</div>
+          <div class="seg-check-description">{{ check.descripcion }}</div>
           {% endif %}
 
           {% if check.requiere_aprobacion %}
-          <div style="font-size:.8rem;"><span class="badge bg-warning">Requiere aprobación</span>{% if check.aprobador_nombre %} <span class="muted">· Aprobador: {{ check.aprobador_nombre }}</span>{% endif %}</div>
+          <div class="seg-check-inline-sm"><span class="badge bg-warning">Requiere aprobación</span>{% if check.aprobador_nombre %} <span class="muted">· Aprobador: {{ check.aprobador_nombre }}</span>{% endif %}</div>
           {% endif %}
 
           {% if check.entregable %}
-          <div style="font-size:.86rem;"><span class="muted" style="font-weight:700;">Entregable:</span> <span style="white-space:pre-line;">{{ check.entregable }}</span></div>
+          <div class="seg-check-inline"><span class="muted seg-inline-strong">Entregable:</span> <span class="seg-check-description">{{ check.entregable }}</span></div>
           {% endif %}
 
           {% if check.sub_checklist %}
-          <div style="border:1px dashed rgba(139,34,82,.18); border-radius:10px; padding:8px 10px;">
-            <div class="muted" style="font-size:.72rem; font-weight:800; text-transform:uppercase; letter-spacing:.04em; margin-bottom:6px;">Checklist operativo del paso</div>
-            <div style="display:grid; gap:4px;">
+          <div class="seg-subcheck-box">
+            <div class="muted seg-subcheck-title">Checklist operativo del paso</div>
+            <div class="seg-subcheck-stack">
               {% for sub in check.sub_checklist %}
               {% if not es_vista_dg and writeback_activo and check.origen_step_id and not item.esta_cerrado %}
-              <form method="post" action="{% url 'seguimiento:marcar_paso' item.pk check.pk %}" style="display:flex; align-items:center; gap:8px; font-size:.88rem;">
+              <form method="post" action="{% url 'seguimiento:marcar_paso' item.pk check.pk %}" class="seg-subcheck-row">
                 {% csrf_token %}
                 <input type="hidden" name="accion" value="subpunto">
                 <input type="hidden" name="sub_index" value="{{ forloop.counter0 }}">
-                <button type="submit" title="Marcar / desmarcar" style="background:none; border:none; cursor:pointer; font-size:1rem; padding:0; line-height:1;">{% if sub.completado %}✅{% else %}⬜{% endif %}</button>
-                <span style="flex:1; overflow:hidden;">{{ sub.titulo }}</span>
-                <span class="muted" style="font-size:.7rem;">{% if sub.completado %}Resuelto{% else %}Pendiente{% endif %}</span>
+                <button type="submit" title="Marcar / desmarcar" class="seg-subcheck-toggle">{% if sub.completado %}✓{% else %}□{% endif %}</button>
+                <span class="seg-subcheck-name">{{ sub.titulo }}</span>
+                <span class="muted seg-subcheck-state">{% if sub.completado %}Resuelto{% else %}Pendiente{% endif %}</span>
               </form>
               {% else %}
-              <div style="display:flex; align-items:center; gap:8px; font-size:.88rem;">
-                <span>{% if sub.completado %}✅{% else %}⬜{% endif %}</span>
-                <span style="flex:1; overflow:hidden;">{{ sub.titulo }}</span>
-                <span class="muted" style="font-size:.7rem;">{% if sub.completado %}Resuelto{% else %}Pendiente{% endif %}</span>
+              <div class="seg-subcheck-row">
+                <span>{% if sub.completado %}✓{% else %}□{% endif %}</span>
+                <span class="seg-subcheck-name">{{ sub.titulo }}</span>
+                <span class="muted seg-subcheck-state">{% if sub.completado %}Resuelto{% else %}Pendiente{% endif %}</span>
               </div>
               {% endif %}
               {% endfor %}
@@ -360,17 +465,17 @@
           {% endif %}
 
           {% if check.completado %}
-          <div class="muted" style="font-size:.8rem;">✓ Hecho por {% if check.completado_por %}{{ check.completado_por.get_full_name|default:check.completado_por.username }}{% else %}app.pollyanasdolce.com{% endif %}{% if check.completado_at %} · {{ check.completado_at|date:"d/m/Y H:i" }}{% endif %}</div>
+          <div class="muted seg-complete-meta">Hecho por {% if check.completado_por %}{{ check.completado_por.get_full_name|default:check.completado_por.username }}{% else %}app.pollyanasdolce.com{% endif %}{% if check.completado_at %} · {{ check.completado_at|date:"d/m/Y H:i" }}{% endif %}</div>
           {% endif %}
 
           {% if not es_vista_dg and not item.esta_cerrado %}
             {% if writeback_activo and check.origen_step_id %}
             {# Write-back: transiciones de estatus sincronizadas con el Agente DG #}
-            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <div class="seg-action-row">
               {% if check.completado or check.estatus_origen == 'COMPLETED' %}
-                <span class="muted" style="font-size:.8rem;">✓ Paso completado</span>
+                <span class="muted seg-complete-meta">Paso completado</span>
               {% elif check.estatus_origen == 'SUBMITTED' %}
-                <span class="muted" style="font-size:.8rem;">⏳ En revisión del aprobador{% if check.aprobador_nombre %} ({{ check.aprobador_nombre }}){% endif %}</span>
+                <span class="muted seg-complete-meta">En revisión del aprobador{% if check.aprobador_nombre %} ({{ check.aprobador_nombre }}){% endif %}</span>
               {% elif check.estatus_origen == 'IN_PROGRESS' %}
                 {% if check.requiere_aprobacion %}
                 <form method="post" action="{% url 'seguimiento:marcar_paso' item.pk check.pk %}">{% csrf_token %}<input type="hidden" name="accion" value="enviar"><button class="btn btn-primary btn-sm" type="submit">Enviar a revisión</button></form>
@@ -405,23 +510,23 @@
 
   <!-- Prórroga pendiente -->
   {% if prorroga_pendiente %}
-  <div class="alert alert-info" style="margin-bottom:16px;">
+  <div class="alert alert-info seg-panel-gap">
     <strong>Más tiempo solicitado:</strong> hasta {{ prorroga_pendiente.fecha_solicitada|date:"d/m/Y" }} —
     {{ prorroga_pendiente.motivo|truncatechars:140 }}
-    <span class="badge bg-warning" style="margin-left:8px;">Pendiente de aprobación</span>
+    <span class="badge bg-warning seg-inline-badge">Pendiente de aprobación</span>
     {% if es_vista_dg %}
-    <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
+    <div class="seg-alert-actions">
       <form method="post" action="{% url 'seguimiento:resolver_prorroga' item.pk prorroga_pendiente.pk %}">
         {% csrf_token %}
         <input type="hidden" name="next" value="detalle">
         <input type="hidden" name="accion" value="aprobar">
-        <button class="btn btn-primary btn-sm" type="submit">✓ Aprobar prórroga</button>
+        <button class="btn btn-primary btn-sm" type="submit">Aprobar prórroga</button>
       </form>
       <form method="post" action="{% url 'seguimiento:resolver_prorroga' item.pk prorroga_pendiente.pk %}">
         {% csrf_token %}
         <input type="hidden" name="next" value="detalle">
         <input type="hidden" name="accion" value="rechazar">
-        <button class="btn btn-secondary btn-sm" type="submit">✕ Rechazar prórroga</button>
+        <button class="btn btn-secondary btn-sm" type="submit">Rechazar prórroga</button>
       </form>
     </div>
     {% endif %}
@@ -430,15 +535,15 @@
 
   <!-- Archivos entregados (vista DG) -->
   {% if es_vista_dg and evidencias %}
-  <div class="bi-panel" style="margin-bottom:16px; border-left:4px solid var(--verde);">
+  <div class="bi-panel seg-panel-gap seg-status-panel is-closed">
     <p class="seg-section-title">Archivos entregados ({{ evidencias|length }})</p>
-    <div style="display:grid; gap:8px;">
+    <div class="seg-check-stack">
       {% for ev in evidencias %}
-      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:8px 10px; background:rgba(35,109,83,.06); border:1px solid rgba(35,109,83,.14); border-radius:10px;">
-        <a href="{{ ev.archivo.url }}" target="_blank" rel="noopener" class="btn btn-secondary btn-sm" style="flex-shrink:0;">📎 Abrir</a>
-        <div style="overflow:hidden; flex:1;">
-          <strong style="font-size:.9rem;">{{ ev.nombre_original }}</strong>
-          {% if ev.comentario %}<div class="muted" style="font-size:.82rem;">{{ ev.comentario }}</div>{% endif %}
+      <div class="seg-evidence-row">
+        <a href="{{ ev.archivo.url }}" target="_blank" rel="noopener" class="btn btn-secondary btn-sm seg-evidence-link">Abrir</a>
+        <div class="seg-evidence-main">
+          <strong class="seg-evidence-name">{{ ev.nombre_original }}</strong>
+          {% if ev.comentario %}<div class="muted seg-evidence-comment">{{ ev.comentario }}</div>{% endif %}
           <div class="seg-timeline-meta">{{ ev.usuario.get_full_name|default:ev.usuario.username }} · {{ ev.created_at|date:"d/m/Y H:i" }}</div>
         </div>
       </div>
@@ -449,19 +554,19 @@
 
   <!-- Revisión DG: aprobar o devolver -->
   {% if puede_resolver_dg %}
-  <div class="bi-panel" style="margin-bottom:16px; border-left:4px solid var(--dorado);">
+  <div class="bi-panel seg-panel-gap seg-status-panel is-review">
     <p class="seg-section-title">Revisión — acción requerida</p>
     <div class="seg-entregar-box">
-      <p style="margin:0; color:var(--texto-light); font-size:.9rem;">
+      <p class="seg-review-copy">
         Este acuerdo está esperando tu aprobación. Puedes aprobarlo como completado o devolverlo con observaciones.
       </p>
-      <form method="post" action="{% url 'seguimiento:resolver_revision' item.pk %}" style="display:grid; gap:10px;">
+      <form method="post" action="{% url 'seguimiento:resolver_revision' item.pk %}" class="seg-form-grid">
         {% csrf_token %}
         <input type="hidden" name="next" value="detalle">
         <textarea name="comentario" class="seg-form-textarea" placeholder="Observación (obligatoria si devuelves, opcional si apruebas)"></textarea>
         <div class="seg-entregar-actions">
-          <button class="btn btn-primary" type="submit" name="accion" value="aprobar">✓ Aprobar como completado</button>
-          <button class="btn btn-secondary" type="submit" name="accion" value="devolver">↩ Devolver para corrección</button>
+          <button class="btn btn-primary" type="submit" name="accion" value="aprobar">Aprobar como completado</button>
+          <button class="btn btn-secondary" type="submit" name="accion" value="devolver">Devolver para corrección</button>
         </div>
       </form>
     </div>
@@ -470,12 +575,12 @@
 
   <!-- Cierre directo (sin aprobación requerida o checklist 100%) -->
   {% if puede_cerrar_directo %}
-  <div class="bi-panel" style="margin-bottom:16px;">
+  <div class="bi-panel seg-panel-gap">
     <p class="seg-section-title">
       {% if checklist_completo %}Checklist completo — cerrar acuerdo{% else %}Marcar como completado{% endif %}
     </p>
     <div class="seg-entregar-box">
-      <p style="margin:0; color:var(--texto-light); font-size:.9rem;">
+      <p class="seg-review-copy">
         {% if checklist_completo %}
           Todos los pasos del checklist están marcados. Puedes cerrar el acuerdo ahora.
         {% else %}
@@ -485,13 +590,13 @@
       </p>
       <form method="post" action="{% url 'seguimiento:completar' item.pk %}" enctype="multipart/form-data">
         {% csrf_token %}
-        <div style="display:grid; gap:10px;">
+        <div class="seg-form-grid">
           <textarea name="comentario" placeholder="Observación o resultado final (opcional)"></textarea>
           <input type="file" name="archivo"
             accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf">
           <div class="seg-entregar-actions">
             <button class="btn btn-primary" type="submit">
-              {% if checklist_completo %}✓ Cerrar acuerdo{% else %}✓ Marcar como completado{% endif %}
+              {% if checklist_completo %}Cerrar acuerdo{% else %}Marcar como completado{% endif %}
             </button>
           </div>
         </div>
@@ -502,16 +607,16 @@
 
   <!-- Retractar entrega (EN_REVISION y DG aún no ha actuado) -->
   {% if puede_retractar %}
-  <div class="bi-panel" style="margin-bottom:16px; border-left:4px solid var(--amarillo);">
+  <div class="bi-panel seg-panel-gap seg-status-panel is-review">
     <p class="seg-section-title">Acuerdo enviado a revisión</p>
     <div class="seg-entregar-box">
-      <p style="margin:0; color:var(--texto-light); font-size:.9rem;">
+      <p class="seg-review-copy">
         ¿Necesitas hacer cambios antes de que el Director General lo revise? Puedes retractar el envío, corregir lo que necesites y volver a enviarlo.
       </p>
       <form method="post" action="{% url 'seguimiento:retractar' item.pk %}" onsubmit="return confirm('¿Retractar el envío y regresar a En proceso?')">
         {% csrf_token %}
         <div class="seg-entregar-actions">
-          <button class="btn btn-secondary" type="submit">↩ Retractar y hacer cambios</button>
+          <button class="btn btn-secondary" type="submit">Retractar y hacer cambios</button>
         </div>
       </form>
     </div>
@@ -520,21 +625,21 @@
 
   <!-- Entregar para revisión DG (requiere aprobación y checklist incompleto o sin checklist) -->
   {% if puede_entregar %}
-  <div class="bi-panel" style="margin-bottom:16px;">
+  <div class="bi-panel seg-panel-gap">
     <p class="seg-section-title">Enviar a revisión del Director General</p>
     <div class="seg-entregar-box">
-      <p style="margin:0; color:var(--texto-light); font-size:.9rem;">
+      <p class="seg-review-copy">
         Cuando termines, notifica al Director General para que revise y apruebe este acuerdo.
         Puedes agregar una observación o adjuntar evidencia (opcional).
       </p>
       <form method="post" action="{% url 'seguimiento:entregar' item.pk %}" enctype="multipart/form-data">
         {% csrf_token %}
-        <div style="display:grid; gap:10px;">
+        <div class="seg-form-grid">
           <textarea name="comentario" placeholder="¿Qué se hizo? ¿Cuál es el resultado? (opcional)"></textarea>
           <input type="file" name="archivo"
             accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf">
           <div class="seg-entregar-actions">
-            <button class="btn btn-primary" type="submit">✓ Terminé — notificar al Director General</button>
+            <button class="btn btn-primary" type="submit">Terminé — notificar al Director General</button>
           </div>
         </div>
       </form>
@@ -544,16 +649,16 @@
 
   <!-- Subir archivo (colaborador, cuando no está cerrado) -->
   {% if not item.esta_cerrado and not es_vista_dg %}
-  <div class="bi-panel" style="margin-bottom:16px;">
+  <div class="bi-panel seg-panel-gap">
     <p class="seg-section-title">Agregar archivo de evidencia</p>
-    <form method="post" action="{% url 'seguimiento:subir_evidencia' item.pk %}" enctype="multipart/form-data" style="display:grid; gap:10px;">
+    <form method="post" action="{% url 'seguimiento:subir_evidencia' item.pk %}" enctype="multipart/form-data" class="seg-form-grid">
       {% csrf_token %}
       <input type="file" name="archivo"
         accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf"
-        style="border:1px solid rgba(139,34,82,.14); border-radius:12px; padding:10px; font:inherit; background:rgba(255,255,255,.96);">
-      <textarea name="comentario" class="seg-form-textarea" placeholder="Nota sobre el archivo (opcional)" style="min-height:50px;"></textarea>
+        class="pd-file-input">
+      <textarea name="comentario" class="seg-form-textarea pd-textarea-compact" placeholder="Nota sobre el archivo (opcional)"></textarea>
       <div>
-        <button class="btn btn-primary btn-sm" type="submit">📎 Subir archivo</button>
+        <button class="btn btn-primary btn-sm" type="submit">Subir archivo</button>
       </div>
     </form>
   </div>
@@ -561,37 +666,37 @@
 
   <!-- Pasos que esperan la aprobación del usuario logueado (colaborador aprobador) -->
   {% if pasos_a_aprobar %}
-  <div class="bi-panel" style="margin-bottom:16px; border-left:4px solid var(--dorado);">
+  <div class="bi-panel seg-panel-gap seg-status-panel is-review">
     <p class="seg-section-title">Pasos que esperan tu aprobación</p>
-    <p class="muted" style="margin:-4px 0 10px; font-size:.82rem;">
+    <p class="muted seg-check-help">
       Eres el aprobador designado de estos pasos. El responsable ya los envió a revisión.
     </p>
-    <div style="display:grid; gap:10px;">
+    <div class="seg-form-grid">
       {% for paso in pasos_a_aprobar %}
-      <div style="padding:12px 14px; background:rgba(201,168,76,.08); border:1px solid rgba(201,168,76,.25); border-radius:12px;">
-        <div style="font-weight:700; font-size:.95rem; margin-bottom:6px;">
+      <div class="seg-review-card">
+        <div class="seg-review-title">
           {{ forloop.counter }}. {{ paso.titulo }}
         </div>
-        <div class="muted" style="font-size:.8rem; margin-bottom:8px; display:flex; flex-wrap:wrap; gap:4px 14px;">
+        <div class="muted seg-review-meta">
           {% if paso.responsable_nombre %}<span>Responsable: <strong>{{ paso.responsable_nombre }}</strong></span>{% endif %}
           {% if paso.vence %}<span>Vence: <strong>{{ paso.vence|date:"d/m/Y" }}</strong></span>{% endif %}
           {% if paso.entregable %}<span>Entregable: {{ paso.entregable|truncatechars:80 }}</span>{% endif %}
         </div>
-        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <div class="seg-action-row">
           <form method="post" action="{% url 'seguimiento:aprobar_paso' item.pk paso.pk %}">
             {% csrf_token %}
             <input type="hidden" name="accion" value="aprobar">
-            <button class="btn btn-primary btn-sm" type="submit">✓ Aprobar paso</button>
+            <button class="btn btn-primary btn-sm" type="submit">Aprobar paso</button>
           </form>
-          <details style="display:inline-block;">
-            <summary style="list-style:none; cursor:pointer;" class="btn btn-secondary btn-sm">↩ Devolver para corrección</summary>
-            <div style="position:absolute; z-index:10; margin-top:4px; background:var(--blanco); border:1px solid rgba(201,168,76,.35); border-radius:10px; padding:12px 14px; box-shadow:0 4px 16px rgba(0,0,0,.1);">
+          <details class="seg-inline-details">
+            <summary class="btn btn-secondary btn-sm seg-summary-link">Devolver para corrección</summary>
+            <div class="seg-popover">
               <form method="post" action="{% url 'seguimiento:aprobar_paso' item.pk paso.pk %}">
                 {% csrf_token %}
                 <input type="hidden" name="accion" value="devolver">
-                <label style="font-size:.8rem; font-weight:600; display:block; margin-bottom:4px;">Motivo de devolución (opcional)</label>
-                <textarea name="motivo" rows="2" placeholder="¿Por qué se devuelve el paso?" class="input-field" style="font-size:.82rem; resize:vertical;"></textarea>
-                <button class="btn btn-secondary btn-sm" type="submit" style="margin-top:8px;">Confirmar devolución</button>
+                <label class="seg-popover-label">Motivo de devolución (opcional)</label>
+                <textarea name="motivo" rows="2" placeholder="¿Por qué se devuelve el paso?" class="input-field seg-popover-textarea"></textarea>
+                <button class="btn btn-secondary btn-sm seg-popover-submit" type="submit">Confirmar devolución</button>
               </form>
             </div>
           </details>
@@ -603,37 +708,37 @@
   {% endif %}
 
   <!-- Historial de actividad -->
-  <div class="bi-panel" style="margin-bottom:16px;">
+  <div class="bi-panel seg-panel-gap">
     <p class="seg-section-title">Historial de actividad</p>
 
     {% if not comentarios and not evidencias %}
-    <p class="muted" style="font-size:.9rem;">Sin actividad registrada todavía.</p>
+    <p class="muted seg-muted-copy">Sin actividad registrada todavía.</p>
     {% else %}
     <div class="seg-timeline">
 
       {% for ev in evidencias %}
       <div class="seg-timeline-item">
-        <div class="seg-timeline-dot is-evidencia">📎</div>
+        <div class="seg-timeline-dot is-evidencia">Doc</div>
         <div class="seg-timeline-body is-evidencia">
           <strong>{{ ev.usuario.get_full_name|default:ev.usuario.username }}</strong> subió evidencia:
           <a href="{{ ev.archivo.url }}" target="_blank" rel="noopener">{{ ev.nombre_original }}</a>
-          {% if ev.comentario %}<p style="margin:4px 0 0; font-size:.88rem; color:var(--texto-light);">{{ ev.comentario }}</p>{% endif %}
+          {% if ev.comentario %}<p class="seg-timeline-copy">{{ ev.comentario }}</p>{% endif %}
           <p class="seg-timeline-meta">{{ ev.created_at|date:"d/m/Y H:i" }}
             · <span class="badge {% if ev.estatus == 'APROBADA' %}bg-success{% elif ev.estatus == 'RECHAZADA' %}bg-danger{% else %}bg-warning{% endif %}">{{ ev.get_estatus_display }}</span>
           </p>
           {% if ev.usuario == current_user and not item.esta_cerrado %}
-          <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:8px; align-items:center;">
+          <div class="seg-timeline-actions">
             <details>
-              <summary style="cursor:pointer; list-style:none; display:inline-flex; align-items:center; gap:6px; font-size:.82rem; color:var(--vino); font-weight:700;">✏ Editar nota</summary>
-              <form method="post" action="{% url 'seguimiento:editar_nota_evidencia' item.pk ev.pk %}" style="margin-top:8px; display:grid; gap:8px;">
+              <summary class="seg-edit-summary">Editar nota</summary>
+              <form method="post" action="{% url 'seguimiento:editar_nota_evidencia' item.pk ev.pk %}" class="seg-edit-form">
                 {% csrf_token %}
-                <textarea name="comentario" class="seg-form-textarea" style="min-height:50px;" placeholder="Nota sobre el archivo (opcional)">{{ ev.comentario }}</textarea>
+                <textarea name="comentario" class="seg-form-textarea pd-textarea-compact" placeholder="Nota sobre el archivo (opcional)">{{ ev.comentario }}</textarea>
                 <button class="btn btn-sm btn-primary" type="submit">Guardar nota</button>
               </form>
             </details>
             <form method="post" action="{% url 'seguimiento:eliminar_evidencia' item.pk ev.pk %}" onsubmit="return confirm('¿Eliminar el archivo {{ ev.nombre_original|escapejs }}? No se puede deshacer.')">
               {% csrf_token %}
-              <button class="btn btn-sm btn-secondary" type="submit" style="color:var(--rojo); border-color:rgba(229,57,53,.3);">🗑 Eliminar archivo</button>
+              <button class="btn btn-sm btn-secondary seg-danger-action" type="submit">Eliminar archivo</button>
             </form>
           </div>
           {% endif %}
@@ -644,19 +749,19 @@
       {% for com in comentarios %}
       <div class="seg-timeline-item">
         <div class="seg-timeline-dot {% if com.tipo == 'REVISION_DG' %}is-dg{% endif %}">
-          {% if com.tipo == 'REVISION_DG' %}⭐{% else %}💬{% endif %}
+          {% if com.tipo == 'REVISION_DG' %}DG{% else %}Msg{% endif %}
         </div>
         <div class="seg-timeline-body {% if com.tipo == 'REVISION_DG' %}is-dg{% endif %}">
           <strong>{{ com.usuario.get_full_name|default:com.usuario.username }}</strong>
-          <span class="muted" style="font-size:.82rem;"> · {{ com.get_tipo_display }}</span>
-          <p style="margin:6px 0 0;">{{ com.comentario }}</p>
+          <span class="muted seg-dg-meta"> · {{ com.get_tipo_display }}</span>
+          <p class="seg-note-copy">{{ com.comentario }}</p>
           <p class="seg-timeline-meta">{{ com.created_at|date:"d/m/Y H:i" }}</p>
           {% if com.tipo == 'FEEDBACK' and com.usuario == current_user and not item.esta_cerrado %}
-          <details style="margin-top:8px;">
-            <summary style="cursor:pointer; list-style:none; display:inline-flex; align-items:center; gap:6px; font-size:.82rem; color:var(--vino); font-weight:700;">✏ Editar</summary>
-            <form method="post" action="{% url 'seguimiento:editar_comentario' item.pk com.pk %}" style="margin-top:8px; display:grid; gap:8px;">
+          <details class="seg-note-stack">
+            <summary class="seg-edit-summary">Editar</summary>
+            <form method="post" action="{% url 'seguimiento:editar_comentario' item.pk com.pk %}" class="seg-edit-form">
               {% csrf_token %}
-              <textarea name="comentario" class="seg-form-textarea" style="min-height:50px;" required>{{ com.comentario }}</textarea>
+              <textarea name="comentario" class="seg-form-textarea pd-textarea-compact" required>{{ com.comentario }}</textarea>
               <button class="btn btn-sm btn-primary" type="submit">Guardar cambio</button>
             </form>
           </details>
@@ -673,11 +778,11 @@
   {% if puede_entregar %}
   <div class="bi-panel">
     <p class="seg-section-title">Otras acciones</p>
-    <div style="display:grid; gap:12px;">
+    <div class="seg-secondary-stack">
 
       <details>
-        <summary class="btn btn-secondary btn-sm" style="cursor:pointer; list-style:none;">Enviar retroalimentación / avance parcial</summary>
-        <form method="post" action="{% url 'seguimiento:registrar_feedback' item.pk %}" style="margin-top:10px; display:grid; gap:8px;">
+        <summary class="btn btn-secondary btn-sm seg-summary-link">Enviar retroalimentación / avance parcial</summary>
+        <form method="post" action="{% url 'seguimiento:registrar_feedback' item.pk %}" class="seg-edit-form">
           {% csrf_token %}
           <textarea name="comentario" class="seg-form-textarea" placeholder="Avance, bloqueo u observación" required></textarea>
           <button class="btn btn-secondary btn-sm" type="submit">Enviar retroalimentación</button>
@@ -685,10 +790,10 @@
       </details>
 
       <details>
-        <summary class="btn btn-secondary btn-sm" style="cursor:pointer; list-style:none;">Solicitar más tiempo</summary>
-        <form method="post" action="{% url 'seguimiento:solicitar_prorroga' item.pk %}" style="margin-top:10px; display:grid; gap:8px;">
+        <summary class="btn btn-secondary btn-sm seg-summary-link">Solicitar más tiempo</summary>
+        <form method="post" action="{% url 'seguimiento:solicitar_prorroga' item.pk %}" class="seg-edit-form">
           {% csrf_token %}
-          <input type="date" name="fecha_solicitada" required style="border:1px solid rgba(139,34,82,.14); border-radius:12px; padding:10px; font:inherit;">
+          <input type="date" name="fecha_solicitada" required class="seg-date-input">
           <textarea name="motivo" class="seg-form-textarea" placeholder="¿Por qué necesitas más tiempo?" required></textarea>
           <button class="btn btn-secondary btn-sm" type="submit">Solicitar prórroga</button>
         </form>

@@ -84,7 +84,7 @@
     </article>
   </div>
   {% if latest_sync %}
-  <p class="muted" style="margin-top:10px;">
+  <p class="muted pd-muted-spaced">
     Última corrida: {{ latest_sync.started_at|date:"Y-m-d H:i" }} ·
     Origen {{ latest_sync.get_source_display }} ·
     Consolidadas {{ latest_sync.matched }} ·
@@ -99,12 +99,12 @@
   <div class="card-header">Control de referencias</div>
   <p class="muted">Herramientas para revisar referencias, consolidar artículos maestros y cerrar duplicados operativos dentro del catálogo.</p>
 
-  <div class="table-responsive" style="margin-top:8px;">
+  <div class="table-responsive pd-mt-2">
     <table class="table table-striped">
       <thead>
         <tr>
-          <th style="width:50%;">Cierre del maestro</th>
-          <th style="width:50%;">Gobierno del catálogo</th>
+          <th class="pd-col-half">Cierre del maestro</th>
+          <th class="pd-col-half">Gobierno del catálogo</th>
         </tr>
       </thead>
       <tbody>
@@ -129,13 +129,13 @@
               {% endif %}
             </form>
 
-            <div class="toolbar" style="margin-top:10px;">
+            <div class="toolbar pd-toolbar-spaced">
               <span class="badge badge-primary">Registros revisados: {{ master_normalize.totales.candidates }}</span>
               <span class="badge badge-warning">Cambios listos: {{ master_normalize.totales.changed }}</span>
               <span class="badge badge-success">Resueltos: {{ master_normalize.totales.updated }}</span>
             </div>
 
-            <div class="table-responsive" style="margin-top:10px;">
+            <div class="table-responsive pd-table-spaced">
               <table class="table table-striped">
                 <thead>
                   <tr>
@@ -181,14 +181,14 @@
               <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}">Limpiar</a>
             </form>
 
-            <div class="toolbar" style="margin-top:10px;">
+            <div class="toolbar pd-toolbar-spaced">
               <span class="badge badge-primary">Grupos: {{ master_duplicates.totales.groups_total }}</span>
               <span class="badge badge-warning">Página: {{ master_duplicates.totales.groups_returned }}</span>
               <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?master_dup_scope={{ master_dup_scope }}&master_dup_q={{ master_dup_q|urlencode }}&master_dup_min_count={{ master_dup_min_count }}&master_dup_limit={{ master_dup_limit }}&master_dup_offset={{ master_dup_offset }}{% if master_dup_include_inactive %}&master_dup_include_inactive=1{% endif %}&export=master_duplicates_csv">Exportar CSV</a>
               <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?master_dup_scope={{ master_dup_scope }}&master_dup_q={{ master_dup_q|urlencode }}&master_dup_min_count={{ master_dup_min_count }}&master_dup_limit={{ master_dup_limit }}&master_dup_offset={{ master_dup_offset }}{% if master_dup_include_inactive %}&master_dup_include_inactive=1{% endif %}&export=master_duplicates_xlsx">Exportar XLSX</a>
             </div>
 
-            <div class="table-responsive" style="margin-top:10px;">
+            <div class="table-responsive pd-table-spaced">
               <table class="table table-striped">
                 <thead>
                   <tr>
@@ -246,8 +246,8 @@
             </div>
 
             {% if can_manage_inventario %}
-            <div class="card" style="margin-top:10px; padding:12px;">
-              <div class="card-header" style="font-size:16px; margin-bottom:8px;">Unificar artículo puntual</div>
+            <div class="card pd-card-inner pd-toolbar-spaced">
+              <div class="card-header pd-card-header-sm">Unificar artículo puntual</div>
               <form method="post" class="form-grid-auto">
                 {% csrf_token %}
                 <input type="hidden" name="action" value="resolve_duplicate_insumo">
@@ -286,7 +286,7 @@
   <p class="muted">Prioriza nombres repetidos entre fuentes para consolidar un solo artículo ERP por operación real.</p>
 
   {% if pending_focus %}
-  <div class="alert alert-warning mb-3" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+  <div class="alert alert-warning mb-3 pd-alert-split">
     <div>
       <strong>{{ pending_focus.label }}</strong>
       <div>{{ pending_focus.summary }}</div>
@@ -315,7 +315,7 @@
     </article>
   </div>
 
-  <div class="toolbar" style="margin-top:10px;">
+  <div class="toolbar pd-toolbar-spaced">
     <a class="btn btn-secondary" href="{% url 'maestros:point_pending_review' %}?tipo=INSUMO">Revisar integración comercial</a>
     <a class="btn btn-secondary" href="{% url 'recetas:matching_pendientes' %}">Revisar BOM de recetas</a>
     <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=cross_pending_csv&cross_q={{ cross_q|urlencode }}&cross_source={{ cross_source }}&cross_min_sources={{ cross_min_sources }}&cross_score_min={{ cross_score_min }}&cross_point_tipo={{ cross_point_tipo }}&cross_sort_by={{ cross_sort_by }}&cross_sort_dir={{ cross_sort_dir }}{% if cross_only_suggested %}&cross_only_suggested=1{% endif %}">Exportar cierre CSV</a>
@@ -330,7 +330,7 @@
   </div>
 
   {% if pending_focus_rows %}
-  <div class="table-responsive" style="margin-top:10px;">
+  <div class="table-responsive pd-table-spaced">
     <table class="table table-striped">
       <thead>
         <tr>
@@ -363,7 +363,7 @@
   {% endif %}
 
   {% if can_manage_inventario and cross_unified_rows %}
-  <form method="post" class="form-grid-auto" style="margin-top:10px; margin-bottom:10px;">
+  <form method="post" class="form-grid-auto pd-toolbar-gap">
     {% csrf_token %}
     <input type="hidden" name="action" value="auto_apply_suggestions">
     <input type="hidden" name="next_q" value="{{ q }}">
@@ -390,7 +390,7 @@
   </form>
   {% endif %}
 
-  <form method="get" class="form-grid-auto" style="margin-top:6px; margin-bottom:10px;">
+  <form method="get" class="form-grid-auto pd-toolbar-compact">
     <input type="hidden" name="cross_offset" value="0">
     <input class="input-field" type="text" name="cross_q" value="{{ cross_q }}" placeholder="Buscar nombre o propuesta...">
     <select class="input-field" name="cross_source">
@@ -431,30 +431,30 @@
     <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}">Limpiar filtros</a>
   </form>
   <p class="muted">Mostrando {{ cross_returned_count }} de {{ cross_filtered_count }} filtrados (total cruzado: {{ cross_total_count }}).</p>
-  <div class="toolbar" style="margin-top:6px; margin-bottom:4px;">
+  <div class="toolbar pd-toolbar-compact">
     <span class="badge badge-primary">Externo: {{ cross_source_stats.point_rows }}</span>
     <span class="badge badge-primary">Almacén: {{ cross_source_stats.almacen_rows }}</span>
     <span class="badge badge-primary">Recetas: {{ cross_source_stats.receta_rows }}</span>
     <span class="badge badge-warning">Multifuente: {{ cross_source_stats.multi_source_rows }}</span>
   </div>
-  <div class="toolbar" style="margin-top:4px; margin-bottom:8px;">
+  <div class="toolbar pd-toolbar-compact">
     <a class="btn btn-small {% if cross_source == 'TODOS' or cross_source == 'ALL' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_source_todos }}">Origen: Todos</a>
     <a class="btn btn-small {% if cross_source == 'ALMACEN' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_source_almacen }}">Origen: Almacén</a>
     <a class="btn btn-small {% if cross_source == 'POINT' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_source_point }}">Origen: Comercial</a>
     <a class="btn btn-small {% if cross_source == 'RECETAS' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_source_recetas }}">Origen: Recetas</a>
   </div>
-  <div class="toolbar" style="margin-top:6px; margin-bottom:10px;">
+  <div class="toolbar pd-toolbar-compact">
     {% if cross_has_prev %}
-    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_common }}&cross_offset={{ cross_prev_offset }}">← Anterior</a>
+    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_common }}&cross_offset={{ cross_prev_offset }}">Anterior</a>
     {% endif %}
     <span class="muted">Offset {{ cross_offset }} · Límite {{ cross_limit }}</span>
     {% if cross_has_next %}
-    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_common }}&cross_offset={{ cross_next_offset }}">Siguiente →</a>
+    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_common }}&cross_offset={{ cross_next_offset }}">Siguiente</a>
     {% endif %}
   </div>
 
   {% if cross_unified_rows %}
-  <div class="table-responsive" style="margin-top:10px;">
+  <div class="table-responsive pd-table-spaced">
     <table class="table table-striped">
       <thead>
         <tr>
@@ -516,7 +516,7 @@
     </table>
   </div>
   {% else %}
-  <p class="muted" style="margin-top:10px;">Sin cruces operativos abiertos.</p>
+  <p class="muted pd-muted-spaced">Sin cruces operativos abiertos.</p>
   {% endif %}
 </section>
 
@@ -541,7 +541,7 @@
         {% endfor %}
       </select>
     </div>
-    <div style="grid-column:1/-1; display:flex; justify-content:flex-end;">
+    <div class="pd-grid-span-full pd-form-actions-end">
       <button class="btn btn-primary" type="submit">Guardar equivalencia</button>
     </div>
   </form>
@@ -552,7 +552,7 @@
 <section class="card">
   <div class="card-header">Carga masiva de referencias ERP (CSV/XLSX)</div>
   <p class="muted">Columnas sugeridas: <code>referencia</code>, <code>insumo</code>. Si no mandas <code>insumo</code>, el sistema intentará detectar el mejor artículo ERP disponible.</p>
-  <div class="toolbar" style="margin-top:8px; margin-bottom:8px;">
+  <div class="toolbar pd-toolbar-gap">
     <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=alias_template_csv">Descargar plantilla CSV</a>
     <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=alias_template_xlsx">Descargar plantilla XLSX</a>
   </div>
@@ -566,7 +566,7 @@
   </form>
 
   {% if alias_import_stats.rows_total %}
-  <div class="kpi-grid kpi-mini" style="margin-top:12px;">
+  <div class="kpi-grid kpi-mini pd-mt-3">
     <article class="kpi-card">
       <div class="kpi-number">{{ alias_import_stats.rows_total }}</div>
       <div class="kpi-label">Filas del corte</div>
@@ -584,7 +584,7 @@
       <div class="kpi-label">Por validar</div>
     </article>
   </div>
-  <p class="muted" style="margin-top:8px;">
+  <p class="muted pd-muted-spaced">
     Corte: {{ alias_import_stats.file_name }} ·
     Confianza mínima: {{ alias_import_stats.score_min|floatformat:1 }} ·
     Integración comercial liberado: {{ alias_import_stats.point_resolved }} ·
@@ -598,7 +598,7 @@
 <section class="card">
   <div class="card-header">Equivalencias por validar</div>
   <p class="muted">Filas que no se pudieron aplicar automáticamente. Corrige el nombre del artículo o usa "Usar en alta".</p>
-  <div class="toolbar" style="margin-bottom:8px;">
+  <div class="toolbar pd-mb-2">
     <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=alias_import_preview_csv">Exportar revisión CSV</a>
     <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=alias_import_preview_xlsx">Exportar revisión XLSX</a>
   </div>
@@ -632,7 +632,7 @@
       </tbody>
     </table>
   </div>
-  <form method="post" style="display:flex; justify-content:flex-end; margin-top:8px;">
+  <form method="post" class="pd-form-actions-end pd-mt-2">
     {% csrf_token %}
     <input type="hidden" name="action" value="clear_import_preview">
     <button class="btn btn-secondary" type="submit">Limpiar revisión</button>
@@ -671,7 +671,7 @@
   </p>
   {% endif %}
   {% if hidden_pending_run and can_manage_inventario %}
-  <div class="toolbar" style="margin-top:10px;">
+  <div class="toolbar pd-toolbar-spaced">
     <span class="muted">Hay un corte oculto: #{{ hidden_pending_run.id }} ({{ hidden_pending_run.started_at|date:"Y-m-d H:i" }}).</span>
     <form method="post" class="inline-form">
       {% csrf_token %}
@@ -682,7 +682,7 @@
   {% endif %}
 
   {% if pending_recent_runs %}
-  <div class="table-responsive" style="margin-top:12px;">
+  <div class="table-responsive pd-table-spaced">
     <table class="table table-striped">
       <thead>
         <tr>
@@ -730,9 +730,9 @@
     </table>
   </div>
   {% else %}
-  <div class="alert alert-info" style="margin-top:12px;">
+  <div class="alert alert-info pd-mt-3">
     No hay sincronizaciones recientes para mostrar en este entorno.
-    <div class="toolbar" style="margin-top:10px;">
+    <div class="toolbar pd-toolbar-spaced">
       <a class="btn btn-secondary" href="{% url 'inventario:carga_almacen' %}">Ir a Carga Almacén</a>
       <a class="btn btn-secondary" href="{% url 'inventario:sync_drive_now' %}">Ejecutar sync ahora</a>
     </div>
@@ -772,7 +772,7 @@
     </table>
   </div>
   {% if can_manage_inventario %}
-  <form method="post" style="display:flex; justify-content:flex-end; margin-top:8px;">
+  <form method="post" class="pd-form-actions-end pd-mt-2">
     {% csrf_token %}
     <input type="hidden" name="action" value="clear_pending">
     {% if latest_pending_run %}<input type="hidden" name="hide_run_id" value="{{ latest_pending_run.id }}">{% endif %}
@@ -898,7 +898,7 @@
   </div>
 
   {% if can_manage_inventario %}
-  <form id="bulk-form" method="post" class="form-grid-auto" style="margin-top:10px;">
+  <form id="bulk-form" method="post" class="form-grid-auto pd-toolbar-spaced">
     {% csrf_token %}
     <input type="hidden" name="action" value="bulk_reassign">
     <input type="hidden" name="next_q" value="{{ q }}">
@@ -913,7 +913,7 @@
   {% endif %}
 
   {% if page.paginator.num_pages > 1 %}
-  <div class="toolbar" style="margin-top:10px;">
+  <div class="toolbar pd-toolbar-spaced">
     {% if page.has_previous %}
     <a class="btn btn-secondary" href="?q={{ q|urlencode }}&page={{ page.previous_page_number }}">Anterior</a>
     {% endif %}

@@ -40,7 +40,16 @@
   .mant-ticket-meta{color:#77656d;font-size:12px;line-height:1.45}
   .mant-ticket-desc{color:#42292e;font-size:13px;line-height:1.45;background:#fff;border:1px solid rgba(139,34,82,.08);border-radius:8px;padding:8px}
   .mant-ticket-tags{display:flex;gap:6px;flex-wrap:wrap}
-  .mant-badge{display:inline-flex;width:max-content;border-radius:999px;padding:4px 9px;font-size:11px;font-weight:900;background:#f3dce7;color:#8B2252}
+  .mant-badge{display:inline-flex;width:max-content;border-radius:999px;padding:4px 9px;font-size:11px;font-weight:900;background:var(--pd-wine-soft);color:var(--pd-wine)}
+  .mant-badge.is-spaced{margin-right:6px}
+  .mant-badge.is-inline{margin-left:4px}
+  .mant-badge.is-compact{padding:2px 7px;font-size:10px}
+  .mant-badge.is-danger{background:var(--pd-danger-soft);color:var(--pd-danger)}
+  .mant-badge.is-warning{background:var(--pd-warning-soft);color:var(--pd-warning)}
+  .mant-badge.is-gold{background:var(--pd-gold-soft);color:var(--pd-warning)}
+  .mant-badge.is-success{background:var(--pd-success-soft);color:var(--pd-success)}
+  .mant-badge.is-info{background:var(--pd-info-soft);color:var(--pd-info)}
+  .mant-badge.is-neutral{background:var(--pd-surface-subtle);color:var(--pd-muted)}
   .mant-badge.logistica{background:#e8f6ee;color:#166534}
   .mant-badge.sucursales{background:#eef4ff;color:#1d4ed8}
   .mant-ticket-actions{display:flex;gap:8px;flex-wrap:wrap}
@@ -95,7 +104,7 @@
   .mant-latest-note span{display:block;color:#8B2252;font-size:11px;font-weight:900;text-transform:uppercase;margin-bottom:5px}
   .mant-planes-grid{display:grid;gap:10px}
   .mant-plan-row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:start;background:#fff;border:1px solid rgba(139,34,82,.12);border-radius:12px;padding:12px}
-  .mant-plan-row.vencido{border-color:#fca5a5;background:#fff5f5}
+  .mant-plan-row.vencido{border-color:color-mix(in srgb, var(--pd-danger) 28%, transparent);background:var(--pd-danger-soft)}
   .mant-plan-title{font-weight:900;color:#3a2b30}
   .mant-plan-meta{color:#77656d;font-size:12px;margin-top:3px}
   .mant-plan-form{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
@@ -113,6 +122,29 @@
   .mant-eliminar-actions{display:flex;gap:10px;justify-content:flex-end}
   .mant-toast-stack{position:fixed;top:16px;right:20px;z-index:2000;display:grid;gap:8px;width:min(380px,calc(100vw - 32px));pointer-events:none}
   .mant-toast-stack .alert{pointer-events:auto;margin:0;padding:12px 16px;border-radius:10px;font-weight:700;box-shadow:0 4px 16px rgba(0,0,0,.12)}
+  .mant-primary-action{background:var(--pd-wine);border-color:var(--pd-wine);color:var(--pd-surface)}
+  .mant-danger-action{background:var(--pd-danger);border-color:var(--pd-danger);color:var(--pd-surface)}
+  .mant-origin-tabs-spaced{margin-bottom:14px}
+  .mant-action-column{display:flex;flex-direction:column;gap:8px;align-items:flex-end}
+  .mant-action-row{display:flex;gap:6px}
+  .mant-panel-flush{margin-top:0}
+  .mant-cancel-label{margin-bottom:12px}
+  .mant-cancel-block{display:none;margin-bottom:14px}
+  .mant-drawer-block{display:none;margin-bottom:14px}
+  .mant-drawer-section-title{font-size:12px;font-weight:900;color:var(--pd-wine);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+  .mant-modal-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+  .mant-modal-stack{display:grid;gap:12px;margin-bottom:14px}
+  .mant-modal-stack-2{display:grid;gap:12px;grid-template-columns:1fr 1fr}
+  .mant-plan-help{background:var(--pd-success-soft);border-radius:8px;padding:10px 12px;border:1px solid color-mix(in srgb, var(--pd-success) 28%, transparent)}
+  .mant-mode-switch{display:grid;grid-template-columns:1fr 1fr;gap:0;margin-bottom:16px;border:1px solid color-mix(in srgb, var(--pd-wine) 22%, transparent);border-radius:10px;overflow:hidden}
+  .mant-mode-btn{padding:10px;font:inherit;font-size:13px;font-weight:700;border:0;cursor:pointer;background:var(--pd-wine-soft);color:var(--pd-wine)}
+  .mant-mode-btn.is-active{font-weight:900;background:var(--pd-wine);color:var(--pd-surface)}
+  .mant-mode-btn.is-first{border-right:1px solid color-mix(in srgb, var(--pd-wine) 15%, transparent)}
+  .mant-mode-btn.is-active.is-first{border-right-color:color-mix(in srgb, var(--pd-surface) 20%, transparent)}
+  .mant-mode-help{margin-bottom:14px;background:var(--pd-wine-soft);border-radius:8px;padding:8px 10px}
+  .mant-service-realizado{display:contents}
+  .mant-provider-active{display:none}
+  .mant-provider-check{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:700;color:#513744;cursor:pointer}
   @media(max-width:760px){.mant-origin-tabs{display:grid}.mant-origin-tab{justify-content:space-between}.mant-form-grid,.mant-asset-create-grid,.mant-board-tools,.mant-drawer-evidence{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr}.mant-drawer-photo{width:100%;max-height:280px;aspect-ratio:16/10}.mant-ticket-main{grid-template-columns:64px minmax(0,1fr)}.mant-ticket-photo,.mant-ticket-photo-empty{width:64px}}
 </style>
 {% endblock %}
@@ -181,13 +213,13 @@
       <div class="bi-panel-head"><div><div class="bi-kicker">Pendiente tu revisión</div><h2 class="bi-panel-title">Solicitudes de cancelación</h2><p class="bi-copy">El equipo solicitó cancelar estos reportes.</p></div></div>
       <div class="mant-planes-grid">
         {% for sol in solicitudes_cancelacion %}
-        <article class="mant-plan-row" style="border-color:#fca5a5;background:#fff5f5">
+        <article class="mant-plan-row vencido">
           <div>
-            <div class="mant-plan-title"><span class="mant-badge" style="background:#fee2e2;color:#b91c1c;margin-right:6px">Pendiente</span>{{ sol.referencia }}</div>
+            <div class="mant-plan-title"><span class="mant-badge is-danger is-spaced">Pendiente</span>{{ sol.referencia }}</div>
             <div class="mant-plan-meta">Por: <strong>{% if sol.solicitado_por %}{{ sol.solicitado_por.get_full_name|default:sol.solicitado_por.username }}{% else %}Usuario eliminado{% endif %}</strong> · {{ sol.creado_en|date:"d/m/Y H:i" }}<br><strong>Motivo:</strong> {{ sol.motivo }}</div>
           </div>
-          <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
-            <form method="post" action="{% url 'mantenimiento:mant-resolver-cancelacion' sol.pk %}">{% csrf_token %}<input type="hidden" name="accion" value="aprobar"><button class="btn btn-sm" type="submit" style="background:#b91c1c;border-color:#b91c1c;color:#fff">Aprobar y eliminar</button></form>
+          <div class="mant-action-column">
+            <form method="post" action="{% url 'mantenimiento:mant-resolver-cancelacion' sol.pk %}">{% csrf_token %}<input type="hidden" name="accion" value="aprobar"><button class="btn btn-sm mant-danger-action" type="submit">Aprobar y eliminar</button></form>
             <form method="post" action="{% url 'mantenimiento:mant-resolver-cancelacion' sol.pk %}">{% csrf_token %}<input type="hidden" name="accion" value="rechazar"><button class="btn btn-secondary btn-sm" type="submit">Rechazar</button></form>
           </div>
         </article>
@@ -207,13 +239,13 @@
           <p class="bi-copy">Todos los reportes abiertos — sucursales, equipos y flota — en una sola vista. Usa "Trabajar" para avanzar cada caso.</p>
         </div>
         <div class="bi-panel-actions">
-          <button class="btn btn-primary btn-sm" type="button" id="btnNuevaFalla" style="background:#8B2252;border-color:#8B2252;">+ Falla / imprevisto</button>
+          <button class="btn btn-primary btn-sm" type="button" id="btnNuevaFalla">+ Falla / imprevisto</button>
           <button class="btn btn-secondary btn-sm" type="button" onclick="abrirModalServicio('', 'realizado')">+ Servicio sin orden</button>
           <button class="btn btn-secondary btn-sm" type="button" onclick="abrirModalPlan()">+ Programar servicio</button>
           <a class="btn btn-secondary btn-sm" href="{% url 'mantenimiento:crear-reporte-unidad' %}">Nuevo reporte de unidad</a>
         </div>
       </div>
-      <div class="mant-origin-tabs" style="margin-bottom:14px" aria-label="Filtro de origen">
+      <div class="mant-origin-tabs mant-origin-tabs-spaced" aria-label="Filtro de origen">
         <a href="{% url 'mantenimiento:dashboard' %}#tab-seguimiento" class="mant-origin-tab {% if origen == 'todos' %}active{% endif %}">Todo <span class="mant-origin-count">{{ counts.sucursales|add:counts.logistica }}</span></a>
         <a href="{% url 'mantenimiento:dashboard' %}?origen=sucursales#tab-seguimiento" class="mant-origin-tab {% if origen == 'sucursales' %}active{% endif %}">Sucursales / CEDIS <span class="mant-origin-count">{{ counts.sucursales }}</span></a>
         <a href="{% url 'mantenimiento:dashboard' %}?origen=logistica#tab-seguimiento" class="mant-origin-tab {% if origen == 'logistica' %}active{% endif %}">Logística <span class="mant-origin-count">{{ counts.logistica }}</span></a>
@@ -307,7 +339,7 @@
           <p class="bi-copy">Hornos, refrigeradores, vitrinas y maquinaria de sucursales. Marca ejecutado para registrar y recalcular la próxima fecha.</p>
         </div>
         <div class="bi-panel-actions">
-          <button class="btn btn-primary btn-sm" type="button" onclick="abrirModalPlan()" style="background:#8B2252;border-color:#8B2252">+ Nuevo plan</button>
+          <button class="btn btn-primary btn-sm" type="button" onclick="abrirModalPlan()">+ Nuevo plan</button>
         </div>
       </div>
       {% if planes_proximos %}
@@ -317,13 +349,13 @@
           <div>
             <div class="mant-plan-title">
               {% if plan.vencido %}
-                <span class="mant-badge" style="background:#fee2e2;color:#b91c1c;margin-right:6px">Vencido</span>
+                <span class="mant-badge is-danger is-spaced">Vencido</span>
               {% elif plan.dias_para_vencer == 0 %}
-                <span class="mant-badge" style="background:#fef9c3;color:#854d0e;margin-right:6px">Hoy</span>
+                <span class="mant-badge is-gold is-spaced">Hoy</span>
               {% elif plan.urgente %}
-                <span class="mant-badge" style="background:#fef3c7;color:#92400e;margin-right:6px">{{ plan.dias_para_vencer }}d</span>
+                <span class="mant-badge is-warning is-spaced">{{ plan.dias_para_vencer }}d</span>
               {% elif plan.proxima_ejecucion %}
-                <span class="mant-badge" style="background:#e8f5e9;color:#2e7d32;margin-right:6px">{{ plan.dias_para_vencer }}d</span>
+                <span class="mant-badge is-success is-spaced">{{ plan.dias_para_vencer }}d</span>
               {% endif %}
               {{ plan.nombre }}
             </div>
@@ -333,11 +365,11 @@
               Próxima: <strong>{% if plan.proxima_ejecucion %}{{ plan.proxima_ejecucion|date:"d/m/Y" }}{% else %}Sin fecha{% endif %}</strong>{% if plan.ultima_ejecucion %} · Última: {{ plan.ultima_ejecucion|date:"d/m/Y" }}{% endif %}
             </div>
           </div>
-          <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+          <div class="mant-action-column">
             <form method="post" action="{% url 'mantenimiento:mant-plan-ejecutar' plan.pk %}">
               {% csrf_token %}
               <input type="hidden" name="fecha_ejecucion" value="{{ today|date:'Y-m-d' }}">
-              <button class="btn btn-primary btn-sm" type="submit" style="background:#8B2252;border-color:#8B2252">
+              <button class="btn btn-primary btn-sm" type="submit">
                 Hecho hoy
               </button>
             </form>
@@ -365,7 +397,7 @@
           <p class="bi-copy">Cambios de aceite, frenos, llantas y más. Registra el servicio aquí para actualizar la próxima fecha automáticamente.</p>
         </div>
         <div class="bi-panel-actions">
-          <button class="btn btn-primary btn-sm" type="button" onclick="abrirModalServicio()" style="background:#8B2252;border-color:#8B2252">+ Registrar servicio</button>
+          <button class="btn btn-primary btn-sm" type="button" onclick="abrirModalServicio()">+ Registrar servicio</button>
         </div>
       </div>
       {% if servicios_flota %}
@@ -374,25 +406,25 @@
         <article class="mant-plan-row {% if srv.vencido %}vencido{% endif %}">
           <div>
             <div class="mant-plan-title">
-              {% if srv.vencido %}<span class="mant-badge" style="background:#fee2e2;color:#b91c1c;margin-right:6px">Vencido</span>
-              {% elif srv.dias_para_vencer == 0 %}<span class="mant-badge" style="background:#fef9c3;color:#854d0e;margin-right:6px">Hoy</span>
-              {% elif srv.dias_para_vencer <= 7 %}<span class="mant-badge" style="background:#fef3c7;color:#92400e;margin-right:6px">{{ srv.dias_para_vencer }}d</span>
+              {% if srv.vencido %}<span class="mant-badge is-danger is-spaced">Vencido</span>
+              {% elif srv.dias_para_vencer == 0 %}<span class="mant-badge is-gold is-spaced">Hoy</span>
+              {% elif srv.dias_para_vencer <= 7 %}<span class="mant-badge is-warning is-spaced">{{ srv.dias_para_vencer }}d</span>
               {% endif %}
               {{ srv.unidad.descripcion|default:srv.unidad.codigo }} · {{ srv.tipo_servicio.nombre }}
             </div>
             <div class="mant-plan-meta">
               Unidad: <strong>{{ srv.unidad.codigo }}</strong>{% if srv.unidad.sucursal %} · {{ srv.unidad.sucursal.nombre }}{% endif %}<br>
               {% if srv.tipo_servicio.tipo_intervalo == 'tiempo' %}
-                <span class="mant-badge" style="background:#e8f0fe;color:#1a56db;margin-right:4px">
+                <span class="mant-badge is-info is-spaced">
                   Por tiempo · cada {{ srv.tipo_servicio.intervalo_meses }} mes{{ srv.tipo_servicio.intervalo_meses|pluralize:"es" }}
                 </span><br>
               {% elif srv.tipo_servicio.tipo_intervalo == 'km' %}
-                <span class="mant-badge" style="background:#f0fdf4;color:#166534;margin-right:4px">Por km</span><br>
+                <span class="mant-badge is-success is-spaced">Por km</span><br>
               {% else %}
-                <span class="mant-badge" style="background:#fef9c3;color:#854d0e;margin-right:4px">Tiempo o km</span><br>
+                <span class="mant-badge is-gold is-spaced">Tiempo o km</span><br>
               {% endif %}
               {% if srv.proxima_fecha %}Próx. fecha: <strong>{{ srv.proxima_fecha|date:"d/m/Y" }}</strong>{% endif %}
-              {% if srv.proximos_km %} · Próx. km: <strong>{{ srv.proximos_km|floatformat:0 }}</strong>{% endif %}<br>
+              {% if srv.proximos_km %} · Próx. km: <strong>{{ srv.proximos_km|floatformat:0|intcomma }}</strong>{% endif %}<br>
               Último servicio: {{ srv.fecha_servicio|date:"d/m/Y" }}
             </div>
           </div>
@@ -407,7 +439,7 @@
       <div class="mant-empty">No hay servicios de flota registrados con próxima fecha pendiente. Usa "+ Registrar servicio" para iniciar el seguimiento de cualquier unidad.</div>
       {% endif %}
     </section>
-    <section class="bi-panel" style="margin-top:0">
+    <section class="bi-panel mant-panel-flush">
       <div class="bi-panel-head">
         <div><div class="bi-kicker">Estado actual</div><h2 class="bi-panel-title">Unidades activas</h2></div>
       </div>
@@ -433,7 +465,7 @@
         <p class="bi-copy">Talleres, técnicos y empresas de mantenimiento. Agrégalos aquí para asignarlos rápidamente a cualquier reporte u orden.</p>
       </div>
       <div class="bi-panel-actions">
-        <button class="btn btn-primary btn-sm" type="button" onclick="abrirModalProveedor()" style="background:#8B2252;border-color:#8B2252">+ Nuevo proveedor</button>
+        <button class="btn btn-primary btn-sm" type="button" onclick="abrirModalProveedor()">+ Nuevo proveedor</button>
       </div>
     </div>
     <div class="mant-planes-grid">
@@ -441,15 +473,15 @@
       <article class="mant-plan-row {% if not prov.activo %}vencido{% endif %}">
         <div>
           <div class="mant-plan-title">
-            {% if not prov.activo %}<span class="mant-badge" style="background:#f5f5f5;color:#616161;margin-right:6px">Inactivo</span>{% endif %}
-            {{ prov.nombre }}{% if prov.especialidad %} <span class="mant-badge" style="background:#e8f0fe;color:#1a56db;margin-left:4px">{{ prov.especialidad }}</span>{% endif %}
+            {% if not prov.activo %}<span class="mant-badge is-neutral is-spaced">Inactivo</span>{% endif %}
+            {{ prov.nombre }}{% if prov.especialidad %} <span class="mant-badge is-info is-inline">{{ prov.especialidad }}</span>{% endif %}
           </div>
           <div class="mant-plan-meta">
             {% if prov.contacto %}{{ prov.contacto }}{% endif %}{% if prov.telefono %} · {{ prov.telefono }}{% endif %}
             {% if prov.notas %}<br>{{ prov.notas }}{% endif %}
           </div>
         </div>
-        <div style="display:flex;gap:6px">
+        <div class="mant-action-row">
           <button class="btn btn-secondary btn-sm" type="button"
             onclick="abrirEditarProveedor({{ prov.pk }},'{{ prov.nombre|escapejs }}','{{ prov.contacto|escapejs }}','{{ prov.telefono|escapejs }}','{{ prov.especialidad|escapejs }}','{{ prov.notas|escapejs }}',{{ prov.activo|yesno:'true,false' }})">
             Editar
@@ -472,7 +504,7 @@
 {% if messages %}
 <div class="mant-toast-stack">
   {% for message in messages %}
-    <div class="alert alert-{{ message.tags|default:'info' }}" style="margin:0;padding:12px 16px;border-radius:10px;font-weight:700;box-shadow:0 4px 16px rgba(0,0,0,.12)">{{ message }}</div>
+    <div class="alert alert-{{ message.tags|default:'info' }}">{{ message }}</div>
   {% endfor %}
 </div>
 {% endif %}
@@ -481,18 +513,18 @@
 <div class="mant-eliminar-modal" id="mantCancelarModal" role="dialog" aria-modal="true">
   <div class="mant-eliminar-panel">
     <h3 id="mantCancelarTitulo">Eliminar reporte</h3>
-    <p id="mantCancelarLabel" style="margin-bottom:12px"></p>
+    <p id="mantCancelarLabel" class="mant-cancel-label"></p>
     <form id="mantCancelarForm" method="post">
       {% csrf_token %}
-      <div id="mantMotivoBlock" style="display:none;margin-bottom:14px">
-        <label style="display:grid;gap:6px;font-size:13px;font-weight:900;color:#513744">
-          Motivo de cancelación <span style="color:#E53935">*</span>
-          <textarea name="motivo" id="mantMotivoInput" class="mant-input" placeholder="Explica por qué es un duplicado o debe cancelarse..." required style="min-height:80px"></textarea>
+      <div id="mantMotivoBlock" class="mant-cancel-block">
+        <label class="mant-field">
+          Motivo de cancelación <span class="pd-required">*</span>
+          <textarea name="motivo" id="mantMotivoInput" class="mant-input pd-textarea-lg" placeholder="Explica por qué es un duplicado o debe cancelarse..." required></textarea>
         </label>
       </div>
       <div class="mant-eliminar-actions">
         <button class="btn btn-secondary btn-sm" type="button" id="mantCancelarCerrar">Cancelar</button>
-        <button class="btn btn-sm" id="mantCancelarSubmit" type="submit" style="background:#b91c1c;border-color:#b91c1c;color:#fff">Eliminar</button>
+        <button class="btn btn-sm mant-danger-action" id="mantCancelarSubmit" type="submit">Eliminar</button>
       </div>
     </form>
   </div>
@@ -511,7 +543,7 @@
     <form class="mant-form" method="post" action="{% url 'mantenimiento:crear-falla' %}" enctype="multipart/form-data">
       {% csrf_token %}
       <div class="mant-form-grid">
-        <label class="mant-field">Sucursal <span style="color:#E53935">*</span>
+        <label class="mant-field">Sucursal <span class="pd-required">*</span>
           <select class="mant-input" name="sucursal" required>
             <option value="">Seleccionar sucursal...</option>
             {% for s in sucursales_list %}
@@ -519,7 +551,7 @@
             {% endfor %}
           </select>
         </label>
-        <label class="mant-field">Categoría <span style="color:#E53935">*</span>
+        <label class="mant-field">Categoría <span class="pd-required">*</span>
           <select class="mant-input" name="categoria" required>
             <option value="">Seleccionar categoría...</option>
             {% for c in categorias_list %}
@@ -541,7 +573,7 @@
             {% endfor %}
           </select>
         </label>
-        <label class="mant-field full">Activo relacionado <span style="color:#77656d;font-weight:400">(opcional)</span>
+        <label class="mant-field full">Activo relacionado <span class="pd-optional">(opcional)</span>
           <select class="mant-input" name="activo_id">
             <option value="">Sin activo vinculado</option>
             {% for activo in asset_options %}
@@ -549,17 +581,17 @@
             {% endfor %}
           </select>
         </label>
-        <label class="mant-field full">Título <span style="color:#E53935">*</span>
+        <label class="mant-field full">Título <span class="pd-required">*</span>
           <input class="mant-input" name="titulo" type="text" required maxlength="200" placeholder="Describe brevemente la falla">
         </label>
-        <label class="mant-field full">Descripción <span style="color:#E53935">*</span>
+        <label class="mant-field full">Descripción <span class="pd-required">*</span>
           <textarea class="mant-input" name="descripcion" required placeholder="Detalla qué ocurre, cuándo inició y qué se afecta"></textarea>
         </label>
-        <label class="mant-field full">Foto de evidencia <span style="color:#77656d;font-weight:400">(opcional desde escritorio)</span>
-          <input class="mant-input" name="foto_evidencia" type="file" accept="image/*" style="padding:8px">
+        <label class="mant-field full">Foto de evidencia <span class="pd-optional">(opcional desde escritorio)</span>
+          <input class="mant-input pd-file-input" name="foto_evidencia" type="file" accept="image/*">
         </label>
       </div>
-      <button class="btn btn-primary" type="submit" style="background:#8B2252;border-color:#8B2252;">Crear reporte de falla</button>
+      <button class="btn btn-primary" type="submit">Crear reporte de falla</button>
     </form>
   </aside>
 </div>
@@ -583,7 +615,7 @@
       </div>
       <button class="btn btn-secondary btn-sm" type="button" data-close-drawer>Cerrar</button>
     </div>
-    <div class="mant-drawer-evidence" id="mantDrawerEvidence" style="display:none">
+    <div class="mant-drawer-evidence pd-is-hidden" id="mantDrawerEvidence">
       <a id="mantDrawerPhotoLink" href="#" target="_blank" rel="noopener">
         <img class="mant-drawer-photo" id="mantDrawerPhoto" src="" alt="Evidencia del reporte">
       </a>
@@ -595,11 +627,11 @@
         <div class="mant-fact-row"><span>Fecha</span><strong id="mantDrawerDate">-</strong></div>
       </div>
     </div>
-    <div id="mantDrawerDescBlock" style="display:none;margin-bottom:14px">
-      <div style="font-size:12px;font-weight:900;color:#8B2252;margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em">Descripción del reporte</div>
+    <div id="mantDrawerDescBlock" class="mant-drawer-block">
+      <div class="mant-drawer-section-title">Descripción del reporte</div>
       <div class="mant-description-box" id="mantDrawerDescription"></div>
     </div>
-    <div class="mant-latest-note" id="mantDrawerLatestBlock" style="display:none">
+    <div class="mant-latest-note pd-is-hidden" id="mantDrawerLatestBlock">
       <span>Último avance</span>
       <div id="mantDrawerLatestNote"></div>
     </div>
@@ -660,11 +692,11 @@
           <textarea class="mant-input" name="comentario" placeholder="Diagnóstico, autorización, proveedor, folio de factura o cierre del trabajo."></textarea>
         </label>
         <label class="mant-field full">Evidencia del avance
-          <input class="mant-input" name="evidencias_seguimiento" type="file" multiple accept="image/*,.pdf" style="padding:8px">
+          <input class="mant-input pd-file-input" name="evidencias_seguimiento" type="file" multiple accept="image/*,.pdf">
           <span class="mant-plan-meta">Fotos de cómo quedó, comprobantes o archivos para que el colaborador vea el seguimiento.</span>
         </label>
       </div>
-      <button class="btn btn-primary" type="submit" style="background:#8B2252;border-color:#8B2252;">Guardar avance</button>
+      <button class="btn btn-primary" type="submit">Guardar avance</button>
     </form>
   </aside>
 </div>
@@ -677,8 +709,8 @@
       {% csrf_token %}
       <input type="hidden" name="action" id="planAction" value="crear">
       <input type="hidden" name="plan_id" id="planId">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
-        <label class="mant-field span-2">Activo / Equipo <span style="color:#E53935">*</span>
+      <div class="mant-modal-grid">
+        <label class="mant-field span-2">Activo / Equipo <span class="pd-required">*</span>
           <select name="activo_id" id="planActivoId" class="mant-input" required>
             <option value="">Seleccionar equipo...</option>
             {% for a in activos_para_plan %}
@@ -686,7 +718,7 @@
             {% endfor %}
           </select>
         </label>
-        <label class="mant-field span-2">Nombre del plan <span style="color:#E53935">*</span>
+        <label class="mant-field span-2">Nombre del plan <span class="pd-required">*</span>
           <input type="text" name="nombre" id="planNombre" class="mant-input" required placeholder="Ej. Mantenimiento preventivo mensual">
         </label>
         <label class="mant-field">Tipo
@@ -715,16 +747,16 @@
           <input type="text" name="responsable" id="planResponsable" class="mant-input" placeholder="Nombre del técnico encargado">
         </label>
         <label class="mant-field span-2">Instrucciones / checklist
-          <textarea name="instrucciones" id="planInstrucciones" class="mant-input" style="min-height:72px" placeholder="Pasos, verificaciones o materiales necesarios"></textarea>
+          <textarea name="instrucciones" id="planInstrucciones" class="mant-input pd-textarea-md" placeholder="Pasos, verificaciones o materiales necesarios"></textarea>
         </label>
-        <div class="mant-plan-meta span-2" style="background:#f0fdf4;border-radius:8px;padding:10px 12px;border:1px solid #bbf7d0">
+        <div class="mant-plan-meta mant-plan-help span-2">
           <strong>Sin historial previo:</strong> deja "Última ejecución" vacía y solo pon la "Próxima ejecución" con la fecha que sabes que toca. El sistema la usará como punto de arranque.<br>
           <strong>Registrar retroactivo:</strong> pon la fecha real en "Última ejecución" y la próxima se calcula automáticamente.
         </div>
       </div>
       <div class="mant-eliminar-actions">
         <button class="btn btn-secondary btn-sm" type="button" onclick="cerrarModalPlan()">Cancelar</button>
-        <button class="btn btn-primary btn-sm" type="submit" style="background:#8B2252;border-color:#8B2252" id="planSubmitBtn">Guardar plan</button>
+        <button class="btn btn-primary btn-sm" type="submit" id="planSubmitBtn">Guardar plan</button>
       </div>
     </form>
   </div>
@@ -738,8 +770,8 @@
       {% csrf_token %}
       <input type="hidden" name="action" id="tipoAction" value="crear">
       <input type="hidden" name="tipo_id" id="tipoId">
-      <div style="display:grid;gap:12px;margin-bottom:14px">
-        <label class="mant-field">Nombre del servicio <span style="color:#E53935">*</span>
+      <div class="mant-modal-stack">
+        <label class="mant-field">Nombre del servicio <span class="pd-required">*</span>
           <input type="text" name="nombre" id="tipoNombre" class="mant-input" required placeholder="Ej. Mantenimiento sistema refrigeración">
         </label>
         <label class="mant-field">Tipo de intervalo
@@ -749,16 +781,16 @@
             <option value="ambos">Tiempo o km — lo que ocurra primero</option>
           </select>
         </label>
-        <div id="campoMeses" style="display:grid;gap:12px;grid-template-columns:1fr 1fr">
-          <label class="mant-field">Cada cuántos meses <span style="color:#E53935">*</span>
+        <div id="campoMeses" class="mant-modal-stack-2">
+          <label class="mant-field">Cada cuántos meses <span class="pd-required">*</span>
             <input type="number" name="intervalo_meses" id="tipoMeses" class="mant-input" min="1" placeholder="Ej. 6 para semestral, 18 para año y medio">
           </label>
-          <div class="mant-plan-meta" style="align-self:end;padding-bottom:8px">
+          <div class="mant-plan-meta pd-align-self-end">
             Escribe cualquier número — no hay opciones fijas.<br>
             Ej: 1 = mensual · 3 = trimestral · 6 = semestral · 12 = anual · 18 = año y medio
           </div>
         </div>
-        <div id="campoKm" style="display:none">
+        <div id="campoKm" class="pd-is-hidden">
           <label class="mant-field">Cada cuántos km
             <input type="number" name="intervalo_km" id="tipoKm" class="mant-input" min="1" placeholder="Ej. 5000">
           </label>
@@ -769,7 +801,7 @@
       </div>
       <div class="mant-eliminar-actions">
         <button class="btn btn-secondary btn-sm" type="button" onclick="cerrarModalTipoServicio()">Cancelar</button>
-        <button class="btn btn-primary btn-sm" type="submit" style="background:#8B2252;border-color:#8B2252" id="tipoSubmitBtn">Guardar tipo</button>
+        <button class="btn btn-primary btn-sm" type="submit" id="tipoSubmitBtn">Guardar tipo</button>
       </div>
     </form>
   </div>
@@ -781,23 +813,21 @@
     <h3 id="modalServicioTitulo">Registrar servicio de unidad</h3>
 
     <!-- Selector de modo -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;margin-bottom:16px;border:1px solid rgba(139,34,82,.22);border-radius:10px;overflow:hidden">
-      <button type="button" id="modoRealizado" onclick="setModoServicio('realizado')"
-        style="padding:10px;font:inherit;font-size:13px;font-weight:900;border:none;cursor:pointer;background:#8B2252;color:#fff;border-right:1px solid rgba(255,255,255,.2)">
+    <div class="mant-mode-switch">
+      <button type="button" id="modoRealizado" class="mant-mode-btn is-first is-active" onclick="setModoServicio('realizado')">
         Registrar servicio ya realizado
       </button>
-      <button type="button" id="modoProgramado" onclick="setModoServicio('programado')"
-        style="padding:10px;font:inherit;font-size:13px;font-weight:700;border:none;cursor:pointer;background:#f5eef2;color:#8B2252">
+      <button type="button" id="modoProgramado" class="mant-mode-btn" onclick="setModoServicio('programado')">
         Programar próximo (sin historial)
       </button>
     </div>
-    <p id="modoHelp" class="mant-plan-meta" style="margin-bottom:14px;background:#fdf6f9;border-radius:8px;padding:8px 10px"></p>
+    <p id="modoHelp" class="mant-plan-meta mant-mode-help"></p>
 
     <form method="post" action="{% url 'mantenimiento:mant-flota-servicio' %}">
       {% csrf_token %}
       <input type="hidden" name="modo_servicio" id="modoServicioInput" value="realizado">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
-        <label class="mant-field span-2">Unidad <span style="color:#E53935">*</span>
+      <div class="mant-modal-grid">
+        <label class="mant-field span-2">Unidad <span class="pd-required">*</span>
           <select name="unidad_id" id="servicioUnidadId" class="mant-input" required>
             <option value="">Seleccionar unidad...</option>
             {% for u in unidades_para_servicio %}
@@ -805,13 +835,13 @@
             {% endfor %}
           </select>
         </label>
-        <label class="mant-field span-2">¿Qué servicio se realizó? <span style="color:#E53935">*</span>
+        <label class="mant-field span-2">¿Qué servicio se realizó? <span class="pd-required">*</span>
           <input type="text" name="nombre_servicio" id="servicioNombre" class="mant-input" required
             placeholder="Ej. Cambio de aceite, Revisión de frenos, Mantenimiento refrigeración...">
         </label>
 
         <!-- Campos modo "ya se realizó" -->
-        <div id="bloqueRealizado" style="display:contents">
+        <div id="bloqueRealizado" class="mant-service-realizado">
           <label class="mant-field" id="lblFechaServicio">Fecha en que se realizó
             <input type="date" name="fecha_servicio" id="servicioFecha" class="mant-input" value="{{ today|date:'Y-m-d' }}">
           </label>
@@ -836,7 +866,7 @@
           <input type="date" name="proxima_fecha" id="servicioProximaFecha" class="mant-input">
           <span class="mant-plan-meta" id="proximaFechaHelp">Si se deja vacía, se calcula automáticamente según el intervalo del tipo.</span>
         </label>
-        <label class="mant-field">Próximos km <span class="mant-badge" style="font-size:10px;padding:2px 7px;margin-left:4px">Opcional</span>
+        <label class="mant-field">Próximos km <span class="mant-badge is-compact is-inline">Opcional</span>
           <input type="number" name="proximos_km" id="servicioProximosKm" class="mant-input" min="0" placeholder="Si se deja vacío se calcula solo">
         </label>
         <label class="mant-field span-2">Notas
@@ -845,7 +875,7 @@
       </div>
       <div class="mant-eliminar-actions">
         <button class="btn btn-secondary btn-sm" type="button" onclick="cerrarModalServicio()">Cancelar</button>
-        <button class="btn btn-primary btn-sm" id="servicioSubmitBtn" type="submit" style="background:#8B2252;border-color:#8B2252">Registrar</button>
+        <button class="btn btn-primary btn-sm" id="servicioSubmitBtn" type="submit">Registrar</button>
       </div>
     </form>
   </div>
@@ -858,8 +888,8 @@
       {% csrf_token %}
       <input type="hidden" name="action" id="proveedorAction" value="crear">
       <input type="hidden" name="proveedor_id" id="proveedorId">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
-        <label class="mant-field span-2">Nombre del taller / técnico <span style="color:#E53935">*</span>
+      <div class="mant-modal-grid">
+        <label class="mant-field span-2">Nombre del taller / técnico <span class="pd-required">*</span>
           <input type="text" name="nombre" id="proveedorNombre" class="mant-input" required
             placeholder="Escribe para buscar o agregar nuevo..."
             list="proveedores-sugeridos" autocomplete="off">
@@ -886,8 +916,8 @@
           <input type="text" name="notas" id="proveedorNotas" class="mant-input"
             placeholder="Horario, dirección, condiciones especiales">
         </label>
-        <div id="proveedorActivoBlock" class="span-2" style="display:none">
-          <label style="display:flex;align-items:center;gap:10px;font-size:13px;font-weight:700;color:#513744;cursor:pointer">
+        <div id="proveedorActivoBlock" class="span-2 mant-provider-active">
+          <label class="mant-provider-check">
             <input type="checkbox" name="activo" id="proveedorActivo" value="1" checked>
             Proveedor activo
           </label>
@@ -895,7 +925,7 @@
       </div>
       <div class="mant-eliminar-actions">
         <button class="btn btn-secondary btn-sm" type="button" onclick="cerrarModalProveedor()">Cancelar</button>
-        <button class="btn btn-primary btn-sm" type="submit" id="proveedorSubmitBtn" style="background:#8B2252;border-color:#8B2252">Guardar</button>
+        <button class="btn btn-primary btn-sm" type="submit" id="proveedorSubmitBtn">Guardar</button>
       </div>
     </form>
   </div>
@@ -996,42 +1026,42 @@
       input.disabled = hideAssets || hasLinkedAsset;
       input.value = "";
     });
-    const photoUrl = (button.dataset.photo || "").trim();
-    const hasFallaContext = button.dataset.type === "falla";
-    if (evidence) {
-      evidence.style.display = hasFallaContext ? "" : "none";
-    }
-    if (photo && photoLink) {
-      if (photoUrl) {
-        photo.src = photoUrl;
-        photoLink.href = photoUrl;
-        photoLink.style.display = "";
-      } else {
-        photo.removeAttribute("src");
-        photoLink.removeAttribute("href");
-        photoLink.style.display = "none";
-      }
-    }
+	    const photoUrl = (button.dataset.photo || "").trim();
+	    const hasFallaContext = button.dataset.type === "falla";
+	    if (evidence) {
+	      evidence.classList.toggle("pd-is-hidden", !hasFallaContext);
+	    }
+	    if (photo && photoLink) {
+	      if (photoUrl) {
+	        photo.src = photoUrl;
+	        photoLink.href = photoUrl;
+	        photoLink.classList.remove("pd-is-hidden");
+	      } else {
+	        photo.removeAttribute("src");
+	        photoLink.removeAttribute("href");
+	        photoLink.classList.add("pd-is-hidden");
+	      }
+	    }
     setFact(reporter, button.dataset.reporter);
     setFact(area, button.dataset.area);
     setFact(category, button.dataset.category);
     setFact(priority, button.dataset.priority);
     setFact(date, button.dataset.date);
     const desc = (button.dataset.description || "").trim();
-    if (desc && descBlock && descBox) {
-      descBox.textContent = desc;
-      descBlock.style.display = "";
-    } else if (descBlock) {
-      descBlock.style.display = "none";
-    }
+	    if (desc && descBlock && descBox) {
+	      descBox.textContent = desc;
+	      descBlock.classList.remove("mant-drawer-block");
+	    } else if (descBlock) {
+	      descBlock.classList.add("mant-drawer-block");
+	    }
     const latest = (button.dataset.latestNote || "").trim();
     const latestDate = (button.dataset.latestDate || "").trim();
-    if (latest && latestBlock && latestNote) {
-      latestNote.textContent = latestDate ? `${latestDate} · ${latest}` : latest;
-      latestBlock.style.display = "";
-    } else if (latestBlock) {
-      latestBlock.style.display = "none";
-    }
+	    if (latest && latestBlock && latestNote) {
+	      latestNote.textContent = latestDate ? `${latestDate} · ${latest}` : latest;
+	      latestBlock.classList.remove("pd-is-hidden");
+	    } else if (latestBlock) {
+	      latestBlock.classList.add("pd-is-hidden");
+	    }
     drawer.classList.add("is-open");
   }
 
@@ -1071,17 +1101,17 @@
     btn.addEventListener("click", () => {
       const esDG = btn.dataset.esDg === "1";
       form.action = btn.dataset.action;
-      if (esDG) {
-        titulo.textContent = "Eliminar reporte";
-        label.textContent = `¿Confirmas eliminar "${btn.dataset.label}"? Esta acción no se puede deshacer.`;
-        motivoBlock.style.display = "none";
-        motivoInput.required = false;
-        submitBtn.textContent = "Eliminar";
-      } else {
-        titulo.textContent = "Solicitar cancelación";
-        label.textContent = `Solicitar cancelación de: "${btn.dataset.label}". El DG recibirá una notificación para aprobar o rechazar.`;
-        motivoBlock.style.display = "";
-        motivoInput.required = true;
+	      if (esDG) {
+	        titulo.textContent = "Eliminar reporte";
+	        label.textContent = `¿Confirmas eliminar "${btn.dataset.label}"? Esta acción no se puede deshacer.`;
+	        motivoBlock.classList.add("mant-cancel-block");
+	        motivoInput.required = false;
+	        submitBtn.textContent = "Eliminar";
+	      } else {
+	        titulo.textContent = "Solicitar cancelación";
+	        label.textContent = `Solicitar cancelación de: "${btn.dataset.label}". El DG recibirá una notificación para aprobar o rechazar.`;
+	        motivoBlock.classList.remove("mant-cancel-block");
+	        motivoInput.required = true;
         motivoInput.value = "";
         submitBtn.textContent = "Enviar solicitud";
       }
@@ -1167,9 +1197,8 @@ const MODOS_HELP = {
 function setModoServicio(modo) {
   document.getElementById("modoServicioInput").value = modo;
   const esRealizado = modo === "realizado";
-  const BASE = "padding:10px;font:inherit;font-size:13px;border:none;cursor:pointer;";
-  document.getElementById("modoRealizado").style.cssText  = BASE + (esRealizado  ? "font-weight:900;background:#8B2252;color:#fff;border-right:1px solid rgba(255,255,255,.2)" : "font-weight:700;background:#f5eef2;color:#8B2252;border-right:1px solid rgba(139,34,82,.15)");
-  document.getElementById("modoProgramado").style.cssText = BASE + (!esRealizado ? "font-weight:900;background:#8B2252;color:#fff" : "font-weight:700;background:#f5eef2;color:#8B2252");
+  document.getElementById("modoRealizado").classList.toggle("is-active", esRealizado);
+  document.getElementById("modoProgramado").classList.toggle("is-active", !esRealizado);
   document.getElementById("modoHelp").textContent = MODOS_HELP[modo];
   document.getElementById("bloqueRealizado").style.display = esRealizado ? "contents" : "none";
   document.getElementById("servicioFecha").required = esRealizado;

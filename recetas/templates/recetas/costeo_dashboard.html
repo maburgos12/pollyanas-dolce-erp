@@ -360,7 +360,7 @@
             <div class="costeo-sim-draft" data-draft-id="{{ draft.id }}">
               <div>
                 <strong>{{ draft.nombre }}</strong>
-                <div class="costeo-sim-muted">${{ draft.precio_venta_sugerido|floatformat:2 }} sugerido · {{ draft.actualizado_en|date:"Y-m-d H:i" }}</div>
+                <div class="costeo-sim-muted">${{ draft.precio_venta_sugerido|floatformat:2|intcomma }} sugerido · {{ draft.actualizado_en|date:"Y-m-d H:i" }}</div>
               </div>
               <button class="btn btn-secondary btn-sm" type="button" data-load-draft="{{ draft.id }}">Abrir</button>
             </div>
