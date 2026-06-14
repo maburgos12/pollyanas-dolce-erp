@@ -313,12 +313,9 @@
         grid-template-columns: auto minmax(0, 1fr);
         grid-template-rows: auto;
         align-items: center;
-        min-height: 102px;
-        border-color: rgba(201, 168, 76, .36);
-        background:
-          linear-gradient(135deg, rgba(139, 34, 82, .34), rgba(26, 26, 36, .94) 52%),
-          var(--surface);
-        box-shadow: 0 16px 34px rgba(0, 0, 0, .22);
+        min-height: 94px;
+        border-color: var(--border);
+        background: var(--surface);
       }
 
       .route-dashboard-card > span:not(.badge):not(.app-glyph) {
@@ -329,15 +326,8 @@
       }
 
       .route-dashboard-card .app-glyph {
-        width: 52px;
-        height: 52px;
-        border-color: rgba(201, 168, 76, .42);
-        background: #2b1725;
-      }
-
-      .route-dashboard-card .app-glyph svg {
-        width: 32px;
-        height: 32px;
+        width: 42px;
+        height: 42px;
       }
 
       .route-dashboard-card .badge.turno {
@@ -4048,7 +4038,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=route-control-v14").catch(() => {});
+          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=route-control-v15").catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {
