@@ -12,7 +12,7 @@
 <div class="section-header">
     <div>
         <h2 class="section-header-title">{{ title }}</h2>
-        {% if subtitle %}<p class="muted" style="font-size:12px;margin:2px 0 0;">{{ subtitle }}</p>{% endif %}
+        {% if subtitle %}<p class="section-header-subtitle muted">{{ subtitle }}</p>{% endif %}
     </div>
     {% if action_url %}
     <a href="{{ action_url }}" class="section-header-action">{{ action_label|default:"Ver todo" }}</a>

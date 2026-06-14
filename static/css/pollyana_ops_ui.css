@@ -196,6 +196,11 @@ a.btn,
     transform 120ms var(--pd-ease);
 }
 
+.section-header-subtitle {
+  margin: var(--pd-space-1) 0 0;
+  font-size: 12px;
+}
+
 .btn:active,
 button.btn:active,
 a.btn:active,
@@ -299,6 +304,16 @@ a.btn:active,
   word-break: normal;
   hyphens: manual;
   vertical-align: middle;
+}
+
+.badge-sm {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.badge-neutral {
+  background: var(--pd-surface-subtle);
+  color: var(--pd-muted);
 }
 
 .badge-success,

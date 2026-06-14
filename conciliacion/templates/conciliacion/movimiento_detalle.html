@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load humanize %}
 
-{% block title %}Documento de conciliacion{% endblock %}
+{% block title %}Documento de conciliación{% endblock %}
 
 {% block content %}
 <style>
@@ -27,7 +27,7 @@
 <div class="conc-doc">
   <div class="conc-doc-head">
     <div>
-      <h1>Documento de conciliacion {{ documento.folio }}</h1>
+      <h1>Documento de conciliación {{ documento.folio }}</h1>
       <p class="conc-doc-note">Expediente de evidencia para revisar que paso, contra que se ligo, que documento sostiene el cierre y que falta para contabilidad.</p>
     </div>
     <div class="conc-doc-actions">
@@ -45,12 +45,12 @@
         <tr><th>Tipo / importe</th><td>{{ movimiento.tipo }} · ${{ movimiento.monto|floatformat:2|intcomma }}</td></tr>
         <tr><th>Clave de rastreo</th><td>{{ documento.clave_rastreo|default:"No detectada" }}</td></tr>
         <tr><th>Cuenta destino</th><td>{{ documento.cuenta_destino|default:"No detectada" }}</td></tr>
-        <tr><th>Descripcion banco</th><td>{{ movimiento.descripcion }}</td></tr>
+        <tr><th>Descripción banco</th><td>{{ movimiento.descripcion }}</td></tr>
       </table></div>
     </section>
 
     <section class="conc-doc-section">
-      <h2>Conciliacion aplicada</h2>
+      <h2>Conciliación aplicada</h2>
       <div class="table-responsive"><table class="conc-doc-table">
         <tr><th>Estado expediente</th><td><span class="conc-doc-chip {{ documento.estado_expediente.tono }}">{{ documento.estado_expediente.label }}</span><br><span class="conc-doc-note">{{ documento.estado_expediente.detalle }}</span></td></tr>
         <tr><th>Tipo real</th><td><strong>{{ documento.tipo_conciliacion }}</strong></td></tr>
@@ -61,13 +61,13 @@
     </section>
 
     <section class="conc-doc-section">
-      <h2>Regla automatica</h2>
+      <h2>Regla automática</h2>
       <div class="table-responsive"><table class="conc-doc-table">
         <tr><th>Etiqueta</th><td>{{ documento.regla.mesa_label }}</td></tr>
         <tr><th>Detalle</th><td>{{ documento.regla.mesa_detalle }}</td></tr>
-        <tr><th>Siguiente revision</th><td>{{ documento.regla.siguiente_revision }}</td></tr>
+        <tr><th>Siguiente revisión</th><td>{{ documento.regla.siguiente_revision }}</td></tr>
       </table></div>
-      <p class="conc-doc-note">La regla automatica no es la conciliacion final. La conciliacion aplicada es la que debe usarse para contabilidad.</p>
+      <p class="conc-doc-note">La regla automática no es la conciliación final. La conciliación aplicada es la que debe usarse para contabilidad.</p>
     </section>
 
     <section class="conc-doc-section">
@@ -117,7 +117,7 @@
     </section>
 
     <section class="conc-doc-section conc-doc-wide">
-      <h2>Pendientes de evidencia y auditoria</h2>
+      <h2>Pendientes de evidencia y auditoría</h2>
       {% if documento.evidencia_pendiente %}
         <ul>
           {% for item in documento.evidencia_pendiente %}

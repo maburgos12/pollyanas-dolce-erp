@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% load humanize %}
 
-{% block title %}Conciliacion bancaria · ERP{% endblock %}
-{% block page_title %}Conciliacion bancaria{% endblock %}
+{% block title %}Conciliación bancaria · ERP{% endblock %}
+{% block page_title %}Conciliación bancaria{% endblock %}
 {% block body_class %}page-conciliacion-bancaria{% endblock %}
 
 {% block extra_css %}
@@ -11,22 +11,22 @@
    * Scope: ERP operational screen, readable SAT explanation, contained tables.
    */
   .conc-page {
-    --conc-surface: #fff;
-    --conc-muted-surface: #f8fafc;
-    --conc-muted-chip: #f1f5f9;
-    --conc-border: #e5e7eb;
-    --conc-control-border: #d1d5db;
-    --conc-text: #111827;
-    --conc-heading: #1f2937;
-    --conc-muted: #64748b;
-    --conc-secondary: #475569;
-    --conc-ok-bg: #dcfce7;
-    --conc-ok-text: #166534;
-    --conc-warn-bg: #fef3c7;
-    --conc-warn-text: #92400e;
-    --conc-info-bg: #dbeafe;
-    --conc-info-text: #1d4ed8;
-    --conc-danger: #991b1b;
+    --conc-surface: var(--pd-surface);
+    --conc-muted-surface: var(--pd-surface-subtle);
+    --conc-muted-chip: var(--pd-surface-subtle);
+    --conc-border: var(--pd-border);
+    --conc-control-border: var(--pd-border-strong);
+    --conc-text: var(--pd-ink);
+    --conc-heading: var(--pd-ink-soft);
+    --conc-muted: var(--pd-muted);
+    --conc-secondary: var(--pd-ink-soft);
+    --conc-ok-bg: var(--pd-success-soft);
+    --conc-ok-text: var(--pd-success);
+    --conc-warn-bg: var(--pd-warning-soft);
+    --conc-warn-text: var(--pd-warning);
+    --conc-info-bg: var(--pd-info-soft);
+    --conc-info-text: var(--pd-info);
+    --conc-danger: var(--pd-danger);
     display: grid;
     gap: 16px;
   }
@@ -103,8 +103,8 @@
 <section class="conc-page">
   <div class="conc-header">
     <div>
-      <h1>Conciliacion bancaria</h1>
-      <p>Carga estados de cuenta de banco o tarjeta corporativa y comparalos contra las facturas descargadas del SAT antes de marcar pagos como conciliados.</p>
+      <h1>Conciliación bancaria</h1>
+      <p>Carga estados de cuenta de banco o tarjeta corporativa y compáralos contra las facturas descargadas del SAT antes de marcar pagos como conciliados.</p>
     </div>
   </div>
 
@@ -128,27 +128,27 @@
   </div>
 
   <div class="conc-panel">
-    <h2>De donde sale la informacion del SAT</h2>
+    <h2>De dónde sale la información del SAT</h2>
     <div class="conc-help-grid">
       <div class="conc-help-item">
         <h3>1. e.firma de la empresa</h3>
-        <p>El ERP usa el certificado, la llave privada y la contrasena fiscal configurados en produccion. Con eso pide acceso al servicio oficial de Descarga Masiva del SAT.</p>
+        <p>El ERP usa el certificado, la llave privada y la contraseña fiscal configurados en producción. Con eso pide acceso al servicio oficial de Descarga Masiva del SAT.</p>
       </div>
       <div class="conc-help-item">
         <h3>2. Descarga de XML</h3>
         <p>El proceso solicita CFDI emitidos y recibidos por periodo. Cuando el SAT termina la solicitud, devuelve paquetes ZIP con los XML fiscales.</p>
       </div>
       <div class="conc-help-item">
-        <h3>3. Datos para conciliacion</h3>
-        <p>De cada XML se guarda UUID, RFC emisor, RFC receptor, total, moneda, fecha, metodo de pago, forma de pago y el XML original para auditoria.</p>
+        <h3>3. Datos para conciliación</h3>
+        <p>De cada XML se guarda UUID, RFC emisor, RFC receptor, total, moneda, fecha, método de pago, forma de pago y el XML original para auditoría.</p>
       </div>
     </div>
     <div class="conc-status-line">
       <span class="conc-chip {{ sat_estado_tone }}">{{ sat_estado_label }}</span>
       {% if sat_ultimo_log %}
-        <span class="conc-note">Ultimo registro: {{ sat_ultimo_log.creado_en|date:"Y-m-d H:i" }} - {{ sat_ultimo_log.mensaje }}</span>
+        <span class="conc-note">Último registro: {{ sat_ultimo_log.creado_en|date:"Y-m-d H:i" }} - {{ sat_ultimo_log.mensaje }}</span>
       {% else %}
-        <span class="conc-note">Todavia no hay registros de descarga SAT.</span>
+        <span class="conc-note">Todavía no hay registros de descarga SAT.</span>
       {% endif %}
     </div>
   </div>
@@ -156,9 +156,9 @@
   <div class="conc-panel">
     <div class="conc-period-bar">
       <div>
-        <h2>Matriz de reglas de conciliacion fiscal</h2>
+        <h2>Matriz de reglas de conciliación fiscal</h2>
         <p class="conc-note">
-          Paquete fiscal dirigido a conciliacion: ordena ingresos por sucursal y forma de pago, factura emitida, deposito bancario, comisiones y soporte.
+          Paquete fiscal dirigido a conciliación: ordena ingresos por sucursal y forma de pago, factura emitida, depósito bancario, comisiones y soporte.
         </p>
       </div>
       <div class="conc-status-line">
@@ -168,7 +168,7 @@
       </div>
     </div>
     <p class="conc-note">
-      Base operativa: las ventas se declaran con CFDI de ingreso por sucursal; efectivo, terminal bancaria y transferencia se concilian segun su forma de pago y su rastro bancario.
+      Base operativa: las ventas se declaran con CFDI de ingreso por sucursal; efectivo, terminal bancaria y transferencia se concilian según su forma de pago y su rastro bancario.
     </p>
     <div class="table-responsive">
       <table class="conc-table">
@@ -177,8 +177,8 @@
             <th>Flujo</th>
             <th>SAT</th>
             <th>Banco</th>
-            <th>Metodo</th>
-            <th>Revision</th>
+            <th>Método</th>
+            <th>Revisión</th>
           </tr>
         </thead>
         <tbody>
@@ -204,9 +204,9 @@
   <div class="conc-panel">
     <div class="conc-period-bar">
       <div>
-        <h2>Revision del periodo: {{ periodo_resumen.periodo_label }}</h2>
+        <h2>Revisión del periodo: {{ periodo_resumen.periodo_label }}</h2>
         <p class="conc-note">
-          Este bloque muestra lo cargado para el mes seleccionado. La tabla de abajo ya no representa solo los ultimos movimientos globales.
+          Este bloque muestra lo cargado para el mes seleccionado. La tabla de abajo ya no representa solo los últimos movimientos globales.
         </p>
       </div>
       <form class="conc-period-form" method="get">
@@ -234,7 +234,7 @@
         </strong>
       </div>
       <div class="conc-mini-card">
-        <span>Dias con movimiento</span>
+        <span>Días con movimiento</span>
         <strong>{{ periodo_resumen.movimientos_dias|intcomma }}</strong>
       </div>
       <div class="conc-mini-card">
@@ -245,7 +245,7 @@
 
     <div class="conc-subpanel conc-section-gap">
       <h3>Cuentas cargadas del periodo</h3>
-      <p class="conc-note">Cada banco o tarjeta aparece separado para revisar si falta un archivo o si la tabla esta filtrada.</p>
+      <p class="conc-note">Cada banco o tarjeta aparece separado para revisar si falta un archivo o si la tabla está filtrada.</p>
       <div class="table-responsive">
         <table class="conc-table">
           <thead>
@@ -288,7 +288,7 @@
 
     <div class="conc-subpanel conc-section-gap">
       <h3>Estado del cierre</h3>
-      <p class="conc-note">Lectura rapida del mes seleccionado antes de revisar movimiento por movimiento.</p>
+      <p class="conc-note">Lectura rápida del mes seleccionado antes de revisar movimiento por movimiento.</p>
       <div class="conc-status-grid">
         {% for item in periodo_resumen.estado_cierre.status %}
         <div class="conc-status-card">
@@ -298,7 +298,7 @@
         {% endfor %}
       </div>
       <div class="conc-status-line">
-        <span class="conc-chip is-info">Siguiente accion</span>
+        <span class="conc-chip is-info">Siguiente acción</span>
         <span class="conc-note">{{ periodo_resumen.estado_cierre.siguiente_accion }}</span>
       </div>
       {% if periodo_resumen.estado_cierre.alertas %}
@@ -340,19 +340,19 @@
           <strong>${{ periodo_resumen.resumen_ejecutivo.diferencia_cargos_proveedores|floatformat:2|intcomma }}</strong>
         </div>
         <div class="conc-mini-card">
-          <span>Pagos por credito cobrados</span>
+          <span>Pagos por crédito cobrados</span>
           <strong>${{ periodo_resumen.resumen_ejecutivo.pagos_cobrados|floatformat:2|intcomma }}</strong>
         </div>
         <div class="conc-mini-card">
-          <span>Credito pendiente</span>
+          <span>Crédito pendiente</span>
           <strong>${{ periodo_resumen.resumen_ejecutivo.credito_clientes_pendiente|floatformat:2|intcomma }}</strong>
         </div>
       </div>
     </div>
 
     <div class="conc-subpanel conc-section-gap">
-      <h3>Trabajo de conciliacion</h3>
-      <p class="conc-note">Ordena los puntos que se revisan en una conciliacion real: efectivo por sucursal, tarjetas, transferencias, gastos y credito.</p>
+      <h3>Trabajo de conciliación</h3>
+      <p class="conc-note">Ordena los puntos que se revisan en una conciliación real: efectivo por sucursal, tarjetas, transferencias, gastos y crédito.</p>
       <div class="table-responsive">
         <table class="conc-table">
           <thead>
@@ -362,8 +362,8 @@
               <th class="conc-money">SAT</th>
               <th class="conc-money">Diferencia</th>
               <th>Estado</th>
-              <th>Metodo</th>
-              <th>Siguiente accion</th>
+              <th>Método</th>
+              <th>Siguiente acción</th>
             </tr>
           </thead>
           <tbody>
@@ -386,7 +386,7 @@
               <td>{{ row.accion }}</td>
             </tr>
             {% empty %}
-            <tr><td colspan="7" class="conc-empty">Sin datos para armar el trabajo de conciliacion.</td></tr>
+            <tr><td colspan="7" class="conc-empty">Sin datos para armar el trabajo de conciliación.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -413,7 +413,7 @@
     </div>
 
     <div class="conc-subpanel" style="margin-top:14px;">
-      <h3>Alcance fiscal de conciliacion</h3>
+      <h3>Alcance fiscal de conciliación</h3>
       <p class="conc-note">
         Incluye complementos con fecha de pago dentro del mes, aunque el XML se timbre hasta el
         {{ periodo_resumen.alcance_fiscal.complemento_fin|date:"Y-m-d" }}.
@@ -428,11 +428,11 @@
           <strong>{{ periodo_resumen.alcance_fiscal.pagos_recibidos.conteo|intcomma }} · ${{ periodo_resumen.alcance_fiscal.pagos_recibidos.total|floatformat:2|intcomma }}</strong>
         </div>
         <div class="conc-mini-card">
-          <span>Credito clientes pendiente</span>
+          <span>Crédito clientes pendiente</span>
           <strong>{{ periodo_resumen.alcance_fiscal.ppd_emitidos_abiertos.conteo|intcomma }} · ${{ periodo_resumen.alcance_fiscal.ppd_emitidos_abiertos.saldo|floatformat:2|intcomma }}</strong>
         </div>
         <div class="conc-mini-card">
-          <span>Credito proveedores pendiente</span>
+          <span>Crédito proveedores pendiente</span>
           <strong>{{ periodo_resumen.alcance_fiscal.ppd_recibidos_abiertos.conteo|intcomma }} · ${{ periodo_resumen.alcance_fiscal.ppd_recibidos_abiertos.saldo|floatformat:2|intcomma }}</strong>
         </div>
       </div>
@@ -463,7 +463,7 @@
               <th>Sucursal / canal</th>
               <th>CFDI ingreso</th>
               <th class="conc-money">SAT</th>
-              <th>Depositos</th>
+              <th>Depósitos</th>
               <th class="conc-money">Banco</th>
               <th class="conc-money">Diferencia</th>
               <th>Estado</th>
@@ -486,7 +486,7 @@
                 {% if row.estado == "ok" %}
                   <span class="conc-chip is-ok">Cuadra</span>
                 {% elif row.estado == "revision" %}
-                  <span class="conc-chip is-warn">Revision menor</span>
+                  <span class="conc-chip is-warn">Revisión menor</span>
                 {% else %}
                   <span class="conc-chip is-muted">Pendiente</span>
                 {% endif %}
@@ -494,7 +494,7 @@
               <td>
                 <strong>{{ row.accion }}</strong><br>
                 {% if row.movimientos_query %}
-                  <a class="conc-link" href="?periodo={{ periodo_resumen.periodo_value }}&tipo=abono&q={{ row.movimientos_query|urlencode }}#mesa-movimientos">Ver depositos</a>
+                  <a class="conc-link" href="?periodo={{ periodo_resumen.periodo_value }}&tipo=abono&q={{ row.movimientos_query|urlencode }}#mesa-movimientos">Ver depósitos</a>
                 {% else %}
                   <a class="conc-link" href="?periodo={{ periodo_resumen.periodo_value }}&tipo=abono#mesa-movimientos">Ver abonos</a>
                 {% endif %}
@@ -511,7 +511,7 @@
     <div class="conc-subpanel" style="margin-top:14px;">
       <h3>Banco contra SAT por canal</h3>
       <p class="conc-note">
-        Compara abonos del estado de cuenta contra CFDI emitidos segun la regla fiscal de cada canal. La diferencia se calcula como banco menos SAT.
+        Compara abonos del estado de cuenta contra CFDI emitidos según la regla fiscal de cada canal. La diferencia se calcula como banco menos SAT.
       </p>
       <div class="table-responsive">
         <table class="conc-table">
@@ -524,7 +524,7 @@
               <th class="conc-money">Total SAT</th>
               <th class="conc-money">Diferencia</th>
               <th>Estado</th>
-              <th>Metodo</th>
+              <th>Método</th>
             </tr>
           </thead>
           <tbody>
@@ -540,7 +540,7 @@
                 {% if row.estado == "ok" %}
                   <span class="conc-chip is-ok">Cuadra</span>
                 {% elif row.estado == "revision" %}
-                  <span class="conc-chip is-warn">Revision menor</span>
+                  <span class="conc-chip is-warn">Revisión menor</span>
                 {% else %}
                   <span class="conc-chip is-muted">Pendiente</span>
                 {% endif %}
@@ -558,7 +558,7 @@
     <div class="conc-subpanel" style="margin-top:14px;">
       <h3>CFDI emitidos por sucursal</h3>
       <p class="conc-note">
-        Sucursales detectadas desde los conceptos del XML. Los pendientes quedan separados para revision fiscal.
+        Sucursales detectadas desde los conceptos del XML. Los pendientes quedan separados para revisión fiscal.
       </p>
       <div class="table-responsive">
         <table class="conc-table">
@@ -626,7 +626,7 @@
       </div>
 
       <div class="conc-subpanel">
-        <h3>Dias cargados del estado de cuenta</h3>
+        <h3>Días cargados del estado de cuenta</h3>
         <div class="table-responsive">
           <table class="conc-table">
             <thead>
@@ -674,7 +674,7 @@
           Archivo de estado de cuenta
           <input type="file" name="archivo" required>
         </label>
-        <p class="conc-note">Formatos aceptados: PDF, XML, CSV, XLS, XLSX o XLSM. Primero se muestra una revision previa; nada se guarda hasta confirmar.</p>
+        <p class="conc-note">Formatos aceptados: PDF, XML, CSV, XLS, XLSX o XLSM. Primero se muestra una revisión previa; nada se guarda hasta confirmar.</p>
         <div class="conc-actions">
           <button class="btn btn-primary" type="submit">Revisar archivo</button>
         </div>
@@ -682,18 +682,18 @@
     </div>
 
     <div class="conc-panel">
-      <h2>Revision previa</h2>
+      <h2>Revisión previa</h2>
       {% if preview %}
         <p class="conc-note">
           {{ preview.movimientos|length }} movimientos validos de {{ preview.archivo_nombre }}.
-          {% if preview.errores %}{{ preview.errores|length }} filas requieren revision.{% endif %}
+          {% if preview.errores %}{{ preview.errores|length }} filas requieren revisión.{% endif %}
         </p>
         <div class="table-responsive">
           <table class="conc-table">
             <thead>
               <tr>
                 <th>Fecha</th>
-                <th>Descripcion</th>
+                <th>Descripción</th>
                 <th>Tipo</th>
                 <th class="conc-money">Monto</th>
               </tr>
@@ -741,8 +741,8 @@
         {% endif %}
       </div>
       <div class="conc-actions">
-        <a class="btn btn-primary" href="{{ paquete_url }}">Paquete de auditoria</a>
-        <a class="btn btn-secondary" href="{{ paquete_url }}&export=xlsx">XLSX auditoria</a>
+        <a class="btn btn-primary" href="{{ paquete_url }}">Paquete de auditoría</a>
+        <a class="btn btn-secondary" href="{{ paquete_url }}&export=xlsx">XLSX auditoría</a>
         <a class="btn btn-secondary" href="{{ paquete_url }}&export=contabilidad_csv">CSV contabilidad</a>
         <a class="btn btn-secondary" href="{{ paquete_url }}&export=contabilidad_desktop_csv">CSV Contabilidad Desktop</a>
       </div>
@@ -769,7 +769,7 @@
         </label>
         <label>
           Buscar
-          <input type="search" name="q" value="{{ movimientos_filtros.q }}" placeholder="Descripcion o cuenta">
+          <input type="search" name="q" value="{{ movimientos_filtros.q }}" placeholder="Descripción o cuenta">
         </label>
         <button class="btn btn-secondary" type="submit">Filtrar movimientos</button>
       </form>
@@ -780,11 +780,11 @@
           <tr>
             <th>Fecha</th>
             <th>Cuenta</th>
-            <th>Descripcion</th>
+            <th>Descripción</th>
             <th>Tipo</th>
             <th class="conc-money">Monto</th>
-            <th>Regla automatica</th>
-            <th>Siguiente revision</th>
+            <th>Regla automática</th>
+            <th>Siguiente revisión</th>
             <th>Estado</th>
             <th>Conciliar</th>
           </tr>
@@ -801,7 +801,7 @@
               <span class="conc-chip {{ row.regla.tono }}">{{ row.regla.mesa_label }}</span>
               <div class="conc-note">{{ row.regla.mesa_detalle }}</div>
               {% if row.movimiento.conciliado and row.movimiento.tipo_conciliacion %}
-                <div class="conc-note">No es el cierre final. Ver conciliacion aplicada.</div>
+                <div class="conc-note">No es el cierre final. Ver conciliación aplicada.</div>
               {% endif %}
             </td>
             <td>
@@ -835,16 +835,16 @@
                 <input type="hidden" name="periodo" value="{{ periodo_resumen.periodo_value }}">
                 <input type="hidden" name="movimiento_id" value="{{ row.movimiento.pk }}">
                 <select name="tipo_conciliacion" required>
-                  <option value="">Que es este movimiento?</option>
+                  <option value="">Qué es este movimiento?</option>
                   <option value="cfdi" {% if row.movimiento.tipo_conciliacion == "cfdi" %}selected{% endif %}>Va contra CFDI</option>
                   <option value="ingreso_facturado" {% if row.movimiento.tipo_conciliacion == "ingreso_facturado" %}selected{% endif %}>Ingreso ya facturado por sucursal/canal</option>
                   <option value="traspaso_cuentas" {% if row.movimiento.tipo_conciliacion == "traspaso_cuentas" %}selected{% endif %}>Traspaso entre cuentas propias</option>
-                  <option value="linea_credito" {% if row.movimiento.tipo_conciliacion == "linea_credito" %}selected{% endif %}>Disposicion / pago linea de credito</option>
-                  <option value="tarjeta_credito" {% if row.movimiento.tipo_conciliacion == "tarjeta_credito" %}selected{% endif %}>Pago / movimiento tarjeta de credito</option>
-                  <option value="comision_bancaria" {% if row.movimiento.tipo_conciliacion == "comision_bancaria" %}selected{% endif %}>Comision bancaria</option>
-                  <option value="fiscal" {% if row.movimiento.tipo_conciliacion == "fiscal" %}selected{% endif %}>Impuesto / devolucion SAT</option>
-                  <option value="nomina" {% if row.movimiento.tipo_conciliacion == "nomina" %}selected{% endif %}>Nomina</option>
-                  <option value="revision_operativa" {% if row.movimiento.tipo_conciliacion == "revision_operativa" %}selected{% endif %}>Cerrar como revision operativa</option>
+                  <option value="linea_credito" {% if row.movimiento.tipo_conciliacion == "linea_credito" %}selected{% endif %}>Disposición / pago línea de crédito</option>
+                  <option value="tarjeta_credito" {% if row.movimiento.tipo_conciliacion == "tarjeta_credito" %}selected{% endif %}>Pago / movimiento tarjeta de crédito</option>
+                  <option value="comision_bancaria" {% if row.movimiento.tipo_conciliacion == "comision_bancaria" %}selected{% endif %}>Comisión bancaria</option>
+                  <option value="fiscal" {% if row.movimiento.tipo_conciliacion == "fiscal" %}selected{% endif %}>Impuesto / devolución SAT</option>
+                  <option value="nomina" {% if row.movimiento.tipo_conciliacion == "nomina" %}selected{% endif %}>Nómina</option>
+                  <option value="revision_operativa" {% if row.movimiento.tipo_conciliacion == "revision_operativa" %}selected{% endif %}>Cerrar como revisión operativa</option>
                   <option value="soporte" {% if row.movimiento.tipo_conciliacion == "soporte" %}selected{% endif %}>Soporte sin CFDI</option>
                 </select>
                 {% if row.candidatos %}
@@ -889,7 +889,7 @@
 
   <div class="conc-panel">
     <h2>CFDI SAT del periodo</h2>
-    <p class="conc-note">Muestra hasta 20 CFDI del mes seleccionado para confirmar que el SAT ya esta reflejado en el ERP.</p>
+    <p class="conc-note">Muestra hasta 20 CFDI del mes seleccionado para confirmar que el SAT ya está reflejado en el ERP.</p>
     <div class="table-responsive">
       <table class="conc-table">
         <thead>
@@ -921,7 +921,7 @@
   </div>
 
   <div class="conc-panel">
-    <h2>Ultimas importaciones</h2>
+    <h2>Últimas importaciones</h2>
     <div class="table-responsive">
       <table class="conc-table">
         <thead>

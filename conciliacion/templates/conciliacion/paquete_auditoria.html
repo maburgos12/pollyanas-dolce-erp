@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load humanize %}
 
-{% block title %}Paquete de auditoria{% endblock %}
+{% block title %}Paquete de auditoría{% endblock %}
 
 {% block content %}
 <style>
@@ -29,8 +29,8 @@
 <div class="audit-pack">
   <div class="audit-head">
     <div>
-      <h1>Paquete de auditoria {{ paquete.periodo_value }}</h1>
-      <p class="audit-note">Resumen mensual para revisar cierre bancario, evidencia, excepciones y paquete de trabajo para CONTPAQi Contabilidad Desktop y Nominas Desktop.</p>
+      <h1>Paquete de auditoría {{ paquete.periodo_value }}</h1>
+      <p class="audit-note">Resumen mensual para revisar cierre bancario, evidencia, excepciones y paquete de trabajo para CONTPAQi Contabilidad Desktop y Nóminas Desktop.</p>
     </div>
     <div class="audit-actions">
       <a class="audit-btn" href="{% url 'conciliacion:bancaria' %}?periodo={{ paquete.periodo_value }}#mesa-movimientos">Volver a mesa</a>
@@ -74,7 +74,7 @@
   </section>
 
   <section class="audit-section">
-    <h2>Por tipo de conciliacion</h2>
+    <h2>Por tipo de conciliación</h2>
     <div class="table-responsive">
       <table class="audit-table">
         <thead><tr><th>Tipo</th><th>Movimientos</th><th>Monto</th></tr></thead>
@@ -93,7 +93,7 @@
     <h2>Excepciones y soporte pendiente</h2>
     <div class="table-responsive">
       <table class="audit-table">
-        <thead><tr><th>Folio</th><th>Fecha</th><th>Cuenta</th><th>Importe</th><th>Conciliacion</th><th>Pendiente</th></tr></thead>
+        <thead><tr><th>Folio</th><th>Fecha</th><th>Cuenta</th><th>Importe</th><th>Conciliación</th><th>Pendiente</th></tr></thead>
         <tbody>
           {% for doc in paquete.excepciones|slice:":100" %}
           <tr>
@@ -117,7 +117,7 @@
 
   <section class="audit-section">
     <h2>Entregables</h2>
-    <p class="audit-note">El XLSX incluye Banco_vs_Factura para ver cada movimiento del estado de cuenta contra su UUID/CFDI ligado, mas poliza sugerida, movimientos banco, CFDI relacionados, auxiliar de cuentas, traspasos propios, tarjetas de credito, lineas de credito, nomina, excepciones y evidencia pendiente. Este paquete esta pensado para CONTPAQi Contabilidad Desktop y Nominas Desktop; no asume CONTPAQi Bancos ni API nube.</p>
+    <p class="audit-note">El XLSX incluye Banco_vs_Factura para ver cada movimiento del estado de cuenta contra su UUID/CFDI ligado, más póliza sugerida, movimientos banco, CFDI relacionados, auxiliar de cuentas, traspasos propios, tarjetas de crédito, líneas de crédito, nómina, excepciones y evidencia pendiente. Este paquete está pensado para CONTPAQi Contabilidad Desktop y Nóminas Desktop; no asume CONTPAQi Bancos ni API nube.</p>
   </section>
 </div>
 {% endblock %}

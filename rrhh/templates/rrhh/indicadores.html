@@ -262,7 +262,7 @@
 <section class="indicadores-page">
   <div class="indicadores-hero">
     <div>
-      <div class="indicadores-eyebrow">Prototipo de indicadores internos</div>
+      <div class="indicadores-eyebrow">Indicadores internos</div>
       <div class="indicadores-title">Capital Humano con fuente única ERP</div>
       <div class="indicadores-subtitle">
         Lectura mensual de nómina, horas extra pagadas, rotación, bajas, permanencia y vacantes.
@@ -286,12 +286,12 @@
       <div class="indicador-note">Suma real de periodos del mes.</div>
     </article>
     <article class="indicador-kpi">
-      <div class="indicador-value">{{ stats.he_horas|floatformat:2 }}</div>
+      <div class="indicador-value">{{ stats.he_horas|floatformat:2|intcomma }}</div>
       <div class="indicador-label">Horas extra pagadas</div>
       <div class="indicador-note">${{ stats.he_costo|floatformat:2|intcomma }} · concepto 4 de nómina.</div>
     </article>
     <article class="indicador-kpi">
-      <div class="indicador-value">{{ stats.rotacion|floatformat:2 }}%</div>
+      <div class="indicador-value">{{ stats.rotacion|floatformat:2|intcomma }}%</div>
       <div class="indicador-label">Rotación del periodo</div>
       <div class="indicador-note">{{ stats.bajas }} bajas sobre plantilla promedio.</div>
     </article>
@@ -319,7 +319,7 @@
       <div class="indicador-note">Por fecha de ingreso registrada en empleados.</div>
     </article>
     <article class="indicador-kpi">
-      <div class="indicador-value">{{ stats.permanencia_promedio|floatformat:2 }}</div>
+      <div class="indicador-value">{{ stats.permanencia_promedio|floatformat:2|intcomma }}</div>
       <div class="indicador-label">Permanencia promedio</div>
       <div class="indicador-note">{{ stats.bajas_prueba }} bajas en periodo de prueba.</div>
     </article>
@@ -357,7 +357,7 @@
                 <td>{{ row.plantilla_autorizada }}</td>
                 <td>{{ row.brecha }}</td>
                 <td>${{ row.nomina_neta|floatformat:2|intcomma }}</td>
-                <td>{{ row.he_horas|floatformat:2 }}</td>
+                <td>{{ row.he_horas|floatformat:2|intcomma }}</td>
                 <td>${{ row.he_costo|floatformat:2|intcomma }}</td>
                 <td>{{ row.bajas }}</td>
                 <td>{{ row.vacantes }}</td>
