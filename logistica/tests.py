@@ -1082,8 +1082,8 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v15", pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v15-dashboard-ruta", sw_js)
+        self.assertIn("route-control-v16", pwa_html)
+        self.assertIn("pollyanas-logistica-pwa-v16-dashboard-ruta-compacta", sw_js)
         self.assertIn("ROUTE_AUTO_TRACKING_INTERVAL_MS", pwa_html)
         self.assertIn("TRACKING_QUEUE_TTL_MS", pwa_html)
         self.assertIn("normalizeRutaTrackingQueue", pwa_html)
@@ -1109,6 +1109,7 @@ class LogisticaControlRutasTests(TestCase):
 
         self.assertIn("route-hero", pwa_html)
         self.assertIn("route-dashboard-card", pwa_html)
+        self.assertNotIn("grid-column: 1 / -1", pwa_html)
         self.assertIn("route-signal-grid", pwa_html)
         self.assertIn("route-progress-card", pwa_html)
         self.assertIn("Capturar ubicación GPS", pwa_html)

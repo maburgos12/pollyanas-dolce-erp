@@ -309,30 +309,8 @@
       }
 
       .route-dashboard-card {
-        grid-column: 1 / -1;
-        grid-template-columns: auto minmax(0, 1fr);
-        grid-template-rows: auto;
-        align-items: center;
-        min-height: 94px;
         border-color: var(--border);
         background: var(--surface);
-      }
-
-      .route-dashboard-card > span:not(.badge):not(.app-glyph) {
-        align-self: center;
-        color: var(--text);
-        font-size: 18px;
-        line-height: 1.1;
-      }
-
-      .route-dashboard-card .app-glyph {
-        width: 42px;
-        height: 42px;
-      }
-
-      .route-dashboard-card .badge.turno {
-        top: 13px;
-        right: 13px;
       }
 
       .badge {
@@ -4038,7 +4016,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=route-control-v15").catch(() => {});
+          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=route-control-v16").catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {
