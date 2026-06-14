@@ -27,38 +27,40 @@
     <article class="inv-kpi"><div class="inv-label">Fuente</div><div class="inv-value pd-u-f2ea5fc13d">{{ benchmark.data_source|default:"N/D" }}</div></article>
   </section>
 
-  <form method="post" id="inversionWizardForm" action="{% url 'reportes:inversiones_wizard' %}">
+  <form method="post" id="inversionWizardForm" action="{% url 'inversiones:wizard' %}">
     {% csrf_token %}
     <input type="hidden" name="action" value="crear_proyecto">
     <input type="hidden" name="partidas_json" id="partidas_json">
 
     <div class="inv-layout">
       <main class="inv-panel">
+        <div id="wizardErrors" class="inv-alert" hidden></div>
         <div class="inv-steps">
           <button type="button" class="inv-step-pill active" data-step-target="1">1. Ficha</button>
           <button type="button" class="inv-step-pill" data-step-target="2">2. Presupuesto</button>
           <button type="button" class="inv-step-pill" data-step-target="3">3. Operación</button>
-          <button type="button" class="inv-step-pill" data-step-target="4">4. Revisión</button>
+          <button type="button" class="inv-step-pill" data-step-target="4">4. Financiamiento</button>
+          <button type="button" class="inv-step-pill" data-step-target="5">5. Revisión</button>
         </div>
 
-        <section class="inv-step active" data-step="1">
-          <div class="inv-form-grid">
-            <div class="inv-field"><label>Nombre del proyecto</label><input class="inv-input" name="nombre_proyecto" value="Apertura Bamoa 2026" required></div>
-            <div class="inv-field"><label>Tipo</label><select class="inv-select" name="tipo_proyecto">{% for value,label in project_types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
-            <div class="inv-field"><label>Ciudad</label><input class="inv-input" name="ciudad" value="Guasave"></div>
-            <div class="inv-field"><label>Colonia</label><input class="inv-input" name="colonia" value="Bamoa"></div>
-            <div class="inv-field"><label>m2 local</label><input class="inv-input" type="number" step="0.01" name="m2_local" value="45"></div>
-            <div class="inv-field"><label>Sucursal relacionada</label><select class="inv-select" name="sucursal_relacionada_id"><option value="">Sin relación</option>{% for sucursal in sucursales %}<option value="{{ sucursal.id }}">{{ sucursal.nombre }}</option>{% endfor %}</select></div>
-            <div class="inv-field"><label>Fecha inicio</label><input class="inv-input" type="date" name="fecha_inicio" value="2026-06-01" required></div>
-            <div class="inv-field"><label>Fecha apertura estimada</label><input class="inv-input" type="date" name="fecha_apertura" value="2026-08-01"></div>
-            <div class="inv-field pd-u-97294b207c"><label>Descripción de ubicación</label><textarea class="inv-textarea" name="descripcion_ubicacion">Sucursal pequeña de pickup y punto de venta para validar demanda local antes de escalar operación.</textarea></div>
-          </div>
-        </section>
+	        <section class="inv-step active" data-step="1">
+	          <div class="inv-form-grid">
+	            <div class="inv-field"><label>Nombre del proyecto</label><input class="inv-input" name="nombre_proyecto" placeholder="Ej. Apertura sucursal Bamoa" required></div>
+	            <div class="inv-field"><label>Tipo</label><select class="inv-select" name="tipo_proyecto">{% for value,label in project_types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+	            <div class="inv-field"><label>Ciudad</label><input class="inv-input" name="ciudad" placeholder="Ciudad"></div>
+	            <div class="inv-field"><label>Colonia</label><input class="inv-input" name="colonia" placeholder="Colonia o zona"></div>
+	            <div class="inv-field"><label>m2 local</label><input class="inv-input" type="number" step="0.01" min="0" name="m2_local" placeholder="0.00"></div>
+	            <div class="inv-field"><label>Sucursal relacionada</label><select class="inv-select" name="sucursal_relacionada_id"><option value="">Sin relación</option>{% for sucursal in sucursales %}<option value="{{ sucursal.id }}">{{ sucursal.nombre }}</option>{% endfor %}</select></div>
+	            <div class="inv-field"><label>Fecha inicio</label><input class="inv-input" type="date" name="fecha_inicio" required></div>
+	            <div class="inv-field"><label>Fecha apertura estimada</label><input class="inv-input" type="date" name="fecha_apertura"></div>
+	            <div class="inv-field pd-u-97294b207c"><label>Descripción de ubicación</label><textarea class="inv-textarea" name="descripcion_ubicacion" placeholder="Describe el local, zona, formato y condición que afecte inversión u operación."></textarea></div>
+	          </div>
+	        </section>
 
         <section class="inv-step" data-step="2">
           <div class="pd-u-e7737f6d3d">
             <button type="button" class="inv-button secondary" id="addPartidaBtn">Agregar partida</button>
-            <button type="button" class="inv-button secondary" id="importGuamuchilBtn">Usar referencia Guamúchil</button>
+            <button type="button" class="inv-button secondary" id="importGuamuchilBtn">Cargar referencia Guamúchil</button>
           </div>
           <div class="pd-u-a76a7a79bc">
             <table class="inv-table">
@@ -72,33 +74,45 @@
           <div id="totalesCategorias" class="pd-u-0cf8f93b0e"></div>
         </section>
 
-        <section class="inv-step" data-step="3">
-          <div class="inv-form-grid">
-            <div class="inv-field"><label>Renta mensual</label><input class="inv-input js-operacion" type="number" step="0.01" name="renta_mensual" value="4000"></div>
-            <div class="inv-field"><label>Depósito</label><input class="inv-input" type="number" step="0.01" name="deposito" value="4000"></div>
-            <div class="inv-field"><label>Nómina mensual</label><input class="inv-input js-operacion" type="number" step="0.01" name="nomina_mensual" value="18000"></div>
-            <div class="inv-field"><label>Servicios</label><input class="inv-input js-operacion" type="number" step="0.01" name="servicios_mensual" value="7000"></div>
-            <div class="inv-field"><label>Marketing mensual</label><input class="inv-input js-operacion" type="number" step="0.01" name="marketing_mensual" value="2500"></div>
-            <div class="inv-field"><label>Otros fijos</label><input class="inv-input js-operacion" type="number" step="0.01" name="otros_fijos_mensual" value="1500"></div>
-            <div class="inv-field"><label>Ventas promedio base</label><input class="inv-input js-fin" type="number" step="0.01" name="ventas_promedio_base" value="{{ ventas_sugeridas|default:260000 }}"></div>
-            <div class="inv-field"><label>Margen bruto %</label><input class="inv-input js-fin" type="number" step="0.01" name="margen_bruto_pct" value="45"></div>
-            <div class="inv-field"><label>Crecimiento mensual %</label><input class="inv-input js-fin" type="number" step="0.01" name="crecimiento_mensual_pct" value="0.8"></div>
-            <div class="inv-field"><label>Horizonte meses</label><input class="inv-input js-fin" type="number" name="horizonte_meses" value="36"></div>
-            <div class="inv-field"><label>Discount rate %</label><input class="inv-input" type="number" step="0.01" name="discount_rate" value="12"></div>
-            <div class="inv-field"><label>ROI objetivo %</label><input class="inv-input" type="number" step="0.01" name="roi_objetivo" value="25"></div>
-            <div class="inv-field"><label>Payback objetivo meses</label><input class="inv-input" type="number" name="payback_objetivo_meses" value="24"></div>
-          </div>
-        </section>
+	        <section class="inv-step" data-step="3">
+	          <div class="inv-form-grid">
+	            <div class="inv-field"><label>Renta mensual</label><input class="inv-input js-operacion" type="number" step="0.01" min="0" name="renta_mensual" placeholder="0.00"></div>
+	            <div class="inv-field"><label>Depósito</label><input class="inv-input" type="number" step="0.01" min="0" name="deposito" placeholder="0.00"></div>
+	            <div class="inv-field"><label>Nómina mensual</label><input class="inv-input js-operacion" type="number" step="0.01" min="0" name="nomina_mensual" placeholder="0.00"></div>
+	            <div class="inv-field"><label>Servicios</label><input class="inv-input js-operacion" type="number" step="0.01" min="0" name="servicios_mensual" placeholder="0.00"></div>
+	            <div class="inv-field"><label>Marketing mensual</label><input class="inv-input js-operacion" type="number" step="0.01" min="0" name="marketing_mensual" placeholder="0.00"></div>
+	            <div class="inv-field"><label>Otros fijos</label><input class="inv-input js-operacion" type="number" step="0.01" min="0" name="otros_fijos_mensual" placeholder="0.00"></div>
+	            <div class="inv-field"><label>Ventas promedio base</label><input class="inv-input js-fin" type="number" step="0.01" min="0" name="ventas_promedio_base" placeholder="{{ ventas_sugeridas|default:0 }}" required><p class="inv-help">Usa el benchmark solo como referencia, no como dato automático.</p></div>
+	            <div class="inv-field"><label>Margen bruto %</label><input class="inv-input js-fin" type="number" step="0.01" name="margen_bruto_pct" value="45"></div>
+	            <div class="inv-field"><label>Crecimiento mensual %</label><input class="inv-input js-fin" type="number" step="0.01" name="crecimiento_mensual_pct" value="0.8"></div>
+	            <div class="inv-field"><label>Horizonte meses</label><input class="inv-input js-fin" type="number" name="horizonte_meses" value="36"></div>
+	            <div class="inv-field"><label>Discount rate %</label><input class="inv-input" type="number" step="0.01" name="discount_rate" value="12"></div>
+	            <div class="inv-field"><label>ROI objetivo %</label><input class="inv-input" type="number" step="0.01" name="roi_objetivo" value="25"></div>
+	            <div class="inv-field"><label>Payback objetivo meses</label><input class="inv-input" type="number" name="payback_objetivo_meses" value="24"></div>
+	          </div>
+	        </section>
 
-        <section class="inv-step" data-step="4">
-          <div class="inv-review-grid" id="escenariosPreview"></div>
-          <div class="inv-panel pd-u-d9da24b4a6">
-            <div class="inv-label">Total inversión planeada</div>
-            <div class="inv-value" id="reviewTotal">$0.00</div>
-            <p class="inv-copy" id="reviewResumen"></p>
-          </div>
-          <button type="submit" class="inv-button pd-u-0cf8f93b0e">Crear proyecto con escenarios</button>
-        </section>
+	        <section class="inv-step" data-step="4">
+	          <div class="inv-note">Si dejas capital vacío, se calcula como inversión planeada menos deuda asociada.</div>
+	          <div class="inv-form-grid">
+	            <div class="inv-field"><label>Capital inicial aportado</label><input class="inv-input js-financing" type="number" step="0.01" min="0" name="capital_inicial_aportado" placeholder="Automático"></div>
+	            <div class="inv-field"><label>Deuda asociada</label><input class="inv-input js-financing" type="number" step="0.01" min="0" name="deuda_asociada" value="0"></div>
+	            <div class="inv-field"><label>Tasa interés anual %</label><input class="inv-input js-financing" type="number" step="0.0001" min="0" name="tasa_interes_anual" value="0"></div>
+	            <div class="inv-field"><label>Plazo deuda meses</label><input class="inv-input js-financing" type="number" min="0" name="plazo_deuda_meses" value="0"></div>
+	            <div class="inv-field"><label>Pago mensual deuda estimado</label><input class="inv-input js-financing" type="number" step="0.01" min="0" name="pago_mensual_deuda_estimado" value="0"></div>
+	            <div class="inv-field"><label>Cobertura</label><div class="inv-review-card"><div class="inv-label">Capital + deuda vs inversión</div><div class="inv-value" id="fundingCoverage">$0.00</div><p class="inv-copy" id="fundingNote"></p></div></div>
+	          </div>
+	        </section>
+
+	        <section class="inv-step" data-step="5">
+	          <div class="inv-review-grid" id="escenariosPreview"></div>
+	          <div class="inv-panel pd-u-d9da24b4a6">
+	            <div class="inv-label">Total inversión planeada</div>
+	            <div class="inv-value" id="reviewTotal">$0.00</div>
+	            <p class="inv-copy" id="reviewResumen"></p>
+	          </div>
+	          <button type="submit" class="inv-button pd-u-0cf8f93b0e">Crear proyecto con escenarios</button>
+	        </section>
 
         <div class="inv-actions">
           <button type="button" class="inv-button secondary" id="prevStepBtn">Anterior</button>
@@ -123,32 +137,52 @@
   const categorias = {{ categorias_json|safe }};
   const gmlCats = {{ gml_cats_json|safe }};
   let step = 1;
-  let partidas = [
-    { categoria: "OBRA_CIVIL", descripcion: "Remodelación local", proveedor_nombre: "", monto: 190000, iva: 0 }
-  ];
+  let partidas = [];
   const money = (value) => new Intl.NumberFormat("es-MX", { style:"currency", currency:"MXN" }).format(Number(value || 0));
   const numberValue = (selector) => Number(document.querySelector(selector)?.value || 0);
+  const escapeAttr = (value) => String(value || "").replace(/[&<>"']/g, (char) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[char]));
+  const stepsTotal = 5;
+  const errorBox = document.getElementById("wizardErrors");
+
+  function setErrors(messages) {
+    document.querySelectorAll(".is-invalid").forEach((node) => node.classList.remove("is-invalid"));
+    if (!messages.length) {
+      errorBox.hidden = true;
+      errorBox.innerHTML = "";
+      return;
+    }
+    errorBox.hidden = false;
+    errorBox.innerHTML = `<strong>Revisa la captura:</strong><ul>${messages.map((message) => `<li>${message}</li>`).join("")}</ul>`;
+    errorBox.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   function renderSteps() {
     document.querySelectorAll(".inv-step").forEach((node) => node.classList.toggle("active", Number(node.dataset.step) === step));
     document.querySelectorAll(".inv-step-pill").forEach((node) => node.classList.toggle("active", Number(node.dataset.stepTarget) === step));
     document.getElementById("prevStepBtn").style.visibility = step === 1 ? "hidden" : "visible";
-    document.getElementById("nextStepBtn").style.display = step === 4 ? "none" : "inline-flex";
+    document.getElementById("nextStepBtn").style.display = step === stepsTotal ? "none" : "inline-flex";
     renderReview();
   }
 
   function renderPartidas() {
     const body = document.getElementById("partidasBody");
     body.innerHTML = "";
+    if (!partidas.length) {
+      body.innerHTML = `<tr><td colspan="7" class="inv-copy">Sin partidas. Agrega una partida o carga la referencia Guamúchil para editarla.</td></tr>`;
+      renderTotales();
+      renderComparativo();
+      renderReview();
+      return;
+    }
     partidas.forEach((partida, idx) => {
       const tr = document.createElement("tr");
       const total = Number(partida.monto || 0) + Number(partida.iva || 0);
       tr.innerHTML = `
         <td><select data-field="categoria">${categorias.map((cat) => `<option value="${cat.value}" ${cat.value === partida.categoria ? "selected" : ""}>${cat.label}</option>`).join("")}</select></td>
-        <td><input data-field="descripcion" value="${partida.descripcion || ""}" placeholder="Descripción"></td>
-        <td><input data-field="proveedor_nombre" value="${partida.proveedor_nombre || ""}" placeholder="Proveedor"></td>
-        <td><input data-field="monto" type="number" step="0.01" min="0" value="${partida.monto || 0}"></td>
-        <td><input data-field="iva" type="number" step="0.01" min="0" value="${partida.iva || 0}"></td>
+        <td><input data-field="descripcion" value="${escapeAttr(partida.descripcion)}" placeholder="Descripción"></td>
+        <td><input data-field="proveedor_nombre" value="${escapeAttr(partida.proveedor_nombre)}" placeholder="Proveedor"></td>
+        <td><input data-field="monto" type="number" step="0.01" min="0" value="${partida.monto || ""}"></td>
+        <td><input data-field="iva" type="number" step="0.01" min="0" value="${partida.iva || ""}"></td>
         <td class="pd-u-5565220dd2">${money(total)}</td>
         <td><button type="button" class="inv-button danger" data-delete="${idx}">X</button></td>`;
       tr.querySelectorAll("[data-field]").forEach((input) => {
@@ -181,9 +215,10 @@
     const labels = Object.fromEntries(categorias.map((cat) => [cat.value, cat.label]));
     const totals = totalesPorCategoria();
     const total = Object.values(totals).reduce((a, b) => a + b, 0);
-    document.getElementById("totalesCategorias").innerHTML = Object.keys(totals).sort().map((cat) =>
+    const content = Object.keys(totals).sort().map((cat) =>
       `<span class="inv-step-pill">${labels[cat] || cat}: ${money(totals[cat])}</span>`
-    ).join(" ") + ` <span class="inv-step-pill active">Total: ${money(total)}</span>`;
+    ).join(" ") || `<span class="inv-step-pill">Sin presupuesto capturado</span>`;
+    document.getElementById("totalesCategorias").innerHTML = `${content} <span class="inv-step-pill active">Total: ${money(total)}</span>`;
   }
 
   function renderComparativo() {
@@ -202,13 +237,19 @@
     const gastos = ["renta_mensual", "nomina_mensual", "servicios_mensual", "marketing_mensual", "otros_fijos_mensual"].reduce((sum, name) => sum + Number(document.querySelector(`[name=${name}]`)?.value || 0), 0);
     const ventas = numberValue("[name=ventas_promedio_base]");
     const margen = numberValue("[name=margen_bruto_pct]") / 100;
+    const deuda = numberValue("[name=deuda_asociada]");
+    const capitalInput = document.querySelector("[name=capital_inicial_aportado]");
+    const capital = capitalInput?.value ? Number(capitalInput.value || 0) : Math.max(total - deuda, 0);
+    const cobertura = capital + deuda;
     const scenarios = [
       ["Conservador", .88, 1.06],
       ["Base", 1, 1],
       ["Optimista", 1.12, .97],
     ];
     document.getElementById("reviewTotal").textContent = money(total);
-    document.getElementById("reviewResumen").textContent = `${partidas.length} partidas capturadas. Gastos fijos mensuales: ${money(gastos)}.`;
+    document.getElementById("reviewResumen").textContent = `${partidas.length} partidas capturadas. Gastos fijos mensuales: ${money(gastos)}. Capital estimado: ${money(capital)}. Deuda: ${money(deuda)}.`;
+    document.getElementById("fundingCoverage").textContent = money(cobertura - total);
+    document.getElementById("fundingNote").textContent = cobertura === total ? "Cobertura completa." : cobertura > total ? "La cobertura excede la inversión planeada." : "Falta cubrir inversión con capital o deuda.";
     document.getElementById("escenariosPreview").innerHTML = scenarios.map(([name, mv, mc]) => {
       const utilidad = (ventas * mv * margen) - (gastos * mc);
       return `<article class="inv-review-card"><div class="inv-label">${name}</div><div class="inv-value">${money(utilidad)}</div><div class="inv-copy">Utilidad mensual estimada</div></article>`;
@@ -220,18 +261,45 @@
     renderPartidas();
   });
   document.getElementById("importGuamuchilBtn").addEventListener("click", () => {
-    Object.keys(gmlCats).forEach((cat) => partidas.push({ categoria:cat, descripcion:`Referencia ${gmlCats[cat].label}`, proveedor_nombre:"", monto:0, iva:0 }));
+    partidas = Object.keys(gmlCats).sort().map((cat) => ({
+      categoria: cat,
+      descripcion: `Referencia Guamúchil · ${gmlCats[cat].label}`,
+      proveedor_nombre: "",
+      monto: Number(gmlCats[cat].total || 0),
+      iva: 0
+    }));
     renderPartidas();
   });
   document.querySelectorAll("[data-step-target]").forEach((button) => button.addEventListener("click", () => { step = Number(button.dataset.stepTarget); renderSteps(); }));
-  document.getElementById("nextStepBtn").addEventListener("click", () => { step = Math.min(4, step + 1); renderSteps(); });
+  document.getElementById("nextStepBtn").addEventListener("click", () => { step = Math.min(stepsTotal, step + 1); renderSteps(); });
   document.getElementById("prevStepBtn").addEventListener("click", () => { step = Math.max(1, step - 1); renderSteps(); });
-  document.querySelectorAll(".js-operacion,.js-fin").forEach((input) => input.addEventListener("input", renderReview));
+  document.querySelectorAll(".js-operacion,.js-fin,.js-financing").forEach((input) => input.addEventListener("input", renderReview));
   document.getElementById("inversionWizardForm").addEventListener("submit", (event) => {
+    const errors = [];
+    const requiredFields = [
+      ["[name=nombre_proyecto]", "Captura el nombre del proyecto."],
+      ["[name=fecha_inicio]", "Captura la fecha de inicio."],
+      ["[name=ventas_promedio_base]", "Captura ventas promedio base."],
+    ];
+    requiredFields.forEach(([selector, message]) => {
+      const input = document.querySelector(selector);
+      if (!String(input?.value || "").trim()) {
+        errors.push(message);
+        input?.classList.add("is-invalid");
+      }
+    });
+    const gastos = ["renta_mensual", "nomina_mensual", "servicios_mensual", "marketing_mensual", "otros_fijos_mensual"].reduce((sum, name) => sum + Number(document.querySelector(`[name=${name}]`)?.value || 0), 0);
+    if (gastos <= 0) {
+      errors.push("Captura al menos un gasto fijo mensual para evitar ROI inflado.");
+      document.querySelectorAll(".js-operacion").forEach((input) => input.classList.add("is-invalid"));
+    }
     document.getElementById("partidas_json").value = JSON.stringify(partidas);
     if (!partidas.length || !partidas.some((p) => Number(p.monto || 0) > 0 && String(p.descripcion || "").trim())) {
+      errors.push("Agrega al menos una partida con descripción y monto mayor a cero.");
+    }
+    if (errors.length) {
       event.preventDefault();
-      alert("Agrega al menos una partida con descripción y monto mayor a cero.");
+      setErrors(errors);
     }
   });
   renderPartidas();

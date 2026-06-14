@@ -1,9 +1,11 @@
 {% load humanize %}
 <section class="inv-panel">
   <h2>Supuestos financieros</h2>
+  <p class="inv-copy">Estos campos alimentan la proyección preliminar. Los snapshots reales siguen siendo la fuente para seguimiento operativo.</p>
   <form method="post">
     {% csrf_token %}
     <input type="hidden" name="action" value="actualizar_supuestos">
+    <h3>Operación mensual</h3>
     <div class="inv-form-grid">
       <div><label class="inv-label">Renta</label><input class="inv-input" type="number" step="0.01" name="renta_mensual" value="{{ supuestos_op.renta|default:0 }}"></div>
       <div><label class="inv-label">Nómina</label><input class="inv-input" type="number" step="0.01" name="nomina_mensual" value="{{ supuestos_op.nomina|default:0 }}"></div>
@@ -15,6 +17,19 @@
       <div><label class="inv-label">Margen bruto %</label><input class="inv-input" type="number" step="0.01" name="margen_bruto_pct" value="{{ supuestos_op.margen_pct|default:45 }}"></div>
       <div><label class="inv-label">Crecimiento mensual %</label><input class="inv-input" type="number" step="0.01" name="crecimiento_mensual_pct" value="{{ supuestos_op.crecimiento_mensual_pct|default:0.8 }}"></div>
       <div><label class="inv-label">Horizonte meses</label><input class="inv-input" type="number" name="horizonte_meses" value="{{ supuestos_op.horizonte_meses|default:36 }}"></div>
+    </div>
+
+    <h3>Financiamiento</h3>
+    <div class="inv-form-grid">
+      <div><label class="inv-label">Capital inicial aportado</label><input class="inv-input" type="number" step="0.01" name="capital_inicial_aportado" value="{{ project.capital_inicial_aportado|default:0 }}"></div>
+      <div><label class="inv-label">Deuda asociada</label><input class="inv-input" type="number" step="0.01" name="deuda_asociada" value="{{ project.deuda_asociada|default:0 }}"></div>
+      <div><label class="inv-label">Tasa interés anual %</label><input class="inv-input" type="number" step="0.0001" name="tasa_interes_anual" value="{{ project.tasa_interes_anual|default:0 }}"></div>
+      <div><label class="inv-label">Plazo deuda meses</label><input class="inv-input" type="number" name="plazo_deuda_meses" value="{{ project.plazo_deuda_meses|default:0 }}"></div>
+      <div><label class="inv-label">Pago mensual deuda estimado</label><input class="inv-input" type="number" step="0.01" name="pago_mensual_deuda_estimado" value="{{ project.pago_mensual_deuda_estimado|default:0 }}"></div>
+    </div>
+
+    <h3>Metas y descuento</h3>
+    <div class="inv-form-grid">
       <div><label class="inv-label">Discount rate %</label><input class="inv-input" type="number" step="0.01" name="discount_rate" value="{{ project.discount_rate|default:12 }}"></div>
       <div><label class="inv-label">ROI objetivo %</label><input class="inv-input" type="number" step="0.01" name="roi_objetivo" value="{{ project.roi_objetivo|default:25 }}"></div>
       <div><label class="inv-label">Payback objetivo</label><input class="inv-input" type="number" name="payback_objetivo_meses" value="{{ project.payback_objetivo_meses|default:24 }}"></div>
@@ -26,6 +41,17 @@
 <section class="inv-panel">
   <h2>Resultados</h2>
   {% if proyeccion.disponible %}
+    {% if proyeccion.warnings %}
+      <div class="inv-alert">
+        <strong>Advertencias de fórmula:</strong>
+        <ul>
+          {% for warning in proyeccion.warnings %}
+            <li>{{ warning }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+    <p class="inv-copy">TIR y VPN se calculan con flujo libre estimado después de gastos fijos y servicio de deuda capturado.</p>
     <div class="inv-kpis">
       <div class="inv-kpi"><span class="inv-label">TIR</span><div class="inv-value">{% if proyeccion.tir_anual is not None %}{{ proyeccion.tir_anual|floatformat:2|intcomma }}%{% else %}N/D{% endif %}</div></div>
       <div class="inv-kpi"><span class="inv-label">VPN</span><div class="inv-value">${{ proyeccion.vpn|floatformat:2|intcomma }}</div></div>
@@ -33,6 +59,11 @@
       <div class="inv-kpi"><span class="inv-label">Payback</span><div class="inv-value">{{ proyeccion.payback_meses|default:"N/D" }} meses</div></div>
       <div class="inv-kpi"><span class="inv-label">Punto equilibrio</span><div class="inv-value">${{ proyeccion.pe_mensual|floatformat:2|intcomma }}</div></div>
       <div class="inv-kpi"><span class="inv-label">Viabilidad</span><div class="inv-value">{% if proyeccion.viable %}Verde{% else %}Revisar{% endif %}</div></div>
+    </div>
+    <div class="inv-kpis" style="margin-top:.75rem">
+      <div class="inv-kpi"><span class="inv-label">Flujo libre total</span><div class="inv-value">${{ proyeccion.utilidad_total|floatformat:2|intcomma }}</div></div>
+      <div class="inv-kpi"><span class="inv-label">Utilidad operativa total</span><div class="inv-value">${{ proyeccion.utilidad_operativa_total|floatformat:2|intcomma }}</div></div>
+      <div class="inv-kpi"><span class="inv-label">Servicio deuda mensual</span><div class="inv-value">${{ proyeccion.servicio_deuda_mensual|floatformat:2|intcomma }}</div></div>
     </div>
     <div class="inv-panel chart-box"><canvas id="flujoCajaChart"></canvas></div>
   {% else %}
