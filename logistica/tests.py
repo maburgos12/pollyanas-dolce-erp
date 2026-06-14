@@ -3,6 +3,7 @@ from decimal import Decimal
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth.models import Group, User
@@ -31,12 +32,12 @@ from logistica.models import (
     RutaEntrega,
     Unidad,
 )
-from logistica.services_carga_ruta import sincronizar_checklist_carga_desde_point
+from logistica.services_carga_ruta import sincronizar_checklist_carga_desde_point, sincronizar_recepcion_desde_point
 from logistica.services_rutas_control import distancia_metros, registrar_ubicacion_ruta, resumen_control_rutas
 from logistica.services_tiempos_ruta import resumen_tiempos_ruta
 from logistica.tasks import _emails_de_grupo, detectar_gps_perdido_rutas
 from api.logistica_views import _can_operate_pwa
-from pos_bridge.models import PointBranch, PointTransferLine
+from pos_bridge.models import PointBranch, PointSyncJob, PointTransferLine
 
 
 class LogisticaEmailTemplateTests(SimpleTestCase):
@@ -561,6 +562,65 @@ class LogisticaControlRutasTests(TestCase):
             is_cancelled=False,
             is_finalized=False,
         )
+
+    def _crear_linea_carga_con_transferencia_recibida(
+        self,
+        *,
+        source_hash="transfer-recibida-1",
+        sent_quantity="5.000",
+        loaded_quantity="5.000",
+        received_quantity="5.000",
+        is_received=True,
+    ):
+        origin = PointBranch.objects.create(external_id=f"CEDIS-R-{source_hash}", name="CEDIS", erp_branch=None)
+        destination = PointBranch.objects.create(external_id=f"SUC-R-{source_hash}", name=self.sucursal.nombre, erp_branch=self.sucursal)
+        sync_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
+            status=PointSyncJob.STATUS_SUCCESS,
+            result_summary={},
+        )
+        transfer_line = PointTransferLine.objects.create(
+            origin_branch=origin,
+            destination_branch=destination,
+            erp_origin_branch=None,
+            erp_destination_branch=self.sucursal,
+            sync_job=sync_job,
+            transfer_external_id=f"T-R-{source_hash}",
+            detail_external_id=f"D-R-{source_hash}",
+            source_hash=source_hash,
+            registered_at=timezone.now(),
+            sent_at=timezone.now(),
+            received_at=timezone.now() if is_received else None,
+            item_name="Pastel Snicker chico",
+            item_code="SNICK-CH",
+            unit="pz",
+            requested_quantity=sent_quantity,
+            sent_quantity=sent_quantity,
+            received_quantity=received_quantity,
+            is_open=not is_received,
+            is_received=is_received,
+            is_cancelled=False,
+            is_finalized=is_received,
+        )
+        checklist = RutaCargaChecklist.objects.create(ruta=self.ruta, estatus=RutaCargaChecklist.ESTATUS_CONFIRMADA)
+        linea = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=self.parada,
+            point_transfer_line=transfer_line,
+            transfer_external_id=transfer_line.transfer_external_id,
+            detail_external_id=transfer_line.detail_external_id,
+            source_hash=transfer_line.source_hash,
+            item_code=transfer_line.item_code,
+            item_name=transfer_line.item_name,
+            unit=transfer_line.unit,
+            cantidad_solicitada=transfer_line.requested_quantity,
+            cantidad_enviada_esperada=transfer_line.sent_quantity,
+            cantidad_cargada=loaded_quantity,
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+            validado_por=self.user,
+            validado_en=timezone.now(),
+        )
+        return checklist, linea, transfer_line
 
     def _crear_ruta_planeada_para_carga(self):
         self.ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
@@ -1582,6 +1642,64 @@ class LogisticaControlRutasTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+    def test_sincronizar_recepcion_desde_point_confirma_parada_recibida(self):
+        self._crear_linea_carga_con_transferencia_recibida()
+
+        resumen = sincronizar_recepcion_desde_point(ruta=self.ruta, user=self.user, ejecutar_sync=False)
+
+        self.parada.refresh_from_db()
+        self.ruta.refresh_from_db()
+        self.assertEqual(resumen.evidencias_creadas, 1)
+        self.assertEqual(resumen.paradas_actualizadas, 1)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertEqual(self.parada.entrega_confirmada_por, self.user)
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
+        self.assertEqual(self.ruta.cumplimiento_porcentaje, Decimal("100.00"))
+        evidencia = ParadaEntregaEvidencia.objects.get(parada=self.parada)
+        self.assertEqual(evidencia.cantidad_entregada, Decimal("5.000"))
+        self.assertEqual(evidencia.metadata["origen"], "point_transfer")
+
+    def test_sincronizar_recepcion_desde_point_no_inventa_si_point_no_recibio(self):
+        self._crear_linea_carga_con_transferencia_recibida(is_received=False, received_quantity="0.000")
+
+        resumen = sincronizar_recepcion_desde_point(ruta=self.ruta, user=self.user, ejecutar_sync=False)
+
+        self.parada.refresh_from_db()
+        self.assertEqual(resumen.evidencias_creadas, 0)
+        self.assertEqual(resumen.lineas_pendientes_point, 1)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
+        self.assertFalse(ParadaEntregaEvidencia.objects.filter(parada=self.parada).exists())
+
+    def test_sincronizar_recepcion_desde_point_marca_diferencia_si_recibido_no_cuadra(self):
+        self._crear_linea_carga_con_transferencia_recibida(loaded_quantity="5.000", received_quantity="3.000")
+
+        resumen = sincronizar_recepcion_desde_point(ruta=self.ruta, user=self.user, ejecutar_sync=False)
+
+        self.parada.refresh_from_db()
+        self.assertEqual(resumen.evidencias_creadas, 1)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_CON_DIFERENCIA)
+
+    def test_api_sincroniza_recepcion_point_y_devuelve_parada_actualizada(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        _, _, transfer_line = self._crear_linea_carga_con_transferencia_recibida()
+        sync_job = transfer_line.sync_job
+
+        with patch("logistica.services_carga_ruta.PointMovementSyncService") as service_cls:
+            service_cls.return_value.run_transfer_sync.return_value = sync_job
+            response = self.client.post(
+                reverse("api_logistica_ruta_recepcion_point_sync", kwargs={"ruta_id": self.ruta.id}),
+                "{}",
+                content_type="application/json",
+            )
+
+        self.parada.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["paradas_actualizadas"], 1)
+        self.assertEqual(response.json()["lineas_recibidas"], 1)
+        self.assertEqual(response.json()["paradas"][0]["entrega_estado"], ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
 
     def test_db_bloquea_dos_rutas_en_ruta_mismo_repartidor(self):
         with self.assertRaises(IntegrityError):

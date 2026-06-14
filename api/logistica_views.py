@@ -46,6 +46,7 @@ from logistica.services_carga_ruta import (
     obtener_checklist_carga,
     registrar_evento_checklist_confirmado,
     sincronizar_checklist_carga_desde_point,
+    sincronizar_recepcion_desde_point,
     validar_linea_carga,
 )
 from logistica.services_rutas_control import registrar_ubicacion_ruta, resumen_control_rutas
@@ -1326,6 +1327,29 @@ class LogisticaRutaCargaChecklistSyncView(_LogisticaBaseView):
                 "creadas": resumen.creadas,
                 "actualizadas": resumen.actualizadas,
                 "omitidas": resumen.omitidas,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class LogisticaRutaRecepcionPointSyncView(_LogisticaBaseView):
+    def post(self, request, ruta_id: int):
+        if not can_manage_submodule(request.user, "logistica", "rutas"):
+            return Response({"detail": "No tienes permisos para sincronizar recepción desde Point."}, status=status.HTTP_403_FORBIDDEN)
+        ruta = get_object_or_404(RutaEntrega, pk=ruta_id)
+        try:
+            resumen = sincronizar_recepcion_desde_point(ruta=ruta, user=request.user, ejecutar_sync=True)
+        except ValidationError as exc:
+            return Response({"detail": exc.message if hasattr(exc, "message") else exc.messages}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {
+                "ruta": LogisticaRutaSerializer(resumen.ruta).data,
+                "paradas": ParadaRutaSerializer(ruta.paradas.select_related("punto").order_by("orden", "id"), many=True).data,
+                "evidencias_creadas": resumen.evidencias_creadas,
+                "evidencias_existentes": resumen.evidencias_existentes,
+                "paradas_actualizadas": resumen.paradas_actualizadas,
+                "lineas_recibidas": resumen.lineas_recibidas,
+                "lineas_pendientes_point": resumen.lineas_pendientes_point,
             },
             status=status.HTTP_200_OK,
         )

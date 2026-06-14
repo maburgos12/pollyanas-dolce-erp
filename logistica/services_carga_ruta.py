@@ -9,10 +9,12 @@ from django.db.models import Q
 from django.utils import timezone
 
 from pos_bridge.models import PointTransferLine
+from pos_bridge.services.movement_sync_service import PointMovementSyncService
 from pos_bridge.services.open_transfer_sync_service import OpenTransferSyncService, resolve_requesting_erp_branch
 
 from .models import (
     EventoRuta,
+    ParadaEntregaEvidencia,
     ParadaRuta,
     RutaCargaChecklist,
     RutaCargaChecklistLinea,
@@ -26,6 +28,16 @@ class ChecklistCargaResumen:
     creadas: int = 0
     actualizadas: int = 0
     omitidas: int = 0
+
+
+@dataclass(frozen=True)
+class RecepcionPointResumen:
+    ruta: RutaEntrega
+    evidencias_creadas: int = 0
+    evidencias_existentes: int = 0
+    paradas_actualizadas: int = 0
+    lineas_recibidas: int = 0
+    lineas_pendientes_point: int = 0
 
 
 def _cantidad_esperada(line: PointTransferLine) -> Decimal:
@@ -42,6 +54,12 @@ def _paradas_por_sucursal(ruta: RutaEntrega) -> dict[int, ParadaRuta]:
         if parada.punto.sucursal_id and parada.punto.sucursal_id not in result:
             result[parada.punto.sucursal_id] = parada
     return result
+
+
+def _cantidad_referencia_entrega(linea: RutaCargaChecklistLinea) -> Decimal:
+    if linea.cantidad_cargada is not None:
+        return Decimal(str(linea.cantidad_cargada or 0))
+    return Decimal(str(linea.cantidad_enviada_esperada or 0))
 
 
 def obtener_checklist_carga(ruta: RutaEntrega) -> RutaCargaChecklist:
@@ -227,4 +245,128 @@ def registrar_evento_checklist_confirmado(*, ruta: RutaEntrega, user) -> None:
         descripcion="Checklist de carga confirmado antes de salida.",
         metadata={"tipo": "checklist_carga"},
         creado_por=user,
+    )
+
+
+@transaction.atomic
+def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_sync: bool = True) -> RecepcionPointResumen:
+    if ruta.estatus not in {RutaEntrega.ESTATUS_EN_RUTA, RutaEntrega.ESTATUS_COMPLETADA}:
+        raise ValidationError("La recepción Point solo aplica a rutas en seguimiento o completadas.")
+
+    checklist = getattr(ruta, "checklist_carga", None)
+    if not checklist or not checklist.lineas.exists():
+        return RecepcionPointResumen(ruta=ruta)
+
+    if ejecutar_sync:
+        sync_job = PointMovementSyncService().run_transfer_sync(
+            start_date=ruta.fecha_ruta,
+            end_date=ruta.fecha_ruta,
+            triggered_by=user,
+        )
+        if sync_job.status != sync_job.STATUS_SUCCESS:
+            raise ValidationError("No se pudo sincronizar Point para confirmar recepción de transferencias.")
+
+    source_hashes = list(checklist.lineas.exclude(source_hash="").values_list("source_hash", flat=True))
+    point_lines = {
+        line.source_hash: line
+        for line in PointTransferLine.objects.select_related("sync_job").filter(
+            source_hash__in=source_hashes,
+            is_cancelled=False,
+        )
+    }
+
+    evidencias_creadas = 0
+    evidencias_existentes = 0
+    paradas_actualizadas = 0
+    lineas_recibidas = 0
+    lineas_pendientes_point = 0
+    touched_paradas: set[int] = set()
+
+    for linea in checklist.lineas.select_related("parada").order_by("parada__orden", "id"):
+        point_line = point_lines.get(linea.source_hash)
+        if point_line is not None and linea.point_transfer_line_id != point_line.id:
+            linea.point_transfer_line = point_line
+            linea.save(update_fields=["point_transfer_line", "actualizado_en"])
+        if point_line is None or not point_line.is_received:
+            lineas_pendientes_point += 1
+            continue
+
+        lineas_recibidas += 1
+        client_event_id = f"point-recepcion-{point_line.source_hash}"
+        evidencia, created = ParadaEntregaEvidencia.objects.get_or_create(
+            ruta=ruta,
+            parada=linea.parada,
+            linea_carga=linea,
+            client_event_id=client_event_id,
+            defaults={
+                "tipo": ParadaEntregaEvidencia.TIPO_CONFIRMACION,
+                "cantidad_entregada": point_line.received_quantity,
+                "comentario": "Recepción confirmada desde Point.",
+                "capturado_por": user,
+                "capturado_en": point_line.received_at or timezone.now(),
+                "metadata": {
+                    "origen": "point_transfer",
+                    "transfer_external_id": point_line.transfer_external_id,
+                    "detail_external_id": point_line.detail_external_id,
+                    "received_by": point_line.received_by,
+                    "is_finalized": point_line.is_finalized,
+                },
+            },
+        )
+        if created:
+            evidencias_creadas += 1
+        else:
+            evidencias_existentes += 1
+        touched_paradas.add(linea.parada_id)
+
+    for parada in ruta.paradas.filter(id__in=touched_paradas).order_by("orden", "id"):
+        lineas = list(checklist.lineas.filter(parada=parada).select_related("point_transfer_line"))
+        if not lineas:
+            continue
+        recibidas = [linea for linea in lineas if linea.point_transfer_line_id and linea.point_transfer_line.is_received]
+        if not recibidas:
+            continue
+
+        todas_recibidas = len(recibidas) == len(lineas)
+        recibido_total = sum((Decimal(str(linea.point_transfer_line.received_quantity or 0)) for linea in recibidas), Decimal("0"))
+        esperado_total = sum((_cantidad_referencia_entrega(linea) for linea in lineas), Decimal("0"))
+        cantidades_cuadran = todas_recibidas and all(
+            Decimal(str(linea.point_transfer_line.received_quantity or 0)) == _cantidad_referencia_entrega(linea)
+            for linea in lineas
+        )
+        if recibido_total == 0:
+            entrega_estado = ParadaRuta.ENTREGA_NO_ENTREGADA
+        elif cantidades_cuadran:
+            entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
+        else:
+            entrega_estado = ParadaRuta.ENTREGA_CON_DIFERENCIA
+
+        received_at_values = [linea.point_transfer_line.received_at for linea in recibidas if linea.point_transfer_line.received_at]
+        entrega_confirmada_en = max(received_at_values) if received_at_values else timezone.now()
+        update_fields = ["entrega_estado", "entrega_confirmada_en", "entrega_confirmada_por", "entrega_notas", "actualizado_en"]
+        parada.entrega_estado = entrega_estado
+        parada.entrega_confirmada_en = entrega_confirmada_en
+        parada.entrega_confirmada_por = user
+        parada.entrega_notas = (
+            f"Recepción Point: {lineas_recibidas} línea(s) recibidas. "
+            f"Esperado/cargado {esperado_total}, recibido {recibido_total}."
+        )
+        if parada.estado == ParadaRuta.ESTADO_PENDIENTE:
+            parada.estado = ParadaRuta.ESTADO_VISITADA
+            parada.hora_llegada_real = parada.hora_llegada_real or entrega_confirmada_en
+            update_fields.extend(["estado", "hora_llegada_real"])
+        parada.save(update_fields=update_fields)
+        paradas_actualizadas += 1
+
+    if paradas_actualizadas:
+        ruta.recompute_route_control()
+        ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
+
+    return RecepcionPointResumen(
+        ruta=ruta,
+        evidencias_creadas=evidencias_creadas,
+        evidencias_existentes=evidencias_existentes,
+        paradas_actualizadas=paradas_actualizadas,
+        lineas_recibidas=lineas_recibidas,
+        lineas_pendientes_point=lineas_pendientes_point,
     )
