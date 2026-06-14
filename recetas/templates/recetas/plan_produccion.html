@@ -13,6 +13,7 @@
   <div class="toolbar mb-3" aria-label="Secciones del plan de producción">
     <a class="btn {% if active_section == 'operacion' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'recetas:plan_produccion' %}{% if plan_actual %}?plan_id={{ plan_actual.id }}{% endif %}">Operación</a>
     <a class="btn {% if active_section == 'demanda' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'recetas:plan_produccion' %}?seccion=demanda{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}&periodo={{ periodo_pronostico_default }}#plan-pronosticos">Demanda</a>
+    <a class="btn {% if active_section == 'calculo_insumos' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'recetas:plan_produccion' %}?seccion=calculo_insumos{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}#calculo-insumos">Cálculo de insumos</a>
     <a class="btn {% if active_section == 'mrp' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'recetas:plan_produccion' %}?seccion=mrp{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}&mrp_periodo={{ mrp_periodo }}&mrp_periodo_tipo={{ mrp_periodo_tipo }}#plan-mrp-periodo">MRP</a>
     <a class="btn {% if active_section == 'dg' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'recetas:plan_produccion' %}?seccion=dg{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}#plan-estados">DG</a>
     <a class="btn {% if active_section == 'diagnostico' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'recetas:plan_produccion' %}?seccion=diagnostico{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}&periodo={{ periodo_pronostico_default }}">Diagnóstico</a>
@@ -317,6 +318,7 @@
   {% endif %}
   {% endif %}
 
+  {% if active_section == "operacion" or active_section == "todo" %}
   <form class="form-grid-2" method="post" action="{% url 'recetas:plan_produccion_create' %}">
     {% csrf_token %}
     <div class="form-group">
@@ -335,6 +337,7 @@
       <button class="btn btn-primary" type="submit">Crear plan</button>
     </div>
   </form>
+  {% endif %}
 </div>
 
 {% if load_demand_workspace %}
@@ -1207,6 +1210,351 @@
   </form>
 </div>
 {% else %}
+{% endif %}
+
+{% if load_calculo_insumos_workspace %}
+<div class="calc-insumos-report" id="calculo-insumos">
+  <section class="calc-insumos-workbench">
+    <aside class="calc-insumos-command">
+      <div class="calc-insumos-brand">
+        <span class="calc-insumos-mark">Pollyana's Dolce</span>
+        <span class="calc-insumos-eyebrow">Producción · BOM operativo</span>
+      </div>
+      <div class="calc-insumos-titleblock">
+        <h2>Cálculo de insumos</h2>
+        <p>Materia prima, preparados internos y costo requerido para el plan de producción.</p>
+      </div>
+      <div class="calc-insumos-total">
+        <span>Costo total requerido</span>
+        <strong>
+          {% if calculo_insumos_context.supply %}
+            ${{ calculo_insumos_context.supply.summary.estimated_spend|floatformat:2|intcomma }}
+          {% else %}
+            $0.00
+          {% endif %}
+        </strong>
+      </div>
+      <div class="calc-insumos-actions" aria-label="Acciones de cálculo de insumos">
+        <a class="btn btn-secondary" href="{% url 'recetas:calculo_insumos_plantilla' %}">Plantilla XLSX</a>
+        <a class="btn btn-secondary" href="{% url 'recetas:calculo_insumos_plantilla' %}?format=csv">Plantilla CSV</a>
+        {% if calculo_insumos_context.export_ready %}
+          <a class="btn btn-primary" href="{% url 'recetas:calculo_insumos_export' %}{% if plan_actual %}?plan_id={{ plan_actual.id }}{% endif %}">Exportar XLSX</a>
+        {% elif calculo_insumos_context and calculo_insumos_context.supply %}
+          <button class="btn btn-secondary" type="button" disabled title="Corrige observaciones bloqueantes antes de exportar">Export bloqueado</button>
+        {% endif %}
+        {% if calculo_insumos_context and perms.recetas.change_planproduccion %}
+          <form method="post" action="{% url 'recetas:calculo_insumos_limpiar' %}" class="inline-form">
+            {% csrf_token %}
+            {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
+            <button class="btn btn-secondary" type="submit">Limpiar</button>
+          </form>
+        {% endif %}
+      </div>
+    </aside>
+
+      <div class="calc-insumos-workzone">
+      <div class="calc-insumos-zone-head">
+        <span>Entrada del plan</span>
+        <h3>Captura manual o carga por archivo</h3>
+        <p>Agrega productos uno por uno o importa la plantilla para recalcular el BOM con el mismo motor del ERP.</p>
+      </div>
+      {% if forecast_preview %}
+      <section class="calc-insumos-forecast-bridge">
+        <div>
+          <span>Proyección activa</span>
+          <strong>{{ forecast_preview.target_label|default:forecast_preview.periodo|default:"Pronóstico vigente" }}</strong>
+          <small>{{ forecast_preview.totals.recetas_count|default:0 }} productos · {{ forecast_preview.totals.forecast_total|default:0|floatformat:0|intcomma }} unidades base</small>
+        </div>
+        {% if perms.recetas.change_planproduccion %}
+        <form method="post" action="{% url 'recetas:calculo_insumos_desde_proyeccion' %}">
+          {% csrf_token %}
+          {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
+          <label class="sr-only" for="calculo-insumos-escenario-proyeccion">Escenario de proyección</label>
+          <select class="form-select" id="calculo-insumos-escenario-proyeccion" name="escenario">
+            <option value="base" {% if forecast_run_escenario_default == "base" %}selected{% endif %}>Base</option>
+            <option value="bajo" {% if forecast_run_escenario_default == "bajo" %}selected{% endif %}>Bajo</option>
+            <option value="alto" {% if forecast_run_escenario_default == "alto" %}selected{% endif %}>Alto</option>
+          </select>
+          <button class="btn btn-secondary" type="submit">Usar proyección actual</button>
+        </form>
+        {% endif %}
+      </section>
+      {% endif %}
+      {% if perms.recetas.change_planproduccion %}
+      <section class="calc-insumos-entry-grid">
+        <div class="calc-insumos-entry">
+          <div class="calc-insumos-entry-head">
+            <h3>Captura manual</h3>
+          </div>
+          <form class="calc-insumos-form" method="post" action="{% url 'recetas:calculo_insumos_guardar' %}">
+            {% csrf_token %}
+            {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
+            <div class="form-group">
+              <label class="form-label" for="calculo-insumos-receta">Producto / receta</label>
+              <select class="form-select" id="calculo-insumos-receta" name="receta_id" required>
+                <option value="">Selecciona...</option>
+                {% for r in recetas_disponibles %}
+                  <option value="{{ r.id }}">{{ r.nombre }}{% if r.codigo_point %} · {{ r.codigo_point }}{% endif %}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="calculo-insumos-cantidad">Cantidad a producir</label>
+              <input class="form-control" id="calculo-insumos-cantidad" type="number" step="0.001" min="0.001" name="cantidad" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="calculo-insumos-notas">Notas</label>
+              <input class="form-control" id="calculo-insumos-notas" name="notas" placeholder="Opcional">
+            </div>
+            <button class="btn btn-primary" type="submit">Agregar y recalcular</button>
+          </form>
+        </div>
+        <div class="calc-insumos-entry">
+          <div class="calc-insumos-entry-head">
+            <h3>Carga por archivo</h3>
+          </div>
+          <form class="calc-insumos-form" method="post" action="{% url 'recetas:calculo_insumos_importar' %}" enctype="multipart/form-data">
+            {% csrf_token %}
+            {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
+            <div class="form-group">
+              <label class="form-label" for="calculo-insumos-archivo">Archivo CSV/XLSX</label>
+              <input class="form-control" id="calculo-insumos-archivo" type="file" name="archivo" accept=".csv,.xlsx,.xlsm" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="calculo-insumos-modo">Modo</label>
+              <select class="form-select" id="calculo-insumos-modo" name="modo">
+                <option value="replace">Reemplazar cálculo</option>
+                <option value="accumulate">Sumar al cálculo actual</option>
+              </select>
+            </div>
+            <button class="btn btn-primary" type="submit">Importar y calcular</button>
+          </form>
+        </div>
+      </section>
+      {% else %}
+      <section class="calc-insumos-empty calc-insumos-readonly">
+        <strong>Modo consulta</strong>
+        <span>Tu usuario puede revisar plantillas y cálculos existentes, pero no capturar ni importar cantidades.</span>
+      </section>
+      {% endif %}
+    </div>
+  </section>
+
+  {% if calculo_insumos_context and calculo_insumos_context.supply %}
+    <section class="calc-insumos-kpis">
+      <article>
+        <span>Unidades plan</span>
+        <strong>{{ calculo_insumos_context.supply.summary.forecast_units|floatformat:0|intcomma }}</strong>
+        <small>Captura activa</small>
+      </article>
+      <article>
+        <span>Insumos consolidados</span>
+        <strong>{{ calculo_insumos_context.supply.summary.projected_insumos }}</strong>
+        <small>MP y empaque</small>
+      </article>
+      <article>
+        <span>Preparados internos</span>
+        <strong>{{ calculo_insumos_context.supply.summary.prepared_insumos }}</strong>
+        <small>Subrecetas</small>
+      </article>
+      <article>
+        <span>Sin costo vigente</span>
+        <strong class="{% if calculo_insumos_context.supply.summary.missing_cost_insumos > 0 %}is-warning{% else %}is-success{% endif %}">
+          {{ calculo_insumos_context.supply.summary.missing_cost_insumos }}
+        </strong>
+        <small>Control ERP</small>
+      </article>
+    </section>
+
+    <section class="calc-insumos-section">
+      <div class="calc-insumos-section-head">
+        <div>
+          <span>Plan capturado</span>
+          <h3>Productos a producir</h3>
+        </div>
+        <strong>{{ calculo_insumos_context.preview.rows|length }} productos</strong>
+      </div>
+      <div class="table-responsive calc-insumos-table">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Código Point</th>
+              <th>Producto ERP</th>
+              <th class="text-end">Cantidad</th>
+              <th>Notas</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in calculo_insumos_context.preview.rows %}
+            <tr>
+              <td>{{ row.codigo_point|default:"-" }}</td>
+              <td><strong>{{ row.receta }}</strong></td>
+              <td class="text-end">{{ row.forecast_qty|floatformat:3|intcomma }}</td>
+              <td class="muted">{{ row.notas|default:"-" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    {% if calculo_insumos_context.supply.prepared_insumos %}
+    <section class="calc-insumos-section">
+      <div class="calc-insumos-section-head">
+        <div>
+          <span>Producción interna</span>
+          <h3>Preparados requeridos</h3>
+        </div>
+        <strong>{{ calculo_insumos_context.supply.summary.prepared_insumos }} preparados</strong>
+      </div>
+      <div class="table-responsive calc-insumos-table">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Familia</th>
+              <th>Categoría</th>
+              <th>Código Point</th>
+              <th>Preparado</th>
+              <th class="text-end">Cantidad</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in calculo_insumos_context.supply.prepared_insumos %}
+            <tr>
+              <td>{{ row.family }}</td>
+              <td>{{ row.category }}</td>
+              <td>{{ row.codigo_point|default:"-" }}</td>
+              <td>
+                <strong>{{ row.insumo_nombre }}</strong>
+                <span class="calc-insumos-row-detail">{{ row.recipes_text }}</span>
+              </td>
+              <td class="text-end">{{ row.display_required_qty|floatformat:3|intcomma }} {{ row.display_unidad_codigo|default:row.unidad_codigo }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+
+    <section class="calc-insumos-section calc-insumos-section-main">
+      <div class="calc-insumos-section-head">
+        <div>
+          <span>Compra requerida</span>
+          <h3>BOM consolidado de materia prima y empaques</h3>
+        </div>
+        <strong>${{ calculo_insumos_context.supply.summary.estimated_spend|floatformat:2|intcomma }}</strong>
+      </div>
+      <div class="table-responsive calc-insumos-table">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Familia</th>
+              <th>Categoría</th>
+              <th>Código Point</th>
+              <th>Insumo</th>
+              <th>Tipo</th>
+              <th class="text-end">Cantidad</th>
+              <th class="text-end">Costo unitario</th>
+              <th class="text-end">Costo total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in calculo_insumos_context.supply.insumos %}
+            <tr>
+              <td>{{ row.family }}</td>
+              <td>{{ row.category }}</td>
+              <td>{{ row.codigo_point|default:"-" }}</td>
+              <td>
+                <strong>{{ row.insumo_nombre }}</strong>
+                <span class="calc-insumos-row-detail">{{ row.recipes_text }}</span>
+              </td>
+              <td>{{ row.article_class_label }}</td>
+              <td class="text-end">{{ row.display_required_qty|floatformat:3|intcomma }} {{ row.display_unidad_codigo|default:row.unidad_codigo }}</td>
+              <td class="text-end">
+                {% if row.missing_cost %}
+                  <span class="badge badge-amarillo">Sin costo</span>
+                {% else %}
+                  ${{ row.display_unit_cost|floatformat:2|intcomma }}
+                {% endif %}
+              </td>
+              <td class="text-end"><strong>${{ row.estimated_spend|floatformat:2|intcomma }}</strong></td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="8" class="text-muted">No hay insumos comprables para los productos capturados.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% else %}
+    <section class="calc-insumos-empty">
+      <strong>Sin cálculo activo</strong>
+      <span>Agrega productos o importa una plantilla para construir el BOM requerido.</span>
+    </section>
+  {% endif %}
+
+  {% if calculo_insumos_context %}
+    {% if calculo_insumos_context.unresolved_rows or calculo_insumos_context.skipped_rows or calculo_insumos_context.supply.issues %}
+    <section class="calc-insumos-section calc-insumos-section-alert">
+      <div class="calc-insumos-section-head">
+        <div>
+          <span>Control de datos</span>
+          <h3>Observaciones</h3>
+        </div>
+      </div>
+      <div class="table-responsive calc-insumos-table">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Tipo</th>
+              <th>Producto / código</th>
+              <th>Detalle</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in calculo_insumos_context.unresolved_rows %}
+            <tr>
+              <td><span class="badge badge-amarillo">Producto no resuelto</span></td>
+              <td>{{ row.codigo_point|default:row.producto }}</td>
+              <td class="muted">{{ row.motivo }}</td>
+            </tr>
+            {% endfor %}
+            {% for row in calculo_insumos_context.skipped_rows %}
+            <tr>
+              <td><span class="badge badge-amarillo">Renglón omitido</span></td>
+              <td>{{ row.codigo_point|default:row.producto }}</td>
+              <td class="muted">{{ row.motivo }}</td>
+            </tr>
+            {% endfor %}
+            {% for row in calculo_insumos_context.supply.issues %}
+            <tr>
+              <td><span class="badge badge-amarillo">{{ row.code }}</span></td>
+              <td>{{ row.product_name|default:row.insumo_nombre }}</td>
+              <td class="muted">{{ row.detail }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+  {% endif %}
+
+  <section class="calc-insumos-rules">
+    <div class="calc-insumos-section-head">
+      <div>
+        <span>Metodología</span>
+        <h3>Reglas de análisis, cálculo y fórmulas</h3>
+      </div>
+    </div>
+    <ol>
+      {% for rule in calculo_insumos_rules %}
+      <li>{{ rule }}</li>
+      {% endfor %}
+    </ol>
+  </section>
+</div>
 {% endif %}
 
 {% if load_mrp_workspace %}

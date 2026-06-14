@@ -66,6 +66,12 @@ urlpatterns = [
     path("plan-produccion/<int:plan_id>/cerrar/", views.plan_produccion_cerrar, name="plan_produccion_cerrar"),
     path("plan-produccion/<int:plan_id>/items/nuevo/", views.plan_produccion_item_create, name="plan_produccion_item_create"),
     path("plan-produccion/<int:plan_id>/items/<int:item_id>/eliminar/", views.plan_produccion_item_delete, name="plan_produccion_item_delete"),
+    path("plan-produccion/calculo-insumos/plantilla/", views.calculo_insumos_plantilla, name="calculo_insumos_plantilla"),
+    path("plan-produccion/calculo-insumos/guardar/", views.calculo_insumos_guardar, name="calculo_insumos_guardar"),
+    path("plan-produccion/calculo-insumos/importar/", views.calculo_insumos_importar, name="calculo_insumos_importar"),
+    path("plan-produccion/calculo-insumos/desde-proyeccion/", views.calculo_insumos_desde_proyeccion, name="calculo_insumos_desde_proyeccion"),
+    path("plan-produccion/calculo-insumos/limpiar/", views.calculo_insumos_limpiar, name="calculo_insumos_limpiar"),
+    path("plan-produccion/calculo-insumos/exportar/", views.calculo_insumos_export, name="calculo_insumos_export"),
     path("plan-produccion/pronosticos/plantilla/", views.pronosticos_descargar_plantilla, name="pronosticos_plantilla"),
     path("plan-produccion/pronosticos/importar/", views.pronosticos_importar, name="pronosticos_importar"),
     path(

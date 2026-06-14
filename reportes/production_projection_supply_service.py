@@ -4,6 +4,7 @@ from collections import defaultdict
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
+from django.db.models import Q
 from django.utils import timezone
 
 from maestros.models import Insumo, UnidadMedida
@@ -51,6 +52,22 @@ def _unit_code(unit: UnidadMedida | None) -> str:
 
 def _line_unit(line: LineaReceta) -> UnidadMedida | None:
     return line.unidad or getattr(line.insumo, "unidad_base", None)
+
+
+def _point_yield_codes(insumo: Insumo, prep_recipe: Receta) -> tuple[str, ...]:
+    codes: list[str] = []
+    seen: set[str] = set()
+    for raw_code in (insumo.codigo_point, prep_recipe.codigo_point):
+        code = (raw_code or "").strip()
+        normalized = code.upper()
+        if code and normalized not in seen:
+            codes.append(code)
+            seen.add(normalized)
+    return tuple(codes)
+
+
+def _point_yield_cache_key(insumo: Insumo, prep_recipe: Receta) -> tuple[int, int, tuple[str, ...]]:
+    return int(insumo.id or 0), int(prep_recipe.id or 0), _point_yield_codes(insumo, prep_recipe)
 
 
 def _compatible_units(source_unit: UnidadMedida | None, target_unit: UnidadMedida | None) -> bool:
@@ -243,6 +260,7 @@ def build_projection_supply_context(
     prepared_rows: dict[tuple[int, str], dict[str, object]] = {}
     explosion_rows: list[dict[str, object]] = []
     issue_rows: list[dict[str, object]] = []
+    point_yield_cache: dict[tuple[int, int, tuple[str, ...]], tuple[Decimal | None, UnidadMedida | None, str]] = {}
 
     def add_issue(
         *,
@@ -323,6 +341,43 @@ def build_projection_supply_context(
     for parent_id in {pid for pid, _ in derivada_map.values()}:
         _load_recipe_lines(parent_id)
 
+    def resolve_point_preparation_yield(
+        insumo: Insumo,
+        prep_recipe: Receta,
+    ) -> tuple[Decimal | None, UnidadMedida | None, str]:
+        cache_key = _point_yield_cache_key(insumo, prep_recipe)
+        codes = cache_key[2]
+        if not codes:
+            return None, None, ""
+        if cache_key not in point_yield_cache:
+            from pos_bridge.models import PointRecipeNode
+
+            query = Q()
+            for code in codes:
+                query |= Q(point_code__iexact=code)
+            nodes = (
+                PointRecipeNode.objects.filter(
+                    query,
+                    node_kind=PointRecipeNode.KIND_PREPARED_INPUT,
+                    source_type=PointRecipeNode.SOURCE_INSUMO,
+                )
+                .select_related("yield_unit", "run", "erp_recipe", "erp_insumo")
+                .order_by("-run__created_at", "-id")
+            )
+            node = (
+                nodes.filter(Q(erp_recipe_id=prep_recipe.id) | Q(erp_insumo_id=insumo.id)).first()
+                or nodes.first()
+            )
+            if node is not None:
+                quantity = _to_decimal(node.yield_quantity)
+                if quantity > ZERO and node.yield_unit_id:
+                    point_yield_cache[cache_key] = (quantity, node.yield_unit, f"POINT:{node.point_code}")
+                else:
+                    point_yield_cache[cache_key] = (None, None, "")
+            else:
+                point_yield_cache[cache_key] = (None, None, "")
+        return point_yield_cache[cache_key]
+
     def add_purchase_row(
         *,
         line: LineaReceta,
@@ -358,6 +413,7 @@ def build_projection_supply_context(
             {
                 "insumo_id": int(insumo.id),
                 "insumo_nombre": insumo.nombre,
+                "codigo_point": insumo.codigo_point or "",
                 "unidad_codigo": unidad_codigo,
                 "article_class_key": article_class["key"],
                 "article_class_label": article_class["label"],
@@ -388,6 +444,7 @@ def build_projection_supply_context(
                 "recipe_name": getattr(line.receta, "nombre", ""),
                 "insumo_id": int(insumo.id),
                 "insumo_nombre": insumo.nombre,
+                "codigo_point": insumo.codigo_point or "",
                 "article_class_label": article_class["label"],
                 "required_gross_qty": required_qty,
                 "unidad_codigo": unidad_codigo,
@@ -403,6 +460,7 @@ def build_projection_supply_context(
         return {
             "insumo_id": int(insumo.id),
             "insumo_nombre": insumo.nombre,
+            "codigo_point": insumo.codigo_point or "",
             "unidad_codigo": unidad_codigo,
             "article_class_key": article_class["key"],
             "article_class_label": article_class["label"],
@@ -439,6 +497,7 @@ def build_projection_supply_context(
             {
                 "insumo_id": int(insumo.id),
                 "insumo_nombre": insumo.nombre,
+                "codigo_point": insumo.codigo_point or "",
                 "prep_recipe_id": int(prep_recipe.id) if prep_recipe else None,
                 "prep_recipe_name": prep_recipe.nombre if prep_recipe else "",
                 "unidad_codigo": unidad_codigo,
@@ -460,6 +519,7 @@ def build_projection_supply_context(
                 "recipe_name": prep_recipe.nombre if prep_recipe else getattr(line.receta, "nombre", ""),
                 "insumo_id": int(insumo.id),
                 "insumo_nombre": insumo.nombre,
+                "codigo_point": insumo.codigo_point or "",
                 "article_class_label": "Insumo interno",
                 "required_gross_qty": required_qty,
                 "unidad_codigo": unidad_codigo,
@@ -473,6 +533,7 @@ def build_projection_supply_context(
         return {
             "insumo_id": int(insumo.id),
             "insumo_nombre": insumo.nombre,
+            "codigo_point": insumo.codigo_point or "",
             "unidad_codigo": unidad_codigo,
             "article_class_key": Insumo.TIPO_INTERNO,
             "article_class_label": "Insumo interno",
@@ -576,16 +637,38 @@ def build_projection_supply_context(
             )
 
         line_unit = _line_unit(line)
-        yield_unit = prep_recipe.rendimiento_unidad or line_unit
-        required_in_yield_unit = _convert_quantity(quantity, source_unit=line_unit, target_unit=yield_unit)
+        erp_yield_unit = prep_recipe.rendimiento_unidad or line_unit
+        required_in_yield_unit = _convert_quantity(quantity, source_unit=line_unit, target_unit=erp_yield_unit)
         yield_qty = _to_decimal(prep_recipe.rendimiento_cantidad)
+        point_yield_qty, point_yield_unit, point_yield_source = resolve_point_preparation_yield(insumo, prep_recipe)
+        if point_yield_qty is not None and point_yield_unit is not None:
+            point_required_qty = _convert_quantity(quantity, source_unit=line_unit, target_unit=point_yield_unit)
+            if point_required_qty is not None:
+                required_in_yield_unit = point_required_qty
+                yield_qty = point_yield_qty
+            else:
+                add_issue(
+                    code="RENDIMIENTO_POINT_UNIDAD_INCOMPATIBLE",
+                    severity="warning",
+                    recipe_name=prep_recipe.nombre,
+                    insumo=insumo,
+                    detail=(
+                        "El rendimiento vivo de Point no convierte contra la unidad requerida; "
+                        "se usó el rendimiento vigente del ERP para no cerrar el preparado como compra."
+                    ),
+                    product_name=str(product_row["recipe_name"]),
+                )
         if required_in_yield_unit is None or yield_qty <= ZERO:
+            source_detail = f" Fuente rendimiento: {point_yield_source}." if point_yield_source else ""
             add_issue(
                 code="PREPARACION_UNIDAD_INCOMPATIBLE",
                 severity="warning",
                 recipe_name=prep_recipe.nombre,
                 insumo=insumo,
-                detail="La unidad requerida no se puede convertir contra el rendimiento de la preparación; se costea como fallback.",
+                detail=(
+                    "La unidad requerida no se puede convertir contra el rendimiento de la preparación; "
+                    f"se costea como fallback.{source_detail}"
+                ),
                 product_name=str(product_row["recipe_name"]),
             )
             return add_purchase_row(
@@ -697,6 +780,7 @@ def build_projection_supply_context(
             {
                 "insumo_id": insumo_id,
                 "insumo_nombre": row["insumo_nombre"],
+                "codigo_point": row["codigo_point"],
                 "unidad_codigo": row["unidad_codigo"],
                 "article_class_key": row["article_class_key"],
                 "article_class_label": row["article_class_label"],
@@ -730,6 +814,7 @@ def build_projection_supply_context(
             {
                 "insumo_id": insumo_id,
                 "insumo_nombre": row["insumo_nombre"],
+                "codigo_point": row["codigo_point"],
                 "prep_recipe_id": row["prep_recipe_id"],
                 "prep_recipe_name": row["prep_recipe_name"],
                 "unidad_codigo": row["unidad_codigo"],
