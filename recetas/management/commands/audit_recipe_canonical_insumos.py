@@ -32,6 +32,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         issues = {
+            "legacy_insumos_present": self._legacy_insumos_present(),
             "legacy_recipe_lines": self._legacy_recipe_lines(),
             "inactive_recipe_lines": self._inactive_recipe_lines(),
             "canonical_text_mismatches": self._canonical_text_mismatches(),
@@ -90,6 +91,13 @@ class Command(BaseCommand):
             .filter(insumo__codigo_point="", insumo__nombre__in=LEGACY_NO_CODE_NAMES)
             .order_by("receta__codigo_point", "posicion", "id")
         ]
+
+    def _legacy_insumos_present(self):
+        return list(
+            Insumo.objects.filter(codigo_point="", nombre__in=LEGACY_NO_CODE_NAMES)
+            .order_by("nombre", "id")
+            .values("id", "nombre", "codigo_point", "activo", "tipo_item")
+        )
 
     def _inactive_recipe_lines(self):
         return [
