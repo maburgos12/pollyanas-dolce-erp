@@ -334,6 +334,221 @@ class ParadaRuta(models.Model):
         super().save(*args, **kwargs)
 
 
+class RutaCargaChecklist(models.Model):
+    ESTATUS_PENDIENTE = "PENDIENTE"
+    ESTATUS_EN_REVISION = "EN_REVISION"
+    ESTATUS_CONFIRMADA = "CONFIRMADA"
+    ESTATUS_CON_INCIDENCIA = "CON_INCIDENCIA"
+    ESTATUS_BLOQUEADA = "BLOQUEADA"
+    ESTATUS_CHOICES = [
+        (ESTATUS_PENDIENTE, "Pendiente"),
+        (ESTATUS_EN_REVISION, "En revisión"),
+        (ESTATUS_CONFIRMADA, "Carga confirmada"),
+        (ESTATUS_CON_INCIDENCIA, "Con incidencia"),
+        (ESTATUS_BLOQUEADA, "Bloqueada"),
+    ]
+
+    ruta = models.OneToOneField(RutaEntrega, on_delete=models.CASCADE, related_name="checklist_carga")
+    estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default=ESTATUS_PENDIENTE)
+    point_sync_job = models.ForeignKey(
+        "pos_bridge.PointSyncJob",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="checklists_carga_ruta",
+    )
+    sincronizado_en = models.DateTimeField(null=True, blank=True)
+    confirmado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="checklists_carga_confirmados",
+    )
+    confirmado_en = models.DateTimeField(null=True, blank=True)
+    motivo_override = models.CharField(max_length=240, blank=True, default="")
+    notas = models.TextField(blank=True, default="")
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-ruta__fecha_ruta", "-id"]
+        verbose_name = "Checklist de carga de ruta"
+        verbose_name_plural = "Checklists de carga de ruta"
+        indexes = [
+            models.Index(fields=["estatus", "sincronizado_en"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.ruta.folio} · {self.get_estatus_display()}"
+
+    @property
+    def esta_completa(self) -> bool:
+        if self.estatus == self.ESTATUS_CONFIRMADA:
+            return True
+        return self.lineas.exists() and not self.lineas.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists()
+
+
+class RutaCargaChecklistLinea(models.Model):
+    ESTATUS_PENDIENTE = "PENDIENTE"
+    ESTATUS_CARGADA = "CARGADA"
+    ESTATUS_PARCIAL = "PARCIAL"
+    ESTATUS_FALTANTE = "FALTANTE"
+    ESTATUS_SOBRANTE = "SOBRANTE"
+    ESTATUS_NO_APLICA = "NO_APLICA"
+    ESTATUS_CHOICES = [
+        (ESTATUS_PENDIENTE, "Pendiente"),
+        (ESTATUS_CARGADA, "Cargada"),
+        (ESTATUS_PARCIAL, "Parcial"),
+        (ESTATUS_FALTANTE, "Faltante"),
+        (ESTATUS_SOBRANTE, "Sobrante"),
+        (ESTATUS_NO_APLICA, "No aplica"),
+    ]
+
+    MOTIVO_STOCK_LIMITADO = "stock_limitado"
+    MOTIVO_SIN_STOCK = "sin_stock"
+    MOTIVO_PRODUCCION_NO_LISTA = "produccion_no_lista"
+    MOTIVO_PRODUCTO_DANADO = "producto_danado"
+    MOTIVO_CAMBIO_AUTORIZADO = "cambio_autorizado"
+    MOTIVO_OTRO = "otro"
+    MOTIVO_CHOICES = [
+        (MOTIVO_STOCK_LIMITADO, "Stock limitado"),
+        (MOTIVO_SIN_STOCK, "No hay stock"),
+        (MOTIVO_PRODUCCION_NO_LISTA, "Producción aún no está lista"),
+        (MOTIVO_PRODUCTO_DANADO, "Producto dañado"),
+        (MOTIVO_CAMBIO_AUTORIZADO, "Cambio autorizado"),
+        (MOTIVO_OTRO, "Otro"),
+    ]
+
+    checklist = models.ForeignKey(RutaCargaChecklist, on_delete=models.CASCADE, related_name="lineas")
+    parada = models.ForeignKey(ParadaRuta, on_delete=models.PROTECT, related_name="lineas_carga")
+    point_transfer_line = models.ForeignKey(
+        "pos_bridge.PointTransferLine",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="lineas_checklist_carga",
+    )
+    transfer_external_id = models.CharField(max_length=40, db_index=True)
+    detail_external_id = models.CharField(max_length=40, db_index=True)
+    source_hash = models.CharField(max_length=64, db_index=True)
+    item_code = models.CharField(max_length=80, blank=True, default="")
+    item_name = models.CharField(max_length=250)
+    unit = models.CharField(max_length=40, blank=True, default="")
+    erp_origin_branch = models.ForeignKey(
+        Sucursal,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="lineas_carga_origen",
+    )
+    erp_destination_branch = models.ForeignKey(
+        Sucursal,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="lineas_carga_destino",
+    )
+    cantidad_solicitada = models.DecimalField(max_digits=18, decimal_places=3, default=Decimal("0"))
+    cantidad_enviada_esperada = models.DecimalField(max_digits=18, decimal_places=3, default=Decimal("0"))
+    cantidad_cargada = models.DecimalField(max_digits=18, decimal_places=3, null=True, blank=True)
+    estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default=ESTATUS_PENDIENTE)
+    motivo_diferencia = models.CharField(max_length=40, choices=MOTIVO_CHOICES, blank=True, default="")
+    notas = models.TextField(blank=True, default="")
+    client_event_id = models.CharField(max_length=80, blank=True, default="")
+    validado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="lineas_carga_validadas",
+    )
+    validado_en = models.DateTimeField(null=True, blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["parada__orden", "item_name", "id"]
+        verbose_name = "Línea de checklist de carga"
+        verbose_name_plural = "Líneas de checklist de carga"
+        indexes = [
+            models.Index(fields=["checklist", "estatus"]),
+            models.Index(fields=["parada", "estatus"]),
+            models.Index(fields=["source_hash"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=["checklist", "source_hash"], name="rutacarga_linea_source_unica"),
+            models.UniqueConstraint(
+                fields=["checklist", "client_event_id"],
+                condition=~Q(client_event_id=""),
+                name="rutacarga_linea_evento_cliente_unico",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.checklist.ruta.folio} · {self.item_name} · {self.get_estatus_display()}"
+
+
+class ParadaEntregaEvidencia(models.Model):
+    TIPO_FOTO_ENTREGA = "FOTO_ENTREGA"
+    TIPO_INCIDENCIA = "INCIDENCIA"
+    TIPO_ENTREGA_PARCIAL = "ENTREGA_PARCIAL"
+    TIPO_CONFIRMACION = "CONFIRMACION"
+    TIPO_CHOICES = [
+        (TIPO_FOTO_ENTREGA, "Foto de entrega"),
+        (TIPO_INCIDENCIA, "Incidencia"),
+        (TIPO_ENTREGA_PARCIAL, "Entrega parcial"),
+        (TIPO_CONFIRMACION, "Confirmación"),
+    ]
+
+    ruta = models.ForeignKey(RutaEntrega, on_delete=models.CASCADE, related_name="evidencias_entrega")
+    parada = models.ForeignKey(ParadaRuta, on_delete=models.PROTECT, related_name="evidencias_entrega")
+    linea_carga = models.ForeignKey(
+        RutaCargaChecklistLinea,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="evidencias_entrega",
+    )
+    tipo = models.CharField(max_length=30, choices=TIPO_CHOICES, default=TIPO_CONFIRMACION)
+    cantidad_entregada = models.DecimalField(max_digits=18, decimal_places=3, null=True, blank=True)
+    foto = models.ImageField(upload_to="logistica/evidencias_entrega/", null=True, blank=True)
+    comentario = models.TextField(blank=True, default="")
+    latitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    precision_metros = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    client_event_id = models.CharField(max_length=80, blank=True, default="")
+    capturado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="evidencias_entrega_capturadas",
+    )
+    capturado_en = models.DateTimeField(default=timezone.now, db_index=True)
+    ip_registro = models.GenericIPAddressField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-capturado_en", "-id"]
+        verbose_name = "Evidencia de entrega por parada"
+        verbose_name_plural = "Evidencias de entrega por parada"
+        indexes = [
+            models.Index(fields=["ruta", "capturado_en"]),
+            models.Index(fields=["parada", "capturado_en"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["ruta", "capturado_por", "client_event_id"],
+                condition=~Q(client_event_id=""),
+                name="paradaevidencia_evento_cliente_unico",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.ruta.folio} · {self.parada.punto_nombre_snapshot} · {self.get_tipo_display()}"
+
+
 class UbicacionRuta(models.Model):
     ruta = models.ForeignKey(RutaEntrega, on_delete=models.CASCADE, related_name="ubicaciones")
     repartidor = models.ForeignKey("Repartidor", on_delete=models.PROTECT, related_name="ubicaciones_ruta")

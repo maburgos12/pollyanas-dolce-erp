@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-logistica-pwa-v13-route-card-retention";
+const CACHE_NAME = "pollyanas-logistica-pwa-v14-carga-checklist";
 const SHELL_ASSETS = [
   "/logistica/app/",
   "/static/logistica/pwa/manifest.json",

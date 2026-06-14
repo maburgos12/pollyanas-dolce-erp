@@ -12,11 +12,14 @@ from .models import (
     InspeccionVehiculo,
     LavadoUnidad,
     ParadaRuta,
+    ParadaEntregaEvidencia,
     PuntoLogistico,
     ReparacionUnidad,
     Repartidor,
     ReporteUnidad,
     ReporteUnidadReafirmacion,
+    RutaCargaChecklist,
+    RutaCargaChecklistLinea,
     RutaEntrega,
     UbicacionRuta,
     ServicioRealizadoUnidad,
@@ -159,6 +162,85 @@ class ParadaRutaAdmin(admin.ModelAdmin):
         "creado_en",
         "actualizado_en",
     )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class RutaCargaChecklistLineaInline(admin.TabularInline):
+    model = RutaCargaChecklistLinea
+    extra = 0
+    can_delete = False
+    fields = (
+        "parada",
+        "item_code",
+        "item_name",
+        "unit",
+        "cantidad_enviada_esperada",
+        "cantidad_cargada",
+        "estatus",
+        "motivo_diferencia",
+        "validado_por",
+        "validado_en",
+    )
+    readonly_fields = fields
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(RutaCargaChecklist)
+class RutaCargaChecklistAdmin(admin.ModelAdmin):
+    list_display = ("ruta", "estatus", "sincronizado_en", "confirmado_por", "confirmado_en")
+    list_filter = ("estatus", "ruta__fecha_ruta")
+    search_fields = ("ruta__folio", "ruta__nombre", "lineas__item_name", "lineas__item_code")
+    readonly_fields = (
+        "ruta",
+        "estatus",
+        "point_sync_job",
+        "sincronizado_en",
+        "confirmado_por",
+        "confirmado_en",
+        "motivo_override",
+        "notas",
+        "creado_en",
+        "actualizado_en",
+    )
+    autocomplete_fields = ("ruta", "point_sync_job", "confirmado_por")
+    inlines = [RutaCargaChecklistLineaInline]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(RutaCargaChecklistLinea)
+class RutaCargaChecklistLineaAdmin(admin.ModelAdmin):
+    list_display = ("checklist", "parada", "item_name", "cantidad_enviada_esperada", "cantidad_cargada", "estatus")
+    list_filter = ("estatus", "checklist__ruta__fecha_ruta", "motivo_diferencia")
+    search_fields = ("checklist__ruta__folio", "item_name", "item_code", "transfer_external_id", "detail_external_id")
+    readonly_fields = [field.name for field in RutaCargaChecklistLinea._meta.fields]
+    autocomplete_fields = ("checklist", "parada", "validado_por")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ParadaEntregaEvidencia)
+class ParadaEntregaEvidenciaAdmin(admin.ModelAdmin):
+    list_display = ("ruta", "parada", "tipo", "cantidad_entregada", "capturado_por", "capturado_en")
+    list_filter = ("tipo", "ruta__fecha_ruta")
+    search_fields = ("ruta__folio", "parada__punto_nombre_snapshot", "comentario", "client_event_id")
+    readonly_fields = [field.name for field in ParadaEntregaEvidencia._meta.fields]
+    autocomplete_fields = ("ruta", "parada", "linea_carga", "capturado_por")
 
     def has_add_permission(self, request):
         return False

@@ -1358,6 +1358,7 @@
         bitacoraSalida: null,
         rutaActiva: null,
         rutaTrackingDraft: null,
+        rutaCargaDraft: {},
         trackingQueueCount: 0,
         routeAutoTrackingTimer: null,
         routeAutoTrackingRutaId: null,
@@ -2319,6 +2320,85 @@
         `).join("") + `</div>`;
       }
 
+      function cargaDraftFor(lineaId) {
+        state.rutaCargaDraft[lineaId] = state.rutaCargaDraft[lineaId] || { cantidad: "", motivo: "", notas: "", guardando: false };
+        return state.rutaCargaDraft[lineaId];
+      }
+
+      function updateCargaLinea(lineaId, field, value) {
+        const draft = cargaDraftFor(lineaId);
+        draft[field] = value;
+      }
+
+      function renderChecklistCarga(checklist) {
+        if (!checklist) return "";
+        const lineas = checklist.lineas || [];
+        const total = Number(checklist.total_lineas || lineas.length || 0);
+        const confirmadas = Number(checklist.lineas_confirmadas || 0);
+        const pendientes = Number(checklist.lineas_pendientes || Math.max(total - confirmadas, 0));
+        const pct = total ? Math.round((confirmadas / total) * 100) : 0;
+        const statusText = checklist.estatus_display || checklist.estatus || "Pendiente";
+        if (!total) {
+          return `
+            <section class="card route-card-pwa">
+              <h2 style="margin:0;color:var(--gold);">Carga de ruta</h2>
+              <p class="unit-line">Sin carga esperada sincronizada desde Point.</p>
+              <p class="muted">Logística debe sincronizar las transferencias abiertas antes de confirmar salida.</p>
+            </section>
+          `;
+        }
+        return `
+          <section class="card route-card-pwa">
+            <div class="route-head">
+              <div>
+                <h2 style="margin:0;color:var(--gold);">Carga de ruta</h2>
+                <p class="route-folio">${escapeHtml(statusText)} · ${confirmadas} de ${total} línea${total === 1 ? "" : "s"}</p>
+              </div>
+              <span class="route-chip">${pct}%</span>
+            </div>
+            <div class="route-progress-track" aria-label="Avance de carga ${pct}%">
+              <div class="route-progress-fill" style="--route-progress:${pct}%;"></div>
+            </div>
+            ${pendientes ? `<div class="daily-banner warning">Faltan ${pendientes} producto${pendientes === 1 ? "" : "s"} por revisar antes de salida.</div>` : `<p class="success">Carga revisada.</p>`}
+            <div class="route-stop-list">
+              ${lineas.map((linea) => {
+                const draft = cargaDraftFor(linea.id);
+                const pendiente = linea.estatus === "PENDIENTE";
+                const diferencia = ["PARCIAL", "FALTANTE", "SOBRANTE"].includes(linea.estatus);
+                const cantidadValue = draft.cantidad || linea.cantidad_cargada || linea.cantidad_enviada_esperada || "0";
+                return `
+                  <section class="route-stop ${pendiente ? "" : "visited"}">
+                    <span class="route-stop-number">${pendiente ? escapeHtml(linea.parada_orden || "") : "OK"}</span>
+                    <div>
+                      <strong>${escapeHtml(linea.item_name || "Producto")}</strong>
+                      <span class="route-stop-meta">${escapeHtml(linea.parada_nombre || "Parada")} · esperado ${escapeHtml(linea.cantidad_enviada_esperada || "0")} ${escapeHtml(linea.unit || "")}</span>
+                      <span class="route-stop-meta">${escapeHtml(linea.estatus_display || linea.estatus || "")}${diferencia ? ` · ${escapeHtml(linea.motivo_diferencia_display || linea.motivo_diferencia || "")}` : ""}</span>
+                      ${pendiente ? `
+                        <div class="form-salida" style="margin-top:10px;">
+                          <label for="carga_${linea.id}">Cantidad real</label>
+                          <input id="carga_${linea.id}" type="number" min="0" step="0.001" value="${escapeHtml(cantidadValue)}" oninput="updateCargaLinea(${linea.id}, 'cantidad', this.value)">
+                          <label for="motivo_${linea.id}">Motivo si hay diferencia</label>
+                          <select id="motivo_${linea.id}" onchange="updateCargaLinea(${linea.id}, 'motivo', this.value)">
+                            <option value="">Sin diferencia</option>
+                            <option value="stock_limitado">Stock limitado</option>
+                            <option value="sin_stock">No hay stock</option>
+                            <option value="produccion_no_lista">Producción aún no está lista</option>
+                            <option value="producto_danado">Producto dañado</option>
+                            <option value="cambio_autorizado">Cambio autorizado</option>
+                            <option value="otro">Otro</option>
+                          </select>
+                        </div>
+                        <button class="secondary-btn" type="button" onclick="validarCargaLinea(${linea.id})" ${draft.guardando ? "disabled" : ""}>${draft.guardando ? "Guardando..." : "Guardar revisión"}</button>
+                      ` : ""}
+                    </div>
+                  </section>
+                `;
+              }).join("")}
+            </div>
+          </section>
+        `;
+      }
+
       async function renderRutaActiva(message = "") {
         let rutaData = null;
         let turnoActivo = null;
@@ -2351,6 +2431,7 @@
           `));
         }
         const ruta = rutaData.ruta;
+        const rutaEnSeguimiento = ruta.estatus === "EN_RUTA";
         const ubicacionLista = isGeoReady(draft);
         const turnoOk = Boolean(turnoActivo?.id);
         const unidadOk = turnoOk && String(turnoActivo.unidad) === String(ruta.unidad_operativa);
@@ -2384,12 +2465,15 @@
             ${renderRutaSignals({ turnoOk, unidadOk, ubicacionLista, pendientesOffline, draft, rutaData })}
           </section>
 
+          ${renderChecklistCarga(rutaData.checklist_carga)}
+
           <section class="card route-action-panel">
+            ${rutaEnSeguimiento ? "" : `<div class="daily-banner warning">Ruta en planeación. Revisa la carga; el GPS se activa cuando logística libere la ruta.</div>`}
             ${turnoOk ? "" : `<div class="daily-banner warning">Inicia turno en Bitácora antes de registrar seguimiento.</div>`}
             ${turnoOk && !unidadOk ? `<div class="daily-banner warning">Tu turno activo no corresponde a la unidad asignada a esta ruta.</div>` : ""}
             ${pendientesOffline ? `<div class="daily-banner warning">${pendientesOffline} seguimiento${pendientesOffline === 1 ? "" : "s"} pendiente${pendientesOffline === 1 ? "" : "s"} por enviar. Se reintentará automáticamente al recuperar conexión.</div>` : ""}
             <div class="route-actions-main">
-              <button class="primary-btn" type="button" onclick="capturarUbicacionRuta()" ${draft.geoStatus === "loading" ? "disabled" : ""}>${ubicacionLista ? "Actualizar ubicación GPS" : "Capturar ubicación GPS"}</button>
+              <button class="primary-btn" type="button" onclick="capturarUbicacionRuta()" ${rutaEnSeguimiento && draft.geoStatus !== "loading" ? "" : "disabled"}>${ubicacionLista ? "Actualizar ubicación GPS" : "Capturar ubicación GPS"}</button>
               ${ubicacionLista ? `<button class="secondary-btn" type="button" onclick="toggleDesvioRuta()">${draft.fuera_de_ruta_confirmado ? "Cancelar desvío" : "Reportar desvío"}</button>` : ""}
               ${draft.fuera_de_ruta_confirmado ? `
                 <div class="route-desvio-field">
@@ -2398,7 +2482,7 @@
                   <p class="muted">Se guardará como evidencia al registrar seguimiento.</p>
                 </div>
               ` : ""}
-              <button class="primary-btn" type="button" onclick="registrarTrackingRuta()" ${turnoOk && unidadOk && ubicacionLista && !draft.guardando ? "" : "disabled"}>${draft.guardando ? "Guardando..." : "Registrar seguimiento"}</button>
+              <button class="primary-btn" type="button" onclick="registrarTrackingRuta()" ${rutaEnSeguimiento && turnoOk && unidadOk && ubicacionLista && !draft.guardando ? "" : "disabled"}>${draft.guardando ? "Guardando..." : "Registrar seguimiento"}</button>
             </div>
           </section>
           <section class="card route-card-pwa">
@@ -2411,7 +2495,40 @@
           </section>
           ${draft.geoStatus === "idle" ? "" : geoOverlay(draft, "capturarUbicacionRuta")}
         `));
-        ensureRutaAutoTracking(ruta.id, turnoOk && unidadOk);
+        ensureRutaAutoTracking(ruta.id, rutaEnSeguimiento && turnoOk && unidadOk);
+      }
+
+      async function validarCargaLinea(lineaId) {
+        const rutaId = state.rutaActiva?.ruta?.id;
+        if (!rutaId) return renderRutaActiva("No hay ruta para validar carga.");
+        const draft = cargaDraftFor(lineaId);
+        const cantidad = String(draft.cantidad || "").trim();
+        if (!cantidad) return renderRutaActiva("Captura la cantidad real cargada.");
+        draft.guardando = true;
+        await renderRutaActiva();
+        try {
+          const response = await apiFetch(`/rutas/${rutaId}/carga-checklist/lineas/${lineaId}/validar/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              cantidad_cargada: cantidad,
+              motivo_diferencia: draft.motivo || "",
+              notas: draft.notas || "",
+              client_event_id: newClientEventId()
+            })
+          });
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            return renderRutaActiva(apiErrorMessage(error, "No se pudo validar la carga."));
+          }
+          delete state.rutaCargaDraft[lineaId];
+          state.rutaActiva = null;
+          return renderRutaActiva("✅ Carga revisada.");
+        } catch (error) {
+          return renderRutaActiva(error?.message === "Sesión expirada" ? "Tu sesión expiró. Vuelve a iniciar sesión." : "No se pudo guardar la carga. Reintenta con señal.");
+        } finally {
+          draft.guardando = false;
+        }
       }
 
       async function registrarTrackingRuta() {
@@ -3931,7 +4048,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=route-control-v13").catch(() => {});
+          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=route-control-v14").catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {
