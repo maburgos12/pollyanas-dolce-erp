@@ -1,0 +1,25 @@
+/* Extracted from templates/mantenimiento/reporte_unidad_form.html */
+.mant-report-shell{display:grid;gap:16px}
+  .mant-report-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .mant-report-head h1{margin:0;color:#42292e;font-size:28px;line-height:1.15}
+  .mant-report-head p{margin:6px 0 0;color:#77656d;font-weight:700}
+  .tipo-grid{display:grid;gap:8px;grid-template-columns:repeat(3,minmax(0,1fr))}
+  .tipo-opt{position:relative}
+  .tipo-opt input[type="radio"]{position:absolute;opacity:0;width:0;height:0}
+  .tipo-btn{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:8px;cursor:pointer;border:1.5px solid var(--rosa-deep);background:#fff;font-size:13px;font-weight:800;color:var(--texto);transition:border-color .15s,background .15s}
+  .tipo-opt input:checked + .tipo-btn{border-color:var(--vino);background:#fdf0f5;color:var(--vino)}
+  .tipo-icon{font-size:16px;line-height:1}
+  .sev-grid{display:flex;gap:10px}
+  .sev-opt{position:relative;flex:1}
+  .sev-opt input[type="radio"]{position:absolute;opacity:0;width:0;height:0}
+  .sev-btn{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 10px;border-radius:8px;cursor:pointer;border:2px solid var(--rosa-deep);background:#fff;font-size:13px;font-weight:900;text-align:center;width:100%;transition:border-color .15s,background .15s,box-shadow .15s}
+  .sev-opt input:checked + .sev-btn{box-shadow:0 0 0 3px currentColor}
+  .sev-opt.ok input:checked + .sev-btn{border-color:#1f7554;background:#e5f5ee;color:#1f7554}
+  .sev-opt.warn input:checked + .sev-btn{border-color:#9a6a00;background:#fff4d8;color:#9a6a00}
+  .sev-opt.crit input:checked + .sev-btn{border-color:#bc3b56;background:#ffe8ec;color:#bc3b56}
+  .foto-zone{border:2px dashed var(--rosa-deep);border-radius:8px;padding:20px;text-align:center;cursor:pointer;background:#fff;transition:border-color .15s,background .15s}
+  .foto-zone:hover{border-color:var(--vino);background:#fdf0f5}
+  .foto-zone input[type="file"]{display:none}
+  .foto-preview{display:none;margin-top:10px}
+  .foto-preview img{max-height:140px;border-radius:8px;border:1px solid var(--rosa-deep);object-fit:cover}
+  @media(max-width:760px){.tipo-grid{grid-template-columns:repeat(2,1fr)}.sev-grid{flex-wrap:wrap}.sev-opt{min-width:30%}}

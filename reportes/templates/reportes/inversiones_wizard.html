@@ -6,44 +6,7 @@
 {% block body_class %}page-reportes-inversiones-wizard{% endblock %}
 
 {% block extra_css %}
-<style>
-  :root { --inv-wine:#8B2252; --inv-gold:#C9A84C; --inv-light:#f8f4ec; --inv-line:#e5e7eb; --inv-muted:#6b7280; }
-  .inv-shell { max-width:1400px; margin:0 auto; padding:1.5rem; font-family:"Nunito", system-ui, sans-serif; }
-  .module-tabs { display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:1rem; }
-  .module-tab { padding:.45rem .85rem; border:1px solid var(--inv-line); border-radius:.5rem; color:#374151; text-decoration:none; background:#fff; }
-  .module-tab.active { background:var(--inv-wine); color:#fff; border-color:var(--inv-wine); }
-  .inv-title { margin:0; font-family:"Playfair Display", Georgia, serif; color:var(--inv-wine); font-size:2rem; }
-  .inv-copy { color:var(--inv-muted); margin:.35rem 0 1.25rem; }
-  .inv-layout { display:grid; grid-template-columns:minmax(0,2.2fr) minmax(280px,.8fr); gap:1rem; align-items:start; }
-  .inv-panel { background:#fff; border:1px solid var(--inv-line); border-radius:.75rem; padding:1rem; }
-  .inv-steps { display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:1rem; }
-  .inv-step-pill { border:1px solid var(--inv-line); background:#fff; border-radius:999px; padding:.35rem .75rem; font-weight:800; font-size:.82rem; color:#374151; }
-  .inv-step-pill.active { background:var(--inv-wine); color:#fff; border-color:var(--inv-wine); }
-  .inv-step { display:none; } .inv-step.active { display:block; }
-  .inv-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.85rem; }
-  .inv-field label { display:block; font-size:.74rem; font-weight:900; text-transform:uppercase; letter-spacing:.05em; color:#4b5563; margin-bottom:.25rem; }
-  .inv-input, .inv-select, .inv-textarea { width:100%; border:1px solid #d1d5db; border-radius:.45rem; padding:.55rem .65rem; font:inherit; background:#fff; color:#111827; }
-  .inv-textarea { min-height:92px; resize:vertical; }
-  .inv-table { width:100%; border-collapse:separate; border-spacing:0; table-layout:fixed; }
-  .inv-table th { background:var(--inv-wine); color:#fff; padding:.5rem; text-align:left; font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
-  .inv-table td { border-bottom:1px solid var(--inv-line); padding:.45rem; vertical-align:middle; }
-  .inv-table input,.inv-table select { width:100%; border:1px solid #d1d5db; border-radius:.35rem; padding:.42rem; font:inherit; background:#fff; }
-  .inv-table input[type=number] { text-align:right; }
-  .inv-actions { display:flex; gap:.65rem; justify-content:space-between; flex-wrap:wrap; margin-top:1rem; }
-  .inv-button { border:0; border-radius:.5rem; padding:.65rem 1rem; background:var(--inv-wine); color:#fff; font-weight:900; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; }
-  .inv-button.secondary { background:#fff; border:1px solid var(--inv-wine); color:var(--inv-wine); }
-  .inv-button.danger { background:#fee2e2; color:#991b1b; border:1px solid #fecaca; padding:.4rem .55rem; }
-  .inv-kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.75rem; margin-bottom:1rem; }
-  .inv-kpi { background:#fff; border:1px solid var(--inv-line); border-radius:.6rem; padding:.8rem; }
-  .inv-label { font-size:.7rem; text-transform:uppercase; letter-spacing:.06em; color:var(--inv-muted); font-weight:900; }
-  .inv-value { font-family:"Playfair Display", Georgia, serif; color:var(--inv-wine); font-size:1.35rem; font-weight:900; }
-  .inv-ref-table { width:100%; border-collapse:collapse; font-size:.84rem; }
-  .inv-ref-table th,.inv-ref-table td { border-bottom:1px solid #f3f4f6; padding:.45rem; text-align:right; }
-  .inv-ref-table th:first-child,.inv-ref-table td:first-child { text-align:left; }
-  .inv-review-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.75rem; }
-  .inv-review-card { border:1px solid var(--inv-line); background:#fafafa; border-radius:.6rem; padding:.8rem; }
-  @media (max-width:1000px){ .inv-layout,.inv-form-grid,.inv-kpis,.inv-review-grid{grid-template-columns:1fr;} }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/reportes-templates-reportes-inversiones-wizard.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
@@ -61,7 +24,7 @@
     <article class="inv-kpi"><div class="inv-label">Ticket promedio</div><div class="inv-value">${{ benchmark.ticket_promedio|default:0|floatformat:2|intcomma }}</div></article>
     <article class="inv-kpi"><div class="inv-label">Ventas benchmark</div><div class="inv-value">${{ benchmark.ventas_mensuales_avg|default:0|floatformat:2|intcomma }}</div></article>
     <article class="inv-kpi"><div class="inv-label">Gasto operativo</div><div class="inv-value">${{ benchmark.gastos_operativos_avg|default:0|floatformat:2|intcomma }}</div></article>
-    <article class="inv-kpi"><div class="inv-label">Fuente</div><div class="inv-value" style="font-size:1rem">{{ benchmark.data_source|default:"N/D" }}</div></article>
+    <article class="inv-kpi"><div class="inv-label">Fuente</div><div class="inv-value pd-u-f2ea5fc13d">{{ benchmark.data_source|default:"N/D" }}</div></article>
   </section>
 
   <form method="post" id="inversionWizardForm" action="{% url 'reportes:inversiones_wizard' %}">
@@ -88,25 +51,25 @@
             <div class="inv-field"><label>Sucursal relacionada</label><select class="inv-select" name="sucursal_relacionada_id"><option value="">Sin relación</option>{% for sucursal in sucursales %}<option value="{{ sucursal.id }}">{{ sucursal.nombre }}</option>{% endfor %}</select></div>
             <div class="inv-field"><label>Fecha inicio</label><input class="inv-input" type="date" name="fecha_inicio" value="2026-06-01" required></div>
             <div class="inv-field"><label>Fecha apertura estimada</label><input class="inv-input" type="date" name="fecha_apertura" value="2026-08-01"></div>
-            <div class="inv-field" style="grid-column:1/-1"><label>Descripción de ubicación</label><textarea class="inv-textarea" name="descripcion_ubicacion">Sucursal pequeña de pickup y punto de venta para validar demanda local antes de escalar operación.</textarea></div>
+            <div class="inv-field pd-u-97294b207c"><label>Descripción de ubicación</label><textarea class="inv-textarea" name="descripcion_ubicacion">Sucursal pequeña de pickup y punto de venta para validar demanda local antes de escalar operación.</textarea></div>
           </div>
         </section>
 
         <section class="inv-step" data-step="2">
-          <div style="display:flex;gap:.65rem;flex-wrap:wrap;margin-bottom:.85rem">
+          <div class="pd-u-e7737f6d3d">
             <button type="button" class="inv-button secondary" id="addPartidaBtn">Agregar partida</button>
             <button type="button" class="inv-button secondary" id="importGuamuchilBtn">Usar referencia Guamúchil</button>
           </div>
-          <div style="overflow:auto;border:1px solid var(--inv-line);border-radius:.6rem">
+          <div class="pd-u-a76a7a79bc">
             <table class="inv-table">
               <colgroup>
-                <col style="width:18%"><col style="width:27%"><col style="width:18%"><col style="width:12%"><col style="width:10%"><col style="width:10%"><col style="width:5%">
+                <col class="pd-u-29d36385cf"><col class="pd-u-6fbc41f373"><col class="pd-u-29d36385cf"><col class="pd-u-bc1989dcad"><col class="pd-u-3b30d0389e"><col class="pd-u-3b30d0389e"><col class="pd-u-479f6b5fed">
               </colgroup>
               <thead><tr><th>Categoría</th><th>Descripción</th><th>Proveedor</th><th>Monto</th><th>IVA</th><th>Total</th><th></th></tr></thead>
               <tbody id="partidasBody"></tbody>
             </table>
           </div>
-          <div id="totalesCategorias" style="margin-top:1rem"></div>
+          <div id="totalesCategorias" class="pd-u-0cf8f93b0e"></div>
         </section>
 
         <section class="inv-step" data-step="3">
@@ -129,12 +92,12 @@
 
         <section class="inv-step" data-step="4">
           <div class="inv-review-grid" id="escenariosPreview"></div>
-          <div class="inv-panel" style="margin-top:1rem;background:#fafafa">
+          <div class="inv-panel pd-u-d9da24b4a6">
             <div class="inv-label">Total inversión planeada</div>
             <div class="inv-value" id="reviewTotal">$0.00</div>
             <p class="inv-copy" id="reviewResumen"></p>
           </div>
-          <button type="submit" class="inv-button" style="margin-top:1rem">Crear proyecto con escenarios</button>
+          <button type="submit" class="inv-button pd-u-0cf8f93b0e">Crear proyecto con escenarios</button>
         </section>
 
         <div class="inv-actions">
@@ -186,7 +149,7 @@
         <td><input data-field="proveedor_nombre" value="${partida.proveedor_nombre || ""}" placeholder="Proveedor"></td>
         <td><input data-field="monto" type="number" step="0.01" min="0" value="${partida.monto || 0}"></td>
         <td><input data-field="iva" type="number" step="0.01" min="0" value="${partida.iva || 0}"></td>
-        <td style="text-align:right;font-weight:900;color:#8B2252">${money(total)}</td>
+        <td class="pd-u-5565220dd2">${money(total)}</td>
         <td><button type="button" class="inv-button danger" data-delete="${idx}">X</button></td>`;
       tr.querySelectorAll("[data-field]").forEach((input) => {
         input.addEventListener("input", () => {

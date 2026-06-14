@@ -1,0 +1,7 @@
+/* Extracted from crm/templates/crm/pedido_detail.html */
+.ops-shell { display:grid; gap:18px; }
+  .ops-grid-2 { display:grid; gap:18px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .ops-summary { display:grid; gap:12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .ops-summary-card { border:1px solid var(--rosa-deep); border-radius:14px; background:#fff; padding:14px 16px; }
+  .ops-summary-card strong { display:block; font-size:28px; color:var(--vino); line-height:1; margin-bottom:8px; }
+  @media (max-width: 960px) { .ops-grid-2, .ops-summary { grid-template-columns: 1fr; } }

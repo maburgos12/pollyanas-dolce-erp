@@ -1,0 +1,72 @@
+/* Extracted from templates/orquestacion/quality_findings.html */
+.quality-shell { display: grid; gap: 1rem; }
+  .quality-hero {
+    background: linear-gradient(135deg, #15243b 0%, #23486a 58%, #b17b40 100%);
+    color: #fff;
+    border-radius: 24px;
+    padding: 1.5rem 1.65rem;
+  }
+  .quality-hero h1 { margin: 0 0 .35rem; }
+  .quality-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+  .quality-card, .quality-panel {
+    background: #fff;
+    border: 1px solid rgba(21, 36, 59, .08);
+    border-radius: 20px;
+    box-shadow: 0 16px 40px rgba(12, 20, 34, .08);
+  }
+  .quality-card { padding: 1rem 1.1rem; }
+  .quality-card-label { font-size: .82rem; text-transform: uppercase; letter-spacing: .06em; color: #6d7785; margin-bottom: .45rem; }
+  .quality-card-value { font-size: 1.95rem; font-weight: 800; color: #15243b; }
+  .quality-card-note { color: #6d7785; font-size: .9rem; }
+  .quality-panel { padding: 1.1rem; }
+  .quality-panel h2 { margin: 0 0 .9rem; color: #15243b; }
+  .quality-kicker { color: #6d7785; font-size: .9rem; margin-bottom: .9rem; }
+  .quality-toolbar { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 1rem; }
+  .quality-field { display: grid; gap: .3rem; }
+  .quality-field label { font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: #6d7785; font-weight: 700; }
+  .quality-select {
+    width: 100%;
+    border: 1px solid rgba(21, 36, 59, .12);
+    border-radius: 12px;
+    padding: .65rem .75rem;
+    color: #15243b;
+    background: #fff;
+  }
+  .quality-actions { display: flex; flex-wrap: wrap; gap: .55rem; align-items: end; }
+  .quality-btn {
+    border: none;
+    border-radius: 12px;
+    padding: .7rem .95rem;
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .quality-btn.primary { background: #15243b; color: #fff; }
+  .quality-btn.secondary { background: #eef2f7; color: #24364d; }
+  .quality-table { width: 100%; border-collapse: collapse; }
+  .quality-table th, .quality-table td { text-align: left; padding: .7rem .55rem; border-top: 1px solid rgba(21, 36, 59, .08); vertical-align: top; }
+  .quality-table th { border-top: none; color: #6d7785; font-size: .82rem; text-transform: uppercase; letter-spacing: .05em; }
+  .quality-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: .2rem .55rem;
+    font-size: .78rem;
+    font-weight: 700;
+    background: #eef2f7;
+    color: #24364d;
+  }
+  .quality-pill.warning, .quality-pill.proposed, .quality-pill.accepted, .quality-pill.implemented { background: #fff1d8; color: #8f5c00; }
+  .quality-pill.high, .quality-pill.critical, .quality-pill.rejected { background: #f8e0e0; color: #9a2430; }
+  .quality-pill.resolved, .quality-pill.validated { background: #dff4e5; color: #12633a; }
+  .quality-subtle { color: #6d7785; font-size: .88rem; }
+  .quality-empty {
+    border: 1px dashed rgba(21, 36, 59, .14);
+    border-radius: 16px;
+    padding: .95rem 1rem;
+    color: #6d7785;
+    background: #fafbfd;
+  }

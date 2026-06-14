@@ -31,7 +31,7 @@
       <div class="kpi-label">Costo diferencia</div>
     </article>
   </div>
-  <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:16px;">
+  <div class="pd-u-eb9108ee20">
     <a class="btn btn-secondary" href="{% url 'inventario:conteo_fisico_export' conteo.id %}">Exportar Excel</a>
     {% if can_manage_inventario and conteo.estatus == "BORRADOR" and captured == total and total > 0 %}
     <form method="post" action="{% url 'inventario:conteo_fisico_revision' conteo.id %}">
@@ -64,8 +64,8 @@
 </section>
 
 {% if conteo.estatus == "BORRADOR" and can_manage_inventario %}
-  <div style="position:sticky; bottom:16px; text-align:right;">
-    <span id="autosave-status" class="muted" style="margin-right:12px;">Guardado automático activo</span>
+  <div class="pd-u-24012d2d41">
+    <span id="autosave-status" class="muted pd-u-84eff7f602">Guardado automático activo</span>
     <button class="btn btn-primary" type="submit">Guardar captura</button>
   </div>
 </form>

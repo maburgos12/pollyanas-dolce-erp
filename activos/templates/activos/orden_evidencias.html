@@ -4,76 +4,7 @@
 {% block page_title %}Activos · Evidencias{% endblock %}
 
 {% block extra_css %}
-<style>
-.orden-header {
-  display: flex; flex-wrap: wrap; gap: 12px;
-  align-items: center; margin-bottom: 16px;
-}
-.orden-folio { font-family: monospace; font-size: 1.3rem; font-weight: 700; color: var(--vino); }
-.orden-meta { font-size: 0.9rem; color: var(--texto-light); }
-.ev-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 12px;
-  margin-top: 12px;
-}
-@media (max-width: 480px) { .ev-grid { grid-template-columns: repeat(2, 1fr); } }
-.ev-card {
-  border: 1.5px solid #e0d0d0;
-  border-radius: 10px;
-  overflow: hidden;
-  background: #fff;
-  position: relative;
-}
-.ev-card img { width: 100%; height: 140px; object-fit: cover; display: block; cursor: pointer; }
-.ev-card .ev-icon { height: 140px; display: flex; align-items: center; justify-content: center; font-size: 3rem; background: var(--gris-suave); }
-.ev-card .ev-body { padding: 8px 10px; }
-.ev-card .ev-tipo { font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: var(--texto-light); }
-.ev-card .ev-desc { font-size: 0.85rem; color: var(--texto); margin-top: 2px; word-break: break-word; }
-.ev-card .ev-meta { font-size: 0.75rem; color: var(--texto-light); margin-top: 4px; }
-.ev-card .ev-actions { padding: 6px 10px 10px; display: flex; gap: 6px; flex-wrap: wrap; }
-.upload-area {
-  border: 2px dashed var(--dorado);
-  border-radius: 10px;
-  padding: 24px 16px;
-  text-align: center;
-  background: #fffbf0;
-  cursor: pointer;
-}
-.upload-area input[type="file"] { display: none; }
-.upload-area .upload-icon { font-size: 2.5rem; margin-bottom: 6px; }
-.upload-area p { margin: 4px 0; color: var(--texto-light); font-size: 0.9rem; }
-.mobile-form-group { margin-bottom: 14px; }
-.mobile-form-group label { display: block; font-weight: 700; font-size: .9rem; margin-bottom: 5px; }
-.mobile-form-group select,
-.mobile-form-group input[type="text"] {
-  width: 100%; font-size: 1rem; padding: 11px;
-  border-radius: 8px; border: 1.5px solid #d0c0c0;
-  background: #fff; box-sizing: border-box;
-}
-.lightbox-overlay {
-  display: none; position: fixed; inset: 0;
-  background: rgba(0,0,0,.88); z-index: 9999;
-  align-items: center; justify-content: center;
-}
-.lightbox-overlay.active { display: flex; }
-.lightbox-overlay img { max-width: 94vw; max-height: 90vh; border-radius: 8px; }
-.lightbox-close {
-  position: absolute; top: 16px; right: 20px;
-  color: #fff; font-size: 2rem; cursor: pointer; line-height: 1;
-}
-.btn-grande { width: 100%; padding: 14px; font-size: 1rem; font-weight: 700; border-radius: 10px; margin-top: 6px; }
-.preview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px,1fr)); gap: 8px; margin-top: 10px; }
-.preview-item { position: relative; border-radius: 8px; overflow: hidden; background: #f0f0f0; }
-.preview-item img { width: 100%; height: 80px; object-fit: cover; display: block; }
-.preview-item .doc-icon { height: 80px; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; }
-.preview-item .preview-remove {
-  position: absolute; top: 3px; right: 3px;
-  background: rgba(229,57,53,.85); color: #fff;
-  border: none; border-radius: 50%; width: 20px; height: 20px;
-  font-size: .7rem; cursor: pointer; line-height: 20px; text-align: center; padding: 0;
-}
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/activos-templates-activos-orden-evidencias.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
@@ -85,7 +16,7 @@
 
 {% if messages %}
   {% for msg in messages %}
-    <div class="alert alert-{{ msg.tags|default:'info' }}" style="margin-bottom:12px;">{{ msg }}</div>
+    <div class="alert alert-{{ msg.tags|default:'info' }} pd-u-3ef1fa1aa1">{{ msg }}</div>
   {% endfor %}
 {% endif %}
 
@@ -94,11 +25,11 @@
   <div class="orden-header">
     <div>
       <span class="orden-folio">{{ orden.folio }}</span>
-      <span class="badge {% if orden.tipo == 'CORRECTIVO' %}bg-danger{% else %}bg-primary{% endif %}" style="margin-left:8px;">{{ orden.get_tipo_display }}</span>
-      <span class="badge {% if orden.estatus == 'CERRADA' %}bg-success{% elif orden.estatus == 'EN_PROCESO' %}bg-warning{% else %}bg-secondary{% endif %}" style="margin-left:4px;">{{ orden.get_estatus_display }}</span>
+      <span class="badge {% if orden.tipo == 'CORRECTIVO' %}bg-danger{% else %}bg-primary{% endif %} pd-u-6170d94c81">{{ orden.get_tipo_display }}</span>
+      <span class="badge {% if orden.estatus == 'CERRADA' %}bg-success{% elif orden.estatus == 'EN_PROCESO' %}bg-warning{% else %}bg-secondary{% endif %} pd-u-ee82001542">{{ orden.get_estatus_display }}</span>
     </div>
     <div>
-      <div style="font-weight:700;">{{ orden.activo_ref.nombre }}</div>
+      <div class="pd-u-758a887326">{{ orden.activo_ref.nombre }}</div>
       <div class="orden-meta">
         {% if orden.activo_ref.sucursal %}{{ orden.activo_ref.sucursal.nombre }} · {% endif %}
         {% if orden.proveedor_servicio %}Proveedor: {{ orden.proveedor_servicio.nombre }} · {% endif %}
@@ -106,12 +37,12 @@
         {% if orden.proxima_revision %} · Próxima revisión: {{ orden.proxima_revision|date:"d/m/Y" }}{% endif %}
       </div>
     </div>
-    <div style="margin-left:auto;">
+    <div class="pd-u-690f054c4e">
       <a href="{% url 'activos:ordenes' %}" class="btn btn-secondary btn-sm">← Volver a órdenes</a>
     </div>
   </div>
   {% if orden.descripcion %}
-    <p style="margin:0;color:var(--texto);">{{ orden.descripcion }}</p>
+    <p class="pd-u-7aeb94261f">{{ orden.descripcion }}</p>
   {% endif %}
 </section>
 
@@ -128,12 +59,12 @@
             <img src="{{ ev.archivo.url }}" alt="{{ ev.descripcion }}"
                  onclick="openLightbox('{{ ev.archivo.url }}')" title="Ver imagen">
           {% elif ev.tipo == 'VIDEO' %}
-            <a href="{{ ev.archivo.url }}" target="_blank" style="text-decoration:none;">
-              <div class="ev-icon">🎥</div>
+            <a href="{{ ev.archivo.url }}" target="_blank" class="pd-u-4edeb9e71d">
+              <div class="ev-icon">Video</div>
             </a>
           {% else %}
-            <a href="{{ ev.archivo.url }}" target="_blank" style="text-decoration:none;">
-              <div class="ev-icon">📄</div>
+            <a href="{{ ev.archivo.url }}" target="_blank" class="pd-u-4edeb9e71d">
+              <div class="ev-icon">DOC</div>
             </a>
           {% endif %}
           <div class="ev-body">
@@ -146,11 +77,11 @@
           </div>
           {% if can_manage_activos %}
           <div class="ev-actions">
-            <a href="{{ ev.archivo.url }}" target="_blank" class="btn btn-secondary btn-sm">⬇ Ver</a>
-            <form method="post" action="{% url 'activos:eliminar_evidencia' ev.id %}" style="display:inline;"
+            <a href="{{ ev.archivo.url }}" target="_blank" class="btn btn-secondary btn-sm">Ver</a>
+            <form method="post" action="{% url 'activos:eliminar_evidencia' ev.id %}" class="pd-u-0cd28ce9ba"
                   onsubmit="return confirm('¿Eliminar esta evidencia?')">
               {% csrf_token %}
-              <button type="submit" class="btn btn-sm" style="background:#fdecea;color:var(--rojo);border-color:var(--rojo);">🗑</button>
+              <button type="submit" class="btn btn-sm pd-u-1e66a03fec">Eliminar</button>
             </form>
           </div>
           {% endif %}
@@ -158,29 +89,29 @@
       {% endfor %}
     </div>
   {% else %}
-    <p class="muted" style="padding: 12px 0;">No hay evidencias subidas todavía.</p>
+    <p class="muted pd-u-9cd3bacd87">No hay evidencias subidas todavía.</p>
   {% endif %}
 </section>
 
 <!-- Sección de Factura / Nota de trabajo -->
 {% if can_manage_activos %}
 <section class="card card-form-narrow">
-  <div class="card-header" style="background:linear-gradient(135deg,#1565C0,#0D47A1);color:#fff;">
-    🧾 Factura / Nota de remisión y trabajo
+  <div class="card-header pd-u-19d635b4f2">
+    Recibo Factura / Nota de remisión y trabajo
   </div>
 
   <!-- Vista de lo registrado -->
   {% if orden.numero_factura or orden.factura_archivo or orden.nota_trabajo %}
-  <div style="margin-bottom:16px;padding:14px;background:#f0f9ff;border:1.5px solid #90CAF9;border-radius:10px;">
+  <div class="pd-u-233d65776f">
     {% if orden.numero_factura %}
-      <div style="margin-bottom:8px;">
+      <div class="pd-u-e4ad4a163b">
         <strong>Número de factura:</strong>
-        <span style="font-family:monospace;font-size:1rem;color:#1565C0;">{{ orden.numero_factura }}</span>
+        <span class="pd-u-c3615382ca">{{ orden.numero_factura }}</span>
       </div>
     {% endif %}
     {% if orden.factura_archivo %}
-      <div style="margin-bottom:8px;display:flex;align-items:center;gap:10px;">
-        <span style="font-size:1.5rem;">🧾</span>
+      <div class="pd-u-d6e693f2b8">
+        <span class="pd-u-8e2b91d031">Recibo</span>
         <a href="{{ orden.factura_archivo.url }}" target="_blank" class="btn btn-secondary btn-sm">
           Ver / descargar factura
         </a>
@@ -189,7 +120,7 @@
     {% if orden.nota_trabajo %}
       <div>
         <strong>Nota del trabajo:</strong>
-        <p style="margin:6px 0 0;white-space:pre-line;color:var(--texto);">{{ orden.nota_trabajo }}</p>
+        <p class="pd-u-d02be0c15b">{{ orden.nota_trabajo }}</p>
       </div>
     {% endif %}
   </div>
@@ -206,14 +137,14 @@
     </div>
 
     <div class="mobile-form-group">
-      <label>Archivo de factura{% if orden.factura_archivo %} <span style="color:var(--verde);font-weight:400;">(ya hay uno, subir reemplaza)</span>{% endif %}</label>
-      <div class="upload-area" style="padding:14px;" onclick="document.getElementById('input-factura-ev').click()">
+      <label>Archivo de factura{% if orden.factura_archivo %} <span class="pd-u-575956b33b">(ya hay uno, subir reemplaza)</span>{% endif %}</label>
+      <div class="upload-area pd-u-67ae1400bb" onclick="document.getElementById('input-factura-ev').click()">
         <input type="file" name="factura_archivo" id="input-factura-ev" accept=".pdf,image/*" capture="environment">
-        <div style="font-size:1.8rem;margin-bottom:4px;">🧾</div>
+        <div class="pd-u-11969f5d7a">Recibo</div>
         <p><strong>Toca para adjuntar factura</strong></p>
         <p>PDF o foto · Máx. 30 MB</p>
       </div>
-      <div id="preview-factura-ev" style="margin-top:8px;"></div>
+      <div id="preview-factura-ev" class="pd-u-b1ecc496e0"></div>
     </div>
 
     <div class="mobile-form-group">
@@ -221,7 +152,7 @@
       <textarea name="nota_trabajo" rows="4" placeholder="Describe qué se hizo, piezas cambiadas, resultado de la prueba…">{{ orden.nota_trabajo }}</textarea>
     </div>
 
-    <button type="submit" class="btn btn-primary btn-grande" style="background:#1565C0;border-color:#1565C0;">
+    <button type="submit" class="btn btn-primary btn-grande pd-u-ff8d7979fd">
       Guardar factura y notas
     </button>
   </form>
@@ -239,13 +170,13 @@
       <input type="file" name="archivo" id="input-archivo"
              accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx"
              capture="environment">
-      <div class="upload-icon">📷</div>
+      <div class="upload-icon">Foto</div>
       <p><strong>Toca para agregar foto, video o documento</strong></p>
       <p>JPG, PNG, MP4, PDF · Máx. 30 MB</p>
     </div>
     <div class="preview-grid" id="preview-grid"></div>
 
-    <div class="mobile-form-group" style="margin-top:14px;">
+    <div class="mobile-form-group pd-u-88b9d5c614">
       <label>Tipo</label>
       <select name="tipo">
         {% for val, label in tipos %}
@@ -296,7 +227,7 @@ if (inputFacturaEv) {
     const isImg = ['jpg','jpeg','png','gif','webp','heic'].includes(ext);
     const div = document.createElement('div');
     div.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px;background:#f0fff4;border-radius:8px;border:1.5px solid var(--verde);margin-top:4px;';
-    div.innerHTML = `<span style="font-size:1.8rem">${isImg ? '🖼️' : '🧾'}</span><div><strong>${file.name}</strong><br><span style="font-size:.8rem;color:var(--texto-light)">${(file.size/1024/1024).toFixed(2)} MB</span></div>`;
+    div.innerHTML = `<span class="pd-u-34d8711a27">${isImg ? 'Imagen' : 'Recibo'}</span><div><strong>${file.name}</strong><br><span class="pd-u-6e4b91a759">${(file.size/1024/1024).toFixed(2)} MB</span></div>`;
     previewFacturaEv.appendChild(div);
   });
 }
@@ -318,7 +249,7 @@ if (inputArchivo) {
       } else {
         const icon = document.createElement('div');
         icon.className = 'doc-icon';
-        icon.textContent = ['mp4','mov','avi'].includes(ext) ? '🎥' : '📄';
+        icon.textContent = ['mp4','mov','avi'].includes(ext) ? 'Video' : 'DOC';
         div.appendChild(icon);
       }
       previewGrid.appendChild(div);

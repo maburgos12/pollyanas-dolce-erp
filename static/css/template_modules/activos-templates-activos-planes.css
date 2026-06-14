@@ -1,0 +1,62 @@
+/* Extracted from activos/templates/activos/planes.html */
+/* ── KPI strip ── */
+  .planes-kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+  .planes-kpi-card{background:#fff;border:1px solid rgba(139,34,82,.12);border-radius:12px;padding:16px 18px}
+  .planes-kpi-num{font-family:"Playfair Display",serif;font-size:32px;font-weight:700;line-height:1}
+  .planes-kpi-num.ok{color:#4CAF50}
+  .planes-kpi-num.warn{color:#FFC107}
+  .planes-kpi-num.bad{color:#E53935}
+  .planes-kpi-label{color:#7A6565;font-size:13px;margin-top:4px}
+
+  /* ── Toolbar ── */
+  .planes-toolbar{display:grid;grid-template-columns:1fr 160px 160px auto;gap:10px;align-items:end;margin-bottom:16px}
+  .planes-toolbar input,.planes-toolbar select{width:100%;min-height:40px;border:1px solid rgba(139,34,82,.22);border-radius:8px;padding:0 10px;font:inherit;font-size:13px;background:#fff}
+
+  /* ── Tabla ── */
+  .planes-table-wrap{overflow-x:auto;border-radius:12px;border:1px solid rgba(139,34,82,.10)}
+  .planes-table{width:100%;border-collapse:collapse;font-size:13px}
+  .planes-table thead tr{background:#8B2252;color:#fff}
+  .planes-table thead th{padding:11px 14px;font-weight:700;text-align:left}
+  .planes-table tbody tr{border-bottom:1px solid #f5eef2}
+  .planes-table tbody tr:last-child{border-bottom:0}
+  .planes-table tbody tr:hover{background:#fffafc}
+  .planes-table td{padding:10px 14px;vertical-align:middle;color:#3D2B2B}
+  .planes-table td.muted-cell{color:#7A6565}
+
+  /* ── Badges de estado ── */
+  .plan-badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:3px 10px;font-size:11px;font-weight:900}
+  .plan-badge.activo{background:#e8f5e9;color:#2e7d32}
+  .plan-badge.pausado{background:#f5f5f5;color:#616161}
+  .plan-badge.vencido{background:#ffebee;color:#c62828}
+  .plan-badge.ok{background:#e8f5e9;color:#2e7d32}
+  .plan-badge.proximo{background:#fff8e1;color:#f57f17}
+  .plan-badge.sin-fecha{background:#fce4ec;color:#880e4f}
+
+  /* ── Acciones fila ── */
+  .planes-row-actions{display:flex;gap:6px;flex-wrap:nowrap}
+
+  /* ── Panel nuevo plan ── */
+  .planes-form-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .planes-form-grid label{display:grid;gap:5px;font-size:13px;font-weight:700;color:#513744}
+  .planes-form-grid input,.planes-form-grid select,.planes-form-grid textarea{min-height:40px;border:1px solid rgba(139,34,82,.22);border-radius:8px;padding:0 10px;font:inherit;font-size:13px;background:#fff}
+  .planes-form-grid .span-full{grid-column:1/-1}
+  .planes-form-grid textarea{min-height:72px;padding:8px 10px;resize:vertical}
+
+  /* ── Modal edición ── */
+  .planes-modal-backdrop{position:fixed;inset:0;z-index:1200;display:none;background:rgba(24,12,18,.52);padding:20px;overflow:auto}
+  .planes-modal-backdrop.open{display:flex;align-items:flex-start;justify-content:center}
+  .planes-modal{width:min(760px,100%);margin:40px 0;background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.28)}
+  .planes-modal-head{display:flex;justify-content:space-between;align-items:center;background:#8B2252;color:#fff;padding:16px 20px;border-radius:14px 14px 0 0}
+  .planes-modal-head strong{font-family:"Playfair Display",serif;font-size:18px}
+  .planes-modal-body{padding:20px}
+  .planes-modal-footer{display:flex;justify-content:flex-end;gap:10px;padding:14px 20px;border-top:1px solid #f0e1e8}
+
+  @media(max-width:900px){
+    .planes-kpi{grid-template-columns:repeat(2,1fr)}
+    .planes-toolbar{grid-template-columns:1fr 1fr}
+    .planes-form-grid{grid-template-columns:1fr 1fr}
+  }
+  @media(max-width:560px){
+    .planes-kpi{grid-template-columns:1fr 1fr}
+    .planes-toolbar{grid-template-columns:1fr}
+  }

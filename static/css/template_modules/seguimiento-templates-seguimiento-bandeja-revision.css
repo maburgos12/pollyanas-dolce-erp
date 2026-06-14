@@ -1,0 +1,91 @@
+/* Extracted from seguimiento/templates/seguimiento/bandeja_revision.html */
+.seg-rev-shell { width: min(100%, 1200px); }
+
+  .seg-rev-item {
+    background: rgba(255,255,255,.88);
+    border: 1px solid rgba(201,168,76,.22);
+    border-radius: 16px;
+    padding: 18px 20px;
+    display: grid;
+    gap: 14px;
+  }
+
+  .seg-rev-item-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .seg-rev-title { margin: 0; font-size: 1.05rem; color: var(--texto); }
+
+  .seg-rev-meta { font-size: .82rem; color: var(--texto-light); margin-top: 4px; }
+
+  .seg-rev-actividad {
+    background: rgba(250,246,248,.94);
+    border: 1px solid rgba(139,34,82,.08);
+    border-radius: 12px;
+    padding: 12px;
+    display: grid;
+    gap: 8px;
+    font-size: .9rem;
+  }
+
+  .seg-rev-evidencia-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(35,109,83,.10);
+    color: #236d53;
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: .85rem;
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .seg-rev-evidencia-link:hover { background: rgba(35,109,83,.18); }
+
+  .seg-rev-actions {
+    display: grid;
+    gap: 10px;
+  }
+
+  .seg-rev-actions form {
+    display: grid;
+    gap: 8px;
+  }
+
+  .seg-rev-actions textarea {
+    width: 100%;
+    border: 1px solid rgba(139,34,82,.14);
+    border-radius: 10px;
+    padding: 9px 10px;
+    font: inherit;
+    color: var(--texto);
+    background: rgba(255,255,255,.96);
+    resize: vertical;
+    min-height: 60px;
+    box-sizing: border-box;
+  }
+
+  .seg-rev-action-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .seg-prorroga-box {
+    background: rgba(255,193,7,.10);
+    border: 1px solid rgba(255,193,7,.30);
+    border-radius: 12px;
+    padding: 12px;
+    font-size: .88rem;
+  }
+
+  .seg-empty {
+    text-align: center;
+    padding: 48px 24px;
+    color: var(--texto-light);
+  }

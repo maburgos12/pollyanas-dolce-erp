@@ -1,0 +1,210 @@
+/* Extracted from recetas/templates/recetas/consolidado_cedis_revision.html */
+.cedis-table-shell {
+    overflow-x:clip;
+    width: 100%;
+  }
+
+  .cedis-consolidado-table {
+    table-layout: fixed;
+    width: 100%;
+    font-size: clamp(10px, 0.72vw, 13px);
+  }
+
+  .cedis-consolidado-table th,
+  .cedis-consolidado-table td {
+    overflow-wrap: anywhere;
+    padding: clamp(4px, 0.45vw, 8px);
+    vertical-align: middle;
+  }
+
+  .cedis-consolidado-table .col-producto { width: 25%; }
+  .cedis-consolidado-table .col-sucursal { width: 11%; }
+  .cedis-consolidado-table .col-num { width: 10%; }
+  .cedis-consolidado-table .col-modificar { width: 13%; }
+  .cedis-consolidado-table .col-autorizar { width: 8%; }
+
+  .cedis-consolidado-table .form-control {
+    font-size: inherit;
+    min-width: 0;
+    padding: 4px 6px;
+    width: 100%;
+  }
+
+  .cedis-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .cedis-tab-link {
+    border: 1px solid var(--border-color, #d1d5db);
+    border-radius: 6px;
+    color: inherit;
+    padding: 8px 12px;
+    text-decoration: none;
+  }
+
+  .cedis-tab-link.is-active {
+    background: #111827;
+    color: #fff;
+  }
+
+  .cedis-inventory-shell {
+    overflow-x: auto;
+    padding-bottom: 8px;
+    width: 100%;
+  }
+
+  .cedis-inventory-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    min-width: 1580px;
+    table-layout: fixed;
+    width: max-content;
+  }
+
+  .cedis-inventory-table th,
+  .cedis-inventory-table td {
+    font-size: 12px;
+    line-height: 1.2;
+    padding: 7px 10px;
+    vertical-align: middle;
+  }
+
+  .cedis-inventory-table th {
+    overflow-wrap: normal;
+    text-align: center;
+    white-space: normal;
+    word-break: normal;
+  }
+
+  .cedis-inventory-table td {
+    white-space:normal;
+  }
+
+  .cedis-inventory-table .inventory-sku {
+    width: 132px;
+  }
+
+  .cedis-inventory-table .inventory-product {
+    min-width: 320px;
+    white-space: normal;
+    width: 320px;
+  }
+
+  .cedis-inventory-table .inventory-category {
+    min-width: 150px;
+    white-space: normal;
+    width: 150px;
+  }
+
+  .cedis-inventory-table .inventory-branch {
+    min-width: 112px;
+    width: 112px;
+  }
+
+  .cedis-inventory-table .inventory-total {
+    background: #fff;
+    box-shadow: -8px 0 12px rgba(255, 255, 255, 0.86);
+    min-width: 132px;
+    width: 132px;
+  }
+
+  .cedis-inventory-table thead .inventory-total {
+    background: #f8e8f0;
+  }
+
+  .cedis-inventory-meta {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    margin-bottom: 12px;
+  }
+
+  .cedis-check-button {
+    align-items: center;
+    display: inline-flex;
+    height: 2rem;
+    justify-content: center;
+    min-width: 2rem;
+    padding: 0;
+    width: 2rem;
+  }
+
+  .cedis-check-button svg {
+    height: 1rem;
+    width: 1rem;
+  }
+
+  .cedis-edit-actions {
+    display: grid;
+    gap: 4px;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .cedis-remove-button {
+    font-size: inherit;
+    min-width: 2rem;
+    padding: 4px 6px;
+  }
+
+  .cedis-add-row {
+    display: grid;
+    column-gap: 12px;
+    row-gap: 6px;
+    grid-template-areas:
+      "product-label qty-label ."
+      "product qty submit";
+    grid-template-columns: minmax(260px, 1fr) 120px 96px;
+    margin-top: 12px;
+  }
+
+  .cedis-add-row .form-label {
+    margin: 0;
+  }
+
+  .cedis-add-product-label { grid-area: product-label; }
+  .cedis-add-qty-label { grid-area: qty-label; }
+  .cedis-add-product { grid-area: product; }
+  .cedis-add-qty { grid-area: qty; }
+  .cedis-add-submit { grid-area: submit; }
+
+  .cedis-add-row .form-control {
+    height: 42px;
+    min-height: 42px;
+  }
+
+  .cedis-add-submit {
+    align-self: end;
+    height: 42px;
+    min-height: 42px;
+    padding: 0 12px;
+    width: 100%;
+  }
+
+  @media (max-width: 820px) {
+    .cedis-consolidado-table {
+      font-size: clamp(8px, 1.7vw, 11px);
+    }
+
+    .cedis-consolidado-table .col-producto { width: 22%; }
+    .cedis-consolidado-table .col-sucursal { width: 10%; }
+    .cedis-consolidado-table .col-num { width: 10%; }
+    .cedis-consolidado-table .col-modificar { width: 14%; }
+    .cedis-consolidado-table .col-autorizar { width: 9%; }
+
+    .cedis-edit-actions {
+      grid-template-columns: 1fr;
+    }
+
+    .cedis-add-row {
+      grid-template-areas:
+        "product-label"
+        "product"
+        "qty-label"
+        "qty"
+        "submit";
+      grid-template-columns: 1fr;
+    }
+  }

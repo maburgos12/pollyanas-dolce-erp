@@ -9,7 +9,7 @@
 {# Banner de alerta — solo si hay alertas activas #}
 {% if alertas_count > 0 or budget_alerts_active > 0 %}
 <div class="alert-banner {% if budget_alerts_active > 0 %}alert-banner-danger{% else %}alert-banner-warning{% endif %}">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;flex-shrink:0;">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="pd-u-db5c56e85f">
         <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/>
         <path d="M12 9v4M12 17h.01"/>
     </svg>
@@ -107,42 +107,42 @@
     </div>
     <div class="dashboard-grid-2">
         <article class="kpi-card">
-            <div class="kpi-label" style="margin-bottom:6px;">{{ budget_semaforo_mes.periodo_label }}</div>
-            <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">
-                <span class="kpi-number" style="font-size:32px;">{% widthratio budget_semaforo_mes.ejecutado budget_semaforo_mes.objetivo 100 %}%</span>
+            <div class="kpi-label pd-u-6c002e2180">{{ budget_semaforo_mes.periodo_label }}</div>
+            <div class="pd-u-0275f9386a">
+                <span class="kpi-number pd-u-905fa29570">{% widthratio budget_semaforo_mes.ejecutado budget_semaforo_mes.objetivo 100 %}%</span>
                 <span class="badge {{ budget_semaforo_mes.estado_badge }}">{{ budget_semaforo_mes.estado_label }}</span>
             </div>
             <div class="progress-bar-wrap">
-                <div class="progress-bar-fill {% if budget_semaforo_mes.estado_badge == 'bg-danger' %}is-danger{% elif budget_semaforo_mes.estado_badge == 'bg-warning' %}is-warning{% endif %}"
-                     style="width:min({% widthratio budget_semaforo_mes.ejecutado budget_semaforo_mes.objetivo 100 %}%, 100%)"></div>
+                <div class="progress-bar-fill {% if budget_semaforo_mes.estado_badge == 'bg-danger' %}is-danger{% elif budget_semaforo_mes.estado_badge == 'bg-warning' %}is-warning{% endif %} pd-js-width"
+                     data-pd-width="min({% widthratio budget_semaforo_mes.ejecutado budget_semaforo_mes.objetivo 100 %}%, 100%)"></div>
             </div>
-            <div class="muted" style="font-size:12px;margin-top:4px;">
+            <div class="muted pd-u-ce79524126">
                 Objetivo ${{ budget_semaforo_mes.objetivo|floatformat:0|intcomma }} · Ejecutado ${{ budget_semaforo_mes.ejecutado|floatformat:0|intcomma }}
             </div>
-            <div style="margin-top:10px;">
+            <div class="pd-u-d8a81eac84">
                 <a class="btn btn-secondary btn-sm" href="{% url 'compras:solicitudes' %}?periodo_tipo=mes&periodo_mes={{ budget_semaforo_mes.periodo_mes }}">Ver detalle</a>
             </div>
         </article>
         <article class="kpi-card">
-            <div class="kpi-label" style="margin-bottom:6px;">{{ budget_semaforo_quincena.periodo_label }}</div>
-            <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">
-                <span class="kpi-number" style="font-size:32px;">{% widthratio budget_semaforo_quincena.ejecutado budget_semaforo_quincena.objetivo 100 %}%</span>
+            <div class="kpi-label pd-u-6c002e2180">{{ budget_semaforo_quincena.periodo_label }}</div>
+            <div class="pd-u-0275f9386a">
+                <span class="kpi-number pd-u-905fa29570">{% widthratio budget_semaforo_quincena.ejecutado budget_semaforo_quincena.objetivo 100 %}%</span>
                 <span class="badge {{ budget_semaforo_quincena.estado_badge }}">{{ budget_semaforo_quincena.estado_label }}</span>
             </div>
             <div class="progress-bar-wrap">
-                <div class="progress-bar-fill {% if budget_semaforo_quincena.estado_badge == 'bg-danger' %}is-danger{% elif budget_semaforo_quincena.estado_badge == 'bg-warning' %}is-warning{% endif %}"
-                     style="width:min({% widthratio budget_semaforo_quincena.ejecutado budget_semaforo_quincena.objetivo 100 %}%, 100%)"></div>
+                <div class="progress-bar-fill {% if budget_semaforo_quincena.estado_badge == 'bg-danger' %}is-danger{% elif budget_semaforo_quincena.estado_badge == 'bg-warning' %}is-warning{% endif %} pd-js-width"
+                     data-pd-width="min({% widthratio budget_semaforo_quincena.ejecutado budget_semaforo_quincena.objetivo 100 %}%, 100%)"></div>
             </div>
-            <div class="muted" style="font-size:12px;margin-top:4px;">
+            <div class="muted pd-u-ce79524126">
                 Objetivo ${{ budget_semaforo_quincena.objetivo|floatformat:0|intcomma }} · Ejecutado ${{ budget_semaforo_quincena.ejecutado|floatformat:0|intcomma }}
             </div>
-            <div style="margin-top:10px;">
+            <div class="pd-u-d8a81eac84">
                 <a class="btn btn-secondary btn-sm" href="{% url 'compras:solicitudes' %}?periodo_tipo={{ budget_semaforo_quincena.periodo_tipo }}&periodo_mes={{ budget_semaforo_quincena.periodo_mes }}">Ver detalle</a>
             </div>
         </article>
     </div>
     {% if latest_budget_alert %}
-    <div class="alert-banner {% if budget_alerts_active > 0 %}alert-banner-danger{% else %}alert-banner-info{% endif %}" style="margin-top:12px;margin-bottom:0;">
+    <div class="alert-banner pd-alert-compact {% if budget_alerts_active > 0 %}alert-banner-danger{% else %}alert-banner-info{% endif %}">
         Última alerta: {{ latest_budget_alert.timestamp|date:"d/m/Y H:i" }} · {{ latest_budget_alert.object_id }}
     </div>
     {% endif %}
@@ -155,7 +155,7 @@
     {# Columna izquierda #}
     <div>
         {% if latest_almacen_sync %}
-        <section class="card card-animate" style="margin-bottom:var(--section-gap);">
+        <section class="card card-animate pd-u-9c1079a7a5">
             <div class="section-header">
                 <h2 class="section-header-title">Último Sync de Almacén</h2>
                 <a href="{% url 'inventario:importar_archivos' %}" class="section-header-action">Ver historial</a>
@@ -192,7 +192,7 @@
                 <h2 class="section-header-title">Indicadores de Inventario</h2>
                 <a href="{% url 'inventario:existencias' %}" class="section-header-action">Ver existencias</a>
             </div>
-            <div class="kpi-grid kpi-mini" style="grid-template-columns:repeat(2,1fr);">
+            <div class="kpi-grid kpi-mini pd-u-dd9577e211">
                 <article class="kpi-card">
                     <div class="kpi-number">{{ inventario_total_count }}</div>
                     <div class="kpi-label">Con existencia</div>
@@ -250,7 +250,7 @@
             <div class="section-header">
                 <h2 class="section-header-title">Control de Homologación</h2>
             </div>
-            <div class="kpi-grid kpi-mini" style="grid-template-columns:repeat(2,1fr);">
+            <div class="kpi-grid kpi-mini pd-u-dd9577e211">
                 <article class="kpi-card">
                     <div class="kpi-number {% if homologacion_total_pending > 0 %}is-danger{% else %}is-success{% endif %}">
                         {{ homologacion_total_pending }}
@@ -277,7 +277,7 @@
                 </article>
             </div>
             {% if point_pending_total > 0 %}
-            <p class="muted" style="font-size:12px;margin:8px 0 12px;">
+            <p class="muted pd-u-fe61ba03d3">
                 Insumos {{ point_pending_insumos }} · Productos {{ point_pending_productos }} · Proveedores {{ point_pending_proveedores }}
             </p>
             {% endif %}

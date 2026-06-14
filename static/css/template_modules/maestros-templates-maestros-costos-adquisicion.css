@@ -1,0 +1,30 @@
+/* Extracted from maestros/templates/maestros/costos_adquisicion.html */
+.kpi-strip  { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:18px; }
+  .kpi-chip   { padding:7px 16px; border-radius:20px; font-size:13px; font-weight:700;
+                text-decoration:none; border:2px solid transparent; }
+  .kpi-chip:hover { opacity:.85; }
+  .kpi-chip.active { border-color:var(--texto); }
+  .chip-all   { background:var(--gris-suave); color:var(--texto); }
+  .chip-sin   { background:#ffebee; color:#c62828; }
+  .chip-con   { background:#e8f5e9; color:#2e7d32; }
+
+  .badge-RECETA         { background:#e3f2fd; color:#1565c0; }
+  .badge-POINT_ALMACEN  { background:#f3e5f5; color:#6a1b9a; }
+  .badge-MANUAL         { background:#e8f5e9; color:#2e7d32; }
+  .badge-sin            { background:#ffebee; color:#c62828; }
+  .badge-anticipo       { background:#fff8e1; color:#f57f17; }
+
+  .tipo-fabricado { color:#1565c0; font-size:11px; }
+  .tipo-reventa   { color:#6a1b9a; font-size:11px; }
+
+  .edit-form { display:none; background:#f9f9f9; padding:8px 12px; border-radius:8px; margin-top:6px; }
+  .edit-form.open { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .cost-table th { white-space:normal; position:sticky; top:0; background:#fff; z-index:1; }
+  .cost-table td { vertical-align:middle; }
+
+  .chip-urgente { background:#fff3e0; color:#e65100; }
+  .filter-bar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
+  .trend-up   { color:#c62828; font-size:11px; }
+  .trend-dn   { color:#2e7d32; font-size:11px; }
+  .ventas-ref { font-size:11px; color:var(--texto-light); }
+  .pvta-approx { font-style:italic; }

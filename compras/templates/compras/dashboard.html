@@ -7,22 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<style>
-  .purchases-shell { display:grid; gap:20px; }
-  .purchases-copy { margin:0; color:#6d5f67; }
-  .purchases-summary-grid { display:grid; gap:18px; grid-template-columns:repeat(3,minmax(0,1fr)); }
-  .purchases-audit-grid { display:grid; gap:18px; grid-template-columns:repeat(3,minmax(0,1fr)); }
-  .purchases-compact-list { display:grid; gap:10px; margin-top:14px; }
-  .purchases-compact-item { display:grid; gap:6px; padding:12px 14px; border:1px solid rgba(131,24,67,.08); border-radius:16px; background:rgba(255,255,255,.92); }
-  .purchases-compact-top { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
-  .purchases-compact-item strong { display:block; font-size:.95rem; }
-  .purchases-compact-meta { color:#6d5f67; font-size:.92rem; }
-  .purchases-empty-note { display:grid; gap:10px; }
-  .purchases-empty-note .bi-empty { min-height:100%; }
-  @media (max-width: 1200px) {
-    .purchases-summary-grid, .purchases-audit-grid { grid-template-columns:1fr; }
-  }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/compras-templates-compras-dashboard.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}

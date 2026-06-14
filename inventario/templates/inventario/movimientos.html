@@ -64,7 +64,7 @@
     {% if selected_master_focus_key %}
     <div class="alert alert-info mb-3">
       <strong>Vista enfocada:</strong> estás revisando el subconjunto del maestro bloqueado para esta pantalla.
-      <a class="btn btn-secondary btn-sm" href="{% url 'inventario:movimientos' %}" style="margin-left:8px;">Quitar foco</a>
+      <a class="btn btn-secondary btn-sm pd-u-6170d94c81" href="{% url 'inventario:movimientos' %}">Quitar foco</a>
     </div>
     {% endif %}
     {% if can_manage_inventario %}
@@ -149,7 +149,7 @@
               </div>
               {% endif %}
               {% if m.enterprise_missing %}
-              <div class="muted" style="margin-top:6px;">Maestro: {{ m.enterprise_missing|join:", " }}</div>
+              <div class="muted pd-u-2fd7789b39">Maestro: {{ m.enterprise_missing|join:", " }}</div>
               {% endif %}
             </td>
             <td><span class="badge bg-primary">{{ m.enterprise_usage_label }}</span></td>

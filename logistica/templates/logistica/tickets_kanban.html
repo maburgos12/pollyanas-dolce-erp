@@ -5,32 +5,7 @@
 {% block page_title %}Logística · Tickets{% endblock %}
 
 {% block extra_css %}
-<style>
-  .kanban-shell { display: grid; gap: 18px; }
-  .kanban-board { display: grid; grid-template-columns: repeat(4, minmax(260px, 1fr)); gap: 14px; align-items: start; overflow-x: auto; padding-bottom: 4px; }
-  .kanban-col { background: #fff; border: 1px solid #efc7d8; border-radius: 14px; padding: 12px; min-height: 260px; }
-  .kanban-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 8px 12px; border-bottom: 1px solid #f4d8e5; margin-bottom: 12px; }
-  .kanban-head strong { color: #3a2b30; font-family: "Playfair Display", serif; font-size: 20px; }
-  .kanban-count { border-radius: 999px; padding: 4px 10px; color: #fff; font-weight: 900; }
-  .kanban-count.open { background: #bc3b56; } .kanban-count.process { background: #b47b17; } .kanban-count.scheduled { background: #305caa; } .kanban-count.closed { background: #1f7554; }
-  .ticket-card { display: grid; gap: 10px; background: #fffafc; border: 1px solid #f0c9d9; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
-  .ticket-title { color: #8B2252; font-weight: 900; }
-  .ticket-meta { color: #77656d; font-size: 13px; line-height: 1.45; }
-  .ticket-badge { display: inline-flex; width: max-content; border-radius: 999px; padding: 4px 9px; font-size: 12px; font-weight: 900; }
-  .ticket-badge.critico { background: #ffe8ec; color: #bc3b56; }
-  .ticket-badge.urgente { background: #fff4d8; color: #9a6a00; }
-  .ticket-badge.informativo { background: #e5f5ee; color: #1f7554; }
-  .ticket-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-  .ticket-actions form { margin: 0; }
-  .ticket-empty { color: #77656d; border: 1px dashed #e8b7cb; border-radius: 12px; padding: 14px; }
-  .ticket-modal { display: none; position: fixed; inset: 0; z-index: 1000; background: rgba(15, 10, 12, .55); padding: 18px; align-items: center; justify-content: center; }
-  .ticket-modal.is-open { display: flex; }
-  .ticket-modal-panel { width: min(520px, 100%); background: #fff; border-radius: 16px; border: 1px solid #efc7d8; padding: 20px; box-shadow: 0 20px 60px rgba(0,0,0,.22); }
-  .ticket-modal-panel h2 { margin: 0 0 12px; color: #8B2252; font-family: "Playfair Display", serif; }
-  .ticket-form-grid { display: grid; gap: 10px; }
-  @media (max-width: 980px) { .kanban-board { grid-template-columns: repeat(2, minmax(260px, 1fr)); } }
-  @media (max-width: 640px) { .kanban-board { grid-template-columns: 1fr; overflow: visible; } }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/logistica-templates-logistica-tickets-kanban.css?v=20260614-ui100-v1">
 <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
 {% endblock %}
 
@@ -57,7 +32,7 @@
         <div class="ticket-actions">
           <form method="post" action="{% url 'logistica:ticket_actualizar' ticket.id %}">{% csrf_token %}<input type="hidden" name="estatus" value="en_proceso"><button class="btn btn-secondary btn-small" type="submit">Tomar</button></form>
           <form method="post" action="{% url 'logistica:ticket_actualizar' ticket.id %}">{% csrf_token %}<input type="hidden" name="estatus" value="programado"><button class="btn btn-secondary btn-small" type="submit">Programar</button></form>
-          <button class="btn btn-primary btn-small" style="background:#8B2252;border-color:#8B2252;" type="button" data-ticket-close-url="{% url 'logistica:ticket_actualizar' ticket.id %}">Cerrar</button>
+          <button class="btn btn-primary btn-small pd-u-8e46cb0687" type="button" data-ticket-close-url="{% url 'logistica:ticket_actualizar' ticket.id %}">Cerrar</button>
         </div>
       </article>
       {% empty %}<div class="ticket-empty">Sin tickets abiertos.</div>{% endfor %}
@@ -70,7 +45,7 @@
         <div class="ticket-meta">{{ ticket.repartidor }}<br>{{ ticket.fecha_reporte|date:"d/m/Y H:i" }} · hace {{ ticket.fecha_reporte|timesince }}<br>{{ ticket.descripcion|truncatechars:95 }}</div>
         <div class="ticket-actions">
           <form method="post" action="{% url 'logistica:ticket_actualizar' ticket.id %}">{% csrf_token %}<input type="hidden" name="estatus" value="programado"><button class="btn btn-secondary btn-small" type="submit">Programar</button></form>
-          <button class="btn btn-primary btn-small" style="background:#8B2252;border-color:#8B2252;" type="button" data-ticket-close-url="{% url 'logistica:ticket_actualizar' ticket.id %}">Cerrar</button>
+          <button class="btn btn-primary btn-small pd-u-8e46cb0687" type="button" data-ticket-close-url="{% url 'logistica:ticket_actualizar' ticket.id %}">Cerrar</button>
         </div>
       </article>
       {% empty %}<div class="ticket-empty">Sin tickets en proceso.</div>{% endfor %}
@@ -83,7 +58,7 @@
         <div class="ticket-meta">{{ ticket.repartidor }}<br>{{ ticket.fecha_reporte|date:"d/m/Y H:i" }} · hace {{ ticket.fecha_reporte|timesince }}<br>{{ ticket.descripcion|truncatechars:95 }}</div>
         {% if ticket.proveedor_servicio or ticket.costo_servicio %}<div class="ticket-meta">{{ ticket.proveedor_servicio|default:"Sin proveedor" }} · ${{ ticket.costo_servicio|default:"0"|floatformat:2|intcomma }}</div>{% endif %}
         <div class="ticket-actions">
-          <button class="btn btn-primary btn-small" style="background:#8B2252;border-color:#8B2252;" type="button" data-ticket-close-url="{% url 'logistica:ticket_actualizar' ticket.id %}">Cerrar</button>
+          <button class="btn btn-primary btn-small pd-u-8e46cb0687" type="button" data-ticket-close-url="{% url 'logistica:ticket_actualizar' ticket.id %}">Cerrar</button>
         </div>
       </article>
       {% empty %}<div class="ticket-empty">Sin tickets programados.</div>{% endfor %}
@@ -117,7 +92,7 @@
         <textarea class="input-field" name="notas_compras" rows="4" placeholder="Trabajo realizado, factura, seguimiento..."></textarea>
       </label>
       <div class="ticket-actions">
-        <button class="btn btn-primary" type="submit" style="background:#8B2252;border-color:#8B2252;">Cerrar ticket</button>
+        <button class="btn btn-primary pd-u-8e46cb0687" type="submit">Cerrar ticket</button>
         <button class="btn btn-secondary" type="button" data-close-modal>Cancelar</button>
       </div>
     </form>

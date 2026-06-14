@@ -1,0 +1,95 @@
+/* Extracted from rrhh/templates/rrhh/vacaciones_list.html */
+.vac-page { display: grid; gap: 16px; }
+  .vac-head {
+    background: #fff;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    display: grid;
+    gap: 14px;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, .65fr);
+    padding: 18px;
+  }
+  .vac-title { color: var(--vino); font-family: "Playfair Display", serif; font-size: 25px; font-weight: 800; }
+  .vac-copy { color: var(--texto-light); margin-top: 4px; max-width: 760px; }
+  .vac-stats { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .vac-stat { background: #fbf6f8; border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; }
+  .vac-stat strong { color: var(--vino); display: block; font-size: 22px; line-height: 1; }
+  .vac-stat span { color: var(--texto-light); font-size: 11px; font-weight: 900; text-transform: uppercase; }
+  .vac-layout { display: grid; gap: 16px; }
+  .vac-panel { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 16px; }
+  .vac-panel h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
+  .vac-entry-grid { display: grid; gap: 16px; grid-template-columns: minmax(360px, .9fr) minmax(320px, 1.1fr); align-items: start; }
+  .vac-form { display: grid; gap: 12px; }
+  .vac-field { display: grid; gap: 5px; }
+  .vac-field label { color: var(--vino); font-size: 12px; font-weight: 900; text-transform: uppercase; }
+  .vac-field input, .vac-field select, .vac-field textarea {
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    font: inherit;
+    padding: 10px;
+    width: 100%;
+  }
+  .vac-field textarea { min-height: 88px; resize: vertical; }
+  .vac-employee-card {
+    background: #fbf6f8;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    color: var(--texto-light);
+    display: grid;
+    gap: 4px;
+    min-height: 58px;
+    padding: 10px;
+  }
+  .vac-employee-card strong { color: var(--texto); font-size: 14px; }
+  .vac-employee-card span { font-size: 12px; }
+  .vac-saldo-list { display: grid; gap: 8px; margin-top: 12px; max-height: 300px; overflow: auto; }
+  .vac-saldo-row { border: 1px solid var(--rosa); border-radius: 8px; display: grid; gap: 4px; padding: 10px; }
+  .vac-saldo-main { color: var(--texto); font-weight: 900; }
+  .vac-meta { color: var(--texto-light); font-size: 13px; }
+  .vac-status-panel { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 16px; }
+  .vac-status-strip { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 14px; }
+  .vac-status-tab {
+    background: #fbf6f8;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    color: var(--vino);
+    display: grid;
+    gap: 3px;
+    min-height: 68px;
+    padding: 12px;
+    text-decoration: none;
+  }
+  .vac-status-tab strong { font-size: 17px; }
+  .vac-status-tab span { color: var(--texto-light); font-size: 12px; font-weight: 900; text-transform: uppercase; }
+  .vac-status-tab.active { background: var(--vino); color: #fff; }
+  .vac-status-tab.active span { color: rgba(255, 255, 255, .8); }
+  .vac-list { display: grid; gap: 10px; }
+  .vac-card { border: 1px solid var(--rosa); border-radius: 8px; display: grid; gap: 10px; padding: 12px; }
+  .vac-card-row {
+    align-items: center;
+    display: grid;
+    gap: 12px;
+    grid-template-columns: minmax(180px, 1.2fr) minmax(190px, 1fr) minmax(180px, 1fr) minmax(130px, .7fr) auto;
+  }
+  .vac-card-main { color: var(--texto); font-weight: 900; }
+  .vac-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+  .vac-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }
+  .vac-badge.gold { background: rgba(201, 168, 76, .18); color: #6f5415; }
+  .vac-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .vac-reglamento {
+    background: #fff;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    padding: 14px;
+  }
+  .vac-reglamento summary { color: var(--vino); cursor: pointer; font-weight: 900; }
+  .vac-reglamento ul { color: var(--texto-light); margin: 10px 0 0 18px; padding: 0; }
+  @media (max-width: 1280px) {
+    .vac-card-row { grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr); align-items: start; }
+    .vac-entry-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 760px) {
+    .vac-head { grid-template-columns: 1fr; }
+    .vac-status-strip, .vac-stats { grid-template-columns: 1fr; }
+    .vac-card-row { grid-template-columns: 1fr; }
+  }

@@ -6,69 +6,7 @@
 {% block body_class %}page-activos-planes{% endblock %}
 
 {% block extra_css %}
-<style>
-  /* ── KPI strip ── */
-  .planes-kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
-  .planes-kpi-card{background:#fff;border:1px solid rgba(139,34,82,.12);border-radius:12px;padding:16px 18px}
-  .planes-kpi-num{font-family:"Playfair Display",serif;font-size:32px;font-weight:700;line-height:1}
-  .planes-kpi-num.ok{color:#4CAF50}
-  .planes-kpi-num.warn{color:#FFC107}
-  .planes-kpi-num.bad{color:#E53935}
-  .planes-kpi-label{color:#7A6565;font-size:13px;margin-top:4px}
-
-  /* ── Toolbar ── */
-  .planes-toolbar{display:grid;grid-template-columns:1fr 160px 160px auto;gap:10px;align-items:end;margin-bottom:16px}
-  .planes-toolbar input,.planes-toolbar select{width:100%;min-height:40px;border:1px solid rgba(139,34,82,.22);border-radius:8px;padding:0 10px;font:inherit;font-size:13px;background:#fff}
-
-  /* ── Tabla ── */
-  .planes-table-wrap{overflow-x:auto;border-radius:12px;border:1px solid rgba(139,34,82,.10)}
-  .planes-table{width:100%;border-collapse:collapse;font-size:13px}
-  .planes-table thead tr{background:#8B2252;color:#fff}
-  .planes-table thead th{padding:11px 14px;font-weight:700;text-align:left}
-  .planes-table tbody tr{border-bottom:1px solid #f5eef2}
-  .planes-table tbody tr:last-child{border-bottom:0}
-  .planes-table tbody tr:hover{background:#fffafc}
-  .planes-table td{padding:10px 14px;vertical-align:middle;color:#3D2B2B}
-  .planes-table td.muted-cell{color:#7A6565}
-
-  /* ── Badges de estado ── */
-  .plan-badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:3px 10px;font-size:11px;font-weight:900}
-  .plan-badge.activo{background:#e8f5e9;color:#2e7d32}
-  .plan-badge.pausado{background:#f5f5f5;color:#616161}
-  .plan-badge.vencido{background:#ffebee;color:#c62828}
-  .plan-badge.ok{background:#e8f5e9;color:#2e7d32}
-  .plan-badge.proximo{background:#fff8e1;color:#f57f17}
-  .plan-badge.sin-fecha{background:#fce4ec;color:#880e4f}
-
-  /* ── Acciones fila ── */
-  .planes-row-actions{display:flex;gap:6px;flex-wrap:nowrap}
-
-  /* ── Panel nuevo plan ── */
-  .planes-form-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
-  .planes-form-grid label{display:grid;gap:5px;font-size:13px;font-weight:700;color:#513744}
-  .planes-form-grid input,.planes-form-grid select,.planes-form-grid textarea{min-height:40px;border:1px solid rgba(139,34,82,.22);border-radius:8px;padding:0 10px;font:inherit;font-size:13px;background:#fff}
-  .planes-form-grid .span-full{grid-column:1/-1}
-  .planes-form-grid textarea{min-height:72px;padding:8px 10px;resize:vertical}
-
-  /* ── Modal edición ── */
-  .planes-modal-backdrop{position:fixed;inset:0;z-index:1200;display:none;background:rgba(24,12,18,.52);padding:20px;overflow:auto}
-  .planes-modal-backdrop.open{display:flex;align-items:flex-start;justify-content:center}
-  .planes-modal{width:min(760px,100%);margin:40px 0;background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.28)}
-  .planes-modal-head{display:flex;justify-content:space-between;align-items:center;background:#8B2252;color:#fff;padding:16px 20px;border-radius:14px 14px 0 0}
-  .planes-modal-head strong{font-family:"Playfair Display",serif;font-size:18px}
-  .planes-modal-body{padding:20px}
-  .planes-modal-footer{display:flex;justify-content:flex-end;gap:10px;padding:14px 20px;border-top:1px solid #f0e1e8}
-
-  @media(max-width:900px){
-    .planes-kpi{grid-template-columns:repeat(2,1fr)}
-    .planes-toolbar{grid-template-columns:1fr 1fr}
-    .planes-form-grid{grid-template-columns:1fr 1fr}
-  }
-  @media(max-width:560px){
-    .planes-kpi{grid-template-columns:1fr 1fr}
-    .planes-toolbar{grid-template-columns:1fr}
-  }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/activos-templates-activos-planes.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
@@ -99,10 +37,10 @@
 </div>
 
 <!-- Toolbar y acciones -->
-<div class="card" style="margin-bottom:16px">
-  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+<div class="card pd-u-79a1c5a5db">
+  <div class="card-header pd-u-41f999b3fb">
     <span>Planes de mantenimiento</span>
-    <div style="display:flex;gap:8px">
+    <div class="pd-u-50ad9d12ae">
       <a class="btn btn-secondary btn-small" href="?q={{ filters.q|urlencode }}&estatus={{ filters.estatus|urlencode }}&scope={{ filters.scope|urlencode }}&export=csv">CSV</a>
       <a class="btn btn-secondary btn-small" href="?q={{ filters.q|urlencode }}&estatus={{ filters.estatus|urlencode }}&scope={{ filters.scope|urlencode }}&export=xlsx">XLSX</a>
       {% if can_manage_activos %}
@@ -111,7 +49,7 @@
     </div>
   </div>
 
-  <form method="get" style="margin-bottom:14px">
+  <form method="get" class="pd-u-a82d7062cc">
     <div class="planes-toolbar">
       <input type="text" name="q" value="{{ filters.q }}" placeholder="Buscar activo o nombre del plan...">
       <select name="estatus">
@@ -125,7 +63,7 @@
         <option value="overdue" {% if filters.scope == 'overdue' %}selected{% endif %}>Vencidos</option>
         <option value="week" {% if filters.scope == 'week' %}selected{% endif %}>Próx. 7 días</option>
       </select>
-      <div style="display:flex;gap:8px">
+      <div class="pd-u-50ad9d12ae">
         <button class="btn btn-primary" type="submit">Filtrar</button>
         <a href="{% url 'activos:planes' %}" class="btn btn-secondary">Limpiar</a>
       </div>
@@ -212,7 +150,7 @@
         {% endwith %}
         {% empty %}
         <tr>
-          <td colspan="{% if can_manage_activos %}9{% else %}8{% endif %}" style="text-align:center;color:#7A6565;padding:24px">
+          <td colspan="{% if can_manage_activos %}9{% else %}8{% endif %}" class="pd-u-eafe1598b0">
             Sin planes para el filtro actual.
           </td>
         </tr>
@@ -224,29 +162,29 @@
 
 {% if can_manage_activos %}
 <!-- Generar órdenes automáticas -->
-<div class="card" style="margin-bottom:16px">
+<div class="card pd-u-79a1c5a5db">
   <div class="card-header">Generar órdenes preventivas automáticas</div>
   <form method="post">
     {% csrf_token %}
     <input type="hidden" name="action" value="generar_ordenes_programadas">
-    <div style="display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:end">
+    <div class="pd-u-c18a9752a0">
       <div>
-        <label style="display:grid;gap:5px;font-size:13px;font-weight:700;color:#513744">
+        <label class="pd-u-1be0b9b19c">
           Alcance
-          <select name="scope" style="min-height:40px;border:1px solid rgba(139,34,82,.22);border-radius:8px;padding:0 10px;font:inherit">
+          <select name="scope" class="pd-u-8866bcded2">
             <option value="overdue">Planes vencidos (hasta hoy)</option>
             <option value="week">Planes próximos 7 días</option>
           </select>
         </label>
       </div>
-      <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:#513744;padding-bottom:2px">
+      <label class="pd-u-6577209d69">
         <input type="checkbox" name="dry_run" value="1"> Simular sin crear
       </label>
       <button class="btn btn-primary" type="submit">Generar órdenes</button>
     </div>
   </form>
   {% if gen_result %}
-  <div class="alert {% if gen_result.dry_run %}alert-info{% else %}alert-success{% endif %}" style="margin-top:14px">
+  <div class="alert {% if gen_result.dry_run %}alert-info{% else %}alert-success{% endif %} pd-u-88b9d5c614">
     {% if gen_result.dry_run %}<strong>Simulación:</strong>{% else %}<strong>Creadas:</strong>{% endif %}
     {{ gen_result.ordenes_creadas }} orden(es) · {{ gen_result.planes_procesados }} plan(es) procesados
     {% if gen_result.errores %} · {{ gen_result.errores }} error(es){% endif %}
@@ -266,7 +204,7 @@
         {% csrf_token %}
         <input type="hidden" name="action" value="create_plan">
         <div class="planes-form-grid">
-          <label>Activo <span style="color:#E53935">*</span>
+          <label>Activo <span class="pd-u-7f5b7c4656">*</span>
             <select name="activo_id" required>
               <option value="">Selecciona...</option>
               {% for a in activos %}
@@ -274,7 +212,7 @@
               {% endfor %}
             </select>
           </label>
-          <label>Nombre del plan <span style="color:#E53935">*</span>
+          <label>Nombre del plan <span class="pd-u-7f5b7c4656">*</span>
             <input type="text" name="nombre" required placeholder="Ej. Mantenimiento preventivo mensual">
           </label>
           <label>Tipo

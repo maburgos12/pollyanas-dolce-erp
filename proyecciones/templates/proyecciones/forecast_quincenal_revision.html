@@ -11,11 +11,11 @@
         <label class="form-label">Fecha de inicio</label>
         <input class="form-control" type="date" name="fecha_inicio" value="{{ fecha_inicio|date:'Y-m-d' }}">
       </div>
-      <div class="form-group" style="align-self:end;">
+      <div class="form-group pd-u-7054699c26">
         <button class="btn btn-secondary" type="submit">Ver</button>
       </div>
     </form>
-    <div class="toolbar" style="margin-top: 12px;">
+    <div class="toolbar pd-u-9c9cee2093">
       <form method="post" action="{% url 'proyecciones:forecast_quincenal_generar' %}">
         {% csrf_token %}
         <input type="hidden" name="fecha_inicio" value="{{ fecha_inicio|date:'Y-m-d' }}">

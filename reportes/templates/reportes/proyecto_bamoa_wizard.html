@@ -7,59 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/investment_projects.css' %}?v=20260406c">
-<style>
-  :root { --bamoa-wine:#8B2252; --bamoa-gold:#C9A84C; --bamoa-gold-light:#f5e9c8; --bamoa-danger:#b91c1c; --bamoa-row-border:#e5e7eb; }
-  .bamoa-step-nav { display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:1rem; }
-  .bamoa-step-button { border:1px solid rgba(139,34,82,.22); background:#fff; color:#5f1838; border-radius:8px; padding:.65rem .85rem; font-weight:800; cursor:pointer; }
-  .bamoa-step-button.is-active { background:var(--bamoa-wine); color:#fff; border-color:var(--bamoa-wine); }
-  .bamoa-step { display:none; }
-  .bamoa-step.is-active, .bamoa-step.active { display:block; }
-  #bamoa-partidas-table { table-layout:fixed; width:100%; border-collapse:separate; border-spacing:0; }
-  #bamoa-partidas-table thead th { background:var(--bamoa-wine); color:#fff; font-family:'Nunito', sans-serif; font-size:.75rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase; padding:.5rem .75rem; border:0; white-space:nowrap; }
-  #bamoa-partidas-table col.col-categoria { width: 17%; }
-  #bamoa-partidas-table col.col-descripcion { width: 26%; }
-  #bamoa-partidas-table col.col-proveedor { width: 18%; }
-  #bamoa-partidas-table col.col-monto { width: 12%; }
-  #bamoa-partidas-table col.col-iva { width: 9%; }
-  #bamoa-partidas-table col.col-total { width: 11%; }
-  #bamoa-partidas-table col.col-acciones { width: 7%; }
-  #bamoa-partidas-table tbody tr { background:#fff; transition:background .15s; }
-  #bamoa-partidas-table tbody tr:nth-child(even) { background:#fafafa; }
-  #bamoa-partidas-table tbody tr:hover { background:var(--bamoa-gold-light); }
-  #bamoa-partidas-table tbody td { padding:.4rem .5rem; border-bottom:1px solid var(--bamoa-row-border); vertical-align:middle; }
-  .bamoa-table-input, .bamoa-table-select { display:block; width:100%; padding:.35rem .5rem; font-size:.85rem; font-family:'Nunito', sans-serif; color:#111827; background:#fff; border:1px solid #d1d5db; border-radius:.375rem; outline:0; transition:border-color .15s, box-shadow .15s; pointer-events:auto; user-select:text; -webkit-user-select:text; }
-  .bamoa-table-input:focus, .bamoa-table-select:focus { border-color:var(--bamoa-wine); box-shadow:0 0 0 3px rgba(139,34,82,.15); background:#fff; z-index:2; position:relative; }
-  .bamoa-table-input[type="number"], .bamoa-row-total { text-align:right; }
-  .bamoa-row-total { font-weight:700; color:var(--bamoa-wine); font-size:.9rem; white-space:nowrap; }
-  .bamoa-btn-eliminar { display:inline-flex; align-items:center; justify-content:center; width:2rem; height:2rem; padding:0; border:1px solid #fca5a5; border-radius:.375rem; background:#fff1f1; color:var(--bamoa-danger); cursor:pointer; transition:background .15s, border-color .15s; font-size:1rem; line-height:1; }
-  .bamoa-btn-eliminar:hover { background:#fee2e2; border-color:var(--bamoa-danger); }
-  .bamoa-icon-button { border:1px solid rgba(139,34,82,.22); background:#fff; color:var(--bamoa-wine); border-radius:.375rem; padding:.45rem .6rem; cursor:pointer; font-weight:800; }
-  .bamoa-btn-agregar, .bamoa-btn-importar, .bamoa-btn-submit { display:inline-flex; align-items:center; gap:.4rem; border-radius:.5rem; font-family:'Nunito', sans-serif; cursor:pointer; transition:background .15s, transform .1s; }
-  .bamoa-btn-agregar { padding:.45rem 1rem; border:2px dashed var(--bamoa-wine); background:transparent; color:var(--bamoa-wine); font-size:.875rem; font-weight:700; }
-  .bamoa-btn-agregar:hover { background:rgba(139,34,82,.06); }
-  .bamoa-btn-importar { padding:.45rem 1rem; border:1px solid var(--bamoa-gold); background:var(--bamoa-gold-light); color:#7c5c00; font-size:.875rem; font-weight:600; }
-  .bamoa-btn-importar:hover { background:#edd98a; }
-  .bamoa-btn-submit { padding:.65rem 1.75rem; background:var(--bamoa-wine); color:#fff; border:0; font-size:1rem; font-weight:700; box-shadow:0 2px 8px rgba(139,34,82,.25); }
-  .bamoa-btn-submit:hover { background:#6e1a40; transform:translateY(-1px); }
-  .bamoa-btn-submit:active { transform:translateY(0); }
-  .bamoa-category-totals { display:flex; flex-wrap:wrap; gap:.75rem; margin-top:1rem; }
-  .bamoa-cat-pill { display:flex; flex-direction:column; align-items:flex-start; padding:.5rem .875rem; border-radius:.5rem; background:#f9f5fb; border:1px solid #e4d0ec; min-width:10rem; }
-  .bamoa-cat-pill__label { font-size:.65rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#6b7280; font-family:'Nunito', sans-serif; }
-  .bamoa-cat-pill__value { font-size:1.1rem; font-weight:800; color:var(--bamoa-wine); font-family:'Playfair Display', serif; }
-  .bamoa-comparativo-table { width:100%; font-size:.8rem; border-collapse:collapse; font-family:'Nunito', sans-serif; }
-  .bamoa-comparativo-table th { background:#f3f4f6; color:#374151; font-weight:700; padding:.4rem .6rem; text-align:left; border-bottom:2px solid #e5e7eb; }
-  .bamoa-comparativo-table td { padding:.4rem .6rem; border-bottom:1px solid #f3f4f6; vertical-align:middle; }
-  .bamoa-comparativo-table td.num { text-align:right; font-variant-numeric:tabular-nums; }
-  .bamoa-delta-menos { color: #15803d; font-weight: 700; }
-  .bamoa-delta-mas { color: #b45309; font-weight: 700; }
-  .bamoa-delta-igual { color: #6b7280; }
-  .bamoa-row-actions { display:flex; gap:.4rem; justify-content:center; }
-  .bamoa-summary-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:.75rem; }
-  .bamoa-modal { position:fixed; inset:0; background:rgba(15,23,42,.42); display:none; align-items:center; justify-content:center; z-index:50; padding:1rem; }
-  .bamoa-modal.is-open { display:flex; }
-  .bamoa-modal-panel { width:min(920px, 96vw); max-height:86vh; overflow:auto; background:#fff; border-radius:10px; padding:1rem; box-shadow:0 24px 70px rgba(15,23,42,.26); }
-  .bamoa-total-line { display:flex; justify-content:space-between; gap:1rem; padding:.6rem 0; border-top:1px solid rgba(15,23,42,.08); }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/reportes-templates-reportes-proyecto-bamoa-wizard.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
@@ -178,12 +126,12 @@
                 <div class="investment-kicker">Paso 2</div>
                 <h2 class="investment-panel-title">Partidas de inversión</h2>
               </div>
-              <div style="display:flex;gap:.75rem;align-items:center;margin-bottom:1rem;flex-wrap:wrap;">
+              <div class="pd-u-7886fce374">
                 <button class="bamoa-btn-agregar" type="button" id="btnAgregarPartida">+ Agregar partida</button>
                 <button class="bamoa-btn-importar" type="button" id="openImportModalBtn">Importar de Guamúchil</button>
               </div>
             </div>
-            <div class="table-responsive" style="border-radius:.5rem;overflow:hidden;border:1px solid #e5e7eb;">
+            <div class="table-responsive pd-u-8ce409ae26">
               <table id="bamoa-partidas-table">
                 <colgroup>
                   <col class="col-categoria">
@@ -199,9 +147,9 @@
                     <th>Categoría</th>
                     <th>Descripción</th>
                     <th>Proveedor estimado</th>
-                    <th style="text-align:right">Monto</th>
-                    <th style="text-align:right">IVA</th>
-                    <th style="text-align:right">Total</th>
+                    <th class="pd-u-a527bac1ee">Monto</th>
+                    <th class="pd-u-a527bac1ee">IVA</th>
+                    <th class="pd-u-a527bac1ee">Total</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -309,7 +257,7 @@
               </div>
             </div>
             <div class="bamoa-summary-grid" id="revisionResumen"></div>
-            <div class="investment-table-wrap" style="margin-top:1rem;">
+            <div class="investment-table-wrap pd-u-0cf8f93b0e">
               <table class="investment-table">
                 <thead>
                   <tr>
@@ -338,14 +286,14 @@
             </div>
           </div>
           <div class="investment-muted">69 partidas reales cargadas en producción.</div>
-          <div class="investment-table-wrap" style="margin-top:1rem;">
+          <div class="investment-table-wrap pd-u-0cf8f93b0e">
             <table class="bamoa-comparativo-table">
               <thead>
                 <tr>
                   <th>Categoría</th>
-                  <th style="text-align:right">Guamúchil</th>
-                  <th style="text-align:right">Bamoa plan</th>
-                  <th style="text-align:right">Delta</th>
+                  <th class="pd-u-a527bac1ee">Guamúchil</th>
+                  <th class="pd-u-a527bac1ee">Bamoa plan</th>
+                  <th class="pd-u-a527bac1ee">Delta</th>
                 </tr>
               </thead>
               <tbody id="comparativoBody"></tbody>
@@ -577,7 +525,7 @@
         pillTotal.style.borderColor = "#8B2252";
         pillTotal.style.background = "#f9f0f4";
         pillTotal.innerHTML =
-          '<span class="bamoa-cat-pill__label" style="color:#8B2252">TOTAL INVERSIÓN</span>' +
+          '<span class="bamoa-cat-pill__label pd-u-0e017721d1">TOTAL INVERSIÓN</span>' +
           `<span class="bamoa-cat-pill__value">${formatPeso(totalGeneral)}</span>`;
         container.appendChild(pillTotal);
       }

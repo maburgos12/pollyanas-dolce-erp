@@ -8,7 +8,7 @@
   <div class="kpi-grid">
     <article class="kpi-card">
       <div class="kpi-label">Responsable principal</div>
-      <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
+      <div class="pd-u-4304c62622">{{ erp_command_center.owner }}</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
@@ -20,7 +20,7 @@
     </article>
     <article class="kpi-card">
       <div class="kpi-label">Siguiente paso</div>
-      <div class="muted" style="margin:8px 0 10px;">{{ erp_command_center.next_step }}</div>
+      <div class="muted pd-u-332dbeaac1">{{ erp_command_center.next_step }}</div>
       <a class="btn btn-secondary btn-small" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
     </article>
   </div>
@@ -82,7 +82,7 @@
       <label class="form-label">Multiplicador</label>
       <input class="form-control" name="multiplicador" value="{% if resultado %}{{ resultado.multiplicador }}{% else %}1{% endif %}">
     </div>
-    <div class="form-group" style="align-self:end;">
+    <div class="form-group pd-u-7054699c26">
       <button class="btn btn-primary" type="submit">Calcular</button>
     </div>
   </form>
@@ -138,58 +138,58 @@
         <article class="kpi-card">
           <div class="kpi-number {% if resultado.demand_signal.historico_tone == 'danger' %}is-danger{% elif resultado.demand_signal.historico_tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ resultado.demand_signal.historico_status }}</div>
           <div class="kpi-label">Base histórica</div>
-          <div class="muted" style="margin-top:8px;">{{ resultado.demand_signal.historico_detail }}</div>
+          <div class="muted pd-u-b1ecc496e0">{{ resultado.demand_signal.historico_detail }}</div>
         </article>
         <article class="kpi-card">
           <div class="kpi-number">{{ resultado.demand_signal.historico_days }}</div>
           <div class="kpi-label">Días observados</div>
-          <div class="muted" style="margin-top:8px;">{{ resultado.demand_signal.historico_branches }} sucursales · {{ resultado.demand_signal.scope_label }}</div>
+          <div class="muted pd-u-b1ecc496e0">{{ resultado.demand_signal.historico_branches }} sucursales · {{ resultado.demand_signal.scope_label }}</div>
         </article>
         <article class="kpi-card">
           <div class="kpi-number">{{ resultado.demand_signal.years_observed }}</div>
           <div class="kpi-label">Años observados</div>
-          <div class="muted" style="margin-top:8px;">{{ resultado.demand_signal.comparable_years }} temporadas comparables · {{ resultado.demand_signal.history_span_label }}</div>
+          <div class="muted pd-u-b1ecc496e0">{{ resultado.demand_signal.comparable_years }} temporadas comparables · {{ resultado.demand_signal.history_span_label }}</div>
         </article>
         <article class="kpi-card">
           <div class="kpi-number">{{ resultado.demand_signal.historico_total|floatformat:0|intcomma }}</div>
           <div class="kpi-label">Unidades recientes</div>
-          <div class="muted" style="margin-top:8px;">Promedio diario {{ resultado.demand_signal.historico_avg_daily|floatformat:1 }}</div>
+          <div class="muted pd-u-b1ecc496e0">Promedio diario {{ resultado.demand_signal.historico_avg_daily|floatformat:1 }}</div>
         </article>
         <article class="kpi-card">
           <div class="kpi-number {% if resultado.demand_signal.forecast_tone == 'danger' %}is-danger{% elif resultado.demand_signal.forecast_tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ resultado.demand_signal.forecast_status }}</div>
           <div class="kpi-label">Forecast vigente</div>
-          <div class="muted" style="margin-top:8px;">{{ resultado.demand_signal.forecast_detail }}</div>
+          <div class="muted pd-u-b1ecc496e0">{{ resultado.demand_signal.forecast_detail }}</div>
         </article>
         <article class="kpi-card">
           <div class="kpi-number {% if resultado.demand_signal.alignment_tone == 'danger' %}is-danger{% elif resultado.demand_signal.alignment_tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ resultado.demand_signal.alignment_status }}</div>
           <div class="kpi-label">Alineación forecast/solicitud</div>
-          <div class="muted" style="margin-top:8px;">{{ resultado.demand_signal.alignment_detail }}</div>
+          <div class="muted pd-u-b1ecc496e0">{{ resultado.demand_signal.alignment_detail }}</div>
         </article>
         <article class="kpi-card">
           <div class="kpi-number">{{ resultado.demand_signal.delta_qty|floatformat:1 }}</div>
           <div class="kpi-label">Delta solicitud vs forecast</div>
-          <div class="muted" style="margin-top:8px;">Solicitud {{ resultado.demand_signal.solicitud_qty|floatformat:1 }} · forecast {{ resultado.demand_signal.forecast_qty|floatformat:1 }}</div>
+          <div class="muted pd-u-b1ecc496e0">Solicitud {{ resultado.demand_signal.solicitud_qty|floatformat:1 }} · forecast {{ resultado.demand_signal.forecast_qty|floatformat:1 }}</div>
         </article>
-        <article class="kpi-card" style="grid-column: span 2;">
+        <article class="kpi-card pd-u-1f61f29863">
           <div class="kpi-label">Sucursales líderes</div>
           {% for row in resultado.demand_signal.top_branches %}
-          <div class="muted" style="margin-top:6px;">{{ row.sucursal__codigo }} - {{ row.sucursal__nombre }} · {{ row.total|floatformat:0|intcomma }}</div>
+          <div class="muted pd-u-2fd7789b39">{{ row.sucursal__codigo }} - {{ row.sucursal__nombre }} · {{ row.total|floatformat:0|intcomma }}</div>
           {% empty %}
-          <div class="muted" style="margin-top:6px;">No hay sucursales con venta reciente para esta receta.</div>
+          <div class="muted pd-u-2fd7789b39">No hay sucursales con venta reciente para esta receta.</div>
           {% endfor %}
         </article>
       </div>
     </div>
     {% endif %}
     {% if resultado.commercial_gate %}
-    <div class="alert {% if resultado.commercial_gate.tone == 'danger' %}alert-danger{% elif resultado.commercial_gate.tone == 'warning' %}alert-warning{% else %}alert-success{% endif %}" style="margin-top: 12px;">
+    <div class="alert {% if resultado.commercial_gate.tone == 'danger' %}alert-danger{% elif resultado.commercial_gate.tone == 'warning' %}alert-warning{% else %}alert-success{% endif %} pd-u-9c9cee2093">
       <strong>Control comercial:</strong>
       {{ resultado.commercial_gate.detail }}
-      <a class="btn btn-secondary btn-sm" href="{{ resultado.commercial_gate.action_url }}" style="margin-left: 8px;">{{ resultado.commercial_gate.action_label }}</a>
+      <a class="btn btn-secondary btn-sm pd-u-c937f3b834" href="{{ resultado.commercial_gate.action_url }}">{{ resultado.commercial_gate.action_label }}</a>
     </div>
     {% endif %}
     {% if resultado.critical_master_rows %}
-    <div class="alert alert-danger" style="margin-top: 12px;">
+    <div class="alert alert-danger pd-u-9c9cee2093">
       <strong>Liberación operativa retenida:</strong>
       El cálculo MRP no debe escalar a compra ni ejecución mientras el maestro crítico por demanda siga abierto.
     </div>
@@ -356,9 +356,9 @@
               <td>{{ row.owner }}</td>
               <td>{{ row.status }}</td>
               <td class="text-end">{{ row.blockers }}</td>
-              <td style="min-width: 160px;">
+              <td class="pd-u-804f67ed75">
                 <div class="erp-progress">
-                  <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="width: {{ row.completion }}%;"></div>
+                  <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %} pd-js-width" data-pd-width="{{ row.completion }}%"></div>
                 </div>
                 <div class="muted mt-1">{{ row.completion }}%</div>
               </td>
@@ -400,9 +400,9 @@
               <td>{{ row.owner }}</td>
               <td>{{ row.status }}</td>
               <td class="text-end">{{ row.count }}</td>
-              <td style="min-width: 160px;">
+              <td class="pd-u-804f67ed75">
                 <div class="erp-progress">
-                  <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% elif row.tone == 'primary' %}is-primary{% else %}is-success{% endif %}" style="width: {{ row.completion }}%;"></div>
+                  <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% elif row.tone == 'primary' %}is-primary{% else %}is-success{% endif %} pd-js-width" data-pd-width="{{ row.completion }}%"></div>
                 </div>
                 <div class="muted mt-1">{{ row.completion }}%</div>
               </td>

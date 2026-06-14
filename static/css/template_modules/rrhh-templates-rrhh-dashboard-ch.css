@@ -1,0 +1,16 @@
+/* Extracted from rrhh/templates/rrhh/dashboard_ch.html */
+.ch-page { display: grid; gap: 18px; width: min(100%, 1720px); margin-inline: auto; }
+  .ch-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: end; }
+  .ch-kicker { color: var(--pd-wine, var(--vino)); font-size: 12px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+  .ch-title { margin: 4px 0 0; font-size: clamp(1.45rem, 1.8vw, 2rem); line-height: 1.08; }
+  .ch-copy { color: var(--pd-muted, var(--texto-light)); margin: 6px 0 0; max-width: 68ch; }
+  .ch-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .ch-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 18px; }
+  .ch-value { color: var(--vino); font-size: 32px; font-weight: 800; line-height: 1; }
+  .ch-label { color: var(--texto); font-weight: 800; margin-top: 8px; }
+  .ch-note { color: var(--texto-light); font-size: 13px; margin-top: 4px; }
+  .ch-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+  .ch-action { background: var(--vino); border-radius: 8px; color: #fff; font-weight: 800; padding: 16px; text-decoration: none; }
+  .ch-action.secondary { background: #fff; border: 1px solid var(--rosa); color: var(--vino); }
+  @media (max-width: 900px) { .ch-grid, .ch-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 620px) { .ch-grid, .ch-actions { grid-template-columns: 1fr; } }

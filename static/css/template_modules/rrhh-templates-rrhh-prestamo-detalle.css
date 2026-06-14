@@ -1,0 +1,8 @@
+/* Extracted from rrhh/templates/rrhh/prestamo_detalle.html */
+.loan-head { display: grid; grid-template-columns: 1.3fr .7fr; gap: 14px; }
+  .loan-progress { height: 12px; background: #f3e9ee; border-radius: 999px; overflow: hidden; }
+  .loan-progress span { display: block; height: 100%; background: var(--vino); }
+  .badge { border-radius: 999px; background: #f7edf2; color: var(--vino); font-weight: 800; padding: 5px 10px; }
+  .quota-table { width: 100%; border-collapse: collapse; }
+  .quota-table th, .quota-table td { border-bottom: 1px solid var(--rosa); padding: 9px; text-align: left; }
+  @media (max-width: 900px) { .loan-head { grid-template-columns: 1fr; } }

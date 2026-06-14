@@ -356,7 +356,7 @@
             <td class="text-end">{{ row.count }}</td>
             <td class="pd-progress-dynamic-cell">
               <div class="erp-progress">
-                <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="width: {{ row.completion }}%;"></div>
+                <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %} pd-js-width" data-pd-width="{{ row.completion }}%"></div>
               </div>
               <div class="muted mt-1">{{ row.completion }}%</div>
             </td>

@@ -1,0 +1,16 @@
+/* Extracted from activos/templates/activos/seguimiento_compras.html */
+.bandeja-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+  .bandeja-tab{padding:8px 16px;border:2px solid #e5dce1;border-radius:999px;background:#fff;color:#6f3150;font-weight:900;font-size:13px;cursor:pointer}
+  .bandeja-tab.active{background:#8B2252;border-color:#8B2252;color:#fff}
+  .bandeja-table{width:100%;border-collapse:collapse;font-size:13px}
+  .bandeja-table th{padding:10px 12px;border-bottom:2px solid rgba(139,34,82,.2);text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#6f3150;font-weight:900}
+  .bandeja-table td{padding:12px;border-bottom:1px solid rgba(139,34,82,.08);vertical-align:top}
+  .bandeja-table tr:hover td{background:#fdf8fb}
+  .prioridad-badge,.estatus-pill{display:inline-flex;align-items:center;border-radius:999px;font-size:11px;font-weight:900}
+  .prioridad-badge{padding:3px 8px}.estatus-pill{padding:3px 9px;background:#f0eaed;color:#6f3150}
+  .p-critica{background:#fef2f2;color:#991b1b;border:1px solid #fca5a5}.p-alta{background:#fff7ed;color:#c2410c;border:1px solid #fdba74}.p-media{background:#fffbeb;color:#92400e;border:1px solid #fde68a}.p-baja{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
+  .estatus-pill.abierto{background:#fef2f2;color:#991b1b}.estatus-pill.en_revision{background:#eff6ff;color:#1d4ed8}.estatus-pill.en_proceso{background:#fffbeb;color:#92400e}
+  .area-pill{font-size:11px;font-weight:800;color:#888}
+  .bandeja-empty{text-align:center;padding:40px;color:#aaa;font-size:14px}
+  .btn-accion{display:inline-flex;padding:5px 10px;border:1px solid #e5dce1;border-radius:6px;background:#fff;color:#8B2252;font-size:12px;font-weight:800;text-decoration:none}
+  .btn-accion:hover{background:#8B2252;color:#fff;border-color:#8B2252}

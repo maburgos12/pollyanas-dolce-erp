@@ -8,7 +8,7 @@
   <div class="kpi-grid mb-3">
     <article class="kpi-card">
       <div class="kpi-label">Responsable principal</div>
-      <div style="font-weight:700; margin-top:8px;">Costeo / DG</div>
+      <div class="pd-u-4304c62622">Costeo / DG</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number {% if drivers_unavailable %}is-danger{% elif drivers %}is-success{% else %}is-warning{% endif %}">
@@ -22,7 +22,7 @@
     </article>
     <article class="kpi-card">
       <div class="kpi-label">Siguiente paso</div>
-      <div class="muted" style="margin:8px 0 10px;">
+      <div class="muted pd-u-332dbeaac1">
         {% if drivers_unavailable %}
           Habilitar tablas del módulo para capturar drivers de mano de obra e indirectos.
         {% elif edit_driver %}
@@ -78,7 +78,7 @@
     Configura mano de obra e indirectos por alcance (producto, familia, lote o global).
   </p>
   {% if drivers_unavailable %}
-  <div class="alert alert-info" style="margin-bottom: 12px;">
+  <div class="alert alert-info pd-u-72d6c38e5f">
     Drivers de costeo no disponibles en este entorno. Ejecuta migraciones para habilitar este módulo.
   </div>
   {% endif %}
@@ -117,7 +117,7 @@
         <option value="replace">Reemplazar todos</option>
       </select>
     </div>
-    <div class="form-group" style="align-self:end;">
+    <div class="form-group pd-u-7054699c26">
       <button class="btn btn-primary" type="submit">Importar drivers</button>
     </div>
   </form>

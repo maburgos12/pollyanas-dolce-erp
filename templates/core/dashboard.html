@@ -5,172 +5,7 @@
 {% block page_title %}Dashboard Ejecutivo{% endblock %}
 {% block body_class %}page-dashboard{% endblock %}
 {% block extra_css %}
-<style>
-    .executive-shell-dashboard {
-        gap: 16px;
-    }
-
-    .executive-shell-dashboard .executive-hero {
-        padding: 18px 22px;
-        min-height: 0;
-        align-items: flex-start;
-    }
-
-    .executive-shell-dashboard .dashboard-hero-copy {
-        max-width: 680px;
-    }
-
-    .executive-shell-dashboard .dashboard-hero-title {
-        font-size: clamp(1.9rem, 2.4vw, 2.8rem);
-        line-height: 1.02;
-        margin-bottom: 6px;
-    }
-
-    .executive-shell-dashboard .dashboard-hero-subtitle {
-        max-width: 56ch;
-        margin-bottom: 0;
-    }
-
-    .executive-shell-dashboard .dashboard-hero-badges {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        justify-content: flex-end;
-        margin-left: auto;
-    }
-
-    .executive-shell-dashboard .executive-section-highlight {
-        padding-top: 16px;
-    }
-
-    .executive-shell-dashboard .executive-section-head {
-        gap: 10px;
-        margin-bottom: 12px;
-    }
-
-    .dashboard-summary-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(320px, 1fr));
-        gap: 16px;
-        align-items: stretch;
-    }
-
-    .dashboard-summary-grid .executive-kpi-card {
-        display: flex;
-        flex-direction: column;
-        min-height: 178px;
-        padding: 26px 32px;
-        border-radius: 28px;
-        overflow: hidden;
-    }
-
-    .dashboard-summary-grid .kpi-number {
-        max-width: 100%;
-        font-family: "Nunito", "Montserrat", system-ui, sans-serif;
-        font-size: clamp(2.2rem, 3.6vw, 3.6rem);
-        font-variant-numeric: tabular-nums;
-        font-weight: 900;
-        line-height: 0.95;
-        letter-spacing: 0;
-        margin-bottom: 10px;
-        white-space: nowrap;
-    }
-
-    .dashboard-summary-grid .kpi-label {
-        color: var(--texto-light);
-        font-size: clamp(1rem, 1.35vw, 1.32rem);
-        font-weight: 900;
-        letter-spacing: 0.1em;
-        line-height: 1.15;
-        margin-bottom: 12px;
-        text-transform: uppercase;
-    }
-
-    .dashboard-summary-grid .executive-kpi-note {
-        color: var(--texto-light);
-        font-size: clamp(1rem, 1.45vw, 1.28rem);
-        line-height: 1.28;
-    }
-
-    .dashboard-summary-grid .executive-kpi-card-action {
-        margin-top: auto;
-        padding-top: 22px;
-    }
-
-    .dashboard-summary-grid .executive-kpi-card-action .btn {
-        width: 100%;
-        min-height: 50px;
-        justify-content: center;
-        border-radius: 999px;
-        font-size: 1rem;
-        font-weight: 900;
-    }
-
-    .dashboard-summary-grid.dashboard-summary-grid-secondary {
-        margin-top: 16px;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-
-    .dashboard-summary-grid.dashboard-summary-grid-secondary .executive-kpi-card {
-        min-height: 124px;
-        padding: 16px 18px;
-        border-radius: 18px;
-    }
-
-    .dashboard-summary-grid.dashboard-summary-grid-secondary .kpi-number {
-        font-size: clamp(1.6rem, 2vw, 2.3rem);
-        white-space: normal;
-    }
-
-    .dashboard-summary-grid.dashboard-summary-grid-secondary .kpi-label {
-        font-size: 0.82rem;
-        letter-spacing: 0.08em;
-        margin-bottom: 4px;
-    }
-
-    .dashboard-summary-grid.dashboard-summary-grid-secondary .executive-kpi-note {
-        font-size: 0.92rem;
-        line-height: 1.35;
-    }
-
-    .dashboard-summary-grid .executive-kpi-card.executive-kpi-card-soft {
-        background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,248,250,0.94));
-    }
-
-    @media (max-width: 1180px) {
-        .dashboard-summary-grid {
-            grid-template-columns: repeat(2, minmax(260px, 1fr));
-        }
-
-        .dashboard-summary-grid.dashboard-summary-grid-secondary {
-            grid-template-columns: 1fr;
-        }
-    }
-
-    @media (max-width: 760px) {
-        .executive-shell-dashboard .executive-hero {
-            padding: 18px;
-        }
-
-        .dashboard-summary-grid {
-            grid-template-columns: 1fr;
-        }
-
-        .dashboard-summary-grid .executive-kpi-card {
-            min-height: 158px;
-            padding: 22px;
-        }
-
-        .dashboard-summary-grid .kpi-number {
-            font-size: clamp(2rem, 11vw, 3rem);
-        }
-
-        .executive-shell-dashboard .dashboard-hero-badges {
-            margin-left: 0;
-            justify-content: flex-start;
-        }
-    }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/templates-core-dashboard.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
@@ -470,7 +305,7 @@
                             <div class="executive-bar-meta">{{ row.secondary }}</div>
                         </div>
                         <div class="executive-bar-track">
-                            <div class="executive-bar-fill" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                            <div class="executive-bar-fill pd-js-width" data-pd-width="{{ row.pct|floatformat:0 }}%"></div>
                         </div>
                         <div class="executive-bar-value">${{ row.value|floatformat:2|intcomma }}</div>
                     </div>
@@ -490,7 +325,7 @@
                             <div class="executive-bar-label">{{ row.label }}</div>
                         </div>
                         <div class="executive-bar-track">
-                            <div class="executive-bar-fill is-accent" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                            <div class="executive-bar-fill is-accent pd-js-width" data-pd-width="{{ row.pct|floatformat:0 }}%"></div>
                         </div>
                         <div class="executive-bar-value">${{ row.value|floatformat:2|intcomma }}</div>
                     </div>
@@ -525,7 +360,7 @@
                         <div class="executive-bar-detail">{{ row.detail }}</div>
                     </div>
                     <div class="executive-bar-track">
-                        <div class="executive-bar-fill is-{{ row.tone }}" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                        <div class="executive-bar-fill is-{{ row.tone }} pd-js-width" data-pd-width="{{ row.pct|floatformat:0 }}%"></div>
                     </div>
                     <div class="executive-bar-side">
                         <span class="badge {% if row.tone == 'danger' %}bg-danger{% elif row.tone == 'warning' %}bg-warning text-dark{% else %}bg-success{% endif %}">{{ row.delta_label }}</span>
@@ -556,7 +391,7 @@
                         <div class="executive-bar-detail">{{ row.detail }}</div>
                     </div>
                     <div class="executive-bar-track">
-                        <div class="executive-bar-fill is-{{ row.tone }}" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                        <div class="executive-bar-fill is-{{ row.tone }} pd-js-width" data-pd-width="{{ row.pct|floatformat:0 }}%"></div>
                     </div>
                     <div class="executive-bar-side">
                         <span class="badge {% if row.tone == 'danger' %}bg-danger{% elif row.tone == 'warning' %}bg-warning text-dark{% else %}bg-success{% endif %}">{{ row.delta_label }}</span>
@@ -590,7 +425,7 @@
                         <div class="executive-bar-detail">{{ row.detail }}</div>
                     </div>
                     <div class="executive-bar-track">
-                        <div class="executive-bar-fill is-{{ row.tone }}" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                        <div class="executive-bar-fill is-{{ row.tone }} pd-js-width" data-pd-width="{{ row.pct|floatformat:0 }}%"></div>
                     </div>
                     <div class="executive-bar-side">
                         <span class="badge {% if row.tone == 'danger' %}bg-danger{% elif row.tone == 'warning' %}bg-warning text-dark{% else %}bg-success{% endif %}">{{ row.delta_label }}</span>
@@ -621,7 +456,7 @@
                         <div class="executive-bar-detail">{{ row.detail }}</div>
                     </div>
                     <div class="executive-bar-track">
-                        <div class="executive-bar-fill is-{{ row.tone }}" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                        <div class="executive-bar-fill is-{{ row.tone }} pd-js-width" data-pd-width="{{ row.pct|floatformat:0 }}%"></div>
                     </div>
                     <div class="executive-bar-side">
                         <span class="badge {% if row.tone == 'danger' %}bg-danger{% elif row.tone == 'warning' %}bg-warning text-dark{% else %}bg-success{% endif %}">{{ row.delta_label }}</span>
@@ -749,7 +584,7 @@
             </article>
         </div>
         {% if production_product_bar_rows %}
-        <div class="executive-chart-card" style="margin-top: 16px;">
+        <div class="executive-chart-card pd-u-d265a6b9b9">
             <div class="executive-chart-title">Productos más producidos</div>
             <div class="executive-bar-list">
                 {% for row in production_product_bar_rows %}
@@ -758,7 +593,7 @@
                         <div class="executive-bar-label">{{ row.label }}</div>
                     </div>
                     <div class="executive-bar-track">
-                        <div class="executive-bar-fill is-accent" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                        <div class="executive-bar-fill is-accent pd-js-width" data-pd-width="{{ row.pct|floatformat:0 }}%"></div>
                     </div>
                     <div class="executive-bar-value">{{ row.value|floatformat:1|intcomma }}</div>
                 </div>
@@ -810,7 +645,7 @@
             </article>
         </div>
         {% if forecast_gap_bar_rows %}
-        <div class="executive-chart-card" style="margin-top: 16px;">
+        <div class="executive-chart-card pd-u-d265a6b9b9">
             <div class="executive-chart-title">Recetas con mayor brecha forecast vs plan</div>
             <div class="executive-bar-list">
                 {% for row in forecast_gap_bar_rows %}
@@ -820,7 +655,7 @@
                         <div class="executive-bar-meta">{{ row.secondary }}</div>
                     </div>
                     <div class="executive-bar-track">
-                        <div class="executive-bar-fill is-{{ row.tone|default:'warning' }}" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                        <div class="executive-bar-fill is-{{ row.tone|default:'warning' }} pd-js-width" data-pd-width="{{ row.pct|floatformat:0 }}%"></div>
                     </div>
                     <div class="executive-bar-value">{{ row.value|floatformat:1|intcomma }}</div>
                 </div>
@@ -867,7 +702,7 @@
                 </div>
             </article>
         </div>
-        <div class="executive-chart-grid" style="margin-top: 16px;">
+        <div class="executive-chart-grid pd-u-d265a6b9b9">
             <section class="executive-chart-card">
                 <div class="executive-chart-title">Sucursales con más merma</div>
                 {% if waste_branch_bar_rows %}
@@ -879,7 +714,7 @@
                             <div class="executive-bar-meta">{{ row.secondary }}</div>
                         </div>
                         <div class="executive-bar-track">
-                            <div class="executive-bar-fill is-warning" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                            <div class="executive-bar-fill is-warning pd-js-width" data-pd-width="{{ row.pct|floatformat:0 }}%"></div>
                         </div>
                         <div class="executive-bar-value">{{ row.value|floatformat:1|intcomma }}</div>
                     </div>
@@ -900,7 +735,7 @@
                             <div class="executive-bar-meta">{{ row.secondary }}</div>
                         </div>
                         <div class="executive-bar-track">
-                            <div class="executive-bar-fill is-danger" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                            <div class="executive-bar-fill is-danger pd-js-width" data-pd-width="{{ row.pct|floatformat:0 }}%"></div>
                         </div>
                         <div class="executive-bar-value">{{ row.value|floatformat:1|intcomma }}</div>
                     </div>
@@ -963,7 +798,7 @@
                         <div class="executive-bar-secondary">{{ row.source_label }}</div>
                     </div>
                     <div class="executive-bar-track">
-                        <div class="executive-bar-fill is-neutral" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                        <div class="executive-bar-fill is-neutral pd-js-width" data-pd-width="{{ row.pct|floatformat:0 }}%"></div>
                     </div>
                     <div class="executive-bar-value">${{ row.value|floatformat:2|intcomma }}</div>
                 </div>

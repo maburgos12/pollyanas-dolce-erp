@@ -4,19 +4,7 @@
 {% block page_title %}Préstamos de personal{% endblock %}
 
 {% block extra_css %}
-<style>
-  .loan-page { display: grid; gap: 16px; }
-  .loan-actions { display: flex; gap: 10px; flex-wrap: wrap; }
-  .loan-board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-  .loan-col { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 14px; }
-  .loan-col h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
-  .loan-list { display: grid; gap: 10px; }
-  .loan-card { border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; text-decoration: none; color: inherit; }
-  .loan-card strong { color: var(--vino); }
-  .loan-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-  .muted { color: var(--texto-light); font-size: 13px; }
-  @media (max-width: 900px) { .loan-board { grid-template-columns: 1fr; } }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-prestamos-lista.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
@@ -43,7 +31,7 @@
       <div class="loan-list">
         {% for prestamo in por_autorizar %}
           <div class="loan-card">
-            <a href="{% url 'rrhh:rrhh_prestamo_detalle' prestamo.pk %}" style="text-decoration:none;color:inherit;">
+            <a href="{% url 'rrhh:rrhh_prestamo_detalle' prestamo.pk %}" class="pd-u-af3b97a004">
               <strong>{{ prestamo.folio }}</strong>
               <div>{{ prestamo.empleado.nombre }}</div>
               <div class="muted">${{ prestamo.importe }} · {{ prestamo.get_estado_display }}</div>

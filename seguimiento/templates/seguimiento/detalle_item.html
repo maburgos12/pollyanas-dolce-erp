@@ -7,280 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<style>
-  .seg-detalle-shell { width: min(100%, 900px); }
-
-  .seg-detalle-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-    flex-wrap: wrap;
-    margin-bottom: 20px;
-  }
-
-  .seg-detalle-title {
-    margin: 0;
-    font-size: 1.5rem;
-    color: var(--texto);
-  }
-
-  .seg-section-title {
-    font-size: 0.85rem;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: .06em;
-    color: var(--texto-light);
-    margin: 0 0 10px;
-  }
-
-  .seg-timeline {
-    display: grid;
-    gap: 10px;
-  }
-
-  .seg-timeline-item {
-    display: grid;
-    grid-template-columns: 36px 1fr;
-    gap: 10px;
-    align-items: start;
-  }
-
-  .seg-timeline-dot {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    display: grid;
-    place-items: center;
-    background: rgba(139, 34, 82, 0.10);
-    color: var(--vino);
-    font-size: 1.1rem;
-    flex-shrink: 0;
-  }
-
-  .seg-timeline-dot.is-dg {
-    background: rgba(201, 168, 76, 0.15);
-    color: #8b6b1c;
-  }
-
-  .seg-timeline-dot.is-evidencia {
-    background: rgba(35, 109, 83, 0.12);
-    color: #236d53;
-  }
-
-  .seg-timeline-body {
-    background: rgba(255, 255, 255, 0.86);
-    border: 1px solid rgba(139, 34, 82, 0.08);
-    border-radius: 12px;
-    padding: 10px 14px;
-  }
-
-  .seg-timeline-body.is-dg {
-    border-color: rgba(201, 168, 76, 0.20);
-    background: rgba(255, 252, 240, 0.92);
-  }
-
-  .seg-conversation-card {
-    border: 1px solid rgba(139, 34, 82, 0.10);
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.84);
-    padding: 12px 14px;
-    display: grid;
-    gap: 8px;
-  }
-
-  .seg-conversation-card.is-closed {
-    border-color: rgba(35, 109, 83, 0.22);
-    background: rgba(35, 109, 83, 0.06);
-  }
-
-  .seg-dg-note {
-    border: 1px solid color-mix(in srgb, var(--pd-gold) 32%, transparent);
-    padding: 8px 10px;
-    background: rgba(255, 252, 240, 0.92);
-    border-radius: 8px;
-  }
-
-  .seg-timeline-meta {
-    font-size: 0.8rem;
-    color: var(--texto-light);
-    margin-top: 4px;
-  }
-
-  .seg-entregar-box {
-    background: linear-gradient(135deg, rgba(139,34,82,.06), rgba(201,168,76,.06));
-    border: 1px solid rgba(139, 34, 82, 0.14);
-    border-radius: 16px;
-    padding: 20px;
-    display: grid;
-    gap: 12px;
-  }
-
-  .seg-entregar-box textarea,
-  .seg-entregar-box input[type="file"] {
-    width: 100%;
-    border: 1px solid rgba(139, 34, 82, 0.14);
-    border-radius: 12px;
-    padding: 10px 12px;
-    font: inherit;
-    color: var(--texto);
-    background: rgba(255, 255, 255, 0.96);
-    resize: vertical;
-    min-height: 80px;
-    box-sizing: border-box;
-  }
-
-  .seg-entregar-box input[type="file"] { min-height: auto; }
-
-  .seg-entregar-actions {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-
-  .seg-badge-status {
-    padding: 4px 12px;
-    border-radius: 999px;
-    font-size: 0.8rem;
-    font-weight: 800;
-  }
-
-  .seg-badge-status.pendiente { background: rgba(255,193,7,.18); color: #7a5c00; }
-  .seg-badge-status.en_proceso { background: rgba(47,108,119,.14); color: #2f6c77; }
-  .seg-badge-status.en_revision { background: rgba(201,168,76,.20); color: #8b6b1c; }
-  .seg-badge-status.completado { background: rgba(76,175,80,.16); color: #236d53; }
-  .seg-badge-status.bloqueado,
-  .seg-badge-status.cancelado { background: rgba(229,57,53,.14); color: #b71c1c; }
-
-  .seg-form-textarea {
-    width: 100%;
-    border: 1px solid rgba(139,34,82,.14);
-    border-radius: 12px;
-    padding: 10px;
-    font: inherit;
-    color: var(--texto);
-    background: rgba(255,255,255,.96);
-    min-height: 64px;
-    resize: vertical;
-    box-sizing: border-box;
-  }
-
-  .seg-progress-fill {
-    display: block;
-    height: 100%;
-    border-radius: 999px;
-    transition: width .4s ease;
-    width: var(--seg-pct, 0%);
-  }
-	  .seg-progress-fill.is-danger { background: var(--rojo); }
-	  .seg-progress-fill.is-success { background: var(--verde); }
-	  .seg-progress-fill.is-plum { background: var(--vino); }
-  .seg-panel-gap { margin-bottom: 16px; }
-  .seg-back-row { margin-bottom: 14px; }
-  .seg-metric-strip { flex-wrap: wrap; }
-  .seg-description { margin: 12px 0 0; color: var(--texto-light); font-size: .92rem; }
-  .seg-entregable { margin: 10px 0 0; color: var(--pd-ink-soft); font-size: .92rem; font-weight: 800; }
-  .seg-progress-track { margin-top: 14px; }
-  .seg-status-panel {
-    border: 1px solid var(--pd-border);
-    background: var(--pd-surface);
-  }
-  .seg-status-panel.is-closed { border-color: color-mix(in srgb, var(--pd-success) 28%, transparent); background: var(--pd-success-soft); }
-  .seg-status-panel.is-review { border-color: color-mix(in srgb, var(--pd-gold) 32%, transparent); background: var(--pd-gold-soft); }
-  .seg-conversation-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
-  .seg-meta-flat { margin:0; }
-  .seg-meta-warning { margin:0; color:var(--pd-warning); font-weight:800; }
-  .seg-meta-success { margin:0; color:var(--pd-success); font-weight:800; }
-  .seg-dg-meta { font-size:.82rem; }
-  .seg-note-copy { margin:6px 0 0; }
-  .seg-muted-copy { margin:0; font-size:.9rem; }
-  .seg-summary-link { cursor:pointer; list-style:none; font-size:.84rem; font-weight:800; color:var(--vino); }
-  .seg-note-stack { display:grid; gap:8px; margin-top:8px; }
-  .seg-check-help { margin:-4px 0 10px; font-size:.82rem; }
-  .seg-check-stack { display:grid; gap:8px; }
-  .seg-check-item {
-    border:1px solid color-mix(in srgb, var(--pd-wine) 10%, transparent);
-    border-radius:10px;
-  }
-  .seg-check-item.is-complete { background: var(--pd-success-soft); }
-  .seg-check-summary { cursor:pointer; list-style:none; display:flex; align-items:center; gap:10px; padding:10px 12px; }
-  .seg-check-number { font-weight:800; }
-  .seg-step-icon { font-size:1.05rem; }
-  .seg-check-title { flex:1; font-weight:700; overflow:hidden; }
-  .seg-check-state { font-size:.76rem; }
-  .seg-check-body { padding:2px 14px 14px 40px; display:grid; gap:8px; }
-  .seg-check-meta { font-size:.8rem; display:flex; flex-wrap:wrap; gap:4px 14px; }
-  .seg-check-description { color:var(--texto); font-size:.92rem; white-space:pre-line; }
-  .seg-check-inline { font-size:.86rem; }
-  .seg-check-inline-sm { font-size:.8rem; }
-  .seg-inline-strong { font-weight:700; }
-  .seg-subcheck-box {
-    border:1px dashed color-mix(in srgb, var(--pd-wine) 18%, transparent);
-    border-radius:10px;
-    padding:8px 10px;
-  }
-  .seg-subcheck-title {
-    margin-bottom:6px;
-    font-size:.72rem;
-    font-weight:800;
-    letter-spacing:.04em;
-    text-transform:uppercase;
-  }
-  .seg-subcheck-stack { display:grid; gap:4px; }
-  .seg-subcheck-row { display:flex; align-items:center; gap:8px; font-size:.88rem; }
-  .seg-subcheck-toggle { background:none; border:0; cursor:pointer; font-size:1rem; line-height:1; padding:0; }
-  .seg-subcheck-name { flex:1; overflow:hidden; }
-  .seg-subcheck-state { font-size:.7rem; }
-  .seg-complete-meta { font-size:.8rem; }
-  .seg-action-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-  .seg-alert-actions { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
-  .seg-evidence-row {
-    display:flex;
-    align-items:center;
-    gap:10px;
-    flex-wrap:wrap;
-    padding:8px 10px;
-    border:1px solid color-mix(in srgb, var(--pd-success) 18%, transparent);
-    border-radius:10px;
-    background:var(--pd-success-soft);
-  }
-  .seg-evidence-link { flex-shrink:0; }
-  .seg-evidence-main { flex:1; overflow:hidden; }
-  .seg-evidence-name { font-size:.9rem; }
-  .seg-evidence-comment { font-size:.82rem; }
-  .seg-review-copy { margin:0; color:var(--texto-light); font-size:.9rem; }
-  .seg-form-grid { display:grid; gap:10px; }
-  .seg-review-card {
-    padding:12px 14px;
-    border:1px solid color-mix(in srgb, var(--pd-gold) 28%, transparent);
-    border-radius:12px;
-    background:var(--pd-gold-soft);
-  }
-  .seg-review-title { margin-bottom:6px; font-size:.95rem; font-weight:700; }
-  .seg-review-meta { margin-bottom:8px; display:flex; flex-wrap:wrap; gap:4px 14px; font-size:.8rem; }
-  .seg-inline-details { display:inline-block; }
-  .seg-popover {
-    position:absolute;
-    z-index:10;
-    margin-top:4px;
-    padding:12px 14px;
-    border:1px solid color-mix(in srgb, var(--pd-gold) 35%, transparent);
-    border-radius:10px;
-    background:var(--blanco);
-    box-shadow:var(--pd-shadow-mid);
-  }
-  .seg-popover-label { display:block; margin-bottom:4px; font-size:.8rem; font-weight:700; }
-  .seg-popover-textarea { font-size:.82rem; resize:vertical; }
-  .seg-popover-submit { margin-top:8px; }
-  .seg-timeline-copy { margin:4px 0 0; color:var(--texto-light); font-size:.88rem; }
-  .seg-timeline-actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:8px; align-items:center; }
-  .seg-edit-summary { cursor:pointer; list-style:none; display:inline-flex; align-items:center; gap:6px; color:var(--vino); font-size:.82rem; font-weight:700; }
-  .seg-edit-form { margin-top:8px; display:grid; gap:8px; }
-  .seg-danger-action { color:var(--rojo); border-color:color-mix(in srgb, var(--pd-danger) 30%, transparent); }
-  .seg-secondary-stack { display:grid; gap:12px; }
-  .seg-date-input { border:1px solid color-mix(in srgb, var(--pd-wine) 14%, transparent); border-radius:12px; padding:10px; font:inherit; }
-  .seg-inline-badge { margin-left: 8px; }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/seguimiento-templates-seguimiento-detalle-item.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
@@ -344,7 +71,7 @@
 
     {% if checklist_total %}
     <div class="bi-progress-track seg-progress-track" aria-label="Avance">
-      <span class="seg-progress-fill {% if item.esta_vencido %}is-danger{% elif progreso_pct >= 100 %}is-success{% else %}is-plum{% endif %}" style="--seg-pct:{{ progreso_pct }}%"></span>
+      <span class="seg-progress-fill pd-js-width {% if item.esta_vencido %}is-danger{% elif progreso_pct >= 100 %}is-success{% else %}is-plum{% endif %}" data-pd-css-var="--seg-pct" data-pd-width="{{ progreso_pct }}%"></span>
     </div>
     {% endif %}
   </div>
@@ -413,7 +140,7 @@
       <details class="seg-check-item{% if check.completado %} is-complete{% endif %}" {% if not es_vista_dg and check.pk == siguiente_check_id %}open{% endif %}>
         <summary class="seg-check-summary">
           <span class="muted seg-check-number">{{ forloop.counter }}.</span>
-          <span class="seg-step-icon">{% if check.completado %}✓{% elif es_vista_dg %}□{% elif check.pk == siguiente_check_id %}○{% else %}•{% endif %}</span>
+          <span class="seg-step-icon">{% if check.completado %}OK{% elif es_vista_dg %}□{% elif check.pk == siguiente_check_id %}○{% else %}•{% endif %}</span>
           <span class="seg-check-title">{{ check.titulo }}</span>
           <span class="muted seg-check-state">{% if check.completado %}Hecho{% elif not es_vista_dg and check.pk == siguiente_check_id %}En turno{% else %}Pendiente{% endif %} ▾</span>
         </summary>
@@ -448,13 +175,13 @@
                 {% csrf_token %}
                 <input type="hidden" name="accion" value="subpunto">
                 <input type="hidden" name="sub_index" value="{{ forloop.counter0 }}">
-                <button type="submit" title="Marcar / desmarcar" class="seg-subcheck-toggle">{% if sub.completado %}✓{% else %}□{% endif %}</button>
+                <button type="submit" title="Marcar / desmarcar" class="seg-subcheck-toggle">{% if sub.completado %}OK{% else %}□{% endif %}</button>
                 <span class="seg-subcheck-name">{{ sub.titulo }}</span>
                 <span class="muted seg-subcheck-state">{% if sub.completado %}Resuelto{% else %}Pendiente{% endif %}</span>
               </form>
               {% else %}
               <div class="seg-subcheck-row">
-                <span>{% if sub.completado %}✓{% else %}□{% endif %}</span>
+                <span>{% if sub.completado %}OK{% else %}□{% endif %}</span>
                 <span class="seg-subcheck-name">{{ sub.titulo }}</span>
                 <span class="muted seg-subcheck-state">{% if sub.completado %}Resuelto{% else %}Pendiente{% endif %}</span>
               </div>

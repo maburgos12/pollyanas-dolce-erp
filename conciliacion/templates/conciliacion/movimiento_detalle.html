@@ -4,25 +4,7 @@
 {% block title %}Documento de conciliación{% endblock %}
 
 {% block content %}
-<style>
-  .conc-doc { --doc-border: #e2e8f0; --doc-muted: #64748b; --doc-text: #0f172a; --doc-ok-bg: #dcfce7; --doc-ok: #166534; --doc-warn-bg: #fef3c7; --doc-warn: #92400e; max-width: 1180px; margin: 0 auto; padding: 20px; color: var(--doc-text); }
-  .conc-doc-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; border-bottom: 1px solid var(--doc-border); padding-bottom: 14px; margin-bottom: 18px; }
-  .conc-doc h1 { margin: 0; font-size: 1.55rem; }
-  .conc-doc h2 { margin: 0 0 10px; font-size: 1rem; }
-  .conc-doc-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-  .conc-doc-btn { border: 1px solid var(--doc-border); border-radius: 8px; padding: 8px 10px; text-decoration: none; color: var(--doc-text); font-weight: 800; background: #fff; }
-  .conc-doc-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  .conc-doc-section { border: 1px solid var(--doc-border); border-radius: 8px; padding: 14px; background: #fff; }
-  .conc-doc-table { width: 100%; border-collapse: collapse; }
-  .conc-doc-table th, .conc-doc-table td { text-align: left; padding: 8px; border-bottom: 1px solid var(--doc-border); vertical-align: top; }
-  .conc-doc-table th { width: 34%; color: var(--doc-muted); font-size: .84rem; }
-  .conc-doc-chip { display: inline-flex; border-radius: 999px; padding: 3px 8px; font-weight: 800; font-size: .82rem; }
-  .conc-doc-chip.is-ok { background: var(--doc-ok-bg); color: var(--doc-ok); }
-  .conc-doc-chip.is-warn { background: var(--doc-warn-bg); color: var(--doc-warn); }
-  .conc-doc-note { color: var(--doc-muted); line-height: 1.45; }
-  .conc-doc-wide { grid-column: 1 / -1; }
-  @media (max-width: 820px) { .conc-doc-grid { grid-template-columns: 1fr; } .conc-doc-head { display: grid; } .conc-doc-actions { justify-content: flex-start; } }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/conciliacion-templates-conciliacion-movimiento-detalle.css?v=20260614-ui100-v1">
 
 <div class="conc-doc">
   <div class="conc-doc-head">

@@ -1,0 +1,20 @@
+/* Extracted from crm/templates/crm/pedidos.html */
+.ops-shell { display:grid; gap:18px; }
+  .ops-topline { display:grid; gap:12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  .ops-stat { border:1px solid var(--rosa-deep); border-radius:14px; padding:14px 16px; background:#fff; }
+  .ops-stat strong { display:block; font-size:28px; line-height:1; color:var(--vino); margin-bottom:8px; }
+  .ops-stat span { display:block; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--texto-light); }
+  .ops-grid-2 { display:grid; gap:18px; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); }
+  .ops-focus-grid { display:grid; gap:12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .ops-focus-card { border:1px solid var(--rosa); border-radius:12px; background:#fff; padding:12px 14px; }
+  .ops-focus-card.is-active { border-color: var(--vino); box-shadow: 0 10px 24px rgba(139,34,82,.08); }
+  .ops-focus-card strong { display:block; font-size:24px; color:var(--vino); }
+  .ops-chip-row { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .ops-chip { display:inline-flex; align-items:center; padding:5px 10px; border-radius:999px; background:rgba(139,34,82,.08); color:var(--vino); font-size:12px; font-weight:600; }
+  .ops-table td, .ops-table th { vertical-align: middle; }
+  @media (max-width: 1080px) {
+    .ops-topline, .ops-focus-grid, .ops-grid-2 { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 760px) {
+    .ops-topline, .ops-focus-grid, .ops-grid-2 { grid-template-columns: 1fr; }
+  }

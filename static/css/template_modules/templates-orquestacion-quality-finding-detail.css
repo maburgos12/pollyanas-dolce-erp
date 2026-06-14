@@ -1,0 +1,63 @@
+/* Extracted from templates/orquestacion/quality_finding_detail.html */
+.quality-detail-shell { display: grid; gap: 1rem; }
+  .quality-detail-hero {
+    background: linear-gradient(135deg, #15243b 0%, #23486a 58%, #b17b40 100%);
+    color: #fff;
+    border-radius: 24px;
+    padding: 1.5rem 1.65rem;
+  }
+  .quality-detail-hero h1 { margin: 0 0 .35rem; }
+  .quality-detail-grid { display: grid; gap: 1rem; grid-template-columns: 1.35fr .95fr; }
+  .quality-panel {
+    background: #fff;
+    border: 1px solid rgba(21, 36, 59, .08);
+    border-radius: 20px;
+    box-shadow: 0 16px 40px rgba(12, 20, 34, .08);
+    padding: 1.2rem;
+  }
+  .quality-panel h2 { margin: 0 0 .85rem; color: #15243b; }
+  .quality-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: .2rem .55rem;
+    font-size: .78rem;
+    font-weight: 700;
+    background: #eef2f7;
+    color: #24364d;
+  }
+  .quality-pill.warning, .quality-pill.proposed, .quality-pill.accepted, .quality-pill.implemented { background: #fff1d8; color: #8f5c00; }
+  .quality-pill.high, .quality-pill.critical, .quality-pill.rejected { background: #f8e0e0; color: #9a2430; }
+  .quality-pill.resolved, .quality-pill.validated { background: #dff4e5; color: #12633a; }
+  .quality-meta { display: grid; gap: .75rem; }
+  .quality-meta-item strong { display: block; color: #15243b; margin-bottom: .2rem; }
+  .quality-subtle { color: #6d7785; font-size: .9rem; }
+  .quality-form { display: grid; gap: .85rem; }
+  .quality-textarea {
+    width: 100%;
+    min-height: 150px;
+    border: 1px solid rgba(21, 36, 59, .12);
+    border-radius: 12px;
+    padding: .7rem .8rem;
+    font: inherit;
+    resize: vertical;
+  }
+  .quality-actions { display: flex; flex-wrap: wrap; gap: .55rem; }
+  .quality-btn {
+    border: none;
+    border-radius: 12px;
+    padding: .75rem 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .quality-btn.primary { background: #15243b; color: #fff; }
+  .quality-btn.secondary { background: #eef2f7; color: #24364d; }
+  .quality-btn.danger { background: #9a2430; color: #fff; }
+  .quality-list { margin: 0; padding-left: 1.1rem; color: #24364d; }
+  @media (max-width: 980px) {
+    .quality-detail-grid { grid-template-columns: 1fr; }
+  }

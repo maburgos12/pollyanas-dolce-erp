@@ -27,7 +27,7 @@
       Captura manual permitida con desviación máxima de <strong>{{ reorder_max_diff_pct|floatformat:2|intcomma }}%</strong> vs recomendado.
     </p>
     {% if can_manage_inventario %}
-    <form method="post" class="form-grid-auto" style="margin-bottom:14px;">
+    <form method="post" class="form-grid-auto pd-u-a82d7062cc">
       {% csrf_token %}
       <input type="hidden" name="action" value="update_reorder_config">
       <input class="input-field" type="number" step="0.01" min="0" name="reorder_max_diff_pct"

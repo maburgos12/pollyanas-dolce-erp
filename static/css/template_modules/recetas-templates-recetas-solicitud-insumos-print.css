@@ -1,0 +1,171 @@
+/* Extracted from recetas/templates/recetas/solicitud_insumos_print.html */
+:root {
+      --vino: #8B2252;
+      --rosa: #F8E8EE;
+      --texto: #3D2B2B;
+      --gris: #7A6565;
+      --borde: #E8B4C8;
+    }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--texto);
+      background: #fff;
+    }
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      margin: 0 auto;
+      padding: 14mm;
+      box-sizing: border-box;
+    }
+    .header {
+      border: 2px solid var(--vino);
+      padding: 10px 12px;
+      margin-bottom: 14px;
+    }
+    .title {
+      font-size: 24px;
+      color: var(--vino);
+      margin: 0 0 6px 0;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+    .subtitle {
+      font-size: 12px;
+      color: var(--gris);
+      margin: 0;
+    }
+    .meta {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 10px 0 14px;
+    }
+    .meta-box {
+      border: 1px solid var(--borde);
+      padding: 8px;
+      font-size: 12px;
+      background: #fff;
+    }
+    .meta-box strong {
+      color: var(--vino);
+    }
+    .workflow {
+      border: 1px solid var(--borde);
+      padding: 10px;
+      margin: 10px 0 14px;
+      background: #fff;
+    }
+    .workflow-title {
+      font-size: 13px;
+      color: var(--vino);
+      font-weight: 700;
+      text-transform: uppercase;
+      margin: 0 0 8px;
+    }
+    .workflow-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+    .workflow-step {
+      border: 1px solid var(--borde);
+      padding: 8px;
+      font-size: 11px;
+    }
+    .workflow-step strong {
+      color: var(--vino);
+      display: block;
+      margin-bottom: 4px;
+    }
+    h2 {
+      font-size: 14px;
+      margin: 14px 0 6px;
+      color: var(--vino);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+    th, td {
+      border: 1px solid #d8d8d8;
+      padding: 6px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: var(--rosa);
+      color: var(--vino);
+      font-weight: 700;
+      text-transform: uppercase;
+      font-size: 11px;
+    }
+    .text-end {
+      text-align: right;
+    }
+    .totals {
+      border: 1px solid var(--borde);
+      padding: 10px;
+      background: #fff;
+      font-size: 13px;
+      margin-top: 4px;
+    }
+    .totals strong {
+      color: var(--vino);
+    }
+    .signatures {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+      margin-top: 24px;
+    }
+    .sig-box {
+      border-top: 1px solid #777;
+      padding-top: 6px;
+      font-size: 11px;
+      color: #555;
+      text-align: center;
+      min-height: 26px;
+    }
+    .print-actions {
+      width: 210mm;
+      margin: 10px auto;
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      font-size: 13px;
+    }
+    .btn {
+      border: 1px solid var(--vino);
+      background: var(--vino);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .btn.secondary {
+      background: #fff;
+      color: var(--vino);
+    }
+    @media print {
+      .print-actions {
+        display: none;
+      }
+      .page {
+        margin: 0;
+        width: auto;
+        min-height: auto;
+        padding: 8mm;
+      }
+      @page {
+        size: A4;
+        margin: 8mm;
+      }
+    }

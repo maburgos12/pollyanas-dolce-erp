@@ -28,7 +28,7 @@
   <div class="kpi-grid kpi-mini">
     <article class="kpi-card">
       <div class="kpi-label">Responsable principal</div>
-      <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
+      <div class="pd-u-4304c62622">{{ erp_command_center.owner }}</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
@@ -40,7 +40,7 @@
     </article>
     <article class="kpi-card">
       <div class="kpi-label">Siguiente paso</div>
-      <div class="muted" style="margin:8px 0 10px;">{{ erp_command_center.next_step }}</div>
+      <div class="muted pd-u-332dbeaac1">{{ erp_command_center.next_step }}</div>
       <a class="btn btn-secondary btn-small" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
     </article>
   </div>
@@ -388,9 +388,9 @@
     </article>
     <article class="kpi-card">
       <div class="kpi-label">Siguiente prioridad</div>
-      <div style="font-weight:700; margin:8px 0 6px;">{{ maturity_summary.next_priority_title }}</div>
+      <div class="pd-u-06a806e885">{{ maturity_summary.next_priority_title }}</div>
       <div class="muted">{{ maturity_summary.next_priority_detail }}</div>
-      <div style="margin-top:10px;">
+      <div class="pd-u-d8a81eac84">
         <a class="btn btn-secondary btn-sm" href="{{ maturity_summary.next_priority_url }}">{{ maturity_summary.next_priority_cta }}</a>
       </div>
     </article>
@@ -399,7 +399,7 @@
 
 <section class="card">
   <div class="card-header">Criterios de cierre ERP</div>
-  <div class="kpi-grid" style="margin-bottom:16px;">
+  <div class="kpi-grid pd-u-79a1c5a5db">
     <article class="kpi-card">
       <div class="kpi-label">Cierre global</div>
       <div class="kpi-number">{{ release_gate_completion }}%</div>
@@ -413,7 +413,7 @@
       <div class="enterprise-stage-body">
         <div class="enterprise-stage-title">{{ row.title }}</div>
         <div class="enterprise-stage-text">{{ row.detail }}</div>
-        <div class="module-chip-list" style="margin-top:10px;">
+        <div class="module-chip-list pd-u-d8a81eac84">
           <span class="module-chip manage">Cerrados {{ row.completed }}</span>
           <span class="module-chip blocked">Abiertos {{ row.open_count }}</span>
         </div>

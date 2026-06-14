@@ -23,7 +23,7 @@
           <td>{{ cuota.fecha_quincena }}</td>
           <td>${{ cuota.monto_esperado }}</td>
           <td>
-            <form method="post" action="{% url 'rrhh:rrhh_prestamo_cobro' cuota.pk %}" style="display:flex;gap:6px;">
+            <form method="post" action="{% url 'rrhh:rrhh_prestamo_cobro' cuota.pk %}" class="pd-u-c5f72a8bf3">
               {% csrf_token %}
               <input type="number" name="monto_cobrado" step="0.01" min="0" value="{{ cuota.monto_esperado }}">
               <input type="text" name="nota" placeholder="Nota">

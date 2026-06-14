@@ -7,40 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<style>
-  .fallas-card{background:#fff;border:1px solid rgba(139,34,82,.16);border-radius:18px;padding:24px;box-shadow:0 18px 42px rgba(139,34,82,.08)}
-  .fallas-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}
-  .fallas-kicker{font-size:12px;text-transform:uppercase;letter-spacing:.08em;font-weight:800;color:#8B2252}
-  .fallas-title{font-family:"Playfair Display",serif;font-size:34px;margin:4px 0;color:#3f2633}
-  .fallas-muted{color:#7a6871;margin:0}
-  .fallas-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
-  .fallas-field{display:grid;gap:7px;font-weight:800;color:#6f3150}
-  .fallas-field.full{grid-column:1/-1}
-  .fallas-input{width:100%;min-height:46px;border:1px solid rgba(139,34,82,.22);border-radius:12px;padding:10px 12px;font:inherit;background:#fff}
-  textarea.fallas-input{min-height:120px;resize:vertical}
-  .fallas-actions{display:flex;gap:12px;justify-content:flex-end;align-items:center;grid-column:1/-1;margin-top:6px}
-  .btn-wine{background:#8B2252;border:1px solid #8B2252;color:#fff;border-radius:12px;padding:12px 18px;font-weight:900;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;min-height:46px}
-  .btn-soft{background:#fff;border:1px solid rgba(139,34,82,.22);color:#8B2252;border-radius:12px;padding:12px 18px;font-weight:900;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;min-height:46px}
-  .fallas-note{background:#fff8e6;border:1px solid rgba(201,168,76,.45);color:#6b4b00;border-radius:14px;padding:12px 14px;font-weight:700}
-  @media(max-width:760px){.fallas-form{grid-template-columns:1fr}.fallas-head{display:grid}.fallas-actions{justify-content:stretch;flex-direction:column}.fallas-actions a,.fallas-actions button{width:100%}}
-
-  /* ── Modo App ── */
-  .btn-app-mode{display:inline-flex;align-items:center;gap:6px;background:#f3e8ef;border:1.5px solid rgba(139,34,82,.25);color:#8B2252;border-radius:20px;padding:6px 14px;font-size:13px;font-weight:800;cursor:pointer;transition:background .15s}
-  .btn-app-mode:hover{background:#e8d0dc}
-  .btn-app-mode svg{flex-shrink:0}
-
-  body.fallas-app-mode .sidebar,
-  body.fallas-app-mode .page-header{display:none!important}
-  body.fallas-app-mode .main-content{margin-left:0!important;padding:0!important}
-  body.fallas-app-mode .module-shell{padding:0}
-  body.fallas-app-mode .module-tabs{border-radius:0;margin:0;position:sticky;top:0;z-index:10;background:#fff;border-bottom:1px solid rgba(139,34,82,.15)}
-  body.fallas-app-mode .fallas-card{border-radius:0;border-left:none;border-right:none;box-shadow:none;padding:20px 16px}
-  body.fallas-app-mode #fallas-app{max-width:100%;padding:0}
-  .fallas-app-topbar{display:none;align-items:center;justify-content:space-between;padding:12px 16px 8px;background:linear-gradient(135deg,#8B2252,#6B1740);color:#fff}
-  .fallas-app-topbar-title{font-family:"Playfair Display",serif;font-size:18px;font-weight:700}
-  body.fallas-app-mode .fallas-app-topbar{display:flex}
-  body.fallas-app-mode .fallas-app-exit{background:rgba(255,255,255,.18);border:none;color:#fff;border-radius:20px;padding:5px 12px;font-size:12px;font-weight:800;cursor:pointer}
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/fallas-templates-fallas-reporte-form.css?v=20260614-ui100-v1">
 <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
 {% endblock %}
 
@@ -50,10 +17,10 @@
   <!-- Barra superior modo app (solo visible en modo app) -->
   <div class="fallas-app-topbar">
     <span class="fallas-app-topbar-title">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:6px"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="pd-u-5621cd41a6"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
       Fallas
     </span>
-    <button class="fallas-app-exit" onclick="toggleAppMode(false)">✕ Salir modo app</button>
+    <button class="fallas-app-exit" onclick="toggleAppMode(false)">X Salir modo app</button>
   </div>
 
   <nav class="module-tabs">
@@ -74,7 +41,7 @@
         <h1 class="fallas-title">{% if modo_edicion %}Editar reporte #{{ reporte.id }}{% else %}Reportar falla{% endif %}</h1>
         <p class="fallas-muted">{% if modo_edicion %}Corrige la información del reporte antes de que entre a seguimiento.{% else %}Registra la falla con evidencia, sucursal y prioridad para seguimiento de Compras/DG.{% endif %}</p>
       </div>
-      <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+      <div class="pd-u-393439e5a5">
         <a class="btn-soft" href="{% url 'fallas:pwa-mis-reportes' %}">Ver reportes</a>
         <button type="button" class="btn-app-mode" onclick="toggleAppMode(true)" id="btn-modo-app">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg>
@@ -83,7 +50,7 @@
       </div>
     </div>
 
-    <form class="fallas-form" method="post" enctype="multipart/form-data" style="margin-top:18px;">
+    <form class="fallas-form pd-u-e7673d9ced" method="post" enctype="multipart/form-data">
       {% csrf_token %}
       <label class="fallas-field">Sucursal
         <select class="fallas-input" name="sucursal" required>

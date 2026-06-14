@@ -1,0 +1,73 @@
+/* Extracted from reportes/templates/reportes/mermas_devoluciones.html */
+.waste-shell { display:grid; gap:1rem; }
+  .waste-toolbar, .waste-kpi, .waste-panel {
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#fff;
+  }
+  .waste-toolbar {
+    display:flex;
+    justify-content:space-between;
+    gap:.75rem;
+    flex-wrap:wrap;
+    padding:1rem;
+    align-items:end;
+  }
+  .waste-controls { display:flex; gap:.7rem; flex-wrap:wrap; align-items:end; }
+  .waste-field { display:grid; gap:.25rem; min-width:160px; }
+  .waste-field label { font-size:.78rem; color:var(--muted); font-weight:700; text-transform:uppercase; }
+  .waste-field input, .waste-field select {
+    height:38px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:0 .65rem;
+    background:#fff;
+  }
+  .waste-button {
+    height:38px;
+    border:0;
+    border-radius:6px;
+    padding:0 .9rem;
+    background:#17324d;
+    color:#fff;
+    font-weight:700;
+  }
+  .waste-kpis {
+    display:grid;
+    grid-template-columns:repeat(4, minmax(0, 1fr));
+    gap:.75rem;
+  }
+  .waste-kpi { padding:1rem; }
+  .waste-kpi span { display:block; color:var(--muted); font-size:.78rem; font-weight:700; text-transform:uppercase; }
+  .waste-kpi strong { display:block; margin-top:.25rem; font-size:1.2rem; color:#17324d; }
+  .waste-panel { overflow:auto; }
+  .waste-panel h2 { margin:0; padding:1rem 1rem .5rem; font-size:1rem; color:#17324d; }
+  .waste-table {
+    width:100%;
+    min-width:980px;
+    border-collapse:separate;
+    border-spacing:0;
+  }
+  .waste-table th, .waste-table td {
+    padding:.55rem .65rem;
+    border-top:1px solid var(--line);
+    white-space:normal;
+    text-align:left;
+  }
+  .waste-table th {
+    background:#f8fafc;
+    color:#44546a;
+    font-size:.75rem;
+    text-transform:uppercase;
+  }
+  .waste-risk { font-weight:800; }
+  .waste-risk.green { color:#16794a; }
+  .waste-risk.yellow { color:#b7791f; }
+  .waste-risk.red { color:#b42318; }
+  .waste-risk.muted, .waste-trend.flat { color:#667085; }
+  .waste-trend { font-weight:900; font-size:1.05rem; }
+  .waste-trend.up { color:#b42318; }
+  .waste-trend.down { color:#16794a; }
+  @media (max-width: 900px) {
+    .waste-kpis { grid-template-columns:1fr 1fr; }
+  }

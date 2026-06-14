@@ -5,19 +5,7 @@
 {% block page_title %}Logística · Unidades{% endblock %}
 
 {% block extra_css %}
-<style>
-  .unit-shell { display: grid; gap: 18px; }
-  .unit-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
-  .unit-search { display: flex; flex-wrap: wrap; gap: 10px; }
-  .unit-badge { display: inline-flex; border-radius: 999px; color: #fff; font-size: 12px; font-weight: 800; padding: 5px 10px; }
-  .unit-badge.active { background: #236d53; }
-  .unit-badge.inactive { background: #bc3b3b; }
-  .unit-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-  .unit-pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 14px; }
-  @media (max-width: 760px) {
-    .unit-head, .unit-search, .unit-actions, .unit-pager { align-items: stretch; flex-direction: column; }
-  }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/logistica-templates-logistica-unidades-list.css?v=20260614-ui100-v1">
 <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
 {% endblock %}
 
@@ -35,7 +23,7 @@
         <div class="card-header">Gestión de Unidades</div>
         <p class="muted">Control de unidades activas, placas y datos operativos.</p>
       </div>
-      <a class="btn btn-primary" style="background:#8B2252;border-color:#8B2252;" href="{% url 'logistica:unidad_create' %}">Nueva unidad</a>
+      <a class="btn btn-primary pd-u-8e46cb0687" href="{% url 'logistica:unidad_create' %}">Nueva unidad</a>
     </div>
     <form class="unit-search" method="get">
       <input class="input-field" type="text" name="q" value="{{ query }}" placeholder="Buscar por código, placa o descripción">

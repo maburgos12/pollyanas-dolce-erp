@@ -4,22 +4,7 @@
 {% block page_title %}RRHH · Nueva vacante{% endblock %}
 
 {% block extra_css %}
-<style>
-  .vacante-form-page { display: grid; gap: 16px; }
-  .vacante-form-head,
-  .vacante-form-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 18px; }
-  .vacante-form-title { color: var(--vino); font-family: "Playfair Display", serif; font-size: 25px; font-weight: 800; }
-  .vacante-form-copy { color: var(--texto-light); margin-top: 4px; max-width: 760px; }
-  .vacante-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .vacante-field { display: grid; gap: 5px; }
-  .vacante-field.span-2 { grid-column: 1 / -1; }
-  .vacante-field label { color: var(--texto); font-size: 12px; font-weight: 900; }
-  .vacante-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin-top: 14px; }
-  @media (max-width: 760px) {
-    .vacante-grid { grid-template-columns: 1fr; }
-    .vacante-actions { justify-content: flex-start; }
-  }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-vacante-form.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
