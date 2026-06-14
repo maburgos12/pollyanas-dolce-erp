@@ -1891,6 +1891,9 @@ def ruta_detail(request, pk: int):
                     if ruta.paradas.filter(estado=ParadaRuta.ESTADO_PENDIENTE).exists():
                         messages.error(request, "No se puede completar la ruta: hay paradas pendientes por visitar u omitir.")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
+                    if ruta.paradas.filter(entrega_estado=ParadaRuta.ENTREGA_PENDIENTE).exists():
+                        messages.error(request, "No se puede completar la ruta: hay paradas sin entrega confirmada.")
+                        return redirect("logistica:ruta_detail", pk=ruta.id)
                 from_status = ruta.estatus
                 if from_status != estatus_nuevo:
                     ruta.estatus = estatus_nuevo

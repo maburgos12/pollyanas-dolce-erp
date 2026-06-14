@@ -22,6 +22,7 @@ from logistica.models import (
     BitacoraSalidaLlegada,
     EntregaRuta,
     EventoRuta,
+    ParadaEntregaEvidencia,
     ParadaRuta,
     PuntoLogistico,
     Repartidor,
@@ -1395,6 +1396,24 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
         self.assertContains(response, "hay paradas pendientes")
 
+    def test_ruta_status_bloquea_completar_con_entrega_pendiente(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        self.parada.estado = ParadaRuta.ESTADO_VISITADA
+        self.parada.hora_llegada_real = timezone.now()
+        self.parada.save(update_fields=["estado", "hora_llegada_real", "actualizado_en"])
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {"action": "ruta_status", "estatus": RutaEntrega.ESTATUS_COMPLETADA},
+            follow=True,
+        )
+
+        self.ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
+        self.assertContains(response, "hay paradas sin entrega confirmada")
+
     def test_ruta_status_no_reabre_ruta_cerrada(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
@@ -1472,6 +1491,97 @@ class LogisticaControlRutasTests(TestCase):
         self.ruta.refresh_from_db()
         self.assertEqual(response.status_code, 400)
         self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
+
+    def test_api_ruta_status_bloquea_completar_con_entrega_pendiente(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        self.parada.estado = ParadaRuta.ESTADO_VISITADA
+        self.parada.hora_llegada_real = timezone.now()
+        self.parada.save(update_fields=["estado", "hora_llegada_real", "actualizado_en"])
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_estatus", kwargs={"ruta_id": self.ruta.id}),
+            json.dumps({"estatus": RutaEntrega.ESTATUS_COMPLETADA}),
+            content_type="application/json",
+        )
+
+        self.ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
+        self.assertIn("entrega confirmada", response.json()["detail"])
+
+    def test_api_confirma_entrega_de_parada_con_evidencia_idempotente(self):
+        self.client.force_login(self.user)
+        checklist = RutaCargaChecklist.objects.create(ruta=self.ruta)
+        linea = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=self.parada,
+            transfer_external_id="T-ENTREGA-1",
+            detail_external_id="D-ENTREGA-1",
+            source_hash="entrega-source-1",
+            item_code="SNICK-CH",
+            item_name="Pastel Snicker chico",
+            unit="pz",
+            cantidad_solicitada="5.000",
+            cantidad_enviada_esperada="5.000",
+        )
+        payload = {
+            "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+            "notas": "Recibido completo",
+            "evidencias": [
+                {
+                    "linea_carga_id": linea.id,
+                    "tipo": ParadaEntregaEvidencia.TIPO_CONFIRMACION,
+                    "cantidad_entregada": "5.000",
+                    "comentario": "Sucursal confirma piezas completas",
+                    "latitud": "25.570010",
+                    "longitud": "-108.470010",
+                    "precision_metros": "12.00",
+                    "client_event_id": "evt-entrega-1",
+                }
+            ],
+        }
+
+        url = reverse("api_logistica_ruta_parada_entrega", kwargs={"ruta_id": self.ruta.id, "parada_id": self.parada.id})
+        response = self.client.post(url, json.dumps(payload), content_type="application/json")
+        retry = self.client.post(url, json.dumps(payload), content_type="application/json")
+
+        self.parada.refresh_from_db()
+        self.ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(retry.status_code, 200)
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertEqual(self.parada.entrega_confirmada_por, self.user)
+        self.assertEqual(ParadaEntregaEvidencia.objects.filter(parada=self.parada, client_event_id="evt-entrega-1").count(), 1)
+        self.assertEqual(self.ruta.cumplimiento_porcentaje, Decimal("100.00"))
+
+    def test_api_confirma_entrega_con_diferencia_exige_motivo(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_parada_entrega", kwargs={"ruta_id": self.ruta.id, "parada_id": self.parada.id}),
+            json.dumps({"entrega_estado": ParadaRuta.ENTREGA_CON_DIFERENCIA, "evidencias": []}),
+            content_type="application/json",
+        )
+
+        self.parada.refresh_from_db()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
+
+    def test_api_no_confirma_entrega_de_otro_repartidor(self):
+        other_user = User.objects.create_user(username="otro.entrega", password="pass123")
+        other_user.groups.add(Group.objects.get_or_create(name="repartidor")[0])
+        Repartidor.objects.create(user=other_user, sucursal=self.sucursal, unidad_asignada=self.unidad)
+        self.client.force_login(other_user)
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_parada_entrega", kwargs={"ruta_id": self.ruta.id, "parada_id": self.parada.id}),
+            json.dumps({"entrega_estado": ParadaRuta.ENTREGA_ENTREGADA, "notas": "Intento ajeno"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
 
     def test_db_bloquea_dos_rutas_en_ruta_mismo_repartidor(self):
         with self.assertRaises(IntegrityError):

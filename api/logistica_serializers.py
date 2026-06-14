@@ -196,6 +196,8 @@ class PuntoLogisticoSerializer(serializers.ModelSerializer):
 class ParadaRutaSerializer(serializers.ModelSerializer):
     punto = PuntoLogisticoSerializer(read_only=True)
     estado_display = serializers.CharField(source="get_estado_display", read_only=True)
+    entrega_estado_display = serializers.CharField(source="get_entrega_estado_display", read_only=True)
+    entrega_confirmada_por_nombre = serializers.SerializerMethodField()
 
     class Meta:
         model = ParadaRuta
@@ -213,10 +215,20 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
             "hora_salida_real",
             "estado",
             "estado_display",
+            "entrega_estado",
+            "entrega_estado_display",
+            "entrega_confirmada_en",
+            "entrega_confirmada_por_nombre",
+            "entrega_notas",
             "distancia_llegada_metros",
             "notas",
         ]
         read_only_fields = fields
+
+    def get_entrega_confirmada_por_nombre(self, obj):
+        if not obj.entrega_confirmada_por_id:
+            return ""
+        return nombre_operativo_usuario(obj.entrega_confirmada_por)
 
 
 class UbicacionRutaSerializer(serializers.ModelSerializer):
@@ -358,6 +370,60 @@ class RutaCargaLineaValidarSerializer(serializers.Serializer):
     )
     notas = serializers.CharField(required=False, allow_blank=True, default="")
     client_event_id = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
+
+
+class ParadaEntregaEvidenciaCreateSerializer(serializers.Serializer):
+    linea_carga_id = serializers.IntegerField(required=False, allow_null=True)
+    tipo = serializers.ChoiceField(
+        choices=ParadaEntregaEvidencia.TIPO_CHOICES,
+        required=False,
+        default=ParadaEntregaEvidencia.TIPO_CONFIRMACION,
+    )
+    cantidad_entregada = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=3,
+        min_value=Decimal("0"),
+        required=False,
+        allow_null=True,
+    )
+    comentario = serializers.CharField(required=False, allow_blank=True, default="")
+    latitud = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
+    longitud = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
+    precision_metros = serializers.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        min_value=Decimal("0"),
+        required=False,
+        allow_null=True,
+    )
+    client_event_id = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
+
+    def validate(self, attrs):
+        latitud = attrs.get("latitud")
+        longitud = attrs.get("longitud")
+        if (latitud is None) != (longitud is None):
+            raise serializers.ValidationError("Latitud y longitud deben enviarse juntas.")
+        if latitud is not None and longitud is not None:
+            validar_coordenadas(latitud, longitud)
+        return attrs
+
+
+class ParadaEntregaConfirmarSerializer(serializers.Serializer):
+    entrega_estado = serializers.ChoiceField(choices=ParadaRuta.ENTREGA_ESTADO_CHOICES)
+    notas = serializers.CharField(required=False, allow_blank=True, default="")
+    evidencias = ParadaEntregaEvidenciaCreateSerializer(many=True, required=False, default=list)
+
+    def validate(self, attrs):
+        entrega_estado = attrs["entrega_estado"]
+        notas = (attrs.get("notas") or "").strip()
+        evidencias = attrs.get("evidencias") or []
+        if entrega_estado == ParadaRuta.ENTREGA_PENDIENTE:
+            raise serializers.ValidationError({"entrega_estado": "La entrega debe quedar entregada, con diferencia o no entregada."})
+        if entrega_estado in {ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA}:
+            comentarios = [str(evidencia.get("comentario") or "").strip() for evidencia in evidencias]
+            if not notas and not any(comentarios):
+                raise serializers.ValidationError({"notas": "Describe la diferencia o el motivo de no entrega."})
+        return attrs
 
 
 class ParadaEntregaEvidenciaSerializer(serializers.ModelSerializer):

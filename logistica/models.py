@@ -291,6 +291,16 @@ class ParadaRuta(models.Model):
         (ESTADO_OMITIDA, "Omitida"),
         (ESTADO_FUERA_RADIO, "Fuera de radio"),
     ]
+    ENTREGA_PENDIENTE = "PENDIENTE"
+    ENTREGA_ENTREGADA = "ENTREGADA"
+    ENTREGA_CON_DIFERENCIA = "CON_DIFERENCIA"
+    ENTREGA_NO_ENTREGADA = "NO_ENTREGADA"
+    ENTREGA_ESTADO_CHOICES = [
+        (ENTREGA_PENDIENTE, "Pendiente"),
+        (ENTREGA_ENTREGADA, "Entregada"),
+        (ENTREGA_CON_DIFERENCIA, "Con diferencia"),
+        (ENTREGA_NO_ENTREGADA, "No entregada"),
+    ]
 
     ruta = models.ForeignKey(RutaEntrega, on_delete=models.CASCADE, related_name="paradas")
     punto = models.ForeignKey(PuntoLogistico, on_delete=models.PROTECT, related_name="paradas_ruta")
@@ -303,6 +313,16 @@ class ParadaRuta(models.Model):
     hora_llegada_real = models.DateTimeField(null=True, blank=True)
     hora_salida_real = models.DateTimeField(null=True, blank=True)
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE)
+    entrega_estado = models.CharField(max_length=20, choices=ENTREGA_ESTADO_CHOICES, default=ENTREGA_PENDIENTE)
+    entrega_confirmada_en = models.DateTimeField(null=True, blank=True)
+    entrega_confirmada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="paradas_logistica_confirmadas",
+    )
+    entrega_notas = models.TextField(blank=True, default="")
     distancia_llegada_metros = models.PositiveIntegerField(null=True, blank=True)
     notas = models.TextField(blank=True, default="")
     creado_en = models.DateTimeField(auto_now_add=True)
