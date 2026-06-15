@@ -348,11 +348,18 @@ def _crear_o_actualizar_movimiento(
     notas: str,
     metadata: dict,
 ) -> PrenominaMovimiento:
+    lookup = {
+        "corte": corte,
+        "fuente_modelo": fuente_modelo,
+        "fuente_id": fuente_id,
+        "tipo_movimiento_erp": tipo_movimiento,
+    }
+    movimiento = PrenominaMovimiento.objects.filter(**lookup).first()
+    if movimiento and movimiento.estado == PrenominaMovimiento.ESTADO_EXPORTADO:
+        return movimiento
+
     movimiento, _ = PrenominaMovimiento.objects.update_or_create(
-        corte=corte,
-        fuente_modelo=fuente_modelo,
-        fuente_id=fuente_id,
-        tipo_movimiento_erp=tipo_movimiento,
+        **lookup,
         defaults={
             "empleado": empleado,
             "fecha": fecha,
