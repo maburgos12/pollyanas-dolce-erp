@@ -57,6 +57,8 @@ def crear_ajuste_asistencia(empleado, fecha, tipo_ajuste, valores_propuestos, mo
     motivo = (motivo or "").strip()
     if not motivo:
         raise ValidationError({"motivo": "El motivo es obligatorio."})
+    if empleado.fecha_ingreso and fecha < empleado.fecha_ingreso:
+        raise ValidationError({"fecha": "No se pueden capturar ajustes antes de la fecha de ingreso del empleado."})
 
     campo = _campo_para_tipo(tipo_ajuste)
     asistencia, _ = AsistenciaEmpleado.objects.get_or_create(

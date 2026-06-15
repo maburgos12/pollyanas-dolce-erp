@@ -313,6 +313,25 @@ class AjusteAsistenciaServiceTests(TestCase):
                 solicitado_por=self.user,
             )
 
+    def test_crear_ajuste_rechaza_fecha_previa_a_ingreso(self):
+        empleado = Empleado.objects.create(
+            codigo="349-B",
+            nombre="CASTRO LOPEZ ANA NUEVA",
+            fecha_ingreso=date(2026, 6, 12),
+            activo=True,
+            sucursal="Matriz",
+        )
+
+        with self.assertRaises(ValidationError):
+            crear_ajuste_asistencia(
+                empleado=empleado,
+                fecha=date(2026, 6, 11),
+                tipo_ajuste=AjusteAsistencia.TIPO_SALIDA,
+                valores_propuestos={"salida": "2026-06-11T18:05:00-07:00"},
+                motivo="Antes del ingreso real.",
+                solicitado_por=self.user,
+            )
+
 
 class PrenominaServiceTests(TestCase):
     def setUp(self):
@@ -1006,7 +1025,7 @@ class PrenominaViewTests(TestCase):
         self.assertEqual(rechazar_response.status_code, 404)
         self.assertEqual(ajuste.estado, AjusteAsistencia.ESTADO_PENDIENTE)
 
-    def test_prenomina_ajuste_crear_no_revienta_si_corte_no_recalcula(self):
+    def test_prenomina_ajuste_crear_bloquea_corte_exportado(self):
         corte = self._crear_corte()
         corte.estado = PrenominaCorte.ESTADO_EXPORTADO
         corte.save(update_fields=["estado", "actualizado_en"])
@@ -1022,9 +1041,28 @@ class PrenominaViewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(AjusteAsistencia.objects.count(), 1)
+        self.assertEqual(AjusteAsistencia.objects.count(), 0)
 
-    def test_prenomina_ajuste_aprobar_rechazar_no_revientan_si_corte_no_recalcula(self):
+    def test_prenomina_ajuste_crear_rechaza_fecha_previa_a_ingreso(self):
+        corte = self._crear_corte()
+        self.empleado.fecha_ingreso = date(2026, 6, 12)
+        self.empleado.save(update_fields=["fecha_ingreso"])
+
+        response = self.client.post(
+            reverse("rrhh:prenomina_ajuste_crear", kwargs={"pk": corte.pk, "empleado_id": self.empleado.pk}),
+            {
+                "fecha": "2026-06-11",
+                "tipo_ajuste": AjusteAsistencia.TIPO_SALIDA,
+                "valor_propuesto": "2026-06-11T18:05",
+                "motivo": "Antes de ingreso",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(AjusteAsistencia.objects.count(), 0)
+        self.assertFalse(AsistenciaEmpleado.objects.filter(empleado=self.empleado, fecha=date(2026, 6, 11)).exists())
+
+    def test_prenomina_ajuste_aprobar_rechazar_bloquean_corte_exportado(self):
         corte = self._crear_corte()
         corte.estado = PrenominaCorte.ESTADO_EXPORTADO
         corte.save(update_fields=["estado", "actualizado_en"])
@@ -1058,8 +1096,15 @@ class PrenominaViewTests(TestCase):
         ajuste_rechazar.refresh_from_db()
         self.assertEqual(aprobar_response.status_code, 302)
         self.assertEqual(rechazar_response.status_code, 302)
-        self.assertEqual(ajuste_aprobar.estado, AjusteAsistencia.ESTADO_APLICADO)
-        self.assertEqual(ajuste_rechazar.estado, AjusteAsistencia.ESTADO_RECHAZADO)
+        self.assertEqual(ajuste_aprobar.estado, AjusteAsistencia.ESTADO_PENDIENTE)
+        self.assertEqual(ajuste_rechazar.estado, AjusteAsistencia.ESTADO_PENDIENTE)
+        self.assertFalse(
+            AsistenciaEmpleado.objects.filter(
+                empleado=self.empleado,
+                fecha=date(2026, 6, 11),
+                salida__isnull=False,
+            ).exists()
+        )
 
     def test_usuario_solo_lectura_no_puede_crear_aprobar_ni_rechazar_ajustes(self):
         corte = self._crear_corte()
@@ -1146,6 +1191,28 @@ class PrenominaViewTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, reverse("rrhh:prenomina_detail", kwargs={"pk": corte.pk}))
 
+    def test_export_contpaqi_marca_corte_y_movimientos_como_exportados(self):
+        corte = self._crear_corte()
+        movimiento = PrenominaMovimiento.objects.create(
+            corte=corte,
+            empleado=self.empleado,
+            fecha=date(2026, 6, 11),
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_FALTA,
+            clave_contpaqi="F",
+            estado=PrenominaMovimiento.ESTADO_LISTO,
+            valor=Decimal("1.00"),
+        )
+
+        response = self.client.get(reverse("rrhh:prenomina_export_contpaqi", kwargs={"pk": corte.pk}))
+
+        corte.refresh_from_db()
+        movimiento.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(corte.estado, PrenominaCorte.ESTADO_EXPORTADO)
+        self.assertEqual(corte.resumen["movimientos_listos"], 0)
+        self.assertEqual(corte.resumen["movimientos_exportados"], 1)
+        self.assertEqual(movimiento.estado, PrenominaMovimiento.ESTADO_EXPORTADO)
+
     def test_usuario_solo_lectura_no_exporta_contpaqi(self):
         viewer = User.objects.create_user(username="paula-view-only")
         UserModuleAccess.objects.create(
@@ -1158,5 +1225,25 @@ class PrenominaViewTests(TestCase):
 
         self.client.force_login(viewer)
         response = self.client.get(reverse("rrhh:prenomina_export_contpaqi", kwargs={"pk": corte.pk}))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_usuario_con_nomina_bloqueada_no_entra_por_url_directa(self):
+        user = User.objects.create_user(username="paula-sin-nomina")
+        UserModuleAccess.objects.create(
+            user=user,
+            module="rrhh",
+            access=UserModuleAccess.ACCESS_MANAGE,
+            updated_by=self.user,
+        )
+        UserModuleAccess.objects.create(
+            user=user,
+            module="rrhh.nomina",
+            access=UserModuleAccess.ACCESS_NONE,
+            updated_by=self.user,
+        )
+
+        self.client.force_login(user)
+        response = self.client.get(reverse("rrhh:prenomina"))
 
         self.assertEqual(response.status_code, 403)
