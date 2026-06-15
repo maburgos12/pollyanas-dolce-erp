@@ -690,6 +690,475 @@
   box-shadow: none;
 }
 
+/* Hallmark · genre: product · macrostructure: workbench · design-system: existing investment module · designed-as-app */
+.page-reportes-inversiones-detalle .investment-detail-shell {
+  width: 100%;
+  max-width: 1480px;
+  min-width: 0;
+  margin: 0 auto;
+  padding: 1rem 1.1rem 1.25rem;
+  border: 1px solid var(--inv-line);
+  border-radius: 12px;
+  background: #f7f8fa;
+  box-shadow: none;
+  color: var(--inv-ink);
+  box-sizing: border-box;
+  justify-self: stretch;
+}
+
+.page-reportes-inversiones-detalle .investment-detail-shell *,
+.page-reportes-inversiones-detalle .investment-detail-shell *::before,
+.page-reportes-inversiones-detalle .investment-detail-shell *::after {
+  box-sizing: border-box;
+}
+
+.page-reportes-inversiones-detalle .investment-module-tabs,
+.page-reportes-inversiones-detalle .module-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.page-reportes-inversiones-detalle .module-tab {
+  border: 1px solid var(--inv-line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--inv-ink);
+  padding: 0.48rem 0.7rem;
+  text-decoration: none;
+  font-size: 0.86rem;
+  font-weight: 700;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 120ms ease;
+}
+
+.page-reportes-inversiones-detalle .module-tab:hover,
+.page-reportes-inversiones-detalle .module-tab:focus-visible,
+.page-reportes-inversiones-detalle .inv-tab:hover,
+.page-reportes-inversiones-detalle .inv-tab:focus-visible {
+  border-color: rgba(23, 50, 77, 0.28);
+  background: rgba(23, 50, 77, 0.06);
+  outline: none;
+}
+
+.page-reportes-inversiones-detalle .module-tab.active,
+.page-reportes-inversiones-detalle .inv-tab.active {
+  border-color: var(--inv-navy);
+  background: var(--inv-navy);
+  color: #fff;
+}
+
+.page-reportes-inversiones-detalle .investment-detail-header {
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.85fr);
+  min-width: 0;
+}
+
+.page-reportes-inversiones-detalle .investment-hero,
+.page-reportes-inversiones-detalle .investment-side,
+.page-reportes-inversiones-detalle .investment-kpi-card,
+.page-reportes-inversiones-detalle .inv-panel {
+  min-width: 0;
+  border-radius: 10px;
+  box-shadow: none;
+}
+
+.page-reportes-inversiones-detalle .investment-detail-hero {
+  padding: 1.15rem 1.2rem;
+}
+
+.page-reportes-inversiones-detalle .investment-title {
+  max-width: 22ch;
+  margin: 0.25rem 0 0.45rem;
+  font-family: inherit;
+  font-size: 1.65rem;
+  line-height: 1.15;
+  letter-spacing: 0;
+  text-wrap: balance;
+}
+
+.page-reportes-inversiones-detalle .investment-copy {
+  max-width: 72ch;
+  margin: 0;
+  line-height: 1.55;
+}
+
+.page-reportes-inversiones-detalle .investment-detail-actions {
+  gap: 0.75rem;
+  padding: 1rem 1.05rem;
+}
+
+.page-reportes-inversiones-detalle .investment-detail-actions .investment-panel-head {
+  margin-bottom: 0;
+}
+
+.page-reportes-inversiones-detalle .investment-actions,
+.page-reportes-inversiones-detalle .inv-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.page-reportes-inversiones-detalle .investment-button,
+.page-reportes-inversiones-detalle .inv-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.35rem;
+  border: 0;
+  border-radius: 8px;
+  padding: 0.62rem 0.86rem;
+  background: var(--inv-navy);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 800;
+  text-decoration: none;
+  transition: background 160ms ease, transform 120ms ease;
+}
+
+.page-reportes-inversiones-detalle .investment-button:hover,
+.page-reportes-inversiones-detalle .inv-button:hover {
+  background: #102840;
+}
+
+.page-reportes-inversiones-detalle .investment-button:active,
+.page-reportes-inversiones-detalle .inv-button:active,
+.page-reportes-inversiones-detalle .module-tab:active,
+.page-reportes-inversiones-detalle .inv-tab:active {
+  transform: translateY(1px);
+}
+
+.page-reportes-inversiones-detalle .investment-button:focus-visible,
+.page-reportes-inversiones-detalle .inv-button:focus-visible,
+.page-reportes-inversiones-detalle .inv-input:focus-visible,
+.page-reportes-inversiones-detalle .inv-select:focus-visible,
+.page-reportes-inversiones-detalle .inv-textarea:focus-visible {
+  outline: 3px solid rgba(184, 134, 50, 0.38);
+  outline-offset: 2px;
+}
+
+.page-reportes-inversiones-detalle .investment-button.is-ghost,
+.page-reportes-inversiones-detalle .inv-button.secondary {
+  border: 1px solid rgba(23, 50, 77, 0.18);
+  background: #fff;
+  color: var(--inv-navy);
+}
+
+.page-reportes-inversiones-detalle .investment-meta {
+  gap: 0.5rem;
+}
+
+.page-reportes-inversiones-detalle .investment-pill,
+.page-reportes-inversiones-detalle .investment-status-pill,
+.page-reportes-inversiones-detalle .inv-pill {
+  border-radius: 8px;
+  padding: 0.38rem 0.55rem;
+  font-size: 0.8rem;
+}
+
+.page-reportes-inversiones-detalle .investment-detail-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.page-reportes-inversiones-detalle .investment-kpi-value,
+.page-reportes-inversiones-detalle .inv-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.page-reportes-inversiones-detalle .investment-section-nav {
+  gap: 0.45rem;
+  padding: 0.2rem 0;
+  min-width: 0;
+}
+
+.page-reportes-inversiones-detalle .inv-tab {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--inv-line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--inv-ink);
+  padding: 0.5rem 0.75rem;
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 800;
+  transition: background 160ms ease, border-color 160ms ease, transform 120ms ease;
+}
+
+.page-reportes-inversiones-detalle .inv-dropdown {
+  position: relative;
+}
+
+.page-reportes-inversiones-detalle .inv-dropdown summary {
+  list-style: none;
+}
+
+.page-reportes-inversiones-detalle .inv-dropdown summary::-webkit-details-marker {
+  display: none;
+}
+
+.page-reportes-inversiones-detalle .inv-dropdown-menu {
+  position: absolute;
+  right: 0;
+  z-index: 10;
+  min-width: 220px;
+  margin-top: 0.45rem;
+  padding: 0.4rem;
+  border: 1px solid var(--inv-line);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 24px rgba(21, 37, 56, 0.12);
+}
+
+.page-reportes-inversiones-detalle .inv-dropdown-menu a {
+  display: block;
+  border-radius: 8px;
+  padding: 0.52rem 0.6rem;
+  color: var(--inv-ink);
+  text-decoration: none;
+}
+
+.page-reportes-inversiones-detalle .inv-dropdown-menu a:hover {
+  background: rgba(23, 50, 77, 0.06);
+}
+
+.page-reportes-inversiones-detalle .inv-workbench {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(430px, 0.95fr) minmax(0, 1.05fr);
+  align-items: start;
+  min-width: 0;
+}
+
+.page-reportes-inversiones-detalle .inv-panel {
+  border: 1px solid var(--inv-line);
+  background: #fff;
+  padding: 1rem 1.05rem;
+}
+
+.page-reportes-inversiones-detalle .inv-panel + .inv-panel,
+.page-reportes-inversiones-detalle .inv-workbench + .inv-panel {
+  margin-top: 1rem;
+}
+
+.page-reportes-inversiones-detalle .inv-panel h2,
+.page-reportes-inversiones-detalle .inv-panel h3 {
+  margin: 0;
+  color: var(--inv-ink);
+}
+
+.page-reportes-inversiones-detalle .inv-panel > h2:first-child {
+  margin-bottom: 0.8rem;
+  font-size: 1.08rem;
+}
+
+.page-reportes-inversiones-detalle .inv-panel > h2:first-child + p,
+.page-reportes-inversiones-detalle .inv-panel > h2:first-child + form,
+.page-reportes-inversiones-detalle .inv-panel > h2:first-child + .inv-kpis,
+.page-reportes-inversiones-detalle .inv-panel > h2:first-child + .inv-grid-3,
+.page-reportes-inversiones-detalle .inv-panel > h2:first-child + .inv-table {
+  margin-top: 0;
+}
+
+.page-reportes-inversiones-detalle .inv-fieldset {
+  display: grid;
+  gap: 0.75rem;
+  padding-top: 0.9rem;
+}
+
+.page-reportes-inversiones-detalle .inv-fieldset + .inv-fieldset {
+  margin-top: 0.9rem;
+  border-top: 1px solid var(--inv-line);
+}
+
+.page-reportes-inversiones-detalle .inv-fieldset h3 {
+  font-size: 0.96rem;
+}
+
+.page-reportes-inversiones-detalle .inv-form-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.page-reportes-inversiones-detalle .inv-field {
+  display: grid;
+  gap: 0.34rem;
+  min-width: 0;
+}
+
+.page-reportes-inversiones-detalle .inv-form-grid > div {
+  display: grid;
+  gap: 0.34rem;
+  min-width: 0;
+}
+
+.page-reportes-inversiones-detalle .inv-field--wide {
+  grid-column: 1 / -1;
+}
+
+.page-reportes-inversiones-detalle .inv-label {
+  display: block;
+  color: var(--inv-muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.page-reportes-inversiones-detalle .inv-input,
+.page-reportes-inversiones-detalle .inv-select,
+.page-reportes-inversiones-detalle .inv-textarea {
+  width: 100%;
+  min-height: 2.45rem;
+  border: 1px solid var(--inv-line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--inv-ink);
+  padding: 0.62rem 0.72rem;
+  font: inherit;
+}
+
+.page-reportes-inversiones-detalle .inv-textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.page-reportes-inversiones-detalle .inv-stacked-form {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.page-reportes-inversiones-detalle .inv-kpis {
+  display: grid;
+  gap: 0.72rem;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.page-reportes-inversiones-detalle .inv-kpi {
+  min-width: 0;
+  border: 1px solid var(--inv-line);
+  border-radius: 8px;
+  background: rgba(23, 50, 77, 0.035);
+  padding: 0.75rem 0.8rem;
+}
+
+.page-reportes-inversiones-detalle .inv-value {
+  margin-top: 0.25rem;
+  color: var(--inv-ink);
+  font-family: inherit;
+  font-size: 1.08rem;
+  font-weight: 850;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.page-reportes-inversiones-detalle .inv-kpis--finance {
+  margin-top: 0.9rem;
+}
+
+.page-reportes-inversiones-detalle .inv-result-list {
+  margin-top: 0.95rem;
+}
+
+.page-reportes-inversiones-detalle .inv-alert {
+  margin: 0.75rem 0;
+  border: 1px solid rgba(179, 108, 24, 0.22);
+  border-radius: 10px;
+  background: rgba(255, 248, 237, 0.96);
+  color: #8a4e12;
+  padding: 0.75rem 0.85rem;
+  font-weight: 700;
+}
+
+.page-reportes-inversiones-detalle .inv-alert ul {
+  margin: 0.45rem 0 0 1rem;
+  padding: 0;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.page-reportes-inversiones-detalle .investment-table-wrap {
+  overflow-x: auto;
+}
+
+.page-reportes-inversiones-detalle .inv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.page-reportes-inversiones-detalle .inv-table th,
+.page-reportes-inversiones-detalle .inv-table td {
+  border-bottom: 1px solid var(--inv-line);
+  padding: 0.72rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+  font-size: 0.9rem;
+}
+
+.page-reportes-inversiones-detalle .inv-table thead th {
+  color: var(--inv-muted);
+  background: rgba(23, 50, 77, 0.045);
+  font-size: 0.78rem;
+  font-weight: 850;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.page-reportes-inversiones-detalle .num {
+  text-align: right;
+}
+
+.page-reportes-inversiones-detalle .chart-box {
+  min-height: 290px;
+  margin-top: 1rem;
+}
+
+.page-reportes-inversiones-detalle .chart-box canvas {
+  width: 100% !important;
+  min-height: 280px;
+}
+
+.page-reportes-inversiones-detalle .inv-grid-2,
+.page-reportes-inversiones-detalle .foda-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.page-reportes-inversiones-detalle .inv-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.page-reportes-inversiones-detalle .score-circle {
+  width: 7rem;
+  height: 7rem;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--inv-muted);
+  color: #fff;
+  font-size: 2rem;
+  font-weight: 900;
+}
+
+.page-reportes-inversiones-detalle .score-circle.ok { background: var(--inv-green); }
+.page-reportes-inversiones-detalle .score-circle.warn { background: var(--inv-amber); }
+.page-reportes-inversiones-detalle .score-circle.risk { background: var(--inv-red); }
+
+@media (prefers-reduced-motion: reduce) {
+  .page-reportes-inversiones-detalle .investment-button,
+  .page-reportes-inversiones-detalle .inv-button,
+  .page-reportes-inversiones-detalle .module-tab,
+  .page-reportes-inversiones-detalle .inv-tab {
+    transition-duration: 1ms;
+  }
+}
+
 @media (max-width: 1180px) {
   .investment-header,
   .investment-layout,
@@ -713,6 +1182,16 @@
     grid-template-columns: 1fr;
   }
 
+  .page-reportes-inversiones-detalle .investment-detail-header,
+  .page-reportes-inversiones-detalle .investment-detail-summary,
+  .page-reportes-inversiones-detalle .inv-workbench,
+  .page-reportes-inversiones-detalle .inv-form-grid,
+  .page-reportes-inversiones-detalle .inv-grid-2,
+  .page-reportes-inversiones-detalle .inv-grid-3,
+  .page-reportes-inversiones-detalle .foda-grid {
+    grid-template-columns: 1fr;
+  }
+
   .investment-history-grid,
   .investment-field-grid--compact {
     grid-template-columns: 1fr;
@@ -721,5 +1200,46 @@
   .investment-shell {
     padding: 1rem;
     border-radius: 22px;
+  }
+
+  .page-reportes-inversiones-detalle .investment-detail-shell {
+    width: 100%;
+    max-width: 100%;
+    padding: 0.8rem;
+    border-radius: 10px;
+  }
+
+  .page-reportes-inversiones-detalle .investment-title {
+    max-width: none;
+    font-size: 1.4rem;
+  }
+
+  .page-reportes-inversiones-detalle .investment-module-tabs,
+  .page-reportes-inversiones-detalle .investment-section-nav {
+    flex-wrap: nowrap;
+    max-width: 100%;
+    overflow-x: auto;
+    padding-bottom: 0.2rem;
+    scrollbar-width: thin;
+  }
+
+  .page-reportes-inversiones-detalle .investment-section-nav {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+
+  .page-reportes-inversiones-detalle .investment-actions,
+  .page-reportes-inversiones-detalle .investment-actions form,
+  .page-reportes-inversiones-detalle .investment-button,
+  .page-reportes-inversiones-detalle .inv-button,
+  .page-reportes-inversiones-detalle .inv-dropdown,
+  .page-reportes-inversiones-detalle .inv-dropdown summary {
+    width: 100%;
+  }
+
+  .page-reportes-inversiones-detalle .investment-actions .inv-dropdown-menu {
+    left: 0;
+    right: auto;
+    width: 100%;
   }
 }
