@@ -1,10 +1,12 @@
-from datetime import date
+from datetime import date, datetime, time
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
+from django.utils import timezone
 
 from rrhh.models import (
     AjusteAsistencia,
@@ -15,6 +17,15 @@ from rrhh.models import (
     PrenominaEquivalenciaCONTPAQi,
     PrenominaMovimiento,
 )
+from rrhh.services_ajustes_asistencia import (
+    aprobar_ajuste_asistencia,
+    crear_ajuste_asistencia,
+    rechazar_ajuste_asistencia,
+)
+
+
+def aware(fecha: date, hora: time):
+    return timezone.make_aware(datetime.combine(fecha, hora), timezone.get_current_timezone())
 
 
 class PrenominaModelTests(TestCase):
@@ -175,5 +186,113 @@ class PrenominaModelTests(TestCase):
                 valores_anteriores={"salida": None},
                 valores_propuestos={"salida": "2026-06-11T18:05:00-07:00"},
                 motivo="Fecha distinta.",
+                solicitado_por=self.user,
+            )
+
+
+class AjusteAsistenciaServiceTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="paula-prenomina")
+        self.autorizador = User.objects.create_user(username="rrhh-autorizador")
+        self.fecha = date(2026, 6, 11)
+        self.empleado = Empleado.objects.create(
+            codigo="349",
+            nombre="CASTRO LOPEZ ANA",
+            fecha_ingreso=date(2026, 6, 1),
+            activo=True,
+            sucursal="Matriz",
+        )
+
+    @patch("rrhh.services_ajustes_asistencia.evaluar_dia_empleado")
+    def test_aprobar_ajuste_de_salida_actualiza_asistencia_y_guarda_historial(self, evaluar_mock):
+        salida_original = aware(self.fecha, time(17, 45))
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado=self.empleado,
+            fecha=self.fecha,
+            entrada=aware(self.fecha, time(9, 0)),
+            salida=salida_original,
+        )
+        ajuste = crear_ajuste_asistencia(
+            empleado=self.empleado,
+            fecha=self.fecha,
+            tipo_ajuste=AjusteAsistencia.TIPO_SALIDA,
+            valores_propuestos={"salida": "2026-06-11T18:05:00-07:00"},
+            motivo="Olvido checar salida correcta.",
+            solicitado_por=self.user,
+        )
+
+        aprobado = aprobar_ajuste_asistencia(ajuste, self.autorizador, comentario="Validado contra checador.")
+
+        asistencia.refresh_from_db()
+        aprobado.refresh_from_db()
+        self.assertEqual(ajuste.asistencia_id, asistencia.id)
+        self.assertEqual(ajuste.valores_anteriores, {"salida": salida_original.isoformat()})
+        self.assertEqual(timezone.localtime(asistencia.salida).time(), time(18, 5))
+        self.assertEqual(aprobado.estado, AjusteAsistencia.ESTADO_APLICADO)
+        self.assertEqual(aprobado.autorizado_por, self.autorizador)
+        self.assertEqual(aprobado.aplicado_por, self.autorizador)
+        self.assertIsNotNone(aprobado.autorizado_en)
+        self.assertIsNotNone(aprobado.aplicado_en)
+        self.assertEqual(aprobado.valores_aplicados["salida"], "2026-06-11T18:05:00-07:00")
+        self.assertEqual(aprobado.valores_aplicados["comentario"], "Validado contra checador.")
+        evaluar_mock.assert_called_once_with(self.empleado, self.fecha)
+
+    @patch("rrhh.services_ajustes_asistencia.evaluar_dia_empleado")
+    def test_rechazar_ajuste_no_modifica_asistencia(self, evaluar_mock):
+        salida_original = aware(self.fecha, time(17, 45))
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado=self.empleado,
+            fecha=self.fecha,
+            salida=salida_original,
+        )
+        ajuste = crear_ajuste_asistencia(
+            empleado=self.empleado,
+            fecha=self.fecha,
+            tipo_ajuste=AjusteAsistencia.TIPO_SALIDA,
+            valores_propuestos={"salida": "2026-06-11T18:05:00-07:00"},
+            motivo="Solicitud por aclarar.",
+            solicitado_por=self.user,
+        )
+
+        rechazado = rechazar_ajuste_asistencia(ajuste, self.autorizador, comentario="No procede.")
+
+        asistencia.refresh_from_db()
+        rechazado.refresh_from_db()
+        self.assertEqual(asistencia.salida, salida_original)
+        self.assertEqual(rechazado.estado, AjusteAsistencia.ESTADO_RECHAZADO)
+        self.assertEqual(rechazado.autorizado_por, self.autorizador)
+        self.assertIsNotNone(rechazado.autorizado_en)
+        self.assertEqual(rechazado.valores_aplicados["comentario"], "No procede.")
+        evaluar_mock.assert_not_called()
+
+    @patch("rrhh.services_ajustes_asistencia.evaluar_dia_empleado")
+    def test_no_se_puede_aprobar_dos_veces(self, evaluar_mock):
+        AsistenciaEmpleado.objects.create(
+            empleado=self.empleado,
+            fecha=self.fecha,
+        )
+        ajuste = crear_ajuste_asistencia(
+            empleado=self.empleado,
+            fecha=self.fecha,
+            tipo_ajuste=AjusteAsistencia.TIPO_ENTRADA,
+            valores_propuestos={"entrada": "2026-06-11T09:03:00-07:00"},
+            motivo="Entrada capturada manualmente.",
+            solicitado_por=self.user,
+        )
+        aprobar_ajuste_asistencia(ajuste, self.autorizador)
+
+        with self.assertRaises(ValidationError):
+            aprobar_ajuste_asistencia(ajuste, self.autorizador)
+
+        self.assertEqual(evaluar_mock.call_count, 1)
+
+    def test_crear_ajuste_requiere_motivo(self):
+        with self.assertRaises(ValidationError):
+            crear_ajuste_asistencia(
+                empleado=self.empleado,
+                fecha=self.fecha,
+                tipo_ajuste=AjusteAsistencia.TIPO_SALIDA,
+                valores_propuestos={"salida": "2026-06-11T18:05:00-07:00"},
+                motivo=" ",
                 solicitado_por=self.user,
             )
