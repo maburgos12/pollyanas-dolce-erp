@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import IntegrityError, models, transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
 
@@ -1697,13 +1697,28 @@ class PrenominaCorte(models.Model):
     def _generate_folio(self) -> str:
         period = self.fecha_inicio.strftime("%Y%m")
         prefix = f"PRE-{period}-"
-        seq = PrenominaCorte.objects.filter(folio__startswith=prefix).count() + 1
-        return f"{prefix}{seq:03d}"
+        max_seq = 0
+        for folio in PrenominaCorte.objects.filter(folio__startswith=prefix).values_list("folio", flat=True):
+            try:
+                max_seq = max(max_seq, int(folio.removeprefix(prefix)))
+            except ValueError:
+                continue
+        return f"{prefix}{max_seq + 1:03d}"
 
     def save(self, *args, **kwargs):
-        if not self.folio:
+        if self.folio:
+            super().save(*args, **kwargs)
+            return
+        for attempt in range(5):
             self.folio = self._generate_folio()
-        super().save(*args, **kwargs)
+            try:
+                with transaction.atomic():
+                    super().save(*args, **kwargs)
+                return
+            except IntegrityError:
+                self.folio = ""
+                if attempt == 4:
+                    raise
 
     def __str__(self) -> str:
         return self.folio
@@ -1807,6 +1822,8 @@ class PrenominaMovimiento(models.Model):
     horas = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     importe = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     fuente = models.CharField(max_length=80, blank=True, default="")
+    fuente_modelo = models.CharField(max_length=80, blank=True, default="", db_index=True)
+    fuente_id = models.CharField(max_length=80, blank=True, default="", db_index=True)
     referencia = models.CharField(max_length=120, blank=True, default="")
     notas = models.TextField(blank=True, default="")
     metadata = models.JSONField(default=dict, blank=True)
@@ -1817,6 +1834,13 @@ class PrenominaMovimiento(models.Model):
         ordering = ["empleado__nombre", "fecha", "tipo_movimiento_erp", "id"]
         verbose_name = "Movimiento de prenomina"
         verbose_name_plural = "Movimientos de prenomina"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["corte", "fuente_modelo", "fuente_id", "tipo_movimiento_erp"],
+                condition=Q(fuente_modelo__gt="", fuente_id__gt=""),
+                name="rrhh_prenomina_movimiento_fuente_unica",
+            )
+        ]
 
     def aplicar_equivalencia(self) -> bool:
         equivalencia = PrenominaEquivalenciaCONTPAQi.objects.filter(
@@ -1910,6 +1934,22 @@ class AjusteAsistencia(models.Model):
 
     def __str__(self) -> str:
         return f"{self.empleado.nombre} · {self.fecha} · {self.get_tipo_ajuste_display()}"
+
+    def clean(self):
+        super().clean()
+        if not self.asistencia_id:
+            return
+        errors = {}
+        if self.empleado_id and self.asistencia.empleado_id != self.empleado_id:
+            errors["asistencia"] = "La asistencia debe pertenecer al mismo empleado del ajuste."
+        if self.fecha and self.asistencia.fecha != self.fecha:
+            errors["fecha"] = "La fecha del ajuste debe coincidir con la fecha de la asistencia."
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
 
 class Prestamo(models.Model):
