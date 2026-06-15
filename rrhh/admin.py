@@ -1,6 +1,7 @@
 from django.contrib import admin
 
 from .models import (
+    AjusteAsistencia,
     AsistenciaEmpleado,
     BonoEsquema,
     CatalogoFuncionOperativa,
@@ -19,6 +20,10 @@ from .models import (
     PermisoSalida,
     PermisoSalidaCambio,
     PlantillaAutorizada,
+    PrenominaCorte,
+    PrenominaEmpleadoResumen,
+    PrenominaEquivalenciaCONTPAQi,
+    PrenominaMovimiento,
     Prestamo,
     PrestamoCuota,
     SuspensionEmpleado,
@@ -383,6 +388,85 @@ class ImportacionAdmin(admin.ModelAdmin):
     list_display = ("creado_en", "metodo", "registros_procesados", "errores", "creado_por")
     list_filter = ("metodo", "creado_en")
     readonly_fields = ("log",)
+
+
+class PrenominaEmpleadoResumenInline(admin.TabularInline):
+    model = PrenominaEmpleadoResumen
+    extra = 0
+    fields = (
+        "empleado",
+        "dias_periodo",
+        "dias_laborables",
+        "dias_no_laborados_pre_ingreso",
+        "faltas",
+        "horas_extra_autorizadas",
+        "estado",
+    )
+
+
+@admin.register(PrenominaCorte)
+class PrenominaCorteAdmin(admin.ModelAdmin):
+    list_display = ("folio", "tipo_periodo", "fecha_inicio", "fecha_fin", "fecha_corte", "estado", "creado_por")
+    list_filter = ("tipo_periodo", "estado", "fecha_corte", "sucursal", "area")
+    search_fields = ("folio", "sucursal", "area", "notas")
+    readonly_fields = ("folio", "creado_en", "actualizado_en")
+    inlines = [PrenominaEmpleadoResumenInline]
+
+
+@admin.register(PrenominaEmpleadoResumen)
+class PrenominaEmpleadoResumenAdmin(admin.ModelAdmin):
+    list_display = (
+        "corte",
+        "empleado",
+        "dias_periodo",
+        "dias_laborables",
+        "dias_no_laborados_pre_ingreso",
+        "faltas",
+        "horas_extra_autorizadas",
+        "estado",
+    )
+    list_filter = ("estado", "corte__tipo_periodo", "corte__fecha_corte")
+    search_fields = ("corte__folio", "empleado__nombre", "empleado__codigo", "observaciones")
+
+
+@admin.register(PrenominaMovimiento)
+class PrenominaMovimientoAdmin(admin.ModelAdmin):
+    list_display = (
+        "corte",
+        "empleado",
+        "fecha",
+        "tipo_movimiento_erp",
+        "clave_contpaqi",
+        "estado",
+        "valor",
+        "horas",
+        "importe",
+    )
+    list_filter = ("tipo_movimiento_erp", "estado", "fecha", "corte__fecha_corte")
+    search_fields = ("corte__folio", "empleado__nombre", "empleado__codigo", "clave_contpaqi", "referencia", "fuente")
+
+
+@admin.register(PrenominaEquivalenciaCONTPAQi)
+class PrenominaEquivalenciaCONTPAQiAdmin(admin.ModelAdmin):
+    list_display = (
+        "tipo_movimiento_erp",
+        "clave_contpaqi",
+        "descripcion",
+        "aplica_valor",
+        "aplica_horas",
+        "aplica_importe",
+        "activo",
+    )
+    list_filter = ("activo", "aplica_valor", "aplica_horas", "aplica_importe")
+    search_fields = ("tipo_movimiento_erp", "clave_contpaqi", "descripcion")
+
+
+@admin.register(AjusteAsistencia)
+class AjusteAsistenciaAdmin(admin.ModelAdmin):
+    list_display = ("empleado", "fecha", "tipo_ajuste", "estado", "solicitado_por", "autorizado_por", "aplicado_por")
+    list_filter = ("tipo_ajuste", "estado", "fecha")
+    search_fields = ("empleado__nombre", "empleado__codigo", "motivo")
+    readonly_fields = ("solicitado_en", "actualizado_en")
 
 
 class PrestamoCuotaInline(admin.TabularInline):
