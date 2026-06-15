@@ -1188,9 +1188,68 @@ def _coord_float(value):
         return None
 
 
+GPS_TRACE_GAP_SECONDS = 3 * 60
+GPS_TRACE_DISCARD_EVENTS = {
+    EventoRuta.TIPO_GPS_PRECISION_BAJA: "precision_baja",
+    EventoRuta.TIPO_UBICACION_TARDIA: "ubicacion_tardia",
+    EventoRuta.TIPO_SALTO_IMPOSIBLE: "salto_imposible",
+}
+
+
+def _gps_trace_flags(eventos_qs, rutas_ids: list[int]) -> dict[int, list[str]]:
+    flags_by_location = {}
+    if not rutas_ids:
+        return flags_by_location
+    eventos = eventos_qs.filter(
+        ruta_id__in=rutas_ids,
+        ubicacion_id__isnull=False,
+        tipo__in=GPS_TRACE_DISCARD_EVENTS,
+    ).values_list("ubicacion_id", "tipo")
+    for ubicacion_id, tipo in eventos:
+        flags_by_location.setdefault(ubicacion_id, []).append(GPS_TRACE_DISCARD_EVENTS[tipo])
+    return flags_by_location
+
+
+def _build_gps_trace_segments(ruta_id: int, ubicaciones: list[dict]) -> list[dict]:
+    segments = []
+    current = []
+
+    def close_segment():
+        nonlocal current
+        if len(current) > 1:
+            raw_coords = [(point["lat"], point["lng"]) for point in current]
+            snapped = snap_gps_path_to_roads(ruta_id=ruta_id, coords=raw_coords)
+            segments.append(
+                {
+                    "coords": [{"lat": lat, "lng": lng} for lat, lng in snapped.coordinates],
+                    "fuente": snapped.source,
+                    "warning": snapped.warning,
+                    "estado": "fuera_geocerca" if current[0]["fuera_geocerca"] else "normal",
+                }
+            )
+        current = []
+
+    previous = None
+    for point in ubicaciones:
+        if point["trazo_descartado"]:
+            close_segment()
+            previous = None
+            continue
+        if previous:
+            gap_seconds = (point["timestamp_dt"] - previous["timestamp_dt"]).total_seconds()
+            if gap_seconds > GPS_TRACE_GAP_SECONDS or point["fuera_geocerca"] != previous["fuera_geocerca"]:
+                close_segment()
+        current.append(point)
+        previous = point
+    close_segment()
+    return segments
+
+
 def _control_rutas_mapa_payload(rutas_control, eventos_qs) -> dict:
     colors = ["#1769c2", "#8b1740", "#2f9e44", "#f08c00", "#6f42c1", "#0f766e", "#d82424", "#4b5563"]
     routes = []
+    route_ids = [row["ruta"].id for row in rutas_control[:12]]
+    gps_flags = _gps_trace_flags(eventos_qs, route_ids)
     for index, row in enumerate(rutas_control[:12]):
         ruta = row["ruta"]
         paradas = []
@@ -1214,28 +1273,42 @@ def _control_rutas_mapa_payload(rutas_control, eventos_qs) -> dict:
         paradas.sort(key=lambda item: item["orden"])
 
         ubicaciones = []
-        ubicaciones_qs = ruta.ubicaciones.order_by("timestamp_servidor", "id").only(
+        ubicaciones_qs = list(ruta.ubicaciones.order_by("-timestamp_servidor", "-id").only(
+            "id",
             "latitud",
             "longitud",
+            "precision_metros",
             "timestamp_servidor",
             "fuera_de_geocerca",
-        )[:300]
+        )[:300])
+        ubicaciones_qs.reverse()
         for ubicacion in ubicaciones_qs:
             lat = _coord_float(ubicacion.latitud)
             lng = _coord_float(ubicacion.longitud)
             if lat is None or lng is None:
                 continue
+            alertas_tracking = gps_flags.get(ubicacion.id, [])
             ubicaciones.append(
                 {
                     "lat": lat,
                     "lng": lng,
                     "fuera_geocerca": ubicacion.fuera_de_geocerca,
+                    "precision_metros": _coord_float(ubicacion.precision_metros),
+                    "alertas_tracking": alertas_tracking,
+                    "trazo_descartado": bool(alertas_tracking),
+                    "timestamp": ubicacion.timestamp_servidor.isoformat(),
+                    "timestamp_dt": ubicacion.timestamp_servidor,
                     "hora": timezone.localtime(ubicacion.timestamp_servidor).strftime("%H:%M"),
                 }
             )
-        raw_coords = [(point["lat"], point["lng"]) for point in ubicaciones]
-        snapped = snap_gps_path_to_roads(ruta_id=ruta.id, coords=raw_coords)
-        ubicaciones_snapped = [{"lat": lat, "lng": lng} for lat, lng in snapped.coordinates]
+        ubicaciones_segmentos = _build_gps_trace_segments(ruta.id, ubicaciones)
+        ubicaciones_snapped = [point for segment in ubicaciones_segmentos for point in segment["coords"]]
+        ubicaciones_snapped_fuente = "GOOGLE_ROADS" if any(
+            segment["fuente"] == "GOOGLE_ROADS" for segment in ubicaciones_segmentos
+        ) else ("RAW" if ubicaciones_segmentos else "")
+        ubicaciones_snapped_warning = next((segment["warning"] for segment in ubicaciones_segmentos if segment["warning"]), "")
+        for ubicacion in ubicaciones:
+            ubicacion.pop("timestamp_dt", None)
 
         routes.append(
             {
@@ -1250,9 +1323,10 @@ def _control_rutas_mapa_payload(rutas_control, eventos_qs) -> dict:
                 "programada_duracion_segundos": ruta.ruta_programada_duracion_segundos,
                 "paradas": paradas,
                 "ubicaciones": ubicaciones,
+                "ubicaciones_segmentos": ubicaciones_segmentos,
                 "ubicaciones_snapped": ubicaciones_snapped,
-                "ubicaciones_snapped_fuente": snapped.source,
-                "ubicaciones_snapped_warning": snapped.warning,
+                "ubicaciones_snapped_fuente": ubicaciones_snapped_fuente,
+                "ubicaciones_snapped_warning": ubicaciones_snapped_warning,
             }
         )
 
