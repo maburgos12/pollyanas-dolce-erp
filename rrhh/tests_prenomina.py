@@ -429,6 +429,7 @@ class PrenominaServiceTests(TestCase):
         resumen = corte.resumenes.get(empleado=self.empleado)
 
         self.assertEqual(resumen.ajustes_pendientes, 1)
+        self.assertEqual(resumen.dias_asistencia, 0)
         self.assertEqual(resumen.estado, PrenominaEmpleadoResumen.ESTADO_REVISAR)
         self.assertEqual(corte.estado, PrenominaCorte.ESTADO_EN_REVISION)
 
@@ -456,6 +457,7 @@ class PrenominaServiceTests(TestCase):
         self.assertEqual(mov.clave_contpaqi, "")
         self.assertEqual(mov.estado, PrenominaMovimiento.ESTADO_PENDIENTE_CONFIGURACION)
         self.assertEqual(corte.resumen["movimientos_pendientes_configuracion"], 1)
+        self.assertEqual(corte.estado, PrenominaCorte.ESTADO_EN_REVISION)
 
     def test_recalcular_preserva_movimiento_manual_con_importe(self):
         corte = crear_corte_prenomina(

@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.db import transaction
+from django.db.models import Q
 
 from rrhh.models import (
     AjusteAsistencia,
@@ -104,7 +105,11 @@ def recalcular_corte_prenomina(corte: PrenominaCorte) -> PrenominaCorte:
     corte.resumen = _resumen_corte(corte)
     corte.estado = (
         PrenominaCorte.ESTADO_LISTO
-        if corte.resumen.get("bloqueados", 0) == 0 and corte.resumen.get("ajustes_pendientes", 0) == 0
+        if (
+            corte.resumen.get("bloqueados", 0) == 0
+            and corte.resumen.get("ajustes_pendientes", 0) == 0
+            and corte.resumen.get("movimientos_pendientes_configuracion", 0) == 0
+        )
         else PrenominaCorte.ESTADO_EN_REVISION
     )
     corte.save(update_fields=["resumen", "estado", "actualizado_en"])
@@ -128,10 +133,16 @@ def _incidencias_por_empleado(corte: PrenominaCorte, empleado_ids: list[int]):
 
 def _asistencias_por_empleado(corte: PrenominaCorte, empleado_ids: list[int]):
     grouped = defaultdict(set)
-    for empleado_id, fecha in AsistenciaEmpleado.objects.filter(
+    asistencias_con_marca = AsistenciaEmpleado.objects.filter(
         empleado_id__in=empleado_ids,
         fecha__range=(corte.fecha_inicio, corte.fecha_fin),
-    ).values_list("empleado_id", "fecha"):
+    ).filter(
+        Q(entrada__isnull=False)
+        | Q(salida_comida__isnull=False)
+        | Q(regreso_comida__isnull=False)
+        | Q(salida__isnull=False)
+    )
+    for empleado_id, fecha in asistencias_con_marca.values_list("empleado_id", "fecha"):
         grouped[empleado_id].add(fecha)
     return grouped
 
