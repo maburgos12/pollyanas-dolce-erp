@@ -20,12 +20,18 @@
   .route-status-note { padding:10px 12px; border-radius:8px; background:#fff7e6; border:1px solid #ffd58a; color:#5d3b00; font-weight:700; }
   .point-reception-head { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-start; justify-content:space-between; margin-bottom:12px; }
   .point-reception-copy { max-width:680px; }
+  .point-flow { display:grid; gap:10px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin:12px 0 16px; }
+  .point-flow-step { border:1px solid #ead5dc; border-radius:10px; padding:10px 12px; background:#fff; }
+  .point-flow-step strong { display:block; color:var(--vino); margin-bottom:4px; }
+  .point-sync-panel { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; padding:12px; border:1px solid #ead5dc; border-radius:10px; background:#fffafc; margin-bottom:12px; }
+  .point-sync-metrics { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .point-sync-metric { display:inline-flex; min-height:32px; align-items:center; gap:6px; padding:5px 10px; border-radius:8px; background:#fff; border:1px solid #ead5dc; font-weight:800; color:#3d2d34; }
   .point-status { display:inline-flex; align-items:center; min-height:28px; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:800; }
   .point-status.is-success { color:#0f5132; background:#d1e7dd; }
   .point-status.is-warning { color:#664d03; background:#fff3cd; }
   .point-status.is-danger { color:#842029; background:#f8d7da; }
   @media (max-width: 960px) { .ops-grid-2, .ops-summary { grid-template-columns: 1fr; } }
-  @media (max-width: 760px) { .route-plan-grid { grid-template-columns:1fr; } }
+  @media (max-width: 760px) { .route-plan-grid, .point-flow { grid-template-columns:1fr; } }
 </style>
 <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
 {% endblock %}
@@ -260,6 +266,75 @@
           {% endwith %}
           {% empty %}
           <tr><td colspan="{% if can_manage_logistica and ruta.estatus == 'PLANEADA' %}9{% else %}8{% endif %}" class="muted">Sin paradas. Agrega puntos logísticos para validar llegada por GPS.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">Carga esperada desde Point</div>
+    <div class="point-flow" aria-label="Regla operativa de carga">
+      <div class="point-flow-step"><strong>1. Sincronizar Point</strong><span class="muted">ERP toma transferencias abiertas por sucursal.</span></div>
+      <div class="point-flow-step"><strong>2. Revisar carga</strong><span class="muted">Repartidor confirma cantidad real antes de salir.</span></div>
+      <div class="point-flow-step"><strong>3. Liberar ruta</strong><span class="muted">Logística cambia la ruta a En ruta.</span></div>
+      <div class="point-flow-step"><strong>4. Recepción Point</strong><span class="muted">Sucursal acepta y el ERP compara el cierre.</span></div>
+    </div>
+    <div class="point-sync-panel">
+      <div>
+        <span class="point-status is-{{ checklist_carga_summary.tone }}">{{ checklist_carga_summary.estado_label }}</span>
+        <div class="muted" style="margin-top:6px;">
+          {% if checklist_carga_summary.sincronizado_en %}
+            Última sincronización: {{ checklist_carga_summary.sincronizado_en|date:"Y-m-d H:i" }}.
+          {% else %}
+            Sin sincronización de carga esperada para esta ruta.
+          {% endif %}
+          {% if checklist_carga_summary.notas %} {{ checklist_carga_summary.notas }}{% endif %}
+        </div>
+      </div>
+      <div class="point-sync-metrics">
+        <span class="point-sync-metric">{{ checklist_carga_summary.total|intcomma }} producto(s)</span>
+        <span class="point-sync-metric">{{ checklist_carga_summary.pendientes|intcomma }} pendiente(s)</span>
+        <span class="point-sync-metric">{{ checklist_carga_summary.confirmadas|intcomma }} confirmado(s)</span>
+        <span class="point-sync-metric">{{ checklist_carga_summary.diferencias|intcomma }} diferencia(s)</span>
+      </div>
+      {% if can_manage_logistica and ruta.estatus == "PLANEADA" %}
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="sync_carga_point">
+        <button class="btn btn-primary" type="submit">Sincronizar carga esperada desde Point</button>
+      </form>
+      {% elif ruta.estatus != "PLANEADA" %}
+      <div class="route-status-note">La carga esperada solo se sincroniza mientras la ruta está planeada.</div>
+      {% endif %}
+    </div>
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Parada</th>
+            <th>Producto</th>
+            <th class="text-end">Solicitado</th>
+            <th class="text-end">Enviado Point</th>
+            <th class="text-end">Carga real</th>
+            <th>Estado carga</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for linea in lineas_carga_point %}
+          <tr>
+            <td>{{ linea.parada.orden }} · {{ linea.parada.punto_nombre_snapshot }}</td>
+            <td>
+              <strong>{{ linea.item_name|default:"Producto sin nombre" }}</strong>
+              <div class="muted">{{ linea.item_code|default:"Sin código" }} · {{ linea.unit|default:"pz" }} · {{ linea.transfer_external_id }}</div>
+            </td>
+            <td class="text-end">{{ linea.cantidad_solicitada|floatformat:3 }}</td>
+            <td class="text-end">{{ linea.cantidad_enviada_esperada|floatformat:3 }}</td>
+            <td class="text-end">{% if linea.cantidad_cargada is not None %}{{ linea.cantidad_cargada|floatformat:3 }}{% else %}-{% endif %}</td>
+            <td><span class="point-status {% if linea.estatus == 'CARGADA' or linea.estatus == 'NO_APLICA' %}is-success{% elif linea.estatus == 'PENDIENTE' %}is-warning{% else %}is-danger{% endif %}">{{ linea.get_estatus_display }}</span></td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6" class="muted">Sin carga esperada sincronizada desde Point. Usa el botón de sincronización antes de pedir la revisión del repartidor.</td></tr>
           {% endfor %}
         </tbody>
       </table>

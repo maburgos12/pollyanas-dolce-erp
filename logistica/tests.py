@@ -1846,6 +1846,44 @@ class LogisticaControlRutasTests(TestCase):
         self.assertContains(response, "Recibido Point")
         self.assertContains(response, "Recibido correcto")
 
+    def test_ruta_detail_muestra_sincronizacion_carga_point_pre_salida(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+
+        response = self.client.get(reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Carga esperada desde Point")
+        self.assertContains(response, "Sincronizar carga esperada desde Point")
+        self.assertContains(response, "Sin carga esperada sincronizada desde Point")
+        self.assertContains(response, "ERP toma transferencias abiertas por sucursal")
+
+    def test_ruta_detail_sincroniza_carga_point_pre_salida(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        transferencia = self._crear_transferencia_point_abierta()
+        sync_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
+            status=PointSyncJob.STATUS_SUCCESS,
+            result_summary={},
+        )
+
+        with patch("logistica.services_carga_ruta.OpenTransferSyncService") as service_cls:
+            service_cls.return_value.sync_open_transfers.return_value = sync_job
+            response = self.client.post(
+                reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
+                {"action": "sync_carga_point"},
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(RutaCargaChecklistLinea.objects.filter(checklist__ruta=ruta, source_hash=transferencia.source_hash).exists())
+        self.assertContains(response, "Carga esperada sincronizada desde Point")
+        self.assertContains(response, "Pastel Snicker chico")
+        self.assertContains(response, "Carga en revisión")
+
     def test_ruta_detail_sincroniza_recepcion_point(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
