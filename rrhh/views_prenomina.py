@@ -5,7 +5,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from django.utils.dateparse import parse_date
+from django.utils.dateparse import parse_date, parse_datetime
 
 from core.access import can_manage_rrhh, can_view_rrhh
 from rrhh.exporters.contpaqi_prenomina import export_movimientos_contpaqi_xlsx, export_revision_xlsx
@@ -29,6 +29,13 @@ TIPOS_AJUSTE_PRENOMINA = [
 
 def _parse_fecha(value, default=None):
     return parse_date((value or "").strip()) or default
+
+
+def _parse_datetime_local(value):
+    parsed = parse_datetime((value or "").strip())
+    if parsed and timezone.is_aware(parsed):
+        parsed = timezone.localtime(parsed)
+    return parsed
 
 
 def _validation_message(exc: ValidationError) -> str:
@@ -193,6 +200,10 @@ def prenomina_ajuste_crear(request, pk, empleado_id):
         return redirect_url
     if not valor_propuesto:
         messages.error(request, "Captura el valor propuesto del ajuste.")
+        return redirect_url
+    valor_datetime = _parse_datetime_local(valor_propuesto)
+    if not valor_datetime or valor_datetime.date() != fecha:
+        messages.error(request, "El valor propuesto debe corresponder a la misma fecha del ajuste.")
         return redirect_url
 
     try:

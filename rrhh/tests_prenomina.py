@@ -885,6 +885,48 @@ class PrenominaViewTests(TestCase):
         self.assertEqual(ajuste.tipo_ajuste, AjusteAsistencia.TIPO_SALIDA)
         self.assertEqual(ajuste.valores_propuestos["salida"], "2026-06-11T18:05")
 
+    def test_prenomina_ajuste_crear_rechaza_valor_fuera_del_dia(self):
+        corte = self._crear_corte()
+
+        response = self.client.post(
+            reverse("rrhh:prenomina_ajuste_crear", kwargs={"pk": corte.pk, "empleado_id": self.empleado.pk}),
+            {
+                "fecha": "2026-06-11",
+                "tipo_ajuste": AjusteAsistencia.TIPO_SALIDA,
+                "valor_propuesto": "2026-06-20T18:05",
+                "motivo": "Salida con fecha incorrecta",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(AjusteAsistencia.objects.count(), 0)
+
+    def test_prenomina_ajuste_crear_rechaza_fecha_fuera_del_corte_y_tipo_invalido(self):
+        corte = self._crear_corte()
+
+        fuera_periodo = self.client.post(
+            reverse("rrhh:prenomina_ajuste_crear", kwargs={"pk": corte.pk, "empleado_id": self.empleado.pk}),
+            {
+                "fecha": "2026-06-20",
+                "tipo_ajuste": AjusteAsistencia.TIPO_SALIDA,
+                "valor_propuesto": "2026-06-20T18:05",
+                "motivo": "Fuera de corte",
+            },
+        )
+        tipo_invalido = self.client.post(
+            reverse("rrhh:prenomina_ajuste_crear", kwargs={"pk": corte.pk, "empleado_id": self.empleado.pk}),
+            {
+                "fecha": "2026-06-11",
+                "tipo_ajuste": AjusteAsistencia.TIPO_TURNO,
+                "valor_propuesto": "2026-06-11T18:05",
+                "motivo": "Tipo no soportado en prenómina",
+            },
+        )
+
+        self.assertEqual(fuera_periodo.status_code, 302)
+        self.assertEqual(tipo_invalido.status_code, 302)
+        self.assertEqual(AjusteAsistencia.objects.count(), 0)
+
     def test_prenomina_ajuste_aprobar_post_aplica_y_actualiza_asistencia(self):
         corte = self._crear_corte()
         fecha = date(2026, 6, 11)
@@ -938,6 +980,49 @@ class PrenominaViewTests(TestCase):
         self.assertEqual(ajuste.estado, AjusteAsistencia.ESTADO_RECHAZADO)
         self.assertEqual(ajuste.comentario_autorizacion, "Sin evidencia")
         self.assertEqual(asistencia.salida, salida_original)
+
+    def test_prenomina_ajuste_aprobar_rechazar_fuera_de_corte_devuelve_404(self):
+        corte = self._crear_corte()
+        ajuste = crear_ajuste_asistencia(
+            self.empleado,
+            date(2026, 6, 20),
+            AjusteAsistencia.TIPO_SALIDA,
+            {"salida": "2026-06-20T18:05"},
+            "Fuera de corte",
+            self.user,
+        )
+
+        aprobar_response = self.client.post(
+            reverse("rrhh:prenomina_ajuste_aprobar", kwargs={"pk": corte.pk, "ajuste_id": ajuste.pk}),
+            {"comentario": "No debe aplicar"},
+        )
+        rechazar_response = self.client.post(
+            reverse("rrhh:prenomina_ajuste_rechazar", kwargs={"pk": corte.pk, "ajuste_id": ajuste.pk}),
+            {"comentario": "No debe rechazar"},
+        )
+
+        ajuste.refresh_from_db()
+        self.assertEqual(aprobar_response.status_code, 404)
+        self.assertEqual(rechazar_response.status_code, 404)
+        self.assertEqual(ajuste.estado, AjusteAsistencia.ESTADO_PENDIENTE)
+
+    def test_prenomina_ajuste_crear_no_revienta_si_corte_no_recalcula(self):
+        corte = self._crear_corte()
+        corte.estado = PrenominaCorte.ESTADO_EXPORTADO
+        corte.save(update_fields=["estado", "actualizado_en"])
+
+        response = self.client.post(
+            reverse("rrhh:prenomina_ajuste_crear", kwargs={"pk": corte.pk, "empleado_id": self.empleado.pk}),
+            {
+                "fecha": "2026-06-11",
+                "tipo_ajuste": AjusteAsistencia.TIPO_SALIDA,
+                "valor_propuesto": "2026-06-11T18:05",
+                "motivo": "Corte exportado",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(AjusteAsistencia.objects.count(), 1)
 
     def test_usuario_solo_lectura_no_puede_crear_aprobar_ni_rechazar_ajustes(self):
         corte = self._crear_corte()
