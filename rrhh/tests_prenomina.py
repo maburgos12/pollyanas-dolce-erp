@@ -456,3 +456,35 @@ class PrenominaServiceTests(TestCase):
         self.assertEqual(mov.clave_contpaqi, "")
         self.assertEqual(mov.estado, PrenominaMovimiento.ESTADO_PENDIENTE_CONFIGURACION)
         self.assertEqual(corte.resumen["movimientos_pendientes_configuracion"], 1)
+
+    def test_recalcular_preserva_movimiento_manual_con_importe(self):
+        corte = crear_corte_prenomina(
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 15),
+            fecha_corte=date(2026, 6, 15),
+            creado_por=self.user,
+        )
+        manual = PrenominaMovimiento.objects.create(
+            corte=corte,
+            empleado=self.empleado,
+            fecha=date(2026, 6, 14),
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_INCAPACIDAD,
+            estado=PrenominaMovimiento.ESTADO_LISTO,
+            clave_contpaqi="MANUAL",
+            importe=Decimal("325.75"),
+            fuente_modelo="",
+            fuente_id="",
+            referencia="captura-manual",
+            notas="Movimiento manual capturado por RRHH.",
+            metadata={"origen": "manual"},
+        )
+
+        recalcular_corte_prenomina(corte)
+        manual.refresh_from_db()
+
+        self.assertEqual(manual.importe, Decimal("325.75"))
+        self.assertEqual(manual.clave_contpaqi, "MANUAL")
+        self.assertEqual(manual.estado, PrenominaMovimiento.ESTADO_LISTO)
+        self.assertEqual(manual.referencia, "captura-manual")
+        self.assertEqual(manual.notas, "Movimiento manual capturado por RRHH.")
+        self.assertEqual(manual.metadata, {"origen": "manual"})

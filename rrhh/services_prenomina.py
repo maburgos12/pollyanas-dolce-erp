@@ -30,6 +30,10 @@ TIPOS_ALERTA_OPERATIVA = {
     IncidenciaAsistencia.TIPO_AVISO_BAJA_FALTAS,
     IncidenciaAsistencia.TIPO_BAJA_FALTAS,
 }
+FUENTES_AUTOMATICAS = {
+    "rrhh.IncidenciaAsistencia",
+    "rrhh.HoraExtra",
+}
 
 
 def _fechas(inicio: date, fin: date) -> list[date]:
@@ -74,7 +78,7 @@ def crear_corte_prenomina(
 def recalcular_corte_prenomina(corte: PrenominaCorte) -> PrenominaCorte:
     corte = PrenominaCorte.objects.select_for_update().get(pk=corte.pk)
     corte.resumenes.all().delete()
-    corte.movimientos.all().delete()
+    corte.movimientos.filter(fuente_modelo__in=FUENTES_AUTOMATICAS).delete()
 
     fechas = _fechas(corte.fecha_inicio, corte.fecha_fin)
     empleados = _empleados_del_periodo(corte.fecha_inicio, corte.fecha_fin, corte.sucursal, corte.area)
