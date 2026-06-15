@@ -78,6 +78,8 @@ class LogisticaControlRutasTemplateTests(SimpleTestCase):
         self.assertIn("function decodeRoutePolyline(value, source)", source)
         self.assertIn("decodeRoutePolyline(route.programada_polyline, route.programada_fuente)", source)
         self.assertIn("const hasSegmentPayload = Array.isArray(route.ubicaciones_segmentos);", source)
+        self.assertIn("segment.estado === \"fuera_geocerca\" ? \"#d82424\" : \"#202027\"", source)
+        self.assertIn("background: #202027;", source)
         self.assertNotIn('if (value.includes("|")) return parseFallbackPolyline(value);', source)
 
 

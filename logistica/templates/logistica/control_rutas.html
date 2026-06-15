@@ -411,7 +411,7 @@
   }
 
   .legend-line.actual {
-    background: #104c9c;
+    background: #202027;
   }
 
   .map-status-stack {
@@ -459,12 +459,12 @@
 
   .map-gps-marker {
     display: block;
-    width: 13px;
-    height: 13px;
+    width: 15px;
+    height: 15px;
     border-radius: 999px;
-    background: #104c9c;
+    background: #202027;
     border: 3px solid #fff;
-    box-shadow: 0 4px 12px rgba(16, 76, 156, .34);
+    box-shadow: 0 5px 14px rgba(32, 32, 39, .38);
   }
 
   .map-gps-discarded-marker {
@@ -1221,9 +1221,9 @@
           });
           if (coords.length <= 1) return;
           L.polyline(coords, {
-            color: segment.estado === "fuera_geocerca" ? "#d82424" : "#104c9c",
-            weight: 4,
-            opacity: 0.88,
+            color: segment.estado === "fuera_geocerca" ? "#d82424" : "#202027",
+            weight: 5,
+            opacity: 0.92,
             dashArray: segment.fuente === "GOOGLE_ROADS" ? null : "7 6",
           }).addTo(map).bindTooltip(route.nombre + " · " + (segment.fuente === "GOOGLE_ROADS" ? "GPS ajustado a calles" : "GPS recorrido"));
           coords.forEach(function (point) { bounds.extend(point); });
@@ -1233,9 +1233,9 @@
         const actualCoords = fallbackActualCoords.length > 1 ? fallbackActualCoords : rawActualCoords;
         if (actualCoords.length > 1) {
           L.polyline(actualCoords, {
-            color: "#104c9c",
-            weight: 4,
-            opacity: 0.88,
+            color: "#202027",
+            weight: 5,
+            opacity: 0.92,
             dashArray: route.ubicaciones_snapped_fuente === "GOOGLE_ROADS" ? null : "7 6",
           }).addTo(map).bindTooltip(route.nombre + " · GPS recorrido");
           actualCoords.forEach(function (point) { bounds.extend(point); });
