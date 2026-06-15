@@ -83,7 +83,9 @@ def recalcular_corte_prenomina(corte: PrenominaCorte) -> PrenominaCorte:
         raise ValidationError("No se puede recalcular un corte exportado o cerrado.")
 
     corte.resumenes.all().delete()
-    corte.movimientos.filter(fuente_modelo__in=FUENTES_AUTOMATICAS).delete()
+    corte.movimientos.filter(fuente_modelo__in=FUENTES_AUTOMATICAS).exclude(
+        estado=PrenominaMovimiento.ESTADO_EXPORTADO
+    ).delete()
 
     fechas = _fechas(corte.fecha_inicio, corte.fecha_fin)
     empleados = _empleados_del_periodo(corte.fecha_inicio, corte.fecha_fin, corte.sucursal, corte.area)

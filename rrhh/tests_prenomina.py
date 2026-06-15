@@ -561,6 +561,38 @@ class PrenominaServiceTests(TestCase):
         with self.assertRaises(ValidationError):
             recalcular_corte_prenomina(corte)
 
+        corte.estado = PrenominaCorte.ESTADO_CERRADO
+        corte.save(update_fields=["estado", "actualizado_en"])
+
+        with self.assertRaises(ValidationError):
+            recalcular_corte_prenomina(corte)
+
+    def test_recalcular_preserva_movimiento_automatico_exportado(self):
+        corte = crear_corte_prenomina(
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 15),
+            fecha_corte=date(2026, 6, 15),
+            creado_por=self.user,
+        )
+        exportado = PrenominaMovimiento.objects.create(
+            corte=corte,
+            empleado=self.empleado,
+            fecha=date(2026, 6, 12),
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_FALTA,
+            estado=PrenominaMovimiento.ESTADO_EXPORTADO,
+            clave_contpaqi="F",
+            valor=Decimal("1"),
+            fuente_modelo="rrhh.IncidenciaAsistencia",
+            fuente_id="9998",
+            referencia="rrhh.IncidenciaAsistencia:9998",
+        )
+
+        corte = recalcular_corte_prenomina(corte)
+
+        self.assertTrue(PrenominaMovimiento.objects.filter(pk=exportado.pk).exists())
+        self.assertEqual(corte.resumen["movimientos_exportados"], 1)
+        self.assertEqual(corte.estado, PrenominaCorte.ESTADO_EN_REVISION)
+
     def test_movimiento_bloqueado_mantiene_corte_en_revision(self):
         corte = crear_corte_prenomina(
             fecha_inicio=date(2026, 6, 1),
