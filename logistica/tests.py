@@ -1270,8 +1270,10 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v19", pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v19-ticket-combustible", sw_js)
+        self.assertIn("route-control-v20", pwa_html)
+        self.assertIn("logistica:pwa_sw", pwa_html)
+        self.assertIn('scope: "/logistica/"', pwa_html)
+        self.assertIn("pollyanas-logistica-pwa-v20-sw-no-cache", sw_js)
         self.assertIn("const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000;", pwa_html)
         self.assertIn("TRACKING_QUEUE_TTL_MS", pwa_html)
         self.assertIn("normalizeRutaTrackingQueue", pwa_html)
@@ -1289,6 +1291,17 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn('await showScreen("ruta_activa")', pwa_html)
         self.assertNotIn('localStorage.setItem("pd_logistica_refresh"', pwa_html)
         self.assertNotIn("localStorage.setItem(REFRESH_TOKEN_KEY", pwa_html)
+
+    def test_pwa_sw_se_sirve_sin_cache_de_borde(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.get(reverse("logistica:pwa_sw"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("no-cache", response["Cache-Control"])
+        self.assertIn("no-store", response["Cache-Control"])
+        self.assertIn("pollyanas-logistica-pwa-v20-sw-no-cache", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path

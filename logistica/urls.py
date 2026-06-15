@@ -7,6 +7,7 @@ app_name = "logistica"
 
 urlpatterns = [
     path("app/", views_pwa.pwa_app, name="pwa_app"),
+    path("sw.js", views_pwa.pwa_sw, name="pwa_sw"),
     path("", views.dashboard, name="home"),
     path("ejecutivo/", views.dashboard_ejecutivo, name="dashboard_ejecutivo"),
     path("tickets/", views.tickets_kanban, name="tickets_kanban"),
