@@ -32,6 +32,8 @@ from .models import (
     ReparacionUnidad,
     Repartidor,
     ReporteUnidad,
+    RutaCargaChecklist,
+    RutaCargaChecklistLinea,
     RutaEntrega,
     ServicioRealizadoUnidad,
     TipoServicioUnidad,
@@ -39,7 +41,11 @@ from .models import (
 )
 from .services_google_routes import recalcular_ruta_programada
 from .services_google_roads import snap_gps_path_to_roads
-from .services_carga_ruta import checklist_bloquea_salida, sincronizar_recepcion_desde_point
+from .services_carga_ruta import (
+    checklist_bloquea_salida,
+    sincronizar_checklist_carga_desde_point,
+    sincronizar_recepcion_desde_point,
+)
 from .services_rutas_control import distancia_metros, resumen_control_rutas
 from .services_tiempos_ruta import resumen_tiempos_ruta
 
@@ -138,6 +144,63 @@ def _recepcion_point_rows(checklist) -> list[dict]:
             }
         )
     return rows
+
+
+def _checklist_carga_summary(checklist) -> dict:
+    if checklist is None:
+        return {
+            "estado_label": "Pendiente de sincronizar",
+            "tone": "warning",
+            "total": 0,
+            "pendientes": 0,
+            "confirmadas": 0,
+            "diferencias": 0,
+            "sincronizado_en": None,
+            "notas": "",
+        }
+
+    total = checklist.lineas.count()
+    pendientes = checklist.lineas.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).count()
+    confirmadas = checklist.lineas.filter(
+        estatus__in=[
+            RutaCargaChecklistLinea.ESTATUS_CARGADA,
+            RutaCargaChecklistLinea.ESTATUS_NO_APLICA,
+        ]
+    ).count()
+    diferencias = checklist.lineas.filter(
+        estatus__in=[
+            RutaCargaChecklistLinea.ESTATUS_PARCIAL,
+            RutaCargaChecklistLinea.ESTATUS_FALTANTE,
+            RutaCargaChecklistLinea.ESTATUS_SOBRANTE,
+        ]
+    ).count()
+
+    if total == 0 and checklist.estatus == RutaCargaChecklist.ESTATUS_BLOQUEADA:
+        estado_label = "Sin transferencias Point"
+        tone = "danger"
+    elif checklist.estatus == RutaCargaChecklist.ESTATUS_CONFIRMADA:
+        estado_label = "Carga confirmada"
+        tone = "success"
+    elif checklist.estatus == RutaCargaChecklist.ESTATUS_CON_INCIDENCIA:
+        estado_label = "Carga con diferencias"
+        tone = "warning"
+    elif total:
+        estado_label = "Carga en revisión"
+        tone = "warning"
+    else:
+        estado_label = "Pendiente de sincronizar"
+        tone = "warning"
+
+    return {
+        "estado_label": estado_label,
+        "tone": tone,
+        "total": total,
+        "pendientes": pendientes,
+        "confirmadas": confirmadas,
+        "diferencias": diferencias,
+        "sincronizado_en": checklist.sincronizado_en,
+        "notas": checklist.notas,
+    }
 
 
 def _module_tabs(active: str, user=None) -> list[dict]:
@@ -2006,6 +2069,29 @@ def ruta_detail(request, pk: int):
                     messages.success(request, "Entrega eliminada.")
             return redirect("logistica:ruta_detail", pk=ruta.id)
 
+        if action == "sync_carga_point":
+            try:
+                resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=request.user)
+            except ValidationError as exc:
+                messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+            else:
+                total = resumen.checklist.lineas.count()
+                if total:
+                    messages.success(
+                        request,
+                        (
+                            "Carga esperada sincronizada desde Point: "
+                            f"{resumen.creadas} nueva(s), {resumen.actualizadas} actualizada(s), "
+                            f"{resumen.omitidas} omitida(s)."
+                        ),
+                    )
+                else:
+                    messages.warning(
+                        request,
+                        "Point no tiene transferencias abiertas para las sucursales de esta ruta.",
+                    )
+            return redirect("logistica:ruta_detail", pk=ruta.id)
+
         if action == "sync_recepcion_point":
             try:
                 resumen = sincronizar_recepcion_desde_point(ruta=ruta, user=request.user)
@@ -2288,6 +2374,16 @@ def ruta_detail(request, pk: int):
     governance_rows = _logistica_governance_rows(document_stage_rows, owner_default="Logística / Operación")
     tiempos_ruta = resumen_tiempos_ruta(ruta)
     checklist_carga = getattr(ruta, "checklist_carga", None)
+    checklist_carga_summary = _checklist_carga_summary(checklist_carga)
+    lineas_carga_point = []
+    if checklist_carga is not None:
+        lineas_carga_point = list(
+            checklist_carga.lineas.select_related("parada", "point_transfer_line").order_by(
+                "parada__orden",
+                "item_name",
+                "id",
+            )
+        )
     recepcion_point_rows = _recepcion_point_rows(checklist_carga)
 
     context = {
@@ -2305,6 +2401,8 @@ def ruta_detail(request, pk: int):
         "paradas_tiempos": tiempos_ruta.paradas,
         "tiempos_ruta": tiempos_ruta,
         "checklist_carga": checklist_carga,
+        "checklist_carga_summary": checklist_carga_summary,
+        "lineas_carga_point": lineas_carga_point,
         "recepcion_point_rows": recepcion_point_rows,
         "enterprise_chain": enterprise_chain,
         "critical_path_rows": _logistica_critical_path_rows(enterprise_chain),
