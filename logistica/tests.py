@@ -33,6 +33,7 @@ from logistica.models import (
     Unidad,
 )
 from logistica.services_carga_ruta import sincronizar_checklist_carga_desde_point, sincronizar_recepcion_desde_point
+from logistica.services_google_roads import snap_gps_path_to_roads
 from logistica.services_rutas_control import distancia_metros, registrar_ubicacion_ruta, resumen_control_rutas
 from logistica.services_tiempos_ruta import resumen_tiempos_ruta
 from logistica.tasks import _emails_de_grupo, detectar_gps_perdido_rutas
@@ -1081,7 +1082,8 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(resultado["rutas_revisadas"], 0)
         self.assertFalse(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_GPS_PERDIDO).exists())
 
-    def test_control_rutas_view_renderiza_panel_interno(self):
+    @patch("logistica.views.snap_gps_path_to_roads")
+    def test_control_rutas_view_renderiza_panel_interno(self, snap_mock):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
         self.ruta.ruta_programada_polyline = "25.570000,-108.470000|25.571000,-108.471000"
@@ -1092,6 +1094,9 @@ class LogisticaControlRutasTests(TestCase):
             ruta=self.ruta,
             payload={"latitud": "25.570010", "longitud": "-108.470010", "precision_metros": "12"},
         )
+        snap_mock.return_value.coordinates = [(25.57001, -108.47001), (25.57050, -108.47050)]
+        snap_mock.return_value.source = "GOOGLE_ROADS"
+        snap_mock.return_value.warning = ""
 
         response = self.client.get(reverse("logistica:control_rutas"))
 
@@ -1105,7 +1110,49 @@ class LogisticaControlRutasTests(TestCase):
         mapa = response.context["mapa_rutas"]
         self.assertEqual(mapa["routes"][0]["paradas"][0]["nombre"], "Sucursal Control")
         self.assertEqual(mapa["routes"][0]["ubicaciones"][0]["lat"], 25.57001)
+        self.assertEqual(mapa["routes"][0]["ubicaciones_snapped_fuente"], "GOOGLE_ROADS")
+        self.assertEqual(mapa["routes"][0]["ubicaciones_snapped"][1]["lng"], -108.4705)
         self.assertEqual(mapa["routes"][0]["programada_polyline"], "25.570000,-108.470000|25.571000,-108.471000")
+
+    @override_settings(GOOGLE_SERVER_API_KEY="server-key", GOOGLE_ROADS_SNAP_ENABLED=True)
+    @patch("logistica.services_google_roads.cache")
+    @patch("logistica.services_google_roads.requests.get")
+    def test_snap_gps_path_to_roads_usa_google_roads(self, get_mock, cache_mock):
+        cache_mock.get.return_value = None
+        get_mock.return_value.status_code = 200
+        get_mock.return_value.json.return_value = {
+            "snappedPoints": [
+                {"location": {"latitude": 25.57001, "longitude": -108.47001}},
+                {"location": {"latitude": 25.57020, "longitude": -108.47020}},
+                {"location": {"latitude": 25.57050, "longitude": -108.47050}},
+            ]
+        }
+
+        result = snap_gps_path_to_roads(
+            ruta_id=self.ruta.id,
+            coords=[(25.57001, -108.47001), (25.57050, -108.47050)],
+        )
+
+        self.assertEqual(result.source, "GOOGLE_ROADS")
+        self.assertEqual(len(result.coordinates), 3)
+        self.assertIn("snapToRoads", get_mock.call_args.args[0])
+        self.assertEqual(get_mock.call_args.kwargs["params"]["interpolate"], "true")
+        cache_mock.set.assert_called_once()
+
+    @override_settings(GOOGLE_SERVER_API_KEY="server-key", GOOGLE_ROADS_SNAP_ENABLED=True)
+    @patch("logistica.services_google_roads.cache")
+    @patch("logistica.services_google_roads.requests.get")
+    def test_snap_gps_path_to_roads_fallback_si_google_bloquea(self, get_mock, cache_mock):
+        cache_mock.get.return_value = None
+        get_mock.return_value.status_code = 403
+        get_mock.return_value.json.return_value = {"error": {"status": "PERMISSION_DENIED"}}
+        coords = [(25.57001, -108.47001), (25.57050, -108.47050)]
+
+        result = snap_gps_path_to_roads(ruta_id=self.ruta.id, coords=coords)
+
+        self.assertEqual(result.source, "RAW")
+        self.assertEqual(result.warning, "google_roads_http_403")
+        self.assertEqual(result.coordinates, coords)
 
     def test_control_rutas_filtra_por_ruta_repartidor_o_unidad(self):
         self.client.force_login(self.user)

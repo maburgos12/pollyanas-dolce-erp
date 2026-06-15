@@ -38,6 +38,7 @@ from .models import (
     Unidad,
 )
 from .services_google_routes import recalcular_ruta_programada
+from .services_google_roads import snap_gps_path_to_roads
 from .services_carga_ruta import checklist_bloquea_salida, sincronizar_recepcion_desde_point
 from .services_rutas_control import distancia_metros, resumen_control_rutas
 from .services_tiempos_ruta import resumen_tiempos_ruta
@@ -1232,6 +1233,9 @@ def _control_rutas_mapa_payload(rutas_control, eventos_qs) -> dict:
                     "hora": timezone.localtime(ubicacion.timestamp_servidor).strftime("%H:%M"),
                 }
             )
+        raw_coords = [(point["lat"], point["lng"]) for point in ubicaciones]
+        snapped = snap_gps_path_to_roads(ruta_id=ruta.id, coords=raw_coords)
+        ubicaciones_snapped = [{"lat": lat, "lng": lng} for lat, lng in snapped.coordinates]
 
         routes.append(
             {
@@ -1246,6 +1250,9 @@ def _control_rutas_mapa_payload(rutas_control, eventos_qs) -> dict:
                 "programada_duracion_segundos": ruta.ruta_programada_duracion_segundos,
                 "paradas": paradas,
                 "ubicaciones": ubicaciones,
+                "ubicaciones_snapped": ubicaciones_snapped,
+                "ubicaciones_snapped_fuente": snapped.source,
+                "ubicaciones_snapped_warning": snapped.warning,
             }
         )
 
