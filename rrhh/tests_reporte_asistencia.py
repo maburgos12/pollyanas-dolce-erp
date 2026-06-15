@@ -31,6 +31,7 @@ class ReporteAsistenciaTests(TestCase):
             puesto="Auxiliar",
             sucursal="Matriz",
             departamento=Empleado.DEP_PRODUCCION,
+            fecha_ingreso=date(2026, 6, 1),
         )
         self.fecha = date(2026, 6, 10)
         self.asistencia = AsistenciaEmpleado.objects.create(
