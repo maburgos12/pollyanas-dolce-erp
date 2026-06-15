@@ -30,6 +30,7 @@ from logistica.models import (
     RutaCargaChecklist,
     RutaCargaChecklistLinea,
     RutaEntrega,
+    UbicacionRuta,
     Unidad,
 )
 from logistica.services_carga_ruta import sincronizar_checklist_carga_desde_point, sincronizar_recepcion_desde_point
@@ -76,6 +77,7 @@ class LogisticaControlRutasTemplateTests(SimpleTestCase):
 
         self.assertIn("function decodeRoutePolyline(value, source)", source)
         self.assertIn("decodeRoutePolyline(route.programada_polyline, route.programada_fuente)", source)
+        self.assertIn("const hasSegmentPayload = Array.isArray(route.ubicaciones_segmentos);", source)
         self.assertNotIn('if (value.includes("|")) return parseFallbackPolyline(value);', source)
 
 
@@ -1104,6 +1106,11 @@ class LogisticaControlRutasTests(TestCase):
             ruta=self.ruta,
             payload={"latitud": "25.570010", "longitud": "-108.470010", "precision_metros": "12"},
         )
+        registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={"latitud": "25.570050", "longitud": "-108.470050", "precision_metros": "12"},
+        )
         snap_mock.return_value.coordinates = [(25.57001, -108.47001), (25.57050, -108.47050)]
         snap_mock.return_value.source = "GOOGLE_ROADS"
         snap_mock.return_value.warning = ""
@@ -1121,8 +1128,57 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(mapa["routes"][0]["paradas"][0]["nombre"], "Sucursal Control")
         self.assertEqual(mapa["routes"][0]["ubicaciones"][0]["lat"], 25.57001)
         self.assertEqual(mapa["routes"][0]["ubicaciones_snapped_fuente"], "GOOGLE_ROADS")
+        self.assertEqual(mapa["routes"][0]["ubicaciones_segmentos"][0]["fuente"], "GOOGLE_ROADS")
         self.assertEqual(mapa["routes"][0]["ubicaciones_snapped"][1]["lng"], -108.4705)
         self.assertEqual(mapa["routes"][0]["programada_polyline"], "25.570000,-108.470000|25.571000,-108.471000")
+
+    @patch("logistica.views.snap_gps_path_to_roads")
+    def test_control_rutas_mapa_no_conecta_puntos_gps_descartados(self, snap_mock):
+        def snap_side_effect(*, ruta_id, coords):
+            return SimpleNamespace(coordinates=coords, source="RAW", warning="")
+
+        snap_mock.side_effect = snap_side_effect
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        base = timezone.now()
+        ubicaciones = [
+            ("25.570000", "-108.470000", base),
+            ("25.570100", "-108.470100", base + timezone.timedelta(seconds=45)),
+            ("25.590000", "-108.490000", base + timezone.timedelta(seconds=90)),
+            ("25.571000", "-108.471000", base + timezone.timedelta(seconds=135)),
+            ("25.571100", "-108.471100", base + timezone.timedelta(seconds=180)),
+        ]
+        creadas = [
+            UbicacionRuta.objects.create(
+                ruta=self.ruta,
+                repartidor=self.repartidor,
+                unidad=self.unidad,
+                latitud=lat,
+                longitud=lng,
+                timestamp_servidor=timestamp,
+            )
+            for lat, lng, timestamp in ubicaciones
+        ]
+        EventoRuta.objects.create(
+            ruta=self.ruta,
+            ubicacion=creadas[2],
+            tipo=EventoRuta.TIPO_GPS_PRECISION_BAJA,
+            severidad=EventoRuta.SEVERIDAD_ALERTA,
+            descripcion="Precisión GPS baja: 180 m.",
+            latitud=creadas[2].latitud,
+            longitud=creadas[2].longitud,
+        )
+
+        response = self.client.get(reverse("logistica:control_rutas"))
+
+        self.assertEqual(response.status_code, 200)
+        route = response.context["mapa_rutas"]["routes"][0]
+        self.assertEqual(len(route["ubicaciones_segmentos"]), 2)
+        self.assertEqual([len(segment["coords"]) for segment in route["ubicaciones_segmentos"]], [2, 2])
+        descartadas = [point for point in route["ubicaciones"] if point["trazo_descartado"]]
+        self.assertEqual(len(descartadas), 1)
+        self.assertEqual(descartadas[0]["alertas_tracking"], ["precision_baja"])
+        self.assertEqual(snap_mock.call_count, 2)
 
     @override_settings(GOOGLE_SERVER_API_KEY="server-key", GOOGLE_ROADS_SNAP_ENABLED=True)
     @patch("logistica.services_google_roads.cache")
@@ -1214,12 +1270,13 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v17", pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v17-recepcion-point", sw_js)
-        self.assertIn("ROUTE_AUTO_TRACKING_INTERVAL_MS", pwa_html)
+        self.assertIn("route-control-v18", pwa_html)
+        self.assertIn("pollyanas-logistica-pwa-v18-gps-trazo", sw_js)
+        self.assertIn("const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000;", pwa_html)
         self.assertIn("TRACKING_QUEUE_TTL_MS", pwa_html)
         self.assertIn("normalizeRutaTrackingQueue", pwa_html)
         self.assertIn("purgeRutaTrackingQueue", pwa_html)
+        self.assertIn("velocidad_kmh: Number.isFinite(position.coords.speed)", pwa_html)
         self.assertIn("document.addEventListener(\"visibilitychange\"", pwa_html)
         self.assertIn("window.addEventListener(\"pagehide\"", pwa_html)
         self.assertIn("automatico_pwa", pwa_html)

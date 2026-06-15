@@ -458,12 +458,23 @@
   }
 
   .map-gps-marker {
+    display: block;
     width: 13px;
     height: 13px;
     border-radius: 999px;
     background: #104c9c;
     border: 3px solid #fff;
     box-shadow: 0 4px 12px rgba(16, 76, 156, .34);
+  }
+
+  .map-gps-discarded-marker {
+    display: block;
+    width: 11px;
+    height: 11px;
+    border-radius: 999px;
+    background: var(--route-orange);
+    border: 3px solid #fff;
+    box-shadow: 0 4px 12px rgba(240, 140, 0, .34);
   }
 
   .map-event-marker {
@@ -1146,6 +1157,15 @@
       });
     }
 
+    function discardedGpsIcon() {
+      return L.divIcon({
+        className: "route-gps-discarded-div-icon",
+        html: '<span class="map-gps-discarded-marker"></span>',
+        iconSize: [11, 11],
+        iconAnchor: [5, 5],
+      });
+    }
+
     function eventIcon() {
       return L.divIcon({
         className: "route-event-div-icon",
@@ -1174,14 +1194,15 @@
       const programmed = decodeRoutePolyline(route.programada_polyline, route.programada_fuente);
       const fallbackProgrammed = stops.map(function (stop) { return [stop.lat, stop.lng]; });
       const programmedCoords = programmed.length ? programmed : fallbackProgrammed;
-      const rawActualCoords = (Array.isArray(route.ubicaciones) ? route.ubicaciones : []).map(function (point) {
+      const rawLocations = Array.isArray(route.ubicaciones) ? route.ubicaciones : [];
+      const rawActualCoords = rawLocations.map(function (point) {
         return [point.lat, point.lng];
       });
-      const snappedActualCoords = (Array.isArray(route.ubicaciones_snapped) ? route.ubicaciones_snapped : []).map(function (point) {
+      const hasSegmentPayload = Array.isArray(route.ubicaciones_segmentos);
+      const actualSegments = hasSegmentPayload ? route.ubicaciones_segmentos : [];
+      const fallbackActualCoords = (Array.isArray(route.ubicaciones_snapped) ? route.ubicaciones_snapped : []).map(function (point) {
         return [point.lat, point.lng];
       });
-      const actualCoords = snappedActualCoords.length > 1 ? snappedActualCoords : rawActualCoords;
-      const actualSource = route.ubicaciones_snapped_fuente === "GOOGLE_ROADS" ? "GPS ajustado a calles" : "GPS recorrido";
 
       if (programmedCoords.length > 1) {
         L.polyline(programmedCoords, {
@@ -1193,15 +1214,33 @@
         drawable += 1;
       }
 
-      if (actualCoords.length > 1) {
-        L.polyline(actualCoords, {
-          color: "#104c9c",
-          weight: 4,
-          opacity: 0.88,
-          dashArray: "7 6",
-        }).addTo(map).bindTooltip(route.nombre + " · " + actualSource);
-        actualCoords.forEach(function (point) { bounds.extend(point); });
-        drawable += 1;
+      if (hasSegmentPayload) {
+        actualSegments.forEach(function (segment) {
+          const coords = (Array.isArray(segment.coords) ? segment.coords : []).map(function (point) {
+            return [point.lat, point.lng];
+          });
+          if (coords.length <= 1) return;
+          L.polyline(coords, {
+            color: segment.estado === "fuera_geocerca" ? "#d82424" : "#104c9c",
+            weight: 4,
+            opacity: 0.88,
+            dashArray: segment.fuente === "GOOGLE_ROADS" ? null : "7 6",
+          }).addTo(map).bindTooltip(route.nombre + " · " + (segment.fuente === "GOOGLE_ROADS" ? "GPS ajustado a calles" : "GPS recorrido"));
+          coords.forEach(function (point) { bounds.extend(point); });
+          drawable += 1;
+        });
+      } else {
+        const actualCoords = fallbackActualCoords.length > 1 ? fallbackActualCoords : rawActualCoords;
+        if (actualCoords.length > 1) {
+          L.polyline(actualCoords, {
+            color: "#104c9c",
+            weight: 4,
+            opacity: 0.88,
+            dashArray: route.ubicaciones_snapped_fuente === "GOOGLE_ROADS" ? null : "7 6",
+          }).addTo(map).bindTooltip(route.nombre + " · GPS recorrido");
+          actualCoords.forEach(function (point) { bounds.extend(point); });
+          drawable += 1;
+        }
       }
 
       stops.forEach(function (stop) {
@@ -1221,8 +1260,16 @@
         drawable += 1;
       });
 
+      rawLocations.filter(function (point) { return point.trazo_descartado; }).forEach(function (point) {
+        L.marker([point.lat, point.lng], { icon: discardedGpsIcon() })
+          .addTo(map)
+          .bindPopup("<strong>" + route.nombre + "</strong><br>GPS descartado del trazo<br>" + ((point.alertas_tracking || []).join(", ") || "señal no confiable") + "<br>" + (point.hora || "sin hora"));
+        bounds.extend([point.lat, point.lng]);
+        drawable += 1;
+      });
+
       if (rawActualCoords.length) {
-        const latest = route.ubicaciones[route.ubicaciones.length - 1];
+        const latest = rawLocations[rawLocations.length - 1];
         L.marker([latest.lat, latest.lng], { icon: gpsIcon() })
           .addTo(map)
           .bindPopup("<strong>" + route.nombre + "</strong><br>Último GPS: " + (latest.hora || "sin hora"));
