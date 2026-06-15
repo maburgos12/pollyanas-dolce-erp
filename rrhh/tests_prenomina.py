@@ -1024,6 +1024,43 @@ class PrenominaViewTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(AjusteAsistencia.objects.count(), 1)
 
+    def test_prenomina_ajuste_aprobar_rechazar_no_revientan_si_corte_no_recalcula(self):
+        corte = self._crear_corte()
+        corte.estado = PrenominaCorte.ESTADO_EXPORTADO
+        corte.save(update_fields=["estado", "actualizado_en"])
+        ajuste_aprobar = crear_ajuste_asistencia(
+            self.empleado,
+            date(2026, 6, 11),
+            AjusteAsistencia.TIPO_SALIDA,
+            {"salida": "2026-06-11T18:05"},
+            "Aprobar en corte exportado",
+            self.user,
+        )
+        ajuste_rechazar = crear_ajuste_asistencia(
+            self.empleado,
+            date(2026, 6, 12),
+            AjusteAsistencia.TIPO_SALIDA,
+            {"salida": "2026-06-12T18:05"},
+            "Rechazar en corte exportado",
+            self.user,
+        )
+
+        aprobar_response = self.client.post(
+            reverse("rrhh:prenomina_ajuste_aprobar", kwargs={"pk": corte.pk, "ajuste_id": ajuste_aprobar.pk}),
+            {"comentario": "Se aplica aunque el corte no recalcula"},
+        )
+        rechazar_response = self.client.post(
+            reverse("rrhh:prenomina_ajuste_rechazar", kwargs={"pk": corte.pk, "ajuste_id": ajuste_rechazar.pk}),
+            {"comentario": "Se rechaza aunque el corte no recalcula"},
+        )
+
+        ajuste_aprobar.refresh_from_db()
+        ajuste_rechazar.refresh_from_db()
+        self.assertEqual(aprobar_response.status_code, 302)
+        self.assertEqual(rechazar_response.status_code, 302)
+        self.assertEqual(ajuste_aprobar.estado, AjusteAsistencia.ESTADO_APLICADO)
+        self.assertEqual(ajuste_rechazar.estado, AjusteAsistencia.ESTADO_RECHAZADO)
+
     def test_usuario_solo_lectura_no_puede_crear_aprobar_ni_rechazar_ajustes(self):
         corte = self._crear_corte()
         ajuste = crear_ajuste_asistencia(
