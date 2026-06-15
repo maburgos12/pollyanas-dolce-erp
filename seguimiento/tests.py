@@ -731,6 +731,119 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertIsNone(checks[0].completado_por)
         self.assertIsNone(checks[0].completado_at)
 
+    def test_sync_no_desmarca_mismo_check_local_si_agente_dg_llega_atrasado(self):
+        command = ImportarAgenteDGCommand()
+        counters = {"created": 0, "updated": 0, "skipped": 0}
+        row = {
+            "id": 11,
+            "titulo": "Proyecto con avance local",
+            "descripcion": "Validar avance local",
+            "expected_deliverable": "",
+            "status": "IN_PROGRESS",
+            "target_date": timezone.now() + timedelta(days=5),
+            "user_email": self.user.email,
+            "user_name": self.user.get_full_name(),
+            "user_id": 4,
+            "area_name": "Proyecto",
+        }
+        payload = [{"titulo": "Paso vigente", "descripcion": "", "completado": False}]
+        command._upsert_item(row, "minute_projects", SeguimientoItem.TIPO_PROYECTO, counters, checklist=payload)
+        item = SeguimientoItem.objects.get(titulo="Proyecto con avance local")
+        check = item.checklist.get()
+        check.completado = True
+        check.completado_por = self.user
+        check.completado_at = timezone.now()
+        check.save(update_fields=["completado", "completado_por", "completado_at"])
+
+        command._upsert_item(row, "minute_projects", SeguimientoItem.TIPO_PROYECTO, counters, checklist=payload)
+
+        check.refresh_from_db()
+        self.assertTrue(check.completado)
+        self.assertEqual(check.completado_por, self.user)
+        self.assertIsNotNone(check.completado_at)
+
+    def test_sync_preserva_subpuntos_locales_si_agente_dg_llega_atrasado(self):
+        command = ImportarAgenteDGCommand()
+        counters = {"created": 0, "updated": 0, "skipped": 0}
+        row = {
+            "id": 12,
+            "titulo": "Proyecto con subpuntos",
+            "descripcion": "Validar avance local",
+            "expected_deliverable": "",
+            "status": "IN_PROGRESS",
+            "target_date": timezone.now() + timedelta(days=5),
+            "user_email": self.user.email,
+            "user_name": self.user.get_full_name(),
+            "user_id": 4,
+            "area_name": "Proyecto",
+        }
+        checklist_json = json.dumps([
+            {"text": "Primer subpunto", "completed": False},
+            {"text": "Segundo subpunto", "completed": False},
+        ])
+        payload = [
+            {
+                "titulo": "Paso con checklist",
+                "origen_step_id": 201,
+                "descripcion": "",
+                "completado": False,
+                "checklist_items_json": checklist_json,
+            }
+        ]
+        command._upsert_item(row, "minute_projects", SeguimientoItem.TIPO_PROYECTO, counters, checklist=payload)
+        item = SeguimientoItem.objects.get(titulo="Proyecto con subpuntos")
+        check = item.checklist.get(origen_step_id=201)
+        check.sub_checklist[0]["completado"] = True
+        check.save(update_fields=["sub_checklist"])
+
+        command._upsert_item(row, "minute_projects", SeguimientoItem.TIPO_PROYECTO, counters, checklist=payload)
+
+        check.refresh_from_db()
+        self.assertTrue(check.sub_checklist[0]["completado"])
+        self.assertFalse(check.sub_checklist[1]["completado"])
+
+    def test_webhook_parcial_no_borra_participantes_existentes(self):
+        command = ImportarAgenteDGCommand()
+        counters = {"created": 0, "updated": 0, "skipped": 0}
+        row = {
+            "id": 13,
+            "titulo": "Proyecto compartido parcial",
+            "descripcion": "Validar participantes",
+            "expected_deliverable": "",
+            "status": "IN_PROGRESS",
+            "target_date": timezone.now() + timedelta(days=5),
+            "user_email": "otra@pollyanasdolce.com",
+            "user_name": "Otra Persona",
+            "user_id": 4,
+            "area_name": "Proyecto",
+        }
+        command._upsert_item(
+            row,
+            "minute_projects",
+            SeguimientoItem.TIPO_PROYECTO,
+            counters,
+            checklist=[{"titulo": "Paso", "descripcion": "", "completado": False}],
+            participants=[
+                {
+                    "user_id": 5,
+                    "user_email": self.user.email,
+                    "user_name": self.user.get_full_name(),
+                    "role": "STEP_OWNER",
+                }
+            ],
+        )
+        item = SeguimientoItem.objects.get(titulo="Proyecto compartido parcial")
+
+        upsert_agente_dg_payload({
+            "source_table": "minute_projects",
+            "source_id": 13,
+            "record": {**row, "descripcion": "Actualizacion parcial"},
+        })
+
+        item.refresh_from_db()
+        self.assertIn(self.user, item.participantes_user.all())
+        self.assertIn(self.empleado, item.participantes_empleado.all())
+
     def test_importador_preserva_identidad_de_pasos_por_origen_step_id_al_reordenar(self):
         command = ImportarAgenteDGCommand()
         counters = {"created": 0, "updated": 0, "skipped": 0}
@@ -1325,6 +1438,14 @@ class CalendarioTests(TestCase):
         self.assertEqual(eliminar_propia.status_code, 200)
         propia.refresh_from_db()
         self.assertFalse(propia.activo)
+
+    def test_calendario_no_expone_boton_eliminar_actividad(self):
+        self.client.force_login(self.user_a)
+
+        response = self.client.get("/seguimiento/calendario/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Eliminar")
 
     def test_crud_crear_editar_completar_valida_campos(self):
         self.client.force_login(self.user_a)

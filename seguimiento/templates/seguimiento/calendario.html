@@ -481,18 +481,8 @@
       complete.className = 'btn btn-secondary';
       complete.textContent = event.estatus === 'COMPLETADA' ? 'Reabrir' : 'Completar';
       complete.addEventListener('click', () => mutate(`/seguimiento/calendario/actividades/${event.id.replace('act-', '')}/completar/`));
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'btn btn-secondary';
-      remove.textContent = 'Eliminar';
-      remove.addEventListener('click', () => {
-        if (confirm('¿Eliminar esta actividad?')) {
-          mutate(`/seguimiento/calendario/actividades/${event.id.replace('act-', '')}/eliminar/`);
-        }
-      });
       actions.appendChild(edit);
       actions.appendChild(complete);
-      actions.appendChild(remove);
     } else if (event.url) {
       const link = document.createElement('a');
       link.className = 'btn btn-secondary';

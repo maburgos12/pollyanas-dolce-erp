@@ -310,6 +310,20 @@ def sub_checklist_de_paso(checklist_items_json: str | None, deliverable_text: st
     return items
 
 
+def _merge_sub_checklist(local_items, incoming_items):
+    if not local_items or not incoming_items:
+        return incoming_items or local_items or []
+    completed = {
+        normalizar_nombre(item.get("titulo") or "")
+        for item in local_items
+        if item.get("completado")
+    }
+    for item in incoming_items:
+        if normalizar_nombre(item.get("titulo") or "") in completed:
+            item["completado"] = True
+    return incoming_items
+
+
 class AgenteDGSeguimientoImporter:
     def _resolve_user(self, row):
         User = get_user_model()
@@ -372,11 +386,18 @@ class AgenteDGSeguimientoImporter:
             counters["skipped"] += 1
             return
 
+        item = SeguimientoItem.objects.filter(
+            metadata__source="agente_dg",
+            metadata__source_table=source_table,
+            metadata__source_id=row["id"],
+        ).first()
         user = self._resolve_user(row)
         empleado = empleado_de_usuario(user) if user else None
+        participants_supplied = participants is not None
         participant_users, participant_empleados, participant_payload = self._resolve_participants(participants or [])
         participant_users = [participant for participant in participant_users if not user or participant.pk != user.pk]
         participant_empleados = [participant for participant in participant_empleados if not empleado or participant.pk != empleado.pk]
+        previous_participants = (item.metadata or {}).get("source_participants", []) if item else []
         metadata = {
             "source": "agente_dg",
             "source_table": source_table,
@@ -388,7 +409,7 @@ class AgenteDGSeguimientoImporter:
             "source_archived_at": _json_datetime(row.get("archived_at")),
             "source_completed_at": _json_datetime(row.get("completed_at")),
             "synced_at": timezone.now().isoformat(),
-            "source_participants": participant_payload,
+            "source_participants": participant_payload if participants_supplied else previous_participants,
         }
         # Solo minutas y proyectos pasan por aprobación del DG. Los compromisos son
         # actividades de desempeño que el colaborador gestiona y cierra por su cuenta.
@@ -415,11 +436,6 @@ class AgenteDGSeguimientoImporter:
             "referencia_externa": f"{source_table}:{row['id']}",
             "metadata": metadata,
         }
-        item = SeguimientoItem.objects.filter(
-            metadata__source="agente_dg",
-            metadata__source_table=source_table,
-            metadata__source_id=row["id"],
-        ).first()
         if item:
             for key, value in defaults.items():
                 setattr(item, key, value)
@@ -441,8 +457,9 @@ class AgenteDGSeguimientoImporter:
             item.aprobado_at = None
             item.save(update_fields=["aprobado_at", "updated_at"])
 
-        item.participantes_user.set(participant_users)
-        item.participantes_empleado.set(participant_empleados)
+        if participants_supplied:
+            item.participantes_user.set(participant_users)
+            item.participantes_empleado.set(participant_empleados)
 
         if checklist is _PRESERVE_CHECKLIST:
             return
@@ -543,6 +560,14 @@ class AgenteDGSeguimientoImporter:
                 "sub_checklist": sub_checklist_de_paso(payload.get("checklist_items_json"), payload.get("entregable")),
             }
             if check:
+                # ponytail: local true wins; Agente DG DB sync can lag after ERP write-back.
+                same_check = (
+                    (origen_step_id and check.origen_step_id == origen_step_id)
+                    or normalizar_nombre(check.titulo or "") == normalizar_nombre(titulo or "")
+                )
+                if same_check and check.completado and not defaults["completado"]:
+                    defaults["completado"] = True
+                defaults["sub_checklist"] = _merge_sub_checklist(check.sub_checklist, defaults["sub_checklist"])
                 check.orden = index
                 for key, value in defaults.items():
                     setattr(check, key, value)
