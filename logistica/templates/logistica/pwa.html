@@ -1056,7 +1056,8 @@
         margin-top: 10px;
       }
       .photo-actions .retake,
-      .photo-actions .keep {
+      .photo-actions .keep,
+      .photo-actions .clear {
         display: inline-flex;
         min-height: 44px;
         align-items: center;
@@ -1075,6 +1076,11 @@
         border: 1px solid #33aa55;
         background: #16351f;
         color: #55cc77;
+      }
+      .photo-actions .clear {
+        border: 1px solid var(--danger);
+        background: #2a151b;
+        color: var(--danger);
       }
       .fuel-save-row {
         display: flex;
@@ -3305,6 +3311,16 @@
         setLivePhoto(input, draft, "carga_foto_ticket", "cargaFotoTicketPreview", renderBitacoraSalida, "cargaFotoTicketError");
       }
 
+      function limpiarFotoCargaCombustible() {
+        const draft = ensureBitacoraSalidaDraft();
+        draft.carga_foto_ticket = null;
+        draft.cargaFotoTicketPreview = "";
+        draft.cargaFotoTicketError = "";
+        const input = document.getElementById("foto_carga_combustible");
+        if (input) input.value = "";
+        renderBitacoraSalida();
+      }
+
       async function seleccionarUnidadSalida(value) {
         const draft = ensureBitacoraSalidaDraft();
         draft.unidad = value;
@@ -3583,8 +3599,8 @@
                 ${draft.cargaFotoTicketPreview ? `
                   <img class="thumb" src="${draft.cargaFotoTicketPreview}" alt="Vista previa ticket combustible">
                   <div class="photo-actions">
-                    <label class="retake" for="foto_carga_combustible">↻ Volver a tomar</label>
-                    <button class="keep" type="button" onclick="renderBitacoraSalida()">Usar esta foto</button>
+                    <label class="retake" for="foto_carga_combustible">↻ Cambiar foto</label>
+                    <button class="clear" type="button" onclick="limpiarFotoCargaCombustible()">Quitar foto</button>
                   </div>
                 ` : ""}
                 ${draft.cargaFotoTicketError ? `<p class="error">${escapeHtml(draft.cargaFotoTicketError)}</p>` : ""}
@@ -4097,7 +4113,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=route-control-v18").catch(() => {});
+          navigator.serviceWorker.register("{% static 'logistica/pwa/sw.js' %}?v=route-control-v19").catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {
