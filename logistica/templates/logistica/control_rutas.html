@@ -1174,9 +1174,14 @@
       const programmed = decodeRoutePolyline(route.programada_polyline);
       const fallbackProgrammed = stops.map(function (stop) { return [stop.lat, stop.lng]; });
       const programmedCoords = programmed.length ? programmed : fallbackProgrammed;
-      const actualCoords = (Array.isArray(route.ubicaciones) ? route.ubicaciones : []).map(function (point) {
+      const rawActualCoords = (Array.isArray(route.ubicaciones) ? route.ubicaciones : []).map(function (point) {
         return [point.lat, point.lng];
       });
+      const snappedActualCoords = (Array.isArray(route.ubicaciones_snapped) ? route.ubicaciones_snapped : []).map(function (point) {
+        return [point.lat, point.lng];
+      });
+      const actualCoords = snappedActualCoords.length > 1 ? snappedActualCoords : rawActualCoords;
+      const actualSource = route.ubicaciones_snapped_fuente === "GOOGLE_ROADS" ? "GPS ajustado a calles" : "GPS recorrido";
 
       if (programmedCoords.length > 1) {
         L.polyline(programmedCoords, {
@@ -1194,7 +1199,7 @@
           weight: 4,
           opacity: 0.88,
           dashArray: "7 6",
-        }).addTo(map).bindTooltip(route.nombre + " · GPS recorrido");
+        }).addTo(map).bindTooltip(route.nombre + " · " + actualSource);
         actualCoords.forEach(function (point) { bounds.extend(point); });
         drawable += 1;
       }
@@ -1216,7 +1221,7 @@
         drawable += 1;
       });
 
-      if (actualCoords.length) {
+      if (rawActualCoords.length) {
         const latest = route.ubicaciones[route.ubicaciones.length - 1];
         L.marker([latest.lat, latest.lng], { icon: gpsIcon() })
           .addTo(map)
