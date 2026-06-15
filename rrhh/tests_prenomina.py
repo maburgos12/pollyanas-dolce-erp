@@ -459,6 +459,28 @@ class PrenominaServiceTests(TestCase):
         self.assertEqual(corte.resumen["movimientos_pendientes_configuracion"], 1)
         self.assertEqual(corte.estado, PrenominaCorte.ESTADO_EN_REVISION)
 
+    def test_incidencia_resuelta_no_impacta_prenomina(self):
+        IncidenciaAsistencia.objects.create(
+            empleado=self.empleado,
+            fecha=date(2026, 6, 11),
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+            estado=IncidenciaAsistencia.ESTADO_RESUELTO,
+            severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+            detalle="Falta ya resuelta.",
+        )
+
+        corte = crear_corte_prenomina(
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 15),
+            fecha_corte=date(2026, 6, 15),
+            creado_por=self.user,
+        )
+        resumen = corte.resumenes.get(empleado=self.empleado)
+
+        self.assertEqual(resumen.faltas, 0)
+        self.assertEqual(resumen.alertas_bloqueantes, 0)
+        self.assertFalse(corte.movimientos.filter(empleado=self.empleado).exists())
+
     def test_recalcular_preserva_movimiento_manual_con_importe(self):
         corte = crear_corte_prenomina(
             fecha_inicio=date(2026, 6, 1),
@@ -490,3 +512,73 @@ class PrenominaServiceTests(TestCase):
         self.assertEqual(manual.referencia, "captura-manual")
         self.assertEqual(manual.notas, "Movimiento manual capturado por RRHH.")
         self.assertEqual(manual.metadata, {"origen": "manual"})
+
+    def test_recalcular_elimina_automatico_obsoleto_y_preserva_manual(self):
+        corte = crear_corte_prenomina(
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 15),
+            fecha_corte=date(2026, 6, 15),
+            creado_por=self.user,
+        )
+        automatico = PrenominaMovimiento.objects.create(
+            corte=corte,
+            empleado=self.empleado,
+            fecha=date(2026, 6, 12),
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_FALTA,
+            estado=PrenominaMovimiento.ESTADO_LISTO,
+            clave_contpaqi="F",
+            valor=Decimal("1"),
+            fuente_modelo="rrhh.IncidenciaAsistencia",
+            fuente_id="9999",
+            referencia="rrhh.IncidenciaAsistencia:9999",
+        )
+        manual = PrenominaMovimiento.objects.create(
+            corte=corte,
+            empleado=self.empleado,
+            fecha=date(2026, 6, 13),
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_INCAPACIDAD,
+            estado=PrenominaMovimiento.ESTADO_LISTO,
+            clave_contpaqi="INC",
+            importe=Decimal("100.00"),
+            referencia="manual-incapacidad",
+        )
+
+        recalcular_corte_prenomina(corte)
+
+        self.assertFalse(PrenominaMovimiento.objects.filter(pk=automatico.pk).exists())
+        self.assertTrue(PrenominaMovimiento.objects.filter(pk=manual.pk).exists())
+
+    def test_recalcular_no_permite_corte_exportado_o_cerrado(self):
+        corte = crear_corte_prenomina(
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 15),
+            fecha_corte=date(2026, 6, 15),
+            creado_por=self.user,
+        )
+        corte.estado = PrenominaCorte.ESTADO_EXPORTADO
+        corte.save(update_fields=["estado", "actualizado_en"])
+
+        with self.assertRaises(ValidationError):
+            recalcular_corte_prenomina(corte)
+
+    def test_movimiento_bloqueado_mantiene_corte_en_revision(self):
+        corte = crear_corte_prenomina(
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 15),
+            fecha_corte=date(2026, 6, 15),
+            creado_por=self.user,
+        )
+        PrenominaMovimiento.objects.create(
+            corte=corte,
+            empleado=self.empleado,
+            fecha=date(2026, 6, 13),
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_INCAPACIDAD,
+            estado=PrenominaMovimiento.ESTADO_BLOQUEADO,
+            clave_contpaqi="INC",
+            referencia="manual-bloqueado",
+        )
+
+        corte = recalcular_corte_prenomina(corte)
+
+        self.assertEqual(corte.resumen["movimientos_bloqueados"], 1)
+        self.assertEqual(corte.estado, PrenominaCorte.ESTADO_EN_REVISION)

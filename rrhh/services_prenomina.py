@@ -4,6 +4,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
 
@@ -78,6 +79,9 @@ def crear_corte_prenomina(
 @transaction.atomic
 def recalcular_corte_prenomina(corte: PrenominaCorte) -> PrenominaCorte:
     corte = PrenominaCorte.objects.select_for_update().get(pk=corte.pk)
+    if corte.estado in {PrenominaCorte.ESTADO_EXPORTADO, PrenominaCorte.ESTADO_CERRADO}:
+        raise ValidationError("No se puede recalcular un corte exportado o cerrado.")
+
     corte.resumenes.all().delete()
     corte.movimientos.filter(fuente_modelo__in=FUENTES_AUTOMATICAS).delete()
 
@@ -109,6 +113,8 @@ def recalcular_corte_prenomina(corte: PrenominaCorte) -> PrenominaCorte:
             corte.resumen.get("bloqueados", 0) == 0
             and corte.resumen.get("ajustes_pendientes", 0) == 0
             and corte.resumen.get("movimientos_pendientes_configuracion", 0) == 0
+            and corte.resumen.get("movimientos_bloqueados", 0) == 0
+            and corte.resumen.get("movimientos_exportados", 0) == 0
         )
         else PrenominaCorte.ESTADO_EN_REVISION
     )
@@ -373,5 +379,11 @@ def _resumen_corte(corte: PrenominaCorte) -> dict:
         "movimientos_listos": corte.movimientos.filter(estado=PrenominaMovimiento.ESTADO_LISTO).count(),
         "movimientos_pendientes_configuracion": corte.movimientos.filter(
             estado=PrenominaMovimiento.ESTADO_PENDIENTE_CONFIGURACION
+        ).count(),
+        "movimientos_bloqueados": corte.movimientos.filter(
+            estado=PrenominaMovimiento.ESTADO_BLOQUEADO
+        ).count(),
+        "movimientos_exportados": corte.movimientos.filter(
+            estado=PrenominaMovimiento.ESTADO_EXPORTADO
         ).count(),
     }
