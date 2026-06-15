@@ -420,6 +420,7 @@ RRHH_MODULE_TABS = [
     {"label": "Vacantes", "url_name": "rrhh:rrhh_vacantes", "key": "vacantes", "submodule": "vacantes"},
     {"label": "Préstamos", "url_name": "rrhh:rrhh_prestamos_lista", "key": "prestamos", "submodule": "prestamos"},
     {"label": "Nómina", "url_name": "rrhh:nomina", "key": "nomina", "submodule": "nomina"},
+    {"label": "Prenómina", "url_name": "rrhh:prenomina", "key": "prenomina", "submodule": "nomina"},
 ]
 
 

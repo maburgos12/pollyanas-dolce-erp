@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}RRHH · {{ corte.folio }}{% endblock %}
+{% block page_title %}RRHH · {{ corte.folio }}{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="card">
+  <div class="card-header">Mesa de cierre</div>
+  <div class="kpi-grid">
+    <article class="kpi-card">
+      <div class="kpi-number">{{ corte.resumen.colaboradores|default:0 }}</div>
+      <div class="kpi-label">Colaboradores</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ corte.resumen.faltas|default:0 }}</div>
+      <div class="kpi-label">Faltas</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ corte.resumen.retardos|default:0 }}</div>
+      <div class="kpi-label">Retardos</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ corte.resumen.ajustes_pendientes|default:0 }}</div>
+      <div class="kpi-label">Ajustes pendientes</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ corte.resumen.movimientos_pendientes_configuracion|default:0 }}</div>
+      <div class="kpi-label">Sin clave CONTPAQi</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ corte.resumen.movimientos_listos|default:0 }}</div>
+      <div class="kpi-label">Movimientos listos</div>
+    </article>
+  </div>
+  <div class="pd-u-d8a81eac84">
+    <a class="btn btn-secondary" href="{% url 'rrhh:prenomina_export_revision' corte.pk %}">Exportar revisión XLSX</a>
+    {% if can_manage_rrhh %}
+      <a class="btn btn-primary" href="{% url 'rrhh:prenomina_export_contpaqi' corte.pk %}">Exportar movimientos CONTPAQi</a>
+      <form method="post" class="inline-form">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="recalcular">
+        <button class="btn btn-secondary" type="submit">Recalcular</button>
+      </form>
+    {% endif %}
+  </div>
+  {% if export_blockers %}
+    <div class="muted">Exportación CONTPAQi detenida por: {{ export_blockers|join:", " }}.</div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">Colaboradores</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Empleado</th>
+          <th>Ingreso</th>
+          <th>Asistencias</th>
+          <th>Faltas</th>
+          <th>Retardos</th>
+          <th>Suspensiones</th>
+          <th>Horas extra</th>
+          <th>Ajustes</th>
+          <th>Estado</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in resumenes %}
+          <tr>
+            <td>{{ row.empleado.codigo }}</td>
+            <td>{{ row.empleado.nombre }}</td>
+            <td>{{ row.empleado.fecha_ingreso|date:"Y-m-d" }}</td>
+            <td>{{ row.dias_asistencia }} / {{ row.dias_laborables }}</td>
+            <td>{{ row.faltas }}</td>
+            <td>{{ row.retardos }}</td>
+            <td>{{ row.suspensiones }}</td>
+            <td>{{ row.horas_extra_autorizadas }}</td>
+            <td>{{ row.ajustes_pendientes }}</td>
+            <td><span class="module-chip {% if row.estado == 'LISTO' %}manage{% elif row.estado == 'REVISAR' %}pending{% else %}blocked{% endif %}">{{ row.get_estado_display }}</span></td>
+            <td><a class="btn btn-secondary btn-small" href="{% url 'rrhh:prenomina_persona' corte.pk row.empleado_id %}">Persona</a></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="11">Sin colaboradores en el corte.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Movimientos</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Empleado</th>
+          <th>Tipo</th>
+          <th>Clave CONTPAQi</th>
+          <th>Valor</th>
+          <th>Horas</th>
+          <th>Importe</th>
+          <th>Estado</th>
+          <th>Referencia</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for mov in movimientos %}
+          <tr>
+            <td>{{ mov.fecha|date:"Y-m-d" }}</td>
+            <td>{{ mov.empleado.nombre }}</td>
+            <td>{{ mov.get_tipo_movimiento_erp_display }}</td>
+            <td>{{ mov.clave_contpaqi|default:"-" }}</td>
+            <td>{{ mov.valor|default:"" }}</td>
+            <td>{{ mov.horas|default:"" }}</td>
+            <td>{{ mov.importe|default:"" }}</td>
+            <td>{{ mov.get_estado_display }}</td>
+            <td>{{ mov.referencia|default:"-" }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="9">Sin movimientos registrados.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

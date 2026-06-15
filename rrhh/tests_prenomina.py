@@ -7,6 +7,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
+from django.urls import reverse
 from django.utils import timezone
 from openpyxl import load_workbook
 
@@ -762,3 +763,112 @@ class PrenominaExportTests(TestCase):
         self.assertEqual(workbook["Resumen"]["A1"].value, "Campo")
         self.assertEqual(workbook["Empleados"]["A1"].value, "Codigo")
         self.assertEqual([cell.value for cell in workbook["Movimientos_CONTPAQi"][1]], MOVIMIENTOS_HEADERS)
+
+
+class PrenominaViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="paula-view",
+            is_superuser=True,
+            is_staff=True,
+        )
+        self.client.force_login(self.user)
+        self.empleado = Empleado.objects.create(
+            codigo="352",
+            nombre="ANAYA VIEW",
+            fecha_ingreso=date(2026, 6, 1),
+            activo=True,
+            sucursal="Matriz",
+        )
+
+    def _crear_corte(self, resumen=None):
+        corte = PrenominaCorte.objects.create(
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 15),
+            fecha_corte=date(2026, 6, 15),
+            creado_por=self.user,
+            resumen=resumen or {"colaboradores": 1, "movimientos_listos": 1},
+        )
+        PrenominaEmpleadoResumen.objects.create(
+            corte=corte,
+            empleado=self.empleado,
+            dias_periodo=15,
+            dias_laborables=15,
+            dias_asistencia=1,
+            estado=PrenominaEmpleadoResumen.ESTADO_LISTO,
+        )
+        return corte
+
+    def test_prenomina_list_renderiza_formulario_y_tab(self):
+        response = self.client.get(reverse("rrhh:prenomina"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Generar corte")
+        self.assertContains(response, "Prenómina")
+
+    def test_crear_corte_redirige_a_detalle(self):
+        response = self.client.post(
+            reverse("rrhh:prenomina"),
+            {
+                "fecha_inicio": "2026-06-01",
+                "fecha_fin": "2026-06-15",
+                "fecha_corte": "2026-06-15",
+                "tipo_periodo": PrenominaCorte.TIPO_QUINCENAL,
+            },
+        )
+        corte = PrenominaCorte.objects.get()
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("rrhh:prenomina_detail", kwargs={"pk": corte.pk}))
+
+    def test_prenomina_detail_renderiza_tablas_y_recalcula(self):
+        corte = self._crear_corte()
+
+        response = self.client.get(reverse("rrhh:prenomina_detail", kwargs={"pk": corte.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Mesa de cierre")
+        self.assertContains(response, "Colaboradores")
+
+        response = self.client.post(
+            reverse("rrhh:prenomina_detail", kwargs={"pk": corte.pk}),
+            {"action": "recalcular"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("rrhh:prenomina_detail", kwargs={"pk": corte.pk}))
+
+    def test_prenomina_persona_renderiza_version_imprimible(self):
+        corte = self._crear_corte()
+
+        response = self.client.get(
+            reverse("rrhh:prenomina_persona", kwargs={"pk": corte.pk, "empleado_id": self.empleado.pk})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "REVISIÓN INDIVIDUAL DE PRENÓMINA")
+        self.assertContains(response, self.empleado.nombre)
+        self.assertContains(response, "Imprimir")
+
+    def test_export_revision_responde_xlsx(self):
+        corte = self._crear_corte()
+
+        response = self.client.get(reverse("rrhh:prenomina_export_revision", kwargs={"pk": corte.pk}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", response["Content-Type"])
+        self.assertIn(f"{corte.folio}_revision_prenomina.xlsx", response["Content-Disposition"])
+
+    def test_export_contpaqi_bloquea_si_hay_pendientes(self):
+        corte = self._crear_corte(resumen={"movimientos_pendientes_configuracion": 1})
+        PrenominaMovimiento.objects.create(
+            corte=corte,
+            empleado=self.empleado,
+            fecha=date(2026, 6, 11),
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_FALTA,
+            estado=PrenominaMovimiento.ESTADO_PENDIENTE_CONFIGURACION,
+            valor=Decimal("1.00"),
+        )
+
+        response = self.client.get(reverse("rrhh:prenomina_export_contpaqi", kwargs={"pk": corte.pk}))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("rrhh:prenomina_detail", kwargs={"pk": corte.pk}))
