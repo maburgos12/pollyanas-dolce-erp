@@ -1227,6 +1227,48 @@ class RRHHViewsTests(TestCase):
         self.assertEqual(repartidor.sucursal, sucursal)
         self.assertEqual(str(repartidor), "VALDEZ FÉLIX REY IVÁN")
 
+    def test_baja_desactiva_empleado_usuario_y_repartidor_operativo(self):
+        from api.logistica_views import _can_operate_pwa
+        from logistica.models import Repartidor
+
+        sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        usuario = User.objects.create_user(username="rep.baja", password="pass123")
+        usuario.groups.add(Group.objects.get_or_create(name="repartidor")[0])
+        empleado = Empleado.objects.create(
+            nombre="REPARTIDOR BAJA",
+            fecha_ingreso=timezone.localdate(),
+            area="REPARTIDORES",
+            puesto_operativo="REPARTIDOR",
+            usuario_erp=usuario,
+            activo=True,
+        )
+        Repartidor.objects.create(user=usuario, sucursal=sucursal)
+
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "baja",
+                "empleado": str(empleado.id),
+                "fecha_baja": "2026-06-15",
+                "motivo": EmpleadoBaja.MOTIVO_OTRO,
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(EmpleadoBaja.objects.filter(empleado=empleado).exists())
+        empleado.refresh_from_db()
+        usuario.refresh_from_db()
+        self.assertFalse(empleado.activo)
+        self.assertFalse(usuario.is_active)
+        self.assertFalse(usuario.groups.filter(name__iexact="repartidor").exists())
+        self.assertFalse(_can_operate_pwa(usuario))
+
+        activos = self.client.get(reverse("rrhh:empleados"))
+        self.assertNotIn(empleado.id, [e.id for e in activos.context["empleados"]])
+        inactivos = self.client.get(reverse("rrhh:empleados"), {"estado": "inactivos"})
+        self.assertIn(empleado.id, [e.id for e in inactivos.context["empleados"]])
+
     def test_empleados_crea_usuario_repartidor_con_password_y_licencia(self):
         from logistica.models import Repartidor
 

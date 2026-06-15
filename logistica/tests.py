@@ -267,6 +267,19 @@ class LogisticaViewsTests(TestCase):
         self.assertNotContains(resp_post, "Cadena documental ERP")
         self.assertNotContains(resp_post, "Mesa de gobierno ERP")
 
+    def test_rutas_selector_omite_repartidores_con_usuario_inactivo(self):
+        sucursal = Sucursal.objects.create(nombre="Sucursal Centro", codigo="SC01")
+        activo_user = User.objects.create_user(username="rep.activo", password="pass123")
+        inactivo_user = User.objects.create_user(username="rep.inactivo", password="pass123", is_active=False)
+        activo = Repartidor.objects.create(user=activo_user, sucursal=sucursal)
+        inactivo = Repartidor.objects.create(user=inactivo_user, sucursal=sucursal)
+
+        resp = self.client.get(reverse("logistica:rutas"))
+
+        ids = {repartidor.id for repartidor in resp.context["repartidores"]}
+        self.assertIn(activo.id, ids)
+        self.assertNotIn(inactivo.id, ids)
+
     def test_rutas_create_requires_route_points(self):
         resp_post = self.client.post(
             reverse("logistica:rutas"),

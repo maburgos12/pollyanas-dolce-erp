@@ -1622,7 +1622,7 @@ def rutas(request):
         else:
             repartidor_id = (request.POST.get("repartidor") or "").strip()
             unidad_id = (request.POST.get("unidad_operativa") or "").strip()
-            repartidor = Repartidor.objects.filter(pk=int(repartidor_id)).first() if repartidor_id.isdigit() else None
+            repartidor = Repartidor.objects.filter(pk=int(repartidor_id), user__is_active=True).first() if repartidor_id.isdigit() else None
             unidad_operativa = Unidad.objects.filter(pk=int(unidad_id), activa=True).first() if unidad_id.isdigit() else None
             puntos = PuntoLogistico.objects.filter(pk__in=puntos_ruta_ids, activo=True)
             puntos_by_id = {str(punto.id): punto for punto in puntos}
@@ -1786,7 +1786,7 @@ def rutas(request):
         "date_from": date_from.isoformat() if date_from else "",
         "date_to": date_to.isoformat() if date_to else "",
         "estatus_choices": RutaEntrega.ESTATUS_CHOICES,
-        "repartidores": Repartidor.objects.select_related("user", "user__empleado_rrhh", "unidad_asignada").order_by("user__first_name", "user__username"),
+        "repartidores": Repartidor.objects.filter(user__is_active=True).select_related("user", "user__empleado_rrhh", "unidad_asignada").order_by("user__first_name", "user__username"),
         "unidades": Unidad.objects.filter(activa=True).order_by("codigo"),
         "puntos_creacion": PuntoLogistico.objects.filter(activo=True).select_related("sucursal").order_by("tipo", "nombre"),
         "totales": {
@@ -1911,7 +1911,7 @@ def ruta_detail(request, pk: int):
         if action == "update_plan":
             repartidor_id = (request.POST.get("repartidor") or "").strip()
             unidad_id = (request.POST.get("unidad_operativa") or "").strip()
-            repartidor = Repartidor.objects.filter(pk=int(repartidor_id)).first() if repartidor_id.isdigit() else None
+            repartidor = Repartidor.objects.filter(pk=int(repartidor_id), user__is_active=True).first() if repartidor_id.isdigit() else None
             unidad_operativa = Unidad.objects.filter(pk=int(unidad_id), activa=True).first() if unidad_id.isdigit() else None
             if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA and (
                 not repartidor
@@ -2372,7 +2372,7 @@ def ruta_detail(request, pk: int):
         "pedidos": pedidos_disponibles,
         "estatus_ruta_choices": _ruta_status_choices_for(ruta),
         "estatus_entrega_choices": EntregaRuta.ESTATUS_CHOICES,
-        "repartidores": Repartidor.objects.select_related("user", "user__empleado_rrhh", "unidad_asignada").order_by("user__first_name", "user__username"),
+        "repartidores": Repartidor.objects.filter(user__is_active=True).select_related("user", "user__empleado_rrhh", "unidad_asignada").order_by("user__first_name", "user__username"),
         "unidades": Unidad.objects.filter(activa=True).order_by("codigo"),
         "puntos_logisticos": PuntoLogistico.objects.filter(activo=True).select_related("sucursal").order_by("tipo", "nombre"),
         "paradas": ruta.paradas.select_related("punto", "punto__sucursal").order_by("orden", "id"),
@@ -2806,7 +2806,7 @@ def reporte_crear(request):
         raise PermissionDenied("No tienes permisos para crear reportes de Logística")
 
     unidades = Unidad.objects.filter(activa=True).order_by("codigo")
-    repartidores = Repartidor.objects.select_related("user", "user__empleado_rrhh").order_by("user__first_name", "user__username")
+    repartidores = Repartidor.objects.filter(user__is_active=True).select_related("user", "user__empleado_rrhh").order_by("user__first_name", "user__username")
 
     if request.method == "POST":
         unidad_id = (request.POST.get("unidad") or "").strip()
@@ -2835,7 +2835,7 @@ def reporte_crear(request):
 
         repartidor = None
         if repartidor_id:
-            repartidor = Repartidor.objects.filter(pk=repartidor_id).first()
+            repartidor = Repartidor.objects.filter(pk=repartidor_id, user__is_active=True).first()
 
         kilometraje = None
         if kilometraje_raw:
@@ -2955,7 +2955,7 @@ def bitacoras_lista(request):
             "combustible_total": combustible_total,
             "cargas_combustible": cargas_combustible,
             "unidades": Unidad.objects.filter(activa=True).order_by("codigo"),
-            "repartidores": Repartidor.objects.select_related("user").order_by("user__first_name", "user__username"),
+            "repartidores": Repartidor.objects.filter(user__is_active=True).select_related("user").order_by("user__first_name", "user__username"),
             "filters": {
                 "unidad": unidad_id,
                 "repartidor": repartidor_id,

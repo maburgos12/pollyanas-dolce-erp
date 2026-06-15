@@ -48,7 +48,12 @@ class RRHHEmpleadosView(_RRHHBaseView):
         limit = self._bounded_int(request.query_params.get("limit"), default=50, min_value=1, max_value=500)
         offset = self._bounded_int(request.query_params.get("offset"), default=0, min_value=0, max_value=100000)
 
-        qs = Empleado.objects.all()
+        if activo_raw in {"0", "false", "no"}:
+            qs = Empleado.objects.filter(activo=False)
+        elif activo_raw in {"all", "todos"} and can_manage_rrhh(request.user):
+            qs = Empleado.objects.all()  # rrhh-allow-inactive-history: endpoint administrativo explicito
+        else:
+            qs = Empleado.objects.filter(activo=True)
         if area:
             qs = qs.filter(area__iexact=area)
         if sucursal:
@@ -65,11 +70,6 @@ class RRHHEmpleadosView(_RRHHBaseView):
                 | Q(area__icontains=q)
                 | Q(puesto__icontains=q)
             )
-        if activo_raw in {"1", "true", "yes"}:
-            qs = qs.filter(activo=True)
-        elif activo_raw in {"0", "false", "no"}:
-            qs = qs.filter(activo=False)
-
         total = qs.count()
         rows = list(qs.order_by("nombre", "id")[offset : offset + limit])
         return Response(
@@ -108,7 +108,7 @@ class RRHHEmpleadosSinAsignarView(_RRHHBaseView):
             return Response({"detail": "No tienes permisos para consultar RRHH."}, status=status.HTTP_403_FORBIDDEN)
 
         area = (request.query_params.get("area") or "").strip()
-        qs = Empleado.objects.filter(Q(sucursal="") | Q(sucursal__isnull=True))
+        qs = Empleado.objects.filter(activo=True).filter(Q(sucursal="") | Q(sucursal__isnull=True))
         if area:
             qs = qs.filter(area__iexact=area)
         else:
@@ -130,7 +130,7 @@ class RRHHEmpleadoAsignarSucursalView(_RRHHBaseView):
         if not can_manage_rrhh(request.user):
             return Response({"detail": "No tienes permisos para editar RRHH."}, status=status.HTTP_403_FORBIDDEN)
 
-        empleado = get_object_or_404(Empleado, pk=empleado_id)
+        empleado = get_object_or_404(Empleado, pk=empleado_id, activo=True)
         sucursal_nombre = (request.data.get("sucursal") or "").strip()
         area_detalle = (request.data.get("area_detalle") or "").strip().upper()
         update_fields = ["updated_at"]

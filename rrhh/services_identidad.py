@@ -113,6 +113,31 @@ def asegurar_identidad_operativa_empleado(
     return result
 
 
+@transaction.atomic
+def desactivar_identidad_operativa_empleado(empleado: Empleado) -> dict[str, bool]:
+    result = {"empleado_deactivated": False, "user_deactivated": False, "repartidor_group_removed": False}
+    if empleado.activo:
+        empleado.activo = False
+        empleado.save(update_fields=["activo", "updated_at"])
+        result["empleado_deactivated"] = True
+
+    user = empleado.usuario_erp
+    if not user:
+        return result
+
+    if user.is_active:
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+        result["user_deactivated"] = True
+
+    grupos_repartidor = list(user.groups.filter(name__iexact="repartidor"))
+    if grupos_repartidor:
+        user.groups.remove(*grupos_repartidor)
+        result["repartidor_group_removed"] = True
+
+    return result
+
+
 def asegurar_repartidor_logistica(empleado: Empleado, *, sucursal: Sucursal | None = None) -> bool:
     if not empleado.usuario_erp_id or (empleado.puesto_operativo or "").strip().upper() != "REPARTIDOR":
         return False

@@ -106,7 +106,7 @@ class _LogisticaBaseView(APIView):
 
 
 def _has_group(user, group_name: str) -> bool:
-    if not user or not user.is_authenticated:
+    if not user or not user.is_authenticated or not user.is_active:
         return False
     target = group_name.lower()
     return user.is_superuser or user.groups.filter(name__iexact=target).exists()
@@ -133,6 +133,8 @@ def _can_view_all_reportes(user) -> bool:
 
 
 def _get_repartidor_for_user(user) -> Repartidor | None:
+    if not user or not user.is_authenticated or not user.is_active:
+        return None
     try:
         return user.repartidor_logistica
     except Repartidor.DoesNotExist:
