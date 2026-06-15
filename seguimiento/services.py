@@ -500,15 +500,27 @@ class AgenteDGSeguimientoImporter:
         if not checklist_payload:
             item.checklist.all().delete()
             return
-        existing = {check.orden: check for check in item.checklist.all()}
-        desired_orders = set()
+        existing_checks = list(item.checklist.all())
+        existing_by_order = {check.orden: check for check in existing_checks}
+        existing_by_step = {
+            check.origen_step_id: check
+            for check in existing_checks
+            if check.origen_step_id
+        }
+        desired_check_ids = set()
         for index, payload in enumerate(checklist_payload, start=1):
             titulo_completo = (payload.get("titulo") or "").strip()
             if not titulo_completo:
                 continue
             titulo = _truncate_for_charfield(titulo_completo, CHECKLIST_TITULO_MAX_LENGTH)
-            desired_orders.add(index)
-            check = existing.get(index)
+            origen_step_id = payload.get("origen_step_id")
+            check = existing_by_step.get(origen_step_id) if origen_step_id else None
+            if check and check.pk in desired_check_ids:
+                check = None
+            if not check:
+                check = existing_by_order.get(index)
+                if check and check.pk in desired_check_ids:
+                    check = None
             # Resolver el aprobador del ERP desde e-mail o nombre (datos del Agente DG)
             aprobador_user = self._resolver_aprobador_user(
                 payload.get("aprobador_email") or "",
@@ -531,6 +543,7 @@ class AgenteDGSeguimientoImporter:
                 "sub_checklist": sub_checklist_de_paso(payload.get("checklist_items_json"), payload.get("entregable")),
             }
             if check:
+                check.orden = index
                 for key, value in defaults.items():
                     setattr(check, key, value)
                 if check.completado:
@@ -539,11 +552,13 @@ class AgenteDGSeguimientoImporter:
                     check.completado_por = None
                     check.completado_at = None
                 check.save()
+                desired_check_ids.add(check.pk)
             else:
                 if defaults["completado"]:
                     defaults["completado_at"] = agente_dg_as_datetime(payload.get("completado_at") or payload.get("completed_at")) or timezone.now()
-                SeguimientoChecklistItem.objects.create(seguimiento=item, orden=index, **defaults)
-        item.checklist.exclude(orden__in=desired_orders).delete()
+                check = SeguimientoChecklistItem.objects.create(seguimiento=item, orden=index, **defaults)
+                desired_check_ids.add(check.pk)
+        item.checklist.exclude(pk__in=desired_check_ids).delete()
 
 
 def upsert_agente_dg_payload(payload: dict) -> dict[str, int]:

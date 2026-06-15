@@ -518,6 +518,12 @@ def seguimiento_compromisos(request):
 def toggle_checklist(request, pk, check_id):
     item = _get_item_para_usuario(request.user, pk)
     check = get_object_or_404(SeguimientoChecklistItem, pk=check_id, seguimiento=item)
+    if check.origen_step_id:
+        messages.error(
+            request,
+            "Este paso viene de app.pollyanasdolce.com; abre el detalle para usar el flujo sincronizado.",
+        )
+        return redirect("seguimiento:detalle", pk=item.pk)
     checks = list(item.checklist.all())  # ordenado por (orden, id) según Meta
 
     # Orden secuencial: los pasos se completan en orden y se deshacen en orden inverso.

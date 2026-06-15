@@ -107,6 +107,39 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertTrue(self.check.completado)
         self.assertEqual(self.check.completado_por, self.user)
 
+    def test_paso_agente_dg_no_acepta_toggle_local(self):
+        self.item.tipo = SeguimientoItem.TIPO_PROYECTO
+        self.item.origen = "Agente DG"
+        self.item.metadata = {"source": "agente_dg", "source_table": "minute_projects", "source_id": 9}
+        self.item.save(update_fields=["tipo", "origen", "metadata"])
+        self.check.origen_step_id = 14
+        self.check.estatus_origen = "READY"
+        self.check.save(update_fields=["origen_step_id", "estatus_origen"])
+
+        response = self.client.post(f"/seguimiento/{self.item.pk}/checklist/{self.check.pk}/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], f"/seguimiento/{self.item.pk}/")
+        self.check.refresh_from_db()
+        self.assertFalse(self.check.completado)
+        self.assertFalse(Notificacion.objects.filter(objeto_id=str(self.item.pk), tipo=Notificacion.TIPO_SEGUIMIENTO).exists())
+
+    def test_mi_trabajo_no_expone_toggle_local_para_paso_agente_dg(self):
+        self.item.tipo = SeguimientoItem.TIPO_PROYECTO
+        self.item.origen = "Agente DG"
+        self.item.metadata = {"source": "agente_dg", "source_table": "minute_projects", "source_id": 9}
+        self.item.save(update_fields=["tipo", "origen", "metadata"])
+        self.check.origen_step_id = 14
+        self.check.estatus_origen = "READY"
+        self.check.save(update_fields=["origen_step_id", "estatus_origen"])
+
+        response = self.client.get("/seguimiento/")
+        content = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(f'action="/seguimiento/{self.item.pk}/checklist/{self.check.pk}/"', content)
+        self.assertIn(f'href="/seguimiento/{self.item.pk}/"', content)
+
     def test_usuario_ajeno_no_ve_ni_actualiza_acuerdo(self):
         otro = get_user_model().objects.create_user(username="usuario.ajeno", password="test12345")
         self.client.force_login(otro)
@@ -697,6 +730,55 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertFalse(checks[0].completado)
         self.assertIsNone(checks[0].completado_por)
         self.assertIsNone(checks[0].completado_at)
+
+    def test_importador_preserva_identidad_de_pasos_por_origen_step_id_al_reordenar(self):
+        command = ImportarAgenteDGCommand()
+        counters = {"created": 0, "updated": 0, "skipped": 0}
+        row = {
+            "id": 10,
+            "titulo": "Proyecto reordenado",
+            "descripcion": "Validar reorden de pasos",
+            "expected_deliverable": "",
+            "status": "IN_PROGRESS",
+            "target_date": timezone.now() + timedelta(days=5),
+            "user_email": self.user.email,
+            "user_name": self.user.get_full_name(),
+            "user_id": 4,
+            "area_name": "Proyecto",
+        }
+        command._upsert_item(
+            row,
+            "minute_projects",
+            SeguimientoItem.TIPO_PROYECTO,
+            counters,
+            checklist=[
+                {"titulo": "Paso uno", "origen_step_id": 101, "descripcion": "", "completado": False},
+                {"titulo": "Paso dos", "origen_step_id": 102, "descripcion": "", "completado": False},
+            ],
+        )
+        item = SeguimientoItem.objects.get(titulo="Proyecto reordenado")
+        pk_by_step = {check.origen_step_id: check.pk for check in item.checklist.all()}
+
+        command._upsert_item(
+            row,
+            "minute_projects",
+            SeguimientoItem.TIPO_PROYECTO,
+            counters,
+            checklist=[
+                {"titulo": "Paso dos actualizado", "origen_step_id": 102, "descripcion": "", "completado": False},
+                {"titulo": "Paso uno actualizado", "origen_step_id": 101, "descripcion": "", "completado": True},
+            ],
+        )
+
+        checks = list(item.checklist.order_by("orden"))
+        self.assertEqual(len(checks), 2)
+        self.assertEqual(checks[0].origen_step_id, 102)
+        self.assertEqual(checks[0].pk, pk_by_step[102])
+        self.assertEqual(checks[0].titulo, "Paso dos actualizado")
+        self.assertEqual(checks[1].origen_step_id, 101)
+        self.assertEqual(checks[1].pk, pk_by_step[101])
+        self.assertEqual(checks[1].titulo, "Paso uno actualizado")
+        self.assertTrue(checks[1].completado)
 
     def test_importador_trunca_titulo_de_checklist_largo_y_preserva_texto(self):
         command = ImportarAgenteDGCommand()

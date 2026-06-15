@@ -239,12 +239,18 @@
             <div class="seguimiento-action-panel">
               <div class="seguimiento-checks">
                 {% for check in item.checklist.all %}
+                {% if check.origen_step_id %}
+                <a class="seguimiento-action-button {% if check.completado %}is-done{% endif %}" href="{% url 'seguimiento:detalle' item.pk %}">
+                  {% if check.completado %}Listo{% else %}Pendiente{% endif %}: {{ check.titulo }}
+                </a>
+                {% else %}
                 <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk check.pk %}">
                   {% csrf_token %}
                   <button class="seguimiento-action-button {% if check.completado %}is-done{% endif %}" type="submit">
                     {% if check.completado %}Listo{% else %}Pendiente{% endif %}: {{ check.titulo }}
                   </button>
                 </form>
+                {% endif %}
                 {% empty %}
                 <span class="bi-summary-chip"><span>Checklist</span><strong>Sin checklist</strong></span>
                 {% endfor %}
