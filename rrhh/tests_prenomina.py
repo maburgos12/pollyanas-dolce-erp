@@ -862,6 +862,127 @@ class PrenominaViewTests(TestCase):
         self.assertContains(response, self.empleado.nombre)
         self.assertContains(response, "Imprimir")
 
+    def test_prenomina_ajuste_crear_post_crea_pendiente(self):
+        corte = self._crear_corte()
+
+        response = self.client.post(
+            reverse("rrhh:prenomina_ajuste_crear", kwargs={"pk": corte.pk, "empleado_id": self.empleado.pk}),
+            {
+                "fecha": "2026-06-11",
+                "tipo_ajuste": AjusteAsistencia.TIPO_SALIDA,
+                "valor_propuesto": "2026-06-11T18:05",
+                "motivo": "Salida registrada por RRHH",
+            },
+        )
+
+        ajuste = AjusteAsistencia.objects.get()
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.url,
+            reverse("rrhh:prenomina_persona", kwargs={"pk": corte.pk, "empleado_id": self.empleado.pk}),
+        )
+        self.assertEqual(ajuste.estado, AjusteAsistencia.ESTADO_PENDIENTE)
+        self.assertEqual(ajuste.tipo_ajuste, AjusteAsistencia.TIPO_SALIDA)
+        self.assertEqual(ajuste.valores_propuestos["salida"], "2026-06-11T18:05")
+
+    def test_prenomina_ajuste_aprobar_post_aplica_y_actualiza_asistencia(self):
+        corte = self._crear_corte()
+        fecha = date(2026, 6, 11)
+        ajuste = crear_ajuste_asistencia(
+            self.empleado,
+            fecha,
+            AjusteAsistencia.TIPO_SALIDA,
+            {"salida": "2026-06-11T18:05"},
+            "Corregir salida",
+            self.user,
+        )
+
+        response = self.client.post(
+            reverse("rrhh:prenomina_ajuste_aprobar", kwargs={"pk": corte.pk, "ajuste_id": ajuste.pk}),
+            {"comentario": "Validado contra checador"},
+        )
+
+        ajuste.refresh_from_db()
+        asistencia = AsistenciaEmpleado.objects.get(empleado=self.empleado, fecha=fecha)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.url,
+            reverse("rrhh:prenomina_persona", kwargs={"pk": corte.pk, "empleado_id": self.empleado.pk}),
+        )
+        self.assertEqual(ajuste.estado, AjusteAsistencia.ESTADO_APLICADO)
+        self.assertEqual(ajuste.comentario_autorizacion, "Validado contra checador")
+        self.assertEqual(timezone.localtime(asistencia.salida).time().replace(second=0, microsecond=0), time(18, 5))
+
+    def test_prenomina_ajuste_rechazar_post_no_aplica_asistencia(self):
+        corte = self._crear_corte()
+        fecha = date(2026, 6, 11)
+        salida_original = aware(fecha, time(17, 30))
+        asistencia = AsistenciaEmpleado.objects.create(empleado=self.empleado, fecha=fecha, salida=salida_original)
+        ajuste = crear_ajuste_asistencia(
+            self.empleado,
+            fecha,
+            AjusteAsistencia.TIPO_SALIDA,
+            {"salida": "2026-06-11T18:05"},
+            "No coincide con checador",
+            self.user,
+        )
+
+        response = self.client.post(
+            reverse("rrhh:prenomina_ajuste_rechazar", kwargs={"pk": corte.pk, "ajuste_id": ajuste.pk}),
+            {"comentario": "Sin evidencia"},
+        )
+
+        ajuste.refresh_from_db()
+        asistencia.refresh_from_db()
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(ajuste.estado, AjusteAsistencia.ESTADO_RECHAZADO)
+        self.assertEqual(ajuste.comentario_autorizacion, "Sin evidencia")
+        self.assertEqual(asistencia.salida, salida_original)
+
+    def test_usuario_solo_lectura_no_puede_crear_aprobar_ni_rechazar_ajustes(self):
+        corte = self._crear_corte()
+        ajuste = crear_ajuste_asistencia(
+            self.empleado,
+            date(2026, 6, 11),
+            AjusteAsistencia.TIPO_SALIDA,
+            {"salida": "2026-06-11T18:05"},
+            "Corregir salida",
+            self.user,
+        )
+        viewer = User.objects.create_user(username="paula-ajustes-view-only")
+        UserModuleAccess.objects.create(
+            user=viewer,
+            module="rrhh",
+            access=UserModuleAccess.ACCESS_VIEW,
+            updated_by=self.user,
+        )
+
+        self.client.force_login(viewer)
+        crear_response = self.client.post(
+            reverse("rrhh:prenomina_ajuste_crear", kwargs={"pk": corte.pk, "empleado_id": self.empleado.pk}),
+            {
+                "fecha": "2026-06-11",
+                "tipo_ajuste": AjusteAsistencia.TIPO_SALIDA,
+                "valor_propuesto": "2026-06-11T18:05",
+                "motivo": "Intento view only",
+            },
+        )
+        aprobar_response = self.client.post(
+            reverse("rrhh:prenomina_ajuste_aprobar", kwargs={"pk": corte.pk, "ajuste_id": ajuste.pk}),
+            {"comentario": "No autorizado"},
+        )
+        rechazar_response = self.client.post(
+            reverse("rrhh:prenomina_ajuste_rechazar", kwargs={"pk": corte.pk, "ajuste_id": ajuste.pk}),
+            {"comentario": "No autorizado"},
+        )
+
+        ajuste.refresh_from_db()
+        self.assertEqual(crear_response.status_code, 403)
+        self.assertEqual(aprobar_response.status_code, 403)
+        self.assertEqual(rechazar_response.status_code, 403)
+        self.assertEqual(AjusteAsistencia.objects.count(), 1)
+        self.assertEqual(ajuste.estado, AjusteAsistencia.ESTADO_PENDIENTE)
+
     def test_export_revision_responde_xlsx(self):
         corte = self._crear_corte()
 

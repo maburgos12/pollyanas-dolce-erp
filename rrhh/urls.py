@@ -39,6 +39,21 @@ urlpatterns = [
     path("prenomina/", views_prenomina.prenomina, name="prenomina"),
     path("prenomina/<int:pk>/", views_prenomina.prenomina_detail, name="prenomina_detail"),
     path("prenomina/<int:pk>/empleado/<int:empleado_id>/", views_prenomina.prenomina_persona, name="prenomina_persona"),
+    path(
+        "prenomina/<int:pk>/empleado/<int:empleado_id>/ajuste/",
+        views_prenomina.prenomina_ajuste_crear,
+        name="prenomina_ajuste_crear",
+    ),
+    path(
+        "prenomina/<int:pk>/ajuste/<int:ajuste_id>/aprobar/",
+        views_prenomina.prenomina_ajuste_aprobar,
+        name="prenomina_ajuste_aprobar",
+    ),
+    path(
+        "prenomina/<int:pk>/ajuste/<int:ajuste_id>/rechazar/",
+        views_prenomina.prenomina_ajuste_rechazar,
+        name="prenomina_ajuste_rechazar",
+    ),
     path("prenomina/<int:pk>/export/revision/", views_prenomina.prenomina_export_revision, name="prenomina_export_revision"),
     path("prenomina/<int:pk>/export/contpaqi/", views_prenomina.prenomina_export_contpaqi, name="prenomina_export_contpaqi"),
     path("app/", views.pwa_capital_humano, name="rrhh_pwa"),

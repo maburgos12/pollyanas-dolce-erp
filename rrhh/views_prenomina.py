@@ -9,13 +9,38 @@ from django.utils.dateparse import parse_date
 
 from core.access import can_manage_rrhh, can_view_rrhh
 from rrhh.exporters.contpaqi_prenomina import export_movimientos_contpaqi_xlsx, export_revision_xlsx
-from rrhh.models import PrenominaCorte, PrenominaEmpleadoResumen, PrenominaMovimiento
+from rrhh.models import AjusteAsistencia, PrenominaCorte, PrenominaEmpleadoResumen, PrenominaMovimiento
+from rrhh.services_ajustes_asistencia import (
+    TIPOS_A_CAMPOS,
+    aprobar_ajuste_asistencia,
+    crear_ajuste_asistencia,
+    rechazar_ajuste_asistencia,
+)
 from rrhh.services_prenomina import crear_corte_prenomina, recalcular_corte_prenomina
 from rrhh.views import _module_tabs
+
+TIPOS_AJUSTE_PRENOMINA = [
+    (AjusteAsistencia.TIPO_ENTRADA, "Entrada"),
+    (AjusteAsistencia.TIPO_SALIDA, "Salida"),
+    (AjusteAsistencia.TIPO_SALIDA_COMIDA, "Salida comida"),
+    (AjusteAsistencia.TIPO_REGRESO_COMIDA, "Regreso comida"),
+]
 
 
 def _parse_fecha(value, default=None):
     return parse_date((value or "").strip()) or default
+
+
+def _validation_message(exc: ValidationError) -> str:
+    return "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
+
+
+def _recalcular_corte_con_mensaje(request, corte: PrenominaCorte) -> PrenominaCorte:
+    try:
+        return recalcular_corte_prenomina(corte)
+    except ValidationError as exc:
+        messages.warning(request, f"El ajuste se guardó, pero el corte no se pudo recalcular: {_validation_message(exc)}")
+        return corte
 
 
 def _contador_resumen(resumen: dict, key: str) -> int:
@@ -129,9 +154,115 @@ def prenomina_persona(request, pk, empleado_id):
             "module_tabs": _module_tabs("prenomina", request.user),
             "corte": corte,
             "resumen": resumen,
+            "can_manage_rrhh": can_manage_rrhh(request.user),
+            "tipo_ajuste_choices": TIPOS_AJUSTE_PRENOMINA,
+            "ajustes": AjusteAsistencia.objects.filter(
+                empleado_id=empleado_id,
+                fecha__gte=corte.fecha_inicio,
+                fecha__lte=corte.fecha_fin,
+            ).select_related("solicitado_por", "autorizado_por").order_by("-fecha", "-id"),
             "movimientos": corte.movimientos.filter(empleado_id=empleado_id).order_by("fecha", "tipo_movimiento_erp", "id"),
         },
     )
+
+
+@login_required
+def prenomina_ajuste_crear(request, pk, empleado_id):
+    if not can_manage_rrhh(request.user):
+        raise PermissionDenied("No tienes permisos para crear ajustes de asistencia.")
+    corte = get_object_or_404(PrenominaCorte, pk=pk)
+    resumen = get_object_or_404(
+        PrenominaEmpleadoResumen.objects.select_related("empleado"),
+        corte=corte,
+        empleado_id=empleado_id,
+    )
+    redirect_url = redirect("rrhh:prenomina_persona", pk=corte.pk, empleado_id=resumen.empleado_id)
+    if request.method != "POST":
+        return redirect_url
+
+    fecha = _parse_fecha(request.POST.get("fecha"))
+    tipo_ajuste = (request.POST.get("tipo_ajuste") or "").strip()
+    valor_propuesto = (request.POST.get("valor_propuesto") or "").strip()
+    motivo = (request.POST.get("motivo") or "").strip()
+
+    if not fecha or fecha < corte.fecha_inicio or fecha > corte.fecha_fin:
+        messages.error(request, "Captura una fecha dentro del periodo del corte.")
+        return redirect_url
+    if tipo_ajuste not in TIPOS_A_CAMPOS:
+        messages.error(request, "Selecciona un tipo de ajuste válido.")
+        return redirect_url
+    if not valor_propuesto:
+        messages.error(request, "Captura el valor propuesto del ajuste.")
+        return redirect_url
+
+    try:
+        ajuste = crear_ajuste_asistencia(
+            resumen.empleado,
+            fecha,
+            tipo_ajuste,
+            {TIPOS_A_CAMPOS[tipo_ajuste]: valor_propuesto},
+            motivo,
+            request.user,
+        )
+    except ValidationError as exc:
+        messages.error(request, _validation_message(exc))
+        return redirect_url
+
+    _recalcular_corte_con_mensaje(request, corte)
+    messages.success(request, f"Ajuste de asistencia solicitado para {ajuste.fecha:%Y-%m-%d}.")
+    return redirect_url
+
+
+@login_required
+def prenomina_ajuste_aprobar(request, pk, ajuste_id):
+    if not can_manage_rrhh(request.user):
+        raise PermissionDenied("No tienes permisos para aprobar ajustes de asistencia.")
+    corte = get_object_or_404(PrenominaCorte, pk=pk)
+    ajuste = get_object_or_404(
+        AjusteAsistencia.objects.select_related("empleado"),
+        pk=ajuste_id,
+        fecha__gte=corte.fecha_inicio,
+        fecha__lte=corte.fecha_fin,
+    )
+    redirect_url = redirect("rrhh:prenomina_persona", pk=corte.pk, empleado_id=ajuste.empleado_id)
+    if request.method != "POST":
+        return redirect_url
+
+    try:
+        aprobar_ajuste_asistencia(ajuste, request.user, comentario=request.POST.get("comentario", ""))
+    except ValidationError as exc:
+        messages.error(request, _validation_message(exc))
+        return redirect_url
+
+    _recalcular_corte_con_mensaje(request, corte)
+    messages.success(request, "Ajuste de asistencia aprobado y aplicado.")
+    return redirect_url
+
+
+@login_required
+def prenomina_ajuste_rechazar(request, pk, ajuste_id):
+    if not can_manage_rrhh(request.user):
+        raise PermissionDenied("No tienes permisos para rechazar ajustes de asistencia.")
+    corte = get_object_or_404(PrenominaCorte, pk=pk)
+    ajuste = get_object_or_404(
+        AjusteAsistencia.objects.select_related("empleado"),
+        pk=ajuste_id,
+        fecha__gte=corte.fecha_inicio,
+        fecha__lte=corte.fecha_fin,
+    )
+    redirect_url = redirect("rrhh:prenomina_persona", pk=corte.pk, empleado_id=ajuste.empleado_id)
+    if request.method != "POST":
+        return redirect_url
+
+    try:
+        rechazar_ajuste_asistencia(ajuste, request.user, comentario=request.POST.get("comentario", ""))
+    except ValidationError as exc:
+        messages.error(request, _validation_message(exc))
+        return redirect_url
+
+    _recalcular_corte_con_mensaje(request, corte)
+    messages.success(request, "Ajuste de asistencia rechazado.")
+    return redirect_url
 
 
 @login_required
