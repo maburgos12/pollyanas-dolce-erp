@@ -411,7 +411,8 @@
   }
 
   .legend-line.actual {
-    background: #202027;
+    height: 5px;
+    background: repeating-linear-gradient(90deg, #008fb3 0 4px, transparent 4px 9px);
   }
 
   .map-status-stack {
@@ -462,9 +463,9 @@
     width: 15px;
     height: 15px;
     border-radius: 999px;
-    background: #202027;
+    background: #008fb3;
     border: 3px solid #fff;
-    box-shadow: 0 5px 14px rgba(32, 32, 39, .38);
+    box-shadow: 0 5px 14px rgba(0, 143, 179, .38);
   }
 
   .map-gps-discarded-marker {
@@ -1188,6 +1189,21 @@
     const bounds = L.latLngBounds();
     let drawable = 0;
 
+    function drawActualRoute(coords, color, tooltip) {
+      L.polyline(coords, {
+        color: "#ffffff",
+        weight: 9,
+        opacity: 0.86,
+      }).addTo(map);
+      L.polyline(coords, {
+        color: color,
+        weight: 5,
+        opacity: 0.96,
+        dashArray: "1 10",
+        lineCap: "round",
+      }).addTo(map).bindTooltip(tooltip);
+    }
+
     routes.forEach(function (route) {
       const color = route.color || "#1769c2";
       const stops = Array.isArray(route.paradas) ? route.paradas : [];
@@ -1220,24 +1236,18 @@
             return [point.lat, point.lng];
           });
           if (coords.length <= 1) return;
-          L.polyline(coords, {
-            color: segment.estado === "fuera_geocerca" ? "#d82424" : "#202027",
-            weight: 5,
-            opacity: 0.92,
-            dashArray: segment.fuente === "GOOGLE_ROADS" ? null : "7 6",
-          }).addTo(map).bindTooltip(route.nombre + " · " + (segment.fuente === "GOOGLE_ROADS" ? "GPS ajustado a calles" : "GPS recorrido"));
+          drawActualRoute(
+            coords,
+            segment.estado === "fuera_geocerca" ? "#d82424" : "#008fb3",
+            route.nombre + " · " + (segment.fuente === "GOOGLE_ROADS" ? "GPS ajustado a calles" : "GPS recorrido")
+          );
           coords.forEach(function (point) { bounds.extend(point); });
           drawable += 1;
         });
       } else {
         const actualCoords = fallbackActualCoords.length > 1 ? fallbackActualCoords : rawActualCoords;
         if (actualCoords.length > 1) {
-          L.polyline(actualCoords, {
-            color: "#202027",
-            weight: 5,
-            opacity: 0.92,
-            dashArray: route.ubicaciones_snapped_fuente === "GOOGLE_ROADS" ? null : "7 6",
-          }).addTo(map).bindTooltip(route.nombre + " · GPS recorrido");
+          drawActualRoute(actualCoords, "#008fb3", route.nombre + " · GPS recorrido");
           actualCoords.forEach(function (point) { bounds.extend(point); });
           drawable += 1;
         }
