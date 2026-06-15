@@ -1,5 +1,6 @@
 from datetime import date, datetime, time
 from decimal import Decimal
+from io import BytesIO
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
@@ -7,7 +8,14 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
+from openpyxl import load_workbook
 
+from rrhh.exporters.contpaqi_prenomina import (
+    MOVIMIENTOS_HEADERS,
+    build_movimientos_contpaqi_rows,
+    export_movimientos_contpaqi_xlsx,
+    export_revision_xlsx,
+)
 from rrhh.models import (
     AjusteAsistencia,
     AsistenciaEmpleado,
@@ -619,3 +627,138 @@ class PrenominaServiceTests(TestCase):
 
         self.assertEqual(corte.resumen["movimientos_bloqueados"], 1)
         self.assertEqual(corte.estado, PrenominaCorte.ESTADO_EN_REVISION)
+
+
+class PrenominaExportTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="paula-export")
+        self.empleado = Empleado.objects.create(
+            codigo="351",
+            nombre="ANAYA EXPORT",
+            fecha_ingreso=date(2026, 6, 1),
+            activo=True,
+            sucursal="Matriz",
+        )
+        self.corte = PrenominaCorte.objects.create(
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 15),
+            fecha_corte=date(2026, 6, 15),
+            creado_por=self.user,
+            resumen={"movimientos_listos": 1},
+        )
+
+    def test_build_movimientos_contpaqi_rows_usa_layout_y_campos_reales(self):
+        PrenominaMovimiento.objects.create(
+            corte=self.corte,
+            empleado=self.empleado,
+            fecha=date(2026, 6, 11),
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_FALTA,
+            clave_contpaqi="F",
+            valor=Decimal("1.00"),
+            estado=PrenominaMovimiento.ESTADO_LISTO,
+            referencia="rrhh.IncidenciaAsistencia:1",
+            notas="Falta validada.",
+        )
+        PrenominaMovimiento.objects.create(
+            corte=self.corte,
+            empleado=self.empleado,
+            fecha=date(2026, 6, 12),
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_SUSPENSION,
+            clave_contpaqi="",
+            valor=Decimal("1.00"),
+            estado=PrenominaMovimiento.ESTADO_PENDIENTE_CONFIGURACION,
+            referencia="rrhh.IncidenciaAsistencia:2",
+            notas="Pendiente de clave.",
+        )
+
+        rows = build_movimientos_contpaqi_rows(self.corte)
+
+        self.assertEqual(rows[0], MOVIMIENTOS_HEADERS)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1], [
+            "351",
+            "2026-06-11",
+            11,
+            PrenominaMovimiento.TIPO_FALTA,
+            "F",
+            "1.00",
+            "",
+            "",
+            "rrhh.IncidenciaAsistencia:1",
+            "Falta validada.",
+        ])
+
+    def test_build_movimientos_contpaqi_rows_exporta_nulos_como_vacio(self):
+        PrenominaMovimiento.objects.create(
+            corte=self.corte,
+            empleado=self.empleado,
+            fecha=date(2026, 6, 13),
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_HORA_EXTRA,
+            clave_contpaqi="HE",
+            estado=PrenominaMovimiento.ESTADO_LISTO,
+            referencia="",
+            notas="",
+        )
+
+        rows = build_movimientos_contpaqi_rows(self.corte)
+
+        self.assertEqual(rows[1][5], "")
+        self.assertEqual(rows[1][6], "")
+        self.assertEqual(rows[1][7], "")
+        self.assertEqual(rows[1][8], "")
+        self.assertEqual(rows[1][9], "")
+
+    def test_export_movimientos_contpaqi_xlsx_response_y_hoja(self):
+        PrenominaMovimiento.objects.create(
+            corte=self.corte,
+            empleado=self.empleado,
+            fecha=date(2026, 6, 11),
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_FALTA,
+            clave_contpaqi="F",
+            valor=Decimal("1.00"),
+            estado=PrenominaMovimiento.ESTADO_LISTO,
+            referencia="rrhh.IncidenciaAsistencia:1",
+            notas="Falta validada.",
+        )
+
+        response = export_movimientos_contpaqi_xlsx(self.corte)
+        workbook = load_workbook(BytesIO(response.content))
+
+        self.assertIn("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", response["Content-Type"])
+        self.assertIn(f"{self.corte.folio}_movimientos_contpaqi.xlsx", response["Content-Disposition"])
+        self.assertEqual(workbook.sheetnames, ["Movimientos_CONTPAQi"])
+        self.assertEqual([cell.value for cell in workbook["Movimientos_CONTPAQi"][1]], MOVIMIENTOS_HEADERS)
+
+    def test_export_revision_xlsx_incluye_hojas_basicas(self):
+        PrenominaEmpleadoResumen.objects.create(
+            corte=self.corte,
+            empleado=self.empleado,
+            dias_periodo=15,
+            dias_laborables=15,
+            dias_asistencia=1,
+            faltas=1,
+            estado=PrenominaEmpleadoResumen.ESTADO_LISTO,
+        )
+        PrenominaMovimiento.objects.create(
+            corte=self.corte,
+            empleado=self.empleado,
+            fecha=date(2026, 6, 11),
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_FALTA,
+            clave_contpaqi="F",
+            valor=Decimal("1.00"),
+            estado=PrenominaMovimiento.ESTADO_LISTO,
+            referencia="rrhh.IncidenciaAsistencia:1",
+            notas="Falta validada.",
+        )
+
+        response = export_revision_xlsx(self.corte)
+        workbook = load_workbook(BytesIO(response.content))
+
+        self.assertIn("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", response["Content-Type"])
+        self.assertIn(f"{self.corte.folio}_revision_prenomina.xlsx", response["Content-Disposition"])
+        self.assertIn("Resumen", workbook.sheetnames)
+        self.assertIn("Empleados", workbook.sheetnames)
+        self.assertIn("Movimientos_CONTPAQi", workbook.sheetnames)
+        self.assertEqual(workbook["Resumen"]["A1"].value, "Campo")
+        self.assertEqual(workbook["Empleados"]["A1"].value, "Codigo")
+        self.assertEqual([cell.value for cell in workbook["Movimientos_CONTPAQi"][1]], MOVIMIENTOS_HEADERS)
