@@ -69,6 +69,16 @@ class LogisticaEmailTemplateTests(SimpleTestCase):
         self.assertNotIn("<style", html.lower())
 
 
+class LogisticaControlRutasTemplateTests(SimpleTestCase):
+    def test_programmed_google_polyline_uses_route_source_not_pipe_character(self):
+        template_path = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "control_rutas.html"
+        source = template_path.read_text(encoding="utf-8")
+
+        self.assertIn("function decodeRoutePolyline(value, source)", source)
+        self.assertIn("decodeRoutePolyline(route.programada_polyline, route.programada_fuente)", source)
+        self.assertNotIn('if (value.includes("|")) return parseFallbackPolyline(value);', source)
+
+
 VALID_GIF = (
     b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!"
     b"\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00"
