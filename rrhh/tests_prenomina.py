@@ -233,8 +233,9 @@ class AjusteAsistenciaServiceTests(TestCase):
         self.assertEqual(aprobado.aplicado_por, self.autorizador)
         self.assertIsNotNone(aprobado.autorizado_en)
         self.assertIsNotNone(aprobado.aplicado_en)
-        self.assertEqual(aprobado.valores_aplicados["salida"], "2026-06-11T18:05:00-07:00")
-        self.assertEqual(aprobado.valores_aplicados["comentario"], "Validado contra checador.")
+        self.assertEqual(aprobado.comentario_autorizacion, "Validado contra checador.")
+        self.assertEqual(aprobado.valores_aplicados, {"salida": "2026-06-11T18:05:00-07:00"})
+        self.assertNotIn("comentario", aprobado.valores_aplicados)
         evaluar_mock.assert_called_once_with(self.empleado, self.fecha)
 
     @patch("rrhh.services_ajustes_asistencia.evaluar_dia_empleado")
@@ -262,7 +263,9 @@ class AjusteAsistenciaServiceTests(TestCase):
         self.assertEqual(rechazado.estado, AjusteAsistencia.ESTADO_RECHAZADO)
         self.assertEqual(rechazado.autorizado_por, self.autorizador)
         self.assertIsNotNone(rechazado.autorizado_en)
-        self.assertEqual(rechazado.valores_aplicados["comentario"], "No procede.")
+        self.assertEqual(rechazado.comentario_autorizacion, "No procede.")
+        self.assertEqual(rechazado.valores_aplicados, {})
+        self.assertNotIn("comentario", rechazado.valores_aplicados)
         evaluar_mock.assert_not_called()
 
     @patch("rrhh.services_ajustes_asistencia.evaluar_dia_empleado")

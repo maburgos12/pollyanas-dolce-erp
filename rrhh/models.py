@@ -1901,6 +1901,7 @@ class AjusteAsistencia(models.Model):
     valores_propuestos = models.JSONField(default=dict, blank=True)
     valores_aplicados = models.JSONField(default=dict, blank=True)
     motivo = models.TextField()
+    comentario_autorizacion = models.TextField(blank=True, default="")
     solicitado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,

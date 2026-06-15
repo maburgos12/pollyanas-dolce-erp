@@ -107,10 +107,8 @@ def aprobar_ajuste_asistencia(ajuste, user, comentario=""):
     ajuste.aplicado_por = user
     ajuste.autorizado_en = now
     ajuste.aplicado_en = now
-    ajuste.valores_aplicados = {
-        campo: _serializar_datetime(valor),
-        "comentario": (comentario or "").strip(),
-    }
+    ajuste.comentario_autorizacion = (comentario or "").strip()
+    ajuste.valores_aplicados = {campo: _serializar_datetime(valor)}
     ajuste.save(
         update_fields=[
             "asistencia",
@@ -119,6 +117,7 @@ def aprobar_ajuste_asistencia(ajuste, user, comentario=""):
             "aplicado_por",
             "autorizado_en",
             "aplicado_en",
+            "comentario_autorizacion",
             "valores_aplicados",
             "actualizado_en",
         ]
@@ -136,13 +135,13 @@ def rechazar_ajuste_asistencia(ajuste, user, comentario=""):
     ajuste.estado = AjusteAsistencia.ESTADO_RECHAZADO
     ajuste.autorizado_por = user
     ajuste.autorizado_en = timezone.now()
-    ajuste.valores_aplicados = {"comentario": (comentario or "").strip()}
+    ajuste.comentario_autorizacion = (comentario or "").strip()
     ajuste.save(
         update_fields=[
             "estado",
             "autorizado_por",
             "autorizado_en",
-            "valores_aplicados",
+            "comentario_autorizacion",
             "actualizado_en",
         ]
     )
