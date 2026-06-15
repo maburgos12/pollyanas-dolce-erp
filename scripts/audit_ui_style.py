@@ -64,6 +64,11 @@ def main() -> int:
     parser.add_argument("--max-react-inline-styles", type=int, default=None)
     parser.add_argument("--max-transition-all", type=int, default=None)
     parser.add_argument("--max-emoji-icons", type=int, default=None)
+    parser.add_argument("--max-email-inline-styles", type=int, default=None)
+    parser.add_argument("--max-email-style-blocks", type=int, default=None)
+    parser.add_argument("--max-email-react-inline-styles", type=int, default=None)
+    parser.add_argument("--max-email-transition-all", type=int, default=None)
+    parser.add_argument("--max-email-emoji-icons", type=int, default=None)
     args = parser.parse_args()
 
     totals = {
@@ -152,6 +157,11 @@ def main() -> int:
         "style_blocks": args.max_style_blocks,
         "transition_all": args.max_transition_all,
         "emoji_icons": args.max_emoji_icons,
+        "email_inline_styles": args.max_email_inline_styles,
+        "email_react_inline_styles": args.max_email_react_inline_styles,
+        "email_style_blocks": args.max_email_style_blocks,
+        "email_transition_all": args.max_email_transition_all,
+        "email_emoji_icons": args.max_email_emoji_icons,
     }
     for key, limit in thresholds.items():
         if limit is not None and totals[key] > limit:
@@ -172,7 +182,7 @@ def main() -> int:
                 )
             )
         if result["email_exceptions"]:
-            print("\nEmail template exceptions:")
+            print("\nEmail source offenders:")
             for offender in result["email_exceptions"]:
                 print(
                     "- {file}: inline={inline_styles}, style_blocks={style_blocks}, "

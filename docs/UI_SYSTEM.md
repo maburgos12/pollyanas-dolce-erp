@@ -248,10 +248,16 @@ Un cambio visual no esta terminado hasta que:
 - no deja numeros visibles sin separador segun `scripts/audit_numeric_format.py`;
 - se valida el flujo final donde el usuario lo usa.
 
-## Excepcion Tecnica De Correos
+## Correos HTML
 
-Las plantillas HTML de correo pueden conservar estilos inline porque los clientes
-de correo no respetan CSS externo con la misma confiabilidad que el navegador.
-`scripts/audit_ui_style.py` separa esa deuda como `email_*`; el objetivo estricto
-de cero `style=""`, cero `<style>`, cero `transition: all` y cero emojis
-funcionales aplica a pantallas, PWAs, reportes y flujos web del ERP.
+Las plantillas fuente de correo deben seguir el mismo sistema visual: clases
+semanticas, base compartido y cero estilos manuales en el HTML fuente.
+
+Los clientes de correo siguen requiriendo estilos inline para compatibilidad.
+Por eso el ERP compila el HTML final con `core.email_rendering.render_email_to_string`,
+tomando `static/css/pollyana_email.css` como fuente visual e inyectando los
+estilos inline solo en la salida enviada.
+
+`scripts/audit_ui_style.py` puede auditar tambien la fuente de correos con los
+umbrales `--max-email-*`. La meta estricta de fuente es cero `style=""`, cero
+`<style>`, cero `transition: all` y cero emojis funcionales.
