@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -18,6 +18,13 @@ def _parse_fecha(value, default=None):
     return parse_date((value or "").strip()) or default
 
 
+def _contador_resumen(resumen: dict, key: str) -> int:
+    try:
+        return int(resumen.get(key) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _blocked_export_reasons(corte: PrenominaCorte) -> list[str]:
     resumen = corte.resumen or {}
     checks = [
@@ -27,7 +34,7 @@ def _blocked_export_reasons(corte: PrenominaCorte) -> list[str]:
         ("movimientos_bloqueados", "movimientos bloqueados"),
         ("movimientos_exportados", "movimientos ya exportados"),
     ]
-    reasons = [label for key, label in checks if int(resumen.get(key) or 0) > 0]
+    reasons = [label for key, label in checks if _contador_resumen(resumen, key) > 0]
     if corte.movimientos.exclude(estado=PrenominaMovimiento.ESTADO_LISTO).exists():
         reasons.append("movimientos fuera de estado listo")
     return reasons
@@ -83,7 +90,11 @@ def prenomina_detail(request, pk):
     if request.method == "POST" and request.POST.get("action") == "recalcular":
         if not can_manage_rrhh(request.user):
             raise PermissionDenied("No tienes permisos para recalcular prenómina.")
-        corte = recalcular_corte_prenomina(corte)
+        try:
+            corte = recalcular_corte_prenomina(corte)
+        except ValidationError as exc:
+            messages.error(request, "; ".join(exc.messages))
+            return redirect("rrhh:prenomina_detail", pk=corte.pk)
         messages.success(request, f"Corte {corte.folio} recalculado.")
         return redirect("rrhh:prenomina_detail", pk=corte.pk)
 

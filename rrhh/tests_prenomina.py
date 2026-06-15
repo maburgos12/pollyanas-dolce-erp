@@ -11,6 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 from openpyxl import load_workbook
 
+from core.models import UserModuleAccess
 from rrhh.exporters.contpaqi_prenomina import (
     MOVIMIENTOS_HEADERS,
     build_movimientos_contpaqi_rows,
@@ -836,6 +837,19 @@ class PrenominaViewTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, reverse("rrhh:prenomina_detail", kwargs={"pk": corte.pk}))
 
+    def test_recalcular_corte_exportado_redirige_sin_500(self):
+        corte = self._crear_corte()
+        corte.estado = PrenominaCorte.ESTADO_EXPORTADO
+        corte.save(update_fields=["estado", "actualizado_en"])
+
+        response = self.client.post(
+            reverse("rrhh:prenomina_detail", kwargs={"pk": corte.pk}),
+            {"action": "recalcular"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("rrhh:prenomina_detail", kwargs={"pk": corte.pk}))
+
     def test_prenomina_persona_renderiza_version_imprimible(self):
         corte = self._crear_corte()
 
@@ -872,3 +886,34 @@ class PrenominaViewTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, reverse("rrhh:prenomina_detail", kwargs={"pk": corte.pk}))
+
+    def test_export_contpaqi_no_revienta_con_resumen_no_numerico(self):
+        corte = self._crear_corte(resumen={"movimientos_pendientes_configuracion": "N/A"})
+        PrenominaMovimiento.objects.create(
+            corte=corte,
+            empleado=self.empleado,
+            fecha=date(2026, 6, 11),
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_FALTA,
+            estado=PrenominaMovimiento.ESTADO_PENDIENTE_CONFIGURACION,
+            valor=Decimal("1.00"),
+        )
+
+        response = self.client.get(reverse("rrhh:prenomina_export_contpaqi", kwargs={"pk": corte.pk}))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("rrhh:prenomina_detail", kwargs={"pk": corte.pk}))
+
+    def test_usuario_solo_lectura_no_exporta_contpaqi(self):
+        viewer = User.objects.create_user(username="paula-view-only")
+        UserModuleAccess.objects.create(
+            user=viewer,
+            module="rrhh",
+            access=UserModuleAccess.ACCESS_VIEW,
+            updated_by=self.user,
+        )
+        corte = self._crear_corte()
+
+        self.client.force_login(viewer)
+        response = self.client.get(reverse("rrhh:prenomina_export_contpaqi", kwargs={"pk": corte.pk}))
+
+        self.assertEqual(response.status_code, 403)
