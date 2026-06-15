@@ -1,0 +1,110 @@
+body.pd-email-body {
+  margin: 0;
+  padding: 0;
+  background: #ffffff;
+  color: #1f1f24;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.pd-email-shell {
+  max-width: 720px;
+  margin: 0 auto;
+  border: 1px solid #eee;
+}
+
+.pd-email-shell--compact {
+  max-width: 680px;
+}
+
+.pd-email-shell--wide {
+  max-width: 760px;
+}
+
+.pd-email-header {
+  background: #8b2252;
+  color: #ffffff;
+  padding: 20px 24px;
+}
+
+.pd-email-title {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.3;
+}
+
+.pd-email-kicker {
+  margin: 8px 0 0;
+  color: #f7e8ef;
+}
+
+.pd-email-content {
+  padding: 24px;
+}
+
+.pd-email-copy {
+  margin: 0 0 18px;
+}
+
+.pd-email-copy--priority {
+  color: #8b2252;
+  font-weight: bold;
+}
+
+.pd-email-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 22px;
+}
+
+.pd-email-table--flush {
+  margin: 0;
+}
+
+.pd-email-cell {
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+}
+
+.pd-email-label-cell {
+  color: #8b2252;
+  font-weight: bold;
+}
+
+.pd-email-heading-cell {
+  text-align: left;
+  padding: 10px;
+  background: #c9a84c;
+  color: #1f1f24;
+}
+
+.pd-email-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 14px;
+  background: #c9a84c;
+  color: #1f1f24;
+  font-weight: bold;
+}
+
+.pd-email-button {
+  display: inline-block;
+  background: #8b2252;
+  color: #ffffff;
+  text-decoration: none;
+  padding: 12px 18px;
+  border-radius: 6px;
+  font-weight: bold;
+}
+
+.pd-email-section-title {
+  margin: 0 0 8px;
+  font-size: 18px;
+  color: #8b2252;
+}
+
+.pd-email-note {
+  margin: 0 0 22px;
+  padding: 14px;
+  background: #faf8f4;
+  border-left: 4px solid #c9a84c;
+}

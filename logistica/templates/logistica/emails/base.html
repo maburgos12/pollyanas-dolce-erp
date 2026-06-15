@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="es-MX">
+  <body class="pd-email-body">
+    <div class="pd-email-shell {% block shell_class %}{% endblock %}">
+      <div class="pd-email-header">
+        <h1 class="pd-email-title">{% block title %}{% endblock %}</h1>
+        <p class="pd-email-kicker">{% block kicker %}{% endblock %}</p>
+      </div>
+      <div class="pd-email-content">
+        {% block content %}{% endblock %}
+      </div>
+    </div>
+  </body>
+</html>

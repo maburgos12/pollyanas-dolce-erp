@@ -1,14 +1,47 @@
+from pathlib import Path
+from types import SimpleNamespace
+
+from django.conf import settings
 from django.contrib.auth.models import Group, User
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
 from core.access import ACCESS_MANAGE
+from core.email_rendering import render_email_to_string
 from core.models import Sucursal, UserModuleAccess
 from crm.models import Cliente, PedidoCliente
 from logistica.models import EntregaRuta, Repartidor, RutaEntrega, Unidad
 from logistica.tasks import _emails_de_grupo
 from api.logistica_views import _can_operate_pwa
+
+
+class LogisticaEmailTemplateTests(SimpleTestCase):
+    def test_email_sources_do_not_use_manual_inline_styles(self):
+        email_dir = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "emails"
+
+        for template_path in email_dir.glob("*.html"):
+            with self.subTest(template=template_path.name):
+                source = template_path.read_text(encoding="utf-8")
+                self.assertNotIn("style=", source)
+                self.assertNotIn("<style", source.lower())
+
+    def test_email_renderer_compiles_source_classes_to_inline_styles(self):
+        unidad = SimpleNamespace(codigo="QA-LOG-1", descripcion="Unidad QA", placa="QA-123")
+
+        html = render_email_to_string(
+            "logistica/emails/alerta_lavado.html",
+            {
+                "unidad": unidad,
+                "dias_sin_lavar": None,
+                "ultimo_lavado": None,
+            },
+        )
+
+        self.assertIn("Alerta de lavado pendiente", html)
+        self.assertIn("style=", html)
+        self.assertIn("background: #8b2252", html)
+        self.assertNotIn("<style", html.lower())
 
 
 class LogisticaGroupAliasCompatibilityTests(TestCase):
