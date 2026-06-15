@@ -1158,6 +1158,7 @@ def control_rutas(request):
         "fecha": fecha,
         "fecha_iso": fecha.isoformat(),
         "control": {**control, "rutas": rutas_control},
+        "mapa_rutas": _control_rutas_mapa_payload(rutas_control, eventos_metricas_qs),
         "eventos": eventos,
         "paradas_pendientes": paradas_pendientes[:60],
         "can_manage_logistica": can_manage_submodule(request.user, "logistica", "rutas"),
@@ -1175,6 +1176,106 @@ def control_rutas(request):
         },
     }
     return render(request, "logistica/control_rutas.html", context)
+
+
+def _coord_float(value):
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _control_rutas_mapa_payload(rutas_control, eventos_qs) -> dict:
+    colors = ["#1769c2", "#8b1740", "#2f9e44", "#f08c00", "#6f42c1", "#0f766e", "#d82424", "#4b5563"]
+    routes = []
+    for index, row in enumerate(rutas_control[:12]):
+        ruta = row["ruta"]
+        paradas = []
+        for parada in ruta.paradas.all():
+            lat = _coord_float(parada.latitud_geocerca)
+            lng = _coord_float(parada.longitud_geocerca)
+            if lat is None or lng is None:
+                continue
+            paradas.append(
+                {
+                    "id": parada.id,
+                    "orden": parada.orden,
+                    "nombre": parada.punto_nombre_snapshot or parada.punto.nombre,
+                    "estado": parada.estado,
+                    "entrega_estado": parada.entrega_estado,
+                    "lat": lat,
+                    "lng": lng,
+                    "radio_metros": parada.radio_geocerca_metros,
+                }
+            )
+        paradas.sort(key=lambda item: item["orden"])
+
+        ubicaciones = []
+        ubicaciones_qs = ruta.ubicaciones.order_by("timestamp_servidor", "id").only(
+            "latitud",
+            "longitud",
+            "timestamp_servidor",
+            "fuera_de_geocerca",
+        )[:300]
+        for ubicacion in ubicaciones_qs:
+            lat = _coord_float(ubicacion.latitud)
+            lng = _coord_float(ubicacion.longitud)
+            if lat is None or lng is None:
+                continue
+            ubicaciones.append(
+                {
+                    "lat": lat,
+                    "lng": lng,
+                    "fuera_geocerca": ubicacion.fuera_de_geocerca,
+                    "hora": timezone.localtime(ubicacion.timestamp_servidor).strftime("%H:%M"),
+                }
+            )
+
+        routes.append(
+            {
+                "id": ruta.id,
+                "folio": ruta.folio,
+                "nombre": ruta.nombre,
+                "estatus": ruta.estatus,
+                "color": colors[index % len(colors)],
+                "programada_polyline": ruta.ruta_programada_polyline or "",
+                "programada_fuente": ruta.ruta_programada_fuente or "",
+                "programada_distancia_metros": ruta.ruta_programada_distancia_metros,
+                "programada_duracion_segundos": ruta.ruta_programada_duracion_segundos,
+                "paradas": paradas,
+                "ubicaciones": ubicaciones,
+            }
+        )
+
+    eventos = []
+    for evento in eventos_qs.exclude(latitud__isnull=True).exclude(longitud__isnull=True).order_by("-creado_en", "-id")[:80]:
+        lat = _coord_float(evento.latitud)
+        lng = _coord_float(evento.longitud)
+        if lat is None or lng is None:
+            continue
+        eventos.append(
+            {
+                "id": evento.id,
+                "ruta_id": evento.ruta_id,
+                "tipo": evento.tipo,
+                "severidad": evento.severidad,
+                "descripcion": evento.descripcion,
+                "lat": lat,
+                "lng": lng,
+                "hora": timezone.localtime(evento.creado_en).strftime("%H:%M"),
+            }
+        )
+
+    return {
+        "routes": routes,
+        "eventos": eventos,
+        "tiles": {
+            "url": "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+            "attribution": "© OpenStreetMap contributors",
+        },
+    }
 
 
 def _punto_logistico_payload(request):
