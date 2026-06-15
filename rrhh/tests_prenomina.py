@@ -12,6 +12,8 @@ from rrhh.models import (
     AjusteAsistencia,
     AsistenciaEmpleado,
     Empleado,
+    HoraExtra,
+    IncidenciaAsistencia,
     PrenominaCorte,
     PrenominaEmpleadoResumen,
     PrenominaEquivalenciaCONTPAQi,
@@ -22,6 +24,7 @@ from rrhh.services_ajustes_asistencia import (
     crear_ajuste_asistencia,
     rechazar_ajuste_asistencia,
 )
+from rrhh.services_prenomina import crear_corte_prenomina, recalcular_corte_prenomina
 
 
 def aware(fecha: date, hora: time):
@@ -299,3 +302,157 @@ class AjusteAsistenciaServiceTests(TestCase):
                 motivo=" ",
                 solicitado_por=self.user,
             )
+
+
+class PrenominaServiceTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="paula-corte")
+        self.empleado = Empleado.objects.create(
+            codigo="350",
+            nombre="ANAYA BERNAL CARLOS EZEQUIEL",
+            fecha_ingreso=date(2026, 6, 10),
+            activo=True,
+            sucursal="Matriz",
+            area="Produccion",
+        )
+
+    def test_crear_corte_no_castiga_dias_pre_ingreso(self):
+        IncidenciaAsistencia.objects.create(
+            empleado=self.empleado,
+            fecha=date(2026, 6, 5),
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+            estado=IncidenciaAsistencia.ESTADO_CONCILIADO,
+            severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+            detalle="Falta previa a ingreso.",
+        )
+
+        corte = crear_corte_prenomina(
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 15),
+            fecha_corte=date(2026, 6, 15),
+            creado_por=self.user,
+        )
+        resumen = corte.resumenes.get(empleado=self.empleado)
+
+        self.assertEqual(resumen.dias_no_laborados_pre_ingreso, 9)
+        self.assertEqual(resumen.dias_laborables, 6)
+        self.assertEqual(resumen.faltas, 0)
+        self.assertEqual(
+            corte.movimientos.filter(
+                empleado=self.empleado,
+                tipo_movimiento_erp=PrenominaMovimiento.TIPO_FALTA,
+            ).count(),
+            0,
+        )
+
+    def test_falta_conciliada_genera_movimiento_si_tiene_equivalencia(self):
+        PrenominaEquivalenciaCONTPAQi.objects.create(
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_FALTA,
+            clave_contpaqi="F",
+            descripcion="Falta",
+            aplica_valor=True,
+        )
+        incidencia = IncidenciaAsistencia.objects.create(
+            empleado=self.empleado,
+            fecha=date(2026, 6, 11),
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+            estado=IncidenciaAsistencia.ESTADO_CONCILIADO,
+            severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+            detalle="Falta validada.",
+        )
+
+        corte = crear_corte_prenomina(
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 15),
+            fecha_corte=date(2026, 6, 15),
+            creado_por=self.user,
+        )
+
+        resumen = corte.resumenes.get(empleado=self.empleado)
+        mov = corte.movimientos.get(empleado=self.empleado, tipo_movimiento_erp=PrenominaMovimiento.TIPO_FALTA)
+        self.assertEqual(resumen.faltas, 1)
+        self.assertEqual(mov.fuente_modelo, "rrhh.IncidenciaAsistencia")
+        self.assertEqual(mov.fuente_id, str(incidencia.id))
+        self.assertEqual(mov.valor, Decimal("1.00"))
+        self.assertEqual(mov.clave_contpaqi, "F")
+        self.assertEqual(mov.estado, PrenominaMovimiento.ESTADO_LISTO)
+
+    def test_hora_extra_autorizada_genera_movimiento_y_recalculo_idempotente(self):
+        PrenominaEquivalenciaCONTPAQi.objects.create(
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_HORA_EXTRA,
+            clave_contpaqi="HE",
+            descripcion="Horas extra",
+            aplica_horas=True,
+        )
+        hora_extra = HoraExtra.objects.create(
+            empleado=self.empleado,
+            fecha=date(2026, 6, 12),
+            horas=Decimal("2.50"),
+            estado=HoraExtra.ESTADO_AUTORIZADO,
+            notas="Autorizadas por jefe.",
+        )
+        corte = crear_corte_prenomina(
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 15),
+            fecha_corte=date(2026, 6, 15),
+            creado_por=self.user,
+        )
+
+        recalcular_corte_prenomina(corte)
+        resumen = corte.resumenes.get(empleado=self.empleado)
+        mov = corte.movimientos.get(empleado=self.empleado, tipo_movimiento_erp=PrenominaMovimiento.TIPO_HORA_EXTRA)
+
+        self.assertEqual(resumen.horas_extra_autorizadas, Decimal("2.50"))
+        self.assertEqual(mov.fuente_modelo, "rrhh.HoraExtra")
+        self.assertEqual(mov.fuente_id, str(hora_extra.id))
+        self.assertEqual(mov.horas, Decimal("2.50"))
+        self.assertEqual(mov.clave_contpaqi, "HE")
+        self.assertEqual(mov.estado, PrenominaMovimiento.ESTADO_LISTO)
+        self.assertEqual(corte.movimientos.filter(tipo_movimiento_erp=PrenominaMovimiento.TIPO_HORA_EXTRA).count(), 1)
+
+    def test_ajuste_pendiente_marca_resumen_en_revision(self):
+        crear_ajuste_asistencia(
+            empleado=self.empleado,
+            fecha=date(2026, 6, 11),
+            tipo_ajuste=AjusteAsistencia.TIPO_SALIDA,
+            valores_propuestos={"salida": "2026-06-11T18:05:00-07:00"},
+            motivo="Pendiente de validar salida.",
+            solicitado_por=self.user,
+        )
+
+        corte = crear_corte_prenomina(
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 15),
+            fecha_corte=date(2026, 6, 15),
+            creado_por=self.user,
+        )
+        resumen = corte.resumenes.get(empleado=self.empleado)
+
+        self.assertEqual(resumen.ajustes_pendientes, 1)
+        self.assertEqual(resumen.estado, PrenominaEmpleadoResumen.ESTADO_REVISAR)
+        self.assertEqual(corte.estado, PrenominaCorte.ESTADO_EN_REVISION)
+
+    def test_movimiento_sin_equivalencia_queda_pendiente_configuracion(self):
+        IncidenciaAsistencia.objects.create(
+            empleado=self.empleado,
+            fecha=date(2026, 6, 11),
+            tipo=IncidenciaAsistencia.TIPO_SUSPENSION,
+            estado=IncidenciaAsistencia.ESTADO_CONCILIADO,
+            severidad=IncidenciaAsistencia.SEVERIDAD_MEDIA,
+            detalle="Suspension conciliada.",
+        )
+
+        corte = crear_corte_prenomina(
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 15),
+            fecha_corte=date(2026, 6, 15),
+            creado_por=self.user,
+        )
+        mov = corte.movimientos.get(
+            empleado=self.empleado,
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_SUSPENSION,
+        )
+
+        self.assertEqual(mov.clave_contpaqi, "")
+        self.assertEqual(mov.estado, PrenominaMovimiento.ESTADO_PENDIENTE_CONFIGURACION)
+        self.assertEqual(corte.resumen["movimientos_pendientes_configuracion"], 1)
