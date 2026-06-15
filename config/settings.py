@@ -78,6 +78,9 @@ LOCAL_DEV_HOST_PORT = os.getenv("WEB_HOST_PORT", "8011")
 CANONICAL_LOCAL_HOST = os.getenv("CANONICAL_LOCAL_HOST", f"localhost:{LOCAL_DEV_HOST_PORT}")
 AI_GATEWAY_OPENAPI_SERVER_URL = os.getenv("AI_GATEWAY_OPENAPI_SERVER_URL", "").strip()
 ONYX_PORTAL_URL = os.getenv("ONYX_PORTAL_URL", "https://ai.pollyanasdolce.com").strip()
+GOOGLE_SERVER_API_KEY = os.getenv("GOOGLE_SERVER_API_KEY", "").strip()
+GOOGLE_ROUTES_TIMEOUT_SECONDS = env_int("GOOGLE_ROUTES_TIMEOUT_SECONDS", 10)
+LOGISTICA_FALLBACK_SPEED_KMH = env_int("LOGISTICA_FALLBACK_SPEED_KMH", 35)
 
 ALLOWED_HOSTS = env_list(
     "ALLOWED_HOSTS",
@@ -326,6 +329,11 @@ CELERY_BEAT_SCHEDULE = {
     "logistica-escalar-tickets-sin-respuesta-cada-60-min": {
         "task": "logistica.tasks.escalar_tickets_sin_respuesta",
         "schedule": 60 * 60,
+    },
+    "logistica-detectar-gps-perdido-cada-5-min": {
+        "task": "logistica.tasks.detectar_gps_perdido_rutas",
+        "schedule": 5 * 60,
+        "kwargs": {"umbral_minutos": 10},
     },
     # --- Sync diario de ventas Point ---
     "pos_bridge: sync ventas diario": {

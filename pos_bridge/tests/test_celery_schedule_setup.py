@@ -59,13 +59,14 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "erp-doctor: reporte diario",
                 "ventas: sync ventas autoritativas mensual",
                 "reportes: snapshot operacion dg",
+                "logistica: detectar GPS perdido rutas activas",
                 "orquestacion: plan diario faltante",
                 "orquestacion: cadena plan demanda-produccion-compras",
                 "orquestacion: excepciones compra DG",
                 "orquestacion: guardia ajustes inventario",
             },
         )
-        self.assertEqual(PeriodicTask.objects.count(), 37)
+        self.assertEqual(PeriodicTask.objects.count(), 38)
         sat_download = PeriodicTask.objects.get(name="sat: descarga cfdi nocturna")
         self.assertEqual(sat_download.task, "sat_client.ejecutar_descarga_sat_nocturna")
         self.assertEqual(sat_download.crontab.hour, "1")
@@ -90,6 +91,11 @@ class SetupCelerySchedulesCommandTests(TestCase):
         self.assertEqual(intraday_profitability.crontab.minute, "10")
         realtime = PeriodicTask.objects.get(name="pos_bridge: inventario realtime")
         self.assertEqual(realtime.interval.every, 5)
+        gps_perdido = PeriodicTask.objects.get(name="logistica: detectar GPS perdido rutas activas")
+        self.assertEqual(gps_perdido.task, "logistica.tasks.detectar_gps_perdido_rutas")
+        self.assertEqual(gps_perdido.interval.every, 5)
+        self.assertEqual(gps_perdido.interval.period, "minutes")
+        self.assertEqual(gps_perdido.kwargs, '{"umbral_minutos": 10}')
         inventory_close = PeriodicTask.objects.get(name="pos_bridge: inventario cierre diario")
         self.assertEqual(inventory_close.task, "pos_bridge.inventory_sync")
         self.assertEqual(inventory_close.crontab.hour, "23")
