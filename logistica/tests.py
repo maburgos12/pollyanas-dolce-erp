@@ -79,9 +79,11 @@ class LogisticaControlRutasTemplateTests(SimpleTestCase):
         self.assertIn("decodeRoutePolyline(route.programada_polyline, route.programada_fuente)", source)
         self.assertIn("const hasSegmentPayload = Array.isArray(route.ubicaciones_segmentos);", source)
         self.assertIn("function drawActualRoute(coords, color, tooltip)", source)
-        self.assertIn("segment.estado === \"fuera_geocerca\" ? \"#d82424\" : \"#008fb3\"", source)
-        self.assertIn('dashArray: "1 10"', source)
-        self.assertIn("background: repeating-linear-gradient(90deg, #008fb3", source)
+        self.assertIn('map.createPane("actualRoutePane");', source)
+        self.assertIn("segment.estado === \"fuera_geocerca\" ? \"#d82424\" : \"#e0007a\"", source)
+        self.assertIn('dashArray: "1 12"', source)
+        self.assertIn("background: repeating-linear-gradient(90deg, #e0007a", source)
+        self.assertIn("L.circleMarker(point", source)
         self.assertNotIn('if (value.includes("|")) return parseFallbackPolyline(value);', source)
 
 

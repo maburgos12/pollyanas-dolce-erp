@@ -412,7 +412,7 @@
 
   .legend-line.actual {
     height: 5px;
-    background: repeating-linear-gradient(90deg, #008fb3 0 4px, transparent 4px 9px);
+    background: repeating-linear-gradient(90deg, #e0007a 0 5px, transparent 5px 10px);
   }
 
   .map-status-stack {
@@ -460,12 +460,12 @@
 
   .map-gps-marker {
     display: block;
-    width: 15px;
-    height: 15px;
+    width: 17px;
+    height: 17px;
     border-radius: 999px;
-    background: #008fb3;
+    background: #e0007a;
     border: 3px solid #fff;
-    box-shadow: 0 5px 14px rgba(0, 143, 179, .38);
+    box-shadow: 0 6px 16px rgba(224, 0, 122, .42);
   }
 
   .map-gps-discarded-marker {
@@ -1188,20 +1188,35 @@
 
     const bounds = L.latLngBounds();
     let drawable = 0;
+    map.createPane("actualRoutePane");
+    map.getPane("actualRoutePane").style.zIndex = 470;
 
     function drawActualRoute(coords, color, tooltip) {
       L.polyline(coords, {
         color: "#ffffff",
-        weight: 9,
-        opacity: 0.86,
+        weight: 12,
+        opacity: 0.9,
+        pane: "actualRoutePane",
       }).addTo(map);
       L.polyline(coords, {
         color: color,
-        weight: 5,
-        opacity: 0.96,
-        dashArray: "1 10",
+        weight: 7,
+        opacity: 1,
+        dashArray: "1 12",
         lineCap: "round",
+        pane: "actualRoutePane",
       }).addTo(map).bindTooltip(tooltip);
+      coords.forEach(function (point, index) {
+        if (index % 8 !== 0 && index !== coords.length - 1) return;
+        L.circleMarker(point, {
+          radius: 4,
+          color: "#ffffff",
+          weight: 2,
+          fillColor: color,
+          fillOpacity: 1,
+          pane: "actualRoutePane",
+        }).addTo(map);
+      });
     }
 
     routes.forEach(function (route) {
@@ -1238,7 +1253,7 @@
           if (coords.length <= 1) return;
           drawActualRoute(
             coords,
-            segment.estado === "fuera_geocerca" ? "#d82424" : "#008fb3",
+            segment.estado === "fuera_geocerca" ? "#d82424" : "#e0007a",
             route.nombre + " · " + (segment.fuente === "GOOGLE_ROADS" ? "GPS ajustado a calles" : "GPS recorrido")
           );
           coords.forEach(function (point) { bounds.extend(point); });
@@ -1247,7 +1262,7 @@
       } else {
         const actualCoords = fallbackActualCoords.length > 1 ? fallbackActualCoords : rawActualCoords;
         if (actualCoords.length > 1) {
-          drawActualRoute(actualCoords, "#008fb3", route.nombre + " · GPS recorrido");
+          drawActualRoute(actualCoords, "#e0007a", route.nombre + " · GPS recorrido");
           actualCoords.forEach(function (point) { bounds.extend(point); });
           drawable += 1;
         }
