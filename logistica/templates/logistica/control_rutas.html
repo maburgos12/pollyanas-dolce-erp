@@ -1117,13 +1117,13 @@
       return coordinates;
     }
 
-    function decodeRoutePolyline(value) {
+    function decodeRoutePolyline(value, source) {
       if (!value) return [];
-      if (value.includes("|")) return parseFallbackPolyline(value);
+      if (source !== "GOOGLE" && value.includes("|")) return parseFallbackPolyline(value);
       try {
         return decodeGooglePolyline(value);
       } catch (error) {
-        return [];
+        return value.includes("|") ? parseFallbackPolyline(value) : [];
       }
     }
 
@@ -1171,7 +1171,7 @@
     routes.forEach(function (route) {
       const color = route.color || "#1769c2";
       const stops = Array.isArray(route.paradas) ? route.paradas : [];
-      const programmed = decodeRoutePolyline(route.programada_polyline);
+      const programmed = decodeRoutePolyline(route.programada_polyline, route.programada_fuente);
       const fallbackProgrammed = stops.map(function (stop) { return [stop.lat, stop.lng]; });
       const programmedCoords = programmed.length ? programmed : fallbackProgrammed;
       const rawActualCoords = (Array.isArray(route.ubicaciones) ? route.ubicaciones : []).map(function (point) {
