@@ -5,6 +5,7 @@
 {% block page_title %}Control interno de rutas{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
 <style>
   /* Hallmark · macrostructure: Operations Console · tone: restrained control room · anchor hue: vino */
   :root {
@@ -337,28 +338,23 @@
   .route-map-panel {
     position: relative;
     min-width: 0;
-    background:
-      linear-gradient(rgba(255, 255, 255, .74), rgba(255, 255, 255, .74)),
-      repeating-linear-gradient(28deg, transparent 0 42px, rgba(83, 101, 119, .15) 43px 45px),
-      repeating-linear-gradient(118deg, transparent 0 58px, rgba(83, 101, 119, .13) 59px 61px),
-      var(--route-map);
+    background: var(--route-map);
     overflow: hidden;
   }
 
-  .map-layer {
+  .route-live-map {
     position: absolute;
     inset: 0;
+    z-index: 1;
   }
 
-  .route-map-panel::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background:
-      linear-gradient(90deg, rgba(255,255,255,.58) 0 1px, transparent 1px 100%),
-      linear-gradient(0deg, rgba(255,255,255,.50) 0 1px, transparent 1px 100%);
-    background-size: 78px 78px;
-    pointer-events: none;
+  .route-live-map .leaflet-control-attribution {
+    font-size: 10px;
+  }
+
+  .route-live-map .leaflet-control-zoom a {
+    color: var(--route-ink);
+    font-weight: 900;
   }
 
   .map-legend {
@@ -418,7 +414,7 @@
     background: #104c9c;
   }
 
-  .map-control-stack {
+  .map-status-stack {
     position: absolute;
     z-index: 5;
     top: 22px;
@@ -427,69 +423,31 @@
     gap: 8px;
   }
 
-  .map-control-stack span {
+  .map-status-pill,
+  .map-empty-state {
     display: grid;
-    place-items: center;
-    min-width: 38px;
-    min-height: 38px;
+    align-items: center;
     border: 1px solid var(--route-line);
     border-radius: 7px;
-    background: rgba(255, 255, 255, .72);
-    color: var(--route-muted);
+    background: rgba(255, 255, 255, .92);
+    color: var(--route-ink);
     font-size: 12px;
     font-weight: 900;
     box-shadow: 0 8px 18px rgba(32, 32, 39, .10);
   }
 
-  .map-static-note {
-    width: 126px;
+  .map-status-pill {
+    min-width: 166px;
     padding: 8px 10px;
     line-height: 1.25;
     text-align: left;
   }
 
-  .route-line-programmed,
-  .route-line-actual,
-  .route-line-alert {
-    position: absolute;
-    z-index: 2;
-    height: 0;
-    border-top: 4px solid var(--route-blue);
-    border-radius: 999px;
-    transform-origin: left center;
-  }
-
-  .route-line-programmed.one { left: 13%; top: 63%; width: 32%; transform: rotate(-26deg); }
-  .route-line-programmed.two { left: 40%; top: 47%; width: 28%; transform: rotate(4deg); }
-  .route-line-programmed.three { left: 64%; top: 48%; width: 22%; transform: rotate(-28deg); }
-  .route-line-actual { left: 31%; top: 58%; width: 22%; border-color: #104c9c; transform: rotate(-2deg); }
-  .route-line-alert { left: 58%; top: 44%; width: 18%; border-color: var(--route-orange); transform: rotate(18deg); }
-
-  .map-point {
-    position: absolute;
-    z-index: 3;
+  .map-stop-marker {
     display: grid;
     place-items: center;
-    width: 116px;
-    height: 116px;
-    margin: -58px 0 0 -58px;
-    border: 1.5px dashed rgba(139, 23, 64, .82);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, .40);
-  }
-
-  .map-point.pin-1 { left: 17%; top: 63%; }
-  .map-point.pin-2 { left: 42%; top: 36%; }
-  .map-point.pin-3 { left: 71%; top: 37%; }
-  .map-point.pin-4 { left: 57%; top: 68%; }
-  .map-point.pin-5 { left: 81%; top: 70%; }
-  .map-point.pin-6 { left: 30%; top: 78%; }
-
-  .map-pin-core {
-    display: grid;
-    place-items: center;
-    width: 34px;
-    height: 34px;
+    width: 30px;
+    height: 30px;
     border-radius: 999px;
     background: var(--route-vino);
     color: #fff;
@@ -499,16 +457,27 @@
     font-weight: 900;
   }
 
-  .map-point span {
-    position: absolute;
-    top: 75px;
-    max-width: 104px;
-    color: var(--route-ink);
-    font-size: 11px;
+  .map-gps-marker {
+    width: 13px;
+    height: 13px;
+    border-radius: 999px;
+    background: #104c9c;
+    border: 3px solid #fff;
+    box-shadow: 0 4px 12px rgba(16, 76, 156, .34);
+  }
+
+  .map-event-marker {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    background: var(--route-red);
+    color: #fff;
+    border: 3px solid #fff;
+    box-shadow: 0 8px 18px rgba(216, 36, 36, .32);
+    font-size: 12px;
     font-weight: 900;
-    line-height: 1.15;
-    text-align: center;
-    overflow-wrap: anywhere;
   }
 
   .map-alert-card {
@@ -543,6 +512,32 @@
     font-weight: 800;
     text-align: center;
     background: rgba(255,255,255,.75);
+  }
+
+  .map-empty-state {
+    position: absolute;
+    z-index: 6;
+    left: 50%;
+    top: 50%;
+    width: min(320px, calc(100% - 48px));
+    padding: 16px;
+    transform: translate(-50%, -50%);
+    text-align: left;
+  }
+
+  .map-empty-state[hidden] {
+    display: none;
+  }
+
+  .map-empty-state strong {
+    font-size: 14px;
+  }
+
+  .map-empty-state p {
+    margin: 6px 0 0;
+    color: var(--route-muted);
+    font-weight: 600;
+    line-height: 1.35;
   }
 
   .evidence-tabs {
@@ -833,7 +828,7 @@
       flex-wrap: wrap;
       white-space: normal;
     }
-    .map-control-stack {
+    .map-status-stack {
       top: 90px;
       left: 12px;
     }
@@ -932,38 +927,23 @@
       {% endfor %}
     </aside>
 
-    <main class="route-map-panel" aria-label="Vista esquemática de rutas">
-      <div class="map-layer" aria-hidden="true">
-        <div class="route-line-programmed one"></div>
-        <div class="route-line-programmed two"></div>
-        <div class="route-line-programmed three"></div>
-        <div class="route-line-actual"></div>
-        {% if metricas.desvios %}<div class="route-line-alert"></div>{% endif %}
-      </div>
+    <main class="route-map-panel" aria-label="Mapa real de rutas">
+      <div id="route-control-map" class="route-live-map" role="application" aria-label="Mapa real con paradas, ruta planeada y GPS recorrido"></div>
       <div class="map-legend" aria-label="Leyenda del mapa">
         <span class="legend-item"><i class="legend-dot"></i>Sucursal</span>
         <span class="legend-item"><i class="legend-dot ring"></i>Geocerca</span>
-        <span class="legend-item"><i class="legend-line"></i>Secuencia planeada</span>
-        <span class="legend-item"><i class="legend-line actual"></i>Referencia visual</span>
+        <span class="legend-item"><i class="legend-line"></i>Ruta planeada</span>
+        <span class="legend-item"><i class="legend-line actual"></i>GPS recorrido</span>
         <span class="legend-item"><i class="legend-dot warn"></i>Desvío detectado</span>
       </div>
-      <div class="map-control-stack" aria-hidden="true">
-        <span class="map-static-note">Vista esquemática, no evidencia GPS</span>
+      <div class="map-status-stack" aria-hidden="true">
+        <span class="map-status-pill">Mapa real · OpenStreetMap</span>
       </div>
 
-      {% for parada in paradas_pendientes|slice:":6" %}
-      <div class="map-point pin-{{ forloop.counter }}">
-        <div class="map-pin-core">{{ forloop.counter }}</div>
-        <span>{{ parada.punto_nombre_snapshot }}</span>
+      <div id="route-map-empty" class="map-empty-state" hidden>
+        <strong>Sin coordenadas para dibujar el mapa</strong>
+        <p>Asigna puntos logísticos con latitud/longitud o espera la primera señal GPS del repartidor.</p>
       </div>
-      {% empty %}
-        {% for row in control.rutas|slice:":6" %}
-        <div class="map-point pin-{{ forloop.counter }}">
-          <div class="map-pin-core">{{ forloop.counter }}</div>
-          <span>{{ row.ruta.folio }}</span>
-        </div>
-        {% endfor %}
-      {% endfor %}
 
       {% if metricas.desvios %}
       <aside class="map-alert-card">
@@ -1066,4 +1046,204 @@
     </article>
   </section>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+{{ mapa_rutas|json_script:"route-control-map-data" }}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+  (function () {
+    const mapNode = document.getElementById("route-control-map");
+    const dataNode = document.getElementById("route-control-map-data");
+    const emptyNode = document.getElementById("route-map-empty");
+    if (!mapNode || !dataNode) return;
+
+    const payload = JSON.parse(dataNode.textContent || "{}");
+    const routes = Array.isArray(payload.routes) ? payload.routes : [];
+    const events = Array.isArray(payload.eventos) ? payload.eventos : [];
+    const hasLeaflet = Boolean(window.L);
+
+    function showEmpty(message) {
+      if (!emptyNode) return;
+      if (message) {
+        const paragraph = emptyNode.querySelector("p");
+        if (paragraph) paragraph.textContent = message;
+      }
+      emptyNode.hidden = false;
+    }
+
+    if (!hasLeaflet) {
+      showEmpty("No se pudo cargar el proveedor de mapa. Revisa la conexión del navegador y vuelve a actualizar.");
+      return;
+    }
+
+    function parseFallbackPolyline(value) {
+      return value.split("|").map(function (pair) {
+        const parts = pair.split(",");
+        const lat = Number(parts[0]);
+        const lng = Number(parts[1]);
+        return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
+      }).filter(Boolean);
+    }
+
+    function decodeGooglePolyline(value) {
+      let index = 0;
+      let lat = 0;
+      let lng = 0;
+      const coordinates = [];
+
+      while (index < value.length) {
+        let shift = 0;
+        let result = 0;
+        let byte = null;
+        do {
+          byte = value.charCodeAt(index++) - 63;
+          result |= (byte & 0x1f) << shift;
+          shift += 5;
+        } while (byte >= 0x20 && index < value.length);
+        lat += (result & 1) ? ~(result >> 1) : (result >> 1);
+
+        shift = 0;
+        result = 0;
+        do {
+          byte = value.charCodeAt(index++) - 63;
+          result |= (byte & 0x1f) << shift;
+          shift += 5;
+        } while (byte >= 0x20 && index < value.length);
+        lng += (result & 1) ? ~(result >> 1) : (result >> 1);
+
+        coordinates.push([lat / 1e5, lng / 1e5]);
+      }
+      return coordinates;
+    }
+
+    function decodeRoutePolyline(value) {
+      if (!value) return [];
+      if (value.includes("|")) return parseFallbackPolyline(value);
+      try {
+        return decodeGooglePolyline(value);
+      } catch (error) {
+        return [];
+      }
+    }
+
+    function stopIcon(stop) {
+      return L.divIcon({
+        className: "route-stop-div-icon",
+        html: '<span class="map-stop-marker">' + String(stop.orden || "") + "</span>",
+        iconSize: [30, 30],
+        iconAnchor: [15, 15],
+        popupAnchor: [0, -16],
+      });
+    }
+
+    function gpsIcon() {
+      return L.divIcon({
+        className: "route-gps-div-icon",
+        html: '<span class="map-gps-marker"></span>',
+        iconSize: [13, 13],
+        iconAnchor: [6, 6],
+      });
+    }
+
+    function eventIcon() {
+      return L.divIcon({
+        className: "route-event-div-icon",
+        html: '<span class="map-event-marker">!</span>',
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      });
+    }
+
+    const map = L.map(mapNode, {
+      zoomControl: true,
+      scrollWheelZoom: false,
+    }).setView([25.57, -108.47], 12);
+
+    L.tileLayer((payload.tiles && payload.tiles.url) || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: (payload.tiles && payload.tiles.attribution) || "© OpenStreetMap contributors",
+      maxZoom: 19,
+    }).addTo(map);
+
+    const bounds = L.latLngBounds();
+    let drawable = 0;
+
+    routes.forEach(function (route) {
+      const color = route.color || "#1769c2";
+      const stops = Array.isArray(route.paradas) ? route.paradas : [];
+      const programmed = decodeRoutePolyline(route.programada_polyline);
+      const fallbackProgrammed = stops.map(function (stop) { return [stop.lat, stop.lng]; });
+      const programmedCoords = programmed.length ? programmed : fallbackProgrammed;
+      const actualCoords = (Array.isArray(route.ubicaciones) ? route.ubicaciones : []).map(function (point) {
+        return [point.lat, point.lng];
+      });
+
+      if (programmedCoords.length > 1) {
+        L.polyline(programmedCoords, {
+          color: color,
+          weight: 4,
+          opacity: 0.82,
+        }).addTo(map).bindTooltip(route.nombre + " · ruta planeada");
+        programmedCoords.forEach(function (point) { bounds.extend(point); });
+        drawable += 1;
+      }
+
+      if (actualCoords.length > 1) {
+        L.polyline(actualCoords, {
+          color: "#104c9c",
+          weight: 4,
+          opacity: 0.88,
+          dashArray: "7 6",
+        }).addTo(map).bindTooltip(route.nombre + " · GPS recorrido");
+        actualCoords.forEach(function (point) { bounds.extend(point); });
+        drawable += 1;
+      }
+
+      stops.forEach(function (stop) {
+        const point = [stop.lat, stop.lng];
+        L.circle(point, {
+          radius: stop.radio_metros || 80,
+          color: "#8b1740",
+          weight: 1.5,
+          dashArray: "5 5",
+          fillColor: "#8b1740",
+          fillOpacity: 0.05,
+        }).addTo(map);
+        L.marker(point, { icon: stopIcon(stop) })
+          .addTo(map)
+          .bindPopup("<strong>" + stop.orden + ". " + stop.nombre + "</strong><br>" + route.nombre + "<br>Estado: " + stop.estado);
+        bounds.extend(point);
+        drawable += 1;
+      });
+
+      if (actualCoords.length) {
+        const latest = route.ubicaciones[route.ubicaciones.length - 1];
+        L.marker([latest.lat, latest.lng], { icon: gpsIcon() })
+          .addTo(map)
+          .bindPopup("<strong>" + route.nombre + "</strong><br>Último GPS: " + (latest.hora || "sin hora"));
+        bounds.extend([latest.lat, latest.lng]);
+        drawable += 1;
+      }
+    });
+
+    events.forEach(function (event) {
+      const point = [event.lat, event.lng];
+      L.marker(point, { icon: eventIcon() })
+        .addTo(map)
+        .bindPopup("<strong>" + event.tipo + "</strong><br>" + event.descripcion + "<br>" + event.hora);
+      bounds.extend(point);
+      drawable += 1;
+    });
+
+    if (drawable && bounds.isValid()) {
+      map.fitBounds(bounds, { padding: [34, 34], maxZoom: 15 });
+    } else {
+      showEmpty();
+    }
+
+    window.setTimeout(function () {
+      map.invalidateSize();
+    }, 160);
+  })();
+</script>
 {% endblock %}

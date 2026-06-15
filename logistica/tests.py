@@ -1084,14 +1084,28 @@ class LogisticaControlRutasTests(TestCase):
     def test_control_rutas_view_renderiza_panel_interno(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        self.ruta.ruta_programada_polyline = "25.570000,-108.470000|25.571000,-108.471000"
+        self.ruta.ruta_programada_fuente = "FALLBACK"
+        self.ruta.save(update_fields=["ruta_programada_polyline", "ruta_programada_fuente", "updated_at"])
+        registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={"latitud": "25.570010", "longitud": "-108.470010", "precision_metros": "12"},
+        )
 
         response = self.client.get(reverse("logistica:control_rutas"))
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Control interno de rutas")
         self.assertContains(response, "Rutas del día")
-        self.assertContains(response, "Vista esquemática, no evidencia GPS")
+        self.assertContains(response, "Mapa real · OpenStreetMap")
+        self.assertContains(response, "route-control-map-data")
+        self.assertNotContains(response, "Vista esquemática, no evidencia GPS")
         self.assertContains(response, "Filtrar")
+        mapa = response.context["mapa_rutas"]
+        self.assertEqual(mapa["routes"][0]["paradas"][0]["nombre"], "Sucursal Control")
+        self.assertEqual(mapa["routes"][0]["ubicaciones"][0]["lat"], 25.57001)
+        self.assertEqual(mapa["routes"][0]["programada_polyline"], "25.570000,-108.470000|25.571000,-108.471000")
 
     def test_control_rutas_filtra_por_ruta_repartidor_o_unidad(self):
         self.client.force_login(self.user)
