@@ -96,11 +96,10 @@ def read_rows(path: Path, periodo_anio: int) -> list[ImportRow]:
 
 def empleado_por_nombre(nombre: str) -> Empleado:
     normalizado = normalizar_nombre(nombre)
-    qs = Empleado.objects.filter(nombre_normalizado=normalizado)
-    count = qs.count()
-    if count == 1:
-        return qs.get()
-    if count > 1:
+    matches = list(Empleado.objects.filter(nombre_normalizado=normalizado)[:2])
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
         raise CommandError(f"Empleado duplicado en ERP: {nombre}")
     raise CommandError(f"Empleado no encontrado en ERP: {nombre}")
 

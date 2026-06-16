@@ -86,6 +86,49 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertEqual(saldo["reservado"], Decimal("0"))
         self.assertEqual(saldo["disponible"], Decimal("7.00"))
 
+    def test_vacaciones_respeta_descansos_oficiales_moviles_lft(self):
+        from datetime import date
+
+        from rrhh.services_vacaciones import contar_dias_laborables, es_dia_laborable
+
+        self.assertFalse(es_dia_laborable(date(2026, 2, 2)))
+        self.assertTrue(es_dia_laborable(date(2026, 2, 5)))
+        self.assertFalse(es_dia_laborable(date(2026, 3, 16)))
+        self.assertFalse(es_dia_laborable(date(2026, 11, 16)))
+        self.assertEqual(contar_dias_laborables(date(2026, 2, 2), date(2026, 2, 6)), Decimal("4"))
+
+    def test_vacaciones_usa_antiguedad_a_fecha_inicio(self):
+        from datetime import date
+
+        from rrhh.services_vacaciones import crear_solicitud_vacaciones, saldo_vacaciones_empleado
+
+        rrhh_user = User.objects.create_user(username="paula")
+        empleado = Empleado.objects.create(
+            nombre="Colaborador Aniversario Futuro",
+            fecha_ingreso=date(2025, 12, 1),
+            activo=True,
+        )
+        PoliticaVacaciones.objects.create(
+            antiguedad_desde=1,
+            antiguedad_hasta=5,
+            dias_laborables=Decimal("12.00"),
+            vigente_desde=date(2026, 1, 1),
+        )
+
+        with patch("rrhh.services_vacaciones.timezone.localdate", return_value=date(2026, 6, 16)):
+            solicitud = crear_solicitud_vacaciones(
+                empleado=empleado,
+                fecha_inicio=date(2026, 12, 2),
+                fecha_fin=date(2026, 12, 4),
+                motivo="Descanso al cumplir aniversario",
+                actor=rrhh_user,
+            )
+
+        self.assertEqual(solicitud.dias_laborables, Decimal("3"))
+        saldo = saldo_vacaciones_empleado(empleado, periodo_anio=2026, al=date(2026, 12, 2))
+        self.assertEqual(saldo["generado"], Decimal("12.00"))
+        self.assertEqual(saldo["reservado"], Decimal("3"))
+
     def test_jefe_crea_y_preautoriza_vacaciones_de_equipo(self):
         from datetime import date
 
