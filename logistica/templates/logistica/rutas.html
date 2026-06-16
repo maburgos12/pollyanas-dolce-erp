@@ -92,12 +92,19 @@
             <option value="{{ repartidor.id }}">{{ repartidor }}{% if repartidor.unidad_asignada %} · {{ repartidor.unidad_asignada.codigo }}{% endif %}</option>
             {% endfor %}
           </select>
+          <select class="input-field" name="acompanante">
+            <option value="">Acompañante operativo...</option>
+            {% for repartidor in repartidores %}
+            <option value="{{ repartidor.id }}">{{ repartidor }}{% if repartidor.unidad_asignada %} · {{ repartidor.unidad_asignada.codigo }}{% endif %}</option>
+            {% endfor %}
+          </select>
           <select class="input-field" name="unidad_operativa">
             <option value="">Unidad operativa...</option>
             {% for unidad in unidades %}
             <option value="{{ unidad.id }}">{{ unidad.codigo }} · {{ unidad.placa|default:unidad.descripcion }}</option>
             {% endfor %}
           </select>
+          <input class="input-field" type="text" name="acompanante_manual" placeholder="Acompañante manual si no está en catálogo">
         </div>
         <div>
           <strong style="display:block; color:var(--vino); margin-bottom:6px;">Sucursales o puntos a visitar</strong>
@@ -166,6 +173,7 @@
             <th>Ruta</th>
             <th>Fecha</th>
             <th>Repartidor</th>
+            <th>Acompañante</th>
             <th>Unidad operativa</th>
             <th>Planeación</th>
             <th class="text-end">Entregas</th>
@@ -183,6 +191,7 @@
             <td>{{ r.nombre }}</td>
             <td>{{ r.fecha_ruta|date:"Y-m-d" }}</td>
             <td>{% if r.repartidor %}{{ r.repartidor }}{% elif r.chofer %}{{ r.chofer }}{% else %}-{% endif %}</td>
+            <td>{% if r.acompanante %}{{ r.acompanante }}{% elif r.acompanante_manual %}{{ r.acompanante_manual }}{% else %}-{% endif %}</td>
             <td>{% if r.unidad_operativa %}{{ r.unidad_operativa.codigo }}{% elif r.unidad %}{{ r.unidad }}{% else %}-{% endif %}</td>
             <td>{% if r.repartidor_id and r.unidad_operativa_id %}<span class="badge bg-success">Asignada</span>{% else %}<span class="badge bg-warning">Pendiente</span>{% endif %}</td>
             <td class="text-end">{{ r.total_entregas }}</td>
@@ -203,7 +212,7 @@
             <td><a class="btn btn-secondary btn-small" href="{% url 'logistica:ruta_detail' r.id %}">Abrir</a></td>
           </tr>
           {% empty %}
-          <tr><td colspan="12" class="muted">No hay rutas para este filtro.</td></tr>
+          <tr><td colspan="13" class="muted">No hay rutas para este filtro.</td></tr>
           {% endfor %}
         </tbody>
       </table>

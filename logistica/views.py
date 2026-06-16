@@ -744,7 +744,7 @@ def dashboard(request):
     if date_from > date_to:
         date_from, date_to = date_to, date_from
 
-    rutas_qs = RutaEntrega.objects.all()
+    rutas_qs = RutaEntrega.objects.select_related("repartidor__user", "acompanante__user", "unidad_operativa")
     entregas_qs = EntregaRuta.objects.select_related("ruta", "pedido", "pedido__cliente")
     rutas_qs = rutas_qs.filter(fecha_ruta__gte=date_from, fecha_ruta__lte=date_to)
     entregas_qs = entregas_qs.filter(ruta__fecha_ruta__gte=date_from, ruta__fecha_ruta__lte=date_to)
@@ -1654,8 +1654,10 @@ def rutas(request):
             messages.error(request, "Selecciona al menos una sucursal o punto para planear la ruta del día.")
         else:
             repartidor_id = (request.POST.get("repartidor") or "").strip()
+            acompanante_id = (request.POST.get("acompanante") or "").strip()
             unidad_id = (request.POST.get("unidad_operativa") or "").strip()
             repartidor = Repartidor.objects.filter(pk=int(repartidor_id), user__is_active=True).first() if repartidor_id.isdigit() else None
+            acompanante = Repartidor.objects.filter(pk=int(acompanante_id), user__is_active=True).first() if acompanante_id.isdigit() else None
             unidad_operativa = Unidad.objects.filter(pk=int(unidad_id), activa=True).first() if unidad_id.isdigit() else None
             puntos = PuntoLogistico.objects.filter(pk__in=puntos_ruta_ids, activo=True)
             puntos_by_id = {str(punto.id): punto for punto in puntos}
@@ -1689,6 +1691,8 @@ def rutas(request):
                     chofer=(request.POST.get("chofer") or "").strip() or (str(repartidor) if repartidor else ""),
                     unidad=(request.POST.get("unidad") or "").strip() or (str(unidad_operativa) if unidad_operativa else ""),
                     repartidor=repartidor,
+                    acompanante=acompanante,
+                    acompanante_manual=(request.POST.get("acompanante_manual") or "").strip(),
                     unidad_operativa=unidad_operativa,
                     estatus=RutaEntrega.ESTATUS_PLANEADA,
                     km_estimado=_parse_decimal(request.POST.get("km_estimado")),
@@ -1745,6 +1749,10 @@ def rutas(request):
             Q(folio__icontains=q)
             | Q(nombre__icontains=q)
             | Q(chofer__icontains=q)
+            | Q(acompanante_manual__icontains=q)
+            | Q(acompanante__user__first_name__icontains=q)
+            | Q(acompanante__user__last_name__icontains=q)
+            | Q(acompanante__user__username__icontains=q)
             | Q(unidad__icontains=q)
         )
     if estatus:
@@ -1943,8 +1951,10 @@ def ruta_detail(request, pk: int):
 
         if action == "update_plan":
             repartidor_id = (request.POST.get("repartidor") or "").strip()
+            acompanante_id = (request.POST.get("acompanante") or "").strip()
             unidad_id = (request.POST.get("unidad_operativa") or "").strip()
             repartidor = Repartidor.objects.filter(pk=int(repartidor_id), user__is_active=True).first() if repartidor_id.isdigit() else None
+            acompanante = Repartidor.objects.filter(pk=int(acompanante_id), user__is_active=True).first() if acompanante_id.isdigit() else None
             unidad_operativa = Unidad.objects.filter(pk=int(unidad_id), activa=True).first() if unidad_id.isdigit() else None
             if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA and (
                 not repartidor
@@ -1957,12 +1967,14 @@ def ruta_detail(request, pk: int):
             ruta.nombre = (request.POST.get("nombre") or ruta.nombre).strip()
             ruta.fecha_ruta = _parse_date(request.POST.get("fecha_ruta")) or ruta.fecha_ruta
             ruta.repartidor = repartidor
+            ruta.acompanante = acompanante
+            ruta.acompanante_manual = (request.POST.get("acompanante_manual") or "").strip()
             ruta.unidad_operativa = unidad_operativa
             ruta.chofer = (request.POST.get("chofer") or "").strip() or (str(repartidor) if repartidor else "")
             ruta.unidad = (request.POST.get("unidad") or "").strip() or (str(unidad_operativa) if unidad_operativa else "")
             ruta.km_estimado = _parse_decimal(request.POST.get("km_estimado"))
             ruta.notas = (request.POST.get("notas") or "").strip()
-            ruta.save(update_fields=["nombre", "fecha_ruta", "repartidor", "unidad_operativa", "chofer", "unidad", "km_estimado", "notas", "updated_at"])
+            ruta.save(update_fields=["nombre", "fecha_ruta", "repartidor", "acompanante", "acompanante_manual", "unidad_operativa", "chofer", "unidad", "km_estimado", "notas", "updated_at"])
             log_event(
                 request.user,
                 "UPDATE",

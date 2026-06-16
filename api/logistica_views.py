@@ -923,6 +923,10 @@ class LogisticaRutasView(_LogisticaBaseView):
                 Q(folio__icontains=q)
                 | Q(nombre__icontains=q)
                 | Q(chofer__icontains=q)
+                | Q(acompanante_manual__icontains=q)
+                | Q(acompanante__user__first_name__icontains=q)
+                | Q(acompanante__user__last_name__icontains=q)
+                | Q(acompanante__user__username__icontains=q)
                 | Q(unidad__icontains=q)
             )
         if estatus:
@@ -973,6 +977,8 @@ class LogisticaRutasView(_LogisticaBaseView):
                 chofer=(payload.get("chofer") or "").strip() or str(payload["repartidor"]),
                 unidad=(payload.get("unidad") or "").strip() or str(payload["unidad_operativa"]),
                 repartidor=payload["repartidor"],
+                acompanante=payload.get("acompanante"),
+                acompanante_manual=(payload.get("acompanante_manual") or "").strip(),
                 unidad_operativa=payload["unidad_operativa"],
                 estatus=RutaEntrega.ESTATUS_PLANEADA,
                 km_estimado=payload.get("km_estimado") or Decimal("0"),

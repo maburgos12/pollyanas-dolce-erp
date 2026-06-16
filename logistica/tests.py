@@ -544,6 +544,9 @@ class LogisticaControlRutasTests(TestCase):
         self.sucursal = Sucursal.objects.create(codigo="CTRL-LOG", nombre="Control Logística", activa=True)
         self.unidad = Unidad.objects.create(codigo="CTRL-01", descripcion="Unidad control", sucursal=self.sucursal)
         self.repartidor = Repartidor.objects.create(user=self.user, sucursal=self.sucursal, unidad_asignada=self.unidad)
+        self.user_acompanante = User.objects.create_user(username="ruta.acompanante", password="pass123")
+        self.user_acompanante.groups.add(Group.objects.get_or_create(name="repartidor")[0])
+        self.acompanante = Repartidor.objects.create(user=self.user_acompanante, sucursal=self.sucursal)
         self.bitacora = BitacoraSalidaLlegada.objects.create(
             repartidor=self.repartidor,
             unidad=self.unidad,
@@ -1531,6 +1534,8 @@ class LogisticaControlRutasTests(TestCase):
                 "nombre": "Ruta Manual",
                 "fecha_ruta": timezone.localdate().isoformat(),
                 "repartidor": self.repartidor.id,
+                "acompanante": self.acompanante.id,
+                "acompanante_manual": "Auxiliar externo",
                 "unidad_operativa": self.unidad.id,
                 "km_estimado": "12.5",
             },
@@ -1551,6 +1556,8 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(released.status_code, 200)
         self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
         self.assertEqual(ruta.repartidor, self.repartidor)
+        self.assertEqual(ruta.acompanante, self.acompanante)
+        self.assertEqual(ruta.acompanante_manual, "Auxiliar externo")
         self.assertEqual(ruta.unidad_operativa, self.unidad)
         self.assertTrue(ruta.paradas.filter(punto=self.punto).exists())
         self.assertTrue(EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_SALIDA).exists())
@@ -2308,6 +2315,8 @@ class LogisticaControlRutasTests(TestCase):
                 "nombre": "Ruta API Vacía",
                 "fecha_ruta": timezone.localdate().isoformat(),
                 "repartidor": self.repartidor.id,
+                "acompanante": self.acompanante.id,
+                "acompanante_manual": "Auxiliar externo",
                 "unidad_operativa": self.unidad.id,
                 "paradas": [],
             }),
@@ -2336,6 +2345,8 @@ class LogisticaControlRutasTests(TestCase):
                 "nombre": "Ruta API Ordenada",
                 "fecha_ruta": timezone.localdate().isoformat(),
                 "repartidor": self.repartidor.id,
+                "acompanante": self.acompanante.id,
+                "acompanante_manual": "Auxiliar externo",
                 "unidad_operativa": self.unidad.id,
                 "paradas": [
                     {"punto_id": punto_sur.id, "orden": 2},
@@ -2352,6 +2363,8 @@ class LogisticaControlRutasTests(TestCase):
         self.assertGreater(data["ruta_programada_distancia_metros"], 0)
         self.assertGreater(data["ruta_programada_duracion_segundos"], 0)
         ruta = RutaEntrega.objects.get(nombre="Ruta API Ordenada")
+        self.assertEqual(ruta.acompanante, self.acompanante)
+        self.assertEqual(ruta.acompanante_manual, "Auxiliar externo")
         paradas = list(ruta.paradas.order_by("orden").values_list("punto_id", "orden"))
         self.assertEqual(paradas, [(self.punto.id, 1), (punto_sur.id, 2)])
         self.assertEqual(ruta.ruta_programada_fuente, "FALLBACK")

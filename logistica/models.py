@@ -37,6 +37,14 @@ class RutaEntrega(models.Model):
         blank=True,
         related_name="rutas_asignadas",
     )
+    acompanante = models.ForeignKey(
+        "Repartidor",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="rutas_acompanadas",
+    )
+    acompanante_manual = models.CharField(max_length=120, blank=True, default="")
     unidad_operativa = models.ForeignKey(
         "Unidad",
         on_delete=models.SET_NULL,
