@@ -140,6 +140,36 @@ def _recepcion_point_rows(checklist) -> list[dict]:
     return rows
 
 
+def _totales_recepcion_point(rows: list[dict]) -> list[dict]:
+    totales = {}
+    for row in rows:
+        linea = row["linea"]
+        key = (
+            (linea.item_code or "").strip().upper(),
+            (linea.item_name or "").strip().upper(),
+            (linea.unit or "").strip().upper(),
+        )
+        total = totales.setdefault(
+            key,
+            {
+                "item_code": linea.item_code,
+                "item_name": linea.item_name,
+                "unit": linea.unit,
+                "esperado": Decimal("0"),
+                "cargado": Decimal("0"),
+                "recibido": Decimal("0"),
+                "cargado_validado": True,
+            },
+        )
+        total["esperado"] += row["esperado"]
+        if row["cargado_validado"]:
+            total["cargado"] += row["cargado"] or Decimal("0")
+        else:
+            total["cargado_validado"] = False
+        total["recibido"] += row["recibido"] or Decimal("0")
+    return sorted(totales.values(), key=lambda row: ((row["item_name"] or ""), (row["item_code"] or "")))
+
+
 def _module_tabs(active: str, user=None) -> list[dict]:
     tabs = [
         {"key": "dashboard", "label": "Dashboard", "url_name": "logistica:home", "active": active == "dashboard"},
@@ -2378,6 +2408,7 @@ def ruta_detail(request, pk: int):
     tiempos_ruta = resumen_tiempos_ruta(ruta)
     checklist_carga = getattr(ruta, "checklist_carga", None)
     recepcion_point_rows = _recepcion_point_rows(checklist_carga)
+    recepcion_point_totales = _totales_recepcion_point(recepcion_point_rows)
 
     context = {
         "module_tabs": _module_tabs("rutas", request.user),
@@ -2395,6 +2426,7 @@ def ruta_detail(request, pk: int):
         "tiempos_ruta": tiempos_ruta,
         "checklist_carga": checklist_carga,
         "recepcion_point_rows": recepcion_point_rows,
+        "recepcion_point_totales": recepcion_point_totales,
         "enterprise_chain": enterprise_chain,
         "critical_path_rows": _logistica_critical_path_rows(enterprise_chain),
         "document_stage_rows": document_stage_rows,
