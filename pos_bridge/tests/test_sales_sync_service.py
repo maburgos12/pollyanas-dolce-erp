@@ -112,6 +112,15 @@ class PointSalesSyncServiceTests(TestCase):
 
         self.assertEqual(branch.erp_branch_id, self.sucursal.id)
 
+    def test_numeric_point_branch_inherits_existing_alias_mapping(self):
+        Sucursal.objects.filter(id=self.sucursal.id).update(codigo="MATRIZ", nombre="Sucursal Matriz")
+        PointBranch.objects.create(external_id="Matriz", name="Matriz", erp_branch=self.sucursal)
+        service = PointSyncService(sales_extractor=FakeSalesExtractor())
+
+        branch = service._upsert_branch({"external_id": "1", "name": "Matriz", "status": "ACTIVE", "metadata": {}})
+
+        self.assertEqual(branch.erp_branch_id, self.sucursal.id)
+
     def test_run_sales_sync_is_idempotent_for_historical_sales_source(self):
         service = PointSyncService(sales_extractor=FakeSalesExtractor())
         first_job = service.run_sales_sync(start_date=date(2025, 12, 31), end_date=date(2025, 12, 31), triggered_by=self.user)
