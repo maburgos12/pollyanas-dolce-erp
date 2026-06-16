@@ -1946,6 +1946,8 @@ class LogisticaControlRutasTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Recepción Point por parada")
+        self.assertContains(response, "Sincronizar carga Point")
+        self.assertContains(response, 'value="sync_carga_point"')
         self.assertContains(response, "Sincronizar recepción Point")
         self.assertContains(response, "Pastel Snicker chico")
         self.assertContains(response, "Esperado")
