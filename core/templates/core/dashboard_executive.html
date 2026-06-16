@@ -600,6 +600,11 @@
       if (Math.abs(value) >= 1000) return `$${(value / 1000).toFixed(0)}k`;
       return `$${value.toFixed(0)}`;
     };
+    const moneyLabel = (value) => {
+      if (Math.abs(value) >= 1000000) return `$${(value / 1000000).toFixed(2)}M`;
+      if (Math.abs(value) >= 1000) return `$${(value / 1000).toFixed(0)}k`;
+      return `$${value.toFixed(0)}`;
+    };
     const forecastRows = parse("home-forecast-weekly-data");
     const yoyRows = parse("home-yoy-data");
     const currentYear = Number("{{ yoy_panel.current_year|default:2026 }}") || 2026;
@@ -632,8 +637,8 @@
       forest: "#236d53",
       amber: "#b38a25",
       border: "rgba(145, 36, 86, 0.10)",
-      blush: "rgba(146, 36, 86, 0.14)",
-      greenSoft: "rgba(35, 109, 83, 0.14)",
+      blush: "rgba(146, 36, 86, 0.36)",
+      greenSoft: "rgba(35, 109, 83, 0.28)",
       amberSoft: "rgba(179, 138, 37, 0.16)"
     };
 
@@ -745,7 +750,27 @@
             grid: { color: theme.border }
           }
         }
-      }
+      },
+      plugins: [{
+        id: "latestYoyValueLabels",
+        afterDatasetsDraw(chart) {
+          const latestIndex = yoyWindowRows.length - 1;
+          const { ctx } = chart;
+          ctx.save();
+          ctx.font = "700 11px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "bottom";
+          chart.data.datasets.forEach((dataset, datasetIndex) => {
+            const value = dataset.data[latestIndex];
+            if (value === null || value === undefined || Number.isNaN(Number(value))) return;
+            const element = chart.getDatasetMeta(datasetIndex).data[latestIndex];
+            if (!element) return;
+            ctx.fillStyle = dataset.borderColor || "#4d3d45";
+            ctx.fillText(moneyLabel(Number(value)), element.x, element.y - 4);
+          });
+          ctx.restore();
+        }
+      }]
     });
   })();
 </script>
