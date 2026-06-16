@@ -111,6 +111,14 @@ class PointMovementSyncServiceTests(TestCase):
         )
         self.branch_produccion_crucero = Sucursal.objects.create(codigo="PRODUCCION_CRUCERO", nombre="Produccion Crucero")
 
+    def test_point_branch_matches_unique_sucursal_name_fragment(self):
+        leyva = Sucursal.objects.create(codigo="LEYVA", nombre="Sucursal Leyva")
+        service = PointMovementSyncService(transfer_extractor=FakeTransferExtractor([]))
+
+        branch = service._upsert_branch({"external_id": "leyva-point", "name": "Leyva", "status": "ACTIVE", "metadata": {}})
+
+        self.assertEqual(branch.erp_branch_id, leyva.id)
+
     def test_run_waste_sync_persists_merma_pos(self):
         receta = Receta.objects.create(nombre="Pastel de 3 Pecados R", codigo_point="0108", hash_contenido="hash-receta-waste")
         waste_line = FakeWasteLine(
