@@ -2396,6 +2396,25 @@
       function renderChecklistCarga(checklist) {
         if (!checklist) return "";
         const lineas = checklist.lineas || [];
+        const totales = Array.from(lineas.reduce((map, linea) => {
+          const key = `${linea.item_code || ""}|${linea.item_name || ""}|${linea.unit || ""}`.toUpperCase();
+          const row = map.get(key) || {
+            item_code: linea.item_code || "",
+            item_name: linea.item_name || "Producto",
+            unit: linea.unit || "",
+            esperado: 0,
+            cargado: 0,
+            cargadoCompleto: true,
+          };
+          row.esperado += Number(linea.cantidad_enviada_esperada || 0);
+          if (linea.cantidad_cargada === null || linea.cantidad_cargada === undefined || linea.cantidad_cargada === "") {
+            row.cargadoCompleto = false;
+          } else {
+            row.cargado += Number(linea.cantidad_cargada || 0);
+          }
+          map.set(key, row);
+          return map;
+        }, new Map()).values()).sort((a, b) => a.item_name.localeCompare(b.item_name));
         const total = Number(checklist.total_lineas || lineas.length || 0);
         const confirmadas = Number(checklist.lineas_confirmadas || 0);
         const pendientes = Number(checklist.lineas_pendientes || Math.max(total - confirmadas, 0));
@@ -2423,6 +2442,18 @@
               <div class="route-progress-fill" style="--route-progress:${pct}%;"></div>
             </div>
             ${pendientes ? `<div class="daily-banner warning">Faltan ${pendientes} producto${pendientes === 1 ? "" : "s"} por revisar antes de salida.</div>` : `<p class="success">Carga revisada.</p>`}
+            <div class="route-stop-list">
+              ${totales.map((totalProducto) => `
+                <section class="route-stop visited">
+                  <span class="route-stop-number">Σ</span>
+                  <div>
+                    <strong>${escapeHtml(totalProducto.item_name)}</strong>
+                    <span class="route-stop-meta">${escapeHtml(totalProducto.item_code || "Sin código")} · total esperado ${totalProducto.esperado.toFixed(3)} ${escapeHtml(totalProducto.unit)}</span>
+                    <span class="route-stop-meta">Total cargado ${totalProducto.cargadoCompleto ? totalProducto.cargado.toFixed(3) : "pendiente"} ${escapeHtml(totalProducto.unit)}</span>
+                  </div>
+                </section>
+              `).join("")}
+            </div>
             <div class="route-stop-list">
               ${lineas.map((linea) => {
                 const draft = cargaDraftFor(linea.id);
@@ -4125,7 +4156,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v22", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v23", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {
