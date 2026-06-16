@@ -89,14 +89,18 @@ def _recepcion_point_rows(checklist) -> list[dict]:
         return []
 
     rows = []
-    lineas = checklist.lineas.select_related("parada", "point_transfer_line").order_by("parada__orden", "item_name", "id")
+    lineas = (
+        checklist.lineas.select_related("parada", "point_transfer_line")
+        .filter(Q(point_transfer_line__isnull=True) | Q(point_transfer_line__is_open=True))
+        .order_by("parada__orden", "item_name", "id")
+    )
     for linea in lineas:
         point_line = linea.point_transfer_line
         esperado = Decimal(str(linea.cantidad_enviada_esperada or 0))
         cargado_validado = linea.cantidad_cargada is not None
         cargado = Decimal(str(linea.cantidad_cargada or 0)) if cargado_validado else None
         referencia_recepcion = cargado if cargado is not None else esperado
-        recibido = Decimal(str(point_line.received_quantity or 0)) if point_line else Decimal("0")
+        recibido = Decimal("0")
         if not point_line:
             estado_label = "Sin transferencia Point"
             estado_tone = "danger"
@@ -119,7 +123,7 @@ def _recepcion_point_rows(checklist) -> list[dict]:
         else:
             estado_label = "Pendiente en Point"
             estado_tone = "warning"
-            recibido_display = recibido
+            recibido_display = None
 
         rows.append(
             {
@@ -2144,7 +2148,7 @@ def ruta_detail(request, pk: int):
 
         if action == "sync_carga_point":
             try:
-                resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=request.user)
+                resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=request.user, ejecutar_sync=False)
             except ValidationError as exc:
                 messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
             else:
