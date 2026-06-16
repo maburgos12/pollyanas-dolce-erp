@@ -2750,7 +2750,6 @@ def vacaciones_list(request):
             solicitudes_qs = solicitudes_qs.filter(Q(empleado=empleado_actual) | Q(jefe_directo=request.user))
         else:
             solicitudes_qs = solicitudes_qs.filter(jefe_directo=request.user)
-    solicitudes = solicitudes_qs[:500]
     empleados = list(empleados_qs[:250])
     empleados_saldo = [
         {
@@ -2784,7 +2783,7 @@ def vacaciones_list(request):
             "module_tabs": _module_tabs("vacaciones", request.user),
             "empleados": empleados,
             "empleados_saldo": empleados_saldo,
-            "solicitudes": solicitudes,
+            "hay_solicitudes": stats["total"] > 0,
             "columnas": columnas,
             "stats": stats,
             "can_manage_rrhh": can_manage_rrhh(request.user),
