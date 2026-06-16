@@ -44,10 +44,7 @@ class RecepcionPointResumen:
 
 
 def _cantidad_esperada(line: PointTransferLine) -> Decimal:
-    sent = Decimal(str(line.sent_quantity or 0))
-    if sent > 0:
-        return sent
-    return Decimal(str(line.requested_quantity or 0))
+    return Decimal(str(line.sent_quantity or 0))
 
 
 def _paradas_por_sucursal(ruta: RutaEntrega) -> dict[int, ParadaRuta]:
@@ -108,6 +105,11 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
         ):
             omitidas += 1
             continue
+        cantidad_esperada = _cantidad_esperada(line)
+        if cantidad_esperada <= 0:
+            RutaCargaChecklistLinea.objects.filter(checklist=checklist, source_hash=line.source_hash).delete()
+            omitidas += 1
+            continue
         parada = paradas_by_branch[branch.id]
         defaults = {
             "parada": parada,
@@ -120,7 +122,7 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             "erp_origin_branch": line.erp_origin_branch,
             "erp_destination_branch": line.erp_destination_branch,
             "cantidad_solicitada": line.requested_quantity,
-            "cantidad_enviada_esperada": _cantidad_esperada(line),
+            "cantidad_enviada_esperada": cantidad_esperada,
         }
         _, created = RutaCargaChecklistLinea.objects.update_or_create(
             checklist=checklist,

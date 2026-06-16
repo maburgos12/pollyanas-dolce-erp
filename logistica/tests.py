@@ -2109,6 +2109,19 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.cantidad_enviada_esperada, Decimal(str(transferencia.sent_quantity)))
         self.assertEqual(linea.source_hash, transferencia.source_hash)
 
+    def test_checklist_carga_omite_transferencia_abierta_sin_enviado(self):
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        transferencia = self._crear_transferencia_point_abierta(source_hash="transfer-sin-enviado")
+        transferencia.sent_quantity = Decimal("0.000")
+        transferencia.requested_quantity = Decimal("2.000")
+        transferencia.save(update_fields=["sent_quantity", "requested_quantity", "updated_at"])
+
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        self.assertEqual(resumen.creadas, 0)
+        self.assertEqual(resumen.checklist.lineas.count(), 0)
+        self.assertFalse(RutaCargaChecklistLinea.objects.filter(source_hash=transferencia.source_hash).exists())
+
     def test_checklist_carga_incluye_transferencia_del_dia_anterior(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
         transferencia = self._crear_transferencia_point_abierta(
