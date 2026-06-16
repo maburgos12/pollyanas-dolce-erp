@@ -235,6 +235,16 @@ class NotificacionesTests(TestCase):
         self.assertEqual(mi_trabajo["badge_count"], 2)
         self.assertEqual(notificaciones["badge_count"], 2)
 
+    def test_navegacion_muestra_mis_solicitudes_si_usuario_es_empleado(self):
+        Empleado.objects.create(nombre="Carolina Cayetano", usuario_erp=self.user, activo=True)
+
+        groups = build_nav_groups(self.user, "/rrhh/app/")
+        mi_trabajo = next(group for group in groups if group["key"] == "mi_trabajo")
+        solicitudes = next(item for item in mi_trabajo["items"] if item["label"] == "Mis solicitudes")
+
+        self.assertEqual(solicitudes["url"], "/rrhh/app/")
+        self.assertTrue(solicitudes["active"])
+
     def test_permiso_solicitado_notifica_jefe_directo_de_rrhh(self):
         jefe_empleado = Empleado.objects.create(nombre="Carolina Cayetano", usuario_erp=self.user)
         empleado = Empleado.objects.create(nombre="Carlos Medina", area="HORNOS", jefe_directo=jefe_empleado)
@@ -252,6 +262,28 @@ class NotificacionesTests(TestCase):
         notif = Notificacion.objects.get(usuario=self.user)
         self.assertEqual(notif.tipo, Notificacion.TIPO_PERMISO)
         self.assertEqual(notif.url, "/bonos-produccion/app/?tab=permisos")
+
+    def test_permiso_administrativo_notifica_direccion(self):
+        dg = get_user_model().objects.create_user(username="mauricio", is_active=True)
+        dg.groups.add(Group.objects.create(name=ROLE_DG))
+        empleado = Empleado.objects.create(
+            nombre="YESENIA SOTO INZUNZA",
+            departamento=Empleado.DEP_ADMINISTRACION,
+            puesto="Responsable Administracion",
+        )
+        permiso = PermisoSalida.objects.create(
+            empleado=empleado,
+            tipo=PermisoSalida.TIPO_PERMISO_DIA,
+            fecha_inicio=timezone.now(),
+            motivo="Permiso administrativo",
+        )
+
+        creadas = notificar_permiso_solicitado(permiso, actor=self.actor)
+
+        self.assertEqual(creadas, 1)
+        notif = Notificacion.objects.get(usuario=dg)
+        self.assertEqual(notif.tipo, Notificacion.TIPO_PERMISO)
+        self.assertEqual(notif.url, "/rrhh/permisos/")
 
     def test_prestamo_solicitado_notifica_jefe_asignado(self):
         empleado = Empleado.objects.create(nombre="Empleado Préstamo")
