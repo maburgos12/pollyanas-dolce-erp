@@ -2282,6 +2282,36 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
         self.assertIn("confirma la carga", response.json()["detail"])
 
+    def test_ruta_detail_confirma_carga_manual_y_permita_liberar(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        self._crear_transferencia_point_abierta()
+        checklist = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False).checklist
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
+            {"action": "confirmar_carga_manual", "notas_carga_manual": "Carga confirmada en patio."},
+            follow=True,
+        )
+
+        checklist.refresh_from_db()
+        linea = checklist.lineas.get()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_CARGADA)
+        self.assertEqual(linea.cantidad_cargada, linea.cantidad_enviada_esperada)
+        self.assertEqual(checklist.estatus, RutaCargaChecklist.ESTATUS_CONFIRMADA)
+        self.assertEqual(checklist.confirmado_por, self.user)
+
+        released = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
+            {"action": "ruta_status", "estatus": RutaEntrega.ESTATUS_EN_RUTA},
+            follow=True,
+        )
+        ruta.refresh_from_db()
+        self.assertEqual(released.status_code, 200)
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
+
     def test_api_repartidor_valida_linea_carga_e_idempotencia(self):
         self.client.force_login(self.user)
         ruta, _ = self._crear_ruta_planeada_para_carga()

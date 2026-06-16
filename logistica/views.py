@@ -32,6 +32,7 @@ from .models import (
     ReparacionUnidad,
     Repartidor,
     ReporteUnidad,
+    RutaCargaChecklistLinea,
     RutaEntrega,
     ServicioRealizadoUnidad,
     TipoServicioUnidad,
@@ -39,7 +40,12 @@ from .models import (
 )
 from .services_google_routes import recalcular_ruta_programada
 from .services_google_roads import snap_gps_path_to_roads
-from .services_carga_ruta import checklist_bloquea_salida, sincronizar_checklist_carga_desde_point, sincronizar_recepcion_desde_point
+from .services_carga_ruta import (
+    checklist_bloquea_salida,
+    confirmar_checklist_carga_manual,
+    sincronizar_checklist_carga_desde_point,
+    sincronizar_recepcion_desde_point,
+)
 from .services_rutas_control import distancia_metros, resumen_control_rutas
 from .services_tiempos_ruta import resumen_tiempos_ruta
 
@@ -1985,6 +1991,19 @@ def ruta_detail(request, pk: int):
             messages.success(request, "Planeación de ruta actualizada.")
             return redirect("logistica:ruta_detail", pk=ruta.id)
 
+        if action == "confirmar_carga_manual":
+            try:
+                lineas = confirmar_checklist_carga_manual(
+                    ruta=ruta,
+                    user=request.user,
+                    notas=(request.POST.get("notas_carga_manual") or "").strip(),
+                )
+            except ValidationError as exc:
+                messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+            else:
+                messages.success(request, f"Carga manual confirmada: {lineas} línea(s). Ya puedes liberar la ruta.")
+            return redirect("logistica:ruta_detail", pk=ruta.id)
+
         if action == "add_parada":
             punto_id = (request.POST.get("punto") or "").strip()
             punto = PuntoLogistico.objects.filter(pk=int(punto_id), activo=True).first() if punto_id.isdigit() else None
@@ -2424,6 +2443,11 @@ def ruta_detail(request, pk: int):
     checklist_carga = getattr(ruta, "checklist_carga", None)
     recepcion_point_rows = _recepcion_point_rows(checklist_carga)
     recepcion_point_totales = _totales_recepcion_point(recepcion_point_rows)
+    carga_manual_pendiente = bool(
+        checklist_carga
+        and ruta.estatus == RutaEntrega.ESTATUS_PLANEADA
+        and checklist_carga.lineas.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists()
+    )
 
     context = {
         "module_tabs": _module_tabs("rutas", request.user),
@@ -2440,6 +2464,7 @@ def ruta_detail(request, pk: int):
         "paradas_tiempos": tiempos_ruta.paradas,
         "tiempos_ruta": tiempos_ruta,
         "checklist_carga": checklist_carga,
+        "carga_manual_pendiente": carga_manual_pendiente,
         "recepcion_point_rows": recepcion_point_rows,
         "recepcion_point_totales": recepcion_point_totales,
         "enterprise_chain": enterprise_chain,

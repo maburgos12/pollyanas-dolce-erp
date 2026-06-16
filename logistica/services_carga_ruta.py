@@ -271,6 +271,48 @@ def checklist_bloquea_salida(ruta: RutaEntrega) -> str | None:
     return "confirma la carga de productos antes de liberar la ruta"
 
 
+@transaction.atomic
+def confirmar_checklist_carga_manual(*, ruta: RutaEntrega, user, notas: str = "") -> int:
+    if ruta.estatus != RutaEntrega.ESTATUS_PLANEADA:
+        raise ValidationError("Solo puedes confirmar carga manual en una ruta planeada.")
+    checklist = RutaCargaChecklist.objects.select_for_update().filter(ruta=ruta).first()
+    if not checklist or not checklist.lineas.exists():
+        raise ValidationError("La ruta no tiene carga Point para confirmar.")
+    now = timezone.now()
+    lineas = list(checklist.lineas.select_for_update().filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE))
+    for linea in lineas:
+        linea.cantidad_cargada = linea.cantidad_enviada_esperada
+        linea.estatus = RutaCargaChecklistLinea.ESTATUS_CARGADA
+        linea.motivo_diferencia = ""
+        linea.notas = notas or "Carga confirmada manualmente por logística."
+        linea.client_event_id = f"manual-carga-{ruta.id}-{linea.id}"
+        linea.validado_por = user
+        linea.validado_en = now
+        linea.save(
+            update_fields=[
+                "cantidad_cargada",
+                "estatus",
+                "motivo_diferencia",
+                "notas",
+                "client_event_id",
+                "validado_por",
+                "validado_en",
+                "actualizado_en",
+            ]
+        )
+    diferencias = checklist.lineas.exclude(
+        estatus__in=[RutaCargaChecklistLinea.ESTATUS_CARGADA, RutaCargaChecklistLinea.ESTATUS_NO_APLICA]
+    ).exists()
+    checklist.estatus = RutaCargaChecklist.ESTATUS_CON_INCIDENCIA if diferencias else RutaCargaChecklist.ESTATUS_CONFIRMADA
+    checklist.confirmado_por = None if diferencias else user
+    checklist.confirmado_en = None if diferencias else now
+    checklist.notas = notas or "Carga confirmada manualmente por logística."
+    checklist.save(update_fields=["estatus", "confirmado_por", "confirmado_en", "notas", "actualizado_en"])
+    if not diferencias:
+        registrar_evento_checklist_confirmado(ruta=ruta, user=user)
+    return len(lineas)
+
+
 def registrar_evento_checklist_confirmado(*, ruta: RutaEntrega, user) -> None:
     if EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL, metadata__tipo="checklist_carga").exists():
         return
