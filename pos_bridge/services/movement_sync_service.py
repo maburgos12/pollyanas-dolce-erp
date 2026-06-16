@@ -77,9 +77,13 @@ class PointMovementSyncService:
             match = Sucursal.objects.filter(nombre__iexact=name).first()
         if match is None and name:
             normalized = normalize_text(name)
-            for branch in Sucursal.objects.all().only("id", "nombre"):
+            branches = list(Sucursal.objects.all().only("id", "nombre"))
+            for branch in branches:
                 if normalize_text(branch.nombre) == normalized:
                     return branch
+            matches = [branch for branch in branches if normalized and normalized in normalize_text(branch.nombre)]
+            if len(matches) == 1:
+                return matches[0]
         return match
 
     def _upsert_branch(self, payload: dict) -> PointBranch:
