@@ -39,7 +39,7 @@ from .models import (
 )
 from .services_google_routes import recalcular_ruta_programada
 from .services_google_roads import snap_gps_path_to_roads
-from .services_carga_ruta import checklist_bloquea_salida, sincronizar_recepcion_desde_point
+from .services_carga_ruta import checklist_bloquea_salida, sincronizar_checklist_carga_desde_point, sincronizar_recepcion_desde_point
 from .services_rutas_control import distancia_metros, resumen_control_rutas
 from .services_tiempos_ruta import resumen_tiempos_ruta
 
@@ -2111,6 +2111,21 @@ def ruta_detail(request, pk: int):
                     messages.warning(request, "Point todavía no marca recepción para las líneas de esta ruta.")
                 else:
                     messages.warning(request, "No hay checklist de carga o transferencias Point ligadas a esta ruta.")
+            return redirect("logistica:ruta_detail", pk=ruta.id)
+
+        if action == "sync_carga_point":
+            try:
+                resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=request.user)
+            except ValidationError as exc:
+                messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+            else:
+                if resumen.creadas or resumen.actualizadas:
+                    messages.success(
+                        request,
+                        f"Carga Point sincronizada: {resumen.creadas} línea(s) nueva(s), {resumen.actualizadas} actualizada(s).",
+                    )
+                else:
+                    messages.warning(request, "Point no tiene transferencias abiertas para las sucursales de esta ruta.")
             return redirect("logistica:ruta_detail", pk=ruta.id)
 
         if action == "ruta_status":

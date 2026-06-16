@@ -277,6 +277,11 @@
       {% if can_manage_logistica %}
       <form method="post">
         {% csrf_token %}
+        <input type="hidden" name="action" value="sync_carga_point">
+        <button class="btn btn-secondary" type="submit">Sincronizar carga Point</button>
+      </form>
+      <form method="post">
+        {% csrf_token %}
         <input type="hidden" name="action" value="sync_recepcion_point">
         <button class="btn btn-secondary" type="submit">Sincronizar recepción Point</button>
       </form>
