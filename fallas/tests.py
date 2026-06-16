@@ -82,6 +82,16 @@ class MisReportesActionsTests(TestCase):
         self.assertContains(response, "Seguimiento")
         self.assertNotContains(response, reverse("fallas:pwa-editar-reporte", args=[reporte.id]))
 
+    def test_dashboard_usa_finalizado_como_estado_operativo(self):
+        UserModuleAccess.objects.create(user=self.user, module="fallas.dashboard", access=UserModuleAccess.ACCESS_MANAGE)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("fallas:dashboard"))
+
+        self.assertEqual(dict(ReporteFalla.ESTATUS)[ReporteFalla.ESTATUS_RESUELTO], "Finalizado")
+        self.assertContains(response, '<option value="resuelto">Finalizado</option>', html=True)
+        self.assertNotContains(response, '<option value="cerrado">Cerrado</option>', html=True)
+
     def test_cambiar_estatus_guarda_evidencia_de_seguimiento(self):
         admin = get_user_model().objects.create_superuser(username="admin.fallas", password="pass123")
         self.client.force_login(admin)

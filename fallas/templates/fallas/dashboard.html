@@ -34,7 +34,7 @@
         <div class="bi-hero-status-grid">
           <article class="bi-status-card"><span class="bi-status-label">Abiertos</span><strong id="kpi-abiertos">-</strong></article>
           <article class="bi-status-card"><span class="bi-status-label">Críticos</span><strong id="kpi-criticos">-</strong></article>
-          <article class="bi-status-card"><span class="bi-status-label">Resueltos 30d</span><strong id="kpi-resueltos">-</strong></article>
+          <article class="bi-status-card"><span class="bi-status-label">Finalizados 30d</span><strong id="kpi-resueltos">-</strong></article>
           <article class="bi-status-card"><span class="bi-status-label">Respuesta prom.</span><strong id="kpi-tiempo">-</strong></article>
         </div>
       </div>
@@ -63,8 +63,7 @@
           <option value="abierto">Abierto</option>
           <option value="en_revision">En revisión</option>
           <option value="en_proceso">En proceso</option>
-          <option value="resuelto">Resuelto</option>
-          <option value="cerrado">Cerrado</option>
+          <option value="resuelto">Finalizado</option>
           <option value="cancelado">Cancelado</option>
         </select>
         <select id="f-prioridad">
@@ -216,8 +215,8 @@ const ESTATUS_BADGE = {
   abierto:    '<span class="fallas-badge e-abierto">Abierto</span>',
   en_revision:'<span class="fallas-badge e-revision">En revisión</span>',
   en_proceso: '<span class="fallas-badge e-proceso">En proceso</span>',
-  resuelto:   '<span class="fallas-badge e-resuelto">Resuelto</span>',
-  cerrado:    '<span class="fallas-badge e-cerrado">Cerrado</span>',
+  resuelto:   '<span class="fallas-badge e-resuelto">Finalizado</span>',
+  cerrado:    '<span class="fallas-badge e-cerrado">Cerrado / validado</span>',
   cancelado:  '<span class="fallas-badge e-cancelado">Cancelado</span>',
 };
 
@@ -400,8 +399,7 @@ async function abrirDetalle(id) {
             <option value="">Sin cambio</option>
             <option value="en_revision">En revisión</option>
             <option value="en_proceso">En proceso</option>
-            <option value="resuelto">Resuelto</option>
-            <option value="cerrado">Cerrado</option>
+            <option value="resuelto">Finalizado</option>
             <option value="cancelado">Cancelado</option>
           </select>
           <label class="pd-form-label pd-mt-3">Asignar a</label>

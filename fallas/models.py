@@ -56,8 +56,8 @@ class ReporteFalla(models.Model):
         (ESTATUS_ABIERTO, "Abierto"),
         (ESTATUS_REVISION, "En revisión"),
         (ESTATUS_PROCESO, "En proceso"),
-        (ESTATUS_RESUELTO, "Resuelto"),
-        (ESTATUS_CERRADO, "Cerrado"),
+        (ESTATUS_RESUELTO, "Finalizado"),
+        (ESTATUS_CERRADO, "Cerrado / validado"),
         (ESTATUS_CANCELADO, "Cancelado"),
     ]
 
