@@ -499,13 +499,18 @@ class AnalyticsDashboardCacheInvalidationTests(SimpleTestCase):
         cursor_cm = MagicMock()
         connection_mock.cursor.return_value = cursor_cm
         connection_mock.in_atomic_block = False
-        build_payload_mock.return_value = {"executive_panels": {"latest_cutoff_date": "2026-04-10"}}
+        events = []
+        bump_mock.side_effect = lambda: events.append("bump")
+        build_payload_mock.side_effect = lambda **_: events.append("build") or {
+            "executive_panels": {"latest_cutoff_date": "2026-04-10"}
+        }
 
         refresh_dashboard_full_materialized_view(months_windows=(6,), concurrently=False)
 
         build_payload_mock.assert_called_once_with(months_window=6)
         bulk_create_mock.assert_called_once()
-        bump_mock.assert_called_once_with()
+        self.assertEqual(events, ["bump", "build", "bump"])
+        self.assertEqual(bump_mock.call_count, 2)
         cursor_cm.__enter__.return_value.execute.assert_called_once_with(
             "REFRESH MATERIALIZED VIEW mv_dashboard_full"
         )
