@@ -1919,8 +1919,12 @@
         } catch (error) {
           if (payload && error?.message !== "Sesión expirada") {
             enqueueRutaTracking({ ruta_id: rutaId, payload });
+            state.routeAutoTrackingStatus = "pendiente_offline";
+          } else if (error?.code === 1) {
+            state.routeAutoTrackingStatus = "gps_denegado";
+          } else {
+            state.routeAutoTrackingStatus = "gps_sin_senal";
           }
-          state.routeAutoTrackingStatus = error?.code === 1 ? "gps_denegado" : "pendiente_offline";
         } finally {
           state.routeAutoTrackingBusy = false;
           if (state.pantallaActual === "ruta_activa") {
@@ -2283,15 +2287,20 @@
         const queueTone = pendientesOffline ? "warn" : "ok";
         const queueLabel = pendientesOffline ? `${pendientesOffline} pendiente${pendientesOffline === 1 ? "" : "s"}` : "Sin pendientes";
         const autoStatus = state.routeAutoTrackingStatus || "idle";
-        const autoTone = ["enviado", "activo", "capturando"].includes(autoStatus) ? "ok" : autoStatus === "idle" ? "warn" : "bad";
+        const autoTone = ["enviado", "activo", "capturando"].includes(autoStatus)
+          ? "ok"
+          : ["idle", "gps_sin_senal", "pendiente_offline"].includes(autoStatus)
+            ? "warn"
+            : "bad";
         const autoLabel = {
           idle: "Esperando ruta",
-          activo: "Activo cada 90 s",
+          activo: "Activo cada 45 s",
           capturando: "Capturando GPS",
           enviado: state.routeAutoTrackingLastSentAt ? `Último ${formatDate(state.routeAutoTrackingLastSentAt)}` : "Enviado",
-          pendiente_offline: "Pendiente local",
+          pendiente_offline: "Sin internet, guardado",
+          gps_sin_senal: "GPS sin señal",
           rechazado_api: "Rechazado por control",
-          gps_denegado: "Permiso bloqueado"
+          gps_denegado: "Ubicación bloqueada"
         }[autoStatus] || autoStatus;
         const lastSignal = rutaData?.ultima_ubicacion?.timestamp_servidor ? formatDate(rutaData.ultima_ubicacion.timestamp_servidor) : "Sin señal previa";
         return `
