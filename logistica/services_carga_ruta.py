@@ -159,8 +159,14 @@ def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, eje
     checklist.save(update_fields=["point_sync_job", "sincronizado_en", "estatus", "actualizado_en"])
 
     creadas, actualizadas, omitidas = _sincronizar_lineas_point_para_ruta(ruta=ruta, checklist=checklist, solo_abiertas=True)
-    if not checklist.lineas.exists():
-        creadas, actualizadas, omitidas = _sincronizar_lineas_point_para_ruta(ruta=ruta, checklist=checklist, solo_abiertas=False)
+    creadas_extra, actualizadas_extra, omitidas_extra = _sincronizar_lineas_point_para_ruta(
+        ruta=ruta,
+        checklist=checklist,
+        solo_abiertas=False,
+    )
+    creadas += creadas_extra
+    actualizadas += actualizadas_extra
+    omitidas += omitidas_extra
 
     if checklist.lineas.exists():
         if checklist.estatus == RutaCargaChecklist.ESTATUS_BLOQUEADA:

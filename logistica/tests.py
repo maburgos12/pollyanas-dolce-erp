@@ -2105,6 +2105,21 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.parada, parada)
         self.assertEqual(linea.point_transfer_line, transferencia)
 
+    def test_checklist_carga_incluye_recibidas_aunque_existan_abiertas(self):
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        self._crear_transferencia_point_abierta(source_hash="transfer-abierta-mixta")
+        recibida = self._crear_transferencia_point_abierta(source_hash="transfer-recibida-mixta")
+        recibida.is_open = False
+        recibida.is_received = True
+        recibida.is_finalized = True
+        recibida.received_quantity = recibida.sent_quantity
+        recibida.received_at = timezone.now()
+        recibida.save(update_fields=["is_open", "is_received", "is_finalized", "received_quantity", "received_at", "updated_at"])
+
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        self.assertEqual(resumen.checklist.lineas.count(), 2)
+
     def test_checklist_carga_usa_alias_unico_de_sucursal(self):
         sucursal_point = Sucursal.objects.create(codigo="PLAZA_NIO", nombre="Plaza Nío", activa=True)
         sucursal_ruta = Sucursal.objects.create(codigo="NIO", nombre="Sucursal Plaza Nio", activa=True)
