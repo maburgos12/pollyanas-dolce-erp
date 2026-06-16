@@ -75,3 +75,14 @@ class PointHttpSessionClientTests(SimpleTestCase):
         reset_session.assert_called_once()
         audit_callback.assert_called_once()
         self.assertEqual(audit_callback.call_args.kwargs["event"], "point_relogin")
+
+    def test_get_product_stock_uses_stock_endpoint(self):
+        client = PointHttpSessionClient(self._settings())
+        response = Mock()
+        response.json.return_value = [{"PK_Sucursal": 1, "Sucursal": "Matriz", "Cantidad": 18}]
+
+        with patch.object(client, "_request", return_value=response) as request:
+            stock = client.get_product_stock(2, timeout=2)
+
+        self.assertEqual(stock[0]["Cantidad"], 18)
+        request.assert_called_once_with("GET", "/Stock/get_productos_existencia", params={"pk": 2}, timeout=2)

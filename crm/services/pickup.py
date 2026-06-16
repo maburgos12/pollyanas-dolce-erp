@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone as dt_timezone
@@ -18,11 +19,13 @@ from core.models import Sucursal
 from crm.models import Cliente, PedidoCliente, PickupReservation, SeguimientoPedido
 from crm.services.sucursal_resolution import SucursalResolutionError, resolve_sucursal
 from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct
+from pos_bridge.services.live_inventory_lookup_service import PointLiveInventoryLookupError, PointLiveInventoryLookupService
 from recetas.models import Receta, RecetaCodigoPointAlias, normalizar_codigo_point
 from recetas.utils.normalizacion import normalizar_nombre
 
 
 ZERO = Decimal("0")
+logger = logging.getLogger(__name__)
 
 
 class PickupReservationError(Exception):
@@ -48,13 +51,15 @@ class PickupAvailability:
     freshness_seconds: int
     snapshot_age_seconds: int | None
     status: str
+    stock_source: str = "ERP_POS_BRIDGE"
+    stock_captured_at: datetime | None = None
 
     @property
     def available(self) -> bool:
         return self.status in {"AVAILABLE", "LOW_STOCK"} and self.available_to_promise >= self.requested_qty
 
     def to_dict(self) -> dict:
-        captured_at = self.snapshot.captured_at if self.snapshot else None
+        captured_at = self.stock_captured_at or (self.snapshot.captured_at if self.snapshot else None)
         return {
             "product_code": self.receta.codigo_point,
             "product_name": self.receta.nombre,
@@ -67,7 +72,7 @@ class PickupAvailability:
             "available_to_promise": str(self.available_to_promise),
             "requested_qty": str(self.requested_qty),
             "status": self.status,
-            "source": "ERP_POS_BRIDGE",
+            "source": self.stock_source,
             "captured_at": captured_at.isoformat() if captured_at else None,
             "snapshot_age_seconds": self.snapshot_age_seconds,
             "freshness_seconds": self.freshness_seconds,
@@ -93,6 +98,7 @@ class PickupAvailabilityService:
         self.default_buffer_qty = self._decimal(getattr(settings, "PICKUP_STOCK_BUFFER_DEFAULT", "1"))
         self.low_stock_threshold = self._decimal(getattr(settings, "PICKUP_LOW_STOCK_THRESHOLD", "3"))
         self.default_ttl_minutes = max(int(getattr(settings, "PICKUP_RESERVATION_TTL_MINUTES", 15)), 1)
+        self.live_lookup_service = PointLiveInventoryLookupService()
 
     @staticmethod
     def _decimal(value, default: Decimal = ZERO) -> Decimal:
@@ -306,17 +312,41 @@ class PickupAvailabilityService:
         sucursal, point_branch = self._resolve_sucursal(branch_code)
         point_product, snapshot = self._resolve_point_product(receta, point_branch)
         reserved_qty = self._reserved_qty(receta=receta, sucursal=sucursal, debounce_expiration=True)
-        snapshot_stock_qty = snapshot.stock if snapshot else ZERO
-        available_to_promise = max(snapshot_stock_qty - reserved_qty - self.default_buffer_qty, ZERO)
-
         now = timezone.now()
+        stock_qty = snapshot.stock if snapshot else ZERO
+        stock_source = "ERP_POS_BRIDGE"
+        stock_captured_at = None
+        live_result = None
+        try:
+            live_result = self.live_lookup_service.get_stock(
+                product_codes=self._candidate_codes(receta),
+                sucursal=sucursal,
+                point_branch=point_branch,
+            )
+        except PointLiveInventoryLookupError as exc:
+            logger.warning(
+                "Point live pickup lookup failed branch=%s product=%s error=%s",
+                sucursal.codigo,
+                receta.codigo_point,
+                exc,
+            )
+        if live_result is not None:
+            stock_qty = live_result.stock_qty
+            stock_source = "ERP_POS_BRIDGE_LIVE_POINT"
+            stock_captured_at = live_result.captured_at
+        available_to_promise = max(stock_qty - reserved_qty - self.default_buffer_qty, ZERO)
+
         freshness_seconds = self.freshness_minutes * 60
         snapshot_age_seconds = int((now - snapshot.captured_at).total_seconds()) if snapshot else None
-        is_fresh = snapshot is not None and snapshot_age_seconds is not None and snapshot_age_seconds <= freshness_seconds
+        if live_result is not None:
+            snapshot_age_seconds = int((now - live_result.captured_at).total_seconds())
+            is_fresh = True
+        else:
+            is_fresh = snapshot is not None and snapshot_age_seconds is not None and snapshot_age_seconds <= freshness_seconds
 
         if available_to_promise <= ZERO:
             status = self.STATUS_OUT_OF_STOCK
-        elif snapshot is None or not is_fresh:
+        elif not is_fresh:
             status = self.STATUS_UNKNOWN
         elif available_to_promise <= self.low_stock_threshold:
             status = self.STATUS_LOW_STOCK
@@ -329,7 +359,7 @@ class PickupAvailabilityService:
             point_branch=point_branch,
             point_product=point_product,
             snapshot=snapshot,
-            snapshot_stock_qty=snapshot_stock_qty,
+            snapshot_stock_qty=stock_qty,
             reserved_qty=reserved_qty,
             buffer_qty=self.default_buffer_qty,
             available_to_promise=available_to_promise,
@@ -338,6 +368,8 @@ class PickupAvailabilityService:
             freshness_seconds=freshness_seconds,
             snapshot_age_seconds=snapshot_age_seconds,
             status=status,
+            stock_source=stock_source,
+            stock_captured_at=stock_captured_at,
         )
 
     @transaction.atomic

@@ -21,6 +21,7 @@ from integraciones.models import PublicApiAccessLog, PublicApiClient
 from inventario.models import ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
 from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob
+from pos_bridge.services.live_inventory_lookup_service import PointLiveInventoryLookupError, PointLiveInventoryResult
 from recetas.models import LineaReceta, Receta, RecetaCodigoPointAlias
 
 
@@ -418,6 +419,65 @@ class PublicApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["status"], "UNKNOWN")
         self.assertFalse(response.data["available"])
+
+    @override_settings(
+        SECURE_SSL_REDIRECT=False,
+        PICKUP_AVAILABILITY_FRESHNESS_MINUTES=1,
+        PICKUP_STOCK_BUFFER_DEFAULT="1",
+        PICKUP_LOW_STOCK_THRESHOLD="2",
+        PICKUP_RESERVATION_TTL_MINUTES=15,
+        PICKUP_AVAILABILITY_RESPONSE_CACHE_SECONDS=0,
+    )
+    def test_pickup_availability_prefers_live_point_stock(self):
+        PointInventorySnapshot.objects.all().update(captured_at=timezone.now() - timedelta(minutes=5), stock=Decimal("0"))
+        live_result = PointLiveInventoryResult(
+            product_code="01PSV",
+            product_name="Pastel Selva Negra",
+            point_product_id="1001",
+            point_branch_id="1",
+            point_branch_name="Matriz",
+            stock_qty=Decimal("7"),
+            captured_at=timezone.now(),
+            raw_payload={"Cantidad": 7, "Sucursal": "Matriz"},
+        )
+
+        with patch("pos_bridge.services.live_inventory_lookup_service.PointLiveInventoryLookupService.get_stock", return_value=live_result):
+            response = self.client.get(
+                reverse("api_public_pickup_availability"),
+                {"product_code": "01PSV", "branch_code": "MATRIZ", "quantity": "1"},
+                **self._auth_headers(),
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "AVAILABLE")
+        self.assertEqual(response.data["source"], "ERP_POS_BRIDGE_LIVE_POINT")
+        self.assertEqual(response.data["available_to_promise"], "6")
+
+    @override_settings(
+        SECURE_SSL_REDIRECT=False,
+        PICKUP_AVAILABILITY_FRESHNESS_MINUTES=1,
+        PICKUP_STOCK_BUFFER_DEFAULT="1",
+        PICKUP_LOW_STOCK_THRESHOLD="2",
+        PICKUP_RESERVATION_TTL_MINUTES=15,
+        PICKUP_AVAILABILITY_RESPONSE_CACHE_SECONDS=0,
+    )
+    def test_pickup_availability_falls_back_to_snapshot_when_live_point_fails(self):
+        PointInventorySnapshot.objects.all().update(captured_at=timezone.now() - timedelta(minutes=5), stock=Decimal("5"))
+
+        with patch(
+            "pos_bridge.services.live_inventory_lookup_service.PointLiveInventoryLookupService.get_stock",
+            side_effect=PointLiveInventoryLookupError("Point timeout"),
+        ):
+            response = self.client.get(
+                reverse("api_public_pickup_availability"),
+                {"product_code": "01PSV", "branch_code": "MATRIZ", "quantity": "1"},
+                **self._auth_headers(),
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "UNKNOWN")
+        self.assertEqual(response.data["source"], "ERP_POS_BRIDGE")
+        self.assertEqual(response.data["available_to_promise"], "4.000")
 
     @override_settings(
         PICKUP_AVAILABILITY_FRESHNESS_MINUTES=20,
