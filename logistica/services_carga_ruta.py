@@ -298,8 +298,6 @@ def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_
         if sync_job.status != sync_job.STATUS_SUCCESS:
             raise ValidationError("No se pudo sincronizar Point para confirmar recepción de transferencias.")
 
-    _sincronizar_lineas_point_para_ruta(ruta=ruta, checklist=checklist)
-
     if not checklist.lineas.exists():
         return RecepcionPointResumen(ruta=ruta)
 

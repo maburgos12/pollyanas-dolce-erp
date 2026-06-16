@@ -267,23 +267,18 @@
   </section>
 
   <section class="card">
-    <div class="card-header">Recepción Point por parada</div>
+    <div class="card-header">Carga Point por parada</div>
     <div class="point-reception-head">
       <div class="point-reception-copy">
         <p class="muted" style="margin:0;">
-          Point confirma lo que la sucursal aceptó. Esta vista compara carga esperada, carga validada por el repartidor y recepción real en Point.
+          Carga esperada desde transferencias abiertas de Point. No mezcla recepciones finalizadas.
         </p>
       </div>
       {% if can_manage_logistica %}
       <form method="post">
         {% csrf_token %}
         <input type="hidden" name="action" value="sync_carga_point">
-        <button class="btn btn-secondary" type="submit">Sincronizar carga Point</button>
-      </form>
-      <form method="post">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="sync_recepcion_point">
-        <button class="btn btn-secondary" type="submit">Sincronizar recepción Point</button>
+        <button class="btn btn-secondary" type="submit">Actualizar carga Point</button>
       </form>
       {% endif %}
     </div>
@@ -295,7 +290,6 @@
             <th>Producto total</th>
             <th class="text-end">Esperado total</th>
             <th class="text-end">Cargado total</th>
-            <th class="text-end">Recibido Point total</th>
           </tr>
         </thead>
         <tbody>
@@ -307,7 +301,6 @@
             </td>
             <td class="text-end">{{ row.esperado|floatformat:3 }}</td>
             <td class="text-end">{% if row.cargado_validado %}{{ row.cargado|floatformat:3 }}{% else %}-{% endif %}</td>
-            <td class="text-end">{{ row.recibido|floatformat:3 }}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -322,9 +315,7 @@
             <th>Producto</th>
             <th class="text-end">Esperado</th>
             <th class="text-end">Cargado</th>
-            <th class="text-end">Recibido Point</th>
             <th>Estado Point</th>
-            <th>Recibió</th>
           </tr>
         </thead>
         <tbody>
@@ -337,19 +328,10 @@
             </td>
             <td class="text-end">{{ row.esperado|floatformat:3 }}</td>
             <td class="text-end">{% if row.cargado_validado %}{{ row.cargado|floatformat:3 }}{% else %}-{% endif %}</td>
-            <td class="text-end">{% if row.recibido is not None %}{{ row.recibido|floatformat:3 }}{% else %}-{% endif %}</td>
             <td><span class="point-status is-{{ row.estado_tone }}">{{ row.estado_label }}</span></td>
-            <td>
-              {% if row.received_at %}
-                {{ row.received_at|date:"Y-m-d H:i" }}
-                <div class="muted">{{ row.received_by|default:"Sin usuario Point" }}</div>
-              {% else %}
-                <span class="muted">Pendiente</span>
-              {% endif %}
-            </td>
           </tr>
           {% empty %}
-          <tr><td colspan="7" class="muted">Sin checklist de carga ligado a transferencias Point para esta ruta.</td></tr>
+          <tr><td colspan="5" class="muted">Sin checklist de carga ligado a transferencias Point para esta ruta.</td></tr>
           {% endfor %}
         </tbody>
       </table>
