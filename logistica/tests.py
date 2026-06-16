@@ -1960,6 +1960,17 @@ class LogisticaControlRutasTests(TestCase):
         self.assertContains(response, "Recibido Point")
         self.assertContains(response, "Recibido correcto")
 
+    def test_ruta_detail_muestra_recibido_point_aunque_carga_no_este_validada(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        self._crear_linea_carga_con_transferencia_recibida(loaded_quantity=None)
+
+        response = self.client.get(reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Recibido correcto")
+        self.assertNotContains(response, "Carga sin validar")
+
     def test_ruta_detail_sincroniza_recepcion_point(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)

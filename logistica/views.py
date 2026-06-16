@@ -97,29 +97,28 @@ def _recepcion_point_rows(checklist) -> list[dict]:
         cargado = Decimal(str(linea.cantidad_cargada or 0)) if cargado_validado else None
         referencia_recepcion = cargado if cargado is not None else esperado
         recibido = Decimal(str(point_line.received_quantity or 0)) if point_line else Decimal("0")
-        if not cargado_validado:
-            estado_label = "Carga sin validar"
-            estado_tone = "warning"
-            recibido_display = recibido if point_line and point_line.is_received else None
-        elif not point_line:
+        if not point_line:
             estado_label = "Sin transferencia Point"
             estado_tone = "danger"
             recibido_display = None
-        elif not point_line.is_received:
+        elif point_line.is_received:
+            if recibido == referencia_recepcion:
+                estado_label = "Recibido correcto"
+                estado_tone = "success"
+            elif recibido == Decimal("0"):
+                estado_label = "Recibido cero"
+                estado_tone = "danger"
+            else:
+                estado_label = "Diferencia"
+                estado_tone = "danger"
+            recibido_display = recibido
+        elif not cargado_validado:
+            estado_label = "Carga sin validar"
+            estado_tone = "warning"
+            recibido_display = None
+        else:
             estado_label = "Pendiente en Point"
             estado_tone = "warning"
-            recibido_display = recibido
-        elif recibido == referencia_recepcion:
-            estado_label = "Recibido correcto"
-            estado_tone = "success"
-            recibido_display = recibido
-        elif recibido == Decimal("0"):
-            estado_label = "Recibido cero"
-            estado_tone = "danger"
-            recibido_display = recibido
-        else:
-            estado_label = "Diferencia"
-            estado_tone = "danger"
             recibido_display = recibido
 
         rows.append(
