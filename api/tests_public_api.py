@@ -7,6 +7,7 @@ from uuid import uuid4
 from unittest.mock import patch
 
 from django.core.cache import cache
+from django.db import DatabaseError
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -534,6 +535,21 @@ class PublicApiTests(APITestCase):
         self.assertEqual(first.status_code, status.HTTP_200_OK)
         self.assertEqual(second.status_code, status.HTTP_200_OK)
         self.assertEqual(mocked_get.call_count, 1)
+
+    @override_settings(PICKUP_AVAILABILITY_RESPONSE_CACHE_SECONDS=0)
+    def test_pickup_availability_returns_503_when_inventory_query_times_out(self):
+        url = reverse("api_public_pickup_availability")
+        with patch(
+            "api.public_views.PickupAvailabilityService.get_availability",
+            side_effect=DatabaseError("canceling statement due to statement timeout"),
+        ):
+            response = self.client.get(
+                url,
+                {"product_code": "01PSV", "branch_code": "MATRIZ", "quantity": "1"},
+                **self._auth_headers(),
+            )
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertEqual(response.data["code"], "inventory_timeout")
 
     @override_settings(PICKUP_RESERVATION_EXPIRY_SWEEP_DEBOUNCE_SECONDS=30)
     def test_pickup_availability_debounces_expired_reservation_sweep(self):

@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.cache import cache
+from django.db import DatabaseError, connection, transaction
 from django.db.models import Count, F
 from django.utils.dateparse import parse_date
 from django.utils import timezone
@@ -46,6 +47,21 @@ def _log_access(client: PublicApiClient, request, status_code: int):
         method=request.method,
         status_code=int(status_code),
     )
+
+
+def _pickup_availability_timeout_ms() -> int:
+    return max(int(getattr(settings, "PICKUP_AVAILABILITY_DB_TIMEOUT_MS", 1500)), 0)
+
+
+def _get_pickup_availability_with_timeout(service: PickupAvailabilityService, **kwargs):
+    timeout_ms = _pickup_availability_timeout_ms()
+    if connection.vendor != "postgresql" or timeout_ms <= 0:
+        return service.get_availability(**kwargs)
+
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute("SET LOCAL statement_timeout = %s", [timeout_ms])
+        return service.get_availability(**kwargs)
 
 
 def _consume_rate_limit(client: PublicApiClient) -> tuple[bool, int]:
@@ -338,7 +354,8 @@ class PublicPickupAvailabilityView(APIView):
 
         service = PickupAvailabilityService()
         try:
-            availability = service.get_availability(
+            availability = _get_pickup_availability_with_timeout(
+                service,
                 product_code=product_code,
                 branch_code=branch_code,
                 quantity=quantity,
@@ -346,6 +363,15 @@ class PublicPickupAvailabilityView(APIView):
         except PickupReservationError as exc:
             _log_access(client, request, status.HTTP_400_BAD_REQUEST)
             return _reservation_error_response(exc)
+        except DatabaseError:
+            _log_access(client, request, status.HTTP_503_SERVICE_UNAVAILABLE)
+            return Response(
+                {
+                    "detail": "Inventario Point tardó demasiado. Intenta de nuevo.",
+                    "code": "inventory_timeout",
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         payload = availability.to_dict()
         if cache_key:
