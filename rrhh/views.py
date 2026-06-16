@@ -37,6 +37,7 @@ from .models import (
     NominaImportacion,
     NominaLinea,
     NominaPeriodo,
+    MovimientoVacaciones,
     PermisoSalida,
     PlantillaAutorizada,
     Prestamo,
@@ -120,6 +121,24 @@ def _parse_date(raw: str | None):
         return dt_date.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _misma_fecha_en_anio(fecha: dt_date, anio: int) -> dt_date:
+    return dt_date(anio, fecha.month, min(fecha.day, monthrange(anio, fecha.month)[1]))
+
+
+def _ultimo_aniversario(fecha_ingreso: dt_date | None, al: dt_date) -> dt_date | None:
+    if not fecha_ingreso:
+        return None
+    aniversario = _misma_fecha_en_anio(fecha_ingreso, al.year)
+    return aniversario if aniversario <= al else _misma_fecha_en_anio(fecha_ingreso, al.year - 1)
+
+
+def _sumar_meses(fecha: dt_date, meses: int) -> dt_date:
+    month = fecha.month - 1 + meses
+    year = fecha.year + month // 12
+    month = month % 12 + 1
+    return dt_date(year, month, min(fecha.day, monthrange(year, month)[1]))
 
 
 def _codigo_empleado_desde_post(post_data) -> str:
@@ -2751,13 +2770,54 @@ def vacaciones_list(request):
         else:
             solicitudes_qs = solicitudes_qs.filter(jefe_directo=request.user)
     empleados = list(empleados_qs[:250])
-    empleados_saldo = [
-        {
-            "empleado": empleado,
-            "saldo": saldo_vacaciones_empleado(empleado),
-        }
-        for empleado in empleados[:80]
-    ]
+    empleados_revision = empleados[:80]
+    hoy = timezone.localdate()
+    movimientos_por_empleado = {empleado.id: [] for empleado in empleados_revision}
+    movimientos_qs = (
+        MovimientoVacaciones.objects.filter(empleado__in=empleados_revision)
+        .select_related("solicitud", "actor")
+        .order_by("empleado_id", "-creado_en", "-id")
+    )
+    for movimiento in movimientos_qs:
+        movimientos = movimientos_por_empleado.get(movimiento.empleado_id)
+        if movimientos is not None and len(movimientos) < 4:
+            movimientos.append(movimiento)
+    pendientes_anteriores = {
+        row["empleado_id"]: row["total"] or Decimal("0")
+        for row in MovimientoVacaciones.objects.filter(
+            empleado__in=empleados_revision,
+            periodo_anio__lt=hoy.year,
+            tipo=MovimientoVacaciones.TIPO_AJUSTE,
+            descripcion__icontains="pendiente de goce",
+        )
+        .values("empleado_id")
+        .annotate(total=Sum("dias"))
+    }
+    empleados_historial = []
+    for empleado in empleados_revision:
+        saldo = saldo_vacaciones_empleado(empleado, periodo_anio=hoy.year)
+        aniversario = _ultimo_aniversario(empleado.fecha_ingreso, hoy)
+        fecha_limite = _sumar_meses(aniversario, 6) if aniversario else None
+        disponible = saldo["disponible"] + pendientes_anteriores.get(empleado.id, Decimal("0"))
+        if disponible <= 0:
+            estado_legal = "Sin saldo pendiente"
+        elif fecha_limite and fecha_limite < hoy:
+            estado_legal = "Plazo vencido"
+        elif fecha_limite and (fecha_limite - hoy).days <= 30:
+            estado_legal = "Por vencer"
+        else:
+            estado_legal = "En plazo"
+        empleados_historial.append(
+            {
+                "empleado": empleado,
+                "saldo": saldo,
+                "ultimo_aniversario": aniversario,
+                "fecha_limite": fecha_limite,
+                "pendiente_anterior": pendientes_anteriores.get(empleado.id, Decimal("0")),
+                "estado_legal": estado_legal,
+                "movimientos": movimientos_por_empleado.get(empleado.id, []),
+            }
+        )
     columnas = [
         ("solicitada", "Solicitadas", solicitudes_qs.filter(estado=SolicitudVacaciones.ESTADO_SOLICITADA)[:120]),
         (
@@ -2782,7 +2842,7 @@ def vacaciones_list(request):
         {
             "module_tabs": _module_tabs("vacaciones", request.user),
             "empleados": empleados,
-            "empleados_saldo": empleados_saldo,
+            "empleados_historial": empleados_historial,
             "hay_solicitudes": stats["total"] > 0,
             "columnas": columnas,
             "stats": stats,

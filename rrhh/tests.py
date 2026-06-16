@@ -24,6 +24,7 @@ from rrhh.models import (
     NominaImportacion,
     NominaLinea,
     NominaPeriodo,
+    MovimientoVacaciones,
     PlantillaAutorizada,
     PermisoSalida,
     PoliticaVacaciones,
@@ -267,7 +268,7 @@ class CapitalHumanoServiceTests(TestCase):
         response = self.client.get(reverse("rrhh:rrhh_vacaciones_list"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Solicitud de vacaciones")
+        self.assertContains(response, "Vacaciones")
         self.assertNotContains(response, "Ver reglamento interno")
 
     def test_vacaciones_list_expone_puesto_del_empleado_en_selector(self):
@@ -293,6 +294,44 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertContains(response, 'data-puesto-operativo="CAJAS"')
         self.assertContains(response, 'data-departamento="Ventas"')
         self.assertContains(response, "El puesto y área aparecerán automáticamente.")
+
+    def test_vacaciones_list_muestra_saldos_e_historial(self):
+        from datetime import date
+
+        rrhh_user = User.objects.create_user(username="paula", is_superuser=True, is_staff=True)
+        empleado = Empleado.objects.create(
+            nombre="Carolina Cayetano",
+            fecha_ingreso=date(2025, 1, 1),
+            activo=True,
+            puesto="Jefa de Produccion",
+            sucursal="CEDIS",
+        )
+        PoliticaVacaciones.objects.create(
+            antiguedad_desde=1,
+            antiguedad_hasta=5,
+            dias_laborables=Decimal("12.00"),
+            vigente_desde=date(2026, 1, 1),
+        )
+        MovimientoVacaciones.objects.create(
+            empleado=empleado,
+            tipo=MovimientoVacaciones.TIPO_AJUSTE,
+            dias=Decimal("7.00"),
+            periodo_anio=2025,
+            descripcion="[saldo-inicial-vacaciones-20260616] pendiente de goce 2025",
+        )
+
+        self.client.force_login(rrhh_user)
+        with patch("rrhh.views.timezone.localdate", return_value=date(2026, 6, 16)), patch(
+            "rrhh.services_vacaciones.timezone.localdate", return_value=date(2026, 6, 16)
+        ):
+            response = self.client.get(reverse("rrhh:rrhh_vacaciones_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Saldos e historial")
+        self.assertContains(response, "Fecha límite legal")
+        self.assertContains(response, "Goce anterior")
+        self.assertContains(response, "Ajuste manual")
+        self.assertContains(response, "Carolina Cayetano")
 
     def test_permiso_de_jefatura_lo_resuelve_direccion_no_rrhh(self):
         from datetime import datetime

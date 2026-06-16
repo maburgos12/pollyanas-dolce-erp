@@ -42,10 +42,35 @@
   }
   .vac-employee-card strong { color: var(--texto); font-size: 14px; }
   .vac-employee-card span { font-size: 12px; }
-  .vac-saldo-list { display: grid; gap: 8px; margin-top: 12px; max-height: 300px; overflow: auto; }
-  .vac-saldo-row { border: 1px solid var(--rosa); border-radius: 8px; display: grid; gap: 4px; padding: 10px; }
+  .vac-saldo-list, .vac-history-list { display: grid; gap: 8px; margin-top: 12px; max-height: 520px; overflow: auto; }
+  .vac-saldo-row, .vac-history-row { border: 1px solid var(--rosa); border-radius: 8px; display: grid; gap: 8px; padding: 10px; }
   .vac-saldo-main { color: var(--texto); font-weight: 900; }
   .vac-meta { color: var(--texto-light); font-size: 13px; }
+  .vac-history-top { align-items: start; display: flex; gap: 10px; justify-content: space-between; }
+  .vac-history-metrics { display: grid; gap: 6px; grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); }
+  .vac-history-metrics span {
+    background: #fbf6f8;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    color: var(--texto-light);
+    display: grid;
+    font-size: 11px;
+    gap: 2px;
+    padding: 7px;
+    text-transform: uppercase;
+  }
+  .vac-history-metrics strong { color: var(--vino); font-size: 14px; }
+  .vac-movement-list { display: grid; gap: 5px; }
+  .vac-movement-line {
+    background: #fff;
+    border-left: 3px solid var(--rosa);
+    color: var(--texto-light);
+    display: grid;
+    font-size: 12px;
+    gap: 2px;
+    padding: 6px 8px;
+  }
+  .vac-movement-line strong { color: var(--texto); }
   .vac-status-panel { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 16px; }
   .vac-status-strip { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 14px; }
   .vac-status-tab {
