@@ -44,6 +44,12 @@ def year_from_iso(value, default: int) -> int:
     return int(str(value)[:4])
 
 
+def periodo_goce_anio(aniversario_value, periodo_anio: int, tratamiento: str, goce_anterior: Decimal) -> int:
+    if goce_anterior and "periodo anterior" in tratamiento.casefold():
+        return periodo_anio - 1
+    return year_from_iso(aniversario_value, periodo_anio - 1)
+
+
 def read_rows(path: Path, periodo_anio: int) -> list[ImportRow]:
     wb = load_workbook(path, data_only=True)
     if "Saldo inicial" not in wb.sheetnames:
@@ -67,15 +73,22 @@ def read_rows(path: Path, periodo_anio: int) -> list[ImportRow]:
         empleado_nombre = str(raw[headers["Empleado"]] or "").strip()
         if not empleado_nombre:
             continue
+        goce_anterior = decimal_value(raw[headers["Días periodo anterior/vencido"]])
+        tratamiento = str(raw[headers["Tratamiento para ERP"]] or "").strip()
         rows.append(
             ImportRow(
                 empleado_nombre=empleado_nombre,
                 periodo_anio=periodo_anio,
-                periodo_goce_anio=year_from_iso(raw[headers["Último aniversario cumplido"]], periodo_anio - 1),
+                periodo_goce_anio=periodo_goce_anio(
+                    raw[headers["Último aniversario cumplido"]],
+                    periodo_anio,
+                    tratamiento,
+                    goce_anterior,
+                ),
                 saldo_ciclo=decimal_value(raw[headers["Días saldo ciclo ERP"]]),
-                goce_anterior=decimal_value(raw[headers["Días periodo anterior/vencido"]]),
+                goce_anterior=goce_anterior,
                 confirmado=confirmed(raw[headers["¿Saldo confirmado por RRHH?"]]),
-                tratamiento=str(raw[headers["Tratamiento para ERP"]] or "").strip(),
+                tratamiento=tratamiento,
             )
         )
     return rows
