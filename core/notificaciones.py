@@ -166,7 +166,7 @@ def usuarios_jefe_de_empleado(empleado) -> list:
 
 
 def notificar_permiso_solicitado(permiso, *, actor=None) -> int:
-    empleados = usuarios_jefe_de_empleado(permiso.empleado)
+    empleados = usuarios_direccion_general() if permiso.requiere_direccion else usuarios_jefe_de_empleado(permiso.empleado)
     origen = permiso.get_origen_solicitud_display()
     return crear_notificaciones(
         empleados,

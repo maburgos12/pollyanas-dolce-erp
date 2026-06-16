@@ -10,6 +10,7 @@ from django.utils import timezone
 from core.access import can_manage_rrhh
 
 from .models import Empleado, MovimientoVacaciones, PoliticaVacaciones, SolicitudVacaciones
+from .services_permisos import permiso_requiere_autorizacion_direccion, usuario_direccion_general_para_autorizacion
 
 
 DESCANSOS_OFICIALES_FIJOS = {
@@ -96,6 +97,10 @@ def saldo_vacaciones_empleado(empleado: Empleado, *, periodo_anio: int | None = 
 
 
 def usuario_jefe_directo_vacaciones(empleado: Empleado):
+    if permiso_requiere_autorizacion_direccion(empleado):
+        direccion = usuario_direccion_general_para_autorizacion()
+        if direccion:
+            return direccion
     jefe = getattr(empleado, "jefe_directo", None)
     return getattr(jefe, "usuario_erp", None)
 

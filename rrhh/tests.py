@@ -134,6 +134,43 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertEqual(solicitud.estado, SolicitudVacaciones.ESTADO_PREAUTORIZADA)
         self.assertEqual(solicitud.preautorizado_por, jefe_user)
 
+    def test_vacaciones_administrativas_las_preautoriza_dg(self):
+        from datetime import date
+        from rrhh.services_vacaciones import crear_solicitud_vacaciones, preautorizar_solicitud_vacaciones_jefe
+
+        dg_user = User.objects.create_user(username="mauricio")
+        dg_user.groups.add(Group.objects.create(name="DG"))
+        rrhh_user = User.objects.create_user(username="paula")
+        rrhh_user.groups.add(Group.objects.create(name="RRHH"))
+        empleada = Empleado.objects.create(
+            nombre="YESENIA SOTO INZUNZA",
+            departamento=Empleado.DEP_ADMINISTRACION,
+            puesto="Responsable Administracion",
+            fecha_ingreso=date(2025, 1, 1),
+            activo=True,
+        )
+        PoliticaVacaciones.objects.create(
+            antiguedad_desde=1,
+            antiguedad_hasta=5,
+            dias_laborables=Decimal("12.00"),
+            vigente_desde=date(2026, 1, 1),
+        )
+
+        solicitud = crear_solicitud_vacaciones(
+            empleado=empleada,
+            fecha_inicio=date(2026, 6, 15),
+            fecha_fin=date(2026, 6, 19),
+            motivo="Descanso administrativo",
+            actor=rrhh_user,
+        )
+
+        self.assertEqual(solicitud.jefe_directo, dg_user)
+
+        preautorizar_solicitud_vacaciones_jefe(solicitud, dg_user, aprobar=True)
+        solicitud.refresh_from_db()
+        self.assertEqual(solicitud.estado, SolicitudVacaciones.ESTADO_PREAUTORIZADA)
+        self.assertEqual(solicitud.preautorizado_por, dg_user)
+
     def test_reglamento_interno_renderiza_reglas_vacaciones(self):
         reglamento = ReglamentoLaboral.objects.create(
             nombre="Reglamento interno FONSMA",
@@ -680,6 +717,42 @@ class CapitalHumanoAPITests(TestCase):
         self.assertEqual(hora_extra.autorizado_por, jefe_user)
         self.assertIsNotNone(hora_extra.fecha_autorizacion_jefe)
         self.assertEqual(hora_extra.monto_calculado, Decimal("200.00"))
+
+    def test_hora_extra_administrativa_la_autoriza_dg(self):
+        dg_user = User.objects.create_user(username="mauricio", password="pass123")
+        dg_user.groups.add(Group.objects.create(name="DG"))
+        empleado_user = User.objects.create_user(
+            username="yesenia.soto",
+            email="yesenia@example.com",
+            password="pass123",
+        )
+        empleada = Empleado.objects.create(
+            nombre="YESENIA SOTO INZUNZA",
+            email="yesenia@example.com",
+            departamento=Empleado.DEP_ADMINISTRACION,
+            puesto="Responsable Administracion",
+            salario_diario="800.00",
+        )
+        self.client.force_authenticate(user=empleado_user)
+
+        resp = self.client.post(
+            reverse("rrhh:hora-extra-list"),
+            {"fecha": "2026-05-20", "horas": "2.00", "notas": "Cierre administrativo"},
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, 201)
+        hora_extra = HoraExtra.objects.get(pk=resp.data["id"])
+        self.assertEqual(hora_extra.empleado, empleada)
+        self.assertEqual(hora_extra.jefe_directo, dg_user)
+        self.assertEqual(Notificacion.objects.filter(usuario=dg_user, tipo=Notificacion.TIPO_HORA_EXTRA).count(), 1)
+
+        self.client.force_authenticate(user=dg_user)
+        resp_dg = self.client.post(reverse("rrhh:hora-extra-autorizar", args=[hora_extra.id]))
+        self.assertEqual(resp_dg.status_code, 200)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_AUTORIZADO)
+        self.assertEqual(hora_extra.autorizado_por, dg_user)
 
     def test_usuario_sin_empleado_no_se_vincula_a_otro_empleado(self):
         Empleado.objects.create(nombre="XANTECO MENA MARISOL", salario_diario="500.00")
