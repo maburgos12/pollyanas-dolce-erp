@@ -9,9 +9,11 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from core.models import Sucursal
 from pos_bridge.models import PointTransferLine
 from pos_bridge.services.movement_sync_service import PointMovementSyncService
 from pos_bridge.services.open_transfer_sync_service import OpenTransferSyncService, resolve_requesting_erp_branch
+from pos_bridge.utils.helpers import normalize_text
 
 from .models import (
     EventoRuta,
@@ -51,9 +53,14 @@ def _cantidad_esperada(line: PointTransferLine) -> Decimal:
 def _paradas_por_sucursal(ruta: RutaEntrega) -> dict[int, ParadaRuta]:
     paradas = ruta.paradas.select_related("punto", "punto__sucursal").order_by("orden", "id")
     result = {}
+    sucursales = list(Sucursal.objects.filter(activa=True).only("id", "nombre"))
     for parada in paradas:
         if parada.punto.sucursal_id and parada.punto.sucursal_id not in result:
             result[parada.punto.sucursal_id] = parada
+            normalized = normalize_text(parada.punto.sucursal.nombre)
+            aliases = [sucursal for sucursal in sucursales if sucursal.id != parada.punto.sucursal_id and normalize_text(sucursal.nombre) in normalized]
+            if len(aliases) == 1:
+                result.setdefault(aliases[0].id, parada)
     return result
 
 
@@ -152,6 +159,8 @@ def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, eje
     checklist.save(update_fields=["point_sync_job", "sincronizado_en", "estatus", "actualizado_en"])
 
     creadas, actualizadas, omitidas = _sincronizar_lineas_point_para_ruta(ruta=ruta, checklist=checklist, solo_abiertas=True)
+    if not checklist.lineas.exists():
+        creadas, actualizadas, omitidas = _sincronizar_lineas_point_para_ruta(ruta=ruta, checklist=checklist, solo_abiertas=False)
 
     if checklist.lineas.exists():
         if checklist.estatus == RutaCargaChecklist.ESTATUS_BLOQUEADA:
