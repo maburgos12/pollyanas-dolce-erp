@@ -287,6 +287,33 @@
       </form>
       {% endif %}
     </div>
+    {% if recepcion_point_totales %}
+    <div class="table-responsive" style="margin-top:14px;">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Producto total</th>
+            <th class="text-end">Esperado total</th>
+            <th class="text-end">Cargado total</th>
+            <th class="text-end">Recibido Point total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in recepcion_point_totales %}
+          <tr>
+            <td>
+              <strong>{{ row.item_name|default:"Producto sin nombre" }}</strong>
+              <div class="muted">{{ row.item_code|default:"Sin código" }} · {{ row.unit|default:"pz" }}</div>
+            </td>
+            <td class="text-end">{{ row.esperado|floatformat:3 }}</td>
+            <td class="text-end">{% if row.cargado_validado %}{{ row.cargado|floatformat:3 }}{% else %}-{% endif %}</td>
+            <td class="text-end">{{ row.recibido|floatformat:3 }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
     <div class="table-responsive">
       <table class="table table-striped">
         <thead>
