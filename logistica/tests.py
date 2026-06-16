@@ -2083,6 +2083,22 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.parada, parada)
         self.assertEqual(linea.point_transfer_line, transferencia)
 
+    def test_checklist_carga_desbloquea_si_luego_encuentra_transferencias(self):
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        checklist = RutaCargaChecklist.objects.create(
+            ruta=ruta,
+            estatus=RutaCargaChecklist.ESTATUS_BLOQUEADA,
+            notas="No se encontraron transferencias abiertas de Point para las sucursales de esta ruta.",
+        )
+        self._crear_transferencia_point_abierta(source_hash="transfer-desbloquea")
+
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        checklist.refresh_from_db()
+        self.assertEqual(resumen.creadas, 1)
+        self.assertEqual(checklist.estatus, RutaCargaChecklist.ESTATUS_EN_REVISION)
+        self.assertEqual(checklist.notas, "")
+
     def test_checklist_carga_no_duplica_transferencia_point_en_otra_ruta(self):
         ruta_uno, _ = self._crear_ruta_planeada_para_carga()
         ruta_dos, _ = self._crear_ruta_planeada_para_carga()
