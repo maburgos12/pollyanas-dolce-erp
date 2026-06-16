@@ -107,6 +107,27 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertTrue(self.check.completado)
         self.assertEqual(self.check.completado_por, self.user)
 
+    def test_minuta_con_checks_muestra_panel_abierto_para_colaborador(self):
+        item = SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            titulo="Minuta con checks visibles",
+            descripcion="Acuerdo de junta.",
+            responsable_empleado=self.empleado,
+            area="PRODUCCION",
+            fecha_limite=timezone.now() + timedelta(days=1),
+        )
+        check = SeguimientoChecklistItem.objects.create(
+            seguimiento=item,
+            titulo="Punto que debe marcar Carolina",
+        )
+
+        response = self.client.get("/seguimiento/minutas/")
+        content = response.content.decode()
+
+        self.assertContains(response, "Minuta con checks visibles")
+        self.assertIn("<details open>", content)
+        self.assertIn(f'action="/seguimiento/{item.pk}/checklist/{check.pk}/"', content)
+
     def test_paso_agente_dg_no_acepta_toggle_local(self):
         self.item.tipo = SeguimientoItem.TIPO_PROYECTO
         self.item.origen = "Agente DG"
@@ -1140,6 +1161,34 @@ class SeguimientoColaboradorTests(TestCase):
         item = SeguimientoItem.objects.get(metadata__source_table="minute_projects", metadata__source_id=601)
         self.assertEqual(item.checklist.count(), 1)
         self.assertEqual(item.checklist.get().titulo, "Paso existente")
+
+    def test_sync_vacio_no_borra_checklist_existente(self):
+        command = ImportarAgenteDGCommand()
+        counters = {"created": 0, "updated": 0, "skipped": 0}
+        row = {
+            "id": 602,
+            "titulo": "Minuta con checklist preservado",
+            "descripcion": "La fuente llegó sin checklist.",
+            "status": "OPEN",
+            "due_at": timezone.now() + timedelta(days=5),
+            "user_email": self.user.email,
+            "user_name": self.user.get_full_name(),
+            "user_id": 4,
+            "area_name": "Junta",
+        }
+
+        command._upsert_item(
+            row,
+            "minute_agreements",
+            SeguimientoItem.TIPO_MINUTA,
+            counters,
+            checklist=[{"titulo": "Check capturado", "descripcion": "", "completado": False}],
+        )
+        command._upsert_item(row, "minute_agreements", SeguimientoItem.TIPO_MINUTA, counters, checklist=[])
+
+        item = SeguimientoItem.objects.get(metadata__source_table="minute_agreements", metadata__source_id=602)
+        self.assertEqual(item.checklist.count(), 1)
+        self.assertEqual(item.checklist.get().titulo, "Check capturado")
 
     def test_superusuario_conserva_bonos_en_menu(self):
         admin = get_user_model().objects.create_superuser(username="admin-seguimiento", password="x")

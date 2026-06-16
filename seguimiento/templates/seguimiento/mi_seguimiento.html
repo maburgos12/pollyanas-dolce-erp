@@ -234,7 +234,7 @@
           </div>
           {% endif %}
 
-          <details>
+          <details{% if item.checklist_total and not item.esta_cerrado %} open{% endif %}>
             <summary class="seguimiento-action-summary">Actualizar seguimiento</summary>
             <div class="seguimiento-action-panel">
               <div class="seguimiento-checks">

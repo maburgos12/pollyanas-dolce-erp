@@ -519,7 +519,6 @@ class AgenteDGSeguimientoImporter:
 
     def _sync_checklist(self, item: SeguimientoItem, checklist_payload):
         if not checklist_payload:
-            item.checklist.all().delete()
             return
         existing_checks = list(item.checklist.all())
         existing_by_order = {check.orden: check for check in existing_checks}
