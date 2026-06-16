@@ -1291,6 +1291,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
         self.assertIn("route-control-v24", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
+        self.assertIn("?v=route-control-v24", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
         self.assertIn("pollyanas-logistica-pwa-v24-confirmar-entrega", sw_js)
         self.assertIn("total esperado", pwa_html)
