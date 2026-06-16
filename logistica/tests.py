@@ -2099,8 +2099,8 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.parada, parada)
         self.assertEqual(linea.point_transfer_line, transferencia)
 
-    def test_checklist_carga_usa_transferencia_recibida_si_no_hay_abiertas(self):
-        ruta, parada = self._crear_ruta_planeada_para_carga()
+    def test_checklist_carga_no_usa_transferencia_recibida_si_no_hay_abiertas(self):
+        ruta, _ = self._crear_ruta_planeada_para_carga()
         transferencia = self._crear_transferencia_point_abierta(source_hash="transfer-recibida-carga")
         transferencia.is_open = False
         transferencia.is_received = True
@@ -2111,14 +2111,13 @@ class LogisticaControlRutasTests(TestCase):
 
         resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
 
-        self.assertEqual(resumen.creadas, 1)
-        linea = RutaCargaChecklistLinea.objects.get(checklist=resumen.checklist)
-        self.assertEqual(linea.parada, parada)
-        self.assertEqual(linea.point_transfer_line, transferencia)
+        self.assertEqual(resumen.creadas, 0)
+        self.assertEqual(resumen.checklist.lineas.count(), 0)
+        self.assertEqual(resumen.checklist.estatus, RutaCargaChecklist.ESTATUS_BLOQUEADA)
 
-    def test_checklist_carga_incluye_recibidas_aunque_existan_abiertas(self):
+    def test_checklist_carga_ignora_recibidas_aunque_existan_abiertas(self):
         ruta, _ = self._crear_ruta_planeada_para_carga()
-        self._crear_transferencia_point_abierta(source_hash="transfer-abierta-mixta")
+        abierta = self._crear_transferencia_point_abierta(source_hash="transfer-abierta-mixta")
         recibida = self._crear_transferencia_point_abierta(source_hash="transfer-recibida-mixta")
         recibida.is_open = False
         recibida.is_received = True
@@ -2129,7 +2128,8 @@ class LogisticaControlRutasTests(TestCase):
 
         resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
 
-        self.assertEqual(resumen.checklist.lineas.count(), 2)
+        self.assertEqual(resumen.checklist.lineas.count(), 1)
+        self.assertEqual(resumen.checklist.lineas.get().point_transfer_line, abierta)
 
     def test_checklist_carga_usa_alias_unico_de_sucursal(self):
         sucursal_point = Sucursal.objects.create(codigo="PLAZA_NIO", nombre="Plaza Nío", activa=True)
