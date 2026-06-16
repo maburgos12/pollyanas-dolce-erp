@@ -569,7 +569,7 @@ class LogisticaControlRutasTests(TestCase):
         )
         self.parada = ParadaRuta.objects.create(ruta=self.ruta, punto=self.punto, orden=1)
 
-    def _crear_transferencia_point_abierta(self, *, sucursal=None, item_name="Pastel Snicker chico", source_hash="transfer-snicker-1"):
+    def _crear_transferencia_point_abierta(self, *, sucursal=None, item_name="Pastel Snicker chico", source_hash="transfer-snicker-1", registered_at=None):
         sucursal = sucursal or self.sucursal
         origin = PointBranch.objects.create(external_id=f"CEDIS-{source_hash}", name="CEDIS", erp_branch=None)
         destination = PointBranch.objects.create(external_id=f"SUC-{source_hash}", name=sucursal.nombre, erp_branch=sucursal)
@@ -581,7 +581,7 @@ class LogisticaControlRutasTests(TestCase):
             transfer_external_id=f"T-{source_hash}",
             detail_external_id=f"D-{source_hash}",
             source_hash=source_hash,
-            registered_at=timezone.now(),
+            registered_at=registered_at or timezone.now(),
             sent_at=timezone.now(),
             item_name=item_name,
             item_code="SNICK-CH",
@@ -2068,6 +2068,20 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.item_name, "Pastel Snicker chico")
         self.assertEqual(linea.cantidad_enviada_esperada, Decimal(str(transferencia.sent_quantity)))
         self.assertEqual(linea.source_hash, transferencia.source_hash)
+
+    def test_checklist_carga_incluye_transferencia_del_dia_anterior(self):
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        transferencia = self._crear_transferencia_point_abierta(
+            source_hash="transfer-vespertina-previa",
+            registered_at=timezone.now() - timezone.timedelta(days=1),
+        )
+
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        self.assertEqual(resumen.creadas, 1)
+        linea = RutaCargaChecklistLinea.objects.get(checklist=resumen.checklist)
+        self.assertEqual(linea.parada, parada)
+        self.assertEqual(linea.point_transfer_line, transferencia)
 
     def test_checklist_carga_no_duplica_transferencia_point_en_otra_ruta(self):
         ruta_uno, _ = self._crear_ruta_planeada_para_carga()

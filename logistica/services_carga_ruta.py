@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from decimal import Decimal
 
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -78,7 +79,7 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
     branch_ids = set(paradas_by_branch)
     candidates = (
         PointTransferLine.objects.select_related("erp_origin_branch", "erp_destination_branch", "origin_branch", "destination_branch")
-        .filter(is_cancelled=False, registered_at__date=ruta.fecha_ruta)
+        .filter(is_cancelled=False, registered_at__date__in=[ruta.fecha_ruta - timedelta(days=1), ruta.fecha_ruta])
         .filter(Q(erp_origin_branch_id__in=branch_ids) | Q(erp_destination_branch_id__in=branch_ids))
         .order_by("transfer_external_id", "detail_external_id", "id")
     )
@@ -137,9 +138,11 @@ def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, eje
 
     sync_job = None
     if ejecutar_sync:
-        sync_job = OpenTransferSyncService().sync_open_transfers(fecha=ruta.fecha_ruta, triggered_by=user)
-        if sync_job.status != sync_job.STATUS_SUCCESS:
-            raise ValidationError("No se pudo sincronizar Point para generar la carga esperada.")
+        service = OpenTransferSyncService()
+        for fecha in [ruta.fecha_ruta - timedelta(days=1), ruta.fecha_ruta]:
+            sync_job = service.sync_open_transfers(fecha=fecha, triggered_by=user)
+            if sync_job.status != sync_job.STATUS_SUCCESS:
+                raise ValidationError("No se pudo sincronizar Point para generar la carga esperada.")
 
     checklist = obtener_checklist_carga(ruta)
     checklist.point_sync_job = sync_job or checklist.point_sync_job
