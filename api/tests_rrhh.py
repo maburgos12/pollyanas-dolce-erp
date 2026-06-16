@@ -36,6 +36,18 @@ class RRHHApiTests(APITestCase):
         self.assertEqual(resp_list.status_code, status.HTTP_200_OK)
         self.assertGreaterEqual(resp_list.data["count"], 1)
 
+    def test_empleados_list_omite_inactivos_por_default(self):
+        self.client.force_authenticate(self.user_rrhh)
+        Empleado.objects.create(nombre="Empleado Activo", activo=True)
+        Empleado.objects.create(nombre="Empleado Inactivo", activo=False)
+
+        resp = self.client.get(reverse("api_rrhh_empleados"))
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        names = {row["nombre"] for row in resp.data["results"]}
+        self.assertIn("Empleado Activo", names)
+        self.assertNotIn("Empleado Inactivo", names)
+
     def test_nomina_create_line_and_dashboard(self):
         self.client.force_authenticate(self.user_rrhh)
         empleado = Empleado.objects.create(nombre="Empleado RRHH", salario_diario=400)

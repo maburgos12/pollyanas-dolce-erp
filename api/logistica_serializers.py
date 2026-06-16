@@ -755,7 +755,7 @@ class LogisticaReporteReafirmacionSerializer(serializers.ModelSerializer):
 
 
 class LogisticaReportePatchSerializer(serializers.ModelSerializer):
-    asignado_a = serializers.PrimaryKeyRelatedField(queryset=get_user_model().objects.all(), required=False, allow_null=True)
+    asignado_a = serializers.PrimaryKeyRelatedField(queryset=get_user_model().objects.filter(is_active=True), required=False, allow_null=True)
 
     class Meta:
         model = ReporteUnidad

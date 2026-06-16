@@ -155,10 +155,14 @@ def usuarios_para_empleado(empleado):
     User = get_user_model()
     qs = User.objects.none()
     if empleado.email:
-        qs = qs | User.objects.filter(email__iexact=empleado.email)
+        qs = qs | User.objects.filter(email__iexact=empleado.email, is_active=True)
     nombre_norm = empleado.nombre_normalizado or normalizar_nombre(empleado.nombre or "")
     if nombre_norm:
-        matches = [user.pk for user in User.objects.all() if normalizar_nombre(user.get_full_name() or user.username) == nombre_norm]
+        matches = [
+            user.pk
+            for user in User.objects.filter(is_active=True)
+            if normalizar_nombre(user.get_full_name() or user.username) == nombre_norm
+        ]
         qs = qs | User.objects.filter(pk__in=matches)
     return qs.distinct()
 

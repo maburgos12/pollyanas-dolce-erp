@@ -77,6 +77,7 @@ from .services_identidad import (
     asegurar_identidad_operativa_empleado,
     buscar_empleado_por_codigo,
     cerrar_identidad_por_codigo_existente,
+    desactivar_identidad_operativa_empleado,
     descartar_identidad_pendiente,
     normalizar_codigo_empleado,
     vincular_identidad_pendiente,
@@ -1203,21 +1204,21 @@ def empleados(request):
                 empleado = Empleado.objects.filter(pk=int(empleado_id)).first()
             fecha_baja = _parse_date(request.POST.get("fecha_baja")) or timezone.localdate()
             fecha_ingreso = _parse_date(request.POST.get("fecha_ingreso"))
-            baja = EmpleadoBaja.objects.create(
-                empleado=empleado,
-                nombre=(request.POST.get("nombre_baja") or (empleado.nombre if empleado else "")).strip(),
-                area=_area_key(request.POST.get("area_baja") or (empleado.area if empleado else "")),
-                puesto=(request.POST.get("puesto_baja") or (empleado.puesto if empleado else "")).strip(),
-                tipo_contrato=(request.POST.get("tipo_contrato_baja") or (empleado.tipo_contrato if empleado else Empleado.CONTRATO_FIJO)).strip(),
-                fecha_ingreso=fecha_ingreso or (empleado.fecha_ingreso if empleado else fecha_baja),
-                fecha_baja=fecha_baja,
-                motivo=(request.POST.get("motivo") or EmpleadoBaja.MOTIVO_OTRO).strip(),
-                observacion=(request.POST.get("observacion") or "").strip(),
-                creado_por=request.user,
-            )
-            if empleado and request.POST.get("marcar_inactivo") == "on":
-                empleado.activo = False
-                empleado.save(update_fields=["activo", "updated_at"])
+            with transaction.atomic():
+                baja = EmpleadoBaja.objects.create(
+                    empleado=empleado,
+                    nombre=(request.POST.get("nombre_baja") or (empleado.nombre if empleado else "")).strip(),
+                    area=_area_key(request.POST.get("area_baja") or (empleado.area if empleado else "")),
+                    puesto=(request.POST.get("puesto_baja") or (empleado.puesto if empleado else "")).strip(),
+                    tipo_contrato=(request.POST.get("tipo_contrato_baja") or (empleado.tipo_contrato if empleado else Empleado.CONTRATO_FIJO)).strip(),
+                    fecha_ingreso=fecha_ingreso or (empleado.fecha_ingreso if empleado else fecha_baja),
+                    fecha_baja=fecha_baja,
+                    motivo=(request.POST.get("motivo") or EmpleadoBaja.MOTIVO_OTRO).strip(),
+                    observacion=(request.POST.get("observacion") or "").strip(),
+                    creado_por=request.user,
+                )
+                if empleado:
+                    desactivar_identidad_operativa_empleado(empleado)
             messages.success(request, f"Baja capturada para {baja.nombre}.")
             return redirect("rrhh:empleados")
         if action == "plantilla":
@@ -1347,7 +1348,9 @@ def empleados(request):
     enterprise_focus = (request.GET.get("enterprise_focus") or "").strip().upper()
 
     asegurar_esquemas_base()
-    qs = Empleado.objects.all().prefetch_related("bonos_esquemas").annotate(total_lineas_nomina=Count("lineas_nomina"))
+    qs = Empleado.objects.all().prefetch_related("bonos_esquemas").annotate(  # rrhh-allow-inactive-history: filtro estado controla historial
+        total_lineas_nomina=Count("lineas_nomina")
+    )
     if q:
         qs = qs.filter(
             Q(nombre__icontains=q)
@@ -2039,21 +2042,21 @@ def indicadores_ch(request):
                 empleado = Empleado.objects.filter(pk=int(empleado_id)).first()
             fecha_baja = _parse_date(request.POST.get("fecha_baja")) or timezone.localdate()
             fecha_ingreso = _parse_date(request.POST.get("fecha_ingreso"))
-            baja = EmpleadoBaja.objects.create(
-                empleado=empleado,
-                nombre=(request.POST.get("nombre") or (empleado.nombre if empleado else "")).strip(),
-                area=_area_key(request.POST.get("area") or (empleado.area if empleado else "")),
-                puesto=(request.POST.get("puesto") or (empleado.puesto if empleado else "")).strip(),
-                tipo_contrato=(request.POST.get("tipo_contrato") or (empleado.tipo_contrato if empleado else Empleado.CONTRATO_FIJO)).strip(),
-                fecha_ingreso=fecha_ingreso or (empleado.fecha_ingreso if empleado else fecha_baja),
-                fecha_baja=fecha_baja,
-                motivo=(request.POST.get("motivo") or EmpleadoBaja.MOTIVO_OTRO).strip(),
-                observacion=(request.POST.get("observacion") or "").strip(),
-                creado_por=request.user,
-            )
-            if empleado and request.POST.get("marcar_inactivo") == "on":
-                empleado.activo = False
-                empleado.save(update_fields=["activo", "updated_at"])
+            with transaction.atomic():
+                baja = EmpleadoBaja.objects.create(
+                    empleado=empleado,
+                    nombre=(request.POST.get("nombre") or (empleado.nombre if empleado else "")).strip(),
+                    area=_area_key(request.POST.get("area") or (empleado.area if empleado else "")),
+                    puesto=(request.POST.get("puesto") or (empleado.puesto if empleado else "")).strip(),
+                    tipo_contrato=(request.POST.get("tipo_contrato") or (empleado.tipo_contrato if empleado else Empleado.CONTRATO_FIJO)).strip(),
+                    fecha_ingreso=fecha_ingreso or (empleado.fecha_ingreso if empleado else fecha_baja),
+                    fecha_baja=fecha_baja,
+                    motivo=(request.POST.get("motivo") or EmpleadoBaja.MOTIVO_OTRO).strip(),
+                    observacion=(request.POST.get("observacion") or "").strip(),
+                    creado_por=request.user,
+                )
+                if empleado:
+                    desactivar_identidad_operativa_empleado(empleado)
             messages.success(request, f"Baja capturada para {baja.nombre}.")
         elif action == "plantilla":
             anio = int(request.POST.get("anio") or inicio.year)
@@ -2173,7 +2176,7 @@ def indicadores_ch(request):
         "can_manage_rrhh": can_manage_rrhh(request.user),
         "mes": mes,
         "months": range(1, 13),
-        "empleados": Empleado.objects.all().order_by("nombre")[:1200],
+        "empleados": Empleado.objects.filter(activo=True).order_by("nombre")[:1200],
         "contrato_choices": Empleado.CONTRATO_CHOICES,
         "motivo_choices": EmpleadoBaja.MOTIVO_CHOICES,
         "vacante_estado_choices": VacanteRRHH.ESTADO_CHOICES,

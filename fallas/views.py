@@ -271,7 +271,7 @@ def cambiar_estatus(request, pk):
     if nuevo_estatus == ReporteFalla.ESTATUS_REVISION and not reporte.fecha_asignacion:
         reporte.fecha_asignacion = now
     if data.get("asignado_a"):
-        reporte.asignado_a = get_user_model().objects.get(pk=data["asignado_a"])
+        reporte.asignado_a = get_user_model().objects.get(pk=data["asignado_a"], is_active=True)
         if not reporte.fecha_asignacion:
             reporte.fecha_asignacion = now
     if nuevo_estatus == ReporteFalla.ESTATUS_RESUELTO and not reporte.fecha_resolucion:

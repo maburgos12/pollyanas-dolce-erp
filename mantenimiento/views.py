@@ -755,7 +755,7 @@ def crear_reporte_unidad(request):
     _require_mantenimiento(request.user)
 
     unidades = Unidad.objects.filter(activa=True).order_by("codigo")
-    repartidores = Repartidor.objects.select_related("user", "user__empleado_rrhh").order_by(
+    repartidores = Repartidor.objects.filter(user__is_active=True).select_related("user", "user__empleado_rrhh").order_by(
         "user__first_name", "user__username"
     )
 
@@ -786,7 +786,7 @@ def crear_reporte_unidad(request):
 
         repartidor = None
         if repartidor_id:
-            repartidor = Repartidor.objects.filter(pk=repartidor_id).first()
+            repartidor = Repartidor.objects.filter(pk=repartidor_id, user__is_active=True).first()
             if not repartidor:
                 errors["repartidor"] = "Repartidor no encontrado."
 
