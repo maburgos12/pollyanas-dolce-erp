@@ -102,6 +102,16 @@ class PointSalesSyncServiceTests(TestCase):
         self.assertEqual(historial.fecha.isoformat(), "2025-12-31")
         self.assertEqual(historial.cantidad, Decimal("40"))
 
+    def test_point_branch_matches_unique_sucursal_name_fragment(self):
+        self.sucursal.codigo = "LEYVA"
+        self.sucursal.nombre = "Sucursal Leyva"
+        self.sucursal.save(update_fields=["codigo", "nombre"])
+        service = PointSyncService(sales_extractor=FakeSalesExtractor())
+
+        branch = service._upsert_branch({"external_id": "leyva-point", "name": "Leyva", "status": "ACTIVE", "metadata": {}})
+
+        self.assertEqual(branch.erp_branch_id, self.sucursal.id)
+
     def test_run_sales_sync_is_idempotent_for_historical_sales_source(self):
         service = PointSyncService(sales_extractor=FakeSalesExtractor())
         first_job = service.run_sales_sync(start_date=date(2025, 12, 31), end_date=date(2025, 12, 31), triggered_by=self.user)
