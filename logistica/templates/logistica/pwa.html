@@ -1953,6 +1953,9 @@
       }
 
       async function useDjangoSessionToken() {
+        state.token = "";
+        state.refreshToken = "";
+        sessionStorage.removeItem(ACCESS_TOKEN_KEY);
         const response = await fetch(`${API}/auth/session-token/`, {
           headers: { "Accept": "application/json" }
         });
@@ -4122,7 +4125,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v21", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v22", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {
