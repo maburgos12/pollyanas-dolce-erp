@@ -763,10 +763,15 @@ def _sales_refresh_status(*, visible_cut_date: date | None = None) -> dict[str, 
         and visible_cut_date
         and request_target_date == visible_cut_date
     )
+    request_matches_expected = bool(
+        request_target_date
+        and expected_cut_date
+        and request_target_date == expected_cut_date
+    )
     pending_recent = bool(
         requested_after_terminal
         and latest_requested
-        and (request_matches_visible or visible_cut_date is None)
+        and (request_matches_visible or request_matches_expected or visible_cut_date is None)
         and (
             lock_active
             or (timezone.now() - latest_requested.timestamp).total_seconds() <= BI_FORCE_REFRESH_LOCK_SECONDS
@@ -774,10 +779,21 @@ def _sales_refresh_status(*, visible_cut_date: date | None = None) -> dict[str, 
     )
     stale_pending = bool(requested_after_terminal and latest_requested and not pending_recent)
     is_cut_delayed = bool(visible_cut_date and expected_cut_date and visible_cut_date < expected_cut_date)
+    is_cut_current = bool(visible_cut_date and expected_cut_date and visible_cut_date >= expected_cut_date)
     cut_lag_days = (expected_cut_date - visible_cut_date).days if is_cut_delayed else 0
     target_refresh_date = expected_cut_date or visible_cut_date or timezone.localdate()
 
-    if latest_terminal is latest_failed and not requested_after_terminal:
+    if is_cut_current and not pending_recent:
+        last_status = "OK"
+        last_event = latest_completed or latest_failed
+        status_title = "Al día"
+        status_message = (
+            f"Fecha visible {visible_cut_date_iso} · fecha esperada {expected_cut_date_iso}. "
+            "No hay rezago operativo."
+        )
+        action_label = "Actualizar ventas"
+        status_label = "Al día"
+    elif latest_terminal is latest_failed and not requested_after_terminal:
         last_status = "ERROR"
         last_event = latest_failed
         status_title = "La actualización falló"
