@@ -604,11 +604,9 @@
     const yoyRows = parse("home-yoy-data");
     const currentYear = Number("{{ yoy_panel.current_year|default:2026 }}") || 2026;
     const prevYear = Number("{{ yoy_panel.prev_year|default:2025 }}") || (currentYear - 1);
-    const prev2Year = Number("{{ yoy_panel.prev2_year|default:2024 }}") || (prevYear - 1);
     const yoyWindowRows = yoyRows;
     const seriesCurrentYear = [];
     const seriesPrevYear = [];
-    const seriesPrev2Year = [];
     for (const row of yoyWindowRows) {
       const rowYear = Number(String(row.month_label || "").slice(0, 4));
       const amount = Number(row.amount || 0);
@@ -616,25 +614,20 @@
       if (rowYear === currentYear) {
         seriesCurrentYear.push(amount);
         seriesPrevYear.push(prevAmount);
-        seriesPrev2Year.push(null);
       } else if (rowYear === prevYear) {
         seriesCurrentYear.push(null);
         seriesPrevYear.push(amount);
-        seriesPrev2Year.push(prevAmount);
       } else {
         seriesCurrentYear.push(null);
         seriesPrevYear.push(null);
-        seriesPrev2Year.push(null);
       }
     }
     const theme = {
       wine: "#922456",
       forest: "#236d53",
-      amber: "#b38a25",
       border: "rgba(145, 36, 86, 0.10)",
       blush: "rgba(146, 36, 86, 0.36)",
-      greenSoft: "rgba(35, 109, 83, 0.28)",
-      amberSoft: "rgba(179, 138, 37, 0.16)"
+      greenSoft: "rgba(35, 109, 83, 0.28)"
     };
 
     const makeChart = (canvasId, config) => {
@@ -713,17 +706,6 @@
             data: seriesPrevYear,
             backgroundColor: theme.greenSoft,
             borderColor: theme.forest,
-            borderWidth: 1,
-            borderRadius: 8,
-            categoryPercentage: 0.82,
-            barPercentage: 0.98,
-            maxBarThickness: 40
-          },
-          {
-            label: String(prev2Year),
-            data: seriesPrev2Year,
-            backgroundColor: theme.amberSoft,
-            borderColor: theme.amber,
             borderWidth: 1,
             borderRadius: 8,
             categoryPercentage: 0.82,
