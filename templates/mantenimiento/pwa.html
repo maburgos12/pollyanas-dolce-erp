@@ -777,8 +777,7 @@
                 <option value="abierto" ${item.estatus==="abierto"?"selected":""}>Abierto</option>
                 <option value="en_revision" ${item.estatus==="en_revision"?"selected":""}>En revisión</option>
                 <option value="programado" ${item.estatus==="programado"?"selected":""}>Programado</option>
-                <option value="resuelto" ${item.estatus==="resuelto"?"selected":""}>Resuelto</option>
-                <option value="cerrado" ${item.estatus==="cerrado"?"selected":""}>Cerrado</option>
+                <option value="resuelto" ${item.estatus==="resuelto"?"selected":""}>Finalizado</option>
               </select>
             </div>
             <div class="field">
@@ -1326,7 +1325,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% static 'mantenimiento/sw.js' %}?v=20260614-ui100-v6").catch(() => {});
+          navigator.serviceWorker.register("{% static 'mantenimiento/sw.js' %}?v=20260615-finalizado-v1").catch(() => {});
         }
 
         try {
