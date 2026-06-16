@@ -862,6 +862,7 @@ def refresh_dashboard_full_materialized_view(
     months_windows: tuple[int, ...] = ALLOWED_MONTH_WINDOWS,
     concurrently: bool = True,
 ) -> int:
+    _bump_sales_dashboard_cache_scopes()
     normalized_windows = tuple(
         dict.fromkeys(normalize_dashboard_months_window(value) for value in months_windows)
     ) or ALLOWED_MONTH_WINDOWS
