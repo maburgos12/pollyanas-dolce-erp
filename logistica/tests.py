@@ -1289,10 +1289,10 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v23", pwa_html)
+        self.assertIn("route-control-v24", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v23-totales-carga", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v24-confirmar-entrega", sw_js)
         self.assertIn("total esperado", pwa_html)
         self.assertIn("Total cargado", pwa_html)
         self.assertIn("const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000;", pwa_html)
@@ -1318,6 +1318,8 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("const response = await fetch(`${API}/auth/session-token/`", pwa_html)
         self.assertIn('error.error === "unidad_ruta_distinta"', pwa_html)
         self.assertIn('await showScreen("ruta_activa")', pwa_html)
+        self.assertIn("confirmarEntregaParada", pwa_html)
+        self.assertIn("Confirmar entrega", pwa_html)
         self.assertNotIn('localStorage.setItem("pd_logistica_refresh"', pwa_html)
         self.assertNotIn("localStorage.setItem(REFRESH_TOKEN_KEY", pwa_html)
 
@@ -1330,7 +1332,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v23-totales-carga", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v24-confirmar-entrega", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path

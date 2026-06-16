@@ -1353,7 +1353,7 @@
       const TRACKING_QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
       const ACCESS_TOKEN_KEY = "pd_logistica_access";
       const REFRESH_TOKEN_KEY = "pd_logistica_refresh";
-      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000;
+      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v24
       const app = document.getElementById("app");
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
@@ -2355,6 +2355,7 @@
         return `<div class="route-stop-list">` + paradas.map((parada) => {
           const visited = parada.estado === "VISITADA";
           const entrega = parada.entrega_estado || "PENDIENTE";
+          const puedeConfirmarEntrega = visited && entrega === "PENDIENTE";
           return `
             <section class="route-stop ${visited ? "visited" : ""}" tabindex="0">
               <span class="route-stop-number">${visited ? "OK" : escapeHtml(parada.orden)}</span>
@@ -2366,6 +2367,7 @@
                 <div class="route-status-row">
                   <span class="route-status-pill ${entregaTone(entrega)}">${escapeHtml(entregaLabel(parada))}</span>
                 </div>
+                ${puedeConfirmarEntrega ? `<button class="primary-btn" style="margin-top:10px;" type="button" onclick="confirmarEntregaParada(${Number(parada.id)})">Confirmar entrega</button>` : ""}
               </div>
             </section>
           `;
@@ -2626,6 +2628,42 @@
           return renderRutaActiva(error?.message === "Sesión expirada" ? "Tu sesión expiró. Vuelve a iniciar sesión." : "No se pudo guardar la carga. Reintenta con señal.");
         } finally {
           draft.guardando = false;
+        }
+      }
+
+      async function confirmarEntregaParada(paradaId) {
+        const rutaId = state.rutaActiva?.ruta?.id;
+        if (!rutaId || !paradaId) return renderRutaActiva("No hay ruta activa para confirmar entrega.");
+        if (!window.confirm("¿Confirmar entrega completa de esta parada?")) return;
+        const draft = ensureRutaTrackingDraft();
+        try {
+          const evidencia = {
+            tipo: "CONFIRMACION",
+            comentario: "Entrega completa confirmada por repartidor en PWA.",
+            client_event_id: newClientEventId()
+          };
+          if (draft.latitud && draft.longitud) {
+            evidencia.latitud = draft.latitud;
+            evidencia.longitud = draft.longitud;
+            evidencia.precision_metros = draft.precision_metros;
+          }
+          const response = await apiFetch(`/rutas/${rutaId}/paradas/${paradaId}/entrega/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              entrega_estado: "ENTREGADA",
+              notas: "Entrega completa confirmada por repartidor en PWA.",
+              evidencias: [evidencia]
+            })
+          });
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            return renderRutaActiva(apiErrorMessage(error, "No se pudo confirmar la entrega."));
+          }
+          state.rutaActiva = null;
+          return renderRutaActiva("✅ Entrega confirmada.");
+        } catch (error) {
+          return renderRutaActiva(error?.message === "Sesión expirada" ? "Tu sesión expiró. Vuelve a iniciar sesión." : "No se pudo confirmar la entrega. Reintenta con señal.");
         }
       }
 
