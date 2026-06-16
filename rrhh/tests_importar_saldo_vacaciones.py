@@ -21,7 +21,16 @@ class ImportarSaldoInicialVacacionesTests(SimpleTestCase):
                 "Tratamiento para ERP",
             ]
         )
-        ws.append(["CAYETANO VALENZUELA CAROLINA", "2026-03-07", 18, 7, "Si", "goce anterior"])
+        ws.append(
+            [
+                "CAYETANO VALENZUELA CAROLINA",
+                "2026-03-07",
+                18,
+                7,
+                "Si",
+                "Registrar como pendiente de goce de periodo anterior",
+            ]
+        )
         with NamedTemporaryFile(suffix=".xlsx") as tmp:
             wb.save(tmp.name)
             rows = read_rows(tmp.name, 2026)
@@ -30,4 +39,5 @@ class ImportarSaldoInicialVacacionesTests(SimpleTestCase):
         self.assertEqual(rows[0].empleado_nombre, "CAYETANO VALENZUELA CAROLINA")
         self.assertEqual(rows[0].saldo_ciclo, 18)
         self.assertEqual(rows[0].goce_anterior, 7)
+        self.assertEqual(rows[0].periodo_goce_anio, 2025)
         self.assertTrue(rows[0].confirmado)
