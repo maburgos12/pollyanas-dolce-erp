@@ -2088,6 +2088,51 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.parada, parada)
         self.assertEqual(linea.point_transfer_line, transferencia)
 
+    def test_checklist_carga_usa_transferencia_recibida_si_no_hay_abiertas(self):
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        transferencia = self._crear_transferencia_point_abierta(source_hash="transfer-recibida-carga")
+        transferencia.is_open = False
+        transferencia.is_received = True
+        transferencia.is_finalized = True
+        transferencia.received_quantity = transferencia.sent_quantity
+        transferencia.received_at = timezone.now()
+        transferencia.save(update_fields=["is_open", "is_received", "is_finalized", "received_quantity", "received_at", "updated_at"])
+
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        self.assertEqual(resumen.creadas, 1)
+        linea = RutaCargaChecklistLinea.objects.get(checklist=resumen.checklist)
+        self.assertEqual(linea.parada, parada)
+        self.assertEqual(linea.point_transfer_line, transferencia)
+
+    def test_checklist_carga_usa_alias_unico_de_sucursal(self):
+        sucursal_point = Sucursal.objects.create(codigo="PLAZA_NIO", nombre="Plaza Nío", activa=True)
+        sucursal_ruta = Sucursal.objects.create(codigo="NIO", nombre="Sucursal Plaza Nio", activa=True)
+        punto = PuntoLogistico.objects.create(
+            sucursal=sucursal_ruta,
+            nombre="Sucursal Plaza Nio",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.570000",
+            longitud="-108.470000",
+            radio_geocerca_metros=120,
+        )
+        ruta = RutaEntrega.objects.create(
+            nombre="Ruta Alias Point",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_PLANEADA,
+            repartidor=self.repartidor,
+            unidad_operativa=self.unidad,
+        )
+        parada = ParadaRuta.objects.create(ruta=ruta, punto=punto, orden=1)
+        transferencia = self._crear_transferencia_point_abierta(sucursal=sucursal_point, source_hash="transfer-alias-nio")
+
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        self.assertEqual(resumen.creadas, 1)
+        linea = RutaCargaChecklistLinea.objects.get(checklist=resumen.checklist)
+        self.assertEqual(linea.parada, parada)
+        self.assertEqual(linea.point_transfer_line, transferencia)
+
     def test_checklist_carga_desbloquea_si_luego_encuentra_transferencias(self):
         ruta, _ = self._crear_ruta_planeada_para_carga()
         checklist = RutaCargaChecklist.objects.create(
