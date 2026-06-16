@@ -153,7 +153,12 @@ def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, eje
 
     creadas, actualizadas, omitidas = _sincronizar_lineas_point_para_ruta(ruta=ruta, checklist=checklist, solo_abiertas=True)
 
-    if not checklist.lineas.exists():
+    if checklist.lineas.exists():
+        if checklist.estatus == RutaCargaChecklist.ESTATUS_BLOQUEADA:
+            checklist.estatus = RutaCargaChecklist.ESTATUS_EN_REVISION
+            checklist.notas = ""
+            checklist.save(update_fields=["estatus", "notas", "actualizado_en"])
+    else:
         checklist.estatus = RutaCargaChecklist.ESTATUS_BLOQUEADA
         checklist.notas = "No se encontraron transferencias abiertas de Point para las sucursales de esta ruta."
         checklist.save(update_fields=["estatus", "notas", "actualizado_en"])
