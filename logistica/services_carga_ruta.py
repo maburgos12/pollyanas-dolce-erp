@@ -422,7 +422,19 @@ def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_
 
         received_at_values = [linea.point_transfer_line.received_at for linea in recibidas if linea.point_transfer_line.received_at]
         entrega_confirmada_en = max(received_at_values) if received_at_values else timezone.now()
-        update_fields = ["entrega_estado", "entrega_confirmada_en", "entrega_confirmada_por", "entrega_notas", "actualizado_en"]
+        update_fields = [
+            "estado",
+            "hora_llegada_real",
+            "hora_salida_real",
+            "entrega_estado",
+            "entrega_confirmada_en",
+            "entrega_confirmada_por",
+            "entrega_notas",
+            "actualizado_en",
+        ]
+        parada.estado = ParadaRuta.ESTADO_VISITADA
+        parada.hora_llegada_real = parada.hora_llegada_real or entrega_confirmada_en
+        parada.hora_salida_real = parada.hora_salida_real or entrega_confirmada_en
         parada.entrega_estado = entrega_estado
         parada.entrega_confirmada_en = entrega_confirmada_en
         parada.entrega_confirmada_por = user

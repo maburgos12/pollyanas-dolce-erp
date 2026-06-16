@@ -1885,8 +1885,8 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(resumen.paradas_actualizadas, 1)
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
         self.assertEqual(self.parada.entrega_confirmada_por, self.user)
-        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
-        self.assertEqual(self.ruta.cumplimiento_porcentaje, Decimal("0.00"))
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
+        self.assertEqual(self.ruta.cumplimiento_porcentaje, Decimal("100.00"))
         evidencia = ParadaEntregaEvidencia.objects.get(parada=self.parada)
         self.assertEqual(evidencia.cantidad_entregada, Decimal("5.000"))
         self.assertEqual(evidencia.metadata["origen"], "point_transfer")
@@ -2002,6 +2002,7 @@ class LogisticaControlRutasTests(TestCase):
 
         self.parada.refresh_from_db()
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
         self.assertContains(response, "Recepción Point sincronizada")
         self.assertNotContains(response, "Recibido correcto")
