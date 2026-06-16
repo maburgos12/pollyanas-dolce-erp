@@ -4,7 +4,7 @@
 {% block page_title %}RRHH · Vacaciones{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-vacaciones-list.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-vacaciones-list.css?v=20260616-historial-v1">
 {% endblock %}
 
 {% block content %}
@@ -17,7 +17,7 @@
 <section class="vac-page">
   <div class="vac-head">
     <div>
-      <div class="vac-title">Solicitud de vacaciones</div>
+      <div class="vac-title">Vacaciones</div>
       <div class="vac-copy">
         Flujo ordenado desde la fuente consolidada de Capital Humano:
         empleado activo, antigüedad, saldo, reserva, autorización y archivo RRHH.
@@ -90,15 +90,43 @@
         </div>
 
         <div>
-          <h2>Saldos iniciales</h2>
-          <div class="vac-saldo-list">
-            {% for row in empleados_saldo %}
-              <div class="vac-saldo-row">
-                <div class="vac-saldo-main">{{ row.empleado.nombre }}</div>
-                <div class="vac-meta">
-                  Disponible: {{ row.saldo.disponible }} días · Generado: {{ row.saldo.generado }} · Reservado: {{ row.saldo.reservado }}
+          <h2>Saldos e historial</h2>
+          <div class="vac-history-list">
+            {% for row in empleados_historial %}
+              <article class="vac-history-row">
+                <div class="vac-history-top">
+                  <div>
+                    <div class="vac-saldo-main">{{ row.empleado.nombre }}</div>
+                    <div class="vac-meta">
+                      {{ row.empleado.puesto|default:"Sin puesto" }} · {{ row.empleado.sucursal|default:"Sin sucursal" }}
+                    </div>
+                  </div>
+                  <span class="vac-badge gold">{{ row.estado_legal }}</span>
                 </div>
-              </div>
+                <div class="vac-history-metrics">
+                  <span>Disponible <strong>{{ row.saldo.disponible }}</strong></span>
+                  <span>Goce anterior <strong>{{ row.pendiente_anterior }}</strong></span>
+                  <span>Generado <strong>{{ row.saldo.generado }}</strong></span>
+                  <span>Reservado <strong>{{ row.saldo.reservado }}</strong></span>
+                  <span>Consumido <strong>{{ row.saldo.consumido }}</strong></span>
+                </div>
+                <div class="vac-meta">
+                  Ingreso: {{ row.empleado.fecha_ingreso|date:"Y-m-d" }} ·
+                  Último aniversario: {{ row.ultimo_aniversario|date:"Y-m-d"|default:"Sin fecha" }} ·
+                  Fecha límite legal: {{ row.fecha_limite|date:"Y-m-d"|default:"Sin fecha" }}
+                </div>
+                <div class="vac-movement-list">
+                  {% for movimiento in row.movimientos %}
+                    <div class="vac-movement-line">
+                      <strong>{{ movimiento.periodo_anio }} · {{ movimiento.get_tipo_display }} · {{ movimiento.dias }} días</strong>
+                      <span>{{ movimiento.descripcion|default:"Sin descripción"|truncatechars:90 }}</span>
+                      {% if movimiento.solicitud %}<span>{{ movimiento.solicitud.folio }}</span>{% endif %}
+                    </div>
+                  {% empty %}
+                    <div class="vac-meta">Sin movimientos registrados.</div>
+                  {% endfor %}
+                </div>
+              </article>
             {% empty %}
               <div class="vac-meta">Sin empleados activos.</div>
             {% endfor %}
