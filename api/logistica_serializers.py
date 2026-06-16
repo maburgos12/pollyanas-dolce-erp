@@ -33,6 +33,7 @@ from rrhh.services_identidad import nombre_operativo_usuario
 
 class LogisticaRutaSerializer(serializers.ModelSerializer):
     repartidor_nombre = serializers.SerializerMethodField()
+    acompanante_nombre = serializers.SerializerMethodField()
     unidad_operativa_codigo = serializers.CharField(source="unidad_operativa.codigo", read_only=True)
     estatus_display = serializers.CharField(source="get_estatus_display", read_only=True)
 
@@ -47,6 +48,9 @@ class LogisticaRutaSerializer(serializers.ModelSerializer):
             "unidad",
             "repartidor",
             "repartidor_nombre",
+            "acompanante",
+            "acompanante_nombre",
+            "acompanante_manual",
             "unidad_operativa",
             "unidad_operativa_codigo",
             "bitacora_salida",
@@ -73,6 +77,7 @@ class LogisticaRutaSerializer(serializers.ModelSerializer):
             "id",
             "folio",
             "repartidor_nombre",
+            "acompanante_nombre",
             "unidad_operativa_codigo",
             "estatus_display",
             "bitacora_salida",
@@ -97,6 +102,11 @@ class LogisticaRutaSerializer(serializers.ModelSerializer):
             return ""
         return nombre_operativo_usuario(obj.repartidor.user)
 
+    def get_acompanante_nombre(self, obj):
+        if not obj.acompanante_id:
+            return ""
+        return nombre_operativo_usuario(obj.acompanante.user)
+
     def validate(self, attrs):
         unidad_operativa = attrs.get("unidad_operativa") or getattr(self.instance, "unidad_operativa", None)
         if unidad_operativa and not unidad_operativa.activa:
@@ -113,6 +123,8 @@ class LogisticaRutaCreateSerializer(serializers.Serializer):
     nombre = serializers.CharField()
     fecha_ruta = serializers.DateField()
     repartidor = serializers.PrimaryKeyRelatedField(queryset=Repartidor.objects.all())
+    acompanante = serializers.PrimaryKeyRelatedField(queryset=Repartidor.objects.all(), required=False, allow_null=True)
+    acompanante_manual = serializers.CharField(required=False, allow_blank=True, default="")
     unidad_operativa = serializers.PrimaryKeyRelatedField(queryset=Unidad.objects.filter(activa=True))
     chofer = serializers.CharField(required=False, allow_blank=True, default="")
     unidad = serializers.CharField(required=False, allow_blank=True, default="")
