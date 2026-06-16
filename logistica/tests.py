@@ -1289,10 +1289,10 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v20", pwa_html)
+        self.assertIn("route-control-v21", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v20-sw-no-cache", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v21-estados-gps", sw_js)
         self.assertIn("const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000;", pwa_html)
         self.assertIn('activo: "Activo cada 45 s"', pwa_html)
         self.assertIn('gps_sin_senal: "GPS sin señal"', pwa_html)
@@ -1326,7 +1326,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v20-sw-no-cache", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v21-estados-gps", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path

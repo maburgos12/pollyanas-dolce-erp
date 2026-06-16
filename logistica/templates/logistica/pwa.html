@@ -4122,7 +4122,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v20", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v21", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {
