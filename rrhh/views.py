@@ -2731,6 +2731,31 @@ def vacaciones_list(request):
                     actor=request.user,
                 )
                 messages.success(request, f"Solicitud {solicitud.folio} registrada y saldo reservado.")
+            elif action == "ajustar_saldo":
+                if not can_manage_rrhh(request.user):
+                    raise PermissionDenied("Solo Capital Humano puede conciliar saldos de vacaciones.")
+                empleado = get_object_or_404(Empleado.objects.filter(activo=True), pk=request.POST.get("empleado_id"))
+                try:
+                    periodo_anio = int((request.POST.get("periodo_anio") or timezone.localdate().year))
+                    dias = Decimal((request.POST.get("dias_ajuste") or "0").replace(",", ".")).quantize(Decimal("0.01"))
+                except (InvalidOperation, TypeError, ValueError):
+                    raise ValidationError("Captura periodo y días válidos.")
+                if periodo_anio < 2000 or periodo_anio > timezone.localdate().year + 1:
+                    raise ValidationError("Periodo fuera de rango.")
+                if abs(dias) > Decimal("100"):
+                    raise ValidationError("El ajuste no puede superar 100 días.")
+                descripcion = (request.POST.get("descripcion") or "").strip()
+                if not descripcion:
+                    raise ValidationError("Captura una nota de conciliación.")
+                MovimientoVacaciones.objects.create(
+                    empleado=empleado,
+                    tipo=MovimientoVacaciones.TIPO_AJUSTE,
+                    dias=dias,
+                    periodo_anio=periodo_anio,
+                    descripcion=f"[conciliacion-manual] {descripcion}"[:220],
+                    actor=request.user,
+                )
+                messages.success(request, f"Saldo de {empleado.nombre} conciliado.")
             elif action in {"preautorizar_jefe", "rechazar_jefe"}:
                 solicitud = get_object_or_404(SolicitudVacaciones, pk=request.POST.get("solicitud_id"))
                 preautorizar_solicitud_vacaciones_jefe(
@@ -2752,7 +2777,9 @@ def vacaciones_list(request):
                 raise PermissionDenied("Acción de vacaciones no válida.")
         except ValidationError as exc:
             messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
-        return redirect("rrhh:rrhh_vacaciones_list")
+        url = reverse("rrhh:rrhh_vacaciones_list")
+        query = request.GET.urlencode()
+        return redirect(f"{url}?{query}" if query else url)
 
     solicitudes_qs = (
         SolicitudVacaciones.objects.select_related(
@@ -2770,7 +2797,27 @@ def vacaciones_list(request):
         else:
             solicitudes_qs = solicitudes_qs.filter(jefe_directo=request.user)
     empleados = list(empleados_qs[:250])
-    empleados_revision = empleados[:80]
+    filtro_q = (request.GET.get("q") or "").strip()
+    filtro_estado = (request.GET.get("estado") or "").strip()
+    filtro_sucursal = (request.GET.get("sucursal") or "").strip()
+    revision_qs = empleados_qs
+    if filtro_q:
+        revision_qs = revision_qs.filter(
+            Q(nombre__icontains=filtro_q)
+            | Q(nombre_normalizado__icontains=normalizar_nombre(filtro_q))
+            | Q(puesto__icontains=filtro_q)
+            | Q(sucursal__icontains=filtro_q)
+            | Q(area__icontains=filtro_q)
+        )
+    if filtro_sucursal:
+        revision_qs = revision_qs.filter(sucursal=filtro_sucursal)
+    empleados_revision = list(revision_qs[:120])
+    sucursales_historial = list(
+        empleados_qs.exclude(sucursal="")
+        .values_list("sucursal", flat=True)
+        .distinct()
+        .order_by("sucursal")
+    )
     hoy = timezone.localdate()
     movimientos_por_empleado = {empleado.id: [] for empleado in empleados_revision}
     movimientos_qs = (
@@ -2798,7 +2845,8 @@ def vacaciones_list(request):
         saldo = saldo_vacaciones_empleado(empleado, periodo_anio=hoy.year)
         aniversario = _ultimo_aniversario(empleado.fecha_ingreso, hoy)
         fecha_limite = _sumar_meses(aniversario, 6) if aniversario else None
-        disponible = saldo["disponible"] + pendientes_anteriores.get(empleado.id, Decimal("0"))
+        pendiente_anterior = pendientes_anteriores.get(empleado.id, Decimal("0"))
+        disponible = saldo["disponible"] + pendiente_anterior
         if disponible <= 0:
             estado_legal = "Sin saldo pendiente"
         elif fecha_limite and fecha_limite < hoy:
@@ -2807,13 +2855,22 @@ def vacaciones_list(request):
             estado_legal = "Por vencer"
         else:
             estado_legal = "En plazo"
+        if filtro_estado == "saldo" and disponible <= 0:
+            continue
+        if filtro_estado == "anterior" and pendiente_anterior <= 0:
+            continue
+        if filtro_estado == "vencido" and estado_legal != "Plazo vencido":
+            continue
+        if filtro_estado == "por_vencer" and estado_legal != "Por vencer":
+            continue
         empleados_historial.append(
             {
                 "empleado": empleado,
                 "saldo": saldo,
                 "ultimo_aniversario": aniversario,
                 "fecha_limite": fecha_limite,
-                "pendiente_anterior": pendientes_anteriores.get(empleado.id, Decimal("0")),
+                "pendiente_anterior": pendiente_anterior,
+                "disponible_total": disponible,
                 "estado_legal": estado_legal,
                 "movimientos": movimientos_por_empleado.get(empleado.id, []),
             }
@@ -2843,6 +2900,10 @@ def vacaciones_list(request):
             "module_tabs": _module_tabs("vacaciones", request.user),
             "empleados": empleados,
             "empleados_historial": empleados_historial,
+            "filtros_historial": {"q": filtro_q, "estado": filtro_estado, "sucursal": filtro_sucursal},
+            "periodo_actual": hoy.year,
+            "periodo_maximo": hoy.year + 1,
+            "sucursales_historial": sucursales_historial,
             "hay_solicitudes": stats["total"] > 0,
             "columnas": columnas,
             "stats": stats,

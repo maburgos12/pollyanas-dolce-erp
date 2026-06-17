@@ -4,7 +4,7 @@
 {% block page_title %}RRHH · Vacaciones{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-vacaciones-list.css?v=20260616-historial-v1">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-vacaciones-list.css?v=20260616-conciliacion-v1">
 {% endblock %}
 
 {% block content %}
@@ -91,6 +91,32 @@
 
         <div>
           <h2>Saldos e historial</h2>
+          <form class="vac-review-tools" method="get">
+            <input
+              type="search"
+              name="q"
+              value="{{ filtros_historial.q }}"
+              placeholder="Buscar empleado, puesto o sucursal"
+              aria-label="Buscar en saldos de vacaciones"
+            >
+            <select name="estado" aria-label="Filtrar saldo">
+              <option value="">Todos</option>
+              <option value="saldo" {% if filtros_historial.estado == "saldo" %}selected{% endif %}>Con saldo</option>
+              <option value="anterior" {% if filtros_historial.estado == "anterior" %}selected{% endif %}>Goce anterior</option>
+              <option value="vencido" {% if filtros_historial.estado == "vencido" %}selected{% endif %}>Plazo vencido</option>
+              <option value="por_vencer" {% if filtros_historial.estado == "por_vencer" %}selected{% endif %}>Por vencer</option>
+            </select>
+            <select name="sucursal" aria-label="Filtrar sucursal">
+              <option value="">Todas las sucursales</option>
+              {% for sucursal in sucursales_historial %}
+                <option value="{{ sucursal }}" {% if filtros_historial.sucursal == sucursal %}selected{% endif %}>{{ sucursal }}</option>
+              {% endfor %}
+            </select>
+            <button class="btn btn-primary" type="submit">Buscar</button>
+            {% if filtros_historial.q or filtros_historial.estado or filtros_historial.sucursal %}
+              <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_vacaciones_list' %}">Limpiar</a>
+            {% endif %}
+          </form>
           <div class="vac-history-list">
             {% for row in empleados_historial %}
               <article class="vac-history-row">
@@ -104,6 +130,7 @@
                   <span class="vac-badge gold">{{ row.estado_legal }}</span>
                 </div>
                 <div class="vac-history-metrics">
+                  <span>Total revisar <strong>{{ row.disponible_total }}</strong></span>
                   <span>Disponible <strong>{{ row.saldo.disponible }}</strong></span>
                   <span>Goce anterior <strong>{{ row.pendiente_anterior }}</strong></span>
                   <span>Generado <strong>{{ row.saldo.generado }}</strong></span>
@@ -126,9 +153,33 @@
                     <div class="vac-meta">Sin movimientos registrados.</div>
                   {% endfor %}
                 </div>
+                {% if can_manage_rrhh %}
+                  <details class="vac-adjust">
+                    <summary>Conciliar / ajustar</summary>
+                    <form class="vac-adjust-form" method="post">
+                      {% csrf_token %}
+                      <input type="hidden" name="action" value="ajustar_saldo">
+                      <input type="hidden" name="empleado_id" value="{{ row.empleado.id }}">
+                      <label>
+                        Periodo
+                        <input type="number" name="periodo_anio" value="{{ row.saldo.periodo_anio }}" min="2000" max="{{ periodo_maximo }}" required>
+                      </label>
+                      <label>
+                        Días ajuste
+                        <input type="number" name="dias_ajuste" value="0" step="0.01" min="-100" max="100" required>
+                      </label>
+                      <label class="wide">
+                        Nota RRHH
+                        <input type="text" name="descripcion" maxlength="180" placeholder="Ej. pago timbrado, corrección o conciliación sin cambio" required>
+                      </label>
+                      <button class="btn btn-primary" type="submit">Guardar ajuste</button>
+                    </form>
+                    <div class="vac-meta">Positivo suma, negativo resta, 0 solo deja evidencia de conciliación.</div>
+                  </details>
+                {% endif %}
               </article>
             {% empty %}
-              <div class="vac-meta">Sin empleados activos.</div>
+              <div class="vac-meta">Sin empleados para esos filtros.</div>
             {% endfor %}
           </div>
         </div>
