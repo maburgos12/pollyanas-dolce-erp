@@ -43,6 +43,7 @@ from logistica.models import (
 from logistica.services_google_routes import recalcular_ruta_programada
 from logistica.services_carga_ruta import (
     checklist_bloquea_salida,
+    checklist_tiene_recepcion_point_pendiente,
     obtener_checklist_carga,
     registrar_evento_checklist_confirmado,
     sincronizar_checklist_carga_desde_point,
@@ -1127,8 +1128,7 @@ class LogisticaRutaStatusView(_LogisticaBaseView):
                 return Response({"detail": "No se puede completar la ruta: hay paradas sin entrega confirmada."}, status=status.HTTP_400_BAD_REQUEST)
             if ruta.paradas.filter(entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA]).exists():
                 return Response({"detail": "No se puede completar la ruta: hay diferencias o entregas no recibidas por resolver."}, status=status.HTTP_400_BAD_REQUEST)
-            checklist = getattr(ruta, "checklist_carga", None)
-            if checklist and checklist.lineas.filter(Q(point_transfer_line__isnull=True) | Q(point_transfer_line__is_received=False)).exists():
+            if checklist_tiene_recepcion_point_pendiente(ruta):
                 return Response({"detail": "No se puede completar la ruta: hay recepción Point pendiente."}, status=status.HTTP_400_BAD_REQUEST)
 
         from_status = ruta.estatus
@@ -1206,7 +1206,21 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
                 return Response({"detail": "Una o más líneas de carga no pertenecen a esta parada.", "lineas": missing}, status=status.HTTP_400_BAD_REQUEST)
 
         with transaction.atomic():
+            parada = ParadaRuta.objects.select_for_update().select_related("punto").get(pk=parada.pk)
+            if parada.entrega_estado != ParadaRuta.ENTREGA_PENDIENTE:
+                return Response(
+                    {
+                        "parada": ParadaRutaSerializer(parada).data,
+                        "evidencias": ParadaEntregaEvidenciaSerializer(
+                            parada.evidencias_entrega.all(),
+                            many=True,
+                            context={"request": request},
+                        ).data,
+                    },
+                    status=status.HTTP_200_OK,
+                )
             evidencias = []
+            created_any = False
             for item in evidencias_payload:
                 client_event_id = item.get("client_event_id") or ""
                 defaults = {
@@ -1221,7 +1235,7 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
                     "metadata": {"origen": "pwa_entrega_parada"},
                 }
                 if client_event_id:
-                    evidencia, _ = ParadaEntregaEvidencia.objects.get_or_create(
+                    evidencia, created = ParadaEntregaEvidencia.objects.get_or_create(
                         ruta=ruta,
                         parada=parada,
                         capturado_por=request.user,
@@ -1237,36 +1251,40 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
                         capturado_por=request.user,
                         **defaults,
                     )
+                    created = True
                 evidencias.append(evidencia)
+                created_any = created_any or created
 
-            parada.entrega_estado = payload["entrega_estado"]
-            parada.entrega_confirmada_en = timezone.now()
-            parada.entrega_confirmada_por = request.user
-            parada.entrega_notas = payload.get("notas") or ""
-            parada.save(
-                update_fields=[
-                    "entrega_estado",
-                    "entrega_confirmada_en",
-                    "entrega_confirmada_por",
-                    "entrega_notas",
-                    "actualizado_en",
-                ]
-            )
-            ruta.recompute_route_control()
-            ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
-            EventoRuta.objects.create(
-                ruta=ruta,
-                parada=parada,
-                tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL
-                if parada.entrega_estado in {ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA}
-                else EventoRuta.TIPO_LLEGADA_GEOFENCE,
-                severidad=EventoRuta.SEVERIDAD_ALERTA
-                if parada.entrega_estado in {ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA}
-                else EventoRuta.SEVERIDAD_INFO,
-                descripcion=f"Entrega de parada confirmada: {parada.get_entrega_estado_display()}.",
-                metadata={"entrega_estado": parada.entrega_estado, "evidencias": len(evidencias)},
-                creado_por=request.user,
-            )
+            if parada.entrega_estado == ParadaRuta.ENTREGA_PENDIENTE:
+                parada.entrega_estado = payload["entrega_estado"]
+                parada.entrega_confirmada_en = timezone.now()
+                parada.entrega_confirmada_por = request.user
+                parada.entrega_notas = payload.get("notas") or ""
+                parada.save(
+                    update_fields=[
+                        "entrega_estado",
+                        "entrega_confirmada_en",
+                        "entrega_confirmada_por",
+                        "entrega_notas",
+                        "actualizado_en",
+                    ]
+                )
+                ruta.recompute_route_control()
+                ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
+            if created_any:
+                EventoRuta.objects.create(
+                    ruta=ruta,
+                    parada=parada,
+                    tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL
+                    if parada.entrega_estado in {ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA}
+                    else EventoRuta.TIPO_LLEGADA_GEOFENCE,
+                    severidad=EventoRuta.SEVERIDAD_ALERTA
+                    if parada.entrega_estado in {ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA}
+                    else EventoRuta.SEVERIDAD_INFO,
+                    descripcion=f"Entrega de parada confirmada: {parada.get_entrega_estado_display()}.",
+                    metadata={"entrega_estado": parada.entrega_estado, "evidencias": len(evidencias)},
+                    creado_por=request.user,
+                )
 
         log_event(
             request.user,
