@@ -10,6 +10,7 @@ from django.urls import reverse
 
 from ventas.services.pronostico_engine import (
     _apply_special_context_forecast,
+    _simple_average_forecast,
     _special_context_comparable_days,
     _special_context_explanations,
     _previous_special_context_day,
@@ -88,6 +89,13 @@ class VentasModuleTests(SimpleTestCase):
 
         self.assertIn('active_tab = request.POST.get("tab")', source)
         self.assertNotIn('active_tab = "proyecciones" if request.method == "POST"', source)
+
+    def test_simple_average_forecast_uses_weekday_pattern(self):
+        index = pd.date_range(start="2026-05-04", periods=28, freq="D")
+        values = [10 if day.weekday() < 5 else 30 for day in index]
+        forecast = _simple_average_forecast(pd.Series(values, index=index), 7).round(0).astype(int).tolist()
+
+        self.assertEqual(forecast, [10, 10, 10, 10, 10, 30, 30])
 
     def test_forecast_adjustment_rows_apply_manual_delta(self):
         rows, totals = _build_adjustment_rows(
