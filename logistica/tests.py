@@ -40,6 +40,7 @@ from logistica.services_tiempos_ruta import resumen_tiempos_ruta
 from logistica.tasks import _emails_de_grupo, detectar_gps_perdido_rutas
 from api.logistica_views import _can_operate_pwa
 from pos_bridge.models import PointBranch, PointSyncJob, PointTransferLine
+from recetas.models import Receta, SolicitudReabastoCedis, SolicitudReabastoCedisLinea
 
 
 class LogisticaEmailTemplateTests(SimpleTestCase):
@@ -597,6 +598,29 @@ class LogisticaControlRutasTests(TestCase):
             is_cancelled=False,
             is_finalized=False,
         )
+
+    def _crear_solicitud_cedis(self, *, ruta=None, sucursal=None, estado=SolicitudReabastoCedis.ESTADO_ENVIADA, cantidad="5.000"):
+        ruta = ruta or self.ruta
+        sucursal = sucursal or self.sucursal
+        receta = Receta.objects.create(
+            nombre=f"Pastel Snicker chico {sucursal.codigo}",
+            codigo_point="SNICK-CH",
+            hash_contenido=f"hash-logistica-carga-{ruta.id}-{sucursal.id}-{estado}",
+        )
+        solicitud = SolicitudReabastoCedis.objects.create(
+            fecha_operacion=ruta.fecha_ruta,
+            sucursal=sucursal,
+            estado=estado,
+            creado_por=self.user,
+        )
+        linea = SolicitudReabastoCedisLinea.objects.create(
+            solicitud=solicitud,
+            receta=receta,
+            sugerido=cantidad,
+            solicitado=cantidad,
+            justificacion="Cierre sucursal",
+        )
+        return solicitud, linea, receta
 
     def _crear_linea_carga_con_transferencia_recibida(
         self,
@@ -2105,6 +2129,65 @@ class LogisticaControlRutasTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertFalse(RutaEntrega.objects.filter(nombre="Ruta API Directa").exists())
+
+    def test_checklist_carga_se_genera_desde_solicitud_cedis_enviada(self):
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        solicitud, linea_solicitud, receta = self._crear_solicitud_cedis(ruta=ruta)
+
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        self.assertEqual(resumen.creadas, 1)
+        linea = RutaCargaChecklistLinea.objects.get(checklist=resumen.checklist)
+        self.assertEqual(linea.parada, parada)
+        self.assertIsNone(linea.point_transfer_line)
+        self.assertEqual(linea.transfer_external_id, solicitud.folio)
+        self.assertEqual(linea.item_code, receta.codigo_point)
+        self.assertEqual(linea.cantidad_solicitada, Decimal(str(linea_solicitud.solicitado)))
+        self.assertEqual(linea.cantidad_enviada_esperada, Decimal(str(linea_solicitud.solicitado)))
+        self.assertEqual(linea.source_hash, f"cedis-reabasto-{ruta.fecha_ruta:%Y%m%d}-{self.sucursal.id}-{receta.id}")
+
+    def test_checklist_carga_cedis_omite_borrador_y_cancelada(self):
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        solicitud, _, _ = self._crear_solicitud_cedis(ruta=ruta, estado=SolicitudReabastoCedis.ESTADO_BORRADOR)
+
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        self.assertEqual(resumen.creadas, 0)
+        self.assertEqual(resumen.checklist.lineas.count(), 0)
+        solicitud.estado = SolicitudReabastoCedis.ESTADO_CANCELADA
+        solicitud.save(update_fields=["estado", "actualizado_en"])
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+        self.assertEqual(resumen.creadas, 0)
+        self.assertEqual(resumen.checklist.lineas.count(), 0)
+
+    def test_recepcion_point_empata_checklist_cedis_por_sucursal_y_producto(self):
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        self._crear_solicitud_cedis(ruta=ruta)
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+        linea = resumen.checklist.lineas.get()
+        linea.cantidad_cargada = linea.cantidad_enviada_esperada
+        linea.estatus = RutaCargaChecklistLinea.ESTATUS_CARGADA
+        linea.save(update_fields=["cantidad_cargada", "estatus", "actualizado_en"])
+        ruta.estatus = RutaEntrega.ESTATUS_EN_RUTA
+        ruta.save(update_fields=["estatus", "updated_at"])
+        transferencia = self._crear_transferencia_point_abierta(source_hash="transfer-recibe-cedis")
+        transferencia.is_open = False
+        transferencia.is_received = True
+        transferencia.is_finalized = True
+        transferencia.received_quantity = linea.cantidad_enviada_esperada
+        transferencia.received_at = timezone.now()
+        transferencia.save(update_fields=["is_open", "is_received", "is_finalized", "received_quantity", "received_at", "updated_at"])
+
+        recepcion = sincronizar_recepcion_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        linea.refresh_from_db()
+        ruta.refresh_from_db()
+        self.assertEqual(recepcion.lineas_recibidas, 1)
+        self.assertEqual(recepcion.lineas_pendientes_point, 0)
+        self.assertEqual(linea.point_transfer_line, transferencia)
+        self.assertEqual(parada.evidencias_entrega.get().cantidad_entregada, linea.cantidad_enviada_esperada)
+        self.assertEqual(parada.evidencias_entrega.get().metadata["source_hashes"], [transferencia.source_hash])
+        self.assertEqual(ruta.cumplimiento_porcentaje, Decimal("100.00"))
 
     def test_checklist_carga_se_genera_desde_transferencia_point_abierta(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()

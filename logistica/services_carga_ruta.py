@@ -14,6 +14,7 @@ from pos_bridge.models import PointTransferLine
 from pos_bridge.services.movement_sync_service import PointMovementSyncService
 from pos_bridge.services.open_transfer_sync_service import OpenTransferSyncService, resolve_requesting_erp_branch
 from pos_bridge.utils.helpers import normalize_text
+from recetas.models import SolicitudReabastoCedis, SolicitudReabastoCedisLinea
 
 from .models import (
     EventoRuta,
@@ -136,6 +137,115 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
     return creadas, actualizadas, omitidas
 
 
+def _sincronizar_lineas_consolidado_para_ruta(*, ruta: RutaEntrega, checklist: RutaCargaChecklist) -> tuple[int, int, int]:
+    paradas_by_branch = _paradas_por_sucursal(ruta)
+    if not paradas_by_branch:
+        return 0, 0, 0
+
+    lineas = (
+        SolicitudReabastoCedisLinea.objects.select_related("solicitud", "solicitud__sucursal", "receta")
+        .filter(
+            solicitud__fecha_operacion=ruta.fecha_ruta,
+            solicitud__sucursal_id__in=set(paradas_by_branch),
+            solicitud__estado__in=[
+                SolicitudReabastoCedis.ESTADO_ENVIADA,
+                SolicitudReabastoCedis.ESTADO_ATENDIDA,
+            ],
+        )
+        .order_by("solicitud__sucursal__codigo", "receta__nombre", "id")
+    )
+    creadas = 0
+    actualizadas = 0
+    omitidas = 0
+    for linea in lineas:
+        cantidad = Decimal(str(linea.solicitado or 0))
+        source_hash = f"cedis-reabasto-{ruta.fecha_ruta:%Y%m%d}-{linea.solicitud.sucursal_id}-{linea.receta_id}"
+        if cantidad <= 0:
+            RutaCargaChecklistLinea.objects.filter(checklist=checklist, source_hash=source_hash).delete()
+            omitidas += 1
+            continue
+        if RutaCargaChecklistLinea.objects.filter(source_hash=source_hash).exclude(checklist=checklist).exists():
+            omitidas += 1
+            continue
+        receta = linea.receta
+        _, created = RutaCargaChecklistLinea.objects.update_or_create(
+            checklist=checklist,
+            source_hash=source_hash,
+            defaults={
+                "parada": paradas_by_branch[linea.solicitud.sucursal_id],
+                "point_transfer_line": None,
+                "transfer_external_id": linea.solicitud.folio,
+                "detail_external_id": str(linea.id),
+                "item_code": receta.codigo_point or "",
+                "item_name": receta.nombre,
+                "unit": "",
+                "erp_origin_branch": None,
+                "erp_destination_branch": linea.solicitud.sucursal,
+                "cantidad_solicitada": cantidad,
+                "cantidad_enviada_esperada": cantidad,
+            },
+        )
+        if created:
+            creadas += 1
+        else:
+            actualizadas += 1
+    return creadas, actualizadas, omitidas
+
+
+def _producto_key(value: str) -> str:
+    return (value or "").strip().lower()
+
+
+def _linea_producto_key(linea: RutaCargaChecklistLinea) -> str:
+    return _producto_key(linea.item_code or linea.item_name)
+
+
+def _point_producto_key(line: PointTransferLine) -> str:
+    return _producto_key(line.item_code or line.item_name)
+
+
+def _point_recibidas_por_ruta(ruta: RutaEntrega) -> dict[tuple[int, str], list[PointTransferLine]]:
+    paradas_by_branch = _paradas_por_sucursal(ruta)
+    if not paradas_by_branch:
+        return {}
+    branch_ids = set(paradas_by_branch)
+    result: dict[tuple[int, str], list[PointTransferLine]] = {}
+    lines = (
+        PointTransferLine.objects.select_related("erp_origin_branch", "erp_destination_branch", "origin_branch", "destination_branch")
+        .filter(
+            is_cancelled=False,
+            is_received=True,
+            registered_at__date__in=[ruta.fecha_ruta - timedelta(days=1), ruta.fecha_ruta],
+        )
+        .filter(Q(erp_origin_branch_id__in=branch_ids) | Q(erp_destination_branch_id__in=branch_ids))
+        .order_by("received_at", "id")
+    )
+    for line in lines:
+        branch = resolve_requesting_erp_branch(line)
+        key = _point_producto_key(line)
+        if branch is None or branch.id not in branch_ids or not key:
+            continue
+        result.setdefault((branch.id, key), []).append(line)
+    return result
+
+
+def _evidencia_point(linea: RutaCargaChecklistLinea) -> ParadaEntregaEvidencia | None:
+    return (
+        ParadaEntregaEvidencia.objects.filter(linea_carga=linea, client_event_id__startswith="point-recepcion-")
+        .order_by("-capturado_en", "-id")
+        .first()
+    )
+
+
+def _cantidad_recibida_linea(linea: RutaCargaChecklistLinea) -> Decimal | None:
+    evidencia = _evidencia_point(linea)
+    if evidencia is not None:
+        return Decimal(str(evidencia.cantidad_entregada or 0))
+    if linea.point_transfer_line_id and linea.point_transfer_line.is_received:
+        return Decimal(str(linea.point_transfer_line.received_quantity or 0))
+    return None
+
+
 @transaction.atomic
 def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_sync: bool = True) -> ChecklistCargaResumen:
     if ruta.estatus != RutaEntrega.ESTATUS_PLANEADA:
@@ -145,23 +255,29 @@ def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, eje
     if not paradas_by_branch:
         raise ValidationError("La ruta no tiene paradas ligadas a sucursales para relacionar transferencias Point.")
 
-    sync_job = None
-    if ejecutar_sync:
-        service = OpenTransferSyncService()
-        for fecha in [ruta.fecha_ruta - timedelta(days=1), ruta.fecha_ruta]:
-            sync_job = service.sync_open_transfers(fecha=fecha, triggered_by=user)
-            if sync_job.status != sync_job.STATUS_SUCCESS:
-                raise ValidationError("No se pudo sincronizar Point para generar la carga esperada.")
-
     checklist = obtener_checklist_carga(ruta)
-    checklist.point_sync_job = sync_job or checklist.point_sync_job
     checklist.sincronizado_en = timezone.now()
     if checklist.estatus == RutaCargaChecklist.ESTATUS_PENDIENTE:
         checklist.estatus = RutaCargaChecklist.ESTATUS_EN_REVISION
     checklist.save(update_fields=["point_sync_job", "sincronizado_en", "estatus", "actualizado_en"])
 
-    checklist.lineas.filter(point_transfer_line__is_open=False).delete()
-    creadas, actualizadas, omitidas = _sincronizar_lineas_point_para_ruta(ruta=ruta, checklist=checklist, solo_abiertas=True)
+    creadas, actualizadas, omitidas = _sincronizar_lineas_consolidado_para_ruta(ruta=ruta, checklist=checklist)
+    if creadas or actualizadas:
+        checklist.lineas.filter(point_transfer_line__isnull=False, estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).delete()
+        checklist.notas = "Carga esperada generada desde consolidado CEDIS."
+        checklist.save(update_fields=["notas", "actualizado_en"])
+    if not checklist.lineas.exists():
+        sync_job = None
+        if ejecutar_sync:
+            service = OpenTransferSyncService()
+            for fecha in [ruta.fecha_ruta - timedelta(days=1), ruta.fecha_ruta]:
+                sync_job = service.sync_open_transfers(fecha=fecha, triggered_by=user)
+                if sync_job.status != sync_job.STATUS_SUCCESS:
+                    raise ValidationError("No se pudo sincronizar Point para generar la carga esperada.")
+            checklist.point_sync_job = sync_job or checklist.point_sync_job
+            checklist.save(update_fields=["point_sync_job", "actualizado_en"])
+        checklist.lineas.filter(point_transfer_line__is_open=False).delete()
+        creadas, actualizadas, omitidas = _sincronizar_lineas_point_para_ruta(ruta=ruta, checklist=checklist, solo_abiertas=True)
 
     if checklist.lineas.exists():
         if checklist.estatus == RutaCargaChecklist.ESTATUS_BLOQUEADA:
@@ -353,6 +469,7 @@ def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_
             is_cancelled=False,
         )
     }
+    point_recibidas = _point_recibidas_por_ruta(ruta)
 
     evidencias_creadas = 0
     evidencias_existentes = 0
@@ -366,12 +483,23 @@ def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_
         if point_line is not None and linea.point_transfer_line_id != point_line.id:
             linea.point_transfer_line = point_line
             linea.save(update_fields=["point_transfer_line", "actualizado_en"])
-        if point_line is None or not point_line.is_received:
+        received_lines = []
+        if point_line is not None and point_line.is_received:
+            received_lines = [point_line]
+        elif linea.parada.punto.sucursal_id:
+            received_lines = point_recibidas.get((linea.parada.punto.sucursal_id, _linea_producto_key(linea)), [])
+            if received_lines and linea.point_transfer_line_id != received_lines[0].id:
+                linea.point_transfer_line = received_lines[0]
+                linea.save(update_fields=["point_transfer_line", "actualizado_en"])
+        if not received_lines:
             lineas_pendientes_point += 1
             continue
 
         lineas_recibidas += 1
-        client_event_id = f"point-recepcion-{point_line.source_hash}"
+        received_quantity = sum((Decimal(str(line.received_quantity or 0)) for line in received_lines), Decimal("0"))
+        received_at_values = [line.received_at for line in received_lines if line.received_at]
+        received_at = max(received_at_values) if received_at_values else timezone.now()
+        client_event_id = f"point-recepcion-{linea.source_hash}"
         evidencia, created = ParadaEntregaEvidencia.objects.get_or_create(
             ruta=ruta,
             parada=linea.parada,
@@ -379,16 +507,17 @@ def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_
             client_event_id=client_event_id,
             defaults={
                 "tipo": ParadaEntregaEvidencia.TIPO_CONFIRMACION,
-                "cantidad_entregada": point_line.received_quantity,
+                "cantidad_entregada": received_quantity,
                 "comentario": "Recepción confirmada desde Point.",
                 "capturado_por": user,
-                "capturado_en": point_line.received_at or timezone.now(),
+                "capturado_en": received_at,
                 "metadata": {
                     "origen": "point_transfer",
-                    "transfer_external_id": point_line.transfer_external_id,
-                    "detail_external_id": point_line.detail_external_id,
-                    "received_by": point_line.received_by,
-                    "is_finalized": point_line.is_finalized,
+                    "transfer_external_id": received_lines[0].transfer_external_id,
+                    "detail_external_id": received_lines[0].detail_external_id,
+                    "received_by": ", ".join(sorted({line.received_by for line in received_lines if line.received_by})),
+                    "is_finalized": all(line.is_finalized for line in received_lines),
+                    "source_hashes": [line.source_hash for line in received_lines],
                 },
             },
         )
@@ -402,15 +531,15 @@ def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_
         lineas = list(checklist.lineas.filter(parada=parada).select_related("point_transfer_line"))
         if not lineas:
             continue
-        recibidas = [linea for linea in lineas if linea.point_transfer_line_id and linea.point_transfer_line.is_received]
+        recibidas = [linea for linea in lineas if _cantidad_recibida_linea(linea) is not None]
         if not recibidas:
             continue
 
         todas_recibidas = len(recibidas) == len(lineas)
-        recibido_total = sum((Decimal(str(linea.point_transfer_line.received_quantity or 0)) for linea in recibidas), Decimal("0"))
+        recibido_total = sum((_cantidad_recibida_linea(linea) or Decimal("0") for linea in recibidas), Decimal("0"))
         esperado_total = sum((_cantidad_referencia_entrega(linea) for linea in lineas), Decimal("0"))
         cantidades_cuadran = todas_recibidas and all(
-            Decimal(str(linea.point_transfer_line.received_quantity or 0)) == _cantidad_referencia_entrega(linea)
+            _cantidad_recibida_linea(linea) == _cantidad_referencia_entrega(linea)
             for linea in lineas
         )
         if recibido_total == 0:
