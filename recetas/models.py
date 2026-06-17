@@ -986,6 +986,12 @@ class SolicitudReabastoCedis(models.Model):
         ordering = ["-fecha_operacion", "-id"]
         unique_together = [("fecha_operacion", "sucursal")]
 
+    @property
+    def estado_operativo_label(self) -> str:
+        if self.estado == self.ESTADO_ENVIADA:
+            return "Solicitud enviada a CEDIS"
+        return self.get_estado_display()
+
     def _next_folio(self) -> str:
         ymd = timezone.localdate().strftime("%y%m%d")
         prefix = f"SRC-{ymd}-"

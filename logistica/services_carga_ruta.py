@@ -500,6 +500,14 @@ def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_
         received_at_values = [line.received_at for line in received_lines if line.received_at]
         received_at = max(received_at_values) if received_at_values else timezone.now()
         client_event_id = f"point-recepcion-{linea.source_hash}"
+        metadata = {
+            "origen": "point_transfer",
+            "transfer_external_id": received_lines[0].transfer_external_id,
+            "detail_external_id": received_lines[0].detail_external_id,
+            "received_by": ", ".join(sorted({line.received_by for line in received_lines if line.received_by})),
+            "is_finalized": all(line.is_finalized for line in received_lines),
+            "source_hashes": [line.source_hash for line in received_lines],
+        }
         evidencia, created = ParadaEntregaEvidencia.objects.get_or_create(
             ruta=ruta,
             parada=linea.parada,
@@ -511,20 +519,18 @@ def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_
                 "comentario": "Recepción confirmada desde Point.",
                 "capturado_por": user,
                 "capturado_en": received_at,
-                "metadata": {
-                    "origen": "point_transfer",
-                    "transfer_external_id": received_lines[0].transfer_external_id,
-                    "detail_external_id": received_lines[0].detail_external_id,
-                    "received_by": ", ".join(sorted({line.received_by for line in received_lines if line.received_by})),
-                    "is_finalized": all(line.is_finalized for line in received_lines),
-                    "source_hashes": [line.source_hash for line in received_lines],
-                },
+                "metadata": metadata,
             },
         )
         if created:
             evidencias_creadas += 1
         else:
             evidencias_existentes += 1
+            evidencia.cantidad_entregada = received_quantity
+            evidencia.capturado_por = user
+            evidencia.capturado_en = received_at
+            evidencia.metadata = metadata
+            evidencia.save(update_fields=["cantidad_entregada", "capturado_por", "capturado_en", "metadata"])
         touched_paradas.add(linea.parada_id)
 
     for parada in ruta.paradas.filter(id__in=touched_paradas).order_by("orden", "id"):

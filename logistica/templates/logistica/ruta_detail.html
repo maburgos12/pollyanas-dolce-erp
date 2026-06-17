@@ -281,22 +281,22 @@
   </section>
 
   <section class="card">
-    <div class="card-header">Carga Point por parada</div>
+    <div class="card-header">Carga esperada CEDIS por parada</div>
     <div class="point-reception-head">
       <div class="point-reception-copy">
         <p class="muted" style="margin:0;">
-          Carga esperada desde transferencias abiertas de Point. No mezcla recepciones finalizadas.
+          Fuente principal: solicitud de reabasto CEDIS. Point solo confirma salida o recepción cuando aplica.
         </p>
       </div>
       {% if can_manage_logistica %}
       <form method="post">
         {% csrf_token %}
         <input type="hidden" name="action" value="sync_carga_point">
-        <button class="btn btn-secondary" type="submit">Actualizar carga Point</button>
+        <button class="btn btn-secondary" type="submit">Actualizar carga esperada</button>
       </form>
       {% endif %}
       {% if can_manage_logistica and carga_manual_pendiente %}
-      <form method="post" onsubmit="return confirm('¿Confirmar manualmente toda la carga pendiente? Esto usará la cantidad enviada esperada de Point.');">
+      <form method="post" onsubmit="return confirm('¿Confirmar manualmente toda la carga pendiente? Esto usará la cantidad esperada para cargar.');">
         {% csrf_token %}
         <input type="hidden" name="action" value="confirmar_carga_manual">
         <input type="hidden" name="notas_carga_manual" value="Carga confirmada manualmente por logística.">
@@ -353,7 +353,7 @@
             <td><span class="point-status is-{{ row.estado_tone }}">{{ row.estado_label }}</span></td>
           </tr>
           {% empty %}
-          <tr><td colspan="5" class="muted">Sin checklist de carga ligado a transferencias Point para esta ruta.</td></tr>
+          <tr><td colspan="5" class="muted">Sin checklist de carga para esta ruta.</td></tr>
           {% endfor %}
         </tbody>
       </table>
