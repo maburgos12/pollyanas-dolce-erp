@@ -1431,11 +1431,11 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v24", pwa_html)
+        self.assertIn("route-control-v25", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v24", pwa_html)
+        self.assertIn("?v=route-control-v25", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v24-confirmar-entrega", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v25-paradas-cedis", sw_js)
         self.assertIn("total esperado", pwa_html)
         self.assertIn("Total cargado", pwa_html)
         self.assertIn("const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000;", pwa_html)
@@ -1475,7 +1475,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v24-confirmar-entrega", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v25-paradas-cedis", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -1491,8 +1491,8 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("Capturar ubicación GPS", pwa_html)
         self.assertIn("Reportar desvío", pwa_html)
         self.assertIn("Paradas de reparto", pwa_html)
-        self.assertIn("Recepción Point pendiente", pwa_html)
-        self.assertIn("Point recibió", pwa_html)
+        self.assertIn("Pendiente de entrega", pwa_html)
+        self.assertIn("Recibido", pwa_html)
         self.assertIn("La ruta puede continuar; cierre final espera recepción Point.", pwa_html)
         self.assertIn('draft.geoStatus === "idle" ? "" : geoOverlay(draft, "capturarUbicacionRuta")', pwa_html)
 
@@ -1701,9 +1701,67 @@ class LogisticaControlRutasTests(TestCase):
         self.assertTrue(ruta.paradas.filter(punto=self.punto).exists())
         self.assertTrue(EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_SALIDA).exists())
 
-    def test_ruta_en_ruta_no_permite_editar_paradas(self):
+    def test_ruta_en_ruta_permite_quitar_parada_pendiente_sin_carga(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        punto_extra = PuntoLogistico.objects.create(
+            nombre="Sucursal Extra",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.571000",
+            longitud="-108.471000",
+            radio_geocerca_metros=120,
+        )
+        ParadaRuta.objects.create(ruta=self.ruta, punto=punto_extra, orden=2)
+        checklist = RutaCargaChecklist.objects.create(ruta=self.ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=self.parada,
+            transfer_external_id="T-PEND",
+            detail_external_id="D-PEND",
+            source_hash="pendiente-quitar",
+            item_code="PZA",
+            item_name="Producto pendiente",
+            unit="PZA",
+            cantidad_solicitada="1.000",
+            cantidad_enviada_esperada="1.000",
+        )
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {"action": "delete_parada", "parada_id": self.parada.id},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(ParadaRuta.objects.filter(pk=self.parada.id).exists())
+        self.assertFalse(RutaCargaChecklistLinea.objects.filter(source_hash="pendiente-quitar").exists())
+
+    def test_ruta_en_ruta_bloquea_quitar_parada_con_carga(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        punto_extra = PuntoLogistico.objects.create(
+            nombre="Sucursal Extra",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.571000",
+            longitud="-108.471000",
+            radio_geocerca_metros=120,
+        )
+        ParadaRuta.objects.create(ruta=self.ruta, punto=punto_extra, orden=2)
+        checklist = RutaCargaChecklist.objects.create(ruta=self.ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=self.parada,
+            transfer_external_id="T-CARGA",
+            detail_external_id="D-CARGA",
+            source_hash="cargada-no-quitar",
+            item_code="PZA",
+            item_name="Producto cargado",
+            unit="PZA",
+            cantidad_solicitada="1.000",
+            cantidad_enviada_esperada="1.000",
+            cantidad_cargada="1.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+        )
 
         response = self.client.post(
             reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
@@ -1713,7 +1771,34 @@ class LogisticaControlRutasTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(ParadaRuta.objects.filter(pk=self.parada.id).exists())
-        self.assertContains(response, "planeación queda congelada")
+        self.assertContains(response, "ya tiene carga validada")
+
+    def test_ruta_en_ruta_solo_permite_agregar_cedis(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.567916",
+            longitud="-108.459969",
+            radio_geocerca_metros=120,
+        )
+
+        bloqueada = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {"action": "add_parada", "punto": self.punto.id, "orden": "2"},
+            follow=True,
+        )
+        permitida = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {"action": "add_parada", "punto": cedis.id, "orden": "2"},
+            follow=True,
+        )
+
+        self.assertEqual(bloqueada.status_code, 200)
+        self.assertContains(bloqueada, "solo puedes agregar una parada CEDIS")
+        self.assertEqual(permitida.status_code, 200)
+        self.assertTrue(ParadaRuta.objects.filter(ruta=self.ruta, punto=cedis).exists())
 
     def test_ruta_en_ruta_no_permite_actualizar_entrega_oculta(self):
         self.client.force_login(self.user)

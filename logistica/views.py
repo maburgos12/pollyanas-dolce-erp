@@ -75,6 +75,19 @@ def _parse_datetime_local(raw: str | None):
     return dt
 
 
+def _parada_puede_quitarse(parada: ParadaRuta) -> tuple[bool, str]:
+    if parada.estado != ParadaRuta.ESTADO_PENDIENTE or parada.entrega_estado != ParadaRuta.ENTREGA_PENDIENTE:
+        return False, "No se puede quitar una parada que ya tiene visita o entrega registrada."
+    if parada.evidencias_entrega.exists():
+        return False, "No se puede quitar una parada que ya tiene evidencia registrada."
+    lineas = parada.lineas_carga.all()
+    if lineas.exclude(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists():
+        return False, "No se puede quitar una parada que ya tiene carga validada."
+    if lineas.filter(Q(cantidad_cargada__isnull=False) | Q(validado_en__isnull=False)).exists():
+        return False, "No se puede quitar una parada que ya tiene carga validada."
+    return True, ""
+
+
 def _parse_date(raw: str | None):
     value = (raw or "").strip()
     if not value:
@@ -1922,7 +1935,7 @@ def ruta_detail(request, pk: int):
 
         action = (request.POST.get("action") or "").strip().lower()
         ruta_cerrada = ruta.estatus in {RutaEntrega.ESTATUS_COMPLETADA, RutaEntrega.ESTATUS_CANCELADA}
-        estructura_actions = {"update_plan", "add_parada", "move_parada", "delete_parada", "add_entrega", "entrega_status", "delete_entrega"}
+        estructura_actions = {"update_plan", "move_parada", "add_entrega", "entrega_status", "delete_entrega"}
         if ruta_cerrada and action not in {"ruta_status", "sync_recepcion_point"}:
             messages.error(request, "La ruta ya está cerrada o cancelada; no se puede editar su planeación ni evidencia.")
             return redirect("logistica:ruta_detail", pk=ruta.id)
@@ -2064,6 +2077,9 @@ def ruta_detail(request, pk: int):
             if not punto:
                 messages.error(request, "Selecciona un punto logístico activo.")
                 return redirect("logistica:ruta_detail", pk=ruta.id)
+            if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA and punto.tipo != PuntoLogistico.TIPO_CEDIS:
+                messages.error(request, "La ruta ya está en seguimiento; solo puedes agregar una parada CEDIS para recarga.")
+                return redirect("logistica:ruta_detail", pk=ruta.id)
             try:
                 orden = int(request.POST.get("orden") or (ruta.paradas.count() + 1))
             except (TypeError, ValueError):
@@ -2144,7 +2160,16 @@ def ruta_detail(request, pk: int):
                 nombre_punto = parada.punto_nombre_snapshot
                 orden_eliminado = parada.orden
                 parada_id_log = parada.id
-                parada.delete()
+                if ruta.paradas.count() <= 1:
+                    messages.error(request, "La ruta debe conservar al menos una parada.")
+                    return redirect("logistica:ruta_detail", pk=ruta.id)
+                puede_quitarse, motivo = _parada_puede_quitarse(parada)
+                if not puede_quitarse:
+                    messages.error(request, motivo)
+                    return redirect("logistica:ruta_detail", pk=ruta.id)
+                with transaction.atomic():
+                    parada.lineas_carga.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).delete()
+                    parada.delete()
                 for index, item in enumerate(ruta.paradas.filter(orden__gt=orden_eliminado).order_by("orden", "id"), start=orden_eliminado):
                     item.orden = index
                     item.save(update_fields=["orden", "actualizado_en"])
