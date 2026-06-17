@@ -187,10 +187,13 @@
 
     <article class="card">
       <div class="card-header">Agregar parada</div>
-      {% if can_manage_logistica and ruta.estatus == "PLANEADA" %}
+      {% if can_manage_logistica and ruta.estatus in "PLANEADA EN_RUTA" %}
       <form method="post" class="filters" style="margin-bottom:0;">
         {% csrf_token %}
         <input type="hidden" name="action" value="add_parada">
+        {% if ruta.estatus == "EN_RUTA" %}
+        <div class="muted" style="grid-column:1/-1;">Ruta en curso: solo agrega CEDIS para recarga.</div>
+        {% endif %}
         <div class="route-plan-grid">
           <div class="route-plan-field">
             <label for="id_parada_orden">Orden</label>
@@ -201,7 +204,7 @@
             <select class="input-field" id="id_parada_punto" name="punto" required>
               <option value="">Selecciona punto</option>
               {% for punto in puntos_logisticos %}
-              <option value="{{ punto.id }}">{{ punto.nombre }} · {{ punto.get_tipo_display }} · {{ punto.radio_geocerca_metros }} m</option>
+              <option value="{{ punto.id }}"{% if ruta.estatus == "EN_RUTA" and punto.tipo != "CEDIS" %} disabled{% endif %}>{{ punto.nombre }} · {{ punto.get_tipo_display }} · {{ punto.radio_geocerca_metros }} m</option>
               {% endfor %}
             </select>
           </div>
@@ -237,7 +240,7 @@
             <th>Promedio surtido</th>
             <th>Permanencia real</th>
             <th>Estado</th>
-            {% if can_manage_logistica and ruta.estatus == "PLANEADA" %}<th>Acciones</th>{% endif %}
+            {% if can_manage_logistica and ruta.estatus in "PLANEADA EN_RUTA" %}<th>Acciones</th>{% endif %}
           </tr>
         </thead>
         <tbody>
@@ -252,9 +255,10 @@
             <td>{% if row.promedio_surtido_minutos is not None %}{{ row.promedio_surtido_minutos }} min{% else %}Sin historial{% endif %}</td>
             <td>{% if row.permanencia_real_minutos is not None %}{{ row.permanencia_real_minutos }} min{% else %}-{% endif %}</td>
             <td>{{ parada.get_estado_display }}</td>
-            {% if can_manage_logistica and ruta.estatus == "PLANEADA" %}
+            {% if can_manage_logistica and ruta.estatus in "PLANEADA EN_RUTA" %}
             <td>
               <div class="route-action-row">
+                {% if ruta.estatus == "PLANEADA" %}
                 <form method="post">
                   {% csrf_token %}
                   <input type="hidden" name="action" value="move_parada">
@@ -269,6 +273,7 @@
                   <input type="hidden" name="direction" value="down">
                   <button class="btn btn-secondary btn-small" type="submit">Bajar</button>
                 </form>
+                {% endif %}
                 <form method="post">
                   {% csrf_token %}
                   <input type="hidden" name="action" value="delete_parada">
@@ -281,7 +286,7 @@
           </tr>
           {% endwith %}
           {% empty %}
-          <tr><td colspan="{% if can_manage_logistica and ruta.estatus == 'PLANEADA' %}9{% else %}8{% endif %}" class="muted">Sin paradas. Agrega puntos logísticos para validar llegada por GPS.</td></tr>
+          <tr><td colspan="{% if can_manage_logistica and ruta.estatus in 'PLANEADA EN_RUTA' %}9{% else %}8{% endif %}" class="muted">Sin paradas. Agrega puntos logísticos para validar llegada por GPS.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -355,7 +360,7 @@
             <th>Producto</th>
             <th class="text-end">Esperado</th>
             <th class="text-end">Cargado</th>
-            <th>Estado Point</th>
+            <th>Estado de carga</th>
           </tr>
         </thead>
         <tbody>
