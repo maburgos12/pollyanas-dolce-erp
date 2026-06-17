@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
 from ventas.services.pronostico_engine import (
@@ -20,6 +20,8 @@ from ventas.services.sales_freshness import (
     build_forecast_sales_freshness,
     queue_forecast_sales_refresh_if_needed,
 )
+from ventas.services.proyecciones_engine import calcular_proyeccion_operativa
+from core.models import Sucursal
 import ventas.views as ventas_views
 from ventas.views import _apply_manual_adjustments, _build_adjustment_rows, _projection_presets
 
@@ -123,6 +125,31 @@ class VentasModuleTests(SimpleTestCase):
         self.assertEqual(rows[0]["nota"], "subir fin de semana")
         self.assertEqual(totals["total_final"], 17)
         self.assertEqual(totals["ingreso_final"], Decimal("1700.00"))
+
+    def test_forecast_adjustment_rows_use_recipe_key_without_point_product(self):
+        rows, _totals = _build_adjustment_rows(
+            {
+                "ajustes_ventas": {"r77": {"ajuste": -2, "nota": "criterio ventas"}},
+                "por_categoria": [
+                    {
+                        "categoria": "Pay Grande",
+                        "productos": [
+                            {
+                                "point_product_id": None,
+                                "receta_id": 77,
+                                "nombre": "Pay prueba",
+                                "total_piezas": 10,
+                                "precio": "120.00",
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(rows[0]["key"], "r77")
+        self.assertEqual(rows[0]["total_final"], 8)
+        self.assertEqual(rows[0]["nota"], "criterio ventas")
 
     def test_manual_adjustments_update_saved_result_summary(self):
         class PostData(dict):
@@ -324,3 +351,48 @@ class VentasModuleTests(SimpleTestCase):
 
         self.assertTrue(freshness.is_fresh)
         delay.assert_not_called()
+
+
+class VentasProjectionEngineTests(TestCase):
+    def test_projection_uses_operational_daily_forecast_with_three_week_lookback(self):
+        branch = Sucursal.objects.create(codigo="GSV", nombre="Guasave")
+        calls = []
+
+        def fake_forecast(*, target_date, lookback_weeks, top_n):
+            calls.append((target_date, lookback_weeks, top_n))
+            qty = Decimal("18") if target_date.weekday() == 5 else Decimal("9")
+            return {
+                "rows": [
+                    {
+                        "branch_id": branch.id,
+                        "recipe_id": 77,
+                        "recipe_name": "Pay prueba",
+                        "family": "Pay Grande",
+                        "category": "Pay Grande",
+                        "forecast_qty": qty,
+                        "forecast_min_qty": qty - Decimal("2"),
+                        "forecast_max_qty": qty + Decimal("3"),
+                        "forecast_amount": qty * Decimal("100"),
+                        "trend_factor": Decimal("1.12"),
+                    }
+                ],
+                "validation": {"wape_pct": Decimal("12.5")},
+            }
+
+        with patch("ventas.services.proyecciones_engine._selected_recipe_ids", return_value=None), patch(
+            "ventas.services.proyecciones_engine.build_daily_forecast_context",
+            side_effect=fake_forecast,
+        ):
+            result = calcular_proyeccion_operativa(
+                date(2026, 6, 19),
+                date(2026, 6, 20),
+                {branch.id},
+                skus_incluidos=None,
+            )
+
+        self.assertEqual(calls, [(date(2026, 6, 19), 3, None), (date(2026, 6, 20), 3, None)])
+        self.assertEqual(result["resumen"]["metodo"], "forecast-operativo-3-semanas")
+        self.assertEqual(result["por_dia"][0]["total_piezas"], 9)
+        self.assertEqual(result["por_dia"][1]["total_piezas"], 18)
+        self.assertEqual(result["por_producto"][0]["por_dia"]["2026-06-20"], 18)
+        self.assertEqual(result["por_producto"][0]["tendencia"], "sube")
