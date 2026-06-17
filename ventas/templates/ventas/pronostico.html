@@ -5,7 +5,7 @@
 {% block body_class %}page-pronostico-ventas{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/ventas-templates-ventas-pronostico.css?v=20260617-proyecciones-v2">
+<link rel="stylesheet" href="/static/css/template_modules/ventas-templates-ventas-pronostico.css?v=20260617-proyecciones-v3">
 {% endblock %}
 
 {% block content %}
@@ -28,10 +28,11 @@
   </section>
 
   <nav class="forecast-workflow-tabs" aria-label="Flujo de pronósticos">
-    <a class="forecast-workflow-tab" href="#pronosticos-guardados">Pronósticos</a>
-    <a class="forecast-workflow-tab active" href="#proyecciones">Proyecciones</a>
+    <a class="forecast-workflow-tab {% if active_tab == 'pronosticos' %}active{% endif %}" href="{% url 'ventas:pronostico' %}?tab=pronosticos">Pronósticos</a>
+    <a class="forecast-workflow-tab {% if active_tab == 'proyecciones' %}active{% endif %}" href="{% url 'ventas:pronostico' %}?tab=proyecciones">Proyecciones</a>
   </nav>
 
+  {% if active_tab == "proyecciones" %}
   <section class="card">
     <details id="proyecciones" open>
       <summary class="pd-u-8400ad8a3f">
@@ -138,7 +139,9 @@
       </form>
     </details>
   </section>
+  {% endif %}
 
+  {% if active_tab == "pronosticos" %}
   <section class="card" id="pronosticos-guardados">
     <div class="section-header">
       <div>
@@ -216,7 +219,9 @@
       </table>
     </div>
   </section>
+  {% endif %}
 
+  {% if active_tab == "proyecciones" %}
   {% if fechas_especiales_en_rango %}
   <div class="forecast-special-banner">
     Evento especial: este rango incluye {% for item in fechas_especiales_en_rango %}{{ item.nombre }}{% if not forloop.last %}, {% endif %}{% endfor %}. El pronóstico usará el comparable histórico del evento cuando exista.
@@ -510,6 +515,7 @@
       {% endfor %}
     </div>
   </section>
+  {% endif %}
   {% endif %}
 
 </div>

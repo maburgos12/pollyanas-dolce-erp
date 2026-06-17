@@ -800,6 +800,9 @@ def PronosticoVentasView(request):
     if not _can_view_pronostico(request.user):
         raise PermissionDenied("No tienes permisos para ver pronosticos de ventas.")
 
+    active_tab = "proyecciones" if request.method == "POST" else request.GET.get("tab", "pronosticos")
+    if active_tab not in {"pronosticos", "proyecciones"}:
+        active_tab = "pronosticos"
     branches = Sucursal.objects.filter(activa=True).order_by("nombre")
     source = "POST" if request.method == "POST" else "GET"
     data = request.POST if request.method == "POST" else request.GET
@@ -829,6 +832,7 @@ def PronosticoVentasView(request):
 
     context = {
         "branches": branches,
+        "active_tab": active_tab,
         "selected_branch_ids": selected_branch_ids,
         "fecha_inicio": fecha_inicio_raw,
         "fecha_fin": fecha_fin_raw,
