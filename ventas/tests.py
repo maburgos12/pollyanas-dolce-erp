@@ -61,7 +61,11 @@ class VentasModuleTests(SimpleTestCase):
     def test_pronostico_includes_projection_tab_and_range_presets(self):
         template = (Path(__file__).resolve().parent / "templates" / "ventas" / "pronostico.html").read_text()
 
-        self.assertIn('href="#proyecciones"', template)
+        self.assertIn("?tab=pronosticos", template)
+        self.assertIn("?tab=proyecciones", template)
+        self.assertIn('active_tab == "pronosticos"', template)
+        self.assertIn('active_tab == "proyecciones"', template)
+        self.assertNotIn('href="#proyecciones"', template)
         self.assertIn("Proyecciones", template)
         self.assertIn("data-projection-days", template)
         self.assertIn("dataset.projectionDays === '15'", template)
