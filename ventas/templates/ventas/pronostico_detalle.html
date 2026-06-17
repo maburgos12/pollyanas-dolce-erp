@@ -5,7 +5,7 @@
 {% block body_class %}page-pronostico-ventas{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/ventas-templates-ventas-pronostico-detalle.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/ventas-templates-ventas-pronostico-detalle.css?v=20260617-ajustes-v1">
 {% endblock %}
 
 {% block content %}
@@ -83,6 +83,58 @@
     cálculo generado el {{ pronostico.creado_en|date:"Y-m-d H:i" }}.
     Para aplicar reglas actuales, venta nueva o datos corregidos, vuelve a generar el pronóstico.
   </div>
+  {% endif %}
+
+  {% if adjustment_rows %}
+  <section class="card" id="revision-ventas">
+    <div class="section-header">
+      <div>
+        <h2 class="section-header-title">Revisión de ventas</h2>
+        <p class="executive-section-copy">Captura ajustes por criterio operativo antes de usar este pronóstico como consolidado.</p>
+      </div>
+      <div class="forecast-branch-totals">
+        <span>Base {{ adjustment_totals.total_base|intcomma }}</span>
+        <span>Ajuste {{ adjustment_totals.total_ajuste|intcomma }}</span>
+        <span>Final {{ adjustment_totals.total_final|intcomma }}</span>
+      </div>
+    </div>
+    <form method="post" action="{% url 'ventas:pronostico_ajustes' pronostico.id %}">
+      {% csrf_token %}
+      <div class="table-responsive production-table-wrap">
+        <table class="table forecast-adjustments-table">
+          <thead>
+            <tr>
+              <th>Categoría</th>
+              <th>Producto</th>
+              <th class="text-end">Base</th>
+              <th class="text-end">Ajuste</th>
+              <th class="text-end">Total final</th>
+              <th>Nota</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in adjustment_rows %}
+            <tr>
+              <td>{{ row.categoria }}</td>
+              <td>{{ row.nombre }}</td>
+              <td class="text-end">{{ row.base|intcomma }}</td>
+              <td>
+                <input class="form-control forecast-adjustment-input" type="number" step="1" name="ajuste_{{ row.key }}" value="{{ row.ajuste }}">
+              </td>
+              <td class="text-end">{{ row.total_final|intcomma }}</td>
+              <td>
+                <input class="form-control" name="nota_{{ row.key }}" value="{{ row.nota }}" maxlength="160">
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="forecast-adjustment-actions">
+        <button class="btn btn-primary" type="submit">Guardar ajustes</button>
+      </div>
+    </form>
+  </section>
   {% endif %}
 
   <section class="card">

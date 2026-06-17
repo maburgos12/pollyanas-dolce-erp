@@ -5,7 +5,7 @@
 {% block body_class %}page-pronostico-ventas{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/ventas-templates-ventas-pronostico.css?v=20260617-proyecciones-v1">
+<link rel="stylesheet" href="/static/css/template_modules/ventas-templates-ventas-pronostico.css?v=20260617-proyecciones-v2">
 {% endblock %}
 
 {% block content %}
@@ -20,7 +20,7 @@
       <div class="forecast-actions">
         <a class="btn btn-secondary" href="{% url 'ventas:pronostico_guardados' %}">Ver guardados</a>
         {% if resumen %}
-        <button class="btn btn-primary" type="button" id="open-save-forecast">Guardar pronóstico</button>
+        <a class="btn btn-primary" href="#revision-ventas">Revisar y guardar</a>
         <button class="btn btn-secondary" type="button" id="export-forecast-csv">Exportar CSV</button>
         {% endif %}
       </div>
@@ -272,6 +272,68 @@
   </div>
   {% endif %}
 
+  {% if adjustment_rows %}
+  <section class="card" id="revision-ventas">
+    <div class="section-header">
+      <div>
+        <h2 class="section-header-title">Revisión de ventas</h2>
+        <p class="executive-section-copy">Ajusta cantidades antes de guardar el consolidado. Nada se guarda hasta confirmar aquí.</p>
+      </div>
+      <div class="forecast-branch-totals">
+        <span>Base {{ adjustment_totals.total_base|intcomma }}</span>
+        <span>Ajuste {{ adjustment_totals.total_ajuste|intcomma }}</span>
+        <span>Final {{ adjustment_totals.total_final|intcomma }}</span>
+      </div>
+    </div>
+    <form method="post" action="{% url 'ventas:pronostico_guardar' %}">
+      {% csrf_token %}
+      <input type="hidden" name="fecha_inicio" value="{{ fecha_inicio }}">
+      <input type="hidden" name="fecha_fin" value="{{ fecha_fin }}">
+      {% for branch in branches %}
+      {% if branch.id in selected_branch_ids %}
+      <input type="hidden" name="sucursales" value="{{ branch.id }}">
+      {% endif %}
+      {% endfor %}
+      {% for sku in selected_product_skus %}
+      <input type="hidden" name="productos_incluidos" value="{{ sku }}">
+      {% endfor %}
+      <div class="forecast-save-name">
+        <label class="form-label" for="forecast-name">Nombre del consolidado</label>
+        <input class="form-control" id="forecast-name" name="nombre" value="Proyección {{ fecha_inicio }} a {{ fecha_fin }}" maxlength="200" required>
+      </div>
+      <div class="table-responsive production-table-wrap">
+        <table class="table forecast-adjustments-table">
+          <thead>
+            <tr>
+              <th>Categoría</th>
+              <th>Producto</th>
+              <th class="text-end">Base</th>
+              <th class="text-end">Ajuste</th>
+              <th class="text-end">Total final</th>
+              <th>Nota</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in adjustment_rows %}
+            <tr>
+              <td>{{ row.categoria }}</td>
+              <td>{{ row.nombre }}</td>
+              <td class="text-end">{{ row.base|intcomma }}</td>
+              <td><input class="form-control forecast-adjustment-input" type="number" step="1" name="ajuste_{{ row.key }}" value="{{ row.ajuste }}"></td>
+              <td class="text-end">{{ row.total_final|intcomma }}</td>
+              <td><input class="form-control" name="nota_{{ row.key }}" value="{{ row.nota }}" maxlength="160"></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="forecast-adjustment-actions">
+        <button class="btn btn-primary" type="submit">Guardar proyección consolidada</button>
+      </div>
+    </form>
+  </section>
+  {% endif %}
+
   <section class="card">
     <div class="section-header">
       <h2 class="section-header-title">Detalle del pronóstico</h2>
@@ -452,33 +514,6 @@
 
 </div>
 
-{% if resumen %}
-<div class="forecast-modal-backdrop" id="save-forecast-modal" aria-hidden="true">
-  <div class="forecast-modal" role="dialog" aria-modal="true" aria-labelledby="save-forecast-title">
-    <h2 class="forecast-modal-title" id="save-forecast-title">Guardar pronóstico</h2>
-    <p class="forecast-modal-copy">Guarda este cálculo para consultarlo después o descargarlo en Excel.</p>
-    <form method="post" action="{% url 'ventas:pronostico_guardar' %}">
-      {% csrf_token %}
-      <input type="hidden" name="fecha_inicio" value="{{ fecha_inicio }}">
-      <input type="hidden" name="fecha_fin" value="{{ fecha_fin }}">
-      {% for branch in branches %}
-      {% if branch.id in selected_branch_ids %}
-      <input type="hidden" name="sucursales" value="{{ branch.id }}">
-      {% endif %}
-      {% endfor %}
-      {% for sku in selected_product_skus %}
-      <input type="hidden" name="productos_incluidos" value="{{ sku }}">
-      {% endfor %}
-      <label class="form-label" for="forecast-name">Nombre</label>
-      <input class="form-control" id="forecast-name" name="nombre" value="Pronóstico {{ fecha_inicio }} a {{ fecha_fin }}" maxlength="200" required>
-      <div class="forecast-modal-actions">
-        <button class="btn btn-secondary" type="button" id="close-save-forecast">Cancelar</button>
-        <button class="btn btn-primary" type="submit">Guardar</button>
-      </div>
-    </form>
-  </div>
-</div>
-{% endif %}
 {% endblock %}
 
 {% block extra_js %}
@@ -679,25 +714,5 @@
     });
   })();
 
-  (function () {
-    const modal = document.getElementById('save-forecast-modal');
-    const openSave = document.getElementById('open-save-forecast');
-    const closeSave = document.getElementById('close-save-forecast');
-    if (!modal || !openSave || !closeSave) return;
-    openSave.addEventListener('click', function () {
-      modal.classList.add('active');
-      modal.setAttribute('aria-hidden', 'false');
-    });
-    closeSave.addEventListener('click', function () {
-      modal.classList.remove('active');
-      modal.setAttribute('aria-hidden', 'true');
-    });
-    modal.addEventListener('click', function (event) {
-      if (event.target === modal) {
-        modal.classList.remove('active');
-        modal.setAttribute('aria-hidden', 'true');
-      }
-    });
-  })();
 </script>
 {% endblock %}
