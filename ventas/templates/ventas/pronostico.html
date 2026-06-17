@@ -299,6 +299,7 @@
     </div>
     <form method="post" action="{% url 'ventas:pronostico_guardar' %}">
       {% csrf_token %}
+      <input type="hidden" name="tab" value="{{ active_tab }}">
       <input type="hidden" name="fecha_inicio" value="{{ fecha_inicio }}">
       <input type="hidden" name="fecha_fin" value="{{ fecha_fin }}">
       {% for branch in branches %}

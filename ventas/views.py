@@ -29,6 +29,7 @@ from ventas.services.pronostico_engine import (
     WEEKDAYS_ES,
 )
 from ventas.services.pronostico_engine import calcular_pronostico
+from ventas.services.proyecciones_engine import calcular_proyeccion_operativa
 from ventas.services.sales_freshness import (
     get_forecast_sales_freshness,
     queue_forecast_sales_refresh_if_needed,
@@ -582,7 +583,13 @@ def _build_adjustment_rows(resultados: dict) -> tuple[list[dict], dict]:
         category_name = category.get("categoria") or "Sin categoría"
         for product in category.get("productos") or []:
             product_id = product.get("point_product_id")
-            key = f"p{product_id}" if product_id else f"n{fallback_index}"
+            recipe_id = product.get("receta_id")
+            if product_id:
+                key = f"p{product_id}"
+            elif recipe_id:
+                key = f"r{recipe_id}"
+            else:
+                key = f"n{fallback_index}"
             fallback_index += 1
             ajuste = ajustes.get(key) or {}
             base = _int_from_json(product.get("total_piezas"))
@@ -760,8 +767,21 @@ def _build_pronostico_detail_context(pronostico: PronosticoGuardado) -> dict:
     }
 
 
-def _calcular_y_guardar_sync(*, nombre, fecha_inicio, fecha_fin, sucursal_ids, usuario, skus_incluidos=None, ajustes_post=None):
-    resultado = calcular_pronostico(fecha_inicio, fecha_fin, set(sucursal_ids), skus_incluidos=skus_incluidos or None)
+def _calcular_y_guardar_sync(
+    *,
+    nombre,
+    fecha_inicio,
+    fecha_fin,
+    sucursal_ids,
+    usuario,
+    skus_incluidos=None,
+    ajustes_post=None,
+    tipo="pronosticos",
+):
+    if tipo == "proyecciones":
+        resultado = calcular_proyeccion_operativa(fecha_inicio, fecha_fin, set(sucursal_ids), skus_incluidos=skus_incluidos or None)
+    else:
+        resultado = calcular_pronostico(fecha_inicio, fecha_fin, set(sucursal_ids), skus_incluidos=skus_incluidos or None)
     if ajustes_post:
         resultado, _totals = _apply_manual_adjustments(resultado, ajustes_post)
     resumen = resultado.get("resumen") or {}
@@ -824,7 +844,20 @@ def PronosticoVentasView(request):
             form_errors.append("Selecciona al menos un producto para incluir en el pronostico.")
         if not form_errors and fecha_inicio and fecha_fin:
             _warn_stale_sales_forecast(request)
-            resultados_preview = calcular_pronostico(fecha_inicio, fecha_fin, selected_branch_ids, skus_incluidos=selected_product_skus)
+            if active_tab == "proyecciones":
+                resultados_preview = calcular_proyeccion_operativa(
+                    fecha_inicio,
+                    fecha_fin,
+                    selected_branch_ids,
+                    skus_incluidos=selected_product_skus,
+                )
+            else:
+                resultados_preview = calcular_pronostico(
+                    fecha_inicio,
+                    fecha_fin,
+                    selected_branch_ids,
+                    skus_incluidos=selected_product_skus,
+                )
         for error in form_errors:
             messages.error(request, error)
 
@@ -877,6 +910,9 @@ def PronosticoGuardarView(request):
         raise PermissionDenied("No tienes permisos para guardar pronosticos de ventas.")
 
     nombre = (request.POST.get("nombre") or "").strip()
+    active_tab = request.POST.get("tab") or "pronosticos"
+    if active_tab not in {"pronosticos", "proyecciones"}:
+        active_tab = "pronosticos"
     fecha_inicio_raw = (request.POST.get("fecha_inicio") or "").strip()
     fecha_fin_raw = (request.POST.get("fecha_fin") or "").strip()
     fecha_inicio, fecha_fin, errors = _validate_dates(fecha_inicio_raw, fecha_fin_raw)
@@ -904,6 +940,7 @@ def PronosticoGuardarView(request):
         usuario=request.user,
         skus_incluidos=selected_product_skus,
         ajustes_post=request.POST,
+        tipo=active_tab,
     )
     return redirect("ventas:pronostico_detalle", pk=pronostico.id)
 
