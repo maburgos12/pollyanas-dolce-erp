@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+import inspect
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,6 +19,7 @@ from ventas.services.sales_freshness import (
     build_forecast_sales_freshness,
     queue_forecast_sales_refresh_if_needed,
 )
+import ventas.views as ventas_views
 from ventas.views import _apply_manual_adjustments, _build_adjustment_rows, _projection_presets
 
 
@@ -67,10 +69,12 @@ class VentasModuleTests(SimpleTestCase):
         self.assertIn('active_tab == "proyecciones"', template)
         self.assertNotIn('href="#proyecciones"', template)
         self.assertIn("Proyecciones", template)
+        self.assertIn("Generar pronóstico", template)
         self.assertIn("data-projection-days", template)
         self.assertIn("dataset.projectionDays === '15'", template)
+        self.assertIn('name="tab" value="{{ active_tab }}"', template)
         self.assertIn("Nada se guarda hasta confirmar aquí", template)
-        self.assertIn("Guardar proyección consolidada", template)
+        self.assertIn("Guardar {% if active_tab", template)
         self.assertNotIn("open-save-forecast", template)
         self.assertIn("fecha_inicio", template)
         self.assertIn("fecha_fin", template)
@@ -78,6 +82,12 @@ class VentasModuleTests(SimpleTestCase):
         presets = _projection_presets()
         self.assertEqual([preset["label"] for preset in presets], ["Semana", "15 días", "30 días"])
         self.assertEqual([preset["days"] for preset in presets], [7, 15, 30])
+
+    def test_post_tab_is_not_forced_to_proyecciones(self):
+        source = inspect.getsource(ventas_views)
+
+        self.assertIn('active_tab = request.POST.get("tab")', source)
+        self.assertNotIn('active_tab = "proyecciones" if request.method == "POST"', source)
 
     def test_forecast_adjustment_rows_apply_manual_delta(self):
         rows, totals = _build_adjustment_rows(
