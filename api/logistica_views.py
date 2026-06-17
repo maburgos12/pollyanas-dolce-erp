@@ -44,7 +44,7 @@ from logistica.services_google_routes import recalcular_ruta_programada
 from logistica.services_carga_ruta import (
     checklist_bloquea_salida,
     checklist_tiene_recepcion_point_pendiente,
-    obtener_checklist_carga,
+    obtener_checklist_carga_detallado,
     registrar_evento_checklist_confirmado,
     sincronizar_checklist_carga_desde_point,
     sincronizar_recepcion_desde_point,
@@ -1314,15 +1314,14 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
         ruta = _ruta_operativa_dia_para_repartidor(repartidor)
         if not ruta:
             return Response(status=status.HTTP_204_NO_CONTENT)
-        checklist = obtener_checklist_carga(ruta)
+        checklist = obtener_checklist_carga_detallado(ruta)
+        ultima_ubicacion = ruta.ubicaciones.select_related("repartidor__user", "unidad").first()
 
         return Response(
             {
                 "ruta": LogisticaRutaSerializer(ruta).data,
                 "paradas": ParadaRutaSerializer(ruta.paradas.select_related("punto").order_by("orden", "id"), many=True).data,
-                "ultima_ubicacion": UbicacionRutaSerializer(ruta.ubicaciones.select_related("repartidor__user", "unidad").first()).data
-                if ruta.ubicaciones.exists()
-                else None,
+                "ultima_ubicacion": UbicacionRutaSerializer(ultima_ubicacion).data if ultima_ubicacion else None,
                 "eventos": EventoRutaSerializer(ruta.eventos.select_related("parada__punto", "ubicacion", "creado_por")[:20], many=True).data,
                 "checklist_carga": RutaCargaChecklistSerializer(
                     checklist,
@@ -1342,7 +1341,7 @@ class LogisticaRutaCargaChecklistView(_LogisticaBaseView):
         )
         if not can_view:
             return Response({"detail": "No tienes permisos para consultar la carga de esta ruta."}, status=status.HTTP_403_FORBIDDEN)
-        checklist = obtener_checklist_carga(ruta)
+        checklist = obtener_checklist_carga_detallado(ruta)
         return Response(RutaCargaChecklistSerializer(checklist, context={"request": request}).data, status=status.HTTP_200_OK)
 
 
@@ -1355,9 +1354,10 @@ class LogisticaRutaCargaChecklistSyncView(_LogisticaBaseView):
             resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=request.user, ejecutar_sync=True)
         except ValidationError as exc:
             return Response({"detail": exc.message if hasattr(exc, "message") else exc.messages}, status=status.HTTP_400_BAD_REQUEST)
+        checklist = obtener_checklist_carga_detallado(ruta)
         return Response(
             {
-                "checklist": RutaCargaChecklistSerializer(resumen.checklist, context={"request": request}).data,
+                "checklist": RutaCargaChecklistSerializer(checklist, context={"request": request}).data,
                 "creadas": resumen.creadas,
                 "actualizadas": resumen.actualizadas,
                 "omitidas": resumen.omitidas,

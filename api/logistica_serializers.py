@@ -409,13 +409,26 @@ class RutaCargaChecklistSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    def _lineas_prefetched(self, obj):
+        cache = getattr(obj, "_prefetched_objects_cache", {})
+        return cache.get("lineas")
+
     def get_total_lineas(self, obj):
+        lineas = self._lineas_prefetched(obj)
+        if lineas is not None:
+            return len(lineas)
         return obj.lineas.count()
 
     def get_lineas_confirmadas(self, obj):
+        lineas = self._lineas_prefetched(obj)
+        if lineas is not None:
+            return sum(1 for linea in lineas if linea.estatus != RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
         return obj.lineas.exclude(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).count()
 
     def get_lineas_pendientes(self, obj):
+        lineas = self._lineas_prefetched(obj)
+        if lineas is not None:
+            return sum(1 for linea in lineas if linea.estatus == RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
         return obj.lineas.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).count()
 
 
