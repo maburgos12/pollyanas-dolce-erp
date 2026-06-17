@@ -5,7 +5,7 @@
 {% block body_class %}page-pronostico-ventas{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/ventas-templates-ventas-pronostico.css?v=20260617-proyecciones-v4">
+<link rel="stylesheet" href="/static/css/template_modules/ventas-templates-ventas-pronostico.css?v=20260617-loading-v1">
 {% endblock %}
 
 {% block content %}
@@ -61,7 +61,7 @@
         El pronostico se calculara con los datos disponibles. Se lanzara actualizacion de ventas en paralelo.
       </div>
       {% endif %}
-      <form method="post" id="forecast-form">
+      <form method="post" id="forecast-form" data-forecast-loading-form data-loading-title="{% if active_tab == "proyecciones" %}Calculando proyección de ventas{% else %}Calculando pronóstico de ventas{% endif %}">
         {% csrf_token %}
         <input type="hidden" name="tab" value="{{ active_tab }}">
         {% if active_tab == "proyecciones" %}
@@ -297,7 +297,7 @@
         <span>Final {{ adjustment_totals.total_final|intcomma }}</span>
       </div>
     </div>
-    <form method="post" action="{% url 'ventas:pronostico_guardar' %}">
+    <form method="post" action="{% url 'ventas:pronostico_guardar' %}" data-forecast-loading-form data-loading-title="Guardando consolidado de ventas">
       {% csrf_token %}
       <input type="hidden" name="tab" value="{{ active_tab }}">
       <input type="hidden" name="fecha_inicio" value="{{ fecha_inicio }}">
@@ -528,6 +528,19 @@
 
 </div>
 
+<div class="forecast-loading-overlay" id="forecast-loading-overlay" role="status" aria-live="polite" aria-hidden="true">
+  <div class="forecast-loading-card">
+    <div class="forecast-loading-brand">Pollyana's Dolce</div>
+    <div class="forecast-loading-orbit" aria-hidden="true">
+      <span class="forecast-loading-core">PD</span>
+    </div>
+    <h2 id="forecast-loading-title">Calculando proyección de ventas</h2>
+    <p id="forecast-loading-message">Analizando ventas recientes por producto...</p>
+    <div class="forecast-loading-bar" aria-hidden="true"><span></span></div>
+    <p class="forecast-loading-note">Esto puede tardar unos segundos. No cierres esta ventana.</p>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
@@ -663,12 +676,46 @@
   })();
 
   (function () {
-    const form = document.getElementById('forecast-form');
-    const submit = document.getElementById('forecast-submit');
-    if (!form || !submit) return;
-    form.addEventListener('submit', function () {
-      submit.disabled = true;
-      submit.textContent = 'Iniciando cálculo...';
+    const overlay = document.getElementById('forecast-loading-overlay');
+    const title = document.getElementById('forecast-loading-title');
+    const message = document.getElementById('forecast-loading-message');
+    const messages = [
+      'Analizando ventas recientes por producto...',
+      'Comparando patrones por día de la semana...',
+      'Revisando eventos, temporadas y fechas especiales...',
+      'Calculando propuesta ERP y escenarios...',
+      'Preparando matriz de ajustes por día...'
+    ];
+    let timer = null;
+
+    function showLoading(form) {
+      if (!overlay || !message) return;
+      let index = 0;
+      if (title) title.textContent = form.dataset.loadingTitle || 'Calculando proyección de ventas';
+      message.textContent = messages[index];
+      overlay.classList.add('active');
+      overlay.setAttribute('aria-hidden', 'false');
+      timer = window.setInterval(function () {
+        index = (index + 1) % messages.length;
+        message.textContent = messages[index];
+      }, 1500);
+    }
+
+    document.querySelectorAll('[data-forecast-loading-form]').forEach(function (form) {
+      form.addEventListener('submit', function () {
+        const submit = form.querySelector('[type=submit]');
+        if (submit) {
+          submit.disabled = true;
+          submit.dataset.originalText = submit.textContent;
+          submit.textContent = 'Calculando...';
+        }
+        showLoading(form);
+      });
+    });
+
+    window.addEventListener('pageshow', function () {
+      if (overlay) overlay.classList.remove('active');
+      if (timer) window.clearInterval(timer);
     });
   })();
 
