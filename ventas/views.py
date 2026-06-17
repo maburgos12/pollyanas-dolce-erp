@@ -572,9 +572,11 @@ def _write_escenarios_sheet(ws, *, title: str, subtitle: str, categorias: list[d
 
 def _build_adjustment_rows(resultados: dict) -> tuple[list[dict], dict]:
     ajustes = resultados.get("ajustes_ventas") or {}
+    fechas = resultados.get("fechas_tabla") or []
     rows = []
-    total_base = 0
-    total_ajuste = 0
+    total_propuesta = 0
+    total_ajuste_general = 0
+    total_ajuste_dias = 0
     total_final = 0
     ingreso_final = Decimal("0")
     fallback_index = 0
@@ -592,13 +594,35 @@ def _build_adjustment_rows(resultados: dict) -> tuple[list[dict], dict]:
                 key = f"n{fallback_index}"
             fallback_index += 1
             ajuste = ajustes.get(key) or {}
-            base = _int_from_json(product.get("total_piezas"))
-            delta = _int_from_json(ajuste.get("ajuste"))
-            final = max(0, base + delta)
+            day_adjustments = ajuste.get("dias") or {}
+            propuesta = _int_from_json(product.get("total_piezas"))
+            general_delta = _int_from_json(ajuste.get("ajuste"))
+            dias = []
+            day_delta_total = 0
+            product_days = {day.get("fecha_iso"): day for day in product.get("dias_lista") or []}
+            for fecha in fechas:
+                fecha_iso = fecha.get("iso")
+                day_values = product_days.get(fecha_iso) or {}
+                sistema = _int_from_json(day_values.get("recomendado") or (product.get("por_dia") or {}).get(fecha_iso))
+                day_adjustment = day_adjustments.get(fecha_iso) or {}
+                day_delta = _int_from_json(day_adjustment.get("ajuste"))
+                day_delta_total += day_delta
+                dias.append(
+                    {
+                        "fecha_iso": fecha_iso,
+                        "label": fecha.get("label") or fecha_iso,
+                        "sistema": sistema,
+                        "ajuste": day_delta,
+                        "final": max(0, sistema + day_delta),
+                        "nota": day_adjustment.get("nota") or "",
+                    }
+                )
+            final = max(0, propuesta + general_delta + day_delta_total)
             price = _decimal_from_json(product.get("precio"))
             income = final * price
-            total_base += base
-            total_ajuste += delta
+            total_propuesta += propuesta
+            total_ajuste_general += general_delta
+            total_ajuste_dias += day_delta_total
             total_final += final
             ingreso_final += income
             rows.append(
@@ -606,17 +630,25 @@ def _build_adjustment_rows(resultados: dict) -> tuple[list[dict], dict]:
                     "key": key,
                     "categoria": category_name,
                     "nombre": product.get("nombre") or "Producto",
-                    "base": base,
-                    "ajuste": delta,
+                    "base": propuesta,
+                    "propuesta": propuesta,
+                    "ajuste": general_delta,
+                    "ajuste_dias": day_delta_total,
+                    "ajuste_total": general_delta + day_delta_total,
                     "total_final": final,
                     "precio": price,
                     "ingreso_final": income,
                     "nota": ajuste.get("nota") or "",
+                    "dias": dias,
                 }
             )
 
+    total_ajuste = total_ajuste_general + total_ajuste_dias
     return rows, {
-        "total_base": total_base,
+        "total_base": total_propuesta,
+        "total_propuesta": total_propuesta,
+        "total_ajuste_general": total_ajuste_general,
+        "total_ajuste_dias": total_ajuste_dias,
         "total_ajuste": total_ajuste,
         "total_final": total_final,
         "ingreso_final": ingreso_final,
@@ -627,6 +659,12 @@ def _save_manual_adjustments(pronostico: PronosticoGuardado, post_data) -> None:
     resultados = deepcopy(pronostico.resultado_json or {})
     resultados["ajustes_ventas"] = _adjustment_payload_from_post(resultados, post_data)
     _rows, totals = _build_adjustment_rows(resultados)
+    resumen = resultados.get("resumen") or {}
+    resumen["total_piezas_base"] = totals["total_base"]
+    resumen["ajuste_piezas_ventas"] = totals["total_ajuste"]
+    resumen["total_piezas"] = totals["total_final"]
+    resumen["total_ingreso"] = totals["ingreso_final"]
+    resultados["resumen"] = resumen
     pronostico.resultado_json = _json_ready(resultados)
     pronostico.total_piezas = totals["total_final"]
     pronostico.total_ingreso = totals["ingreso_final"]
@@ -640,8 +678,15 @@ def _adjustment_payload_from_post(resultados: dict, post_data) -> dict:
         key = row["key"]
         delta = _int_from_form(post_data.get(f"ajuste_{key}"))
         nota = (post_data.get(f"nota_{key}") or "").strip()
-        if delta or nota:
-            ajustes[key] = {"ajuste": delta, "nota": nota}
+        day_payload = {}
+        for day in row.get("dias") or []:
+            fecha_iso = day.get("fecha_iso")
+            day_delta = _int_from_form(post_data.get(f"ajuste_dia_{key}_{fecha_iso}"))
+            day_note = (post_data.get(f"nota_dia_{key}_{fecha_iso}") or "").strip()
+            if day_delta or day_note:
+                day_payload[fecha_iso] = {"ajuste": day_delta, "nota": day_note}
+        if delta or nota or day_payload:
+            ajustes[key] = {"ajuste": delta, "nota": nota, "dias": day_payload}
     return ajustes
 
 
@@ -662,22 +707,35 @@ def _write_adjustments_sheet(ws, *, rows: list[dict], totals: dict):
     ws["A1"] = "Ajustes de ventas"
     ws["A1"].font = Font(color="7B1A48", bold=True, size=14)
     ws.append([])
-    ws.append(["Categoría", "Producto", "Base", "Ajuste", "Total final", "Precio", "Ingreso final", "Nota"])
+    ws.append(["Categoría", "Producto", "Propuesta ERP", "Ajuste general", "Ajuste por día", "Total final", "Precio", "Ingreso final", "Nota"])
     _style_row(ws, 3, fill="F5E6ED", font_color="7B1A48", bold=True)
     for row in rows:
         ws.append(
             [
                 row["categoria"],
                 row["nombre"],
-                row["base"],
+                row["propuesta"],
                 row["ajuste"],
+                row["ajuste_dias"],
                 row["total_final"],
                 float(row["precio"]),
                 float(row["ingreso_final"]),
                 row["nota"],
             ]
         )
-    ws.append(["Total", "", totals["total_base"], totals["total_ajuste"], totals["total_final"], "", float(totals["ingreso_final"]), ""])
+    ws.append(
+        [
+            "Total",
+            "",
+            totals["total_propuesta"],
+            totals["total_ajuste_general"],
+            totals["total_ajuste_dias"],
+            totals["total_final"],
+            "",
+            float(totals["ingreso_final"]),
+            "",
+        ]
+    )
     _style_row(ws, ws.max_row, fill="3D0A24", font_color="FFFFFF", bold=True)
     for column_cells in ws.columns:
         column_letter = get_column_letter(column_cells[0].column)
