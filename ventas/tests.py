@@ -396,3 +396,45 @@ class VentasProjectionEngineTests(TestCase):
         self.assertEqual(result["por_dia"][1]["total_piezas"], 18)
         self.assertEqual(result["por_producto"][0]["por_dia"]["2026-06-20"], 18)
         self.assertEqual(result["por_producto"][0]["tendencia"], "sube")
+
+    def test_projection_blends_special_event_comparable_without_ignoring_recent_demand(self):
+        branch = Sucursal.objects.create(codigo="GSV", nombre="Guasave")
+
+        def fake_forecast(*, target_date, lookback_weeks, top_n):
+            return {
+                "rows": [
+                    {
+                        "branch_id": branch.id,
+                        "recipe_id": 77,
+                        "recipe_name": "Pay prueba",
+                        "family": "Pay Grande",
+                        "category": "Pay Grande",
+                        "forecast_qty": Decimal("10"),
+                        "forecast_min_qty": Decimal("8"),
+                        "forecast_max_qty": Decimal("12"),
+                        "forecast_amount": Decimal("1000"),
+                        "avg_price": Decimal("100"),
+                        "trend_factor": Decimal("1"),
+                    }
+                ],
+                "validation": {"wape_pct": Decimal("10")},
+            }
+
+        event_lookup = {
+            (date(2025, 6, 15), branch.id, 77): Decimal("30"),
+        }
+        with patch("ventas.services.proyecciones_engine._selected_recipe_ids", return_value=None), patch(
+            "ventas.services.proyecciones_engine.build_daily_forecast_context",
+            side_effect=fake_forecast,
+        ), patch("ventas.services.proyecciones_engine._event_history_lookup", return_value=event_lookup):
+            result = calcular_proyeccion_operativa(
+                date(2026, 6, 19),
+                date(2026, 6, 21),
+                {branch.id},
+                skus_incluidos=None,
+            )
+
+        self.assertEqual(result["resumen"]["metodo"], "forecast-operativo-3-semanas+evento-comparable")
+        self.assertEqual(result["por_producto"][0]["por_dia"]["2026-06-21"], 16)
+        self.assertEqual(result["por_producto"][0]["por_dia"]["2026-06-19"], 10)
+        self.assertEqual(result["resumen"]["comparables_evento"][2]["comparables"][0]["fecha_iso"], "2025-06-15")

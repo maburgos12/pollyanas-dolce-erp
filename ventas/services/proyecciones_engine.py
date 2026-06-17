@@ -4,15 +4,29 @@ from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_CEILING
 
+from django.db.models import Sum
+
 from core.models import Sucursal
 from pos_bridge.models import PointSalesDailyProductFact
 from recetas.models import Receta
+from reportes.models import FactVentaDiaria
 from reportes.forecast_service import build_daily_forecast_context
-from ventas.services.pronostico_engine import MONTHS_ES, ORDEN_CATEGORIAS, WEEKDAYS_ES
+from ventas.services.pronostico_engine import (
+    MONTHS_ES,
+    ORDEN_CATEGORIAS,
+    SPECIAL_CONTEXT_YEAR_WEIGHTS,
+    WEEKDAYS_ES,
+    _special_context_comparable_days,
+    _special_context_explanations,
+    _special_day_name,
+    _special_days,
+)
 
 
 ZERO = Decimal("0")
 THREE_WEEK_LOOKBACK = 3
+EVENT_RECENT_WEIGHT = Decimal("0.70")
+EVENT_CONTEXT_WEIGHT = Decimal("0.30")
 
 
 def _date_range(start: date, end: date):
@@ -128,6 +142,50 @@ def _build_categories(products: list[dict]) -> list[dict]:
     return categories
 
 
+def _event_history_lookup(days: list[date], branch_ids: set[int]) -> dict[tuple[date, int, int], Decimal]:
+    comparable_days = {
+        comparable_day
+        for target_day in days
+        for comparable_day in _special_context_comparable_days(target_day, days)
+    }
+    if not comparable_days:
+        return {}
+    rows = (
+        FactVentaDiaria.objects.filter(
+            fecha__in=comparable_days,
+            sucursal_id__in=branch_ids,
+            receta_id__isnull=False,
+        )
+        .values("fecha", "sucursal_id", "receta_id")
+        .annotate(qty=Sum("cantidad"))
+    )
+    return {
+        (row["fecha"], int(row["sucursal_id"]), int(row["receta_id"])): _decimal(row.get("qty"))
+        for row in rows
+        if row.get("sucursal_id") and row.get("receta_id")
+    }
+
+
+def _event_context_qty(
+    *,
+    target_day: date,
+    selected_days: list[date],
+    branch_id: int,
+    recipe_id: int,
+    lookup: dict[tuple[date, int, int], Decimal],
+) -> Decimal:
+    weighted_sum = ZERO
+    used_weight = ZERO
+    for index, comparable_day in enumerate(_special_context_comparable_days(target_day, selected_days)):
+        qty = lookup.get((comparable_day, branch_id, recipe_id), ZERO)
+        if qty <= ZERO:
+            continue
+        weight = SPECIAL_CONTEXT_YEAR_WEIGHTS[min(index, len(SPECIAL_CONTEXT_YEAR_WEIGHTS) - 1)]
+        weighted_sum += qty * weight
+        used_weight += weight
+    return weighted_sum / used_weight if used_weight > ZERO else ZERO
+
+
 def calcular_proyeccion_operativa(
     fecha_inicio: date,
     fecha_fin: date,
@@ -151,6 +209,10 @@ def calcular_proyeccion_operativa(
     if selected_recipes == set():
         return _empty_result(fecha_inicio, fecha_fin, len(branch_ids))
 
+    event_explanations = _special_context_explanations(selected_days)
+    event_context_by_day = {item["fecha_iso"]: item for item in event_explanations}
+    event_lookup = _event_history_lookup(selected_days, branch_ids) if event_explanations else {}
+    has_event_context = bool(event_lookup)
     products_by_recipe: dict[int, dict] = {}
     branch_products: dict[int, dict[int, dict]] = defaultdict(dict)
     day_totals: dict[date, dict] = {
@@ -158,9 +220,9 @@ def calcular_proyeccion_operativa(
             "fecha": day,
             "fecha_iso": day.isoformat(),
             "fecha_label": _date_label(day),
-            "es_fecha_especial": False,
-            "nombre_especial": "",
-            "contexto_evento": None,
+            "es_fecha_especial": bool(_special_day_name(day)),
+            "nombre_especial": _special_day_name(day),
+            "contexto_evento": event_context_by_day.get(day.isoformat()),
             "total_piezas": 0,
             "total_ingreso": ZERO,
             "top_productos": [],
@@ -186,13 +248,28 @@ def calcular_proyeccion_operativa(
             if selected_recipes is not None and recipe_id not in selected_recipes:
                 continue
 
-            qty = _units(row.get("forecast_qty"))
+            raw_qty = _decimal(row.get("forecast_qty"))
+            event_qty = _event_context_qty(
+                target_day=target_day,
+                selected_days=selected_days,
+                branch_id=branch_id,
+                recipe_id=recipe_id,
+                lookup=event_lookup,
+            )
+            qty_source = "evento-comparable" if event_qty > ZERO else ""
+            forecast_qty = ((raw_qty * EVENT_RECENT_WEIGHT) + (event_qty * EVENT_CONTEXT_WEIGHT)) if event_qty > ZERO else raw_qty
+            qty = _units(forecast_qty)
             if qty <= 0:
                 continue
-            amount = _money(row.get("forecast_amount"))
-            price = _money(amount / Decimal(qty)) if qty else ZERO
-            conservative = _units(row.get("forecast_min_qty"))
-            aggressive = _units(row.get("forecast_max_qty"))
+            avg_price = _money(row.get("avg_price"))
+            if avg_price <= ZERO:
+                amount_source = _money(row.get("forecast_amount"))
+                avg_price = _money(amount_source / raw_qty) if raw_qty > ZERO else ZERO
+            price = avg_price
+            amount = _money(forecast_qty * avg_price)
+            ratio = (forecast_qty / raw_qty) if raw_qty > ZERO else Decimal("1")
+            conservative = _units(_decimal(row.get("forecast_min_qty")) * ratio)
+            aggressive = _units(_decimal(row.get("forecast_max_qty")) * ratio)
             day_key = target_day.isoformat()
             name = row.get("recipe_name") or "Producto"
             category = row.get("category") or row.get("family") or "Sin categoria"
@@ -218,10 +295,12 @@ def calcular_proyeccion_operativa(
                     "pct_del_total": ZERO,
                     "factor_tendencia": 1.0,
                     "tendencia": "estable",
-                    "metodo_usado": "forecast-operativo-3-semanas",
+                    "metodo_usado": "forecast-operativo-3-semanas+evento-comparable" if qty_source else "forecast-operativo-3-semanas",
                     "confianza": 0.0,
                 },
             )
+            if qty_source:
+                product["metodo_usado"] = "forecast-operativo-3-semanas+evento-comparable"
             product["precio"] = price or product["precio"]
             product["dias"][day_key] = {
                 "conservador": product["dias"].get(day_key, {}).get("conservador", 0) + conservative,
@@ -244,6 +323,8 @@ def calcular_proyeccion_operativa(
                     "escenarios": {"conservador": 0, "recomendado": 0, "agresivo": 0},
                 },
             )
+            if qty_source:
+                branch_product["metodo_usado"] = "forecast-operativo-3-semanas+evento-comparable"
             branch_product["dias"][day_key] = {
                 "conservador": conservative,
                 "recomendado": qty,
@@ -344,13 +425,17 @@ def calcular_proyeccion_operativa(
             "productos": len(products),
             "n_sucursales": len(por_sucursal),
             "sucursales": len(por_sucursal),
-            "fechas_especiales": [],
-            "metodo": "forecast-operativo-3-semanas",
+            "fechas_especiales": _special_days(selected_days),
+            "metodo": "forecast-operativo-3-semanas+evento-comparable" if has_event_context else "forecast-operativo-3-semanas",
             "confianza_promedio": confidence,
             "tendencia_reciente": "ultimas 3 semanas por patron diario",
-            "comparable": "mismo dia de la semana + calibracion operativa",
+            "comparable": "mismo evento anual + ultimas 3 semanas" if has_event_context else "mismo dia de la semana + calibracion operativa",
+            "comparables_evento": event_explanations,
             "explicacion_modelo": (
-                "Proyeccion basada en el forecast operativo diario: promedio ponderado, factor de dia de semana, "
+                "Proyeccion basada en forecast operativo diario; si el rango cruza un evento, mezcla 70% demanda reciente "
+                "y 30% comparable anual del mismo evento por sucursal/receta."
+                if has_event_context
+                else "Proyeccion basada en el forecast operativo diario: promedio ponderado, factor de dia de semana, "
                 "tendencia reciente, volatilidad y calibracion por sucursal/familia/patron semanal."
             ),
         },
