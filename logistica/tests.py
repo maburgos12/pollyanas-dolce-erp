@@ -1431,11 +1431,12 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v28", pwa_html)
+        self.assertIn("route-control-v29", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v28", pwa_html)
+        self.assertIn("?v=route-control-v29", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v28-entrega-click", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v29-profile-before-flush", sw_js)
+        self.assertIn("if (!state.perfil) await loadPerfil();", pwa_html)
         self.assertIn("ultimaParadaCedisOrden", pwa_html)
         self.assertIn("Carga desde CEDIS", pwa_html)
         self.assertIn("lineasPostCedis", pwa_html)
@@ -1480,7 +1481,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v28-entrega-click", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v29-profile-before-flush", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -2334,7 +2335,7 @@ class LogisticaControlRutasTests(TestCase):
         ruta.refresh_from_db()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
-        self.assertContains(response, "confirma la carga")
+        self.assertContains(response, "confirma al menos una línea de carga")
 
     def test_ruta_detail_bloquea_completar_con_diferencia_point(self):
         self.client.force_login(self.user)
@@ -2785,7 +2786,7 @@ class LogisticaControlRutasTests(TestCase):
         ruta.refresh_from_db()
         self.assertEqual(response.status_code, 400)
         self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
-        self.assertIn("confirma la carga", response.json()["detail"])
+        self.assertIn("confirma al menos una línea de carga", response.json()["detail"])
 
     def test_ruta_detail_confirma_carga_manual_y_permita_liberar(self):
         self.client.force_login(self.user)

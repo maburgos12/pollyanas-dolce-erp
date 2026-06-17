@@ -1353,7 +1353,7 @@
       const TRACKING_QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
       const ACCESS_TOKEN_KEY = "pd_logistica_access";
       const REFRESH_TOKEN_KEY = "pd_logistica_refresh";
-      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v28
+      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v29
       const app = document.getElementById("app");
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
@@ -1848,6 +1848,7 @@
 
       async function flushRutaTrackingQueue() {
         if (!state.token || !navigator.onLine) return loadRutaTrackingQueue().length;
+        if (!state.perfil) await loadPerfil();
         const pending = loadRutaTrackingQueue();
         if (!pending.length) {
           state.trackingQueueCount = 0;
@@ -4220,7 +4221,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v28", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v29", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {
