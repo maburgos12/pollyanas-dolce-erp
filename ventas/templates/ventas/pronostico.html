@@ -5,7 +5,7 @@
 {% block body_class %}page-pronostico-ventas{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/ventas-templates-ventas-pronostico.css?v=20260617-proyecciones-v3">
+<link rel="stylesheet" href="/static/css/template_modules/ventas-templates-ventas-pronostico.css?v=20260617-proyecciones-v4">
 {% endblock %}
 
 {% block content %}
@@ -32,17 +32,21 @@
     <a class="forecast-workflow-tab {% if active_tab == 'proyecciones' %}active{% endif %}" href="{% url 'ventas:pronostico' %}?tab=proyecciones">Proyecciones</a>
   </nav>
 
-  {% if active_tab == "proyecciones" %}
+  {% if active_tab == "pronosticos" or active_tab == "proyecciones" %}
   <section class="card">
     <details id="proyecciones" open>
       <summary class="pd-u-8400ad8a3f">
         <div class="pd-u-c3cd92807b">
-          ＋ Generar proyección
+          ＋ {% if active_tab == "proyecciones" %}Generar proyección{% else %}Generar pronóstico{% endif %}
         </div>
       </summary>
-      <div class="card-header">Proyección de ventas</div>
+      <div class="card-header">{% if active_tab == "proyecciones" %}Proyección de ventas{% else %}Pronóstico de ventas{% endif %}</div>
       <p class="executive-section-copy forecast-projection-copy">
+        {% if active_tab == "proyecciones" %}
         El ERP calcula el rango; ventas revisa, ajusta y guarda el documento antes de enviarlo a producción o compras.
+        {% else %}
+        Genera el pronóstico estadístico por rango, sucursal y productos.
+        {% endif %}
       </p>
       {% if form_errors %}
       <div class="production-banner-list">
@@ -59,6 +63,8 @@
       {% endif %}
       <form method="post" id="forecast-form">
         {% csrf_token %}
+        <input type="hidden" name="tab" value="{{ active_tab }}">
+        {% if active_tab == "proyecciones" %}
         <div class="forecast-projection-presets" aria-label="Rangos de proyección">
           {% for preset in projection_presets %}
           <button
@@ -73,6 +79,7 @@
           </button>
           {% endfor %}
         </div>
+        {% endif %}
         <div class="forecast-filter-grid">
           <div>
             <label class="form-label" for="fecha_inicio">Fecha inicio</label>
@@ -134,14 +141,14 @@
           </details>
         </div>
         <div class="forecast-filter-submit">
-          <button class="btn btn-primary w-100" type="submit" id="forecast-submit">Generar proyección</button>
+          <button class="btn btn-primary w-100" type="submit" id="forecast-submit">Generar {% if active_tab == "proyecciones" %}proyección{% else %}pronóstico{% endif %}</button>
         </div>
       </form>
     </details>
   </section>
   {% endif %}
 
-  {% if active_tab == "pronosticos" %}
+  {% if active_tab == "pronosticos" and not resumen %}
   <section class="card" id="pronosticos-guardados">
     <div class="section-header">
       <div>
@@ -221,7 +228,7 @@
   </section>
   {% endif %}
 
-  {% if active_tab == "proyecciones" %}
+  {% if active_tab == "pronosticos" or active_tab == "proyecciones" %}
   {% if fechas_especiales_en_rango %}
   <div class="forecast-special-banner">
     Evento especial: este rango incluye {% for item in fechas_especiales_en_rango %}{{ item.nombre }}{% if not forloop.last %}, {% endif %}{% endfor %}. El pronóstico usará el comparable histórico del evento cuando exista.
@@ -304,7 +311,7 @@
       {% endfor %}
       <div class="forecast-save-name">
         <label class="form-label" for="forecast-name">Nombre del consolidado</label>
-        <input class="form-control" id="forecast-name" name="nombre" value="Proyección {{ fecha_inicio }} a {{ fecha_fin }}" maxlength="200" required>
+        <input class="form-control" id="forecast-name" name="nombre" value="{% if active_tab == "proyecciones" %}Proyección{% else %}Pronóstico{% endif %} {{ fecha_inicio }} a {{ fecha_fin }}" maxlength="200" required>
       </div>
       <div class="table-responsive production-table-wrap">
         <table class="table forecast-adjustments-table">
@@ -333,7 +340,7 @@
         </table>
       </div>
       <div class="forecast-adjustment-actions">
-        <button class="btn btn-primary" type="submit">Guardar proyección consolidada</button>
+        <button class="btn btn-primary" type="submit">Guardar {% if active_tab == "proyecciones" %}proyección{% else %}pronóstico{% endif %} consolidado</button>
       </div>
     </form>
   </section>
