@@ -1431,11 +1431,11 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v26", pwa_html)
+        self.assertIn("route-control-v27", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v26", pwa_html)
+        self.assertIn("?v=route-control-v27", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v26-carga-post-cedis", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v27-entrega-visible", sw_js)
         self.assertIn("ultimaParadaCedisOrden", pwa_html)
         self.assertIn("Carga desde CEDIS", pwa_html)
         self.assertIn("lineasPostCedis", pwa_html)
@@ -1478,7 +1478,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v26-carga-post-cedis", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v27-entrega-visible", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -1494,6 +1494,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("Capturar ubicación GPS", pwa_html)
         self.assertIn("Reportar desvío", pwa_html)
         self.assertIn("Paradas de reparto", pwa_html)
+        self.assertLess(pwa_html.index("${renderParadasRuta(paradas)}"), pwa_html.index("${renderChecklistCarga(rutaData.checklist_carga, paradas)}"))
         self.assertIn("Pendiente de entrega", pwa_html)
         self.assertIn("Recibido", pwa_html)
         self.assertIn("La ruta puede continuar; cierre final espera recepción Point.", pwa_html)
