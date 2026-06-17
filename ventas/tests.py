@@ -20,7 +20,7 @@ from ventas.services.sales_freshness import (
     build_forecast_sales_freshness,
     queue_forecast_sales_refresh_if_needed,
 )
-from ventas.services.proyecciones_engine import calcular_proyeccion_operativa
+from ventas.services.proyecciones_engine import _context_uplift_lookup, _season_name, calcular_proyeccion_operativa
 from core.models import Sucursal
 import ventas.views as ventas_views
 from ventas.views import _apply_manual_adjustments, _build_adjustment_rows, _projection_presets
@@ -397,7 +397,7 @@ class VentasProjectionEngineTests(TestCase):
         self.assertEqual(result["por_producto"][0]["por_dia"]["2026-06-20"], 18)
         self.assertEqual(result["por_producto"][0]["tendencia"], "sube")
 
-    def test_projection_blends_special_event_comparable_without_ignoring_recent_demand(self):
+    def test_projection_applies_special_event_uplift_without_copying_old_units(self):
         branch = Sucursal.objects.create(codigo="GSV", nombre="Guasave")
 
         def fake_forecast(*, target_date, lookback_weeks, top_n):
@@ -420,13 +420,13 @@ class VentasProjectionEngineTests(TestCase):
                 "validation": {"wape_pct": Decimal("10")},
             }
 
-        event_lookup = {
-            (date(2025, 6, 15), branch.id, 77): Decimal("30"),
+        uplift_lookup = {
+            (date(2026, 6, 21), branch.id, 77): Decimal("3"),
         }
         with patch("ventas.services.proyecciones_engine._selected_recipe_ids", return_value=None), patch(
             "ventas.services.proyecciones_engine.build_daily_forecast_context",
             side_effect=fake_forecast,
-        ), patch("ventas.services.proyecciones_engine._event_history_lookup", return_value=event_lookup):
+        ), patch("ventas.services.proyecciones_engine._context_uplift_lookup", return_value=uplift_lookup):
             result = calcular_proyeccion_operativa(
                 date(2026, 6, 19),
                 date(2026, 6, 21),
@@ -434,7 +434,25 @@ class VentasProjectionEngineTests(TestCase):
                 skus_incluidos=None,
             )
 
-        self.assertEqual(result["resumen"]["metodo"], "forecast-operativo-3-semanas+evento-comparable")
-        self.assertEqual(result["por_producto"][0]["por_dia"]["2026-06-21"], 16)
+        self.assertEqual(result["resumen"]["metodo"], "forecast-operativo-3-semanas+uplift-evento")
+        self.assertEqual(result["por_producto"][0]["por_dia"]["2026-06-21"], 30)
         self.assertEqual(result["por_producto"][0]["por_dia"]["2026-06-19"], 10)
         self.assertEqual(result["resumen"]["comparables_evento"][2]["comparables"][0]["fecha_iso"], "2025-06-15")
+
+    def test_context_uplift_uses_event_against_normal_comparable_days(self):
+        branch = Sucursal.objects.create(codigo="GSV", nombre="Guasave")
+
+        def fake_rows():
+            yield {"fecha": date(2025, 6, 15), "sucursal_id": branch.id, "receta_id": 77, "qty": Decimal("30")}
+            yield {"fecha": date(2025, 6, 8), "sucursal_id": branch.id, "receta_id": 77, "qty": Decimal("10")}
+            yield {"fecha": date(2025, 6, 22), "sucursal_id": branch.id, "receta_id": 77, "qty": Decimal("10")}
+
+        with patch("ventas.services.proyecciones_engine.FactVentaDiaria.objects") as manager:
+            manager.filter.return_value.values.return_value.annotate.return_value = list(fake_rows())
+            uplifts = _context_uplift_lookup([date(2026, 6, 21)], {branch.id})
+
+        self.assertEqual(uplifts[(date(2026, 6, 21), branch.id, 77)], Decimal("3"))
+
+    def test_projection_detects_high_season_dates(self):
+        self.assertEqual(_season_name(date(2026, 12, 22)), "Temporada Navidad")
+        self.assertEqual(_season_name(date(2026, 5, 9)), "Temporada Día de las Madres")
