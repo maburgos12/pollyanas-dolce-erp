@@ -412,7 +412,9 @@ def checklist_bloquea_salida(ruta: RutaEntrega) -> str | None:
         return None
     if checklist.estatus == RutaCargaChecklist.ESTATUS_CON_INCIDENCIA and checklist.motivo_override:
         return None
-    return "confirma la carga de productos antes de liberar la ruta"
+    if checklist.lineas.exclude(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists():
+        return None
+    return "confirma al menos una línea de carga antes de liberar la ruta"
 
 
 @transaction.atomic
