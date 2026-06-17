@@ -44,6 +44,7 @@ from .services_google_routes import recalcular_ruta_programada
 from .services_google_roads import snap_gps_path_to_roads
 from .services_carga_ruta import (
     checklist_bloquea_salida,
+    checklist_tiene_recepcion_point_pendiente,
     cerrar_ruta_con_diferencia_autorizada,
     confirmar_checklist_carga_manual,
     registrar_recarga_cedis,
@@ -2232,7 +2233,7 @@ def ruta_detail(request, pk: int):
 
         if action == "sync_carga_point":
             try:
-                resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=request.user, ejecutar_sync=False)
+                resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=request.user, ejecutar_sync=True)
             except ValidationError as exc:
                 messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
             else:
@@ -2310,8 +2311,7 @@ def ruta_detail(request, pk: int):
                     if ruta.paradas.filter(entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA]).exists():
                         messages.error(request, "No se puede completar la ruta: hay diferencias o entregas no recibidas por resolver.")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
-                    checklist = getattr(ruta, "checklist_carga", None)
-                    if checklist and checklist.lineas.filter(Q(point_transfer_line__isnull=True) | Q(point_transfer_line__is_received=False)).exists():
+                    if checklist_tiene_recepcion_point_pendiente(ruta):
                         messages.error(request, "No se puede completar la ruta: hay recepción Point pendiente.")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
                 from_status = ruta.estatus

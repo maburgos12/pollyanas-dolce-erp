@@ -79,6 +79,13 @@ def obtener_checklist_carga(ruta: RutaEntrega) -> RutaCargaChecklist:
     return checklist
 
 
+def checklist_tiene_recepcion_point_pendiente(ruta: RutaEntrega) -> bool:
+    checklist = getattr(ruta, "checklist_carga", None)
+    if not checklist:
+        return False
+    return checklist.lineas.filter(point_transfer_line__isnull=False, point_transfer_line__is_received=False).exists()
+
+
 def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCargaChecklist, solo_abiertas: bool = False) -> tuple[int, int, int]:
     paradas_by_branch = _paradas_por_sucursal(ruta)
     if not paradas_by_branch:
@@ -251,14 +258,17 @@ def _cantidad_recibida_linea(linea: RutaCargaChecklistLinea) -> Decimal | None:
 
 @transaction.atomic
 def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_sync: bool = True) -> ChecklistCargaResumen:
+    ruta = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
     if ruta.estatus != RutaEntrega.ESTATUS_PLANEADA:
         raise ValidationError("La carga solo se puede sincronizar mientras la ruta está planeada.")
 
     paradas_by_branch = _paradas_por_sucursal(ruta)
     if not paradas_by_branch:
         raise ValidationError("La ruta no tiene paradas ligadas a sucursales para relacionar transferencias Point.")
-
-    checklist = obtener_checklist_carga(ruta)
+    checklist = RutaCargaChecklist.objects.select_for_update().filter(ruta=ruta).first()
+    if checklist and checklist.lineas.exclude(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists():
+        return ChecklistCargaResumen(checklist=checklist)
+    checklist = checklist or obtener_checklist_carga(ruta)
     checklist.sincronizado_en = timezone.now()
     if checklist.estatus == RutaCargaChecklist.ESTATUS_PENDIENTE:
         checklist.estatus = RutaCargaChecklist.ESTATUS_EN_REVISION
@@ -506,6 +516,7 @@ def cerrar_ruta_con_diferencia_autorizada(*, ruta: RutaEntrega, user, notas: str
         actor=user,
         objeto_tipo="logistica.RutaEntrega",
         objeto_id=ruta.id,
+        excluir=user,
     )
     return evento
 
@@ -610,7 +621,8 @@ def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_
         if point_line is not None and point_line.is_received:
             received_lines = [point_line]
         elif linea.parada.punto.sucursal_id:
-            received_lines = point_recibidas.get((linea.parada.punto.sucursal_id, _linea_producto_key(linea)), [])
+            candidates = point_recibidas.get((linea.parada.punto.sucursal_id, _linea_producto_key(linea)), [])
+            received_lines = candidates if len(candidates) == 1 else []
             if received_lines and linea.point_transfer_line_id != received_lines[0].id:
                 linea.point_transfer_line = received_lines[0]
                 linea.save(update_fields=["point_transfer_line", "actualizado_en"])

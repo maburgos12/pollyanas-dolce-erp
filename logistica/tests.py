@@ -1846,6 +1846,25 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(self.parada.entrega_confirmada_por, self.user)
         self.assertEqual(ParadaEntregaEvidencia.objects.filter(parada=self.parada, client_event_id="evt-entrega-1").count(), 1)
         self.assertEqual(self.ruta.cumplimiento_porcentaje, Decimal("0.00"))
+        self.assertEqual(EventoRuta.objects.filter(ruta=self.ruta, parada=self.parada).count(), 1)
+
+    def test_api_retry_no_sobrescribe_entrega_confirmada(self):
+        self.client.force_login(self.user)
+        self.parada.entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
+        self.parada.entrega_confirmada_por = self.user
+        self.parada.entrega_confirmada_en = timezone.now()
+        self.parada.save(update_fields=["entrega_estado", "entrega_confirmada_por", "entrega_confirmada_en", "actualizado_en"])
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_parada_entrega", kwargs={"ruta_id": self.ruta.id, "parada_id": self.parada.id}),
+            json.dumps({"entrega_estado": ParadaRuta.ENTREGA_CON_DIFERENCIA, "evidencias": [{"comentario": "retry tarde"}]}),
+            content_type="application/json",
+        )
+
+        self.parada.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertEqual(EventoRuta.objects.filter(ruta=self.ruta, parada=self.parada).count(), 0)
 
     def test_api_entrega_completa_exige_evidencia(self):
         self.client.force_login(self.user)
@@ -2073,14 +2092,20 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
         self.assertContains(response, "Recepción Point sincronizada")
 
-    def test_ruta_detail_actualiza_carga_point_sin_sync_externo(self):
+    def test_ruta_detail_actualiza_carga_point_con_sync_externo(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
         self.ruta.estatus = RutaEntrega.ESTATUS_PLANEADA
         self.ruta.save(update_fields=["estatus", "updated_at"])
         self._crear_transferencia_point_abierta()
+        sync_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
+            status=PointSyncJob.STATUS_SUCCESS,
+            result_summary={},
+        )
 
         with patch("logistica.services_carga_ruta.OpenTransferSyncService") as service_cls:
+            service_cls.return_value.sync_open_transfers.return_value = sync_job
             response = self.client.post(
                 reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
                 {"action": "sync_carga_point"},
@@ -2088,7 +2113,7 @@ class LogisticaControlRutasTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        service_cls.assert_not_called()
+        self.assertEqual(service_cls.return_value.sync_open_transfers.call_count, 2)
         self.assertTrue(RutaCargaChecklistLinea.objects.filter(checklist__ruta=self.ruta, point_transfer_line__is_open=True).exists())
         self.assertContains(response, "Carga esperada actualizada")
 
@@ -2128,6 +2153,50 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
         self.assertContains(response, "diferencias o entregas no recibidas")
+
+    def test_ruta_detail_completa_carga_cedis_sin_recepcion_point_pendiente(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        self._crear_solicitud_cedis(ruta=ruta)
+        checklist = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False).checklist
+        checklist.lineas.update(
+            cantidad_cargada=Decimal("5.000"),
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+            validado_por=self.user,
+            validado_en=timezone.now(),
+        )
+        checklist.estatus = RutaCargaChecklist.ESTATUS_CONFIRMADA
+        checklist.save(update_fields=["estatus", "actualizado_en"])
+        ruta.estatus = RutaEntrega.ESTATUS_EN_RUTA
+        ruta.save(update_fields=["estatus", "updated_at"])
+        parada.estado = ParadaRuta.ESTADO_VISITADA
+        parada.entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
+        parada.hora_llegada_real = timezone.now()
+        parada.hora_salida_real = timezone.now()
+        parada.entrega_confirmada_en = timezone.now()
+        parada.entrega_confirmada_por = self.user
+        parada.save(
+            update_fields=[
+                "estado",
+                "entrega_estado",
+                "hora_llegada_real",
+                "hora_salida_real",
+                "entrega_confirmada_en",
+                "entrega_confirmada_por",
+                "actualizado_en",
+            ]
+        )
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
+            {"action": "ruta_status", "estatus": RutaEntrega.ESTATUS_COMPLETADA},
+            follow=True,
+        )
+
+        ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
 
     def test_ruta_detail_muestra_cierre_con_diferencia_autorizada(self):
         self.client.force_login(self.user)
@@ -2285,6 +2354,50 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(parada.evidencias_entrega.get().cantidad_entregada, linea.cantidad_enviada_esperada)
         self.assertEqual(parada.evidencias_entrega.get().metadata["source_hashes"], [transferencia.source_hash])
         self.assertEqual(ruta.cumplimiento_porcentaje, Decimal("100.00"))
+
+    def test_recepcion_point_no_empata_producto_ambiguo(self):
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        self._crear_solicitud_cedis(ruta=ruta)
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+        linea = resumen.checklist.lineas.get()
+        linea.cantidad_cargada = linea.cantidad_enviada_esperada
+        linea.estatus = RutaCargaChecklistLinea.ESTATUS_CARGADA
+        linea.save(update_fields=["cantidad_cargada", "estatus", "actualizado_en"])
+        ruta.estatus = RutaEntrega.ESTATUS_EN_RUTA
+        ruta.save(update_fields=["estatus", "updated_at"])
+        for idx in range(2):
+            transferencia = self._crear_transferencia_point_abierta(source_hash=f"transfer-recibe-ambiguo-{idx}")
+            transferencia.is_open = False
+            transferencia.is_received = True
+            transferencia.is_finalized = True
+            transferencia.received_quantity = Decimal("1.000")
+            transferencia.received_at = timezone.now()
+            transferencia.save(update_fields=["is_open", "is_received", "is_finalized", "received_quantity", "received_at", "updated_at"])
+
+        recepcion = sincronizar_recepcion_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        linea.refresh_from_db()
+        self.assertEqual(recepcion.lineas_recibidas, 0)
+        self.assertEqual(recepcion.lineas_pendientes_point, 1)
+        self.assertIsNone(linea.point_transfer_line_id)
+
+    def test_sync_carga_no_pisa_lineas_ya_validadas(self):
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        transferencia = self._crear_transferencia_point_abierta()
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+        linea = resumen.checklist.lineas.get()
+        linea.cantidad_cargada = Decimal("5.000")
+        linea.estatus = RutaCargaChecklistLinea.ESTATUS_CARGADA
+        linea.save(update_fields=["cantidad_cargada", "estatus", "actualizado_en"])
+        transferencia.sent_quantity = Decimal("3.000")
+        transferencia.save(update_fields=["sent_quantity", "updated_at"])
+
+        segundo = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        linea.refresh_from_db()
+        self.assertEqual(segundo.creadas, 0)
+        self.assertEqual(segundo.actualizadas, 0)
+        self.assertEqual(linea.cantidad_enviada_esperada, Decimal("5.000"))
 
     def test_checklist_carga_se_genera_desde_transferencia_point_abierta(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
