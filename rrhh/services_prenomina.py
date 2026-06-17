@@ -13,6 +13,7 @@ from rrhh.models import (
     AsistenciaEmpleado,
     Empleado,
     HoraExtra,
+    IncapacidadEmpleado,
     IncidenciaAsistencia,
     PrenominaCorte,
     PrenominaEmpleadoResumen,
@@ -35,6 +36,7 @@ TIPOS_ALERTA_OPERATIVA = {
 FUENTES_AUTOMATICAS = {
     "rrhh.IncidenciaAsistencia",
     "rrhh.HoraExtra",
+    "rrhh.IncapacidadEmpleado",
 }
 
 
@@ -95,6 +97,7 @@ def recalcular_corte_prenomina(corte: PrenominaCorte) -> PrenominaCorte:
     asistencias_por_empleado = _asistencias_por_empleado(corte, empleado_ids)
     ajustes_pendientes_por_empleado = _ajustes_pendientes_por_empleado(corte, empleado_ids)
     horas_extra_por_empleado = _horas_extra_por_empleado(corte, empleado_ids)
+    incapacidades_por_empleado = _incapacidades_por_empleado(corte, empleado_ids)
 
     for empleado in empleados:
         resumen_data = _calcular_resumen_empleado(
@@ -105,6 +108,7 @@ def recalcular_corte_prenomina(corte: PrenominaCorte) -> PrenominaCorte:
             asistencias=asistencias_por_empleado.get(empleado.id, set()),
             ajustes_pendientes=ajustes_pendientes_por_empleado.get(empleado.id, 0),
             horas_extra=horas_extra_por_empleado.get(empleado.id, []),
+            incapacidades=incapacidades_por_empleado.get(empleado.id, []),
         )
         PrenominaEmpleadoResumen.objects.create(corte=corte, empleado=empleado, **resumen_data)
 
@@ -183,6 +187,19 @@ def _horas_extra_por_empleado(corte: PrenominaCorte, empleado_ids: list[int]):
     return grouped
 
 
+def _incapacidades_por_empleado(corte: PrenominaCorte, empleado_ids: list[int]):
+    grouped = defaultdict(list)
+    incapacidades = IncapacidadEmpleado.objects.filter(
+        empleado_id__in=empleado_ids,
+        estado__in=[IncapacidadEmpleado.ESTADO_ACTIVA, IncapacidadEmpleado.ESTADO_CERRADA],
+        fecha_inicio__lte=corte.fecha_fin,
+        fecha_fin__gte=corte.fecha_inicio,
+    ).order_by("empleado_id", "fecha_inicio", "id")
+    for incapacidad in incapacidades:
+        grouped[incapacidad.empleado_id].append(incapacidad)
+    return grouped
+
+
 def _calcular_resumen_empleado(
     *,
     corte: PrenominaCorte,
@@ -192,6 +209,7 @@ def _calcular_resumen_empleado(
     asistencias: set[date],
     ajustes_pendientes: int,
     horas_extra: list[HoraExtra],
+    incapacidades: list[IncapacidadEmpleado],
 ) -> dict:
     fechas_laborables = [
         fecha for fecha in fechas if not empleado.fecha_ingreso or fecha >= empleado.fecha_ingreso
@@ -202,9 +220,25 @@ def _calcular_resumen_empleado(
     suspensiones = 0
     alertas = 0
     mensajes = []
+    rangos_incapacidad = []
+    fechas_incapacidad = set()
+    for incapacidad in incapacidades:
+        inicio = max(corte.fecha_inicio, incapacidad.fecha_inicio)
+        fin = min(corte.fecha_fin, incapacidad.fecha_fin)
+        if empleado.fecha_ingreso:
+            inicio = max(inicio, empleado.fecha_ingreso)
+        if fin < inicio:
+            continue
+        rangos_incapacidad.append((incapacidad, inicio, fin))
+        cursor = inicio
+        while cursor <= fin:
+            fechas_incapacidad.add(cursor)
+            cursor += timedelta(days=1)
 
     for incidencia in incidencias:
         if empleado.fecha_ingreso and incidencia.fecha < empleado.fecha_ingreso:
+            continue
+        if incidencia.fecha in fechas_incapacidad:
             continue
         if incidencia.tipo in {IncidenciaAsistencia.TIPO_FALTA, IncidenciaAsistencia.TIPO_FALTA_RETARDOS}:
             faltas += 1
@@ -250,6 +284,12 @@ def _calcular_resumen_empleado(
         horas_extra_autorizadas += Decimal(str(hora_extra.horas or "0"))
         _crear_o_actualizar_movimiento_hora_extra(corte, empleado, hora_extra)
 
+    incapacidades_dias = 0
+    for incapacidad, inicio, fin in rangos_incapacidad:
+        dias = (fin - inicio).days + 1
+        incapacidades_dias += dias
+        _crear_o_actualizar_movimiento_incapacidad(corte, empleado, incapacidad, inicio, dias)
+
     estado = PrenominaEmpleadoResumen.ESTADO_LISTO
     if alertas:
         estado = PrenominaEmpleadoResumen.ESTADO_BLOQUEADO
@@ -264,6 +304,7 @@ def _calcular_resumen_empleado(
         "faltas": faltas,
         "retardos": retardos,
         "suspensiones": suspensiones,
+        "incapacidades": incapacidades_dias,
         "horas_extra_autorizadas": horas_extra_autorizadas,
         "ajustes_pendientes": ajustes_pendientes,
         "alertas_bloqueantes": alertas,
@@ -272,6 +313,7 @@ def _calcular_resumen_empleado(
         "snapshot": {
             "dias_pre_ingreso": dias_pre_ingreso,
             "incidencias": mensajes,
+            "incapacidades": incapacidades_dias,
         },
     }
 
@@ -335,6 +377,28 @@ def _crear_o_actualizar_movimiento_hora_extra(
     )
 
 
+def _crear_o_actualizar_movimiento_incapacidad(
+    corte: PrenominaCorte,
+    empleado: Empleado,
+    incapacidad: IncapacidadEmpleado,
+    fecha: date,
+    dias: int,
+) -> PrenominaMovimiento:
+    notas = f"{incapacidad.get_tipo_display()} {incapacidad.folio}".strip()
+    return _crear_o_actualizar_movimiento(
+        corte=corte,
+        empleado=empleado,
+        fecha=fecha,
+        tipo_movimiento=PrenominaMovimiento.TIPO_INCAPACIDAD,
+        fuente_modelo="rrhh.IncapacidadEmpleado",
+        fuente_id=str(incapacidad.id),
+        valor=Decimal(dias),
+        horas=None,
+        notas="\n".join(part for part in [notas, incapacidad.notas] if part),
+        metadata={"tipo": incapacidad.tipo, "folio": incapacidad.folio, "estado": incapacidad.estado},
+    )
+
+
 def _crear_o_actualizar_movimiento(
     *,
     corte: PrenominaCorte,
@@ -382,6 +446,7 @@ def _resumen_corte(corte: PrenominaCorte) -> dict:
         "faltas": sum(row.faltas for row in resumenes),
         "retardos": sum(row.retardos for row in resumenes),
         "suspensiones": sum(row.suspensiones for row in resumenes),
+        "incapacidades": sum(row.incapacidades for row in resumenes),
         "horas_extra": str(sum((row.horas_extra_autorizadas for row in resumenes), Decimal("0"))),
         "ajustes_pendientes": sum(row.ajustes_pendientes for row in resumenes),
         "bloqueados": sum(1 for row in resumenes if row.estado == PrenominaEmpleadoResumen.ESTADO_BLOQUEADO),

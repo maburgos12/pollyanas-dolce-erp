@@ -1290,6 +1290,85 @@ class SuspensionEmpleado(models.Model):
         return f"{self.empleado} · {self.fecha_inicio} a {self.fecha_fin}"
 
 
+class IncapacidadEmpleado(models.Model):
+    TIPO_ENFERMEDAD_GENERAL = "enfermedad_general"
+    TIPO_RIESGO_TRABAJO = "riesgo_trabajo"
+    TIPO_MATERNIDAD = "maternidad"
+    TIPO_OTRO = "otro"
+    TIPO_CHOICES = [
+        (TIPO_ENFERMEDAD_GENERAL, "Enfermedad general"),
+        (TIPO_RIESGO_TRABAJO, "Riesgo de trabajo"),
+        (TIPO_MATERNIDAD, "Maternidad"),
+        (TIPO_OTRO, "Otro"),
+    ]
+    ESTADO_ACTIVA = "activa"
+    ESTADO_CERRADA = "cerrada"
+    ESTADO_CANCELADA = "cancelada"
+    ESTADO_CHOICES = [
+        (ESTADO_ACTIVA, "Activa"),
+        (ESTADO_CERRADA, "Cerrada"),
+        (ESTADO_CANCELADA, "Cancelada"),
+    ]
+
+    empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.CASCADE, related_name="incapacidades")
+    fecha_inicio = models.DateField()
+    fecha_fin = models.DateField()
+    tipo = models.CharField(max_length=24, choices=TIPO_CHOICES, default=TIPO_ENFERMEDAD_GENERAL, db_index=True)
+    folio = models.CharField(max_length=80, blank=True, default="")
+    estado = models.CharField(max_length=12, choices=ESTADO_CHOICES, default=ESTADO_ACTIVA, db_index=True)
+    notas = models.TextField(blank=True, default="")
+    registrada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="incapacidades_registradas",
+    )
+    comentario_cancelacion = models.TextField(blank=True, default="")
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-fecha_inicio", "-id"]
+        constraints = [
+            models.CheckConstraint(
+                check=Q(fecha_fin__gte=models.F("fecha_inicio")),
+                name="rrhh_incapacidad_fecha_fin_gte_inicio",
+            ),
+            models.UniqueConstraint(
+                fields=["empleado", "folio"],
+                condition=~Q(folio=""),
+                name="rrhh_incapacidad_folio_unico_empleado",
+            )
+        ]
+        verbose_name = "Incapacidad"
+        verbose_name_plural = "Incapacidades"
+
+    @property
+    def dias_naturales(self) -> int:
+        return (self.fecha_fin - self.fecha_inicio).days + 1
+
+    def clean(self):
+        if self.fecha_inicio and self.fecha_fin and self.fecha_fin < self.fecha_inicio:
+            raise ValidationError({"fecha_fin": "La fecha final no puede ser anterior a la fecha inicial."})
+        if self.estado != self.ESTADO_CANCELADA and self.empleado_id and self.fecha_inicio and self.fecha_fin:
+            traslape = IncapacidadEmpleado.objects.filter(
+                empleado_id=self.empleado_id,
+                estado__in=[self.ESTADO_ACTIVA, self.ESTADO_CERRADA],
+                fecha_inicio__lte=self.fecha_fin,
+                fecha_fin__gte=self.fecha_inicio,
+            ).exclude(pk=self.pk)
+            if traslape.exists():
+                raise ValidationError("Ya existe una incapacidad no cancelada que cruza esas fechas.")
+
+    def save(self, *args, **kwargs):
+        self.folio = (self.folio or "").strip()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"{self.empleado} · {self.fecha_inicio} a {self.fecha_fin}"
+
+
 class ReglamentoLaboral(models.Model):
     ESTADO_BORRADOR = "borrador"
     ESTADO_VIGENTE = "vigente"
@@ -1743,6 +1822,7 @@ class PrenominaEmpleadoResumen(models.Model):
     faltas = models.PositiveSmallIntegerField(default=0)
     retardos = models.PositiveSmallIntegerField(default=0)
     suspensiones = models.PositiveSmallIntegerField(default=0)
+    incapacidades = models.PositiveSmallIntegerField(default=0)
     permisos = models.PositiveSmallIntegerField(default=0)
     vacaciones = models.PositiveSmallIntegerField(default=0)
     horas_extra_autorizadas = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0"))

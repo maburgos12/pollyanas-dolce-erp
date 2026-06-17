@@ -30,6 +30,10 @@
       <div class="kpi-label">Ajustes pendientes</div>
     </article>
     <article class="kpi-card">
+      <div class="kpi-number">{{ corte.resumen.incapacidades|default:0 }}</div>
+      <div class="kpi-label">Incapacidades</div>
+    </article>
+    <article class="kpi-card">
       <div class="kpi-number">{{ corte.resumen.movimientos_pendientes_configuracion|default:0 }}</div>
       <div class="kpi-label">Sin clave CONTPAQi</div>
     </article>
@@ -67,6 +71,7 @@
           <th>Faltas</th>
           <th>Retardos</th>
           <th>Suspensiones</th>
+          <th>Incapacidades</th>
           <th>Horas extra</th>
           <th>Ajustes</th>
           <th>Estado</th>
@@ -83,13 +88,14 @@
             <td>{{ row.faltas }}</td>
             <td>{{ row.retardos }}</td>
             <td>{{ row.suspensiones }}</td>
+            <td>{{ row.incapacidades }}</td>
             <td>{{ row.horas_extra_autorizadas }}</td>
             <td>{{ row.ajustes_pendientes }}</td>
             <td><span class="module-chip {% if row.estado == 'LISTO' %}manage{% elif row.estado == 'REVISAR' %}pending{% else %}blocked{% endif %}">{{ row.get_estado_display }}</span></td>
             <td><a class="btn btn-secondary btn-small" href="{% url 'rrhh:prenomina_persona' corte.pk row.empleado_id %}">Persona</a></td>
           </tr>
         {% empty %}
-          <tr><td colspan="11">Sin colaboradores en el corte.</td></tr>
+          <tr><td colspan="12">Sin colaboradores en el corte.</td></tr>
         {% endfor %}
       </tbody>
     </table>

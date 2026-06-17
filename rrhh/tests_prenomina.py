@@ -23,6 +23,7 @@ from rrhh.models import (
     AsistenciaEmpleado,
     Empleado,
     HoraExtra,
+    IncapacidadEmpleado,
     IncidenciaAsistencia,
     PrenominaCorte,
     PrenominaEmpleadoResumen,
@@ -438,6 +439,82 @@ class PrenominaServiceTests(TestCase):
         self.assertEqual(mov.clave_contpaqi, "HE")
         self.assertEqual(mov.estado, PrenominaMovimiento.ESTADO_LISTO)
         self.assertEqual(corte.movimientos.filter(tipo_movimiento_erp=PrenominaMovimiento.TIPO_HORA_EXTRA).count(), 1)
+
+    def test_incapacidad_genera_movimiento_y_recalculo_idempotente(self):
+        PrenominaEquivalenciaCONTPAQi.objects.create(
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_INCAPACIDAD,
+            clave_contpaqi="INC",
+            descripcion="Incapacidad",
+            aplica_valor=True,
+        )
+        incapacidad = IncapacidadEmpleado.objects.create(
+            empleado=self.empleado,
+            fecha_inicio=date(2026, 6, 12),
+            fecha_fin=date(2026, 6, 14),
+            tipo=IncapacidadEmpleado.TIPO_ENFERMEDAD_GENERAL,
+            folio="IMSS-1",
+            estado=IncapacidadEmpleado.ESTADO_CERRADA,
+        )
+
+        corte = crear_corte_prenomina(
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 15),
+            fecha_corte=date(2026, 6, 15),
+            creado_por=self.user,
+        )
+        recalcular_corte_prenomina(corte)
+        resumen = corte.resumenes.get(empleado=self.empleado)
+        mov = corte.movimientos.get(empleado=self.empleado, tipo_movimiento_erp=PrenominaMovimiento.TIPO_INCAPACIDAD)
+
+        self.assertEqual(resumen.incapacidades, 3)
+        self.assertEqual(mov.fuente_modelo, "rrhh.IncapacidadEmpleado")
+        self.assertEqual(mov.fuente_id, str(incapacidad.id))
+        self.assertEqual(mov.valor, Decimal("3.00"))
+        self.assertEqual(mov.clave_contpaqi, "INC")
+        self.assertEqual(mov.estado, PrenominaMovimiento.ESTADO_LISTO)
+        self.assertEqual(corte.movimientos.filter(tipo_movimiento_erp=PrenominaMovimiento.TIPO_INCAPACIDAD).count(), 1)
+
+    def test_incapacidad_no_duplica_falta_en_prenomina(self):
+        PrenominaEquivalenciaCONTPAQi.objects.create(
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_FALTA,
+            clave_contpaqi="F",
+            descripcion="Falta",
+            aplica_valor=True,
+        )
+        PrenominaEquivalenciaCONTPAQi.objects.create(
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_INCAPACIDAD,
+            clave_contpaqi="INC",
+            descripcion="Incapacidad",
+            aplica_valor=True,
+        )
+        IncidenciaAsistencia.objects.create(
+            empleado=self.empleado,
+            fecha=date(2026, 6, 12),
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+            estado=IncidenciaAsistencia.ESTADO_CONCILIADO,
+            severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+            detalle="Falta previa a incapacidad.",
+        )
+        IncapacidadEmpleado.objects.create(
+            empleado=self.empleado,
+            fecha_inicio=date(2026, 6, 12),
+            fecha_fin=date(2026, 6, 12),
+            tipo=IncapacidadEmpleado.TIPO_ENFERMEDAD_GENERAL,
+            folio="IMSS-2",
+        )
+
+        corte = crear_corte_prenomina(
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 15),
+            fecha_corte=date(2026, 6, 15),
+            creado_por=self.user,
+        )
+        resumen = corte.resumenes.get(empleado=self.empleado)
+
+        self.assertEqual(resumen.faltas, 0)
+        self.assertEqual(resumen.incapacidades, 1)
+        self.assertFalse(corte.movimientos.filter(tipo_movimiento_erp=PrenominaMovimiento.TIPO_FALTA).exists())
+        self.assertEqual(corte.movimientos.filter(tipo_movimiento_erp=PrenominaMovimiento.TIPO_INCAPACIDAD).count(), 1)
 
     def test_ajuste_pendiente_marca_resumen_en_revision(self):
         crear_ajuste_asistencia(

@@ -33,6 +33,7 @@ from .models import (
     EmpleadoIdentidadPendiente,
     HoraExtra,
     ImportacionChecador,
+    IncapacidadEmpleado,
     NominaConceptoLinea,
     NominaImportacion,
     NominaLinea,
@@ -432,6 +433,7 @@ RRHH_MODULE_TABS = [
     {"label": "Empleados", "url_name": "rrhh:empleados", "key": "empleados", "submodule": "empleados"},
     {"label": "Permisos", "url_name": "rrhh:rrhh_permisos_list", "key": "permisos", "submodule": "permisos"},
     {"label": "Suspensiones", "url_name": "rrhh:rrhh_suspensiones", "key": "suspensiones", "submodule": "permisos"},
+    {"label": "Incapacidades", "url_name": "rrhh:rrhh_incapacidades", "key": "incapacidades", "submodule": "nomina"},
     {"label": "Vacaciones", "url_name": "rrhh:rrhh_vacaciones_list", "key": "vacaciones", "submodule": "vacaciones"},
     {"label": "Horas extra", "url_name": "rrhh:rrhh_he_list", "key": "horas_extra", "submodule": "horas_extra"},
     {"label": "Asistencias", "url_name": "rrhh:rrhh_asistencias", "key": "asistencias", "submodule": "asistencias"},
@@ -518,6 +520,8 @@ def _has_rrhh_task_access(user, tab_key: str) -> bool:
         return HoraExtra.objects.filter(jefe_directo=user).exists()
     if tab_key == "vacaciones":
         return SolicitudVacaciones.objects.filter(Q(jefe_directo=user) | Q(creado_por=user)).exists()
+    if tab_key == "incapacidades":
+        return IncapacidadEmpleado.objects.filter(registrada_por=user).exists()
     return False
 
 

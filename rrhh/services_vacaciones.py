@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from core.access import can_manage_rrhh
 
-from .models import Empleado, MovimientoVacaciones, PoliticaVacaciones, SolicitudVacaciones
+from .models import Empleado, IncapacidadEmpleado, MovimientoVacaciones, PoliticaVacaciones, SolicitudVacaciones
 from .services_permisos import permiso_requiere_autorizacion_direccion, usuario_direccion_general_para_autorizacion
 
 
@@ -153,6 +153,21 @@ def crear_solicitud_vacaciones(*, empleado: Empleado, fecha_inicio: date, fecha_
         ).exists()
         if traslape:
             raise ValidationError("Ya existe una solicitud de vacaciones en ese periodo.")
+        incapacidad = (
+            IncapacidadEmpleado.objects.filter(
+                empleado=empleado,
+                estado__in=[IncapacidadEmpleado.ESTADO_ACTIVA, IncapacidadEmpleado.ESTADO_CERRADA],
+                fecha_inicio__lte=fecha_fin,
+                fecha_fin__gte=fecha_inicio,
+            )
+            .order_by("fecha_inicio", "id")
+            .first()
+        )
+        if incapacidad:
+            folio = f" {incapacidad.folio}" if incapacidad.folio else ""
+            raise ValidationError(
+                f"El periodo cruza incapacidad{folio} del {incapacidad.fecha_inicio:%Y-%m-%d} al {incapacidad.fecha_fin:%Y-%m-%d}."
+            )
         saldo = saldo_vacaciones_empleado(empleado, periodo_anio=fecha_inicio.year, al=fecha_inicio)
         if dias > saldo["disponible"]:
             raise ValidationError(f"Saldo insuficiente. Disponible: {saldo['disponible']} días.")
