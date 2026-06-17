@@ -232,6 +232,26 @@ class DecisionSupportServicesTests(TestCase):
         self.assertTrue(any(row["action"] in {"PRODUCIR_MAS", "PROMOCIONAR", "REACTIVAR"} for row in opportunity_context["rows"]))
         self.assertTrue(any(row["priority"] in {"ALTA", "MEDIA", "BAJA"} for row in decision_context["rows"]))
 
+    def test_future_forecast_uses_latest_real_history_not_future_holes(self):
+        current_context = build_daily_forecast_context(
+            target_date=self.target_date,
+            reference_date=self.target_date,
+            lookback_weeks=3,
+            top_n=10,
+        )
+        future_context = build_daily_forecast_context(
+            target_date=self.target_date + timedelta(days=14),
+            reference_date=self.target_date,
+            lookback_weeks=3,
+            top_n=10,
+        )
+
+        current_row = next(row for row in current_context["rows"] if row["recipe_id"] == self.recipe_hot.id)
+        future_row = next(row for row in future_context["rows"] if row["recipe_id"] == self.recipe_hot.id)
+
+        self.assertEqual(future_row["forecast_qty"], current_row["forecast_qty"])
+        self.assertEqual(future_row["same_weekday_avg"], current_row["same_weekday_avg"])
+
     @patch("reportes.dashboard_full_dataset.get_dashboard_sales_dataset")
     @patch("reportes.dashboard_full_dataset.get_dashboard_daily_ops_dataset")
     @patch("reportes.dashboard_full_dataset.build_executive_bi_panels")
