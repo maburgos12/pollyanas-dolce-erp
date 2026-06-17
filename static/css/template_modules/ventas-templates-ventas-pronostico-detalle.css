@@ -35,7 +35,15 @@
   .page-pronostico-ventas .forecast-adjustments-table { --table-min-width: 960px; }
   .page-pronostico-ventas .forecast-adjustments-table td:nth-child(2) { min-width: 260px; }
   .page-pronostico-ventas .forecast-adjustment-input { min-width: 96px; text-align:right; }
+  .page-pronostico-ventas .forecast-adjustment-panel { display:none; }
+  .page-pronostico-ventas .forecast-adjustment-panel.active { display:block; }
   .page-pronostico-ventas .forecast-adjustment-actions { display:flex; justify-content:flex-end; margin-top:14px; }
+  .page-pronostico-ventas .forecast-matrix-wrap { max-height:70vh; }
+  .page-pronostico-ventas .forecast-matrix-table { --table-min-width: 1800px; }
+  .page-pronostico-ventas .forecast-matrix-table th,
+  .page-pronostico-ventas .forecast-matrix-table td { min-width:104px; }
+  .page-pronostico-ventas .forecast-sticky-col { position:sticky; left:0; z-index:2; min-width:260px; background:#fff; }
+  .page-pronostico-ventas .forecast-matrix-table thead .forecast-sticky-col { z-index:3; background:#f5e6ed; }
   .page-pronostico-ventas .comparison-alert { display:inline-flex; align-items:center; justify-content:center; min-width:34px; border-radius:999px; padding:3px 8px; font-weight:900; }
   .page-pronostico-ventas .comparison-alert.ok { background:#e8f5ee; color:#198754; }
   .page-pronostico-ventas .comparison-alert.sobre { background:#fff3cd; color:#9a6700; }

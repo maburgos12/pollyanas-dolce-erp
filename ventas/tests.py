@@ -23,7 +23,7 @@ from ventas.services.sales_freshness import (
 from ventas.services.proyecciones_engine import _context_uplift_lookup, _season_name, calcular_proyeccion_operativa
 from core.models import Sucursal
 import ventas.views as ventas_views
-from ventas.views import _apply_manual_adjustments, _build_adjustment_rows, _projection_presets
+from ventas.views import _apply_manual_adjustments, _build_adjustment_rows, _projection_presets, _save_manual_adjustments
 
 
 class VentasModuleTests(SimpleTestCase):
@@ -103,6 +103,7 @@ class VentasModuleTests(SimpleTestCase):
         rows, totals = _build_adjustment_rows(
             {
                 "ajustes_ventas": {"p10": {"ajuste": 5, "nota": "subir fin de semana"}},
+                "fechas_tabla": [{"iso": "2026-06-21", "label": "Dom 21 Jun"}],
                 "por_categoria": [
                     {
                         "categoria": "Pastel Grande",
@@ -112,6 +113,7 @@ class VentasModuleTests(SimpleTestCase):
                                 "nombre": "Pastel prueba",
                                 "total_piezas": 12,
                                 "precio": "100.00",
+                                "dias_lista": [{"fecha_iso": "2026-06-21", "recomendado": 12}],
                             }
                         ],
                     }
@@ -120,11 +122,60 @@ class VentasModuleTests(SimpleTestCase):
         )
 
         self.assertEqual(rows[0]["base"], 12)
+        self.assertEqual(rows[0]["propuesta"], 12)
         self.assertEqual(rows[0]["ajuste"], 5)
+        self.assertEqual(rows[0]["ajuste_dias"], 0)
         self.assertEqual(rows[0]["total_final"], 17)
         self.assertEqual(rows[0]["nota"], "subir fin de semana")
+        self.assertEqual(rows[0]["dias"][0]["sistema"], 12)
         self.assertEqual(totals["total_final"], 17)
         self.assertEqual(totals["ingreso_final"], Decimal("1700.00"))
+
+    def test_forecast_adjustment_rows_unify_general_and_daily_adjustments(self):
+        rows, totals = _build_adjustment_rows(
+            {
+                "ajustes_ventas": {
+                    "p10": {
+                        "ajuste": 5,
+                        "dias": {
+                            "2026-06-21": {"ajuste": 2},
+                            "2026-06-22": {"ajuste": -1},
+                        },
+                    }
+                },
+                "fechas_tabla": [
+                    {"iso": "2026-06-21", "label": "Dom 21 Jun"},
+                    {"iso": "2026-06-22", "label": "Lun 22 Jun"},
+                ],
+                "por_categoria": [
+                    {
+                        "categoria": "Pastel Grande",
+                        "productos": [
+                            {
+                                "point_product_id": 10,
+                                "nombre": "Pastel prueba",
+                                "total_piezas": 30,
+                                "precio": "100.00",
+                                "dias_lista": [
+                                    {"fecha_iso": "2026-06-21", "recomendado": 20},
+                                    {"fecha_iso": "2026-06-22", "recomendado": 10},
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(rows[0]["propuesta"], 30)
+        self.assertEqual(rows[0]["ajuste"], 5)
+        self.assertEqual(rows[0]["ajuste_dias"], 1)
+        self.assertEqual(rows[0]["total_final"], 36)
+        self.assertEqual(rows[0]["dias"][0]["final"], 22)
+        self.assertEqual(rows[0]["dias"][1]["final"], 9)
+        self.assertEqual(totals["total_ajuste_general"], 5)
+        self.assertEqual(totals["total_ajuste_dias"], 1)
+        self.assertEqual(totals["total_final"], 36)
 
     def test_forecast_adjustment_rows_use_recipe_key_without_point_product(self):
         rows, _totals = _build_adjustment_rows(
@@ -159,6 +210,7 @@ class VentasModuleTests(SimpleTestCase):
         resultados, totals = _apply_manual_adjustments(
             {
                 "resumen": {"total_piezas": 12, "total_ingreso": "1200.00"},
+                "fechas_tabla": [{"iso": "2026-06-21", "label": "Dom 21 Jun"}],
                 "por_categoria": [
                     {
                         "categoria": "Pastel Grande",
@@ -168,19 +220,52 @@ class VentasModuleTests(SimpleTestCase):
                                 "nombre": "Pastel prueba",
                                 "total_piezas": 12,
                                 "precio": "100.00",
+                                "dias_lista": [{"fecha_iso": "2026-06-21", "recomendado": 12}],
                             }
                         ],
                     }
                 ],
             },
-            PostData({"ajuste_p10": "5", "nota_p10": "subir fin de semana"}),
+            PostData({"ajuste_p10": "5", "nota_p10": "subir fin de semana", "ajuste_dia_p10_2026-06-21": "2"}),
         )
 
         self.assertEqual(totals["total_base"], 12)
-        self.assertEqual(totals["total_ajuste"], 5)
-        self.assertEqual(resultados["resumen"]["total_piezas"], 17)
-        self.assertEqual(resultados["resumen"]["ajuste_piezas_ventas"], 5)
+        self.assertEqual(totals["total_ajuste"], 7)
+        self.assertEqual(resultados["resumen"]["total_piezas"], 19)
+        self.assertEqual(resultados["resumen"]["ajuste_piezas_ventas"], 7)
         self.assertEqual(resultados["ajustes_ventas"]["p10"]["nota"], "subir fin de semana")
+        self.assertEqual(resultados["ajustes_ventas"]["p10"]["dias"]["2026-06-21"]["ajuste"], 2)
+
+    def test_save_manual_adjustments_updates_snapshot_summary(self):
+        class Forecast:
+            resultado_json = {
+                "resumen": {"total_piezas": 12, "total_ingreso": "1200.00"},
+                "fechas_tabla": [{"iso": "2026-06-21", "label": "Dom 21 Jun"}],
+                "por_categoria": [
+                    {
+                        "categoria": "Pastel Grande",
+                        "productos": [
+                            {
+                                "point_product_id": 10,
+                                "nombre": "Pastel prueba",
+                                "total_piezas": 12,
+                                "precio": "100.00",
+                                "dias_lista": [{"fecha_iso": "2026-06-21", "recomendado": 12}],
+                            }
+                        ],
+                    }
+                ],
+            }
+
+            def save(self, update_fields):
+                self.saved_fields = update_fields
+
+        pronostico = Forecast()
+        _save_manual_adjustments(pronostico, {"ajuste_dia_p10_2026-06-21": "2"})
+
+        self.assertEqual(pronostico.resultado_json["resumen"]["total_piezas"], 14)
+        self.assertEqual(pronostico.resultado_json["resumen"]["ajuste_piezas_ventas"], 2)
+        self.assertEqual(pronostico.total_piezas, 14)
 
     def test_saved_forecast_detail_labels_confidence_as_saved_snapshot(self):
         template = (Path(__file__).resolve().parent / "templates" / "ventas" / "pronostico_detalle.html").read_text()
@@ -190,6 +275,9 @@ class VentasModuleTests(SimpleTestCase):
         self.assertIn("vuelve a generar el pronóstico", template)
         self.assertIn("Revisión de ventas", template)
         self.assertIn("ventas:pronostico_ajustes", template)
+        self.assertIn("Propuesta ERP", template)
+        self.assertIn("Matriz por día", template)
+        self.assertIn("ajuste_dia_{{ row.key }}_{{ day.fecha_iso }}", template)
 
     def test_saved_forecast_print_uses_standalone_document(self):
         detail_template = (Path(__file__).resolve().parent / "templates" / "ventas" / "pronostico_detalle.html").read_text()

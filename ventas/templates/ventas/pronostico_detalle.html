@@ -93,23 +93,30 @@
         <p class="executive-section-copy">Captura ajustes por criterio operativo antes de usar este pronóstico como consolidado.</p>
       </div>
       <div class="forecast-branch-totals">
-        <span>Base {{ adjustment_totals.total_base|intcomma }}</span>
-        <span>Ajuste {{ adjustment_totals.total_ajuste|intcomma }}</span>
+        <span>Propuesta ERP {{ adjustment_totals.total_propuesta|intcomma }}</span>
+        <span>Ajuste general {{ adjustment_totals.total_ajuste_general|intcomma }}</span>
+        <span>Ajuste por día {{ adjustment_totals.total_ajuste_dias|intcomma }}</span>
         <span>Final {{ adjustment_totals.total_final|intcomma }}</span>
       </div>
     </div>
     <form method="post" action="{% url 'ventas:pronostico_ajustes' pronostico.id %}">
       {% csrf_token %}
+      <div class="forecast-tabs forecast-adjustment-tabs" role="tablist">
+        <button class="forecast-tab active" type="button" data-adjustment-tab="summary">Consolidado</button>
+        <button class="forecast-tab" type="button" data-adjustment-tab="matrix">Matriz por día</button>
+      </div>
+      <div class="forecast-adjustment-panel active" id="adjustment-panel-summary">
       <div class="table-responsive production-table-wrap">
         <table class="table forecast-adjustments-table">
           <thead>
             <tr>
               <th>Categoría</th>
               <th>Producto</th>
-              <th class="text-end">Base</th>
-              <th class="text-end">Ajuste</th>
-              <th class="text-end">Total final</th>
-              <th>Nota</th>
+              <th class="text-end">Propuesta ERP</th>
+              <th class="text-end">Ajuste general</th>
+              <th class="text-end">Ajuste por día</th>
+              <th class="text-end">Final</th>
+              <th>Motivo general</th>
             </tr>
           </thead>
           <tbody>
@@ -117,10 +124,11 @@
             <tr>
               <td>{{ row.categoria }}</td>
               <td>{{ row.nombre }}</td>
-              <td class="text-end">{{ row.base|intcomma }}</td>
+              <td class="text-end">{{ row.propuesta|intcomma }}</td>
               <td>
                 <input class="form-control forecast-adjustment-input" type="number" step="1" name="ajuste_{{ row.key }}" value="{{ row.ajuste }}">
               </td>
+              <td class="text-end">{{ row.ajuste_dias|intcomma }}</td>
               <td class="text-end">{{ row.total_final|intcomma }}</td>
               <td>
                 <input class="form-control" name="nota_{{ row.key }}" value="{{ row.nota }}" maxlength="160">
@@ -129,6 +137,43 @@
             {% endfor %}
           </tbody>
         </table>
+      </div>
+      </div>
+      <div class="forecast-adjustment-panel" id="adjustment-panel-matrix">
+        <div class="table-responsive production-table-wrap forecast-matrix-wrap">
+          <table class="table forecast-adjustments-table forecast-matrix-table">
+            <thead>
+              <tr>
+                <th rowspan="2" class="forecast-sticky-col">Producto</th>
+                {% for fecha in fechas_tabla %}
+                <th colspan="2" class="text-center">{{ fecha.label }}</th>
+                {% endfor %}
+                <th rowspan="2" class="text-end">Final</th>
+              </tr>
+              <tr>
+                {% for fecha in fechas_tabla %}
+                <th class="text-end">Sistema</th>
+                <th class="text-end">Ajuste</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in adjustment_rows %}
+              <tr>
+                <td class="forecast-sticky-col">{{ row.nombre }}<small class="text-muted d-block">{{ row.categoria }}</small></td>
+                {% for day in row.dias %}
+                <td class="text-end">{{ day.sistema|intcomma }}</td>
+                <td>
+                  <input class="form-control forecast-adjustment-input" type="number" step="1" name="ajuste_dia_{{ row.key }}_{{ day.fecha_iso }}" value="{{ day.ajuste }}" title="Ajuste {{ row.nombre }} {{ day.label }}">
+                  <input type="hidden" name="nota_dia_{{ row.key }}_{{ day.fecha_iso }}" value="{{ day.nota }}">
+                </td>
+                {% endfor %}
+                <td class="text-end">{{ row.total_final|intcomma }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
       </div>
       <div class="forecast-adjustment-actions">
         <button class="btn btn-primary" type="submit">Guardar ajustes</button>
@@ -396,12 +441,21 @@
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
-  document.querySelectorAll('.forecast-tab').forEach(function (tab) {
+  document.querySelectorAll('[data-tab]').forEach(function (tab) {
     tab.addEventListener('click', function () {
-      document.querySelectorAll('.forecast-tab').forEach((item) => item.classList.remove('active'));
+      document.querySelectorAll('[data-tab]').forEach((item) => item.classList.remove('active'));
       document.querySelectorAll('.forecast-panel').forEach((item) => item.classList.remove('active'));
       tab.classList.add('active');
       const panel = document.getElementById('panel-' + tab.dataset.tab);
+      if (panel) panel.classList.add('active');
+    });
+  });
+  document.querySelectorAll('[data-adjustment-tab]').forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      document.querySelectorAll('[data-adjustment-tab]').forEach((item) => item.classList.remove('active'));
+      document.querySelectorAll('.forecast-adjustment-panel').forEach((item) => item.classList.remove('active'));
+      tab.classList.add('active');
+      const panel = document.getElementById('adjustment-panel-' + tab.dataset.adjustmentTab);
       if (panel) panel.classList.add('active');
     });
   });
