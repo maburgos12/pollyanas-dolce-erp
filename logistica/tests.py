@@ -1952,6 +1952,22 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(resumen.evidencias_creadas, 1)
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_CON_DIFERENCIA)
 
+    def test_sincronizar_recepcion_desde_point_actualiza_evidencia_si_point_corrige(self):
+        _, _, transfer_line = self._crear_linea_carga_con_transferencia_recibida(loaded_quantity="5.000", received_quantity="3.000")
+        sincronizar_recepcion_desde_point(ruta=self.ruta, user=self.user, ejecutar_sync=False)
+        transfer_line.received_quantity = Decimal("5.000")
+        transfer_line.received_at = timezone.now()
+        transfer_line.save(update_fields=["received_quantity", "received_at", "updated_at"])
+
+        resumen = sincronizar_recepcion_desde_point(ruta=self.ruta, user=self.user, ejecutar_sync=False)
+
+        self.parada.refresh_from_db()
+        evidencia = ParadaEntregaEvidencia.objects.get(parada=self.parada)
+        self.assertEqual(resumen.evidencias_creadas, 0)
+        self.assertEqual(resumen.evidencias_existentes, 1)
+        self.assertEqual(evidencia.cantidad_entregada, Decimal("5.000"))
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+
     def test_api_sincroniza_recepcion_point_y_devuelve_parada_actualizada(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
@@ -1973,7 +1989,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.json()["paradas"][0]["entrega_estado"], ParadaRuta.ENTREGA_ENTREGADA)
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
 
-    def test_ruta_detail_muestra_carga_point_por_producto(self):
+    def test_ruta_detail_muestra_carga_esperada_por_producto(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
         self.ruta.estatus = RutaEntrega.ESTATUS_PLANEADA
@@ -1984,8 +2000,8 @@ class LogisticaControlRutasTests(TestCase):
         response = self.client.get(reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Carga Point por parada")
-        self.assertContains(response, "Actualizar carga Point")
+        self.assertContains(response, "Carga esperada CEDIS por parada")
+        self.assertContains(response, "Actualizar carga esperada")
         self.assertContains(response, 'value="sync_carga_point"')
         self.assertNotContains(response, "Sincronizar recepción Point")
         self.assertContains(response, "Producto total")
@@ -1998,7 +2014,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertNotContains(response, "Recibido Point")
         self.assertNotContains(response, "Recibido correcto")
 
-    def test_ruta_detail_oculta_recibido_point_en_carga(self):
+    def test_ruta_detail_muestra_recibido_point_en_carga(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
         self._crear_linea_carga_con_transferencia_recibida(loaded_quantity=None)
@@ -2006,8 +2022,8 @@ class LogisticaControlRutasTests(TestCase):
         response = self.client.get(reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}))
 
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, "Recibido correcto")
-        self.assertNotContains(response, "Recibido Point")
+        self.assertContains(response, "Recibido correcto")
+        self.assertContains(response, "5.000")
         self.assertNotContains(response, "Carga sin validar")
 
     def test_ruta_detail_sincroniza_recepcion_point(self):
@@ -2029,7 +2045,28 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
         self.assertContains(response, "Recepción Point sincronizada")
-        self.assertNotContains(response, "Recibido correcto")
+        self.assertContains(response, "Recibido correcto")
+
+    def test_ruta_detail_sincroniza_recepcion_point_en_ruta_completada(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        _, _, transfer_line = self._crear_linea_carga_con_transferencia_recibida()
+        self.ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
+        self.ruta.save(update_fields=["estatus", "updated_at"])
+        sync_job = transfer_line.sync_job
+
+        with patch("logistica.services_carga_ruta.PointMovementSyncService") as service_cls:
+            service_cls.return_value.run_transfer_sync.return_value = sync_job
+            response = self.client.post(
+                reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+                {"action": "sync_recepcion_point"},
+                follow=True,
+            )
+
+        self.parada.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertContains(response, "Recepción Point sincronizada")
 
     def test_ruta_detail_actualiza_carga_point_sin_sync_externo(self):
         self.client.force_login(self.user)
@@ -2048,7 +2085,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         service_cls.assert_not_called()
         self.assertTrue(RutaCargaChecklistLinea.objects.filter(checklist__ruta=self.ruta, point_transfer_line__is_open=True).exists())
-        self.assertContains(response, "Carga Point sincronizada")
+        self.assertContains(response, "Carga esperada actualizada")
 
     def test_ruta_detail_bloquea_salida_si_checklist_carga_pendiente(self):
         self.client.force_login(self.user)

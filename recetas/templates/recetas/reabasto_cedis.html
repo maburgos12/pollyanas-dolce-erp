@@ -274,7 +274,7 @@
       {% if solicitud %}
       <span class="badge badge-primary">Folio: {{ solicitud.folio }}</span>
       <span class="badge {% if solicitud.estado == 'ENVIADA' %}badge-warning{% elif solicitud.estado == 'ATENDIDA' %}badge-success{% elif solicitud.estado == 'CANCELADA' %}badge-danger{% else %}badge-primary{% endif %}">
-        Estado: {{ solicitud.get_estado_display }}
+        Estado: {{ solicitud.estado_operativo_label }}
       </span>
       {% else %}
       <span class="badge badge-warning">Sin solicitud creada aún para esta fecha/sucursal</span>

@@ -27,6 +27,7 @@ from .models import (
     EventoRuta,
     InspeccionVehiculo,
     LavadoUnidad,
+    ParadaEntregaEvidencia,
     ParadaRuta,
     PuntoLogistico,
     ReparacionUnidad,
@@ -95,23 +96,38 @@ def _recepcion_point_rows(checklist) -> list[dict]:
         return []
 
     rows = []
-    lineas = (
+    lineas = list(
         checklist.lineas.select_related("parada", "point_transfer_line")
-        .filter(Q(point_transfer_line__isnull=True) | Q(point_transfer_line__is_open=True))
+        .filter(Q(point_transfer_line__isnull=True) | Q(point_transfer_line__is_cancelled=False))
         .order_by("parada__orden", "item_name", "id")
     )
+    evidencias = {
+        evidencia.linea_carga_id: evidencia
+        for evidencia in ParadaEntregaEvidencia.objects.filter(
+            linea_carga_id__in=[linea.id for linea in lineas],
+            tipo=ParadaEntregaEvidencia.TIPO_CONFIRMACION,
+        )
+    }
     for linea in lineas:
         point_line = linea.point_transfer_line
+        evidencia = evidencias.get(linea.id)
         esperado = Decimal(str(linea.cantidad_enviada_esperada or 0))
         cargado_validado = linea.cantidad_cargada is not None
         cargado = Decimal(str(linea.cantidad_cargada or 0)) if cargado_validado else None
         referencia_recepcion = cargado if cargado is not None else esperado
         recibido = Decimal("0")
+        received_at = point_line.received_at if point_line else None
+        received_by = point_line.received_by if point_line else ""
         if not point_line:
             estado_label = "Sin transferencia Point"
             estado_tone = "danger"
             recibido_display = None
         elif point_line.is_received:
+            recibido = Decimal(str(evidencia.cantidad_entregada if evidencia else point_line.received_quantity or 0))
+            if evidencia:
+                received_at = evidencia.capturado_en
+                metadata = evidencia.metadata if isinstance(evidencia.metadata, dict) else {}
+                received_by = metadata.get("received_by", received_by)
             if recibido == referencia_recepcion:
                 estado_label = "Recibido correcto"
                 estado_tone = "success"
@@ -142,8 +158,8 @@ def _recepcion_point_rows(checklist) -> list[dict]:
                 "recibido": recibido_display,
                 "estado_label": estado_label,
                 "estado_tone": estado_tone,
-                "received_at": point_line.received_at if point_line else None,
-                "received_by": point_line.received_by if point_line else "",
+                "received_at": received_at,
+                "received_by": received_by,
             }
         )
     return rows
@@ -1903,7 +1919,7 @@ def ruta_detail(request, pk: int):
         action = (request.POST.get("action") or "").strip().lower()
         ruta_cerrada = ruta.estatus in {RutaEntrega.ESTATUS_COMPLETADA, RutaEntrega.ESTATUS_CANCELADA}
         estructura_actions = {"update_plan", "add_parada", "move_parada", "delete_parada", "add_entrega", "entrega_status", "delete_entrega"}
-        if ruta_cerrada and action != "ruta_status":
+        if ruta_cerrada and action not in {"ruta_status", "sync_recepcion_point"}:
             messages.error(request, "La ruta ya está cerrada o cancelada; no se puede editar su planeación ni evidencia.")
             return redirect("logistica:ruta_detail", pk=ruta.id)
         if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA and action in estructura_actions:
@@ -2186,10 +2202,10 @@ def ruta_detail(request, pk: int):
                 if resumen.creadas or resumen.actualizadas:
                     messages.success(
                         request,
-                        f"Carga Point sincronizada: {resumen.creadas} línea(s) nueva(s), {resumen.actualizadas} actualizada(s).",
+                        f"Carga esperada actualizada: {resumen.creadas} línea(s) nueva(s), {resumen.actualizadas} actualizada(s).",
                     )
                 else:
-                    messages.warning(request, "Point no tiene transferencias abiertas para las sucursales de esta ruta.")
+                    messages.warning(request, "No hay solicitudes CEDIS ni transferencias abiertas Point para las sucursales de esta ruta.")
             return redirect("logistica:ruta_detail", pk=ruta.id)
 
         if action == "ruta_status":
