@@ -198,6 +198,19 @@ def _selected_product_skus(request) -> list[str]:
     return [value.strip() for value in request.POST.getlist("productos_incluidos") if value.strip()]
 
 
+def _projection_presets() -> list[dict[str, str | int]]:
+    start = timezone.localdate()
+    return [
+        {
+            "label": label,
+            "days": days,
+            "fecha_inicio": start.isoformat(),
+            "fecha_fin": (start + timedelta(days=days - 1)).isoformat(),
+        }
+        for label, days in (("Semana", 7), ("15 días", 15), ("30 días", 30))
+    ]
+
+
 def _catalogo_productos_por_categoria() -> OrderedDict[str, list[dict]]:
     hace_30 = timezone.localdate() - timedelta(days=30)
     skus_vigentes = set(
@@ -702,6 +715,7 @@ def PronosticoVentasView(request):
         "categorias_productos": categorias_productos,
         "categorias_principales": {category.upper() for category in CATALOG_CATEGORY_ORDER},
         "selected_product_skus": set(selected_product_skus),
+        "projection_presets": _projection_presets(),
         "form_errors": form_errors,
         "pronosticos_guardados": _pronosticos_for_user(request.user)[:10],
         "sales_freshness": get_forecast_sales_freshness(),

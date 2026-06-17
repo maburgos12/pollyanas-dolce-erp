@@ -18,6 +18,7 @@ from ventas.services.sales_freshness import (
     build_forecast_sales_freshness,
     queue_forecast_sales_refresh_if_needed,
 )
+from ventas.views import _projection_presets
 
 
 class VentasModuleTests(SimpleTestCase):
@@ -38,21 +39,38 @@ class VentasModuleTests(SimpleTestCase):
 
     def test_saved_forecast_tables_use_non_overlapping_columns_and_actions(self):
         templates_dir = Path(__file__).resolve().parent / "templates" / "ventas"
+        css_dir = Path(__file__).resolve().parent.parent / "static" / "css" / "template_modules"
         full_list = (templates_dir / "pronostico_lista.html").read_text()
         dashboard_list = (templates_dir / "pronostico.html").read_text()
+        full_list_surface = full_list + (css_dir / "ventas-templates-ventas-pronostico-lista.css").read_text()
+        dashboard_surface = dashboard_list + (css_dir / "ventas-templates-ventas-pronostico.css").read_text()
 
         self.assertIn('class="table saved-forecasts-table"', full_list)
         self.assertIn('class="table saved-forecasts-table"', dashboard_list)
-        self.assertIn("--table-min-width", full_list)
-        self.assertIn("--table-min-width", dashboard_list)
-        self.assertIn(".saved-forecasts-wrap > table.saved-forecasts-table td:nth-child(n+3)", full_list)
-        self.assertIn(".saved-forecasts-wrap > table.saved-forecasts-table td:nth-child(n+3)", dashboard_list)
-        self.assertIn("white-space:normal", full_list)
-        self.assertIn("white-space:normal", dashboard_list)
+        self.assertIn("--table-min-width", full_list_surface)
+        self.assertIn("--table-min-width", dashboard_surface)
+        self.assertIn(".saved-forecasts-wrap > table.saved-forecasts-table td:nth-child(n+3)", full_list_surface)
+        self.assertIn(".saved-forecasts-wrap > table.saved-forecasts-table td:nth-child(n+3)", dashboard_surface)
+        self.assertIn("white-space:normal", full_list_surface)
+        self.assertIn("white-space:normal", dashboard_surface)
         self.assertIn("forecast-actions-cell", full_list)
         self.assertIn("forecast-actions-cell", dashboard_list)
         self.assertIn("forecast-method-cell", full_list)
         self.assertIn("forecast-method-cell", dashboard_list)
+
+    def test_pronostico_includes_projection_tab_and_range_presets(self):
+        template = (Path(__file__).resolve().parent / "templates" / "ventas" / "pronostico.html").read_text()
+
+        self.assertIn('href="#proyecciones"', template)
+        self.assertIn("Proyecciones", template)
+        self.assertIn("data-projection-days", template)
+        self.assertIn("dataset.projectionDays === '15'", template)
+        self.assertIn("fecha_inicio", template)
+        self.assertIn("fecha_fin", template)
+
+        presets = _projection_presets()
+        self.assertEqual([preset["label"] for preset in presets], ["Semana", "15 días", "30 días"])
+        self.assertEqual([preset["days"] for preset in presets], [7, 15, 30])
 
     def test_saved_forecast_detail_labels_confidence_as_saved_snapshot(self):
         template = (Path(__file__).resolve().parent / "templates" / "ventas" / "pronostico_detalle.html").read_text()

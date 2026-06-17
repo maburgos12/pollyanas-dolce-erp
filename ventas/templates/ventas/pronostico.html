@@ -5,7 +5,7 @@
 {% block body_class %}page-pronostico-ventas{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/ventas-templates-ventas-pronostico.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/ventas-templates-ventas-pronostico.css?v=20260617-proyecciones-v1">
 {% endblock %}
 
 {% block content %}
@@ -27,14 +27,22 @@
     </div>
   </section>
 
+  <nav class="forecast-workflow-tabs" aria-label="Flujo de pronósticos">
+    <a class="forecast-workflow-tab" href="#pronosticos-guardados">Pronósticos</a>
+    <a class="forecast-workflow-tab active" href="#proyecciones">Proyecciones</a>
+  </nav>
+
   <section class="card">
-    <details id="nuevo-calculo">
+    <details id="proyecciones" open>
       <summary class="pd-u-8400ad8a3f">
         <div class="pd-u-c3cd92807b">
-          ＋ Calcular nuevo pronóstico
+          ＋ Generar proyección
         </div>
       </summary>
-      <div class="card-header">Filtros</div>
+      <div class="card-header">Proyección de ventas</div>
+      <p class="executive-section-copy forecast-projection-copy">
+        El ERP calcula el rango; ventas revisa, ajusta y guarda el documento antes de enviarlo a producción o compras.
+      </p>
       {% if form_errors %}
       <div class="production-banner-list">
         {% for error in form_errors %}
@@ -50,6 +58,20 @@
       {% endif %}
       <form method="post" id="forecast-form">
         {% csrf_token %}
+        <div class="forecast-projection-presets" aria-label="Rangos de proyección">
+          {% for preset in projection_presets %}
+          <button
+            class="forecast-projection-preset {% if preset.days == 15 %}active{% endif %}"
+            type="button"
+            data-projection-days="{{ preset.days }}"
+            data-start="{{ preset.fecha_inicio }}"
+            data-end="{{ preset.fecha_fin }}"
+          >
+            <span>{{ preset.label }}</span>
+            <small>{{ preset.fecha_inicio }} a {{ preset.fecha_fin }}</small>
+          </button>
+          {% endfor %}
+        </div>
         <div class="forecast-filter-grid">
           <div>
             <label class="form-label" for="fecha_inicio">Fecha inicio</label>
@@ -111,13 +133,13 @@
           </details>
         </div>
         <div class="forecast-filter-submit">
-          <button class="btn btn-primary w-100" type="submit" id="forecast-submit">Calcular pronóstico</button>
+          <button class="btn btn-primary w-100" type="submit" id="forecast-submit">Generar proyección</button>
         </div>
       </form>
     </details>
   </section>
 
-  <section class="card">
+  <section class="card" id="pronosticos-guardados">
     <div class="section-header">
       <div>
         <h2 class="section-header-title">Pronósticos generados</h2>
@@ -525,6 +547,33 @@
     });
     updateSucLabel();
   }
+
+  (function () {
+    const start = document.getElementById('fecha_inicio');
+    const end = document.getElementById('fecha_fin');
+    const presets = Array.from(document.querySelectorAll('[data-projection-days]'));
+    if (!start || !end || !presets.length) return;
+
+    function markActive(button) {
+      presets.forEach((item) => item.classList.remove('active'));
+      if (button) button.classList.add('active');
+    }
+
+    presets.forEach(function (button) {
+      button.addEventListener('click', function () {
+        start.value = button.dataset.start || '';
+        end.value = button.dataset.end || '';
+        markActive(button);
+      });
+    });
+
+    if (!start.value && !end.value) {
+      const defaultPreset = presets.find((button) => button.dataset.projectionDays === '15') || presets[0];
+      start.value = defaultPreset.dataset.start || '';
+      end.value = defaultPreset.dataset.end || '';
+      markActive(defaultPreset);
+    }
+  })();
 
   (function () {
     const table = document.getElementById('saved-forecasts-table');
