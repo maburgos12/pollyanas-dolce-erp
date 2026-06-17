@@ -510,6 +510,114 @@ class LogisticaPwaApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["unidad"], self.unidad.id)
 
+    def test_bitacora_salida_libera_ruta_planeada_con_carga_parcial(self):
+        ruta = RutaEntrega.objects.create(
+            nombre="Ruta PWA",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_PLANEADA,
+            repartidor=self.repartidor,
+            unidad_operativa=self.unidad,
+        )
+        punto = PuntoLogistico.objects.create(
+            sucursal=self.sucursal,
+            nombre="Sucursal PWA",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.570000",
+            longitud="-108.470000",
+            radio_geocerca_metros=120,
+        )
+        parada = ParadaRuta.objects.create(ruta=ruta, punto=punto, orden=1)
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="pwa-cargada",
+            item_code="PZA1",
+            item_name="Producto cargado",
+            unit="PZA",
+            cantidad_solicitada="1.000",
+            cantidad_enviada_esperada="1.000",
+            cantidad_cargada="1.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+            validado_por=self.user,
+            validado_en=timezone.now(),
+        )
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="pwa-pendiente",
+            item_code="PZA2",
+            item_name="Producto pendiente",
+            unit="PZA",
+            cantidad_solicitada="1.000",
+            cantidad_enviada_esperada="1.000",
+        )
+
+        response = self.client.post(
+            reverse("api_logistica_bitacora_salida"),
+            {
+                "unidad": self.unidad.id,
+                "km_salida": "1000",
+                "nivel_gas_salida": "lleno",
+                "latitud_salida": "25.570000",
+                "longitud_salida": "-108.470000",
+                "foto_tablero_salida": SimpleUploadedFile("tablero.gif", VALID_GIF, content_type="image/gif"),
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+        ruta.refresh_from_db()
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
+        self.assertEqual(ruta.bitacora_salida_id, response.json()["id"])
+        self.assertTrue(EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_SALIDA).exists())
+
+    def test_bitacora_salida_bloquea_ruta_sin_carga_confirmada(self):
+        ruta = RutaEntrega.objects.create(
+            nombre="Ruta Sin Carga",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_PLANEADA,
+            repartidor=self.repartidor,
+            unidad_operativa=self.unidad,
+        )
+        punto = PuntoLogistico.objects.create(
+            sucursal=self.sucursal,
+            nombre="Sucursal Bloqueo",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.570000",
+            longitud="-108.470000",
+            radio_geocerca_metros=120,
+        )
+        parada = ParadaRuta.objects.create(ruta=ruta, punto=punto, orden=1)
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="pwa-pendiente-unico",
+            item_code="PZA1",
+            item_name="Producto pendiente",
+            unit="PZA",
+            cantidad_solicitada="1.000",
+            cantidad_enviada_esperada="1.000",
+        )
+
+        response = self.client.post(
+            reverse("api_logistica_bitacora_salida"),
+            {
+                "unidad": self.unidad.id,
+                "km_salida": "1000",
+                "nivel_gas_salida": "lleno",
+                "latitud_salida": "25.570000",
+                "longitud_salida": "-108.470000",
+                "foto_tablero_salida": SimpleUploadedFile("tablero.gif", VALID_GIF, content_type="image/gif"),
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "ruta_no_liberada")
+        ruta.refresh_from_db()
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
+        self.assertFalse(BitacoraSalidaLlegada.objects.filter(repartidor=self.repartidor, cerrada=False).exists())
+
     def test_occasional_driver_with_repartidor_profile_can_operate_without_repartidor_group(self):
         user = User.objects.create_user(username="conductora.ocasional", password="pass123")
         user.groups.add(Group.objects.get_or_create(name="PRODUCCION")[0])

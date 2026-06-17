@@ -142,6 +142,28 @@ def _get_repartidor_for_user(user) -> Repartidor | None:
         return None
 
 
+def _liberar_ruta_desde_bitacora_salida(*, ruta: RutaEntrega | None, bitacora: BitacoraSalidaLlegada, user) -> None:
+    if not ruta or ruta.estatus != RutaEntrega.ESTATUS_PLANEADA:
+        return
+    if ruta.unidad_operativa_id and ruta.unidad_operativa_id != bitacora.unidad_id:
+        return
+    blocker = checklist_bloquea_salida(ruta)
+    if blocker:
+        raise ValidationError(blocker)
+    ruta.estatus = RutaEntrega.ESTATUS_EN_RUTA
+    ruta.bitacora_salida = bitacora
+    ruta.hora_inicio_real = ruta.hora_inicio_real or bitacora.hora_salida or timezone.now()
+    ruta.save(update_fields=["estatus", "bitacora_salida", "hora_inicio_real", "updated_at"])
+    if not EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_SALIDA).exists():
+        EventoRuta.objects.create(
+            ruta=ruta,
+            tipo=EventoRuta.TIPO_SALIDA,
+            severidad=EventoRuta.SEVERIDAD_INFO,
+            descripcion="Ruta liberada por salida registrada desde PWA.",
+            creado_por=user,
+        )
+
+
 def _serializer_error_message(errors) -> str:
     for field, messages in errors.items():
         if isinstance(messages, (list, tuple)) and messages:
@@ -640,7 +662,18 @@ class LogisticaBitacoraSalidaView(_LogisticaBaseView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        bitacora = serializer.save(ip_registro=request.META.get("REMOTE_ADDR"))
+        try:
+            with transaction.atomic():
+                bitacora = serializer.save(ip_registro=request.META.get("REMOTE_ADDR"))
+                _liberar_ruta_desde_bitacora_salida(ruta=ruta_activa, bitacora=bitacora, user=request.user)
+        except ValidationError as exc:
+            return Response(
+                {
+                    "error": "ruta_no_liberada",
+                    "mensaje": exc.message if hasattr(exc, "message") else "; ".join(exc.messages),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         return Response(LogisticaBitacoraSalidaLlegadaSerializer(bitacora).data, status=status.HTTP_201_CREATED)
 
 
