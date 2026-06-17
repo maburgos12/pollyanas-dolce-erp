@@ -1353,7 +1353,7 @@
       const TRACKING_QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
       const ACCESS_TOKEN_KEY = "pd_logistica_access";
       const REFRESH_TOKEN_KEY = "pd_logistica_refresh";
-      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v25
+      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v26
       const app = document.getElementById("app");
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
@@ -2395,10 +2395,27 @@
         draft[field] = value;
       }
 
-      function renderChecklistCarga(checklist) {
+      function ultimaParadaCedisOrden(paradas) {
+        return Math.max(
+          0,
+          ...((paradas || [])
+            .filter((parada) => (parada.punto?.tipo || "").toUpperCase() === "CEDIS")
+            .map((parada) => Number(parada.orden || 0)))
+        );
+      }
+
+      function renderChecklistCarga(checklist, paradas = []) {
         if (!checklist) return "";
         const lineas = checklist.lineas || [];
-        const totales = Array.from(lineas.reduce((map, linea) => {
+        const cedisOrden = ultimaParadaCedisOrden(paradas);
+        const lineasPostCedis = cedisOrden ? lineas.filter((linea) => Number(linea.parada_orden || 0) > cedisOrden) : [];
+        const lineasOperativas = lineasPostCedis.length ? lineasPostCedis : lineas;
+        const cargaTitulo = lineasPostCedis.length ? "Carga desde CEDIS" : "Carga de ruta";
+        const pendientesPostCedis = lineasOperativas.filter((linea) => linea.estatus === "PENDIENTE").length;
+        const cargaDetalle = lineasPostCedis.length
+          ? `${pendientesPostCedis} línea${pendientesPostCedis === 1 ? "" : "s"} pendiente${pendientesPostCedis === 1 ? "" : "s"} para las próximas paradas.`
+          : "";
+        const totales = Array.from(lineasOperativas.reduce((map, linea) => {
           const key = `${linea.item_code || ""}|${linea.item_name || ""}|${linea.unit || ""}`.toUpperCase();
           const row = map.get(key) || {
             item_code: linea.item_code || "",
@@ -2417,15 +2434,19 @@
           map.set(key, row);
           return map;
         }, new Map()).values()).sort((a, b) => a.item_name.localeCompare(b.item_name));
-        const total = Number(checklist.total_lineas || lineas.length || 0);
-        const confirmadas = Number(checklist.lineas_confirmadas || 0);
-        const pendientes = Number(checklist.lineas_pendientes || Math.max(total - confirmadas, 0));
+        const total = lineasPostCedis.length ? lineasOperativas.length : Number(checklist.total_lineas || lineas.length || 0);
+        const confirmadas = lineasPostCedis.length
+          ? lineasOperativas.filter((linea) => linea.estatus !== "PENDIENTE").length
+          : Number(checklist.lineas_confirmadas || 0);
+        const pendientes = lineasPostCedis.length
+          ? lineasOperativas.filter((linea) => linea.estatus === "PENDIENTE").length
+          : Number(checklist.lineas_pendientes || Math.max(total - confirmadas, 0));
         const pct = total ? Math.round((confirmadas / total) * 100) : 0;
         const statusText = checklist.estatus_display || checklist.estatus || "Pendiente";
         if (!total) {
           return `
             <section class="card route-card-pwa">
-              <h2 style="margin:0;color:var(--gold);">Carga de ruta</h2>
+              <h2 style="margin:0;color:var(--gold);">${cargaTitulo}</h2>
               <p class="unit-line">Sin carga esperada sincronizada desde Point.</p>
               <p class="muted">Logística debe sincronizar las transferencias abiertas antes de confirmar salida.</p>
             </section>
@@ -2435,11 +2456,12 @@
           <section class="card route-card-pwa">
             <div class="route-head">
               <div>
-                <h2 style="margin:0;color:var(--gold);">Carga de ruta</h2>
+                <h2 style="margin:0;color:var(--gold);">${cargaTitulo}</h2>
                 <p class="route-folio">${escapeHtml(statusText)} · ${confirmadas} de ${total} línea${total === 1 ? "" : "s"}</p>
               </div>
               <span class="route-chip">${pct}%</span>
             </div>
+            ${cargaDetalle ? `<p class="unit-line">${escapeHtml(cargaDetalle)}</p>` : ""}
             <div class="route-progress-track" aria-label="Avance de carga ${pct}%">
               <div class="route-progress-fill" style="--route-progress:${pct}%;"></div>
             </div>
@@ -2457,7 +2479,7 @@
               `).join("")}
             </div>
             <div class="route-stop-list">
-              ${lineas.map((linea) => {
+              ${lineasOperativas.map((linea) => {
                 const draft = cargaDraftFor(linea.id);
                 const pendiente = linea.estatus === "PENDIENTE";
                 const diferencia = ["PARCIAL", "FALTANTE", "SOBRANTE"].includes(linea.estatus);
@@ -2565,7 +2587,7 @@
             ${renderRutaSignals({ turnoOk, unidadOk, ubicacionLista, pendientesOffline, draft, rutaData })}
           </section>
 
-          ${renderChecklistCarga(rutaData.checklist_carga)}
+          ${renderChecklistCarga(rutaData.checklist_carga, paradas)}
 
           <section class="card route-action-panel">
             ${rutaEnSeguimiento ? "" : `<div class="daily-banner warning">Ruta en planeación. Revisa la carga; el GPS se activa cuando logística libere la ruta.</div>`}
@@ -4194,7 +4216,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v25", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v26", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {
