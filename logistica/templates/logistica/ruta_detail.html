@@ -165,6 +165,14 @@
       {% if not ruta.repartidor_id or not ruta.unidad_operativa_id or not paradas %}
       <div class="route-status-note" style="margin-top:12px;">Para liberar seguimiento: asigna repartidor, unidad operativa y al menos una parada.</div>
       {% endif %}
+      {% if cierre_diferencia_disponible %}
+      <form method="post" style="margin-top:12px;" onsubmit="return confirm('¿Cerrar la ruta con diferencia autorizada y alertar a Logística?');">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="cerrar_con_diferencia_autorizada">
+        <input type="hidden" name="notas_cierre_diferencia" value="Cierre autorizado con diferencia para revisión posterior de Logística.">
+        <button class="btn btn-danger" type="submit">Cerrar con diferencia autorizada</button>
+      </form>
+      {% endif %}
       {% endif %}
       <div class="kpi-grid" style="margin-top:14px;">
         {% for card in operational_health_cards %}

@@ -44,6 +44,7 @@ from .services_google_routes import recalcular_ruta_programada
 from .services_google_roads import snap_gps_path_to_roads
 from .services_carga_ruta import (
     checklist_bloquea_salida,
+    cerrar_ruta_con_diferencia_autorizada,
     confirmar_checklist_carga_manual,
     registrar_recarga_cedis,
     sincronizar_checklist_carga_desde_point,
@@ -2035,6 +2036,27 @@ def ruta_detail(request, pk: int):
                 messages.success(request, evento.descripcion)
             return redirect("logistica:ruta_detail", pk=ruta.id)
 
+        if action == "cerrar_con_diferencia_autorizada":
+            try:
+                sincronizar_recepcion_desde_point(ruta=ruta, user=request.user, ejecutar_sync=False)
+                evento = cerrar_ruta_con_diferencia_autorizada(
+                    ruta=ruta,
+                    user=request.user,
+                    notas=(request.POST.get("notas_cierre_diferencia") or "").strip(),
+                )
+            except ValidationError as exc:
+                messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+            else:
+                log_event(
+                    request.user,
+                    "UPDATE",
+                    "logistica.RutaEntrega",
+                    str(ruta.id),
+                    {"folio": ruta.folio, "accion": "cerrar_con_diferencia_autorizada"},
+                )
+                messages.warning(request, evento.descripcion)
+            return redirect("logistica:ruta_detail", pk=ruta.id)
+
         if action == "add_parada":
             punto_id = (request.POST.get("punto") or "").strip()
             punto = PuntoLogistico.objects.filter(pk=int(punto_id), activo=True).first() if punto_id.isdigit() else None
@@ -2491,6 +2513,15 @@ def ruta_detail(request, pk: int):
             )
         )
     )
+    cierre_diferencia_disponible = bool(
+        can_manage_submodule(request.user, "logistica", "rutas")
+        and ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA
+        and not ruta.paradas.filter(estado=ParadaRuta.ESTADO_PENDIENTE).exists()
+        and not ruta.paradas.filter(entrega_estado=ParadaRuta.ENTREGA_PENDIENTE).exists()
+        and ruta.paradas.filter(
+            entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA]
+        ).exists()
+    )
 
     context = {
         "module_tabs": _module_tabs("rutas", request.user),
@@ -2509,6 +2540,7 @@ def ruta_detail(request, pk: int):
         "checklist_carga": checklist_carga,
         "carga_manual_pendiente": carga_manual_pendiente,
         "recarga_cedis_disponible": recarga_cedis_disponible,
+        "cierre_diferencia_disponible": cierre_diferencia_disponible,
         "recepcion_point_rows": recepcion_point_rows,
         "recepcion_point_totales": recepcion_point_totales,
         "enterprise_chain": enterprise_chain,

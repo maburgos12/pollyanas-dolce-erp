@@ -4,12 +4,15 @@ from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from core.models import Sucursal
+from core.access import can_manage_submodule
+from core.models import Notificacion, Sucursal
+from core.notificaciones import crear_notificaciones
 from pos_bridge.models import PointTransferLine
 from pos_bridge.services.movement_sync_service import PointMovementSyncService
 from pos_bridge.services.open_transfer_sync_service import OpenTransferSyncService, resolve_requesting_erp_branch
@@ -425,6 +428,86 @@ def registrar_recarga_cedis(*, ruta: RutaEntrega, user, notas: str = "") -> Even
         },
         creado_por=user,
     )
+
+
+def _usuarios_logistica_rutas():
+    User = get_user_model()
+    usuarios = User.objects.filter(is_active=True).prefetch_related("groups", "module_access")
+    return [usuario for usuario in usuarios if can_manage_submodule(usuario, "logistica", "rutas")]
+
+
+def _resumen_diferencias_cierre(ruta: RutaEntrega) -> list[dict]:
+    checklist = getattr(ruta, "checklist_carga", None)
+    resumen = []
+    for parada in ruta.paradas.filter(
+        entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA]
+    ).order_by("orden", "id"):
+        item = {
+            "parada_id": parada.id,
+            "orden": parada.orden,
+            "punto": parada.punto_nombre_snapshot,
+            "entrega_estado": parada.entrega_estado,
+            "productos": [],
+        }
+        if checklist:
+            for linea in checklist.lineas.filter(parada=parada).select_related("point_transfer_line").order_by("item_name", "id"):
+                esperado = _cantidad_referencia_entrega(linea)
+                recibido = _cantidad_recibida_linea(linea)
+                if recibido != esperado:
+                    item["productos"].append(
+                        {
+                            "codigo": linea.item_code,
+                            "producto": linea.item_name,
+                            "esperado": str(esperado),
+                            "recibido": str(recibido) if recibido is not None else None,
+                        }
+                    )
+        resumen.append(item)
+    return resumen
+
+
+@transaction.atomic
+def cerrar_ruta_con_diferencia_autorizada(*, ruta: RutaEntrega, user, notas: str = "") -> EventoRuta:
+    ruta = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
+    if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
+        raise ValidationError("Solo puedes cerrar con diferencia una ruta en seguimiento.")
+    if ruta.paradas.filter(estado=ParadaRuta.ESTADO_PENDIENTE).exists():
+        raise ValidationError("No se puede cerrar: hay paradas pendientes por visitar u omitir.")
+    if ruta.paradas.filter(entrega_estado=ParadaRuta.ENTREGA_PENDIENTE).exists():
+        raise ValidationError("No se puede cerrar: hay paradas sin entrega confirmada.")
+    if not ruta.paradas.filter(
+        entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA]
+    ).exists():
+        raise ValidationError("Esta ruta no tiene diferencias; usa el cierre normal.")
+
+    diferencias = _resumen_diferencias_cierre(ruta)
+    ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
+    ruta.hora_cierre_real = ruta.hora_cierre_real or timezone.now()
+    ruta.save(update_fields=["estatus", "hora_cierre_real", "updated_at"])
+    evento = EventoRuta.objects.create(
+        ruta=ruta,
+        tipo=EventoRuta.TIPO_CIERRE,
+        severidad=EventoRuta.SEVERIDAD_ALERTA,
+        descripcion="Ruta cerrada con diferencia autorizada para revisión de Logística.",
+        metadata={
+            "tipo": "cierre_con_diferencia_autorizada",
+            "diferencias": diferencias,
+            "notas": notas,
+        },
+        creado_por=user,
+    )
+    crear_notificaciones(
+        _usuarios_logistica_rutas(),
+        titulo=f"Ruta con diferencia: {ruta.folio}",
+        mensaje="Cerrada operativamente con diferencia autorizada. Revisar evidencia y recepción Point.",
+        url=f"/logistica/rutas/{ruta.id}/",
+        tipo=Notificacion.TIPO_SISTEMA,
+        prioridad=Notificacion.PRIORIDAD_ALTA,
+        actor=user,
+        objeto_tipo="logistica.RutaEntrega",
+        objeto_id=ruta.id,
+    )
+    return evento
 
 
 @transaction.atomic

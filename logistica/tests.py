@@ -17,7 +17,7 @@ from django.utils import timezone
 
 from core.access import ACCESS_MANAGE, ACCESS_VIEW
 from core.email_rendering import render_email_to_string
-from core.models import Sucursal, UserModuleAccess
+from core.models import Notificacion, Sucursal, UserModuleAccess
 from crm.models import Cliente, PedidoCliente
 from logistica.models import (
     BitacoraSalidaLlegada,
@@ -33,7 +33,12 @@ from logistica.models import (
     UbicacionRuta,
     Unidad,
 )
-from logistica.services_carga_ruta import registrar_recarga_cedis, sincronizar_checklist_carga_desde_point, sincronizar_recepcion_desde_point
+from logistica.services_carga_ruta import (
+    cerrar_ruta_con_diferencia_autorizada,
+    registrar_recarga_cedis,
+    sincronizar_checklist_carga_desde_point,
+    sincronizar_recepcion_desde_point,
+)
 from logistica.services_google_roads import snap_gps_path_to_roads
 from logistica.services_rutas_control import distancia_metros, registrar_ubicacion_ruta, resumen_control_rutas
 from logistica.services_tiempos_ruta import resumen_tiempos_ruta
@@ -2123,6 +2128,61 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
         self.assertContains(response, "diferencias o entregas no recibidas")
+
+    def test_ruta_detail_muestra_cierre_con_diferencia_autorizada(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        self.parada.estado = ParadaRuta.ESTADO_VISITADA
+        self.parada.entrega_estado = ParadaRuta.ENTREGA_CON_DIFERENCIA
+        self.parada.hora_llegada_real = timezone.now()
+        self.parada.save(update_fields=["estado", "entrega_estado", "hora_llegada_real", "actualizado_en"])
+
+        response = self.client.get(reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'value="cerrar_con_diferencia_autorizada"')
+        self.assertContains(response, "Cerrar con diferencia autorizada")
+
+    def test_cerrar_ruta_con_diferencia_autorizada_notifica_logistica(self):
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        supervisor = User.objects.create_user(username="logistica.supervisor", password="pass123")
+        UserModuleAccess.objects.create(user=supervisor, module="logistica", access=ACCESS_MANAGE)
+        checklist, linea, transfer_line = self._crear_linea_carga_con_transferencia_recibida(
+            received_quantity="3.000",
+            is_received=True,
+        )
+        self.parada.estado = ParadaRuta.ESTADO_VISITADA
+        self.parada.entrega_estado = ParadaRuta.ENTREGA_CON_DIFERENCIA
+        self.parada.hora_llegada_real = timezone.now()
+        self.parada.hora_salida_real = timezone.now()
+        self.parada.save(
+            update_fields=[
+                "estado",
+                "entrega_estado",
+                "hora_llegada_real",
+                "hora_salida_real",
+                "actualizado_en",
+            ]
+        )
+
+        evento = cerrar_ruta_con_diferencia_autorizada(
+            ruta=self.ruta,
+            user=self.user,
+            notas="Diferencia revisable al cierre.",
+        )
+
+        self.ruta.refresh_from_db()
+        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
+        self.assertEqual(evento.metadata["tipo"], "cierre_con_diferencia_autorizada")
+        self.assertEqual(evento.metadata["diferencias"][0]["productos"][0]["recibido"], "3.000")
+        self.assertTrue(
+            Notificacion.objects.filter(
+                usuario=supervisor,
+                titulo=f"Ruta con diferencia: {self.ruta.folio}",
+                prioridad=Notificacion.PRIORIDAD_ALTA,
+                url=f"/logistica/rutas/{self.ruta.id}/",
+            ).exists()
+        )
 
     def test_api_ruta_activa_expone_recepcion_point_por_producto(self):
         self.client.force_login(self.user)
