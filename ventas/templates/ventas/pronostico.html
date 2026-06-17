@@ -5,7 +5,7 @@
 {% block body_class %}page-pronostico-ventas{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/ventas-templates-ventas-pronostico.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/ventas-templates-ventas-pronostico.css?v=20260617-proyecciones-v2">
 {% endblock %}
 
 {% block content %}
@@ -20,21 +20,29 @@
       <div class="forecast-actions">
         <a class="btn btn-secondary" href="{% url 'ventas:pronostico_guardados' %}">Ver guardados</a>
         {% if resumen %}
-        <button class="btn btn-primary" type="button" id="open-save-forecast">Guardar pronóstico</button>
+        <a class="btn btn-primary" href="#revision-ventas">Revisar y guardar</a>
         <button class="btn btn-secondary" type="button" id="export-forecast-csv">Exportar CSV</button>
         {% endif %}
       </div>
     </div>
   </section>
 
+  <nav class="forecast-workflow-tabs" aria-label="Flujo de pronósticos">
+    <a class="forecast-workflow-tab" href="#pronosticos-guardados">Pronósticos</a>
+    <a class="forecast-workflow-tab active" href="#proyecciones">Proyecciones</a>
+  </nav>
+
   <section class="card">
-    <details id="nuevo-calculo">
+    <details id="proyecciones" open>
       <summary class="pd-u-8400ad8a3f">
         <div class="pd-u-c3cd92807b">
-          ＋ Calcular nuevo pronóstico
+          ＋ Generar proyección
         </div>
       </summary>
-      <div class="card-header">Filtros</div>
+      <div class="card-header">Proyección de ventas</div>
+      <p class="executive-section-copy forecast-projection-copy">
+        El ERP calcula el rango; ventas revisa, ajusta y guarda el documento antes de enviarlo a producción o compras.
+      </p>
       {% if form_errors %}
       <div class="production-banner-list">
         {% for error in form_errors %}
@@ -50,6 +58,20 @@
       {% endif %}
       <form method="post" id="forecast-form">
         {% csrf_token %}
+        <div class="forecast-projection-presets" aria-label="Rangos de proyección">
+          {% for preset in projection_presets %}
+          <button
+            class="forecast-projection-preset {% if preset.days == 15 %}active{% endif %}"
+            type="button"
+            data-projection-days="{{ preset.days }}"
+            data-start="{{ preset.fecha_inicio }}"
+            data-end="{{ preset.fecha_fin }}"
+          >
+            <span>{{ preset.label }}</span>
+            <small>{{ preset.fecha_inicio }} a {{ preset.fecha_fin }}</small>
+          </button>
+          {% endfor %}
+        </div>
         <div class="forecast-filter-grid">
           <div>
             <label class="form-label" for="fecha_inicio">Fecha inicio</label>
@@ -111,13 +133,13 @@
           </details>
         </div>
         <div class="forecast-filter-submit">
-          <button class="btn btn-primary w-100" type="submit" id="forecast-submit">Calcular pronóstico</button>
+          <button class="btn btn-primary w-100" type="submit" id="forecast-submit">Generar proyección</button>
         </div>
       </form>
     </details>
   </section>
 
-  <section class="card">
+  <section class="card" id="pronosticos-guardados">
     <div class="section-header">
       <div>
         <h2 class="section-header-title">Pronósticos generados</h2>
@@ -248,6 +270,68 @@
   <div class="forecast-special-banner">
     {{ resumen.explicacion_modelo }}
   </div>
+  {% endif %}
+
+  {% if adjustment_rows %}
+  <section class="card" id="revision-ventas">
+    <div class="section-header">
+      <div>
+        <h2 class="section-header-title">Revisión de ventas</h2>
+        <p class="executive-section-copy">Ajusta cantidades antes de guardar el consolidado. Nada se guarda hasta confirmar aquí.</p>
+      </div>
+      <div class="forecast-branch-totals">
+        <span>Base {{ adjustment_totals.total_base|intcomma }}</span>
+        <span>Ajuste {{ adjustment_totals.total_ajuste|intcomma }}</span>
+        <span>Final {{ adjustment_totals.total_final|intcomma }}</span>
+      </div>
+    </div>
+    <form method="post" action="{% url 'ventas:pronostico_guardar' %}">
+      {% csrf_token %}
+      <input type="hidden" name="fecha_inicio" value="{{ fecha_inicio }}">
+      <input type="hidden" name="fecha_fin" value="{{ fecha_fin }}">
+      {% for branch in branches %}
+      {% if branch.id in selected_branch_ids %}
+      <input type="hidden" name="sucursales" value="{{ branch.id }}">
+      {% endif %}
+      {% endfor %}
+      {% for sku in selected_product_skus %}
+      <input type="hidden" name="productos_incluidos" value="{{ sku }}">
+      {% endfor %}
+      <div class="forecast-save-name">
+        <label class="form-label" for="forecast-name">Nombre del consolidado</label>
+        <input class="form-control" id="forecast-name" name="nombre" value="Proyección {{ fecha_inicio }} a {{ fecha_fin }}" maxlength="200" required>
+      </div>
+      <div class="table-responsive production-table-wrap">
+        <table class="table forecast-adjustments-table">
+          <thead>
+            <tr>
+              <th>Categoría</th>
+              <th>Producto</th>
+              <th class="text-end">Base</th>
+              <th class="text-end">Ajuste</th>
+              <th class="text-end">Total final</th>
+              <th>Nota</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in adjustment_rows %}
+            <tr>
+              <td>{{ row.categoria }}</td>
+              <td>{{ row.nombre }}</td>
+              <td class="text-end">{{ row.base|intcomma }}</td>
+              <td><input class="form-control forecast-adjustment-input" type="number" step="1" name="ajuste_{{ row.key }}" value="{{ row.ajuste }}"></td>
+              <td class="text-end">{{ row.total_final|intcomma }}</td>
+              <td><input class="form-control" name="nota_{{ row.key }}" value="{{ row.nota }}" maxlength="160"></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="forecast-adjustment-actions">
+        <button class="btn btn-primary" type="submit">Guardar proyección consolidada</button>
+      </div>
+    </form>
+  </section>
   {% endif %}
 
   <section class="card">
@@ -430,33 +514,6 @@
 
 </div>
 
-{% if resumen %}
-<div class="forecast-modal-backdrop" id="save-forecast-modal" aria-hidden="true">
-  <div class="forecast-modal" role="dialog" aria-modal="true" aria-labelledby="save-forecast-title">
-    <h2 class="forecast-modal-title" id="save-forecast-title">Guardar pronóstico</h2>
-    <p class="forecast-modal-copy">Guarda este cálculo para consultarlo después o descargarlo en Excel.</p>
-    <form method="post" action="{% url 'ventas:pronostico_guardar' %}">
-      {% csrf_token %}
-      <input type="hidden" name="fecha_inicio" value="{{ fecha_inicio }}">
-      <input type="hidden" name="fecha_fin" value="{{ fecha_fin }}">
-      {% for branch in branches %}
-      {% if branch.id in selected_branch_ids %}
-      <input type="hidden" name="sucursales" value="{{ branch.id }}">
-      {% endif %}
-      {% endfor %}
-      {% for sku in selected_product_skus %}
-      <input type="hidden" name="productos_incluidos" value="{{ sku }}">
-      {% endfor %}
-      <label class="form-label" for="forecast-name">Nombre</label>
-      <input class="form-control" id="forecast-name" name="nombre" value="Pronóstico {{ fecha_inicio }} a {{ fecha_fin }}" maxlength="200" required>
-      <div class="forecast-modal-actions">
-        <button class="btn btn-secondary" type="button" id="close-save-forecast">Cancelar</button>
-        <button class="btn btn-primary" type="submit">Guardar</button>
-      </div>
-    </form>
-  </div>
-</div>
-{% endif %}
 {% endblock %}
 
 {% block extra_js %}
@@ -525,6 +582,33 @@
     });
     updateSucLabel();
   }
+
+  (function () {
+    const start = document.getElementById('fecha_inicio');
+    const end = document.getElementById('fecha_fin');
+    const presets = Array.from(document.querySelectorAll('[data-projection-days]'));
+    if (!start || !end || !presets.length) return;
+
+    function markActive(button) {
+      presets.forEach((item) => item.classList.remove('active'));
+      if (button) button.classList.add('active');
+    }
+
+    presets.forEach(function (button) {
+      button.addEventListener('click', function () {
+        start.value = button.dataset.start || '';
+        end.value = button.dataset.end || '';
+        markActive(button);
+      });
+    });
+
+    if (!start.value && !end.value) {
+      const defaultPreset = presets.find((button) => button.dataset.projectionDays === '15') || presets[0];
+      start.value = defaultPreset.dataset.start || '';
+      end.value = defaultPreset.dataset.end || '';
+      markActive(defaultPreset);
+    }
+  })();
 
   (function () {
     const table = document.getElementById('saved-forecasts-table');
@@ -630,25 +714,5 @@
     });
   })();
 
-  (function () {
-    const modal = document.getElementById('save-forecast-modal');
-    const openSave = document.getElementById('open-save-forecast');
-    const closeSave = document.getElementById('close-save-forecast');
-    if (!modal || !openSave || !closeSave) return;
-    openSave.addEventListener('click', function () {
-      modal.classList.add('active');
-      modal.setAttribute('aria-hidden', 'false');
-    });
-    closeSave.addEventListener('click', function () {
-      modal.classList.remove('active');
-      modal.setAttribute('aria-hidden', 'true');
-    });
-    modal.addEventListener('click', function (event) {
-      if (event.target === modal) {
-        modal.classList.remove('active');
-        modal.setAttribute('aria-hidden', 'true');
-      }
-    });
-  })();
 </script>
 {% endblock %}

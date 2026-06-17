@@ -32,6 +32,10 @@
   .page-pronostico-ventas .forecast-branch-totals { display:flex; gap:14px; flex-wrap:wrap; color:#7b1a48; font-weight:800; font-size:0.92rem; }
   .page-pronostico-ventas .forecast-chart-wrap { min-height:280px; }
   .page-pronostico-ventas .forecast-confidence { color:#3d0a24; font-weight:800; margin:-8px 0 18px; }
+  .page-pronostico-ventas .forecast-adjustments-table { --table-min-width: 960px; }
+  .page-pronostico-ventas .forecast-adjustments-table td:nth-child(2) { min-width: 260px; }
+  .page-pronostico-ventas .forecast-adjustment-input { min-width: 96px; text-align:right; }
+  .page-pronostico-ventas .forecast-adjustment-actions { display:flex; justify-content:flex-end; margin-top:14px; }
   .page-pronostico-ventas .comparison-alert { display:inline-flex; align-items:center; justify-content:center; min-width:34px; border-radius:999px; padding:3px 8px; font-weight:900; }
   .page-pronostico-ventas .comparison-alert.ok { background:#e8f5ee; color:#198754; }
   .page-pronostico-ventas .comparison-alert.sobre { background:#fff3cd; color:#9a6700; }
