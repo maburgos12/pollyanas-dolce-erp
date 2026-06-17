@@ -19,6 +19,7 @@ from core.access import ACCESS_MANAGE, ACCESS_VIEW
 from core.email_rendering import render_email_to_string
 from core.models import Notificacion, Sucursal, UserModuleAccess
 from crm.models import Cliente, PedidoCliente
+from api.logistica_serializers import RutaCargaChecklistSerializer
 from logistica.models import (
     BitacoraSalidaLlegada,
     EntregaRuta,
@@ -35,6 +36,7 @@ from logistica.models import (
 )
 from logistica.services_carga_ruta import (
     cerrar_ruta_con_diferencia_autorizada,
+    obtener_checklist_carga_detallado,
     registrar_recarga_cedis,
     sincronizar_checklist_carga_desde_point,
     sincronizar_recepcion_desde_point,
@@ -2265,6 +2267,16 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea["point_received_quantity"], "5.000")
         self.assertEqual(linea["point_recepcion_estado"], "RECIBIDO_OK")
         self.assertIn("entrega_estado", response.json()["paradas"][0])
+
+    def test_checklist_detallado_serializa_sin_consultas_por_linea(self):
+        self._crear_linea_carga_con_transferencia_recibida()
+        checklist = obtener_checklist_carga_detallado(self.ruta)
+
+        with self.assertNumQueries(0):
+            data = RutaCargaChecklistSerializer(checklist).data
+
+        self.assertEqual(data["total_lineas"], 1)
+        self.assertEqual(data["lineas"][0]["point_recepcion_estado"], "RECIBIDO_OK")
 
     def test_db_bloquea_dos_rutas_en_ruta_mismo_repartidor(self):
         with self.assertRaises(IntegrityError):

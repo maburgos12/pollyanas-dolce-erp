@@ -7,7 +7,7 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.utils import timezone
 
 from core.access import can_manage_submodule
@@ -77,6 +77,21 @@ def obtener_checklist_carga(ruta: RutaEntrega) -> RutaCargaChecklist:
         defaults={"estatus": RutaCargaChecklist.ESTATUS_PENDIENTE},
     )
     return checklist
+
+
+def obtener_checklist_carga_detallado(ruta: RutaEntrega) -> RutaCargaChecklist:
+    checklist = obtener_checklist_carga(ruta)
+    lineas_qs = RutaCargaChecklistLinea.objects.select_related(
+        "parada",
+        "point_transfer_line",
+        "validado_por",
+        "validado_por__empleado_rrhh",
+    ).order_by("parada__orden", "item_name", "id")
+    return (
+        RutaCargaChecklist.objects.select_related("ruta")
+        .prefetch_related(Prefetch("lineas", queryset=lineas_qs))
+        .get(pk=checklist.pk)
+    )
 
 
 def checklist_tiene_recepcion_point_pendiente(ruta: RutaEntrega) -> bool:
