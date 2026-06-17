@@ -33,7 +33,7 @@ from logistica.models import (
     UbicacionRuta,
     Unidad,
 )
-from logistica.services_carga_ruta import sincronizar_checklist_carga_desde_point, sincronizar_recepcion_desde_point
+from logistica.services_carga_ruta import registrar_recarga_cedis, sincronizar_checklist_carga_desde_point, sincronizar_recepcion_desde_point
 from logistica.services_google_roads import snap_gps_path_to_roads
 from logistica.services_rutas_control import distancia_metros, registrar_ubicacion_ruta, resumen_control_rutas
 from logistica.services_tiempos_ruta import resumen_tiempos_ruta
@@ -2432,6 +2432,64 @@ class LogisticaControlRutasTests(TestCase):
         ruta.refresh_from_db()
         self.assertEqual(released.status_code, 200)
         self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
+
+    def test_ruta_detail_autoriza_salida_parcial_con_recarga_cedis(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        self._crear_transferencia_point_abierta()
+        checklist = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False).checklist
+        linea = checklist.lineas.get()
+        linea.cantidad_cargada = Decimal("0")
+        linea.estatus = RutaCargaChecklistLinea.ESTATUS_FALTANTE
+        linea.motivo_diferencia = RutaCargaChecklistLinea.MOTIVO_PRODUCCION_NO_LISTA
+        linea.save(update_fields=["cantidad_cargada", "estatus", "motivo_diferencia", "actualizado_en"])
+        checklist.estatus = RutaCargaChecklist.ESTATUS_CON_INCIDENCIA
+        checklist.save(update_fields=["estatus", "actualizado_en"])
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
+            {"action": "registrar_recarga_cedis", "notas_recarga_cedis": "Regresa a CEDIS por producto pendiente."},
+            follow=True,
+        )
+        salida = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
+            {"action": "ruta_status", "estatus": RutaEntrega.ESTATUS_EN_RUTA},
+            follow=True,
+        )
+
+        ruta.refresh_from_db()
+        checklist.refresh_from_db()
+        evento = ruta.eventos.get(metadata__tipo="recarga_cedis")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Regresa a CEDIS", checklist.motivo_override)
+        self.assertEqual(evento.metadata["numero"], 1)
+        self.assertEqual(evento.metadata["diferencias"], 1)
+        self.assertEqual(salida.status_code, 200)
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
+
+    def test_registrar_recarga_cedis_en_ruta_no_cierra_ni_duplica_ruta(self):
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        self._crear_transferencia_point_abierta()
+        checklist = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False).checklist
+        checklist.lineas.update(
+            cantidad_cargada=Decimal("5.000"),
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+            validado_por=self.user,
+            validado_en=timezone.now(),
+        )
+        checklist.estatus = RutaCargaChecklist.ESTATUS_CONFIRMADA
+        checklist.save(update_fields=["estatus", "actualizado_en"])
+        ruta.estatus = RutaEntrega.ESTATUS_EN_RUTA
+        ruta.save(update_fields=["estatus", "updated_at"])
+
+        evento = registrar_recarga_cedis(ruta=ruta, user=self.user, notas="Segunda carga en CEDIS.")
+
+        ruta.refresh_from_db()
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
+        self.assertEqual(RutaEntrega.objects.filter(pk=ruta.pk).count(), 1)
+        self.assertEqual(evento.metadata["tipo"], "recarga_cedis")
+        self.assertEqual(evento.metadata["numero"], 1)
 
     def test_api_repartidor_valida_linea_carga_e_idempotencia(self):
         self.client.force_login(self.user)

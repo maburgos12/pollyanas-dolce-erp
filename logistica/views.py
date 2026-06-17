@@ -33,6 +33,7 @@ from .models import (
     ReparacionUnidad,
     Repartidor,
     ReporteUnidad,
+    RutaCargaChecklist,
     RutaCargaChecklistLinea,
     RutaEntrega,
     ServicioRealizadoUnidad,
@@ -44,6 +45,7 @@ from .services_google_roads import snap_gps_path_to_roads
 from .services_carga_ruta import (
     checklist_bloquea_salida,
     confirmar_checklist_carga_manual,
+    registrar_recarga_cedis,
     sincronizar_checklist_carga_desde_point,
     sincronizar_recepcion_desde_point,
 )
@@ -2020,6 +2022,19 @@ def ruta_detail(request, pk: int):
                 messages.success(request, f"Carga manual confirmada: {lineas} línea(s). Ya puedes liberar la ruta.")
             return redirect("logistica:ruta_detail", pk=ruta.id)
 
+        if action == "registrar_recarga_cedis":
+            try:
+                evento = registrar_recarga_cedis(
+                    ruta=ruta,
+                    user=request.user,
+                    notas=(request.POST.get("notas_recarga_cedis") or "").strip(),
+                )
+            except ValidationError as exc:
+                messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+            else:
+                messages.success(request, evento.descripcion)
+            return redirect("logistica:ruta_detail", pk=ruta.id)
+
         if action == "add_parada":
             punto_id = (request.POST.get("punto") or "").strip()
             punto = PuntoLogistico.objects.filter(pk=int(punto_id), activo=True).first() if punto_id.isdigit() else None
@@ -2464,6 +2479,18 @@ def ruta_detail(request, pk: int):
         and ruta.estatus == RutaEntrega.ESTATUS_PLANEADA
         and checklist_carga.lineas.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists()
     )
+    recarga_cedis_disponible = bool(
+        checklist_carga
+        and can_manage_submodule(request.user, "logistica", "rutas")
+        and (
+            ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA
+            or (
+                ruta.estatus == RutaEntrega.ESTATUS_PLANEADA
+                and checklist_carga.estatus == RutaCargaChecklist.ESTATUS_CON_INCIDENCIA
+                and not checklist_carga.lineas.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists()
+            )
+        )
+    )
 
     context = {
         "module_tabs": _module_tabs("rutas", request.user),
@@ -2481,6 +2508,7 @@ def ruta_detail(request, pk: int):
         "tiempos_ruta": tiempos_ruta,
         "checklist_carga": checklist_carga,
         "carga_manual_pendiente": carga_manual_pendiente,
+        "recarga_cedis_disponible": recarga_cedis_disponible,
         "recepcion_point_rows": recepcion_point_rows,
         "recepcion_point_totales": recepcion_point_totales,
         "enterprise_chain": enterprise_chain,

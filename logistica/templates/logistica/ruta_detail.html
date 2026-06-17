@@ -303,6 +303,16 @@
         <button class="btn btn-primary" type="submit">Confirmar carga manual</button>
       </form>
       {% endif %}
+      {% if recarga_cedis_disponible %}
+      <form method="post" onsubmit="return confirm('¿Registrar recarga CEDIS para esta misma ruta?');">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="registrar_recarga_cedis">
+        <input type="hidden" name="notas_recarga_cedis" value="Recarga registrada por CEDIS/Logística.">
+        <button class="btn btn-secondary" type="submit">
+          {% if ruta.estatus == "PLANEADA" %}Autorizar salida parcial con recarga{% else %}Registrar recarga CEDIS{% endif %}
+        </button>
+      </form>
+      {% endif %}
     </div>
     {% if recepcion_point_totales %}
     <div class="table-responsive" style="margin-top:14px;">

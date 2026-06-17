@@ -388,6 +388,46 @@ def checklist_bloquea_salida(ruta: RutaEntrega) -> str | None:
 
 
 @transaction.atomic
+def registrar_recarga_cedis(*, ruta: RutaEntrega, user, notas: str = "") -> EventoRuta:
+    if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
+        raise ValidationError("La recarga CEDIS solo aplica a rutas planeadas o en ruta.")
+    checklist = RutaCargaChecklist.objects.select_for_update().filter(ruta=ruta).first()
+    if not checklist or not checklist.lineas.exists():
+        raise ValidationError("La ruta no tiene carga esperada para registrar recarga CEDIS.")
+
+    pendientes = checklist.lineas.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).count()
+    diferencias = checklist.lineas.exclude(
+        estatus__in=[RutaCargaChecklistLinea.ESTATUS_CARGADA, RutaCargaChecklistLinea.ESTATUS_NO_APLICA]
+    ).count()
+    if ruta.estatus == RutaEntrega.ESTATUS_PLANEADA:
+        if pendientes:
+            raise ValidationError("Primero valida cada línea como cargada, parcial o faltante.")
+        if checklist.estatus != RutaCargaChecklist.ESTATUS_CON_INCIDENCIA:
+            raise ValidationError("La salida parcial solo aplica cuando hay faltantes o parciales.")
+        checklist.motivo_override = notas or "Salida parcial autorizada con recarga CEDIS programada."
+        checklist.save(update_fields=["motivo_override", "actualizado_en"])
+
+    numero = (
+        EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL, metadata__tipo="recarga_cedis").count()
+        + 1
+    )
+    return EventoRuta.objects.create(
+        ruta=ruta,
+        tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+        severidad=EventoRuta.SEVERIDAD_INFO,
+        descripcion=f"Recarga CEDIS {numero} registrada por logística.",
+        metadata={
+            "tipo": "recarga_cedis",
+            "numero": numero,
+            "pendientes": pendientes,
+            "diferencias": diferencias,
+            "notas": notas,
+        },
+        creado_por=user,
+    )
+
+
+@transaction.atomic
 def confirmar_checklist_carga_manual(*, ruta: RutaEntrega, user, notas: str = "") -> int:
     if ruta.estatus != RutaEntrega.ESTATUS_PLANEADA:
         raise ValidationError("Solo puedes confirmar carga manual en una ruta planeada.")
