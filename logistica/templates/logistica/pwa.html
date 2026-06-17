@@ -1353,7 +1353,7 @@
       const TRACKING_QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
       const ACCESS_TOKEN_KEY = "pd_logistica_access";
       const REFRESH_TOKEN_KEY = "pd_logistica_refresh";
-      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v26
+      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v27
       const app = document.getElementById("app");
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
@@ -2587,7 +2587,10 @@
             ${renderRutaSignals({ turnoOk, unidadOk, ubicacionLista, pendientesOffline, draft, rutaData })}
           </section>
 
-          ${renderChecklistCarga(rutaData.checklist_carga, paradas)}
+          <section class="card route-card-pwa">
+            <h2 style="margin:0;color:var(--gold);">Paradas de reparto</h2>
+            ${renderParadasRuta(paradas)}
+          </section>
 
           <section class="card route-action-panel">
             ${rutaEnSeguimiento ? "" : `<div class="daily-banner warning">Ruta en planeación. Revisa la carga; el GPS se activa cuando logística libere la ruta.</div>`}
@@ -2607,10 +2610,7 @@
               <button class="primary-btn" type="button" onclick="registrarTrackingRuta()" ${rutaEnSeguimiento && turnoOk && unidadOk && ubicacionLista && !draft.guardando ? "" : "disabled"}>${draft.guardando ? "Guardando..." : "Registrar seguimiento"}</button>
             </div>
           </section>
-          <section class="card route-card-pwa">
-            <h2 style="margin:0;color:var(--gold);">Paradas de reparto</h2>
-            ${renderParadasRuta(paradas)}
-          </section>
+          ${renderChecklistCarga(rutaData.checklist_carga, paradas)}
           <section class="card route-card-pwa">
             <h2 style="margin:0;color:var(--gold);">Eventos recientes</h2>
             ${renderEventosRuta(rutaData.eventos || [])}
@@ -4216,7 +4216,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v26", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v27", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {
