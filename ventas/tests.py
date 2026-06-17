@@ -81,6 +81,10 @@ class VentasModuleTests(SimpleTestCase):
         self.assertNotIn("open-save-forecast", template)
         self.assertIn("fecha_inicio", template)
         self.assertIn("fecha_fin", template)
+        self.assertIn("forecast-loading-overlay", template)
+        self.assertIn("data-forecast-loading-form", template)
+        self.assertIn("Preparando matriz de ajustes por día", template)
+        self.assertIn("No cierres esta ventana", template)
 
         presets = _projection_presets()
         self.assertEqual([preset["label"] for preset in presets], ["Semana", "15 días", "30 días"])
