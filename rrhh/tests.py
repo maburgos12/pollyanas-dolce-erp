@@ -333,6 +333,48 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertContains(response, "Ajuste manual")
         self.assertContains(response, "Carolina Cayetano")
 
+    def test_vacaciones_historial_filtra_y_concilia_saldo(self):
+        from datetime import date
+
+        rrhh_user = User.objects.create_user(username="paula", is_superuser=True, is_staff=True)
+        empleado = Empleado.objects.create(
+            nombre="Carolina Cayetano",
+            fecha_ingreso=date(2025, 1, 1),
+            activo=True,
+            puesto="Jefa de Produccion",
+            sucursal="CEDIS",
+        )
+        PoliticaVacaciones.objects.create(
+            antiguedad_desde=1,
+            antiguedad_hasta=5,
+            dias_laborables=Decimal("12.00"),
+            vigente_desde=date(2026, 1, 1),
+        )
+
+        self.client.force_login(rrhh_user)
+        response = self.client.get(reverse("rrhh:rrhh_vacaciones_list"), {"q": "nadie"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Sin empleados para esos filtros.")
+
+        response = self.client.post(
+            reverse("rrhh:rrhh_vacaciones_list"),
+            {
+                "action": "ajustar_saldo",
+                "empleado_id": empleado.id,
+                "periodo_anio": "2026",
+                "dias_ajuste": "-2",
+                "descripcion": "Corrección por pago timbrado",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        movimiento = MovimientoVacaciones.objects.get(empleado=empleado)
+        self.assertEqual(movimiento.tipo, MovimientoVacaciones.TIPO_AJUSTE)
+        self.assertEqual(movimiento.dias, Decimal("-2.00"))
+        self.assertEqual(movimiento.periodo_anio, 2026)
+        self.assertEqual(movimiento.actor, rrhh_user)
+        self.assertIn("[conciliacion-manual] Corrección por pago timbrado", movimiento.descripcion)
+
     def test_permiso_de_jefatura_lo_resuelve_direccion_no_rrhh(self):
         from datetime import datetime
         from zoneinfo import ZoneInfo

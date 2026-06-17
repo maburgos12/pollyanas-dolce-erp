@@ -42,6 +42,18 @@
   }
   .vac-employee-card strong { color: var(--texto); font-size: 14px; }
   .vac-employee-card span { font-size: 12px; }
+  .vac-review-tools {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+  .vac-review-tools input, .vac-review-tools select {
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    font: inherit;
+    min-width: 0;
+    padding: 9px;
+  }
   .vac-saldo-list, .vac-history-list { display: grid; gap: 8px; margin-top: 12px; max-height: 520px; overflow: auto; }
   .vac-saldo-row, .vac-history-row { border: 1px solid var(--rosa); border-radius: 8px; display: grid; gap: 8px; padding: 10px; }
   .vac-saldo-main { color: var(--texto); font-weight: 900; }
@@ -71,6 +83,28 @@
     padding: 6px 8px;
   }
   .vac-movement-line strong { color: var(--texto); }
+  .vac-adjust {
+    background: #fbf6f8;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    padding: 8px;
+  }
+  .vac-adjust summary { color: var(--vino); cursor: pointer; font-weight: 900; }
+  .vac-adjust-form {
+    align-items: end;
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    margin-top: 8px;
+  }
+  .vac-adjust-form label { color: var(--texto-light); display: grid; font-size: 11px; font-weight: 900; gap: 4px; text-transform: uppercase; }
+  .vac-adjust-form input {
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    font: inherit;
+    min-width: 0;
+    padding: 9px;
+  }
   .vac-status-panel { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 16px; }
   .vac-status-strip { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 14px; }
   .vac-status-tab {
@@ -115,6 +149,7 @@
   }
   @media (max-width: 760px) {
     .vac-head { grid-template-columns: 1fr; }
+    .vac-review-tools, .vac-adjust-form { grid-template-columns: 1fr; }
     .vac-status-strip, .vac-stats { grid-template-columns: 1fr; }
     .vac-card-row { grid-template-columns: 1fr; }
   }
