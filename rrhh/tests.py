@@ -1,4 +1,5 @@
 from django.contrib.auth.models import Group, User
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import TestCase, override_settings
@@ -20,6 +21,7 @@ from rrhh.models import (
     EmpleadoIdentidadPendiente,
     HoraExtra,
     IncidenciaAsistencia,
+    IncapacidadEmpleado,
     NominaConceptoLinea,
     NominaImportacion,
     NominaLinea,
@@ -86,6 +88,145 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertEqual(saldo["consumido"], Decimal("5"))
         self.assertEqual(saldo["reservado"], Decimal("0"))
         self.assertEqual(saldo["disponible"], Decimal("7.00"))
+
+    def test_incapacidad_bloquea_vacaciones_traslapadas(self):
+        from datetime import date
+
+        rrhh_user = User.objects.create_user(username="paula", is_superuser=True, is_staff=True)
+        empleado = Empleado.objects.create(
+            nombre="Colaborador Incapacidad",
+            fecha_ingreso=date(2025, 1, 1),
+            activo=True,
+        )
+        PoliticaVacaciones.objects.create(
+            antiguedad_desde=1,
+            antiguedad_hasta=5,
+            dias_laborables=Decimal("12.00"),
+            vigente_desde=date(2026, 1, 1),
+        )
+        incidencia = IncidenciaAsistencia.objects.create(
+            empleado=empleado,
+            fecha=date(2026, 6, 16),
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+            severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+            detalle="Falta antes de capturar incapacidad.",
+        )
+
+        self.client.force_login(rrhh_user)
+        response = self.client.post(
+            reverse("rrhh:rrhh_incapacidad_crear"),
+            {
+                "empleado": empleado.id,
+                "fecha_inicio": "2026-06-15",
+                "fecha_fin": "2026-06-20",
+                "tipo": IncapacidadEmpleado.TIPO_ENFERMEDAD_GENERAL,
+                "folio": "IMSS-1",
+                "estado": IncapacidadEmpleado.ESTADO_ACTIVA,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(IncapacidadEmpleado.objects.count(), 1)
+        incidencia.refresh_from_db()
+        self.assertEqual(incidencia.estado, IncidenciaAsistencia.ESTADO_RESUELTO)
+
+        response = self.client.post(
+            reverse("rrhh:rrhh_vacaciones_list"),
+            {
+                "action": "crear",
+                "empleado_id": empleado.id,
+                "fecha_inicio": "2026-06-16",
+                "fecha_fin": "2026-06-18",
+                "motivo": "Cruza incapacidad",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(SolicitudVacaciones.objects.filter(empleado=empleado).exists())
+        response = self.client.get(reverse("rrhh:rrhh_incapacidades"))
+        self.assertContains(response, "IMSS-1")
+
+    def test_incapacidades_exigen_permiso_de_nomina(self):
+        vacaciones_user = User.objects.create_user(username="vacaciones-viewer")
+        nomina_user = User.objects.create_user(username="nomina-viewer")
+        UserModuleAccess.objects.create(
+            user=vacaciones_user,
+            module="rrhh.vacaciones",
+            access=UserModuleAccess.ACCESS_MANAGE,
+        )
+        UserModuleAccess.objects.create(
+            user=nomina_user,
+            module="rrhh.nomina",
+            access=UserModuleAccess.ACCESS_VIEW,
+        )
+
+        self.client.force_login(vacaciones_user)
+        self.assertEqual(self.client.get(reverse("rrhh:rrhh_incapacidades")).status_code, 403)
+
+        self.client.force_login(nomina_user)
+        response = self.client.get(reverse("rrhh:rrhh_incapacidades"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Alta de incapacidad")
+
+    def test_cancelar_incapacidad_futura_no_crea_faltas_futuras(self):
+        from datetime import date
+
+        rrhh_user = User.objects.create_user(username="paula", is_superuser=True, is_staff=True)
+        empleado = Empleado.objects.create(
+            nombre="Colaborador Incapacidad Futura",
+            fecha_ingreso=date(2025, 1, 1),
+            activo=True,
+        )
+        incapacidad = IncapacidadEmpleado.objects.create(
+            empleado=empleado,
+            fecha_inicio=date(2026, 7, 1),
+            fecha_fin=date(2026, 7, 5),
+            tipo=IncapacidadEmpleado.TIPO_ENFERMEDAD_GENERAL,
+            folio="IMSS-FUTURA",
+        )
+
+        self.client.force_login(rrhh_user)
+        with patch("rrhh.views_incapacidades.timezone.localdate", return_value=date(2026, 6, 16)):
+            response = self.client.post(
+                reverse("rrhh:rrhh_incapacidad_cancelar", args=[incapacidad.id]),
+                {"comentario_cancelacion": "Captura futura cancelada."},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(IncidenciaAsistencia.objects.filter(empleado=empleado).exists())
+
+    def test_incapacidad_rechaza_traslape_y_cancelada_no_bloquea(self):
+        from datetime import date
+
+        empleado = Empleado.objects.create(
+            nombre="Colaborador Duplicado Incapacidad",
+            fecha_ingreso=date(2025, 1, 1),
+            activo=True,
+        )
+        incapacidad = IncapacidadEmpleado.objects.create(
+            empleado=empleado,
+            fecha_inicio=date(2026, 6, 15),
+            fecha_fin=date(2026, 6, 20),
+            tipo=IncapacidadEmpleado.TIPO_ENFERMEDAD_GENERAL,
+            folio="IMSS-2",
+        )
+        duplicada = IncapacidadEmpleado(
+            empleado=empleado,
+            fecha_inicio=date(2026, 6, 18),
+            fecha_fin=date(2026, 6, 22),
+            tipo=IncapacidadEmpleado.TIPO_RIESGO_TRABAJO,
+            folio="IMSS-3",
+        )
+        with self.assertRaises(ValidationError):
+            duplicada.full_clean()
+
+        incapacidad.estado = IncapacidadEmpleado.ESTADO_CANCELADA
+        incapacidad.comentario_cancelacion = "Captura duplicada."
+        incapacidad.save(update_fields=["estado", "comentario_cancelacion", "actualizado_en"])
+
+        duplicada.full_clean()
+        duplicada.save()
+        self.assertEqual(IncapacidadEmpleado.objects.filter(estado=IncapacidadEmpleado.ESTADO_ACTIVA).count(), 1)
 
     def test_vacaciones_respeta_descansos_oficiales_moviles_lft(self):
         from datetime import date

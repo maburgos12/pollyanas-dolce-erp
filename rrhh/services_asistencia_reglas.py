@@ -12,6 +12,7 @@ from .models import (
     AsistenciaEmpleado,
     Empleado,
     HoraExtra,
+    IncapacidadEmpleado,
     IncidenciaAsistencia,
     PermisoSalida,
     SolicitudVacaciones,
@@ -104,6 +105,19 @@ def _suspension_activa_en_fecha(empleado: Empleado, fecha: date) -> SuspensionEm
         SuspensionEmpleado.objects.filter(
             empleado=empleado,
             estado=SuspensionEmpleado.ESTADO_ACTIVA,
+            fecha_inicio__lte=fecha,
+            fecha_fin__gte=fecha,
+        )
+        .order_by("fecha_inicio")
+        .first()
+    )
+
+
+def _incapacidad_activa_en_fecha(empleado: Empleado, fecha: date) -> IncapacidadEmpleado | None:
+    return (
+        IncapacidadEmpleado.objects.filter(
+            empleado=empleado,
+            estado__in=[IncapacidadEmpleado.ESTADO_ACTIVA, IncapacidadEmpleado.ESTADO_CERRADA],
             fecha_inicio__lte=fecha,
             fecha_fin__gte=fecha,
         )
@@ -550,6 +564,10 @@ def evaluar_dia_empleado(empleado: Empleado, fecha: date) -> ResultadoEvaluacion
     resueltos = 0
 
     if empleado.fecha_ingreso and fecha < empleado.fecha_ingreso:
+        resueltos = _resolver_incidencias_stale(empleado, fecha, touched)
+        return ResultadoEvaluacionAsistencia(evaluados=1, resueltos=resueltos)
+
+    if _incapacidad_activa_en_fecha(empleado, fecha):
         resueltos = _resolver_incidencias_stale(empleado, fecha, touched)
         return ResultadoEvaluacionAsistencia(evaluados=1, resueltos=resueltos)
 
