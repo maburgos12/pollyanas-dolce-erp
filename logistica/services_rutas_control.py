@@ -10,6 +10,8 @@ from django.utils import timezone
 
 from .models import BitacoraSalidaLlegada, EventoRuta, ParadaRuta, Repartidor, RutaEntrega, UbicacionRuta
 
+GEOCERCA_PERMANENCIA_VISITA_MINUTOS = 5
+
 
 @dataclass(frozen=True)
 class GeocercaResultado:
@@ -141,6 +143,25 @@ def crear_evento_ruta_once(
         metadata=metadata or {},
         creado_por=user if getattr(user, "is_authenticated", False) else None,
     )
+
+
+def _marcar_visitada_por_permanencia(*, ruta: RutaEntrega, parada: ParadaRuta, distancia_metros_value: int | None) -> bool:
+    primera_llegada = (
+        EventoRuta.objects.filter(ruta=ruta, parada=parada, tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE)
+        .order_by("creado_en")
+        .first()
+    )
+    if not primera_llegada:
+        return False
+    if primera_llegada.creado_en > timezone.now() - timezone.timedelta(minutes=GEOCERCA_PERMANENCIA_VISITA_MINUTOS):
+        return False
+    parada.estado = ParadaRuta.ESTADO_VISITADA
+    parada.hora_llegada_real = primera_llegada.creado_en
+    parada.distancia_llegada_metros = distancia_metros_value
+    parada.save(update_fields=["estado", "hora_llegada_real", "distancia_llegada_metros", "actualizado_en"])
+    ruta.recompute_route_control()
+    ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
+    return True
 
 
 def _timestamp_dispositivo_confiable(timestamp_dispositivo) -> tuple[bool, str]:
@@ -288,12 +309,11 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
     resultado = evaluar_geocercas(ruta, ubicacion.latitud, ubicacion.longitud)
     if resultado.parada and resultado.dentro and ubicacion_confiable:
         if resultado.parada.estado != ParadaRuta.ESTADO_VISITADA:
-            resultado.parada.estado = ParadaRuta.ESTADO_VISITADA
-            resultado.parada.hora_llegada_real = timezone.now()
-            resultado.parada.distancia_llegada_metros = resultado.distancia_metros
-            resultado.parada.save(update_fields=["estado", "hora_llegada_real", "distancia_llegada_metros", "actualizado_en"])
-            ruta.recompute_route_control()
-            ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
+            _marcar_visitada_por_permanencia(
+                ruta=ruta,
+                parada=resultado.parada,
+                distancia_metros_value=resultado.distancia_metros,
+            )
         crear_evento_ruta_once(
             ruta=ruta,
             tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
