@@ -621,12 +621,19 @@ class LogisticaBitacoraSalidaView(_LogisticaBaseView):
         if licencia_bloqueo:
             return Response(licencia_bloqueo, status=status.HTTP_403_FORBIDDEN)
 
+        ruta_activa = _ruta_operativa_dia_para_repartidor(repartidor)
         abierta = BitacoraSalidaLlegada.objects.select_related("unidad").filter(repartidor=repartidor, cerrada=False).first()
         if abierta:
+            mensaje = f"Tienes un turno abierto en la unidad {abierta.unidad.codigo}. Debes cerrarlo antes de iniciar uno nuevo."
+            if ruta_activa and ruta_activa.estatus == RutaEntrega.ESTATUS_PLANEADA:
+                mensaje = (
+                    f"Tienes un turno abierto, pero {ruta_activa.folio} sigue planeada. "
+                    "Cierra el turno accidental; luego revisa la carga y vuelve a iniciar turno."
+                )
             return Response(
                 {
                     "error": "turno_abierto",
-                    "mensaje": f"Tienes un turno abierto en la unidad {abierta.unidad.codigo}. Debes cerrarlo antes de iniciar uno nuevo.",
+                    "mensaje": mensaje,
                     "bitacora_id": abierta.id,
                     "bitacora": LogisticaBitacoraSalidaLlegadaSerializer(abierta).data,
                 },
@@ -643,7 +650,6 @@ class LogisticaBitacoraSalidaView(_LogisticaBaseView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        ruta_activa = _ruta_operativa_dia_para_repartidor(repartidor)
         unidad = serializer.validated_data.get("unidad")
         if ruta_activa and ruta_activa.unidad_operativa_id and unidad and unidad.id != ruta_activa.unidad_operativa_id:
             unidad_requerida = ruta_activa.unidad_operativa
