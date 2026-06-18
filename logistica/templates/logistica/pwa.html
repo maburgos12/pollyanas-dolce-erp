@@ -2494,7 +2494,7 @@
                 const draft = cargaDraftFor(linea.id);
                 const pendiente = linea.estatus === "PENDIENTE";
                 const diferencia = ["PARCIAL", "FALTANTE", "SOBRANTE"].includes(linea.estatus);
-                const cantidadValue = draft.cantidad || linea.cantidad_cargada || linea.cantidad_enviada_esperada || "0";
+                const cantidadValue = draft.cantidad !== "" ? draft.cantidad : (linea.cantidad_cargada ?? linea.cantidad_enviada_esperada ?? "0");
                 return `
                   <section class="route-stop ${pendiente ? "" : "visited"}">
                     <span class="route-stop-number">${pendiente ? escapeHtml(linea.parada_orden || "") : "OK"}</span>
@@ -2512,13 +2512,13 @@
                           <input id="carga_${linea.id}" type="number" min="0" step="0.001" value="${escapeHtml(cantidadValue)}" oninput="updateCargaLinea(${linea.id}, 'cantidad', this.value)">
                           <label for="motivo_${linea.id}">Motivo si hay diferencia</label>
                           <select id="motivo_${linea.id}" onchange="updateCargaLinea(${linea.id}, 'motivo', this.value)">
-                            <option value="">Sin diferencia</option>
-                            <option value="stock_limitado">Stock limitado</option>
-                            <option value="sin_stock">No hay stock</option>
-                            <option value="produccion_no_lista">Producción aún no está lista</option>
-                            <option value="producto_danado">Producto dañado</option>
-                            <option value="cambio_autorizado">Cambio autorizado</option>
-                            <option value="otro">Otro</option>
+                            <option value="" ${draft.motivo === "" ? "selected" : ""}>Sin diferencia</option>
+                            <option value="stock_limitado" ${draft.motivo === "stock_limitado" ? "selected" : ""}>Stock limitado</option>
+                            <option value="sin_stock" ${draft.motivo === "sin_stock" ? "selected" : ""}>No hay stock</option>
+                            <option value="produccion_no_lista" ${draft.motivo === "produccion_no_lista" ? "selected" : ""}>Producción aún no está lista</option>
+                            <option value="producto_danado" ${draft.motivo === "producto_danado" ? "selected" : ""}>Producto dañado</option>
+                            <option value="cambio_autorizado" ${draft.motivo === "cambio_autorizado" ? "selected" : ""}>Cambio autorizado</option>
+                            <option value="otro" ${draft.motivo === "otro" ? "selected" : ""}>Otro</option>
                           </select>
                         </div>
                         <button class="secondary-btn" type="button" onclick="validarCargaLinea(${linea.id})" ${draft.guardando ? "disabled" : ""}>${draft.guardando ? "Guardando..." : "Guardar revisión"}</button>
@@ -2635,8 +2635,14 @@
         const rutaId = state.rutaActiva?.ruta?.id;
         if (!rutaId) return renderRutaActiva("No hay ruta para validar carga.");
         const draft = cargaDraftFor(lineaId);
-        const cantidad = String(draft.cantidad || "").trim();
+        const linea = (state.rutaActiva?.checklist_carga?.lineas || []).find((item) => Number(item.id) === Number(lineaId));
+        const cantidad = String(draft.cantidad !== "" ? draft.cantidad : (linea?.cantidad_cargada ?? linea?.cantidad_enviada_esperada ?? "")).trim();
         if (!cantidad) return renderRutaActiva("Captura la cantidad real cargada.");
+        const real = Number(cantidad);
+        const esperada = Number(linea?.cantidad_enviada_esperada ?? 0);
+        if (Number.isFinite(real) && Number.isFinite(esperada) && real !== esperada && !draft.motivo) {
+          return renderRutaActiva("Selecciona el motivo de la diferencia antes de guardar.");
+        }
         draft.guardando = true;
         await renderRutaActiva();
         try {
