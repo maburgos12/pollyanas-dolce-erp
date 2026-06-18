@@ -2692,6 +2692,50 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea["point_recepcion_estado"], "RECIBIDO_OK")
         self.assertIn("entrega_estado", response.json()["paradas"][0])
 
+    def test_api_ruta_activa_muestra_carga_solo_del_tramo_actual(self):
+        self.client.force_login(self.user)
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.567916",
+            longitud="-108.459969",
+            radio_geocerca_metros=120,
+        )
+        sucursal_dos = Sucursal.objects.create(codigo="TRAMO-2", nombre="Sucursal Tramo 2", activa=True)
+        punto_dos = PuntoLogistico.objects.create(
+            sucursal=sucursal_dos,
+            nombre="Sucursal Tramo 2",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.580000",
+            longitud="-108.480000",
+            radio_geocerca_metros=120,
+        )
+        parada_cedis = ParadaRuta.objects.create(ruta=self.ruta, punto=cedis, orden=2)
+        parada_dos = ParadaRuta.objects.create(ruta=self.ruta, punto=punto_dos, orden=3)
+        checklist = RutaCargaChecklist.objects.create(ruta=self.ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        for parada, codigo in [(self.parada, "ANTES-CEDIS"), (parada_dos, "DESPUES-CEDIS")]:
+            RutaCargaChecklistLinea.objects.create(
+                checklist=checklist,
+                parada=parada,
+                source_hash=f"tramo-{codigo}",
+                item_code=codigo,
+                item_name=codigo,
+                unit="pz",
+                cantidad_solicitada="1.000",
+                cantidad_enviada_esperada="1.000",
+            )
+
+        response = self.client.get(reverse("api_logistica_ruta_activa"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([linea["item_code"] for linea in response.json()["checklist_carga"]["lineas"]], ["ANTES-CEDIS"])
+
+        parada_cedis.estado = ParadaRuta.ESTADO_VISITADA
+        parada_cedis.save(update_fields=["estado", "actualizado_en"])
+        response = self.client.get(reverse("api_logistica_ruta_activa"))
+
+        self.assertEqual([linea["item_code"] for linea in response.json()["checklist_carga"]["lineas"]], ["DESPUES-CEDIS"])
+
     def test_checklist_detallado_serializa_sin_consultas_por_linea(self):
         self._crear_linea_carga_con_transferencia_recibida()
         checklist = obtener_checklist_carga_detallado(self.ruta)

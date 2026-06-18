@@ -80,7 +80,31 @@ def obtener_checklist_carga(ruta: RutaEntrega) -> RutaCargaChecklist:
     return checklist
 
 
-def obtener_checklist_carga_detallado(ruta: RutaEntrega) -> RutaCargaChecklist:
+def _ordenes_tramo_carga_actual(ruta: RutaEntrega) -> set[int] | None:
+    paradas = list(ruta.paradas.select_related("punto").order_by("orden", "id"))
+    cedis = [parada for parada in paradas if parada.punto and parada.punto.tipo == PuntoLogistico.TIPO_CEDIS]
+    if not cedis:
+        return None
+
+    visitadas = [parada.orden for parada in cedis if parada.estado == ParadaRuta.ESTADO_VISITADA]
+    if visitadas:
+        inicio = max(visitadas)
+        fin = next((parada.orden for parada in cedis if parada.orden > inicio), None)
+    else:
+        inicio = cedis[0].orden if cedis[0].orden == 1 else None
+        fin = next((parada.orden for parada in cedis if inicio is None or parada.orden > inicio), None)
+
+    return {
+        parada.orden
+        for parada in paradas
+        if parada.punto
+        and parada.punto.tipo != PuntoLogistico.TIPO_CEDIS
+        and (inicio is None or parada.orden > inicio)
+        and (fin is None or parada.orden < fin)
+    }
+
+
+def obtener_checklist_carga_detallado(ruta: RutaEntrega, *, solo_tramo_actual: bool = False) -> RutaCargaChecklist:
     checklist = obtener_checklist_carga(ruta)
     lineas_qs = RutaCargaChecklistLinea.objects.select_related(
         "parada",
@@ -88,6 +112,10 @@ def obtener_checklist_carga_detallado(ruta: RutaEntrega) -> RutaCargaChecklist:
         "validado_por",
         "validado_por__empleado_rrhh",
     ).order_by("parada__orden", "item_name", "id")
+    if solo_tramo_actual:
+        ordenes = _ordenes_tramo_carga_actual(ruta)
+        if ordenes is not None:
+            lineas_qs = lineas_qs.filter(parada__orden__in=ordenes)
     return (
         RutaCargaChecklist.objects.select_related("ruta")
         .prefetch_related(Prefetch("lineas", queryset=lineas_qs))
