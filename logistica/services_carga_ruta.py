@@ -272,6 +272,26 @@ def _cantidad_recibida_linea(linea: RutaCargaChecklistLinea) -> Decimal | None:
     return None
 
 
+def _confirmacion_completa_parada(parada: ParadaRuta) -> ParadaEntregaEvidencia | None:
+    return (
+        parada.evidencias_entrega.filter(linea_carga__isnull=True, tipo=ParadaEntregaEvidencia.TIPO_CONFIRMACION)
+        .order_by("-capturado_en", "-id")
+        .first()
+    )
+
+
+def _cantidad_recibida_con_respaldo_pwa(
+    linea: RutaCargaChecklistLinea,
+    confirmacion: ParadaEntregaEvidencia | None,
+) -> Decimal | None:
+    recibida = _cantidad_recibida_linea(linea)
+    if recibida is not None:
+        return recibida
+    if confirmacion is not None and not linea.point_transfer_line_id:
+        return _cantidad_referencia_entrega(linea)
+    return None
+
+
 @transaction.atomic
 def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_sync: bool = True) -> ChecklistCargaResumen:
     ruta = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
@@ -702,15 +722,19 @@ def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_
         lineas = list(checklist.lineas.filter(parada=parada).select_related("point_transfer_line"))
         if not lineas:
             continue
-        recibidas = [linea for linea in lineas if _cantidad_recibida_linea(linea) is not None]
+        confirmacion_pwa = _confirmacion_completa_parada(parada)
+        recibidas = [linea for linea in lineas if _cantidad_recibida_con_respaldo_pwa(linea, confirmacion_pwa) is not None]
         if not recibidas:
             continue
 
         todas_recibidas = len(recibidas) == len(lineas)
-        recibido_total = sum((_cantidad_recibida_linea(linea) or Decimal("0") for linea in recibidas), Decimal("0"))
+        recibido_total = sum(
+            (_cantidad_recibida_con_respaldo_pwa(linea, confirmacion_pwa) or Decimal("0") for linea in recibidas),
+            Decimal("0"),
+        )
         esperado_total = sum((_cantidad_referencia_entrega(linea) for linea in lineas), Decimal("0"))
         cantidades_cuadran = todas_recibidas and all(
-            _cantidad_recibida_linea(linea) == _cantidad_referencia_entrega(linea)
+            _cantidad_recibida_con_respaldo_pwa(linea, confirmacion_pwa) == _cantidad_referencia_entrega(linea)
             for linea in lineas
         )
         if recibido_total == 0:
@@ -720,8 +744,8 @@ def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_
         else:
             entrega_estado = ParadaRuta.ENTREGA_CON_DIFERENCIA
 
-        received_at_values = [linea.point_transfer_line.received_at for linea in recibidas if linea.point_transfer_line.received_at]
-        entrega_confirmada_en = max(received_at_values) if received_at_values else timezone.now()
+        received_at_values = [linea.point_transfer_line.received_at for linea in recibidas if linea.point_transfer_line and linea.point_transfer_line.received_at]
+        entrega_confirmada_en = max(received_at_values) if received_at_values else (confirmacion_pwa.capturado_en if confirmacion_pwa else timezone.now())
         update_fields = [
             "estado",
             "hora_llegada_real",
