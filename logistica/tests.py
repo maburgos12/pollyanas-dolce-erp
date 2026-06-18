@@ -2973,6 +2973,22 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.cantidad_enviada_esperada, Decimal("5.000"))
         self.assertEqual(linea.cantidad_cargada, Decimal("5.000"))
 
+    def test_checklist_carga_sincroniza_point_con_ruta_en_ruta(self):
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        ruta.estatus = RutaEntrega.ESTATUS_EN_RUTA
+        ruta.save(update_fields=["estatus", "updated_at"])
+        transferencia = self._crear_transferencia_point_abierta(source_hash="transfer-en-ruta")
+        transferencia.sent_quantity = Decimal("4.000")
+        transferencia.save(update_fields=["sent_quantity", "updated_at"])
+
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        self.assertEqual(resumen.creadas, 1)
+        linea = RutaCargaChecklistLinea.objects.get(checklist=resumen.checklist)
+        self.assertEqual(linea.parada, parada)
+        self.assertEqual(linea.point_transfer_line, transferencia)
+        self.assertEqual(linea.cantidad_enviada_esperada, Decimal("4.000"))
+
     def test_totales_carga_muestran_parcial_con_lineas_pendientes(self):
         from logistica.views import _recepcion_point_rows, _totales_recepcion_point
 
