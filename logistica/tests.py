@@ -1145,6 +1145,15 @@ class LogisticaControlRutasTests(TestCase):
             payload={"latitud": "25.570010", "longitud": "-108.470010"},
         )
 
+        EventoRuta.objects.filter(ruta=self.ruta, parada=self.parada, tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE).update(
+            creado_en=timezone.now() - timezone.timedelta(minutes=6)
+        )
+        registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={"latitud": "25.570010", "longitud": "-108.470010"},
+        )
+
         self.parada.refresh_from_db()
         self.assertFalse(ubicacion.fuera_de_geocerca)
         self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
@@ -1341,6 +1350,20 @@ class LogisticaControlRutasTests(TestCase):
     def test_tracking_api_registra_ubicacion_de_ruta_activa(self):
         self.client.force_login(self.user)
 
+        response = self.client.post(
+            reverse("api_logistica_ruta_tracking", kwargs={"ruta_id": self.ruta.id}),
+            '{"latitud": "25.570010", "longitud": "-108.470010", "velocidad_kmh": 0}',
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
+        self.assertFalse(response.json()["fuera_de_geocerca"])
+
+        EventoRuta.objects.filter(ruta=self.ruta, parada=self.parada, tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE).update(
+            creado_en=timezone.now() - timezone.timedelta(minutes=6)
+        )
         response = self.client.post(
             reverse("api_logistica_ruta_tracking", kwargs={"ruta_id": self.ruta.id}),
             '{"latitud": "25.570010", "longitud": "-108.470010", "velocidad_kmh": 0}',
@@ -1636,11 +1659,11 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v39", pwa_html)
+        self.assertIn("route-control-v40", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v39", pwa_html)
+        self.assertIn("?v=route-control-v40", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v39-carga-tramo", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v40-entrega-productos", sw_js)
         api_block = sw_js[sw_js.index('url.pathname.startsWith("/api/")'):sw_js.index('event.request.mode === "navigate"')]
         self.assertIn("event.respondWith(fetch(event.request));", api_block)
         self.assertNotIn("caches.match(event.request)", api_block)
@@ -1678,6 +1701,12 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("Liberar ruta con este turno", pwa_html)
         self.assertIn("/bitacora-salida/liberar-ruta/", pwa_html)
         self.assertIn("confirmarEntregaParada", pwa_html)
+        self.assertIn("function evidenciasEntregaParada(paradaId)", pwa_html)
+        self.assertIn("linea_carga_id: linea.id", pwa_html)
+        self.assertIn("cantidad_entregada: String(linea.cantidad_cargada ?? linea.cantidad_enviada_esperada ?? \"0\")", pwa_html)
+        self.assertIn("evidenciasEntregaParada(paradaId)", pwa_html)
+        self.assertIn("entregables = (paradas || []).filter(paradaRequiereEntrega)", pwa_html)
+        self.assertIn("entregadas = entregables.filter((parada) => parada.entrega_estado === \"ENTREGADA\")", pwa_html)
         self.assertIn("confirmarEntregaParada(${Number(rutaId)}, ${Number(parada.id)}, this)", pwa_html)
         self.assertIn("const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && entrega === \"PENDIENTE\";", pwa_html)
         self.assertIn("paradaRequiereEntrega", pwa_html)
@@ -1697,7 +1726,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v39-carga-tramo", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v40-entrega-productos", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -2352,6 +2381,74 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(ParadaEntregaEvidencia.objects.filter(parada=self.parada, client_event_id="evt-entrega-1").count(), 1)
         self.assertEqual(self.ruta.cumplimiento_porcentaje, Decimal("100.00"))
         self.assertEqual(EventoRuta.objects.filter(ruta=self.ruta, parada=self.parada).count(), 1)
+
+    def test_api_confirma_entrega_guarda_evidencia_por_producto(self):
+        self.client.force_login(self.user)
+        checklist = RutaCargaChecklist.objects.create(ruta=self.ruta)
+        linea_1 = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=self.parada,
+            transfer_external_id="T-ENTREGA-MULTI",
+            detail_external_id="D-ENTREGA-MULTI-1",
+            source_hash="entrega-multi-1",
+            item_code="PAY-G",
+            item_name="Pay de Queso Grande",
+            unit="pz",
+            cantidad_solicitada="2.000",
+            cantidad_enviada_esperada="2.000",
+            cantidad_cargada="2.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+        )
+        linea_2 = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=self.parada,
+            transfer_external_id="T-ENTREGA-MULTI",
+            detail_external_id="D-ENTREGA-MULTI-2",
+            source_hash="entrega-multi-2",
+            item_code="ZAN-M",
+            item_name="Pastel de Zanahoria Mediano",
+            unit="pz",
+            cantidad_solicitada="3.000",
+            cantidad_enviada_esperada="3.000",
+            cantidad_cargada="3.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+        )
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_parada_entrega", kwargs={"ruta_id": self.ruta.id, "parada_id": self.parada.id}),
+            json.dumps(
+                {
+                    "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+                    "notas": "Entrega completa por productos",
+                    "evidencias": [
+                        {
+                            "linea_carga_id": linea_1.id,
+                            "tipo": ParadaEntregaEvidencia.TIPO_CONFIRMACION,
+                            "cantidad_entregada": "2.000",
+                            "comentario": "Pay entregado",
+                            "client_event_id": "evt-entrega-prod-1",
+                        },
+                        {
+                            "linea_carga_id": linea_2.id,
+                            "tipo": ParadaEntregaEvidencia.TIPO_CONFIRMACION,
+                            "cantidad_entregada": "3.000",
+                            "comentario": "Zanahoria entregado",
+                            "client_event_id": "evt-entrega-prod-2",
+                        },
+                    ],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.parada.refresh_from_db()
+        evidencias = ParadaEntregaEvidencia.objects.filter(parada=self.parada).order_by("linea_carga_id")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertEqual(evidencias.count(), 2)
+        self.assertEqual([row.linea_carga_id for row in evidencias], [linea_1.id, linea_2.id])
+        self.assertEqual([row.cantidad_entregada for row in evidencias], [Decimal("2.000"), Decimal("3.000")])
 
     def test_api_no_confirma_entrega_en_parada_cedis(self):
         self.client.force_login(self.user)

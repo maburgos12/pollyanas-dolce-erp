@@ -1353,7 +1353,7 @@
       const TRACKING_QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
       const ACCESS_TOKEN_KEY = "pd_logistica_access";
       const REFRESH_TOKEN_KEY = "pd_logistica_refresh";
-      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v39
+      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v40
       const app = document.getElementById("app");
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
@@ -2280,7 +2280,9 @@
       function routeStopCounts(paradas) {
         const total = paradas?.length || 0;
         const visitadas = (paradas || []).filter((parada) => parada.estado === "VISITADA").length;
-        return { total, visitadas, pendientes: Math.max(total - visitadas, 0) };
+        const entregables = (paradas || []).filter(paradaRequiereEntrega);
+        const entregadas = entregables.filter((parada) => parada.entrega_estado === "ENTREGADA").length;
+        return { total, visitadas, pendientes: Math.max(total - visitadas, 0), entregables: entregables.length, entregadas };
       }
 
       function renderRutaSignals({ turnoOk, unidadOk, ubicacionLista, pendientesOffline, draft, rutaData }) {
@@ -2548,6 +2550,34 @@
         `;
       }
 
+      function evidenciasEntregaParada(paradaId) {
+        const draft = ensureRutaTrackingDraft();
+        const conUbicacion = (row) => {
+          if (draft.latitud && draft.longitud) {
+            row.latitud = draft.latitud;
+            row.longitud = draft.longitud;
+            row.precision_metros = draft.precision_metros;
+          }
+          return row;
+        };
+        const lineas = (state.rutaActiva?.checklist_carga?.lineas || [])
+          .filter((linea) => Number(linea.parada) === Number(paradaId));
+        if (!lineas.length) {
+          return [conUbicacion({
+            tipo: "CONFIRMACION",
+            comentario: "Entrega completa confirmada por repartidor en PWA.",
+            client_event_id: newClientEventId()
+          })];
+        }
+        return lineas.map((linea) => conUbicacion({
+          linea_carga_id: linea.id,
+          tipo: "CONFIRMACION",
+          cantidad_entregada: String(linea.cantidad_cargada ?? linea.cantidad_enviada_esperada ?? "0"),
+          comentario: `Entrega confirmada: ${linea.item_name || "Producto"}`,
+          client_event_id: `${newClientEventId()}-${linea.id}`
+        }));
+      }
+
       async function renderRutaActiva(message = "") {
         let rutaData = null;
         let turnoActivo = null;
@@ -2604,7 +2634,7 @@
             <div class="route-progress-card">
               <div class="route-progress-top">
                 <span>${escapeHtml(counts.visitadas)} visitada${counts.visitadas === 1 ? "" : "s"} de ${escapeHtml(counts.total)}</span>
-                <span>${escapeHtml(counts.pendientes)} pendiente${counts.pendientes === 1 ? "" : "s"}</span>
+                <span>${escapeHtml(counts.entregadas)} entregada${counts.entregadas === 1 ? "" : "s"} de ${escapeHtml(counts.entregables)}</span>
               </div>
               <div class="route-progress-track" aria-label="Avance de ruta ${escapeHtml(progress)}%">
                 <div class="route-progress-fill" style="--route-progress:${escapeHtml(progress)}%;"></div>
@@ -2693,25 +2723,15 @@
           button.disabled = true;
           button.textContent = "Enviando...";
         }
-        const draft = ensureRutaTrackingDraft();
         try {
-          const evidencia = {
-            tipo: "CONFIRMACION",
-            comentario: "Entrega completa confirmada por repartidor en PWA.",
-            client_event_id: newClientEventId()
-          };
-          if (draft.latitud && draft.longitud) {
-            evidencia.latitud = draft.latitud;
-            evidencia.longitud = draft.longitud;
-            evidencia.precision_metros = draft.precision_metros;
-          }
+          const evidencias = evidenciasEntregaParada(paradaId);
           const response = await apiFetch(`/rutas/${rutaId}/paradas/${paradaId}/entrega/`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               entrega_estado: "ENTREGADA",
               notas: "Entrega completa confirmada por repartidor en PWA.",
-              evidencias: [evidencia]
+              evidencias
             })
           });
           if (!response.ok) {
@@ -4284,7 +4304,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v39", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v40", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {
