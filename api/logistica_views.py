@@ -1293,6 +1293,9 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
                 created_any = created_any or created
 
             if parada.entrega_estado == ParadaRuta.ENTREGA_PENDIENTE:
+                if parada.estado != ParadaRuta.ESTADO_VISITADA:
+                    parada.estado = ParadaRuta.ESTADO_VISITADA
+                    parada.hora_llegada_real = timezone.now()
                 parada.entrega_estado = payload["entrega_estado"]
                 parada.entrega_confirmada_en = timezone.now()
                 parada.entrega_confirmada_por = request.user
@@ -1303,6 +1306,8 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
                         "entrega_confirmada_en",
                         "entrega_confirmada_por",
                         "entrega_notas",
+                        "estado",
+                        "hora_llegada_real",
                         "actualizado_en",
                     ]
                 )
