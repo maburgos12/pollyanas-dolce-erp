@@ -510,7 +510,7 @@ class LogisticaPwaApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["unidad"], self.unidad.id)
 
-    def test_bitacora_salida_libera_ruta_planeada_con_carga_parcial(self):
+    def test_bitacora_salida_abre_turno_sin_liberar_ruta_planeada(self):
         ruta = RutaEntrega.objects.create(
             nombre="Ruta PWA",
             fecha_ruta=timezone.localdate(),
@@ -567,11 +567,19 @@ class LogisticaPwaApiTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         ruta.refresh_from_db()
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
+        self.assertIsNone(ruta.bitacora_salida_id)
+        self.assertFalse(EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_SALIDA).exists())
+
+        liberar = self.client.post(reverse("api_logistica_bitacora_salida_liberar_ruta"))
+
+        self.assertEqual(liberar.status_code, 200)
+        ruta.refresh_from_db()
         self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
         self.assertEqual(ruta.bitacora_salida_id, response.json()["id"])
         self.assertTrue(EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_SALIDA).exists())
 
-    def test_bitacora_salida_bloquea_ruta_sin_carga_confirmada(self):
+    def test_bitacora_salida_no_libera_ruta_sin_carga_confirmada(self):
         ruta = RutaEntrega.objects.create(
             nombre="Ruta Sin Carga",
             fecha_ruta=timezone.localdate(),
@@ -612,12 +620,118 @@ class LogisticaPwaApiTests(TestCase):
             },
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["error"], "ruta_no_liberada")
-        self.assertIn("confirma al menos una línea de carga", response.json()["mensaje"])
+        self.assertEqual(response.status_code, 201)
         ruta.refresh_from_db()
         self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
-        self.assertFalse(BitacoraSalidaLlegada.objects.filter(repartidor=self.repartidor, cerrada=False).exists())
+        self.assertIsNone(ruta.bitacora_salida_id)
+        self.assertTrue(BitacoraSalidaLlegada.objects.filter(repartidor=self.repartidor, cerrada=False).exists())
+
+        liberar = self.client.post(reverse("api_logistica_bitacora_salida_liberar_ruta"))
+
+        self.assertEqual(liberar.status_code, 400)
+        self.assertEqual(liberar.json()["error"], "ruta_no_liberada")
+        self.assertIn("confirma al menos una línea de carga", liberar.json()["mensaje"])
+
+    def test_bitacora_salida_permite_turno_mandado_si_ruta_planeada_usa_otra_unidad(self):
+        unidad_ruta = Unidad.objects.create(codigo="QA-RUTA", descripcion="Unidad ruta", sucursal=self.sucursal)
+        ruta = RutaEntrega.objects.create(
+            nombre="Ruta Despues",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_PLANEADA,
+            repartidor=self.repartidor,
+            unidad_operativa=unidad_ruta,
+        )
+
+        response = self.client.post(
+            reverse("api_logistica_bitacora_salida"),
+            {
+                "unidad": self.unidad.id,
+                "km_salida": "1000",
+                "nivel_gas_salida": "lleno",
+                "latitud_salida": "25.570000",
+                "longitud_salida": "-108.470000",
+                "foto_tablero_salida": SimpleUploadedFile("tablero.gif", VALID_GIF, content_type="image/gif"),
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+        ruta.refresh_from_db()
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
+        self.assertIsNone(ruta.bitacora_salida_id)
+
+        liberar = self.client.post(reverse("api_logistica_bitacora_salida_liberar_ruta"))
+
+        self.assertEqual(liberar.status_code, 400)
+        self.assertEqual(liberar.json()["error"], "unidad_ruta_distinta")
+
+    def test_bitacora_salida_libera_ruta_con_turno_abierto_y_carga(self):
+        ruta = RutaEntrega.objects.create(
+            nombre="Ruta con turno",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_PLANEADA,
+            repartidor=self.repartidor,
+            unidad_operativa=self.unidad,
+        )
+        punto = PuntoLogistico.objects.create(
+            sucursal=self.sucursal,
+            nombre="Sucursal con carga",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.570000",
+            longitud="-108.470000",
+            radio_geocerca_metros=120,
+        )
+        parada = ParadaRuta.objects.create(ruta=ruta, punto=punto, orden=1)
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="pwa-turno-abierto",
+            item_code="PZA1",
+            item_name="Producto cargado",
+            unit="PZA",
+            cantidad_solicitada="1.000",
+            cantidad_enviada_esperada="1.000",
+            cantidad_cargada="1.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+            validado_por=self.user,
+            validado_en=timezone.now(),
+        )
+        bitacora = BitacoraSalidaLlegada.objects.create(
+            repartidor=self.repartidor,
+            unidad=self.unidad,
+            km_salida=1000,
+            nivel_gas_salida="lleno",
+            foto_tablero_salida=SimpleUploadedFile("tablero.gif", VALID_GIF, content_type="image/gif"),
+        )
+
+        response = self.client.post(reverse("api_logistica_bitacora_salida_liberar_ruta"))
+
+        self.assertEqual(response.status_code, 200)
+        ruta.refresh_from_db()
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
+        self.assertEqual(ruta.bitacora_salida_id, bitacora.id)
+
+    def test_liberar_ruta_en_ruta_rechaza_turno_de_otra_unidad(self):
+        unidad_ruta = Unidad.objects.create(codigo="QA-RUTA", descripcion="Unidad ruta", sucursal=self.sucursal)
+        RutaEntrega.objects.create(
+            nombre="Ruta activa",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_EN_RUTA,
+            repartidor=self.repartidor,
+            unidad_operativa=unidad_ruta,
+        )
+        BitacoraSalidaLlegada.objects.create(
+            repartidor=self.repartidor,
+            unidad=self.unidad,
+            km_salida=1000,
+            nivel_gas_salida="lleno",
+            foto_tablero_salida=SimpleUploadedFile("tablero.gif", VALID_GIF, content_type="image/gif"),
+        )
+
+        response = self.client.post(reverse("api_logistica_bitacora_salida_liberar_ruta"))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "unidad_ruta_distinta")
 
     def test_bitacora_activa_alerta_si_ruta_sigue_planeada(self):
         bitacora = BitacoraSalidaLlegada.objects.create(
@@ -1455,11 +1569,11 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v35", pwa_html)
+        self.assertIn("route-control-v36", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v35", pwa_html)
+        self.assertIn("?v=route-control-v36", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v35-bitacora-alerta", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v36-turno-ruta", sw_js)
         api_block = sw_js[sw_js.index('url.pathname.startsWith("/api/")'):sw_js.index('event.request.mode === "navigate"')]
         self.assertIn("event.respondWith(fetch(event.request));", api_block)
         self.assertNotIn("caches.match(event.request)", api_block)
@@ -1492,6 +1606,8 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("const response = await fetch(`${API}/auth/session-token/`", pwa_html)
         self.assertIn('error.error === "unidad_ruta_distinta"', pwa_html)
         self.assertIn('await showScreen("ruta_activa")', pwa_html)
+        self.assertIn("Liberar ruta con este turno", pwa_html)
+        self.assertIn("/bitacora-salida/liberar-ruta/", pwa_html)
         self.assertIn("confirmarEntregaParada", pwa_html)
         self.assertIn("confirmarEntregaParada(${Number(rutaId)}, ${Number(parada.id)}, this)", pwa_html)
         self.assertIn("const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && entrega === \"PENDIENTE\";", pwa_html)
@@ -1512,7 +1628,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v35-bitacora-alerta", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v36-turno-ruta", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path

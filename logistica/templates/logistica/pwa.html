@@ -1353,7 +1353,7 @@
       const TRACKING_QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
       const ACCESS_TOKEN_KEY = "pd_logistica_access";
       const REFRESH_TOKEN_KEY = "pd_logistica_refresh";
-      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v35
+      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v36
       const app = document.getElementById("app");
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
@@ -3779,6 +3779,7 @@
           actual = null;
         }
         await loadUnidades();
+        const rutaData = actual?.id ? await loadRutaActiva().catch(() => null) : null;
         const draft = ensureBitacoraSalidaDraft();
         const tieneSalida = Boolean(actual?.id);
         let body = "";
@@ -3856,9 +3857,30 @@
         } else {
           const cargasRuta = actual.cargas_combustible || [];
           const requiereCargaAntesDeCerrar = requiereCargaCombustibleAntesDeCerrar(actual, draft);
+          const ruta = rutaData?.ruta || null;
+          const rutaPlaneada = ruta?.estatus === "PLANEADA";
+          const mismaUnidadRuta = ruta && String(ruta.unidad_operativa || "") === String(actual.unidad || "");
+          const cargaConfirmada = Number(rutaData?.checklist_carga?.lineas_confirmadas || 0) > 0;
+          const rutaTurnoBanner = rutaPlaneada
+            ? (!mismaUnidadRuta ? `
+                <div class="daily-banner warning">
+                  Tienes turno abierto en ${escapeHtml(actual.unidad_codigo)}. Para salir a ${escapeHtml(ruta.folio)}, cierra este turno y abre con ${escapeHtml(ruta.unidad_operativa_codigo || "la unidad asignada")}.
+                </div>
+              ` : cargaConfirmada ? `
+                <div class="daily-banner">
+                  <span style="font-size:22px;">✅</span> Carga revisada para ${escapeHtml(ruta.folio)}. Puedes liberar la ruta con este turno.
+                </div>
+                <button class="primary-btn" type="button" onclick="liberarRutaConTurno()">Liberar ruta con este turno</button>
+              ` : `
+                <div class="daily-banner warning">
+                  ${escapeHtml(ruta.folio)} sigue planeada. Revisa al menos una línea de carga antes de liberar la ruta.
+                </div>
+              `)
+            : "";
           body = `
             <p class="unit-line">Turno activo · ${escapeHtml(actual.unidad_codigo)} · Folio: ${escapeHtml(actual.folio)}</p>
             ${actual.alerta_operativa ? `<div class="daily-banner warning">${escapeHtml(actual.alerta_operativa)}</div>` : ""}
+            ${rutaTurnoBanner}
             <section class="card report-card">
               <div class="kv"><b>Salida</b><span>${formatDate(actual.hora_salida)}</span></div>
               <div class="kv"><b>KM salida</b><span>${escapeHtml(actual.km_salida)}</span></div>
@@ -3956,11 +3978,20 @@
         state.bitacoraSalidaDraft = null;
         state.bitacoraSalida = creado;
         const rutaData = await loadRutaActiva().catch(() => null);
-        if (rutaData?.ruta?.id && String(rutaData.ruta.unidad_operativa) === String(creado.unidad)) {
+        if (rutaData?.ruta?.estatus === "EN_RUTA" && String(rutaData.ruta.unidad_operativa) === String(creado.unidad)) {
           await showScreen("ruta_activa");
           return;
         }
         await renderBitacoraSalida(`✅ Turno iniciado · Folio: ${creado.folio}`);
+      }
+
+      async function liberarRutaConTurno() {
+        const response = await apiFetch("/bitacora-salida/liberar-ruta/", { method: "POST" });
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          return renderBitacoraSalida(apiErrorMessage(error, "No se pudo liberar la ruta."));
+        }
+        await showScreen("ruta_activa");
       }
 
       async function guardarLlegada(event) {
@@ -4229,7 +4260,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v35", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v36", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {
