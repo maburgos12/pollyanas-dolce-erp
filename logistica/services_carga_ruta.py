@@ -747,7 +747,9 @@ def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_
             _cantidad_recibida_con_respaldo_pwa(linea, confirmacion_pwa) == _cantidad_referencia_entrega(linea)
             for linea in lineas
         )
-        if recibido_total == 0:
+        if not todas_recibidas:
+            entrega_estado = ParadaRuta.ENTREGA_PENDIENTE
+        elif recibido_total == 0:
             entrega_estado = ParadaRuta.ENTREGA_NO_ENTREGADA
         elif cantidades_cuadran:
             entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
@@ -775,6 +777,7 @@ def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_
         parada.entrega_notas = (
             f"Recepción Point: {lineas_recibidas} línea(s) recibidas. "
             f"Esperado/cargado {esperado_total}, recibido {recibido_total}."
+            + ("" if todas_recibidas else " Pendiente de sincronizar recepción completa.")
         )
         parada.save(update_fields=update_fields)
         paradas_actualizadas += 1
