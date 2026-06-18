@@ -1431,11 +1431,11 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v31", pwa_html)
+        self.assertIn("route-control-v32", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v31", pwa_html)
+        self.assertIn("?v=route-control-v32", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v31-cedis-recarga", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v32-entrega-sin-gps", sw_js)
         self.assertIn("if (!state.perfil) await loadPerfil();", pwa_html)
         self.assertIn("ultimaParadaCedisOrden", pwa_html)
         self.assertIn("Carga desde CEDIS", pwa_html)
@@ -1467,6 +1467,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn('await showScreen("ruta_activa")', pwa_html)
         self.assertIn("confirmarEntregaParada", pwa_html)
         self.assertIn("confirmarEntregaParada(${Number(rutaId)}, ${Number(parada.id)}, this)", pwa_html)
+        self.assertIn("const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && entrega === \"PENDIENTE\";", pwa_html)
         self.assertIn("paradaRequiereEntrega", pwa_html)
         self.assertIn('toUpperCase() !== "CEDIS"', pwa_html)
         self.assertIn('button.textContent = "Enviando...";', pwa_html)
@@ -1484,7 +1485,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v31-cedis-recarga", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v32-entrega-sin-gps", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -1500,7 +1501,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("Capturar ubicación GPS", pwa_html)
         self.assertIn("Reportar desvío", pwa_html)
         self.assertIn("Paradas de reparto", pwa_html)
-        self.assertLess(pwa_html.index("${renderParadasRuta(paradas, ruta.id)}"), pwa_html.index("${renderChecklistCarga(rutaData.checklist_carga, paradas)}"))
+        self.assertLess(pwa_html.index("${renderParadasRuta(paradas, ruta.id, rutaEnSeguimiento)}"), pwa_html.index("${renderChecklistCarga(rutaData.checklist_carga, paradas)}"))
         self.assertIn("Pendiente de entrega", pwa_html)
         self.assertIn("Recibido", pwa_html)
         self.assertIn("La ruta puede continuar; cierre final espera recepción Point.", pwa_html)
@@ -2132,11 +2133,12 @@ class LogisticaControlRutasTests(TestCase):
         self.ruta.refresh_from_db()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(retry.status_code, 200)
-        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
+        self.assertIsNotNone(self.parada.hora_llegada_real)
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
         self.assertEqual(self.parada.entrega_confirmada_por, self.user)
         self.assertEqual(ParadaEntregaEvidencia.objects.filter(parada=self.parada, client_event_id="evt-entrega-1").count(), 1)
-        self.assertEqual(self.ruta.cumplimiento_porcentaje, Decimal("0.00"))
+        self.assertEqual(self.ruta.cumplimiento_porcentaje, Decimal("100.00"))
         self.assertEqual(EventoRuta.objects.filter(ruta=self.ruta, parada=self.parada).count(), 1)
 
     def test_api_no_confirma_entrega_en_parada_cedis(self):
@@ -2400,6 +2402,28 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.json()["paradas_actualizadas"], 1)
         self.assertEqual(response.json()["lineas_recibidas"], 1)
         self.assertEqual(response.json()["paradas"][0]["entrega_estado"], ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+
+    def test_api_confirmar_entrega_marca_parada_visitada_si_gps_no_la_detecto(self):
+        self.client.force_login(self.user)
+        self.parada.estado = ParadaRuta.ESTADO_PENDIENTE
+        self.parada.hora_llegada_real = None
+        self.parada.save(update_fields=["estado", "hora_llegada_real", "actualizado_en"])
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_parada_entrega", kwargs={"ruta_id": self.ruta.id, "parada_id": self.parada.id}),
+            json.dumps({
+                "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+                "notas": "Entrega confirmada en sucursal.",
+                "evidencias": [{"tipo": "CONFIRMACION", "comentario": "Entrega completa.", "client_event_id": "entrega-sin-gps"}],
+            }),
+            content_type="application/json",
+        )
+
+        self.parada.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
+        self.assertIsNotNone(self.parada.hora_llegada_real)
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
 
     def test_ruta_detail_muestra_carga_esperada_por_producto(self):
