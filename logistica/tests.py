@@ -1093,6 +1093,42 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
         self.assertEqual(self.ruta.cumplimiento_porcentaje, 100)
 
+    def test_geocerca_no_marca_parada_posterior_si_hay_pendiente_previa(self):
+        cedis = PuntoLogistico.objects.create(
+            sucursal=self.sucursal,
+            nombre="CEDIS Control",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.580000",
+            longitud="-108.480000",
+            radio_geocerca_metros=120,
+        )
+        parada_cedis = ParadaRuta.objects.create(ruta=self.ruta, punto=cedis, orden=2)
+        EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=parada_cedis,
+            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            descripcion="Llegada detectada en CEDIS Control.",
+            creado_en=timezone.now() - timezone.timedelta(minutes=6),
+        )
+
+        registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={
+                "latitud": "25.580010",
+                "longitud": "-108.480010",
+                "precision_metros": 0,
+            },
+            ip_registro="127.0.0.1",
+        )
+
+        self.parada.refresh_from_db()
+        parada_cedis.refresh_from_db()
+        self.ruta.refresh_from_db()
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
+        self.assertEqual(parada_cedis.estado, ParadaRuta.ESTADO_PENDIENTE)
+        self.assertEqual(self.ruta.cumplimiento_porcentaje, 0)
+
     def test_parada_conserva_geocerca_planeada_si_punto_maestro_cambia(self):
         self.assertEqual(self.parada.punto_nombre_snapshot, "Sucursal Control")
         self.assertEqual(self.parada.radio_geocerca_metros, 120)
