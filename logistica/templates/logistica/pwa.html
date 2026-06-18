@@ -1353,7 +1353,7 @@
       const TRACKING_QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
       const ACCESS_TOKEN_KEY = "pd_logistica_access";
       const REFRESH_TOKEN_KEY = "pd_logistica_refresh";
-      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v38
+      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v39
       const app = document.getElementById("app");
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
@@ -2404,26 +2404,46 @@
         draft[field] = value;
       }
 
-      function ultimaParadaCedisOrden(paradas) {
-        return Math.max(
-          0,
-          ...((paradas || [])
-            .filter((parada) => (parada.punto?.tipo || "").toUpperCase() === "CEDIS")
-            .map((parada) => Number(parada.orden || 0)))
-        );
+      function segmentoCargaOperativo(lineas, paradas) {
+        const todas = (paradas || []).map((parada) => ({
+          orden: Number(parada.orden || 0),
+          tipo: (parada.punto?.tipo || "").toUpperCase(),
+          visitada: parada.estado === "VISITADA",
+          entrega: parada.entrega_estado || "PENDIENTE",
+        }));
+        const cedis = todas
+          .filter((parada) => parada.tipo === "CEDIS")
+          .map((parada) => ({
+            orden: parada.orden,
+            visitada: parada.visitada,
+            anterioresResueltas: todas.every((item) => item.tipo === "CEDIS" || item.orden >= parada.orden || item.entrega !== "PENDIENTE"),
+          }))
+          .filter((parada) => parada.orden > 0)
+          .sort((a, b) => a.orden - b.orden);
+        if (!cedis.length) return { lineas, titulo: "Carga de ruta", detalle: "" };
+
+        const siguienteCedis = cedis.find((parada) => !(parada.visitada && parada.anterioresResueltas));
+        const limiteSuperior = siguienteCedis?.orden || Infinity;
+        const limiteInferior = Math.max(0, ...cedis.filter((parada) => parada.visitada && parada.anterioresResueltas && parada.orden < limiteSuperior).map((parada) => parada.orden));
+        const segmento = lineas.filter((linea) => {
+          const orden = Number(linea.parada_orden || 0);
+          return orden > limiteInferior && orden < limiteSuperior;
+        });
+        return {
+          lineas: segmento.length ? segmento : lineas,
+          titulo: "Carga del tramo",
+          detalle: segmento.length ? "Mostrando solo el tramo operativo actual." : "",
+        };
       }
 
       function renderChecklistCarga(checklist, paradas = []) {
         if (!checklist) return "";
         const lineas = checklist.lineas || [];
-        const cedisOrden = ultimaParadaCedisOrden(paradas);
-        const lineasPostCedis = cedisOrden ? lineas.filter((linea) => Number(linea.parada_orden || 0) > cedisOrden) : [];
-        const lineasOperativas = lineasPostCedis.length ? lineasPostCedis : lineas;
-        const cargaTitulo = lineasPostCedis.length ? "Carga desde CEDIS" : "Carga de ruta";
+        const segmento = segmentoCargaOperativo(lineas, paradas);
+        const lineasOperativas = segmento.lineas;
+        const cargaTitulo = segmento.titulo;
         const pendientesPostCedis = lineasOperativas.filter((linea) => linea.estatus === "PENDIENTE").length;
-        const cargaDetalle = lineasPostCedis.length
-          ? `${pendientesPostCedis} línea${pendientesPostCedis === 1 ? "" : "s"} pendiente${pendientesPostCedis === 1 ? "" : "s"} para las próximas paradas.`
-          : "";
+        const cargaDetalle = segmento.detalle;
         const totales = Array.from(lineasOperativas.reduce((map, linea) => {
           const key = `${linea.item_code || ""}|${linea.item_name || ""}|${linea.unit || ""}`.toUpperCase();
           const row = map.get(key) || {
@@ -2445,13 +2465,9 @@
           map.set(key, row);
           return map;
         }, new Map()).values()).sort((a, b) => a.item_name.localeCompare(b.item_name));
-        const total = lineasPostCedis.length ? lineasOperativas.length : Number(checklist.total_lineas || lineas.length || 0);
-        const confirmadas = lineasPostCedis.length
-          ? lineasOperativas.filter((linea) => linea.estatus !== "PENDIENTE").length
-          : Number(checklist.lineas_confirmadas || 0);
-        const pendientes = lineasPostCedis.length
-          ? lineasOperativas.filter((linea) => linea.estatus === "PENDIENTE").length
-          : Number(checklist.lineas_pendientes || Math.max(total - confirmadas, 0));
+        const total = lineasOperativas.length;
+        const confirmadas = lineasOperativas.filter((linea) => linea.estatus !== "PENDIENTE").length;
+        const pendientes = pendientesPostCedis;
         const pct = total ? Math.round((confirmadas / total) * 100) : 0;
         const statusText = checklist.estatus_display || checklist.estatus || "Pendiente";
         if (!total) {
@@ -4268,7 +4284,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v38", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v39", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {
