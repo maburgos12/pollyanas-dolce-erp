@@ -1569,11 +1569,11 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v36", pwa_html)
+        self.assertIn("route-control-v37", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v36", pwa_html)
+        self.assertIn("?v=route-control-v37", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v36-turno-ruta", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v37-carga-parcial", sw_js)
         api_block = sw_js[sw_js.index('url.pathname.startsWith("/api/")'):sw_js.index('event.request.mode === "navigate"')]
         self.assertIn("event.respondWith(fetch(event.request));", api_block)
         self.assertNotIn("caches.match(event.request)", api_block)
@@ -1628,7 +1628,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v36-turno-ruta", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v37-carga-parcial", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -2931,6 +2931,85 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.cantidad_solicitada, Decimal(str(linea_solicitud.solicitado)))
         self.assertEqual(linea.cantidad_enviada_esperada, Decimal(str(linea_solicitud.solicitado)))
         self.assertEqual(linea.source_hash, f"cedis-reabasto-{ruta.fecha_ruta:%Y%m%d}-{self.sucursal.id}-{receta.id}")
+
+    def test_checklist_carga_cedis_usa_point_abierto_como_enviado(self):
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        solicitud, linea_solicitud, receta = self._crear_solicitud_cedis(ruta=ruta, cantidad="5.000")
+        transferencia = self._crear_transferencia_point_abierta(source_hash="transfer-ajuste-enviado")
+        transferencia.sent_quantity = Decimal("3.000")
+        transferencia.save(update_fields=["sent_quantity", "updated_at"])
+
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        self.assertEqual(resumen.creadas, 1)
+        self.assertEqual(resumen.actualizadas, 1)
+        linea = RutaCargaChecklistLinea.objects.get(checklist=resumen.checklist)
+        self.assertEqual(linea.parada, parada)
+        self.assertEqual(linea.source_hash, f"cedis-reabasto-{ruta.fecha_ruta:%Y%m%d}-{self.sucursal.id}-{receta.id}")
+        self.assertEqual(linea.point_transfer_line, transferencia)
+        self.assertEqual(linea.transfer_external_id, transferencia.transfer_external_id)
+        self.assertEqual(linea.cantidad_solicitada, Decimal(str(linea_solicitud.solicitado)))
+        self.assertEqual(linea.cantidad_enviada_esperada, Decimal("3.000"))
+        self.assertFalse(RutaCargaChecklistLinea.objects.filter(source_hash=transferencia.source_hash).exists())
+
+    def test_checklist_carga_cedis_no_pisa_linea_validada_con_point(self):
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        self._crear_solicitud_cedis(ruta=ruta, cantidad="5.000")
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+        linea = resumen.checklist.lineas.get()
+        linea.cantidad_cargada = Decimal("5.000")
+        linea.estatus = RutaCargaChecklistLinea.ESTATUS_CARGADA
+        linea.save(update_fields=["cantidad_cargada", "estatus", "actualizado_en"])
+        transferencia = self._crear_transferencia_point_abierta(source_hash="transfer-validada-no-pisa")
+        transferencia.sent_quantity = Decimal("3.000")
+        transferencia.save(update_fields=["sent_quantity", "updated_at"])
+
+        segundo = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        linea.refresh_from_db()
+        self.assertEqual(segundo.creadas, 0)
+        self.assertEqual(segundo.actualizadas, 0)
+        self.assertEqual(linea.point_transfer_line_id, None)
+        self.assertEqual(linea.cantidad_enviada_esperada, Decimal("5.000"))
+        self.assertEqual(linea.cantidad_cargada, Decimal("5.000"))
+
+    def test_totales_carga_muestran_parcial_con_lineas_pendientes(self):
+        from logistica.views import _recepcion_point_rows, _totales_recepcion_point
+
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta)
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="parcial-cargada",
+            transfer_external_id="SRC-1",
+            detail_external_id="1",
+            item_code="0065",
+            item_name="Pastel de Zanahoria Mediano",
+            unit="pz",
+            cantidad_solicitada=Decimal("3.000"),
+            cantidad_enviada_esperada=Decimal("3.000"),
+            cantidad_cargada=Decimal("3.000"),
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+        )
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="parcial-pendiente",
+            transfer_external_id="SRC-2",
+            detail_external_id="2",
+            item_code="0065",
+            item_name="Pastel de Zanahoria Mediano",
+            unit="pz",
+            cantidad_solicitada=Decimal("1.000"),
+            cantidad_enviada_esperada=Decimal("1.000"),
+        )
+
+        total = _totales_recepcion_point(_recepcion_point_rows(checklist))[0]
+
+        self.assertFalse(total["cargado_validado"])
+        self.assertTrue(total["cargado_parcial"])
+        self.assertEqual(total["cargado"], Decimal("3.000"))
 
     def test_checklist_carga_cedis_omite_borrador_y_cancelada(self):
         ruta, _ = self._crear_ruta_planeada_para_carga()

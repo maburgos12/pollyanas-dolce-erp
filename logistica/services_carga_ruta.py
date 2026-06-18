@@ -161,11 +161,51 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             omitidas += 1
             continue
         cantidad_esperada = _cantidad_esperada(line)
+        parada = paradas_by_branch[branch.id]
+        producto_key = _point_producto_key(line)
+        cedis_line = None
+        if producto_key:
+            for existing in checklist.lineas.filter(parada=parada).select_for_update():
+                if existing.source_hash.startswith("cedis-reabasto-") and _linea_producto_key(existing) == producto_key:
+                    cedis_line = existing
+                    break
+        if cedis_line:
+            if cedis_line.estatus != RutaCargaChecklistLinea.ESTATUS_PENDIENTE:
+                omitidas += 1
+                continue
+            cedis_line.point_transfer_line = line
+            cedis_line.transfer_external_id = line.transfer_external_id
+            cedis_line.detail_external_id = line.detail_external_id
+            cedis_line.unit = line.unit
+            cedis_line.erp_origin_branch = line.erp_origin_branch
+            cedis_line.erp_destination_branch = line.erp_destination_branch
+            cedis_line.cantidad_enviada_esperada = cantidad_esperada
+            cedis_line.save(
+                update_fields=[
+                    "point_transfer_line",
+                    "transfer_external_id",
+                    "detail_external_id",
+                    "unit",
+                    "erp_origin_branch",
+                    "erp_destination_branch",
+                    "cantidad_enviada_esperada",
+                    "actualizado_en",
+                ]
+            )
+            actualizadas += 1
+            continue
         if cantidad_esperada <= 0:
-            RutaCargaChecklistLinea.objects.filter(checklist=checklist, source_hash=line.source_hash).delete()
+            RutaCargaChecklistLinea.objects.filter(
+                checklist=checklist,
+                source_hash=line.source_hash,
+                estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
+            ).delete()
             omitidas += 1
             continue
-        parada = paradas_by_branch[branch.id]
+        existing = RutaCargaChecklistLinea.objects.filter(checklist=checklist, source_hash=line.source_hash).first()
+        if existing and existing.estatus != RutaCargaChecklistLinea.ESTATUS_PENDIENTE:
+            omitidas += 1
+            continue
         defaults = {
             "parada": parada,
             "point_transfer_line": line,
@@ -215,10 +255,18 @@ def _sincronizar_lineas_consolidado_para_ruta(*, ruta: RutaEntrega, checklist: R
         cantidad = Decimal(str(linea.solicitado or 0))
         source_hash = f"cedis-reabasto-{ruta.fecha_ruta:%Y%m%d}-{linea.solicitud.sucursal_id}-{linea.receta_id}"
         if cantidad <= 0:
-            RutaCargaChecklistLinea.objects.filter(checklist=checklist, source_hash=source_hash).delete()
+            RutaCargaChecklistLinea.objects.filter(
+                checklist=checklist,
+                source_hash=source_hash,
+                estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
+            ).delete()
             omitidas += 1
             continue
         if RutaCargaChecklistLinea.objects.filter(source_hash=source_hash).exclude(checklist=checklist).exists():
+            omitidas += 1
+            continue
+        existing = RutaCargaChecklistLinea.objects.filter(checklist=checklist, source_hash=source_hash).first()
+        if existing and existing.estatus != RutaCargaChecklistLinea.ESTATUS_PENDIENTE:
             omitidas += 1
             continue
         receta = linea.receta
@@ -340,8 +388,6 @@ def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, eje
     if not paradas_by_branch:
         raise ValidationError("La ruta no tiene paradas ligadas a sucursales para relacionar transferencias Point.")
     checklist = RutaCargaChecklist.objects.select_for_update().filter(ruta=ruta).first()
-    if checklist and checklist.lineas.exclude(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists():
-        return ChecklistCargaResumen(checklist=checklist)
     checklist = checklist or obtener_checklist_carga(ruta)
     checklist.sincronizado_en = timezone.now()
     if checklist.estatus == RutaCargaChecklist.ESTATUS_PENDIENTE:
@@ -350,21 +396,25 @@ def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, eje
 
     creadas, actualizadas, omitidas = _sincronizar_lineas_consolidado_para_ruta(ruta=ruta, checklist=checklist)
     if creadas or actualizadas:
-        checklist.lineas.filter(point_transfer_line__isnull=False, estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).delete()
+        checklist.lineas.filter(point_transfer_line__isnull=False, estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exclude(
+            source_hash__startswith="cedis-reabasto-"
+        ).delete()
         checklist.notas = "Carga esperada generada desde consolidado CEDIS."
         checklist.save(update_fields=["notas", "actualizado_en"])
-    if not checklist.lineas.exists():
-        sync_job = None
-        if ejecutar_sync:
-            service = OpenTransferSyncService()
-            for fecha in [ruta.fecha_ruta - timedelta(days=1), ruta.fecha_ruta]:
-                sync_job = service.sync_open_transfers(fecha=fecha, triggered_by=user)
-                if sync_job.status != sync_job.STATUS_SUCCESS:
-                    raise ValidationError("No se pudo sincronizar Point para generar la carga esperada.")
-            checklist.point_sync_job = sync_job or checklist.point_sync_job
-            checklist.save(update_fields=["point_sync_job", "actualizado_en"])
-        checklist.lineas.filter(point_transfer_line__is_open=False).delete()
-        creadas, actualizadas, omitidas = _sincronizar_lineas_point_para_ruta(ruta=ruta, checklist=checklist, solo_abiertas=True)
+    sync_job = None
+    if ejecutar_sync:
+        service = OpenTransferSyncService()
+        for fecha in [ruta.fecha_ruta - timedelta(days=1), ruta.fecha_ruta]:
+            sync_job = service.sync_open_transfers(fecha=fecha, triggered_by=user)
+            if sync_job.status != sync_job.STATUS_SUCCESS:
+                raise ValidationError("No se pudo sincronizar Point para generar la carga esperada.")
+        checklist.point_sync_job = sync_job or checklist.point_sync_job
+        checklist.save(update_fields=["point_sync_job", "actualizado_en"])
+    checklist.lineas.filter(point_transfer_line__is_open=False, estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).delete()
+    creadas_point, actualizadas_point, omitidas_point = _sincronizar_lineas_point_para_ruta(ruta=ruta, checklist=checklist, solo_abiertas=True)
+    creadas += creadas_point
+    actualizadas += actualizadas_point
+    omitidas += omitidas_point
 
     if checklist.lineas.exists():
         if checklist.estatus == RutaCargaChecklist.ESTATUS_BLOQUEADA:
