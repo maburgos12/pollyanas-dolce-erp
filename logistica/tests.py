@@ -614,9 +614,33 @@ class LogisticaPwaApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"], "ruta_no_liberada")
+        self.assertIn("confirma al menos una línea de carga", response.json()["mensaje"])
         ruta.refresh_from_db()
         self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
         self.assertFalse(BitacoraSalidaLlegada.objects.filter(repartidor=self.repartidor, cerrada=False).exists())
+
+    def test_bitacora_activa_alerta_si_ruta_sigue_planeada(self):
+        bitacora = BitacoraSalidaLlegada.objects.create(
+            repartidor=self.repartidor,
+            unidad=self.unidad,
+            km_salida=1000,
+            nivel_gas_salida="lleno",
+            foto_tablero_salida=SimpleUploadedFile("tablero.gif", VALID_GIF, content_type="image/gif"),
+        )
+        ruta = RutaEntrega.objects.create(
+            nombre="Ruta Planeada Con Turno",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_PLANEADA,
+            repartidor=self.repartidor,
+            unidad_operativa=self.unidad,
+            bitacora_salida=bitacora,
+        )
+
+        response = self.client.get(reverse("api_logistica_bitacora_salida_activa"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["ruta_folio"], ruta.folio)
+        self.assertIn("sigue planeada", response.json()["alerta_operativa"])
 
     def test_occasional_driver_with_repartidor_profile_can_operate_without_repartidor_group(self):
         user = User.objects.create_user(username="conductora.ocasional", password="pass123")
@@ -1431,11 +1455,11 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v34", pwa_html)
+        self.assertIn("route-control-v35", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v34", pwa_html)
+        self.assertIn("?v=route-control-v35", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v34-tramo-carga", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v35-bitacora-alerta", sw_js)
         api_block = sw_js[sw_js.index('url.pathname.startsWith("/api/")'):sw_js.index('event.request.mode === "navigate"')]
         self.assertIn("event.respondWith(fetch(event.request));", api_block)
         self.assertNotIn("caches.match(event.request)", api_block)
@@ -1488,7 +1512,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v34-tramo-carga", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v35-bitacora-alerta", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path

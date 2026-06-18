@@ -836,6 +836,9 @@ class LogisticaBitacoraSalidaLlegadaSerializer(serializers.ModelSerializer):
     unidad_codigo = serializers.CharField(source="unidad.codigo", read_only=True)
     unidad_descripcion = serializers.CharField(source="unidad.descripcion", read_only=True)
     cargas_combustible = serializers.SerializerMethodField()
+    ruta_folio = serializers.SerializerMethodField()
+    ruta_estatus = serializers.SerializerMethodField()
+    alerta_operativa = serializers.SerializerMethodField()
 
     class Meta:
         model = BitacoraSalidaLlegada
@@ -860,6 +863,9 @@ class LogisticaBitacoraSalidaLlegadaSerializer(serializers.ModelSerializer):
             "costo_combustible",
             "foto_ticket_combustible",
             "cargas_combustible",
+            "ruta_folio",
+            "ruta_estatus",
+            "alerta_operativa",
             "cerrada",
             "ip_registro",
             "latitud_salida",
@@ -889,6 +895,23 @@ class LogisticaBitacoraSalidaLlegadaSerializer(serializers.ModelSerializer):
             many=True,
             context=self.context,
         ).data
+
+    def _ruta_operativa(self, obj):
+        return obj.rutas_operativas.order_by("-fecha_ruta", "-id").first()
+
+    def get_ruta_folio(self, obj):
+        ruta = self._ruta_operativa(obj)
+        return ruta.folio if ruta else ""
+
+    def get_ruta_estatus(self, obj):
+        ruta = self._ruta_operativa(obj)
+        return ruta.estatus if ruta else ""
+
+    def get_alerta_operativa(self, obj):
+        ruta = self._ruta_operativa(obj)
+        if ruta and ruta.estatus == RutaEntrega.ESTATUS_PLANEADA:
+            return f"Turno abierto, pero {ruta.folio} sigue planeada. Cierra este turno accidental y revisa la carga antes de salir."
+        return ""
 
 
 class LogisticaCargaCombustibleSerializer(serializers.ModelSerializer):

@@ -1353,7 +1353,7 @@
       const TRACKING_QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
       const ACCESS_TOKEN_KEY = "pd_logistica_access";
       const REFRESH_TOKEN_KEY = "pd_logistica_refresh";
-      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v34
+      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v35
       const app = document.getElementById("app");
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
@@ -3858,6 +3858,7 @@
           const requiereCargaAntesDeCerrar = requiereCargaCombustibleAntesDeCerrar(actual, draft);
           body = `
             <p class="unit-line">Turno activo · ${escapeHtml(actual.unidad_codigo)} · Folio: ${escapeHtml(actual.folio)}</p>
+            ${actual.alerta_operativa ? `<div class="daily-banner warning">${escapeHtml(actual.alerta_operativa)}</div>` : ""}
             <section class="card report-card">
               <div class="kv"><b>Salida</b><span>${formatDate(actual.hora_salida)}</span></div>
               <div class="kv"><b>KM salida</b><span>${escapeHtml(actual.km_salida)}</span></div>
@@ -3944,7 +3945,7 @@
           const error = await response.json().catch(() => ({}));
           if (error.error === "turno_abierto") {
             state.bitacoraSalida = error.bitacora || state.bitacoraSalida;
-            return renderBitacoraSalida(`⚠️ Tienes un turno abierto en ${error.bitacora?.unidad_codigo || "otra unidad"}.`);
+            return renderBitacoraSalida(error.mensaje || `⚠️ Tienes un turno abierto en ${error.bitacora?.unidad_codigo || "otra unidad"}.`);
           }
           if (error.error === "unidad_ruta_distinta") {
             return renderBitacoraSalida(error.mensaje || "Tienes una ruta activa en otra unidad. Inicia turno con la unidad asignada.");
@@ -4228,7 +4229,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v34", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v35", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {
