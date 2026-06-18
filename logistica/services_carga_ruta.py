@@ -23,6 +23,7 @@ from .models import (
     EventoRuta,
     ParadaEntregaEvidencia,
     ParadaRuta,
+    PuntoLogistico,
     RutaCargaChecklist,
     RutaCargaChecklistLinea,
     RutaEntrega,
@@ -463,10 +464,24 @@ def _usuarios_logistica_rutas():
     return [usuario for usuario in usuarios if can_manage_submodule(usuario, "logistica", "rutas")]
 
 
+def paradas_con_entrega_requerida(ruta: RutaEntrega):
+    return ruta.paradas.select_related("punto").exclude(punto__tipo=PuntoLogistico.TIPO_CEDIS)
+
+
+def ruta_tiene_entregas_pendientes(ruta: RutaEntrega) -> bool:
+    return paradas_con_entrega_requerida(ruta).filter(entrega_estado=ParadaRuta.ENTREGA_PENDIENTE).exists()
+
+
+def ruta_tiene_diferencias_entrega(ruta: RutaEntrega) -> bool:
+    return paradas_con_entrega_requerida(ruta).filter(
+        entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA]
+    ).exists()
+
+
 def _resumen_diferencias_cierre(ruta: RutaEntrega) -> list[dict]:
     checklist = getattr(ruta, "checklist_carga", None)
     resumen = []
-    for parada in ruta.paradas.filter(
+    for parada in paradas_con_entrega_requerida(ruta).filter(
         entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA]
     ).order_by("orden", "id"):
         item = {
@@ -500,11 +515,9 @@ def cerrar_ruta_con_diferencia_autorizada(*, ruta: RutaEntrega, user, notas: str
         raise ValidationError("Solo puedes cerrar con diferencia una ruta en seguimiento.")
     if ruta.paradas.filter(estado=ParadaRuta.ESTADO_PENDIENTE).exists():
         raise ValidationError("No se puede cerrar: hay paradas pendientes por visitar u omitir.")
-    if ruta.paradas.filter(entrega_estado=ParadaRuta.ENTREGA_PENDIENTE).exists():
+    if ruta_tiene_entregas_pendientes(ruta):
         raise ValidationError("No se puede cerrar: hay paradas sin entrega confirmada.")
-    if not ruta.paradas.filter(
-        entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA]
-    ).exists():
+    if not ruta_tiene_diferencias_entrega(ruta):
         raise ValidationError("Esta ruta no tiene diferencias; usa el cierre normal.")
 
     diferencias = _resumen_diferencias_cierre(ruta)

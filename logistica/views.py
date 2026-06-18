@@ -47,6 +47,8 @@ from .services_carga_ruta import (
     checklist_tiene_recepcion_point_pendiente,
     cerrar_ruta_con_diferencia_autorizada,
     confirmar_checklist_carga_manual,
+    ruta_tiene_diferencias_entrega,
+    ruta_tiene_entregas_pendientes,
     registrar_recarga_cedis,
     sincronizar_checklist_carga_desde_point,
     sincronizar_recepcion_desde_point,
@@ -2330,10 +2332,10 @@ def ruta_detail(request, pk: int):
                     except ValidationError as exc:
                         messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
                         return redirect("logistica:ruta_detail", pk=ruta.id)
-                    if ruta.paradas.filter(entrega_estado=ParadaRuta.ENTREGA_PENDIENTE).exists():
+                    if ruta_tiene_entregas_pendientes(ruta):
                         messages.error(request, "No se puede completar la ruta: hay paradas sin entrega confirmada.")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
-                    if ruta.paradas.filter(entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA]).exists():
+                    if ruta_tiene_diferencias_entrega(ruta):
                         messages.error(request, "No se puede completar la ruta: hay diferencias o entregas no recibidas por resolver.")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
                     if checklist_tiene_recepcion_point_pendiente(ruta):
@@ -2542,10 +2544,8 @@ def ruta_detail(request, pk: int):
         can_manage_submodule(request.user, "logistica", "rutas")
         and ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA
         and not ruta.paradas.filter(estado=ParadaRuta.ESTADO_PENDIENTE).exists()
-        and not ruta.paradas.filter(entrega_estado=ParadaRuta.ENTREGA_PENDIENTE).exists()
-        and ruta.paradas.filter(
-            entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA]
-        ).exists()
+        and not ruta_tiene_entregas_pendientes(ruta)
+        and ruta_tiene_diferencias_entrega(ruta)
     )
 
     context = {
