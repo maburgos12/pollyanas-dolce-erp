@@ -2300,6 +2300,44 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(resumen.evidencias_creadas, 1)
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_CON_DIFERENCIA)
 
+    def test_sincronizar_recepcion_respeta_confirmacion_pwa_para_lineas_sin_point(self):
+        checklist, _, _ = self._crear_linea_carga_con_transferencia_recibida(
+            source_hash="transfer-mixta-point",
+            loaded_quantity="5.000",
+            received_quantity="5.000",
+        )
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=self.parada,
+            transfer_external_id="",
+            detail_external_id="",
+            source_hash="manual-sin-point-pwa",
+            item_code="PAY-MED",
+            item_name="Pay de Queso Mediano",
+            unit="pz",
+            cantidad_solicitada="2.000",
+            cantidad_enviada_esperada="2.000",
+            cantidad_cargada="2.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+            validado_por=self.user,
+            validado_en=timezone.now(),
+        )
+        ParadaEntregaEvidencia.objects.create(
+            ruta=self.ruta,
+            parada=self.parada,
+            tipo=ParadaEntregaEvidencia.TIPO_CONFIRMACION,
+            comentario="Entrega completa confirmada por repartidor en PWA.",
+            capturado_por=self.user,
+            client_event_id="pwa-entrega-completa-mixta",
+        )
+
+        resumen = sincronizar_recepcion_desde_point(ruta=self.ruta, user=self.user, ejecutar_sync=False)
+
+        self.parada.refresh_from_db()
+        self.assertEqual(resumen.evidencias_creadas, 1)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertIn("Esperado/cargado 7.000, recibido 7.000", self.parada.entrega_notas)
+
     def test_sincronizar_recepcion_desde_point_actualiza_evidencia_si_point_corrige(self):
         _, _, transfer_line = self._crear_linea_carga_con_transferencia_recibida(loaded_quantity="5.000", received_quantity="3.000")
         sincronizar_recepcion_desde_point(ruta=self.ruta, user=self.user, ejecutar_sync=False)
