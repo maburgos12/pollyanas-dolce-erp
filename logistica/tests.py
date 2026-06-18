@@ -2727,6 +2727,38 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(parada.evidencias_entrega.get().metadata["source_hashes"], [transferencia.source_hash])
         self.assertEqual(ruta.cumplimiento_porcentaje, Decimal("100.00"))
 
+    def test_recepcion_point_resuelve_ambiguo_por_cantidad_recibida(self):
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        self._crear_solicitud_cedis(ruta=ruta)
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+        linea = resumen.checklist.lineas.get()
+        linea.cantidad_cargada = Decimal("5.000")
+        linea.estatus = RutaCargaChecklistLinea.ESTATUS_CARGADA
+        linea.save(update_fields=["cantidad_cargada", "estatus", "actualizado_en"])
+        ruta.estatus = RutaEntrega.ESTATUS_EN_RUTA
+        ruta.save(update_fields=["estatus", "updated_at"])
+        vieja = self._crear_transferencia_point_abierta(source_hash="transfer-recibe-ambiguo-vieja")
+        vieja.is_open = False
+        vieja.is_received = True
+        vieja.is_finalized = True
+        vieja.received_quantity = Decimal("1.000")
+        vieja.received_at = timezone.now() - timezone.timedelta(hours=2)
+        vieja.save(update_fields=["is_open", "is_received", "is_finalized", "received_quantity", "received_at", "updated_at"])
+        correcta = self._crear_transferencia_point_abierta(source_hash="transfer-recibe-ambiguo-correcta")
+        correcta.is_open = False
+        correcta.is_received = True
+        correcta.is_finalized = True
+        correcta.received_quantity = Decimal("5.000")
+        correcta.received_at = timezone.now()
+        correcta.save(update_fields=["is_open", "is_received", "is_finalized", "received_quantity", "received_at", "updated_at"])
+
+        recepcion = sincronizar_recepcion_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        linea.refresh_from_db()
+        self.assertEqual(recepcion.lineas_recibidas, 1)
+        self.assertEqual(recepcion.lineas_pendientes_point, 0)
+        self.assertEqual(linea.point_transfer_line, correcta)
+
     def test_recepcion_point_no_empata_producto_ambiguo(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
         self._crear_solicitud_cedis(ruta=ruta)
