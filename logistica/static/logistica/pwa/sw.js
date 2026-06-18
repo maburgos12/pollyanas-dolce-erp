@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-logistica-pwa-v32-entrega-sin-gps";
+const CACHE_NAME = "pollyanas-logistica-pwa-v33-api-network-only";
 const SHELL_ASSETS = [
   "/logistica/app/",
   "/static/logistica/pwa/manifest.json",
@@ -23,11 +23,7 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
   if (url.pathname.startsWith("/api/")) {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => response)
-        .catch(() => caches.match(event.request))
-    );
+    event.respondWith(fetch(event.request));
     return;
   }
 
