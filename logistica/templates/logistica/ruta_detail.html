@@ -309,6 +309,13 @@
         <input type="hidden" name="action" value="sync_carga_point">
         <button class="btn btn-secondary" type="submit">Actualizar carga esperada</button>
       </form>
+      {% if ruta.estatus in "EN_RUTA COMPLETADA" %}
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="sync_recepcion_point">
+        <button class="btn btn-secondary" type="submit">Actualizar recepción Point</button>
+      </form>
+      {% endif %}
       {% endif %}
       {% if can_manage_logistica and carga_manual_pendiente %}
       <form method="post" onsubmit="return confirm('¿Confirmar manualmente toda la carga pendiente? Esto usará la cantidad esperada para cargar.');">

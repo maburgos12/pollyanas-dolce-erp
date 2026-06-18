@@ -2234,7 +2234,16 @@ def ruta_detail(request, pk: int):
                 diferencias_point = ruta.paradas.filter(
                     entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA]
                 ).count()
-                if resumen.lineas_recibidas and diferencias_point:
+                if resumen.lineas_pendientes_point:
+                    messages.warning(
+                        request,
+                        (
+                            "Recepción Point sincronizada parcialmente: "
+                            f"{resumen.lineas_recibidas} línea(s) recibidas y "
+                            f"{resumen.lineas_pendientes_point} línea(s) pendientes de recepción Point."
+                        ),
+                    )
+                elif resumen.lineas_recibidas and diferencias_point:
                     messages.warning(
                         request,
                         (
@@ -2252,8 +2261,6 @@ def ruta_detail(request, pk: int):
                             f"{resumen.paradas_actualizadas} parada(s) actualizadas."
                         ),
                     )
-                elif resumen.lineas_pendientes_point:
-                    messages.warning(request, "Point todavía no marca recepción para las líneas de esta ruta.")
                 else:
                     messages.warning(request, "No hay checklist de carga o transferencias Point ligadas a esta ruta.")
             return redirect("logistica:ruta_detail", pk=ruta.id)
