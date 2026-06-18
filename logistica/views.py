@@ -203,11 +203,13 @@ def _totales_recepcion_point(rows: list[dict]) -> list[dict]:
                 "cargado": Decimal("0"),
                 "recibido": Decimal("0"),
                 "cargado_validado": True,
+                "cargado_parcial": False,
             },
         )
         total["esperado"] += row["esperado"]
         if row["cargado_validado"]:
             total["cargado"] += row["cargado"] or Decimal("0")
+            total["cargado_parcial"] = True
         else:
             total["cargado_validado"] = False
         total["recibido"] += row["recibido"] or Decimal("0")
