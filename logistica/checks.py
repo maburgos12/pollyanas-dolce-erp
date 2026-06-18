@@ -22,11 +22,11 @@ REMOVED_PWA_MARKERS = {
 }
 
 REQUIRED_TEMPLATE_MARKERS = {
-    "route-control-v29": "versionado del service worker para forzar actualizacion de la PWA",
+    "route-control-v30": "versionado del service worker para forzar actualizacion de la PWA",
 }
 
 REQUIRED_SERVICE_WORKER_MARKERS = {
-    "pollyanas-logistica-pwa-v29-profile-before-flush": "cache versionado de la PWA",
+    "pollyanas-logistica-pwa-v30-entrega-directa": "cache versionado de la PWA",
     'event.request.mode === "navigate"': "estrategia network-first para navegacion",
     'url.pathname === "/logistica/app/"': "estrategia network-first para el app shell",
 }

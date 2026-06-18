@@ -1431,11 +1431,11 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v29", pwa_html)
+        self.assertIn("route-control-v30", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v29", pwa_html)
+        self.assertIn("?v=route-control-v30", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v29-profile-before-flush", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v30-entrega-directa", sw_js)
         self.assertIn("if (!state.perfil) await loadPerfil();", pwa_html)
         self.assertIn("ultimaParadaCedisOrden", pwa_html)
         self.assertIn("Carga desde CEDIS", pwa_html)
@@ -1468,6 +1468,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("confirmarEntregaParada", pwa_html)
         self.assertIn("confirmarEntregaParada(${Number(rutaId)}, ${Number(parada.id)}, this)", pwa_html)
         self.assertIn('button.textContent = "Enviando...";', pwa_html)
+        self.assertNotIn('window.confirm("¿Confirmar entrega completa de esta parada?")', pwa_html)
         self.assertIn("Confirmar entrega", pwa_html)
         self.assertNotIn('localStorage.setItem("pd_logistica_refresh"', pwa_html)
         self.assertNotIn("localStorage.setItem(REFRESH_TOKEN_KEY", pwa_html)
@@ -1481,7 +1482,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v29-profile-before-flush", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v30-entrega-directa", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
