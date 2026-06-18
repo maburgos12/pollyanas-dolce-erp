@@ -1431,11 +1431,11 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v30", pwa_html)
+        self.assertIn("route-control-v31", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v30", pwa_html)
+        self.assertIn("?v=route-control-v31", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v30-entrega-directa", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v31-cedis-recarga", sw_js)
         self.assertIn("if (!state.perfil) await loadPerfil();", pwa_html)
         self.assertIn("ultimaParadaCedisOrden", pwa_html)
         self.assertIn("Carga desde CEDIS", pwa_html)
@@ -1467,6 +1467,8 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn('await showScreen("ruta_activa")', pwa_html)
         self.assertIn("confirmarEntregaParada", pwa_html)
         self.assertIn("confirmarEntregaParada(${Number(rutaId)}, ${Number(parada.id)}, this)", pwa_html)
+        self.assertIn("paradaRequiereEntrega", pwa_html)
+        self.assertIn('toUpperCase() !== "CEDIS"', pwa_html)
         self.assertIn('button.textContent = "Enviando...";', pwa_html)
         self.assertNotIn('window.confirm("¿Confirmar entrega completa de esta parada?")', pwa_html)
         self.assertIn("Confirmar entrega", pwa_html)
@@ -1482,7 +1484,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v30-entrega-directa", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v31-cedis-recarga", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -1889,6 +1891,49 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
         self.assertContains(response, "hay paradas sin entrega confirmada")
 
+    def test_ruta_status_no_bloquea_completar_por_cedis_sin_entrega(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.567916",
+            longitud="-108.459969",
+            radio_geocerca_metros=120,
+        )
+        self.parada.estado = ParadaRuta.ESTADO_VISITADA
+        self.parada.entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
+        self.parada.hora_llegada_real = timezone.now()
+        self.parada.entrega_confirmada_en = timezone.now()
+        self.parada.entrega_confirmada_por = self.user
+        self.parada.save(
+            update_fields=[
+                "estado",
+                "entrega_estado",
+                "hora_llegada_real",
+                "entrega_confirmada_en",
+                "entrega_confirmada_por",
+                "actualizado_en",
+            ]
+        )
+        ParadaRuta.objects.create(
+            ruta=self.ruta,
+            punto=cedis,
+            orden=2,
+            estado=ParadaRuta.ESTADO_VISITADA,
+            hora_llegada_real=timezone.now(),
+        )
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {"action": "ruta_status", "estatus": RutaEntrega.ESTATUS_COMPLETADA},
+            follow=True,
+        )
+
+        self.ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
+
     def test_ruta_status_no_reabre_ruta_cerrada(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
@@ -1985,6 +2030,49 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
         self.assertIn("entrega confirmada", response.json()["detail"])
 
+    def test_api_ruta_status_no_bloquea_completar_por_cedis_sin_entrega(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.567916",
+            longitud="-108.459969",
+            radio_geocerca_metros=120,
+        )
+        self.parada.estado = ParadaRuta.ESTADO_VISITADA
+        self.parada.entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
+        self.parada.hora_llegada_real = timezone.now()
+        self.parada.entrega_confirmada_en = timezone.now()
+        self.parada.entrega_confirmada_por = self.user
+        self.parada.save(
+            update_fields=[
+                "estado",
+                "entrega_estado",
+                "hora_llegada_real",
+                "entrega_confirmada_en",
+                "entrega_confirmada_por",
+                "actualizado_en",
+            ]
+        )
+        ParadaRuta.objects.create(
+            ruta=self.ruta,
+            punto=cedis,
+            orden=2,
+            estado=ParadaRuta.ESTADO_VISITADA,
+            hora_llegada_real=timezone.now(),
+        )
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_estatus", kwargs={"ruta_id": self.ruta.id}),
+            json.dumps({"estatus": RutaEntrega.ESTATUS_COMPLETADA}),
+            content_type="application/json",
+        )
+
+        self.ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
+
     def test_api_ruta_status_bloquea_completar_con_diferencia_point(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
@@ -2050,6 +2138,39 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(ParadaEntregaEvidencia.objects.filter(parada=self.parada, client_event_id="evt-entrega-1").count(), 1)
         self.assertEqual(self.ruta.cumplimiento_porcentaje, Decimal("0.00"))
         self.assertEqual(EventoRuta.objects.filter(ruta=self.ruta, parada=self.parada).count(), 1)
+
+    def test_api_no_confirma_entrega_en_parada_cedis(self):
+        self.client.force_login(self.user)
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.567916",
+            longitud="-108.459969",
+            radio_geocerca_metros=120,
+        )
+        parada_cedis = ParadaRuta.objects.create(
+            ruta=self.ruta,
+            punto=cedis,
+            orden=2,
+            estado=ParadaRuta.ESTADO_VISITADA,
+            hora_llegada_real=timezone.now(),
+        )
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_parada_entrega", kwargs={"ruta_id": self.ruta.id, "parada_id": parada_cedis.id}),
+            json.dumps(
+                {
+                    "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+                    "evidencias": [{"comentario": "Intento de entrega en CEDIS"}],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        parada_cedis.refresh_from_db()
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("recarga", response.json()["detail"])
+        self.assertEqual(parada_cedis.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
 
     def test_api_retry_no_sobrescribe_entrega_confirmada(self):
         self.client.force_login(self.user)

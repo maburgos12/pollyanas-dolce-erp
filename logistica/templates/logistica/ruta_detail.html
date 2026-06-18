@@ -240,6 +240,7 @@
             <th>Promedio surtido</th>
             <th>Permanencia real</th>
             <th>Estado</th>
+            <th>Entrega</th>
             {% if can_manage_logistica and ruta.estatus in "PLANEADA EN_RUTA" %}<th>Acciones</th>{% endif %}
           </tr>
         </thead>
@@ -255,6 +256,7 @@
             <td>{% if row.promedio_surtido_minutos is not None %}{{ row.promedio_surtido_minutos }} min{% else %}Sin historial{% endif %}</td>
             <td>{% if row.permanencia_real_minutos is not None %}{{ row.permanencia_real_minutos }} min{% else %}-{% endif %}</td>
             <td>{{ parada.get_estado_display }}</td>
+            <td>{% if parada.punto.tipo == "CEDIS" %}Recarga CEDIS{% else %}{{ parada.get_entrega_estado_display }}{% endif %}</td>
             {% if can_manage_logistica and ruta.estatus in "PLANEADA EN_RUTA" %}
             <td>
               <div class="route-action-row">
@@ -286,7 +288,7 @@
           </tr>
           {% endwith %}
           {% empty %}
-          <tr><td colspan="{% if can_manage_logistica and ruta.estatus in 'PLANEADA EN_RUTA' %}9{% else %}8{% endif %}" class="muted">Sin paradas. Agrega puntos logísticos para validar llegada por GPS.</td></tr>
+          <tr><td colspan="{% if can_manage_logistica and ruta.estatus in 'PLANEADA EN_RUTA' %}10{% else %}9{% endif %}" class="muted">Sin paradas. Agrega puntos logísticos para validar llegada por GPS.</td></tr>
           {% endfor %}
         </tbody>
       </table>

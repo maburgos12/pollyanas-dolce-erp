@@ -46,6 +46,8 @@ from logistica.services_carga_ruta import (
     checklist_tiene_recepcion_point_pendiente,
     obtener_checklist_carga_detallado,
     registrar_evento_checklist_confirmado,
+    ruta_tiene_diferencias_entrega,
+    ruta_tiene_entregas_pendientes,
     sincronizar_checklist_carga_desde_point,
     sincronizar_recepcion_desde_point,
     validar_linea_carga,
@@ -1157,9 +1159,9 @@ class LogisticaRutaStatusView(_LogisticaBaseView):
             except ValidationError as exc:
                 detail = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
                 return Response({"detail": detail}, status=status.HTTP_400_BAD_REQUEST)
-            if ruta.paradas.filter(entrega_estado=ParadaRuta.ENTREGA_PENDIENTE).exists():
+            if ruta_tiene_entregas_pendientes(ruta):
                 return Response({"detail": "No se puede completar la ruta: hay paradas sin entrega confirmada."}, status=status.HTTP_400_BAD_REQUEST)
-            if ruta.paradas.filter(entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA]).exists():
+            if ruta_tiene_diferencias_entrega(ruta):
                 return Response({"detail": "No se puede completar la ruta: hay diferencias o entregas no recibidas por resolver."}, status=status.HTTP_400_BAD_REQUEST)
             if checklist_tiene_recepcion_point_pendiente(ruta):
                 return Response({"detail": "No se puede completar la ruta: hay recepción Point pendiente."}, status=status.HTTP_400_BAD_REQUEST)
@@ -1217,6 +1219,8 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
             return Response({"detail": "Solo puedes confirmar entregas de una ruta en seguimiento."}, status=status.HTTP_400_BAD_REQUEST)
 
         parada = get_object_or_404(ParadaRuta.objects.select_related("punto"), pk=parada_id, ruta=ruta)
+        if parada.punto.tipo == PuntoLogistico.TIPO_CEDIS:
+            return Response({"detail": "CEDIS es parada de recarga; no requiere confirmación de entrega."}, status=status.HTTP_400_BAD_REQUEST)
         serializer = ParadaEntregaConfirmarSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         payload = serializer.validated_data
