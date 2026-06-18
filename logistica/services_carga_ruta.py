@@ -292,6 +292,16 @@ def _cantidad_recibida_con_respaldo_pwa(
     return None
 
 
+def _elegir_recepcion_point(linea: RutaCargaChecklistLinea, candidates: list[PointTransferLine]) -> list[PointTransferLine]:
+    if len(candidates) <= 1:
+        return candidates
+    esperado = _cantidad_referencia_entrega(linea)
+    exactas = [line for line in candidates if Decimal(str(line.received_quantity or 0)) == esperado]
+    if not exactas:
+        return []
+    return [max(exactas, key=lambda line: (line.received_at or line.updated_at, line.id))]
+
+
 @transaction.atomic
 def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_sync: bool = True) -> ChecklistCargaResumen:
     ruta = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
@@ -672,7 +682,7 @@ def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_
             received_lines = [point_line]
         elif linea.parada.punto.sucursal_id:
             candidates = point_recibidas.get((linea.parada.punto.sucursal_id, _linea_producto_key(linea)), [])
-            received_lines = candidates if len(candidates) == 1 else []
+            received_lines = _elegir_recepcion_point(linea, candidates)
             if received_lines and linea.point_transfer_line_id != received_lines[0].id:
                 linea.point_transfer_line = received_lines[0]
                 linea.save(update_fields=["point_transfer_line", "actualizado_en"])
