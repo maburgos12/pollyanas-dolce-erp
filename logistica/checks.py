@@ -22,7 +22,7 @@ REMOVED_PWA_MARKERS = {
 }
 
 REQUIRED_TEMPLATE_MARKERS = {
-    "route-control-v33": "versionado del service worker para forzar actualizacion de la PWA",
+    "route-control-v34": "versionado del service worker para forzar actualizacion de la PWA",
 }
 
 REQUIRED_SERVICE_WORKER_MARKERS = {
