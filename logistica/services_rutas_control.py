@@ -146,6 +146,9 @@ def crear_evento_ruta_once(
 
 
 def _marcar_visitada_por_permanencia(*, ruta: RutaEntrega, parada: ParadaRuta, distancia_metros_value: int | None) -> bool:
+    primera_pendiente = ruta.paradas.filter(estado=ParadaRuta.ESTADO_PENDIENTE).order_by("orden", "id").first()
+    if not primera_pendiente or primera_pendiente.id != parada.id:
+        return False
     primera_llegada = (
         EventoRuta.objects.filter(ruta=ruta, parada=parada, tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE)
         .order_by("creado_en")
