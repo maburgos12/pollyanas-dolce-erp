@@ -381,8 +381,8 @@ def _elegir_recepcion_point(linea: RutaCargaChecklistLinea, candidates: list[Poi
 @transaction.atomic
 def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_sync: bool = True) -> ChecklistCargaResumen:
     ruta = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
-    if ruta.estatus != RutaEntrega.ESTATUS_PLANEADA:
-        raise ValidationError("La carga solo se puede sincronizar mientras la ruta está planeada.")
+    if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
+        raise ValidationError("La carga solo se puede sincronizar mientras la ruta está planeada o en ruta.")
 
     paradas_by_branch = _paradas_por_sucursal(ruta)
     if not paradas_by_branch:
