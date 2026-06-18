@@ -371,8 +371,10 @@ carga inicial - ventas - reposiciones - mermas - devoluciones = diferencia
 Tambien debe hacer arqueo de efectivo:
 
 ```text
-efectivo esperado - efectivo entregado = diferencia de efectivo
+efectivo entregado - efectivo esperado = diferencia de efectivo
 ```
+
+Positivo = sobrante. Negativo = faltante.
 
 Estados:
 

@@ -164,6 +164,8 @@ El pedido es intención, **no descuenta inventario ni genera cartera**.
 `Pedido`: cliente FK, fecha_entrega, canal (`planta`/`ruta`/`administracion`), ruta_sugerida FK (nullable), observaciones, estado.
 Estados: `pendiente` / `programado` / `entregado_parcial` / `entregado` / `reprogramado` / `cancelado`.
 
+Etiqueta visible: la clave `programado` se muestra como "Programado en ruta".
+
 `PedidoDetalle`: pedido FK, presentacion FK, cantidad_solicitada, cantidad_entregada (default 0).
 
 > **Aclaración menor (entrega parcial):** `cantidad_entregada < cantidad_solicitada` cierra el renglón en V1; el faltante NO se reprograma automático. Si el cliente lo quiere de nuevo, se crea pedido nuevo. (Decisión explícita para no construir un motor de backorders en V1; cámbiala aquí si el negocio lo pide.)
@@ -202,6 +204,7 @@ La nota es la evidencia de lo realmente entregado. Descuenta inventario y, si es
 | total | Decimal | |
 | estado_pago | Choice | `pagada` / `pendiente` |
 | estado_factura | Choice | `pendiente` / `facturada` / `no_facturable` / `cancelada` |
+| estado_credito | Choice nullable | `borrador` / `pendiente_autorizacion` / `autorizada` / `rechazada` / `vendida` / `cancelada`; solo aplica cuando `condicion=credito` |
 | **folio_offline** | UUID | **nullable, UNIQUE.** Generado por el dispositivo en venta offline. |
 | creado_en / creado_por | | |
 
@@ -267,11 +270,13 @@ pago FK, nota FK, monto_aplicado. Suma de aplicaciones ≤ monto del pago.
 serie_folio, uuid (CFDI), rfc, fecha, subtotal, iva, total, xml (file nullable), pdf (file nullable), cliente FK, estado (`conciliada`/`con_diferencia`).
 
 ### 10.2 `FacturaNota` (M2M con monto)
-factura FK, nota FK, monto_asignado.
+factura FK, nota FK, monto_asignado, base_asignada, iva_asignado, tasa_iva.
 
 ### 10.3 Validación
 ```
-suma(monto_asignado de la factura)  ==  total factura   ± tolerancia_redondeo
+suma(base_asignada de la factura)  ==  subtotal factura   ± tolerancia_redondeo
+suma(iva_asignado de la factura)   ==  iva factura        ± tolerancia_redondeo
+suma(monto_asignado de la factura) ==  total factura      ± tolerancia_redondeo
 ```
 - `tolerancia_redondeo` configurable (p. ej. $0.50) para absorber centavos de IVA/redondeo.
 - Si no cuadra dentro de la tolerancia → factura queda `con_diferencia` para resolver (no se fuerza).
@@ -304,11 +309,14 @@ La merma genera `MovimientoInventario` tipo `merma` (negativo) sobre `ubicacion`
 | Campo | Tipo | Notas |
 |---|---|---|
 | merma | FK | nullable; reposición ligada a merma o motivo autorizado |
+| motivo | Char/Text | nullable |
 | presentacion | FK | |
 | cantidad | Decimal | |
 | ubicacion_origen | FK | si es en ruta, baja del almacén móvil |
 | autorizado_por | FK | |
 | ruta | FK | nullable; aparece en el cierre como reposición |
+
+Regla: la reposición tiene merma ligada O tiene motivo + autorización.
 
 Genera `MovimientoInventario` tipo `reposicion` (negativo). **Nunca** se registra como venta en cero pesos.
 
