@@ -1038,7 +1038,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertContains(response, "24 min")
         self.assertContains(response, "54")
 
-    def test_registrar_ubicacion_marca_geocerca_visitada(self):
+    def test_registrar_ubicacion_en_geocerca_solo_crea_evento(self):
         ubicacion = registrar_ubicacion_ruta(
             user=self.user,
             ruta=self.ruta,
@@ -1058,9 +1058,40 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(ubicacion.precision_metros, 0)
         self.assertEqual(ubicacion.velocidad_kmh, 0)
         self.assertEqual(ubicacion.bateria_porcentaje, 0)
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
+        self.assertEqual(self.ruta.cumplimiento_porcentaje, 0)
+        self.assertTrue(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE).exists())
+
+    def test_registrar_ubicacion_marca_visitada_con_permanencia(self):
+        registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={
+                "latitud": "25.570010",
+                "longitud": "-108.470010",
+                "precision_metros": 0,
+            },
+            ip_registro="127.0.0.1",
+        )
+        EventoRuta.objects.filter(ruta=self.ruta, parada=self.parada, tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE).update(
+            creado_en=timezone.now() - timezone.timedelta(minutes=6)
+        )
+
+        registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={
+                "latitud": "25.570010",
+                "longitud": "-108.470010",
+                "precision_metros": 0,
+            },
+            ip_registro="127.0.0.1",
+        )
+
+        self.parada.refresh_from_db()
+        self.ruta.refresh_from_db()
         self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
         self.assertEqual(self.ruta.cumplimiento_porcentaje, 100)
-        self.assertTrue(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE).exists())
 
     def test_parada_conserva_geocerca_planeada_si_punto_maestro_cambia(self):
         self.assertEqual(self.parada.punto_nombre_snapshot, "Sucursal Control")
