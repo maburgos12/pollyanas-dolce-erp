@@ -1,0 +1,269 @@
+<mxfile host="app.diagrams.net" modified="2026-06-18T20:55:00.000Z" agent="Codex" version="24.7.17" type="device">
+  <diagram id="flujo-logistica-rutas" name="Flujo operativo rutas">
+    <mxGraphModel dx="2600" dy="1800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3600" pageHeight="2500" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title" value="Logistica - arbol y conexiones completas del flujo interno de rutas" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=none;fontSize=28;fontStyle=1;fontColor=#7a1744;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1200" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="subtitle" value="Fuente: modelos, servicios, API, PWA y control operativo del modulo logistica. Diagrama editable en diagrams.net / Draw.io." style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=none;fontSize=13;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="40" y="70" width="1220" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="lane1" value="1. Fuentes y datos maestros" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;fillColor=#f8edf3;strokeColor=#8b1e52;fontStyle=1;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="40" y="140" width="360" height="760" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane2" value="2. Planeacion ERP" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;fillColor=#eef4ff;strokeColor=#315ca8;fontStyle=1;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="430" y="140" width="390" height="760" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane3" value="3. Carga CEDIS y Point" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;fillColor=#fff6e7;strokeColor=#b26a00;fontStyle=1;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="850" y="140" width="410" height="760" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane4" value="4. PWA repartidor" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;fillColor=#edf8f1;strokeColor=#227a3a;fontStyle=1;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1290" y="140" width="410" height="760" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane5" value="5. Ruta, GPS y geocercas" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;fillColor=#f0f7fb;strokeColor=#2d6f8f;fontStyle=1;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1730" y="140" width="410" height="760" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane6" value="6. Entrega, recepcion y cierre" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;fillColor=#fff0f0;strokeColor=#b64040;fontStyle=1;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="2170" y="140" width="420" height="760" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane7" value="7. Control visual, alertas y cache" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;fillColor=#f5f1ff;strokeColor=#6b4bb4;fontStyle=1;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="2620" y="140" width="430" height="760" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="src_sucursal" value="Sucursales&#xa;levantan solicitud vespertina&#xa;para surtir al dia siguiente" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#8b1e52;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="80" y="190" width="260" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="src_reabasto" value="recetas.SolicitudReabastoCedis&#xa;SolicitudReabastoCedisLinea&#xa;estado: SOLICITADA / ATENDIDA / ENVIADA" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#8b1e52;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="80" y="290" width="260" height="86" as="geometry"/>
+        </mxCell>
+        <mxCell id="src_point" value="Point / pos_bridge&#xa;PointTransferLine&#xa;transferencia abierta, enviada, recibida&#xa;PointSyncJob" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#8b1e52;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="80" y="405" width="260" height="96" as="geometry"/>
+        </mxCell>
+        <mxCell id="src_catalogos" value="Catalogos maestros&#xa;core.Sucursal&#xa;PuntoLogistico&#xa;Unidad&#xa;Repartidor / rrhh.Empleado / auth.User" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#8b1e52;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="80" y="530" width="260" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="src_google" value="Google Routes / Roads&#xa;polyline planeada&#xa;GPS snapped opcional&#xa;fallback sin romper mapa" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#8b1e52;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="80" y="665" width="260" height="92" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="plan_ruta" value="RutaEntrega&#xa;PLANEADA&#xa;folio, fecha_ruta, repartidor, acompanante, unidad, notas, fuente ruteo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#315ca8;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="470" y="190" width="300" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="plan_paradas" value="ParadaRuta&#xa;orden + PuntoLogistico&#xa;tipo: SUCURSAL / CEDIS / otros&#xa;geocerca snapshot, estado, entrega_estado" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#315ca8;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="470" y="310" width="300" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="plan_botones" value="Pantalla detalle ruta&#xa;Guardar planeacion&#xa;Agregar / quitar / mover paradas&#xa;Actualizar estatus&#xa;Actualizar carga esperada" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#315ca8;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="470" y="445" width="300" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="plan_estado" value="Reglas de estatus&#xa;PLANEADA -> EN_RUTA -> COMPLETADA&#xa;no reabrir completada/cancelada&#xa;no volver EN_RUTA a PLANEADA por API normal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#315ca8;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="470" y="580" width="300" height="104" as="geometry"/>
+        </mxCell>
+        <mxCell id="plan_constraints" value="Restricciones base&#xa;una ruta EN_RUTA por repartidor&#xa;una ruta EN_RUTA por unidad&#xa;requiere repartidor, unidad y paradas para salir/cerrar" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#315ca8;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="470" y="715" width="300" height="95" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="cargo_sync" value="sincronizar_checklist_carga_desde_point()&#xa;fuente 1: SolicitudReabastoCedisLineas del dia&#xa;fuente 2: Point abierto / enviado&#xa;limpia cerradas, no duplica source_hash" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b26a00;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="895" y="190" width="320" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="cargo_checklist" value="RutaCargaChecklist&#xa;PENDIENTE / EN_REVISION / CONFIRMADA&#xa;CON_INCIDENCIA / BLOQUEADA&#xa;motivo_override, sync_job" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b26a00;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="895" y="325" width="320" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="cargo_lineas" value="RutaCargaChecklistLinea&#xa;parada, producto, codigo, unidad&#xa;solicitado, enviado_esperado, cargado&#xa;PENDIENTE / CARGADA / PARCIAL / FALTANTE / SOBRANTE" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b26a00;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="895" y="455" width="320" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="cargo_bloqueo" value="checklist_bloquea_salida()&#xa;bloquea si hay lineas pero ninguna revisada&#xa;no bloquea si hay alguna carga marcada&#xa;CON_INCIDENCIA requiere override para liberar" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b26a00;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="895" y="605" width="320" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="cargo_segmento" value="Segmento operativo de carga&#xa;PWA solo muestra tramo actual&#xa;CEDIS corta tramo cuando anteriores no-CEDIS estan resueltas&#xa;evita mezclar primera salida con recarga posterior" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b26a00;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="895" y="740" width="320" height="112" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="pwa_auth" value="PWA /logistica/pwa/&#xa;auth token / session-token / refresh&#xa;mi-perfil enlaza usuario con Repartidor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#227a3a;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1335" y="190" width="320" height="85" as="geometry"/>
+        </mxCell>
+        <mxCell id="pwa_bitacora" value="Turno operativo&#xa;bitacora-salida activa&#xa;unidad asignada&#xa;si la unidad no coincide, el sistema debe exigir cerrar/cambiar turno" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#227a3a;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1335" y="305" width="320" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="pwa_ruta_activa" value="GET /api/logistica/rutas/activa/&#xa;devuelve ruta EN_RUTA del repartidor&#xa;paradas, eventos, ultima ubicacion&#xa;checklist_carga solo del tramo actual" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#227a3a;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1335" y="435" width="320" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="pwa_validar" value="Validar carga en PWA&#xa;POST linea/validar&#xa;exacto = CARGADA&#xa;diferencia requiere motivo&#xa;offline queue debe reintentar y mostrar error claro" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#227a3a;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1335" y="570" width="320" height="112" as="geometry"/>
+        </mxCell>
+        <mxCell id="pwa_entregar" value="Confirmar entrega en PWA&#xa;POST paradas/{id}/entrega&#xa;CEDIS no es entregable&#xa;ENTREGADA exige evidencia de productos recibidos&#xa;puede marcar VISITADA al entregar" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#227a3a;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1335" y="712" width="320" height="118" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="gps_salida" value="Liberar salida&#xa;POST /rutas/{id}/estatus EN_RUTA&#xa;valida checklist, unidad, repartidor, paradas&#xa;crea EventoRuta SALIDA" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#2d6f8f;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1775" y="190" width="320" height="96" as="geometry"/>
+        </mxCell>
+        <mxCell id="gps_tracking" value="Tracking GPS&#xa;POST /rutas/{id}/tracking&#xa;registrar_ubicacion_ruta()&#xa;guarda UbicacionRuta con precision, velocidad, bateria, timestamp" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#2d6f8f;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1775" y="315" width="320" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="gps_validaciones" value="Validaciones GPS&#xa;coordenadas validas&#xa;timestamp no muy viejo/futuro&#xa;precision baja &gt; 100m&#xa;salto imposible &gt; 120 km/h" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#2d6f8f;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1775" y="450" width="320" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="gps_geofence" value="Geocerca&#xa;detecta parada mas cercana&#xa;crea LLEGADA_GEOFENCE&#xa;visita automatica solo si es la siguiente parada pendiente y hay permanencia minima" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#2d6f8f;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1775" y="590" width="320" height="112" as="geometry"/>
+        </mxCell>
+        <mxCell id="gps_eventos" value="EventoRuta operativo&#xa;GPS_PERDIDO&#xa;GPS_PRECISION_BAJA&#xa;UBICACION_TARDIA&#xa;SALTO_IMPOSIBLE&#xa;DESVIO&#xa;INCIDENCIA_MANUAL" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#2d6f8f;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1775" y="730" width="320" height="120" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_evidencia" value="ParadaEntregaEvidencia&#xa;producto, cantidad_esperada, cantidad_entregada&#xa;foto, lat/lng, usuario, client_event_id&#xa;origen PWA o Point" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b64040;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="2215" y="190" width="320" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent_estado" value="Estado de parada&#xa;VISITADA por geocerca/permanencia o entrega manual&#xa;entrega_estado: PENDIENTE / ENTREGADA / CON_DIFERENCIA / NO_ENTREGADA" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b64040;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="2215" y="325" width="320" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent_point_recibido" value="Actualizar recepcion Point&#xa;sincronizar_recepcion_desde_point()&#xa;toma transferencias recibidas&#xa;crea/actualiza evidencias y confirma recepcion real" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b64040;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="2215" y="460" width="320" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent_cierre_normal" value="Cierre normal COMPLETADA&#xa;bloquea si hay paradas pendientes&#xa;bloquea si hay entrega pendiente&#xa;bloquea si hay diferencia no autorizada&#xa;bloquea si hay recepcion Point pendiente" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b64040;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="2215" y="595" width="320" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent_cierre_dif" value="Cierre con diferencia autorizada&#xa;cerrar_ruta_con_diferencia_autorizada()&#xa;solo EN_RUTA, sin pendientes operativos&#xa;genera CIERRE alerta y notifica a logistica" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b64040;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="2215" y="745" width="320" height="105" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ctrl_mapa" value="Control interno de rutas&#xa;resumen_control_rutas()&#xa;mapa OSM, ruta planeada Google, GPS recorrido, eventos, geocercas" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6b4bb4;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="2665" y="190" width="330" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="ctrl_timeline" value="Panel evidencia&#xa;timeline de EventoRuta&#xa;filtros por ruta&#xa;alertas de GPS, desviacion, llegada, incidencias manuales" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6b4bb4;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="2665" y="320" width="330" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="ctrl_detail" value="Detalle ruta ERP&#xa;paradas y geocercas&#xa;carga esperada CEDIS por parada&#xa;botones de sync/recarga&#xa;totales esperado vs cargado" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6b4bb4;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="2665" y="455" width="330" height="112" as="geometry"/>
+        </mxCell>
+        <mxCell id="ctrl_cache" value="Service Worker PWA&#xa;sw.js CACHE_NAME&#xa;bump obligatorio al tocar HTML/CSS/JS PWA&#xa;collectstatic + no-cache para que repartidor vea cambios" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6b4bb4;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="2665" y="595" width="330" height="112" as="geometry"/>
+        </mxCell>
+        <mxCell id="ctrl_guardrails" value="Reglas que NO se deben mezclar&#xa;GPS llegada no es entrega&#xa;Point enviado no es recibido&#xa;CEDIS no es sucursal entregable&#xa;carga esperada, cargada y recibida son evidencias distintas" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6b4bb4;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="2665" y="735" width="330" height="115" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="bottom1" value="Arbol tecnico principal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f7f7f7;strokeColor=#555555;fontStyle=1;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="40" y="970" width="300" height="48" as="geometry"/>
+        </mxCell>
+        <mxCell id="tree_models" value="Modelos logistica&#xa;RutaEntrega&#xa;PuntoLogistico&#xa;ParadaRuta&#xa;RutaCargaChecklist&#xa;RutaCargaChecklistLinea&#xa;ParadaEntregaEvidencia&#xa;UbicacionRuta&#xa;EventoRuta&#xa;Unidad / Repartidor / BitacoraSalidaLlegada / InspeccionVehiculo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#555555;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="1040" width="360" height="190" as="geometry"/>
+        </mxCell>
+        <mxCell id="tree_services" value="Servicios criticos&#xa;services_carga_ruta: sync checklist, validar linea, tramo actual, recarga CEDIS, recepcion Point, cierre autorizado&#xa;services_rutas_control: registrar ubicacion, geocercas, GPS perdido, resumen control&#xa;services_google_routes / roads: ruteo y snap" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#555555;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="430" y="1040" width="470" height="190" as="geometry"/>
+        </mxCell>
+        <mxCell id="tree_api" value="API DRF&#xa;/api/logistica/rutas/&#xa;/activa/&#xa;/control/&#xa;/{id}/estatus/&#xa;/{id}/tracking/&#xa;/{id}/eventos/&#xa;/{id}/carga-checklist/&#xa;/{id}/carga-checklist/sincronizar/&#xa;/{id}/carga-checklist/lineas/{linea}/validar/&#xa;/{id}/recepcion-point/sincronizar/&#xa;/{id}/paradas/{parada}/entrega/" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#555555;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="930" y="1040" width="430" height="235" as="geometry"/>
+        </mxCell>
+        <mxCell id="tree_templates" value="UI / templates&#xa;logistica/templates/logistica/ruta_detail.html&#xa;control_rutas.html&#xa;pwa.html&#xa;views.py / views_pwa.py&#xa;static/service worker&#xa;leaflet mapa y timeline evidencia" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#555555;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1390" y="1040" width="360" height="175" as="geometry"/>
+        </mxCell>
+        <mxCell id="tree_external" value="Integraciones externas&#xa;recetas: consolidado CEDIS / solicitudes de reabasto&#xa;pos_bridge: OpenTransferSyncService, PointMovementSyncService, PointTransferLine&#xa;Google Routes / Roads&#xa;Redis/Celery: jobs de GPS perdido y sync" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#555555;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1780" y="1040" width="420" height="175" as="geometry"/>
+        </mxCell>
+        <mxCell id="tree_ops" value="Checklist operativo diario&#xa;1. actualizar carga esperada antes de liberar&#xa;2. confirmar carga en PWA por tramo&#xa;3. dar salida EN_RUTA&#xa;4. GPS registra ubicacion y geocercas&#xa;5. entregar en sucursal con evidencia&#xa;6. si vuelve a CEDIS, registrar recarga y continuar tramo&#xa;7. actualizar recepcion Point cuando sucursal reciba&#xa;8. cerrar normal o con diferencia autorizada" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#555555;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="2230" y="1040" width="430" height="230" as="geometry"/>
+        </mxCell>
+        <mxCell id="tree_riesgos" value="Puntos de falla auditados&#xa;- PWA cache vieja: bump SW y recargar app&#xa;- unidad/turno no coincide: bloquear hasta cerrar turno correcto&#xa;- Point recibido viejo: no usarlo como carga actual&#xa;- enviado parcial: mantener solicitado, enviado y recibido separados&#xa;- CEDIS mal contado como visitada: solo separador/recarga, no entrega&#xa;- llegada geocerca sin permanencia: evento, no visita automatica&#xa;- diferencia sin motivo: no guardar&#xa;- cierre 100% visual pero estado EN_RUTA: validar pendientes/diferencias/Point antes de cerrar" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#555555;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="2690" y="1040" width="430" height="245" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e_src_reabasto" value="genera pedido operativo" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#8b1e52;fontSize=11;" edge="1" parent="1" source="src_sucursal" target="src_reabasto">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_reabasto_plan" value="fecha_ruta + sucursal" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#8b1e52;fontSize=11;" edge="1" parent="1" source="src_reabasto" target="plan_ruta">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_catalogos_plan" value="asigna puntos, unidad y personas" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#8b1e52;fontSize=11;" edge="1" parent="1" source="src_catalogos" target="plan_paradas">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_google_plan" value="calcula ruta planeada" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#8b1e52;fontSize=11;" edge="1" parent="1" source="src_google" target="plan_ruta">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_plan_paradas" value="contiene" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#315ca8;fontSize=11;" edge="1" parent="1" source="plan_ruta" target="plan_paradas">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_plan_sync" value="ruta + paradas alimentan carga" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#315ca8;fontSize=11;" edge="1" parent="1" source="plan_paradas" target="cargo_sync">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_point_sync" value="abiertas/enviadas confirman carga" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#b26a00;fontSize=11;" edge="1" parent="1" source="src_point" target="cargo_sync">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_sync_checklist" value="crea/actualiza" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#b26a00;fontSize=11;" edge="1" parent="1" source="cargo_sync" target="cargo_checklist">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_checklist_lineas" value="agrupa lineas" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#b26a00;fontSize=11;" edge="1" parent="1" source="cargo_checklist" target="cargo_lineas">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_lineas_bloqueo" value="decide si puede salir" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#b26a00;fontSize=11;" edge="1" parent="1" source="cargo_lineas" target="cargo_bloqueo">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_bloqueo_status" value="bloquea/libera EN_RUTA" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#b26a00;fontSize=11;" edge="1" parent="1" source="cargo_bloqueo" target="gps_salida">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_pwa_active" value="consume tramo actual" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#227a3a;fontSize=11;" edge="1" parent="1" source="cargo_segmento" target="pwa_ruta_activa">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_pwa_validar_linea" value="actualiza cantidad_cargada" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#227a3a;fontSize=11;" edge="1" parent="1" source="pwa_validar" target="cargo_lineas">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_pwa_gps" value="envia coordenadas" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#227a3a;fontSize=11;" edge="1" parent="1" source="pwa_ruta_activa" target="gps_tracking">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_tracking_validaciones" value="filtra datos malos" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#2d6f8f;fontSize=11;" edge="1" parent="1" source="gps_tracking" target="gps_validaciones">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_valid_geofence" value="si confiable, evalua radio" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#2d6f8f;fontSize=11;" edge="1" parent="1" source="gps_validaciones" target="gps_geofence">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_geofence_eventos" value="crea evidencia operativa" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#2d6f8f;fontSize=11;" edge="1" parent="1" source="gps_geofence" target="gps_eventos">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_pwa_entrega" value="crea evidencia" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#227a3a;fontSize=11;" edge="1" parent="1" source="pwa_entregar" target="ent_evidencia">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_evidencia_estado" value="actualiza parada" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#b64040;fontSize=11;" edge="1" parent="1" source="ent_evidencia" target="ent_estado">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_point_recibido" value="recibido real en sucursal" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#b64040;fontSize=11;" edge="1" parent="1" source="src_point" target="ent_point_recibido">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_recibido_evidencia" value="si coincide, genera evidencia" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#b64040;fontSize=11;" edge="1" parent="1" source="ent_point_recibido" target="ent_evidencia">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_estado_cierre" value="precondiciones de cierre" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#b64040;fontSize=11;" edge="1" parent="1" source="ent_estado" target="ent_cierre_normal">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_cierre_dif" value="si hay diferencia justificada" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#b64040;fontSize=11;" edge="1" parent="1" source="ent_cierre_normal" target="ent_cierre_dif">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_control_mapa" value="muestra estado vivo" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#6b4bb4;fontSize=11;" edge="1" parent="1" source="gps_eventos" target="ctrl_mapa">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_control_timeline" value="timeline" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#6b4bb4;fontSize=11;" edge="1" parent="1" source="gps_eventos" target="ctrl_timeline">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_control_detail" value="audita carga y paradas" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#6b4bb4;fontSize=11;" edge="1" parent="1" source="cargo_checklist" target="ctrl_detail">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_cache_pwa" value="si no se ve cambio, revisar cache" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#6b4bb4;fontSize=11;" edge="1" parent="1" source="ctrl_cache" target="pwa_auth">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_models_services" value="implementan" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#555555;fontSize=11;" edge="1" parent="1" source="tree_models" target="tree_services">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_services_api" value="expuestos por" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#555555;fontSize=11;" edge="1" parent="1" source="tree_services" target="tree_api">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_api_templates" value="consumidos por" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#555555;fontSize=11;" edge="1" parent="1" source="tree_api" target="tree_templates">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_external_services" value="alimentan" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#555555;fontSize=11;" edge="1" parent="1" source="tree_external" target="tree_services">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,103 @@
+<mxfile host="app.diagrams.net" modified="2026-06-18T21:20:00.000Z" agent="Codex" version="24.7.17" type="device">
+  <diagram id="flujo-simple-rutas" name="Flujo simple rutas">
+    <mxGraphModel dx="1800" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1500" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title" value="Flujo operativo simple - rutas logistica" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=none;fontSize=28;fontStyle=1;fontColor=#7a1744;" vertex="1" parent="1">
+          <mxGeometry x="60" y="30" width="900" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="subtitle" value="Este es el flujo que debe entender el sistema. Lo tecnico queda debajo, separado por estados." style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=none;fontSize=14;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="60" y="78" width="1000" height="35" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n1" value="1. Sucursal solicita&#xa;dia anterior" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8edf3;strokeColor=#8b1e52;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="170" width="180" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="n2" value="2. CEDIS consolida&#xa;lo que se debe surtir" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff6e7;strokeColor=#b26a00;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="300" y="170" width="190" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="n3" value="3. Logistica arma ruta&#xa;paradas + CEDIS si habra recarga" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef4ff;strokeColor=#315ca8;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="560" y="170" width="220" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="n4" value="4. Actualizar carga esperada&#xa;toma lo enviado/actual del tramo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff6e7;strokeColor=#b26a00;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="850" y="170" width="235" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="n5" value="5. PWA muestra solo&#xa;el tramo actual" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#edf8f1;strokeColor=#227a3a;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1160" y="170" width="200" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="n6" value="6. Repartidor confirma carga&#xa;exacta o con motivo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#edf8f1;strokeColor=#227a3a;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1430" y="170" width="220" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="n7" value="7. Dar salida&#xa;EN_RUTA" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f7fb;strokeColor=#2d6f8f;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1730" y="170" width="170" height="80" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n8" value="8. GPS detecta llegada&#xa;solo marca VISITADA&#xa;si hay orden + permanencia" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f7fb;strokeColor=#2d6f8f;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="350" y="360" width="240" height="95" as="geometry"/>
+        </mxCell>
+        <mxCell id="n9" value="9. Repartidor marca ENTREGADA&#xa;con productos/evidencia" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff0f0;strokeColor=#b64040;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="680" y="360" width="250" height="95" as="geometry"/>
+        </mxCell>
+        <mxCell id="d1" value="10. ¿La siguiente parada es CEDIS?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff6e7;strokeColor=#b26a00;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1025" y="345" width="180" height="125" as="geometry"/>
+        </mxCell>
+        <mxCell id="n10" value="11A. Registrar recarga CEDIS&#xa;y abrir siguiente tramo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff6e7;strokeColor=#b26a00;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="360" width="245" height="95" as="geometry"/>
+        </mxCell>
+        <mxCell id="n11" value="11B. Continuar a siguiente sucursal&#xa;mismo tramo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#edf8f1;strokeColor=#227a3a;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="520" width="245" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="n12" value="12. Actualizar recepcion Point&#xa;cuando sucursal reciba" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff0f0;strokeColor=#b64040;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="350" y="690" width="250" height="85" as="geometry"/>
+        </mxCell>
+        <mxCell id="n13" value="13. Comparar 3 cosas&#xa;solicitado vs enviado/cargado vs recibido" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff0f0;strokeColor=#b64040;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="690" y="690" width="265" height="85" as="geometry"/>
+        </mxCell>
+        <mxCell id="n14" value="14. Cerrar ruta&#xa;solo si no quedan pendientes&#xa;o diferencia autorizada" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f1ff;strokeColor=#6b4bb4;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1050" y="690" width="260" height="95" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="s1" value="Estados separados, no mezclar" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f7f7f7;strokeColor=#555555;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="900" width="330" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="state_route" value="Ruta&#xa;PLANEADA -> EN_RUTA -> COMPLETADA&#xa;CANCELADA aparte" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef4ff;strokeColor=#315ca8;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="60" y="980" width="255" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="state_stop" value="Parada&#xa;PENDIENTE -> VISITADA&#xa;VISITADA = llegada fisica, no entrega" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f7fb;strokeColor=#2d6f8f;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="350" y="980" width="285" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="state_load" value="Carga&#xa;PENDIENTE / CARGADA / PARCIAL / FALTANTE / SOBRANTE&#xa;diferencia requiere motivo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff6e7;strokeColor=#b26a00;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="670" y="980" width="315" height="115" as="geometry"/>
+        </mxCell>
+        <mxCell id="state_delivery" value="Entrega&#xa;PENDIENTE / ENTREGADA / CON_DIFERENCIA / NO_ENTREGADA&#xa;esto lo marca repartidor o evidencia valida" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff0f0;strokeColor=#b64040;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="980" width="330" height="115" as="geometry"/>
+        </mxCell>
+        <mxCell id="state_point" value="Point&#xa;SOLICITADO = pedido de sucursal&#xa;ENVIADO = salio de CEDIS&#xa;RECIBIDO = sucursal cerro transferencia&#xa;ATENDIDO no debe contar como entrega" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8edf3;strokeColor=#8b1e52;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1385" y="980" width="330" height="135" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="rule" value="Regla madre: el sistema no debe adivinar. Si solo hay GPS, solo hay llegada. Si solo hay Point enviado, solo hay salida de carga. Entrega requiere accion/evidencia. Recepcion Point requiere que sucursal cierre/reciba." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#7a1744;fontSize=15;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1210" width="1150" height="75" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#555555;" edge="1" parent="1" source="n1" target="n2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#555555;" edge="1" parent="1" source="n2" target="n3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#555555;" edge="1" parent="1" source="n3" target="n4"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#555555;" edge="1" parent="1" source="n4" target="n5"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#555555;" edge="1" parent="1" source="n5" target="n6"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#555555;" edge="1" parent="1" source="n6" target="n7"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" value="en ruta" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#2d6f8f;fontSize=12;" edge="1" parent="1" source="n7" target="n8"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e8" value="llego, luego entrega" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#2d6f8f;fontSize=12;" edge="1" parent="1" source="n8" target="n9"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e9" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b64040;" edge="1" parent="1" source="n9" target="d1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e10" value="si" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b26a00;fontSize=12;" edge="1" parent="1" source="d1" target="n10"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e11" value="no" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#227a3a;fontSize=12;" edge="1" parent="1" source="d1" target="n11"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e12" value="siguiente tramo" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b26a00;fontSize=12;" edge="1" parent="1" source="n10" target="n4"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e13" value="siguiente parada" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#227a3a;fontSize=12;" edge="1" parent="1" source="n11" target="n8"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e14" value="cuando sucursal recibe" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b64040;fontSize=12;" edge="1" parent="1" source="n9" target="n12"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e15" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b64040;" edge="1" parent="1" source="n12" target="n13"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e16" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#6b4bb4;" edge="1" parent="1" source="n13" target="n14"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
