@@ -1356,7 +1356,7 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
         ruta = _ruta_operativa_dia_para_repartidor(repartidor)
         if not ruta:
             return Response(status=status.HTTP_204_NO_CONTENT)
-        checklist = obtener_checklist_carga_detallado(ruta)
+        checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=True)
         ultima_ubicacion = ruta.ubicaciones.select_related("repartidor__user", "unidad").first()
 
         return Response(
