@@ -1,5 +1,10 @@
 # ERP Mar de Cortes V1 - Diseno Operativo
 
+> Contrato de datos: este diseno se implementa contra
+> `2026-06-18-mar-de-cortes-erp-v1-modelo-datos-nucleo.md`, que fija tablas,
+> campos y constraints. Si hay diferencia entre flujo operativo y modelo,
+> primero se corrige el spec; no se improvisa en migraciones.
+
 ## Objetivo
 
 Crear una base ERP autonoma para Mar de Cortes Agua y Hielo, derivada del
