@@ -47,6 +47,7 @@ from logistica.services_carga_ruta import (
     registrar_evento_checklist_confirmado,
     ruta_tiene_diferencias_entrega,
     ruta_tiene_entregas_pendientes,
+    ruta_tiene_paradas_entregables_pendientes,
     sincronizar_checklist_carga_desde_point,
     sincronizar_recepcion_desde_point,
     validar_linea_carga,
@@ -1202,7 +1203,7 @@ class LogisticaRutaStatusView(_LogisticaBaseView):
                 return Response({"detail": "Solo puedes completar una ruta que ya está en seguimiento."}, status=status.HTTP_400_BAD_REQUEST)
             if not ruta.repartidor_id or not ruta.unidad_operativa_id or not ruta.paradas.exists():
                 return Response({"detail": "No se puede completar la ruta: falta repartidor, unidad o paradas."}, status=status.HTTP_400_BAD_REQUEST)
-            if ruta.paradas.filter(estado=ParadaRuta.ESTADO_PENDIENTE).exists():
+            if ruta_tiene_paradas_entregables_pendientes(ruta):
                 return Response({"detail": "No se puede completar la ruta: hay paradas pendientes por visitar u omitir."}, status=status.HTTP_400_BAD_REQUEST)
             if ruta_tiene_entregas_pendientes(ruta):
                 return Response({"detail": "No se puede completar la ruta: hay paradas sin entrega confirmada."}, status=status.HTTP_400_BAD_REQUEST)

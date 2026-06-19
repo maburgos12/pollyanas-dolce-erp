@@ -2293,8 +2293,6 @@ class LogisticaControlRutasTests(TestCase):
             ruta=self.ruta,
             punto=cedis,
             orden=2,
-            estado=ParadaRuta.ESTADO_VISITADA,
-            hora_llegada_real=timezone.now(),
         )
 
         response = self.client.post(
@@ -2432,8 +2430,6 @@ class LogisticaControlRutasTests(TestCase):
             ruta=self.ruta,
             punto=cedis,
             orden=2,
-            estado=ParadaRuta.ESTADO_VISITADA,
-            hora_llegada_real=timezone.now(),
         )
 
         response = self.client.post(

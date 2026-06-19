@@ -49,6 +49,7 @@ from .services_carga_ruta import (
     confirmar_checklist_carga_manual,
     ruta_tiene_diferencias_entrega,
     ruta_tiene_entregas_pendientes,
+    ruta_tiene_paradas_entregables_pendientes,
     registrar_recarga_cedis,
     sincronizar_checklist_carga_desde_point,
     sincronizar_recepcion_desde_point,
@@ -2368,7 +2369,7 @@ def ruta_detail(request, pk: int):
                     if not ruta.repartidor_id or not ruta.unidad_operativa_id or not ruta.paradas.exists():
                         messages.error(request, "No se puede completar la ruta: falta repartidor, unidad o paradas.")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
-                    if ruta.paradas.filter(estado=ParadaRuta.ESTADO_PENDIENTE).exists():
+                    if ruta_tiene_paradas_entregables_pendientes(ruta):
                         messages.error(request, "No se puede completar la ruta: hay paradas pendientes por visitar u omitir.")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
                     if ruta_tiene_entregas_pendientes(ruta):
