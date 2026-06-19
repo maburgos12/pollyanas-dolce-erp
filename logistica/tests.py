@@ -2163,6 +2163,38 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
 
+    def test_ruta_status_no_reabre_entrega_por_recepcion_point_diferente(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        self._crear_linea_carga_con_transferencia_recibida(received_quantity="0.000")
+        self.parada.estado = ParadaRuta.ESTADO_VISITADA
+        self.parada.entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
+        self.parada.hora_llegada_real = timezone.now()
+        self.parada.entrega_confirmada_en = timezone.now()
+        self.parada.entrega_confirmada_por = self.user
+        self.parada.save(
+            update_fields=[
+                "estado",
+                "entrega_estado",
+                "hora_llegada_real",
+                "entrega_confirmada_en",
+                "entrega_confirmada_por",
+                "actualizado_en",
+            ]
+        )
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {"action": "ruta_status", "estatus": RutaEntrega.ESTATUS_COMPLETADA},
+            follow=True,
+        )
+
+        self.ruta.refresh_from_db()
+        self.parada.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+
     def test_ruta_status_no_bloquea_completar_por_cedis_sin_entrega(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)

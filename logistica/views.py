@@ -2334,12 +2334,6 @@ def ruta_detail(request, pk: int):
                     if ruta.paradas.filter(estado=ParadaRuta.ESTADO_PENDIENTE).exists():
                         messages.error(request, "No se puede completar la ruta: hay paradas pendientes por visitar u omitir.")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
-                    try:
-                        sincronizar_recepcion_desde_point(ruta=ruta, user=request.user, ejecutar_sync=False)
-                        ruta.refresh_from_db()
-                    except ValidationError as exc:
-                        messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
-                        return redirect("logistica:ruta_detail", pk=ruta.id)
                     if ruta_tiene_entregas_pendientes(ruta):
                         messages.error(request, "No se puede completar la ruta: hay paradas sin entrega confirmada.")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
