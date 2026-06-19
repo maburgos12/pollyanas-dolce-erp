@@ -286,10 +286,13 @@ class LogisticaViewsTests(TestCase):
             total_entregas=0,
             entregas_completadas=0,
             entregas_incidencia=0,
+            monto_estimado_total=Decimal("0"),
         )
         sucursal_ok = Sucursal.objects.create(nombre="Sucursal OK", codigo="SOK")
         sucursal_pendiente = Sucursal.objects.create(nombre="Sucursal Pendiente", codigo="SPE")
         sucursal_diff = Sucursal.objects.create(nombre="Sucursal Diferencia", codigo="SDI")
+        origen = PointBranch.objects.create(external_id="cedis", name="CEDIS")
+        destino = PointBranch.objects.create(external_id="sok", name="Sucursal OK")
         puntos = [
             PuntoLogistico.objects.create(nombre="Sucursal OK", tipo=PuntoLogistico.TIPO_SUCURSAL, sucursal=sucursal_ok, latitud="25.570000", longitud="-108.470000"),
             PuntoLogistico.objects.create(nombre="Sucursal Pendiente", tipo=PuntoLogistico.TIPO_SUCURSAL, sucursal=sucursal_pendiente, latitud="25.571000", longitud="-108.471000"),
@@ -302,8 +305,38 @@ class LogisticaViewsTests(TestCase):
             ParadaRuta.ENTREGA_CON_DIFERENCIA,
             ParadaRuta.ENTREGA_PENDIENTE,
         ]
-        for orden, (punto, entrega_estado) in enumerate(zip(puntos, estados), start=1):
+        paradas = [
             ParadaRuta.objects.create(ruta=ruta, punto=punto, orden=orden, entrega_estado=entrega_estado)
+            for orden, (punto, entrega_estado) in enumerate(zip(puntos, estados), start=1)
+        ]
+        transfer_line = PointTransferLine.objects.create(
+            origin_branch=origen,
+            destination_branch=destino,
+            erp_destination_branch=sucursal_ok,
+            transfer_external_id="transfer-ruta-operativa",
+            detail_external_id="detail-ruta-operativa",
+            source_hash="transfer-ruta-operativa",
+            registered_at=timezone.now(),
+            item_name="Pastel",
+            item_code="PST",
+            unit_cost=Decimal("12.50"),
+            requested_quantity=Decimal("2.000"),
+            sent_quantity=Decimal("2.000"),
+        )
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta)
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=paradas[0],
+            point_transfer_line=transfer_line,
+            transfer_external_id=transfer_line.transfer_external_id,
+            detail_external_id=transfer_line.detail_external_id,
+            source_hash=transfer_line.source_hash,
+            item_code=transfer_line.item_code,
+            item_name=transfer_line.item_name,
+            unit=transfer_line.unit,
+            cantidad_solicitada=transfer_line.requested_quantity,
+            cantidad_enviada_esperada=transfer_line.sent_quantity,
+        )
 
         resp = self.client.get(reverse("logistica:rutas"))
 
@@ -312,6 +345,8 @@ class LogisticaViewsTests(TestCase):
         self.assertEqual(ruta_row.paradas_entrega_total, 3)
         self.assertEqual(ruta_row.paradas_entregadas, 1)
         self.assertEqual(ruta_row.paradas_incidencia, 1)
+        self.assertEqual(ruta_row.monto_transferido_point, Decimal("25"))
+        self.assertContains(resp, "$25.00")
 
     def test_rutas_selector_omite_repartidores_con_usuario_inactivo(self):
         sucursal = Sucursal.objects.create(nombre="Sucursal Centro", codigo="SC01")
