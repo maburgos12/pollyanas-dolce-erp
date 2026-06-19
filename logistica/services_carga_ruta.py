@@ -610,6 +610,10 @@ def paradas_con_entrega_requerida(ruta: RutaEntrega):
     return ruta.paradas.select_related("punto").exclude(punto__tipo=PuntoLogistico.TIPO_CEDIS)
 
 
+def ruta_tiene_paradas_entregables_pendientes(ruta: RutaEntrega) -> bool:
+    return paradas_con_entrega_requerida(ruta).filter(estado=ParadaRuta.ESTADO_PENDIENTE).exists()
+
+
 def ruta_tiene_entregas_pendientes(ruta: RutaEntrega) -> bool:
     return paradas_con_entrega_requerida(ruta).filter(entrega_estado=ParadaRuta.ENTREGA_PENDIENTE).exists()
 
@@ -655,7 +659,7 @@ def cerrar_ruta_con_diferencia_autorizada(*, ruta: RutaEntrega, user, notas: str
     ruta = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
     if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
         raise ValidationError("Solo puedes cerrar con diferencia una ruta en seguimiento.")
-    if ruta.paradas.filter(estado=ParadaRuta.ESTADO_PENDIENTE).exists():
+    if ruta_tiene_paradas_entregables_pendientes(ruta):
         raise ValidationError("No se puede cerrar: hay paradas pendientes por visitar u omitir.")
     if ruta_tiene_entregas_pendientes(ruta):
         raise ValidationError("No se puede cerrar: hay paradas sin entrega confirmada.")
