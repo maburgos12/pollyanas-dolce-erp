@@ -3777,6 +3777,124 @@ class LogisticaControlRutasTests(TestCase):
 
         self.assertQuerySetEqual(detallado.lineas.all(), ["Siguiente"], transform=lambda linea: linea.item_name)
 
+    def test_sync_carga_limpia_pendientes_antes_del_tramo_actual(self):
+        ruta, primera = self._crear_ruta_planeada_para_carga()
+        ruta.estatus = RutaEntrega.ESTATUS_EN_RUTA
+        ruta.save(update_fields=["estatus", "updated_at"])
+        cedis_punto = PuntoLogistico.objects.create(
+            nombre="CEDIS Test",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.571000",
+            longitud="-108.471000",
+            radio_geocerca_metros=120,
+        )
+        siguiente_sucursal = Sucursal.objects.create(codigo="CTRL-LOG-3", nombre="Control Logística 3", activa=True)
+        siguiente_punto = PuntoLogistico.objects.create(
+            sucursal=siguiente_sucursal,
+            nombre="Sucursal Control 3",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.573000",
+            longitud="-108.473000",
+            radio_geocerca_metros=120,
+        )
+        cedis = ParadaRuta.objects.create(ruta=ruta, punto=cedis_punto, orden=2)
+        segunda = ParadaRuta.objects.create(ruta=ruta, punto=siguiente_punto, orden=3)
+        primera.estado = ParadaRuta.ESTADO_VISITADA
+        primera.entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
+        primera.save(update_fields=["estado", "entrega_estado", "actualizado_en"])
+        EventoRuta.objects.create(
+            ruta=ruta,
+            parada=cedis,
+            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            severidad=EventoRuta.SEVERIDAD_OK,
+            descripcion="Llegada detectada en CEDIS.",
+            creado_por=self.user,
+        )
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta)
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=primera,
+            source_hash="pendiente-viejo",
+            item_code="A",
+            item_name="Anterior",
+            cantidad_solicitada=Decimal("1.000"),
+            cantidad_enviada_esperada=Decimal("1.000"),
+        )
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=segunda,
+            source_hash="pendiente-actual",
+            item_code="B",
+            item_name="Siguiente",
+            cantidad_solicitada=Decimal("2.000"),
+            cantidad_enviada_esperada=Decimal("2.000"),
+        )
+
+        sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        self.assertFalse(RutaCargaChecklistLinea.objects.filter(source_hash="pendiente-viejo").exists())
+        self.assertTrue(RutaCargaChecklistLinea.objects.filter(source_hash="pendiente-actual").exists())
+
+    def test_api_checklist_repartidor_usa_tramo_actual(self):
+        self.client.force_login(self.user)
+        ruta, primera = self._crear_ruta_planeada_para_carga()
+        ruta.estatus = RutaEntrega.ESTATUS_EN_RUTA
+        ruta.save(update_fields=["estatus", "updated_at"])
+        cedis_punto = PuntoLogistico.objects.create(
+            nombre="CEDIS Test",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.571000",
+            longitud="-108.471000",
+            radio_geocerca_metros=120,
+        )
+        siguiente_sucursal = Sucursal.objects.create(codigo="CTRL-LOG-4", nombre="Control Logística 4", activa=True)
+        siguiente_punto = PuntoLogistico.objects.create(
+            sucursal=siguiente_sucursal,
+            nombre="Sucursal Control 4",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.574000",
+            longitud="-108.474000",
+            radio_geocerca_metros=120,
+        )
+        cedis = ParadaRuta.objects.create(ruta=ruta, punto=cedis_punto, orden=2)
+        segunda = ParadaRuta.objects.create(ruta=ruta, punto=siguiente_punto, orden=3)
+        primera.estado = ParadaRuta.ESTADO_VISITADA
+        primera.entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
+        primera.save(update_fields=["estado", "entrega_estado", "actualizado_en"])
+        EventoRuta.objects.create(
+            ruta=ruta,
+            parada=cedis,
+            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            severidad=EventoRuta.SEVERIDAD_OK,
+            descripcion="Llegada detectada en CEDIS.",
+            creado_por=self.user,
+        )
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta)
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=primera,
+            source_hash="api-tramo-anterior",
+            item_code="A",
+            item_name="Anterior",
+            cantidad_solicitada=Decimal("1.000"),
+            cantidad_enviada_esperada=Decimal("1.000"),
+        )
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=segunda,
+            source_hash="api-tramo-siguiente",
+            item_code="B",
+            item_name="Siguiente",
+            cantidad_solicitada=Decimal("2.000"),
+            cantidad_enviada_esperada=Decimal("2.000"),
+        )
+
+        response = self.client.get(reverse("api_logistica_ruta_carga_checklist", kwargs={"ruta_id": ruta.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["total_lineas"], 1)
+        self.assertEqual(response.json()["lineas"][0]["item_name"], "Siguiente")
+
     def test_api_repartidor_valida_linea_carga_e_idempotencia(self):
         self.client.force_login(self.user)
         ruta, _ = self._crear_ruta_planeada_para_carga()
