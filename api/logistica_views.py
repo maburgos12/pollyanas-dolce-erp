@@ -1204,12 +1204,6 @@ class LogisticaRutaStatusView(_LogisticaBaseView):
                 return Response({"detail": "No se puede completar la ruta: falta repartidor, unidad o paradas."}, status=status.HTTP_400_BAD_REQUEST)
             if ruta.paradas.filter(estado=ParadaRuta.ESTADO_PENDIENTE).exists():
                 return Response({"detail": "No se puede completar la ruta: hay paradas pendientes por visitar u omitir."}, status=status.HTTP_400_BAD_REQUEST)
-            try:
-                sincronizar_recepcion_desde_point(ruta=ruta, user=request.user, ejecutar_sync=False)
-                ruta.refresh_from_db()
-            except ValidationError as exc:
-                detail = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
-                return Response({"detail": detail}, status=status.HTTP_400_BAD_REQUEST)
             if ruta_tiene_entregas_pendientes(ruta):
                 return Response({"detail": "No se puede completar la ruta: hay paradas sin entrega confirmada."}, status=status.HTTP_400_BAD_REQUEST)
             if ruta_tiene_diferencias_entrega(ruta):
