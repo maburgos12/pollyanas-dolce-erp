@@ -176,8 +176,8 @@
             <th>Acompañante</th>
             <th>Unidad operativa</th>
             <th>Planeación</th>
-            <th class="text-end">Entregas</th>
-            <th class="text-end">Completadas</th>
+            <th class="text-end">Paradas entrega</th>
+            <th class="text-end">Entregadas</th>
             <th class="text-end">Incidencias</th>
             <th class="text-end">Valor pedidos</th>
             <th>Estatus</th>
@@ -194,9 +194,9 @@
             <td>{% if r.acompanante %}{{ r.acompanante }}{% elif r.acompanante_manual %}{{ r.acompanante_manual }}{% else %}-{% endif %}</td>
             <td>{% if r.unidad_operativa %}{{ r.unidad_operativa.codigo }}{% elif r.unidad %}{{ r.unidad }}{% else %}-{% endif %}</td>
             <td>{% if r.repartidor_id and r.unidad_operativa_id %}<span class="badge bg-success">Asignada</span>{% else %}<span class="badge bg-warning">Pendiente</span>{% endif %}</td>
-            <td class="text-end">{{ r.total_entregas }}</td>
-            <td class="text-end">{{ r.entregas_completadas }}</td>
-            <td class="text-end">{{ r.entregas_incidencia }}</td>
+            <td class="text-end">{{ r.paradas_entrega_total }}</td>
+            <td class="text-end">{{ r.paradas_entregadas }}</td>
+            <td class="text-end">{{ r.paradas_incidencia }}</td>
             <td class="text-end">${{ r.monto_estimado_total|floatformat:2|intcomma }}</td>
             <td>
               {% if r.estatus == 'COMPLETADA' %}

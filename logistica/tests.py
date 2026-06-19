@@ -279,6 +279,40 @@ class LogisticaViewsTests(TestCase):
         self.assertNotContains(resp_post, "Cadena documental ERP")
         self.assertNotContains(resp_post, "Mesa de gobierno ERP")
 
+    def test_rutas_view_usa_paradas_para_resumen_operativo(self):
+        ruta = RutaEntrega.objects.create(
+            nombre="Ruta Operativa",
+            fecha_ruta=timezone.localdate(),
+            total_entregas=0,
+            entregas_completadas=0,
+            entregas_incidencia=0,
+        )
+        sucursal_ok = Sucursal.objects.create(nombre="Sucursal OK", codigo="SOK")
+        sucursal_pendiente = Sucursal.objects.create(nombre="Sucursal Pendiente", codigo="SPE")
+        sucursal_diff = Sucursal.objects.create(nombre="Sucursal Diferencia", codigo="SDI")
+        puntos = [
+            PuntoLogistico.objects.create(nombre="Sucursal OK", tipo=PuntoLogistico.TIPO_SUCURSAL, sucursal=sucursal_ok, latitud="25.570000", longitud="-108.470000"),
+            PuntoLogistico.objects.create(nombre="Sucursal Pendiente", tipo=PuntoLogistico.TIPO_SUCURSAL, sucursal=sucursal_pendiente, latitud="25.571000", longitud="-108.471000"),
+            PuntoLogistico.objects.create(nombre="Sucursal Diferencia", tipo=PuntoLogistico.TIPO_SUCURSAL, sucursal=sucursal_diff, latitud="25.572000", longitud="-108.472000"),
+            PuntoLogistico.objects.create(nombre="CEDIS", tipo=PuntoLogistico.TIPO_CEDIS, latitud="25.573000", longitud="-108.473000"),
+        ]
+        estados = [
+            ParadaRuta.ENTREGA_ENTREGADA,
+            ParadaRuta.ENTREGA_PENDIENTE,
+            ParadaRuta.ENTREGA_CON_DIFERENCIA,
+            ParadaRuta.ENTREGA_PENDIENTE,
+        ]
+        for orden, (punto, entrega_estado) in enumerate(zip(puntos, estados), start=1):
+            ParadaRuta.objects.create(ruta=ruta, punto=punto, orden=orden, entrega_estado=entrega_estado)
+
+        resp = self.client.get(reverse("logistica:rutas"))
+
+        ruta_row = list(resp.context["rutas"])[0]
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(ruta_row.paradas_entrega_total, 3)
+        self.assertEqual(ruta_row.paradas_entregadas, 1)
+        self.assertEqual(ruta_row.paradas_incidencia, 1)
+
     def test_rutas_selector_omite_repartidores_con_usuario_inactivo(self):
         sucursal = Sucursal.objects.create(nombre="Sucursal Centro", codigo="SC01")
         activo_user = User.objects.create_user(username="rep.activo", password="pass123")
