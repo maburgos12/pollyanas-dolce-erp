@@ -1804,22 +1804,28 @@ def rutas(request):
     elif enterprise_focus == "EN_RUTA":
         rutas_qs = rutas_qs.filter(estatus=RutaEntrega.ESTATUS_EN_RUTA)
     elif enterprise_focus == "PENDIENTES":
-        rutas_qs = rutas_qs.filter(entregas__estatus=EntregaRuta.ESTATUS_PENDIENTE).distinct()
+        rutas_qs = rutas_qs.filter(
+            paradas__entrega_estado=ParadaRuta.ENTREGA_PENDIENTE,
+        ).exclude(paradas__punto__tipo=PuntoLogistico.TIPO_CEDIS).distinct()
     elif enterprise_focus == "INCIDENCIAS":
-        rutas_qs = rutas_qs.filter(entregas__estatus=EntregaRuta.ESTATUS_INCIDENCIA).distinct()
+        rutas_qs = rutas_qs.filter(
+            paradas__entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA],
+        ).exclude(paradas__punto__tipo=PuntoLogistico.TIPO_CEDIS).distinct()
 
     rutas_total = RutaEntrega.objects.count()
     rutas_hoy = RutaEntrega.objects.filter(fecha_ruta=today).count()
     rutas_en_ruta = RutaEntrega.objects.filter(estatus=RutaEntrega.ESTATUS_EN_RUTA).count()
-    entregas_pendientes = EntregaRuta.objects.filter(estatus=EntregaRuta.ESTATUS_PENDIENTE).count()
-    incidencias = EntregaRuta.objects.filter(estatus=EntregaRuta.ESTATUS_INCIDENCIA).count()
-    entregas_total = EntregaRuta.objects.count()
+    entregas_pendientes = ParadaRuta.objects.exclude(punto__tipo=PuntoLogistico.TIPO_CEDIS).filter(entrega_estado=ParadaRuta.ENTREGA_PENDIENTE).count()
+    incidencias = ParadaRuta.objects.exclude(punto__tipo=PuntoLogistico.TIPO_CEDIS).filter(
+        entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA]
+    ).count()
+    entregas_total = ParadaRuta.objects.exclude(punto__tipo=PuntoLogistico.TIPO_CEDIS).count()
     rutas_liberadas = RutaEntrega.objects.exclude(estatus=RutaEntrega.ESTATUS_CANCELADA).filter(
         repartidor__isnull=False,
         unidad_operativa__isnull=False,
     ).count()
-    entregas_controladas = EntregaRuta.objects.filter(
-        estatus__in=[EntregaRuta.ESTATUS_EN_CAMINO, EntregaRuta.ESTATUS_ENTREGADA]
+    entregas_controladas = ParadaRuta.objects.exclude(punto__tipo=PuntoLogistico.TIPO_CEDIS).filter(
+        entrega_estado=ParadaRuta.ENTREGA_ENTREGADA
     ).count()
     entregas_cerradas = max(entregas_total - entregas_pendientes - incidencias, 0)
     enterprise_chain = _logistica_enterprise_chain(
@@ -1828,7 +1834,7 @@ def rutas(request):
         rutas_en_ruta=rutas_en_ruta,
         entregas_pendientes=entregas_pendientes,
         incidencias=incidencias,
-        entregas_completadas=EntregaRuta.objects.filter(estatus=EntregaRuta.ESTATUS_ENTREGADA).count(),
+        entregas_completadas=entregas_controladas,
     )
     document_stage_rows = _logistica_document_stage_rows(
         rutas_total=rutas_total,
@@ -1862,7 +1868,20 @@ def rutas(request):
     context = {
         "module_tabs": _module_tabs("rutas", request.user),
         "can_manage_logistica": can_manage_submodule(request.user, "logistica", "rutas"),
-        "rutas": rutas_qs.order_by("-fecha_ruta", "-id")[:200],
+        "rutas": rutas_qs.annotate(
+            paradas_entrega_total=Count("paradas", filter=~Q(paradas__punto__tipo=PuntoLogistico.TIPO_CEDIS), distinct=True),
+            paradas_entregadas=Count(
+                "paradas",
+                filter=Q(paradas__entrega_estado=ParadaRuta.ENTREGA_ENTREGADA) & ~Q(paradas__punto__tipo=PuntoLogistico.TIPO_CEDIS),
+                distinct=True,
+            ),
+            paradas_incidencia=Count(
+                "paradas",
+                filter=Q(paradas__entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA])
+                & ~Q(paradas__punto__tipo=PuntoLogistico.TIPO_CEDIS),
+                distinct=True,
+            ),
+        ).order_by("-fecha_ruta", "-id")[:200],
         "q": q,
         "estatus": estatus,
         "enterprise_focus": enterprise_focus,
