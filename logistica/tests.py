@@ -3249,6 +3249,23 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.cantidad_enviada_esperada, Decimal("3.000"))
         self.assertFalse(RutaCargaChecklistLinea.objects.filter(source_hash=transferencia.source_hash).exists())
 
+    def test_checklist_carga_point_en_cero_usa_solicitado_como_esperado(self):
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        solicitud, linea_solicitud, receta = self._crear_solicitud_cedis(ruta=ruta, cantidad="5.000")
+        transferencia = self._crear_transferencia_point_abierta(source_hash="transfer-enviado-cero")
+        transferencia.requested_quantity = Decimal("4.000")
+        transferencia.sent_quantity = Decimal("0.000")
+        transferencia.save(update_fields=["requested_quantity", "sent_quantity", "updated_at"])
+
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        linea = RutaCargaChecklistLinea.objects.get(checklist=resumen.checklist)
+        self.assertEqual(linea.parada, parada)
+        self.assertEqual(linea.source_hash, f"cedis-reabasto-{ruta.fecha_ruta:%Y%m%d}-{self.sucursal.id}-{receta.id}")
+        self.assertEqual(linea.point_transfer_line, transferencia)
+        self.assertEqual(linea.cantidad_solicitada, Decimal(str(linea_solicitud.solicitado)))
+        self.assertEqual(linea.cantidad_enviada_esperada, Decimal("4.000"))
+
     def test_checklist_carga_cedis_no_pisa_linea_validada_con_point(self):
         ruta, _ = self._crear_ruta_planeada_para_carga()
         self._crear_solicitud_cedis(ruta=ruta, cantidad="5.000")
@@ -3894,6 +3911,26 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["total_lineas"], 1)
         self.assertEqual(response.json()["lineas"][0]["item_name"], "Siguiente")
+
+    def test_api_checklist_carga_formatea_cantidades_maximo_dos_decimales(self):
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta)
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="api-decimales",
+            item_code="DEC",
+            item_name="Decimal",
+            cantidad_solicitada=Decimal("2.555"),
+            cantidad_enviada_esperada=Decimal("4.000"),
+            cantidad_cargada=Decimal("0.600"),
+        )
+
+        data = RutaCargaChecklistSerializer(checklist).data["lineas"][0]
+
+        self.assertEqual(data["cantidad_solicitada"], "2.56")
+        self.assertEqual(data["cantidad_enviada_esperada"], "4")
+        self.assertEqual(data["cantidad_cargada"], "0.6")
 
     def test_api_repartidor_valida_linea_carga_e_idempotencia(self):
         self.client.force_login(self.user)

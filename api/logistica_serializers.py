@@ -31,6 +31,13 @@ from logistica.services_rutas_control import validar_coordenadas
 from rrhh.services_identidad import nombre_operativo_usuario
 
 
+def _format_quantity(value):
+    if value is None:
+        return None
+    quantity = Decimal(str(value)).quantize(Decimal("0.01"))
+    return format(quantity.normalize(), "f")
+
+
 class LogisticaRutaSerializer(serializers.ModelSerializer):
     repartidor_nombre = serializers.SerializerMethodField()
     acompanante_nombre = serializers.SerializerMethodField()
@@ -300,6 +307,9 @@ class UbicacionRutaCreateSerializer(serializers.Serializer):
 class RutaCargaChecklistLineaSerializer(serializers.ModelSerializer):
     parada_nombre = serializers.CharField(source="parada.punto_nombre_snapshot", read_only=True)
     parada_orden = serializers.IntegerField(source="parada.orden", read_only=True)
+    cantidad_solicitada = serializers.SerializerMethodField()
+    cantidad_enviada_esperada = serializers.SerializerMethodField()
+    cantidad_cargada = serializers.SerializerMethodField()
     estatus_display = serializers.CharField(source="get_estatus_display", read_only=True)
     motivo_diferencia_display = serializers.CharField(source="get_motivo_diferencia_display", read_only=True)
     validado_por_nombre = serializers.SerializerMethodField()
@@ -346,6 +356,15 @@ class RutaCargaChecklistLineaSerializer(serializers.ModelSerializer):
             return ""
         return nombre_operativo_usuario(obj.validado_por)
 
+    def get_cantidad_solicitada(self, obj):
+        return _format_quantity(obj.cantidad_solicitada)
+
+    def get_cantidad_enviada_esperada(self, obj):
+        return _format_quantity(obj.cantidad_enviada_esperada)
+
+    def get_cantidad_cargada(self, obj):
+        return _format_quantity(obj.cantidad_cargada)
+
     def _point_line(self, obj):
         return getattr(obj, "point_transfer_line", None)
 
@@ -357,7 +376,7 @@ class RutaCargaChecklistLineaSerializer(serializers.ModelSerializer):
         point_line = self._point_line(obj)
         if not point_line or not point_line.is_received:
             return None
-        return str(point_line.received_quantity)
+        return _format_quantity(point_line.received_quantity)
 
     def get_point_received_at(self, obj):
         point_line = self._point_line(obj)
