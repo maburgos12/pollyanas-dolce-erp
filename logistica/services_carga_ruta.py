@@ -143,6 +143,16 @@ def obtener_checklist_carga_detallado(ruta: RutaEntrega, *, solo_tramo_actual: b
     )
 
 
+def _limpiar_pendientes_antes_tramo_actual(*, ruta: RutaEntrega, checklist: RutaCargaChecklist) -> int:
+    ordenes = _ordenes_tramo_carga_actual(ruta)
+    if not ordenes:
+        return 0
+    return checklist.lineas.filter(
+        estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
+        parada__orden__lt=min(ordenes),
+    ).delete()[0]
+
+
 def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCargaChecklist, solo_abiertas: bool = False) -> tuple[int, int, int]:
     paradas_by_branch = _paradas_por_sucursal(ruta)
     if not paradas_by_branch:
@@ -435,6 +445,7 @@ def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, eje
     creadas += creadas_point
     actualizadas += actualizadas_point
     omitidas += omitidas_point
+    omitidas += _limpiar_pendientes_antes_tramo_actual(ruta=ruta, checklist=checklist)
 
     if checklist.lineas.exists():
         if checklist.estatus == RutaCargaChecklist.ESTATUS_BLOQUEADA:

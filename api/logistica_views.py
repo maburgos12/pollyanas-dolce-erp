@@ -1426,7 +1426,8 @@ class LogisticaRutaCargaChecklistView(_LogisticaBaseView):
         )
         if not can_view:
             return Response({"detail": "No tienes permisos para consultar la carga de esta ruta."}, status=status.HTTP_403_FORBIDDEN)
-        checklist = obtener_checklist_carga_detallado(ruta)
+        solo_tramo_actual = repartidor is not None and ruta.repartidor_id == repartidor.id
+        checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=solo_tramo_actual)
         return Response(RutaCargaChecklistSerializer(checklist, context={"request": request}).data, status=status.HTTP_200_OK)
 
 
