@@ -123,13 +123,6 @@ def obtener_checklist_carga_detallado(ruta: RutaEntrega, *, solo_tramo_actual: b
     )
 
 
-def checklist_tiene_recepcion_point_pendiente(ruta: RutaEntrega) -> bool:
-    checklist = getattr(ruta, "checklist_carga", None)
-    if not checklist:
-        return False
-    return checklist.lineas.filter(point_transfer_line__isnull=False, point_transfer_line__is_received=False).exists()
-
-
 def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCargaChecklist, solo_abiertas: bool = False) -> tuple[int, int, int]:
     paradas_by_branch = _paradas_por_sucursal(ruta)
     if not paradas_by_branch:

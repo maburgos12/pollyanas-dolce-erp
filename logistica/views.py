@@ -44,7 +44,6 @@ from .services_google_routes import recalcular_ruta_programada
 from .services_google_roads import snap_gps_path_to_roads
 from .services_carga_ruta import (
     checklist_bloquea_salida,
-    checklist_tiene_recepcion_point_pendiente,
     cerrar_ruta_con_diferencia_autorizada,
     confirmar_checklist_carga_manual,
     ruta_tiene_diferencias_entrega,
@@ -2346,9 +2345,6 @@ def ruta_detail(request, pk: int):
                         return redirect("logistica:ruta_detail", pk=ruta.id)
                     if ruta_tiene_diferencias_entrega(ruta):
                         messages.error(request, "No se puede completar la ruta: hay diferencias o entregas no recibidas por resolver.")
-                        return redirect("logistica:ruta_detail", pk=ruta.id)
-                    if checklist_tiene_recepcion_point_pendiente(ruta):
-                        messages.error(request, "No se puede completar la ruta: hay recepción Point pendiente.")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
                 from_status = ruta.estatus
                 if from_status != estatus_nuevo:

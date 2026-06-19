@@ -2133,6 +2133,36 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
         self.assertContains(response, "hay paradas sin entrega confirmada")
 
+    def test_ruta_status_no_bloquea_completar_por_recepcion_point_pendiente(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        self._crear_linea_carga_con_transferencia_recibida(is_received=False, received_quantity="0.000")
+        self.parada.estado = ParadaRuta.ESTADO_VISITADA
+        self.parada.entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
+        self.parada.hora_llegada_real = timezone.now()
+        self.parada.entrega_confirmada_en = timezone.now()
+        self.parada.entrega_confirmada_por = self.user
+        self.parada.save(
+            update_fields=[
+                "estado",
+                "entrega_estado",
+                "hora_llegada_real",
+                "entrega_confirmada_en",
+                "entrega_confirmada_por",
+                "actualizado_en",
+            ]
+        )
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {"action": "ruta_status", "estatus": RutaEntrega.ESTATUS_COMPLETADA},
+            follow=True,
+        )
+
+        self.ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
+
     def test_ruta_status_no_bloquea_completar_por_cedis_sin_entrega(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
