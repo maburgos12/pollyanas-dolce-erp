@@ -9,7 +9,8 @@ from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Max, Q, Sum
+from django.db.models import Count, DecimalField, ExpressionWrapper, F, Max, OuterRef, Q, Subquery, Sum
+from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -1864,6 +1865,19 @@ def rutas(request):
         base_url=reverse("logistica:rutas"),
     )
     governance_rows = _logistica_governance_rows(document_stage_rows, owner_default="Logística / Planeación")
+    monto_transferido_subquery = (
+        RutaCargaChecklistLinea.objects.filter(checklist__ruta=OuterRef("pk"), point_transfer_line__isnull=False)
+        .values("checklist__ruta")
+        .annotate(
+            total=Sum(
+                ExpressionWrapper(
+                    F("point_transfer_line__sent_quantity") * F("point_transfer_line__unit_cost"),
+                    output_field=DecimalField(max_digits=18, decimal_places=2),
+                )
+            )
+        )
+        .values("total")[:1]
+    )
 
     context = {
         "module_tabs": _module_tabs("rutas", request.user),
@@ -1880,6 +1894,10 @@ def rutas(request):
                 filter=Q(paradas__entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA])
                 & ~Q(paradas__punto__tipo=PuntoLogistico.TIPO_CEDIS),
                 distinct=True,
+            ),
+            monto_transferido_point=Coalesce(
+                Subquery(monto_transferido_subquery, output_field=DecimalField(max_digits=18, decimal_places=2)),
+                Decimal("0"),
             ),
         ).order_by("-fecha_ruta", "-id")[:200],
         "q": q,

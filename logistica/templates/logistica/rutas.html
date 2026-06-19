@@ -179,7 +179,7 @@
             <th class="text-end">Paradas entrega</th>
             <th class="text-end">Entregadas</th>
             <th class="text-end">Incidencias</th>
-            <th class="text-end">Valor pedidos</th>
+            <th class="text-end">Monto transferido</th>
             <th>Estatus</th>
             <th>Detalle</th>
           </tr>
@@ -197,7 +197,7 @@
             <td class="text-end">{{ r.paradas_entrega_total }}</td>
             <td class="text-end">{{ r.paradas_entregadas }}</td>
             <td class="text-end">{{ r.paradas_incidencia }}</td>
-            <td class="text-end">${{ r.monto_estimado_total|floatformat:2|intcomma }}</td>
+            <td class="text-end">${{ r.monto_transferido_point|floatformat:2|intcomma }}</td>
             <td>
               {% if r.estatus == 'COMPLETADA' %}
               <span class="badge bg-success">{{ r.get_estatus_display }}</span>
