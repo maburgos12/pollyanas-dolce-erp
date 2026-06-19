@@ -43,7 +43,6 @@ from logistica.models import (
 from logistica.services_google_routes import recalcular_ruta_programada
 from logistica.services_carga_ruta import (
     checklist_bloquea_salida,
-    checklist_tiene_recepcion_point_pendiente,
     obtener_checklist_carga_detallado,
     registrar_evento_checklist_confirmado,
     ruta_tiene_diferencias_entrega,
@@ -1215,8 +1214,6 @@ class LogisticaRutaStatusView(_LogisticaBaseView):
                 return Response({"detail": "No se puede completar la ruta: hay paradas sin entrega confirmada."}, status=status.HTTP_400_BAD_REQUEST)
             if ruta_tiene_diferencias_entrega(ruta):
                 return Response({"detail": "No se puede completar la ruta: hay diferencias o entregas no recibidas por resolver."}, status=status.HTTP_400_BAD_REQUEST)
-            if checklist_tiene_recepcion_point_pendiente(ruta):
-                return Response({"detail": "No se puede completar la ruta: hay recepción Point pendiente."}, status=status.HTTP_400_BAD_REQUEST)
 
         from_status = ruta.estatus
         ruta.estatus = estatus_nuevo
