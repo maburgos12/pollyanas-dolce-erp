@@ -49,7 +49,10 @@ class RecepcionPointResumen:
 
 
 def _cantidad_esperada(line: PointTransferLine) -> Decimal:
-    return Decimal(str(line.sent_quantity or 0))
+    sent = Decimal(str(line.sent_quantity or 0))
+    if sent > 0:
+        return sent
+    return Decimal(str(line.requested_quantity or 0))
 
 
 def _paradas_por_sucursal(ruta: RutaEntrega) -> dict[int, ParadaRuta]:
