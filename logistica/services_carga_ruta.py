@@ -86,13 +86,33 @@ def _ordenes_tramo_carga_actual(ruta: RutaEntrega) -> set[int] | None:
     if not cedis:
         return None
 
-    visitadas = [parada.orden for parada in cedis if parada.estado == ParadaRuta.ESTADO_VISITADA]
-    if visitadas:
-        inicio = max(visitadas)
-        fin = next((parada.orden for parada in cedis if parada.orden > inicio), None)
-    else:
-        inicio = cedis[0].orden if cedis[0].orden == 1 else None
-        fin = next((parada.orden for parada in cedis if inicio is None or parada.orden > inicio), None)
+    cedis_con_llegada = set(
+        EventoRuta.objects.filter(
+            ruta=ruta,
+            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            parada_id__in=[parada.id for parada in cedis],
+        ).values_list("parada_id", flat=True)
+    )
+    inicio = cedis[0].orden if cedis[0].orden == 1 else None
+    for cedis_parada in cedis:
+        if inicio is not None and cedis_parada.orden <= inicio:
+            continue
+        tramo_anterior = [
+            parada
+            for parada in paradas
+            if parada.punto
+            and parada.punto.tipo != PuntoLogistico.TIPO_CEDIS
+            and (inicio is None or parada.orden > inicio)
+            and parada.orden < cedis_parada.orden
+        ]
+        cedis_alcanzado = cedis_parada.estado == ParadaRuta.ESTADO_VISITADA or cedis_parada.id in cedis_con_llegada
+        if cedis_alcanzado or (
+            tramo_anterior and all(parada.estado == ParadaRuta.ESTADO_VISITADA for parada in tramo_anterior)
+        ):
+            inicio = cedis_parada.orden
+            continue
+        break
+    fin = next((parada.orden for parada in cedis if inicio is None or parada.orden > inicio), None)
 
     return {
         parada.orden
@@ -163,6 +183,13 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
                     cedis_line = existing
                     break
         if cedis_line:
+            if cantidad_esperada <= 0:
+                if cedis_line.estatus == RutaCargaChecklistLinea.ESTATUS_PENDIENTE:
+                    cedis_line.delete()
+                    actualizadas += 1
+                else:
+                    omitidas += 1
+                continue
             if cedis_line.estatus != RutaCargaChecklistLinea.ESTATUS_PENDIENTE:
                 omitidas += 1
                 continue
