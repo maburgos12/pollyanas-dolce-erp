@@ -1728,11 +1728,15 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v40", pwa_html)
+        self.assertIn("route-control-v41", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v40", pwa_html)
+        self.assertIn("?v=route-control-v41", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v40-entrega-productos", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v41-bloqueos-operativos", sw_js)
+        self.assertIn("operationalModalHtml", pwa_html)
+        self.assertIn("Falta obligatorio", pwa_html)
+        self.assertIn("Logística debe asignar la unidad a la ruta.", pwa_html)
+        self.assertIn("El turno abierto no corresponde a la unidad de esta ruta.", pwa_html)
         api_block = sw_js[sw_js.index('url.pathname.startsWith("/api/")'):sw_js.index('event.request.mode === "navigate"')]
         self.assertIn("event.respondWith(fetch(event.request));", api_block)
         self.assertNotIn("caches.match(event.request)", api_block)
@@ -1795,7 +1799,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v40-entrega-productos", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v41-bloqueos-operativos", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
