@@ -104,6 +104,16 @@ class LogisticaControlRutasTemplateTests(SimpleTestCase):
         self.assertIn("Actualizando recepción Point", source)
         self.assertIn("Cargando datos de la unidad", source)
 
+    def test_ruta_detail_separa_totales_y_detalle_de_carga(self):
+        template_path = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "ruta_detail.html"
+        source = template_path.read_text(encoding="utf-8")
+
+        self.assertIn('class="route-load-subsection"', source)
+        self.assertIn("Totales por producto", source)
+        self.assertIn("Detalle por parada", source)
+        self.assertLess(source.index("Totales por producto"), source.index("Detalle por parada"))
+        self.assertIn(".route-load-subsection + .route-load-subsection", source)
+
 
 VALID_GIF = (
     b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!"

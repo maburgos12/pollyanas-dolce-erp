@@ -24,6 +24,10 @@
   .point-status.is-success { color:#0f5132; background:#d1e7dd; }
   .point-status.is-warning { color:#664d03; background:#fff3cd; }
   .point-status.is-danger { color:#842029; background:#f8d7da; }
+  .route-load-subsection { margin-top:16px; }
+  .route-load-subsection + .route-load-subsection { margin-top:24px; padding-top:18px; border-top:1px solid #eadce3; }
+  .route-load-subtitle { margin:0 0 4px; color:var(--vino); font-size:1rem; font-weight:900; }
+  .route-load-caption { margin:0 0 10px; color:#7b6b73; font-size:.9rem; font-weight:700; }
   .route-loading-overlay { display:none; position:fixed; inset:0; z-index:1300; align-items:center; justify-content:center; padding:18px; background:rgba(61,10,36,.28); backdrop-filter:blur(3px); }
   .route-loading-overlay.active { display:flex; }
   .route-loading-card { width:min(420px, 100%); border-radius:12px; background:linear-gradient(180deg, #fff 0%, #fdf2f6 100%); color:#3d0a24; padding:28px; text-align:center; box-shadow:0 10px 14px rgba(61,10,36,.18); }
@@ -353,58 +357,66 @@
       {% endif %}
     </div>
     {% if recepcion_point_totales %}
-    <div class="table-responsive" style="margin-top:14px;">
-      <table class="table table-striped">
-        <thead>
-          <tr>
-            <th>Producto total</th>
-            <th class="text-end">Esperado total</th>
-            <th class="text-end">Cargado total</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in recepcion_point_totales %}
-          <tr>
-            <td>
-              <strong>{{ row.item_name|default:"Producto sin nombre" }}</strong>
-              <div class="muted">{{ row.item_code|default:"Sin código" }} · {{ row.unit|default:"pz" }}</div>
-            </td>
-            <td class="text-end">{{ row.esperado|floatformat:3 }}</td>
-            <td class="text-end">{% if row.cargado_validado or row.cargado_parcial %}{{ row.cargado|floatformat:3 }}{% else %}-{% endif %}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <div class="route-load-subsection">
+      <h3 class="route-load-subtitle">Totales por producto</h3>
+      <p class="route-load-caption">Resumen agregado de lo esperado y cargado en toda la ruta.</p>
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead>
+            <tr>
+              <th>Producto total</th>
+              <th class="text-end">Esperado total</th>
+              <th class="text-end">Cargado total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in recepcion_point_totales %}
+            <tr>
+              <td>
+                <strong>{{ row.item_name|default:"Producto sin nombre" }}</strong>
+                <div class="muted">{{ row.item_code|default:"Sin código" }} · {{ row.unit|default:"pz" }}</div>
+              </td>
+              <td class="text-end">{{ row.esperado|floatformat:3 }}</td>
+              <td class="text-end">{% if row.cargado_validado or row.cargado_parcial %}{{ row.cargado|floatformat:3 }}{% else %}-{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
     {% endif %}
-    <div class="table-responsive">
-      <table class="table table-striped">
-        <thead>
-          <tr>
-            <th>Parada</th>
-            <th>Producto</th>
-            <th class="text-end">Esperado</th>
-            <th class="text-end">Cargado</th>
-            <th>Estado de carga</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in recepcion_point_rows %}
-          <tr>
-            <td>{{ row.parada.orden }} · {{ row.parada.punto_nombre_snapshot }}</td>
-            <td>
-              <strong>{{ row.linea.item_name|default:"Producto sin nombre" }}</strong>
-              <div class="muted">{{ row.linea.item_code|default:"Sin código" }} · {{ row.linea.unit|default:"pz" }}</div>
-            </td>
-            <td class="text-end">{{ row.esperado|floatformat:3 }}</td>
-            <td class="text-end">{% if row.cargado_validado %}{{ row.cargado|floatformat:3 }}{% else %}-{% endif %}</td>
-            <td><span class="point-status is-{{ row.estado_tone }}">{{ row.estado_label }}</span></td>
-          </tr>
-          {% empty %}
-          <tr><td colspan="5" class="muted">Sin checklist de carga para esta ruta.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <div class="route-load-subsection">
+      <h3 class="route-load-subtitle">Detalle por parada</h3>
+      <p class="route-load-caption">Líneas por sucursal o punto logístico para revisar qué corresponde a cada parada.</p>
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead>
+            <tr>
+              <th>Parada</th>
+              <th>Producto</th>
+              <th class="text-end">Esperado</th>
+              <th class="text-end">Cargado</th>
+              <th>Estado de carga</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in recepcion_point_rows %}
+            <tr>
+              <td>{{ row.parada.orden }} · {{ row.parada.punto_nombre_snapshot }}</td>
+              <td>
+                <strong>{{ row.linea.item_name|default:"Producto sin nombre" }}</strong>
+                <div class="muted">{{ row.linea.item_code|default:"Sin código" }} · {{ row.linea.unit|default:"pz" }}</div>
+              </td>
+              <td class="text-end">{{ row.esperado|floatformat:3 }}</td>
+              <td class="text-end">{% if row.cargado_validado %}{{ row.cargado|floatformat:3 }}{% else %}-{% endif %}</td>
+              <td><span class="point-status is-{{ row.estado_tone }}">{{ row.estado_label }}</span></td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5" class="muted">Sin checklist de carga para esta ruta.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
   </section>
 
