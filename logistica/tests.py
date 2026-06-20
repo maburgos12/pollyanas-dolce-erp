@@ -3271,6 +3271,28 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.cantidad_enviada_esperada, Decimal(str(linea_solicitud.solicitado)))
         self.assertEqual(linea.source_hash, f"cedis-reabasto-{ruta.fecha_ruta:%Y%m%d}-{self.sucursal.id}-{receta.id}")
 
+    def test_checklist_carga_no_genera_lineas_para_parada_cedis(self):
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        cedis_sucursal = Sucursal.objects.create(codigo="CEDIS-T", nombre="CEDIS Test", activa=True)
+        cedis_punto = PuntoLogistico.objects.create(
+            sucursal=cedis_sucursal,
+            nombre="CEDIS Test",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.571000",
+            longitud="-108.471000",
+            radio_geocerca_metros=120,
+        )
+        ParadaRuta.objects.create(ruta=ruta, punto=cedis_punto, orden=2)
+        self._crear_solicitud_cedis(ruta=ruta)
+        self._crear_solicitud_cedis(ruta=ruta, sucursal=cedis_sucursal)
+
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        self.assertEqual(resumen.checklist.lineas.count(), 1)
+        linea = resumen.checklist.lineas.get()
+        self.assertEqual(linea.parada, parada)
+        self.assertNotEqual(linea.parada.punto.tipo, PuntoLogistico.TIPO_CEDIS)
+
     def test_checklist_carga_cedis_usa_point_abierto_como_enviado(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
         solicitud, linea_solicitud, receta = self._crear_solicitud_cedis(ruta=ruta, cantidad="5.000")
