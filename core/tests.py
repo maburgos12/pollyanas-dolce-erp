@@ -174,6 +174,11 @@ class NavigationActiveStateTests(TestCase):
         self.assertIsNotNone(item)
         self.assertEqual(item["url"], "/recetas/plan-produccion/?seccion=calculo_insumos#calculo-insumos")
 
+    def test_fallas_group_has_sidebar_svg_icon(self):
+        template = (Path(settings.BASE_DIR) / "templates" / "base.html").read_text()
+        self.assertIn('{% elif group.key == "fallas" %}', template)
+        self.assertIn("M10.29 3.86 1.82 18", template)
+
     def test_calculo_insumos_query_activates_own_navigation_item(self):
         self.assertEqual(
             self._active_labels("/recetas/plan-produccion/?seccion=calculo_insumos&plan_id=46"),
