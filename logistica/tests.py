@@ -104,6 +104,9 @@ class LogisticaControlRutasTemplateTests(SimpleTestCase):
         self.assertIn("Actualizando recepción Point", source)
         self.assertIn("Cargando datos de la unidad", source)
         self.assertIn("ti-truck-delivery", source)
+        self.assertIn("function showRouteLoading(form, submit)", source)
+        self.assertIn("form._routeSubmitter = button", source)
+        self.assertIn('value="sync_recepcion_point"', source)
 
     def test_ruta_detail_separa_totales_y_detalle_de_carga(self):
         template_path = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "ruta_detail.html"

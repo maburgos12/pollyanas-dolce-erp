@@ -590,18 +590,26 @@
     const message = document.getElementById("route-loading-message");
     if (!overlay) return;
 
+    function showRouteLoading(form, submit) {
+      if (submit) {
+        submit.disabled = true;
+        submit.dataset.originalText = submit.textContent;
+        submit.textContent = "Procesando...";
+      }
+      if (title) title.textContent = form.dataset.loadingTitle || "Actualizando ruta";
+      if (message) message.textContent = form.dataset.loadingMessage || "Cargando datos de la unidad...";
+      overlay.classList.add("active");
+      overlay.setAttribute("aria-hidden", "false");
+    }
+
     document.querySelectorAll("[data-route-loading-form]").forEach(function (form) {
+      form.querySelectorAll("[type=submit]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          form._routeSubmitter = button;
+        });
+      });
       form.addEventListener("submit", function () {
-        const submit = form.querySelector("[type=submit]");
-        if (submit) {
-          submit.disabled = true;
-          submit.dataset.originalText = submit.textContent;
-          submit.textContent = "Procesando...";
-        }
-        if (title) title.textContent = form.dataset.loadingTitle || "Actualizando ruta";
-        if (message) message.textContent = form.dataset.loadingMessage || "Cargando datos de la unidad...";
-        overlay.classList.add("active");
-        overlay.setAttribute("aria-hidden", "false");
+        showRouteLoading(form, form._routeSubmitter || form.querySelector("[type=submit]"));
       });
     });
 
