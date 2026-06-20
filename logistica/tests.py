@@ -3175,7 +3175,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea["point_recepcion_estado"], "RECIBIDO_OK")
         self.assertIn("entrega_estado", response.json()["paradas"][0])
 
-    def test_api_ruta_activa_muestra_carga_solo_del_tramo_actual(self):
+    def test_api_ruta_activa_muestra_toda_la_carga_aunque_haya_cedis_intermedio(self):
         self.client.force_login(self.user)
         cedis = PuntoLogistico.objects.create(
             nombre="CEDIS",
@@ -3193,7 +3193,7 @@ class LogisticaControlRutasTests(TestCase):
             longitud="-108.480000",
             radio_geocerca_metros=120,
         )
-        parada_cedis = ParadaRuta.objects.create(ruta=self.ruta, punto=cedis, orden=2)
+        ParadaRuta.objects.create(ruta=self.ruta, punto=cedis, orden=2)
         parada_dos = ParadaRuta.objects.create(ruta=self.ruta, punto=punto_dos, orden=3)
         checklist = RutaCargaChecklist.objects.create(ruta=self.ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
         for parada, codigo in [(self.parada, "ANTES-CEDIS"), (parada_dos, "DESPUES-CEDIS")]:
@@ -3211,13 +3211,10 @@ class LogisticaControlRutasTests(TestCase):
         response = self.client.get(reverse("api_logistica_ruta_activa"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual([linea["item_code"] for linea in response.json()["checklist_carga"]["lineas"]], ["ANTES-CEDIS"])
-
-        parada_cedis.estado = ParadaRuta.ESTADO_VISITADA
-        parada_cedis.save(update_fields=["estado", "actualizado_en"])
-        response = self.client.get(reverse("api_logistica_ruta_activa"))
-
-        self.assertEqual([linea["item_code"] for linea in response.json()["checklist_carga"]["lineas"]], ["DESPUES-CEDIS"])
+        self.assertEqual(
+            [linea["item_code"] for linea in response.json()["checklist_carga"]["lineas"]],
+            ["ANTES-CEDIS", "DESPUES-CEDIS"],
+        )
 
     def test_checklist_detallado_serializa_sin_consultas_por_linea(self):
         self._crear_linea_carga_con_transferencia_recibida()
