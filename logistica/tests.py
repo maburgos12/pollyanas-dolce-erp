@@ -3171,7 +3171,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         linea = response.json()["checklist_carga"]["lineas"][0]
         self.assertTrue(linea["point_is_received"])
-        self.assertEqual(linea["point_received_quantity"], "5.000")
+        self.assertEqual(linea["point_received_quantity"], "5")
         self.assertEqual(linea["point_recepcion_estado"], "RECIBIDO_OK")
         self.assertIn("entrega_estado", response.json()["paradas"][0])
 
