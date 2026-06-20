@@ -396,7 +396,7 @@ def _cantidad_recibida_con_respaldo_pwa(
     recibida = _cantidad_recibida_linea(linea)
     if recibida is not None:
         return recibida
-    if confirmacion is not None and not linea.point_transfer_line_id:
+    if confirmacion is not None:
         return _cantidad_referencia_entrega(linea)
     return None
 
