@@ -103,6 +103,7 @@ class LogisticaControlRutasTemplateTests(SimpleTestCase):
         self.assertIn("Actualizando carga esperada", source)
         self.assertIn("Actualizando recepción Point", source)
         self.assertIn("Cargando datos de la unidad", source)
+        self.assertIn("ti-truck-delivery", source)
 
     def test_ruta_detail_separa_totales_y_detalle_de_carga(self):
         template_path = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "ruta_detail.html"
@@ -113,6 +114,14 @@ class LogisticaControlRutasTemplateTests(SimpleTestCase):
         self.assertIn("Detalle por parada", source)
         self.assertLess(source.index("Totales por producto"), source.index("Detalle por parada"))
         self.assertIn(".route-load-subsection + .route-load-subsection", source)
+
+    def test_base_carga_librerias_de_iconos(self):
+        template_path = Path(settings.BASE_DIR) / "templates" / "base.html"
+        source = template_path.read_text(encoding="utf-8")
+
+        self.assertIn("@tabler/icons-webfont", source)
+        self.assertIn("Material+Symbols+Sharp", source)
+        self.assertIn("lucide", source)
 
 
 VALID_GIF = (
