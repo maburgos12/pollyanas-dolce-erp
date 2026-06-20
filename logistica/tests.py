@@ -94,6 +94,16 @@ class LogisticaControlRutasTemplateTests(SimpleTestCase):
         self.assertIn("L.circleMarker(point", source)
         self.assertNotIn('if (value.includes("|")) return parseFallbackPolyline(value);', source)
 
+    def test_ruta_detail_muestra_overlay_en_acciones_lentas(self):
+        template_path = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "ruta_detail.html"
+        source = template_path.read_text(encoding="utf-8")
+
+        self.assertIn('id="route-loading-overlay"', source)
+        self.assertIn("data-route-loading-form", source)
+        self.assertIn("Actualizando carga esperada", source)
+        self.assertIn("Actualizando recepción Point", source)
+        self.assertIn("Cargando datos de la unidad", source)
+
 
 VALID_GIF = (
     b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!"
