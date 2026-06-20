@@ -19,7 +19,7 @@ from core.access import ACCESS_MANAGE, ACCESS_VIEW
 from core.email_rendering import render_email_to_string
 from core.models import Notificacion, Sucursal, UserModuleAccess
 from crm.models import Cliente, PedidoCliente
-from api.logistica_serializers import RutaCargaChecklistSerializer
+from api.logistica_serializers import ParadaRutaSerializer, RutaCargaChecklistSerializer
 from logistica.models import (
     BitacoraSalidaLlegada,
     EntregaRuta,
@@ -2304,6 +2304,21 @@ class LogisticaControlRutasTests(TestCase):
         self.ruta.refresh_from_db()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
+
+    def test_serializer_muestra_cedis_como_no_aplica_en_entrega(self):
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.567916",
+            longitud="-108.459969",
+            radio_geocerca_metros=120,
+        )
+        parada = ParadaRuta.objects.create(ruta=self.ruta, punto=cedis, orden=2)
+
+        data = ParadaRutaSerializer(parada).data
+
+        self.assertEqual(data["entrega_estado"], "NO_APLICA")
+        self.assertEqual(data["entrega_estado_display"], "No aplica")
 
     def test_ruta_status_no_reabre_ruta_cerrada(self):
         self.client.force_login(self.user)
