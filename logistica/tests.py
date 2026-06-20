@@ -2803,6 +2803,37 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
         self.assertIn("Esperado/cargado 7.000, recibido 7.000", self.parada.entrega_notas)
 
+    def test_sincronizar_recepcion_no_reabre_entrega_pwa_con_point_pendiente(self):
+        self._crear_linea_carga_con_transferencia_recibida(is_received=False, received_quantity="0.000")
+        ParadaEntregaEvidencia.objects.create(
+            ruta=self.ruta,
+            parada=self.parada,
+            tipo=ParadaEntregaEvidencia.TIPO_CONFIRMACION,
+            comentario="Entrega completa confirmada por repartidor en PWA.",
+            capturado_por=self.user,
+            client_event_id="pwa-entrega-completa-point-pendiente",
+        )
+        self.parada.estado = ParadaRuta.ESTADO_VISITADA
+        self.parada.entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
+        self.parada.entrega_confirmada_en = timezone.now()
+        self.parada.entrega_confirmada_por = self.user
+        self.parada.save(
+            update_fields=[
+                "estado",
+                "entrega_estado",
+                "entrega_confirmada_en",
+                "entrega_confirmada_por",
+                "actualizado_en",
+            ]
+        )
+
+        resumen = sincronizar_recepcion_desde_point(ruta=self.ruta, user=self.user, ejecutar_sync=False)
+
+        self.parada.refresh_from_db()
+        self.assertEqual(resumen.evidencias_creadas, 0)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertNotIn("Pendiente de sincronizar recepción completa", self.parada.entrega_notas)
+
     def test_sincronizar_recepcion_desde_point_actualiza_evidencia_si_point_corrige(self):
         _, _, transfer_line = self._crear_linea_carga_con_transferencia_recibida(loaded_quantity="5.000", received_quantity="3.000")
         sincronizar_recepcion_desde_point(ruta=self.ruta, user=self.user, ejecutar_sync=False)
