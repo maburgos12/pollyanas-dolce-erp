@@ -215,7 +215,8 @@ class PuntoLogisticoSerializer(serializers.ModelSerializer):
 class ParadaRutaSerializer(serializers.ModelSerializer):
     punto = PuntoLogisticoSerializer(read_only=True)
     estado_display = serializers.CharField(source="get_estado_display", read_only=True)
-    entrega_estado_display = serializers.CharField(source="get_entrega_estado_display", read_only=True)
+    entrega_estado = serializers.SerializerMethodField()
+    entrega_estado_display = serializers.SerializerMethodField()
     entrega_confirmada_por_nombre = serializers.SerializerMethodField()
 
     class Meta:
@@ -243,6 +244,16 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
             "notas",
         ]
         read_only_fields = fields
+
+    def get_entrega_estado(self, obj):
+        if obj.punto.tipo == PuntoLogistico.TIPO_CEDIS:
+            return "NO_APLICA"
+        return obj.entrega_estado
+
+    def get_entrega_estado_display(self, obj):
+        if obj.punto.tipo == PuntoLogistico.TIPO_CEDIS:
+            return "No aplica"
+        return obj.get_entrega_estado_display()
 
     def get_entrega_confirmada_por_nombre(self, obj):
         if not obj.entrega_confirmada_por_id:
