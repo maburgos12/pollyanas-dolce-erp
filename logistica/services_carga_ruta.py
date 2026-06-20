@@ -57,6 +57,8 @@ def _paradas_por_sucursal(ruta: RutaEntrega) -> dict[int, ParadaRuta]:
     result = {}
     sucursales = list(Sucursal.objects.filter(activa=True).only("id", "nombre"))
     for parada in paradas:
+        if parada.punto.tipo == PuntoLogistico.TIPO_CEDIS:
+            continue
         if parada.punto.sucursal_id and parada.punto.sucursal_id not in result:
             result[parada.punto.sucursal_id] = parada
             normalized = normalize_text(parada.punto.sucursal.nombre)
@@ -423,8 +425,10 @@ def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, eje
     if checklist.estatus == RutaCargaChecklist.ESTATUS_PENDIENTE:
         checklist.estatus = RutaCargaChecklist.ESTATUS_EN_REVISION
     checklist.save(update_fields=["point_sync_job", "sincronizado_en", "estatus", "actualizado_en"])
+    omitidas = checklist.lineas.filter(parada__punto__tipo=PuntoLogistico.TIPO_CEDIS, estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).delete()[0]
 
-    creadas, actualizadas, omitidas = _sincronizar_lineas_consolidado_para_ruta(ruta=ruta, checklist=checklist)
+    creadas, actualizadas, omitidas_consolidado = _sincronizar_lineas_consolidado_para_ruta(ruta=ruta, checklist=checklist)
+    omitidas += omitidas_consolidado
     if creadas or actualizadas:
         checklist.lineas.filter(point_transfer_line__isnull=False, estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exclude(
             source_hash__startswith="cedis-reabasto-"
