@@ -32,15 +32,18 @@
   .route-loading-overlay.active { display:flex; }
   .route-loading-card { width:min(420px, 100%); border-radius:12px; background:linear-gradient(180deg, #fff 0%, #fdf2f6 100%); color:#3d0a24; padding:28px; text-align:center; box-shadow:0 10px 14px rgba(61,10,36,.18); }
   .route-loading-brand { color:#7b1a48; font-family:"Playfair Display", Georgia, serif; font-size:1.15rem; font-weight:800; margin-bottom:16px; }
-  .route-loading-unit { width:112px; height:72px; margin:0 auto 18px; color:#7b1a48; animation:route-unit 1.1s ease-in-out infinite; }
-  .route-loading-unit .ti { font-size:72px; line-height:1; }
+  .route-loading-unit { position:relative; width:min(232px, 100%); height:64px; margin:0 auto 18px; overflow:hidden; color:#7b1a48; }
+  .route-loading-unit::before { content:""; position:absolute; left:8px; right:8px; bottom:11px; height:4px; border-radius:999px; background:linear-gradient(90deg, transparent 0 8px, rgba(123,26,72,.28) 8px 18px); background-size:28px 4px; animation:route-road .7s linear infinite; }
+  .route-loading-unit .ti { position:absolute; left:0; bottom:16px; font-size:44px; line-height:1; filter:drop-shadow(0 5px 3px rgba(61,10,36,.18)); animation:route-unit-drive 1.45s cubic-bezier(.45, 0, .25, 1) infinite; }
   .route-loading-bar { height:7px; margin:18px 0 12px; overflow:hidden; border-radius:999px; background:#eadce3; }
   .route-loading-bar span { display:block; width:42%; height:100%; border-radius:inherit; background:#7b1a48; animation:route-bar 1.35s cubic-bezier(.23, 1, .32, 1) infinite; }
   .route-loading-note { font-size:.85rem; font-weight:800; color:#7b1a48; }
-  @keyframes route-unit { 0%, 100% { transform:translateX(-6px); } 50% { transform:translateX(6px); } }
+  @keyframes route-unit-drive { 0% { transform:translateX(0) translateY(0); } 48% { transform:translateX(178px) translateY(-2px); } 52% { transform:translateX(178px) translateY(-2px) scaleX(-1); } 100% { transform:translateX(0) translateY(0) scaleX(-1); } }
+  @keyframes route-road { 0% { background-position-x:0; } 100% { background-position-x:-28px; } }
   @keyframes route-bar { 0% { transform:translateX(-120%); } 100% { transform:translateX(240%); } }
   @media (prefers-reduced-motion: reduce) {
-    .route-loading-unit, .route-loading-bar span { animation:none; }
+    .route-loading-unit::before, .route-loading-unit .ti, .route-loading-bar span { animation:none; }
+    .route-loading-unit .ti { left:50%; transform:translateX(-50%); }
     .route-loading-bar span { width:100%; opacity:.7; }
   }
   @media (max-width: 960px) { .ops-grid-2, .ops-summary { grid-template-columns: 1fr; } }
