@@ -1,0 +1,37 @@
+{% extends "logistica/emails/base.html" %}
+
+{% block shell_class %}pd-email-shell--compact{% endblock %}
+{% block title %}Desvío de ruta detectado{% endblock %}
+{% block kicker %}Logística Pollyana's Dolce{% endblock %}
+
+{% block content %}
+  <p class="pd-email-copy">El GPS detectó que una unidad salió del corredor autorizado de su ruta.</p>
+
+  <table class="pd-email-table">
+    <tr>
+      <td class="pd-email-cell pd-email-label-cell">Ruta</td>
+      <td class="pd-email-cell">{{ evento.ruta.folio }} · {{ evento.ruta.nombre }}</td>
+    </tr>
+    <tr>
+      <td class="pd-email-cell pd-email-label-cell">Repartidor</td>
+      <td class="pd-email-cell">{{ evento.ruta.repartidor }}</td>
+    </tr>
+    <tr>
+      <td class="pd-email-cell pd-email-label-cell">Unidad</td>
+      <td class="pd-email-cell">{{ evento.ruta.unidad_operativa }}</td>
+    </tr>
+    <tr>
+      <td class="pd-email-cell pd-email-label-cell">Punto más cercano</td>
+      <td class="pd-email-cell">{{ evento.metadata.punto_mas_cercano|default:"Sin parada cercana" }}</td>
+    </tr>
+    <tr>
+      <td class="pd-email-cell pd-email-label-cell">Detectado</td>
+      <td class="pd-email-cell">{{ evento.creado_en|date:"d/m/Y H:i" }}</td>
+    </tr>
+  </table>
+
+  <h2 class="pd-email-section-title">Descripción</h2>
+  <p class="pd-email-note">{{ evento.descripcion }}</p>
+
+  <a href="{{ control_url }}" class="pd-email-button">Ver control de rutas</a>
+{% endblock %}

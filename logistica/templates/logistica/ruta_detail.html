@@ -392,6 +392,22 @@
         </button>
       </form>
       {% endif %}
+      {% if diferencia_carga_pendiente_autorizar %}
+      <form method="post" data-route-loading-form data-loading-title="Autorizando diferencia" data-loading-message="Registrando autorización de logística..." onsubmit="return confirm('¿Autorizar que esta ruta se libere con la diferencia de carga reportada?');">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="autorizar_diferencia_carga">
+        <input type="hidden" name="autorizado" value="1">
+        <input type="hidden" name="notas_autorizacion_carga" value="Diferencia de carga autorizada por logística.">
+        <button class="btn btn-primary" type="submit">Autorizar ruta con diferencia</button>
+      </form>
+      <form method="post" data-route-loading-form data-loading-title="Rechazando diferencia" data-loading-message="Registrando rechazo de logística..." onsubmit="return confirm('¿Rechazar la liberación de esta ruta? Seguirá bloqueada hasta corregir la carga.');">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="autorizar_diferencia_carga">
+        <input type="hidden" name="autorizado" value="0">
+        <input type="hidden" name="notas_autorizacion_carga" value="Diferencia de carga rechazada por logística.">
+        <button class="btn btn-secondary" type="submit">Rechazar</button>
+      </form>
+      {% endif %}
     </div>
     {% if recepcion_point_totales %}
     <div class="route-load-subsection">

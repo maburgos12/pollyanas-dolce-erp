@@ -44,6 +44,7 @@ from .models import (
 from .services_google_routes import recalcular_ruta_programada
 from .services_google_roads import snap_gps_path_to_roads
 from .services_carga_ruta import (
+    autorizar_diferencia_checklist_carga,
     checklist_bloquea_salida,
     cerrar_ruta_con_diferencia_autorizada,
     confirmar_checklist_carga_manual,
@@ -2122,6 +2123,21 @@ def ruta_detail(request, pk: int):
                 messages.success(request, evento.descripcion)
             return redirect("logistica:ruta_detail", pk=ruta.id)
 
+        if action == "autorizar_diferencia_carga":
+            autorizado = (request.POST.get("autorizado") or "").strip() == "1"
+            try:
+                autorizar_diferencia_checklist_carga(
+                    ruta=ruta,
+                    user=request.user,
+                    autorizado=autorizado,
+                    notas=(request.POST.get("notas_autorizacion_carga") or "").strip(),
+                )
+            except ValidationError as exc:
+                messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+            else:
+                messages.success(request, "Ruta autorizada a pesar de la diferencia de carga." if autorizado else "Diferencia de carga rechazada; la ruta sigue bloqueada.")
+            return redirect("logistica:ruta_detail", pk=ruta.id)
+
         if action == "ajustar_entrega_manual":
             parada_id = (request.POST.get("parada_id") or "").strip()
             entrega_estado = (request.POST.get("entrega_estado") or "").strip().upper()
@@ -2678,6 +2694,12 @@ def ruta_detail(request, pk: int):
             )
         )
     )
+    diferencia_carga_pendiente_autorizar = bool(
+        checklist_carga
+        and can_manage_submodule(request.user, "logistica", "rutas")
+        and checklist_carga.estatus == RutaCargaChecklist.ESTATUS_CON_INCIDENCIA
+        and not checklist_carga.motivo_override
+    )
     cierre_diferencia_disponible = bool(
         can_manage_submodule(request.user, "logistica", "rutas")
         and ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA
@@ -2703,6 +2725,7 @@ def ruta_detail(request, pk: int):
         "checklist_carga": checklist_carga,
         "carga_manual_pendiente": carga_manual_pendiente,
         "recarga_cedis_disponible": recarga_cedis_disponible,
+        "diferencia_carga_pendiente_autorizar": diferencia_carga_pendiente_autorizar,
         "cierre_diferencia_disponible": cierre_diferencia_disponible,
         "recepcion_point_rows": recepcion_point_rows,
         "recepcion_point_totales": recepcion_point_totales,

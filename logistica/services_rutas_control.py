@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -9,6 +10,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import BitacoraSalidaLlegada, EventoRuta, ParadaRuta, Repartidor, RutaEntrega, UbicacionRuta
+
+logger = logging.getLogger(__name__)
 
 GEOCERCA_PERMANENCIA_VISITA_MINUTOS = 5
 
@@ -335,39 +338,45 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
         ubicacion.save(update_fields=["fuera_de_geocerca"])
         confirmado = payload.get("fuera_de_ruta_confirmado") is True
         motivo = (payload.get("desvio_motivo") or "").strip()
-        if confirmado or not automatico_pwa:
-            descripcion_desvio = (
-                "Desvío confirmado fuera del corredor autorizado de la ruta."
-                if confirmado
-                else (
-                    "Desvío detectado automáticamente por GPS fuera de geocerca."
-                    if tracking_origen == "automatico_geocerca"
-                    else "Desvío detectado por registro manual fuera de geocerca."
-                )
-            )
-            motivo_desvio = motivo or (
+        descripcion_desvio = (
+            "Desvío confirmado fuera del corredor autorizado de la ruta."
+            if confirmado
+            else (
                 "Desvío detectado automáticamente por GPS fuera de geocerca."
-                if tracking_origen == "automatico_geocerca"
-                else "Registro fuera de geocerca."
+                if automatico_pwa or tracking_origen == "automatico_geocerca"
+                else "Desvío detectado por registro manual fuera de geocerca."
             )
-            crear_evento_ruta_once(
-                ruta=ruta,
-                tipo=EventoRuta.TIPO_DESVIO,
-                severidad=EventoRuta.SEVERIDAD_CRITICA,
-                descripcion=descripcion_desvio,
-                user=user,
-                parada=resultado.parada,
-                ubicacion=ubicacion,
-                latitud=ubicacion.latitud,
-                longitud=ubicacion.longitud,
-                distancia_metros_value=resultado.distancia_metros,
-                metadata={
-                    "punto_mas_cercano": resultado.parada.punto_nombre_snapshot if resultado.parada else None,
-                    "motivo": motivo_desvio,
-                    "origen": "repartidor_confirmado" if confirmado else tracking_origen,
-                },
-                ventana_minutos=0 if confirmado else 15,
-            )
+        )
+        motivo_desvio = motivo or (
+            "Desvío detectado automáticamente por GPS fuera de geocerca."
+            if automatico_pwa or tracking_origen == "automatico_geocerca"
+            else "Registro fuera de geocerca."
+        )
+        evento_desvio = crear_evento_ruta_once(
+            ruta=ruta,
+            tipo=EventoRuta.TIPO_DESVIO,
+            severidad=EventoRuta.SEVERIDAD_CRITICA,
+            descripcion=descripcion_desvio,
+            user=user,
+            parada=resultado.parada,
+            ubicacion=ubicacion,
+            latitud=ubicacion.latitud,
+            longitud=ubicacion.longitud,
+            distancia_metros_value=resultado.distancia_metros,
+            metadata={
+                "punto_mas_cercano": resultado.parada.punto_nombre_snapshot if resultado.parada else None,
+                "motivo": motivo_desvio,
+                "origen": "repartidor_confirmado" if confirmado else tracking_origen,
+            },
+            ventana_minutos=0 if confirmado else 15,
+        )
+        if evento_desvio and automatico_pwa and not confirmado:
+            from .tasks import notificar_desvio_ruta_automatico
+
+            try:
+                notificar_desvio_ruta_automatico.delay(evento_desvio.id)
+            except Exception:
+                logger.exception("No se pudo encolar notificar_desvio_ruta_automatico para evento %s", evento_desvio.id)
 
     ubicacion._alertas_tracking = alertas_tracking
     return ubicacion
