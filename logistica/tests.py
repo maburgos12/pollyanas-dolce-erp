@@ -3157,6 +3157,53 @@ class LogisticaControlRutasTests(TestCase):
         self.assertContains(response, 'value="cerrar_con_diferencia_autorizada"')
         self.assertContains(response, "Cerrar con diferencia autorizada")
 
+    def test_ruta_detail_muestra_ajuste_manual_entrega(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.get(reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'value="ajustar_entrega_manual"')
+        self.assertContains(response, "Guardar ajuste")
+
+    def test_ruta_detail_ajuste_manual_entrega_permite_cierre(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {
+                "action": "ajustar_entrega_manual",
+                "parada_id": self.parada.id,
+                "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+                "nota_entrega_manual": "Sucursal confirmó entrega por llamada.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertTrue(
+            ParadaEntregaEvidencia.objects.filter(
+                ruta=self.ruta,
+                parada=self.parada,
+                tipo=ParadaEntregaEvidencia.TIPO_CONFIRMACION,
+                metadata__origen="erp_manual",
+            ).exists()
+        )
+        self.assertTrue(EventoRuta.objects.filter(ruta=self.ruta, metadata__tipo="ajuste_entrega_manual").exists())
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {"action": "ruta_status", "estatus": RutaEntrega.ESTATUS_COMPLETADA},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.ruta.refresh_from_db()
+        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
+
     def test_cerrar_ruta_con_diferencia_autorizada_notifica_logistica(self):
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
         supervisor = User.objects.create_user(username="logistica.supervisor", password="pass123")
