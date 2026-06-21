@@ -10,6 +10,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
+from rest_framework.exceptions import PermissionDenied as DRFPermissionDenied
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -93,9 +94,45 @@ from .logistica_serializers import (
 LOGISTICA_ROLE_REPARTIDOR = "repartidor"
 LOGISTICA_ROLE_COMPRAS = "compras_logistica"
 LOGISTICA_ROLE_SUPERVISOR = "supervisor_logistica"
+PWA_PREVIEW_PARAM = "preview_repartidor"
+SAFE_HTTP_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
-class _LogisticaBaseView(APIView):
+def _preview_repartidor_id(request) -> str:
+    return (request.query_params.get(PWA_PREVIEW_PARAM) or request.headers.get("X-Logistica-Preview-Repartidor") or "").strip()
+
+
+def _is_pwa_preview_request(request) -> bool:
+    return bool(_preview_repartidor_id(request))
+
+
+def _get_preview_repartidor_for_request(request) -> Repartidor | None:
+    repartidor_id = _preview_repartidor_id(request)
+    if not repartidor_id:
+        return None
+    if not request.user.is_superuser:
+        raise DRFPermissionDenied("Solo superadmin puede usar vista como repartidor.")
+    if not repartidor_id.isdigit():
+        raise DRFPermissionDenied("Repartidor de vista inválido.")
+    return get_object_or_404(
+        Repartidor.objects.select_related("user", "user__empleado_rrhh", "unidad_asignada", "sucursal"),
+        pk=int(repartidor_id),
+        user__is_active=True,
+    )
+
+
+def _get_repartidor_for_request(request) -> Repartidor | None:
+    return _get_preview_repartidor_for_request(request) or _get_repartidor_for_user(request.user)
+
+
+class _LogisticaPreviewGuardMixin:
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if _is_pwa_preview_request(request) and request.method not in SAFE_HTTP_METHODS:
+            raise DRFPermissionDenied("Modo vista como repartidor: las capturas están bloqueadas.")
+
+
+class _LogisticaBaseView(_LogisticaPreviewGuardMixin, APIView):
     authentication_classes = [JWTAuthentication, TokenAuthentication, SessionAuthentication]
     permission_classes = [IsAuthenticated]
 
@@ -265,7 +302,8 @@ class LogisticaSessionTokenView(_LogisticaBaseView):
 
 class LogisticaMiPerfilView(_LogisticaBaseView):
     def get(self, request):
-        repartidor = _get_repartidor_for_user(request.user)
+        repartidor = _get_repartidor_for_request(request)
+        preview_activo = _is_pwa_preview_request(request)
         data = {
             "user": {
                 "id": request.user.id,
@@ -276,7 +314,18 @@ class LogisticaMiPerfilView(_LogisticaBaseView):
             "roles": list(request.user.groups.values_list("name", flat=True)),
             "repartidor": LogisticaRepartidorSerializer(repartidor).data if repartidor else None,
             "ultimos_servicios": [],
+            "preview": {
+                "activo": preview_activo,
+                "solo_lectura": preview_activo,
+                "repartidor_id": repartidor.id if preview_activo and repartidor else None,
+                "opciones": [],
+            },
         }
+        if request.user.is_superuser:
+            repartidores = Repartidor.objects.select_related("user", "user__empleado_rrhh", "unidad_asignada", "sucursal").filter(
+                user__is_active=True
+            )
+            data["preview"]["opciones"] = LogisticaRepartidorSerializer(repartidores, many=True).data
         if repartidor and repartidor.unidad_asignada_id:
             servicios = _reportes_with_reafirmaciones(ReporteUnidad.objects.filter(unidad=repartidor.unidad_asignada)).exclude(
                 estatus=ReporteUnidad.ESTATUS_ABIERTO
@@ -287,7 +336,7 @@ class LogisticaMiPerfilView(_LogisticaBaseView):
 
 class LogisticaResumenSemanalView(_LogisticaBaseView):
     def get(self, request):
-        repartidor = _get_repartidor_for_user(request.user)
+        repartidor = _get_repartidor_for_request(request)
         if not repartidor:
             return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -344,7 +393,7 @@ class LogisticaResumenSemanalView(_LogisticaBaseView):
 
 class LogisticaCombustibleAlertaView(_LogisticaBaseView):
     def get(self, request):
-        repartidor = _get_repartidor_for_user(request.user)
+        repartidor = _get_repartidor_for_request(request)
         if not repartidor:
             return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -431,7 +480,7 @@ class LogisticaReporteCreateView(_LogisticaBaseView):
 
 class LogisticaReportesUnidadAbiertosView(_LogisticaBaseView):
     def get(self, request):
-        repartidor = _get_repartidor_for_user(request.user)
+        repartidor = _get_repartidor_for_request(request)
         if not repartidor:
             return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
         unidad_id = request.query_params.get("unidad_id")
@@ -499,7 +548,7 @@ class LogisticaReporteReafirmarView(_LogisticaBaseView):
 
 class LogisticaMisReportesView(_LogisticaBaseView):
     def get(self, request):
-        repartidor = _get_repartidor_for_user(request.user)
+        repartidor = _get_repartidor_for_request(request)
         if not repartidor:
             return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
         reportes = _reportes_with_reafirmaciones(
@@ -568,8 +617,10 @@ class LogisticaReporteDetailView(_LogisticaBaseView):
 
 class LogisticaBitacoraView(_LogisticaBaseView):
     def get(self, request):
-        repartidor = _get_repartidor_for_user(request.user)
-        if _can_view_all_reportes(request.user):
+        repartidor = _get_repartidor_for_request(request)
+        if _is_pwa_preview_request(request) and repartidor:
+            qs = BitacoraRepartidor.objects.select_related("repartidor__user", "repartidor__user__empleado_rrhh").filter(repartidor=repartidor)
+        elif _can_view_all_reportes(request.user):
             qs = BitacoraRepartidor.objects.select_related("repartidor__user", "repartidor__user__empleado_rrhh").all()
             repartidor_id = request.query_params.get("repartidor")
             fecha = request.query_params.get("fecha")
@@ -773,7 +824,7 @@ class LogisticaCargaCombustibleView(_LogisticaBaseView):
 
 class LogisticaLavadoEstadoView(_LogisticaBaseView):
     def get(self, request):
-        repartidor = _get_repartidor_for_user(request.user)
+        repartidor = _get_repartidor_for_request(request)
         if not repartidor:
             return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -857,7 +908,7 @@ class LogisticaBitacoraSalidaDetailView(_LogisticaBaseView):
 
 class LogisticaBitacoraSalidaActivaView(_LogisticaBaseView):
     def get(self, request):
-        repartidor = _get_repartidor_for_user(request.user)
+        repartidor = _get_repartidor_for_request(request)
         if not repartidor:
             return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
         bitacora = (
@@ -891,7 +942,7 @@ class LogisticaInspeccionView(_LogisticaBaseView):
 
 class LogisticaInspeccionUltimaView(_LogisticaBaseView):
     def get(self, request):
-        repartidor = _get_repartidor_for_user(request.user)
+        repartidor = _get_repartidor_for_request(request)
         if not repartidor or not repartidor.unidad_asignada_id:
             return Response({"detail": "No tienes unidad asignada."}, status=status.HTTP_404_NOT_FOUND)
         inspeccion = (
@@ -946,7 +997,7 @@ class InspeccionDiariaCheckView(_LogisticaBaseView):
         )
 
 
-class InspeccionDiariaCreateView(generics.CreateAPIView):
+class InspeccionDiariaCreateView(_LogisticaPreviewGuardMixin, generics.CreateAPIView):
     authentication_classes = _LogisticaBaseView.authentication_classes
     permission_classes = _LogisticaBaseView.permission_classes
     parser_classes = [MultiPartParser, FormParser, JSONParser]
@@ -1393,7 +1444,7 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
         if not _can_operate_pwa(request.user):
             return Response({"detail": "No tienes permisos para consultar ruta activa."}, status=status.HTTP_403_FORBIDDEN)
 
-        repartidor = _get_repartidor_for_user(request.user)
+        repartidor = _get_repartidor_for_request(request)
         if not repartidor:
             return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -1421,7 +1472,7 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
 class LogisticaRutaCargaChecklistView(_LogisticaBaseView):
     def get(self, request, ruta_id: int):
         ruta = get_object_or_404(RutaEntrega, pk=ruta_id)
-        repartidor = _get_repartidor_for_user(request.user)
+        repartidor = _get_repartidor_for_request(request)
         can_view = can_view_submodule(request.user, "logistica", "rutas") or (
             repartidor is not None and ruta.repartidor_id == repartidor.id
         )
@@ -1554,7 +1605,7 @@ class LogisticaRutasControlView(_LogisticaBaseView):
 class LogisticaRutaTrackingView(_LogisticaBaseView):
     def get(self, request, ruta_id: int):
         ruta = get_object_or_404(RutaEntrega, pk=ruta_id)
-        repartidor = _get_repartidor_for_user(request.user)
+        repartidor = _get_repartidor_for_request(request)
         can_view_tracking = can_manage_submodule(request.user, "logistica", "rutas") or (
             repartidor is not None and ruta.repartidor_id == repartidor.id
         )
