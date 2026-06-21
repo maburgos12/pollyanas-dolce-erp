@@ -3562,8 +3562,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertContains(response, "Cargado total (PWA)")
         self.assertContains(response, "Esperado (solicitado Point)")
         self.assertContains(response, "Ajustado (enviado Point)")
-        self.assertContains(response, "10.000")
-        self.assertContains(response, "6.000")
+        self.assertNotContains(response, "10.000")
+        self.assertNotContains(response, "6.000")
+        self.assertContains(response, "value=\"6\"")
 
     def test_checklist_carga_cedis_omite_borrador_y_cancelada(self):
         ruta, _ = self._crear_ruta_planeada_para_carga()
