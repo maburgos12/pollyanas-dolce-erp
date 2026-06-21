@@ -342,6 +342,31 @@ select:focus {
   gap: 8px !important;
 }
 
+.filters,
+.card-actions,
+.unit-actions,
+.photo-actions {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+
+.card .filters {
+  align-items: end !important;
+}
+
+.card > .btn + .btn,
+.card > .btn + form,
+.card > form + .btn,
+.card > form + form,
+td > .btn + .btn,
+td > .btn + form,
+td > form + .btn,
+td > form + form {
+  margin-left: 8px !important;
+}
+
 .card-actions button {
   min-height: 38px !important;
   font-size: 12px !important;
