@@ -16,7 +16,9 @@
   .route-plan-grid { display:grid; gap:12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .route-plan-field { display:grid; gap:6px; }
   .route-plan-field label { font-weight:800; color:var(--vino); }
-  .route-action-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .route-action-row { display:flex; flex-wrap:wrap; gap:10px 12px; align-items:center; }
+  .route-action-row form { margin:0; }
+  .route-plan-actions { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:12px; }
   .route-status-note { padding:10px 12px; border-radius:8px; background:#fff7e6; border:1px solid #ffd58a; color:#5d3b00; font-weight:700; }
   .point-reception-head { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-start; justify-content:space-between; margin-bottom:12px; }
   .point-reception-copy { max-width:680px; }
@@ -251,8 +253,10 @@
             <input class="input-field" id="id_notas_parada" type="text" name="notas">
           </div>
         </div>
-        <button class="btn btn-primary" type="submit">Agregar parada</button>
-        <a class="btn btn-secondary" href="{% url 'logistica:puntos_logisticos' %}">Crear punto</a>
+        <div class="route-plan-actions">
+          <button class="btn btn-primary" type="submit">Agregar parada</button>
+          <a class="btn btn-secondary" href="{% url 'logistica:puntos_logisticos' %}">Crear punto</a>
+        </div>
       </form>
       {% else %}
       <div class="muted">{% if can_manage_logistica %}La planeación de paradas está congelada para conservar evidencia.{% else %}Tu rol es de consulta. No puedes editar paradas.{% endif %}</div>
