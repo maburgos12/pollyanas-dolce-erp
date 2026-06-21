@@ -107,6 +107,8 @@ class LogisticaControlRutasTemplateTests(SimpleTestCase):
         self.assertIn("route-unit-drive", source)
         self.assertIn("route-road", source)
         self.assertIn("function showRouteLoading(form, submit)", source)
+        self.assertIn('submit.setAttribute("aria-disabled", "true")', source)
+        self.assertNotIn("submit.disabled = true", source)
         self.assertIn("form._routeSubmitter = button", source)
         self.assertIn('value="sync_recepcion_point"', source)
 
