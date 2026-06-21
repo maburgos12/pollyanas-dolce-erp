@@ -389,14 +389,15 @@
     {% if recepcion_point_totales %}
     <div class="route-load-subsection">
       <h3 class="route-load-subtitle">Totales por producto</h3>
-      <p class="route-load-caption">Resumen agregado de lo esperado y cargado en toda la ruta.</p>
+      <p class="route-load-caption">Resumen agregado de lo solicitado en Point, enviado por CEDIS y cargado en PWA.</p>
       <div class="table-responsive">
         <table class="table table-striped">
           <thead>
             <tr>
               <th>Producto total</th>
-              <th class="text-end">Esperado total</th>
-              <th class="text-end">Cargado total</th>
+              <th class="text-end">Esperado total (solicitado Point)</th>
+              <th class="text-end">Ajustado total (enviado Point)</th>
+              <th class="text-end">Cargado total (PWA)</th>
             </tr>
           </thead>
           <tbody>
@@ -406,7 +407,8 @@
                 <strong>{{ row.item_name|default:"Producto sin nombre" }}</strong>
                 <div class="muted">{{ row.item_code|default:"Sin código" }} · {{ row.unit|default:"pz" }}</div>
               </td>
-              <td class="text-end">{{ row.esperado|floatformat:3 }}</td>
+              <td class="text-end">{{ row.solicitado|floatformat:3 }}</td>
+              <td class="text-end">{{ row.enviado|floatformat:3 }}</td>
               <td class="text-end">{% if row.cargado_validado or row.cargado_parcial %}{{ row.cargado|floatformat:3 }}{% else %}-{% endif %}</td>
             </tr>
             {% endfor %}
@@ -424,8 +426,9 @@
             <tr>
               <th>Parada</th>
               <th>Producto</th>
-              <th class="text-end">Esperado</th>
-              <th class="text-end">Cargado</th>
+              <th class="text-end">Esperado (solicitado Point)</th>
+              <th class="text-end">Ajustado (enviado Point)</th>
+              <th class="text-end">Cargado PWA</th>
               <th>Estado de carga</th>
             </tr>
           </thead>
@@ -437,12 +440,13 @@
                 <strong>{{ row.linea.item_name|default:"Producto sin nombre" }}</strong>
                 <div class="muted">{{ row.linea.item_code|default:"Sin código" }} · {{ row.linea.unit|default:"pz" }}</div>
               </td>
-              <td class="text-end">{{ row.esperado|floatformat:3 }}</td>
+              <td class="text-end">{{ row.solicitado|floatformat:3 }}</td>
+              <td class="text-end">{{ row.enviado|floatformat:3 }}</td>
               <td class="text-end">{% if row.cargado_validado %}{{ row.cargado|floatformat:3 }}{% else %}-{% endif %}</td>
               <td><span class="point-status is-{{ row.estado_tone }}">{{ row.estado_label }}</span></td>
             </tr>
             {% empty %}
-            <tr><td colspan="5" class="muted">Sin checklist de carga para esta ruta.</td></tr>
+            <tr><td colspan="6" class="muted">Sin checklist de carga para esta ruta.</td></tr>
             {% endfor %}
           </tbody>
         </table>
