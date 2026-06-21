@@ -79,6 +79,17 @@ class LogisticaEmailTemplateTests(SimpleTestCase):
 
 
 class LogisticaControlRutasTemplateTests(SimpleTestCase):
+    def test_bitacoras_muestra_preview_de_tickets_combustible(self):
+        template_path = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "bitacoras_lista.html"
+        source = template_path.read_text(encoding="utf-8")
+
+        self.assertIn("<th>Tickets</th>", source)
+        self.assertIn("logi-ticket-cell", source)
+        self.assertIn('alt="Ticket combustible cierre"', source)
+        self.assertIn('alt="Ticket combustible ruta"', source)
+        self.assertIn("log-ticket-thumb", source)
+        self.assertIn("object-fit: contain", (Path(settings.BASE_DIR) / "static" / "css" / "styles.css").read_text(encoding="utf-8"))
+
     def test_programmed_google_polyline_uses_route_source_not_pipe_character(self):
         template_path = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "control_rutas.html"
         source = template_path.read_text(encoding="utf-8")

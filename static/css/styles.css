@@ -1386,6 +1386,15 @@ textarea:focus,
   min-width: 142px;
 }
 
+.logi-bitacoras-table .logi-ticket-cell {
+  min-width: 92px;
+  max-width: 156px;
+}
+
+.logi-ticket-cell a + a {
+  margin-left: 6px;
+}
+
 .log-fuel {
   display: grid;
   gap: 3px;
@@ -1426,6 +1435,12 @@ textarea:focus,
   object-fit: cover;
   border: 1px solid var(--pd-border-strong);
   border-radius: var(--pd-radius-md);
+}
+
+.log-ticket-thumb {
+  height: 64px;
+  background: #fff;
+  object-fit: contain;
 }
 
 tr.log-overdue td {
