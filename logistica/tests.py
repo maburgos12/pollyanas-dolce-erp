@@ -36,10 +36,12 @@ from logistica.models import (
 )
 from logistica.services_carga_ruta import (
     cerrar_ruta_con_diferencia_autorizada,
+    checklist_bloquea_salida,
     obtener_checklist_carga_detallado,
     registrar_recarga_cedis,
     sincronizar_checklist_carga_desde_point,
     sincronizar_recepcion_desde_point,
+    validar_linea_carga,
 )
 from logistica.services_google_roads import snap_gps_path_to_roads
 from logistica.services_rutas_control import distancia_metros, registrar_ubicacion_ruta, resumen_control_rutas
@@ -678,11 +680,11 @@ class LogisticaPwaApiTests(TestCase):
 
         liberar = self.client.post(reverse("api_logistica_bitacora_salida_liberar_ruta"))
 
-        self.assertEqual(liberar.status_code, 200)
+        self.assertEqual(liberar.status_code, 400)
+        self.assertIn("confirma todas las líneas de carga", liberar.json()["mensaje"])
         ruta.refresh_from_db()
-        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
-        self.assertEqual(ruta.bitacora_salida_id, response.json()["id"])
-        self.assertTrue(EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_SALIDA).exists())
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
+        self.assertFalse(EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_SALIDA).exists())
 
     def test_bitacora_salida_no_libera_ruta_sin_carga_confirmada(self):
         ruta = RutaEntrega.objects.create(
@@ -735,7 +737,7 @@ class LogisticaPwaApiTests(TestCase):
 
         self.assertEqual(liberar.status_code, 400)
         self.assertEqual(liberar.json()["error"], "ruta_no_liberada")
-        self.assertIn("confirma al menos una línea de carga", liberar.json()["mensaje"])
+        self.assertIn("confirma todas las líneas de carga", liberar.json()["mensaje"])
 
     def test_bitacora_salida_permite_turno_mandado_si_ruta_planeada_usa_otra_unidad(self):
         unidad_ruta = Unidad.objects.create(codigo="QA-RUTA", descripcion="Unidad ruta", sucursal=self.sucursal)
@@ -786,7 +788,12 @@ class LogisticaPwaApiTests(TestCase):
             radio_geocerca_metros=120,
         )
         parada = ParadaRuta.objects.create(ruta=ruta, punto=punto, orden=1)
-        checklist = RutaCargaChecklist.objects.create(ruta=ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        checklist = RutaCargaChecklist.objects.create(
+            ruta=ruta,
+            estatus=RutaCargaChecklist.ESTATUS_CONFIRMADA,
+            confirmado_por=self.user,
+            confirmado_en=timezone.now(),
+        )
         RutaCargaChecklistLinea.objects.create(
             checklist=checklist,
             parada=parada,
@@ -1298,7 +1305,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(evento.metadata["origen"], "automatico_geocerca")
         self.assertEqual(evento.metadata["motivo"], "Desvío detectado automáticamente por GPS fuera de geocerca.")
 
-    def test_tracking_automatico_fuera_de_geocerca_no_crea_desvio_critico(self):
+    def test_tracking_automatico_fuera_de_geocerca_crea_desvio_y_notifica(self):
         ubicacion = registrar_ubicacion_ruta(
             user=self.user,
             ruta=self.ruta,
@@ -1311,7 +1318,42 @@ class LogisticaControlRutasTests(TestCase):
         )
 
         self.assertTrue(ubicacion.fuera_de_geocerca)
-        self.assertFalse(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_DESVIO).exists())
+        evento = EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_DESVIO).first()
+        self.assertIsNotNone(evento)
+        self.assertEqual(evento.metadata.get("origen"), "automatico_pwa")
+
+    @patch("logistica.tasks.notificar_desvio_ruta_automatico.delay")
+    def test_tracking_desvio_confirmado_no_dispara_notificacion_automatica(self, mock_delay):
+        registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={
+                "latitud": "25.590000",
+                "longitud": "-108.490000",
+                "timestamp_dispositivo": timezone.now(),
+                "tracking_origen": "manual_pwa",
+                "fuera_de_ruta_confirmado": True,
+                "desvio_motivo": "Cierre de calle",
+            },
+        )
+
+        self.assertTrue(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_DESVIO).exists())
+        mock_delay.assert_not_called()
+
+    @patch("logistica.tasks.notificar_desvio_ruta_automatico.delay")
+    def test_tracking_automatico_fuera_de_geocerca_dispara_notificacion(self, mock_delay):
+        registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={
+                "latitud": "25.590000",
+                "longitud": "-108.490000",
+                "timestamp_dispositivo": timezone.now(),
+                "tracking_origen": "automatico_pwa",
+            },
+        )
+
+        mock_delay.assert_called_once()
 
     def test_tracking_precision_baja_no_marca_parada_visitada(self):
         ubicacion = registrar_ubicacion_ruta(
@@ -1791,15 +1833,15 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v41", pwa_html)
+        self.assertIn("route-control-v47", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v41", pwa_html)
+        self.assertIn("?v=route-control-v47", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v41-bloqueos-operativos", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v47-tema-claro-y-preview-repartidor", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
         self.assertIn("Logística debe asignar la unidad a la ruta.", pwa_html)
-        self.assertIn("El turno abierto no corresponde a la unidad de esta ruta.", pwa_html)
+        self.assertIn("Tu turno activo no corresponde a la unidad asignada a esta ruta.", pwa_html)
         api_block = sw_js[sw_js.index('url.pathname.startsWith("/api/")'):sw_js.index('event.request.mode === "navigate"')]
         self.assertIn("event.respondWith(fetch(event.request));", api_block)
         self.assertNotIn("caches.match(event.request)", api_block)
@@ -1862,7 +1904,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v41-bloqueos-operativos", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v47-tema-claro-y-preview-repartidor", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -1875,14 +1917,16 @@ class LogisticaControlRutasTests(TestCase):
         self.assertNotIn("grid-column: 1 / -1", pwa_html)
         self.assertIn("route-signal-grid", pwa_html)
         self.assertIn("route-progress-card", pwa_html)
-        self.assertIn("Capturar ubicación GPS", pwa_html)
+        self.assertNotIn("Capturar ubicación GPS", pwa_html)
         self.assertIn("Reportar desvío", pwa_html)
+        self.assertIn("Confirmar desvío", pwa_html)
+        self.assertIn("Tu ubicación se envía automáticamente cada 45 segundos mientras estás en ruta.", pwa_html)
         self.assertIn("Paradas de reparto", pwa_html)
-        self.assertLess(pwa_html.index("${renderParadasRuta(paradas, ruta.id, rutaEnSeguimiento)}"), pwa_html.index("${renderChecklistCarga(rutaData.checklist_carga, paradas)}"))
+        self.assertLess(pwa_html.index("${renderParadasRuta(paradas, ruta.id, rutaEnSeguimiento)}"), pwa_html.index("showScreen('ruta_carga')"))
         self.assertIn("Pendiente de entrega", pwa_html)
         self.assertIn("Recibido", pwa_html)
         self.assertIn("La ruta puede continuar; cierre final espera recepción Point.", pwa_html)
-        self.assertIn('draft.geoStatus === "idle" ? "" : geoOverlay(draft, "capturarUbicacionRuta")', pwa_html)
+        self.assertIn('draft.geoStatus === "idle" ? "" : geoOverlay(draft, "confirmarDesvioRuta")', pwa_html)
 
     def test_puntos_logisticos_crea_punto_manual(self):
         self.client.force_login(self.user)
@@ -2993,7 +3037,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertContains(response, "Producto total")
         self.assertContains(response, "Esperado total")
         self.assertContains(response, "Pastel Snicker chico")
-        self.assertContains(response, "5.000")
+        self.assertContains(response, ">5</td>")
         self.assertContains(response, "Esperado")
         self.assertContains(response, "Cargado")
         self.assertContains(response, "Carga sin validar")
@@ -3009,7 +3053,7 @@ class LogisticaControlRutasTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Recibido correcto")
-        self.assertContains(response, "5.000")
+        self.assertContains(response, ">5</td>")
         self.assertNotContains(response, "Carga sin validar")
 
     def test_ruta_detail_en_ruta_muestra_boton_recepcion_point(self):
@@ -3105,7 +3149,7 @@ class LogisticaControlRutasTests(TestCase):
         ruta.refresh_from_db()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
-        self.assertContains(response, "confirma al menos una línea de carga")
+        self.assertContains(response, "confirma todas las líneas de carga")
 
     def test_ruta_detail_bloquea_completar_con_diferencia_point(self):
         self.client.force_login(self.user)
@@ -3872,7 +3916,7 @@ class LogisticaControlRutasTests(TestCase):
         ruta.refresh_from_db()
         self.assertEqual(response.status_code, 400)
         self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
-        self.assertIn("confirma al menos una línea de carga", response.json()["detail"])
+        self.assertIn("confirma todas las líneas de carga", response.json()["detail"])
 
     def test_ruta_detail_confirma_carga_manual_y_permita_liberar(self):
         self.client.force_login(self.user)
@@ -3950,6 +3994,185 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_CARGADA)
         self.assertEqual(linea.cantidad_cargada, linea.cantidad_enviada_esperada)
         self.assertEqual(checklist.estatus, RutaCargaChecklist.ESTATUS_CONFIRMADA)
+
+    def test_validar_linea_carga_sigue_bloqueando_salida_si_quedan_lineas_pendientes(self):
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        linea_uno = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="linea-uno",
+            item_code="PZA1",
+            item_name="Producto uno",
+            unit="PZA",
+            cantidad_solicitada="2.000",
+            cantidad_enviada_esperada="2.000",
+        )
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="linea-dos",
+            item_code="PZA2",
+            item_name="Producto dos",
+            unit="PZA",
+            cantidad_solicitada="3.000",
+            cantidad_enviada_esperada="3.000",
+        )
+
+        validar_linea_carga(
+            user=self.user,
+            ruta=ruta,
+            repartidor=self.repartidor,
+            linea_id=linea_uno.id,
+            cantidad_cargada="2.000",
+        )
+
+        checklist.refresh_from_db()
+        self.assertEqual(checklist.estatus, RutaCargaChecklist.ESTATUS_EN_REVISION)
+        self.assertEqual(checklist_bloquea_salida(ruta), "confirma todas las líneas de carga antes de liberar la ruta")
+
+    def test_validar_linea_carga_con_diferencia_notifica_logistica_una_sola_vez(self):
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        supervisor = User.objects.create_user(username="logistica.supervisor.carga", password="pass123")
+        UserModuleAccess.objects.create(user=supervisor, module="logistica", access=ACCESS_MANAGE)
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        linea = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="linea-diferencia",
+            item_code="PZA1",
+            item_name="Producto con diferencia",
+            unit="PZA",
+            cantidad_solicitada="5.000",
+            cantidad_enviada_esperada="5.000",
+        )
+
+        validar_linea_carga(
+            user=self.user,
+            ruta=ruta,
+            repartidor=self.repartidor,
+            linea_id=linea.id,
+            cantidad_cargada="3.000",
+            motivo_diferencia=RutaCargaChecklistLinea.MOTIVO_STOCK_LIMITADO,
+        )
+
+        checklist.refresh_from_db()
+        self.assertEqual(checklist.estatus, RutaCargaChecklist.ESTATUS_CON_INCIDENCIA)
+        self.assertEqual(checklist_bloquea_salida(ruta), "logística debe autorizar la ruta con la diferencia")
+        self.assertEqual(
+            Notificacion.objects.filter(usuario=supervisor, titulo=f"Diferencia de carga: {ruta.folio}").count(),
+            1,
+        )
+
+        validar_linea_carga(
+            user=self.user,
+            ruta=ruta,
+            repartidor=self.repartidor,
+            linea_id=linea.id,
+            cantidad_cargada="3.000",
+            motivo_diferencia=RutaCargaChecklistLinea.MOTIVO_STOCK_LIMITADO,
+            notas="Segunda revisión.",
+        )
+        self.assertEqual(
+            Notificacion.objects.filter(usuario=supervisor, titulo=f"Diferencia de carga: {ruta.folio}").count(),
+            1,
+        )
+
+    def test_ruta_detail_autoriza_diferencia_carga_permite_liberar(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        linea = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="linea-autorizar",
+            item_code="PZA1",
+            item_name="Producto con diferencia",
+            unit="PZA",
+            cantidad_solicitada="5.000",
+            cantidad_enviada_esperada="5.000",
+        )
+        validar_linea_carga(
+            user=self.user,
+            ruta=ruta,
+            repartidor=self.repartidor,
+            linea_id=linea.id,
+            cantidad_cargada="3.000",
+            motivo_diferencia=RutaCargaChecklistLinea.MOTIVO_STOCK_LIMITADO,
+        )
+
+        bloqueada = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
+            {"action": "ruta_status", "estatus": RutaEntrega.ESTATUS_EN_RUTA},
+            follow=True,
+        )
+        ruta.refresh_from_db()
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
+        self.assertContains(bloqueada, "logística debe autorizar la ruta con la diferencia")
+
+        autorizar = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
+            {"action": "autorizar_diferencia_carga", "autorizado": "1", "notas_autorizacion_carga": "Autorizado por jefa de logística."},
+            follow=True,
+        )
+        checklist.refresh_from_db()
+        self.assertEqual(autorizar.status_code, 200)
+        self.assertIn("Autorizado por jefa de logística.", checklist.motivo_override)
+
+        liberada = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
+            {"action": "ruta_status", "estatus": RutaEntrega.ESTATUS_EN_RUTA},
+            follow=True,
+        )
+        ruta.refresh_from_db()
+        self.assertEqual(liberada.status_code, 200)
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
+
+    def test_ruta_detail_rechaza_diferencia_carga_mantiene_bloqueo(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        linea = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="linea-rechazar",
+            item_code="PZA1",
+            item_name="Producto con diferencia",
+            unit="PZA",
+            cantidad_solicitada="5.000",
+            cantidad_enviada_esperada="5.000",
+        )
+        validar_linea_carga(
+            user=self.user,
+            ruta=ruta,
+            repartidor=self.repartidor,
+            linea_id=linea.id,
+            cantidad_cargada="3.000",
+            motivo_diferencia=RutaCargaChecklistLinea.MOTIVO_STOCK_LIMITADO,
+        )
+
+        rechazar = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
+            {"action": "autorizar_diferencia_carga", "autorizado": "0", "notas_autorizacion_carga": "Falta confirmar con CEDIS."},
+            follow=True,
+        )
+        checklist.refresh_from_db()
+        self.assertEqual(rechazar.status_code, 200)
+        self.assertFalse(checklist.motivo_override)
+        self.assertTrue(
+            ruta.eventos.filter(metadata__tipo="autorizacion_diferencia_carga", metadata__autorizado=False).exists()
+        )
+
+        bloqueada = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
+            {"action": "ruta_status", "estatus": RutaEntrega.ESTATUS_EN_RUTA},
+            follow=True,
+        )
+        ruta.refresh_from_db()
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
 
     def test_ruta_detail_autoriza_salida_parcial_con_recarga_cedis(self):
         self.client.force_login(self.user)

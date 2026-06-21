@@ -15,16 +15,17 @@
     <link rel="stylesheet" href="/static/css/pollyana_generated_utilities.css?v=20260614-ui100-v1">
     <style>
       :root {
-        --bg: #0f0f14;
-        --surface: #1a1a24;
-        --border: #2a2a38;
+        --bg: #FFFAF5;
+        --surface: #FFFFFF;
+        --border: #F0D0DC;
         --wine: #8B2252;
         --gold: #C9A84C;
-        --text: #e8e0d5;
-        --text-muted: #888888;
-        --danger: #e64f64;
-        --warning: #e6b84f;
-        --success: #51b56f;
+        --gold-text: #8a6512;
+        --text: #3D2B2B;
+        --text-muted: #7A6565;
+        --danger: #E53935;
+        --warning: #FFC107;
+        --success: #4CAF50;
         --info: #4f8ee6;
       }
 
@@ -85,7 +86,7 @@
 
       .brand-subtitle {
         margin: 8px 0 0;
-        color: var(--gold);
+        color: var(--gold-text);
         font-weight: 800;
         letter-spacing: 0;
         text-transform: uppercase;
@@ -126,7 +127,7 @@
         min-height: 48px;
         border: 1px solid var(--border);
         border-radius: 10px;
-        background: #111118;
+        background: #F5F0EB;
         color: var(--text);
         outline: none;
         padding: 12px 13px;
@@ -143,7 +144,7 @@
 
       select.gas-native-select {
         border-color: var(--gold);
-        background: #15151e;
+        background: #F5F0EB;
         color: var(--text);
         font-weight: 800;
       }
@@ -210,7 +211,7 @@
       .logout {
         min-height: 40px;
         border-radius: 999px;
-        background: #261521;
+        background: #F8E8EE;
         color: var(--text);
         font-size: 13px;
         font-weight: 800;
@@ -219,7 +220,7 @@
 
       .unit-line {
         margin: 0 0 20px;
-        color: var(--gold);
+        color: var(--gold-text);
         font-weight: 800;
       }
 
@@ -239,7 +240,7 @@
 
       .dashboard-help:hover, .dashboard-help:focus {
         border-color: var(--gold);
-        color: var(--gold);
+        color: var(--gold-text);
       }
 
       .dash-grid {
@@ -281,8 +282,8 @@
         height: 42px;
         border: 1px solid rgba(201, 168, 76, .26);
         border-radius: 13px;
-        background: #21151f;
-        color: var(--gold);
+        background: #F8E8EE;
+        color: var(--wine);
       }
 
       .app-glyph svg {
@@ -330,7 +331,7 @@
         margin-top: 6px;
         min-width: 0;
         height: auto;
-        background: #676771;
+        background: #7A6565;
         padding: 4px 8px;
       }
 
@@ -397,7 +398,7 @@
 
       .option-card.selected {
         border-color: var(--wine);
-        background: #2a1423;
+        background: #F8E8EE;
         box-shadow: 0 0 0 2px rgba(201, 168, 76, 0.22);
       }
 
@@ -463,7 +464,7 @@
       .status.abierto { background: var(--danger); }
       .status.en_proceso { background: var(--warning); color: #17120a; }
       .status.programado { background: var(--info); }
-      .status.cerrado { background: #676771; }
+      .status.cerrado { background: #7A6565; }
 
       .detail {
         display: none;
@@ -484,7 +485,7 @@
         font-size: 14px;
       }
 
-      .kv b { color: var(--gold); }
+      .kv b { color: var(--gold-text); }
 
       .empty {
         border: 1px dashed var(--border);
@@ -507,7 +508,7 @@
       }
 
       .help-card h2 {
-        color: var(--gold);
+        color: var(--gold-text);
         font-size: 18px;
         margin: 0 0 8px;
       }
@@ -553,8 +554,8 @@
         border: 1px solid var(--border);
         border-left: 3px solid var(--gold);
         border-radius: 16px;
-        background: #1e1e2e;
-        color: var(--gold);
+        background: #F5F0EB;
+        color: var(--gold-text);
         text-align: left;
         font-weight: 900;
         margin: 12px 0 0;
@@ -570,7 +571,7 @@
         gap: 12px;
         border: 1px solid var(--border);
         border-radius: 12px;
-        background: #1a1a24;
+        background: #FFFFFF;
         color: var(--text);
         font-size: 13px;
         padding: 14px 16px;
@@ -587,37 +588,37 @@
       .chip {
         min-width: 72px;
         min-height: 44px;
-        border: 1px solid #2a2a38;
+        border: 1px solid #F0D0DC;
         border-radius: 10px;
-        background: #22222e;
-        color: #b6bac4;
+        background: #F5F0EB;
+        color: #7A6565;
         font-size: 12px;
         font-weight: 900;
         padding: 9px 11px;
         transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
       }
 
-      .chip.ok { background: #1a3a1a; border-color: #33aa55; color: #55cc77; }
-      .chip.fail { background: #3a1a1a; border-color: #aa3333; color: #cc5555; }
-      .chip.pending { background: #22222e; border-color: #3b3b4d; color: #c2c6d0; }
+      .chip.ok { background: #effaf3; border-color: #8bd3a6; color: #21633b; }
+      .chip.fail { background: #fff1f5; border-color: #f3a5b8; color: #8B2252; }
+      .chip.pending { background: #F5F0EB; border-color: #E3D9CE; color: #7A6565; }
       .check-row.ok { border-color: rgba(51, 170, 85, 0.65); }
       .check-row.fail { border-color: rgba(170, 51, 51, 0.72); }
       .check-row.pending { border-color: var(--border); }
       .daily-banner {
-        border: 1px solid #33aa55;
+        border: 1px solid #8bd3a6;
         border-radius: 14px;
-        background: #1a3a1a;
-        color: #55cc77;
+        background: #effaf3;
+        color: #21633b;
         padding: 16px;
         margin: 12px 0;
         font-weight: 900;
       }
       .daily-banner strong { color: var(--text); }
-      .daily-banner time { color: var(--gold); }
+      .daily-banner time { color: var(--gold-text); }
       .daily-banner.warning {
         border-color: rgba(201, 168, 76, 0.7);
-        background: #1e1a10;
-        color: var(--gold);
+        background: #fff8df;
+        color: var(--gold-text);
       }
       .daily-counter {
         display: inline-flex;
@@ -625,13 +626,13 @@
         width: 100%;
         border: 1px solid var(--border);
         border-radius: 50px;
-        background: #1a1a24;
-        color: var(--gold);
+        background: #FFFFFF;
+        color: var(--gold-text);
         font-weight: 900;
         margin: 8px 0 12px;
         padding: 10px 14px;
       }
-      .daily-counter.complete { color: #55cc77; }
+      .daily-counter.complete { color: #21633b; }
       .daily-checklist-card {
         border-radius: 16px;
         background: var(--surface);
@@ -644,26 +645,26 @@
       }
       .daily-mark-all {
         width: 100%;
-        border: 1px solid #33aa55;
+        border: 1px solid #8bd3a6;
         border-radius: 10px;
         background: transparent;
-        color: #55cc77;
+        color: #21633b;
         font-weight: 900;
         padding: 12px;
       }
-      .daily-mark-all:active { background: #1a3a1a; }
+      .daily-mark-all:active { background: #effaf3; }
       .daily-fail-field label {
-        color: var(--gold);
+        color: var(--gold-text);
         font-weight: 900;
       }
       .daily-fail-field textarea {
         border: 1px solid #C9A84C44;
         border-radius: 12px;
-        background: #1e1a10;
+        background: #fff8df;
         color: var(--text);
         padding: 14px;
       }
-      .daily-fail-field textarea::placeholder { color: #888; }
+      .daily-fail-field textarea::placeholder { color: #7A6565; }
       .daily-continue {
         width: 100%;
         margin-top: 24px;
@@ -726,7 +727,7 @@
       .license-pill.blocked {
         border-color: #f3a5b8;
         background: #fff1f5;
-        color: #9f1d52;
+        color: #8B2252;
       }
       .license-pill.blocked::before {
         background: #e84f73;
@@ -742,7 +743,7 @@
       }
       .license-banner.ok { border-color: #8bd3a6; color: #21633b; background: #effaf3; }
       .license-banner.warning { border-color: #ead28a; color: #8a6512; background: #fff8df; }
-      .license-banner.blocked { border-color: #f3a5b8; color: #9f1d52; background: #fff1f5; }
+      .license-banner.blocked { border-color: #f3a5b8; color: #8B2252; background: #fff1f5; }
 
       .thumb {
         width: 100%;
@@ -829,7 +830,7 @@
         justify-content: center;
         border: 1px solid var(--border);
         border-radius: 10px;
-        background: #111118;
+        background: #F5F0EB;
         color: var(--text);
         font-weight: 900;
         padding: 12px 13px;
@@ -870,7 +871,7 @@
       }
       .weekly-metric strong {
         display: block;
-        color: var(--gold);
+        color: var(--gold-text);
         font-size: 20px;
       }
       .duplicate-report-card {
@@ -878,7 +879,7 @@
       }
       .duplicate-report-card h3 {
         margin: 0 0 6px;
-        color: var(--gold);
+        color: var(--gold-text);
         font-size: 16px;
       }
       .duplicate-report-card .meta {
@@ -919,7 +920,7 @@
         height: 38px;
         border-radius: 999px;
         border: 1px solid var(--border);
-        background: #111119;
+        background: #F5F0EB;
         color: var(--text);
         font-size: 22px;
         font-weight: 900;
@@ -940,7 +941,7 @@
         border-color: rgba(230, 79, 100, .5);
       }
       .fuel-label {
-        color: var(--gold);
+        color: var(--gold-text);
         font-size: 12px;
         font-weight: 900;
         letter-spacing: .04em;
@@ -956,7 +957,7 @@
       }
       .fuel-modal p {
         margin: 0 0 14px;
-        color: #bdb4aa;
+        color: #7A6565;
         line-height: 1.42;
         font-weight: 700;
       }
@@ -964,13 +965,13 @@
         margin: 16px 0;
         border: 1px solid var(--border);
         border-radius: 14px;
-        background: #111119;
+        background: #F5F0EB;
         color: var(--text);
         padding: 14px;
         font-weight: 800;
       }
       .fuel-notice strong {
-        color: var(--gold);
+        color: var(--gold-text);
       }
       .fuel-modal.pending .fuel-notice strong {
         color: var(--danger);
@@ -985,13 +986,13 @@
       .route-fuel-card {
         border: 1px solid rgba(201, 168, 76, .35);
         border-radius: 14px;
-        background: #16161f;
+        background: #F5F0EB;
         margin: 14px 0;
         padding: 14px;
       }
       .route-fuel-card h2 {
         margin: 0 0 10px;
-        color: var(--gold);
+        color: var(--gold-text);
         font-size: 16px;
       }
       .route-fuel-item {
@@ -1013,8 +1014,8 @@
         width: 100%;
         border: 1px solid rgba(201, 168, 76, .55);
         border-radius: 14px;
-        background: #201a10;
-        color: var(--gold);
+        background: #fff8df;
+        color: var(--gold-text);
         font-weight: 900;
         margin: 12px 0 16px;
         padding: 14px;
@@ -1072,17 +1073,17 @@
       }
       .photo-actions .retake {
         border: 1px solid var(--gold);
-        background: #201a10;
-        color: var(--gold);
+        background: #fff8df;
+        color: var(--gold-text);
       }
       .photo-actions .keep {
-        border: 1px solid #33aa55;
-        background: #16351f;
-        color: #55cc77;
+        border: 1px solid #8bd3a6;
+        background: #effaf3;
+        color: #21633b;
       }
       .photo-actions .clear {
         border: 1px solid var(--danger);
-        background: #2a151b;
+        background: #fff1f5;
         color: var(--danger);
       }
       .fuel-save-row {
@@ -1097,16 +1098,17 @@
       .route-card-pwa,
       .route-hero,
       .route-action-panel {
-        --route-pwa-panel: #14141d;
-        --route-pwa-panel-strong: #101018;
-        --route-pwa-border: #2a2a38;
-        --route-pwa-text: #f3edf4;
-        --route-pwa-muted: #b9adbd;
-        --route-pwa-gold: #d8b75f;
-        --route-pwa-wine: #9f1d52;
-        --route-pwa-success: #51b56f;
-        --route-pwa-danger: #e64f64;
-        --route-pwa-warning: #e6b84f;
+        --route-pwa-panel: #FFFFFF;
+        --route-pwa-panel-strong: #F8E8EE;
+        --route-pwa-border: #F0D0DC;
+        --route-pwa-text: #3D2B2B;
+        --route-pwa-muted: #7A6565;
+        --route-pwa-gold: #C9A84C;
+        --route-pwa-gold-text: #8a6512;
+        --route-pwa-wine: #8B2252;
+        --route-pwa-success: #4CAF50;
+        --route-pwa-danger: #E53935;
+        --route-pwa-warning: #FFC107;
         display: grid;
         gap: 12px;
         padding: 16px;
@@ -1115,10 +1117,10 @@
         border: 1px solid rgba(201, 168, 76, .36);
         border-radius: 18px;
         background:
-          linear-gradient(145deg, rgba(139, 34, 82, .28), rgba(20, 20, 29, .92) 46%),
+          linear-gradient(145deg, rgba(139, 34, 82, .10), rgba(255, 255, 255, 0) 46%),
           var(--route-pwa-panel);
         color: var(--route-pwa-text);
-        box-shadow: 0 18px 45px rgba(0, 0, 0, .24);
+        box-shadow: 0 8px 24px rgba(139, 34, 82, .10);
       }
       .route-head {
         display: grid;
@@ -1135,7 +1137,7 @@
       }
       .route-folio {
         margin: 5px 0 0;
-        color: var(--route-pwa-gold);
+        color: var(--route-pwa-gold-text);
         font-size: 12px;
         font-weight: 900;
         letter-spacing: .03em;
@@ -1149,7 +1151,7 @@
         border: 1px solid rgba(201, 168, 76, .44);
         border-radius: 999px;
         background: rgba(201, 168, 76, .10);
-        color: var(--route-pwa-gold);
+        color: var(--route-pwa-gold-text);
         font-size: 12px;
         font-weight: 900;
         padding: 5px 10px;
@@ -1158,9 +1160,9 @@
       .route-progress-card {
         display: grid;
         gap: 8px;
-        border: 1px solid rgba(255, 255, 255, .08);
+        border: 1px solid rgba(139, 34, 82, .12);
         border-radius: 14px;
-        background: rgba(15, 15, 20, .72);
+        background: rgba(255, 255, 255, .55);
         padding: 12px;
       }
       .route-progress-top {
@@ -1208,8 +1210,8 @@
         font-weight: 800;
       }
       .route-signal.ok { border-color: rgba(81, 181, 111, .78); }
-      .route-signal.warn { border-color: rgba(230, 184, 79, .72); background: #1e1a10; }
-      .route-signal.bad { border-color: rgba(230, 79, 100, .68); background: #241419; }
+      .route-signal.warn { border-color: rgba(230, 184, 79, .72); background: #fff8df; }
+      .route-signal.bad { border-color: rgba(230, 79, 100, .68); background: #fff1f5; }
       .route-hero .unit-line,
       .route-event .muted {
         color: var(--route-pwa-muted) !important;
@@ -1237,11 +1239,11 @@
         gap: 7px;
         border: 1px solid rgba(230, 184, 79, .55);
         border-radius: 14px;
-        background: #1e1a10;
+        background: #fff8df;
         padding: 12px;
       }
       .route-desvio-field label {
-        color: var(--gold);
+        color: var(--gold-text);
       }
       .route-stop-list,
       .route-event-list {
@@ -1261,7 +1263,11 @@
       }
       .route-stop.visited {
         border-color: rgba(81, 181, 111, .70);
-        background: #122219;
+        background: #effaf3;
+      }
+      .route-stop.next {
+        border-color: var(--route-pwa-gold);
+        box-shadow: 0 0 0 1px var(--route-pwa-gold);
       }
       .route-stop-number {
         display: grid;
@@ -1269,13 +1275,13 @@
         width: 32px;
         height: 32px;
         border-radius: 999px;
-        background: #252535;
-        color: var(--route-pwa-gold);
+        background: #F8E8EE;
+        color: var(--route-pwa-gold-text);
         font-weight: 900;
       }
       .route-stop.visited .route-stop-number {
         background: var(--route-pwa-success);
-        color: #08130c;
+        color: #FFFFFF;
       }
       .route-stop strong {
         display: block;
@@ -1302,7 +1308,7 @@
         align-items: center;
         border: 1px solid var(--route-pwa-border);
         border-radius: 999px;
-        background: #1f1f2d;
+        background: #F8E8EE;
         color: var(--route-pwa-muted);
         font-size: 11px;
         font-weight: 900;
@@ -1310,18 +1316,18 @@
       }
       .route-status-pill.ok {
         border-color: rgba(81, 181, 111, .70);
-        background: #122219;
-        color: #9fe3b0;
+        background: #effaf3;
+        color: #21633b;
       }
       .route-status-pill.warn {
         border-color: rgba(230, 184, 79, .72);
-        background: #1e1a10;
-        color: #f0d684;
+        background: #fff8df;
+        color: #8a6512;
       }
       .route-status-pill.bad {
         border-color: rgba(230, 79, 100, .68);
-        background: #241419;
-        color: #f3a2ad;
+        background: #fff1f5;
+        color: #8B2252;
       }
       .route-event {
         border-left: 4px solid var(--route-pwa-warning);
@@ -1356,7 +1362,7 @@
       const TRACKING_QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
       const ACCESS_TOKEN_KEY = "pd_logistica_access";
       const REFRESH_TOKEN_KEY = "pd_logistica_refresh";
-      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v42
+      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v47
       const PREVIEW_REPARTIDOR_PARAM = "preview_repartidor";
       const app = document.getElementById("app");
       const initialParams = new URLSearchParams(window.location.search);
@@ -1380,6 +1386,7 @@
         rutaActiva: null,
         rutaTrackingDraft: null,
         rutaCargaDraft: {},
+        entregaNotasDraft: {},
         trackingQueueCount: 0,
         routeAutoTrackingTimer: null,
         routeAutoTrackingRutaId: null,
@@ -2099,6 +2106,7 @@
       function renderCurrentScreen() {
         if (state.pantallaActual === "bitacora_salida") return renderBitacoraSalida();
         if (state.pantallaActual === "ruta_activa") return renderRutaActiva();
+        if (state.pantallaActual === "ruta_carga") return renderRutaCarga();
         return renderDashboard();
       }
 
@@ -2112,7 +2120,7 @@
 
       async function showScreen(nombre) {
         state.pantallaActual = nombre;
-        if (nombre !== "ruta_activa") stopRutaAutoTracking();
+        if (nombre !== "ruta_activa" && nombre !== "ruta_carga") stopRutaAutoTracking();
         if (nombre === "login") return renderLogin();
         if (!state.perfil) await loadPerfil();
         if (nombre === "dashboard") return renderDashboard();
@@ -2122,6 +2130,7 @@
         if (nombre === "bitacora") return renderBitacora();
         if (nombre === "bitacora_salida") return renderBitacoraSalida();
         if (nombre === "ruta_activa") return renderRutaActiva();
+        if (nombre === "ruta_carga") return renderRutaCarga();
         if (nombre === "inspeccion_vehiculo") return renderInspeccionVehiculo();
         if (nombre === "lavado") return renderLavadoUnidad();
         if (nombre === "ayuda") return renderAyuda();
@@ -2281,7 +2290,7 @@
         const m = resumen.metricas || {};
         return `
           <section class="weekly-summary ${escapeHtml(resumen.semaforo || "amarillo")}">
-            <h2 style="margin:0;color:var(--gold);">Resumen de tu semana</h2>
+            <h2 style="margin:0;color:var(--gold-text);">Resumen de tu semana</h2>
             <p class="muted">${escapeHtml(resumen.periodo_inicio || "")} al ${escapeHtml(resumen.periodo_fin || "")}</p>
             <p>${escapeHtml(resumen.mensaje || "")}</p>
             <div class="weekly-grid">
@@ -2321,15 +2330,19 @@
         render(shell(`
           ${resumenSemanalCard()}
           ${combustibleAlertaModal()}
-          <p class="unit-line">Selecciona la unidad al iniciar cada captura.</p>
           <button class="dashboard-help" onclick="showScreen('ayuda')" type="button">? Ayuda rápida</button>
+          <p class="muted" style="margin:4px 0 8px;font-weight:800;">Tu turno</p>
+          <div class="dash-grid">
+            <button class="dash-btn" onclick="showScreen('bitacora_salida')">${appGlyph("bitacora")}<span>Bitácora</span>${turnoBadge}</button>
+            <button class="dash-btn route-dashboard-card" onclick="showScreen('ruta_activa')">${appGlyph("ruta")}<span>Mi ruta</span>${rutaBadge}</button>
+          </div>
+          <p class="unit-line" style="margin-top:18px;">Selecciona la unidad al iniciar cada captura.</p>
+          <p class="muted" style="margin:4px 0 8px;font-weight:800;">Capturas</p>
           <div class="dash-grid">
             <button class="dash-btn" onclick="startNuevoReporte()">${appGlyph("reporte")}<span>Nuevo Reporte</span></button>
             <button class="dash-btn" onclick="showScreen('mis_reportes')">${appGlyph("historial")}<span>Mis Reportes</span>${abiertos ? `<span class="badge">${abiertos}</span>` : ""}</button>
             <button class="dash-btn" onclick="showScreen('inspeccion_vehiculo')">${appGlyph("inspeccion")}<span>Inspección</span></button>
             <button class="dash-btn" onclick="showScreen('lavado')">${appGlyph("lavado")}<span>Lavado</span></button>
-            <button class="dash-btn route-dashboard-card" onclick="showScreen('ruta_activa')">${appGlyph("ruta")}<span>Mi ruta</span>${rutaBadge}</button>
-            <button class="dash-btn" onclick="showScreen('bitacora_salida')">${appGlyph("bitacora")}<span>Bitácora</span>${turnoBadge}</button>
           </div>
         `));
       }
@@ -2350,10 +2363,11 @@
         return state.rutaTrackingDraft;
       }
 
-      function capturarUbicacionRuta() {
+      function confirmarDesvioRuta() {
         if (previewBlocked("La ubicación GPS no se captura en vista como repartidor.")) return;
         const draft = ensureRutaTrackingDraft();
-        requestLocation(draft, renderRutaActiva, "latitud", "longitud");
+        if (!String(draft.desvio_motivo || "").trim()) return renderRutaActiva("Indica un motivo breve para registrar el desvío.");
+        requestLocation(draft, () => (draft.geoStatus === "ready" ? registrarTrackingRuta() : renderRutaActiva()), "latitud", "longitud");
       }
 
       function toggleDesvioRuta() {
@@ -2459,17 +2473,41 @@
         return `Recibido ${cantidad} ${unit}${fecha}`;
       }
 
+      function proximaParadaId(paradas) {
+        const proxima = (paradas || []).find((parada) => parada.estado !== "VISITADA");
+        return proxima ? Number(proxima.id) : null;
+      }
+
+      function entregaNotasDraftFor(paradaId) {
+        state.entregaNotasDraft[paradaId] = state.entregaNotasDraft[paradaId] || { estado: "", notas: "" };
+        return state.entregaNotasDraft[paradaId];
+      }
+
+      function toggleEntregaProblema(paradaId, estado) {
+        const draft = entregaNotasDraftFor(paradaId);
+        draft.estado = draft.estado === estado ? "" : estado;
+        renderRutaActiva();
+      }
+
+      function updateEntregaNotas(paradaId, value) {
+        entregaNotasDraftFor(paradaId).notas = value.slice(0, 240);
+      }
+
       function renderParadasRuta(paradas, rutaId, rutaEnSeguimiento) {
         if (!paradas?.length) return `<p class="unit-line">Esta ruta no tiene paradas configuradas.</p>`;
+        const nextId = proximaParadaId(paradas);
         return `<div class="route-stop-list">` + paradas.map((parada) => {
           const visited = parada.estado === "VISITADA";
           const entrega = parada.entrega_estado || "PENDIENTE";
           const requiereEntrega = paradaRequiereEntrega(parada);
           const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && entrega === "PENDIENTE";
+          const esSiguiente = !visited && Number(parada.id) === nextId;
+          const notasDraft = entregaNotasDraftFor(parada.id);
           return `
-            <section class="route-stop ${visited ? "visited" : ""}" tabindex="0">
+            <section class="route-stop ${visited ? "visited" : ""}${esSiguiente ? " next" : ""}" tabindex="0">
               <span class="route-stop-number">${visited ? "OK" : escapeHtml(parada.orden)}</span>
               <div>
+                ${esSiguiente ? `<span class="route-status-pill ok" style="margin-bottom:6px;display:inline-block;">Siguiente parada</span>` : ""}
                 <strong>${escapeHtml(parada.punto_nombre_snapshot || parada.punto?.nombre || "Punto")}</strong>
                 <span class="route-stop-meta">${escapeHtml(parada.punto?.tipo_display || parada.punto?.tipo || "Punto")} · Geocerca ${escapeHtml(parada.radio_geocerca_metros || parada.punto?.radio_geocerca_metros || "-")} m</span>
                 <span class="route-stop-meta">${escapeHtml(parada.estado_display || parada.estado || "")}${parada.hora_llegada_real ? ` · llegada ${formatDate(parada.hora_llegada_real)}` : ""}</span>
@@ -2477,7 +2515,20 @@
                 <div class="route-status-row">
                   <span class="route-status-pill ${requiereEntrega ? entregaTone(entrega) : (visited ? "ok" : "warn")}">${escapeHtml(entregaLabel(parada))}</span>
                 </div>
-                ${puedeConfirmarEntrega ? `<button class="primary-btn" style="margin-top:10px;" type="button" onclick="confirmarEntregaParada(${Number(rutaId)}, ${Number(parada.id)}, this)">Confirmar entrega</button>` : ""}
+                ${puedeConfirmarEntrega ? `
+                  <div class="route-status-row" style="margin-top:10px;flex-wrap:wrap;gap:8px;">
+                    <button class="primary-btn" type="button" onclick="confirmarEntregaParada(${Number(rutaId)}, ${Number(parada.id)}, this)">Confirmar entrega</button>
+                    <button class="secondary-btn" type="button" onclick="toggleEntregaProblema(${Number(parada.id)}, 'CON_DIFERENCIA')">Con diferencia</button>
+                    <button class="secondary-btn" type="button" onclick="toggleEntregaProblema(${Number(parada.id)}, 'NO_ENTREGADA')">No entregada</button>
+                  </div>
+                  ${notasDraft.estado ? `
+                    <div class="route-desvio-field">
+                      <label for="entrega-notas-${parada.id}">${notasDraft.estado === "NO_ENTREGADA" ? "Motivo de no entrega" : "Describe la diferencia"}</label>
+                      <input id="entrega-notas-${parada.id}" class="input-field" type="text" maxlength="240" placeholder="Obligatorio" value="${escapeHtml(notasDraft.notas)}" oninput="updateEntregaNotas(${parada.id}, this.value)">
+                      <button class="primary-btn" type="button" onclick="confirmarEntregaParada(${Number(rutaId)}, ${Number(parada.id)}, this, '${notasDraft.estado}')">Guardar</button>
+                    </div>
+                  ` : ""}
+                ` : ""}
               </div>
             </section>
           `;
@@ -2537,6 +2588,13 @@
         };
       }
 
+      function resumenCargaRuta(checklist) {
+        const lineas = checklist?.lineas || [];
+        if (!lineas.length) return "Sin carga sincronizada desde Point.";
+        const confirmadas = lineas.filter((linea) => linea.estatus !== "PENDIENTE").length;
+        return `${confirmadas} de ${lineas.length} línea${lineas.length === 1 ? "" : "s"} revisada${lineas.length === 1 ? "" : "s"}.`;
+      }
+
       function renderChecklistCarga(checklist, paradas = []) {
         if (!checklist) return "";
         const lineas = checklist.lineas || [];
@@ -2574,7 +2632,7 @@
         if (!total) {
           return `
             <section class="card route-card-pwa">
-              <h2 style="margin:0;color:var(--gold);">${cargaTitulo}</h2>
+              <h2 style="margin:0;color:var(--gold-text);">${cargaTitulo}</h2>
               <p class="unit-line">Sin carga esperada sincronizada desde Point.</p>
               <p class="muted">Logística debe sincronizar las transferencias abiertas antes de confirmar salida.</p>
             </section>
@@ -2584,7 +2642,7 @@
           <section class="card route-card-pwa">
             <div class="route-head">
               <div>
-                <h2 style="margin:0;color:var(--gold);">${cargaTitulo}</h2>
+                <h2 style="margin:0;color:var(--gold-text);">${cargaTitulo}</h2>
                 <p class="route-folio">${escapeHtml(statusText)} · ${confirmadas} de ${total} línea${total === 1 ? "" : "s"}</p>
               </div>
               <span class="route-chip">${pct}%</span>
@@ -2718,14 +2776,6 @@
         const paradas = rutaData.paradas || [];
         const counts = routeStopCounts(paradas);
         const progress = routeProgressValue(ruta, paradas);
-        const blockers = [];
-        if (!ruta.unidad_operativa) blockers.push("Logística debe asignar la unidad a la ruta.");
-        if (!rutaEnSeguimiento) blockers.push("Logística debe liberar la ruta en estado En ruta.");
-        if (!turnoOk) blockers.push("Abre turno en Bitácora con la unidad asignada.");
-        if (turnoOk && !unidadOk) blockers.push("El turno abierto no corresponde a la unidad de esta ruta.");
-        if (blockers.length) {
-          showOperationalModal("Ruta detenida", blockers.join(" "), `ruta_${ruta.id}_${blockers.join("|").slice(0, 120)}`);
-        }
         state.trackingQueueCount = pendientesOffline;
         render(shell(`
           <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
@@ -2753,53 +2803,79 @@
           </section>
 
           <section class="card route-card-pwa">
-            <h2 style="margin:0;color:var(--gold);">Paradas de reparto</h2>
+            <h2 style="margin:0;color:var(--gold-text);">Paradas de reparto</h2>
             ${renderParadasRuta(paradas, ruta.id, rutaEnSeguimiento)}
           </section>
 
           <section class="card route-action-panel">
+            ${!ruta.unidad_operativa ? `<div class="daily-banner warning">Logística debe asignar la unidad a la ruta.</div>` : ""}
             ${rutaEnSeguimiento ? "" : `<div class="daily-banner warning">Ruta en planeación. Revisa la carga; el GPS se activa cuando logística libere la ruta.</div>`}
             ${turnoOk ? "" : `<div class="daily-banner warning">Inicia turno en Bitácora antes de registrar seguimiento.</div>`}
             ${turnoOk && !unidadOk ? `<div class="daily-banner warning">Tu turno activo no corresponde a la unidad asignada a esta ruta.</div>` : ""}
             ${pendientesOffline ? `<div class="daily-banner warning">${pendientesOffline} seguimiento${pendientesOffline === 1 ? "" : "s"} pendiente${pendientesOffline === 1 ? "" : "s"} por enviar. Se reintentará automáticamente al recuperar conexión.</div>` : ""}
+            <p class="muted">Tu ubicación se envía automáticamente cada 45 segundos mientras estás en ruta.</p>
             <div class="route-actions-main">
-              <button class="primary-btn" type="button" onclick="capturarUbicacionRuta()" ${rutaEnSeguimiento && draft.geoStatus !== "loading" ? "" : "disabled"}>${ubicacionLista ? "Actualizar ubicación GPS" : "Capturar ubicación GPS"}</button>
-              ${ubicacionLista ? `<button class="secondary-btn" type="button" onclick="toggleDesvioRuta()">${draft.fuera_de_ruta_confirmado ? "Cancelar desvío" : "Reportar desvío"}</button>` : ""}
+              <button class="secondary-btn" type="button" onclick="toggleDesvioRuta()" ${rutaEnSeguimiento ? "" : "disabled"}>${draft.fuera_de_ruta_confirmado ? "Cancelar desvío" : "Reportar desvío"}</button>
               ${draft.fuera_de_ruta_confirmado ? `
                 <div class="route-desvio-field">
                   <label for="desvio-motivo">Motivo breve obligatorio</label>
                   <input id="desvio-motivo" class="input-field" type="text" maxlength="160" placeholder="Ej. cierre de calle, instrucción de supervisor" value="${escapeHtml(draft.desvio_motivo)}" oninput="updateDesvioMotivo(this.value)">
-                  <p class="muted">Se guardará como evidencia al registrar seguimiento.</p>
+                  <p class="muted">Se guardará como evidencia al confirmar.</p>
+                  <button class="primary-btn" type="button" onclick="confirmarDesvioRuta()" ${draft.guardando ? "disabled" : ""}>${draft.guardando ? "Guardando..." : "Confirmar desvío"}</button>
                 </div>
               ` : ""}
-              <button class="primary-btn" type="button" onclick="registrarTrackingRuta()" ${rutaEnSeguimiento && turnoOk && unidadOk && ubicacionLista && !draft.guardando ? "" : "disabled"}>${draft.guardando ? "Guardando..." : "Registrar seguimiento"}</button>
             </div>
           </section>
-          ${renderChecklistCarga(rutaData.checklist_carga, paradas)}
           <section class="card route-card-pwa">
-            <h2 style="margin:0;color:var(--gold);">Eventos recientes</h2>
+            <h2 style="margin:0;color:var(--gold-text);">Carga de ruta</h2>
+            <p class="unit-line">${escapeHtml(resumenCargaRuta(rutaData.checklist_carga))}</p>
+            <button class="secondary-btn" type="button" onclick="showScreen('ruta_carga')">Ver carga del tramo</button>
+          </section>
+          <section class="card route-card-pwa">
+            <h2 style="margin:0;color:var(--gold-text);">Eventos recientes</h2>
             ${renderEventosRuta(rutaData.eventos || [])}
           </section>
-          ${draft.geoStatus === "idle" ? "" : geoOverlay(draft, "capturarUbicacionRuta")}
+          ${draft.geoStatus === "idle" ? "" : geoOverlay(draft, "confirmarDesvioRuta")}
         `));
         ensureRutaAutoTracking(ruta.id, rutaEnSeguimiento && turnoOk && unidadOk && !state.previewReadOnly);
+      }
+
+      async function renderRutaCarga(message = "") {
+        let rutaData = null;
+        try {
+          rutaData = await loadRutaActiva();
+        } catch (error) {
+          rutaData = null;
+        }
+        if (!rutaData?.ruta?.id) return showScreen("ruta_activa");
+        const paradas = rutaData.paradas || [];
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('ruta_activa')">← Volver a Mi ruta</button>
+          <h1 class="screen-title" style="margin-top:16px;">Carga de ruta</h1>
+          ${message ? `<p class="${message.startsWith("✅") ? "success" : "error"}">${escapeHtml(message)}</p>` : ""}
+          ${renderChecklistCarga(rutaData.checklist_carga, paradas)}
+        `));
+      }
+
+      function renderRutaScreen(message = "") {
+        return state.pantallaActual === "ruta_carga" ? renderRutaCarga(message) : renderRutaActiva(message);
       }
 
       async function validarCargaLinea(lineaId) {
         if (previewBlocked("La revisión de carga está bloqueada en vista como repartidor.")) return;
         const rutaId = state.rutaActiva?.ruta?.id;
-        if (!rutaId) return renderRutaActiva("No hay ruta para validar carga.");
+        if (!rutaId) return renderRutaScreen("No hay ruta para validar carga.");
         const draft = cargaDraftFor(lineaId);
         const linea = (state.rutaActiva?.checklist_carga?.lineas || []).find((item) => Number(item.id) === Number(lineaId));
         const cantidad = String(draft.cantidad !== "" ? draft.cantidad : (linea?.cantidad_cargada ?? linea?.cantidad_enviada_esperada ?? "")).trim();
-        if (!cantidad) return renderRutaActiva("Captura la cantidad real cargada.");
+        if (!cantidad) return renderRutaScreen("Captura la cantidad real cargada.");
         const real = Number(cantidad);
         const esperada = Number(linea?.cantidad_enviada_esperada ?? 0);
         if (Number.isFinite(real) && Number.isFinite(esperada) && real !== esperada && !draft.motivo) {
-          return renderRutaActiva("Selecciona el motivo de la diferencia antes de guardar.");
+          return renderRutaScreen("Selecciona el motivo de la diferencia antes de guardar.");
         }
         draft.guardando = true;
-        await renderRutaActiva();
+        await renderRutaScreen();
         try {
           const response = await apiFetch(`/rutas/${rutaId}/carga-checklist/lineas/${lineaId}/validar/`, {
             method: "POST",
@@ -2813,34 +2889,39 @@
           });
           if (!response.ok) {
             const error = await response.json().catch(() => ({}));
-            return renderRutaActiva(apiErrorMessage(error, "No se pudo validar la carga."));
+            return renderRutaScreen(apiErrorMessage(error, "No se pudo validar la carga."));
           }
           delete state.rutaCargaDraft[lineaId];
           state.rutaActiva = null;
-          return renderRutaActiva("✅ Carga revisada.");
+          return renderRutaScreen("✅ Carga revisada.");
         } catch (error) {
-          return renderRutaActiva(error?.message === "Sesión expirada" ? "Tu sesión expiró. Vuelve a iniciar sesión." : "No se pudo guardar la carga. Reintenta con señal.");
+          return renderRutaScreen(error?.message === "Sesión expirada" ? "Tu sesión expiró. Vuelve a iniciar sesión." : "No se pudo guardar la carga. Reintenta con señal.");
         } finally {
           draft.guardando = false;
         }
       }
 
-      async function confirmarEntregaParada(rutaId, paradaId, button = null) {
+      async function confirmarEntregaParada(rutaId, paradaId, button = null, estado = "ENTREGADA") {
         if (previewBlocked("La confirmación de entrega está bloqueada en vista como repartidor.")) return;
         rutaId = Number(rutaId || state.rutaActiva?.ruta?.id);
         if (!rutaId || !paradaId) return renderRutaActiva("No hay ruta activa para confirmar entrega.");
+        const notasDraft = entregaNotasDraftFor(paradaId);
+        const notas = estado === "ENTREGADA" ? "Entrega completa confirmada por repartidor en PWA." : String(notasDraft.notas || "").trim();
+        if (estado !== "ENTREGADA" && !notas) {
+          return renderRutaActiva("Describe la diferencia o el motivo antes de guardar.");
+        }
         if (button) {
           button.disabled = true;
           button.textContent = "Enviando...";
         }
         try {
-          const evidencias = evidenciasEntregaParada(paradaId);
+          const evidencias = estado === "ENTREGADA" ? evidenciasEntregaParada(paradaId) : [];
           const response = await apiFetch(`/rutas/${rutaId}/paradas/${paradaId}/entrega/`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              entrega_estado: "ENTREGADA",
-              notas: "Entrega completa confirmada por repartidor en PWA.",
+              entrega_estado: estado,
+              notas,
               evidencias
             })
           });
@@ -2848,8 +2929,9 @@
             const error = await response.json().catch(() => ({}));
             return renderRutaActiva(apiErrorMessage(error, "No se pudo confirmar la entrega."));
           }
+          delete state.entregaNotasDraft[paradaId];
           state.rutaActiva = null;
-          return renderRutaActiva("✅ Entrega confirmada.");
+          return renderRutaActiva("✅ Entrega registrada.");
         } catch (error) {
           return renderRutaActiva(error?.message === "Sesión expirada" ? "Tu sesión expiró. Vuelve a iniciar sesión." : "No se pudo confirmar la entrega. Reintenta con señal.");
         }
@@ -3008,7 +3090,7 @@
         }
         return `
           <section class="card report-card">
-            <h2 style="color:var(--gold);margin-top:0;">Reportes abiertos de esta unidad</h2>
+            <h2 style="color:var(--gold-text);margin-top:0;">Reportes abiertos de esta unidad</h2>
             <p class="muted">Si tu problema ya está aquí, usa “Volver a reportar” para insistir sin crear un ticket duplicado.</p>
             ${draft.reportesAbiertos.map((reporte) => `
               <article class="duplicate-report-card">
@@ -3925,12 +4007,15 @@
       }
 
       function puedeCerrarTurno() {
-        const draft = ensureBitacoraSalidaDraft();
-        const actual = state.bitacoraSalida;
-        const baseLista = draft.nivel_gas_llegada && draft.foto_tablero_llegada;
-        if (!baseLista) return false;
-        if (requiereCargaCombustibleAntesDeCerrar(actual, draft)) return false;
-        return true;
+        return faltantesCierreTurno(ensureBitacoraSalidaDraft(), state.bitacoraSalida).length === 0;
+      }
+
+      function faltantesCierreTurno(draft, actual) {
+        const faltantes = [];
+        if (!draft.nivel_gas_llegada) faltantes.push("nivel de gasolina de llegada");
+        if (!draft.foto_tablero_llegada) faltantes.push("foto del tablero de llegada");
+        if (requiereCargaCombustibleAntesDeCerrar(actual, draft)) faltantes.push("registrar la carga de gasolina del recorrido");
+        return faltantes;
       }
 
       async function renderBitacoraSalida(message = "") {
@@ -3979,7 +4064,7 @@
                 ${draft.inspeccionDiariaAviso ? `<div class="daily-banner warning">${escapeHtml(draft.inspeccionDiariaAviso)}</div>` : ""}
                 ${mostrarChecklist ? `
                   <section class="card report-card daily-checklist-card">
-                    <h2 style="color:var(--gold); margin-top:0;">Checklist pre-turno</h2>
+                    <h2 style="color:var(--gold-text); margin-top:0;">Checklist pre-turno</h2>
                     <p class="daily-counter ${pendientesDiarios ? "" : "complete"}">${marcadosDiarios} de ${totalPuntosDiarios} puntos marcados</p>
                     <p class="muted">Marca cada punto como OK o FALLA antes de capturar kilometraje y tablero.</p>
                     <button class="daily-mark-all" type="button" onclick="marcarInspeccionDiariaTodosOk()">✅ Marcar todos los puntos como OK</button>
@@ -4082,6 +4167,11 @@
                 ${draft.fotoLlegadaPreview ? `<img class="thumb" src="${draft.fotoLlegadaPreview}" alt="Vista previa tablero llegada">` : ""}
                 ${draft.fotoLlegadaError ? `<p class="error">${escapeHtml(draft.fotoLlegadaError)}</p>` : ""}
               </div>
+              ${faltantesCierreTurno(draft, actual).filter((item) => item !== "registrar la carga de gasolina del recorrido").length ? `
+                <div class="daily-banner warning">
+                  Para cerrar turno falta: ${faltantesCierreTurno(draft, actual).filter((item) => item !== "registrar la carga de gasolina del recorrido").join(", ")}.
+                </div>
+              ` : ""}
               <button class="primary-btn" type="submit" ${puedeCerrarTurno() ? "" : "disabled"}>Cerrar turno</button>
             </form>
           `;
@@ -4196,7 +4286,7 @@
       function ensureInspeccionDraft() {
         if (!state.inspeccionDraft) {
           const checks = {};
-          inspeccionSecciones.forEach((section) => section.items.forEach(([field]) => { checks[field] = false; }));
+          inspeccionSecciones.forEach((section) => section.items.forEach(([field]) => { checks[field] = null; }));
           state.inspeccionDraft = {
             unidad: "",
             km_entrada: "",
@@ -4249,14 +4339,19 @@
           ${open ? `
             <section class="card report-card">
               <button class="secondary-btn" type="button" onclick="marcarSeccionOk('${section.key}')">Marcar todos OK</button>
-              ${section.items.map(([field, label]) => `
-                <div class="check-row">
-                  <span>${escapeHtml(label)}</span>
-                  <button class="chip ${draft.checks[field] ? "ok" : "fail"}" type="button" onclick="toggleInspeccionItem('${field}')">
-                    ${draft.checks[field] ? "OK" : "Falta"}
-                  </button>
-                </div>
-              `).join("")}
+              ${section.items.map(([field, label]) => {
+                const value = draft.checks[field];
+                const tone = value === true ? "ok" : value === false ? "fail" : "pending";
+                return `
+                  <div class="check-row ${tone}">
+                    <span>${escapeHtml(label)}</span>
+                    <div style="display:flex; gap:8px;">
+                      <button class="chip ${value === true ? "ok" : "pending"}" type="button" onclick="setInspeccionItem('${field}', true)">${value === true ? "✓ " : ""}OK</button>
+                      <button class="chip ${value === false ? "fail" : "pending"}" type="button" onclick="setInspeccionItem('${field}', false)">${value === false ? "✗ " : ""}Falta</button>
+                    </div>
+                  </div>
+                `;
+              }).join("")}
             </section>
           ` : ""}
         `;
@@ -4287,11 +4382,12 @@
                 ${draft.inspeccionDiariaLoading ? `<p class="unit-line">Revisando inspección diaria...</p>` : ""}
                 ${avisoDiario ? `
                   <div class="daily-banner warning">
-                    ℹ️ Esta unidad ya fue revisada por ${escapeHtml(draft.inspeccionDiariaCheck.repartidor_nombre || "")} el ${escapeHtml(draft.inspeccionDiariaCheck.fecha || "hoy")} a las ${escapeHtml(draft.inspeccionDiariaCheck.hora || "")}. Si detectaste algo nuevo puedes registrar un reporte independiente.
+                    ℹ️ Esta unidad ya fue revisada por ${escapeHtml(draft.inspeccionDiariaCheck.repartidor_nombre || "")} el ${escapeHtml(draft.inspeccionDiariaCheck.fecha || "hoy")} a las ${escapeHtml(draft.inspeccionDiariaCheck.hora || "")}.
                   </div>
+                  <p class="muted">¿Detectaste algo nuevo? Registra un reporte independiente. ¿Necesitas repetir la inspección completa de todas formas? Usa la otra opción.</p>
                   <div class="confirm-actions">
-                    <button class="primary-btn" type="button" onclick="startNuevoReporte()">Registrar reporte</button>
-                    <button class="secondary-btn" type="button" onclick="state.inspeccionDraft.verFormularioCompleto = true; renderInspeccionVehiculo()">Ver de todas formas</button>
+                    <button class="primary-btn" type="button" onclick="startNuevoReporte()">Registrar reporte de algo nuevo</button>
+                    <button class="secondary-btn" type="button" onclick="state.inspeccionDraft.verFormularioCompleto = true; renderInspeccionVehiculo()">Repetir inspección completa</button>
                   </div>
                 ` : ""}
                 ${!avisoDiario ? `
@@ -4356,9 +4452,9 @@
         renderInspeccionVehiculo();
       }
 
-      function toggleInspeccionItem(field) {
+      function setInspeccionItem(field, value) {
         const draft = ensureInspeccionDraft();
-        draft.checks[field] = !draft.checks[field];
+        draft.checks[field] = value;
         renderInspeccionVehiculo();
       }
 
@@ -4427,7 +4523,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v42", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v47", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {

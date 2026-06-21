@@ -8,13 +8,14 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.html import strip_tags
 
-from core.access import group_name_variants
+from core.access import can_view_module, group_name_variants
 from core.email_rendering import render_email_to_string
 
 from .models import (
     BitacoraSalidaLlegada,
     ConfigAlertaFlota,
     DocumentoUnidad,
+    EventoRuta,
     LavadoUnidad,
     ReporteUnidad,
     RutaEntrega,
@@ -32,6 +33,16 @@ def _emails_de_grupo(nombre_grupo: str) -> list[str]:
         .values_list("email", flat=True)
         .distinct()
     )
+
+
+def _emails_con_acceso_modulo(modulo: str) -> list[str]:
+    usuarios = (
+        get_user_model()
+        .objects.filter(is_active=True)
+        .exclude(email__isnull=True)
+        .exclude(email="")
+    )
+    return sorted({usuario.email for usuario in usuarios if can_view_module(usuario, modulo)})
 
 
 def _emails_de_usuarios(usuarios) -> list[str]:
@@ -113,6 +124,36 @@ def notificar_reporte_nuevo(reporte_id):
         enviados += 1
 
     return {"enviado": bool(enviados), "grupos_notificados": enviados, "reporte_id": reporte.id}
+
+
+@shared_task
+def notificar_desvio_ruta_automatico(evento_id):
+    try:
+        evento = EventoRuta.objects.select_related("ruta__repartidor__user", "ruta__unidad_operativa").get(pk=evento_id)
+    except EventoRuta.DoesNotExist:
+        return {"enviado": False, "motivo": "evento_no_encontrado", "evento_id": evento_id}
+
+    context = {
+        "evento": evento,
+        "control_url": "/logistica/rutas/control/",
+    }
+    html_message = render_email_to_string("logistica/emails/desvio_ruta.html", context)
+    plain_message = strip_tags(html_message)
+    from_email = _from_email()
+
+    destinatarios = sorted(set(_emails_de_grupo("dg")) | set(_emails_con_acceso_modulo("logistica")))
+    if not destinatarios:
+        return {"enviado": False, "motivo": "sin_destinatarios", "evento_id": evento.id}
+
+    send_mail(
+        subject=f"Desvío de ruta detectado · {evento.ruta.folio}",
+        message=plain_message,
+        from_email=from_email,
+        recipient_list=destinatarios,
+        html_message=html_message,
+        fail_silently=False,
+    )
+    return {"enviado": True, "destinatarios": len(destinatarios), "evento_id": evento.id}
 
 
 @shared_task

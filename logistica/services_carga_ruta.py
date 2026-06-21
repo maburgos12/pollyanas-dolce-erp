@@ -537,6 +537,7 @@ def validar_linea_carga(
         ]
     )
 
+    estatus_previo = checklist.estatus
     pendientes = checklist.lineas.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists()
     diferencias = checklist.lineas.exclude(
         estatus__in=[RutaCargaChecklistLinea.ESTATUS_CARGADA, RutaCargaChecklistLinea.ESTATUS_NO_APLICA]
@@ -550,6 +551,20 @@ def validar_linea_carga(
         checklist.confirmado_por = user
         checklist.confirmado_en = timezone.now()
     checklist.save(update_fields=["estatus", "confirmado_por", "confirmado_en", "actualizado_en"])
+
+    if checklist.estatus == RutaCargaChecklist.ESTATUS_CON_INCIDENCIA and estatus_previo != RutaCargaChecklist.ESTATUS_CON_INCIDENCIA:
+        crear_notificaciones(
+            _usuarios_logistica_rutas(),
+            titulo=f"Diferencia de carga: {ruta.folio}",
+            mensaje="La carga quedó completa con al menos una línea con diferencia. Logística debe autorizar la ruta con la diferencia.",
+            url=f"/logistica/rutas/{ruta.id}/",
+            tipo=Notificacion.TIPO_SISTEMA,
+            prioridad=Notificacion.PRIORIDAD_ALTA,
+            actor=user,
+            objeto_tipo="logistica.RutaEntrega",
+            objeto_id=ruta.id,
+            excluir=user,
+        )
     return linea
 
 
@@ -559,11 +574,39 @@ def checklist_bloquea_salida(ruta: RutaEntrega) -> str | None:
         return None
     if checklist.estatus == RutaCargaChecklist.ESTATUS_CONFIRMADA:
         return None
-    if checklist.estatus == RutaCargaChecklist.ESTATUS_CON_INCIDENCIA and checklist.motivo_override:
-        return None
-    if checklist.lineas.exclude(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists():
-        return None
-    return "confirma al menos una línea de carga antes de liberar la ruta"
+    if checklist.estatus == RutaCargaChecklist.ESTATUS_CON_INCIDENCIA:
+        if checklist.motivo_override:
+            return None
+        return "logística debe autorizar la ruta con la diferencia"
+    return "confirma todas las líneas de carga antes de liberar la ruta"
+
+
+@transaction.atomic
+def autorizar_diferencia_checklist_carga(*, ruta: RutaEntrega, user, autorizado: bool, notas: str = "") -> RutaCargaChecklist:
+    checklist = RutaCargaChecklist.objects.select_for_update().filter(ruta=ruta).first()
+    if not checklist:
+        raise ValidationError("La ruta no tiene checklist de carga.")
+    if checklist.estatus != RutaCargaChecklist.ESTATUS_CON_INCIDENCIA:
+        raise ValidationError("Esta ruta no tiene una diferencia de carga pendiente de autorizar.")
+
+    if autorizado:
+        checklist.motivo_override = notas or "Diferencia de carga autorizada por logística."
+        checklist.save(update_fields=["motivo_override", "actualizado_en"])
+        descripcion = f"Logística autorizó liberar la ruta con diferencia de carga. {notas}".strip()
+        severidad = EventoRuta.SEVERIDAD_INFO
+    else:
+        descripcion = f"Logística rechazó liberar la ruta con diferencia de carga. {notas}".strip()
+        severidad = EventoRuta.SEVERIDAD_ALERTA
+
+    EventoRuta.objects.create(
+        ruta=ruta,
+        tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+        severidad=severidad,
+        descripcion=descripcion,
+        metadata={"tipo": "autorizacion_diferencia_carga", "autorizado": autorizado, "notas": notas},
+        creado_por=user,
+    )
+    return checklist
 
 
 @transaction.atomic
