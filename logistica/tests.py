@@ -3165,7 +3165,11 @@ class LogisticaControlRutasTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'value="ajustar_entrega_manual"')
-        self.assertContains(response, "Guardar ajuste")
+        self.assertContains(response, "Editar entrega")
+        self.assertContains(response, 'id="delivery-edit-modal"')
+        self.assertContains(response, 'data-delivery-edit')
+        self.assertContains(response, "Estado de entrega")
+        self.assertContains(response, "Motivo / evidencia")
 
     def test_ruta_detail_ajuste_manual_entrega_permite_cierre(self):
         self.client.force_login(self.user)
