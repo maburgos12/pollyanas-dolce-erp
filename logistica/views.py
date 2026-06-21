@@ -53,6 +53,7 @@ from .services_carga_ruta import (
     registrar_recarga_cedis,
     sincronizar_checklist_carga_desde_point,
     sincronizar_recepcion_desde_point,
+    validar_linea_carga,
 )
 from .services_rutas_control import distancia_metros, resumen_control_rutas
 from .services_tiempos_ruta import resumen_tiempos_ruta
@@ -2088,6 +2089,26 @@ def ruta_detail(request, pk: int):
                 messages.success(request, f"Carga manual confirmada: {lineas} línea(s). Ya puedes liberar la ruta.")
             return redirect("logistica:ruta_detail", pk=ruta.id)
 
+        if action == "confirmar_linea_carga_manual":
+            if not can_manage_submodule(request.user, "logistica", "rutas"):
+                raise PermissionDenied("No tienes permisos para capturar carga manual.")
+            try:
+                linea_id = int(request.POST.get("linea_carga_id") or 0)
+                validar_linea_carga(
+                    user=request.user,
+                    ruta=ruta,
+                    repartidor=ruta.repartidor,
+                    linea_id=linea_id,
+                    cantidad_cargada=request.POST.get("cantidad_cargada_manual"),
+                    motivo_diferencia=(request.POST.get("motivo_diferencia_manual") or "").strip(),
+                    notas=(request.POST.get("notas_carga_manual") or "").strip(),
+                )
+            except (ValueError, ValidationError) as exc:
+                messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+            else:
+                messages.success(request, "Línea de carga capturada manualmente.")
+            return redirect("logistica:ruta_detail", pk=ruta.id)
+
         if action == "registrar_recarga_cedis":
             try:
                 evento = registrar_recarga_cedis(
@@ -2685,6 +2706,7 @@ def ruta_detail(request, pk: int):
         "cierre_diferencia_disponible": cierre_diferencia_disponible,
         "recepcion_point_rows": recepcion_point_rows,
         "recepcion_point_totales": recepcion_point_totales,
+        "motivos_carga_manual": RutaCargaChecklistLinea.MOTIVO_CHOICES,
         "enterprise_chain": enterprise_chain,
         "critical_path_rows": _logistica_critical_path_rows(enterprise_chain),
         "document_stage_rows": document_stage_rows,

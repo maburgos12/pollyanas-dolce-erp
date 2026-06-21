@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -467,6 +467,8 @@ def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, eje
 def validar_usuario_puede_operar_checklist(*, user, ruta: RutaEntrega, repartidor) -> None:
     if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
         raise ValidationError("La ruta no permite confirmar carga en este estatus.")
+    if can_manage_submodule(user, "logistica", "rutas"):
+        return
     if not repartidor or ruta.repartidor_id != repartidor.id:
         raise PermissionDenied("No tienes permiso para confirmar carga de esta ruta.")
 
@@ -494,7 +496,10 @@ def validar_linea_carga(
     if client_event_id and linea.client_event_id == client_event_id and linea.estatus != RutaCargaChecklistLinea.ESTATUS_PENDIENTE:
         return linea
 
-    cantidad = Decimal(str(cantidad_cargada))
+    try:
+        cantidad = Decimal(str(cantidad_cargada))
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValidationError("Captura una cantidad cargada válida.")
     if cantidad < 0:
         raise ValidationError("La cantidad cargada no puede ser negativa.")
 

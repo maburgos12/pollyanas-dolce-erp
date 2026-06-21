@@ -3876,6 +3876,53 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(released.status_code, 200)
         self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
 
+    def test_ruta_detail_permite_capturar_linea_carga_manual_en_erp(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        self._crear_transferencia_point_abierta()
+        checklist = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False).checklist
+        linea = checklist.lineas.get()
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
+            {
+                "action": "confirmar_linea_carga_manual",
+                "linea_carga_id": str(linea.id),
+                "cantidad_cargada_manual": "3",
+                "motivo_diferencia_manual": RutaCargaChecklistLinea.MOTIVO_STOCK_LIMITADO,
+                "notas_carga_manual": "Captura ERP en patio.",
+            },
+            follow=True,
+        )
+
+        checklist.refresh_from_db()
+        linea.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_PARCIAL)
+        self.assertEqual(linea.cantidad_cargada, Decimal("3"))
+        self.assertEqual(linea.validado_por, self.user)
+        self.assertEqual(checklist.estatus, RutaCargaChecklist.ESTATUS_CON_INCIDENCIA)
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}),
+            {
+                "action": "confirmar_linea_carga_manual",
+                "linea_carga_id": str(linea.id),
+                "cantidad_cargada_manual": str(linea.cantidad_enviada_esperada),
+                "motivo_diferencia_manual": "",
+                "notas_carga_manual": "Corrección ERP.",
+            },
+            follow=True,
+        )
+
+        checklist.refresh_from_db()
+        linea.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_CARGADA)
+        self.assertEqual(linea.cantidad_cargada, linea.cantidad_enviada_esperada)
+        self.assertEqual(checklist.estatus, RutaCargaChecklist.ESTATUS_CONFIRMADA)
+
     def test_ruta_detail_autoriza_salida_parcial_con_recarga_cedis(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
