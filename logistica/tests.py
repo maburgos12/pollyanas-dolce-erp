@@ -1452,6 +1452,33 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.json()["paradas"][0]["id"], self.parada.id)
         self.assertEqual(response.json()["paradas"][0]["punto_nombre_snapshot"], "Sucursal Control")
 
+    def test_superadmin_puede_ver_pwa_como_repartidor(self):
+        admin = User.objects.create_superuser(username="admin.preview", password="pass123")
+        self.client.force_login(admin)
+
+        response = self.client.get(reverse("api_logistica_ruta_activa"), {"preview_repartidor": self.repartidor.id})
+        perfil = self.client.get(reverse("api_logistica_mi_perfil"), {"preview_repartidor": self.repartidor.id})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["ruta"]["id"], self.ruta.id)
+        self.assertEqual(response.json()["paradas"][0]["id"], self.parada.id)
+        self.assertEqual(perfil.status_code, 200)
+        self.assertTrue(perfil.json()["preview"]["solo_lectura"])
+        self.assertEqual(perfil.json()["preview"]["repartidor_id"], self.repartidor.id)
+
+    def test_superadmin_preview_bloquea_capturas(self):
+        admin = User.objects.create_superuser(username="admin.preview.block", password="pass123")
+        self.client.force_login(admin)
+
+        response = self.client.post(
+            f"{reverse('api_logistica_ruta_tracking', kwargs={'ruta_id': self.ruta.id})}?preview_repartidor={self.repartidor.id}",
+            '{"latitud": "25.570010", "longitud": "-108.470010"}',
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(UbicacionRuta.objects.filter(ruta=self.ruta).count(), 0)
+
     def test_tracking_api_registra_ubicacion_de_ruta_activa(self):
         self.client.force_login(self.user)
 
