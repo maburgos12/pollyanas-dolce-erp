@@ -595,7 +595,7 @@
 
     function showRouteLoading(form, submit) {
       if (submit) {
-        submit.disabled = true;
+        submit.setAttribute("aria-disabled", "true");
         submit.dataset.originalText = submit.textContent;
         submit.textContent = "Procesando...";
       }
