@@ -1362,14 +1362,19 @@
       const TRACKING_QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
       const ACCESS_TOKEN_KEY = "pd_logistica_access";
       const REFRESH_TOKEN_KEY = "pd_logistica_refresh";
-      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v46
+      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v47
+      const PREVIEW_REPARTIDOR_PARAM = "preview_repartidor";
       const app = document.getElementById("app");
+      const initialParams = new URLSearchParams(window.location.search);
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
       const state = {
         token: sessionStorage.getItem(ACCESS_TOKEN_KEY) || "",
         refreshToken: "",
         perfil: null,
+        previewRepartidor: initialParams.get(PREVIEW_REPARTIDOR_PARAM) || "",
+        previewReadOnly: false,
+        previewOptions: [],
         pantallaActual: "login",
         reportes: [],
         reportesAbiertosUnidad: [],
@@ -1757,7 +1762,9 @@
         const repartidor = raw?.repartidor || {};
         const unidad = raw?.unidad || repartidor?.unidad_asignada || {};
         const username = raw?.user?.username || repartidor?.username || "";
-        const nombreCompleto = raw?.nombre || raw?.user?.nombre || repartidor?.nombre || "";
+        const nombreCompleto = raw?.preview?.activo
+          ? (repartidor?.nombre || raw?.nombre || raw?.user?.nombre || "")
+          : (raw?.nombre || raw?.user?.nombre || repartidor?.nombre || "");
         const nombreLimpio = String(nombreCompleto || "").trim();
         const primerNombre = nombreLimpio && nombreLimpio !== username
           ? nombreLimpio.split(/\s+/)[0]
@@ -1768,7 +1775,8 @@
           primerNombre,
           repartidor,
           unidad,
-          ultimosServicios: raw?.ultimos_servicios || []
+          ultimosServicios: raw?.ultimos_servicios || [],
+          preview: raw?.preview || {}
         };
       }
 
@@ -1824,7 +1832,13 @@
       async function apiFetch(path, options = {}) {
         const headers = { ...(options.headers || {}) };
         if (state.token) headers.Authorization = `Bearer ${state.token}`;
-        const response = await fetch(`${API}${path}`, { ...options, headers });
+        let finalPath = path;
+        if (state.previewRepartidor) {
+          const separator = finalPath.includes("?") ? "&" : "?";
+          finalPath = `${finalPath}${separator}${PREVIEW_REPARTIDOR_PARAM}=${encodeURIComponent(state.previewRepartidor)}`;
+          headers["X-Logistica-Preview-Repartidor"] = state.previewRepartidor;
+        }
+        const response = await fetch(`${API}${finalPath}`, { ...options, headers });
         if (response.status === 401) {
           if (state.refreshToken && !options._retry) {
             const refreshed = await fetch(`${API}/auth/token/refresh/`, {
@@ -1937,6 +1951,7 @@
       }
 
       async function enviarTrackingAutomaticoRuta(rutaId) {
+        if (state.previewReadOnly) return;
         if (!rutaId || state.routeAutoTrackingBusy || state.pantallaActual !== "ruta_activa") return;
         state.routeAutoTrackingBusy = true;
         state.routeAutoTrackingStatus = "capturando";
@@ -2050,10 +2065,42 @@
             </div>
             <button class="logout" onclick="logout()">Salir</button>
           </div>
+          ${previewBanner()}
           ${content}
           ${operationalModalHtml()}
           <div class="footer">Pollyana's Dolce © 2026</div>
         `;
+      }
+
+      function previewBanner() {
+        const opciones = state.previewOptions || [];
+        if (!opciones.length && !state.previewReadOnly) return "";
+        return `
+          <section class="daily-banner warning" style="margin:0 0 16px;">
+            <strong>Vista superadmin.</strong> ${state.previewReadOnly ? "Estás viendo lo que ve este repartidor; las capturas están bloqueadas." : "Selecciona un repartidor para ver su PWA."}
+            <div class="field" style="margin:10px 0 0;">
+              <label for="preview_repartidor">Repartidor</label>
+              <select id="preview_repartidor" onchange="setPreviewRepartidor(this.value)">
+                <option value="">Sin vista de repartidor</option>
+                ${opciones.map((item) => `<option value="${item.id}" ${String(state.previewRepartidor) === String(item.id) ? "selected" : ""}>${escapeHtml(item.nombre || item.username || `Repartidor ${item.id}`)}${item.unidad_asignada?.codigo ? ` · ${escapeHtml(item.unidad_asignada.codigo)}` : ""}</option>`).join("")}
+              </select>
+            </div>
+          </section>
+        `;
+      }
+
+      function setPreviewRepartidor(value) {
+        const url = new URL(window.location.href);
+        if (value) url.searchParams.set(PREVIEW_REPARTIDOR_PARAM, value);
+        else url.searchParams.delete(PREVIEW_REPARTIDOR_PARAM);
+        window.location.href = url.toString();
+      }
+
+      function previewBlocked(message = "Modo vista: esta acción no modifica operación.") {
+        if (!state.previewReadOnly) return false;
+        showOperationalModal("Vista segura", message);
+        renderCurrentScreen();
+        return true;
       }
 
       function renderCurrentScreen() {
@@ -2127,7 +2174,11 @@
 
       async function loadPerfil() {
         const response = await apiFetch("/mi-perfil/");
-        state.perfil = normalizePerfil(await response.json());
+        const raw = await response.json();
+        state.previewReadOnly = Boolean(raw?.preview?.solo_lectura);
+        state.previewOptions = raw?.preview?.opciones || [];
+        state.previewRepartidor = raw?.preview?.repartidor_id ? String(raw.preview.repartidor_id) : state.previewRepartidor;
+        state.perfil = normalizePerfil(raw);
         purgeRutaTrackingQueue();
       }
 
@@ -2313,6 +2364,7 @@
       }
 
       function confirmarDesvioRuta() {
+        if (previewBlocked("La ubicación GPS no se captura en vista como repartidor.")) return;
         const draft = ensureRutaTrackingDraft();
         if (!String(draft.desvio_motivo || "").trim()) return renderRutaActiva("Indica un motivo breve para registrar el desvío.");
         requestLocation(draft, () => (draft.geoStatus === "ready" ? registrarTrackingRuta() : renderRutaActiva()), "latitud", "longitud");
@@ -2785,7 +2837,7 @@
           </section>
           ${draft.geoStatus === "idle" ? "" : geoOverlay(draft, "confirmarDesvioRuta")}
         `));
-        ensureRutaAutoTracking(ruta.id, rutaEnSeguimiento && turnoOk && unidadOk);
+        ensureRutaAutoTracking(ruta.id, rutaEnSeguimiento && turnoOk && unidadOk && !state.previewReadOnly);
       }
 
       async function renderRutaCarga(message = "") {
@@ -2810,6 +2862,7 @@
       }
 
       async function validarCargaLinea(lineaId) {
+        if (previewBlocked("La revisión de carga está bloqueada en vista como repartidor.")) return;
         const rutaId = state.rutaActiva?.ruta?.id;
         if (!rutaId) return renderRutaScreen("No hay ruta para validar carga.");
         const draft = cargaDraftFor(lineaId);
@@ -2849,6 +2902,7 @@
       }
 
       async function confirmarEntregaParada(rutaId, paradaId, button = null, estado = "ENTREGADA") {
+        if (previewBlocked("La confirmación de entrega está bloqueada en vista como repartidor.")) return;
         rutaId = Number(rutaId || state.rutaActiva?.ruta?.id);
         if (!rutaId || !paradaId) return renderRutaActiva("No hay ruta activa para confirmar entrega.");
         const notasDraft = entregaNotasDraftFor(paradaId);
@@ -2884,6 +2938,7 @@
       }
 
       async function registrarTrackingRuta() {
+        if (previewBlocked("El seguimiento GPS está bloqueado en vista como repartidor.")) return;
         const draft = ensureRutaTrackingDraft();
         const rutaId = state.rutaActiva?.ruta?.id;
         if (!rutaId) return renderRutaActiva("No hay ruta activa.");
@@ -2982,6 +3037,7 @@
       }
 
       function startNuevoReporte() {
+        if (previewBlocked("Los reportes están bloqueados en vista como repartidor.")) return;
         state.reporteDraft = {
           step: 1,
           unidad: "",
@@ -3185,6 +3241,7 @@
       }
 
       async function enviarReporte() {
+        if (previewBlocked("El envío de reportes está bloqueado en vista como repartidor.")) return;
         const draft = state.reporteDraft;
         if (!isGeoReady(draft) || !draft.foto) return renderNuevoReporte("Se requiere ubicación y foto tomada en este momento.");
         const form = new FormData();
@@ -3211,6 +3268,7 @@
       }
 
       async function reafirmarReporte(reporteId) {
+        if (previewBlocked("La reafirmación de reportes está bloqueada en vista como repartidor.")) return;
         const payload = new FormData();
         payload.append("comentario", "Reafirmado desde PWA por repartidor.");
         const response = await apiFetch(`/reportes/${reporteId}/reafirmar/`, {
@@ -3329,6 +3387,7 @@
 
       async function guardarBitacora(event) {
         event.preventDefault();
+        if (previewBlocked("La bitácora está bloqueada en vista como repartidor.")) return;
         const form = new FormData(event.currentTarget);
         const payload = {
           km_inicio: Number(form.get("km_inicio")),
@@ -3494,6 +3553,7 @@
       }
 
       async function guardarLavadoUnidad() {
+        if (previewBlocked("El registro de lavado está bloqueado en vista como repartidor.")) return;
         const draft = ensureLavadoDraft();
         if (!puedeGuardarLavado()) return renderLavadoUnidad("Completa unidad, tipo, foto y ubicación.");
         draft.guardando = true;
@@ -3714,6 +3774,7 @@
       }
 
       async function continuarInspeccionDiaria() {
+        if (previewBlocked("La inspección diaria está bloqueada en vista como repartidor.")) return;
         const draft = ensureBitacoraSalidaDraft();
         if (!inspeccionDiariaCompleta(draft)) {
           const section = primeraSeccionInspeccionDiariaPendiente(draft);
@@ -3913,6 +3974,7 @@
       }
 
       async function guardarCargaCombustible() {
+        if (previewBlocked("La carga de combustible está bloqueada en vista como repartidor.")) return;
         const draft = ensureBitacoraSalidaDraft();
         if (!puedeGuardarCargaCombustible()) {
           return renderBitacoraSalida("Captura litros, importe total, ticket y ubicación para guardar la carga.");
@@ -4139,6 +4201,7 @@
 
       async function guardarSalida(event) {
         if (event) event.preventDefault();
+        if (previewBlocked("El inicio de turno está bloqueado en vista como repartidor.")) return;
         const draft = ensureBitacoraSalidaDraft();
         if (!draft.unidad || !draft.nivel_gas_salida || !draft.foto_tablero_salida || !draft.latitud_salida) {
           return renderBitacoraSalida("Completa unidad, gas, foto y ubicación.");
@@ -4177,6 +4240,7 @@
       }
 
       async function liberarRutaConTurno() {
+        if (previewBlocked("La liberación de ruta está bloqueada en vista como repartidor.")) return;
         const response = await apiFetch("/bitacora-salida/liberar-ruta/", { method: "POST" });
         if (!response.ok) {
           const error = await response.json().catch(() => ({}));
@@ -4187,6 +4251,7 @@
 
       async function guardarLlegada(event) {
         event.preventDefault();
+        if (previewBlocked("El cierre de turno está bloqueado en vista como repartidor.")) return;
         const form = new FormData(event.currentTarget);
         const draft = ensureBitacoraSalidaDraft();
         const kmLlegada = Number(form.get("km_llegada"));
@@ -4413,6 +4478,7 @@
 
       async function enviarInspeccion(event) {
         event.preventDefault();
+        if (previewBlocked("La inspección de unidad está bloqueada en vista como repartidor.")) return;
         const draft = ensureInspeccionDraft();
         if (!draft.unidad || !draft.km_entrada || !draft.nivel_gas_entrada || !isGeoReady(draft)) {
           return renderInspeccionVehiculo("Completa unidad, KM, gas y ubicación.");
@@ -4457,7 +4523,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v46", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v47", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {

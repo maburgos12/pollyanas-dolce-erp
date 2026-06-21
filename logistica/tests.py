@@ -1494,6 +1494,33 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.json()["paradas"][0]["id"], self.parada.id)
         self.assertEqual(response.json()["paradas"][0]["punto_nombre_snapshot"], "Sucursal Control")
 
+    def test_superadmin_puede_ver_pwa_como_repartidor(self):
+        admin = User.objects.create_superuser(username="admin.preview", password="pass123")
+        self.client.force_login(admin)
+
+        response = self.client.get(reverse("api_logistica_ruta_activa"), {"preview_repartidor": self.repartidor.id})
+        perfil = self.client.get(reverse("api_logistica_mi_perfil"), {"preview_repartidor": self.repartidor.id})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["ruta"]["id"], self.ruta.id)
+        self.assertEqual(response.json()["paradas"][0]["id"], self.parada.id)
+        self.assertEqual(perfil.status_code, 200)
+        self.assertTrue(perfil.json()["preview"]["solo_lectura"])
+        self.assertEqual(perfil.json()["preview"]["repartidor_id"], self.repartidor.id)
+
+    def test_superadmin_preview_bloquea_capturas(self):
+        admin = User.objects.create_superuser(username="admin.preview.block", password="pass123")
+        self.client.force_login(admin)
+
+        response = self.client.post(
+            f"{reverse('api_logistica_ruta_tracking', kwargs={'ruta_id': self.ruta.id})}?preview_repartidor={self.repartidor.id}",
+            '{"latitud": "25.570010", "longitud": "-108.470010"}',
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(UbicacionRuta.objects.filter(ruta=self.ruta).count(), 0)
+
     def test_tracking_api_registra_ubicacion_de_ruta_activa(self):
         self.client.force_login(self.user)
 
@@ -1806,11 +1833,11 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v46", pwa_html)
+        self.assertIn("route-control-v47", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v46", pwa_html)
+        self.assertIn("?v=route-control-v47", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v46-dashboard-checklist", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v47-tema-claro-y-preview-repartidor", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
         self.assertIn("Logística debe asignar la unidad a la ruta.", pwa_html)
@@ -1877,7 +1904,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v46-dashboard-checklist", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v47-tema-claro-y-preview-repartidor", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -3010,7 +3037,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertContains(response, "Producto total")
         self.assertContains(response, "Esperado total")
         self.assertContains(response, "Pastel Snicker chico")
-        self.assertContains(response, "5.000")
+        self.assertContains(response, ">5</td>")
         self.assertContains(response, "Esperado")
         self.assertContains(response, "Cargado")
         self.assertContains(response, "Carga sin validar")
@@ -3026,7 +3053,7 @@ class LogisticaControlRutasTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Recibido correcto")
-        self.assertContains(response, "5.000")
+        self.assertContains(response, ">5</td>")
         self.assertNotContains(response, "Carga sin validar")
 
     def test_ruta_detail_en_ruta_muestra_boton_recepcion_point(self):
@@ -3579,8 +3606,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertContains(response, "Cargado total (PWA)")
         self.assertContains(response, "Esperado (solicitado Point)")
         self.assertContains(response, "Ajustado (enviado Point)")
-        self.assertContains(response, "10.000")
-        self.assertContains(response, "6.000")
+        self.assertNotContains(response, "10.000")
+        self.assertNotContains(response, "6.000")
+        self.assertContains(response, "value=\"6\"")
 
     def test_checklist_carga_cedis_omite_borrador_y_cancelada(self):
         ruta, _ = self._crear_ruta_planeada_para_carga()
