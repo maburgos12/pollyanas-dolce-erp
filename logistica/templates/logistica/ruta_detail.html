@@ -304,6 +304,20 @@
                   <input type="hidden" name="parada_id" value="{{ parada.id }}">
                   <button class="btn btn-danger btn-small" type="submit" onclick="return confirm('¿Eliminar parada de la ruta?')">Quitar</button>
                 </form>
+                {% if ruta.estatus == "EN_RUTA" and parada.punto.tipo != "CEDIS" %}
+                <form method="post" class="route-action-row" onsubmit="return confirm('¿Guardar ajuste manual de entrega para esta parada?');">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="ajustar_entrega_manual">
+                  <input type="hidden" name="parada_id" value="{{ parada.id }}">
+                  <select name="entrega_estado" class="form-control" required>
+                    <option value="ENTREGADA">Entregada</option>
+                    <option value="CON_DIFERENCIA">Con diferencia</option>
+                    <option value="NO_ENTREGADA">No entregada</option>
+                  </select>
+                  <input type="text" name="nota_entrega_manual" class="form-control" placeholder="Motivo / evidencia" required>
+                  <button class="btn btn-primary btn-small" type="submit">Guardar ajuste</button>
+                </form>
+                {% endif %}
               </div>
             </td>
             {% endif %}
@@ -353,7 +367,7 @@
         <input type="hidden" name="action" value="registrar_recarga_cedis">
         <input type="hidden" name="notas_recarga_cedis" value="Recarga registrada por CEDIS/Logística.">
         <button class="btn btn-secondary" type="submit">
-          {% if ruta.estatus == "PLANEADA" %}Autorizar salida parcial con recarga{% else %}Registrar recarga CEDIS{% endif %}
+          {% if ruta.estatus == "PLANEADA" %}Autorizar salida parcial con recarga{% else %}Registrar evento recarga CEDIS{% endif %}
         </button>
       </form>
       {% endif %}

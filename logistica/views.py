@@ -2091,6 +2091,76 @@ def ruta_detail(request, pk: int):
                 messages.success(request, evento.descripcion)
             return redirect("logistica:ruta_detail", pk=ruta.id)
 
+        if action == "ajustar_entrega_manual":
+            parada_id = (request.POST.get("parada_id") or "").strip()
+            entrega_estado = (request.POST.get("entrega_estado") or "").strip().upper()
+            nota = (request.POST.get("nota_entrega_manual") or "").strip()
+            parada = ruta.paradas.select_related("punto").filter(pk=int(parada_id)).first() if parada_id.isdigit() else None
+            estados_validos = {
+                ParadaRuta.ENTREGA_ENTREGADA,
+                ParadaRuta.ENTREGA_CON_DIFERENCIA,
+                ParadaRuta.ENTREGA_NO_ENTREGADA,
+            }
+            if not parada or parada.punto.tipo == PuntoLogistico.TIPO_CEDIS:
+                messages.error(request, "Selecciona una parada de sucursal.")
+                return redirect("logistica:ruta_detail", pk=ruta.id)
+            if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA or entrega_estado not in estados_validos:
+                messages.error(request, "El ajuste manual solo aplica a rutas en seguimiento.")
+                return redirect("logistica:ruta_detail", pk=ruta.id)
+            if not nota:
+                messages.error(request, "Captura una nota para justificar el ajuste manual.")
+                return redirect("logistica:ruta_detail", pk=ruta.id)
+            tipo_evidencia = (
+                ParadaEntregaEvidencia.TIPO_CONFIRMACION
+                if entrega_estado == ParadaRuta.ENTREGA_ENTREGADA
+                else ParadaEntregaEvidencia.TIPO_INCIDENCIA
+            )
+            now = timezone.now()
+            with transaction.atomic():
+                parada.estado = ParadaRuta.ESTADO_VISITADA
+                parada.hora_llegada_real = parada.hora_llegada_real or now
+                parada.entrega_estado = entrega_estado
+                parada.entrega_confirmada_en = now
+                parada.entrega_confirmada_por = request.user
+                parada.entrega_notas = nota
+                parada.save(
+                    update_fields=[
+                        "estado",
+                        "hora_llegada_real",
+                        "entrega_estado",
+                        "entrega_confirmada_en",
+                        "entrega_confirmada_por",
+                        "entrega_notas",
+                        "actualizado_en",
+                    ]
+                )
+                evidencia = ParadaEntregaEvidencia.objects.create(
+                    ruta=ruta,
+                    parada=parada,
+                    tipo=tipo_evidencia,
+                    comentario=nota,
+                    capturado_por=request.user,
+                    metadata={"origen": "erp_manual", "entrega_estado": entrega_estado},
+                )
+                EventoRuta.objects.create(
+                    ruta=ruta,
+                    parada=parada,
+                    tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+                    severidad=EventoRuta.SEVERIDAD_INFO,
+                    descripcion=f"Ajuste manual de entrega en {parada.punto_nombre_snapshot}: {parada.get_entrega_estado_display()}.",
+                    metadata={
+                        "tipo": "ajuste_entrega_manual",
+                        "entrega_estado": entrega_estado,
+                        "evidencia_id": evidencia.id,
+                        "nota": nota,
+                    },
+                    creado_por=request.user,
+                )
+                ruta.recompute_route_control()
+                ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
+            messages.success(request, f"Entrega ajustada manualmente para {parada.punto_nombre_snapshot}.")
+            return redirect("logistica:ruta_detail", pk=ruta.id)
+
         if action == "cerrar_con_diferencia_autorizada":
             try:
                 sincronizar_recepcion_desde_point(ruta=ruta, user=request.user, ejecutar_sync=False)
