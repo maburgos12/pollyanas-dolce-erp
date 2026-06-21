@@ -104,6 +104,8 @@ class LogisticaControlRutasTemplateTests(SimpleTestCase):
         self.assertIn("Actualizando recepción Point", source)
         self.assertIn("Cargando datos de la unidad", source)
         self.assertIn("ti-truck-delivery", source)
+        self.assertIn("route-unit-drive", source)
+        self.assertIn("route-road", source)
         self.assertIn("function showRouteLoading(form, submit)", source)
         self.assertIn("form._routeSubmitter = button", source)
         self.assertIn('value="sync_recepcion_point"', source)
