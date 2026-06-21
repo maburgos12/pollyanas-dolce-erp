@@ -131,10 +131,11 @@ def _recepcion_point_rows(checklist) -> list[dict]:
     for linea in lineas:
         point_line = linea.point_transfer_line
         evidencia = evidencias.get(linea.id)
-        esperado = Decimal(str(linea.cantidad_enviada_esperada or 0))
+        solicitado = Decimal(str(point_line.requested_quantity if point_line else linea.cantidad_solicitada or 0))
+        enviado = Decimal(str(point_line.sent_quantity if point_line else linea.cantidad_enviada_esperada or 0))
         cargado_validado = linea.cantidad_cargada is not None
         cargado = Decimal(str(linea.cantidad_cargada or 0)) if cargado_validado else None
-        referencia_recepcion = cargado if cargado is not None else esperado
+        referencia_recepcion = cargado if cargado is not None else enviado
         recibido = Decimal("0")
         received_at = point_line.received_at if point_line else None
         received_by = point_line.received_by if point_line else ""
@@ -172,7 +173,10 @@ def _recepcion_point_rows(checklist) -> list[dict]:
                 "linea": linea,
                 "parada": linea.parada,
                 "point_line": point_line,
-                "esperado": esperado,
+                "solicitado": solicitado,
+                "enviado": enviado,
+                "esperado": solicitado,
+                "ajustado": enviado,
                 "cargado": cargado,
                 "cargado_validado": cargado_validado,
                 "recibido": recibido_display,
@@ -200,14 +204,20 @@ def _totales_recepcion_point(rows: list[dict]) -> list[dict]:
                 "item_code": linea.item_code,
                 "item_name": linea.item_name,
                 "unit": linea.unit,
+                "solicitado": Decimal("0"),
+                "enviado": Decimal("0"),
                 "esperado": Decimal("0"),
+                "ajustado": Decimal("0"),
                 "cargado": Decimal("0"),
                 "recibido": Decimal("0"),
                 "cargado_validado": True,
                 "cargado_parcial": False,
             },
         )
-        total["esperado"] += row["esperado"]
+        total["solicitado"] += row["solicitado"]
+        total["enviado"] += row["enviado"]
+        total["esperado"] += row["solicitado"]
+        total["ajustado"] += row["enviado"]
         if row["cargado_validado"]:
             total["cargado"] += row["cargado"] or Decimal("0")
             total["cargado_parcial"] = True

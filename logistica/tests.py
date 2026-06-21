@@ -3494,6 +3494,50 @@ class LogisticaControlRutasTests(TestCase):
         self.assertTrue(total["cargado_parcial"])
         self.assertEqual(total["cargado"], Decimal("3.000"))
 
+    def test_totales_carga_separan_solicitado_enviado_y_cargado_pwa(self):
+        from logistica.views import _recepcion_point_rows, _totales_recepcion_point
+
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        transferencia = self._crear_transferencia_point_abierta(source_hash="transfer-solicitado-enviado")
+        transferencia.requested_quantity = Decimal("10.000")
+        transferencia.sent_quantity = Decimal("6.000")
+        transferencia.save(update_fields=["requested_quantity", "sent_quantity", "updated_at"])
+
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+        linea = resumen.checklist.lineas.get()
+        linea.cantidad_cargada = Decimal("5.000")
+        linea.estatus = RutaCargaChecklistLinea.ESTATUS_PARCIAL
+        linea.save(update_fields=["cantidad_cargada", "estatus", "actualizado_en"])
+
+        rows = _recepcion_point_rows(resumen.checklist)
+        total = _totales_recepcion_point(rows)[0]
+
+        self.assertEqual(rows[0]["solicitado"], Decimal("10.000"))
+        self.assertEqual(rows[0]["enviado"], Decimal("6.000"))
+        self.assertEqual(rows[0]["cargado"], Decimal("5.000"))
+        self.assertEqual(total["solicitado"], Decimal("10.000"))
+        self.assertEqual(total["enviado"], Decimal("6.000"))
+        self.assertEqual(total["cargado"], Decimal("5.000"))
+
+    def test_detalle_ruta_muestra_columnas_point_y_pwa(self):
+        self.client.force_login(self.user)
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        transferencia = self._crear_transferencia_point_abierta(source_hash="transfer-columnas-detail")
+        transferencia.requested_quantity = Decimal("10.000")
+        transferencia.sent_quantity = Decimal("6.000")
+        transferencia.save(update_fields=["requested_quantity", "sent_quantity", "updated_at"])
+        sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        response = self.client.get(reverse("logistica:ruta_detail", args=[ruta.id]))
+
+        self.assertContains(response, "Esperado total (solicitado Point)")
+        self.assertContains(response, "Ajustado total (enviado Point)")
+        self.assertContains(response, "Cargado total (PWA)")
+        self.assertContains(response, "Esperado (solicitado Point)")
+        self.assertContains(response, "Ajustado (enviado Point)")
+        self.assertContains(response, "10.000")
+        self.assertContains(response, "6.000")
+
     def test_checklist_carga_cedis_omite_borrador_y_cancelada(self):
         ruta, _ = self._crear_ruta_planeada_para_carga()
         solicitud, _, _ = self._crear_solicitud_cedis(ruta=ruta, estado=SolicitudReabastoCedis.ESTADO_BORRADOR)
