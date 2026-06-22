@@ -125,6 +125,23 @@ class LogisticaControlRutasTemplateTests(SimpleTestCase):
         self.assertLess(source.index("Totales por producto"), source.index("Detalle por parada"))
         self.assertIn(".route-load-subsection + .route-load-subsection", source)
 
+    def test_ruta_detail_liga_hoja_imprimible_de_paradas(self):
+        template_path = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "ruta_detail.html"
+        source = template_path.read_text(encoding="utf-8")
+
+        self.assertIn("logistica:ruta_print", source)
+        self.assertIn("Imprimir orden de paradas", source)
+
+    def test_ruta_print_es_hoja_de_orden_sin_carga_esperada(self):
+        template_path = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "ruta_print.html"
+        source = template_path.read_text(encoding="utf-8")
+
+        self.assertIn("ORDEN DE PARADAS", source)
+        self.assertIn("Orden de paradas para surtido", source)
+        self.assertIn("[&nbsp;&nbsp;] Surtido", source)
+        self.assertIn("Esta hoja NO valida cantidades", source)
+        self.assertNotIn("Carga esperada", source)
+
     def test_base_carga_librerias_de_iconos(self):
         template_path = Path(settings.BASE_DIR) / "templates" / "base.html"
         source = template_path.read_text(encoding="utf-8")
@@ -564,6 +581,27 @@ class LogisticaViewsTests(TestCase):
         self.assertTrue(resp.context["enterprise_chain"])
         self.assertIn("dependency_status", resp.context["enterprise_chain"][0])
         self.assertTrue(resp.context["operational_health_cards"])
+
+    def test_ruta_print_renderiza_orden_de_paradas(self):
+        sucursal = Sucursal.objects.create(nombre="Sucursal Leyva", codigo="LEY")
+        punto = PuntoLogistico.objects.create(
+            nombre="Sucursal Leyva",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            sucursal=sucursal,
+            latitud="25.570000",
+            longitud="-108.470000",
+            radio_geocerca_metros=120,
+        )
+        ruta = RutaEntrega.objects.create(nombre="CEDIS - Sucursales", fecha_ruta="2026-06-22")
+        ParadaRuta.objects.create(ruta=ruta, punto=punto, orden=1)
+
+        resp = self.client.get(reverse("logistica:ruta_print", kwargs={"pk": ruta.id}))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "ORDEN DE PARADAS")
+        self.assertContains(resp, "Sucursal Leyva")
+        self.assertContains(resp, "Esta hoja NO valida cantidades")
+        self.assertNotContains(resp, "Carga esperada")
 
     def test_rutas_view_can_focus_enterprise_subset(self):
         cliente = Cliente.objects.create(nombre="Cliente Focus")
