@@ -271,6 +271,7 @@ def ruta_tiene_movimiento_point_nuevo(*, fecha, puntos: list[PuntoLogistico]) ->
         PointTransferLine.objects.filter(
             is_cancelled=False,
             is_open=True,
+            sent_quantity__gt=0,
             registered_at__date__in=[fecha - timedelta(days=1), fecha],
         )
         .exclude(source_hash__in=RutaCargaChecklistLinea.objects.exclude(source_hash="").values("source_hash"))
