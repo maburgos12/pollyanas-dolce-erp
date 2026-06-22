@@ -5,7 +5,7 @@
 {% block page_title %}Logística · Rutas{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/logistica-templates-logistica-rutas.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/logistica-templates-logistica-rutas.css?v=20260622-mobile-filter-v1">
 <style>
   .ops-shell { display:grid; gap:18px; }
   .ops-topline { display:grid; gap:12px; grid-template-columns: repeat(5, minmax(0, 1fr)); }
@@ -33,6 +33,13 @@
   }
   @media (max-width: 760px) {
     .ops-topline, .ops-focus-grid, .ops-grid-2, .route-create-grid { grid-template-columns: 1fr; }
+    .route-filter-form,
+    .route-filter-form :is(input, select, button, .btn) {
+      box-sizing: border-box;
+      max-width: 100%;
+      min-width: 0;
+      width: 100%;
+    }
   }
 </style>
 <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260621-button-gap-v1">
@@ -141,7 +148,7 @@
 
     <article class="card">
       <div class="card-header">Filtro operativo</div>
-      <form method="get" class="filters pd-u-76084ee4e5">
+      <form method="get" class="filters route-filter-form pd-u-76084ee4e5">
         <input class="input-field" type="text" name="q" value="{{ q }}" placeholder="Buscar por folio, ruta, chofer o unidad">
         <input class="input-field" type="date" name="date_from" value="{{ date_from }}">
         <input class="input-field" type="date" name="date_to" value="{{ date_to }}">
