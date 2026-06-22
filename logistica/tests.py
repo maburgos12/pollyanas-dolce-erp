@@ -3589,9 +3589,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.cantidad_enviada_esperada, Decimal("3.000"))
         self.assertFalse(RutaCargaChecklistLinea.objects.filter(source_hash=transferencia.source_hash).exists())
 
-    def test_checklist_carga_point_en_cero_omite_producto_no_enviado(self):
+    def test_checklist_carga_point_en_cero_conserva_producto_para_captura_erp(self):
         ruta, _ = self._crear_ruta_planeada_para_carga()
-        _, _, receta = self._crear_solicitud_cedis(ruta=ruta, cantidad="5.000")
+        _, linea_solicitud, receta = self._crear_solicitud_cedis(ruta=ruta, cantidad="5.000")
         transferencia = self._crear_transferencia_point_abierta(source_hash="transfer-enviado-cero")
         transferencia.requested_quantity = Decimal("4.000")
         transferencia.sent_quantity = Decimal("0.000")
@@ -3599,12 +3599,14 @@ class LogisticaControlRutasTests(TestCase):
 
         resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
 
-        self.assertEqual(resumen.checklist.lineas.count(), 0)
-        self.assertFalse(
-            RutaCargaChecklistLinea.objects.filter(
-                source_hash=f"cedis-reabasto-{ruta.fecha_ruta:%Y%m%d}-{self.sucursal.id}-{receta.id}"
-            ).exists()
+        self.assertEqual(resumen.checklist.lineas.count(), 1)
+        linea = RutaCargaChecklistLinea.objects.get(
+            source_hash=f"cedis-reabasto-{ruta.fecha_ruta:%Y%m%d}-{self.sucursal.id}-{receta.id}"
         )
+        self.assertEqual(linea.point_transfer_line, transferencia)
+        self.assertEqual(linea.cantidad_solicitada, Decimal(str(linea_solicitud.solicitado)))
+        self.assertEqual(linea.cantidad_enviada_esperada, Decimal("0.000"))
+        self.assertIsNone(linea.cantidad_cargada)
         self.assertFalse(RutaCargaChecklistLinea.objects.filter(source_hash=transferencia.source_hash).exists())
 
     def test_checklist_carga_cedis_no_pisa_linea_validada_con_point(self):
