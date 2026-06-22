@@ -926,7 +926,7 @@
         var main = document.getElementById('main-content');
         var tpl = document.getElementById('active-group-tabs-template');
         if (!main || !tpl) return;
-        if (main.querySelector('.module-tabs, .rrhh-tabs, .report-tabs, .mant-tabs, .tabs-wrap, .forecast-tabs, .forecast-workflow-tabs, .costeo-tabs, .costeo-view-tabs, .rent-tabs, .unit-tabs, .cedis-tabs, .bandeja-tabs, .notif-tabs, .assign-tabs, .panel-dg-tabs, .panel-dg-view-tabs')) return;
+        if (main.querySelector('.erp-group-tabs, .module-tabs, .rrhh-tabs, .report-tabs, .mant-tabs')) return;
         var tabs = tpl.content.firstElementChild && tpl.content.firstElementChild.cloneNode(true);
         if (tabs) main.prepend(tabs);
     })();
