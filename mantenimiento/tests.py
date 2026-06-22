@@ -1,3 +1,4 @@
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -5,13 +6,14 @@ from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from activos.models import Activo, OrdenMantenimiento
 from core.access import ACCESS_MANAGE
 from core.models import Sucursal, UserModuleAccess
 from core.navigation import build_nav_groups
 from fallas.models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
-from logistica.models import Repartidor, ReporteUnidad, Unidad
+from logistica.models import Repartidor, ReporteUnidad, ServicioRealizadoUnidad, Unidad
 from mantenimiento.models import ProveedorServicio
 from maestros.models import Proveedor
 
@@ -109,6 +111,13 @@ class MantenimientoUnifiedInboxTests(TestCase):
             ubicacion="Produccion CEDIS",
             sucursal=self.branch,
         )
+        self.other_branch = Sucursal.objects.create(codigo="MNTQB", nombre="Sucursal QA B", activa=True)
+        self.other_activo = Activo.objects.create(
+            nombre="Vitrina Sucursal B",
+            categoria="Vitrinas",
+            ubicacion="Piso venta",
+            sucursal=self.other_branch,
+        )
         self.categoria = CategoriaFalla.objects.create(nombre="Equipo", tipo=CategoriaFalla.TIPO_EQUIPO)
         self.falla = ReporteFalla.objects.create(
             sucursal=self.branch,
@@ -131,6 +140,12 @@ class MantenimientoUnifiedInboxTests(TestCase):
             descripcion="Panel logística",
             sucursal=self.branch,
             placa="ABC123",
+        )
+        self.other_unidad = Unidad.objects.create(
+            codigo="GS-PM2",
+            descripcion="Unidad sucursal B",
+            sucursal=self.other_branch,
+            placa="XYZ987",
         )
         self.repartidor = Repartidor.objects.create(user=self.reporter, sucursal=self.branch, unidad_asignada=self.unidad)
         ReporteUnidad.objects.bulk_create(
@@ -282,6 +297,203 @@ class MantenimientoUnifiedInboxTests(TestCase):
         self.assertEqual(str(self.reporte_unidad.costo_servicio), "975.25")
         self.assertEqual(self.reporte_unidad.proveedor_servicio, "Taller Logistica QA")
         self.assertTrue(Proveedor.objects.filter(nombre="Taller Logistica QA", activo=True).exists())
+
+    def test_can_register_completed_service_without_previous_order(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("mantenimiento:crear-servicio"),
+            {
+                "modo_servicio": "realizado",
+                "sucursal_id": self.branch.id,
+                "activo_id": self.activo.id,
+                "tipo": OrdenMantenimiento.TIPO_CORRECTIVO,
+                "prioridad": OrdenMantenimiento.PRIORIDAD_MEDIA,
+                "origen": OrdenMantenimiento.ORIGEN_EMERGENCIA,
+                "fecha_objetivo": timezone.localdate().isoformat(),
+                "proveedor_servicio": "Taller Horno QA",
+                "responsable": "Tecnico QA",
+                "descripcion": "Cambio de resistencia sin reporte previo.",
+                "costo_total": "1450.75",
+                "nota_trabajo": "Equipo queda operativo.",
+                "cerrar_servicio": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        orden = OrdenMantenimiento.objects.exclude(pk=self.orden.pk).get()
+        self.assertEqual(orden.estatus, OrdenMantenimiento.ESTATUS_CERRADA)
+        self.assertEqual(orden.origen, OrdenMantenimiento.ORIGEN_EMERGENCIA)
+        self.assertEqual(str(orden.costo_otros), "1450.75")
+        self.assertEqual(orden.proveedor_servicio.nombre, "Taller Horno QA")
+        self.assertTrue(ProveedorServicio.objects.filter(nombre="Taller Horno QA", activo=True).exists())
+
+    def test_one_off_future_service_is_shown_as_programmed(self):
+        self.client.force_login(self.user)
+        fecha_objetivo = timezone.localdate() + timedelta(days=30)
+
+        response = self.client.post(
+            reverse("mantenimiento:crear-servicio"),
+            {
+                "modo_servicio": "pendiente",
+                "sucursal_id": self.branch.id,
+                "activo_id": self.activo.id,
+                "tipo": OrdenMantenimiento.TIPO_PREVENTIVO,
+                "prioridad": OrdenMantenimiento.PRIORIDAD_MEDIA,
+                "origen": OrdenMantenimiento.ORIGEN_INICIATIVA,
+                "fecha_objetivo": fecha_objetivo.isoformat(),
+                "descripcion": "Cambiar empaque de puerta antes de que falle.",
+                "responsable": "Mantenimiento interno",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        orden = OrdenMantenimiento.objects.get(descripcion="Cambiar empaque de puerta antes de que falle.")
+        self.assertEqual(orden.estatus, OrdenMantenimiento.ESTATUS_PENDIENTE)
+        self.assertEqual(orden.fecha_programada, fecha_objetivo)
+        dashboard = self.client.get(reverse("mantenimiento:dashboard"))
+        programado = next(col for col in dashboard.context["kanban_columns"] if col["key"] == "programado")
+        self.assertIn(f"orden:{orden.id}", [item["uid"] for item in programado["items"]])
+
+    def test_can_register_completed_logistics_unit_service_without_previous_report(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("mantenimiento:crear-servicio"),
+            {
+                "modo_servicio": "realizado",
+                "alcance": "unidad",
+                "sucursal_id": self.branch.id,
+                "unidad_id": self.unidad.id,
+                "fecha_objetivo": timezone.localdate().isoformat(),
+                "proveedor_servicio": "Taller Unidad QA",
+                "descripcion": "Cambio de aceite sin reporte previo.",
+                "costo_total": "980.00",
+                "nota_trabajo": "Servicio cerrado en ruta.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        servicio = ServicioRealizadoUnidad.objects.get(tipo_servicio__nombre="Cambio de aceite sin reporte previo.")
+        self.assertEqual(servicio.unidad, self.unidad)
+        self.assertEqual(str(servicio.costo), "980.00")
+        self.assertEqual(servicio.proveedor, "Taller Unidad QA")
+
+    def test_one_off_future_logistics_unit_service_is_scheduled(self):
+        self.client.force_login(self.user)
+        fecha_objetivo = timezone.localdate() + timedelta(days=15)
+
+        response = self.client.post(
+            reverse("mantenimiento:crear-servicio"),
+            {
+                "modo_servicio": "pendiente",
+                "alcance": "unidad",
+                "sucursal_id": self.branch.id,
+                "unidad_id": self.unidad.id,
+                "fecha_objetivo": fecha_objetivo.isoformat(),
+                "descripcion": "Revisar balatas antes de ruta larga.",
+                "responsable": "Mantenimiento interno",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        servicio = ServicioRealizadoUnidad.objects.get(tipo_servicio__nombre="Revisar balatas antes de ruta larga.")
+        self.assertEqual(servicio.unidad, self.unidad)
+        self.assertEqual(servicio.proxima_fecha, fecha_objetivo)
+        self.assertIsNone(servicio.costo)
+
+    def test_active_service_rejects_asset_from_other_branch(self):
+        self.client.force_login(self.user)
+        ordenes_before = OrdenMantenimiento.objects.count()
+
+        response = self.client.post(
+            reverse("mantenimiento:crear-servicio"),
+            {
+                "modo_servicio": "realizado",
+                "sucursal_id": self.branch.id,
+                "activo_id": self.other_activo.id,
+                "fecha_objetivo": timezone.localdate().isoformat(),
+                "descripcion": "Intento cruzado de activo.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(OrdenMantenimiento.objects.count(), ordenes_before)
+
+    def test_unit_service_rejects_unit_from_other_branch(self):
+        self.client.force_login(self.user)
+        servicios_before = ServicioRealizadoUnidad.objects.count()
+
+        response = self.client.post(
+            reverse("mantenimiento:crear-servicio"),
+            {
+                "modo_servicio": "realizado",
+                "alcance": "unidad",
+                "sucursal_id": self.branch.id,
+                "unidad_id": self.other_unidad.id,
+                "fecha_objetivo": timezone.localdate().isoformat(),
+                "descripcion": "Intento cruzado de unidad.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(ServicioRealizadoUnidad.objects.count(), servicios_before)
+
+    def test_can_register_installation_service_by_branch_without_asset_selection(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("mantenimiento:crear-servicio"),
+            {
+                "modo_servicio": "realizado",
+                "alcance": "instalacion",
+                "sucursal_id": self.branch.id,
+                "instalacion_categoria": "Plomería",
+                "fecha_objetivo": timezone.localdate().isoformat(),
+                "proveedor_servicio": "Plomero QA",
+                "responsable": "Mantenimiento interno",
+                "descripcion": "Reparación de fuga en baño.",
+                "costo_total": "720.50",
+                "cerrar_servicio": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        activo_instalacion = Activo.objects.get(nombre=f"Plomería - {self.branch.nombre}")
+        orden = OrdenMantenimiento.objects.get(descripcion="Reparación de fuga en baño.")
+        self.assertEqual(activo_instalacion.sucursal, self.branch)
+        self.assertEqual(activo_instalacion.categoria, "Plomería")
+        self.assertEqual(orden.activo_ref, activo_instalacion)
+        self.assertEqual(orden.estatus, OrdenMantenimiento.ESTATUS_CERRADA)
+        self.assertEqual(str(orden.costo_otros), "720.50")
+        self.assertEqual(orden.proveedor_servicio.nombre, "Plomero QA")
+
+    def test_one_off_future_installation_service_is_programmed(self):
+        self.client.force_login(self.user)
+        fecha_objetivo = timezone.localdate() + timedelta(days=20)
+
+        response = self.client.post(
+            reverse("mantenimiento:crear-servicio"),
+            {
+                "modo_servicio": "pendiente",
+                "alcance": "instalacion",
+                "sucursal_id": self.branch.id,
+                "instalacion_categoria": "Pintura / obra civil",
+                "fecha_objetivo": fecha_objetivo.isoformat(),
+                "descripcion": "Pintar pared antes de temporada alta.",
+                "responsable": "Mantenimiento interno",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        activo_instalacion = Activo.objects.get(nombre=f"Pintura / obra civil - {self.branch.nombre}")
+        orden = OrdenMantenimiento.objects.get(descripcion="Pintar pared antes de temporada alta.")
+        self.assertEqual(orden.activo_ref, activo_instalacion)
+        self.assertEqual(orden.estatus, OrdenMantenimiento.ESTATUS_PENDIENTE)
+        self.assertEqual(orden.fecha_programada, fecha_objetivo)
+        dashboard = self.client.get(reverse("mantenimiento:dashboard"))
+        programado = next(col for col in dashboard.context["kanban_columns"] if col["key"] == "programado")
+        self.assertIn(f"orden:{orden.id}", [item["uid"] for item in programado["items"]])
 
     def test_maintenance_can_open_unit_report_form_without_logistics_permission(self):
         self.client.force_login(self.user)

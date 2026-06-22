@@ -8,6 +8,7 @@ urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("app/", views.pwa_mantenimiento, name="app"),
     path("nueva-falla/", views.crear_falla, name="crear-falla"),
+    path("servicios/crear/", views.crear_servicio_mantenimiento, name="crear-servicio"),
     path("reportes/unidad/nuevo/", views.crear_reporte_unidad, name="crear-reporte-unidad"),
     path("bandeja/<str:tipo>/<int:pk>/actualizar/", views.actualizar_item, name="mant-actualizar"),
     path("bandeja/<str:tipo>/<int:pk>/cancelar/", views.solicitar_cancelacion, name="mant-cancelar"),
