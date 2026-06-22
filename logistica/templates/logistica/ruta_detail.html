@@ -30,6 +30,10 @@
   .route-load-subsection + .route-load-subsection { margin-top:24px; padding-top:18px; border-top:1px solid #eadce3; }
   .route-load-subtitle { margin:0 0 4px; color:var(--vino); font-size:1rem; font-weight:900; }
   .route-load-caption { margin:0 0 10px; color:#7b6b73; font-size:.9rem; font-weight:700; }
+  .route-load-search { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; margin:12px 0; }
+  .route-load-search label { color:var(--vino); font-weight:900; }
+  .route-load-search .input-field { width:min(420px, 100%); }
+  .route-load-search-count { color:#7b6b73; font-size:.86rem; font-weight:800; }
   .route-load-subsection .table th.text-end,
   .route-load-subsection .table td.text-end {
     text-align:right;
@@ -451,8 +455,13 @@
     <div class="route-load-subsection">
       <h3 class="route-load-subtitle">Detalle por parada</h3>
       <p class="route-load-caption">Líneas por sucursal o punto logístico para revisar qué corresponde a cada parada.</p>
+      <div class="route-load-search" data-route-load-filter>
+        <label for="route-load-detail-search">Buscar:</label>
+        <input class="input-field" id="route-load-detail-search" type="search" autocomplete="off" placeholder="Sucursal, producto, código, estado o cantidad">
+        <span class="route-load-search-count" id="route-load-detail-count" aria-live="polite"></span>
+      </div>
       <div class="table-responsive">
-        <table class="table table-striped">
+        <table class="table table-striped" id="route-load-detail-table">
           <thead>
             <tr>
               <th>Parada</th>
@@ -466,7 +475,7 @@
           </thead>
           <tbody>
             {% for row in recepcion_point_rows %}
-            <tr>
+            <tr data-route-load-detail-row>
               <td>{{ row.parada.orden }} · {{ row.parada.punto_nombre_snapshot }}</td>
               <td>
                 <strong>{{ row.linea.item_name|default:"Producto sin nombre" }}</strong>
@@ -498,6 +507,7 @@
             {% empty %}
             <tr><td colspan="{% if can_manage_logistica and ruta.estatus == "PLANEADA" %}7{% else %}6{% endif %}" class="muted">Sin checklist de carga para esta ruta.</td></tr>
             {% endfor %}
+            <tr data-route-load-detail-empty hidden><td colspan="{% if can_manage_logistica and ruta.estatus == "PLANEADA" %}7{% else %}6{% endif %}" class="muted">Sin coincidencias para la búsqueda.</td></tr>
           </tbody>
         </table>
       </div>
@@ -748,6 +758,33 @@
     document.addEventListener("keydown", function (event) {
       if (event.key === "Escape" && !modal.hidden) closeDeliveryModal();
     });
+  })();
+
+  (function () {
+    const input = document.getElementById("route-load-detail-search");
+    const count = document.getElementById("route-load-detail-count");
+    const rows = Array.from(document.querySelectorAll("[data-route-load-detail-row]"));
+    const empty = document.querySelector("[data-route-load-detail-empty]");
+    if (!input || !rows.length) return;
+
+    function normalize(value) {
+      return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    }
+
+    function applyFilter() {
+      const term = normalize(input.value.trim());
+      let visible = 0;
+      rows.forEach(function (row) {
+        const match = !term || normalize(row.textContent).includes(term);
+        row.hidden = !match;
+        if (match) visible += 1;
+      });
+      if (empty) empty.hidden = visible !== 0;
+      if (count) count.textContent = term ? `${visible} de ${rows.length} líneas` : `${rows.length} líneas`;
+    }
+
+    input.addEventListener("input", applyFilter);
+    applyFilter();
   })();
 
   (function () {
