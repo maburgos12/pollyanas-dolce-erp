@@ -130,7 +130,7 @@ class LogisticaControlRutasTemplateTests(SimpleTestCase):
         source = template_path.read_text(encoding="utf-8")
 
         self.assertIn("logistica:ruta_print", source)
-        self.assertIn("Imprimir orden de paradas", source)
+        self.assertIn("Imprimir orden de ruta", source)
 
     def test_ruta_print_es_hoja_de_orden_sin_carga_esperada(self):
         template_path = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "ruta_print.html"
