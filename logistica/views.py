@@ -8,7 +8,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, OperationalError, transaction
 from django.db.models import Count, DecimalField, ExpressionWrapper, F, Max, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404, redirect, render
@@ -2409,6 +2409,11 @@ def ruta_detail(request, pk: int):
                 resumen = sincronizar_recepcion_desde_point(ruta=ruta, user=request.user)
             except ValidationError as exc:
                 messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+            except OperationalError:
+                messages.error(
+                    request,
+                    "La sincronización se cruzó con otra actualización. Recarga la ruta e intenta de nuevo.",
+                )
             else:
                 diferencias_point = ruta.paradas.filter(
                     entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA]
@@ -2449,6 +2454,11 @@ def ruta_detail(request, pk: int):
                 resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=request.user, ejecutar_sync=True)
             except ValidationError as exc:
                 messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+            except OperationalError:
+                messages.error(
+                    request,
+                    "La sincronización se cruzó con otra actualización. Recarga la ruta e intenta de nuevo.",
+                )
             else:
                 if resumen.creadas or resumen.actualizadas:
                     messages.success(

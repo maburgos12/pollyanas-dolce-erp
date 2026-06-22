@@ -11,7 +11,7 @@ from django.contrib.auth.models import Group, User
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, OperationalError, transaction
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -3232,6 +3232,23 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(service_cls.return_value.sync_open_transfers.call_count, 2)
         self.assertTrue(RutaCargaChecklistLinea.objects.filter(checklist__ruta=self.ruta, point_transfer_line__is_open=True).exists())
         self.assertContains(response, "Carga esperada actualizada")
+
+    def test_ruta_detail_sync_carga_point_deadlock_redirige_sin_500(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        with patch(
+            "logistica.views.sincronizar_checklist_carga_desde_point",
+            side_effect=OperationalError("deadlock detected"),
+        ):
+            response = self.client.post(
+                reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+                {"action": "sync_carga_point"},
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "La sincronización se cruzó con otra actualización")
 
     def test_ruta_detail_bloquea_salida_si_checklist_carga_pendiente(self):
         self.client.force_login(self.user)
