@@ -113,7 +113,11 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('id="active-group-tabs-template"', html)
         self.assertIn("module-tabs erp-group-tabs", html)
         self.assertIn("group.active", html)
-        self.assertIn("main.querySelector('.module-tabs, .rrhh-tabs, .report-tabs", html)
+        self.assertIn(
+            "main.querySelector('.erp-group-tabs, .module-tabs, .rrhh-tabs, .report-tabs, .mant-tabs')",
+            html,
+        )
+        self.assertNotIn(".forecast-workflow-tabs')) return", html)
         self.assertIn("main.prepend(tabs)", html)
 
     def test_base_template_makes_erp_installable_as_pwa(self):
