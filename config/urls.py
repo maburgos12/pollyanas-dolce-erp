@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from django.contrib import admin
 from django.conf import settings
 from django.urls import path, include, re_path
@@ -19,6 +21,7 @@ urlpatterns = [
         "apple-touch-icon-precomposed.png",
         RedirectView.as_view(url="/static/apple-touch-icon-precomposed.png", permanent=False),
     ),
+    path("erp-sw.js", static_serve, {"document_root": Path(settings.BASE_DIR) / "static", "path": "erp-sw.js"}),
     path("login/", core_views.login_view, name="login"),
     path("logout/", core_views.logout_view, name="logout"),
     path("notificaciones/", core_views.notificaciones_view, name="notificaciones"),
