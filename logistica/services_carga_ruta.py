@@ -263,6 +263,24 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
     return creadas, actualizadas, omitidas
 
 
+def ruta_tiene_movimiento_point_nuevo(*, fecha, puntos: list[PuntoLogistico]) -> bool:
+    branch_ids = {punto.sucursal_id for punto in puntos if punto.tipo != PuntoLogistico.TIPO_CEDIS and punto.sucursal_id}
+    if not branch_ids:
+        return True
+    base_qs = (
+        PointTransferLine.objects.filter(
+            is_cancelled=False,
+            is_open=True,
+            registered_at__date__in=[fecha - timedelta(days=1), fecha],
+        )
+        .exclude(source_hash__in=RutaCargaChecklistLinea.objects.exclude(source_hash="").values("source_hash"))
+    )
+    return all(
+        base_qs.filter(Q(erp_origin_branch_id=branch_id) | Q(erp_destination_branch_id=branch_id)).exists()
+        for branch_id in branch_ids
+    )
+
+
 def _sincronizar_lineas_consolidado_para_ruta(*, ruta: RutaEntrega, checklist: RutaCargaChecklist) -> tuple[int, int, int]:
     paradas_by_branch = _paradas_por_sucursal(ruta)
     if not paradas_by_branch:
