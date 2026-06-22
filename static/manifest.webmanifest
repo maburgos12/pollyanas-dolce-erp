@@ -1,0 +1,38 @@
+{
+  "name": "Pollyana's Dolce ERP",
+  "short_name": "Pollyana ERP",
+  "description": "ERP operativo de Pollyana's Dolce",
+  "id": "/dashboard/",
+  "start_url": "/dashboard/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f7f2f4",
+  "theme_color": "#8B2252",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/static/favicon-192x192.png?v=20260525-logo-v1",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/pwa-icon-512.png?v=20260622-erp-pwa-v1",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Mi trabajo",
+      "short_name": "Trabajo",
+      "url": "/seguimiento/proyectos/?source=pwa"
+    },
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "url": "/dashboard/?source=pwa"
+    }
+  ]
+}
