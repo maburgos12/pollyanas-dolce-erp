@@ -821,7 +821,8 @@
           form._routeSubmitter = button;
         });
       });
-      form.addEventListener("submit", function () {
+      form.addEventListener("submit", function (event) {
+        if (event.defaultPrevented) return;
         showRouteLoading(form, form._routeSubmitter || form.querySelector("[type=submit]"));
       });
     });
