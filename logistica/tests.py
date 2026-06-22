@@ -125,6 +125,16 @@ class LogisticaControlRutasTemplateTests(SimpleTestCase):
         self.assertLess(source.index("Totales por producto"), source.index("Detalle por parada"))
         self.assertIn(".route-load-subsection + .route-load-subsection", source)
 
+    def test_ruta_detail_filtra_detalle_por_parada_en_cliente(self):
+        template_path = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "ruta_detail.html"
+        source = template_path.read_text(encoding="utf-8")
+
+        self.assertIn('id="route-load-detail-search"', source)
+        self.assertIn("data-route-load-detail-row", source)
+        self.assertIn("data-route-load-detail-empty", source)
+        self.assertIn("function applyFilter()", source)
+        self.assertIn('input.addEventListener("input", applyFilter)', source)
+
     def test_ruta_detail_liga_hoja_imprimible_de_paradas(self):
         template_path = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "ruta_detail.html"
         source = template_path.read_text(encoding="utf-8")
