@@ -128,3 +128,43 @@
     .page-pronostico-ventas .forecast-actions,
     .page-pronostico-ventas .forecast-branch-header { justify-content:flex-start; }
   }
+  @media (max-width: 760px) {
+    .page-pronostico-ventas .forecast-workflow-tabs,
+    .page-pronostico-ventas .forecast-filter-grid,
+    .page-pronostico-ventas .forecast-product-section,
+    .page-pronostico-ventas .forecast-filter-submit {
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    .page-pronostico-ventas .forecast-products-summary {
+      align-items: start;
+      display: grid;
+      gap: 8px 10px;
+      grid-template-columns: auto minmax(0, 1fr);
+      white-space: normal;
+    }
+
+    .page-pronostico-ventas .forecast-products-title {
+      min-width: 0;
+    }
+
+    .page-pronostico-ventas .forecast-products-count {
+      display: block;
+      margin-top: 2px;
+    }
+
+    .page-pronostico-ventas .forecast-product-actions {
+      display: grid;
+      gap: 8px;
+      grid-column: 1 / -1;
+      grid-template-columns: 1fr;
+      margin-left: 0 !important;
+      width: 100%;
+    }
+
+    .page-pronostico-ventas .forecast-product-actions .btn {
+      min-height: 44px;
+      width: 100%;
+    }
+  }

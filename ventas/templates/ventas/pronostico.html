@@ -5,7 +5,7 @@
 {% block body_class %}page-pronostico-ventas{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/ventas-templates-ventas-pronostico.css?v=20260617-loading-v1">
+<link rel="stylesheet" href="/static/css/template_modules/ventas-templates-ventas-pronostico.css?v=20260622-mobile-form-margins-v1">
 {% endblock %}
 
 {% block content %}
@@ -114,8 +114,10 @@
           <details id="productos-incluir">
           <summary class="forecast-products-summary">
             <span id="productos-arrow">▶</span>
-            Productos a incluir
-            <span class="forecast-products-count">— <span id="productos-count">todos seleccionados</span></span>
+            <span class="forecast-products-title">
+              Productos a incluir
+              <span class="forecast-products-count">— <span id="productos-count">todos seleccionados</span></span>
+            </span>
             <span class="forecast-product-actions pd-u-690f054c4e">
               <button class="btn btn-secondary btn-sm" type="button" onclick="setAllProducts(event, true)">Seleccionar todos</button>
               <button class="btn btn-secondary btn-sm" type="button" onclick="setAllProducts(event, false)">Limpiar todo</button>
