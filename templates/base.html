@@ -26,7 +26,7 @@
     <link rel="stylesheet" href="/static/css/pollyana_ops_ui.css?v=20260614-ui-fase-final-v1">
     {% block extra_css %}{% endblock %}
     <link rel="stylesheet" href="/static/css/pollyana_generated_utilities.css?v=20260614-ui100-v1">
-    <link rel="stylesheet" href="/static/css/hallmark_guardrails.css?v=20260622-mobile-route-filter-v1">
+    <link rel="stylesheet" href="/static/css/hallmark_guardrails.css?v=20260622-ios-pwa-lock-v1">
 </head>
 <body class="{% block body_class %}{% endblock %}">
     <a class="skip-link" href="#main-content">Saltar al contenido</a>
@@ -1021,7 +1021,7 @@
     // ponytail: no offline ERP cache; installable shell only, data stays network-fresh.
     (function () {
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/erp-sw.js?v=20260622-erp-pwa-v2').catch(function () {});
+            navigator.serviceWorker.register('/erp-sw.js?v=20260622-erp-pwa-v3').catch(function () {});
         }
     })();
     </script>

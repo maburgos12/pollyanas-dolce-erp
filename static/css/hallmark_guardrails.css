@@ -24,7 +24,7 @@ body,
 .layout-wrapper,
 .main-content {
   max-width: 100%;
-  overflow-x: clip;
+  overflow-x: hidden;
 }
 
 .main-content[data-hallmark-scope="erp"] {
@@ -491,7 +491,7 @@ body,
 .main-content[data-hallmark-scope="erp"] .rrhh-edit-form {
   max-height: min(72vh, 860px);
   overflow-y: auto;
-  overflow-x: clip;
+  overflow-x: hidden;
   scrollbar-gutter: stable;
 }
 
