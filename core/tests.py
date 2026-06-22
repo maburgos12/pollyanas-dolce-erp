@@ -74,7 +74,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         html = base.read_text()
         self.assertIn('data-hallmark-scope="erp"', html)
         self.assertLess(html.index("{% block extra_css %}"), html.index("hallmark_guardrails.css"))
-        self.assertIn("20260622-mobile-tabs-v1", html)
+        self.assertIn("20260622-mobile-tabs-forms-v1", html)
 
     def test_base_template_includes_mobile_touch_navigation_shell(self):
         base = Path(settings.BASE_DIR) / "templates" / "base.html"
@@ -105,6 +105,16 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn("body.mobile-nav-open .sidebar", css)
         self.assertIn(".mobile-nav-backdrop:not([hidden])", css)
         self.assertIn("@media (max-width: 720px)", css)
+
+    def test_base_template_inserts_group_tabs_when_page_has_none(self):
+        base = Path(settings.BASE_DIR) / "templates" / "base.html"
+        html = base.read_text()
+
+        self.assertIn('id="active-group-tabs-template"', html)
+        self.assertIn("module-tabs erp-group-tabs", html)
+        self.assertIn("group.active", html)
+        self.assertIn("main.querySelector('.module-tabs, .rrhh-tabs, .report-tabs", html)
+        self.assertIn("main.prepend(tabs)", html)
 
     def test_base_template_makes_erp_installable_as_pwa(self):
         base = Path(settings.BASE_DIR) / "templates" / "base.html"
@@ -179,12 +189,36 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
 
     def test_guardrails_keep_module_tabs_horizontally_scrollable_on_mobile(self):
         css = (Path(settings.BASE_DIR) / "static" / "css" / "hallmark_guardrails.css").read_text()
-        self.assertIn(":is(.module-tabs, .rrhh-tabs, .report-tabs, .mant-tabs)", css)
+        for selector in [".module-tabs", ".rrhh-tabs", ".report-tabs", ".mant-tabs"]:
+            self.assertIn(selector, css)
         self.assertIn("flex-wrap: nowrap !important", css)
         self.assertIn("overflow-x: auto !important", css)
         self.assertIn("scroll-snap-type: x proximity", css)
         self.assertIn("min-width: max-content !important", css)
         self.assertIn("width: auto !important", css)
+
+    def test_guardrails_standardize_tab_aliases_and_mobile_forms(self):
+        css = (Path(settings.BASE_DIR) / "static" / "css" / "hallmark_guardrails.css").read_text()
+        for selector in [
+            ".tabs-wrap",
+            ".forecast-tabs",
+            ".forecast-workflow-tabs",
+            ".costeo-tabs",
+            ".rent-tabs",
+            ".unit-tabs",
+            ".cedis-tabs",
+            ".bandeja-tabs",
+            ".notif-tabs",
+            ".panel-dg-tabs",
+        ]:
+            with self.subTest(selector=selector):
+                self.assertIn(selector, css)
+        self.assertIn(".rango-corte-grid", css)
+        self.assertIn(".period-filter", css)
+        self.assertIn(".filter-bar", css)
+        self.assertIn("grid-template-columns: 1fr !important", css)
+        self.assertIn(".rango-corte .bonos-field > div", css)
+        self.assertIn("grid-template-columns: minmax(0, 1fr) auto", css)
 
     def test_hallmark_ui_has_no_unapproved_regressions(self):
         issues = new_issues_against_baseline(Path(settings.BASE_DIR))

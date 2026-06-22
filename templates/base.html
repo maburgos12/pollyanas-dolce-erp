@@ -26,7 +26,7 @@
     <link rel="stylesheet" href="/static/css/pollyana_ops_ui.css?v=20260614-ui-fase-final-v1">
     {% block extra_css %}{% endblock %}
     <link rel="stylesheet" href="/static/css/pollyana_generated_utilities.css?v=20260614-ui100-v1">
-    <link rel="stylesheet" href="/static/css/hallmark_guardrails.css?v=20260622-mobile-tabs-v1">
+    <link rel="stylesheet" href="/static/css/hallmark_guardrails.css?v=20260622-mobile-tabs-forms-v1">
 </head>
 <body class="{% block body_class %}{% endblock %}">
     <a class="skip-link" href="#main-content">Saltar al contenido</a>
@@ -846,6 +846,21 @@
 
         <button class="mobile-nav-backdrop" type="button" aria-label="Cerrar menú" hidden></button>
 
+        <template id="active-group-tabs-template">
+            {% for group in ui_nav_groups %}
+                {% if group.active and group.items|length > 1 %}
+                <nav class="module-tabs erp-group-tabs" aria-label="{{ group.label }}">
+                    {% for item in group.items %}
+                    <a class="module-tab{% if item.active %} active{% endif %}" href="{{ item.url }}">
+                        {{ item.label }}
+                        {% if item.badge_count %}<span class="tab-badge">{{ item.badge_count }}</span>{% endif %}
+                    </a>
+                    {% endfor %}
+                </nav>
+                {% endif %}
+            {% endfor %}
+        </template>
+
         <main class="main-content" id="main-content" data-hallmark-scope="erp">
             {% if messages %}
             <div class="messages-container">
@@ -904,6 +919,16 @@
         window.addEventListener('resize', function () {
             if (window.innerWidth > 720) setOpen(false);
         });
+    })();
+
+    // ponytail: fallback only; pages with their own group tabs keep them.
+    (function () {
+        var main = document.getElementById('main-content');
+        var tpl = document.getElementById('active-group-tabs-template');
+        if (!main || !tpl) return;
+        if (main.querySelector('.module-tabs, .rrhh-tabs, .report-tabs, .mant-tabs, .tabs-wrap, .forecast-tabs, .forecast-workflow-tabs, .costeo-tabs, .costeo-view-tabs, .rent-tabs, .unit-tabs, .cedis-tabs, .bandeja-tabs, .notif-tabs, .assign-tabs, .panel-dg-tabs, .panel-dg-view-tabs')) return;
+        var tabs = tpl.content.firstElementChild && tpl.content.firstElementChild.cloneNode(true);
+        if (tabs) main.prepend(tabs);
     })();
 
     // ── Sidebar colapsable ─────────────────────────────────────────
