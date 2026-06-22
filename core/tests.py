@@ -74,7 +74,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         html = base.read_text()
         self.assertIn('data-hallmark-scope="erp"', html)
         self.assertLess(html.index("{% block extra_css %}"), html.index("hallmark_guardrails.css"))
-        self.assertIn("20260622-mobile-route-filter-v1", html)
+        self.assertIn("20260622-ios-pwa-lock-v1", html)
 
     def test_base_template_includes_mobile_touch_navigation_shell(self):
         base = Path(settings.BASE_DIR) / "templates" / "base.html"
@@ -129,7 +129,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('name="mobile-web-app-capable"', html)
         self.assertIn('name="apple-mobile-web-app-capable"', html)
         self.assertIn('name="apple-mobile-web-app-title"', html)
-        self.assertIn("navigator.serviceWorker.register('/erp-sw.js?v=20260622-erp-pwa-v2')", html)
+        self.assertIn("navigator.serviceWorker.register('/erp-sw.js?v=20260622-erp-pwa-v3')", html)
 
     def test_login_template_also_exposes_pwa_install_metadata(self):
         login = Path(settings.BASE_DIR) / "core" / "templates" / "core" / "login.html"
@@ -139,7 +139,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('name="theme-color"', html)
         self.assertIn('name="apple-mobile-web-app-capable"', html)
         self.assertIn('name="apple-mobile-web-app-title"', html)
-        self.assertIn("navigator.serviceWorker.register('/erp-sw.js?v=20260622-erp-pwa-v2')", html)
+        self.assertIn("navigator.serviceWorker.register('/erp-sw.js?v=20260622-erp-pwa-v3')", html)
 
     def test_erp_pwa_manifest_and_service_worker_are_minimal(self):
         manifest = (Path(settings.BASE_DIR) / "static" / "manifest.webmanifest").read_text()
@@ -149,19 +149,19 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('"start_url": "/dashboard/?source=pwa"', manifest)
         self.assertIn('"scope": "/"', manifest)
         self.assertIn('"sizes": "512x512"', manifest)
-        self.assertIn('const CACHE_NAME = "pollyanas-erp-shell-v2-route-filter"', sw)
+        self.assertIn('const CACHE_NAME = "pollyanas-erp-shell-v3-ios-pwa-lock"', sw)
         self.assertIn("self.addEventListener(\"fetch\"", sw)
         self.assertIn("event.respondWith(fetch(event.request))", sw)
 
         response = self.client.get("/erp-sw.js")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"pollyanas-erp-shell-v2-route-filter", b"".join(response.streaming_content))
+        self.assertIn(b"pollyanas-erp-shell-v3-ios-pwa-lock", b"".join(response.streaming_content))
 
     def test_guardrails_define_global_erp_scope(self):
         css = (Path(settings.BASE_DIR) / "static" / "css" / "hallmark_guardrails.css").read_text()
         self.assertIn('.main-content[data-hallmark-scope="erp"]', css)
         self.assertIn("--erp-workspace-max", css)
-        self.assertIn("overflow-x: clip", css)
+        self.assertIn("overflow-x: hidden", css)
         self.assertIn(".period-filter", css)
         self.assertIn("overflow-wrap: anywhere", css)
         self.assertIn("white-space: normal", css)

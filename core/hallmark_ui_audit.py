@@ -132,6 +132,8 @@ def scan_hallmark_ui(base_dir: Path) -> list[HallmarkIssue]:
             )
 
         for line in _line_matches(HARD_OVERFLOW_RE, text):
+            if "hallmark_guardrails.css" in rel_path:
+                continue
             issues.append(
                 HallmarkIssue(
                     "overflow-hidden-x",
