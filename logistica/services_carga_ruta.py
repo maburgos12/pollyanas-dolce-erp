@@ -641,6 +641,9 @@ def registrar_recarga_cedis(*, ruta: RutaEntrega, user, notas: str = "") -> Even
     checklist = RutaCargaChecklist.objects.select_for_update().filter(ruta=ruta).first()
     if not checklist or not checklist.lineas.exists():
         raise ValidationError("La ruta no tiene carga esperada para registrar recarga CEDIS.")
+    cedis_punto = PuntoLogistico.objects.filter(tipo=PuntoLogistico.TIPO_CEDIS).order_by("id").first()
+    if not cedis_punto:
+        raise ValidationError("No hay punto logístico CEDIS configurado para registrar la recarga.")
 
     pendientes = checklist.lineas.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).count()
     diferencias = checklist.lineas.exclude(
@@ -658,8 +661,27 @@ def registrar_recarga_cedis(*, ruta: RutaEntrega, user, notas: str = "") -> Even
         EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL, metadata__tipo="recarga_cedis").count()
         + 1
     )
+    parada_cedis = (
+        ruta.paradas.select_for_update()
+        .filter(punto__tipo=PuntoLogistico.TIPO_CEDIS, estado=ParadaRuta.ESTADO_PENDIENTE)
+        .order_by("orden", "id")
+        .first()
+    )
+    if not parada_cedis:
+        ultimo_orden = ruta.paradas.order_by("-orden").values_list("orden", flat=True).first() or 0
+        parada_cedis = ParadaRuta.objects.create(ruta=ruta, punto=cedis_punto, orden=ultimo_orden + 1)
+    now = timezone.now()
+    parada_cedis.estado = ParadaRuta.ESTADO_VISITADA
+    parada_cedis.hora_llegada_real = parada_cedis.hora_llegada_real or now
+    parada_cedis.hora_salida_real = parada_cedis.hora_salida_real or now
+    parada_cedis.notas = notas or parada_cedis.notas
+    parada_cedis.save(update_fields=["estado", "hora_llegada_real", "hora_salida_real", "notas", "actualizado_en"])
+    ruta.recompute_route_control()
+    ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
+
     return EventoRuta.objects.create(
         ruta=ruta,
+        parada=parada_cedis,
         tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
         severidad=EventoRuta.SEVERIDAD_INFO,
         descripcion=f"Recarga CEDIS {numero} registrada por logística.",

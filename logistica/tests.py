@@ -110,6 +110,7 @@ class LogisticaControlRutasTemplateTests(SimpleTestCase):
         self.assertIn("route-unit-drive", source)
         self.assertIn("route-road", source)
         self.assertIn("function showRouteLoading(form, submit)", source)
+        self.assertIn("if (event.defaultPrevented) return;", source)
         self.assertIn('submit.setAttribute("aria-disabled", "true")', source)
         self.assertNotIn("submit.disabled = true", source)
         self.assertIn("form._routeSubmitter = button", source)
@@ -4347,15 +4348,25 @@ class LogisticaControlRutasTests(TestCase):
         ruta.refresh_from_db()
         checklist.refresh_from_db()
         evento = ruta.eventos.get(metadata__tipo="recarga_cedis")
+        parada_cedis = evento.parada
         self.assertEqual(response.status_code, 200)
         self.assertIn("Regresa a CEDIS", checklist.motivo_override)
         self.assertEqual(evento.metadata["numero"], 1)
         self.assertEqual(evento.metadata["diferencias"], 1)
+        self.assertEqual(parada_cedis.punto.tipo, PuntoLogistico.TIPO_CEDIS)
+        self.assertEqual(parada_cedis.estado, ParadaRuta.ESTADO_VISITADA)
         self.assertEqual(salida.status_code, 200)
         self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
 
     def test_registrar_recarga_cedis_en_ruta_no_cierra_ni_duplica_ruta(self):
         ruta, _ = self._crear_ruta_planeada_para_carga()
+        cedis_punto = PuntoLogistico.objects.create(
+            nombre="CEDIS Recarga En Ruta",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.571000",
+            longitud="-108.471000",
+            radio_geocerca_metros=120,
+        )
         self._crear_transferencia_point_abierta()
         checklist = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False).checklist
         checklist.lineas.update(
@@ -4372,10 +4383,13 @@ class LogisticaControlRutasTests(TestCase):
         evento = registrar_recarga_cedis(ruta=ruta, user=self.user, notas="Segunda carga en CEDIS.")
 
         ruta.refresh_from_db()
+        parada_cedis = evento.parada
         self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
         self.assertEqual(RutaEntrega.objects.filter(pk=ruta.pk).count(), 1)
         self.assertEqual(evento.metadata["tipo"], "recarga_cedis")
         self.assertEqual(evento.metadata["numero"], 1)
+        self.assertEqual(parada_cedis.punto.tipo, PuntoLogistico.TIPO_CEDIS)
+        self.assertEqual(parada_cedis.estado, ParadaRuta.ESTADO_VISITADA)
 
     def test_tramo_carga_avanza_con_llegada_a_cedis(self):
         ruta, primera = self._crear_ruta_planeada_para_carga()
