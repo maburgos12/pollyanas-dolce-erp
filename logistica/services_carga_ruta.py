@@ -478,6 +478,9 @@ def _actualizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, syn
             checklist.estatus = RutaCargaChecklist.ESTATUS_EN_REVISION
             checklist.notas = ""
             checklist.save(update_fields=["estatus", "notas", "actualizado_en"])
+        elif checklist.lineas.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists():
+            checklist.estatus = RutaCargaChecklist.ESTATUS_EN_REVISION
+            checklist.save(update_fields=["estatus", "actualizado_en"])
     else:
         checklist.estatus = RutaCargaChecklist.ESTATUS_BLOQUEADA
         checklist.notas = "No se encontraron transferencias abiertas de Point para las sucursales de esta ruta."

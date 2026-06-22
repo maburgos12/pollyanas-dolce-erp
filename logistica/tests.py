@@ -3609,6 +3609,22 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIsNone(linea.cantidad_cargada)
         self.assertFalse(RutaCargaChecklistLinea.objects.filter(source_hash=transferencia.source_hash).exists())
 
+    def test_sync_carga_regresa_a_revision_si_quedan_lineas_pendientes(self):
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        self._crear_solicitud_cedis(ruta=ruta, cantidad="5.000")
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+        resumen.checklist.estatus = RutaCargaChecklist.ESTATUS_CONFIRMADA
+        resumen.checklist.save(update_fields=["estatus", "actualizado_en"])
+
+        transferencia = self._crear_transferencia_point_abierta(source_hash="transfer-enviado-cero-revision")
+        transferencia.sent_quantity = Decimal("0.000")
+        transferencia.save(update_fields=["sent_quantity", "updated_at"])
+
+        segundo = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        self.assertEqual(segundo.checklist.estatus, RutaCargaChecklist.ESTATUS_EN_REVISION)
+        self.assertEqual(checklist_bloquea_salida(ruta), "confirma todas las líneas de carga antes de liberar la ruta")
+
     def test_checklist_carga_cedis_no_pisa_linea_validada_con_point(self):
         ruta, _ = self._crear_ruta_planeada_para_carga()
         self._crear_solicitud_cedis(ruta=ruta, cantidad="5.000")
