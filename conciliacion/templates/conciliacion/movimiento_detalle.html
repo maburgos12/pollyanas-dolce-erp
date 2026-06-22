@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Documento de conciliación{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="/static/css/template_modules/conciliacion-templates-conciliacion-movimiento-detalle.css?v=20260614-ui100-v1">
+
+<div class="conc-doc">
+  <div class="conc-doc-head">
+    <div>
+      <h1>Documento de conciliación {{ documento.folio }}</h1>
+      <p class="conc-doc-note">Expediente de evidencia para revisar que paso, contra que se ligo, que documento sostiene el cierre y que falta para contabilidad.</p>
+    </div>
+    <div class="conc-doc-actions">
+      <a class="conc-doc-btn" href="{% url 'conciliacion:bancaria' %}?periodo={{ movimiento.fecha_transaccion|date:'Y-m' }}&q={{ documento.clave_rastreo|default:movimiento.pk }}">Volver a la mesa</a>
+      <a class="conc-doc-btn" href="?export=contabilidad_csv">Exportar CSV contabilidad</a>
+    </div>
+  </div>
+
+  <div class="conc-doc-grid">
+    <section class="conc-doc-section">
+      <h2>Movimiento bancario</h2>
+      <div class="table-responsive"><table class="conc-doc-table">
+        <tr><th>Fecha</th><td>{{ movimiento.fecha_transaccion|date:"Y-m-d H:i" }}</td></tr>
+        <tr><th>Banco / cuenta</th><td>{{ movimiento.cuenta.nombre_display }}{% if movimiento.cuenta.numero_cuenta %} · {{ movimiento.cuenta.numero_cuenta }}{% endif %}</td></tr>
+        <tr><th>Tipo / importe</th><td>{{ movimiento.tipo }} · ${{ movimiento.monto|floatformat:2|intcomma }}</td></tr>
+        <tr><th>Clave de rastreo</th><td>{{ documento.clave_rastreo|default:"No detectada" }}</td></tr>
+        <tr><th>Cuenta destino</th><td>{{ documento.cuenta_destino|default:"No detectada" }}</td></tr>
+        <tr><th>Descripción banco</th><td>{{ movimiento.descripcion }}</td></tr>
+      </table></div>
+    </section>
+
+    <section class="conc-doc-section">
+      <h2>Conciliación aplicada</h2>
+      <div class="table-responsive"><table class="conc-doc-table">
+        <tr><th>Estado expediente</th><td><span class="conc-doc-chip {{ documento.estado_expediente.tono }}">{{ documento.estado_expediente.label }}</span><br><span class="conc-doc-note">{{ documento.estado_expediente.detalle }}</span></td></tr>
+        <tr><th>Tipo real</th><td><strong>{{ documento.tipo_conciliacion }}</strong></td></tr>
+        <tr><th>Usuario</th><td>{{ movimiento.conciliado_por|default:"Sin usuario" }}</td></tr>
+        <tr><th>Fecha cierre</th><td>{{ movimiento.conciliado_en|date:"Y-m-d H:i"|default:"Sin fecha" }}</td></tr>
+        <tr><th>Nota</th><td>{{ movimiento.nota_conciliacion|default:"Sin nota" }}</td></tr>
+      </table></div>
+    </section>
+
+    <section class="conc-doc-section">
+      <h2>Regla automática</h2>
+      <div class="table-responsive"><table class="conc-doc-table">
+        <tr><th>Etiqueta</th><td>{{ documento.regla.mesa_label }}</td></tr>
+        <tr><th>Detalle</th><td>{{ documento.regla.mesa_detalle }}</td></tr>
+        <tr><th>Siguiente revisión</th><td>{{ documento.regla.siguiente_revision }}</td></tr>
+      </table></div>
+      <p class="conc-doc-note">La regla automática no es la conciliación final. La conciliación aplicada es la que debe usarse para contabilidad.</p>
+    </section>
+
+    <section class="conc-doc-section">
+      <h2>Relacion contable</h2>
+      <div class="table-responsive"><table class="conc-doc-table">
+        <tr><th>Tipo</th><td><strong>{{ documento.relacion_contable.tipo }}</strong></td></tr>
+        <tr><th>Documento relacionado</th><td>{{ documento.relacion_contable.documento }}</td></tr>
+        <tr><th>Criterio</th><td>{{ documento.relacion_contable.criterio }}</td></tr>
+      </table></div>
+    </section>
+
+    <section class="conc-doc-section">
+      <h2>Ligas del expediente</h2>
+      <div class="table-responsive"><table class="conc-doc-table">
+        <tr>
+          <th>Contraparte bancaria</th>
+          <td>
+            {% if documento.contraparte %}
+              #{{ documento.contraparte.pk }} · {{ documento.contraparte.cuenta.nombre_display }} · {{ documento.contraparte.tipo }} · ${{ documento.contraparte.monto|floatformat:2|intcomma }}
+            {% elif movimiento.tipo_conciliacion == "traspaso_cuentas" %}
+              Traspaso propio sin abono contraparte importado o ligado.
+            {% else %}
+              No aplica.
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <th>CFDI</th>
+          <td>
+            {% if documento.cfdi %}
+              {{ documento.cfdi.uuid }} · {{ documento.cfdi.get_tipo_cfdi_display }} · {{ documento.cfdi.tipo_comprobante }} · ${{ documento.cfdi.total|floatformat:2|intcomma }}
+            {% else %}
+              No ligado.
+            {% endif %}
+          </td>
+        </tr>
+      </table></div>
+    </section>
+
+    <section class="conc-doc-section conc-doc-wide">
+      <h2>Campos para contabilidad / CONTPAQi</h2>
+      <div class="table-responsive"><table class="conc-doc-table">
+        {% for key, value in documento.contpaq.items %}
+        <tr><th>{{ key }}</th><td>{{ value|default:"" }}</td></tr>
+        {% endfor %}
+      </table></div>
+    </section>
+
+    <section class="conc-doc-section conc-doc-wide">
+      <h2>Pendientes de evidencia y auditoría</h2>
+      {% if documento.evidencia_pendiente %}
+        <ul>
+          {% for item in documento.evidencia_pendiente %}
+          <li>{{ item }}</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="conc-doc-note">Sin pendientes detectados en este expediente.</p>
+      {% endif %}
+    </section>
+  </div>
+</div>
+{% endblock %}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 from decimal import Decimal
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from django.test import TestCase
@@ -10,7 +11,7 @@ from core.models import Sucursal
 from rrhh.models import AsistenciaEmpleado, Empleado, IncidenciaAsistencia
 
 from .models import BonoVentasEmpleado, ConfigBonoVentasPeriodo, RegistroDiarioVentas
-from .services_checador import sincronizar_asistencia_desde_checador
+from .services_checador import sincronizar_asistencia_desde_checador, sincronizar_empleado_dia_desde_checador
 
 
 TZ = ZoneInfo("America/Mazatlan")
@@ -34,6 +35,7 @@ class SyncChecadorVentasTests(TestCase):
             nombre=f"Empleado Ventas {fecha.day}",
             area="VENTAS",
             sucursal=sucursal.nombre,
+            fecha_ingreso=date(2026, 1, 1),
         )
         bono = BonoVentasEmpleado.objects.create(
             periodo=periodo,
@@ -92,6 +94,85 @@ class SyncChecadorVentasTests(TestCase):
         registro = RegistroDiarioVentas.objects.get(bono=bono, dia=3)
         self.assertFalse(registro.tiene_asistencia)
         self.assertFalse(registro.tiene_puntualidad)
+
+    def test_sync_no_genera_ni_conserva_registros_antes_de_fecha_ingreso(self):
+        sucursal = Sucursal.objects.create(codigo="ING", nombre="Sucursal Ingreso", activa=True)
+        periodo = ConfigBonoVentasPeriodo.objects.create(
+            mes=6,
+            anio=2026,
+            dias_laborables=11,
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 11),
+        )
+        empleado = Empleado.objects.create(
+            nombre="Empleado Ingreso Ventas",
+            area="VENTAS",
+            sucursal=sucursal.nombre,
+            fecha_ingreso=date(2026, 6, 10),
+        )
+        bono = BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal)
+        RegistroDiarioVentas.objects.create(bono=bono, dia=1, tiene_asistencia=False, tiene_puntualidad=False)
+        self.crear_asistencia(empleado, date(2026, 6, 10))
+        self.crear_asistencia(empleado, date(2026, 6, 11))
+
+        with patch("bonos_ventas.services_checador.timezone.localdate", return_value=date(2026, 7, 1)):
+            resultado = sincronizar_asistencia_desde_checador(periodo)
+
+        self.assertEqual(resultado["registros_eliminados"], 1)
+        self.assertEqual(resultado["registros_creados"], 2)
+        self.assertFalse(RegistroDiarioVentas.objects.filter(bono=bono, dia__lt=10).exists())
+        self.assertEqual(
+            list(RegistroDiarioVentas.objects.filter(bono=bono).values_list("dia", flat=True).order_by("dia")),
+            [10, 11],
+        )
+
+    def test_sync_no_genera_ni_conserva_registros_futuros_en_periodo_en_curso(self):
+        sucursal = Sucursal.objects.create(codigo="FUT", nombre="Sucursal Futuro", activa=True)
+        periodo = ConfigBonoVentasPeriodo.objects.create(
+            mes=6,
+            anio=2026,
+            dias_laborables=27,
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 27),
+        )
+        empleado = Empleado.objects.create(
+            nombre="Empleado Futuro Ventas",
+            area="VENTAS",
+            sucursal=sucursal.nombre,
+            fecha_ingreso=date(2026, 1, 1),
+        )
+        bono = BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal)
+        RegistroDiarioVentas.objects.create(bono=bono, dia=12, tiene_asistencia=False, tiene_puntualidad=False)
+
+        with patch("bonos_ventas.services_checador.timezone.localdate", return_value=date(2026, 6, 11)):
+            resultado = sincronizar_asistencia_desde_checador(periodo)
+
+        self.assertEqual(resultado["registros_eliminados"], 1)
+        self.assertFalse(RegistroDiarioVentas.objects.filter(bono=bono, dia__gt=11).exists())
+
+    def test_sync_dia_futuro_elimina_registro_existente_en_periodo_en_curso(self):
+        sucursal = Sucursal.objects.create(codigo="FUD", nombre="Sucursal Futuro Dia", activa=True)
+        periodo = ConfigBonoVentasPeriodo.objects.create(
+            mes=6,
+            anio=2026,
+            dias_laborables=27,
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 27),
+        )
+        empleado = Empleado.objects.create(
+            nombre="Empleado Futuro Dia Ventas",
+            area="VENTAS",
+            sucursal=sucursal.nombre,
+            fecha_ingreso=date(2026, 1, 1),
+        )
+        bono = BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal)
+        RegistroDiarioVentas.objects.create(bono=bono, dia=12, tiene_asistencia=False, tiene_puntualidad=False)
+
+        with patch("bonos_ventas.services_checador.timezone.localdate", return_value=date(2026, 6, 11)):
+            resultado = sincronizar_empleado_dia_desde_checador(empleado.id, date(2026, 6, 12))
+
+        self.assertEqual(resultado["registros_eliminados"], 1)
+        self.assertFalse(RegistroDiarioVentas.objects.filter(bono=bono, dia=12).exists())
 
     def test_suspension_quita_asistencia_y_puntualidad(self):
         fecha = date(2026, 6, 4)
@@ -198,3 +279,77 @@ class SyncChecadorVentasTests(TestCase):
         self.assertEqual(resultado["bonos_omitidos"], 1)
         self.assertTrue(registro.tiene_asistencia)
         self.assertTrue(registro.tiene_puntualidad)
+
+    def test_sync_empleado_dia_crea_solo_el_registro_del_dia_afectado(self):
+        fecha = date(2026, 6, 11)
+        _periodo, empleado, bono = self.crear_bono(fecha)
+        self.crear_asistencia(empleado, fecha)
+
+        resultado = sincronizar_empleado_dia_desde_checador(empleado.id, fecha)
+
+        self.assertEqual(resultado["bonos_sincronizados"], 1)
+        self.assertEqual(resultado["registros_creados"], 1)
+        self.assertEqual(RegistroDiarioVentas.objects.filter(bono=bono).count(), 1)
+        registro = RegistroDiarioVentas.objects.get(bono=bono, dia=11)
+        self.assertTrue(registro.tiene_asistencia)
+        self.assertTrue(registro.tiene_puntualidad)
+
+    def test_sync_empleado_dia_no_modifica_bono_cerrado(self):
+        fecha = date(2026, 6, 12)
+        _periodo, empleado, bono = self.crear_bono(fecha, estatus="CERRADO")
+        self.crear_asistencia(empleado, fecha)
+
+        resultado = sincronizar_empleado_dia_desde_checador(empleado.id, fecha)
+
+        self.assertEqual(resultado["bonos_sincronizados"], 0)
+        self.assertEqual(resultado["bonos_omitidos"], 1)
+        self.assertFalse(RegistroDiarioVentas.objects.filter(bono=bono, dia=12).exists())
+
+    def test_periodo_cruza_mes_no_convierte_mayo_en_dias_futuros_de_junio(self):
+        sucursal = Sucursal.objects.create(codigo="CRUCE", nombre="Sucursal Cruce", activa=True)
+        periodo = ConfigBonoVentasPeriodo.objects.create(
+            mes=6,
+            anio=2026,
+            dias_laborables=31,
+            fecha_inicio=date(2026, 5, 28),
+            fecha_fin=date(2026, 6, 27),
+        )
+        empleado = Empleado.objects.create(
+            nombre="Empleado Cruce Mes",
+            area="VENTAS",
+            sucursal=sucursal.nombre,
+            fecha_ingreso=date(2026, 1, 1),
+        )
+        bono = BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal)
+        self.crear_asistencia(empleado, date(2026, 5, 28))
+        self.crear_asistencia(empleado, date(2026, 6, 1))
+
+        with patch("bonos_ventas.services_checador.timezone.localdate", return_value=date(2026, 7, 1)):
+            resultado = sincronizar_asistencia_desde_checador(periodo)
+
+        self.assertEqual(resultado["registros_creados"], 27)
+        self.assertTrue(RegistroDiarioVentas.objects.filter(bono=bono, dia=1).exists())
+        self.assertFalse(RegistroDiarioVentas.objects.filter(bono=bono, dia=28).exists())
+
+    def test_sync_empleado_dia_no_impacta_periodo_junio_con_fecha_de_mayo(self):
+        sucursal = Sucursal.objects.create(codigo="MAY", nombre="Sucursal Mayo", activa=True)
+        periodo = ConfigBonoVentasPeriodo.objects.create(
+            mes=6,
+            anio=2026,
+            dias_laborables=31,
+            fecha_inicio=date(2026, 5, 28),
+            fecha_fin=date(2026, 6, 27),
+        )
+        empleado = Empleado.objects.create(
+            nombre="Empleado Mayo",
+            area="VENTAS",
+            sucursal=sucursal.nombre,
+            fecha_ingreso=date(2026, 1, 1),
+        )
+        bono = BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal)
+        self.crear_asistencia(empleado, date(2026, 5, 28))
+
+        resultado = sincronizar_empleado_dia_desde_checador(empleado.id, date(2026, 5, 28))
+
+        self.assertEqual(resultado["bonos_sincronizados"], 0)
+        self.assertFalse(RegistroDiarioVentas.objects.filter(bono=bono).exists())

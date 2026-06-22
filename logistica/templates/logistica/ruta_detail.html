@@ -5,20 +5,77 @@
 {% block page_title %}Logística · {{ ruta.folio }}{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="/static/css/template_modules/logistica-templates-logistica-ruta-detail.css?v=20260614-ui100-v1">
 <style>
   .ops-shell { display:grid; gap:18px; }
   .ops-grid-2 { display:grid; gap:18px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .ops-summary { display:grid; gap:12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .ops-summary-card { border:1px solid var(--rosa-deep); border-radius:14px; background:#fff; padding:14px 16px; }
   .ops-summary-card strong { display:block; font-size:28px; color:var(--vino); line-height:1; margin-bottom:8px; }
+  .ops-shell .module-tabs { display:flex; flex-wrap:wrap; gap:8px; overflow-x:auto; }
+  .route-plan-grid { display:grid; gap:12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .route-plan-field { display:grid; gap:6px; }
+  .route-plan-field label { font-weight:800; color:var(--vino); }
+  .route-action-row { display:flex; flex-wrap:wrap; gap:10px 12px; align-items:center; }
+  .route-action-row form { margin:0; }
+  .route-plan-actions { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:12px; }
+  .route-status-note { padding:10px 12px; border-radius:8px; background:#fff7e6; border:1px solid #ffd58a; color:#5d3b00; font-weight:700; }
+  .point-reception-head { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-start; justify-content:space-between; margin-bottom:12px; }
+  .point-reception-copy { max-width:680px; }
+  .point-status { display:inline-flex; align-items:center; min-height:28px; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:800; }
+  .point-status.is-success { color:#0f5132; background:#d1e7dd; }
+  .point-status.is-warning { color:#664d03; background:#fff3cd; }
+  .point-status.is-danger { color:#842029; background:#f8d7da; }
+  .route-load-subsection { margin-top:16px; }
+  .route-load-subsection + .route-load-subsection { margin-top:24px; padding-top:18px; border-top:1px solid #eadce3; }
+  .route-load-subtitle { margin:0 0 4px; color:var(--vino); font-size:1rem; font-weight:900; }
+  .route-load-caption { margin:0 0 10px; color:#7b6b73; font-size:.9rem; font-weight:700; }
+  .route-load-subsection .table th.text-end,
+  .route-load-subsection .table td.text-end {
+    text-align:right;
+    font-variant-numeric:tabular-nums;
+  }
+  .route-inline-form { display:grid; gap:6px; min-width:220px; }
+  .route-inline-number { max-width:120px; text-align:right; }
+  .route-delivery-modal[hidden] { display:none; }
+  .route-delivery-modal { position:fixed; inset:0; z-index:1350; display:flex; align-items:center; justify-content:center; padding:18px; }
+  .route-delivery-backdrop { position:absolute; inset:0; background:rgba(61,10,36,.36); backdrop-filter:blur(3px); }
+  .route-delivery-card { position:relative; width:min(460px, 100%); border-radius:12px; background:#fff; color:#3d0a24; padding:22px; box-shadow:0 16px 28px rgba(61,10,36,.2); }
+  .route-delivery-head { display:flex; gap:12px; align-items:flex-start; justify-content:space-between; margin-bottom:16px; }
+  .route-delivery-title { margin:0; color:var(--vino); font-family:"Playfair Display", Georgia, serif; font-size:1.35rem; line-height:1.2; }
+  .route-delivery-stop { margin:4px 0 0; color:#7b6b73; font-weight:800; }
+  .route-delivery-body { display:grid; gap:12px; }
+  .route-delivery-field { display:grid; gap:6px; }
+  .route-delivery-field label { color:var(--vino); font-weight:900; }
+  .route-delivery-field textarea { min-height:92px; resize:vertical; }
+  .route-delivery-actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:18px; padding-top:14px; border-top:1px solid #eadce3; }
+  .route-loading-overlay { display:none; position:fixed; inset:0; z-index:1300; align-items:center; justify-content:center; padding:18px; background:rgba(61,10,36,.28); backdrop-filter:blur(3px); }
+  .route-loading-overlay.active { display:flex; }
+  .route-loading-card { width:min(420px, 100%); border-radius:12px; background:linear-gradient(180deg, #fff 0%, #fdf2f6 100%); color:#3d0a24; padding:28px; text-align:center; box-shadow:0 10px 14px rgba(61,10,36,.18); }
+  .route-loading-brand { color:#7b1a48; font-family:"Playfair Display", Georgia, serif; font-size:1.15rem; font-weight:800; margin-bottom:16px; }
+  .route-loading-unit { position:relative; width:min(232px, 100%); height:64px; margin:0 auto 18px; overflow:hidden; color:#7b1a48; }
+  .route-loading-unit::before { content:""; position:absolute; left:8px; right:8px; bottom:11px; height:4px; border-radius:999px; background:linear-gradient(90deg, transparent 0 8px, rgba(123,26,72,.28) 8px 18px); background-size:28px 4px; animation:route-road .7s linear infinite; }
+  .route-loading-unit .ti { position:absolute; left:0; bottom:16px; font-size:44px; line-height:1; filter:drop-shadow(0 5px 3px rgba(61,10,36,.18)); animation:route-unit-drive 1.45s cubic-bezier(.45, 0, .25, 1) infinite; }
+  .route-loading-bar { height:7px; margin:18px 0 12px; overflow:hidden; border-radius:999px; background:#eadce3; }
+  .route-loading-bar span { display:block; width:42%; height:100%; border-radius:inherit; background:#7b1a48; animation:route-bar 1.35s cubic-bezier(.23, 1, .32, 1) infinite; }
+  .route-loading-note { font-size:.85rem; font-weight:800; color:#7b1a48; }
+  @keyframes route-unit-drive { 0% { transform:translateX(0) translateY(0); } 48% { transform:translateX(178px) translateY(-2px); } 52% { transform:translateX(178px) translateY(-2px) scaleX(-1); } 100% { transform:translateX(0) translateY(0) scaleX(-1); } }
+  @keyframes route-road { 0% { background-position-x:0; } 100% { background-position-x:-28px; } }
+  @keyframes route-bar { 0% { transform:translateX(-120%); } 100% { transform:translateX(240%); } }
+  @media (prefers-reduced-motion: reduce) {
+    .route-loading-unit::before, .route-loading-unit .ti, .route-loading-bar span { animation:none; }
+    .route-loading-unit .ti { left:50%; transform:translateX(-50%); }
+    .route-loading-bar span { width:100%; opacity:.7; }
+  }
   @media (max-width: 960px) { .ops-grid-2, .ops-summary { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) { .route-plan-grid { grid-template-columns:1fr; } }
 </style>
-<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
+<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260621-button-gap-v1">
 {% endblock %}
 
 {% block content %}
 <div class="ops-shell">
-  <section class="module-tabs" aria-label="Submódulos Logística">
+  <section class="module-tabs report-tabs" aria-label="Submódulos Logística">
     {% for tab in module_tabs %}
       <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
     {% endfor %}
@@ -29,36 +86,136 @@
     <div class="ops-summary">
       <article class="ops-summary-card"><span class="muted">Ruta</span><strong style="font-size:22px;">{{ ruta.nombre }}</strong><div>{{ ruta.folio }}</div></article>
       <article class="ops-summary-card"><span class="muted">Fecha</span><strong style="font-size:22px;">{{ ruta.fecha_ruta|date:"Y-m-d" }}</strong><div>{{ ruta.get_estatus_display }}</div></article>
-      <article class="ops-summary-card"><span class="muted">Chofer / unidad</span><strong style="font-size:22px;">{{ ruta.chofer|default:"-" }}</strong><div>{{ ruta.unidad|default:"Sin unidad" }}</div></article>
-      <article class="ops-summary-card"><span class="muted">Monto estimado</span><strong>${{ ruta.monto_estimado_total|floatformat:2|intcomma }}</strong><div>{{ ruta.total_entregas|intcomma }} entregas visibles</div></article>
+      <article class="ops-summary-card"><span class="muted">Repartidor / unidad</span><strong style="font-size:22px;">{{ ruta.repartidor|default:ruta.chofer|default:"-" }}</strong><div>{{ ruta.unidad_operativa|default:ruta.unidad|default:"Sin unidad" }}</div></article>
+      <article class="ops-summary-card"><span class="muted">Paradas</span><strong>{{ paradas|length|intcomma }}</strong><div>Valor pedidos ${{ ruta.monto_estimado_total|floatformat:2|intcomma }}</div></article>
     </div>
     <div class="table-responsive" style="margin-top:14px;">
       <table class="table table-striped">
         <tbody>
           <tr><th>Folio</th><td>{{ ruta.folio }}</td><th>Estatus</th><td>{{ ruta.get_estatus_display }}</td></tr>
-          <tr><th>Chofer</th><td>{{ ruta.chofer|default:"-" }}</td><th>Unidad</th><td>{{ ruta.unidad|default:"-" }}</td></tr>
+          <tr><th>Repartidor</th><td>{{ ruta.repartidor|default:"Sin asignar" }}</td><th>Unidad operativa</th><td>{{ ruta.unidad_operativa|default:"Sin asignar" }}</td></tr>
+          <tr><th>Acompañante</th><td>{{ ruta.acompanante|default:ruta.acompanante_manual|default:"-" }}</td><th>Unidad manual</th><td>{{ ruta.unidad|default:"-" }}</td></tr>
+          <tr><th>Chofer manual respaldo</th><td colspan="3">{{ ruta.chofer|default:"-" }}</td></tr>
+          <tr>
+            <th>Ruta programada</th>
+            <td>
+              {% if ruta.ruta_programada_distancia_metros %}
+                {{ ruta.ruta_programada_distancia_metros|intcomma }} m
+              {% else %}
+                Sin cálculo
+              {% endif %}
+            </td>
+            <th>Fuente ruteo</th>
+            <td>{{ ruta.ruta_programada_fuente|default:"Pendiente" }}</td>
+          </tr>
           <tr><th>Notas</th><td colspan="3">{{ ruta.notas|default:"-" }}</td></tr>
         </tbody>
       </table>
+    </div>
+    <div class="ops-summary" style="margin-top:14px;">
+      <article class="ops-summary-card"><span class="muted">Tránsito programado</span><strong>{{ tiempos_ruta.transito_programado_minutos }}</strong><div>minutos en ruta</div></article>
+      <article class="ops-summary-card"><span class="muted">Promedio en puntos</span><strong>{{ tiempos_ruta.surtido_estimado_minutos }}</strong><div>minutos de surtido</div></article>
+      <article class="ops-summary-card"><span class="muted">Total esperado</span><strong>{{ tiempos_ruta.total_operativo_estimado_minutos }}</strong><div>tránsito + surtido</div></article>
+      <article class="ops-summary-card"><span class="muted">Fuente</span><strong style="font-size:22px;">{{ ruta.ruta_programada_fuente|default:"Pendiente" }}</strong><div>Google o respaldo interno</div></article>
     </div>
   </section>
 
   <section class="ops-grid-2">
     <article class="card">
-      <div class="card-header">Actualizar ruta</div>
-      {% if can_manage_logistica %}
+      <div class="card-header">Planeación operativa</div>
+      {% if can_manage_logistica and ruta.estatus == "PLANEADA" %}
       <form method="post" class="filters" style="margin-bottom:0;">
         {% csrf_token %}
-        <input type="hidden" name="action" value="ruta_status">
-        <select class="input-field" name="estatus">
-          {% for value,label in estatus_ruta_choices %}
-          <option value="{{ value }}" {% if ruta.estatus == value %}selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
-        <button class="btn btn-primary" type="submit">Actualizar estatus ruta</button>
+        <input type="hidden" name="action" value="update_plan">
+        <div class="route-plan-grid">
+          <div class="route-plan-field">
+            <label for="id_ruta_nombre">Nombre de ruta</label>
+            <input class="input-field" id="id_ruta_nombre" type="text" name="nombre" value="{{ ruta.nombre }}" required>
+          </div>
+          <div class="route-plan-field">
+            <label for="id_fecha_ruta">Fecha de ruta</label>
+            <input class="input-field" id="id_fecha_ruta" type="date" name="fecha_ruta" value="{{ ruta.fecha_ruta|date:'Y-m-d' }}">
+          </div>
+          <div class="route-plan-field">
+            <label for="id_repartidor">Repartidor operativo</label>
+            <select class="input-field" id="id_repartidor" name="repartidor">
+              <option value="">Sin asignar</option>
+              {% for repartidor in repartidores %}
+              <option value="{{ repartidor.id }}" {% if ruta.repartidor_id == repartidor.id %}selected{% endif %}>{{ repartidor }}{% if repartidor.unidad_asignada %} · {{ repartidor.unidad_asignada.codigo }}{% endif %}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="route-plan-field">
+            <label for="id_unidad_operativa">Unidad operativa</label>
+            <select class="input-field" id="id_unidad_operativa" name="unidad_operativa">
+              <option value="">Sin asignar</option>
+              {% for unidad in unidades %}
+              <option value="{{ unidad.id }}" {% if ruta.unidad_operativa_id == unidad.id %}selected{% endif %}>{{ unidad.codigo }} · {{ unidad.placa|default:unidad.descripcion }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="route-plan-field">
+            <label for="id_acompanante">Acompañante operativo</label>
+            <select class="input-field" id="id_acompanante" name="acompanante">
+              <option value="">Sin acompañante</option>
+              {% for repartidor in repartidores %}
+              <option value="{{ repartidor.id }}" {% if ruta.acompanante_id == repartidor.id %}selected{% endif %}>{{ repartidor }}{% if repartidor.unidad_asignada %} · {{ repartidor.unidad_asignada.codigo }}{% endif %}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="route-plan-field">
+            <label for="id_acompanante_manual">Acompañante manual</label>
+            <input class="input-field" id="id_acompanante_manual" type="text" name="acompanante_manual" value="{{ ruta.acompanante_manual }}" placeholder="Solo si no está en catálogo">
+          </div>
+          <div class="route-plan-field">
+            <label for="id_chofer_manual">Chofer manual respaldo</label>
+            <input class="input-field" id="id_chofer_manual" type="text" name="chofer" value="{{ ruta.chofer }}" placeholder="Solo si no está en catálogo">
+          </div>
+          <div class="route-plan-field">
+            <label for="id_unidad_manual">Unidad manual</label>
+            <input class="input-field" id="id_unidad_manual" type="text" name="unidad" value="{{ ruta.unidad }}" placeholder="Compatibilidad">
+          </div>
+          <div class="route-plan-field">
+            <label for="id_km_estimado">KM estimado opcional</label>
+            <input class="input-field" id="id_km_estimado" type="number" min="0" step="0.01" name="km_estimado" value="{{ ruta.km_estimado }}">
+          </div>
+          <div class="route-plan-field">
+            <label for="id_notas_ruta">Notas internas</label>
+            <input class="input-field" id="id_notas_ruta" type="text" name="notas" value="{{ ruta.notas }}">
+          </div>
+        </div>
+        <button class="btn btn-primary" type="submit">Guardar planeación</button>
       </form>
+      {% elif can_manage_logistica %}
+      <div class="route-status-note">La planeación está congelada porque la ruta ya inició o quedó cerrada.</div>
       {% else %}
       <div class="muted">Tu rol es de consulta. No puedes editar la ruta.</div>
+      {% endif %}
+      {% if can_manage_logistica and ruta.estatus != "COMPLETADA" and ruta.estatus != "CANCELADA" %}
+      <form method="post" class="filters" style="margin-top:12px; margin-bottom:0;" onsubmit="return confirmRouteStatusChange(this);">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="ruta_status">
+        <div class="route-plan-field">
+          <label for="id_estatus_ruta">Estatus de ruta</label>
+          <select class="input-field" id="id_estatus_ruta" name="estatus">
+            {% for value,label in estatus_ruta_choices %}
+            <option value="{{ value }}" {% if ruta.estatus == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button class="btn btn-primary" type="submit">Actualizar estatus</button>
+      </form>
+      {% if not ruta.repartidor_id or not ruta.unidad_operativa_id or not paradas %}
+      <div class="route-status-note" style="margin-top:12px;">Para liberar seguimiento: asigna repartidor, unidad operativa y al menos una parada.</div>
+      {% endif %}
+      {% if cierre_diferencia_disponible %}
+      <form method="post" style="margin-top:12px;" onsubmit="return confirm('¿Cerrar la ruta con diferencia autorizada y alertar a Logística?');">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="cerrar_con_diferencia_autorizada">
+        <input type="hidden" name="notas_cierre_diferencia" value="Cierre autorizado con diferencia para revisión posterior de Logística.">
+        <button class="btn btn-danger" type="submit">Cerrar con diferencia autorizada</button>
+      </form>
+      {% endif %}
       {% endif %}
       <div class="kpi-grid" style="margin-top:14px;">
         {% for card in operational_health_cards %}
@@ -72,37 +229,339 @@
     </article>
 
     <article class="card">
-      <div class="card-header">Agregar entrega</div>
-      {% if can_manage_logistica %}
+      <div class="card-header">Agregar parada</div>
+      {% if can_manage_logistica and ruta.estatus in "PLANEADA EN_RUTA" %}
       <form method="post" class="filters" style="margin-bottom:0;">
         {% csrf_token %}
-        <input type="hidden" name="action" value="add_entrega">
-        <input class="input-field" type="number" min="1" name="secuencia" value="{{ ruta.total_entregas|add:1 }}" placeholder="#">
-        <select class="input-field" name="pedido_id">
-          <option value="">Pedido opcional...</option>
-          {% for p in pedidos %}
-          <option value="{{ p.id }}">{{ p.folio }} · {{ p.cliente.nombre }} · {{ p.descripcion|truncatechars:50 }}</option>
-          {% endfor %}
-        </select>
-        <input class="input-field" type="text" name="cliente_nombre" placeholder="Cliente (si no eliges pedido)">
-        <input class="input-field" type="text" name="direccion" placeholder="Dirección de entrega">
-        <input class="input-field" type="text" name="contacto" placeholder="Contacto">
-        <input class="input-field" type="text" name="telefono" placeholder="Teléfono">
-        <input class="input-field" type="datetime-local" name="ventana_inicio">
-        <input class="input-field" type="datetime-local" name="ventana_fin">
-        <select class="input-field" name="estatus">
-          {% for value,label in estatus_entrega_choices %}
-          <option value="{{ value }}">{{ label }}</option>
-          {% endfor %}
-        </select>
-        <input class="input-field" type="number" min="0" step="0.01" name="monto_estimado" placeholder="Monto estimado">
-        <input class="input-field" type="text" name="comentario" placeholder="Comentario opcional">
-        <button class="btn btn-primary" type="submit">Guardar entrega</button>
+        <input type="hidden" name="action" value="add_parada">
+        {% if ruta.estatus == "EN_RUTA" %}
+        <div class="muted" style="grid-column:1/-1;">Ruta en curso: solo agrega CEDIS para recarga.</div>
+        {% endif %}
+        <div class="route-plan-grid">
+          <div class="route-plan-field">
+            <label for="id_parada_orden">Orden</label>
+            <input class="input-field" id="id_parada_orden" type="number" min="1" name="orden" value="{{ paradas|length|add:1 }}">
+          </div>
+          <div class="route-plan-field">
+            <label for="id_parada_punto">Punto logístico</label>
+            <select class="input-field" id="id_parada_punto" name="punto" required>
+              <option value="">Selecciona punto</option>
+              {% for punto in puntos_logisticos %}
+              <option value="{{ punto.id }}"{% if ruta.estatus == "EN_RUTA" and punto.tipo != "CEDIS" %} disabled{% endif %}>{{ punto.nombre }} · {{ punto.get_tipo_display }} · {{ punto.radio_geocerca_metros }} m</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="route-plan-field">
+            <label for="id_hora_estimada">Hora estimada</label>
+            <input class="input-field" id="id_hora_estimada" type="datetime-local" name="hora_estimada">
+          </div>
+          <div class="route-plan-field">
+            <label for="id_notas_parada">Notas de parada</label>
+            <input class="input-field" id="id_notas_parada" type="text" name="notas">
+          </div>
+        </div>
+        <div class="route-plan-actions">
+          <button class="btn btn-primary" type="submit">Agregar parada</button>
+          <a class="btn btn-secondary" href="{% url 'logistica:puntos_logisticos' %}">Crear punto</a>
+        </div>
       </form>
       {% else %}
-      <div class="muted">Tu rol es de consulta. No puedes editar entregas.</div>
+      <div class="muted">{% if can_manage_logistica %}La planeación de paradas está congelada para conservar evidencia.{% else %}Tu rol es de consulta. No puedes editar paradas.{% endif %}</div>
       {% endif %}
     </article>
+  </section>
+
+  <section class="card">
+    <div class="card-header">Paradas y geocercas</div>
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Orden</th>
+            <th>Punto</th>
+            <th>Tipo</th>
+            <th>Radio</th>
+            <th>Hora estimada</th>
+            <th>Promedio surtido</th>
+            <th>Permanencia real</th>
+            <th>Estado</th>
+            <th>Entrega</th>
+            {% if can_manage_logistica and ruta.estatus in "PLANEADA EN_RUTA" %}<th>Acciones</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in paradas_tiempos %}
+          {% with parada=row.parada %}
+          <tr>
+            <td>{{ parada.orden }}</td>
+            <td>{{ parada.punto_nombre_snapshot }}</td>
+            <td>{{ parada.punto.get_tipo_display }}</td>
+            <td>{{ parada.radio_geocerca_metros }} m</td>
+            <td>{% if parada.hora_estimada %}{{ parada.hora_estimada|date:"Y-m-d H:i" }}{% else %}-{% endif %}</td>
+            <td>{% if row.promedio_surtido_minutos is not None %}{{ row.promedio_surtido_minutos }} min{% else %}Sin historial{% endif %}</td>
+            <td>{% if row.permanencia_real_minutos is not None %}{{ row.permanencia_real_minutos }} min{% else %}-{% endif %}</td>
+            <td>{{ parada.get_estado_display }}</td>
+            <td>{% if parada.punto.tipo == "CEDIS" %}Recarga CEDIS{% else %}{{ parada.get_entrega_estado_display }}{% endif %}</td>
+            {% if can_manage_logistica and ruta.estatus in "PLANEADA EN_RUTA" %}
+            <td>
+              <div class="route-action-row">
+                {% if ruta.estatus == "PLANEADA" %}
+                <form method="post">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="move_parada">
+                  <input type="hidden" name="parada_id" value="{{ parada.id }}">
+                  <input type="hidden" name="direction" value="up">
+                  <button class="btn btn-secondary btn-small" type="submit">Subir</button>
+                </form>
+                <form method="post">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="move_parada">
+                  <input type="hidden" name="parada_id" value="{{ parada.id }}">
+                  <input type="hidden" name="direction" value="down">
+                  <button class="btn btn-secondary btn-small" type="submit">Bajar</button>
+                </form>
+                {% endif %}
+                <form method="post">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="delete_parada">
+                  <input type="hidden" name="parada_id" value="{{ parada.id }}">
+                  <button class="btn btn-danger btn-small" type="submit" onclick="return confirm('¿Eliminar parada de la ruta?')">Quitar</button>
+                </form>
+                {% if ruta.estatus == "EN_RUTA" and parada.punto.tipo != "CEDIS" %}
+                <button
+                  class="btn btn-secondary btn-small"
+                  type="button"
+                  data-delivery-edit
+                  data-parada-id="{{ parada.id }}"
+                  data-parada-nombre="{{ parada.punto_nombre_snapshot }}"
+                  data-entrega-estado="{{ parada.entrega_estado }}"
+                  data-entrega-notas="{{ parada.entrega_notas|default_if_none:'' }}"
+                  aria-controls="delivery-edit-modal"
+                >Editar entrega</button>
+                {% endif %}
+              </div>
+            </td>
+            {% endif %}
+          </tr>
+          {% endwith %}
+          {% empty %}
+          <tr><td colspan="{% if can_manage_logistica and ruta.estatus in 'PLANEADA EN_RUTA' %}10{% else %}9{% endif %}" class="muted">Sin paradas. Agrega puntos logísticos para validar llegada por GPS.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">Carga esperada CEDIS por parada</div>
+    <div class="point-reception-head">
+      <div class="point-reception-copy">
+        <p class="muted" style="margin:0;">
+          Fuente principal: solicitud de reabasto CEDIS. Point solo confirma salida o recepción cuando aplica.
+        </p>
+      </div>
+      {% if can_manage_logistica %}
+      <form method="post" data-route-loading-form data-loading-title="Actualizando carga esperada" data-loading-message="Consultando solicitudes, salidas Point y carga CEDIS...">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="sync_carga_point">
+        <button class="btn btn-secondary" type="submit">Actualizar carga esperada</button>
+      </form>
+      {% if ruta.estatus in "EN_RUTA COMPLETADA" %}
+      <form method="post" data-route-loading-form data-loading-title="Actualizando recepción Point" data-loading-message="Comparando lo entregado contra recepción de sucursal...">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="sync_recepcion_point">
+        <button class="btn btn-secondary" type="submit">Actualizar recepción Point</button>
+      </form>
+      {% endif %}
+      {% endif %}
+      {% if can_manage_logistica and carga_manual_pendiente %}
+      <form method="post" data-route-loading-form data-loading-title="Confirmando carga manual" data-loading-message="Registrando cantidades confirmadas por logística..." onsubmit="return confirm('¿Confirmar manualmente toda la carga pendiente? Esto usará la cantidad esperada para cargar.');">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="confirmar_carga_manual">
+        <input type="hidden" name="notas_carga_manual" value="Carga confirmada manualmente por logística.">
+        <button class="btn btn-primary" type="submit">Confirmar carga manual</button>
+      </form>
+      {% endif %}
+      {% if recarga_cedis_disponible %}
+      <form method="post" data-route-loading-form data-loading-title="Registrando recarga CEDIS" data-loading-message="Actualizando el flujo de carga de la unidad..." onsubmit="return confirm('¿Registrar recarga CEDIS para esta misma ruta?');">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="registrar_recarga_cedis">
+        <input type="hidden" name="notas_recarga_cedis" value="Recarga registrada por CEDIS/Logística.">
+        <button class="btn btn-secondary" type="submit">
+          {% if ruta.estatus == "PLANEADA" %}Autorizar salida parcial con recarga{% else %}Registrar evento recarga CEDIS{% endif %}
+        </button>
+      </form>
+      {% endif %}
+      {% if diferencia_carga_pendiente_autorizar %}
+      <form method="post" data-route-loading-form data-loading-title="Autorizando diferencia" data-loading-message="Registrando autorización de logística..." onsubmit="return confirm('¿Autorizar que esta ruta se libere con la diferencia de carga reportada?');">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="autorizar_diferencia_carga">
+        <input type="hidden" name="autorizado" value="1">
+        <input type="hidden" name="notas_autorizacion_carga" value="Diferencia de carga autorizada por logística.">
+        <button class="btn btn-primary" type="submit">Autorizar ruta con diferencia</button>
+      </form>
+      <form method="post" data-route-loading-form data-loading-title="Rechazando diferencia" data-loading-message="Registrando rechazo de logística..." onsubmit="return confirm('¿Rechazar la liberación de esta ruta? Seguirá bloqueada hasta corregir la carga.');">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="autorizar_diferencia_carga">
+        <input type="hidden" name="autorizado" value="0">
+        <input type="hidden" name="notas_autorizacion_carga" value="Diferencia de carga rechazada por logística.">
+        <button class="btn btn-secondary" type="submit">Rechazar</button>
+      </form>
+      {% endif %}
+    </div>
+    {% if recepcion_point_totales %}
+    <div class="route-load-subsection">
+      <h3 class="route-load-subtitle">Totales por producto</h3>
+      <p class="route-load-caption">Resumen agregado de lo solicitado en Point, enviado por CEDIS y cargado en PWA.</p>
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead>
+            <tr>
+              <th>Producto total</th>
+              <th class="text-end">Esperado total (solicitado Point)</th>
+              <th class="text-end">Ajustado total (enviado Point)</th>
+              <th class="text-end">Cargado total (PWA)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in recepcion_point_totales %}
+            <tr>
+              <td>
+                <strong>{{ row.item_name|default:"Producto sin nombre" }}</strong>
+                <div class="muted">{{ row.item_code|default:"Sin código" }} · {{ row.unit|default:"pz" }}</div>
+              </td>
+              <td class="text-end">{{ row.solicitado|floatformat:-2 }}</td>
+              <td class="text-end">{{ row.enviado|floatformat:-2 }}</td>
+              <td class="text-end">{% if row.cargado_validado or row.cargado_parcial %}{{ row.cargado|floatformat:-2 }}{% else %}-{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+    <div class="route-load-subsection">
+      <h3 class="route-load-subtitle">Detalle por parada</h3>
+      <p class="route-load-caption">Líneas por sucursal o punto logístico para revisar qué corresponde a cada parada.</p>
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead>
+            <tr>
+              <th>Parada</th>
+              <th>Producto</th>
+              <th class="text-end">Esperado (solicitado Point)</th>
+              <th class="text-end">Ajustado (enviado Point)</th>
+              <th class="text-end">Cargado PWA</th>
+              <th>Estado de carga</th>
+              {% if can_manage_logistica and ruta.estatus == "PLANEADA" %}<th>Captura ERP</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in recepcion_point_rows %}
+            <tr>
+              <td>{{ row.parada.orden }} · {{ row.parada.punto_nombre_snapshot }}</td>
+              <td>
+                <strong>{{ row.linea.item_name|default:"Producto sin nombre" }}</strong>
+                <div class="muted">{{ row.linea.item_code|default:"Sin código" }} · {{ row.linea.unit|default:"pz" }}</div>
+              </td>
+              <td class="text-end">{{ row.solicitado|floatformat:-2 }}</td>
+              <td class="text-end">{{ row.enviado|floatformat:-2 }}</td>
+              <td class="text-end">{% if row.cargado_validado %}{{ row.cargado|floatformat:-2 }}{% else %}-{% endif %}</td>
+              <td><span class="point-status is-{{ row.estado_tone }}">{{ row.estado_label }}</span></td>
+              {% if can_manage_logistica and ruta.estatus == "PLANEADA" %}
+              <td>
+                <form method="post" class="route-inline-form" data-route-loading-form data-loading-title="Guardando carga manual" data-loading-message="Registrando cantidad capturada en ERP...">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="confirmar_linea_carga_manual">
+                  <input type="hidden" name="linea_carga_id" value="{{ row.linea.id }}">
+                  <input class="input-field route-inline-number" type="number" step="0.01" min="0" name="cantidad_cargada_manual" value="{% if row.cargado_validado %}{{ row.cargado|floatformat:-2 }}{% else %}{{ row.enviado|floatformat:-2 }}{% endif %}" required>
+                  <select class="input-field" name="motivo_diferencia_manual">
+                    <option value="">Sin diferencia</option>
+                    {% for value,label in motivos_carga_manual %}
+                    <option value="{{ value }}" {% if row.linea.motivo_diferencia == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                  <input class="input-field" type="text" name="notas_carga_manual" placeholder="Nota si aplica">
+                  <button class="btn btn-primary btn-small" type="submit">Guardar</button>
+                </form>
+              </td>
+              {% endif %}
+            </tr>
+            {% empty %}
+            <tr><td colspan="{% if can_manage_logistica and ruta.estatus == "PLANEADA" %}7{% else %}6{% endif %}" class="muted">Sin checklist de carga para esta ruta.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">Agregar entrega</div>
+    {% if can_manage_logistica and ruta.estatus == "PLANEADA" %}
+    <form method="post" class="filters" style="margin-bottom:0;">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="add_entrega">
+      <div class="route-plan-grid">
+        <div class="route-plan-field">
+          <label for="id_entrega_secuencia">Secuencia</label>
+          <input class="input-field" id="id_entrega_secuencia" type="number" min="1" name="secuencia" value="{{ ruta.total_entregas|add:1 }}">
+        </div>
+        <div class="route-plan-field">
+          <label for="id_entrega_pedido">Pedido opcional</label>
+          <select class="input-field" id="id_entrega_pedido" name="pedido_id">
+            <option value="">Pedido opcional...</option>
+            {% for p in pedidos %}
+            <option value="{{ p.id }}">{{ p.folio }} · {{ p.cliente.nombre }} · {{ p.descripcion|truncatechars:50 }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="route-plan-field">
+          <label for="id_cliente_nombre">Cliente</label>
+          <input class="input-field" id="id_cliente_nombre" type="text" name="cliente_nombre" placeholder="Si no eliges pedido">
+        </div>
+        <div class="route-plan-field">
+          <label for="id_direccion_entrega">Dirección de entrega</label>
+          <input class="input-field" id="id_direccion_entrega" type="text" name="direccion">
+        </div>
+        <div class="route-plan-field">
+          <label for="id_contacto_entrega">Contacto</label>
+          <input class="input-field" id="id_contacto_entrega" type="text" name="contacto">
+        </div>
+        <div class="route-plan-field">
+          <label for="id_telefono_entrega">Teléfono</label>
+          <input class="input-field" id="id_telefono_entrega" type="text" name="telefono">
+        </div>
+        <div class="route-plan-field">
+          <label for="id_ventana_inicio">Ventana inicio</label>
+          <input class="input-field" id="id_ventana_inicio" type="datetime-local" name="ventana_inicio">
+        </div>
+        <div class="route-plan-field">
+          <label for="id_ventana_fin">Ventana fin</label>
+          <input class="input-field" id="id_ventana_fin" type="datetime-local" name="ventana_fin">
+        </div>
+        <div class="route-plan-field">
+          <label for="id_estatus_entrega">Estatus entrega</label>
+          <select class="input-field" id="id_estatus_entrega" name="estatus">
+            {% for value,label in estatus_entrega_choices %}
+            <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="route-plan-field">
+          <label for="id_monto_estimado">Monto estimado</label>
+          <input class="input-field" id="id_monto_estimado" type="number" min="0" step="0.01" name="monto_estimado">
+        </div>
+        <div class="route-plan-field">
+          <label for="id_comentario_entrega">Comentario opcional</label>
+          <input class="input-field" id="id_comentario_entrega" type="text" name="comentario">
+        </div>
+      </div>
+      <button class="btn btn-primary" type="submit">Guardar entrega</button>
+    </form>
+    {% else %}
+    <div class="muted">{% if can_manage_logistica %}Las entregas están congeladas para conservar evidencia de la ruta.{% else %}Tu rol es de consulta. No puedes editar entregas.{% endif %}</div>
+    {% endif %}
   </section>
 
   <section class="card">
@@ -119,7 +578,7 @@
             <th class="text-end">Monto</th>
             <th>Estatus</th>
             <th>Comentario</th>
-            {% if can_manage_logistica %}<th>Acciones</th>{% endif %}
+            {% if can_manage_logistica and ruta.estatus == "PLANEADA" %}<th>Acciones</th>{% endif %}
           </tr>
         </thead>
         <tbody>
@@ -146,7 +605,7 @@
               {% endif %}
             </td>
             <td>{{ e.comentario|default:"-" }}</td>
-            {% if can_manage_logistica %}
+            {% if can_manage_logistica and ruta.estatus == "PLANEADA" %}
             <td>
               <form method="post" style="display:inline-flex; gap:6px; align-items:center;">
                 {% csrf_token %}
@@ -169,11 +628,153 @@
             {% endif %}
           </tr>
           {% empty %}
-          <tr><td colspan="9" class="muted">Sin entregas en esta ruta.</td></tr>
+          <tr><td colspan="{% if can_manage_logistica and ruta.estatus == 'PLANEADA' %}9{% else %}8{% endif %}" class="muted">Sin entregas en esta ruta.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </section>
 </div>
+<div class="route-delivery-modal" id="delivery-edit-modal" hidden>
+  <div class="route-delivery-backdrop" data-delivery-close></div>
+  <section class="route-delivery-card" role="dialog" aria-modal="true" aria-labelledby="delivery-edit-title">
+    <div class="route-delivery-head">
+      <div>
+        <h2 class="route-delivery-title" id="delivery-edit-title">Editar entrega</h2>
+        <p class="route-delivery-stop" id="delivery-edit-stop">Selecciona una parada</p>
+      </div>
+      <button class="btn btn-secondary btn-small" type="button" data-delivery-close>Cerrar</button>
+    </div>
+    <form method="post" id="delivery-edit-form" data-route-loading-form data-loading-title="Guardando ajuste de entrega" data-loading-message="Actualizando evidencia operativa de la parada...">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="ajustar_entrega_manual">
+      <input type="hidden" name="parada_id" id="delivery-edit-parada-id">
+      <div class="route-delivery-body">
+        <div class="route-delivery-field">
+          <label for="delivery-edit-estado">Estado de entrega</label>
+          <select name="entrega_estado" id="delivery-edit-estado" class="form-control" required>
+            <option value="ENTREGADA">Entregada</option>
+            <option value="CON_DIFERENCIA">Con diferencia</option>
+            <option value="NO_ENTREGADA">No entregada</option>
+          </select>
+        </div>
+        <div class="route-delivery-field">
+          <label for="delivery-edit-nota">Motivo / evidencia</label>
+          <textarea name="nota_entrega_manual" id="delivery-edit-nota" class="form-control" required placeholder="Ej. Sucursal confirmó por llamada, foto o validación operativa."></textarea>
+        </div>
+      </div>
+      <div class="route-delivery-actions">
+        <button class="btn btn-secondary" type="button" data-delivery-close>Cerrar</button>
+        <button class="btn btn-primary" type="submit">Guardar</button>
+      </div>
+    </form>
+  </section>
+</div>
+<div class="route-loading-overlay" id="route-loading-overlay" role="status" aria-live="polite" aria-hidden="true">
+  <div class="route-loading-card">
+    <div class="route-loading-brand">Pollyana's Dolce</div>
+    <div class="route-loading-unit" aria-hidden="true">
+      <i class="ti ti-truck-delivery"></i>
+    </div>
+    <h2 id="route-loading-title">Actualizando ruta</h2>
+    <p id="route-loading-message">Cargando datos de la unidad...</p>
+    <div class="route-loading-bar" aria-hidden="true"><span></span></div>
+    <p class="route-loading-note">Esto puede tardar unos segundos. No cierres esta ventana.</p>
+  </div>
+</div>
+<script>
+  function confirmRouteStatusChange(form) {
+    const select = form.querySelector("select[name='estatus']");
+    if (!select || select.value === "{{ ruta.estatus }}") return true;
+    const labels = {
+      EN_RUTA: "liberar esta ruta para seguimiento GPS",
+      COMPLETADA: "cerrar esta ruta como completada",
+      CANCELADA: "cancelar esta ruta"
+    };
+    const label = labels[select.value];
+    if (!label) return true;
+    return window.confirm(`Confirma que deseas ${label}. Esta acción afecta la evidencia operativa.`);
+  }
+
+  (function () {
+    const modal = document.getElementById("delivery-edit-modal");
+    const form = document.getElementById("delivery-edit-form");
+    if (!modal || !form) return;
+
+    const paradaInput = document.getElementById("delivery-edit-parada-id");
+    const stopLabel = document.getElementById("delivery-edit-stop");
+    const estadoInput = document.getElementById("delivery-edit-estado");
+    const notaInput = document.getElementById("delivery-edit-nota");
+
+    function closeDeliveryModal() {
+      modal.hidden = true;
+      form.reset();
+    }
+
+    function openDeliveryModal(button) {
+      paradaInput.value = button.dataset.paradaId || "";
+      stopLabel.textContent = button.dataset.paradaNombre || "Parada";
+      estadoInput.value = button.dataset.entregaEstado || "ENTREGADA";
+      if (estadoInput.value !== button.dataset.entregaEstado) {
+        estadoInput.value = "ENTREGADA";
+      }
+      notaInput.value = button.dataset.entregaNotas || "";
+      modal.hidden = false;
+      estadoInput.focus();
+    }
+
+    document.querySelectorAll("[data-delivery-edit]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        openDeliveryModal(button);
+      });
+    });
+
+    modal.querySelectorAll("[data-delivery-close]").forEach(function (button) {
+      button.addEventListener("click", closeDeliveryModal);
+    });
+
+    form.addEventListener("submit", function () {
+      modal.hidden = true;
+    });
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && !modal.hidden) closeDeliveryModal();
+    });
+  })();
+
+  (function () {
+    const overlay = document.getElementById("route-loading-overlay");
+    const title = document.getElementById("route-loading-title");
+    const message = document.getElementById("route-loading-message");
+    if (!overlay) return;
+
+    function showRouteLoading(form, submit) {
+      if (submit) {
+        submit.setAttribute("aria-disabled", "true");
+        submit.dataset.originalText = submit.textContent;
+        submit.textContent = "Procesando...";
+      }
+      if (title) title.textContent = form.dataset.loadingTitle || "Actualizando ruta";
+      if (message) message.textContent = form.dataset.loadingMessage || "Cargando datos de la unidad...";
+      overlay.classList.add("active");
+      overlay.setAttribute("aria-hidden", "false");
+    }
+
+    document.querySelectorAll("[data-route-loading-form]").forEach(function (form) {
+      form.querySelectorAll("[type=submit]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          form._routeSubmitter = button;
+        });
+      });
+      form.addEventListener("submit", function () {
+        showRouteLoading(form, form._routeSubmitter || form.querySelector("[type=submit]"));
+      });
+    });
+
+    window.addEventListener("pageshow", function () {
+      overlay.classList.remove("active");
+      overlay.setAttribute("aria-hidden", "true");
+    });
+  })();
+</script>
 {% endblock %}

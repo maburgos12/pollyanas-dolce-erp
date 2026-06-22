@@ -1,4 +1,5 @@
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -493,3 +494,110 @@ class MantenimientoUnifiedInboxTests(TestCase):
         dashboard = self.client.get(reverse("mantenimiento:dashboard"))
         programado = next(col for col in dashboard.context["kanban_columns"] if col["key"] == "programado")
         self.assertIn(f"orden:{orden.id}", [item["uid"] for item in programado["items"]])
+
+    def test_maintenance_can_open_unit_report_form_without_logistics_permission(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mantenimiento:crear-reporte-unidad"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Nuevo reporte de unidad")
+        self.assertContains(response, "Levanta desde Mantenimiento")
+        self.assertContains(response, self.unidad.codigo)
+
+    def test_maintenance_can_create_unit_report_for_missing_driver_capture(self):
+        self.client.force_login(self.user)
+        initial_count = ReporteUnidad.objects.count()
+
+        with patch("logistica.signals.notificar_reporte_nuevo.delay") as notify_delay:
+            response = self.client.post(
+                reverse("mantenimiento:crear-reporte-unidad"),
+                {
+                    "unidad": str(self.unidad.id),
+                    "repartidor": str(self.repartidor.id),
+                    "tipo": ReporteUnidad.TIPO_LLANTA,
+                    "severidad": ReporteUnidad.SEVERIDAD_CRITICO,
+                    "descripcion": "Llanta trasera reportada por llamada, no se capturo en app.",
+                    "kilometraje": "88210",
+                },
+            )
+
+        self.assertRedirects(response, reverse("mantenimiento:dashboard"))
+        self.assertEqual(ReporteUnidad.objects.count(), initial_count + 1)
+        reporte = ReporteUnidad.objects.latest("id")
+        notify_delay.assert_called_once_with(reporte.id)
+        self.assertEqual(reporte.unidad, self.unidad)
+        self.assertEqual(reporte.repartidor, self.repartidor)
+        self.assertEqual(reporte.tipo, ReporteUnidad.TIPO_LLANTA)
+        self.assertEqual(reporte.severidad, ReporteUnidad.SEVERIDAD_CRITICO)
+        self.assertEqual(reporte.estatus, ReporteUnidad.ESTATUS_ABIERTO)
+        self.assertEqual(reporte.kilometraje, 88210)
+        self.assertEqual(reporte.asignado_a, self.user)
+        self.assertIn("Mantenimiento", reporte.notas_compras)
+
+    def test_maintenance_unit_report_form_does_not_create_invalid_report(self):
+        self.client.force_login(self.user)
+        initial_count = ReporteUnidad.objects.count()
+
+        response = self.client.post(
+            reverse("mantenimiento:crear-reporte-unidad"),
+            {
+                "unidad": "",
+                "tipo": ReporteUnidad.TIPO_FALLA,
+                "severidad": ReporteUnidad.SEVERIDAD_URGENTE,
+                "descripcion": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ReporteUnidad.objects.count(), initial_count)
+        self.assertContains(response, "Selecciona una unidad.")
+        self.assertContains(response, "La descripción es obligatoria.")
+
+    def test_maintenance_unit_report_rejects_negative_kilometraje(self):
+        self.client.force_login(self.user)
+        initial_count = ReporteUnidad.objects.count()
+
+        response = self.client.post(
+            reverse("mantenimiento:crear-reporte-unidad"),
+            {
+                "unidad": str(self.unidad.id),
+                "tipo": ReporteUnidad.TIPO_FALLA,
+                "severidad": ReporteUnidad.SEVERIDAD_INFORMATIVO,
+                "descripcion": "Validacion directa desde mantenimiento.",
+                "kilometraje": "-1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ReporteUnidad.objects.count(), initial_count)
+        self.assertContains(response, "El kilometraje no puede ser negativo.")
+
+    def test_maintenance_unit_report_rejects_non_image_evidence(self):
+        self.client.force_login(self.user)
+        initial_count = ReporteUnidad.objects.count()
+
+        response = self.client.post(
+            reverse("mantenimiento:crear-reporte-unidad"),
+            {
+                "unidad": str(self.unidad.id),
+                "tipo": ReporteUnidad.TIPO_FALLA,
+                "severidad": ReporteUnidad.SEVERIDAD_INFORMATIVO,
+                "descripcion": "Archivo no permitido desde mantenimiento.",
+                "foto": SimpleUploadedFile("evidencia.txt", b"texto", content_type="text/plain"),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ReporteUnidad.objects.count(), initial_count)
+        self.assertContains(response, "La evidencia debe ser una imagen JPG o PNG.")
+
+    def test_dashboard_shows_maintenance_instruction_actions(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mantenimiento:dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "+ Falla / imprevisto")
+        self.assertContains(response, "+ Servicio sin orden")
+        self.assertContains(response, "+ Programar servicio")

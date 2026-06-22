@@ -17,180 +17,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:ital,wght@0,700;1,400&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<style>
-:root{
-  --wine:#8B2252;--wine-light:rgba(139,34,82,.08);--wine-mid:rgba(139,34,82,.18);
-  --gold:#C9A84C;--gold-light:rgba(201,168,76,.12);
-  --ink:#1C1520;--sub:#6B5F70;--faint:#B8ADBE;
-  --line:#EDE6F0;--bg:#F9F5F8;--card:#FFFFFF;
-  --ok:#166534;--ok-bg:#DCFCE7;--bad:#991B1B;--bad-bg:#FEE2E2;
-  --r:10px;--r-sm:6px;--sh:0 1px 3px rgba(0,0,0,.07),0 1px 2px rgba(0,0,0,.04);
-}
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--ink);font-family:Nunito,sans-serif;font-size:14px;line-height:1.5}
-.hdr{position:sticky;top:0;z-index:20;background:var(--card);border-bottom:1px solid var(--line);padding:12px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.hdr-brand{display:flex;align-items:center;gap:10px;flex:1;min-width:200px}
-.hdr-icon{width:36px;height:36px;border-radius:50%;background:var(--wine);display:flex;align-items:center;justify-content:center;flex:none}
-.hdr-icon svg{width:18px;height:18px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.hdr-title{font-family:"Playfair Display",serif;font-size:20px;color:var(--wine);line-height:1.1}
-.hdr-sub{font-size:11px;color:var(--sub);margin-top:1px}
-.hdr-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.hdr-controls input[type=number]{width:60px;padding:6px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font:inherit;font-size:13px;color:var(--ink);background:var(--bg);text-align:center}
-.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:var(--r-sm);font:inherit;font-size:13px;font-weight:700;cursor:pointer;border:none;transition:opacity .15s,background .15s}
-.btn-wine{background:var(--wine);color:#fff}.btn-wine:hover{opacity:.88}
-.btn-ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}.btn-ghost:hover{background:var(--line)}
-.btn-logout{color:var(--bad);border-color:rgba(153,27,27,.24);text-decoration:none;background:#fff}
-.btn-logout:hover{background:var(--bad-bg);border-color:rgba(153,27,27,.38)}
-.btn-sm{padding:5px 10px;font-size:12px}
-.status-bar{background:var(--wine);color:#fff;font-size:12px;font-weight:700;padding:6px 20px;display:flex;align-items:center;gap:8px}
-.status-bar.ok{background:#166534}.status-bar.err{background:#991B1B}
-.tabs-wrap{background:var(--card);border-bottom:1px solid var(--line);padding:0 20px;display:flex;overflow-x:auto}
-.tab-btn{padding:12px 16px;font:inherit;font-size:13px;font-weight:700;color:var(--sub);background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap;transition:all .15s}
-.tab-btn:hover{color:var(--wine)}.tab-btn.on{color:var(--wine);border-bottom-color:var(--wine)}
-main{padding:20px;max-width:1100px;margin:0 auto}
-.periodo-bar{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px;box-shadow:var(--sh)}
-.periodo-label{font-size:12px;color:var(--sub);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
-.periodo-id{font-size:13px;font-weight:800;color:var(--wine);background:var(--wine-light);padding:3px 10px;border-radius:999px}
-.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px}
-.metric-card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;box-shadow:var(--sh)}
-.metric-card .lbl{font-size:11px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
-.metric-card .val{font-size:22px;font-weight:800;color:var(--ink);line-height:1}
-.metric-card .val.wine{color:var(--wine)}.metric-card .val.gold{color:var(--gold)}
-.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
-.chip{padding:6px 14px;border-radius:999px;border:1px solid var(--line);font:inherit;font-size:13px;font-weight:700;cursor:pointer;background:var(--card);color:var(--sub);transition:all .15s}
-.chip:hover{border-color:var(--wine);color:var(--wine)}.chip.on{background:var(--wine);color:#fff;border-color:var(--wine)}
-.chip-area{border-radius:8px;font-size:12px;padding:5px 12px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh);overflow:hidden;margin-bottom:16px}
-.card-hdr{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.card-hdr-title{font-size:13px;font-weight:800;color:var(--ink);text-transform:uppercase;letter-spacing:.05em}
-.card-body{padding:16px 18px}
-.tbl-wrap{overflow-x:auto}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th{padding:8px 12px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--sub);border-bottom:1px solid var(--line);white-space:nowrap}
-td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
-tr:last-child td{border-bottom:none}
-tr:hover td{background:var(--bg)}
-.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:800}
-.badge.ok{background:var(--ok-bg);color:var(--ok)}.badge.bad{background:var(--bad-bg);color:var(--bad)}
-.badge.area{background:var(--wine-light);color:var(--wine)}
-.badge.pending{background:#FEF3C7;color:#92400E}
-.badge.info{background:var(--wine-light);color:var(--wine)}
-.av{width:32px;height:32px;border-radius:50%;background:var(--wine);color:#fff;font-size:11px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;flex:none}
-.persona-row{display:flex;align-items:center;gap:10px}
-.persona-name{font-weight:700;font-size:13px}
-.persona-sub{font-size:11px;color:var(--sub)}
-.employee-picker{display:grid;gap:10px}
-.employee-search-wrap{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r-sm);padding:8px 10px}
-.employee-search{flex:1;min-width:0;border:none;background:transparent;font:inherit;font-size:14px;font-weight:700;color:var(--ink);outline:none}
-.employee-search::placeholder{color:var(--faint);font-weight:700}
-.employee-count{font-size:11px;font-weight:800;color:var(--wine);background:var(--wine-light);border-radius:999px;padding:3px 8px;white-space:nowrap}
-.employee-list{display:grid;gap:6px;max-height:330px;overflow-y:auto;padding-right:2px}
-.employee-row{width:100%;display:flex;align-items:center;gap:10px;text-align:left;padding:10px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--card);font:inherit;cursor:pointer;color:var(--ink);transition:background .12s,border-color .12s,box-shadow .12s}
-.employee-row:hover{border-color:var(--wine);background:var(--wine-light)}
-.employee-row.on{border-color:var(--wine);background:var(--wine-light);box-shadow:inset 3px 0 0 var(--wine)}
-.employee-row-main{flex:1;min-width:0}
-.employee-row .persona-name{white-space:normal}
-.employee-row-right{font-size:12px;font-weight:800;color:var(--wine);white-space:nowrap}
-.employee-empty{padding:18px;text-align:center;border:1px dashed var(--line);border-radius:var(--r-sm);color:var(--faint);font-size:13px;font-weight:700}
-.perm-layout{display:grid;grid-template-columns:minmax(290px,420px) 1fr;gap:16px;align-items:start}
-.form-grid{display:grid;gap:12px}
-.field{display:grid;gap:5px}
-.field label{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--sub)}
-.form-control{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--bg);color:var(--ink);font:inherit;font-size:13px}
-.form-control:focus{outline:none;border-color:var(--wine);background:#fff}
-.segmented{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-.segment{border:1px solid var(--line);border-radius:var(--r-sm);background:var(--card);color:var(--sub);font:inherit;font-size:12px;font-weight:800;padding:8px;cursor:pointer}
-.segment.on{background:var(--wine);border-color:var(--wine);color:#fff}
-.permission-list{display:grid;gap:10px}
-.permission-item{border:1px solid var(--line);border-radius:var(--r);background:var(--card);padding:12px;display:grid;gap:8px}
-.permission-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
-.permission-title{font-size:13px;font-weight:800;color:var(--ink)}
-.permission-meta{font-size:11px;color:var(--sub);font-weight:700}
-.permission-reason{font-size:13px;color:var(--ink);background:var(--bg);border-radius:var(--r-sm);padding:8px}
-.permission-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
-.permission-edit-error{background:var(--bad-bg);border:1px solid rgba(153,27,27,.22);border-radius:var(--r-sm);color:var(--bad);font-size:12px;font-weight:800;padding:8px}
-.preview-note{font-size:12px;font-weight:700;color:var(--sub);background:var(--gold-light);border:1px solid rgba(201,168,76,.28);border-radius:var(--r-sm);padding:9px 10px}
-.print-success{display:grid;gap:8px;margin-top:10px;padding:10px;border:1px solid rgba(22,101,52,.22);background:var(--ok-bg);border-radius:var(--r-sm)}
-.print-success-title{font-size:12px;font-weight:900;color:var(--ok)}
-.print-success-text{font-size:12px;font-weight:700;color:var(--sub)}
-.print-success-actions{display:flex;gap:8px;flex-wrap:wrap}
-.print-modal{position:fixed;inset:0;z-index:80;background:rgba(28,21,32,.55);display:flex;align-items:flex-start;justify-content:center;padding:18px;overflow:auto}
-.print-dialog{background:var(--card);border-radius:var(--r);box-shadow:0 20px 50px rgba(28,21,32,.22);width:min(940px,100%);overflow:hidden}
-.print-dialog-hdr{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.print-dialog-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.05em}
-.print-actions{display:flex;gap:8px;flex-wrap:wrap}
-.print-preview{background:#ece7ee;padding:16px;overflow:auto}
-.print-page{width:216mm;min-height:279mm;background:#fff;color:#17121a;margin:0 auto;padding:15mm 16mm;box-shadow:0 8px 26px rgba(28,21,32,.18);font-family:Arial,sans-serif;font-size:12px;line-height:1.35}
-.print-head{display:flex;justify-content:space-between;gap:16px;border-bottom:2px solid #8B2252;padding-bottom:10px;margin-bottom:14px}
-.print-brand{font-family:"Playfair Display",serif;color:#8B2252;font-size:22px;font-weight:700}
-.print-doc-title{text-align:right;font-size:16px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
-.print-folio{text-align:right;font-size:12px;font-weight:700;color:#6B5F70;margin-top:4px}
-.print-section{border:1px solid #E6DCEB;border-radius:6px;margin-top:10px;overflow:hidden}
-.print-section-title{background:#F7F1F5;color:#8B2252;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:7px 9px;border-bottom:1px solid #E6DCEB}
-.print-grid{display:grid;grid-template-columns:1fr 1fr;gap:0}
-.print-field{padding:8px 9px;border-right:1px solid #E6DCEB;border-bottom:1px solid #E6DCEB;min-height:42px}
-.print-field:nth-child(2n){border-right:none}
-.print-label{font-size:9px;color:#6B5F70;font-weight:800;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px}
-.print-value{font-size:12px;font-weight:700;color:#17121a;white-space:pre-wrap}
-.print-reason{padding:10px 9px;min-height:74px;white-space:pre-wrap}
-.signature-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:24px}
-.signature-line{border-top:1px solid #17121a;text-align:center;padding-top:6px;font-size:10px;font-weight:700;min-height:34px}
-.print-foot{margin-top:14px;font-size:10px;color:#6B5F70}
-.days-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:16px}
-.day-cell{aspect-ratio:1;border-radius:6px;border:1px solid var(--line);background:var(--bg);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--faint);transition:all .12s}
-.day-cell:hover{border-color:var(--wine);color:var(--wine)}
-.day-cell.worked{background:var(--wine);border-color:var(--wine);color:#fff}
-.day-cell.dom{background:#FFF7ED;color:#9A3412;border-color:#FED7AA}
-.day-cell.dom.worked{background:var(--wine);border-color:var(--wine);color:#fff}
-.day-cell.saving{opacity:.65;cursor:progress}
-.day-cell .dn{font-size:13px;font-weight:800}.day-cell .ds{font-size:9px;margin-top:1px}
-.concepto-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
-.concepto-row:last-child{border-bottom:none}
-.toggle-btn{width:26px;height:26px;border-radius:6px;border:1px solid var(--line);background:var(--bg);cursor:pointer;display:flex;align-items:center;justify-content:center;flex:none;transition:all .12s;font-size:13px}
-.toggle-btn.on{background:var(--wine);border-color:var(--wine);color:#fff}.toggle-btn.off{color:transparent}
-.concepto-lbl{flex:1;font-size:13px;font-weight:600;color:var(--ink)}
-.emb-counter{display:flex;align-items:center;gap:8px;margin-top:8px;padding:8px;background:var(--gold-light);border-radius:var(--r-sm)}
-.emb-counter label{font-size:12px;font-weight:700;color:var(--sub);flex:1}
-.emb-counter input{width:70px;padding:5px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font:inherit;font-size:14px;font-weight:800;text-align:center}
-.aj-input{width:90px;padding:5px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font:inherit;font-size:13px;text-align:right}
-.nota-input{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font:inherit;font-size:12px;resize:none;background:var(--bg)}
-.sec-title{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--sub);margin-bottom:10px}
-.div{height:1px;background:var(--line);margin:14px 0}
-.empty{text-align:center;padding:40px 20px;color:var(--faint);font-size:13px;font-weight:700}
-.pill-HORNOS{background:#FEF3C7;color:#92400E}
-.pill-EMBETUNADO{background:#FCE7F3;color:#831843}
-.pill-PRODUCCION{background:#FCE7F3;color:#831843}
-.pill-ARMADO{background:#E0E7FF;color:#3730A3}
-.pill-LOGISTICA{background:#E0F2FE;color:#075985}
-.pill-CRUCERO{background:#D1FAE5;color:#065F46}
-
-.report-tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.report-table{width:100%;border-collapse:collapse;font-size:9.5px;margin-top:8px}
-.report-table th{background:#F7F1F5;color:#6B5F70;font-size:8px;text-transform:uppercase;letter-spacing:.04em;padding:5px;border:1px solid #E6DCEB;text-align:left}
-.report-table td{padding:5px;border:1px solid #E6DCEB;vertical-align:top}
-.report-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}
-.report-kpi{border:1px solid #E6DCEB;border-radius:5px;padding:6px}
-.report-kpi-label{font-size:8px;color:#6B5F70;text-transform:uppercase;font-weight:800}
-.report-kpi-value{font-size:14px;font-weight:900;color:#8B2252;margin-top:2px}
-.report-note{font-size:10px;color:#6B5F70;margin-top:8px}
-.report-print .print-page{height:auto;min-height:279mm;max-height:none;overflow:visible;break-after:page;page-break-after:always}
-.report-print .print-page:last-child{break-after:auto;page-break-after:auto}
-@media(max-width:700px){.hdr{padding:10px 14px}main{padding:14px}.metrics{grid-template-columns:1fr 1fr}.perm-layout{grid-template-columns:1fr}}
-@media(max-width:760px){.print-page{transform:scale(.56);transform-origin:top left;margin:0}.print-preview{max-height:70vh}.print-dialog{width:100%}}
-@media print{
-  @page{size:letter;margin:0}
-  html,body{width:216mm!important;height:auto!important;min-height:279mm!important;margin:0!important;padding:0!important;background:#fff!important;overflow:visible!important}
-  body > :not(.print-modal){display:none!important}
-  .print-modal{position:static!important;inset:auto!important;z-index:auto!important;background:#fff!important;display:block!important;width:216mm!important;height:279mm!important;margin:0!important;padding:0!important;overflow:visible!important}
-  .print-dialog,.print-preview{display:block!important;width:216mm!important;height:279mm!important;margin:0!important;padding:0!important;border:0!important;box-shadow:none!important;background:#fff!important;overflow:hidden!important}
-  .print-dialog-hdr{display:none!important}
-  .print-page{display:block!important;position:static!important;transform:none!important;width:216mm!important;height:279mm!important;min-height:0!important;max-height:279mm!important;margin:0!important;box-shadow:none!important;padding:15mm 16mm!important;overflow:hidden!important;break-after:avoid!important;page-break-after:avoid!important}
-  .report-print{height:auto!important;overflow:visible!important}
-  .report-print .print-dialog,.report-print .print-preview{height:auto!important;overflow:visible!important}
-  .report-print .print-page{height:auto!important;min-height:279mm!important;max-height:none!important;overflow:visible!important;break-after:page!important;page-break-after:always!important}
-  .report-print .print-page:last-child{break-after:auto!important;page-break-after:auto!important}
-}
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/bonos-produccion-templates-bonos-produccion-index.css?v=20260614-ui100-v1">
 </head>
 <body>
 <div id="root"></div>
@@ -224,19 +51,19 @@ function money(v){return Number(v||0).toLocaleString('es-MX',{style:'currency',c
 function initials(n){return(n||'').split(' ').filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase();}
 function esDom(d,m,a){return new Date(a,m-1,d).getDay()===0;}
 function diasEnMes(m,a){return new Date(a,m,0).getDate();}
-const IconFactory=()=>h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'#fff',strokeWidth:2,strokeLinecap:'round',strokeLinejoin:'round',style:{width:18,height:18}},h('rect',{x:2,y:7,width:20,height:15,rx:2}),h('polyline',{points:'17 2 12 7 7 2'}));
-const IconCheck=()=>h('span',null,'✓');
-function Badge({ok}){return h('span',{className:`badge ${ok?'ok':'bad'}`},ok?'✓ Pasa':'✗ No pasa');}
-function AreaPill({area}){return h('span',{className:`badge area pill-${area}`,style:{fontSize:11}},AREA_LABELS[area]||area);}
+const IconFactory=()=>h('svg',{className:'icon-factory-svg',viewBox:'0 0 24 24',fill:'none',stroke:'#fff',strokeWidth:2,strokeLinecap:'round',strokeLinejoin:'round'},h('rect',{x:2,y:7,width:20,height:15,rx:2}),h('polyline',{points:'17 2 12 7 7 2'}));
+const IconCheck=()=>h('span',null,'OK');
+function Badge({ok}){return h('span',{className:`badge ${ok?'ok':'bad'}`},ok?'OK Pasa':'NO No pasa');}
+function AreaPill({area}){return h('span',{className:`badge area pill-${area}`},AREA_LABELS[area]||area);}
 function BonusRight({bono}){
   const extras=[];
   if(Number(bono.monto_premio_embetunado||0)>0)extras.push(`Premio ${money(bono.monto_premio_embetunado)}`);
   if(Number(bono.ajuste_positivo||0)>0)extras.push(`Ajuste +${money(bono.ajuste_positivo)}`);
   if(Number(bono.bono_extra||0)>0)extras.push(`Extra ${money(bono.bono_extra)}`);
   if(Number(bono.ajuste_negativo||0)>0)extras.push(`Desc. ${money(bono.ajuste_negativo)}`);
-  return h('div',{style:{textAlign:'right'}},
+  return h('div',{className:'bonus-right'},
     h('div',null,money(bono.total_a_pagar)),
-    extras.length?h('div',{style:{fontSize:11,color:'var(--sub)',fontWeight:700,marginTop:2}},extras.join(' · ')):null
+    extras.length?h('div',{className:'bonus-right-meta'},extras.join(' · ')):null
   );
 }
 function AreaChips({area,setArea,includeAll=false}){
@@ -333,6 +160,57 @@ function PermisoPrintModal({permiso,onClose,contextLabel}){
     )
   ), document.body);
 }
+function HoraExtraPrintPage({item,contextLabel}){
+  const estadoLabel={pendiente:'Pendiente',autorizado:'Autorizada',rechazado:'Rechazada',pagado:'Pagada',cancelado:'Eliminada'}[item.estado]||item.estado;
+  return h('section',{className:'print-page'},
+    h('div',{className:'print-head'},
+      h('div',null,h('div',{className:'print-brand'},"Pollyana's Dolce"),h('div',{className:'print-foot'},'Capital Humano · Control de horas extra')),
+      h('div',null,h('div',{className:'print-doc-title'},'Solicitud de horas extra'),h('div',{className:'print-folio'},item.folio||`HE-${item.id}`))
+    ),
+    h('div',{className:'print-section'},
+      h('div',{className:'print-section-title'},'Datos del colaborador'),
+      h('div',{className:'print-grid'},
+        h(PrintField,{label:'Empleado',value:item.empleado_nombre}),
+        h(PrintField,{label:'Area',value:contextLabel}),
+        h(PrintField,{label:'Puesto',value:item.puesto||'—'}),
+        h(PrintField,{label:'Jefe directo',value:item.jefe_directo_nombre||'Sin asignar'})
+      )
+    ),
+    h('div',{className:'print-section'},
+      h('div',{className:'print-section-title'},'Detalle de horas extra'),
+      h('div',{className:'print-grid'},
+        h(PrintField,{label:'Fecha',value:new Date(`${item.fecha}T12:00:00`).toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit',year:'numeric'})}),
+        h(PrintField,{label:'Horas solicitadas',value:`${item.horas} h`}),
+        h(PrintField,{label:'Estado',value:item.estado_label||estadoLabel})
+      )
+    ),
+    h('div',{className:'print-section'},
+      h('div',{className:'print-section-title'},'Motivo'),
+      h('div',{className:'print-reason'},item.notas||'—')
+    ),
+    h('div',{className:'signature-grid'},
+      h('div',{className:'signature-line'},`Firma empleado · ${item.empleado_nombre||''}`),
+      h('div',{className:'signature-line'},'Firma jefe directo')
+    ),
+    h('div',{className:'print-foot'},'Documento generado desde Bonos. Capital Humano conserva el registro en RRHH.')
+  );
+}
+function HoraExtraPrintModal({item,onClose,contextLabel}){
+  if(!item)return null;
+  const printNow=()=>setTimeout(()=>window.print(),50);
+  return ReactDOM.createPortal(h('div',{className:'print-modal'},
+    h('div',{className:'print-dialog'},
+      h('div',{className:'print-dialog-hdr'},
+        h('div',{className:'print-dialog-title'},'Vista previa tamaño carta'),
+        h('div',{className:'print-actions'},
+          h('button',{className:'btn btn-ghost btn-sm',onClick:onClose},'Cerrar'),
+          h('button',{className:'btn btn-wine btn-sm',onClick:printNow},'Imprimir / PDF')
+        )
+      ),
+      h('div',{className:'print-preview'},h(HoraExtraPrintPage,{item,contextLabel}))
+    )
+  ), document.body);
+}
 function ReportModal({title,onClose,children}){
   const printNow=()=>setTimeout(()=>window.print(),50);
   return ReactDOM.createPortal(h('div',{className:'print-modal report-print'},
@@ -388,7 +266,7 @@ function ProduccionCollaboratorPage({bono,periodoLabel}){
 function statusTxt(ok){return ok?'Pasa':'No pasa';}
 function App(){
   const queryTab=new URLSearchParams(window.location.search).get('tab');
-  const initialTab=['config','captura','permisos','resumen','ajustes','revision'].includes(queryTab)?queryTab:(FORCE_CAPTURE?'captura':'config');
+  const initialTab=['config','captura','permisos','horas_extra','resumen','ajustes','revision'].includes(queryTab)?queryTab:(FORCE_CAPTURE?'captura':'config');
   const [tab,setTab]=React.useState(initialTab);
   const [mes,setMes]=React.useState(TODAY.getMonth()+1);
   const [anio,setAnio]=React.useState(TODAY.getFullYear());
@@ -444,10 +322,10 @@ function App(){
   const bonosArea=area===AREA_TODAS?bonos:bonos.filter(b=>b.area===area);
   const totalGlobal=bonos.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
   const pasan=bonos.filter(b=>b.pasa_asistencia&&b.pasa_uniforme&&b.pasa_puntualidad&&b.pasa_produccion).length;
-  const showBonusContext=tab!=='permisos';
+  const showBonusContext=!['permisos','horas_extra'].includes(tab);
   function selectTab(nextTab){
     setTab(nextTab);
-    if(area===AREA_TODAS&&!['captura','permisos','revision'].includes(nextTab))setArea('HORNOS');
+    if(area===AREA_TODAS&&!['captura','permisos','horas_extra','revision'].includes(nextTab))setArea('HORNOS');
   }
   return h('div',null,
     h('header',{className:'hdr'},
@@ -457,20 +335,20 @@ function App(){
       ),
         h('div',{className:'hdr-controls'},
         h('input',{type:'number',min:1,max:12,value:mes,onChange:e=>setMes(+e.target.value),title:'Mes'}),
-        h('input',{type:'number',value:anio,onChange:e=>setAnio(+e.target.value),style:{width:70},title:'Año'}),
+        h('input',{type:'number',value:anio,onChange:e=>setAnio(+e.target.value),className:'year-input',title:'Año'}),
         h('button',{className:'btn btn-wine',onClick:cargarTodo},loading?'Cargando…':'Actualizar'),
         h('a',{className:'btn btn-ghost btn-logout',href:'/logout/',title:'Cerrar sesión del ERP'},'Cerrar sesión')
       )
     ),
     status&&h('div',{className:`status-bar ${statusType}`},status),
     h('div',{className:'tabs-wrap'},
-      [['config','Configuracion'],['captura','Captura diaria'],['permisos','Permisos'],['resumen','Resumen mensual'],['ajustes','Ajustes'],['revision','Revision por area']].map(([id,lbl])=>
+      [['config','Configuracion'],['captura','Captura diaria'],['permisos','Permisos'],['horas_extra','Horas extra'],['resumen','Resumen mensual'],['ajustes','Ajustes'],['revision','Revision por area']].map(([id,lbl])=>
         h('button',{key:id,className:`tab-btn ${tab===id?'on':''}`,onClick:()=>selectTab(id)},lbl))
     ),
     h('main',null,
       showBonusContext&&h('div',{className:'periodo-bar'},
         h('span',{className:'periodo-label'},'Periodo:'),
-        periodo?h('span',{className:'periodo-id'},`ID ${periodo.id} · ${periodo.dias_laborables} dias lab.`):h('span',{style:{color:'var(--faint)',fontSize:13}},'Sin periodo para este mes'),
+        periodo?h('span',{className:'periodo-id'},`ID ${periodo.id} · ${periodo.dias_laborables} dias lab.`):h('span',{className:'muted-inline'},'Sin periodo para este mes'),
         !periodo&&h('button',{className:'btn btn-wine btn-sm',onClick:crearPeriodo},'Crear periodo'),
         periodo&&h('button',{className:'btn btn-ghost btn-sm',onClick:inicializar},'Inicializar empleados'),
         periodo&&h('button',{className:'btn btn-ghost btn-sm',onClick:syncChecador},'Recalcular desde checador')
@@ -479,11 +357,12 @@ function App(){
         h('div',{className:'metric-card'},h('div',{className:'lbl'},'Total a pagar'),h('div',{className:'val gold'},money(totalGlobal))),
         h('div',{className:'metric-card'},h('div',{className:'lbl'},'Empleados'),h('div',{className:'val'},bonos.length)),
         h('div',{className:'metric-card'},h('div',{className:'lbl'},'Pasan todo'),h('div',{className:'val wine'},pasan)),
-        h('div',{className:'metric-card'},h('div',{className:'lbl'},'Area activa'),h('div',{className:'val',style:{fontSize:14}},AREA_LABELS[area]))
+        h('div',{className:'metric-card'},h('div',{className:'lbl'},'Area activa'),h('div',{className:'val val-sm'},AREA_LABELS[area]))
       ),
       tab==='config'&&h(ConfigTab,{bonos,area,setArea}),
       tab==='captura'&&h(CapturaTab,{bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia,mes,anio}),
       tab==='permisos'&&h(PermisosTab,{bonos,area,setArea,mes,anio,showStatus}),
+      tab==='horas_extra'&&h(HorasExtraTab,{area,setArea,mes,anio,showStatus}),
       tab==='resumen'&&h(ResumenTab,{bonos,area,setArea,mes,anio}),
       tab==='ajustes'&&h(AjustesTab,{bonosArea,area,setArea,actualizarBono}),
       tab==='revision'&&h(RevisionTab,{bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia})
@@ -493,7 +372,7 @@ function App(){
 function ConfigTab({bonos,area,setArea}){
   return h('div',null,h(AreaChips,{area,setArea}),
     h('div',{className:'card'},
-      h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},AREA_LABELS[area]),h('span',{style:{fontSize:12,color:'var(--sub)',fontWeight:700}},`${bonos.filter(b=>b.area===area).length} empleados`)),
+      h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},AREA_LABELS[area]),h('span',{className:'card-hdr-meta'},`${bonos.filter(b=>b.area===area).length} empleados`)),
       h('div',{className:'tbl-wrap'},h('table',null,
         h('thead',null,h('tr',null,h('th',null,'Empleado'),h('th',null,'Area'),h('th',null,'Uniforme'),h('th',null,'Asistencia'),h('th',null,'Puntualidad'),h('th',null,'Produccion'),h('th',null,'Total'))),
         h('tbody',null,bonos.filter(b=>b.area===area).map(b=>h('tr',{key:b.id},
@@ -501,7 +380,7 @@ function ConfigTab({bonos,area,setArea}){
           h('td',null,h(AreaPill,{area:b.area})),
           h('td',null,h(Badge,{ok:b.pasa_uniforme})),h('td',null,h(Badge,{ok:b.pasa_asistencia})),
           h('td',null,h(Badge,{ok:b.pasa_puntualidad})),h('td',null,h(Badge,{ok:b.pasa_produccion})),
-          h('td',{style:{fontWeight:800,color:'var(--wine)'}},money(b.total_a_pagar))
+          h('td',{className:'text-total'},money(b.total_a_pagar))
         )))
       ))
     )
@@ -581,7 +460,7 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
     const fechaStr=ini.toISOString().slice(0,10);
     const desdeStr=ini.toTimeString().slice(0,5);
     const hastaStr=fin?fin.toTimeString().slice(0,5):'';
-    setEditPermiso({id:p.id,tipo:p.tipo,fecha:fechaStr,desde:desdeStr,hasta:hastaStr,motivo:p.motivo,goce:p.goce_sueldo,motivoCambio:'',error:''});
+    setEditPermiso({id:p.id,area:p.area,tipo:p.tipo,fecha:fechaStr,desde:desdeStr,hasta:hastaStr,motivo:p.motivo,goce:p.goce_sueldo,motivoCambio:'',error:''});
   }
   function setEditError(msg){
     setEditPermiso(prev=>prev?({...prev,error:msg}):prev);
@@ -595,7 +474,7 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
     const payload={
       mes,
       anio,
-      area,
+      area:editPermiso.area||area,
       tipo:editPermiso.tipo,
       motivo:editPermiso.motivo,
       goce_sueldo:editPermiso.goce,
@@ -603,7 +482,8 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
       fecha_fin:editPermiso.tipo==='permiso_dia'?null:`${editPermiso.fecha}T${editPermiso.hasta}:00`,
       motivo_cambio:editPermiso.motivoCambio,
     };
-    const qs=new URLSearchParams({mes,anio,area});
+    const qs=new URLSearchParams({mes,anio});
+    if((editPermiso.area||area)!==AREA_TODAS)qs.set('area',editPermiso.area||area);
     api(`/api/bonos-produccion/permisos/${editPermiso.id}/editar/?${qs.toString()}`,{method:'POST',body:JSON.stringify(payload)})
       .then(()=>{showStatus('Permiso actualizado','ok');setEditPermiso(null);cargarPermisos();})
       .catch(err=>setEditError(err.message));
@@ -612,8 +492,9 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
     const motivo=window.prompt(`Motivo para eliminar el permiso ${p.folio}`);
     if(motivo===null)return;
     if(!motivo.trim()){showStatus('Explica por que se elimina el permiso.','err');return;}
-    const qs=new URLSearchParams({mes,anio,area});
-    api(`/api/bonos-produccion/permisos/${p.id}/eliminar/?${qs.toString()}`,{method:'POST',body:JSON.stringify({mes,anio,area,motivo_cambio:motivo})})
+    const qs=new URLSearchParams({mes,anio});
+    if((p.area||area)!==AREA_TODAS)qs.set('area',p.area||area);
+    api(`/api/bonos-produccion/permisos/${p.id}/eliminar/?${qs.toString()}`,{method:'POST',body:JSON.stringify({mes,anio,area:p.area||area,motivo_cambio:motivo})})
       .then(()=>{showStatus('Permiso eliminado','ok');cargarPermisos();})
       .catch(err=>showStatus(err.message,'err'));
   }
@@ -648,18 +529,18 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
               h('button',{className:'btn btn-wine btn-sm',type:'button',onClick:()=>imprimirPermiso(lastPermiso)},'Imprimir / guardar PDF')
             )
           ),
-          h('div',{style:{height:12}}),
+          h('div',{className:'spacer-sm'}),
           h(EmployeeSearchList,{items:equipo,selected,onSelect:setSelected,placeholder:'Buscar empleado del area...',metaText:b=>AREA_LABELS[b.area]||b.area||'Produccion'}),
           h('div',{className:'div'}),
           h('div',{className:'form-grid'},
             h('div',{className:'field'},h('label',null,'Tipo de permiso'),h('div',{className:'segmented'},
               [['permiso_hora','Tiempo parcial'],['permiso_dia','Dia completo']].map(([v,lbl])=>h('button',{key:v,type:'button',className:`segment ${tipo===v?'on':''}`,onClick:()=>setTipo(v)},lbl))
             )),
-            h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+            h('div',{className:'grid-2'},
               h('div',{className:'field'},h('label',null,'Fecha'),h('input',{className:'form-control',type:'date',value:fecha,onChange:e=>setFecha(e.target.value)})),
               h('div',{className:'field'},h('label',null,'Area'),h('input',{className:'form-control',value:selected?(AREA_LABELS[selected.area]||selected.area||''):'' ,readOnly:true}))
             ),
-            tipo==='permiso_hora'?h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+            tipo==='permiso_hora'?h('div',{className:'grid-2'},
               h('div',{className:'field'},h('label',null,'Desde'),h('input',{className:'form-control',type:'time',value:desde,onChange:e=>setDesde(e.target.value)})),
               h('div',{className:'field'},h('label',null,'Hasta'),h('input',{className:'form-control',type:'time',value:hasta,onChange:e=>setHasta(e.target.value)}))
             ):h('div',{className:'preview-note'},'Dia completo: no necesitas capturar horario de entrada y salida.'),
@@ -691,13 +572,13 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
                 p.puede_preautorizar&&p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-ghost btn-sm',onClick:()=>accion(p,'rechazar')},'Rechazar'),
                 p.puede_preautorizar&&p.estado_jefe==='pendiente'&&p.estado==='solicitado'&&h('button',{className:'btn btn-wine btn-sm',onClick:()=>accion(p,'preautorizar')},'Autorizar')
               ),
-              editPermiso&&editPermiso.id===p.id&&h('div',{className:'form-grid',style:{marginTop:10,padding:12,background:'var(--rosa)',borderRadius:8}},
+              editPermiso&&editPermiso.id===p.id&&h('div',{className:'form-grid edit-panel'},
                 h('div',{className:'field'},h('label',null,'Tipo'),h('div',{className:'segmented'},
                   [['permiso_hora','Tiempo parcial'],['permiso_dia','Dia completo']].map(([v,lbl])=>h('button',{key:v,type:'button',className:`segment ${editPermiso.tipo===v?'on':''}`,onClick:()=>setEditPermiso(prev=>({...prev,tipo:v}))},lbl))
                 )),
-                h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+                h('div',{className:'grid-2'},
                   h('div',{className:'field'},h('label',null,'Fecha'),h('input',{className:'form-control',type:'date',value:editPermiso.fecha,onChange:e=>setEditPermiso(prev=>({...prev,fecha:e.target.value}))})),
-                  editPermiso.tipo==='permiso_hora'&&h('div',{style:{display:'contents'}},
+                  editPermiso.tipo==='permiso_hora'&&h('div',{className:'contents-grid'},
                     h('div',{className:'field'},h('label',null,'Desde'),h('input',{className:'form-control',type:'time',value:editPermiso.desde,onChange:e=>setEditPermiso(prev=>({...prev,desde:e.target.value}))})),
                     h('div',{className:'field'},h('label',null,'Hasta'),h('input',{className:'form-control',type:'time',value:editPermiso.hasta,onChange:e=>setEditPermiso(prev=>({...prev,hasta:e.target.value}))}))
                   )
@@ -715,6 +596,172 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
         )
       ),
       previewPermiso&&h(PermisoPrintModal,{permiso:previewPermiso,onClose:()=>setPreviewPermiso(null),contextLabel:contextoPermiso(previewPermiso)})
+    )
+  );
+}
+function HorasExtraTab({area,setArea,mes,anio,showStatus}){
+  const [empleados,setEmpleados]=React.useState([]);
+  const [horasExtra,setHorasExtra]=React.useState([]);
+  const [selected,setSelected]=React.useState(null);
+  const [fecha,setFecha]=React.useState(new Date().toISOString().slice(0,10));
+  const [horas,setHoras]=React.useState('1.00');
+  const [notas,setNotas]=React.useState('');
+  const [loading,setLoading]=React.useState(false);
+  const [previewHoraExtra,setPreviewHoraExtra]=React.useState(null);
+  const [lastHoraExtra,setLastHoraExtra]=React.useState(null);
+  const [editHoraExtra,setEditHoraExtra]=React.useState(null);
+  const equipo=empleados;
+  React.useEffect(()=>{cargarHorasExtra();},[mes,anio,area]);
+  React.useEffect(()=>{if(!selected&&equipo.length)setSelected(equipo[0]);else if(selected&&!equipo.some(e=>e.id===selected.id))setSelected(equipo[0]||null);},[area,equipo.map(e=>e.id).join(','),selected?.id]);
+  function cargarHorasExtra(){
+    setLoading(true);
+    const qs=new URLSearchParams({mes:String(mes),anio:String(anio)});
+    if(area!==AREA_TODAS)qs.set('area',area);
+    api(`/api/bonos-produccion/horas-extra/?${qs.toString()}`)
+      .then(d=>{setEmpleados(d.empleados||[]);setHorasExtra(d.horas_extra||[]);setLoading(false);})
+      .catch(err=>{showStatus(err.message,'err');setLoading(false);});
+  }
+  function estadoHoraExtraLabel(item){
+    if(item.estado==='autorizado')return'Autorizada';
+    if(item.estado==='rechazado')return'Rechazada';
+    if(item.estado==='pagado')return'Pagada';
+    if(item.estado==='cancelado')return'Eliminada';
+    return'Pendiente';
+  }
+  function badgeClass(item){
+    if(item.estado==='autorizado'||item.estado==='pagado')return'ok';
+    if(item.estado==='rechazado'||item.estado==='cancelado')return'bad';
+    return'pending';
+  }
+  function fmtFecha(value){
+    return new Date(`${value}T12:00:00`).toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit',year:'numeric'});
+  }
+  function submitHoraExtra(){
+    if(!selected){showStatus('Selecciona un empleado.','err');return;}
+    if(!Number(horas)||Number(horas)<=0){showStatus('Captura horas extra mayores a cero.','err');return;}
+    if(!notas.trim()){showStatus('Captura el motivo de la hora extra.','err');return;}
+    const areaSolicitud=selected.area&&selected.area!==AREA_TODAS?selected.area:area;
+    api('/api/bonos-produccion/horas-extra/',{method:'POST',body:JSON.stringify({
+      empleado:selected.id,
+      mes,
+      anio,
+      area:areaSolicitud,
+      fecha,
+      horas,
+      notas,
+    })}).then(item=>{showStatus('Hora extra enviada a RRHH','ok');setNotas('');setHoras('1.00');setLastHoraExtra(item);setPreviewHoraExtra(item);cargarHorasExtra();}).catch(err=>showStatus(err.message,'err'));
+  }
+  function imprimirHoraExtra(item){
+    setPreviewHoraExtra(item);
+    setTimeout(()=>window.print(),160);
+  }
+  function accion(item,kind){
+    api(`/api/bonos-produccion/horas-extra/${item.id}/${kind}/`,{method:'POST',body:'{}'})
+      .then(()=>{showStatus(kind==='autorizar'?'Hora extra autorizada':'Hora extra rechazada','ok');cargarHorasExtra();})
+      .catch(err=>showStatus(err.message,'err'));
+  }
+  function abrirEdicion(item){
+    setEditHoraExtra({id:item.id,fecha:item.fecha,horas:item.horas,notas:item.notas||'',motivoCambio:'',error:''});
+  }
+  function setEditError(msg){
+    setEditHoraExtra(prev=>prev?({...prev,error:msg}):prev);
+    showStatus(msg,'err');
+  }
+  function guardarEdicion(){
+    if(!editHoraExtra)return;
+    if(!Number(editHoraExtra.horas)||Number(editHoraExtra.horas)<=0){setEditError('Captura horas extra mayores a cero.');return;}
+    if(!editHoraExtra.notas.trim()){setEditError('Captura el motivo de la hora extra.');return;}
+    if(!editHoraExtra.motivoCambio.trim()){setEditError('Escribe el motivo de correccion para poder guardar.');return;}
+    api(`/api/bonos-produccion/horas-extra/${editHoraExtra.id}/editar/`,{method:'POST',body:JSON.stringify({
+      fecha:editHoraExtra.fecha,
+      horas:editHoraExtra.horas,
+      notas:editHoraExtra.notas,
+      motivo_cambio:editHoraExtra.motivoCambio,
+    })}).then(()=>{showStatus('Hora extra actualizada','ok');setEditHoraExtra(null);cargarHorasExtra();}).catch(err=>setEditError(err.message));
+  }
+  function eliminarHoraExtra(item){
+    const motivo=window.prompt(`Motivo para eliminar la hora extra ${item.folio||item.id}`);
+    if(motivo===null)return;
+    if(!motivo.trim()){showStatus('Explica por que se elimina la hora extra.','err');return;}
+    api(`/api/bonos-produccion/horas-extra/${item.id}/eliminar/`,{method:'POST',body:JSON.stringify({motivo_cambio:motivo})})
+      .then(()=>{showStatus('Hora extra eliminada','ok');cargarHorasExtra();})
+      .catch(err=>showStatus(err.message,'err'));
+  }
+  function contextoHoraExtra(item){
+    return AREA_LABELS[item.area]||item.area||'Produccion';
+  }
+  const pendientes=horasExtra.filter(hx=>hx.estado==='pendiente').length;
+  const autorizadas=horasExtra.filter(hx=>hx.estado==='autorizado'||hx.estado==='pagado').length;
+  const rechazadas=horasExtra.filter(hx=>hx.estado==='rechazado').length;
+  return h('div',null,
+    h(AreaChips,{area,setArea,includeAll:true}),
+    h('div',{className:'metrics'},
+      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Pendientes'),h('div',{className:'val wine'},pendientes)),
+      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Autorizadas'),h('div',{className:'val'},autorizadas)),
+      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Rechazadas'),h('div',{className:'val gold'},rechazadas))
+    ),
+    h('div',{className:'perm-layout'},
+      h('div',{className:'card'},
+        h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},'Nueva hora extra')),
+        h('div',{className:'card-body'},
+          h('div',{className:'preview-note'},'La solicitud queda registrada en Capital Humano y visible en RRHH · Horas extra.'),
+          lastHoraExtra&&h('div',{className:'print-success'},
+            h('div',{className:'print-success-title'},`Hora extra ${lastHoraExtra.folio||lastHoraExtra.id} registrada`),
+            h('div',{className:'print-success-text'},'Ya puedes imprimirla o guardarla como PDF en hoja tamaño carta.'),
+            h('div',{className:'print-success-actions'},
+              h('button',{className:'btn btn-ghost btn-sm',type:'button',onClick:()=>setPreviewHoraExtra(lastHoraExtra)},'Vista carta'),
+              h('button',{className:'btn btn-wine btn-sm',type:'button',onClick:()=>imprimirHoraExtra(lastHoraExtra)},'Imprimir / guardar PDF')
+            )
+          ),
+          h('div',{className:'spacer-sm'}),
+          h(EmployeeSearchList,{items:equipo,selected,onSelect:setSelected,placeholder:'Buscar empleado del area...',metaText:e=>AREA_LABELS[e.area]||e.area||'Produccion'}),
+          h('div',{className:'div'}),
+          h('div',{className:'form-grid'},
+            h('div',{className:'grid-2'},
+              h('div',{className:'field'},h('label',null,'Fecha'),h('input',{className:'form-control',type:'date',value:fecha,onChange:e=>setFecha(e.target.value)})),
+              h('div',{className:'field'},h('label',null,'Horas'),h('input',{className:'form-control',type:'number',min:'0.25',step:'0.25',value:horas,onChange:e=>setHoras(e.target.value)}))
+            ),
+            h('div',{className:'field'},h('label',null,'Motivo'),h('textarea',{className:'form-control',rows:3,value:notas,onChange:e=>setNotas(e.target.value),placeholder:'Ej. cierre, pedido especial, apoyo de producción...'})),
+            h('button',{className:'btn btn-wine',onClick:submitHoraExtra},'Enviar a RRHH')
+          )
+        )
+      ),
+      h('div',{className:'card'},
+        h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},'Horas extra del equipo'),h(AreaPill,{area})),
+        h('div',{className:'card-body'},
+          loading?h('div',{className:'empty'},'Cargando horas extra...'):
+          horasExtra.length?h('div',{className:'permission-list'},
+            horasExtra.map(item=>h('div',{key:item.id,className:'permission-item'},
+              h('div',{className:'permission-top'},
+                h('div',null,h('div',{className:'permission-title'},item.empleado_nombre),h('div',{className:'permission-meta'},`${fmtFecha(item.fecha)} · ${item.horas} h · Jefe: ${item.jefe_directo_nombre||'Sin asignar'}`)),
+                h('span',{className:`badge ${badgeClass(item)}`},item.estado_label||estadoHoraExtraLabel(item))
+              ),
+              h('div',{className:'permission-meta'},`${AREA_LABELS[item.area]||item.area||'Produccion'} · ${item.folio||`HE-${item.id}`}`),
+              h('div',{className:'permission-reason'},item.notas||'Sin motivo capturado'),
+              h('div',{className:'permission-actions'},
+                h('button',{className:'btn btn-ghost btn-sm',onClick:()=>setPreviewHoraExtra(item)},'Vista carta'),
+                h('button',{className:'btn btn-ghost btn-sm',onClick:()=>imprimirHoraExtra(item)},'Imprimir / PDF'),
+                item.puede_editar&&h('button',{className:'btn btn-ghost btn-sm',onClick:()=>editHoraExtra&&editHoraExtra.id===item.id?setEditHoraExtra(null):abrirEdicion(item)},editHoraExtra&&editHoraExtra.id===item.id?'Cancelar':'Editar'),
+                item.puede_eliminar&&h('button',{className:'btn btn-ghost btn-sm',onClick:()=>eliminarHoraExtra(item)},'Eliminar'),
+                item.puede_autorizar&&h('button',{className:'btn btn-ghost btn-sm',onClick:()=>accion(item,'rechazar')},'Rechazar'),
+                item.puede_autorizar&&h('button',{className:'btn btn-wine btn-sm',onClick:()=>accion(item,'autorizar')},'Autorizar')
+              ),
+              editHoraExtra&&editHoraExtra.id===item.id&&h('div',{className:'form-grid edit-panel'},
+                h('div',{className:'grid-2'},
+                  h('div',{className:'field'},h('label',null,'Fecha'),h('input',{className:'form-control',type:'date',value:editHoraExtra.fecha,onChange:e=>setEditHoraExtra(prev=>({...prev,fecha:e.target.value,error:''}))})),
+                  h('div',{className:'field'},h('label',null,'Horas'),h('input',{className:'form-control',type:'number',min:'0.25',step:'0.25',value:editHoraExtra.horas,onChange:e=>setEditHoraExtra(prev=>({...prev,horas:e.target.value,error:''}))}))
+                ),
+                h('div',{className:'field'},h('label',null,'Motivo'),h('textarea',{className:'form-control',rows:2,value:editHoraExtra.notas,onChange:e=>setEditHoraExtra(prev=>({...prev,notas:e.target.value,error:''}))})),
+                h('div',{className:'field'},h('label',null,'Motivo de correccion'),h('textarea',{className:'form-control',rows:2,value:editHoraExtra.motivoCambio,placeholder:'Ej. Se capturo mal la fecha / horas / solicitud duplicada',onChange:e=>setEditHoraExtra(prev=>({...prev,motivoCambio:e.target.value,error:''}))})),
+                editHoraExtra.error&&h('div',{className:'permission-edit-error'},editHoraExtra.error),
+                h('button',{className:'btn btn-wine btn-sm',onClick:guardarEdicion},'Guardar cambios')
+              )
+            ))
+          ):h('div',{className:'empty'},'Sin horas extra registradas para esta area.')
+        )
+      )
+      ,
+      previewHoraExtra&&h(HoraExtraPrintModal,{item:previewHoraExtra,onClose:()=>setPreviewHoraExtra(null),contextLabel:contextoHoraExtra(previewHoraExtra)})
     )
   );
 }
@@ -751,15 +798,15 @@ function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registr
     ),
     selectedBono&&h('div',{className:'card'},
       h('div',{className:'card-hdr'},
-        h('div',{style:{display:'flex',alignItems:'center',gap:10}},
+        h('div',{className:'employee-heading'},
           h('div',{className:'av'},initials(selectedBono.empleado_nombre)),
           h('div',null,h('div',{className:'persona-name'},selectedBono.empleado_nombre),h('div',{className:'persona-sub'},`${regActivos.length} dias registrados`))
         ),
-        h('div',{style:{display:'flex',gap:6,flexWrap:'wrap'}},
+        h('div',{className:'badge-row'},
           h(Badge,{ok:selectedBono.pasa_asistencia}),h(Badge,{ok:selectedBono.pasa_uniforme}),h(Badge,{ok:selectedBono.pasa_produccion}),
           Number(selectedBono.monto_premio_embetunado||0)>0&&h('span',{className:'badge ok'},`Premio ${money(selectedBono.monto_premio_embetunado)}`),
           Number(selectedBono.ajuste_negativo||0)>0&&h('span',{className:'badge bad'},`Desc. ${money(selectedBono.ajuste_negativo)}`),
-          h('span',{style:{fontWeight:800,color:'var(--wine)',fontSize:14}},money(selectedBono.total_a_pagar))
+          h('span',{className:'text-total'},money(selectedBono.total_a_pagar))
         )
       ),
       h('div',{className:'card-body'},
@@ -769,12 +816,12 @@ function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registr
           const r=registros.find(x=>+x.dia===d);
           const worked=r?.tiene_asistencia;
           return h('div',{key:d,className:`day-cell ${dom?'dom':''} ${worked?'worked':''} ${savingDia===d?'saving':''}`,onClick:()=>togDia(d)},
-            h('span',{className:'dn'},d),h('span',{className:'ds'},worked?'✓':dom?'D':''));
+            h('span',{className:'dn'},d),h('span',{className:'ds'},worked?'OK':dom?'D':''));
         })),
         regActivos.length>0&&h('div',null,
           h('div',{className:'div'}),
           h('div',{className:'sec-title'},'Detalle por dia trabajado'),
-          h('div',{className:'chips'},regActivos.map(r=>h('button',{key:r.dia,className:`chip ${selDia===+r.dia?'on':''}`,style:{padding:'4px 10px',fontSize:12},onClick:()=>setSelDia(+r.dia)},r.dia))),
+          h('div',{className:'chips'},regActivos.map(r=>h('button',{key:r.dia,className:`chip chip-compact ${selDia===+r.dia?'on':''}`,onClick:()=>setSelDia(+r.dia)},r.dia))),
           diaActual&&h('div',null,
             [{k:'tiene_uniforme',lbl:'Uniforme'},{k:'tiene_puntualidad',lbl:'Puntualidad'},{k:'tiene_produccion',lbl:'Produccion'}].map(({k,lbl})=>
               h('div',{key:k,className:'concepto-row'},
@@ -783,7 +830,7 @@ function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registr
               )
             ),
             (['EMBETUNADO','PRODUCCION'].includes(selectedArea))&&h('div',{className:'emb-counter'},
-              h('label',null,'🎂 Pasteles embetunados'),
+              h('label',null,'Cumpleaños Pasteles embetunados'),
               h('input',{type:'number',min:0,value:diaActual.cantidad_embetunados||0,onChange:e=>guardarDia(selDia,{cantidad_embetunados:+e.target.value})})
             ),
             h('div',{className:'concepto-row'},
@@ -821,30 +868,30 @@ function ResumenTab({bonos,area,setArea,mes,anio}){
   }
   return h('div',null,
     h(AreaChips,{area,setArea}),
-    h('div',{className:'report-tools',style:{marginBottom:12}},
+    h('div',{className:'report-tools report-tools-spaced'},
       h('button',{className:'btn btn-wine btn-sm',onClick:()=>setReport({type:'all'})},'Imprimir reporte completo'),
       h('button',{className:'btn btn-ghost btn-sm',disabled:selectedBonos.length===0,onClick:()=>setReport({type:'selected',bonos:selectedBonos})},`Imprimir seleccionados (${selectedBonos.length})`)
     ),
-    h('div',{className:'metrics',style:{marginBottom:20}},
+    h('div',{className:'metrics metrics-spaced'},
       h('div',{className:'metric-card'},h('div',{className:'lbl'},'Total global'),h('div',{className:'val gold'},money(totalGlobal))),
       h('div',{className:'metric-card'},h('div',{className:'lbl'},'Empleados'),h('div',{className:'val'},bonos.length)),
       h('div',{className:'metric-card'},h('div',{className:'lbl'},'Pasan todo'),h('div',{className:'val wine'},bonos.filter(b=>b.pasa_asistencia&&b.pasa_uniforme&&b.pasa_puntualidad&&b.pasa_produccion).length)),
-      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Area'),h('div',{className:'val',style:{fontSize:14}},AREA_LABELS[area]))
+      h('div',{className:'metric-card'},h('div',{className:'lbl'},'Area'),h('div',{className:'val val-sm'},AREA_LABELS[area]))
     ),
     h('div',{className:'card'},
-      h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},AREA_LABELS[area]),h('div',{style:{fontWeight:800,color:'var(--gold)',fontSize:14}},money(selected.reduce((s,b)=>s+Number(b.total_a_pagar||0),0)))),
+      h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},AREA_LABELS[area]),h('div',{className:'text-gold-strong'},money(selected.reduce((s,b)=>s+Number(b.total_a_pagar||0),0)))),
       h('div',{className:'tbl-wrap'},h('table',null,
         h('thead',null,h('tr',null,[h('th',null,h('input',{type:'checkbox',checked:allVisibleSelected,onChange:toggleVisible,title:'Seleccionar area visible'})),h('th',null,'Empleado'),h('th',null,'Dias'),h('th',null,'Uniforme'),h('th',null,'Asistencia'),h('th',null,'Puntualidad'),h('th',null,'Produccion'),(['EMBETUNADO','PRODUCCION'].includes(area))&&h('th',null,'Embet.'),(['EMBETUNADO','PRODUCCION'].includes(area))&&h('th',null,'Premio'),h('th',null,'Total')].filter(Boolean))),
         h('tbody',null,selected.map(b=>{
           const esGanador=(['EMBETUNADO','PRODUCCION'].includes(area))&&maxEmb>0&&(b.total_embetunados||0)===maxEmb;
           return h('tr',{key:b.id},
             h('td',null,h('input',{type:'checkbox',checked:selectedIds.has(b.id),onChange:()=>toggleSelected(b.id),title:'Seleccionar colaborador'})),
-            h('td',null,h('div',{className:'persona-row'},h('div',{className:'av'},initials(b.empleado_nombre)),h('div',null,h('div',{className:'persona-name'},b.empleado_nombre+(esGanador?' *':'')),esGanador&&h('div',{className:'persona-sub',style:{color:'var(--gold)'}},'Mas embetunados')))),
+            h('td',null,h('div',{className:'persona-row'},h('div',{className:'av'},initials(b.empleado_nombre)),h('div',null,h('div',{className:'persona-name'},b.empleado_nombre+(esGanador?' *':'')),esGanador&&h('div',{className:'persona-sub persona-sub-gold'},'Mas embetunados')))),
             h('td',null,b.dias_trabajados||0),h('td',null,h(Badge,{ok:b.pasa_uniforme})),h('td',null,h(Badge,{ok:b.pasa_asistencia})),
             h('td',null,h(Badge,{ok:b.pasa_puntualidad})),h('td',null,h(Badge,{ok:b.pasa_produccion})),
             (['EMBETUNADO','PRODUCCION'].includes(area))&&h('td',null,b.total_embetunados||0),
             (['EMBETUNADO','PRODUCCION'].includes(area))&&h('td',null,money(b.monto_premio_embetunado||0)),
-            h('td',{style:{fontWeight:800,color:'var(--wine)'}},money(b.total_a_pagar))
+            h('td',{className:'text-total'},money(b.total_a_pagar))
           );
         }))
       ))
@@ -859,16 +906,16 @@ function ResumenTab({bonos,area,setArea,mes,anio}){
 function AjustesTab({bonosArea,area,setArea,actualizarBono}){
   return h('div',null,h(AreaChips,{area,setArea}),
     bonosArea.length===0?h('div',{className:'empty'},'Sin empleados en esta area.'):
-    bonosArea.map(b=>h('div',{key:b.id,className:'card',style:{marginBottom:10}},
+    bonosArea.map(b=>h('div',{key:b.id,className:'card card-spaced-sm'},
       h('div',{className:'card-hdr'},
-        h('div',{style:{display:'flex',alignItems:'center',gap:10}},h('div',{className:'av'},initials(b.empleado_nombre)),h('div',null,h('div',{className:'persona-name'},b.empleado_nombre),h(AreaPill,{area:b.area}))),
-        h('div',{style:{fontWeight:800,color:'var(--wine)',fontSize:15}},money(b.total_a_pagar))
+        h('div',{className:'employee-heading'},h('div',{className:'av'},initials(b.empleado_nombre)),h('div',null,h('div',{className:'persona-name'},b.empleado_nombre),h(AreaPill,{area:b.area}))),
+        h('div',{className:'text-total-lg'},money(b.total_a_pagar))
       ),
       h('div',{className:'card-body'},
-        h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12}},
-          h('label',{style:{display:'grid',gap:4,fontSize:12,fontWeight:700,color:'var(--sub)'}},'Ajuste positivo (+)',h('input',{className:'aj-input',type:'number',defaultValue:b.ajuste_positivo||0,min:0,onBlur:e=>actualizarBono(b.id,{ajuste_positivo:e.target.value})})),
-          h('label',{style:{display:'grid',gap:4,fontSize:12,fontWeight:700,color:'var(--sub)'}},'Ajuste negativo (-)',h('input',{className:'aj-input',type:'number',defaultValue:b.ajuste_negativo||0,min:0,onBlur:e=>actualizarBono(b.id,{ajuste_negativo:e.target.value})})),
-          h('label',{style:{display:'grid',gap:4,fontSize:12,fontWeight:700,color:'var(--sub)'}},'Bono extra',h('input',{className:'aj-input',type:'number',defaultValue:b.bono_extra||0,min:0,onBlur:e=>actualizarBono(b.id,{bono_extra:e.target.value})}))
+        h('div',{className:'grid-3'},
+          h('label',{className:'adjust-label'},'Ajuste positivo (+)',h('input',{className:'aj-input',type:'number',defaultValue:b.ajuste_positivo||0,min:0,onBlur:e=>actualizarBono(b.id,{ajuste_positivo:e.target.value})})),
+          h('label',{className:'adjust-label'},'Ajuste negativo (-)',h('input',{className:'aj-input',type:'number',defaultValue:b.ajuste_negativo||0,min:0,onBlur:e=>actualizarBono(b.id,{ajuste_negativo:e.target.value})})),
+          h('label',{className:'adjust-label'},'Bono extra',h('input',{className:'aj-input',type:'number',defaultValue:b.bono_extra||0,min:0,onBlur:e=>actualizarBono(b.id,{bono_extra:e.target.value})}))
         )
       )
     ))
@@ -885,11 +932,11 @@ function RevisionTab({bonosArea,area,setArea,selectedBono,setSelectedBono,regist
         bonosArea.length===0?h('div',{className:'empty'},'Sin empleados en esta area.'):
         h(EmployeeSearchList,{items:bonosArea,selected:selectedBono,onSelect:setSelectedBono,placeholder:'Buscar empleado para revisar...',metaText:b=>AREA_LABELS[b.area]||b.area||'Produccion',rightText:b=>`${b.dias_trabajados||0} dias`}),
         selectedBono&&(registros.length===0?h('div',{className:'empty'},'Sin dias registrados.'):
-          h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:10}},
-            registros.filter(r=>r.tiene_asistencia).map(r=>h('div',{key:r.id,style:{background:'var(--bg)',border:'1px solid var(--line)',borderRadius:8,padding:10}},
-              h('div',{style:{fontWeight:800,fontSize:12,color:'var(--sub)',marginBottom:6}},`Dia ${r.dia}`),
-              h('div',{style:{display:'flex',gap:4,flexWrap:'wrap',marginBottom:8}},h(Badge,{ok:r.tiene_uniforme}),h(Badge,{ok:r.tiene_puntualidad}),h(Badge,{ok:r.tiene_produccion})),
-              (['EMBETUNADO','PRODUCCION'].includes(selectedArea))&&r.cantidad_embetunados>0&&h('div',{style:{fontSize:12,color:'var(--gold)',fontWeight:700,marginBottom:6}},`🎂 ${r.cantidad_embetunados} pasteles`),
+          h('div',{className:'review-grid'},
+            registros.filter(r=>r.tiene_asistencia).map(r=>h('div',{key:r.id,className:'review-day-card'},
+              h('div',{className:'review-day-title'},`Dia ${r.dia}`),
+              h('div',{className:'review-day-badges'},h(Badge,{ok:r.tiene_uniforme}),h(Badge,{ok:r.tiene_puntualidad}),h(Badge,{ok:r.tiene_produccion})),
+              (['EMBETUNADO','PRODUCCION'].includes(selectedArea))&&r.cantidad_embetunados>0&&h('div',{className:'review-day-note'},`Cumpleaños ${r.cantidad_embetunados} pasteles`),
               h('textarea',{className:'nota-input',rows:2,defaultValue:r.observacion||'',onBlur:e=>guardarDia(+r.dia,{observacion:e.target.value}),placeholder:'Observacion del dia…'})
             ))
           )

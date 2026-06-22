@@ -10,6 +10,7 @@ from .models import (
     LineaReceta,
     PlanProduccion,
     PlanProduccionItem,
+    PoliticaMargenPrecio,
     PronosticoVenta,
     Receta,
     RecetaCodigoPointAlias,
@@ -238,6 +239,23 @@ class CostoDriverAdmin(admin.ModelAdmin):
     autocomplete_fields = ("receta",)
 
 
+@admin.register(PoliticaMargenPrecio)
+class PoliticaMargenPrecioAdmin(admin.ModelAdmin):
+    list_display = (
+        "familia_point",
+        "fuente_costo",
+        "margen_meta_pct",
+        "subida_maxima_pct",
+        "precio_max_competitivo",
+        "prioridad",
+        "activo",
+        "actualizado_en",
+    )
+    list_filter = ("fuente_costo", "activo")
+    search_fields = ("familia_point", "notas")
+    ordering = ("prioridad", "familia_point", "fuente_costo")
+
+
 @admin.register(RecetaCostoVersion)
 class RecetaCostoVersionAdmin(admin.ModelAdmin):
     list_display = (
@@ -324,11 +342,15 @@ class SolicitudReabastoCedisLineaInline(admin.TabularInline):
 
 @admin.register(SolicitudReabastoCedis)
 class SolicitudReabastoCedisAdmin(admin.ModelAdmin):
-    list_display = ("folio", "fecha_operacion", "sucursal", "estado", "creado_por", "creado_en", "actualizado_en")
+    list_display = ("folio", "fecha_operacion", "sucursal", "estado_operativo", "creado_por", "creado_en", "actualizado_en")
     list_filter = ("estado", "fecha_operacion", "sucursal")
     search_fields = ("folio", "sucursal__codigo", "sucursal__nombre", "notas")
     autocomplete_fields = ("sucursal", "creado_por")
     inlines = [SolicitudReabastoCedisLineaInline]
+
+    @admin.display(description="Estado")
+    def estado_operativo(self, obj):
+        return obj.estado_operativo_label
 
 
 @admin.register(SolicitudReabastoCedisLinea)

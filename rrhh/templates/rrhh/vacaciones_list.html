@@ -4,102 +4,7 @@
 {% block page_title %}RRHH · Vacaciones{% endblock %}
 
 {% block extra_css %}
-<style>
-  .vac-page { display: grid; gap: 16px; }
-  .vac-head {
-    background: #fff;
-    border: 1px solid var(--rosa);
-    border-radius: 8px;
-    display: grid;
-    gap: 14px;
-    grid-template-columns: minmax(0, 1fr) minmax(320px, .65fr);
-    padding: 18px;
-  }
-  .vac-title { color: var(--vino); font-family: "Playfair Display", serif; font-size: 25px; font-weight: 800; }
-  .vac-copy { color: var(--texto-light); margin-top: 4px; max-width: 760px; }
-  .vac-stats { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .vac-stat { background: #fbf6f8; border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; }
-  .vac-stat strong { color: var(--vino); display: block; font-size: 22px; line-height: 1; }
-  .vac-stat span { color: var(--texto-light); font-size: 11px; font-weight: 900; text-transform: uppercase; }
-  .vac-layout { display: grid; gap: 16px; }
-  .vac-panel { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 16px; }
-  .vac-panel h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
-  .vac-entry-grid { display: grid; gap: 16px; grid-template-columns: minmax(360px, .9fr) minmax(320px, 1.1fr); align-items: start; }
-  .vac-form { display: grid; gap: 12px; }
-  .vac-field { display: grid; gap: 5px; }
-  .vac-field label { color: var(--vino); font-size: 12px; font-weight: 900; text-transform: uppercase; }
-  .vac-field input, .vac-field select, .vac-field textarea {
-    border: 1px solid var(--rosa);
-    border-radius: 8px;
-    font: inherit;
-    padding: 10px;
-    width: 100%;
-  }
-  .vac-field textarea { min-height: 88px; resize: vertical; }
-  .vac-employee-card {
-    background: #fbf6f8;
-    border: 1px solid var(--rosa);
-    border-radius: 8px;
-    color: var(--texto-light);
-    display: grid;
-    gap: 4px;
-    min-height: 58px;
-    padding: 10px;
-  }
-  .vac-employee-card strong { color: var(--texto); font-size: 14px; }
-  .vac-employee-card span { font-size: 12px; }
-  .vac-saldo-list { display: grid; gap: 8px; margin-top: 12px; max-height: 300px; overflow: auto; }
-  .vac-saldo-row { border: 1px solid var(--rosa); border-radius: 8px; display: grid; gap: 4px; padding: 10px; }
-  .vac-saldo-main { color: var(--texto); font-weight: 900; }
-  .vac-meta { color: var(--texto-light); font-size: 13px; }
-  .vac-status-panel { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 16px; }
-  .vac-status-strip { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 14px; }
-  .vac-status-tab {
-    background: #fbf6f8;
-    border: 1px solid var(--rosa);
-    border-radius: 8px;
-    color: var(--vino);
-    display: grid;
-    gap: 3px;
-    min-height: 68px;
-    padding: 12px;
-    text-decoration: none;
-  }
-  .vac-status-tab strong { font-size: 17px; }
-  .vac-status-tab span { color: var(--texto-light); font-size: 12px; font-weight: 900; text-transform: uppercase; }
-  .vac-status-tab.active { background: var(--vino); color: #fff; }
-  .vac-status-tab.active span { color: rgba(255, 255, 255, .8); }
-  .vac-list { display: grid; gap: 10px; }
-  .vac-card { border: 1px solid var(--rosa); border-radius: 8px; display: grid; gap: 10px; padding: 12px; }
-  .vac-card-row {
-    align-items: center;
-    display: grid;
-    gap: 12px;
-    grid-template-columns: minmax(180px, 1.2fr) minmax(190px, 1fr) minmax(180px, 1fr) minmax(130px, .7fr) auto;
-  }
-  .vac-card-main { color: var(--texto); font-weight: 900; }
-  .vac-badges { display: flex; flex-wrap: wrap; gap: 6px; }
-  .vac-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }
-  .vac-badge.gold { background: rgba(201, 168, 76, .18); color: #6f5415; }
-  .vac-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-  .vac-reglamento {
-    background: #fff;
-    border: 1px solid var(--rosa);
-    border-radius: 8px;
-    padding: 14px;
-  }
-  .vac-reglamento summary { color: var(--vino); cursor: pointer; font-weight: 900; }
-  .vac-reglamento ul { color: var(--texto-light); margin: 10px 0 0 18px; padding: 0; }
-  @media (max-width: 1280px) {
-    .vac-card-row { grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr); align-items: start; }
-    .vac-entry-grid { grid-template-columns: 1fr; }
-  }
-  @media (max-width: 760px) {
-    .vac-head { grid-template-columns: 1fr; }
-    .vac-status-strip, .vac-stats { grid-template-columns: 1fr; }
-    .vac-card-row { grid-template-columns: 1fr; }
-  }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-vacaciones-list.css?v=20260616-conciliacion-v1">
 {% endblock %}
 
 {% block content %}
@@ -112,9 +17,9 @@
 <section class="vac-page">
   <div class="vac-head">
     <div>
-      <div class="vac-title">Solicitud de vacaciones</div>
+      <div class="vac-title">Vacaciones</div>
       <div class="vac-copy">
-        Prototipo de flujo ordenado desde la fuente consolidada de Capital Humano:
+        Flujo ordenado desde la fuente consolidada de Capital Humano:
         empleado activo, antigüedad, saldo, reserva, autorización y archivo RRHH.
       </div>
     </div>
@@ -185,17 +90,96 @@
         </div>
 
         <div>
-          <h2>Saldos iniciales</h2>
-          <div class="vac-saldo-list">
-            {% for row in empleados_saldo %}
-              <div class="vac-saldo-row">
-                <div class="vac-saldo-main">{{ row.empleado.nombre }}</div>
-                <div class="vac-meta">
-                  Disponible: {{ row.saldo.disponible }} días · Generado: {{ row.saldo.generado }} · Reservado: {{ row.saldo.reservado }}
+          <h2>Saldos e historial</h2>
+          <form class="vac-review-tools" method="get">
+            <input
+              type="search"
+              name="q"
+              value="{{ filtros_historial.q }}"
+              placeholder="Buscar empleado, puesto o sucursal"
+              aria-label="Buscar en saldos de vacaciones"
+            >
+            <select name="estado" aria-label="Filtrar saldo">
+              <option value="">Todos</option>
+              <option value="saldo" {% if filtros_historial.estado == "saldo" %}selected{% endif %}>Con saldo</option>
+              <option value="anterior" {% if filtros_historial.estado == "anterior" %}selected{% endif %}>Goce anterior</option>
+              <option value="vencido" {% if filtros_historial.estado == "vencido" %}selected{% endif %}>Plazo vencido</option>
+              <option value="por_vencer" {% if filtros_historial.estado == "por_vencer" %}selected{% endif %}>Por vencer</option>
+            </select>
+            <select name="sucursal" aria-label="Filtrar sucursal">
+              <option value="">Todas las sucursales</option>
+              {% for sucursal in sucursales_historial %}
+                <option value="{{ sucursal }}" {% if filtros_historial.sucursal == sucursal %}selected{% endif %}>{{ sucursal }}</option>
+              {% endfor %}
+            </select>
+            <button class="btn btn-primary" type="submit">Buscar</button>
+            {% if filtros_historial.q or filtros_historial.estado or filtros_historial.sucursal %}
+              <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_vacaciones_list' %}">Limpiar</a>
+            {% endif %}
+          </form>
+          <div class="vac-history-list">
+            {% for row in empleados_historial %}
+              <article class="vac-history-row">
+                <div class="vac-history-top">
+                  <div>
+                    <div class="vac-saldo-main">{{ row.empleado.nombre }}</div>
+                    <div class="vac-meta">
+                      {{ row.empleado.puesto|default:"Sin puesto" }} · {{ row.empleado.sucursal|default:"Sin sucursal" }}
+                    </div>
+                  </div>
+                  <span class="vac-badge gold">{{ row.estado_legal }}</span>
                 </div>
-              </div>
+                <div class="vac-history-metrics">
+                  <span>Total revisar <strong>{{ row.disponible_total }}</strong></span>
+                  <span>Disponible <strong>{{ row.saldo.disponible }}</strong></span>
+                  <span>Goce anterior <strong>{{ row.pendiente_anterior }}</strong></span>
+                  <span>Generado <strong>{{ row.saldo.generado }}</strong></span>
+                  <span>Reservado <strong>{{ row.saldo.reservado }}</strong></span>
+                  <span>Consumido <strong>{{ row.saldo.consumido }}</strong></span>
+                </div>
+                <div class="vac-meta">
+                  Ingreso: {{ row.empleado.fecha_ingreso|date:"Y-m-d" }} ·
+                  Último aniversario: {{ row.ultimo_aniversario|date:"Y-m-d"|default:"Sin fecha" }} ·
+                  Fecha límite legal: {{ row.fecha_limite|date:"Y-m-d"|default:"Sin fecha" }}
+                </div>
+                <div class="vac-movement-list">
+                  {% for movimiento in row.movimientos %}
+                    <div class="vac-movement-line">
+                      <strong>{{ movimiento.periodo_anio }} · {{ movimiento.get_tipo_display }} · {{ movimiento.dias }} días</strong>
+                      <span>{{ movimiento.descripcion|default:"Sin descripción"|truncatechars:90 }}</span>
+                      {% if movimiento.solicitud %}<span>{{ movimiento.solicitud.folio }}</span>{% endif %}
+                    </div>
+                  {% empty %}
+                    <div class="vac-meta">Sin movimientos registrados.</div>
+                  {% endfor %}
+                </div>
+                {% if can_manage_rrhh %}
+                  <details class="vac-adjust">
+                    <summary>Conciliar / ajustar</summary>
+                    <form class="vac-adjust-form" method="post">
+                      {% csrf_token %}
+                      <input type="hidden" name="action" value="ajustar_saldo">
+                      <input type="hidden" name="empleado_id" value="{{ row.empleado.id }}">
+                      <label>
+                        Periodo
+                        <input type="number" name="periodo_anio" value="{{ row.saldo.periodo_anio }}" min="2000" max="{{ periodo_maximo }}" required>
+                      </label>
+                      <label>
+                        Días ajuste
+                        <input type="number" name="dias_ajuste" value="0" step="0.01" min="-100" max="100" required>
+                      </label>
+                      <label class="wide">
+                        Nota RRHH
+                        <input type="text" name="descripcion" maxlength="180" placeholder="Ej. pago timbrado, corrección o conciliación sin cambio" required>
+                      </label>
+                      <button class="btn btn-primary" type="submit">Guardar ajuste</button>
+                    </form>
+                    <div class="vac-meta">Positivo suma, negativo resta, 0 solo deja evidencia de conciliación.</div>
+                  </details>
+                {% endif %}
+              </article>
             {% empty %}
-              <div class="vac-meta">Sin empleados activos.</div>
+              <div class="vac-meta">Sin empleados para esos filtros.</div>
             {% endfor %}
           </div>
         </div>
@@ -255,7 +239,7 @@
           {% endfor %}
         </div>
       {% endfor %}
-      {% if not solicitudes %}
+      {% if not hay_solicitudes %}
         <div class="vac-meta">Sin solicitudes.</div>
       {% endif %}
       </div>

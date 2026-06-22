@@ -20,8 +20,8 @@ EMOJI_ESTATUS = {
     "abierto": "[Nuevo]",
     "en_revision": "[Revision]",
     "en_proceso": "[Proceso]",
-    "resuelto": "[Resuelto]",
-    "cerrado": "[Cerrado]",
+    "resuelto": "[Finalizado]",
+    "cerrado": "[Cerrado / validado]",
     "cancelado": "[Cancelado]",
 }
 

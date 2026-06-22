@@ -10,6 +10,7 @@ from rest_framework.response import Response
 
 from rrhh.models import Empleado, NominaPeriodo
 from rrhh.bonos_permisos import BasePermisosEquipoViewSet, _empleado_payload, _permiso_payload
+from rrhh.bonos_horas_extra import BaseHorasExtraEquipoViewSet
 from core.access import can_manage_submodule, can_view_submodule, is_bonos_produccion_capture_only
 from core.audit import log_event
 from recetas.utils.normalizacion import normalizar_nombre
@@ -242,13 +243,31 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
             BonoProduccionEmpleado.objects.filter(periodo__mes=mes, periodo__anio=anio)
         ).select_related("empleado")
         area = self._context_param("area")
-        if area:
+        if area and area != "TODAS":
             area_normalizada = normalizar_area_produccion(area)
             areas_validas = {code for code, _ in AREAS_PRODUCCION}
             if area_normalizada not in areas_validas:
                 return BonoProduccionEmpleado.objects.none()
             qs = qs.filter(area=area_normalizada)
         return qs
+
+    def _areas_validas(self):
+        return {code for code, _ in AREAS_PRODUCCION}
+
+    def _area_normalizada_valida(self, area):
+        area_normalizada = normalizar_area_produccion(area)
+        if area_normalizada in self._areas_validas():
+            return area_normalizada
+        return None
+
+    def _area_payload_empleado(self, empleado, area_bono_por_empleado=None):
+        area = (area_bono_por_empleado or {}).get(empleado.id) or area_bono_produccion_empleado(empleado)
+        area_normalizada = self._area_normalizada_valida(area)
+        if area_normalizada:
+            return area_normalizada
+        if empleado.departamento == AREA_PRODUCCION or empleado.departamento_origen == AREA_PRODUCCION:
+            return AREA_PRODUCCION
+        return area or empleado.departamento or AREA_PRODUCCION
 
     def _equipo_directo_queryset(self):
         jefe = _empleado_de_usuario(self.request.user)
@@ -275,8 +294,7 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
         jefaturas = Empleado.objects.filter(
             activo=True,
             departamento=AREA_PRODUCCION,
-            puesto_operativo="JEFATURA",
-        )
+        ).filter(Q(puesto_operativo="JEFATURA") | Q(nivel_organizacional=Empleado.NIVEL_JEFATURA))
         ids = self._ids_jerarquia_desde(jefaturas.values_list("id", flat=True))
         empleados = list(Empleado.objects.filter(id__in=ids, activo=True))
         if area_normalizada and area_normalizada != AREA_PRODUCCION:
@@ -294,12 +312,13 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
 
     def _prioridad_permisos(self, empleado):
         puesto_operativo = (empleado.puesto_operativo or "").upper()
+        nivel = (empleado.nivel_organizacional or "").upper()
         puesto_texto = normalizar_nombre(f"{empleado.puesto or ''} {puesto_operativo}")
-        if puesto_operativo == "JEFATURA" or "JEFE" in puesto_texto:
+        if puesto_operativo == "JEFATURA" or nivel == Empleado.NIVEL_JEFATURA or "JEFE" in puesto_texto:
             return 0
-        if puesto_operativo == "SUPERVISION_PRODUCCION" or "SUPERVIS" in puesto_texto:
+        if puesto_operativo == "SUPERVISION_PRODUCCION" or nivel == Empleado.NIVEL_SUPERVISION or "SUPERVIS" in puesto_texto:
             return 1
-        if puesto_operativo == "ENCARGADA_PRODUCCION" or "ENCARGAD" in puesto_texto:
+        if puesto_operativo == "ENCARGADA_PRODUCCION" or nivel == Empleado.NIVEL_ENCARGADA or "ENCARGAD" in puesto_texto:
             return 2
         return 10
 
@@ -327,17 +346,14 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
         if bonos_periodo is None:
             return super().list(request)
         area = self._context_param("area")
-        area_normalizada = normalizar_area_produccion(area) if area else None
+        area_normalizada = normalizar_area_produccion(area) if area and area != "TODAS" else None
         bonos = list(bonos_periodo.filter(empleado__activo=True).order_by("area", "empleado__nombre"))
         area_bono_por_empleado = {bono.empleado_id: bono.area for bono in bonos}
         empleados = []
         empleados_ids = set()
         for empleado in self._personal_autorizable_ordenado(area_normalizada):
             payload = _empleado_payload(empleado)
-            payload["area"] = area_bono_por_empleado.get(
-                empleado.id,
-                area_bono_produccion_empleado(empleado) or empleado.departamento or AREA_PRODUCCION,
-            )
+            payload["area"] = self._area_payload_empleado(empleado, area_bono_por_empleado)
             empleados.append(payload)
             empleados_ids.add(empleado.id)
         for bono in bonos:
@@ -351,7 +367,7 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
             if empleado.id in empleados_ids:
                 continue
             payload = _empleado_payload(empleado)
-            payload["area"] = area_bono_produccion_empleado(empleado) or empleado.departamento or AREA_PRODUCCION
+            payload["area"] = self._area_payload_empleado(empleado)
             empleados.append(payload)
             empleados_ids.add(empleado.id)
         permisos = list(self._permisos())
@@ -363,14 +379,13 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
         )
 
     def empleados_queryset(self):
-        areas_validas = {code for code, _ in AREAS_PRODUCCION}
         area = self._context_param("area")
         mes = self._context_param("mes")
         anio = self._context_param("anio")
-        if area:
-            area_normalizada = normalizar_area_produccion(area)
-            if area_normalizada not in areas_validas:
-                return Empleado.objects.none()
+        if area and area != "TODAS":
+            area_normalizada = self._area_normalizada_valida(area)
+            if not area_normalizada:
+                return self._personal_autorizable_queryset()
             if mes and anio:
                 empleados_periodo = bonos_produccion_elegibles_queryset(
                     BonoProduccionEmpleado.objects.filter(
@@ -393,3 +408,18 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
             ).values_list("empleado_id", flat=True)
             return self._con_personal_autorizable(Empleado.objects.filter(id__in=empleados_periodo))
         return self._con_personal_autorizable(empleados_elegibles_bonos_produccion())
+
+
+class HorasExtraProduccionEquipoViewSet(BaseHorasExtraEquipoViewSet, PermisosProduccionEquipoViewSet):
+    permission_classes = [IsAuthenticated, CanAccessBonosProduccion]
+
+    def empleados_queryset(self):
+        return PermisosProduccionEquipoViewSet.empleados_queryset(self)
+
+    def empleado_payload(self, empleado):
+        payload = _empleado_payload(empleado)
+        payload["area"] = self._area_payload_empleado(empleado)
+        return payload
+
+    def can_gestionar_empleado(self, empleado):
+        return can_manage_submodule(self.request.user, "produccion", "bonos") or super().can_gestionar_empleado(empleado)

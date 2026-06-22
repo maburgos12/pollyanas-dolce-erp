@@ -86,6 +86,250 @@ class ConceptoConciliacion(models.Model):
         return f"{self.codigo} | {self.nombre}"
 
 
+class CuentaContableConciliacion(models.Model):
+    TIPO_ACTIVO = "activo"
+    TIPO_PASIVO = "pasivo"
+    TIPO_CAPITAL = "capital"
+    TIPO_INGRESO = "ingreso"
+    TIPO_COSTO = "costo"
+    TIPO_GASTO = "gasto"
+    TIPO_ORDEN = "orden"
+    TIPO_CHOICES = [
+        (TIPO_ACTIVO, "Activo"),
+        (TIPO_PASIVO, "Pasivo"),
+        (TIPO_CAPITAL, "Capital"),
+        (TIPO_INGRESO, "Ingreso"),
+        (TIPO_COSTO, "Costo"),
+        (TIPO_GASTO, "Gasto"),
+        (TIPO_ORDEN, "Orden"),
+    ]
+    NATURALEZA_DEUDORA = "deudora"
+    NATURALEZA_ACREEDORA = "acreedora"
+    NATURALEZA_CHOICES = [
+        (NATURALEZA_DEUDORA, "Deudora"),
+        (NATURALEZA_ACREEDORA, "Acreedora"),
+    ]
+
+    codigo = models.CharField(max_length=60, unique=True)
+    nombre = models.CharField(max_length=180)
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES)
+    naturaleza = models.CharField(max_length=20, choices=NATURALEZA_CHOICES)
+    agrupador_sat = models.CharField(max_length=20, blank=True)
+    cuenta_contpaqi = models.CharField(max_length=60, blank=True)
+    descripcion = models.TextField(blank=True)
+    activa = models.BooleanField(default=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["codigo"]
+        verbose_name = "Cuenta contable de conciliacion"
+        verbose_name_plural = "Cuentas contables de conciliacion"
+        indexes = [
+            models.Index(fields=["tipo", "activa"]),
+            models.Index(fields=["agrupador_sat"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.codigo} | {self.nombre}"
+
+
+class CuentaBancariaPropia(models.Model):
+    cuenta_bancaria = models.OneToOneField(
+        "syncfy_client.CuentaBancaria",
+        on_delete=models.PROTECT,
+        related_name="catalogo_conciliacion",
+    )
+    alias = models.CharField(max_length=120)
+    empresa_rfc = models.CharField(max_length=13, blank=True)
+    clabe = models.CharField(max_length=18, blank=True)
+    ultimos_digitos = models.CharField(max_length=8, blank=True)
+    cuenta_contable = models.ForeignKey(
+        CuentaContableConciliacion,
+        on_delete=models.PROTECT,
+        related_name="cuentas_bancarias",
+    )
+    moneda = models.CharField(max_length=10, default="MXN")
+    activa = models.BooleanField(default=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["alias"]
+        verbose_name = "Cuenta bancaria propia"
+        verbose_name_plural = "Cuentas bancarias propias"
+        indexes = [
+            models.Index(fields=["empresa_rfc", "activa"]),
+            models.Index(fields=["ultimos_digitos"]),
+            models.Index(fields=["clabe"]),
+        ]
+
+    def __str__(self) -> str:
+        return self.alias
+
+
+class ContraparteConciliacion(models.Model):
+    TIPO_CLIENTE = "cliente"
+    TIPO_PROVEEDOR = "proveedor"
+    TIPO_BANCO = "banco"
+    TIPO_SAT = "sat"
+    TIPO_CUENTA_PROPIA = "cuenta_propia"
+    TIPO_TARJETA = "tarjeta_credito"
+    TIPO_LINEA_CREDITO = "linea_credito"
+    TIPO_OTRO = "otro"
+    TIPO_CHOICES = [
+        (TIPO_CLIENTE, "Cliente"),
+        (TIPO_PROVEEDOR, "Proveedor"),
+        (TIPO_BANCO, "Banco"),
+        (TIPO_SAT, "SAT"),
+        (TIPO_CUENTA_PROPIA, "Cuenta propia"),
+        (TIPO_TARJETA, "Tarjeta de credito"),
+        (TIPO_LINEA_CREDITO, "Linea de credito"),
+        (TIPO_OTRO, "Otro"),
+    ]
+
+    tipo = models.CharField(max_length=30, choices=TIPO_CHOICES)
+    nombre = models.CharField(max_length=180)
+    rfc = models.CharField(max_length=13, blank=True)
+    cuenta_contable = models.ForeignKey(
+        CuentaContableConciliacion,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="contrapartes",
+    )
+    palabras_clave = models.JSONField(default=list, blank=True)
+    activa = models.BooleanField(default=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tipo", "nombre"]
+        verbose_name = "Contraparte de conciliacion"
+        verbose_name_plural = "Contrapartes de conciliacion"
+        indexes = [
+            models.Index(fields=["tipo", "activa"]),
+            models.Index(fields=["rfc"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.get_tipo_display()} | {self.nombre}"
+
+
+class InstrumentoFinancieroConciliacion(models.Model):
+    TIPO_TARJETA_CREDITO = "tarjeta_credito"
+    TIPO_LINEA_CREDITO = "linea_credito"
+    TIPO_CHOICES = [
+        (TIPO_TARJETA_CREDITO, "Tarjeta de credito"),
+        (TIPO_LINEA_CREDITO, "Linea de credito"),
+    ]
+
+    tipo = models.CharField(max_length=30, choices=TIPO_CHOICES)
+    nombre = models.CharField(max_length=160)
+    institucion = models.CharField(max_length=120)
+    numero_referencia = models.CharField(max_length=60, blank=True)
+    contraparte = models.ForeignKey(
+        ContraparteConciliacion,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="instrumentos",
+    )
+    cuenta_bancaria_pago = models.ForeignKey(
+        CuentaBancariaPropia,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="instrumentos_pagados",
+    )
+    cuenta_contable_pasivo = models.ForeignKey(
+        CuentaContableConciliacion,
+        on_delete=models.PROTECT,
+        related_name="instrumentos_pasivo",
+    )
+    cuenta_contable_intereses = models.ForeignKey(
+        CuentaContableConciliacion,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="instrumentos_intereses",
+    )
+    patrones_descripcion = models.JSONField(default=list, blank=True)
+    evidencia_requerida = models.JSONField(default=list, blank=True)
+    activo = models.BooleanField(default=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tipo", "nombre"]
+        verbose_name = "Instrumento financiero de conciliacion"
+        verbose_name_plural = "Instrumentos financieros de conciliacion"
+        indexes = [
+            models.Index(fields=["tipo", "activo"]),
+            models.Index(fields=["institucion"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.get_tipo_display()} | {self.nombre}"
+
+
+class ReglaClasificacionMovimiento(models.Model):
+    TIPO_CARGO = "cargo"
+    TIPO_ABONO = "abono"
+    TIPO_AMBOS = "ambos"
+    TIPO_MOVIMIENTO_CHOICES = [
+        (TIPO_CARGO, "Cargo"),
+        (TIPO_ABONO, "Abono"),
+        (TIPO_AMBOS, "Ambos"),
+    ]
+
+    nombre = models.CharField(max_length=180)
+    concepto = models.ForeignKey(
+        ConceptoConciliacion,
+        on_delete=models.PROTECT,
+        related_name="reglas_clasificacion",
+    )
+    tipo_movimiento = models.CharField(max_length=10, choices=TIPO_MOVIMIENTO_CHOICES, default=TIPO_AMBOS)
+    prioridad = models.PositiveIntegerField(default=100)
+    patrones_descripcion = models.JSONField(default=list, blank=True)
+    contraparte_tipo = models.CharField(max_length=30, choices=ContraparteConciliacion.TIPO_CHOICES, blank=True)
+    instrumento_tipo = models.CharField(max_length=30, choices=InstrumentoFinancieroConciliacion.TIPO_CHOICES, blank=True)
+    requiere_cuenta_propia_destino = models.BooleanField(default=False)
+    cuenta_debe_sugerida = models.ForeignKey(
+        CuentaContableConciliacion,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="reglas_debe",
+    )
+    cuenta_haber_sugerida = models.ForeignKey(
+        CuentaContableConciliacion,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="reglas_haber",
+    )
+    evidencia_requerida = models.JSONField(default=list, blank=True)
+    confianza_base = models.PositiveSmallIntegerField(default=70)
+    activa = models.BooleanField(default=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["prioridad", "nombre"]
+        verbose_name = "Regla de clasificacion bancaria"
+        verbose_name_plural = "Reglas de clasificacion bancaria"
+        indexes = [
+            models.Index(fields=["tipo_movimiento", "activa"]),
+            models.Index(fields=["prioridad", "activa"]),
+            models.Index(fields=["contraparte_tipo"]),
+            models.Index(fields=["instrumento_tipo"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.nombre} -> {self.concepto.codigo}"
+
+
 class SucursalIdentificadorFiscal(models.Model):
     TIPO_TEXTO = "texto"
     TIPO_REGEX = "regex"

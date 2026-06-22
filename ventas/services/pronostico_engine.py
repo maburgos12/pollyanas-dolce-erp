@@ -644,11 +644,19 @@ def _simple_average_forecast(series: pd.Series, horizon: int) -> pd.Series:
     if horizon <= 0:
         return pd.Series(dtype=float)
     if series.empty:
-        avg = 0.0
-    else:
-        window = series.tail(min(30, len(series)))
-        avg = float(window.mean()) if len(window) else 0.0
-    return pd.Series([max(avg, 0.0)] * horizon)
+        return pd.Series([0.0] * horizon)
+
+    clean = series.astype(float).clip(lower=0)
+    window = clean.tail(min(84, len(clean)))
+    fallback = float(window.mean()) if len(window) else 0.0
+    values = []
+    last_day = clean.index.max().date()
+    for offset in range(1, horizon + 1):
+        target_day = last_day + timedelta(days=offset)
+        same_weekday = window[window.index.weekday == target_day.weekday()]
+        value = float(same_weekday.mean()) if len(same_weekday) else fallback
+        values.append(max(value, 0.0))
+    return pd.Series(values)
 
 
 def _series_from_history(history: dict[date, Decimal], *, end_date: date) -> pd.Series:

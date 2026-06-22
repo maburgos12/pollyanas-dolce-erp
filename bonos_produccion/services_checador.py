@@ -5,6 +5,8 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 from django.db import transaction
+from django.db.models import Q
+from django.utils import timezone
 
 from rrhh.models import AsistenciaEmpleado, IncidenciaAsistencia
 
@@ -30,6 +32,32 @@ def _rango_periodo(periodo: ConfigBonoPeriodo) -> tuple[date, date]:
 def _fechas(inicio: date, fin: date) -> list[date]:
     dias = (fin - inicio).days
     return [inicio + timedelta(days=offset) for offset in range(dias + 1)]
+
+
+def _fecha_visible_en_periodo(periodo: ConfigBonoPeriodo, fecha: date) -> bool:
+    return fecha.month == periodo.mes and fecha.year == periodo.anio
+
+
+def _periodo_en_curso(periodo: ConfigBonoPeriodo) -> bool:
+    hoy = timezone.localdate()
+    inicio, fin = _rango_periodo(periodo)
+    return inicio <= hoy <= fin and periodo.mes == hoy.month and periodo.anio == hoy.year
+
+
+def _fecha_futura_en_periodo_en_curso(periodo: ConfigBonoPeriodo, fecha: date) -> bool:
+    return _periodo_en_curso(periodo) and fecha > timezone.localdate()
+
+
+def _debe_eliminar_registro(periodo: ConfigBonoPeriodo, bono: BonoProduccionEmpleado, fecha: date) -> bool:
+    if bono.empleado.fecha_ingreso and fecha < bono.empleado.fecha_ingreso:
+        return True
+    return _fecha_futura_en_periodo_en_curso(periodo, fecha)
+
+
+def _fecha_sincronizable(periodo: ConfigBonoPeriodo, fecha: date) -> bool:
+    if not _fecha_visible_en_periodo(periodo, fecha):
+        return False
+    return not _fecha_futura_en_periodo_en_curso(periodo, fecha)
 
 
 def _cargar_asistencias(empleado_ids: list[int], inicio: date, fin: date) -> set[tuple[int, date]]:
@@ -89,7 +117,7 @@ def _evaluar_dia(
 
 def sincronizar_asistencia_desde_checador(periodo: ConfigBonoPeriodo) -> dict:
     inicio, fin = _rango_periodo(periodo)
-    dias = _fechas(inicio, fin)
+    dias = [fecha for fecha in _fechas(inicio, fin) if _fecha_visible_en_periodo(periodo, fecha)]
     bonos_borrador = list(
         periodo.bonos.select_related("empleado").filter(estatus=BonoProduccionEmpleado.ESTATUS_BORRADOR)
     )
@@ -104,11 +132,18 @@ def sincronizar_asistencia_desde_checador(periodo: ConfigBonoPeriodo) -> dict:
         "bonos_omitidos": bonos_omitidos,
         "registros_creados": 0,
         "registros_actualizados": 0,
+        "registros_eliminados": 0,
     }
 
     for bono in bonos_borrador:
         with transaction.atomic():
             for fecha in dias:
+                if _debe_eliminar_registro(periodo, bono, fecha):
+                    eliminados, _ = RegistroDiarioProduccion.objects.filter(bono=bono, dia=fecha.day).delete()
+                    resultado["registros_eliminados"] += eliminados
+                    continue
+                if not _fecha_sincronizable(periodo, fecha):
+                    continue
                 tiene_asistencia, tiene_puntualidad = _evaluar_dia(
                     bono.empleado_id,
                     fecha,
@@ -133,6 +168,79 @@ def sincronizar_asistencia_desde_checador(periodo: ConfigBonoPeriodo) -> dict:
                     registro.tiene_puntualidad = tiene_puntualidad
                     registro.save(update_fields=["tiene_asistencia", "tiene_puntualidad"])
                     resultado["registros_actualizados"] += 1
+            recalcular_desde_registros(bono)
+            resultado["bonos_sincronizados"] += 1
+
+    return resultado
+
+
+def _periodos_para_fecha(fecha: date):
+    return ConfigBonoPeriodo.objects.filter(
+        (
+            (Q(fecha_inicio__isnull=True) | Q(fecha_fin__isnull=True))
+            & Q(mes=fecha.month, anio=fecha.year)
+        )
+        | Q(fecha_inicio__lte=fecha, fecha_fin__gte=fecha, mes=fecha.month, anio=fecha.year)
+    )
+
+
+def sincronizar_empleado_dia_desde_checador(empleado_id: int, fecha: date) -> dict:
+    resultado = {
+        "bonos_sincronizados": 0,
+        "bonos_omitidos": 0,
+        "registros_creados": 0,
+        "registros_actualizados": 0,
+        "registros_eliminados": 0,
+    }
+
+    asistencias = _cargar_asistencias([empleado_id], fecha, fecha)
+    incidencias = _cargar_incidencias([empleado_id], fecha, fecha)
+    tiene_asistencia, tiene_puntualidad = _evaluar_dia(
+        empleado_id,
+        fecha,
+        asistencias,
+        incidencias,
+    )
+
+    for periodo in _periodos_para_fecha(fecha):
+        bono = (
+            periodo.bonos.select_related("empleado")
+            .filter(empleado_id=empleado_id)
+            .first()
+        )
+        if bono is None:
+            continue
+        if bono.estatus != BonoProduccionEmpleado.ESTATUS_BORRADOR:
+            resultado["bonos_omitidos"] += 1
+            continue
+
+        with transaction.atomic():
+            if _debe_eliminar_registro(periodo, bono, fecha):
+                eliminados, _ = RegistroDiarioProduccion.objects.filter(bono=bono, dia=fecha.day).delete()
+                resultado["registros_eliminados"] += eliminados
+                recalcular_desde_registros(bono)
+                resultado["bonos_sincronizados"] += 1
+                continue
+            if not _fecha_sincronizable(periodo, fecha):
+                continue
+            registro, created = RegistroDiarioProduccion.objects.get_or_create(
+                bono=bono,
+                dia=fecha.day,
+                defaults={
+                    "tiene_asistencia": tiene_asistencia,
+                    "tiene_puntualidad": tiene_puntualidad,
+                },
+            )
+            if created:
+                resultado["registros_creados"] += 1
+            elif (
+                registro.tiene_asistencia != tiene_asistencia
+                or registro.tiene_puntualidad != tiene_puntualidad
+            ):
+                registro.tiene_asistencia = tiene_asistencia
+                registro.tiene_puntualidad = tiene_puntualidad
+                registro.save(update_fields=["tiene_asistencia", "tiene_puntualidad"])
+                resultado["registros_actualizados"] += 1
             recalcular_desde_registros(bono)
             resultado["bonos_sincronizados"] += 1
 

@@ -142,9 +142,9 @@
           <strong>${{ global_summary.policy.min_free_cashflow_total|floatformat:2|intcomma }}</strong>
         </div>
       </div>
-      <div class="investment-grid-2 investment-grid-2--compact" style="margin-top:1rem;">
+      <div class="investment-grid-2 investment-grid-2--compact pd-u-0cf8f93b0e">
         <div>
-          <div class="investment-muted" style="margin-bottom:0.5rem;">Mejores bases</div>
+          <div class="investment-muted pd-u-59b87fdbd1">Mejores bases</div>
           <div class="investment-portfolio-list">
             {% for row in recommended_bases %}
             <article class="investment-project-row">
@@ -160,7 +160,7 @@
           </div>
         </div>
         <div>
-          <div class="investment-muted" style="margin-bottom:0.5rem;">Riesgos del portafolio</div>
+          <div class="investment-muted pd-u-59b87fdbd1">Riesgos del portafolio</div>
           <div class="investment-portfolio-list">
             {% for row in risk_bases %}
             <article class="investment-project-row">
@@ -255,7 +255,7 @@
 	        </div>
 	      </div>
 
-	      <div class="investment-grid-2 investment-grid-2--compact" style="margin-top:1rem;">
+	      <div class="investment-grid-2 investment-grid-2--compact pd-u-0cf8f93b0e">
 	        <div class="investment-assumption-box">
 	          <strong>Guardar escenario ejecutivo</strong>
 	          <div class="investment-muted">Guarda sólo simulaciones completas para compararlas, marcarlas como candidatas y retomarlas después sin recalcular.</div>
@@ -372,7 +372,7 @@
 	      </div>
 	      {% endif %}
 
-	      <div class="investment-grid-2 investment-grid-2--compact" style="margin-top:1rem;">
+	      <div class="investment-grid-2 investment-grid-2--compact pd-u-0cf8f93b0e">
 	        <div class="investment-assumption-box">
 	          <strong>Datos históricos usados</strong>
           <div class="investment-stats-list">
@@ -452,7 +452,7 @@
       </div>
       {% endif %}
       {% if forecast_payload.data_gaps %}
-      <div class="investment-alert-stack" style="margin-top:1rem;">
+      <div class="investment-alert-stack pd-u-0cf8f93b0e">
         {% for gap in forecast_payload.data_gaps %}
         <div class="investment-alert"><strong>Dato pendiente</strong><span>{{ gap }}</span></div>
         {% endfor %}

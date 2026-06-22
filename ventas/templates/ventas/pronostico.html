@@ -5,90 +5,7 @@
 {% block body_class %}page-pronostico-ventas{% endblock %}
 
 {% block extra_css %}
-<style>
-  .page-pronostico-ventas .forecast-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
-  .page-pronostico-ventas .saved-forecast-filters { display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:12px; align-items:end; margin-bottom:16px; }
-  .page-pronostico-ventas .saved-forecasts-wrap { --table-min-width:1320px; overflow-x:auto; padding-bottom:8px; }
-  .page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table { min-width:var(--table-min-width); table-layout:fixed; border-collapse:separate; border-spacing:0; }
-  .page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table th,
-  .page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table td { width:auto; min-width:0; vertical-align:middle; overflow-wrap:anywhere; word-break:normal; line-height:1.25; white-space:normal; text-align:left; }
-  .page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table th:nth-child(n+3),
-  .page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table td:nth-child(n+3) { width:auto; min-width:0; white-space:normal; text-align:left; }
-  .page-pronostico-ventas .saved-forecasts-table .forecast-number-cell,
-  .page-pronostico-ventas .saved-forecasts-table .forecast-date-cell { white-space:nowrap; overflow-wrap:normal; text-align:right; }
-  .page-pronostico-ventas .forecast-method-cell { font-size:0.92rem; color:#4f464b; word-break:break-word; }
-  .page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table .forecast-actions-cell { width:280px; min-width:280px; white-space:nowrap; text-align:right; overflow:visible; }
-  .page-pronostico-ventas .forecast-row-actions { display:flex; justify-content:flex-end; align-items:center; gap:8px; flex-wrap:nowrap; }
-  .page-pronostico-ventas .forecast-row-actions form { display:inline-flex; margin:0; }
-  .page-pronostico-ventas .forecast-row-actions .btn { min-width:64px; }
-  .page-pronostico-ventas .new-forecast-summary { cursor:pointer; padding:12px 0; font-size:16px; font-weight:600; color:#7b1a48; list-style:none; display:flex; align-items:center; gap:8px; user-select:none; }
-  .page-pronostico-ventas .new-forecast-summary::-webkit-details-marker { display:none; }
-  .page-pronostico-ventas .forecast-product-section > summary { cursor:pointer; list-style:none; user-select:none; }
-  .page-pronostico-ventas .forecast-product-section > summary::-webkit-details-marker { display:none; }
-  .page-pronostico-ventas .forecast-filter-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:16px; align-items:end; }
-  .page-pronostico-ventas .forecast-filter-submit { margin-top:16px; }
-  .page-pronostico-ventas .forecast-branch-filter { position:relative; width:100%; }
-  .page-pronostico-ventas .forecast-branch-button { width:100%; height:42px; border:1px solid #ced4da; border-radius:6px; background:#fff; cursor:pointer; font-size:14px; padding:0 12px; text-align:left; display:flex; justify-content:space-between; align-items:center; color:#333; }
-  .page-pronostico-ventas .forecast-branch-menu { display:none; position:absolute; top:100%; left:0; width:100%; background:#fff; border:1px solid #ced4da; border-radius:6px; padding:8px; z-index:200; box-shadow:0 4px 12px rgba(0,0,0,0.1); margin-top:2px; }
-  .page-pronostico-ventas .forecast-branch-menu label { display:flex; align-items:center; gap:8px; padding:5px 4px; font-size:13px; cursor:pointer; color:#333; }
-  .page-pronostico-ventas .forecast-product-section { margin-top:18px; border-top:1px solid #eadce3; padding-top:16px; }
-  .page-pronostico-ventas .forecast-products-summary { cursor:pointer; padding:10px 0; font-weight:600; color:#7b1a48; font-size:15px; display:flex; align-items:center; gap:8px; list-style:none; user-select:none; }
-  .page-pronostico-ventas .forecast-products-summary::-webkit-details-marker { display:none; }
-  .page-pronostico-ventas .forecast-products-count { font-weight:400; color:#999; font-size:13px; }
-  .page-pronostico-ventas .forecast-product-actions { display:flex; gap:8px; flex-wrap:wrap; }
-  .page-pronostico-ventas .forecast-product-group { border:1px solid #eadce3; border-radius:8px; margin-bottom:8px; background:#fff; overflow:hidden; }
-  .page-pronostico-ventas .forecast-product-summary { display:flex; align-items:center; gap:10px; padding:10px 12px; color:#3d0a24; font-weight:800; cursor:pointer; }
-  .page-pronostico-ventas .forecast-product-summary span { color:#776b72; font-weight:700; font-size:0.85rem; }
-  .page-pronostico-ventas .forecast-product-summary .btn { margin-left:auto; }
-  .page-pronostico-ventas .forecast-product-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:4px; padding:8px 12px 12px; }
-  .page-pronostico-ventas .forecast-product-option { display:flex; align-items:center; gap:6px; font-size:13px; color:#4f464b; min-width:0; }
-  .page-pronostico-ventas .forecast-product-option span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .page-pronostico-ventas .forecast-special-banner { background:#fff3cd; border:1px solid #ffc107; color:#6b4c00; border-radius:8px; padding:12px 14px; margin-bottom:16px; font-weight:600; }
-  .page-pronostico-ventas .kpi-number,
-  .page-pronostico-ventas .kpi-number.is-success,
-  .page-pronostico-ventas .kpi-number.is-warning,
-  .page-pronostico-ventas .kpi-number.is-danger { color:#7b1a48; font-size:2rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; width:100%; }
-  .page-pronostico-ventas .kpi-icon,
-  .page-pronostico-ventas .kpi-icon.is-success { background:#f5e6ed; color:#7b1a48; }
-  .page-pronostico-ventas .forecast-method { color:#6f6269; font-size:0.9rem; margin:-4px 0 18px; }
-  .page-pronostico-ventas .forecast-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; border-bottom:1px solid #eadce3; }
-  .page-pronostico-ventas .forecast-tab { border:0; border-bottom:3px solid transparent; background:transparent; color:#6b5e65; padding:10px 14px; font-weight:700; cursor:pointer; }
-  .page-pronostico-ventas .forecast-tab.active { color:#7b1a48; border-bottom-color:#7b1a48; }
-  .page-pronostico-ventas .forecast-panel { display:none; }
-  .page-pronostico-ventas .forecast-panel.active { display:block; }
-  .page-pronostico-ventas .production-table-wrap .table thead th { background:#f5e6ed; color:#7b1a48; }
-  .page-pronostico-ventas .production-table-wrap .table tbody tr:nth-child(even):not(.production-subtotal-row):not(.production-grand-total-row) { background:#fdf2f6; }
-  .page-pronostico-ventas .production-subtotal-row td { background:#7b1a48; color:#fff; font-weight:800; }
-  .page-pronostico-ventas .production-grand-total-row td { background:#3d0a24; color:#fff; font-weight:900; }
-  .page-pronostico-ventas .forecast-trend { font-weight:800; white-space:nowrap; }
-  .page-pronostico-ventas .forecast-trend.sube { color:#198754; }
-  .page-pronostico-ventas .forecast-trend.baja { color:#dc3545; }
-  .page-pronostico-ventas .forecast-trend.estable { color:#6c757d; }
-  .page-pronostico-ventas .forecast-day-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:14px; margin-bottom:18px; }
-  .page-pronostico-ventas .forecast-day-card { border:1px solid #e2d6dc; border-radius:8px; padding:14px; background:#fff; box-shadow:0 4px 16px rgba(61,10,36,0.06); }
-  .page-pronostico-ventas .forecast-day-title { display:flex; justify-content:space-between; gap:12px; align-items:center; color:#3d0a24; font-weight:800; margin-bottom:10px; }
-  .page-pronostico-ventas .forecast-day-metrics { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px; }
-  .page-pronostico-ventas .forecast-day-number { color:#7b1a48; font-size:1.2rem; font-weight:900; }
-  .page-pronostico-ventas .forecast-top-list { margin:0; padding-left:18px; color:#4f464b; font-size:0.9rem; }
-  .page-pronostico-ventas .forecast-branch-section { border-top:1px solid #eadce3; padding-top:18px; margin-top:18px; }
-  .page-pronostico-ventas .forecast-branch-header { display:flex; justify-content:space-between; gap:12px; align-items:flex-end; margin-bottom:10px; }
-  .page-pronostico-ventas .forecast-branch-header h3 { margin:0; color:#3d0a24; font-size:1rem; font-weight:900; }
-  .page-pronostico-ventas .forecast-branch-totals { display:flex; gap:14px; flex-wrap:wrap; color:#7b1a48; font-weight:800; font-size:0.92rem; }
-  .page-pronostico-ventas .forecast-modal-backdrop { display:none; position:fixed; inset:0; z-index:1200; background:rgba(61,10,36,0.32); align-items:center; justify-content:center; padding:18px; }
-  .page-pronostico-ventas .forecast-modal-backdrop.active { display:flex; }
-  .page-pronostico-ventas .forecast-modal { width:min(460px, 100%); background:#fff; border-radius:12px; box-shadow:0 18px 42px rgba(61,10,36,0.22); border:1px solid #f1dce6; padding:22px; }
-  .page-pronostico-ventas .forecast-modal-title { margin:0 0 6px; color:#3d0a24; font-size:1.15rem; font-weight:800; }
-  .page-pronostico-ventas .forecast-modal-copy { margin:0 0 18px; color:#776b72; font-size:0.92rem; }
-  .page-pronostico-ventas .forecast-modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:18px; }
-  .page-pronostico-ventas .forecast-chart-wrap { min-height:280px; }
-  @media (max-width: 900px) {
-    .page-pronostico-ventas .saved-forecast-filters { grid-template-columns:1fr; }
-    .page-pronostico-ventas .forecast-filter-grid { grid-template-columns:1fr; }
-    .page-pronostico-ventas .forecast-product-grid { grid-template-columns:1fr; }
-    .page-pronostico-ventas .forecast-actions,
-    .page-pronostico-ventas .forecast-branch-header { justify-content:flex-start; }
-  }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/ventas-templates-ventas-pronostico.css?v=20260617-loading-v1">
 {% endblock %}
 
 {% block content %}
@@ -103,25 +20,34 @@
       <div class="forecast-actions">
         <a class="btn btn-secondary" href="{% url 'ventas:pronostico_guardados' %}">Ver guardados</a>
         {% if resumen %}
-        <button class="btn btn-primary" type="button" id="open-save-forecast">Guardar pronóstico</button>
+        <a class="btn btn-primary" href="#revision-ventas">Revisar y guardar</a>
         <button class="btn btn-secondary" type="button" id="export-forecast-csv">Exportar CSV</button>
         {% endif %}
       </div>
     </div>
   </section>
 
+  <nav class="forecast-workflow-tabs" aria-label="Flujo de pronósticos">
+    <a class="forecast-workflow-tab {% if active_tab == 'pronosticos' %}active{% endif %}" href="{% url 'ventas:pronostico' %}?tab=pronosticos">Pronósticos</a>
+    <a class="forecast-workflow-tab {% if active_tab == 'proyecciones' %}active{% endif %}" href="{% url 'ventas:pronostico' %}?tab=proyecciones">Proyecciones</a>
+  </nav>
+
+  {% if active_tab == "pronosticos" or active_tab == "proyecciones" %}
   <section class="card">
-    <details id="nuevo-calculo">
-      <summary style="list-style:none; cursor:pointer;">
-        <div style="
-          display:inline-flex; align-items:center; gap:8px;
-          background:#7b1a48; color:white; font-weight:600;
-          font-size:14px; padding:10px 20px; border-radius:6px;
-          margin-bottom:16px; user-select:none;">
-          ＋ Calcular nuevo pronóstico
+    <details id="proyecciones" open>
+      <summary class="pd-u-8400ad8a3f">
+        <div class="pd-u-c3cd92807b">
+          ＋ {% if active_tab == "proyecciones" %}Generar proyección{% else %}Generar pronóstico{% endif %}
         </div>
       </summary>
-      <div class="card-header">Filtros</div>
+      <div class="card-header">{% if active_tab == "proyecciones" %}Proyección de ventas{% else %}Pronóstico de ventas{% endif %}</div>
+      <p class="executive-section-copy forecast-projection-copy">
+        {% if active_tab == "proyecciones" %}
+        El ERP calcula el rango; ventas revisa, ajusta y guarda el documento antes de enviarlo a producción o compras.
+        {% else %}
+        Genera el pronóstico estadístico por rango, sucursal y productos.
+        {% endif %}
+      </p>
       {% if form_errors %}
       <div class="production-banner-list">
         {% for error in form_errors %}
@@ -131,12 +57,29 @@
       {% endif %}
       {% if sales_freshness and not sales_freshness.is_fresh %}
       <div class="forecast-special-banner">
-        ⚠️ Ventas Point atrasadas: ultimo dia cargado {{ sales_freshness.latest_label }}; requerido {{ sales_freshness.target_label }}.
+        Atención Ventas Point atrasadas: ultimo dia cargado {{ sales_freshness.latest_label }}; requerido {{ sales_freshness.target_label }}.
         El pronostico se calculara con los datos disponibles. Se lanzara actualizacion de ventas en paralelo.
       </div>
       {% endif %}
-      <form method="post" id="forecast-form">
+      <form method="post" id="forecast-form" data-forecast-loading-form data-loading-title="{% if active_tab == "proyecciones" %}Calculando proyección de ventas{% else %}Calculando pronóstico de ventas{% endif %}">
         {% csrf_token %}
+        <input type="hidden" name="tab" value="{{ active_tab }}">
+        {% if active_tab == "proyecciones" %}
+        <div class="forecast-projection-presets" aria-label="Rangos de proyección">
+          {% for preset in projection_presets %}
+          <button
+            class="forecast-projection-preset {% if preset.days == 15 %}active{% endif %}"
+            type="button"
+            data-projection-days="{{ preset.days }}"
+            data-start="{{ preset.fecha_inicio }}"
+            data-end="{{ preset.fecha_fin }}"
+          >
+            <span>{{ preset.label }}</span>
+            <small>{{ preset.fecha_inicio }} a {{ preset.fecha_fin }}</small>
+          </button>
+          {% endfor %}
+        </div>
+        {% endif %}
         <div class="forecast-filter-grid">
           <div>
             <label class="form-label" for="fecha_inicio">Fecha inicio</label>
@@ -160,7 +103,7 @@
                   {{ branch.nombre }}
                 </label>
                 {% endfor %}
-                <div style="margin-top:8px; padding-top:8px; border-top:1px solid #eee; text-align:right;">
+                <div class="pd-u-c8b34d7a3c">
                   <button type="button" class="btn btn-primary btn-sm" onclick="closeSuc()">Aceptar</button>
                 </div>
               </div>
@@ -173,7 +116,7 @@
             <span id="productos-arrow">▶</span>
             Productos a incluir
             <span class="forecast-products-count">— <span id="productos-count">todos seleccionados</span></span>
-            <span class="forecast-product-actions" style="margin-left:auto;">
+            <span class="forecast-product-actions pd-u-690f054c4e">
               <button class="btn btn-secondary btn-sm" type="button" onclick="setAllProducts(event, true)">Seleccionar todos</button>
               <button class="btn btn-secondary btn-sm" type="button" onclick="setAllProducts(event, false)">Limpiar todo</button>
             </span>
@@ -198,13 +141,15 @@
           </details>
         </div>
         <div class="forecast-filter-submit">
-          <button class="btn btn-primary w-100" type="submit" id="forecast-submit">Calcular pronóstico</button>
+          <button class="btn btn-primary w-100" type="submit" id="forecast-submit">Generar {% if active_tab == "proyecciones" %}proyección{% else %}pronóstico{% endif %}</button>
         </div>
       </form>
     </details>
   </section>
+  {% endif %}
 
-  <section class="card">
+  {% if active_tab == "pronosticos" and not resumen %}
+  <section class="card" id="pronosticos-guardados">
     <div class="section-header">
       <div>
         <h2 class="section-header-title">Pronósticos generados</h2>
@@ -230,13 +175,13 @@
     <div class="table-responsive production-table-wrap saved-forecasts-wrap">
       <table class="table saved-forecasts-table" id="saved-forecasts-table">
         <colgroup>
-          <col style="width:190px;">
-          <col style="width:190px;">
-          <col style="width:90px;">
-          <col style="width:130px;">
-          <col style="width:250px;">
-          <col style="width:130px;">
-          <col style="width:250px;">
+          <col class="pd-u-234b578d25">
+          <col class="pd-u-234b578d25">
+          <col class="pd-u-9bec53c941">
+          <col class="pd-u-29dbf95ce3">
+          <col class="pd-u-d15f904694">
+          <col class="pd-u-29dbf95ce3">
+          <col class="pd-u-d15f904694">
         </colgroup>
         <thead>
           <tr>
@@ -274,17 +219,19 @@
             <td colspan="7" class="text-center text-muted">Aún no hay pronósticos guardados.</td>
           </tr>
           {% endfor %}
-          <tr id="saved-forecasts-empty-filter" style="display:none;">
+          <tr id="saved-forecasts-empty-filter" class="pd-u-c8be1ccba6">
             <td colspan="7" class="text-center text-muted">Sin pronósticos que coincidan con los filtros.</td>
           </tr>
         </tbody>
       </table>
     </div>
   </section>
+  {% endif %}
 
+  {% if active_tab == "pronosticos" or active_tab == "proyecciones" %}
   {% if fechas_especiales_en_rango %}
   <div class="forecast-special-banner">
-    ⭐ Este rango incluye {% for item in fechas_especiales_en_rango %}{{ item.nombre }}{% if not forloop.last %}, {% endif %}{% endfor %} — el pronóstico usará el comparable histórico del evento cuando exista.
+    Evento especial: este rango incluye {% for item in fechas_especiales_en_rango %}{{ item.nombre }}{% if not forloop.last %}, {% endif %}{% endfor %}. El pronóstico usará el comparable histórico del evento cuando exista.
   </div>
   {% endif %}
 
@@ -335,6 +282,69 @@
   <div class="forecast-special-banner">
     {{ resumen.explicacion_modelo }}
   </div>
+  {% endif %}
+
+  {% if adjustment_rows %}
+  <section class="card" id="revision-ventas">
+    <div class="section-header">
+      <div>
+        <h2 class="section-header-title">Revisión de ventas</h2>
+        <p class="executive-section-copy">Ajusta cantidades antes de guardar el consolidado. Nada se guarda hasta confirmar aquí.</p>
+      </div>
+      <div class="forecast-branch-totals">
+        <span>Base {{ adjustment_totals.total_base|intcomma }}</span>
+        <span>Ajuste {{ adjustment_totals.total_ajuste|intcomma }}</span>
+        <span>Final {{ adjustment_totals.total_final|intcomma }}</span>
+      </div>
+    </div>
+    <form method="post" action="{% url 'ventas:pronostico_guardar' %}" data-forecast-loading-form data-loading-title="Guardando consolidado de ventas">
+      {% csrf_token %}
+      <input type="hidden" name="tab" value="{{ active_tab }}">
+      <input type="hidden" name="fecha_inicio" value="{{ fecha_inicio }}">
+      <input type="hidden" name="fecha_fin" value="{{ fecha_fin }}">
+      {% for branch in branches %}
+      {% if branch.id in selected_branch_ids %}
+      <input type="hidden" name="sucursales" value="{{ branch.id }}">
+      {% endif %}
+      {% endfor %}
+      {% for sku in selected_product_skus %}
+      <input type="hidden" name="productos_incluidos" value="{{ sku }}">
+      {% endfor %}
+      <div class="forecast-save-name">
+        <label class="form-label" for="forecast-name">Nombre del consolidado</label>
+        <input class="form-control" id="forecast-name" name="nombre" value="{% if active_tab == "proyecciones" %}Proyección{% else %}Pronóstico{% endif %} {{ fecha_inicio }} a {{ fecha_fin }}" maxlength="200" required>
+      </div>
+      <div class="table-responsive production-table-wrap">
+        <table class="table forecast-adjustments-table">
+          <thead>
+            <tr>
+              <th>Categoría</th>
+              <th>Producto</th>
+              <th class="text-end">Base</th>
+              <th class="text-end">Ajuste</th>
+              <th class="text-end">Total final</th>
+              <th>Nota</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in adjustment_rows %}
+            <tr>
+              <td>{{ row.categoria }}</td>
+              <td>{{ row.nombre }}</td>
+              <td class="text-end">{{ row.base|intcomma }}</td>
+              <td><input class="form-control forecast-adjustment-input" type="number" step="1" name="ajuste_{{ row.key }}" value="{{ row.ajuste }}"></td>
+              <td class="text-end">{{ row.total_final|intcomma }}</td>
+              <td><input class="form-control" name="nota_{{ row.key }}" value="{{ row.nota }}" maxlength="160"></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="forecast-adjustment-actions">
+        <button class="btn btn-primary" type="submit">Guardar {% if active_tab == "proyecciones" %}proyección{% else %}pronóstico{% endif %} consolidado</button>
+      </div>
+    </form>
+  </section>
   {% endif %}
 
   <section class="card">
@@ -414,7 +424,7 @@
             {% if day.es_fecha_especial %}<span class="badge bg-warning">{{ day.nombre_especial }}</span>{% endif %}
           </div>
           {% if day.contexto_evento %}
-          <div class="forecast-method" style="margin:0 0 10px;">
+          <div class="forecast-method pd-u-f06aec1133">
             {{ day.contexto_evento.relacion_evento }} · usa
             {% for comparable in day.contexto_evento.comparables %}
               {{ comparable.fecha_label }}{% if not forloop.last %}, {% endif %}
@@ -514,36 +524,23 @@
     </div>
   </section>
   {% endif %}
+  {% endif %}
 
 </div>
 
-{% if resumen %}
-<div class="forecast-modal-backdrop" id="save-forecast-modal" aria-hidden="true">
-  <div class="forecast-modal" role="dialog" aria-modal="true" aria-labelledby="save-forecast-title">
-    <h2 class="forecast-modal-title" id="save-forecast-title">Guardar pronóstico</h2>
-    <p class="forecast-modal-copy">Guarda este cálculo para consultarlo después o descargarlo en Excel.</p>
-    <form method="post" action="{% url 'ventas:pronostico_guardar' %}">
-      {% csrf_token %}
-      <input type="hidden" name="fecha_inicio" value="{{ fecha_inicio }}">
-      <input type="hidden" name="fecha_fin" value="{{ fecha_fin }}">
-      {% for branch in branches %}
-      {% if branch.id in selected_branch_ids %}
-      <input type="hidden" name="sucursales" value="{{ branch.id }}">
-      {% endif %}
-      {% endfor %}
-      {% for sku in selected_product_skus %}
-      <input type="hidden" name="productos_incluidos" value="{{ sku }}">
-      {% endfor %}
-      <label class="form-label" for="forecast-name">Nombre</label>
-      <input class="form-control" id="forecast-name" name="nombre" value="Pronóstico {{ fecha_inicio }} a {{ fecha_fin }}" maxlength="200" required>
-      <div class="forecast-modal-actions">
-        <button class="btn btn-secondary" type="button" id="close-save-forecast">Cancelar</button>
-        <button class="btn btn-primary" type="submit">Guardar</button>
-      </div>
-    </form>
+<div class="forecast-loading-overlay" id="forecast-loading-overlay" role="status" aria-live="polite" aria-hidden="true">
+  <div class="forecast-loading-card">
+    <div class="forecast-loading-brand">Pollyana's Dolce</div>
+    <div class="forecast-loading-orbit" aria-hidden="true">
+      <span class="forecast-loading-core">PD</span>
+    </div>
+    <h2 id="forecast-loading-title">Calculando proyección de ventas</h2>
+    <p id="forecast-loading-message">Analizando ventas recientes por producto...</p>
+    <div class="forecast-loading-bar" aria-hidden="true"><span></span></div>
+    <p class="forecast-loading-note">Esto puede tardar unos segundos. No cierres esta ventana.</p>
   </div>
 </div>
-{% endif %}
+
 {% endblock %}
 
 {% block extra_js %}
@@ -614,6 +611,33 @@
   }
 
   (function () {
+    const start = document.getElementById('fecha_inicio');
+    const end = document.getElementById('fecha_fin');
+    const presets = Array.from(document.querySelectorAll('[data-projection-days]'));
+    if (!start || !end || !presets.length) return;
+
+    function markActive(button) {
+      presets.forEach((item) => item.classList.remove('active'));
+      if (button) button.classList.add('active');
+    }
+
+    presets.forEach(function (button) {
+      button.addEventListener('click', function () {
+        start.value = button.dataset.start || '';
+        end.value = button.dataset.end || '';
+        markActive(button);
+      });
+    });
+
+    if (!start.value && !end.value) {
+      const defaultPreset = presets.find((button) => button.dataset.projectionDays === '15') || presets[0];
+      start.value = defaultPreset.dataset.start || '';
+      end.value = defaultPreset.dataset.end || '';
+      markActive(defaultPreset);
+    }
+  })();
+
+  (function () {
     const table = document.getElementById('saved-forecasts-table');
     const search = document.getElementById('saved-forecast-search');
     const from = document.getElementById('saved-forecast-from');
@@ -652,12 +676,46 @@
   })();
 
   (function () {
-    const form = document.getElementById('forecast-form');
-    const submit = document.getElementById('forecast-submit');
-    if (!form || !submit) return;
-    form.addEventListener('submit', function () {
-      submit.disabled = true;
-      submit.textContent = 'Iniciando cálculo...';
+    const overlay = document.getElementById('forecast-loading-overlay');
+    const title = document.getElementById('forecast-loading-title');
+    const message = document.getElementById('forecast-loading-message');
+    const messages = [
+      'Analizando ventas recientes por producto...',
+      'Comparando patrones por día de la semana...',
+      'Revisando eventos, temporadas y fechas especiales...',
+      'Calculando propuesta ERP y escenarios...',
+      'Preparando matriz de ajustes por día...'
+    ];
+    let timer = null;
+
+    function showLoading(form) {
+      if (!overlay || !message) return;
+      let index = 0;
+      if (title) title.textContent = form.dataset.loadingTitle || 'Calculando proyección de ventas';
+      message.textContent = messages[index];
+      overlay.classList.add('active');
+      overlay.setAttribute('aria-hidden', 'false');
+      timer = window.setInterval(function () {
+        index = (index + 1) % messages.length;
+        message.textContent = messages[index];
+      }, 1500);
+    }
+
+    document.querySelectorAll('[data-forecast-loading-form]').forEach(function (form) {
+      form.addEventListener('submit', function () {
+        const submit = form.querySelector('[type=submit]');
+        if (submit) {
+          submit.disabled = true;
+          submit.dataset.originalText = submit.textContent;
+          submit.textContent = 'Calculando...';
+        }
+        showLoading(form);
+      });
+    });
+
+    window.addEventListener('pageshow', function () {
+      if (overlay) overlay.classList.remove('active');
+      if (timer) window.clearInterval(timer);
     });
   })();
 
@@ -717,25 +775,5 @@
     });
   })();
 
-  (function () {
-    const modal = document.getElementById('save-forecast-modal');
-    const openSave = document.getElementById('open-save-forecast');
-    const closeSave = document.getElementById('close-save-forecast');
-    if (!modal || !openSave || !closeSave) return;
-    openSave.addEventListener('click', function () {
-      modal.classList.add('active');
-      modal.setAttribute('aria-hidden', 'false');
-    });
-    closeSave.addEventListener('click', function () {
-      modal.classList.remove('active');
-      modal.setAttribute('aria-hidden', 'true');
-    });
-    modal.addEventListener('click', function (event) {
-      if (event.target === modal) {
-        modal.classList.remove('active');
-        modal.setAttribute('aria-hidden', 'true');
-      }
-    });
-  })();
 </script>
 {% endblock %}

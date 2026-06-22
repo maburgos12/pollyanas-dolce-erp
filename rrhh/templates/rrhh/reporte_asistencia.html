@@ -49,7 +49,7 @@
       </div>
     </div>
     <div>
-      <button class="btn btn-primary" style="background:var(--vino);border-color:var(--vino);" type="submit">Filtrar</button>
+      <button class="btn btn-primary pd-u-d0ee3ca9de" type="submit">Filtrar</button>
       <a class="btn btn-secondary" href="?{{ query_csv }}">Exportar CSV</a>
       <a class="btn btn-secondary" href="?{{ query_xlsx }}">Exportar XLSX</a>
     </div>
@@ -136,38 +136,56 @@
                 <td>{{ fila.asistencia.salida|date:"H:i"|default:"-" }}</td>
                 <td>{{ fila.asistencia.minutos_comida|default:"-" }}</td>
                 <td>
-                  {% for incidencia in fila.incidencias %}
-                    <span class="badge {{ incidencia.badge_class }}">{{ incidencia.tipo }}</span>
-                    {% if incidencia.editado_manual %}
-                      <span class="badge" style="background:var(--dorado);color:#fff;">Editado</span>
-                    {% endif %}
-                  {% empty %}
-                    -
-                  {% endfor %}
+                  {% if fila.estado_laboral_label %}
+                    <span class="badge bg-primary">{{ fila.estado_laboral_label }}</span>
+                  {% else %}
+                    {% for incidencia in fila.incidencias %}
+                      <span class="badge {{ incidencia.badge_class }}">{{ incidencia.tipo }}</span>
+                      {% if incidencia.editado_manual %}
+                        <span class="badge pd-u-2f5da2b12a">Editado</span>
+                      {% endif %}
+                    {% empty %}
+                      -
+                    {% endfor %}
+                  {% endif %}
                 </td>
                 <td>
-                  {% for incidencia in fila.incidencias %}
-                    <div>{{ incidencia.estado }}</div>
-                  {% empty %}
-                    -
-                  {% endfor %}
+                  {% if fila.estado_laboral_label %}
+                    No aplica
+                  {% else %}
+                    {% for incidencia in fila.incidencias %}
+                      <div>{{ incidencia.estado }}</div>
+                    {% empty %}
+                      -
+                    {% endfor %}
+                  {% endif %}
                 </td>
                 <td>
-                  {% for incidencia in fila.incidencias %}
-                    <div>{{ incidencia.minutos }}</div>
-                  {% empty %}
-                    -
-                  {% endfor %}
+                  {% if fila.estado_laboral_label %}
+                    0
+                  {% else %}
+                    {% for incidencia in fila.incidencias %}
+                      <div>{{ incidencia.minutos }}</div>
+                    {% empty %}
+                      -
+                    {% endfor %}
+                  {% endif %}
                 </td>
                 <td>
-                  {% for incidencia in fila.incidencias %}
-                    <div>{{ incidencia.detalle|default:"-" }}</div>
-                  {% empty %}
-                    -
-                  {% endfor %}
+                  {% if fila.estado_laboral_label %}
+                    {{ fila.detalle_laboral|default:"-" }}
+                  {% else %}
+                    {% for incidencia in fila.incidencias %}
+                      <div>{{ incidencia.detalle|default:"-" }}</div>
+                    {% empty %}
+                      -
+                    {% endfor %}
+                  {% endif %}
                 </td>
                 <td>
-                  {% if reporte.puede_editar %}
+                  {% if fila.estado_laboral_label %}
+                    -
+                  {% elif reporte.puede_editar %}
                     {% for incidencia in fila.incidencias %}
                       <details>
                         <summary class="btn btn-sm btn-secondary">Editar</summary>
@@ -197,7 +215,7 @@
                           <input type="hidden" name="fecha_fin" value="{{ fecha_fin }}">
                           <input type="hidden" name="empleado" value="{{ empleado_id }}">
                           <input type="hidden" name="sucursal" value="{{ sucursal }}">
-                          <button class="btn btn-sm btn-primary" style="background:var(--vino);border-color:var(--vino);" type="submit">Guardar</button>
+                          <button class="btn btn-sm btn-primary pd-u-d0ee3ca9de" type="submit">Guardar</button>
                         </form>
                       </details>
                     {% empty %}

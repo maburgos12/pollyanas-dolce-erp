@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import BytesIO
 from datetime import datetime
 from decimal import Decimal
 
@@ -7,6 +8,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from openpyxl import load_workbook
 
 from conciliacion.models import CfdiSucursalResolucion, ImportacionBancaria
 from core.models import Sucursal
@@ -33,7 +35,7 @@ class ConciliacionBancariaViewTests(TestCase):
         response = self.client.get("/conciliacion/bancaria/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Conciliacion bancaria")
+        self.assertContains(response, "Conciliación bancaria")
         self.assertContains(response, "BBVA Empresas")
         self.assertContains(response, "Formatos aceptados: PDF, XML, CSV, XLS, XLSX o XLSM")
         self.assertNotContains(response, "accept=")
@@ -52,7 +54,7 @@ class ConciliacionBancariaViewTests(TestCase):
         MovimientoBancario.objects.create(
             id_transaction="mayo-1",
             cuenta=self.cuenta,
-            descripcion="DEPOSITO EN EFECTIVO MAYO",
+            descripcion="DEPOSITO EN EFECTIVO MATRIZ MAYO",
             monto=Decimal("1250.00"),
             tipo=MovimientoBancario.TIPO_ABONO,
             fecha_transaccion=timezone.make_aware(datetime(2026, 5, 1, 12, 0)),
@@ -136,13 +138,22 @@ class ConciliacionBancariaViewTests(TestCase):
         response = self.client.get("/conciliacion/bancaria/?periodo=2026-05")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Revision del periodo: mayo 2026")
+        self.assertContains(response, "Revisión del periodo: mayo 2026")
         self.assertContains(response, "Estado del cierre")
         self.assertContains(response, "Bancos cargados")
         self.assertContains(response, "SAT del mes cargado")
+        self.assertContains(response, "Matriz de reglas de conciliación fiscal")
+        self.assertContains(response, "Paquete fiscal dirigido a conciliación")
+        self.assertContains(response, "ordena ingresos por sucursal y forma de pago")
+        self.assertContains(response, "Efectivo por sucursal y día")
+        self.assertContains(response, "CFDI de ingreso emitido por sucursal")
+        self.assertContains(response, "factura de ingreso contra depósito bancario")
+        self.assertContains(response, "Tarjetas: depósito neto")
+        self.assertContains(response, "Ingreso facturado por sucursal")
+        self.assertContains(response, "Complementos de pago")
         self.assertContains(response, "Resumen ejecutivo")
-        self.assertContains(response, "Trabajo de conciliacion")
-        self.assertContains(response, "Siguiente accion")
+        self.assertContains(response, "Trabajo de conciliación")
+        self.assertContains(response, "Siguiente acción")
         self.assertContains(response, "mayo.csv")
         self.assertContains(response, "2026-05-01")
         self.assertContains(response, "2026-05-31")
@@ -151,15 +162,20 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertContains(response, "CFDI emitidos por sucursal")
         self.assertContains(response, "Matriz")
         self.assertContains(response, "$500.00")
+        self.assertContains(response, "Mesa de ingresos para trabajar")
+        self.assertContains(response, "Cruza lo facturado en SAT contra los abonos del banco")
+        self.assertContains(response, "Depósitos")
+        self.assertContains(response, "Revisar diferencia")
+        self.assertContains(response, "Ver depósitos")
         self.assertContains(response, "Banco contra SAT por canal")
         self.assertContains(response, "Efectivo en ventanilla")
-        self.assertContains(response, "Revisar diferencia")
+        self.assertContains(response, "Comparar factura/corte de efectivo por sucursal contra depósitos")
         self.assertContains(response, "$1,250.00")
         self.assertContains(response, "$750.00")
-        self.assertContains(response, "Alcance fiscal de conciliacion")
+        self.assertContains(response, "Alcance fiscal de conciliación")
         self.assertContains(response, "Pagos cobrados del mes")
         self.assertContains(response, "$400.00")
-        self.assertContains(response, "Credito clientes pendiente")
+        self.assertContains(response, "Crédito clientes pendiente")
         self.assertContains(response, "$600.00")
 
     def test_get_bancaria_shows_all_accounts_and_filters_movements(self):
@@ -213,6 +229,14 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertContains(response, "BBVA Empresas")
         self.assertContains(response, "American Express Business Gold")
         self.assertContains(response, "Mesa de movimientos")
+        self.assertContains(response, "Regla automática")
+        self.assertContains(response, "Qué es este movimiento?")
+        self.assertContains(response, "Ingreso ya facturado por sucursal/canal")
+        self.assertContains(response, "Traspaso entre cuentas propias")
+        self.assertContains(response, "Disposición / pago línea de crédito")
+        self.assertContains(response, "Pago / movimiento tarjeta de crédito")
+        self.assertContains(response, "Cerrar como revisión operativa")
+        self.assertContains(response, "Sin contraparte importada / no aplica")
         self.assertContains(response, "Filtrar movimientos")
         self.assertContains(response, "Mostrando 1-3 de 3 movimientos")
 
@@ -242,3 +266,326 @@ class ConciliacionBancariaViewTests(TestCase):
         self.assertEqual(confirm_response.status_code, 302)
         self.assertEqual(MovimientoBancario.objects.count(), 1)
         self.assertEqual(ImportacionBancaria.objects.count(), 1)
+
+    def test_post_conciliar_movimiento_marks_credit_line_without_cfdi(self):
+        movimiento = MovimientoBancario.objects.create(
+            id_transaction="linea-credito-1",
+            cuenta=self.cuenta,
+            descripcion="DISPOSICION LINEA DE CREDITO",
+            monto=Decimal("50000.00"),
+            tipo=MovimientoBancario.TIPO_ABONO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 10, 12, 0)),
+            fecha_refresh=timezone.now(),
+        )
+
+        response = self.client.post(
+            "/conciliacion/bancaria/",
+            {
+                "action": "conciliar_movimiento",
+                "periodo": "2026-05",
+                "movimiento_id": str(movimiento.pk),
+                "tipo_conciliacion": MovimientoBancario.CONCILIACION_LINEA_CREDITO,
+                "nota_conciliacion": "Disposicion autorizada",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        movimiento.refresh_from_db()
+        self.assertTrue(movimiento.conciliado)
+        self.assertEqual(movimiento.tipo_conciliacion, MovimientoBancario.CONCILIACION_LINEA_CREDITO)
+        self.assertEqual(movimiento.nota_conciliacion, "Disposicion autorizada")
+        self.assertEqual(movimiento.conciliado_por, self.user)
+
+    def test_post_conciliar_movimiento_pairs_transfer_between_accounts(self):
+        otra_cuenta = CuentaBancaria.objects.create(
+            banco=CuentaBancaria.BANCO_BANBAJIO,
+            nombre_display="BanBajio Empresas",
+            id_site_syncfy="site-banbajio",
+            numero_cuenta="410641890201",
+        )
+        cargo = MovimientoBancario.objects.create(
+            id_transaction="traspaso-cargo",
+            cuenta=self.cuenta,
+            descripcion="TRASPASO A BANBAJIO",
+            monto=Decimal("12500.00"),
+            tipo=MovimientoBancario.TIPO_CARGO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 10, 12, 0)),
+            fecha_refresh=timezone.now(),
+        )
+        abono = MovimientoBancario.objects.create(
+            id_transaction="traspaso-abono",
+            cuenta=otra_cuenta,
+            descripcion="TRASPASO DE BBVA",
+            monto=Decimal("12500.00"),
+            tipo=MovimientoBancario.TIPO_ABONO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 10, 12, 5)),
+            fecha_refresh=timezone.now(),
+        )
+
+        response = self.client.post(
+            "/conciliacion/bancaria/",
+            {
+                "action": "conciliar_movimiento",
+                "periodo": "2026-05",
+                "movimiento_id": str(cargo.pk),
+                "tipo_conciliacion": MovimientoBancario.CONCILIACION_TRASPASO,
+                "contraparte_id": str(abono.pk),
+                "nota_conciliacion": "Movimiento entre cuentas propias",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        cargo.refresh_from_db()
+        abono.refresh_from_db()
+        self.assertTrue(cargo.conciliado)
+        self.assertTrue(abono.conciliado)
+        self.assertEqual(cargo.movimiento_relacionado, abono)
+        self.assertEqual(abono.movimiento_relacionado, cargo)
+        self.assertEqual(cargo.tipo_conciliacion, MovimientoBancario.CONCILIACION_TRASPASO)
+
+    def test_post_conciliar_movimiento_allows_transfer_without_imported_counterpart(self):
+        cargo = MovimientoBancario.objects.create(
+            id_transaction="traspaso-sin-contraparte",
+            cuenta=self.cuenta,
+            descripcion="SPEI A CUENTA PROPIA BBVA",
+            monto=Decimal("100000.00"),
+            tipo=MovimientoBancario.TIPO_CARGO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 30, 12, 0)),
+            fecha_refresh=timezone.now(),
+        )
+
+        response = self.client.post(
+            "/conciliacion/bancaria/",
+            {
+                "action": "conciliar_movimiento",
+                "periodo": "2026-05",
+                "movimiento_id": str(cargo.pk),
+                "tipo_conciliacion": MovimientoBancario.CONCILIACION_TRASPASO,
+                "nota_conciliacion": "Traspaso a BBVA sin abono importado",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        cargo.refresh_from_db()
+        self.assertTrue(cargo.conciliado)
+        self.assertEqual(cargo.tipo_conciliacion, MovimientoBancario.CONCILIACION_TRASPASO)
+        self.assertIsNone(cargo.movimiento_relacionado)
+        self.assertEqual(cargo.nota_conciliacion, "Traspaso a BBVA sin abono importado")
+
+    def test_get_movimiento_detalle_shows_conciliation_document(self):
+        movimiento = MovimientoBancario.objects.create(
+            id_transaction="spei-propio-detalle",
+            cuenta=self.cuenta,
+            descripcion=(
+                "SPEI Enviado: | Institucion Receptora: BBVA MEXICO | "
+                "Beneficiario: GRUPO EMPRESARIAL FONSMA | Cuenta Beneficiario: 012733001207530844 "
+                "Clave de Rastreo: BB2643314013215 Concepto del Pago: T"
+            ),
+            monto=Decimal("100000.00"),
+            tipo=MovimientoBancario.TIPO_CARGO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 30, 12, 0)),
+            fecha_refresh=timezone.now(),
+            conciliado=True,
+            tipo_conciliacion=MovimientoBancario.CONCILIACION_TRASPASO,
+            nota_conciliacion="Traspaso a BBVA sin abono importado",
+            conciliado_por=self.user,
+            conciliado_en=timezone.now(),
+        )
+
+        response = self.client.get(f"/conciliacion/bancaria/movimiento/{movimiento.pk}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Documento de conciliación")
+        self.assertContains(response, "CONC-20260530")
+        self.assertContains(response, "BB2643314013215")
+        self.assertContains(response, "Estado expediente")
+        self.assertContains(response, "Cerrado con pendientes")
+        self.assertContains(response, "Relacion contable")
+        self.assertContains(response, "Traspaso entre cuentas")
+        self.assertContains(response, "no se trata como gasto")
+        self.assertContains(response, "Traspaso propio sin abono contraparte importado o ligado")
+        self.assertContains(response, "Exportar CSV contabilidad")
+
+    def test_get_movimiento_detalle_exports_accounting_csv(self):
+        movimiento = MovimientoBancario.objects.create(
+            id_transaction="spei-propio-export",
+            cuenta=self.cuenta,
+            descripcion="SPEI Enviado Clave de Rastreo: BB2643314013215 Concepto del Pago: T",
+            monto=Decimal("100000.00"),
+            tipo=MovimientoBancario.TIPO_CARGO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 30, 12, 0)),
+            fecha_refresh=timezone.now(),
+            conciliado=True,
+            tipo_conciliacion=MovimientoBancario.CONCILIACION_TRASPASO,
+            nota_conciliacion="Traspaso a cuenta propia",
+        )
+
+        response = self.client.get(f"/conciliacion/bancaria/movimiento/{movimiento.pk}/?export=contabilidad_csv")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
+        self.assertIn("contabilidad.csv", response["Content-Disposition"])
+        body = response.content.decode("utf-8")
+        self.assertIn("ClaveRastreo", body)
+        self.assertIn("EstadoExpediente", body)
+        self.assertIn("RelacionContable", body)
+        self.assertIn("BB2643314013215", body)
+        self.assertIn("Traspaso entre cuentas", body)
+
+    def test_get_paquete_auditoria_shows_monthly_summary(self):
+        MovimientoBancario.objects.create(
+            id_transaction="paquete-mayo-1",
+            cuenta=self.cuenta,
+            descripcion="SPEI Enviado Clave de Rastreo: BB2643314013215 Concepto del Pago: T",
+            monto=Decimal("100000.00"),
+            tipo=MovimientoBancario.TIPO_CARGO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 30, 12, 0)),
+            fecha_refresh=timezone.now(),
+            conciliado=True,
+            tipo_conciliacion=MovimientoBancario.CONCILIACION_TRASPASO,
+            nota_conciliacion="Traspaso a cuenta propia",
+        )
+        CfdiDescargado.objects.create(
+            uuid="55555555-5555-5555-5555-555555555555",
+            rfc_emisor="GEF211230KR2",
+            rfc_receptor="XAXX010101000",
+            subtotal=Decimal("100.00"),
+            total=Decimal("100.00"),
+            tipo_comprobante="I",
+            tipo_cfdi=CfdiDescargado.TIPO_EMITIDO,
+            fecha_emision=timezone.make_aware(datetime(2026, 5, 30, 12, 0)),
+            conciliado=True,
+        )
+
+        response = self.client.get("/conciliacion/bancaria/paquete/?periodo=2026-05")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Paquete de auditoría 2026-05")
+        self.assertContains(response, "Descargar XLSX")
+        self.assertContains(response, "Descargar CSV contabilidad")
+        self.assertContains(response, "CSV Contabilidad Desktop")
+        self.assertContains(response, "CONTPAQi Contabilidad Desktop y Nóminas Desktop")
+        self.assertContains(response, "Por cuenta bancaria")
+        self.assertContains(response, "Excepciones y soporte pendiente")
+
+    def test_get_paquete_auditoria_exports_xlsx(self):
+        cfdi = CfdiDescargado.objects.create(
+            uuid="66666666-6666-6666-6666-666666666666",
+            rfc_emisor="GEF211230KR2",
+            rfc_receptor="XAXX010101000",
+            nombre_receptor="PUBLICO EN GENERAL",
+            subtotal=Decimal("2500.00"),
+            total=Decimal("2500.00"),
+            tipo_comprobante="I",
+            tipo_cfdi=CfdiDescargado.TIPO_EMITIDO,
+            metodo_pago="PUE",
+            forma_pago="04",
+            fecha_emision=timezone.make_aware(datetime(2026, 5, 10, 10, 0)),
+            conciliado=True,
+        )
+        MovimientoBancario.objects.create(
+            id_transaction="paquete-xlsx",
+            cuenta=self.cuenta,
+            descripcion="Deposito Negocios Afiliados",
+            monto=Decimal("2500.00"),
+            tipo=MovimientoBancario.TIPO_ABONO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 10, 12, 0)),
+            fecha_refresh=timezone.now(),
+            conciliado=True,
+            tipo_conciliacion=MovimientoBancario.CONCILIACION_INGRESO_FACTURADO,
+            cfdi_relacionado=cfdi,
+        )
+
+        response = self.client.get("/conciliacion/bancaria/paquete/?periodo=2026-05&export=xlsx")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.assertIn("paquete_conciliacion_2026-05.xlsx", response["Content-Disposition"])
+        workbook = load_workbook(BytesIO(response.content), read_only=True)
+        self.assertEqual(
+            workbook.sheetnames,
+            [
+                "Resumen",
+                "Movimientos_Banco",
+                "CFDI_Relacionados",
+                "Banco_vs_Factura",
+                "Poliza_Sugerida",
+                "Auxiliar_Cuentas",
+                "Traspasos_Propios",
+                "Tarjetas_Credito",
+                "Lineas_Credito",
+                "Nomina",
+                "Excepciones",
+                "Evidencia_Pendiente",
+            ],
+        )
+        self.assertEqual(workbook["Resumen"]["A1"].value, "Paquete mensual de conciliacion")
+        banco_vs_factura = workbook["Banco_vs_Factura"]
+        headers = [cell.value for cell in banco_vs_factura[1]]
+        row = [cell.value for cell in banco_vs_factura[2]]
+        self.assertIn("UUIDFacturaCFDI", headers)
+        self.assertIn("ImporteBanco", headers)
+        self.assertIn("DiferenciaBancoFactura", headers)
+        self.assertEqual(row[headers.index("UUIDFacturaCFDI")], cfdi.uuid)
+        self.assertEqual(row[headers.index("RFCReceptor")], "XAXX010101000")
+        self.assertEqual(row[headers.index("DiferenciaBancoFactura")], "0.00")
+
+    def test_get_paquete_auditoria_exports_accounting_csv(self):
+        MovimientoBancario.objects.create(
+            id_transaction="paquete-csv",
+            cuenta=self.cuenta,
+            descripcion="SPEI Enviado Clave de Rastreo: BB2643314013215 Concepto del Pago: T",
+            monto=Decimal("100000.00"),
+            tipo=MovimientoBancario.TIPO_CARGO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 30, 12, 0)),
+            fecha_refresh=timezone.now(),
+            conciliado=True,
+            tipo_conciliacion=MovimientoBancario.CONCILIACION_TRASPASO,
+            extra_raw={"referencia": "2643314013215"},
+        )
+
+        response = self.client.get("/conciliacion/bancaria/paquete/?periodo=2026-05&export=contabilidad_csv")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
+        self.assertIn("conciliacion_2026-05_contabilidad.csv", response["Content-Disposition"])
+        body = response.content.decode("utf-8")
+        self.assertIn("Folio", body)
+        self.assertIn("ClaveRastreo", body)
+        self.assertIn("EstadoExpediente", body)
+        self.assertIn("Cerrado con pendientes", body)
+        self.assertIn("BB2643314013215", body)
+
+    def test_get_paquete_auditoria_exports_contabilidad_desktop_csv(self):
+        MovimientoBancario.objects.create(
+            id_transaction="paquete-contabilidad-desktop",
+            cuenta=self.cuenta,
+            descripcion=(
+                "SPEI Enviado: | Beneficiario: GRUPO EMPRESARIAL FONSMA | "
+                "Cuenta Beneficiario: 012733001207530844 Clave de Rastreo: BB2643314013215 Concepto del Pago: T"
+            ),
+            monto=Decimal("100000.00"),
+            tipo=MovimientoBancario.TIPO_CARGO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 30, 12, 0)),
+            fecha_refresh=timezone.now(),
+            conciliado=True,
+            tipo_conciliacion=MovimientoBancario.CONCILIACION_TRASPASO,
+            extra_raw={"referencia": "2643314013215"},
+        )
+
+        response = self.client.get("/conciliacion/bancaria/paquete/?periodo=2026-05&export=contabilidad_desktop_csv")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
+        self.assertIn("conciliacion_2026-05_contpaqi_contabilidad.csv", response["Content-Disposition"])
+        body = response.content.decode("utf-8")
+        self.assertIn("FechaPoliza", body)
+        self.assertIn("TipoPolizaSugerida", body)
+        self.assertIn("FolioMovimientoERP", body)
+        self.assertIn("CuentaContrapartidaSugerida", body)
+        self.assertIn("Cerrado con pendientes", body)
+        self.assertIn("Diario", body)
+        self.assertIn("BB2643314013215", body)

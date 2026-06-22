@@ -248,6 +248,13 @@ class SeguimientoProrrogaSolicitud(models.Model):
 
 
 class ActividadCalendario(models.Model):
+    TIPO_ACTIVIDAD = "ACTIVIDAD"
+    TIPO_REUNION = "REUNION"
+    TIPO_CHOICES = [
+        (TIPO_ACTIVIDAD, "Actividad"),
+        (TIPO_REUNION, "Reunión"),
+    ]
+
     ESTATUS_PENDIENTE = "PENDIENTE"
     ESTATUS_COMPLETADA = "COMPLETADA"
     ESTATUS_CHOICES = [
@@ -260,12 +267,28 @@ class ActividadCalendario(models.Model):
         on_delete=models.CASCADE,
         related_name="actividades_calendario",
     )
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="actividades_calendario_creadas",
+        null=True,
+        blank=True,
+    )
+    invitado_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="actividades_calendario_invitado",
+        null=True,
+        blank=True,
+    )
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default=TIPO_ACTIVIDAD, db_index=True)
     titulo = models.CharField(max_length=220)
     descripcion = models.TextField(blank=True, default="")
     fecha = models.DateField(db_index=True)
     hora_inicio = models.TimeField(null=True, blank=True)
     hora_fin = models.TimeField(null=True, blank=True)
     estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default=ESTATUS_PENDIENTE)
+    direccion_general = models.BooleanField(default=False, db_index=True)
     activo = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -274,6 +297,8 @@ class ActividadCalendario(models.Model):
         ordering = ["fecha", "hora_inicio", "id"]
         indexes = [
             models.Index(fields=["usuario", "fecha", "activo"], name="seg_act_cal_user_fecha_idx"),
+            models.Index(fields=["creado_por", "fecha", "activo"], name="seg_act_cal_creador_fecha_idx"),
+            models.Index(fields=["invitado_user", "fecha", "activo"], name="seg_act_cal_inv_fecha_idx"),
         ]
         verbose_name = "Actividad de calendario"
         verbose_name_plural = "Actividades de calendario"

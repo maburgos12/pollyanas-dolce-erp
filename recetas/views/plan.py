@@ -24,7 +24,10 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.chart import BarChart, Reference
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
+from openpyxl.utils.cell import range_boundaries
 from rapidfuzz import fuzz
 
 from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
@@ -109,6 +112,10 @@ MIX_MIN_RECENT_SALES_QTY = Decimal("12")
 MIX_MIN_EFFECTIVE_RECENT_SAMPLES = Decimal("4")
 MIX_MAX_CHANGE_PCT = Decimal("0.20")
 MIX_ALPHA_MAX = Decimal("0.35")
+CALCULO_INSUMOS_SESSION_KEY = "calculo_insumos_preview"
+CALCULO_INSUMOS_DRAFT_SESSION_KEY = "calculo_insumos_draft"
+CALCULO_INSUMOS_MAX_UPLOAD_BYTES = 3 * 1024 * 1024
+CALCULO_INSUMOS_MAX_ROWS = 2000
 
 
 def _presentacion_sort_key(nombre: str) -> tuple[int, str]:
@@ -12306,6 +12313,30 @@ def _to_decimal_safe(value: object) -> Decimal:
         return Decimal("0")
 
 
+def _to_decimal_calculo_insumos(value: object) -> Decimal:
+    if value is None:
+        return Decimal("0")
+    raw = str(value).strip()
+    if not raw:
+        return Decimal("0")
+    raw = raw.replace("$", "").replace(" ", "")
+    if "," in raw and "." in raw:
+        if raw.rfind(",") > raw.rfind("."):
+            raw = raw.replace(".", "").replace(",", ".")
+        else:
+            raw = raw.replace(",", "")
+    elif "," in raw:
+        parts = raw.split(",")
+        if len(parts) > 1 and all(len(part) == 3 for part in parts[1:]) and parts[0].lstrip("-").isdigit():
+            raw = "".join(parts)
+        else:
+            raw = raw.replace(",", ".")
+    try:
+        return Decimal(raw)
+    except Exception:
+        return Decimal("0")
+
+
 def _quantize_qty(value: object) -> Decimal:
     return _to_decimal_safe(value).quantize(Decimal("0.001"))
 
@@ -12477,6 +12508,74 @@ def _load_solicitud_ventas_rows(uploaded) -> list[dict]:
     raise ValueError("Formato no soportado. Usa CSV o XLSX.")
 
 
+def _map_calculo_insumos_header(header: str) -> str:
+    key = normalizar_nombre(header).replace("_", " ")
+    if key in {"receta", "producto", "nombre", "nombre receta", "nombre producto", "pastel"}:
+        return "producto"
+    if key in {"presentacion", "presentacion producto", "tamano", "tamaño"}:
+        return "presentacion"
+    if key in {"codigo point", "codigo", "sku", "codigo producto", "codigo receta"}:
+        return "codigo_point"
+    if key in {"cantidad", "cantidad a producir", "unidades", "qty", "produccion", "producción"}:
+        return "cantidad"
+    if key in {"notas", "comentarios", "observacion", "observación"}:
+        return "notas"
+    return key
+
+
+def _load_calculo_insumos_rows(uploaded) -> list[dict]:
+    filename = (uploaded.name or "").lower()
+    rows: list[dict] = []
+    upload_size = getattr(uploaded, "size", 0) or 0
+    if upload_size > CALCULO_INSUMOS_MAX_UPLOAD_BYTES:
+        raise ValueError("El archivo supera 3 MB. Divide la captura o usa la plantilla con menos renglones.")
+    if filename.endswith(".csv"):
+        uploaded.seek(0)
+        raw_content = uploaded.read()
+        try:
+            content = raw_content.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            content = raw_content.decode("latin-1")
+        try:
+            dialect = csv.Sniffer().sniff(content[:4096], delimiters=",;\t")
+        except csv.Error:
+            dialect = csv.excel
+        reader = csv.DictReader(content.splitlines(), dialect=dialect)
+        for row in reader:
+            if len(rows) >= CALCULO_INSUMOS_MAX_ROWS:
+                raise ValueError(f"El archivo supera {CALCULO_INSUMOS_MAX_ROWS} renglones permitidos.")
+            parsed = {}
+            for key, value in (row or {}).items():
+                if not key:
+                    continue
+                parsed[_map_calculo_insumos_header(str(key))] = value
+            rows.append(parsed)
+        return rows
+
+    if filename.endswith(".xlsx") or filename.endswith(".xlsm"):
+        uploaded.seek(0)
+        wb = load_workbook(uploaded, read_only=True, data_only=True)
+        ws = wb.active
+        row_iter = ws.iter_rows(values_only=True)
+        try:
+            header_row = next(row_iter)
+        except StopIteration:
+            return []
+        headers = [_map_calculo_insumos_header(str(h or "")) for h in header_row]
+        for raw in row_iter:
+            if len(rows) >= CALCULO_INSUMOS_MAX_ROWS:
+                raise ValueError(f"El archivo supera {CALCULO_INSUMOS_MAX_ROWS} renglones permitidos.")
+            parsed = {}
+            for idx, header in enumerate(headers):
+                if not header:
+                    continue
+                parsed[header] = raw[idx] if idx < len(raw) else None
+            rows.append(parsed)
+        return rows
+
+    raise ValueError("Formato no soportado. Usa CSV o XLSX.")
+
+
 def _parse_date_safe(value: object) -> date | None:
     if value is None:
         return None
@@ -12603,6 +12702,355 @@ def _resolve_sucursal_for_sales(sucursal_name: str, sucursal_codigo: str, defaul
                 sucursal = row
                 break
     return sucursal or default_sucursal
+
+
+def _normalize_calculo_insumos_row(row: dict[str, Any]) -> dict[str, str]:
+    producto = str(row.get("producto") or row.get("receta") or row.get("pastel") or "").strip()
+    return {
+        "receta_id": str(row.get("receta_id") or "").strip(),
+        "codigo_point": str(row.get("codigo_point") or row.get("codigo") or row.get("sku") or "").strip(),
+        "producto": producto,
+        "presentacion": str(row.get("presentacion") or "").strip(),
+        "cantidad": str(row.get("cantidad") or "").strip(),
+        "notas": str(row.get("notas") or "").strip(),
+    }
+
+
+def _row_has_calculo_insumos_value(row: dict[str, str]) -> bool:
+    return any((row.get(key) or "").strip() for key in ("receta_id", "codigo_point", "producto", "presentacion", "cantidad"))
+
+
+def _resolve_receta_for_calculo_insumos(row: dict[str, str]) -> Receta | None:
+    receta_id = _to_int_safe(row.get("receta_id"), default=0)
+    if receta_id > 0:
+        receta = Receta.objects.filter(pk=receta_id, tipo=Receta.TIPO_PRODUCTO_FINAL).first()
+        if receta:
+            return receta
+
+    codigo_point = (row.get("codigo_point") or "").strip()
+    producto = (row.get("producto") or "").strip()
+    presentacion = (row.get("presentacion") or "").strip()
+    candidates: list[str] = []
+    if producto and presentacion and normalizar_nombre(presentacion) not in normalizar_nombre(producto):
+        candidates.extend([f"{producto} {presentacion}", f"{presentacion} {producto}", f"{producto} - {presentacion}"])
+    if producto:
+        candidates.append(producto)
+    if presentacion and not producto:
+        candidates.append(presentacion)
+
+    receta = _resolve_receta_for_sales(candidates[0] if candidates else "", codigo_point)
+    if receta and receta.tipo == Receta.TIPO_PRODUCTO_FINAL:
+        return receta
+    for candidate in candidates[1:]:
+        receta = _resolve_receta_for_sales(candidate, "")
+        if receta and receta.tipo == Receta.TIPO_PRODUCTO_FINAL:
+            return receta
+
+    return None
+
+
+def _calculo_insumos_target_label(source_label: str) -> str:
+    today = timezone.localdate()
+    source = (source_label or "captura manual").strip()
+    return f"Cálculo de insumos · {source} · {today.isoformat()}"
+
+
+def _build_calculo_insumos_preview(rows: list[dict[str, Any]], source_label: str, *, plan_id: int | None = None) -> dict[str, Any]:
+    normalized_rows = [
+        normalized
+        for normalized in (_normalize_calculo_insumos_row(row) for row in rows)
+        if _row_has_calculo_insumos_value(normalized)
+    ]
+    grouped: dict[int, dict[str, Any]] = {}
+    unresolved_rows: list[dict[str, str]] = []
+    skipped_rows: list[dict[str, str]] = []
+
+    for row in normalized_rows:
+        cantidad = _to_decimal_calculo_insumos(row.get("cantidad"))
+        if cantidad <= 0:
+            skipped_rows.append({**row, "motivo": "Cantidad vacía o menor o igual a cero"})
+            continue
+        receta = _resolve_receta_for_calculo_insumos(row)
+        if receta is None:
+            unresolved_rows.append(
+                {
+                    **row,
+                    "motivo": "Sin producto final equivalente en ERP/Point. Usa código Point o una receta de producto final.",
+                    "identificador": row.get("codigo_point") or row.get("producto") or row.get("presentacion") or "sin_identificador",
+                }
+            )
+            continue
+        item = grouped.setdefault(
+            receta.id,
+            {
+                "receta": receta,
+                "cantidad": Decimal("0"),
+                "notas": [],
+            },
+        )
+        item["cantidad"] += cantidad
+        if row.get("notas"):
+            item["notas"].append(row["notas"])
+
+    forecast_rows = []
+    for recipe_id, item in sorted(grouped.items(), key=lambda kv: (-kv[1]["cantidad"], kv[1]["receta"].nombre)):
+        receta = item["receta"]
+        cantidad = Decimal(str(item["cantidad"])).quantize(Decimal("0.001"))
+        forecast_rows.append(
+            {
+                "receta_id": int(recipe_id),
+                "receta": receta.nombre,
+                "codigo_point": receta.codigo_point or "",
+                "forecast_qty": float(cantidad),
+                "forecast_low": float(cantidad),
+                "forecast_high": float(cantidad),
+                "desviacion": 0.0,
+                "muestras": 0,
+                "pronostico_actual": 0.0,
+                "delta": float(cantidad),
+                "recomendacion": "CAPTURA_PLAN_PRODUCCION",
+                "observaciones": 0,
+                "confianza": 100.0,
+                "notas": "; ".join(item["notas"]),
+            }
+        )
+
+    total_qty = sum((Decimal(str(row["forecast_qty"])) for row in forecast_rows), Decimal("0")).quantize(Decimal("0.001"))
+    today = timezone.localdate()
+    target_label = _calculo_insumos_target_label(source_label)
+    return {
+        "alcance": "calculo_insumos",
+        "periodo": today.strftime("%Y-%m"),
+        "target_start": today.isoformat(),
+        "target_end": today.isoformat(),
+        "target_label": target_label,
+        "plan_id": int(plan_id) if plan_id else None,
+        "sucursal_id": None,
+        "sucursal_nombre": "Producción",
+        "source_label": source_label,
+        "created_at": timezone.localtime().isoformat(timespec="seconds"),
+        "source_rows": normalized_rows,
+        "unresolved_rows": unresolved_rows,
+        "skipped_rows": skipped_rows,
+        "rows": forecast_rows,
+        "detail_rows": [],
+        "detail_rows_total": 0,
+        "totals": {
+            "recetas_count": len(forecast_rows),
+            "forecast_total": float(total_qty),
+            "forecast_low_total": float(total_qty),
+            "forecast_high_total": float(total_qty),
+            "pronostico_total": 0.0,
+            "delta_total": float(total_qty),
+        },
+        "history_meta": {
+            "available": False,
+            "first_date": "",
+            "last_date": "",
+            "days_observed": 0,
+            "years_observed": 0,
+            "comparable_years": 0,
+            "months_observed": 0,
+            "scope_label": "Captura manual / Excel",
+        },
+        "model_meta": {
+            "source": "calculo_insumos",
+        },
+    }
+
+
+def _calculo_insumos_rows_from_forecast_preview(payload: dict[str, Any], escenario: str) -> list[dict[str, Any]]:
+    scenario = (escenario or "base").strip().lower()
+    qty_key = {
+        "bajo": "forecast_low",
+        "alto": "forecast_high",
+    }.get(scenario, "forecast_qty")
+    rows: list[dict[str, Any]] = []
+    for row in payload.get("rows") or []:
+        cantidad = _to_decimal_calculo_insumos(row.get(qty_key) or row.get("forecast_qty") or 0)
+        if cantidad <= 0:
+            continue
+        rows.append(
+            {
+                "receta_id": str(row.get("receta_id") or ""),
+                "codigo_point": str(row.get("codigo_point") or "").strip(),
+                "producto": str(row.get("receta") or row.get("recipe_name") or "").strip(),
+                "presentacion": "",
+                "cantidad": str(cantidad),
+                "notas": f"Proyección {scenario.upper()} · {payload.get('target_label') or payload.get('periodo') or ''}".strip(),
+            }
+        )
+    return rows
+
+
+def _display_supply_quantity(row: dict[str, Any]) -> dict[str, Any]:
+    unit_code = str(row.get("unidad_codigo") or "").strip()
+    unit_norm = normalizar_nombre(unit_code)
+    qty = Decimal(str(row.get("required_gross_qty") or 0))
+    unit_cost = row.get("unit_cost")
+    display_unit_cost = Decimal(str(unit_cost or 0)) if unit_cost not in (None, "") else None
+    display_qty = qty
+    display_unit = unit_code or "-"
+    if unit_norm in {"g", "gr", "grs", "gramo", "gramos"}:
+        display_qty = qty / Decimal("1000")
+        display_unit = "kg"
+        if display_unit_cost is not None:
+            display_unit_cost *= Decimal("1000")
+    elif unit_norm in {"ml", "mililitro", "mililitros"}:
+        display_qty = qty / Decimal("1000")
+        display_unit = "L"
+        if display_unit_cost is not None:
+            display_unit_cost *= Decimal("1000")
+    return {
+        "display_required_qty": display_qty.quantize(Decimal("0.001")),
+        "display_unidad_codigo": display_unit,
+        "display_unit_cost": display_unit_cost,
+    }
+
+
+def _decorate_supply_context_for_display(supply: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not supply:
+        return supply
+    for key in ("prepared_insumos", "insumos", "purchase_insumos", "explosion_rows"):
+        for row in supply.get(key) or []:
+            row.update(_display_supply_quantity(row))
+    return supply
+
+
+def _calculo_insumos_rules() -> list[str]:
+    return [
+        "Entrada: cada renglón debe tener código Point, receta explícita o nombre exacto de producto final y una cantidad a producir mayor a cero.",
+        "Resolución ERP: primero se busca Receta.codigo_point, después alias Point activo y por último nombre normalizado exacto del producto final.",
+        "Consolidación: si el mismo producto aparece varias veces, las cantidades se suman antes de explotar el BOM.",
+        "Explosión: se reutiliza el motor multinivel vigente para separar preparados internos de materia prima y empaques comprables.",
+        "Unidades: gramos y mililitros se muestran como kg y L; el costo unitario se escala con el mismo factor para mantener el total.",
+        "Costo por insumo: cantidad requerida visible por costo unitario actual del ERP; el total financiero solo suma materia prima y empaques hoja.",
+        "Exportación: productos no resueltos, renglones omitidos o errores críticos bloquean el XLSX de compra hasta corregirse.",
+        "Observaciones: insumos sin costo y advertencias de preparación quedan visibles antes de comprar.",
+    ]
+
+
+def _calculo_insumos_redirect_url(request: HttpRequest) -> str:
+    params = {"seccion": "calculo_insumos"}
+    plan_id = (request.POST.get("plan_id") or request.GET.get("plan_id") or "").strip()
+    if plan_id:
+        params["plan_id"] = plan_id
+    return f"{reverse('recetas:plan_produccion')}?{urlencode(params)}#calculo-insumos"
+
+
+def _calculo_insumos_plan_id_from_request(request: HttpRequest) -> int | None:
+    plan_id = _to_int_safe(request.POST.get("plan_id") or request.GET.get("plan_id"), default=0)
+    return plan_id if plan_id > 0 else None
+
+
+def _calculo_insumos_plan_scoped_payload(payload: dict[str, Any] | None, plan_id: int | None) -> dict[str, Any] | None:
+    if not payload:
+        return None
+    payload_plan_id = _to_int_safe(payload.get("plan_id"), default=0) or None
+    if plan_id and payload_plan_id and payload_plan_id != plan_id:
+        return None
+    return payload
+
+
+def _calculo_insumos_draft_payload(request: HttpRequest, *, plan_id: int | None = None) -> dict[str, Any]:
+    payload = _calculo_insumos_plan_scoped_payload(
+        request.session.get(CALCULO_INSUMOS_DRAFT_SESSION_KEY),
+        plan_id,
+    )
+    if payload is not None:
+        return payload
+    return {
+        "plan_id": int(plan_id) if plan_id else None,
+        "source_rows": [],
+    }
+
+
+def _save_calculo_insumos_draft(request: HttpRequest, rows: list[dict[str, Any]], *, plan_id: int | None = None) -> None:
+    request.session[CALCULO_INSUMOS_DRAFT_SESSION_KEY] = {
+        "plan_id": int(plan_id) if plan_id else None,
+        "source_rows": rows,
+        "updated_at": timezone.localtime().isoformat(timespec="seconds"),
+    }
+    request.session.modified = True
+
+
+def _same_calculo_insumos_rows(left: list[dict[str, Any]], right: list[dict[str, Any]]) -> bool:
+    left_norm = [_normalize_calculo_insumos_row(row) for row in left]
+    right_norm = [_normalize_calculo_insumos_row(row) for row in right]
+    return left_norm == right_norm
+
+
+def _attach_calculo_insumos_visual_rows(supply: dict[str, Any] | None) -> None:
+    if not supply:
+        return
+    top_rows = _calculo_top_insumo_rows(supply, limit=8)
+    max_spend = max((_to_calculo_float(row.get("estimated_spend")) for row in top_rows), default=0.0)
+    for row in top_rows:
+        spend = _to_calculo_float(row.get("estimated_spend"))
+        row["spend_share_pct"] = round((spend / max_spend) * 100, 2) if max_spend else 0
+    supply["top_insumo_rows"] = top_rows
+
+
+def _calculo_insumos_blocking_observations(payload: dict[str, Any], supply: dict[str, Any] | None) -> list[dict[str, str]]:
+    blockers: list[dict[str, str]] = []
+    for row in payload.get("unresolved_rows") or []:
+        blockers.append(
+            {
+                "tipo": "PRODUCTO_NO_RESUELTO",
+                "detalle": row.get("motivo") or "Producto no resuelto.",
+                "producto": row.get("codigo_point") or row.get("producto") or row.get("presentacion") or "",
+            }
+        )
+    for row in payload.get("skipped_rows") or []:
+        blockers.append(
+            {
+                "tipo": "RENGLON_OMITIDO",
+                "detalle": row.get("motivo") or "Renglón omitido.",
+                "producto": row.get("codigo_point") or row.get("producto") or row.get("presentacion") or "",
+            }
+        )
+    for row in (supply or {}).get("issues") or []:
+        if str(row.get("severity") or "").lower() == "error":
+            blockers.append(
+                {
+                    "tipo": row.get("code") or "ERROR_BOM",
+                    "detalle": row.get("detail") or "Error crítico en explosión BOM.",
+                    "producto": row.get("product_name") or row.get("insumo_nombre") or "",
+                }
+            )
+    return blockers
+
+
+def _calculo_insumos_context_from_session(request: HttpRequest, *, plan_id: int | None = None) -> dict[str, Any] | None:
+    payload = _calculo_insumos_plan_scoped_payload(
+        request.session.get(CALCULO_INSUMOS_SESSION_KEY),
+        plan_id,
+    )
+    draft_payload = _calculo_insumos_draft_payload(request, plan_id=plan_id)
+    draft_rows = list(draft_payload.get("source_rows") or [])
+    if not payload and not draft_rows:
+        return None
+    supply = None
+    if payload and payload.get("rows"):
+        supply = build_projection_supply_context_from_forecast_preview(payload, escenario="base")
+        _decorate_supply_context_for_display(supply)
+        _attach_calculo_insumos_visual_rows(supply)
+    blocking_observations = _calculo_insumos_blocking_observations(payload or {}, supply)
+    preview_source_rows = list((payload or {}).get("source_rows") or [])
+    draft_is_calculated = bool(payload and draft_rows and _same_calculo_insumos_rows(draft_rows, preview_source_rows))
+    return {
+        "preview": payload,
+        "source_rows": preview_source_rows or draft_rows,
+        "draft_rows": draft_rows,
+        "draft_count": len(draft_rows),
+        "draft_is_calculated": draft_is_calculated,
+        "draft_has_pending_changes": bool(draft_rows and not draft_is_calculated),
+        "unresolved_rows": (payload or {}).get("unresolved_rows") or [],
+        "skipped_rows": (payload or {}).get("skipped_rows") or [],
+        "supply": supply,
+        "blocking_observations": blocking_observations,
+        "export_ready": bool(supply) and not blocking_observations,
+    }
 
 
 def _normalize_alcance_solicitud(raw: str | None) -> str:
@@ -15400,6 +15848,1039 @@ def forecast_supply_export(request: HttpRequest) -> HttpResponse:
     return response
 
 
+CALCULO_INSUMOS_WINE = "64153A"
+CALCULO_INSUMOS_WINE_DARK = "3A0F22"
+CALCULO_INSUMOS_GOLD = "C9A24A"
+CALCULO_INSUMOS_PAPER = "FFFAF6"
+CALCULO_INSUMOS_SURFACE = "FFFFFF"
+CALCULO_INSUMOS_BLUSH = "F6E7EC"
+CALCULO_INSUMOS_BORDER = "DEC6CF"
+CALCULO_INSUMOS_INK = "241820"
+CALCULO_INSUMOS_MUTED = "6F6069"
+CALCULO_INSUMOS_WARNING = "8B5E12"
+
+
+def _calculo_fill(color: str) -> PatternFill:
+    return PatternFill("solid", fgColor=color)
+
+
+def _calculo_border(color: str = CALCULO_INSUMOS_BORDER) -> Border:
+    side = Side(style="thin", color=color)
+    return Border(left=side, right=side, top=side, bottom=side)
+
+
+def _paint_calculo_range(ws, cell_range: str, fill: PatternFill | None = None, border: Border | None = None) -> None:
+    for row in ws[cell_range]:
+        for cell in row:
+            if fill:
+                cell.fill = fill
+            if border:
+                cell.border = border
+
+
+def _write_calculo_merged(
+    ws,
+    cell_range: str,
+    value: Any,
+    *,
+    fill: PatternFill | None = None,
+    font: Font | None = None,
+    alignment: Alignment | None = None,
+    border: Border | None = None,
+    number_format: str | None = None,
+) -> None:
+    _paint_calculo_range(ws, cell_range, fill=fill, border=border)
+    ws.merge_cells(cell_range)
+    cell = ws[cell_range.split(":")[0]]
+    cell.value = value
+    if font:
+        cell.font = font
+    if alignment:
+        cell.alignment = alignment
+    if number_format:
+        cell.number_format = number_format
+
+
+def _write_calculo_metric_card(ws, cell_range: str, label: str, value: Any, *, number_format: str | None = None) -> None:
+    min_col, min_row, max_col, max_row = range_boundaries(cell_range)
+    start_col = get_column_letter(min_col)
+    end_col = get_column_letter(max_col)
+    card_border = _calculo_border()
+    _paint_calculo_range(ws, cell_range, fill=_calculo_fill(CALCULO_INSUMOS_SURFACE), border=card_border)
+    _write_calculo_merged(
+        ws,
+        f"{start_col}{min_row}:{end_col}{min_row}",
+        label,
+        fill=_calculo_fill(CALCULO_INSUMOS_SURFACE),
+        font=Font(color=CALCULO_INSUMOS_MUTED, bold=True, size=9),
+        alignment=Alignment(horizontal="left", vertical="center"),
+        border=card_border,
+    )
+    _write_calculo_merged(
+        ws,
+        f"{start_col}{min_row + 1}:{end_col}{max_row}",
+        value,
+        fill=_calculo_fill(CALCULO_INSUMOS_SURFACE),
+        font=Font(color=CALCULO_INSUMOS_WINE, bold=True, size=18),
+        alignment=Alignment(horizontal="left", vertical="center", wrap_text=True),
+        border=card_border,
+        number_format=number_format,
+    )
+
+
+def _to_calculo_float(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _short_calculo_label(value: Any, length: int = 34) -> str:
+    text = str(value or "").strip()
+    if len(text) <= length:
+        return text
+    return f"{text[: max(length - 1, 1)].rstrip()}…"
+
+
+def _prepare_calculo_visual_sheet(ws, *, title: str, subtitle: str) -> None:
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = CALCULO_INSUMOS_WINE
+    for col_idx in range(1, 16):
+        ws.column_dimensions[get_column_letter(col_idx)].width = 12
+    for row_idx in range(1, 32):
+        ws.row_dimensions[row_idx].height = 22
+    _paint_calculo_range(ws, "A1:O31", fill=_calculo_fill(CALCULO_INSUMOS_PAPER))
+    _paint_calculo_range(ws, "A1:O2", fill=_calculo_fill(CALCULO_INSUMOS_WINE))
+    _write_calculo_merged(
+        ws,
+        "A1:C2",
+        "Pollyana's Dolce",
+        fill=_calculo_fill(CALCULO_INSUMOS_WINE),
+        font=Font(color="FFFFFF", bold=True, size=14),
+        alignment=Alignment(horizontal="left", vertical="center"),
+    )
+    _write_calculo_merged(
+        ws,
+        "D1:L1",
+        title,
+        fill=_calculo_fill(CALCULO_INSUMOS_WINE),
+        font=Font(color="FFFFFF", bold=True, size=16),
+        alignment=Alignment(horizontal="left", vertical="center"),
+    )
+    _write_calculo_merged(
+        ws,
+        "D2:L2",
+        subtitle,
+        fill=_calculo_fill(CALCULO_INSUMOS_WINE),
+        font=Font(color="FFFFFF", size=9),
+        alignment=Alignment(horizontal="left", vertical="center"),
+    )
+    _write_calculo_merged(
+        ws,
+        "M1:O2",
+        "Producción",
+        fill=_calculo_fill(CALCULO_INSUMOS_WINE),
+        font=Font(color=CALCULO_INSUMOS_GOLD, bold=True, size=10),
+        alignment=Alignment(horizontal="right", vertical="center"),
+    )
+
+
+def _write_calculo_visual_card(
+    ws,
+    cell_range: str,
+    label: str,
+    value: Any,
+    *,
+    note: str = "",
+    number_format: str | None = None,
+) -> None:
+    min_col, min_row, max_col, max_row = range_boundaries(cell_range)
+    start_col = get_column_letter(min_col)
+    end_col = get_column_letter(max_col)
+    border = _calculo_border()
+    _paint_calculo_range(ws, cell_range, fill=_calculo_fill(CALCULO_INSUMOS_SURFACE), border=border)
+    _write_calculo_merged(
+        ws,
+        f"{start_col}{min_row}:{end_col}{min_row}",
+        label,
+        fill=_calculo_fill(CALCULO_INSUMOS_SURFACE),
+        font=Font(color=CALCULO_INSUMOS_MUTED, bold=True, size=9),
+        alignment=Alignment(horizontal="left", vertical="center", wrap_text=True),
+        border=border,
+    )
+    _write_calculo_merged(
+        ws,
+        f"{start_col}{min_row + 1}:{end_col}{max_row - (1 if note else 0)}",
+        value,
+        fill=_calculo_fill(CALCULO_INSUMOS_SURFACE),
+        font=Font(color=CALCULO_INSUMOS_WINE, bold=True, size=16),
+        alignment=Alignment(horizontal="left", vertical="center", wrap_text=True),
+        border=border,
+        number_format=number_format,
+    )
+    if note:
+        _write_calculo_merged(
+            ws,
+            f"{start_col}{max_row}:{end_col}{max_row}",
+            note,
+            fill=_calculo_fill(CALCULO_INSUMOS_SURFACE),
+            font=Font(color=CALCULO_INSUMOS_MUTED, size=8),
+            alignment=Alignment(horizontal="left", vertical="center", wrap_text=True),
+            border=border,
+        )
+
+
+def _write_calculo_section_title(ws, cell_range: str, title: str, subtitle: str = "") -> None:
+    _write_calculo_merged(
+        ws,
+        cell_range,
+        title if not subtitle else f"{title}\n{subtitle}",
+        fill=_calculo_fill(CALCULO_INSUMOS_SURFACE),
+        font=Font(color=CALCULO_INSUMOS_WINE, bold=True, size=11),
+        alignment=Alignment(horizontal="left", vertical="center", wrap_text=True),
+        border=_calculo_border(),
+    )
+
+
+def _write_calculo_bar_cells(ws, row: int, start_col: int, end_col: int, pct: float, *, color: str = CALCULO_INSUMOS_WINE) -> None:
+    pct = max(0.0, min(float(pct or 0), 1.0))
+    width = max(end_col - start_col + 1, 1)
+    filled = max(1 if pct > 0 else 0, int(round(width * pct)))
+    for col_idx in range(start_col, end_col + 1):
+        cell = ws.cell(row=row, column=col_idx)
+        cell.value = ""
+        cell.fill = _calculo_fill(color if col_idx < start_col + filled else CALCULO_INSUMOS_BLUSH)
+        cell.border = _calculo_border("E9D9E0")
+
+
+def _calculo_top_insumo_rows(supply: dict[str, Any] | None, limit: int = 10) -> list[dict[str, Any]]:
+    rows = [_calculo_insumos_display_row(row) for row in (supply or {}).get("insumos") or []]
+    return sorted(rows, key=lambda row: _to_calculo_float(row.get("estimated_spend")), reverse=True)[:limit]
+
+
+def _calculo_mix_rows(supply: dict[str, Any] | None, limit: int = 6) -> list[tuple[str, float]]:
+    totals: dict[str, float] = defaultdict(float)
+    for row in (supply or {}).get("insumos") or []:
+        label = str(row.get("family") or row.get("category") or "Sin familia").strip() or "Sin familia"
+        totals[label] += _to_calculo_float(row.get("estimated_spend"))
+    return sorted(totals.items(), key=lambda item: item[1], reverse=True)[:limit]
+
+
+def _calculo_product_cost_rows(supply: dict[str, Any] | None, limit: int = 12) -> list[dict[str, Any]]:
+    totals: dict[str, float] = defaultdict(float)
+    qty_by_product: dict[str, float] = {}
+    for row in (supply or {}).get("products") or []:
+        product = str(row.get("recipe_name") or "").strip()
+        if product:
+            qty_by_product[product] = _to_calculo_float(row.get("forecast_qty"))
+    for row in (supply or {}).get("explosion_rows") or []:
+        if row.get("rollup_kind") != "COMPRA":
+            continue
+        product = str(row.get("product_name") or "").strip()
+        if product:
+            totals[product] += _to_calculo_float(row.get("estimated_spend"))
+    rows = [
+        {
+            "product": product,
+            "qty": qty_by_product.get(product, 0),
+            "cost": cost,
+            "unit_cost": cost / qty_by_product[product] if qty_by_product.get(product) else 0,
+        }
+        for product, cost in totals.items()
+    ]
+    return sorted(rows, key=lambda row: row["cost"], reverse=True)[:limit]
+
+
+def _add_calculo_dashboard_chart(ws, start_row: int, end_row: int) -> None:
+    if end_row <= start_row:
+        return
+    chart = BarChart()
+    chart.type = "bar"
+    chart.style = 10
+    chart.title = "Top insumos por costo"
+    chart.y_axis.title = "Insumo"
+    chart.x_axis.title = "$"
+    data = Reference(ws, min_col=3, min_row=start_row - 1, max_row=end_row)
+    categories = Reference(ws, min_col=1, min_row=start_row, max_row=end_row)
+    chart.add_data(data, titles_from_data=True)
+    chart.set_categories(categories)
+    chart.height = 7
+    chart.width = 13
+    chart.legend = None
+    ws.add_chart(chart, "A24")
+
+
+def _build_calculo_insumos_summary_panel(
+    ws,
+    payload: dict[str, Any],
+    summary: dict[str, Any],
+    supply: dict[str, Any] | None,
+) -> None:
+    projected_products = int(summary.get("projected_products") or payload.get("totals", {}).get("recetas_count") or 0)
+    forecast_units = float(summary.get("forecast_units") or payload.get("totals", {}).get("forecast_total") or 0)
+    projected_insumos = int(summary.get("projected_insumos") or 0)
+    prepared_insumos = int(summary.get("prepared_insumos") or 0)
+    missing_cost_insumos = int(summary.get("missing_cost_insumos") or 0)
+    issues_count = int(summary.get("issues") or 0) + len(payload.get("unresolved_rows") or [])
+    estimated_spend = float(summary.get("estimated_spend") or 0)
+    source_label = payload.get("source_label") or "Captura manual"
+    target_label = payload.get("target_label") or "Plan de producción"
+
+    _prepare_calculo_visual_sheet(
+        ws,
+        title="BOM requerido de insumos y materia prima",
+        subtitle=f"{source_label} · {target_label}",
+    )
+    for col_idx, width in {
+        1: 18,
+        2: 13,
+        3: 14,
+        4: 10,
+        5: 10,
+        6: 10,
+        7: 10,
+        8: 10,
+        9: 4,
+        10: 18,
+        11: 13,
+        12: 13,
+        13: 13,
+        14: 13,
+        15: 13,
+    }.items():
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+    ws.freeze_panes = "A9"
+    _write_calculo_visual_card(ws, "A4:C6", "Costo total requerido", estimated_spend, number_format='$#,##0.00')
+    _write_calculo_visual_card(ws, "D4:F6", "Unidades plan", forecast_units, number_format="#,##0")
+    _write_calculo_visual_card(ws, "G4:I6", "Insumos comprables", projected_insumos, number_format="#,##0")
+    _write_calculo_visual_card(ws, "J4:L6", "Preparados internos", prepared_insumos, number_format="#,##0")
+    _write_calculo_visual_card(
+        ws,
+        "M4:O6",
+        "Calidad de costo",
+        f"{missing_cost_insumos} / {issues_count}",
+        note="sin costo / observaciones",
+    )
+
+    _write_calculo_section_title(ws, "A8:H8", "Top insumos por costo", "Mayor impacto para compras y negociación")
+    top_rows = _calculo_top_insumo_rows(supply)
+    max_cost = max((_to_calculo_float(row.get("estimated_spend")) for row in top_rows), default=0)
+    ws["A9"].value = "Insumo"
+    ws["B9"].value = "Unidad"
+    ws["C9"].value = "Costo total"
+    for cell in ws[9][:8]:
+        cell.fill = _calculo_fill(CALCULO_INSUMOS_BLUSH)
+        cell.font = Font(color=CALCULO_INSUMOS_WINE, bold=True, size=9)
+        cell.border = _calculo_border()
+    for offset, row in enumerate(top_rows, start=10):
+        cost = _to_calculo_float(row.get("estimated_spend"))
+        ws.cell(offset, 1).value = _short_calculo_label(row.get("insumo_nombre"), 28)
+        ws.cell(offset, 2).value = row.get("display_unidad_codigo") or row.get("unidad_codigo") or ""
+        ws.cell(offset, 3).value = cost
+        ws.cell(offset, 3).number_format = '$#,##0.00'
+        for col_idx in range(1, 9):
+            ws.cell(offset, col_idx).fill = _calculo_fill(CALCULO_INSUMOS_SURFACE if offset % 2 else CALCULO_INSUMOS_PAPER)
+            ws.cell(offset, col_idx).border = _calculo_border()
+            ws.cell(offset, col_idx).alignment = Alignment(vertical="center", wrap_text=True)
+        _write_calculo_bar_cells(ws, offset, 4, 8, cost / max_cost if max_cost else 0)
+    _add_calculo_dashboard_chart(ws, 10, 9 + len(top_rows))
+
+    _write_calculo_section_title(ws, "J8:O8", "Mix de costo", "Familias con mayor peso financiero")
+    mix_rows = _calculo_mix_rows(supply)
+    max_mix = max((value for _label, value in mix_rows), default=0)
+    for offset, (label, value) in enumerate(mix_rows, start=10):
+        ws.cell(offset, 10).value = _short_calculo_label(label, 24)
+        ws.cell(offset, 11).value = value
+        ws.cell(offset, 11).number_format = '$#,##0.00'
+        for col_idx in range(10, 16):
+            ws.cell(offset, col_idx).fill = _calculo_fill(CALCULO_INSUMOS_SURFACE if offset % 2 else CALCULO_INSUMOS_PAPER)
+            ws.cell(offset, col_idx).border = _calculo_border()
+        _write_calculo_bar_cells(ws, offset, 12, 15, value / max_mix if max_mix else 0, color=CALCULO_INSUMOS_GOLD)
+
+    _write_calculo_section_title(ws, "J18:O18", "Lectura operativa", "Cómo usar este reporte")
+    notes = [
+        "1. Compra: ordenar por costo total o familia.",
+        "2. Producción: revisar preparados internos antes de materia prima.",
+        "3. Auditoría: observaciones no se ocultan; se revisan contra ERP vivo.",
+        "4. Unidades: g/ml se muestran como kg/L cuando corresponde.",
+    ]
+    for offset, note in enumerate(notes, start=19):
+        _write_calculo_merged(
+            ws,
+            f"J{offset}:O{offset}",
+            note,
+            fill=_calculo_fill(CALCULO_INSUMOS_SURFACE),
+            font=Font(color=CALCULO_INSUMOS_INK, size=9),
+            alignment=Alignment(horizontal="left", vertical="center", wrap_text=True),
+            border=_calculo_border(),
+        )
+
+
+def _build_calculo_insumos_purchase_visual_sheet(ws, supply: dict[str, Any] | None) -> None:
+    _prepare_calculo_visual_sheet(
+        ws,
+        title="BOM consolidado para compras",
+        subtitle="Materia prima y empaques comprables · costo unitario vivo · cantidad convertida",
+    )
+    widths = {
+        1: 13,
+        2: 28,
+        3: 14,
+        4: 16,
+        5: 12,
+        6: 10,
+        7: 13,
+        8: 13,
+        9: 14,
+        10: 18,
+        11: 16,
+        12: 16,
+        13: 18,
+    }
+    for col_idx, width in widths.items():
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+    rows = [_calculo_insumos_display_row(row) for row in (supply or {}).get("insumos") or []]
+    rows = sorted(rows, key=lambda row: _to_calculo_float(row.get("estimated_spend")), reverse=True)
+    _write_calculo_visual_card(ws, "A4:C6", "Renglones comprables", len(rows), number_format="#,##0")
+    _write_calculo_visual_card(
+        ws,
+        "D4:F6",
+        "Total compras",
+        sum(_to_calculo_float(row.get("estimated_spend")) for row in rows),
+        number_format='$#,##0.00',
+    )
+    _write_calculo_visual_card(
+        ws,
+        "G4:I6",
+        "Sin costo",
+        sum(1 for row in rows if row.get("missing_cost")),
+        number_format="#,##0",
+    )
+    _write_calculo_visual_card(ws, "J4:L6", "Orden sugerido", "Costo total", note="mayor impacto primero")
+
+    headers = [
+        "Prioridad",
+        "Código Point",
+        "Insumo",
+        "Tipo",
+        "Familia",
+        "Cantidad",
+        "Unidad",
+        "Costo unitario",
+        "Costo total",
+        "Fuente",
+        "Usado en",
+        "Estado",
+        "Acción",
+    ]
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=8, column=col_idx)
+        cell.value = header
+        cell.fill = _calculo_fill(CALCULO_INSUMOS_WINE)
+        cell.font = Font(color="FFFFFF", bold=True, size=9)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = _calculo_border(CALCULO_INSUMOS_WINE)
+    for offset, row in enumerate(rows[:32], start=9):
+        missing = bool(row.get("missing_cost"))
+        values = [
+            offset - 8,
+            row.get("codigo_point") or "",
+            row.get("insumo_nombre") or "",
+            row.get("article_class_label") or "",
+            row.get("family") or row.get("category") or "",
+            _to_calculo_float(row.get("display_required_qty")),
+            row.get("display_unidad_codigo") or row.get("unidad_codigo") or "",
+            _to_calculo_float(row.get("display_unit_cost")),
+            _to_calculo_float(row.get("estimated_spend")),
+            row.get("cost_sources_text") or row.get("cost_source") or "",
+            _short_calculo_label(row.get("recipes_text"), 36),
+            "Revisar" if missing else "Listo",
+            "Actualizar costo" if missing else "Comprar / validar proveedor",
+        ]
+        for col_idx, value in enumerate(values, start=1):
+            cell = ws.cell(row=offset, column=col_idx)
+            cell.value = value
+            cell.fill = _calculo_fill("FFF3D6" if missing else (CALCULO_INSUMOS_SURFACE if offset % 2 else CALCULO_INSUMOS_PAPER))
+            cell.border = _calculo_border()
+            cell.alignment = Alignment(vertical="center", wrap_text=True)
+            if col_idx in {6}:
+                cell.number_format = '#,##0.000'
+            if col_idx in {8, 9}:
+                cell.number_format = '$#,##0.00'
+            if col_idx == 12:
+                cell.font = Font(color=CALCULO_INSUMOS_WARNING if missing else "236D53", bold=True)
+    ws.freeze_panes = "A9"
+    ws.auto_filter.ref = f"A8:M{max(9, min(40, 8 + len(rows[:32])))}"
+
+
+def _build_calculo_insumos_detail_visual_sheet(
+    ws,
+    payload: dict[str, Any],
+    supply: dict[str, Any] | None,
+) -> None:
+    _prepare_calculo_visual_sheet(
+        ws,
+        title="Detalle por producto y preparados internos",
+        subtitle="Relación ERP/Point, costo por producto y requerimientos internos",
+    )
+    widths = {
+        1: 12,
+        2: 30,
+        3: 12,
+        4: 13,
+        5: 13,
+        6: 12,
+        7: 11,
+        8: 4,
+        9: 20,
+        10: 13,
+        11: 13,
+        12: 12,
+        13: 12,
+        14: 12,
+        15: 12,
+    }
+    for col_idx, width in widths.items():
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+    product_rows = _calculo_product_cost_rows(supply, limit=18)
+    prepared_rows = [_calculo_insumos_display_row(row) for row in (supply or {}).get("prepared_insumos") or []]
+    prepared_rows = sorted(prepared_rows, key=lambda row: _to_calculo_float(row.get("display_required_qty")), reverse=True)
+
+    _write_calculo_visual_card(ws, "A4:C6", "Productos resueltos", len(payload.get("rows") or []), number_format="#,##0")
+    _write_calculo_visual_card(
+        ws,
+        "D4:F6",
+        "Costo promedio",
+        (
+            sum(row["cost"] for row in product_rows) / sum(row["qty"] for row in product_rows)
+            if sum(row["qty"] for row in product_rows)
+            else 0
+        ),
+        number_format='$#,##0.00',
+    )
+    _write_calculo_visual_card(ws, "G4:I6", "Preparados", len(prepared_rows), number_format="#,##0")
+
+    _write_calculo_section_title(ws, "A8:G8", "Referencia producto ERP / costo", "Costo calculado por explosión de materia prima comprable")
+    headers = ["#", "Producto ERP", "Unidades", "Costo total", "Costo unitario", "Estado", "Notas"]
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=9, column=col_idx)
+        cell.value = header
+        cell.fill = _calculo_fill(CALCULO_INSUMOS_WINE)
+        cell.font = Font(color="FFFFFF", bold=True, size=9)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = _calculo_border(CALCULO_INSUMOS_WINE)
+    for offset, row in enumerate(product_rows, start=10):
+        values = [
+            offset - 9,
+            row["product"],
+            row["qty"],
+            row["cost"],
+            row["unit_cost"],
+            "Listo",
+            "ERP + Point",
+        ]
+        for col_idx, value in enumerate(values, start=1):
+            cell = ws.cell(row=offset, column=col_idx)
+            cell.value = value
+            cell.fill = _calculo_fill(CALCULO_INSUMOS_SURFACE if offset % 2 else CALCULO_INSUMOS_PAPER)
+            cell.border = _calculo_border()
+            cell.alignment = Alignment(vertical="center", wrap_text=True)
+            if col_idx == 3:
+                cell.number_format = '#,##0'
+            if col_idx in {4, 5}:
+                cell.number_format = '$#,##0.00'
+            if col_idx == 6:
+                cell.font = Font(color="236D53", bold=True)
+
+    _write_calculo_section_title(ws, "I8:O8", "Flujo de explosión de insumos", "Captura → ERP → Receta → Preparado → Compra")
+    flow = [
+        ("1", "Captura", "manual / XLSX / CSV"),
+        ("2", "Relación ERP", "código Point o alias"),
+        ("3", "Explosión", "receta multinivel"),
+        ("4", "Preparados", "producir interno"),
+        ("5", "Compra", "materia prima"),
+    ]
+    for idx, (num, title, note) in enumerate(flow, start=9):
+        _write_calculo_merged(
+            ws,
+            f"I{idx}:J{idx}",
+            num,
+            fill=_calculo_fill(CALCULO_INSUMOS_WINE),
+            font=Font(color="FFFFFF", bold=True),
+            alignment=Alignment(horizontal="center", vertical="center"),
+            border=_calculo_border(CALCULO_INSUMOS_WINE),
+        )
+        _write_calculo_merged(
+            ws,
+            f"K{idx}:O{idx}",
+            f"{title} · {note}",
+            fill=_calculo_fill(CALCULO_INSUMOS_SURFACE),
+            font=Font(color=CALCULO_INSUMOS_INK, bold=True if idx == 9 else False, size=9),
+            alignment=Alignment(horizontal="left", vertical="center", wrap_text=True),
+            border=_calculo_border(),
+        )
+
+    _write_calculo_section_title(ws, "I16:O16", "Preparados internos principales", "Requerimientos antes de compra final")
+    max_prepared = max((_to_calculo_float(row.get("display_required_qty")) for row in prepared_rows[:10]), default=0)
+    for offset, row in enumerate(prepared_rows[:10], start=17):
+        qty = _to_calculo_float(row.get("display_required_qty"))
+        ws.cell(offset, 9).value = _short_calculo_label(row.get("insumo_nombre"), 22)
+        ws.cell(offset, 10).value = qty
+        ws.cell(offset, 11).value = row.get("display_unidad_codigo") or row.get("unidad_codigo") or ""
+        ws.cell(offset, 10).number_format = '#,##0.000'
+        for col_idx in range(9, 16):
+            ws.cell(offset, col_idx).fill = _calculo_fill(CALCULO_INSUMOS_SURFACE if offset % 2 else CALCULO_INSUMOS_PAPER)
+            ws.cell(offset, col_idx).border = _calculo_border()
+            ws.cell(offset, col_idx).alignment = Alignment(vertical="center", wrap_text=True)
+        _write_calculo_bar_cells(ws, offset, 12, 15, qty / max_prepared if max_prepared else 0, color=CALCULO_INSUMOS_GOLD)
+    ws.freeze_panes = "A9"
+
+
+def _style_calculo_insumos_sheet(ws, header_row: int = 1) -> None:
+    for cell in ws[header_row]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = _calculo_fill(CALCULO_INSUMOS_WINE)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = _calculo_border(CALCULO_INSUMOS_WINE)
+    if header_row > 1:
+        for row in ws.iter_rows(min_row=1, max_row=header_row - 1):
+            for cell in row:
+                cell.fill = _calculo_fill(CALCULO_INSUMOS_PAPER)
+                cell.border = _calculo_border()
+    for row_idx, row in enumerate(ws.iter_rows(min_row=header_row + 1), start=header_row + 1):
+        for cell in row:
+            cell.fill = _calculo_fill(CALCULO_INSUMOS_SURFACE if row_idx % 2 else CALCULO_INSUMOS_PAPER)
+            cell.border = _calculo_border()
+            cell.font = Font(color=CALCULO_INSUMOS_INK)
+            cell.alignment = Alignment(vertical="center", wrap_text=True)
+    ws.freeze_panes = f"A{header_row + 1}"
+    if ws.max_row >= header_row and ws.max_column >= 1:
+        ws.auto_filter.ref = f"A{header_row}:{get_column_letter(ws.max_column)}{ws.max_row}"
+    for column_cells in ws.columns:
+        max_length = max(len(str(cell.value or "")) for cell in column_cells)
+        ws.column_dimensions[column_cells[0].column_letter].width = min(max(max_length + 2, 12), 52)
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = CALCULO_INSUMOS_GOLD
+
+
+def _append_calculo_insumos_rules(ws) -> None:
+    ws.append(["Regla", "Detalle"])
+    for index, rule in enumerate(_calculo_insumos_rules(), start=1):
+        ws.append([index, rule])
+    _style_calculo_insumos_sheet(ws)
+
+
+def _calculo_insumos_display_row(row: dict[str, Any]) -> dict[str, Any]:
+    if row.get("display_required_qty") not in (None, "") and row.get("display_unidad_codigo"):
+        return row
+    display_row = dict(row)
+    display_row.update(_display_supply_quantity(row))
+    return display_row
+
+
+def _apply_calculo_number_formats(wb: Workbook) -> None:
+    money_columns_by_sheet = {
+        "BOM consolidado": ("H", "I"),
+        "Explosion detalle": ("J", "K"),
+    }
+    qty_columns_by_sheet = {
+        "Productos": ("C",),
+        "BOM consolidado": ("F",),
+        "Preparados internos": ("F",),
+        "Explosion detalle": ("H",),
+    }
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                cell.alignment = Alignment(vertical="center", wrap_text=True)
+        for col in qty_columns_by_sheet.get(ws.title, ()):
+            for cell in ws[col]:
+                if isinstance(cell.value, (int, float)):
+                    cell.number_format = '#,##0.000'
+        for col in money_columns_by_sheet.get(ws.title, ()):
+            for cell in ws[col]:
+                if isinstance(cell.value, (int, float)):
+                    cell.number_format = '$#,##0.00'
+
+
+def _build_calculo_insumos_workbook(payload: dict[str, Any], supply: dict[str, Any] | None) -> Workbook:
+    wb = Workbook()
+    summary = (supply or {}).get("summary") or {}
+
+    ws_resumen = wb.active
+    ws_resumen.title = "Resumen"
+    _build_calculo_insumos_summary_panel(ws_resumen, payload, summary, supply)
+
+    ws_bom_compras = wb.create_sheet("BOM compras")
+    _build_calculo_insumos_purchase_visual_sheet(ws_bom_compras, supply)
+
+    ws_detalle_visual = wb.create_sheet("Detalle producción")
+    _build_calculo_insumos_detail_visual_sheet(ws_detalle_visual, payload, supply)
+
+    ws_resumen_datos = wb.create_sheet("Resumen datos")
+    ws_resumen_datos.append(["Campo", "Valor"])
+    ws_resumen_datos.append(["Origen", payload.get("source_label") or "Captura manual"])
+    ws_resumen_datos.append(["Rango", payload.get("target_label") or ""])
+    ws_resumen_datos.append(["Productos", int(summary.get("projected_products") or payload.get("totals", {}).get("recetas_count") or 0)])
+    ws_resumen_datos.append(["Unidades plan", float(summary.get("forecast_units") or payload.get("totals", {}).get("forecast_total") or 0)])
+    ws_resumen_datos.append(["Materia prima y empaques", int(summary.get("projected_insumos") or 0)])
+    ws_resumen_datos.append(["Preparados internos", int(summary.get("prepared_insumos") or 0)])
+    ws_resumen_datos.append(["Insumos sin costo", int(summary.get("missing_cost_insumos") or 0)])
+    ws_resumen_datos.append(["Observaciones", int(summary.get("issues") or 0) + len(payload.get("unresolved_rows") or [])])
+    ws_resumen_datos.append(["Costo total requerido", float(summary.get("estimated_spend") or 0)])
+    _style_calculo_insumos_sheet(ws_resumen_datos)
+
+    ws_productos = wb.create_sheet("Productos")
+    ws_productos.append(["Código Point", "Producto ERP", "Cantidad plan", "Notas"])
+    for row in payload.get("rows") or []:
+        ws_productos.append(
+            [
+                row.get("codigo_point") or "",
+                row.get("receta") or "",
+                float(row.get("forecast_qty") or 0),
+                row.get("notas") or "",
+            ]
+        )
+    _style_calculo_insumos_sheet(ws_productos)
+
+    ws_bom = wb.create_sheet("BOM consolidado")
+    ws_bom.append(
+        [
+            "Código Point",
+            "Familia",
+            "Categoría",
+            "Tipo",
+            "Insumo",
+            "Cantidad",
+            "Unidad",
+            "Costo unitario",
+            "Costo total",
+            "Fuente costo",
+            "Productos",
+        ]
+    )
+    for row in (supply or {}).get("insumos") or []:
+        display_row = _calculo_insumos_display_row(row)
+        unit_cost = display_row.get("display_unit_cost")
+        ws_bom.append(
+            [
+                row.get("codigo_point") or "",
+                row.get("family") or "",
+                row.get("category") or "",
+                row.get("article_class_label") or "",
+                row.get("insumo_nombre") or "",
+                float(display_row.get("display_required_qty") or 0),
+                display_row.get("display_unidad_codigo") or row.get("unidad_codigo") or "",
+                float(unit_cost or 0),
+                float(row.get("estimated_spend") or 0),
+                row.get("cost_sources_text") or row.get("cost_source") or "",
+                row.get("recipes_text") or "",
+            ]
+        )
+    _style_calculo_insumos_sheet(ws_bom)
+
+    ws_preparados = wb.create_sheet("Preparados internos")
+    ws_preparados.append(["Código Point", "Familia", "Categoría", "Preparado", "Receta preparación", "Cantidad", "Unidad", "Productos"])
+    for row in (supply or {}).get("prepared_insumos") or []:
+        display_row = _calculo_insumos_display_row(row)
+        ws_preparados.append(
+            [
+                row.get("codigo_point") or "",
+                row.get("family") or "",
+                row.get("category") or "",
+                row.get("insumo_nombre") or "",
+                row.get("prep_recipe_name") or "",
+                float(display_row.get("display_required_qty") or 0),
+                display_row.get("display_unidad_codigo") or row.get("unidad_codigo") or "",
+                row.get("recipes_text") or "",
+            ]
+        )
+    _style_calculo_insumos_sheet(ws_preparados)
+
+    ws_explosion = wb.create_sheet("Explosion detalle")
+    ws_explosion.append(
+        [
+            "Nivel",
+            "Ruta",
+            "Producto",
+            "Receta",
+            "Tipo",
+            "Código Point",
+            "Insumo",
+            "Cantidad",
+            "Unidad",
+            "Costo unitario",
+            "Costo total",
+            "Fuente",
+            "Rollup",
+        ]
+    )
+    for row in (supply or {}).get("explosion_rows") or []:
+        display_row = _calculo_insumos_display_row(row)
+        unit_cost = display_row.get("display_unit_cost")
+        ws_explosion.append(
+            [
+                int(row.get("level") or 0),
+                row.get("path") or "",
+                row.get("product_name") or "",
+                row.get("recipe_name") or "",
+                row.get("article_class_label") or "",
+                row.get("codigo_point") or "",
+                row.get("insumo_nombre") or "",
+                float(display_row.get("display_required_qty") or 0),
+                display_row.get("display_unidad_codigo") or row.get("unidad_codigo") or "",
+                float(unit_cost or 0),
+                float(row.get("estimated_spend") or 0),
+                row.get("cost_source") or "",
+                row.get("rollup_kind") or "",
+            ]
+        )
+    _style_calculo_insumos_sheet(ws_explosion)
+
+    ws_obs = wb.create_sheet("Observaciones")
+    ws_obs.append(["Tipo", "Código", "Producto", "Receta", "Insumo", "Detalle"])
+    for row in payload.get("unresolved_rows") or []:
+        ws_obs.append(["PRODUCTO_NO_RESUELTO", row.get("codigo_point") or "", row.get("producto") or "", "", "", row.get("motivo") or ""])
+    for row in payload.get("skipped_rows") or []:
+        ws_obs.append(["RENGLON_OMITIDO", row.get("codigo_point") or "", row.get("producto") or "", "", "", row.get("motivo") or ""])
+    for row in (supply or {}).get("issues") or []:
+        ws_obs.append(
+            [
+                row.get("code") or "",
+                row.get("severity") or "",
+                row.get("product_name") or "",
+                row.get("recipe_name") or "",
+                row.get("insumo_nombre") or "",
+                row.get("detail") or "",
+            ]
+        )
+    _style_calculo_insumos_sheet(ws_obs)
+
+    ws_rules = wb.create_sheet("Reglas calculo")
+    _append_calculo_insumos_rules(ws_rules)
+
+    _apply_calculo_number_formats(wb)
+    return wb
+
+
+@login_required
+@permission_required("recetas.view_planproduccion", raise_exception=True)
+def calculo_insumos_plantilla(request: HttpRequest) -> HttpResponse:
+    export_format = (request.GET.get("format") or "xlsx").strip().lower()
+    headers = ["codigo_point", "producto", "presentacion", "cantidad", "notas"]
+    sample_rows = [
+        ["CODIGO_POINT", "Empanada de Manzana", "", "80", "Reemplaza CODIGO_POINT por el código real de Point"],
+        ["CODIGO_POINT", "Sabor Pay Fresa", "Mediano", "475", "Usa código Point para evitar nombres ambiguos"],
+    ]
+    if export_format == "csv":
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = 'attachment; filename="plantilla_calculo_insumos.csv"'
+        writer = csv.writer(response)
+        writer.writerow(headers)
+        writer.writerows(sample_rows)
+        return response
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Plantilla carga"
+    ws.append(headers)
+    for row in sample_rows:
+        ws.append(row)
+    _style_calculo_insumos_sheet(ws)
+    ws_rules = wb.create_sheet("Reglas calculo")
+    _append_calculo_insumos_rules(ws_rules)
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = 'attachment; filename="plantilla_calculo_insumos.xlsx"'
+    return response
+
+
+@login_required
+@permission_required("recetas.change_planproduccion", raise_exception=True)
+@require_POST
+def calculo_insumos_guardar(request: HttpRequest) -> HttpResponse:
+    next_url = _calculo_insumos_redirect_url(request)
+    plan_id = _calculo_insumos_plan_id_from_request(request)
+    receta = Receta.objects.filter(pk=request.POST.get("receta_id"), tipo=Receta.TIPO_PRODUCTO_FINAL).first()
+    cantidad = _to_decimal_calculo_insumos(request.POST.get("cantidad"))
+    if receta is None:
+        messages.error(request, "Selecciona una receta de producto final válida para calcular insumos.")
+        return redirect(next_url)
+    if cantidad <= 0:
+        messages.error(request, "La cantidad a producir debe ser mayor a 0.")
+        return redirect(next_url)
+
+    draft = _calculo_insumos_draft_payload(request, plan_id=plan_id)
+    rows = list(draft.get("source_rows") or [])
+    rows.append(
+        {
+            "receta_id": str(receta.id),
+            "codigo_point": receta.codigo_point or "",
+            "producto": receta.nombre,
+            "presentacion": "",
+            "cantidad": str(cantidad),
+            "notas": (request.POST.get("notas") or "").strip(),
+        }
+    )
+    _save_calculo_insumos_draft(request, rows, plan_id=plan_id)
+    messages.success(request, f"Producto agregado a la lista manual. Hay {len(rows)} renglones por calcular.")
+    return redirect(next_url)
+
+
+@login_required
+@permission_required("recetas.change_planproduccion", raise_exception=True)
+@require_POST
+def calculo_insumos_calcular(request: HttpRequest) -> HttpResponse:
+    next_url = _calculo_insumos_redirect_url(request)
+    plan_id = _calculo_insumos_plan_id_from_request(request)
+    draft = _calculo_insumos_draft_payload(request, plan_id=plan_id)
+    rows = list(draft.get("source_rows") or [])
+    if not rows:
+        existing = _calculo_insumos_plan_scoped_payload(
+            request.session.get(CALCULO_INSUMOS_SESSION_KEY),
+            plan_id,
+        )
+        rows = list((existing or {}).get("source_rows") or [])
+    if not rows:
+        messages.warning(request, "Agrega productos a la lista manual antes de calcular insumos.")
+        return redirect(next_url)
+
+    preview = _build_calculo_insumos_preview(rows, "Captura manual", plan_id=plan_id)
+    request.session[CALCULO_INSUMOS_SESSION_KEY] = preview
+    _save_calculo_insumos_draft(request, preview.get("source_rows") or rows, plan_id=plan_id)
+    messages.success(request, f"BOM generado con {len(preview.get('rows') or [])} productos resueltos.")
+    if preview.get("unresolved_rows"):
+        messages.warning(request, f"{len(preview['unresolved_rows'])} renglones no encontraron receta equivalente.")
+    if preview.get("skipped_rows"):
+        messages.warning(request, f"{len(preview['skipped_rows'])} renglones fueron omitidos por cantidad inválida.")
+    return redirect(next_url)
+
+
+@login_required
+@permission_required("recetas.change_planproduccion", raise_exception=True)
+@require_POST
+def calculo_insumos_importar(request: HttpRequest) -> HttpResponse:
+    next_url = _calculo_insumos_redirect_url(request)
+    plan_id = _calculo_insumos_plan_id_from_request(request)
+    uploaded = request.FILES.get("archivo")
+    if not uploaded:
+        messages.error(request, "Selecciona un archivo CSV o XLSX para calcular insumos.")
+        return redirect(next_url)
+
+    try:
+        rows = _load_calculo_insumos_rows(uploaded)
+    except Exception as exc:
+        messages.error(request, f"No se pudo leer el archivo: {exc}")
+        return redirect(next_url)
+    if not rows:
+        messages.warning(request, "Archivo sin filas para calcular insumos.")
+        return redirect(next_url)
+
+    modo = (request.POST.get("modo") or "replace").strip().lower()
+    if modo == "accumulate":
+        existing = _calculo_insumos_plan_scoped_payload(
+            request.session.get(CALCULO_INSUMOS_SESSION_KEY),
+            plan_id,
+        ) or {}
+        existing_plan_id = _to_int_safe(existing.get("plan_id"), default=0) or None
+        draft = _calculo_insumos_draft_payload(request, plan_id=plan_id)
+        existing_rows = existing.get("source_rows") or draft.get("source_rows") or []
+        if existing_plan_id and plan_id and existing_plan_id != plan_id:
+            existing_rows = []
+        rows = list(existing_rows) + rows
+    preview = _build_calculo_insumos_preview(rows, uploaded.name or "Archivo de producción", plan_id=plan_id)
+    request.session[CALCULO_INSUMOS_SESSION_KEY] = preview
+    request.session.pop(CALCULO_INSUMOS_DRAFT_SESSION_KEY, None)
+    request.session.modified = True
+    messages.success(request, f"Cálculo generado: {len(preview.get('rows') or [])} productos resueltos.")
+    if preview.get("unresolved_rows"):
+        messages.warning(request, f"{len(preview['unresolved_rows'])} renglones no encontraron receta equivalente.")
+    if preview.get("skipped_rows"):
+        messages.warning(request, f"{len(preview['skipped_rows'])} renglones fueron omitidos por cantidad inválida.")
+    return redirect(next_url)
+
+
+@login_required
+@permission_required("recetas.change_planproduccion", raise_exception=True)
+@require_POST
+def calculo_insumos_desde_proyeccion(request: HttpRequest) -> HttpResponse:
+    next_url = _calculo_insumos_redirect_url(request)
+    plan_id = _calculo_insumos_plan_id_from_request(request)
+    payload = request.session.get("pronostico_estadistico_preview")
+    if not payload:
+        messages.warning(request, "No hay proyección activa para traer al cálculo de insumos.")
+        return redirect(next_url)
+
+    escenario = (request.POST.get("escenario") or payload.get("escenario") or "base").strip().lower()
+    if escenario not in {"base", "bajo", "alto"}:
+        escenario = "base"
+    rows = _calculo_insumos_rows_from_forecast_preview(payload, escenario)
+    if not rows:
+        messages.warning(request, "La proyección activa no tiene productos con cantidad mayor a cero.")
+        return redirect(next_url)
+
+    source_label = f"Proyección {escenario.upper()} · {payload.get('target_label') or payload.get('periodo') or 'sin rango'}"
+    preview = _build_calculo_insumos_preview(rows, source_label, plan_id=plan_id)
+    request.session[CALCULO_INSUMOS_SESSION_KEY] = preview
+    request.session.pop(CALCULO_INSUMOS_DRAFT_SESSION_KEY, None)
+    request.session.modified = True
+    messages.success(request, f"Proyección cargada al cálculo de insumos: {len(preview.get('rows') or [])} productos resueltos.")
+    if preview.get("unresolved_rows"):
+        messages.warning(request, f"{len(preview['unresolved_rows'])} productos de la proyección requieren revisión de código Point/receta.")
+    if preview.get("skipped_rows"):
+        messages.warning(request, f"{len(preview['skipped_rows'])} renglones de la proyección fueron omitidos por cantidad inválida.")
+    return redirect(next_url)
+
+
+@login_required
+@permission_required("recetas.change_planproduccion", raise_exception=True)
+@require_POST
+def calculo_insumos_limpiar(request: HttpRequest) -> HttpResponse:
+    request.session.pop(CALCULO_INSUMOS_SESSION_KEY, None)
+    request.session.pop(CALCULO_INSUMOS_DRAFT_SESSION_KEY, None)
+    request.session.modified = True
+    messages.success(request, "Cálculo de insumos limpiado.")
+    return redirect(_calculo_insumos_redirect_url(request))
+
+
+@login_required
+@permission_required("recetas.view_planproduccion", raise_exception=True)
+def calculo_insumos_export(request: HttpRequest) -> HttpResponse:
+    payload = request.session.get(CALCULO_INSUMOS_SESSION_KEY)
+    if not payload:
+        messages.warning(request, "No hay cálculo de insumos activo para exportar.")
+        return redirect(_calculo_insumos_redirect_url(request))
+    plan_id = _calculo_insumos_plan_id_from_request(request)
+    payload_plan_id = _to_int_safe(payload.get("plan_id"), default=0) or None
+    if plan_id and payload_plan_id and payload_plan_id != plan_id:
+        messages.error(request, "El cálculo activo pertenece a otro plan. Limpia o recalcula antes de exportar.")
+        return redirect(_calculo_insumos_redirect_url(request))
+    supply = None
+    if payload.get("rows"):
+        supply = build_projection_supply_context_from_forecast_preview(payload, escenario="base")
+        _decorate_supply_context_for_display(supply)
+    blockers = _calculo_insumos_blocking_observations(payload, supply)
+    if blockers:
+        messages.error(request, "Corrige productos no resueltos, renglones omitidos o errores críticos antes de exportar el XLSX de compra.")
+        return redirect(_calculo_insumos_redirect_url(request))
+    wb = _build_calculo_insumos_workbook(payload, supply)
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    today = timezone.localdate().strftime("%Y%m%d")
+    response["Content-Disposition"] = f'attachment; filename="calculo_insumos_{today}.xlsx"'
+    return response
+
+
 @login_required
 @permission_required("recetas.view_planproduccion", raise_exception=True)
 def forecast_vs_solicitud_export(request: HttpRequest) -> HttpResponse:
@@ -16995,7 +18476,7 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
     if estado_plan not in estado_plan_map:
         estado_plan = "all"
     active_section = (request.GET.get("seccion") or "operacion").strip().lower()
-    valid_sections = {"operacion", "demanda", "mrp", "dg", "diagnostico", "todo"}
+    valid_sections = {"operacion", "demanda", "calculo_insumos", "mrp", "dg", "diagnostico", "todo"}
     if active_section not in valid_sections:
         active_section = "operacion"
     load_all_sections = active_section == "todo"
@@ -17007,6 +18488,8 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
         request.GET.get(key)
         for key in ("mrp_periodo", "mrp_periodo_tipo", "mrp_focus_kind", "mrp_focus_key")
     )
+    load_calculo_insumos_workspace = load_all_sections or active_section == "calculo_insumos"
+    show_plan_workspace = active_section != "calculo_insumos"
     load_dg_dashboard = load_all_sections or active_section == "dg" or any(
         request.GET.get(key)
         for key in ("dg_start_date", "dg_end_date", "dg_group_by")
@@ -17073,7 +18556,7 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
     elif planes.exists():
         plan_actual = planes.first()
 
-    recetas_disponibles = Receta.objects.order_by("tipo", "nombre")
+    recetas_disponibles = Receta.objects.filter(tipo=Receta.TIPO_PRODUCTO_FINAL).order_by("nombre")
     plan_items = (
         list(plan_actual.items.select_related("receta").order_by("receta__nombre", "id"))
         if plan_actual
@@ -17192,6 +18675,11 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
         except (OperationalError, ProgrammingError):
             forecast_supply_context = None
     forecast_preview_summary = _forecast_preview_operational_summary(forecast_preview)
+    calculo_insumos_context = (
+        _calculo_insumos_context_from_session(request, plan_id=plan_actual.id if plan_actual else None)
+        if load_calculo_insumos_workspace
+        else None
+    )
     demand_gate_summary = _commercial_signal_gate(
         forecast_preview_summary,
         context_label="el plan de producción",
@@ -17346,8 +18834,10 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
             "active_section": active_section,
             "load_demand_workspace": load_demand_workspace,
             "load_mrp_workspace": load_mrp_workspace,
+            "load_calculo_insumos_workspace": load_calculo_insumos_workspace,
             "load_dg_dashboard": load_dg_dashboard,
             "load_plan_diagnostics": load_plan_diagnostics,
+            "show_plan_workspace": show_plan_workspace,
             "planes": planes[:30],
             "plan_status_dashboard": plan_status_dashboard,
             "plan_status_cards": plan_status_cards,
@@ -17384,6 +18874,8 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
             "forecast_vs_solicitud": forecast_vs_solicitud,
             "forecast_preview_summary": forecast_preview_summary,
             "forecast_vs_solicitud_summary": _forecast_vs_solicitud_operational_summary(forecast_vs_solicitud),
+            "calculo_insumos_context": calculo_insumos_context,
+            "calculo_insumos_rules": _calculo_insumos_rules(),
             "demand_gate_summary": demand_gate_summary,
             "master_demand_gate_summary": master_demand_gate_summary,
             "critical_master_demand_rows": critical_master_demand_rows,

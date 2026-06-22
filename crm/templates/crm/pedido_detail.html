@@ -5,14 +5,7 @@
 {% block page_title %}CRM · {{ pedido.folio }}{% endblock %}
 
 {% block extra_css %}
-<style>
-  .ops-shell { display:grid; gap:18px; }
-  .ops-grid-2 { display:grid; gap:18px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .ops-summary { display:grid; gap:12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .ops-summary-card { border:1px solid var(--rosa-deep); border-radius:14px; background:#fff; padding:14px 16px; }
-  .ops-summary-card strong { display:block; font-size:28px; color:var(--vino); line-height:1; margin-bottom:8px; }
-  @media (max-width: 960px) { .ops-grid-2, .ops-summary { grid-template-columns: 1fr; } }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/crm-templates-crm-pedido-detail.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
@@ -26,12 +19,12 @@
   <section class="card">
     <div class="card-header">Ficha del pedido</div>
     <div class="ops-summary">
-      <article class="ops-summary-card"><span class="muted">Cliente</span><strong style="font-size:22px;">{{ pedido.cliente.nombre }}</strong><div>{{ pedido.folio }}</div></article>
-      <article class="ops-summary-card"><span class="muted">Estatus</span><strong style="font-size:22px;">{{ pedido.get_estatus_display }}</strong><div>{{ pedido.get_prioridad_display }} · {{ pedido.get_canal_display }}</div></article>
-      <article class="ops-summary-card"><span class="muted">Compromiso</span><strong style="font-size:22px;">{{ pedido.fecha_compromiso|date:"Y-m-d"|default:"-" }}</strong><div>{{ pedido.sucursal|default:"Sin sucursal" }}</div></article>
+      <article class="ops-summary-card"><span class="muted">Cliente</span><strong class="pd-u-b5d84becca">{{ pedido.cliente.nombre }}</strong><div>{{ pedido.folio }}</div></article>
+      <article class="ops-summary-card"><span class="muted">Estatus</span><strong class="pd-u-b5d84becca">{{ pedido.get_estatus_display }}</strong><div>{{ pedido.get_prioridad_display }} · {{ pedido.get_canal_display }}</div></article>
+      <article class="ops-summary-card"><span class="muted">Compromiso</span><strong class="pd-u-b5d84becca">{{ pedido.fecha_compromiso|date:"Y-m-d"|default:"-" }}</strong><div>{{ pedido.sucursal|default:"Sin sucursal" }}</div></article>
       <article class="ops-summary-card"><span class="muted">Monto estimado</span><strong>${{ pedido.monto_estimado|floatformat:2|intcomma }}</strong><div>{{ seguimientos|length }} eventos en bitácora</div></article>
     </div>
-    <div class="table-responsive" style="margin-top:14px;">
+    <div class="table-responsive pd-u-88b9d5c614">
       <table class="table table-striped">
         <tbody>
           <tr><th>Descripción</th><td>{{ pedido.descripcion }}</td><th>Cliente</th><td>{{ pedido.cliente.nombre }}</td></tr>
@@ -46,7 +39,7 @@
     <article class="card">
       <div class="card-header">Registrar seguimiento</div>
       {% if can_manage_crm %}
-      <form method="post" class="filters" style="margin-bottom:0;">
+      <form method="post" class="filters pd-u-76084ee4e5">
         {% csrf_token %}
         <select class="input-field" name="estatus_nuevo">
           <option value="">Sin cambio de estatus</option>

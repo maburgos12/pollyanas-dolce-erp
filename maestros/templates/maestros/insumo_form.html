@@ -53,9 +53,9 @@
           <strong>{{ usage_profile.inventory_refs }}</strong>
         </article>
         {% if next_action_recommendation %}
-        <article class="bi-status-card" style="grid-column:span 2;">
+        <article class="bi-status-card pd-u-36adee321a">
           <span class="bi-status-label">Siguiente paso</span>
-          <div style="font-weight:700;margin:4px 0;">{{ next_action_recommendation.title }}</div>
+          <div class="pd-u-cb88cbc63b">{{ next_action_recommendation.title }}</div>
           <a class="btn btn-secondary btn-sm" href="{{ next_action_recommendation.action_url }}">{{ next_action_recommendation.action_label }}</a>
         </article>
         {% endif %}
@@ -67,7 +67,7 @@
   <section class="card">
     {% if not object %}
     <div class="mb-3">
-      <div class="recipes-filters" style="flex-wrap:wrap;">
+      <div class="recipes-filters pd-u-9deb4d0bcc">
         {% for item in item_type_cards %}
         <a class="btn {% if selected_type_card.code == item.code %}btn-primary{% else %}btn-secondary{% endif %}"
            href="{% url 'maestros:insumo_create' %}?tipo_item={{ item.code }}">{{ item.title }}</a>
@@ -150,17 +150,17 @@
       <article class="kpi-card">
         <div class="kpi-number {% if commercial_signal.tone == 'danger' %}is-danger{% elif commercial_signal.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ commercial_signal.status }}</div>
         <div class="kpi-label">Señal</div>
-        <div class="muted" style="margin-top:6px;">{{ commercial_signal.detail }}</div>
+        <div class="muted pd-u-2fd7789b39">{{ commercial_signal.detail }}</div>
       </article>
       <article class="kpi-card">
         <div class="kpi-number">{{ commercial_signal.days_count }}</div>
         <div class="kpi-label">Días observados</div>
-        <div class="muted" style="margin-top:6px;">{{ commercial_signal.branch_count }} sucursales</div>
+        <div class="muted pd-u-2fd7789b39">{{ commercial_signal.branch_count }} sucursales</div>
       </article>
       <article class="kpi-card">
         <div class="kpi-number">{{ commercial_signal.total_units|floatformat:0|intcomma }}</div>
         <div class="kpi-label">Unidades recientes</div>
-        <div class="muted" style="margin-top:6px;">{{ commercial_signal.recipe_count }} productos finales</div>
+        <div class="muted pd-u-2fd7789b39">{{ commercial_signal.recipe_count }} productos finales</div>
       </article>
       <article class="kpi-card">
         <div class="kpi-number">{{ commercial_signal.avg_daily|floatformat:1 }}</div>

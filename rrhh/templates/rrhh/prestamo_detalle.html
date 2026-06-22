@@ -4,15 +4,7 @@
 {% block page_title %}{{ prestamo.folio }} · {{ prestamo.empleado.nombre }}{% endblock %}
 
 {% block extra_css %}
-<style>
-  .loan-head { display: grid; grid-template-columns: 1.3fr .7fr; gap: 14px; }
-  .loan-progress { height: 12px; background: #f3e9ee; border-radius: 999px; overflow: hidden; }
-  .loan-progress span { display: block; height: 100%; background: var(--vino); }
-  .badge { border-radius: 999px; background: #f7edf2; color: var(--vino); font-weight: 800; padding: 5px 10px; }
-  .quota-table { width: 100%; border-collapse: collapse; }
-  .quota-table th, .quota-table td { border-bottom: 1px solid var(--rosa); padding: 9px; text-align: left; }
-  @media (max-width: 900px) { .loan-head { grid-template-columns: 1fr; } }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-prestamo-detalle.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
@@ -34,7 +26,7 @@
     <p>{{ prestamo.concepto }}</p>
     <p><strong>Importe:</strong> ${{ prestamo.importe }} · <strong>Saldo:</strong> ${{ prestamo.saldo_actual }}</p>
     <p><strong>Jefe directo:</strong> {% if prestamo.jefe_directo %}{{ prestamo.jefe_directo.get_full_name|default:prestamo.jefe_directo.username }}{% else %}Sin asignar{% endif %}</p>
-    <div class="loan-progress"><span style="width: {{ progreso }}%;"></span></div>
+    <div class="loan-progress"><span class="pd-js-width" data-pd-width="{{ progreso }}%"></span></div>
   </section>
   <section class="card">
     <p><span class="badge">Jefe: {% if prestamo.firma_jefe %}Firmado{% else %}Pendiente{% endif %}</span></p>
@@ -50,7 +42,7 @@
   </section>
 </div>
 
-<section class="card" style="margin-top:16px;">
+<section class="card pd-u-8a359a76eb">
   <h2>Cuotas</h2>
   <table class="quota-table">
     <thead><tr><th>Q</th><th>Fecha</th><th>Esperado</th><th>Cobrado</th><th>Estado</th><th>Cobro rápido</th></tr></thead>
@@ -63,10 +55,10 @@
           <td>{% if cuota.monto_cobrado %}${{ cuota.monto_cobrado }}{% else %}-{% endif %}</td>
           <td>{{ cuota.get_estado_display }}</td>
           <td>
-            <form method="post" action="{% url 'rrhh:rrhh_prestamo_cobro' cuota.pk %}" style="display:flex;gap:6px;align-items:center;">
+            <form method="post" action="{% url 'rrhh:rrhh_prestamo_cobro' cuota.pk %}" class="pd-u-d3ecd376d1">
               {% csrf_token %}
-              <input type="number" name="monto_cobrado" step="0.01" min="0" value="{{ cuota.monto_esperado }}" style="max-width:120px;">
-              <input type="text" name="nota" placeholder="Nota" style="max-width:160px;">
+              <input type="number" name="monto_cobrado" step="0.01" min="0" value="{{ cuota.monto_esperado }}" class="pd-u-a392c5cb16">
+              <input type="text" name="nota" placeholder="Nota" class="pd-u-f836a58a67">
               <button class="btn btn-secondary btn-sm" type="submit">Aplicar</button>
             </form>
           </td>

@@ -295,6 +295,7 @@ class BIForceRefreshEndpointTests(TestCase):
 class VentasRefreshUiTests(TestCase):
     def setUp(self):
         cache.delete("reportes:bi-force-refresh-lock")
+        AuditLog.objects.filter(model="reportes.AnalyticRefreshWindow").delete()
 
     def test_ventas_view_shows_refresh_button_and_scheduler_for_management_role(self):
         from django_celery_beat.models import PeriodicTask
@@ -366,9 +367,15 @@ class VentasRefreshUiTests(TestCase):
             payload={"reference_date": "2026-04-06", "lookback_days": 7},
         )
         cache.set("reportes:bi-force-refresh-lock", "2026-04-06", 60)
-        mocked_localtime = datetime(2026, 4, 7, 22, 8, tzinfo=timezone.get_current_timezone())
+        expected_meta = {
+            "expected_cut_date": date(2026, 4, 6),
+            "schedule_hour": 3,
+            "schedule_minute": 35,
+            "timezone_label": "America/Mazatlan",
+            "schedule_time_label": "03:35",
+        }
 
-        with patch("reportes.views.timezone.localtime", return_value=mocked_localtime):
+        with patch("reportes.views._expected_sales_cut_date", return_value=expected_meta):
             status = _sales_refresh_status(visible_cut_date=date(2026, 4, 5))
 
         self.assertEqual(status["expected_cut_date_iso"], "2026-04-06")
@@ -376,6 +383,31 @@ class VentasRefreshUiTests(TestCase):
         self.assertEqual(status["cut_lag_days"], 1)
         self.assertTrue(status["is_cut_delayed"])
         self.assertEqual(status["last_status"], "PENDIENTE_REZAGO")
+
+    def test_sales_refresh_status_treats_current_visible_cut_as_ok_after_failed_job(self):
+        user = User.objects.create_user(username="dg_ventas_current", password="secret")
+        call_command("setup_celery_schedules")
+        AuditLog.objects.create(
+            user=user,
+            action="INTEGRATIONS_OPERATIONAL_REFRESH_FAILED",
+            model="reportes.AnalyticRefreshWindow",
+            object_id="2026-04-06",
+            payload={"reference_date": "2026-04-06"},
+        )
+        expected_meta = {
+            "expected_cut_date": date(2026, 4, 6),
+            "schedule_hour": 3,
+            "schedule_minute": 35,
+            "timezone_label": "America/Mazatlan",
+            "schedule_time_label": "03:35",
+        }
+
+        with patch("reportes.views._expected_sales_cut_date", return_value=expected_meta):
+            status = _sales_refresh_status(visible_cut_date=date(2026, 4, 6))
+
+        self.assertEqual(status["expected_cut_date_iso"], "2026-04-06")
+        self.assertEqual(status["last_status"], "OK")
+        self.assertFalse(status["is_cut_delayed"])
 
 
 class SalesDashboardFreshnessTests(SimpleTestCase):
@@ -467,13 +499,18 @@ class AnalyticsDashboardCacheInvalidationTests(SimpleTestCase):
         cursor_cm = MagicMock()
         connection_mock.cursor.return_value = cursor_cm
         connection_mock.in_atomic_block = False
-        build_payload_mock.return_value = {"executive_panels": {"latest_cutoff_date": "2026-04-10"}}
+        events = []
+        bump_mock.side_effect = lambda: events.append("bump")
+        build_payload_mock.side_effect = lambda **_: events.append("build") or {
+            "executive_panels": {"latest_cutoff_date": "2026-04-10"}
+        }
 
         refresh_dashboard_full_materialized_view(months_windows=(6,), concurrently=False)
 
         build_payload_mock.assert_called_once_with(months_window=6)
         bulk_create_mock.assert_called_once()
-        bump_mock.assert_called_once_with()
+        self.assertEqual(events, ["bump", "build", "bump"])
+        self.assertEqual(bump_mock.call_count, 2)
         cursor_cm.__enter__.return_value.execute.assert_called_once_with(
             "REFRESH MATERIALIZED VIEW mv_dashboard_full"
         )

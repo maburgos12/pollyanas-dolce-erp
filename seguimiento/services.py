@@ -155,10 +155,14 @@ def usuarios_para_empleado(empleado):
     User = get_user_model()
     qs = User.objects.none()
     if empleado.email:
-        qs = qs | User.objects.filter(email__iexact=empleado.email)
+        qs = qs | User.objects.filter(email__iexact=empleado.email, is_active=True)
     nombre_norm = empleado.nombre_normalizado or normalizar_nombre(empleado.nombre or "")
     if nombre_norm:
-        matches = [user.pk for user in User.objects.all() if normalizar_nombre(user.get_full_name() or user.username) == nombre_norm]
+        matches = [
+            user.pk
+            for user in User.objects.filter(is_active=True)
+            if normalizar_nombre(user.get_full_name() or user.username) == nombre_norm
+        ]
         qs = qs | User.objects.filter(pk__in=matches)
     return qs.distinct()
 
@@ -310,6 +314,20 @@ def sub_checklist_de_paso(checklist_items_json: str | None, deliverable_text: st
     return items
 
 
+def _merge_sub_checklist(local_items, incoming_items):
+    if not local_items or not incoming_items:
+        return incoming_items or local_items or []
+    completed = {
+        normalizar_nombre(item.get("titulo") or "")
+        for item in local_items
+        if item.get("completado")
+    }
+    for item in incoming_items:
+        if normalizar_nombre(item.get("titulo") or "") in completed:
+            item["completado"] = True
+    return incoming_items
+
+
 class AgenteDGSeguimientoImporter:
     def _resolve_user(self, row):
         User = get_user_model()
@@ -372,11 +390,18 @@ class AgenteDGSeguimientoImporter:
             counters["skipped"] += 1
             return
 
+        item = SeguimientoItem.objects.filter(
+            metadata__source="agente_dg",
+            metadata__source_table=source_table,
+            metadata__source_id=row["id"],
+        ).first()
         user = self._resolve_user(row)
         empleado = empleado_de_usuario(user) if user else None
+        participants_supplied = participants is not None
         participant_users, participant_empleados, participant_payload = self._resolve_participants(participants or [])
         participant_users = [participant for participant in participant_users if not user or participant.pk != user.pk]
         participant_empleados = [participant for participant in participant_empleados if not empleado or participant.pk != empleado.pk]
+        previous_participants = (item.metadata or {}).get("source_participants", []) if item else []
         metadata = {
             "source": "agente_dg",
             "source_table": source_table,
@@ -388,7 +413,7 @@ class AgenteDGSeguimientoImporter:
             "source_archived_at": _json_datetime(row.get("archived_at")),
             "source_completed_at": _json_datetime(row.get("completed_at")),
             "synced_at": timezone.now().isoformat(),
-            "source_participants": participant_payload,
+            "source_participants": participant_payload if participants_supplied else previous_participants,
         }
         # Solo minutas y proyectos pasan por aprobación del DG. Los compromisos son
         # actividades de desempeño que el colaborador gestiona y cierra por su cuenta.
@@ -415,11 +440,6 @@ class AgenteDGSeguimientoImporter:
             "referencia_externa": f"{source_table}:{row['id']}",
             "metadata": metadata,
         }
-        item = SeguimientoItem.objects.filter(
-            metadata__source="agente_dg",
-            metadata__source_table=source_table,
-            metadata__source_id=row["id"],
-        ).first()
         if item:
             for key, value in defaults.items():
                 setattr(item, key, value)
@@ -441,8 +461,9 @@ class AgenteDGSeguimientoImporter:
             item.aprobado_at = None
             item.save(update_fields=["aprobado_at", "updated_at"])
 
-        item.participantes_user.set(participant_users)
-        item.participantes_empleado.set(participant_empleados)
+        if participants_supplied:
+            item.participantes_user.set(participant_users)
+            item.participantes_empleado.set(participant_empleados)
 
         if checklist is _PRESERVE_CHECKLIST:
             return
@@ -498,17 +519,28 @@ class AgenteDGSeguimientoImporter:
 
     def _sync_checklist(self, item: SeguimientoItem, checklist_payload):
         if not checklist_payload:
-            item.checklist.all().delete()
             return
-        existing = {check.orden: check for check in item.checklist.all()}
-        desired_orders = set()
+        existing_checks = list(item.checklist.all())
+        existing_by_order = {check.orden: check for check in existing_checks}
+        existing_by_step = {
+            check.origen_step_id: check
+            for check in existing_checks
+            if check.origen_step_id
+        }
+        desired_check_ids = set()
         for index, payload in enumerate(checklist_payload, start=1):
             titulo_completo = (payload.get("titulo") or "").strip()
             if not titulo_completo:
                 continue
             titulo = _truncate_for_charfield(titulo_completo, CHECKLIST_TITULO_MAX_LENGTH)
-            desired_orders.add(index)
-            check = existing.get(index)
+            origen_step_id = payload.get("origen_step_id")
+            check = existing_by_step.get(origen_step_id) if origen_step_id else None
+            if check and check.pk in desired_check_ids:
+                check = None
+            if not check:
+                check = existing_by_order.get(index)
+                if check and check.pk in desired_check_ids:
+                    check = None
             # Resolver el aprobador del ERP desde e-mail o nombre (datos del Agente DG)
             aprobador_user = self._resolver_aprobador_user(
                 payload.get("aprobador_email") or "",
@@ -531,6 +563,15 @@ class AgenteDGSeguimientoImporter:
                 "sub_checklist": sub_checklist_de_paso(payload.get("checklist_items_json"), payload.get("entregable")),
             }
             if check:
+                # ponytail: local true wins; Agente DG DB sync can lag after ERP write-back.
+                same_check = (
+                    (origen_step_id and check.origen_step_id == origen_step_id)
+                    or normalizar_nombre(check.titulo or "") == normalizar_nombre(titulo or "")
+                )
+                if same_check and check.completado and not defaults["completado"]:
+                    defaults["completado"] = True
+                defaults["sub_checklist"] = _merge_sub_checklist(check.sub_checklist, defaults["sub_checklist"])
+                check.orden = index
                 for key, value in defaults.items():
                     setattr(check, key, value)
                 if check.completado:
@@ -539,11 +580,13 @@ class AgenteDGSeguimientoImporter:
                     check.completado_por = None
                     check.completado_at = None
                 check.save()
+                desired_check_ids.add(check.pk)
             else:
                 if defaults["completado"]:
                     defaults["completado_at"] = agente_dg_as_datetime(payload.get("completado_at") or payload.get("completed_at")) or timezone.now()
-                SeguimientoChecklistItem.objects.create(seguimiento=item, orden=index, **defaults)
-        item.checklist.exclude(orden__in=desired_orders).delete()
+                check = SeguimientoChecklistItem.objects.create(seguimiento=item, orden=index, **defaults)
+                desired_check_ids.add(check.pk)
+        item.checklist.exclude(pk__in=desired_check_ids).delete()
 
 
 def upsert_agente_dg_payload(payload: dict) -> dict[str, int]:

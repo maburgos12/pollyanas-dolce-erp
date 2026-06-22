@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Logística · Editar punto{% endblock %}
+{% block page_title %}Logística · Editar punto{% endblock %}
+
+{% block extra_css %}
+<style>
+  .point-edit-shell { display:grid; gap:18px; max-width:920px; }
+  .point-edit-shell .module-tabs { display:flex; flex-wrap:wrap; gap:8px; overflow-x:auto; }
+  .point-form-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
+  .point-field { display:grid; gap:6px; }
+  .point-field label { font-weight:800; color:var(--vino); }
+  .point-error { color:#bc3b3b; font-weight:700; font-size:13px; }
+  .point-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:14px; }
+  @media (max-width:760px) {
+    .point-form-grid { grid-template-columns:1fr; }
+  }
+</style>
+<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260621-button-gap-v1">
+{% endblock %}
+
+{% block content %}
+<div class="point-edit-shell">
+  <section class="module-tabs report-tabs" aria-label="Submódulos Logística">
+    {% for tab in module_tabs %}
+      <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+    {% endfor %}
+  </section>
+
+  <section class="card">
+    <div class="card-header">Editar punto logístico</div>
+    <p class="muted">Ajusta coordenadas, radio y vínculo con sucursal antes de usar este punto en rutas.</p>
+    {% if rutas_abiertas_count %}
+    <div class="route-status-note" style="padding:10px 12px; border-radius:8px; background:#fff7e6; border:1px solid #ffd58a; color:#5d3b00; font-weight:700; margin-bottom:14px;">
+      Este punto está en {{ rutas_abiertas_count }} ruta{{ rutas_abiertas_count|pluralize }} planeada{{ rutas_abiertas_count|pluralize }} o en ruta. Las paradas ya creadas conservan su geocerca; los cambios aplican a nuevas paradas.
+    </div>
+    {% endif %}
+    <form method="post" novalidate onsubmit="return confirmPointActiveChange(this);" data-current-active="{% if punto.activo %}1{% else %}0{% endif %}">
+      {% csrf_token %}
+      {% if errors.punto_cercano %}
+      <div class="point-error" style="margin-bottom:12px;">
+        {{ errors.punto_cercano }}
+        {% if errors.punto_cercano_url %}<a class="btn btn-secondary btn-small" href="{{ errors.punto_cercano_url }}" style="margin-left:8px;">Editar punto existente</a>{% endif %}
+      </div>
+      {% endif %}
+      <div class="point-form-grid">
+        <div class="point-field">
+          <label for="id_nombre">Nombre</label>
+          <input class="input-field" id="id_nombre" name="nombre" type="text" value="{{ punto.nombre }}" required>
+          {% if errors.nombre %}<div class="point-error">{{ errors.nombre }}</div>{% endif %}
+        </div>
+        <div class="point-field">
+          <label for="id_tipo">Tipo</label>
+          <select class="input-field" id="id_tipo" name="tipo">
+            {% for value,label in tipo_choices %}
+            <option value="{{ value }}" {% if punto.tipo == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          {% if errors.tipo %}<div class="point-error">{{ errors.tipo }}</div>{% endif %}
+        </div>
+        <div class="point-field">
+          <label for="id_sucursal">Sucursal vinculada</label>
+          <select class="input-field" id="id_sucursal" name="sucursal">
+            <option value="">Sin vincular</option>
+            {% for sucursal in sucursales %}
+            <option value="{{ sucursal.id }}" {% if punto.sucursal_id == sucursal.id %}selected{% endif %}>{{ sucursal }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="point-field">
+          <label for="id_radio">Radio geocerca metros</label>
+          <input class="input-field" id="id_radio" name="radio_geocerca_metros" type="number" min="20" max="1000" value="{{ punto.radio_geocerca_metros }}">
+          {% if errors.radio_geocerca_metros %}<div class="point-error">{{ errors.radio_geocerca_metros }}</div>{% endif %}
+        </div>
+        <div class="point-field">
+          <label for="id_latitud">Latitud</label>
+          <input class="input-field" id="id_latitud" name="latitud" type="number" step="0.000001" value="{{ punto.latitud }}" required>
+          {% if errors.latitud %}<div class="point-error">{{ errors.latitud }}</div>{% endif %}
+        </div>
+        <div class="point-field">
+          <label for="id_longitud">Longitud</label>
+          <input class="input-field" id="id_longitud" name="longitud" type="number" step="0.000001" value="{{ punto.longitud }}" required>
+          {% if errors.longitud %}<div class="point-error">{{ errors.longitud }}</div>{% endif %}
+        </div>
+      </div>
+      <div class="point-field" style="margin-top:12px;">
+        <label for="id_notas">Notas</label>
+        <textarea class="input-field" id="id_notas" name="notas" rows="3">{{ punto.notas }}</textarea>
+      </div>
+      <label style="display:inline-flex; gap:8px; align-items:center; margin-top:12px; font-weight:800; color:var(--vino);">
+        <input type="checkbox" name="activo" {% if punto.activo %}checked{% endif %}>
+        Punto activo
+      </label>
+      {% if errors.activo %}<div class="point-error">{{ errors.activo }}</div>{% endif %}
+      <div class="point-actions">
+        <button class="btn btn-primary" type="submit">Guardar cambios</button>
+        <a class="btn btn-secondary" href="{% url 'logistica:puntos_logisticos' %}">Cancelar</a>
+      </div>
+    </form>
+  </section>
+</div>
+<script>
+  function confirmPointActiveChange(form) {
+    const wasActive = form.dataset.currentActive === "1";
+    const checkbox = form.querySelector("input[name='activo']");
+    if (wasActive && checkbox && !checkbox.checked) {
+      return window.confirm("Confirma que deseas desactivar este punto logístico. Las rutas ya planeadas conservarán su geocerca histórica.");
+    }
+    return true;
+  }
+</script>
+{% endblock %}

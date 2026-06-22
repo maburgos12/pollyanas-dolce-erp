@@ -25,7 +25,7 @@
 
   <section class="card">
     <form method="get" class="recipes-filters mb-2">
-      <input name="ajuste_id" type="text" class="form-control" value="{{ selected_ajuste_id }}" placeholder="ID ajuste (ej. 154)" style="max-width:140px;">
+      <input name="ajuste_id" type="text" class="form-control pd-u-68c83ff711" value="{{ selected_ajuste_id }}" placeholder="ID ajuste (ej. 154)">
       <select name="estatus" class="form-select">
         <option value="all" {% if selected_status == 'ALL' %}selected{% endif %}>Todos los estatus</option>
         {% for value, label in status_choices %}
@@ -76,7 +76,7 @@
     {% if selected_master_focus_key %}
     <div class="alert alert-info mb-3">
       <strong>Vista enfocada:</strong> estás revisando el subconjunto del maestro bloqueado para esta pantalla.
-      <a class="btn btn-secondary btn-sm" href="{% url 'inventario:ajustes' %}" style="margin-left:8px;">Quitar foco</a>
+      <a class="btn btn-secondary btn-sm pd-u-6170d94c81" href="{% url 'inventario:ajustes' %}">Quitar foco</a>
     </div>
     {% endif %}
     {% if can_manage_inventario %}
@@ -158,10 +158,10 @@
             <td>
               {{ a.insumo.display_name }}
               {% if a.enterprise_missing %}
-              <div class="muted" style="margin-top:6px;">Maestro: {{ a.enterprise_missing|join:", " }}</div>
+              <div class="muted pd-u-2fd7789b39">Maestro: {{ a.enterprise_missing|join:", " }}</div>
               {% endif %}
               {% if a.canonical_pending %}
-              <div class="muted" style="margin-top:6px;">Referencia maestra: {{ a.canonical_pending_label }}</div>
+              <div class="muted pd-u-2fd7789b39">Referencia maestra: {{ a.canonical_pending_label }}</div>
               {% endif %}
             </td>
             <td><span class="badge bg-primary">{{ a.enterprise_usage_label }}</span></td>

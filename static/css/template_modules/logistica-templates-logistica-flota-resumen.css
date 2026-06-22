@@ -1,0 +1,17 @@
+/* Extracted from logistica/templates/logistica/flota_resumen.html */
+.fleet-shell { display: grid; gap: 18px; }
+  .fleet-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .fleet-card { background: #fff; border: 1px solid #efc7d8; border-radius: 16px; padding: 16px; box-shadow: 0 12px 28px rgba(139,34,82,.07); }
+  .fleet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  .fleet-head h2 { margin: 0; color: #8B2252; font-family: "Playfair Display", serif; }
+  .fleet-head p { margin: 3px 0 0; color: #77656d; }
+  .fleet-badge { display: inline-flex; border-radius: 999px; padding: 5px 10px; font-size: 12px; font-weight: 900; white-space:normal; }
+  .fleet-badge.ok { background: #e5f5ee; color: #1f7554; }
+  .fleet-badge.warn { background: #fff4d8; color: #9a6a00; }
+  .fleet-badge.danger { background: #ffe8ec; color: #bc3b56; }
+  .fleet-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .fleet-detail { border: 1px solid #f2d4e1; border-radius: 12px; padding: 12px; background: #fffafc; }
+  .fleet-detail strong { display: block; color: #3a2b30; margin-bottom: 6px; }
+  .fleet-muted { color: #77656d; font-size: 13px; line-height: 1.45; }
+  @media (max-width: 980px) { .fleet-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 620px) { .fleet-detail-grid { grid-template-columns: 1fr; } .fleet-head { flex-direction: column; } }

@@ -33,10 +33,12 @@ from .models import (
     EmpleadoIdentidadPendiente,
     HoraExtra,
     ImportacionChecador,
+    IncapacidadEmpleado,
     NominaConceptoLinea,
     NominaImportacion,
     NominaLinea,
     NominaPeriodo,
+    MovimientoVacaciones,
     PermisoSalida,
     PlantillaAutorizada,
     Prestamo,
@@ -77,6 +79,7 @@ from .services_identidad import (
     asegurar_identidad_operativa_empleado,
     buscar_empleado_por_codigo,
     cerrar_identidad_por_codigo_existente,
+    desactivar_identidad_operativa_empleado,
     descartar_identidad_pendiente,
     normalizar_codigo_empleado,
     vincular_identidad_pendiente,
@@ -119,6 +122,24 @@ def _parse_date(raw: str | None):
         return dt_date.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _misma_fecha_en_anio(fecha: dt_date, anio: int) -> dt_date:
+    return dt_date(anio, fecha.month, min(fecha.day, monthrange(anio, fecha.month)[1]))
+
+
+def _ultimo_aniversario(fecha_ingreso: dt_date | None, al: dt_date) -> dt_date | None:
+    if not fecha_ingreso:
+        return None
+    aniversario = _misma_fecha_en_anio(fecha_ingreso, al.year)
+    return aniversario if aniversario <= al else _misma_fecha_en_anio(fecha_ingreso, al.year - 1)
+
+
+def _sumar_meses(fecha: dt_date, meses: int) -> dt_date:
+    month = fecha.month - 1 + meses
+    year = fecha.year + month // 12
+    month = month % 12 + 1
+    return dt_date(year, month, min(fecha.day, monthrange(year, month)[1]))
 
 
 def _codigo_empleado_desde_post(post_data) -> str:
@@ -412,6 +433,7 @@ RRHH_MODULE_TABS = [
     {"label": "Empleados", "url_name": "rrhh:empleados", "key": "empleados", "submodule": "empleados"},
     {"label": "Permisos", "url_name": "rrhh:rrhh_permisos_list", "key": "permisos", "submodule": "permisos"},
     {"label": "Suspensiones", "url_name": "rrhh:rrhh_suspensiones", "key": "suspensiones", "submodule": "permisos"},
+    {"label": "Incapacidades", "url_name": "rrhh:rrhh_incapacidades", "key": "incapacidades", "submodule": "nomina"},
     {"label": "Vacaciones", "url_name": "rrhh:rrhh_vacaciones_list", "key": "vacaciones", "submodule": "vacaciones"},
     {"label": "Horas extra", "url_name": "rrhh:rrhh_he_list", "key": "horas_extra", "submodule": "horas_extra"},
     {"label": "Asistencias", "url_name": "rrhh:rrhh_asistencias", "key": "asistencias", "submodule": "asistencias"},
@@ -420,6 +442,7 @@ RRHH_MODULE_TABS = [
     {"label": "Vacantes", "url_name": "rrhh:rrhh_vacantes", "key": "vacantes", "submodule": "vacantes"},
     {"label": "Préstamos", "url_name": "rrhh:rrhh_prestamos_lista", "key": "prestamos", "submodule": "prestamos"},
     {"label": "Nómina", "url_name": "rrhh:nomina", "key": "nomina", "submodule": "nomina"},
+    {"label": "Prenómina", "url_name": "rrhh:prenomina", "key": "prenomina", "submodule": "nomina"},
 ]
 
 
@@ -497,6 +520,8 @@ def _has_rrhh_task_access(user, tab_key: str) -> bool:
         return HoraExtra.objects.filter(jefe_directo=user).exists()
     if tab_key == "vacaciones":
         return SolicitudVacaciones.objects.filter(Q(jefe_directo=user) | Q(creado_por=user)).exists()
+    if tab_key == "incapacidades":
+        return IncapacidadEmpleado.objects.filter(registrada_por=user).exists()
     return False
 
 
@@ -1202,21 +1227,21 @@ def empleados(request):
                 empleado = Empleado.objects.filter(pk=int(empleado_id)).first()
             fecha_baja = _parse_date(request.POST.get("fecha_baja")) or timezone.localdate()
             fecha_ingreso = _parse_date(request.POST.get("fecha_ingreso"))
-            baja = EmpleadoBaja.objects.create(
-                empleado=empleado,
-                nombre=(request.POST.get("nombre_baja") or (empleado.nombre if empleado else "")).strip(),
-                area=_area_key(request.POST.get("area_baja") or (empleado.area if empleado else "")),
-                puesto=(request.POST.get("puesto_baja") or (empleado.puesto if empleado else "")).strip(),
-                tipo_contrato=(request.POST.get("tipo_contrato_baja") or (empleado.tipo_contrato if empleado else Empleado.CONTRATO_FIJO)).strip(),
-                fecha_ingreso=fecha_ingreso or (empleado.fecha_ingreso if empleado else fecha_baja),
-                fecha_baja=fecha_baja,
-                motivo=(request.POST.get("motivo") or EmpleadoBaja.MOTIVO_OTRO).strip(),
-                observacion=(request.POST.get("observacion") or "").strip(),
-                creado_por=request.user,
-            )
-            if empleado and request.POST.get("marcar_inactivo") == "on":
-                empleado.activo = False
-                empleado.save(update_fields=["activo", "updated_at"])
+            with transaction.atomic():
+                baja = EmpleadoBaja.objects.create(
+                    empleado=empleado,
+                    nombre=(request.POST.get("nombre_baja") or (empleado.nombre if empleado else "")).strip(),
+                    area=_area_key(request.POST.get("area_baja") or (empleado.area if empleado else "")),
+                    puesto=(request.POST.get("puesto_baja") or (empleado.puesto if empleado else "")).strip(),
+                    tipo_contrato=(request.POST.get("tipo_contrato_baja") or (empleado.tipo_contrato if empleado else Empleado.CONTRATO_FIJO)).strip(),
+                    fecha_ingreso=fecha_ingreso or (empleado.fecha_ingreso if empleado else fecha_baja),
+                    fecha_baja=fecha_baja,
+                    motivo=(request.POST.get("motivo") or EmpleadoBaja.MOTIVO_OTRO).strip(),
+                    observacion=(request.POST.get("observacion") or "").strip(),
+                    creado_por=request.user,
+                )
+                if empleado:
+                    desactivar_identidad_operativa_empleado(empleado)
             messages.success(request, f"Baja capturada para {baja.nombre}.")
             return redirect("rrhh:empleados")
         if action == "plantilla":
@@ -1346,7 +1371,9 @@ def empleados(request):
     enterprise_focus = (request.GET.get("enterprise_focus") or "").strip().upper()
 
     asegurar_esquemas_base()
-    qs = Empleado.objects.all().prefetch_related("bonos_esquemas").annotate(total_lineas_nomina=Count("lineas_nomina"))
+    qs = Empleado.objects.all().prefetch_related("bonos_esquemas").annotate(  # rrhh-allow-inactive-history: filtro estado controla historial
+        total_lineas_nomina=Count("lineas_nomina")
+    )
     if q:
         qs = qs.filter(
             Q(nombre__icontains=q)
@@ -2038,21 +2065,21 @@ def indicadores_ch(request):
                 empleado = Empleado.objects.filter(pk=int(empleado_id)).first()
             fecha_baja = _parse_date(request.POST.get("fecha_baja")) or timezone.localdate()
             fecha_ingreso = _parse_date(request.POST.get("fecha_ingreso"))
-            baja = EmpleadoBaja.objects.create(
-                empleado=empleado,
-                nombre=(request.POST.get("nombre") or (empleado.nombre if empleado else "")).strip(),
-                area=_area_key(request.POST.get("area") or (empleado.area if empleado else "")),
-                puesto=(request.POST.get("puesto") or (empleado.puesto if empleado else "")).strip(),
-                tipo_contrato=(request.POST.get("tipo_contrato") or (empleado.tipo_contrato if empleado else Empleado.CONTRATO_FIJO)).strip(),
-                fecha_ingreso=fecha_ingreso or (empleado.fecha_ingreso if empleado else fecha_baja),
-                fecha_baja=fecha_baja,
-                motivo=(request.POST.get("motivo") or EmpleadoBaja.MOTIVO_OTRO).strip(),
-                observacion=(request.POST.get("observacion") or "").strip(),
-                creado_por=request.user,
-            )
-            if empleado and request.POST.get("marcar_inactivo") == "on":
-                empleado.activo = False
-                empleado.save(update_fields=["activo", "updated_at"])
+            with transaction.atomic():
+                baja = EmpleadoBaja.objects.create(
+                    empleado=empleado,
+                    nombre=(request.POST.get("nombre") or (empleado.nombre if empleado else "")).strip(),
+                    area=_area_key(request.POST.get("area") or (empleado.area if empleado else "")),
+                    puesto=(request.POST.get("puesto") or (empleado.puesto if empleado else "")).strip(),
+                    tipo_contrato=(request.POST.get("tipo_contrato") or (empleado.tipo_contrato if empleado else Empleado.CONTRATO_FIJO)).strip(),
+                    fecha_ingreso=fecha_ingreso or (empleado.fecha_ingreso if empleado else fecha_baja),
+                    fecha_baja=fecha_baja,
+                    motivo=(request.POST.get("motivo") or EmpleadoBaja.MOTIVO_OTRO).strip(),
+                    observacion=(request.POST.get("observacion") or "").strip(),
+                    creado_por=request.user,
+                )
+                if empleado:
+                    desactivar_identidad_operativa_empleado(empleado)
             messages.success(request, f"Baja capturada para {baja.nombre}.")
         elif action == "plantilla":
             anio = int(request.POST.get("anio") or inicio.year)
@@ -2172,7 +2199,7 @@ def indicadores_ch(request):
         "can_manage_rrhh": can_manage_rrhh(request.user),
         "mes": mes,
         "months": range(1, 13),
-        "empleados": Empleado.objects.all().order_by("nombre")[:1200],
+        "empleados": Empleado.objects.filter(activo=True).order_by("nombre")[:1200],
         "contrato_choices": Empleado.CONTRATO_CHOICES,
         "motivo_choices": EmpleadoBaja.MOTIVO_CHOICES,
         "vacante_estado_choices": VacanteRRHH.ESTADO_CHOICES,
@@ -2575,6 +2602,7 @@ def horas_extra_list(request):
         ("autorizado", "Autorizado", horas_extra.filter(estado=HoraExtra.ESTADO_AUTORIZADO)),
         ("rechazado", "Rechazado", horas_extra.filter(estado=HoraExtra.ESTADO_RECHAZADO)),
         ("pagado", "Pagado", horas_extra.filter(estado=HoraExtra.ESTADO_PAGADO)),
+        ("cancelado", "Cancelado", horas_extra.filter(estado=HoraExtra.ESTADO_CANCELADO)),
     ]
     return render(
         request,
@@ -2707,6 +2735,31 @@ def vacaciones_list(request):
                     actor=request.user,
                 )
                 messages.success(request, f"Solicitud {solicitud.folio} registrada y saldo reservado.")
+            elif action == "ajustar_saldo":
+                if not can_manage_rrhh(request.user):
+                    raise PermissionDenied("Solo Capital Humano puede conciliar saldos de vacaciones.")
+                empleado = get_object_or_404(Empleado.objects.filter(activo=True), pk=request.POST.get("empleado_id"))
+                try:
+                    periodo_anio = int((request.POST.get("periodo_anio") or timezone.localdate().year))
+                    dias = Decimal((request.POST.get("dias_ajuste") or "0").replace(",", ".")).quantize(Decimal("0.01"))
+                except (InvalidOperation, TypeError, ValueError):
+                    raise ValidationError("Captura periodo y días válidos.")
+                if periodo_anio < 2000 or periodo_anio > timezone.localdate().year + 1:
+                    raise ValidationError("Periodo fuera de rango.")
+                if abs(dias) > Decimal("100"):
+                    raise ValidationError("El ajuste no puede superar 100 días.")
+                descripcion = (request.POST.get("descripcion") or "").strip()
+                if not descripcion:
+                    raise ValidationError("Captura una nota de conciliación.")
+                MovimientoVacaciones.objects.create(
+                    empleado=empleado,
+                    tipo=MovimientoVacaciones.TIPO_AJUSTE,
+                    dias=dias,
+                    periodo_anio=periodo_anio,
+                    descripcion=f"[conciliacion-manual] {descripcion}"[:220],
+                    actor=request.user,
+                )
+                messages.success(request, f"Saldo de {empleado.nombre} conciliado.")
             elif action in {"preautorizar_jefe", "rechazar_jefe"}:
                 solicitud = get_object_or_404(SolicitudVacaciones, pk=request.POST.get("solicitud_id"))
                 preautorizar_solicitud_vacaciones_jefe(
@@ -2728,7 +2781,9 @@ def vacaciones_list(request):
                 raise PermissionDenied("Acción de vacaciones no válida.")
         except ValidationError as exc:
             messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
-        return redirect("rrhh:rrhh_vacaciones_list")
+        url = reverse("rrhh:rrhh_vacaciones_list")
+        query = request.GET.urlencode()
+        return redirect(f"{url}?{query}" if query else url)
 
     solicitudes_qs = (
         SolicitudVacaciones.objects.select_related(
@@ -2745,15 +2800,85 @@ def vacaciones_list(request):
             solicitudes_qs = solicitudes_qs.filter(Q(empleado=empleado_actual) | Q(jefe_directo=request.user))
         else:
             solicitudes_qs = solicitudes_qs.filter(jefe_directo=request.user)
-    solicitudes = solicitudes_qs[:500]
     empleados = list(empleados_qs[:250])
-    empleados_saldo = [
-        {
-            "empleado": empleado,
-            "saldo": saldo_vacaciones_empleado(empleado),
-        }
-        for empleado in empleados[:80]
-    ]
+    filtro_q = (request.GET.get("q") or "").strip()
+    filtro_estado = (request.GET.get("estado") or "").strip()
+    filtro_sucursal = (request.GET.get("sucursal") or "").strip()
+    revision_qs = empleados_qs
+    if filtro_q:
+        revision_qs = revision_qs.filter(
+            Q(nombre__icontains=filtro_q)
+            | Q(nombre_normalizado__icontains=normalizar_nombre(filtro_q))
+            | Q(puesto__icontains=filtro_q)
+            | Q(sucursal__icontains=filtro_q)
+            | Q(area__icontains=filtro_q)
+        )
+    if filtro_sucursal:
+        revision_qs = revision_qs.filter(sucursal=filtro_sucursal)
+    empleados_revision = list(revision_qs[:120])
+    sucursales_historial = list(
+        empleados_qs.exclude(sucursal="")
+        .values_list("sucursal", flat=True)
+        .distinct()
+        .order_by("sucursal")
+    )
+    hoy = timezone.localdate()
+    movimientos_por_empleado = {empleado.id: [] for empleado in empleados_revision}
+    movimientos_qs = (
+        MovimientoVacaciones.objects.filter(empleado__in=empleados_revision)
+        .select_related("solicitud", "actor")
+        .order_by("empleado_id", "-creado_en", "-id")
+    )
+    for movimiento in movimientos_qs:
+        movimientos = movimientos_por_empleado.get(movimiento.empleado_id)
+        if movimientos is not None and len(movimientos) < 4:
+            movimientos.append(movimiento)
+    pendientes_anteriores = {
+        row["empleado_id"]: row["total"] or Decimal("0")
+        for row in MovimientoVacaciones.objects.filter(
+            empleado__in=empleados_revision,
+            periodo_anio__lt=hoy.year,
+            tipo=MovimientoVacaciones.TIPO_AJUSTE,
+            descripcion__icontains="pendiente de goce",
+        )
+        .values("empleado_id")
+        .annotate(total=Sum("dias"))
+    }
+    empleados_historial = []
+    for empleado in empleados_revision:
+        saldo = saldo_vacaciones_empleado(empleado, periodo_anio=hoy.year)
+        aniversario = _ultimo_aniversario(empleado.fecha_ingreso, hoy)
+        fecha_limite = _sumar_meses(aniversario, 6) if aniversario else None
+        pendiente_anterior = pendientes_anteriores.get(empleado.id, Decimal("0"))
+        disponible = saldo["disponible"] + pendiente_anterior
+        if disponible <= 0:
+            estado_legal = "Sin saldo pendiente"
+        elif fecha_limite and fecha_limite < hoy:
+            estado_legal = "Plazo vencido"
+        elif fecha_limite and (fecha_limite - hoy).days <= 30:
+            estado_legal = "Por vencer"
+        else:
+            estado_legal = "En plazo"
+        if filtro_estado == "saldo" and disponible <= 0:
+            continue
+        if filtro_estado == "anterior" and pendiente_anterior <= 0:
+            continue
+        if filtro_estado == "vencido" and estado_legal != "Plazo vencido":
+            continue
+        if filtro_estado == "por_vencer" and estado_legal != "Por vencer":
+            continue
+        empleados_historial.append(
+            {
+                "empleado": empleado,
+                "saldo": saldo,
+                "ultimo_aniversario": aniversario,
+                "fecha_limite": fecha_limite,
+                "pendiente_anterior": pendiente_anterior,
+                "disponible_total": disponible,
+                "estado_legal": estado_legal,
+                "movimientos": movimientos_por_empleado.get(empleado.id, []),
+            }
+        )
     columnas = [
         ("solicitada", "Solicitadas", solicitudes_qs.filter(estado=SolicitudVacaciones.ESTADO_SOLICITADA)[:120]),
         (
@@ -2778,8 +2903,12 @@ def vacaciones_list(request):
         {
             "module_tabs": _module_tabs("vacaciones", request.user),
             "empleados": empleados,
-            "empleados_saldo": empleados_saldo,
-            "solicitudes": solicitudes,
+            "empleados_historial": empleados_historial,
+            "filtros_historial": {"q": filtro_q, "estado": filtro_estado, "sucursal": filtro_sucursal},
+            "periodo_actual": hoy.year,
+            "periodo_maximo": hoy.year + 1,
+            "sucursales_historial": sucursales_historial,
+            "hay_solicitudes": stats["total"] > 0,
             "columnas": columnas,
             "stats": stats,
             "can_manage_rrhh": can_manage_rrhh(request.user),

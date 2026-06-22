@@ -86,6 +86,7 @@ ACCESS_SUBMODULES = {
     ],
     "produccion": [
         ("plan", "Plan de producción"),
+        ("calculo_insumos", "Cálculo de insumos"),
         ("reabasto_cedis", "Reabasto CEDIS"),
         ("consolidado_cedis", "Consolidado CEDIS"),
         ("cedis_semanal", "Producción CEDIS semanal"),
@@ -249,8 +250,12 @@ def group_name_variants(*group_names: str) -> tuple[str, ...]:
     return tuple(sorted(names))
 
 
+def _is_active_user(user: AbstractBaseUser) -> bool:
+    return bool(user and user.is_authenticated and getattr(user, "is_active", True))
+
+
 def has_any_role(user: AbstractBaseUser, *roles: str) -> bool:
-    if not user or not user.is_authenticated:
+    if not _is_active_user(user):
         return False
     if user.is_superuser:
         return True
@@ -259,7 +264,7 @@ def has_any_role(user: AbstractBaseUser, *roles: str) -> bool:
 
 def is_admin_or_dg(user: AbstractBaseUser) -> bool:
     """Superuser, is_staff, o miembro de grupo DG/ADMIN siempre tiene acceso total."""
-    if not user or not user.is_authenticated:
+    if not _is_active_user(user):
         return False
     if user.is_superuser or user.is_staff:
         return True
@@ -268,7 +273,7 @@ def is_admin_or_dg(user: AbstractBaseUser) -> bool:
 
 def can_review_seguimiento_global(user: AbstractBaseUser) -> bool:
     """Permiso para revisar acuerdos/minutas/proyectos de todos los colaboradores."""
-    if not user or not user.is_authenticated:
+    if not _is_active_user(user):
         return False
     return bool(user.is_superuser or has_any_role(user, ROLE_DG, ROLE_ADMIN))
 
@@ -285,7 +290,7 @@ def _is_locked(user: AbstractBaseUser, lock_field: str) -> bool:
 
 
 def is_repartidor_only(user: AbstractBaseUser) -> bool:
-    if not user or not user.is_authenticated or user.is_superuser or user.is_staff:
+    if not _is_active_user(user) or user.is_superuser or user.is_staff:
         return False
     if _explicit_access_map(user).get("mermas.recepcion") == ACCESS_MANAGE:
         return False
@@ -336,7 +341,7 @@ def _max_access(*values: str) -> str:
 
 
 def _explicit_access_map(user: AbstractBaseUser) -> dict[str, str]:
-    if not user or not user.is_authenticated:
+    if not _is_active_user(user):
         return {}
     cached = getattr(user, "_module_access_map_cache", None)
     if cached is not None:
@@ -352,7 +357,7 @@ def _explicit_access_map(user: AbstractBaseUser) -> dict[str, str]:
 
 
 def is_mermas_only(user: AbstractBaseUser) -> bool:
-    if not user or not user.is_authenticated or user.is_superuser or user.is_staff:
+    if not _is_active_user(user) or user.is_superuser or user.is_staff:
         return False
     groups = _group_names(user)
     allowed_app_groups = {ROLE_REPARTIDOR.lower(), ROLE_REPARTIDOR}
@@ -420,7 +425,7 @@ def get_module_access(user: AbstractBaseUser, module: str) -> str:
     2. Permiso explicito en UserModuleAccess
     3. Fallback derivado del rol actual
     """
-    if not user or not user.is_authenticated:
+    if not _is_active_user(user):
         return ACCESS_NONE
     if user.is_superuser:
         return ACCESS_MANAGE
@@ -446,7 +451,7 @@ def get_effective_module_access(user: AbstractBaseUser, module: str) -> str:
 
 
 def get_submodule_access(user: AbstractBaseUser, module: str, submodule: str) -> str:
-    if not user or not user.is_authenticated:
+    if not _is_active_user(user):
         return ACCESS_NONE
     if user.is_superuser:
         return ACCESS_MANAGE

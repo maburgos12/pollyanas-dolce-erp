@@ -1,0 +1,324 @@
+/* Extracted from seguimiento/templates/seguimiento/panel_dg.html */
+.panel-dg-shell { width: min(100%, 1580px); }
+  .panel-dg-hero {
+    margin-bottom: 20px;
+  }
+  .panel-dg-hero-title {
+    font-size: 1.7rem;
+  }
+  .panel-dg-side-actions {
+    margin-top: 10px;
+  }
+  .panel-dg-panel-gap {
+    margin-bottom: 20px;
+  }
+  .panel-dg-create-head,
+  .panel-dg-review-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .panel-dg-create-title {
+    margin-bottom: 4px;
+  }
+  .panel-dg-create-copy {
+    margin: 0;
+    font-size: .86rem;
+  }
+  .panel-dg-create-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.4fr) minmax(0, .7fr) minmax(0, .5fr);
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .panel-dg-control-span-2 {
+    grid-column: span 2;
+  }
+  .panel-dg-form-actions,
+  .panel-dg-row-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .panel-dg-form-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+  .panel-dg-action-section {
+    margin-bottom: 22px;
+  }
+  .panel-dg-section-head {
+    margin-bottom: 12px;
+  }
+  .panel-dg-section-kicker {
+    color: var(--dorado);
+  }
+  .panel-dg-section-title {
+    margin: 0;
+  }
+  .panel-dg-review-list {
+    display: grid;
+    gap: 12px;
+  }
+  .panel-dg-review-card {
+    padding: 16px;
+    border-color: color-mix(in srgb, var(--dorado) 34%, var(--pd-border));
+    background: color-mix(in srgb, var(--pd-surface) 92%, var(--dorado) 8%);
+  }
+  .panel-dg-review-card.is-prorroga {
+    border-color: color-mix(in srgb, var(--amarillo) 40%, var(--pd-border));
+    background: color-mix(in srgb, var(--pd-surface) 90%, var(--amarillo) 10%);
+  }
+  .panel-dg-review-main {
+    min-width: 0;
+    overflow: hidden;
+  }
+  .panel-dg-pill-sm {
+    font-size: .7rem;
+  }
+  .panel-dg-pill-xs {
+    flex-shrink: 0;
+    font-size: .68rem;
+  }
+  .panel-dg-pill-status {
+    flex-shrink: 0;
+    font-size: .72rem;
+  }
+  .panel-dg-pill-table {
+    font-size: .75rem;
+  }
+  .panel-dg-prorroga-badge {
+    font-size: .68rem;
+  }
+  .panel-dg-review-title {
+    margin: 6px 0 2px;
+    font-size: 1.02rem;
+  }
+  .panel-dg-review-meta,
+  .panel-dg-comment {
+    margin: 0;
+    font-size: .82rem;
+  }
+  .panel-dg-comment {
+    margin-left: 6px;
+  }
+  .panel-dg-detail-link {
+    flex-shrink: 0;
+  }
+  .panel-dg-evidence-row {
+    margin-top: 10px;
+  }
+  .panel-dg-standalone-comment {
+    margin: 10px 0 0;
+    font-size: .85rem;
+  }
+  .panel-dg-prorroga-box {
+    margin-top: 12px;
+    padding: 10px;
+    border: 1px solid color-mix(in srgb, var(--amarillo) 32%, var(--pd-border));
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--pd-surface) 90%, var(--amarillo) 10%);
+  }
+  .panel-dg-prorroga-copy {
+    margin: 0 0 8px;
+    font-size: .86rem;
+  }
+  .panel-dg-review-form {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .panel-dg-review-textarea {
+    min-height: 54px;
+    padding: 9px 10px;
+    border: 1px solid color-mix(in srgb, var(--pd-wine) 16%, var(--pd-border));
+    border-radius: 10px;
+    font: inherit;
+    resize: vertical;
+  }
+  .panel-dg-filterbar {
+    margin-bottom: 16px;
+  }
+  .panel-dg-check-control {
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    padding-top: 18px;
+  }
+  .panel-dg-check-label {
+    color: var(--rojo);
+    cursor: pointer;
+    font-size: .88rem;
+    font-weight: 700;
+  }
+  .panel-dg-tabs,
+  .panel-dg-view-tabs {
+    margin-bottom: 14px;
+  }
+  .panel-dg-view-tabs {
+    display: flex;
+    gap: 6px;
+  }
+  .panel-dg-empty {
+    padding: 48px 24px;
+    color: var(--texto-light);
+    text-align: center;
+  }
+  .panel-dg-empty-mark {
+    margin: 0;
+    color: var(--verde);
+    font-size: 1.6rem;
+    font-weight: 900;
+  }
+  .panel-dg-empty-copy {
+    margin: 8px 0 0;
+    font-weight: 700;
+  }
+  .panel-dg-colab-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 800;
+  }
+  .panel-dg-summary-band {
+    margin-top: 6px;
+  }
+  .panel-dg-chip-danger {
+    color: var(--rojo);
+  }
+  .panel-dg-chip-warning {
+    color: var(--pd-warning);
+  }
+  .panel-dg-progress-meta {
+    font-size: .75rem;
+  }
+  .panel-dg-updated {
+    font-size: .8rem;
+  }
+
+  /* ── Tabla proporciones fijas ── */
+  .panel-dg-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .88rem;
+    table-layout: fixed;
+  }
+  .panel-dg-table th {
+    background: rgba(139,34,82,.06);
+    padding: 10px 12px;
+    text-align: left;
+    font-size: .75rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--texto-light);
+  }
+  .panel-dg-table td {
+    padding: 10px 12px;
+    border-top: 1px solid rgba(139,34,82,.06);
+    vertical-align: middle;
+  }
+  .panel-dg-table tr:hover td { background: rgba(248,232,238,.45); }
+  .panel-dg-table tr.is-vencido td { background: rgba(229,57,53,.04); }
+
+  /* Anchos de columna fijos */
+  .col-acuerdo   { width: 30%; }
+  .col-colab     { width: 16%; }
+  .col-area      { width: 11%; }
+  .col-estatus   { width: 12%; }
+  .col-fecha     { width: 10%; }
+  .col-avance    { width: 9%; }
+  .col-act       { width: 7%; }
+  .col-ver       { width: 5%; }
+
+  /* Truncado en celdas — nowrap vive en hallmark_guardrails.css */
+  .panel-dg-cell-trunc { display: block; }
+  .panel-dg-cell-title { font-weight: 700; }
+
+  /* Barra de progreso */
+  .panel-dg-progress {
+    height: 6px;
+    background: var(--pd-wine-soft);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .panel-dg-progress-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: var(--vino);
+    width: var(--w, 0%);
+  }
+  .panel-dg-progress-fill.is-done   { background: var(--verde); }
+  .panel-dg-progress-fill.is-danger { background: var(--rojo); }
+  .panel-dg-progress.is-muted { background: var(--pd-surface-subtle); }
+
+  /* Pills de estatus */
+  .pill-pendiente   { background: var(--pd-surface-subtle); color: var(--pd-muted); }
+  .pill-en_proceso  { background: var(--pd-info-soft); color: var(--pd-info); }
+  .pill-en_revision { background: var(--pd-gold-soft); color: var(--pd-warning); }
+  .pill-completado  { background: var(--pd-success-soft); color: var(--pd-success); }
+  .pill-bloqueado,
+  .pill-cancelado   { background: var(--pd-danger-soft); color: var(--pd-danger); }
+  .pill-desfase     { background: var(--pd-gold-soft); color: var(--pd-warning); }
+  .pill-app         { background: var(--pd-info-soft); color: var(--pd-info); }
+  .pill-historico   { background: var(--pd-success-soft); color: var(--pd-success); }
+
+  /* colab-item-label — nowrap en guardrails */
+  .panel-dg-colab-item-label { flex: 1; min-width: 0; }
+
+  /* Cards por colaborador */
+  .panel-dg-colab-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 14px;
+  }
+  .panel-dg-colab-card {
+    background: var(--pd-surface);
+    border: 1px solid var(--pd-border);
+    border-radius: 16px;
+    padding: 16px;
+    display: grid;
+    gap: 10px;
+  }
+  .panel-dg-colab-card.tiene-vencidos { border-color: var(--pd-danger); }
+  .panel-dg-colab-card.tiene-revision { border-color: var(--pd-gold); }
+  .panel-dg-colab-items {
+    display: grid;
+    gap: 5px;
+    max-height: 280px;
+    overflow: auto;
+  }
+  .panel-dg-colab-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    background: var(--pd-wine-soft);
+    font-size: .83rem;
+    text-decoration: none;
+    color: var(--texto);
+    border: 1px solid var(--pd-border);
+    min-width: 0;
+  }
+  .panel-dg-colab-item:hover { background: var(--pd-border); }
+  .panel-dg-colab-item.is-vencido  { background: var(--pd-danger-soft); border-color: var(--pd-danger); }
+  .panel-dg-colab-item.is-revision { background: var(--pd-gold-soft); border-color: var(--pd-gold); }
+  .panel-dg-colab-item.is-done     { opacity: .6; }
+
+  /* Colores fecha según urgencia */
+  .fecha-danger { color: var(--rojo); font-weight: 700; }
+  .fecha-warn   { color: var(--pd-warning); font-weight: 700; }
+
+  @media (max-width: 900px) {
+    .panel-dg-colab-grid { grid-template-columns: 1fr; }
+    .col-area, .col-act { display: none; }
+    .panel-dg-create-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .panel-dg-control-span-2 { grid-column: auto; }
+  }
+  @media (max-width: 640px) {
+    .col-avance, .col-fecha { display: none; }
+    .panel-dg-create-form { grid-template-columns: 1fr; }
+  }

@@ -74,7 +74,7 @@
   <section class="investment-grid-2">
     <article class="investment-decision-card {% if calibration_result.applied %}is-positive{% else %}is-warning{% endif %}">
       <div class="investment-kicker">Resultado</div>
-      <div class="investment-title" style="font-size:2rem;">{% if calibration_result.applied %}Calibración aplicada{% else %}Sin aplicar{% endif %}</div>
+      <div class="investment-title pd-u-e14c897172">{% if calibration_result.applied %}Calibración aplicada{% else %}Sin aplicar{% endif %}</div>
       <div class="investment-copy">{% if calibration_result.applied %}Mejora estimada de {{ calibration_result.improvement_pct|default:0|floatformat:2|intcomma }}% en precisión.{% else %}{{ calibration_result.reason }}{% endif %}</div>
     </article>
   </section>
@@ -158,7 +158,7 @@
           <button class="investment-button" type="submit">Guardar ajustes</button>
         </div>
       </form>
-      <form method="post" style="margin-top:0.85rem;">
+      <form method="post" class="pd-u-9cc337615c">
         {% csrf_token %}
         <input type="hidden" name="action" value="run_calibration">
         <button class="investment-button is-ghost" type="submit">Recalibrar</button>

@@ -1,0 +1,1326 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Logística · Control de rutas{% endblock %}
+{% block page_title %}Control interno de rutas{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<style>
+  /* Hallmark · macrostructure: Operations Console · tone: restrained control room · anchor hue: vino */
+  :root {
+    --route-vino: #8b1740;
+    --route-vino-dark: #65102d;
+    --route-ink: #202027;
+    --route-muted: #69707a;
+    --route-line: #dfe3e8;
+    --route-paper: #ffffff;
+    --route-soft: #f6f7f9;
+    --route-map: #eef2f5;
+    --route-blue: #1769c2;
+    --route-orange: #f08c00;
+    --route-green: #2f9e44;
+    --route-red: #d82424;
+    --route-shadow: 0 16px 38px rgba(32, 32, 39, .10);
+  }
+
+  .route-control-page {
+    display: grid;
+    gap: 12px;
+    color: var(--route-ink);
+    min-width: 0;
+  }
+
+  .route-control-page * {
+    box-sizing: border-box;
+  }
+
+  .route-toolbar,
+  .route-workbench,
+  .route-kpi-strip {
+    background: var(--route-paper);
+    border: 1px solid var(--route-line);
+    border-radius: 8px;
+  }
+
+  .route-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 16px;
+    align-items: end;
+    padding: 14px 16px;
+  }
+
+  .route-title-block {
+    min-width: 0;
+  }
+
+  .route-title-block h1 {
+    margin: 0;
+    font-size: 24px;
+    line-height: 1.2;
+    color: var(--route-ink);
+  }
+
+  .route-title-block p {
+    margin: 4px 0 0;
+    color: var(--route-muted);
+    font-size: 13px;
+  }
+
+  .route-actions {
+    display: flex;
+    align-items: end;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .route-field {
+    display: grid;
+    gap: 5px;
+    min-width: 160px;
+  }
+
+  .route-field label {
+    color: #515862;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .route-field .input-field {
+    min-height: 38px;
+  }
+
+  .route-updated {
+    display: grid;
+    gap: 4px;
+    min-width: 118px;
+    text-align: right;
+    color: var(--route-muted);
+    font-size: 12px;
+  }
+
+  .route-updated strong {
+    color: var(--route-ink);
+    font-size: 14px;
+  }
+
+  .route-workbench {
+    display: grid;
+    grid-template-columns: 280px minmax(420px, 1fr) 320px;
+    min-height: 620px;
+    overflow: hidden;
+  }
+
+  .route-list-panel,
+  .route-evidence-panel {
+    display: grid;
+    align-content: start;
+    gap: 12px;
+    padding: 14px;
+    background: #fbfbfc;
+    min-width: 0;
+  }
+
+  .route-list-panel {
+    border-right: 1px solid var(--route-line);
+  }
+
+  .route-evidence-panel {
+    border-left: 1px solid var(--route-line);
+  }
+
+  .route-search {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .route-search input,
+  .route-search button {
+    min-height: 38px;
+    border: 1px solid var(--route-line);
+    border-radius: 7px;
+    background: var(--route-paper);
+  }
+
+  .route-search input {
+    padding: 0 11px;
+    color: var(--route-ink);
+  }
+
+  .route-search button {
+    padding: 0 12px;
+    color: var(--route-vino);
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .route-search button:focus-visible,
+  .route-search input:focus-visible,
+  .evidence-filter:focus-visible,
+  .route-actions .btn:focus-visible,
+  .control-route-card .btn:focus-visible {
+    outline: 2px solid rgba(139, 23, 64, .38);
+    outline-offset: 2px;
+  }
+
+  .route-search button:active,
+  .route-actions .btn:active,
+  .control-route-card .btn:active {
+    transform: scale(.98);
+  }
+
+  .active-filter-note {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 9px 10px;
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    border-radius: 7px;
+    color: #7c2d12;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .active-filter-note a {
+    color: var(--route-vino);
+    font-weight: 900;
+  }
+
+  .panel-title-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .panel-title-row h2 {
+    margin: 0;
+    font-size: 14px;
+    color: var(--route-ink);
+  }
+
+  .panel-title-row span {
+    color: var(--route-muted);
+    font-size: 12px;
+  }
+
+  .control-route-card {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    background: var(--route-paper);
+    border: 1px solid var(--route-line);
+    border-left: 4px solid #aeb6c1;
+    border-radius: 7px;
+    box-shadow: 0 8px 20px rgba(32, 32, 39, .04);
+  }
+
+  .control-route-card.is-active {
+    border-left-color: var(--route-vino);
+    border-color: rgba(139, 23, 64, .42);
+    box-shadow: var(--route-shadow);
+  }
+
+  .control-route-card.is-alert {
+    border-left-color: var(--route-red);
+  }
+
+  .route-card-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    align-items: start;
+    min-width: 0;
+  }
+
+  .route-card-head strong {
+    display: block;
+    color: var(--route-ink);
+    font-size: 14px;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+
+  .route-status {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0 8px;
+    border-radius: 4px;
+    background: #eef6f0;
+    color: #16743a;
+    font-size: 10px;
+    font-weight: 900;
+  }
+
+  .route-status.pending {
+    background: #eef1f5;
+    color: #3f4a57;
+  }
+
+  .route-card-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    color: var(--route-muted);
+    font-size: 12px;
+  }
+
+  .route-card-meta span {
+    display: block;
+    color: var(--route-ink);
+    font-weight: 800;
+    overflow-wrap: anywhere;
+  }
+
+  .route-progress-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 48px;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .route-progress-track {
+    height: 7px;
+    background: #e8ebef;
+    border-radius: 999px;
+    overflow: hidden;
+  }
+
+  .route-progress-track progress,
+  .kpi-rule progress {
+    width: 100%;
+    height: 100%;
+    display: block;
+    appearance: none;
+    border: 0;
+    background: transparent;
+  }
+
+  .route-progress-track progress::-webkit-progress-bar,
+  .kpi-rule progress::-webkit-progress-bar {
+    background: transparent;
+  }
+
+  .route-progress-track progress::-webkit-progress-value,
+  .kpi-rule progress::-webkit-progress-value {
+    background: var(--route-orange);
+    border-radius: 999px;
+  }
+
+  .route-progress-track progress::-moz-progress-bar,
+  .kpi-rule progress::-moz-progress-bar {
+    background: var(--route-orange);
+    border-radius: 999px;
+  }
+
+  .route-progress-track progress::-webkit-progress-value {
+    background: linear-gradient(90deg, var(--route-green), var(--route-orange));
+  }
+
+  .route-progress-track progress::-moz-progress-bar {
+    background: linear-gradient(90deg, var(--route-green), var(--route-orange));
+  }
+
+  .route-progress-value {
+    color: var(--route-orange);
+    font-size: 12px;
+    font-weight: 900;
+    text-align: right;
+  }
+
+  .route-map-panel {
+    position: relative;
+    min-width: 0;
+    background: var(--route-map);
+    overflow: hidden;
+  }
+
+  .route-live-map {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+  }
+
+  .route-live-map .leaflet-control-attribution {
+    font-size: 10px;
+  }
+
+  .route-live-map .leaflet-control-zoom a {
+    color: var(--route-ink);
+    font-weight: 900;
+  }
+
+  .map-legend {
+    position: absolute;
+    z-index: 4;
+    top: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, .96);
+    border: 1px solid var(--route-line);
+    border-radius: 8px;
+    box-shadow: 0 10px 24px rgba(32, 32, 39, .10);
+    color: var(--route-ink);
+    font-size: 12px;
+  }
+
+  .legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .legend-dot,
+  .legend-line {
+    display: inline-block;
+    flex: 0 0 auto;
+  }
+
+  .legend-dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 999px;
+    background: var(--route-vino);
+  }
+
+  .legend-dot.ring {
+    background: transparent;
+    border: 1.5px dashed var(--route-vino);
+  }
+
+  .legend-dot.warn {
+    background: var(--route-orange);
+  }
+
+  .legend-line {
+    width: 30px;
+    height: 3px;
+    background: var(--route-blue);
+    border-radius: 999px;
+  }
+
+  .legend-line.actual {
+    height: 5px;
+    background: repeating-linear-gradient(90deg, #e0007a 0 5px, transparent 5px 10px);
+  }
+
+  .map-status-stack {
+    position: absolute;
+    z-index: 5;
+    top: 22px;
+    left: 18px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .map-status-pill,
+  .map-empty-state {
+    display: grid;
+    align-items: center;
+    border: 1px solid var(--route-line);
+    border-radius: 7px;
+    background: rgba(255, 255, 255, .92);
+    color: var(--route-ink);
+    font-size: 12px;
+    font-weight: 900;
+    box-shadow: 0 8px 18px rgba(32, 32, 39, .10);
+  }
+
+  .map-status-pill {
+    min-width: 166px;
+    padding: 8px 10px;
+    line-height: 1.25;
+    text-align: left;
+  }
+
+  .map-stop-marker {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 999px;
+    background: var(--route-vino);
+    color: #fff;
+    border: 4px solid #fff;
+    box-shadow: 0 10px 20px rgba(32, 32, 39, .24);
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .map-gps-marker {
+    display: block;
+    width: 17px;
+    height: 17px;
+    border-radius: 999px;
+    background: #e0007a;
+    border: 3px solid #fff;
+    box-shadow: 0 6px 16px rgba(224, 0, 122, .42);
+  }
+
+  .map-gps-discarded-marker {
+    display: block;
+    width: 11px;
+    height: 11px;
+    border-radius: 999px;
+    background: var(--route-orange);
+    border: 3px solid #fff;
+    box-shadow: 0 4px 12px rgba(240, 140, 0, .34);
+  }
+
+  .map-event-marker {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    background: var(--route-red);
+    color: #fff;
+    border: 3px solid #fff;
+    box-shadow: 0 8px 18px rgba(216, 36, 36, .32);
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .map-alert-card {
+    position: absolute;
+    z-index: 6;
+    right: 34px;
+    top: 43%;
+    max-width: 270px;
+    padding: 14px 16px;
+    background: rgba(255, 255, 255, .97);
+    border: 1px solid #efb4b4;
+    border-left: 5px solid var(--route-red);
+    border-radius: 8px;
+    box-shadow: var(--route-shadow);
+  }
+
+  .map-alert-card strong {
+    color: var(--route-red);
+    font-size: 13px;
+  }
+
+  .map-scale {
+    position: absolute;
+    right: 22px;
+    bottom: 16px;
+    z-index: 4;
+    width: 86px;
+    padding-bottom: 8px;
+    border-bottom: 3px solid #1f2933;
+    color: var(--route-ink);
+    font-size: 11px;
+    font-weight: 800;
+    text-align: center;
+    background: rgba(255,255,255,.75);
+  }
+
+  .map-empty-state {
+    position: absolute;
+    z-index: 6;
+    left: 50%;
+    top: 50%;
+    width: min(320px, calc(100% - 48px));
+    padding: 16px;
+    transform: translate(-50%, -50%);
+    text-align: left;
+  }
+
+  .map-empty-state[hidden] {
+    display: none;
+  }
+
+  .map-empty-state strong {
+    font-size: 14px;
+  }
+
+  .map-empty-state p {
+    margin: 6px 0 0;
+    color: var(--route-muted);
+    font-weight: 600;
+    line-height: 1.35;
+  }
+
+  .evidence-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-bottom: 1px solid var(--route-line);
+  }
+
+  .evidence-tab {
+    padding: 10px 6px;
+    color: var(--route-muted);
+    border-bottom: 3px solid transparent;
+    font-size: 13px;
+    font-weight: 900;
+    text-align: center;
+    text-decoration: none;
+  }
+
+  .evidence-tab.active {
+    color: var(--route-vino);
+    border-bottom-color: var(--route-vino);
+  }
+
+  .evidence-filter {
+    width: 100%;
+    min-height: 38px;
+    border: 1px solid var(--route-line);
+    border-radius: 7px;
+    background: var(--route-paper);
+    padding: 0 10px;
+    color: var(--route-ink);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .route-search button,
+    .route-actions .btn,
+    .control-route-card .btn {
+      transition: transform 120ms ease-out, border-color 120ms ease-out, box-shadow 120ms ease-out;
+    }
+  }
+
+  .timeline {
+    display: grid;
+    gap: 0;
+  }
+
+  .timeline-row {
+    display: grid;
+    grid-template-columns: 56px 26px minmax(0, 1fr);
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .timeline-time {
+    padding-top: 3px;
+    color: #4d5660;
+    font-size: 12px;
+    font-weight: 900;
+    text-align: right;
+  }
+
+  .timeline-rail {
+    position: relative;
+    display: grid;
+    justify-items: center;
+  }
+
+  .timeline-rail::after {
+    content: "";
+    position: absolute;
+    top: 24px;
+    bottom: -8px;
+    width: 1px;
+    background: var(--route-line);
+  }
+
+  .timeline-row:last-child .timeline-rail::after {
+    display: none;
+  }
+
+  .timeline-dot {
+    position: relative;
+    z-index: 1;
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    background: #6f7a86;
+    border: 4px solid #fff;
+    box-shadow: 0 0 0 1px var(--route-line);
+  }
+
+  .timeline-dot.critica { background: var(--route-red); }
+  .timeline-dot.alerta { background: var(--route-orange); }
+  .timeline-dot.ok { background: var(--route-green); }
+  .timeline-dot.info { background: var(--route-blue); }
+
+  .timeline-content {
+    padding: 0 0 18px;
+    min-width: 0;
+  }
+
+  .timeline-content strong {
+    display: block;
+    color: var(--route-ink);
+    font-size: 12px;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+
+  .timeline-content p {
+    margin: 4px 0;
+    color: #39424c;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  .exceptions-box {
+    display: grid;
+    gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid var(--route-line);
+  }
+
+  .exception-item {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 11px;
+    background: var(--route-paper);
+    border: 1px solid var(--route-line);
+    border-radius: 7px;
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .exception-icon {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    background: #fff3e1;
+    color: var(--route-orange);
+    font-weight: 900;
+  }
+
+  .exception-item.critical .exception-icon {
+    background: #fff0f0;
+    color: var(--route-red);
+  }
+
+  .exception-item strong {
+    display: block;
+    color: var(--route-ink);
+    font-size: 13px;
+    overflow-wrap: anywhere;
+  }
+
+  .route-kpi-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    overflow: hidden;
+  }
+
+  .route-kpi {
+    display: grid;
+    gap: 7px;
+    padding: 14px 18px;
+    min-height: 104px;
+    border-right: 1px solid var(--route-line);
+  }
+
+  .route-kpi:last-child {
+    border-right: 0;
+  }
+
+  .route-kpi span {
+    color: var(--route-ink);
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .route-kpi strong {
+    color: var(--route-vino);
+    font-size: 30px;
+    line-height: 1;
+  }
+
+  .route-kpi strong.good { color: var(--route-green); }
+  .route-kpi strong.warn { color: var(--route-orange); }
+  .route-kpi strong.bad { color: var(--route-red); }
+
+  .kpi-rule {
+    width: min(100%, 150px);
+    height: 5px;
+    background: #e8ebef;
+    border-radius: 999px;
+    overflow: hidden;
+  }
+
+  .kpi-rule.good progress::-webkit-progress-value,
+  .kpi-rule.good progress::-moz-progress-bar {
+    background: var(--route-green);
+  }
+
+  .kpi-rule.bad progress::-webkit-progress-value,
+  .kpi-rule.bad progress::-moz-progress-bar {
+    background: var(--route-red);
+  }
+
+  .route-empty {
+    margin: 0;
+    padding: 16px;
+    color: var(--route-muted);
+    background: var(--route-paper);
+    border: 1px dashed var(--route-line);
+    border-radius: 7px;
+  }
+
+  @media (max-width: 1280px) {
+    .route-workbench {
+      grid-template-columns: 260px minmax(360px, 1fr);
+    }
+    .route-evidence-panel {
+      grid-column: 1 / -1;
+      border-left: 0;
+      border-top: 1px solid var(--route-line);
+      grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+    }
+    .evidence-tabs,
+    .evidence-filter {
+      grid-column: 1 / -1;
+    }
+  }
+
+  @media (max-width: 920px) {
+    .route-toolbar {
+      grid-template-columns: 1fr;
+    }
+    .route-actions {
+      justify-content: stretch;
+    }
+    .route-field,
+    .route-actions .btn,
+    .route-updated {
+      width: 100%;
+      min-width: 0;
+      text-align: left;
+    }
+    .route-workbench {
+      grid-template-columns: 1fr;
+    }
+    .route-list-panel,
+    .route-evidence-panel {
+      border: 0;
+      border-top: 1px solid var(--route-line);
+    }
+    .route-map-panel {
+      min-height: 520px;
+      order: -1;
+    }
+    .route-evidence-panel {
+      grid-template-columns: 1fr;
+    }
+    .route-kpi-strip {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  @media (max-width: 560px) {
+    .route-control-page {
+      gap: 10px;
+    }
+    .route-toolbar,
+    .route-list-panel,
+    .route-evidence-panel {
+      padding: 12px;
+    }
+    .route-map-panel {
+      min-height: 460px;
+    }
+    .map-legend {
+      left: 12px;
+      right: 12px;
+      top: 12px;
+      transform: none;
+      flex-wrap: wrap;
+      white-space: normal;
+    }
+    .map-status-stack {
+      top: 90px;
+      left: 12px;
+    }
+    .map-alert-card {
+      left: 14px;
+      right: 14px;
+      top: auto;
+      bottom: 52px;
+      max-width: none;
+    }
+    .route-kpi-strip {
+      grid-template-columns: 1fr;
+    }
+    .route-kpi {
+      border-right: 0;
+      border-bottom: 1px solid var(--route-line);
+    }
+    .route-card-meta {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="route-control-page">
+  <section class="module-tabs report-tabs" aria-label="Submódulos Logística">
+    {% for tab in module_tabs %}
+      <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+    {% endfor %}
+  </section>
+
+  <section class="route-toolbar" aria-label="Filtros de control de rutas">
+    <div class="route-title-block">
+      <h1>Control interno de rutas</h1>
+      <p>Seguimiento operativo de rutas activas, evidencia, geocercas y excepciones del día.</p>
+    </div>
+    <form class="route-actions" method="get">
+      <div class="route-field">
+        <label for="fecha-control">Fecha</label>
+        <input id="fecha-control" class="input-field" type="date" name="fecha" value="{{ fecha_iso }}">
+      </div>
+      <div class="route-updated">
+        <span>Actualización</span>
+        <strong>{% now "H:i:s" %}</strong>
+      </div>
+      <button class="btn btn-primary" type="submit">Actualizar</button>
+    </form>
+  </section>
+
+  <section class="route-workbench" aria-label="Panel de monitoreo de rutas">
+    <aside class="route-list-panel" aria-label="Rutas activas">
+      <form class="route-search" method="get">
+        <input type="hidden" name="fecha" value="{{ fecha_iso }}">
+        {% if evento_tipo %}<input type="hidden" name="evento" value="{{ evento_tipo }}">{% endif %}
+        <input type="search" name="q" value="{{ query }}" placeholder="Buscar ruta o repartidor..." aria-label="Buscar ruta, folio, repartidor o unidad">
+        <button type="submit">Filtrar</button>
+      </form>
+      {% if query or evento_tipo %}
+      <div class="active-filter-note">
+        <span>Filtro activo{% if query %}: {{ query }}{% endif %}</span>
+        <a href="?fecha={{ fecha_iso }}">Limpiar</a>
+      </div>
+      {% endif %}
+      <div class="panel-title-row">
+        <h2>Rutas del día</h2>
+        <span>{{ metricas.rutas }} visibles</span>
+      </div>
+      {% for row in control.rutas %}
+      <article class="control-route-card {% if forloop.first %}is-active{% endif %} {% if row.eventos_alerta %}is-alert{% endif %}">
+        <div class="route-card-head">
+          <div>
+            <strong>{{ row.ruta.nombre }}</strong>
+            <span class="muted">{{ row.ruta.folio }}</span>
+          </div>
+          <span class="route-status {% if row.ruta.estatus == 'PLANEADA' %}pending{% endif %}">{{ row.ruta.get_estatus_display|upper }}</span>
+        </div>
+        <div class="route-card-meta">
+          <div>Repartidor<span>{{ row.ruta.repartidor|default:row.ruta.chofer|default:"Sin asignar" }}</span></div>
+          <div>Unidad<span>{{ row.ruta.unidad_operativa|default:row.ruta.unidad|default:"Sin asignar" }}</span></div>
+        </div>
+        <div class="route-progress-row" aria-label="Cumplimiento {{ row.ruta.cumplimiento_porcentaje|floatformat:0 }}%">
+          <div class="route-progress-track">
+            <progress value="{{ row.ruta.cumplimiento_porcentaje|floatformat:0 }}" max="100">{{ row.ruta.cumplimiento_porcentaje|floatformat:0 }}%</progress>
+          </div>
+          <div class="route-progress-value">{{ row.ruta.cumplimiento_porcentaje|floatformat:0 }}%</div>
+        </div>
+        <div class="route-card-meta">
+          <div>Geocercas<span>{{ row.paradas_visitadas }} / {{ row.paradas_total }}</span></div>
+          <div>GPS<span>{% if row.ultima_ubicacion %}{{ row.ultima_ubicacion.timestamp_servidor|naturaltime }}{% else %}Sin señal{% endif %}</span></div>
+        </div>
+        <a class="btn btn-secondary btn-small" href="{% url 'logistica:ruta_detail' row.ruta.id %}">Abrir detalle</a>
+      </article>
+      {% empty %}
+      <p class="route-empty">No hay rutas programadas para esta fecha.</p>
+      {% endfor %}
+    </aside>
+
+    <main class="route-map-panel" aria-label="Mapa real de rutas">
+      <div id="route-control-map" class="route-live-map" role="application" aria-label="Mapa real con paradas, ruta planeada y GPS recorrido"></div>
+      <div class="map-legend" aria-label="Leyenda del mapa">
+        <span class="legend-item"><i class="legend-dot"></i>Sucursal</span>
+        <span class="legend-item"><i class="legend-dot ring"></i>Geocerca</span>
+        <span class="legend-item"><i class="legend-line"></i>Ruta planeada</span>
+        <span class="legend-item"><i class="legend-line actual"></i>GPS recorrido</span>
+        <span class="legend-item"><i class="legend-dot warn"></i>Desvío detectado</span>
+      </div>
+      <div class="map-status-stack" aria-hidden="true">
+        <span class="map-status-pill">Mapa real · OpenStreetMap</span>
+      </div>
+
+      <div id="route-map-empty" class="map-empty-state" hidden>
+        <strong>Sin coordenadas para dibujar el mapa</strong>
+        <p>Asigna puntos logísticos con latitud/longitud o espera la primera señal GPS del repartidor.</p>
+      </div>
+
+      {% if metricas.desvios %}
+      <aside class="map-alert-card">
+        <strong>DESVÍO DETECTADO</strong>
+        <p class="muted mb-0">{{ metricas.desvios }} evento{{ metricas.desvios|pluralize }} fuera de ruta registrado en evidencia.</p>
+      </aside>
+      {% endif %}
+    </main>
+
+    <aside class="route-evidence-panel" aria-label="Evidencia y excepciones">
+      <nav class="evidence-tabs" aria-label="Secciones de evidencia">
+        <a class="evidence-tab active" href="#evidencia-dia">Evidencia</a>
+        <a class="evidence-tab" href="{% url 'logistica:puntos_logisticos' %}">Geocercas</a>
+      </nav>
+      <form method="get">
+        <input type="hidden" name="fecha" value="{{ fecha_iso }}">
+        {% if query %}<input type="hidden" name="q" value="{{ query }}">{% endif %}
+        <select class="evidence-filter" name="evento" aria-label="Filtrar eventos" onchange="this.form.submit()">
+          <option value="">Ver eventos del día</option>
+          {% for value, label in evento_choices %}
+          <option value="{{ value }}" {% if evento_tipo == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </form>
+
+      <section id="evidencia-dia" class="timeline">
+        {% for evento in eventos|slice:":8" %}
+        <div class="timeline-row">
+          <div class="timeline-time">{{ evento.creado_en|date:"H:i" }}</div>
+          <div class="timeline-rail"><span class="timeline-dot {{ evento.severidad }}"></span></div>
+          <div class="timeline-content">
+            <strong>{{ evento.get_tipo_display|upper }}</strong>
+            <p>{{ evento.descripcion }}</p>
+            <div class="muted">{{ evento.ruta.folio }}{% if evento.parada %} · {{ evento.parada.punto_nombre_snapshot }}{% endif %}{% if evento.distancia_metros %} · {{ evento.distancia_metros }} m{% endif %}</div>
+          </div>
+        </div>
+        {% empty %}
+        <p class="route-empty">Sin eventos de evidencia para esta fecha.</p>
+        {% endfor %}
+      </section>
+
+      <section class="exceptions-box" aria-label="Excepciones activas">
+        <div class="panel-title-row">
+          <h2>Excepciones activas</h2>
+          <span>{{ metricas.eventos_criticos|add:metricas.gps_perdido }}</span>
+        </div>
+        {% if metricas.desvios %}
+        <a class="exception-item critical" href="#evidencia-dia">
+          <span class="exception-icon">!</span>
+          <span><strong>Desvío de ruta</strong><span class="muted">{{ metricas.desvios }} detectado{{ metricas.desvios|pluralize }}</span></span>
+          <span aria-hidden="true">›</span>
+        </a>
+        {% endif %}
+        {% if metricas.gps_perdido %}
+        <a class="exception-item critical" href="#evidencia-dia">
+          <span class="exception-icon">!</span>
+          <span><strong>GPS perdido</strong><span class="muted">{{ metricas.gps_perdido }} evento{{ metricas.gps_perdido|pluralize }}</span></span>
+          <span aria-hidden="true">›</span>
+        </a>
+        {% endif %}
+        {% if not metricas.desvios and not metricas.gps_perdido %}
+        <p class="route-empty">No hay excepciones críticas abiertas.</p>
+        {% endif %}
+      </section>
+    </aside>
+  </section>
+
+  <section class="route-kpi-strip" aria-label="Indicadores de control">
+    <article class="route-kpi">
+      <span>Cumplimiento</span>
+      <strong class="{% if metricas.geocercas_programadas and metricas.geocercas_visitadas == metricas.geocercas_programadas %}good{% elif metricas.geocercas_visitadas %}warn{% endif %}">
+        {{ metricas.geocercas_visitadas }} / {{ metricas.geocercas_programadas }}
+      </strong>
+      <div class="muted">Geocercas visitadas</div>
+      <div class="kpi-rule"><progress value="{{ metricas.geocercas_visitadas }}" max="{{ metricas.geocercas_programadas|default:1 }}">{{ metricas.geocercas_visitadas }}</progress></div>
+    </article>
+    <article class="route-kpi">
+      <span>Desvíos</span>
+      <strong class="{% if metricas.desvios %}bad{% endif %}">{{ metricas.desvios }}</strong>
+      <div class="muted">Hoy</div>
+      <div class="kpi-rule {% if metricas.desvios %}bad{% endif %}"><progress value="{{ metricas.desvios }}" max="{% if metricas.desvios %}{{ metricas.desvios }}{% else %}1{% endif %}">{{ metricas.desvios }}</progress></div>
+    </article>
+    <article class="route-kpi">
+      <span>Geocercas</span>
+      <strong class="good">{{ metricas.geocercas_visitadas }} / {{ metricas.geocercas_programadas }}</strong>
+      <div class="muted">Programadas</div>
+      <div class="kpi-rule good"><progress value="{{ metricas.geocercas_visitadas }}" max="{{ metricas.geocercas_programadas|default:1 }}">{{ metricas.geocercas_visitadas }}</progress></div>
+    </article>
+    <article class="route-kpi">
+      <span>Paradas pendientes</span>
+      <strong class="{% if metricas.paradas_pendientes %}warn{% endif %}">{{ metricas.paradas_pendientes }}</strong>
+      <div class="muted">No visitadas</div>
+      <div class="kpi-rule"><progress value="{{ metricas.paradas_pendientes }}" max="{% if metricas.paradas_pendientes %}{{ metricas.paradas_pendientes }}{% else %}1{% endif %}">{{ metricas.paradas_pendientes }}</progress></div>
+    </article>
+    <article class="route-kpi">
+      <span>GPS perdido</span>
+      <strong class="{% if metricas.gps_perdido %}bad{% endif %}">{{ metricas.gps_perdido }}</strong>
+      <div class="muted">Máx. permitido: 0</div>
+      <div class="kpi-rule {% if metricas.gps_perdido %}bad{% endif %}"><progress value="{{ metricas.gps_perdido }}" max="{% if metricas.gps_perdido %}{{ metricas.gps_perdido }}{% else %}1{% endif %}">{{ metricas.gps_perdido }}</progress></div>
+    </article>
+  </section>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{{ mapa_rutas|json_script:"route-control-map-data" }}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+  (function () {
+    const mapNode = document.getElementById("route-control-map");
+    const dataNode = document.getElementById("route-control-map-data");
+    const emptyNode = document.getElementById("route-map-empty");
+    if (!mapNode || !dataNode) return;
+
+    const payload = JSON.parse(dataNode.textContent || "{}");
+    const routes = Array.isArray(payload.routes) ? payload.routes : [];
+    const events = Array.isArray(payload.eventos) ? payload.eventos : [];
+    const hasLeaflet = Boolean(window.L);
+
+    function showEmpty(message) {
+      if (!emptyNode) return;
+      if (message) {
+        const paragraph = emptyNode.querySelector("p");
+        if (paragraph) paragraph.textContent = message;
+      }
+      emptyNode.hidden = false;
+    }
+
+    if (!hasLeaflet) {
+      showEmpty("No se pudo cargar el proveedor de mapa. Revisa la conexión del navegador y vuelve a actualizar.");
+      return;
+    }
+
+    function parseFallbackPolyline(value) {
+      return value.split("|").map(function (pair) {
+        const parts = pair.split(",");
+        const lat = Number(parts[0]);
+        const lng = Number(parts[1]);
+        return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
+      }).filter(Boolean);
+    }
+
+    function decodeGooglePolyline(value) {
+      let index = 0;
+      let lat = 0;
+      let lng = 0;
+      const coordinates = [];
+
+      while (index < value.length) {
+        let shift = 0;
+        let result = 0;
+        let byte = null;
+        do {
+          byte = value.charCodeAt(index++) - 63;
+          result |= (byte & 0x1f) << shift;
+          shift += 5;
+        } while (byte >= 0x20 && index < value.length);
+        lat += (result & 1) ? ~(result >> 1) : (result >> 1);
+
+        shift = 0;
+        result = 0;
+        do {
+          byte = value.charCodeAt(index++) - 63;
+          result |= (byte & 0x1f) << shift;
+          shift += 5;
+        } while (byte >= 0x20 && index < value.length);
+        lng += (result & 1) ? ~(result >> 1) : (result >> 1);
+
+        coordinates.push([lat / 1e5, lng / 1e5]);
+      }
+      return coordinates;
+    }
+
+    function decodeRoutePolyline(value, source) {
+      if (!value) return [];
+      if (source !== "GOOGLE" && value.includes("|")) return parseFallbackPolyline(value);
+      try {
+        return decodeGooglePolyline(value);
+      } catch (error) {
+        return value.includes("|") ? parseFallbackPolyline(value) : [];
+      }
+    }
+
+    function stopIcon(stop) {
+      return L.divIcon({
+        className: "route-stop-div-icon",
+        html: '<span class="map-stop-marker">' + String(stop.orden || "") + "</span>",
+        iconSize: [30, 30],
+        iconAnchor: [15, 15],
+        popupAnchor: [0, -16],
+      });
+    }
+
+    function gpsIcon() {
+      return L.divIcon({
+        className: "route-gps-div-icon",
+        html: '<span class="map-gps-marker"></span>',
+        iconSize: [13, 13],
+        iconAnchor: [6, 6],
+      });
+    }
+
+    function discardedGpsIcon() {
+      return L.divIcon({
+        className: "route-gps-discarded-div-icon",
+        html: '<span class="map-gps-discarded-marker"></span>',
+        iconSize: [11, 11],
+        iconAnchor: [5, 5],
+      });
+    }
+
+    function eventIcon() {
+      return L.divIcon({
+        className: "route-event-div-icon",
+        html: '<span class="map-event-marker">!</span>',
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      });
+    }
+
+    const map = L.map(mapNode, {
+      zoomControl: true,
+      scrollWheelZoom: false,
+    }).setView([25.57, -108.47], 12);
+
+    L.tileLayer((payload.tiles && payload.tiles.url) || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: (payload.tiles && payload.tiles.attribution) || "© OpenStreetMap contributors",
+      maxZoom: 19,
+    }).addTo(map);
+
+    const bounds = L.latLngBounds();
+    let drawable = 0;
+    map.createPane("actualRoutePane");
+    map.getPane("actualRoutePane").style.zIndex = 470;
+
+    function drawActualRoute(coords, color, tooltip) {
+      L.polyline(coords, {
+        color: "#ffffff",
+        weight: 12,
+        opacity: 0.9,
+        pane: "actualRoutePane",
+      }).addTo(map);
+      L.polyline(coords, {
+        color: color,
+        weight: 7,
+        opacity: 1,
+        dashArray: "1 12",
+        lineCap: "round",
+        pane: "actualRoutePane",
+      }).addTo(map).bindTooltip(tooltip);
+      coords.forEach(function (point, index) {
+        if (index % 8 !== 0 && index !== coords.length - 1) return;
+        L.circleMarker(point, {
+          radius: 4,
+          color: "#ffffff",
+          weight: 2,
+          fillColor: color,
+          fillOpacity: 1,
+          pane: "actualRoutePane",
+        }).addTo(map);
+      });
+    }
+
+    routes.forEach(function (route) {
+      const color = route.color || "#1769c2";
+      const stops = Array.isArray(route.paradas) ? route.paradas : [];
+      const programmed = decodeRoutePolyline(route.programada_polyline, route.programada_fuente);
+      const fallbackProgrammed = stops.map(function (stop) { return [stop.lat, stop.lng]; });
+      const programmedCoords = programmed.length ? programmed : fallbackProgrammed;
+      const rawLocations = Array.isArray(route.ubicaciones) ? route.ubicaciones : [];
+      const rawActualCoords = rawLocations.map(function (point) {
+        return [point.lat, point.lng];
+      });
+      const hasSegmentPayload = Array.isArray(route.ubicaciones_segmentos);
+      const actualSegments = hasSegmentPayload ? route.ubicaciones_segmentos : [];
+      const fallbackActualCoords = (Array.isArray(route.ubicaciones_snapped) ? route.ubicaciones_snapped : []).map(function (point) {
+        return [point.lat, point.lng];
+      });
+
+      if (programmedCoords.length > 1) {
+        L.polyline(programmedCoords, {
+          color: color,
+          weight: 4,
+          opacity: 0.82,
+        }).addTo(map).bindTooltip(route.nombre + " · ruta planeada");
+        programmedCoords.forEach(function (point) { bounds.extend(point); });
+        drawable += 1;
+      }
+
+      if (hasSegmentPayload) {
+        actualSegments.forEach(function (segment) {
+          const coords = (Array.isArray(segment.coords) ? segment.coords : []).map(function (point) {
+            return [point.lat, point.lng];
+          });
+          if (coords.length <= 1) return;
+          drawActualRoute(
+            coords,
+            segment.estado === "fuera_geocerca" ? "#d82424" : "#e0007a",
+            route.nombre + " · " + (segment.fuente === "GOOGLE_ROADS" ? "GPS ajustado a calles" : "GPS recorrido")
+          );
+          coords.forEach(function (point) { bounds.extend(point); });
+          drawable += 1;
+        });
+      } else {
+        const actualCoords = fallbackActualCoords.length > 1 ? fallbackActualCoords : rawActualCoords;
+        if (actualCoords.length > 1) {
+          drawActualRoute(actualCoords, "#e0007a", route.nombre + " · GPS recorrido");
+          actualCoords.forEach(function (point) { bounds.extend(point); });
+          drawable += 1;
+        }
+      }
+
+      stops.forEach(function (stop) {
+        const point = [stop.lat, stop.lng];
+        L.circle(point, {
+          radius: stop.radio_metros || 80,
+          color: "#8b1740",
+          weight: 1.5,
+          dashArray: "5 5",
+          fillColor: "#8b1740",
+          fillOpacity: 0.05,
+        }).addTo(map);
+        L.marker(point, { icon: stopIcon(stop) })
+          .addTo(map)
+          .bindPopup("<strong>" + stop.orden + ". " + stop.nombre + "</strong><br>" + route.nombre + "<br>Estado: " + stop.estado);
+        bounds.extend(point);
+        drawable += 1;
+      });
+
+      rawLocations.filter(function (point) { return point.trazo_descartado; }).forEach(function (point) {
+        L.marker([point.lat, point.lng], { icon: discardedGpsIcon() })
+          .addTo(map)
+          .bindPopup("<strong>" + route.nombre + "</strong><br>GPS descartado del trazo<br>" + ((point.alertas_tracking || []).join(", ") || "señal no confiable") + "<br>" + (point.hora || "sin hora"));
+        bounds.extend([point.lat, point.lng]);
+        drawable += 1;
+      });
+
+      if (rawActualCoords.length) {
+        const latest = rawLocations[rawLocations.length - 1];
+        L.marker([latest.lat, latest.lng], { icon: gpsIcon() })
+          .addTo(map)
+          .bindPopup("<strong>" + route.nombre + "</strong><br>Último GPS: " + (latest.hora || "sin hora"));
+        bounds.extend([latest.lat, latest.lng]);
+        drawable += 1;
+      }
+    });
+
+    events.forEach(function (event) {
+      const point = [event.lat, event.lng];
+      L.marker(point, { icon: eventIcon() })
+        .addTo(map)
+        .bindPopup("<strong>" + event.tipo + "</strong><br>" + event.descripcion + "<br>" + event.hora);
+      bounds.extend(point);
+      drawable += 1;
+    });
+
+    if (drawable && bounds.isValid()) {
+      map.fitBounds(bounds, { padding: [34, 34], maxZoom: 15 });
+    } else {
+      showEmpty();
+    }
+
+    window.setTimeout(function () {
+      map.invalidateSize();
+    }, 160);
+  })();
+</script>
+{% endblock %}

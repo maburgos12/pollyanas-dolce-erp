@@ -4,266 +4,7 @@
 {% block page_title %}Mi calendario{% endblock %}
 
 {% block extra_css %}
-<style>
-  .calendar-shell {
-    display: grid;
-    gap: 16px;
-  }
-
-  .calendar-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .calendar-toolbar-group {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-  }
-
-  .calendar-title {
-    margin: 0;
-    color: var(--texto);
-    font-size: 1.15rem;
-    font-weight: 900;
-    overflow-wrap: anywhere;
-  }
-
-  .calendar-toggle .btn.is-active,
-  .calendar-nav .btn.is-active {
-    border-color: var(--vino);
-    color: var(--vino);
-  }
-
-  .calendar-legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-  }
-
-  .calendar-legend-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    min-height: 28px;
-    padding: 4px 9px;
-    border: 1px solid var(--gris-suave);
-    border-radius: var(--radius-sm);
-    color: var(--texto);
-    font-size: .82rem;
-    font-weight: 800;
-  }
-
-  .calendar-legend-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 999px;
-    background: var(--vino);
-  }
-
-  .calendar-legend-dot.is-minuta { background: var(--vino); }
-  .calendar-legend-dot.is-proyecto { background: var(--dorado); }
-  .calendar-legend-dot.is-compromiso { background: var(--verde); }
-  .calendar-legend-dot.is-paso { background: var(--rosa); }
-  .calendar-legend-dot.is-actividad { background: var(--amarillo); }
-  .calendar-legend-dot.is-vencido { background: var(--rojo); }
-
-  .calendar-month,
-  .calendar-week {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
-    gap: 8px;
-  }
-
-  .calendar-weekday {
-    color: var(--texto-light);
-    font-size: .78rem;
-    font-weight: 900;
-    text-align: center;
-    text-transform: uppercase;
-  }
-
-  .calendar-day {
-    min-height: 132px;
-    border: 1px solid var(--gris-suave);
-    border-radius: var(--radius-sm);
-    background: var(--blanco, #fff);
-    padding: 8px;
-    display: grid;
-    grid-template-rows: auto 1fr;
-    gap: 8px;
-    cursor: pointer;
-  }
-
-  .calendar-day.is-out {
-    opacity: .55;
-  }
-
-  .calendar-day.is-today {
-    border-color: var(--vino);
-  }
-
-  .calendar-day-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    color: var(--texto);
-    font-size: .88rem;
-    font-weight: 900;
-  }
-
-  .calendar-day-count {
-    color: var(--texto-light);
-    font-size: .76rem;
-    font-weight: 800;
-  }
-
-  .calendar-events {
-    display: grid;
-    gap: 5px;
-    align-content: start;
-  }
-
-  .calendar-chip {
-    border: 1px solid var(--gris-suave);
-    border-left: 4px solid var(--vino);
-    border-radius: var(--radius-sm);
-    background: var(--blanco, #fff);
-    color: var(--texto);
-    padding: 5px 7px;
-    text-align: left;
-    font: inherit;
-    font-size: .78rem;
-    font-weight: 800;
-    line-height: 1.2;
-    cursor: pointer;
-    overflow-wrap: anywhere;
-  }
-
-  .calendar-chip.is-minuta { border-left-color: var(--vino); }
-  .calendar-chip.is-proyecto { border-left-color: var(--dorado); }
-  .calendar-chip.is-compromiso { border-left-color: var(--verde); }
-  .calendar-chip.is-paso { border-left-color: var(--rosa); }
-  .calendar-chip.is-actividad { border-left-color: var(--amarillo); }
-  .calendar-chip.is-vencido { border-color: var(--rojo); }
-  .calendar-chip.is-completed { opacity: .68; }
-
-  .calendar-more {
-    border: 0;
-    background: transparent;
-    color: var(--vino);
-    padding: 3px 0;
-    text-align: left;
-    font: inherit;
-    font-size: .78rem;
-    font-weight: 900;
-    cursor: pointer;
-  }
-
-  .calendar-week-day {
-    min-height: 340px;
-    border: 1px solid var(--gris-suave);
-    border-radius: var(--radius-sm);
-    padding: 10px;
-    display: grid;
-    gap: 10px;
-    align-content: start;
-  }
-
-  .calendar-list {
-    display: none;
-    gap: 10px;
-  }
-
-  .calendar-list-day {
-    border: 1px solid var(--gris-suave);
-    border-radius: var(--radius-sm);
-    padding: 10px;
-    display: grid;
-    gap: 8px;
-  }
-
-  .calendar-side {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(280px, .38fr);
-    gap: 16px;
-    align-items: start;
-  }
-
-  .calendar-panel {
-    border: 1px solid var(--gris-suave);
-    border-radius: var(--radius-sm);
-    padding: 14px;
-    display: grid;
-    gap: 12px;
-  }
-
-  .calendar-panel h2,
-  .calendar-panel h3 {
-    margin: 0;
-    color: var(--texto);
-    font-size: 1rem;
-    font-weight: 900;
-    overflow-wrap: anywhere;
-  }
-
-  .calendar-panel p {
-    margin: 0;
-  }
-
-  .calendar-panel-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .calendar-hidden {
-    display: none;
-  }
-
-  .calendar-form-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .calendar-full-field {
-    grid-column: 1 / -1;
-  }
-
-  @media (max-width: 920px) {
-    .calendar-side {
-      grid-template-columns: minmax(0, 1fr);
-    }
-  }
-
-  @media (max-width: 720px) {
-    .calendar-month,
-    .calendar-week,
-    .calendar-weekday {
-      display: none;
-    }
-
-    .calendar-list {
-      display: grid;
-    }
-
-    .calendar-toolbar {
-      align-items: stretch;
-    }
-
-    .calendar-toolbar-group,
-    .calendar-toolbar .input-field {
-      width: 100%;
-    }
-  }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/seguimiento-templates-seguimiento-calendario.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
@@ -286,7 +27,7 @@
       <button type="button" class="btn btn-secondary is-active" data-view="mes">Mes</button>
       <button type="button" class="btn btn-secondary" data-view="semana">Semana</button>
       {% if es_dg %}
-        <select class="input-field" id="calendar-user-filter" aria-label="Filtrar por colaborador">
+        <select class="input-field calendar-filter" id="calendar-user-filter" aria-label="Filtrar por colaborador">
           <option value="">Todos</option>
           {% for colaborador in colaboradores %}
             <option value="{{ colaborador.id }}">{{ colaborador.get_full_name|default:colaborador.username }}</option>
@@ -294,6 +35,7 @@
         </select>
       {% endif %}
       <button type="button" class="btn btn-primary" data-action="new">Nueva actividad</button>
+      <button type="button" class="btn btn-secondary" data-action="new-meeting">Crear reunión</button>
     </div>
   </div>
 
@@ -310,9 +52,11 @@
 
   <div class="calendar-side">
     <div>
-      <div class="calendar-month" id="calendar-weekdays" aria-hidden="true"></div>
-      <div class="calendar-month" id="calendar-month"></div>
-      <div class="calendar-week calendar-hidden" id="calendar-week"></div>
+      <div class="calendar-grid-scroll">
+        <div class="calendar-month" id="calendar-weekdays" aria-hidden="true"></div>
+        <div class="calendar-month" id="calendar-month"></div>
+        <div class="calendar-week calendar-hidden" id="calendar-week"></div>
+      </div>
       <div class="calendar-list" id="calendar-list"></div>
     </div>
 
@@ -327,10 +71,20 @@
     <form id="calendar-form">
       {% csrf_token %}
       <input type="hidden" name="actividad_id" id="actividad-id">
+      <input type="hidden" name="tipo" id="actividad-tipo" value="ACTIVIDAD">
       <div class="form-grid-2">
         <div class="form-group">
           <label for="actividad-titulo">Título</label>
           <input class="input-field" type="text" id="actividad-titulo" name="titulo" maxlength="220" required>
+        </div>
+        <div class="form-group calendar-meeting-field calendar-hidden">
+          <label for="actividad-invitado">Colaborador</label>
+          <select class="input-field" id="actividad-invitado" name="invitado_user">
+            <option value="">Sin colaborador específico</option>
+            {% for usuario in usuarios_reunion %}
+              <option value="{{ usuario.id }}">{{ usuario.get_full_name|default:usuario.username }}</option>
+            {% endfor %}
+          </select>
         </div>
         <div class="form-group">
           <label for="actividad-fecha">Fecha</label>
@@ -347,6 +101,27 @@
         <div class="form-group calendar-full-field">
           <label for="actividad-descripcion">Descripción</label>
           <textarea class="input-field" id="actividad-descripcion" name="descripcion" rows="4"></textarea>
+        </div>
+        <div class="form-group calendar-full-field calendar-meeting-field calendar-hidden">
+          <div class="calendar-inline-options">
+            <label for="actividad-direccion-general">
+              <input type="checkbox" id="actividad-direccion-general" name="direccion_general" value="1">
+              Incluir Dirección General
+            </label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="actividad-periodicidad">Repetir</label>
+          <select class="input-field" id="actividad-periodicidad" name="periodicidad">
+            <option value="NINGUNA">No se repite</option>
+            <option value="DIARIA">Diario</option>
+            <option value="SEMANAL">Semanal</option>
+            <option value="MENSUAL">Mensual</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="actividad-repeticiones">Ocurrencias</label>
+          <input class="input-field" type="number" id="actividad-repeticiones" name="repeticiones" min="2" max="26" value="2" disabled>
         </div>
       </div>
       <p class="text-danger calendar-hidden" id="calendar-form-error"></p>
@@ -382,6 +157,12 @@
     formTitle: byId('calendar-form-title'),
     formError: byId('calendar-form-error'),
     userFilter: byId('calendar-user-filter'),
+    eventType: byId('actividad-tipo'),
+    meetingFields: document.querySelectorAll('.calendar-meeting-field'),
+    invitedUser: byId('actividad-invitado'),
+    direccionGeneral: byId('actividad-direccion-general'),
+    periodicidad: byId('actividad-periodicidad'),
+    repeticiones: byId('actividad-repeticiones'),
   };
 
   function pad(value) {
@@ -458,7 +239,7 @@
     const type = String(event.tipo || '').toLowerCase();
     const classes = ['calendar-chip'];
     if (event.fuente === 'actividad') {
-      classes.push('is-actividad');
+      classes.push(event.tipo === 'REUNION' ? 'is-proyecto' : 'is-actividad');
     } else if (event.fuente === 'checklist') {
       classes.push('is-paso');
     } else if (type === 'minuta') {
@@ -471,7 +252,7 @@
     if (event.vencido) {
       classes.push('is-vencido');
     }
-    if (event.estatus === 'COMPLETADA' || event.estatus === 'COMPLETADO') {
+    if (event.finalizado || event.estatus === 'COMPLETADA' || event.estatus === 'COMPLETADO') {
       classes.push('is-completed');
     }
     return classes.join(' ');
@@ -484,7 +265,11 @@
     button.textContent = `${event.hora ? event.hora + ' · ' : ''}${event.titulo}`;
     button.addEventListener('click', (ev) => {
       ev.stopPropagation();
-      showDetail(event);
+      if (event.url) {
+        window.location.href = event.url;
+      } else {
+        showDetail(event);
+      }
     });
     return button;
   }
@@ -651,7 +436,7 @@
     els.detail.appendChild(title);
     const meta = document.createElement('p');
     meta.className = 'muted';
-    meta.textContent = `${event.tipo} · ${event.fecha}${event.hora ? ' · ' + event.hora : ''}${event.hora_fin ? ' - ' + event.hora_fin : ''}`;
+    meta.textContent = `${event.source_label || event.tipo} · ${event.fecha}${event.hora ? ' · ' + event.hora : ''}${event.hora_fin ? ' - ' + event.hora_fin : ''}`;
     els.detail.appendChild(meta);
     const status = document.createElement('p');
     status.textContent = `Estatus: ${event.estatus || 'Pendiente'}`;
@@ -660,6 +445,16 @@
       const responsible = document.createElement('p');
       responsible.textContent = `Responsable: ${event.responsable}`;
       els.detail.appendChild(responsible);
+    }
+    if (event.invitado) {
+      const invited = document.createElement('p');
+      invited.textContent = `Con: ${event.invitado}`;
+      els.detail.appendChild(invited);
+    }
+    if (event.direccion_general) {
+      const dg = document.createElement('p');
+      dg.textContent = 'Incluye Dirección General';
+      els.detail.appendChild(dg);
     }
     if (event.descripcion) {
       const desc = document.createElement('p');
@@ -686,18 +481,8 @@
       complete.className = 'btn btn-secondary';
       complete.textContent = event.estatus === 'COMPLETADA' ? 'Reabrir' : 'Completar';
       complete.addEventListener('click', () => mutate(`/seguimiento/calendario/actividades/${event.id.replace('act-', '')}/completar/`));
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'btn btn-secondary';
-      remove.textContent = 'Eliminar';
-      remove.addEventListener('click', () => {
-        if (confirm('¿Eliminar esta actividad?')) {
-          mutate(`/seguimiento/calendario/actividades/${event.id.replace('act-', '')}/eliminar/`);
-        }
-      });
       actions.appendChild(edit);
       actions.appendChild(complete);
-      actions.appendChild(remove);
     } else if (event.url) {
       const link = document.createElement('a');
       link.className = 'btn btn-secondary';
@@ -708,17 +493,41 @@
     els.detail.appendChild(actions);
   }
 
-  function openForm(event) {
+  function setFormType(tipo) {
+    const isMeeting = tipo === 'REUNION';
+    els.eventType.value = tipo;
+    els.meetingFields.forEach((field) => field.classList.toggle('calendar-hidden', !isMeeting));
+    els.formTitle.textContent = isMeeting ? 'Crear reunión' : 'Nueva actividad';
+  }
+
+  function syncRecurrence() {
+    const repeats = els.periodicidad.value !== 'NINGUNA';
+    els.repeticiones.disabled = !repeats;
+  }
+
+  function openForm(event, tipo) {
     els.form.reset();
     els.formError.textContent = '';
     els.formError.classList.add('calendar-hidden');
     byId('actividad-id').value = event && event.id ? event.id.replace('act-', '') : '';
+    const eventType = event && event.tipo === 'REUNION' ? 'REUNION' : (tipo || 'ACTIVIDAD');
+    setFormType(eventType);
     byId('actividad-titulo').value = event && event.titulo ? event.titulo : '';
     byId('actividad-fecha').value = event && event.fecha ? event.fecha : dateKey(state.cursor);
     byId('actividad-hora-inicio').value = event && event.hora ? event.hora : '';
     byId('actividad-hora-fin').value = event && event.hora_fin ? event.hora_fin : '';
     byId('actividad-descripcion').value = event && event.descripcion ? event.descripcion : '';
-    els.formTitle.textContent = event && event.id ? 'Editar actividad' : 'Nueva actividad';
+    if (els.invitedUser && event && event.invitado_user_id) {
+      els.invitedUser.value = String(event.invitado_user_id);
+    }
+    if (els.direccionGeneral && event) {
+      els.direccionGeneral.checked = Boolean(event.direccion_general);
+    }
+    if (event && event.id) {
+      els.periodicidad.value = 'NINGUNA';
+      els.formTitle.textContent = eventType === 'REUNION' ? 'Editar reunión' : 'Editar actividad';
+    }
+    syncRecurrence();
     els.formPanel.classList.remove('calendar-hidden');
     byId('actividad-titulo').focus();
   }
@@ -778,7 +587,9 @@
         }
         loadEvents();
       } else if (action === 'new') {
-        openForm({fecha: dateKey(state.cursor)});
+        openForm({fecha: dateKey(state.cursor)}, 'ACTIVIDAD');
+      } else if (action === 'new-meeting') {
+        openForm({fecha: dateKey(state.cursor)}, 'REUNION');
       } else if (action === 'cancel-form') {
         closeForm();
       }
@@ -799,6 +610,8 @@
     });
   }
 
+  els.periodicidad.addEventListener('change', syncRecurrence);
+  syncRecurrence();
   loadEvents();
 })();
 </script>

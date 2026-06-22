@@ -7,12 +7,17 @@ app_name = "logistica"
 
 urlpatterns = [
     path("app/", views_pwa.pwa_app, name="pwa_app"),
+    path("sw.js", views_pwa.pwa_sw, name="pwa_sw"),
     path("", views.dashboard, name="home"),
     path("ejecutivo/", views.dashboard_ejecutivo, name="dashboard_ejecutivo"),
     path("tickets/", views.tickets_kanban, name="tickets_kanban"),
     path("tickets/<int:pk>/actualizar/", views.ticket_actualizar, name="ticket_actualizar"),
     path("flota/", views.flota_resumen, name="flota_resumen"),
     path("rutas/", views.rutas, name="rutas"),
+    path("rutas/control/", views.control_rutas, name="control_rutas"),
+    path("rutas/puntos/", views.puntos_logisticos, name="puntos_logisticos"),
+    path("rutas/puntos/<int:pk>/editar/", views.punto_logistico_edit, name="punto_logistico_edit"),
+    path("rutas/puntos/<int:pk>/toggle/", views.punto_logistico_toggle, name="punto_logistico_toggle"),
     path("dashboard/", views.dashboard, name="dashboard"),
     path("capturas/", views.capturas_pwa, name="capturas_pwa"),
     path("unidades/", views.unidades_list, name="unidades_list"),

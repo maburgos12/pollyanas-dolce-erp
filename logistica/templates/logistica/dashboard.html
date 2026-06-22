@@ -6,8 +6,8 @@
 {% block body_class %}page-logistica-dashboard{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260621-button-gap-v1">
+<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260621-button-gap-v1">
 {% endblock %}
 
 {% block content %}
@@ -100,12 +100,12 @@
       </div>
     </div>
     <div class="bi-summary-band">
-      <a class="bi-summary-chip" href="{% url 'logistica:dashboard_ejecutivo' %}" style="text-decoration:none;"><span>Dirección</span><strong>Dashboard ejecutivo</strong></a>
-      <a class="bi-summary-chip" href="{% url 'logistica:tickets_kanban' %}" style="text-decoration:none;"><span>Operación</span><strong>Tickets</strong></a>
-      <a class="bi-summary-chip" href="{% url 'logistica:reportes_lista' %}" style="text-decoration:none;"><span>Reportes</span><strong>Fallas y evidencias</strong></a>
-      <a class="bi-summary-chip" href="{% url 'logistica:bitacoras_lista' %}" style="text-decoration:none;"><span>Bitácoras</span><strong>Salida y llegada</strong></a>
-      <a class="bi-summary-chip" href="{% url 'logistica:flota_resumen' %}" style="text-decoration:none;"><span>Flota</span><strong>Resumen de flota</strong></a>
-      <a class="bi-summary-chip" href="{% url 'logistica:pwa_app' %}" style="text-decoration:none;" target="_blank" rel="noopener"><span>App móvil</span><strong>Abrir app móvil</strong></a>
+      <a class="bi-summary-chip pd-u-4edeb9e71d" href="{% url 'logistica:dashboard_ejecutivo' %}"><span>Dirección</span><strong>Dashboard ejecutivo</strong></a>
+      <a class="bi-summary-chip pd-u-4edeb9e71d" href="{% url 'logistica:tickets_kanban' %}"><span>Operación</span><strong>Tickets</strong></a>
+      <a class="bi-summary-chip pd-u-4edeb9e71d" href="{% url 'logistica:reportes_lista' %}"><span>Reportes</span><strong>Fallas y evidencias</strong></a>
+      <a class="bi-summary-chip pd-u-4edeb9e71d" href="{% url 'logistica:bitacoras_lista' %}"><span>Bitácoras</span><strong>Salida y llegada</strong></a>
+      <a class="bi-summary-chip pd-u-4edeb9e71d" href="{% url 'logistica:flota_resumen' %}"><span>Flota</span><strong>Resumen de flota</strong></a>
+      <a class="bi-summary-chip pd-u-4edeb9e71d" href="{% url 'logistica:pwa_app' %}" target="_blank" rel="noopener"><span>App móvil</span><strong>Abrir app móvil</strong></a>
     </div>
   </section>
   {% endif %}

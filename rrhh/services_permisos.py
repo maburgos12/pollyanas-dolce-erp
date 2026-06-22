@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from django.contrib.auth.models import AbstractBaseUser
+from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
 from django.utils import timezone
 
-from core.access import ROLE_DG
+from core.access import ROLE_DG, group_name_variants
 from recetas.utils.normalizacion import normalizar_nombre
 
 from .models import Empleado, PermisoSalida
@@ -47,6 +48,17 @@ def can_authorize_direccion(user: AbstractBaseUser) -> bool:
     if user.is_superuser:
         return True
     return user.groups.filter(name__iexact=ROLE_DG).exists()
+
+
+def usuario_direccion_general_para_autorizacion():
+    User = get_user_model()
+    return (
+        User.objects.filter(is_active=True, groups__name__in=group_name_variants(ROLE_DG))
+        .distinct()
+        .order_by("username")
+        .first()
+        or User.objects.filter(is_active=True, is_superuser=True).order_by("username").first()
+    )
 
 
 def usuario_jefe_directo_permiso(permiso: PermisoSalida):

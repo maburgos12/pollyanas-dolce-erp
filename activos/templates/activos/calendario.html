@@ -15,7 +15,7 @@
   <div class="kpi-grid kpi-mini">
     <article class="kpi-card">
       <div class="kpi-label">Responsable principal</div>
-      <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
+      <div class="pd-u-4304c62622">{{ erp_command_center.owner }}</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
@@ -27,7 +27,7 @@
     </article>
     <article class="kpi-card">
       <div class="kpi-label">Siguiente paso</div>
-      <div class="muted" style="margin:8px 0 10px;">{{ erp_command_center.next_step }}</div>
+      <div class="muted pd-u-332dbeaac1">{{ erp_command_center.next_step }}</div>
       <a class="btn btn-secondary btn-small" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
     </article>
   </div>
@@ -39,7 +39,7 @@
     <table class="table">
       <tbody>
         <tr>
-          <td style="width:28%;"><strong>Documento</strong></td>
+          <td class="pd-u-e5897dceea"><strong>Documento</strong></td>
           <td>Calendario operativo de planes, órdenes y eventos técnicos programados.</td>
         </tr>
         <tr>
@@ -114,9 +114,9 @@
       <article class="enterprise-pill-card {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
         <div class="enterprise-pill-title">{{ item.step }} · {{ item.title }}</div>
         <div class="enterprise-pill-text">{{ item.detail }}</div>
-        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="margin-top:10px;">{{ item.count }}</div>
+        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %} pd-u-d8a81eac84">{{ item.count }}</div>
         <div class="muted">{{ item.status }}</div>
-        <div style="margin-top:10px;">
+        <div class="pd-u-d8a81eac84">
           <a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a>
         </div>
       </article>
@@ -247,9 +247,9 @@
     </article>
     <article class="kpi-card">
       <div class="kpi-label">Siguiente prioridad</div>
-      <div style="font-weight:700; margin:8px 0 6px;">{{ enterprise_maturity_summary.next_priority_title }}</div>
+      <div class="pd-u-06a806e885">{{ enterprise_maturity_summary.next_priority_title }}</div>
       <div class="muted">{{ enterprise_maturity_summary.next_priority_detail }}</div>
-      <div style="margin-top:10px;">
+      <div class="pd-u-d8a81eac84">
         <a class="btn btn-secondary btn-small" href="{{ enterprise_maturity_summary.next_priority_url }}">{{ enterprise_maturity_summary.next_priority_cta }}</a>
       </div>
     </article>
@@ -292,9 +292,9 @@
       <article class="enterprise-pill-card {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
         <div class="enterprise-pill-title">{{ item.label }}</div>
         <div class="enterprise-pill-text">{{ item.detail }}</div>
-        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="margin-top:10px;">{{ item.count }}</div>
+        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %} pd-u-d8a81eac84">{{ item.count }}</div>
         <div class="muted">{{ item.status }}</div>
-        <div style="margin-top:10px;">
+        <div class="pd-u-d8a81eac84">
           <a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a>
         </div>
       </article>
@@ -330,9 +330,9 @@
             <td>{{ row.owner }}</td>
             <td>{{ row.status }}</td>
             <td class="text-end">{{ row.count }}</td>
-            <td style="min-width:160px;">
+            <td class="pd-u-1cf294634a">
               <div class="erp-progress">
-                <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="width: {{ row.completion }}%;"></div>
+                <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %} pd-js-width" data-pd-width="{{ row.completion }}%"></div>
               </div>
               <div class="muted mt-1">{{ row.completion }}%</div>
             </td>
@@ -351,7 +351,7 @@
 <section class="card">
   <div class="card-header">Rango calendario</div>
   <form method="get">
-    <div class="row" style="display:grid;grid-template-columns:repeat(4,minmax(180px,1fr));gap:10px;align-items:end;">
+    <div class="row pd-u-1177383c7c">
       <div>
         <label>Desde</label>
         <input type="date" name="from" value="{{ date_from|date:'Y-m-d' }}">
@@ -375,7 +375,7 @@
       </div>
     </div>
   </form>
-  <div class="quick-actions" style="margin-top:10px;">
+  <div class="quick-actions pd-u-d8a81eac84">
     <a class="btn btn-secondary" href="?days=7">Próx. 7 días</a>
     <a class="btn btn-secondary" href="?days=15">Próx. 15 días</a>
     <a class="btn btn-secondary" href="?days=30">Próx. 30 días</a>

@@ -29,6 +29,27 @@
   box-sizing: border-box;
 }
 
+.ti,
+.material-symbols-sharp,
+.lucide {
+  display: inline-block;
+  flex: 0 0 auto;
+  line-height: 1;
+}
+
+.material-symbols-sharp {
+  font-size: 1.2em;
+  font-variation-settings: "FILL" 0, "wght" 500, "GRAD" 0, "opsz" 24;
+  vertical-align: -0.18em;
+}
+
+.lucide {
+  width: 1em;
+  height: 1em;
+  stroke-width: 2;
+  vertical-align: -0.16em;
+}
+
 html {
   width: 100%;
   max-width: 100%;
@@ -6237,7 +6258,7 @@ tr,
   font-size: 13px;
   font-weight: 700;
   text-align: center;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
   min-height: 80px;
 }
 .quick-action-card:hover {

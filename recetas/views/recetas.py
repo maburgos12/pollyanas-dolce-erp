@@ -6,7 +6,7 @@ from math import exp, sqrt
 from datetime import date, datetime, timedelta
 from calendar import monthrange
 from collections import defaultdict
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 from typing import Dict, Any, List
 from urllib.parse import urlencode
 from uuid import uuid4
@@ -28,6 +28,7 @@ from django.views.decorators.http import require_POST
 from openpyxl import Workbook, load_workbook
 from openpyxl.drawing.image import Image as OpenpyxlImage
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 from rapidfuzz import fuzz
 
 from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
@@ -73,6 +74,7 @@ from ..models import (
     CostoDriver,
     PlanProduccion,
     PlanProduccionItem,
+    PoliticaMargenPrecio,
     PronosticoVenta,
     SolicitudVenta,
     VentaHistorica,
@@ -6175,7 +6177,7 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
     familias_produccion = sorted({
         (categoria or "").strip()
         for categoria in PointProduct.objects.filter(
-            active=True, precio_activo=True, precio__isnull=False
+            active=True, precio_activo=True
         ).values_list("category", flat=True)
         if (categoria or "").strip()
     })
@@ -6197,6 +6199,8 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
             "total_cost": total_cost,
             "total_price": total_price,
             "familias_produccion": familias_produccion,
+            "politicas_precio_base": _base_policy_payload(),
+            "puede_editar_politicas_precio": request.user.is_superuser,
         },
     )
 
@@ -6240,6 +6244,244 @@ def _margen_meta_por_fuente(fuente: str) -> Decimal:
     return MARGEN_META_FAB_PCT
 
 
+ACCION_SUBIR = "SUBIR"
+ACCION_SUBIR_GRADUAL = "SUBIR_GRADUAL"
+ACCION_MANTENER = "MANTENER"
+ACCION_REVISAR_COSTO = "REVISAR_COSTO"
+ACCION_ALTO_RIESGO = "ALTO_RIESGO_COMPETITIVO"
+ACCION_LABELS = {
+    ACCION_SUBIR: "Subir",
+    ACCION_SUBIR_GRADUAL: "Subir gradual",
+    ACCION_MANTENER: "Mantener",
+    ACCION_REVISAR_COSTO: "Revisar costo",
+    ACCION_ALTO_RIESGO: "Alto riesgo competitivo",
+}
+
+
+def _politicas_margen_precio() -> list[PoliticaMargenPrecio]:
+    return list(
+        PoliticaMargenPrecio.objects.filter(activo=True).order_by(
+            "-familia_point", "prioridad", "-actualizado_en", "-id"
+        )
+    )
+
+
+def _resolver_politica_margen(
+    politicas: list[PoliticaMargenPrecio],
+    *,
+    fuente: str,
+    familia_point: str,
+) -> dict[str, Decimal | str | None]:
+    familia_norm = (familia_point or "").strip()
+    fuente_norm = fuente or ""
+    mejor: PoliticaMargenPrecio | None = None
+    mejor_score: tuple[int, int, int] | None = None
+    for politica in politicas:
+        politica_familia = (politica.familia_point or "").strip()
+        if politica_familia and politica_familia != familia_norm:
+            continue
+        if politica.fuente_costo not in {PoliticaMargenPrecio.FUENTE_TODAS, fuente_norm}:
+            continue
+        score = (
+            1 if politica_familia else 0,
+            1 if politica.fuente_costo == fuente_norm else 0,
+            -int(politica.prioridad or 0),
+        )
+        if mejor_score is None or score > mejor_score:
+            mejor = politica
+            mejor_score = score
+
+    if mejor:
+        return {
+            "margen_meta": Decimal(str(mejor.margen_meta_pct)),
+            "subida_maxima_pct": Decimal(str(mejor.subida_maxima_pct)) if mejor.subida_maxima_pct is not None else None,
+            "precio_max_competitivo": Decimal(str(mejor.precio_max_competitivo)) if mejor.precio_max_competitivo is not None else None,
+            "politica_margen_id": mejor.id,
+            "politica_margen_label": str(mejor),
+        }
+
+    return {
+        "margen_meta": _margen_meta_por_fuente(fuente_norm),
+        "subida_maxima_pct": None,
+        "precio_max_competitivo": None,
+        "politica_margen_id": None,
+        "politica_margen_label": "Fallback interno",
+    }
+
+
+def _accion_precio_sugerida(
+    *,
+    estado: str,
+    fuente: str,
+    precio_minimo: Decimal,
+    precio_recomendado: Decimal,
+    precio_actual: Decimal,
+) -> str:
+    if estado == "OK":
+        return ACCION_MANTENER
+    if estado in {"SIN_COSTO", "SIN_PRECIO"}:
+        return ACCION_REVISAR_COSTO
+
+    if fuente == COSTO_MP_FALLBACK and estado == "AJUSTE":
+        return ACCION_REVISAR_COSTO
+    if precio_minimo > precio_recomendado:
+        if precio_actual > 0 and precio_recomendado > precio_actual:
+            return ACCION_SUBIR_GRADUAL
+        return ACCION_ALTO_RIESGO
+    return ACCION_SUBIR
+
+
+def _round_down_to_increment(value: Decimal, increment: Decimal = Decimal("5")) -> Decimal:
+    if value <= 0:
+        return Decimal("0.00")
+    if increment <= 0:
+        return value.quantize(Decimal("0.01"))
+    return ((value / increment).to_integral_value(rounding=ROUND_FLOOR) * increment).quantize(Decimal("0.01"))
+
+
+def _precio_recomendado_comercial(
+    *,
+    precio_actual: Decimal,
+    precio_minimo: Decimal,
+    costo: Decimal,
+    politica: dict[str, Decimal | str | None],
+) -> dict[str, Decimal | None]:
+    """Precio comercial recomendado: respeta topes sin ocultar el piso financiero."""
+    if precio_minimo <= 0:
+        return {
+            "precio_recomendado": Decimal("0.00"),
+            "brecha_precio_minimo": None,
+            "subida_recomendada_pct": None,
+            "margen_recomendado": None,
+            "precio_tope_riesgo": None,
+        }
+
+    precio_tope_riesgo: Decimal | None = None
+    subida_max = politica.get("subida_maxima_pct")
+    if isinstance(subida_max, Decimal) and subida_max > 0 and precio_actual > 0:
+        precio_tope_riesgo = (precio_actual * (Decimal("1") + (subida_max / Decimal("100")))).quantize(Decimal("0.01"))
+
+    precio_tope_competitivo = politica.get("precio_max_competitivo")
+    if isinstance(precio_tope_competitivo, Decimal) and precio_tope_competitivo > 0:
+        precio_tope_riesgo = (
+            min(precio_tope_riesgo, precio_tope_competitivo)
+            if precio_tope_riesgo is not None
+            else precio_tope_competitivo
+        )
+
+    if precio_actual > 0 and precio_actual >= precio_minimo:
+        precio_recomendado = precio_actual.quantize(Decimal("0.01"))
+    elif precio_tope_riesgo is not None and precio_tope_riesgo < precio_minimo:
+        precio_recomendado = _round_down_to_increment(precio_tope_riesgo)
+        if precio_actual > 0 and precio_recomendado < precio_actual:
+            precio_recomendado = precio_actual.quantize(Decimal("0.01"))
+    else:
+        precio_recomendado = precio_minimo.quantize(Decimal("0.01"))
+
+    brecha = None
+    if precio_minimo > precio_recomendado:
+        brecha = (precio_minimo - precio_recomendado).quantize(Decimal("0.01"))
+
+    subida_pct = None
+    if precio_actual > 0 and precio_recomendado > precio_actual:
+        subida_pct = ((precio_recomendado - precio_actual) / precio_actual * Decimal("100")).quantize(Decimal("0.1"))
+
+    margen_recomendado = None
+    if costo > 0 and precio_recomendado > 0:
+        margen_recomendado = ((precio_recomendado - costo) / precio_recomendado * Decimal("100")).quantize(Decimal("0.1"))
+
+    return {
+        "precio_recomendado": precio_recomendado,
+        "brecha_precio_minimo": brecha,
+        "subida_recomendada_pct": subida_pct,
+        "margen_recomendado": margen_recomendado,
+        "precio_tope_riesgo": precio_tope_riesgo,
+    }
+
+
+def _fmt_decimal(value: Decimal | None) -> str | None:
+    if value is None:
+        return None
+    text = format(value.normalize(), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
+
+
+def _base_policy_payload() -> dict[str, dict[str, str | None]]:
+    politicas = _politicas_margen_precio()
+    config = {}
+    for key, fuente in {
+        "fab": COSTO_FAB_COMPLETO,
+        "mp": COSTO_MP_FALLBACK,
+        "reventa": COSTO_REVENTA,
+    }.items():
+        politica = _resolver_politica_margen(politicas, fuente=fuente, familia_point="")
+        config[key] = {
+            "margen_meta_pct": _fmt_decimal(politica["margen_meta"]),
+            "subida_maxima_pct": _fmt_decimal(politica["subida_maxima_pct"]),
+            "precio_max_competitivo": _fmt_decimal(politica["precio_max_competitivo"]),
+        }
+    return config
+
+
+def _decimal_from_payload(value: Any, *, field_name: str, minimum: Decimal, maximum: Decimal) -> Decimal | None:
+    if value in ("", None):
+        return None
+    try:
+        parsed = Decimal(str(value))
+    except Exception as exc:
+        raise ValueError(f"{field_name} no es numérico") from exc
+    if parsed < minimum or parsed > maximum:
+        raise ValueError(f"{field_name} debe estar entre {minimum} y {maximum}")
+    return parsed.quantize(Decimal("0.01"))
+
+
+@login_required
+@require_POST
+def monitor_margenes_politicas_precio(request: HttpRequest) -> JsonResponse:
+    if not request.user.is_superuser:
+        raise PermissionDenied
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+        fuentes = {
+            "fab": (COSTO_FAB_COMPLETO, "Fabricacion completa"),
+            "mp": (COSTO_MP_FALLBACK, "Solo materia prima"),
+            "reventa": (COSTO_REVENTA, "Reventa"),
+        }
+        for key, (fuente, label) in fuentes.items():
+            row = payload.get(key) or {}
+            margen = _decimal_from_payload(
+                row.get("margen_meta_pct"),
+                field_name=f"Margen {label}",
+                minimum=Decimal("0"),
+                maximum=Decimal("95"),
+            )
+            subida = _decimal_from_payload(
+                row.get("subida_maxima_pct"),
+                field_name=f"Riesgo {label}",
+                minimum=Decimal("0"),
+                maximum=Decimal("500"),
+            )
+            if margen is None:
+                raise ValueError(f"Margen {label} es requerido")
+            PoliticaMargenPrecio.objects.update_or_create(
+                fuente_costo=fuente,
+                familia_point="",
+                defaults={
+                    "margen_meta_pct": margen,
+                    "subida_maxima_pct": subida,
+                    "prioridad": 100,
+                    "activo": True,
+                },
+            )
+    except ValueError as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+
+    return JsonResponse({"ok": True, "politicas_base": _base_policy_payload()})
+
+
 def _precio_sugerido_excel_response(
     *,
     rows: list[dict[str, Any]],
@@ -6249,6 +6491,9 @@ def _precio_sugerido_excel_response(
     start_period: date,
     current_period: date,
     familias_sel: list[str],
+    margen_meta_fab: Decimal,
+    margen_meta_mp: Decimal,
+    margen_meta_reventa: Decimal,
 ) -> HttpResponse:
     wb = Workbook()
     ws = wb.active
@@ -6281,11 +6526,13 @@ def _precio_sugerido_excel_response(
         logo.width = 160
         ws.add_image(logo, "A1")
 
-    ws.merge_cells("A5:T5")
-    ws["A5"] = "Pollyana's Dolce - Precio minimo rentable"
+    last_col_letter = "AA"
+
+    ws.merge_cells(f"A5:{last_col_letter}5")
+    ws["A5"] = "Pollyana's Dolce - Precio minimo y recomendado"
     ws["A5"].font = Font(bold=True, size=16, color=brand_dark)
     ws["A5"].alignment = Alignment(horizontal="left")
-    ws.merge_cells("A6:T6")
+    ws.merge_cells(f"A6:{last_col_letter}6")
     familias_label = ", ".join(familias_sel) if familias_sel else "Todas las familias Point"
     ws["A6"] = (
         f"Monitor de margenes | Ventana {meses} meses | "
@@ -6293,9 +6540,10 @@ def _precio_sugerido_excel_response(
     )
     ws["A6"].font = Font(size=10, color="5B4A52")
     ws["A6"].alignment = Alignment(horizontal="left")
-    ws.merge_cells("A7:T7")
+    ws.merge_cells(f"A7:{last_col_letter}7")
     ws["A7"] = (
-        "Margen meta: 55% fabricación completa · 65% solo materia prima · 30% reventa. "
+        f"Margen meta configurable: {_fmt_decimal(margen_meta_fab)}% fabricación completa · "
+        f"{_fmt_decimal(margen_meta_mp)}% solo materia prima · {_fmt_decimal(margen_meta_reventa)}% reventa. "
         "Archivo listo para imprimir con texto y tabla alineados al mismo margen."
     )
     ws["A7"].font = Font(size=10, color="5B4A52")
@@ -6326,8 +6574,11 @@ def _precio_sugerido_excel_response(
         f"Costo inicial ({meses}m)", "Costo ultimo mes", "Variacion costo %",
         "MP", "Mano obra", "Indirectos", "Empaque",
         "Precio actual", "Fuente precio", "Margen actual %", "Margen meta %",
-        "Utilidad por unidad", "Precio sugerido", "Falta subir %", "Estado",
+        "Utilidad por unidad", "Precio minimo rentable", "Precio recomendado",
+        "Margen recomendado %", "Subida recomendada %", "Brecha vs minimo",
+        "Ventas 90d pzas", "Venta neta 90d", "Impacto 90d est.", "Estado", "Accion sugerida",
     ]
+    last_col_letter = get_column_letter(len(headers))
     header_row = 12
     for col, header in enumerate(headers, start=1):
         cell = ws.cell(header_row, col, header)
@@ -6380,19 +6631,26 @@ def _precio_sugerido_excel_response(
                 row["margen_actual"] if row["margen_actual"] is not None else None,
                 row["margen_meta"],
                 row["utilidad_unit"] if row["utilidad_unit"] is not None else None,
-                row["precio_sugerido"] if row["precio_sugerido"] > 0 else None,
-                row["falta_subir_pct"] if row["falta_subir_pct"] is not None else None,
+                row["precio_minimo_rentable"] if row["precio_minimo_rentable"] > 0 else None,
+                row["precio_recomendado"] if row["precio_recomendado"] > 0 else None,
+                row["margen_recomendado"] if row["margen_recomendado"] is not None else None,
+                row["subida_recomendada_pct"] if row["subida_recomendada_pct"] is not None else None,
+                row["brecha_precio_minimo"] if row["brecha_precio_minimo"] is not None else None,
+                row["ventas_90d_qty"],
+                row["ventas_90d_neto"],
+                row["impacto_venta_90d"],
                 row["estado"],
+                row["accion_sugerida_label"],
             ]
             for col, value in enumerate(values, start=1):
                 cell = ws.cell(current_row, col, value)
                 cell.border = border
                 cell.alignment = Alignment(vertical="top", wrap_text=True)
-                if col in {6, 7, 9, 10, 11, 12, 13, 17, 18}:
+                if col in {6, 7, 9, 10, 11, 12, 13, 17, 18, 19, 22, 24, 25}:
                     cell.number_format = '$#,##0.00'
-                elif col in {8, 15, 16, 19}:
+                elif col in {8, 15, 16, 20, 21, 23}:
                     cell.number_format = '0.0'
-                if col == 20:
+                if col == 26:
                     if row["estado"] == "CRITICO":
                         cell.fill = PatternFill("solid", fgColor="FDE2E2")
                         cell.font = Font(bold=True, color="991B1B")
@@ -6411,7 +6669,8 @@ def _precio_sugerido_excel_response(
         "A": 34, "B": 15, "C": 20, "D": 14, "E": 18,
         "F": 14, "G": 14, "H": 13, "I": 12, "J": 12,
         "K": 12, "L": 12, "M": 14, "N": 14, "O": 13,
-        "P": 13, "Q": 15, "R": 15, "S": 13, "T": 14,
+        "P": 13, "Q": 15, "R": 15, "S": 15, "T": 13, "U": 14,
+        "V": 14, "W": 13, "X": 14, "Y": 14, "Z": 14, "AA": 22,
     }
     for col, width in widths.items():
         ws.column_dimensions[col].width = width
@@ -6422,7 +6681,7 @@ def _precio_sugerido_excel_response(
     ws.row_dimensions[header_row].height = 34
     ws.freeze_panes = "A13"
     ws.print_title_rows = f"{header_row}:{header_row}"
-    ws.print_area = f"A1:T{max(current_row - 1, header_row)}"
+    ws.print_area = f"A1:{last_col_letter}{max(current_row - 1, header_row)}"
 
     buffer = BytesIO()
     wb.save(buffer)
@@ -6490,6 +6749,7 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
         categoria_por_sku[sku] = (registro["category"] or "").strip()
     activos_sku = set(precio_por_sku)
     familias_point = sorted({c for c in categoria_por_sku.values() if c})
+    politicas_margen = _politicas_margen_precio()
 
     # --- Addons aprobados: se listan como combinaciones base + sabor ---
     addons_por_base: dict[int, list[dict[str, Any]]] = defaultdict(list)
@@ -6590,6 +6850,54 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
 
     price_stats = _median_point_prices_bulk(receta_ids, start_period, today, branch_ids)
 
+    sales_start = today - timedelta(days=90)
+    sales_skus = set(skus_set)
+    for addon_list in addons_por_base.values():
+        for addon in addon_list:
+            if addon["codigo_point"]:
+                sales_skus.add(addon["codigo_point"])
+    sales_stats: dict[str, dict[str, Decimal | int]] = {}
+    if sales_skus and branch_ids:
+        for registro in (
+            PointDailySale.objects.filter(
+                product__sku__in=sales_skus,
+                branch__erp_branch_id__in=branch_ids,
+                sale_date__gte=sales_start,
+                sale_date__lte=today,
+                source_endpoint=OFFICIAL_POINT_SOURCE,
+            )
+            .values("product__sku")
+            .annotate(
+                qty=Sum("quantity"),
+                net=Sum("net_amount"),
+                total=Sum("total_amount"),
+                tickets=Sum("tickets"),
+            )
+        ):
+            sku_key = (registro["product__sku"] or "").strip()
+            if not sku_key:
+                continue
+            qty = Decimal(str(registro["qty"] or 0))
+            net = Decimal(str(registro["net"] or 0))
+            total = Decimal(str(registro["total"] or 0))
+            sales_stats[sku_key] = {
+                "qty": qty,
+                "net": net if net > 0 else total,
+                "tickets": int(registro["tickets"] or 0),
+            }
+
+    def _sales_payload_for_sku(sku_key: str) -> dict[str, Decimal | int]:
+        data = sales_stats.get(sku_key) or {}
+        qty = Decimal(str(data.get("qty") or 0))
+        net = Decimal(str(data.get("net") or 0))
+        asp = (net / qty).quantize(Decimal("0.01")) if qty > 0 and net > 0 else Decimal("0.00")
+        return {
+            "qty": qty,
+            "net": net.quantize(Decimal("0.01")),
+            "asp": asp,
+            "tickets": int(data.get("tickets") or 0),
+        }
+
     def _costo_fabricado(recipe_id: int):
         """(serie, inicial, ultimo, fuente, breakdown|None) para fabricados."""
         ops = op_series.get(recipe_id, [])
@@ -6624,6 +6932,28 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
         "criticos": 0, "requieren_ajuste": 0, "combinados": 0,
     }
 
+    def _contabilizar_row(row: dict[str, Any]) -> None:
+        fuente = row["costo_fuente"]
+        estado = row["estado"]
+        if fuente == COSTO_FAB_COMPLETO:
+            cnt["fab"] += 1
+        elif fuente == COSTO_MP_FALLBACK:
+            cnt["mp"] += 1
+        elif fuente == COSTO_REVENTA:
+            cnt["reventa"] += 1
+
+        if row["tiene_sabores"]:
+            cnt["combinados"] += 1
+        if estado == "SIN_COSTO":
+            cnt["sin_costo"] += 1
+        elif estado == "SIN_PRECIO":
+            cnt["sin_precio"] += 1
+        elif estado == "CRITICO":
+            cnt["criticos"] += 1
+            cnt["requieren_ajuste"] += 1
+        elif estado == "AJUSTE":
+            cnt["requieren_ajuste"] += 1
+
     for receta in recetas:
         sku = (receta.codigo_point or "").strip()
         familia_point = categoria_por_sku.get(sku, "")
@@ -6652,8 +6982,6 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
         costo_completo = (costo_ult + addon_cost).quantize(Decimal("0.01"))
         costo_inicial = (costo_ini + addon_cost).quantize(Decimal("0.01"))
         tiene_sabores = addon_cost > 0
-        if tiene_sabores:
-            cnt["combinados"] += 1
         n_sabores = len([
             addon for addon in addons_por_base.get(receta.id, [])
             if unidades_by.get(addon["id"], Decimal("0")) > 0 and _costo_addon(addon["id"]) > 0
@@ -6666,8 +6994,12 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             precio_actual = price_stats.get(receta.id, (Decimal("0"), 0))[0]
             precio_fuente = "POS_MEDIANA" if precio_actual > 0 else "SIN_PRECIO"
 
-        # Margen meta según la fuente de costo.
-        margen_meta_row = _margen_meta_por_fuente(fuente)
+        politica_margen = _resolver_politica_margen(
+            politicas_margen,
+            fuente=fuente,
+            familia_point=familia_point,
+        )
+        margen_meta_row = politica_margen["margen_meta"]
 
         margen = None
         utilidad = None
@@ -6688,28 +7020,36 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
 
         if fuente == COSTO_SIN or costo_completo <= 0:
             estado = "SIN_COSTO"
-            cnt["sin_costo"] += 1
         elif precio_actual <= 0:
             estado = "SIN_PRECIO"
-            cnt["sin_precio"] += 1
         elif precio_actual < costo_completo:
             estado = "CRITICO"
-            cnt["criticos"] += 1
-            cnt["requieren_ajuste"] += 1
         elif margen is not None and margen < margen_meta_row:
             estado = "AJUSTE"
-            cnt["requieren_ajuste"] += 1
         else:
             estado = "OK"
 
-        if fuente == COSTO_FAB_COMPLETO:
-            cnt["fab"] += 1
-        elif fuente == COSTO_MP_FALLBACK:
-            cnt["mp"] += 1
-        elif fuente == COSTO_REVENTA:
-            cnt["reventa"] += 1
+        recomendacion = _precio_recomendado_comercial(
+            precio_actual=precio_actual,
+            precio_minimo=precio_sugerido,
+            costo=costo_completo,
+            politica=politica_margen,
+        )
+        precio_recomendado = recomendacion["precio_recomendado"] or Decimal("0.00")
+        ventas_90d = _sales_payload_for_sku(sku)
+        impacto_90d = Decimal("0.00")
+        if precio_actual > 0 and precio_recomendado > precio_actual and ventas_90d["qty"] > 0:
+            impacto_90d = ((precio_recomendado - precio_actual) * ventas_90d["qty"]).quantize(Decimal("0.01"))
 
-        rows.append({
+        accion_sugerida = _accion_precio_sugerida(
+            estado=estado,
+            fuente=fuente,
+            precio_minimo=precio_sugerido,
+            precio_recomendado=precio_recomendado,
+            precio_actual=precio_actual,
+        )
+
+        base_row = {
             "receta_id": receta.id,
             "nombre": receta.nombre,
             "codigo_point": sku,
@@ -6723,6 +7063,10 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             "n_sabores": n_sabores,
             "costo_fuente": fuente,
             "margen_meta": margen_meta_row,
+            "politica_margen_id": politica_margen["politica_margen_id"],
+            "politica_margen_label": politica_margen["politica_margen_label"],
+            "subida_maxima_pct": politica_margen["subida_maxima_pct"],
+            "precio_max_competitivo": politica_margen["precio_max_competitivo"],
             "breakdown": breakdown,
             "variacion_costo_pct": variacion,
             "precio_actual": precio_actual,
@@ -6730,12 +7074,28 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             "margen_actual": margen,
             "utilidad_unit": utilidad,
             "precio_sugerido": precio_sugerido,
+            "precio_minimo_rentable": precio_sugerido,
+            "precio_recomendado": precio_recomendado,
+            "brecha_precio_minimo": recomendacion["brecha_precio_minimo"],
+            "subida_recomendada_pct": recomendacion["subida_recomendada_pct"],
+            "margen_recomendado": recomendacion["margen_recomendado"],
+            "precio_tope_riesgo": recomendacion["precio_tope_riesgo"],
             "falta_subir_pct": falta_subir,
+            "ventas_90d_qty": ventas_90d["qty"],
+            "ventas_90d_neto": ventas_90d["net"],
+            "ventas_90d_asp": ventas_90d["asp"],
+            "ventas_90d_tickets": ventas_90d["tickets"],
+            "ventas_90d_fuente": sku,
+            "impacto_venta_90d": impacto_90d,
+            "costo_incluye_mano_obra": bool(breakdown and breakdown.get("mo", Decimal("0")) > 0),
             "estado": estado,
+            "accion_sugerida": accion_sugerida,
+            "accion_sugerida_label": ACCION_LABELS[accion_sugerida],
             "serie": [float(s) for s in serie],
             "_margen_sort": margen if margen is not None else Decimal("9999"),
-        })
+        }
 
+        combo_rows: list[dict[str, Any]] = []
         if not es_reventa and fuente != COSTO_SIN:
             for addon in addons_por_base.get(receta.id, []):
                 addon_id = addon["id"]
@@ -6761,24 +7121,35 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
                     combo_falta_subir = ((combo_sugerido - combo_precio) / combo_precio * Decimal("100")).quantize(Decimal("0.1"))
                 if combo_precio <= 0:
                     combo_estado = "SIN_PRECIO"
-                    cnt["sin_precio"] += 1
                 elif combo_precio < combo_costo:
                     combo_estado = "CRITICO"
-                    cnt["criticos"] += 1
-                    cnt["requieren_ajuste"] += 1
                 elif combo_margen is not None and combo_margen < margen_meta_row:
                     combo_estado = "AJUSTE"
-                    cnt["requieren_ajuste"] += 1
                 else:
                     combo_estado = "OK"
 
-                if fuente == COSTO_FAB_COMPLETO:
-                    cnt["fab"] += 1
-                elif fuente == COSTO_MP_FALLBACK:
-                    cnt["mp"] += 1
-                cnt["combinados"] += 1
+                combo_recomendacion = _precio_recomendado_comercial(
+                    precio_actual=combo_precio,
+                    precio_minimo=combo_sugerido,
+                    costo=combo_costo,
+                    politica=politica_margen,
+                )
+                combo_recomendado = combo_recomendacion["precio_recomendado"] or Decimal("0.00")
+                sales_sku = addon_sku if (addon_sku and sales_stats.get(addon_sku, {}).get("qty", Decimal("0")) > 0) else sku
+                combo_ventas_90d = _sales_payload_for_sku(sales_sku)
+                combo_impacto_90d = Decimal("0.00")
+                if combo_precio > 0 and combo_recomendado > combo_precio and combo_ventas_90d["qty"] > 0:
+                    combo_impacto_90d = ((combo_recomendado - combo_precio) * combo_ventas_90d["qty"]).quantize(Decimal("0.01"))
 
-                rows.append({
+                combo_accion = _accion_precio_sugerida(
+                    estado=combo_estado,
+                    fuente=fuente,
+                    precio_minimo=combo_sugerido,
+                    precio_recomendado=combo_recomendado,
+                    precio_actual=combo_precio,
+                )
+
+                combo_rows.append({
                     "receta_id": receta.id,
                     "nombre": f"{receta.nombre} + {addon['nombre'] or addon_sku}",
                     "codigo_point": f"{sku} + {addon_sku}" if addon_sku else sku,
@@ -6792,6 +7163,10 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
                     "n_sabores": 1,
                     "costo_fuente": fuente,
                     "margen_meta": margen_meta_row,
+                    "politica_margen_id": politica_margen["politica_margen_id"],
+                    "politica_margen_label": politica_margen["politica_margen_label"],
+                    "subida_maxima_pct": politica_margen["subida_maxima_pct"],
+                    "precio_max_competitivo": politica_margen["precio_max_competitivo"],
                     "breakdown": breakdown,
                     "variacion_costo_pct": variacion,
                     "precio_actual": combo_precio,
@@ -6799,11 +7174,33 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
                     "margen_actual": combo_margen,
                     "utilidad_unit": combo_utilidad,
                     "precio_sugerido": combo_sugerido,
+                    "precio_minimo_rentable": combo_sugerido,
+                    "precio_recomendado": combo_recomendado,
+                    "brecha_precio_minimo": combo_recomendacion["brecha_precio_minimo"],
+                    "subida_recomendada_pct": combo_recomendacion["subida_recomendada_pct"],
+                    "margen_recomendado": combo_recomendacion["margen_recomendado"],
+                    "precio_tope_riesgo": combo_recomendacion["precio_tope_riesgo"],
                     "falta_subir_pct": combo_falta_subir,
+                    "ventas_90d_qty": combo_ventas_90d["qty"],
+                    "ventas_90d_neto": combo_ventas_90d["net"],
+                    "ventas_90d_asp": combo_ventas_90d["asp"],
+                    "ventas_90d_tickets": combo_ventas_90d["tickets"],
+                    "ventas_90d_fuente": sales_sku,
+                    "impacto_venta_90d": combo_impacto_90d,
+                    "costo_incluye_mano_obra": bool(breakdown and breakdown.get("mo", Decimal("0")) > 0),
                     "estado": combo_estado,
+                    "accion_sugerida": combo_accion,
+                    "accion_sugerida_label": ACCION_LABELS[combo_accion],
                     "serie": [float(s) for s in serie],
                     "_margen_sort": combo_margen if combo_margen is not None else Decimal("9999"),
                 })
+
+        # En precio sugerido el producto comercial correcto es el total base+addon.
+        # Si hay combinaciones válidas, no duplicar la base sola en el reporte.
+        rows_a_publicar = combo_rows or [base_row]
+        for row in rows_a_publicar:
+            rows.append(row)
+            _contabilizar_row(row)
 
     estado_orden = {"CRITICO": 0, "AJUSTE": 1, "OK": 2, "SIN_PRECIO": 3, "SIN_COSTO": 4}
     rows.sort(key=lambda item: (
@@ -6811,6 +7208,15 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
         item["_margen_sort"],
         item["nombre"].lower(),
     ))
+    default_meta_fab = _resolver_politica_margen(
+        politicas_margen, fuente=COSTO_FAB_COMPLETO, familia_point=""
+    )["margen_meta"]
+    default_meta_mp = _resolver_politica_margen(
+        politicas_margen, fuente=COSTO_MP_FALLBACK, familia_point=""
+    )["margen_meta"]
+    default_meta_reventa = _resolver_politica_margen(
+        politicas_margen, fuente=COSTO_REVENTA, familia_point=""
+    )["margen_meta"]
 
     if export_csv:
         response = HttpResponse(content_type="text/csv; charset=utf-8")
@@ -6824,7 +7230,9 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             f"Costo inicial ({meses}m)", "Costo ultimo mes", "Variacion costo %",
             "MP", "Mano obra", "Indirectos", "Empaque",
             "Precio actual", "Fuente precio", "Margen actual %", "Margen meta %", "Utilidad por unidad",
-            "Precio sugerido", "Falta subir %", "Estado",
+            "Precio minimo rentable", "Precio recomendado", "Margen recomendado %",
+            "Subida recomendada %", "Brecha vs minimo", "Ventas 90d pzas",
+            "Venta neta 90d", "Impacto 90d est.", "Estado", "Accion sugerida", "Politica margen",
         ])
         for row in rows:
             bd = row["breakdown"] or {}
@@ -6839,9 +7247,17 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
                 row["margen_actual"] if row["margen_actual"] is not None else "",
                 row["margen_meta"],
                 row["utilidad_unit"] if row["utilidad_unit"] is not None else "",
-                row["precio_sugerido"] if row["precio_sugerido"] > 0 else "",
-                row["falta_subir_pct"] if row["falta_subir_pct"] is not None else "",
+                row["precio_minimo_rentable"] if row["precio_minimo_rentable"] > 0 else "",
+                row["precio_recomendado"] if row["precio_recomendado"] > 0 else "",
+                row["margen_recomendado"] if row["margen_recomendado"] is not None else "",
+                row["subida_recomendada_pct"] if row["subida_recomendada_pct"] is not None else "",
+                row["brecha_precio_minimo"] if row["brecha_precio_minimo"] is not None else "",
+                row["ventas_90d_qty"],
+                row["ventas_90d_neto"],
+                row["impacto_venta_90d"],
                 row["estado"],
+                row["accion_sugerida_label"],
+                row["politica_margen_label"],
             ])
         return response
 
@@ -6854,6 +7270,9 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             start_period=start_period,
             current_period=current_period,
             familias_sel=familias_sel,
+            margen_meta_fab=default_meta_fab,
+            margen_meta_mp=default_meta_mp,
+            margen_meta_reventa=default_meta_reventa,
         )
 
     def _s(value):
@@ -6875,7 +7294,11 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             "tiene_sabores": row["tiene_sabores"],
             "n_sabores": row["n_sabores"],
             "costo_fuente": row["costo_fuente"],
-            "margen_meta": str(row["margen_meta"]),
+            "margen_meta": _fmt_decimal(row["margen_meta"]),
+            "politica_margen_id": row["politica_margen_id"],
+            "politica_margen_label": row["politica_margen_label"],
+            "subida_maxima_pct": _fmt_decimal(row["subida_maxima_pct"]),
+            "precio_max_competitivo": _fmt_decimal(row["precio_max_competitivo"]),
             "breakdown": ({k: str(v) for k, v in bd.items()} if bd else None),
             "variacion_costo_pct": _s(row["variacion_costo_pct"]),
             "precio_actual": str(row["precio_actual"]) if row["precio_actual"] > 0 else None,
@@ -6883,8 +7306,23 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             "margen_actual": _s(row["margen_actual"]),
             "utilidad_unit": _s(row["utilidad_unit"]),
             "precio_sugerido": str(row["precio_sugerido"]) if row["precio_sugerido"] > 0 else None,
+            "precio_minimo_rentable": str(row["precio_minimo_rentable"]) if row["precio_minimo_rentable"] > 0 else None,
+            "precio_recomendado": str(row["precio_recomendado"]) if row["precio_recomendado"] > 0 else None,
+            "brecha_precio_minimo": _s(row["brecha_precio_minimo"]),
+            "subida_recomendada_pct": _s(row["subida_recomendada_pct"]),
+            "margen_recomendado": _s(row["margen_recomendado"]),
+            "precio_tope_riesgo": _s(row["precio_tope_riesgo"]),
             "falta_subir_pct": _s(row["falta_subir_pct"]),
+            "ventas_90d_qty": _s(row["ventas_90d_qty"]),
+            "ventas_90d_neto": _s(row["ventas_90d_neto"]),
+            "ventas_90d_asp": _s(row["ventas_90d_asp"]),
+            "ventas_90d_tickets": row["ventas_90d_tickets"],
+            "ventas_90d_fuente": row["ventas_90d_fuente"],
+            "impacto_venta_90d": _s(row["impacto_venta_90d"]),
+            "costo_incluye_mano_obra": row["costo_incluye_mano_obra"],
             "estado": row["estado"],
+            "accion_sugerida": row["accion_sugerida"],
+            "accion_sugerida_label": row["accion_sugerida_label"],
             "serie": row["serie"],
         })
 
@@ -6895,9 +7333,10 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
 
     return JsonResponse({
         "meses": meses,
-        "margen_meta_fab": str(MARGEN_META_FAB_PCT),
-        "margen_meta_mp": str(MARGEN_META_MP_PCT),
-        "margen_meta_reventa": str(MARGEN_META_REVENTA_PCT),
+        "margen_meta_fab": _fmt_decimal(default_meta_fab),
+        "margen_meta_mp": _fmt_decimal(default_meta_mp),
+        "margen_meta_reventa": _fmt_decimal(default_meta_reventa),
+        "politicas_margen_count": len(politicas_margen),
         "periodo_inicio": start_period.isoformat(),
         "periodo_fin": current_period.isoformat(),
         "familias_point": familias_point,

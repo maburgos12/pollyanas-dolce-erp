@@ -51,6 +51,13 @@ NAV_GROUPS = [
         "label": "Producción",
         "items": [
             ("produccion", "plan", "Plan de producción", "/recetas/plan-produccion/", ["/recetas/plan-produccion/"]),
+            (
+                "produccion",
+                "calculo_insumos",
+                "Cálculo de insumos",
+                "/recetas/plan-produccion/?seccion=calculo_insumos#calculo-insumos",
+                ["/recetas/plan-produccion/?seccion=calculo_insumos"],
+            ),
             ("produccion", "bonos", "Bonos producción", "/bonos-produccion/dashboard/", ["/bonos-produccion/"]),
             ("produccion", "reabasto_cedis", "Reabasto CEDIS", "/recetas/reabasto-cedis/", ["/recetas/reabasto-cedis/"]),
             ("produccion", "consolidado_cedis", "Consolidado CEDIS", "/recetas/consolidado-cedis/", ["/recetas/consolidado-cedis/"]),
@@ -245,6 +252,26 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                 "badge_count": notificaciones_pendientes,
             },
         )
+        try:
+            from rrhh.api_views import empleado_de_usuario
+
+            empleado_actual = empleado_de_usuario(user)
+        except Exception:
+            empleado_actual = None
+        if empleado_actual:
+            match_len = len("/rrhh/app/") if current_path.startswith("/rrhh/app/") else 0
+            best_match_len = max(best_match_len, match_len)
+            mi_trabajo["items"].append(
+                {
+                    "label": "Mis solicitudes",
+                    "url": "/rrhh/app/",
+                    "active": False,
+                    "_match_len": match_len,
+                    "module": "rrhh",
+                    "submodule": "autoservicio",
+                    "initial": "S",
+                }
+            )
         try:
             from rrhh.services_vacantes import can_solicitar_vacantes
 

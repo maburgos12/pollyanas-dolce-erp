@@ -57,10 +57,10 @@
   </section>
 
   {% if duplicate_groups %}
-  <div class="alert alert-warning" style="margin-bottom:0;">
+  <div class="alert alert-warning pd-u-76084ee4e5">
     <strong>{{ total_duplicate_groups }} grupo{{ total_duplicate_groups|pluralize:"s" }} con posibles duplicados</strong> ({{ total_duplicate_items }} artículos).
     Usa el filtro "Duplicados" para revisarlos y consolidar.
-    <a class="btn btn-secondary btn-sm" style="margin-left:12px;" href="?duplicate_status=duplicates">Ver duplicados</a>
+    <a class="btn btn-secondary btn-sm pd-u-4018f4a8b5" href="?duplicate_status=duplicates">Ver duplicados</a>
   </div>
   {% endif %}
 
@@ -134,7 +134,7 @@
               <span class="badge bg-danger">{{ i.operational_profile.readiness_label }}</span>
               {% endif %}
               {% if i.operational_profile.missing %}
-              <div class="text-muted" style="font-size:.8rem;margin-top:3px;">Falta: {{ i.operational_profile.missing|join:", " }}</div>
+              <div class="text-muted pd-u-bb69f92b8b">Falta: {{ i.operational_profile.missing|join:", " }}</div>
               {% endif %}
             </td>
             <td>

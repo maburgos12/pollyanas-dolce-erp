@@ -5,28 +5,8 @@
 {% block page_title %}Logística · Dashboard ejecutivo{% endblock %}
 
 {% block extra_css %}
-<style>
-  .exec-shell { display: grid; gap: 18px; }
-  .exec-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-  .exec-kpis.secondary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .exec-kpi { background: #fff; border: 1px solid #efc7d8; border-radius: 14px; padding: 16px; box-shadow: 0 12px 28px rgba(139,34,82,.07); }
-  .exec-kpi span { color: #725d66; font-weight: 900; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
-  .exec-kpi strong { display: block; margin-top: 8px; color: #8B2252; font-family: "Playfair Display", serif; font-size: 34px; line-height: 1; }
-  .exec-kpi small { display: block; margin-top: 8px; color: #77656d; font-weight: 700; }
-  .exec-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(340px, .8fr); gap: 18px; align-items: start; }
-  .exec-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 12px; }
-  .exec-card-head h2 { margin: 0; color: #3a2b30; font-family: "Playfair Display", serif; }
-  .exec-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 5px 10px; font-size: 12px; font-weight: 900; }
-  .exec-badge.ok { background: #e5f5ee; color: #1f7554; }
-  .exec-badge.warn { background: #fff4d8; color: #9a6a00; }
-  .exec-badge.danger { background: #ffe8ec; color: #bc3b56; }
-  .exec-badge.info { background: #e9f0ff; color: #305caa; }
-  .exec-muted { color: #77656d; font-size: 13px; }
-  .exec-empty { padding: 16px; border: 1px dashed #e8b7cb; border-radius: 14px; color: #77656d; }
-  @media (max-width: 1100px) { .exec-kpis, .exec-kpis.secondary, .exec-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @media (max-width: 680px) { .exec-kpis, .exec-kpis.secondary, .exec-grid { grid-template-columns: 1fr; } }
-</style>
-<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
+<link rel="stylesheet" href="/static/css/template_modules/logistica-templates-logistica-dashboard-ejecutivo.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260621-button-gap-v1">
 {% endblock %}
 
 {% block content %}

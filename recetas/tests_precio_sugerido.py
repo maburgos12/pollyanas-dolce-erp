@@ -21,8 +21,8 @@ from django.urls import reverse
 from openpyxl import load_workbook
 
 from core.models import Sucursal
-from recetas.models import Receta, RecetaAgrupacionAddon, RecetaCostoVersion
-from pos_bridge.models import PointProduct
+from recetas.models import PoliticaMargenPrecio, Receta, RecetaAgrupacionAddon, RecetaCostoVersion
+from pos_bridge.models import PointBranch, PointDailySale, PointProduct
 from reportes.models import (
     ProductoCostoOperativoMensual,
     ProductoReventaCostoHistoricoMensual,
@@ -39,6 +39,9 @@ class PrecioSugeridoViewTests(TestCase):
         self.client.force_login(self.user)
         self.sucursal = Sucursal.objects.create(
             codigo="S1", nombre="Sucursal Prueba", fecha_apertura=date(2020, 1, 1)
+        )
+        self.point_branch = PointBranch.objects.create(
+            external_id="PB1", name="Sucursal Prueba", erp_branch=self.sucursal,
         )
         self.period = date.today().replace(day=1)
 
@@ -81,6 +84,18 @@ class PrecioSugeridoViewTests(TestCase):
             costo_promedio=Decimal(str(costo)),
         )
 
+    def _sale_90d(self, point, receta, qty, net, sale_date=None):
+        return PointDailySale.objects.create(
+            branch=self.point_branch,
+            product=point,
+            receta=receta,
+            sale_date=sale_date or date.today(),
+            quantity=Decimal(str(qty)),
+            total_amount=Decimal(str(net)),
+            net_amount=Decimal(str(net)),
+            source_endpoint="/Report/PrintReportes?idreporte=3",
+        )
+
     def _fetch(self, **params):
         params.setdefault("meses", 6)
         resp = self.client.get(reverse("recetas:monitor_margenes_precio_sugerido"), params)
@@ -101,6 +116,7 @@ class PrecioSugeridoViewTests(TestCase):
         row = self._row(self._fetch(), r)
         self.assertEqual(row["costo_fuente"], "FAB_COMPLETO")
         self.assertEqual(row["costo_completo"], "100.00")
+        self.assertTrue(row["costo_incluye_mano_obra"])
         self.assertIsNotNone(row["breakdown"])
         self.assertEqual(row["breakdown"]["mo"], "20.000000")
 
@@ -111,6 +127,7 @@ class PrecioSugeridoViewTests(TestCase):
         row = self._row(self._fetch(), r)
         self.assertEqual(row["costo_fuente"], "MP_FALLBACK")
         self.assertEqual(row["costo_completo"], "80.00")
+        self.assertFalse(row["costo_incluye_mano_obra"])
         self.assertIsNone(row["breakdown"])
 
     def test_operativo_sin_componentes_es_mp_fallback(self):
@@ -156,6 +173,8 @@ class PrecioSugeridoViewTests(TestCase):
         # margen (500-95)/500 = 81% >= 55 -> OK; sugerido 95/0.45=211->215 < 500
         self.assertEqual(row["estado"], "OK")
         self.assertEqual(row["precio_sugerido"], "215.00")
+        self.assertEqual(row["precio_minimo_rentable"], "215.00")
+        self.assertEqual(row["precio_recomendado"], "500.00")
         self.assertIsNone(row["falta_subir_pct"])
 
     def test_margen_menor_55_requiere_ajuste(self):
@@ -236,10 +255,7 @@ class PrecioSugeridoViewTests(TestCase):
         )
         data = self._fetch()
         self.assertIsNone(self._row(data, addon))  # addon excluido
-        row = self._row_by_name(data, "Pay de Queso Grande")
-        self.assertIsNotNone(row)
-        self.assertEqual(row["costo_completo"], "178.00")
-        self.assertFalse(row["tiene_sabores"])
+        self.assertIsNone(self._row_by_name(data, "Pay de Queso Grande"))  # base excluida si hay producto completo
 
         combo = self._row_by_name(data, "Pay de Queso Grande + Sabor Fresa Grande")
         self.assertIsNotNone(combo)
@@ -280,7 +296,7 @@ class PrecioSugeridoViewTests(TestCase):
         )
         wb = load_workbook(BytesIO(resp.content))
         ws = wb["Precio sugerido"]
-        self.assertEqual(ws["A5"].value, "Pollyana's Dolce - Precio minimo rentable")
+        self.assertEqual(ws["A5"].value, "Pollyana's Dolce - Precio minimo y recomendado")
         family_headers = [
             cell.value for row in ws.iter_rows(min_row=13, max_col=1) for cell in row
             if isinstance(cell.value, str) and cell.value.startswith("Familia:")
@@ -322,3 +338,107 @@ class PrecioSugeridoViewTests(TestCase):
         # sugerido = 19.87 / (1 - 0.30) = 28.39 -> redondeo techo $5 = 30
         self.assertEqual(row["precio_sugerido"], "30.00")
         self.assertIsNone(row["falta_subir_pct"])
+
+    def test_politica_familia_fuente_sobrescribe_meta_mp(self):
+        PoliticaMargenPrecio.objects.create(
+            fuente_costo=PoliticaMargenPrecio.FUENTE_MP_FALLBACK,
+            familia_point="Pastel Mediano",
+            margen_meta_pct=Decimal("55.00"),
+            subida_maxima_pct=Decimal("25.00"),
+            prioridad=1,
+        )
+        r = self._receta("SoloMP Familiar", "MMF1")
+        self._point("MMF1", "SoloMP Familiar", precio=200, categoria="Pastel Mediano")
+        self._mp_hist(r, 80)
+
+        row = self._row(self._fetch(), r)
+
+        self.assertEqual(row["margen_meta"], "55")
+        self.assertEqual(row["estado"], "OK")
+        self.assertEqual(row["accion_sugerida"], "MANTENER")
+        self.assertEqual(row["precio_sugerido"], "180.00")
+
+    def test_subida_mayor_a_politica_propone_recomendado_gradual(self):
+        PoliticaMargenPrecio.objects.create(
+            fuente_costo=PoliticaMargenPrecio.FUENTE_FAB_COMPLETO,
+            familia_point="Pastel Mediano",
+            margen_meta_pct=Decimal("55.00"),
+            subida_maxima_pct=Decimal("10.00"),
+            prioridad=1,
+        )
+        r = self._receta("Fab Riesgo", "RIESGO1")
+        self._point("RIESGO1", "Fab Riesgo", precio=150, categoria="Pastel Mediano")
+        self._operativo(r, fab=100, mp=60, mo=20, ind=10, emp=10)
+
+        row = self._row(self._fetch(), r)
+
+        self.assertEqual(row["estado"], "AJUSTE")
+        self.assertEqual(row["precio_sugerido"], "225.00")
+        self.assertEqual(row["precio_minimo_rentable"], "225.00")
+        self.assertEqual(row["precio_recomendado"], "165.00")
+        self.assertEqual(row["subida_recomendada_pct"], "10.0")
+        self.assertEqual(row["brecha_precio_minimo"], "60.00")
+        self.assertEqual(row["accion_sugerida"], "SUBIR_GRADUAL")
+
+    def test_ventas_90d_e_impacto_recomendado_usan_ventas_point(self):
+        PoliticaMargenPrecio.objects.create(
+            fuente_costo=PoliticaMargenPrecio.FUENTE_FAB_COMPLETO,
+            familia_point="Pastel Mediano",
+            margen_meta_pct=Decimal("55.00"),
+            subida_maxima_pct=Decimal("10.00"),
+            prioridad=1,
+        )
+        r = self._receta("Fab Volumen", "VOL1")
+        point = self._point("VOL1", "Fab Volumen", precio=150, categoria="Pastel Mediano")
+        self._operativo(r, fab=100, mp=60, mo=20, ind=10, emp=10)
+        self._sale_90d(point, r, qty=12, net=Decimal("1800.00"))
+
+        row = self._row(self._fetch(), r)
+
+        self.assertEqual(row["ventas_90d_qty"], "12.000")
+        self.assertEqual(row["ventas_90d_neto"], "1800.00")
+        self.assertEqual(row["ventas_90d_asp"], "150.00")
+        self.assertEqual(row["impacto_venta_90d"], "180.00")
+
+    def test_monitor_muestra_inputs_para_editar_metas(self):
+        resp = self.client.get(reverse("recetas:monitor_margenes"))
+
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertIn('data-source="fab"', html)
+        self.assertIn('data-source="mp"', html)
+        self.assertIn('data-source="reventa"', html)
+        self.assertIn("Guardar metas", html)
+
+    def test_monitor_muestra_familias_point_activas_aunque_no_tengan_precio(self):
+        p = self._point("PMINI1", "Pastel Mini Demo", precio=0, categoria="Pastel Mini")
+        p.precio = None
+        p.save(update_fields=["precio"])
+
+        resp = self.client.get(reverse("recetas:monitor_margenes"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Pastel Mini", resp.content.decode())
+
+    def test_guardar_politicas_base_desde_panel_actualiza_calculo(self):
+        r = self._receta("SoloMP Panel", "MMPANEL1")
+        self._point("MMPANEL1", "SoloMP Panel", precio=200)
+        self._mp_hist(r, 80)
+
+        resp = self.client.post(
+            reverse("recetas:monitor_margenes_politicas_precio"),
+            data=json.dumps({
+                "fab": {"margen_meta_pct": "50", "subida_maxima_pct": "30"},
+                "mp": {"margen_meta_pct": "55", "subida_maxima_pct": "25"},
+                "reventa": {"margen_meta_pct": "30", "subida_maxima_pct": "15"},
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.content)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["politicas_base"]["mp"]["margen_meta_pct"], "55")
+        row = self._row(self._fetch(), r)
+        self.assertEqual(row["margen_meta"], "55")
+        self.assertEqual(row["estado"], "OK")

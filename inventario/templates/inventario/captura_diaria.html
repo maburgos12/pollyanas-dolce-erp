@@ -4,56 +4,17 @@
 {% block page_title %}Captura Diaria — Almacén{% endblock %}
 
 {% block extra_css %}
-<style>
-  .captura-grid { display: grid; grid-template-columns: 380px 1fr; gap: 20px; align-items: start; }
-  .form-card { position: sticky; top: 20px; }
-  .tab-btns { display: flex; gap: 4px; margin-bottom: 16px; }
-  .tab-btn { flex: 1; padding: 10px; border: 2px solid transparent; border-radius: 8px; cursor: pointer;
-             font-weight: 700; font-size: 14px; transition: all .15s; }
-  .tab-btn.entrada { background: #e8f5e9; color: #2e7d32; border-color: #a5d6a7; }
-  .tab-btn.salida  { background: #fce4ec; color: #c62828; border-color: #f48fb1; }
-  .tab-btn.entrada.active { background: #2e7d32; color: #fff; }
-  .tab-btn.salida.active  { background: #c62828; color: #fff; }
-  .insumo-search { position: relative; }
-  .insumo-search input { width: 100%; }
-  .insumo-dropdown { display: none; position: absolute; z-index: 100; background: #fff;
-                     border: 1px solid #ddd; border-radius: 8px; max-height: 260px;
-                     overflow-y: auto; width: 100%; box-shadow: 0 4px 12px rgba(0,0,0,.15); }
-  .insumo-dropdown.open { display: block; }
-  .insumo-opt { padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
-  .insumo-opt:hover { background: var(--rosa); }
-  .insumo-opt .opt-stock { font-size: 11px; color: var(--texto-light); }
-  .stock-table th { white-space: nowrap; }
-  .alerta-critico { background: #ffebee !important; }
-  .alerta-reorden { background: #fff8e1 !important; }
-  .alerta-exceso  { background: #e8f5e9 !important; }
-  .badge-critico { background: var(--rojo); color: #fff; }
-  .badge-reorden { background: var(--amarillo); color: #333; }
-  .badge-exceso  { background: var(--verde); color: #fff; }
-  .badge-ok      { background: #e0e0e0; color: #555; }
-  .dias-cobertura { font-weight: 700; }
-  .dias-ok    { color: var(--verde); }
-  .dias-bajo  { color: var(--amarillo); }
-  .dias-crit  { color: var(--rojo); }
-  .mov-list { max-height: 320px; overflow-y: auto; }
-  .mov-row { display: flex; gap: 8px; align-items: center; padding: 6px 0;
-             border-bottom: 1px solid #f0f0f0; font-size: 13px; }
-  .mov-tipo-e { color: var(--verde); font-weight: 700; }
-  .mov-tipo-s { color: var(--rojo); font-weight: 700; }
-  .filter-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
-  .kpi-strip { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
-  .kpi-chip { padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 700; }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/inventario-templates-inventario-captura-diaria.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
-<div style="margin-bottom:16px">
+<div class="captura-topbar">
   <span class="muted">Hoy: <strong>{{ hoy }}</strong></span>
   {% if total_criticos > 0 %}
     <span class="badge badge-danger ms-2">{{ total_criticos }} críticos</span>
   {% endif %}
   {% if total_reorden > 0 %}
-    <span class="badge bg-warning ms-1" style="color:#333">{{ total_reorden }} en reorden</span>
+    <span class="badge bg-warning ms-1 captura-reorden-badge">{{ total_reorden }} en reorden</span>
   {% endif %}
   {% if total_exceso > 0 %}
     <span class="badge bg-success ms-1">{{ total_exceso }} exceso</span>
@@ -65,7 +26,7 @@
   {# ── FORMULARIO IZQUIERDO ─────────────────────────────────────────── #}
   <div class="card form-card">
     <div class="card-header">Registrar movimiento</div>
-    <div style="padding:16px">
+    <div class="captura-form-body">
 
       {% if messages %}
         {% for msg in messages %}
@@ -74,8 +35,8 @@
       {% endif %}
 
       <div class="tab-btns">
-        <button class="tab-btn entrada active" onclick="setTipo('entrada',this)">⬆ ENTRADA</button>
-        <button class="tab-btn salida" onclick="setTipo('salida',this)">⬇ SALIDA</button>
+        <button class="tab-btn entrada active" onclick="setTipo('entrada',this)">ENTRADA</button>
+        <button class="tab-btn salida" onclick="setTipo('salida',this)">SALIDA</button>
       </div>
 
       {% if can_manage %}
@@ -97,7 +58,7 @@
                    placeholder="Buscar insumo..." autocomplete="off">
             <div class="insumo-dropdown" id="insumo-dropdown"></div>
           </div>
-          <div id="insumo-selected" class="mt-1 muted" style="font-size:12px"></div>
+          <div id="insumo-selected" class="mt-1 muted captura-muted-xs"></div>
         </div>
 
         <div class="mb-3">
@@ -121,7 +82,7 @@
                  placeholder="Ej: NUTRIGO Factura 1234">
         </div>
 
-        <button type="submit" class="btn btn-primary w-100" id="btn-submit" style="height:44px;font-weight:700">
+        <button type="submit" class="btn btn-primary w-100 captura-submit is-entrada" id="btn-submit">
           Registrar entrada
         </button>
       </form>
@@ -131,17 +92,17 @@
 
       {# Últimos movimientos de hoy #}
       {% if movs_hoy %}
-      <div style="margin-top:20px">
-        <div style="font-weight:700;font-size:13px;margin-bottom:8px">Hoy registrados ({{ movs_hoy|length }})</div>
+      <div class="captura-section">
+        <div class="captura-section-title">Hoy registrados ({{ movs_hoy|length }})</div>
         <div class="mov-list">
           {% for m in movs_hoy %}
           <div class="mov-row">
             <span class="{% if m.tipo == 'ENTRADA' %}mov-tipo-e{% else %}mov-tipo-s{% endif %}">
-              {% if m.tipo == 'ENTRADA' %}⬆{% else %}⬇{% endif %}
+              {% if m.tipo == 'ENTRADA' %}ENT{% else %}SAL{% endif %}
             </span>
-            <span style="flex:1;font-size:12px">{{ m.insumo.nombre|truncatechars:28 }}</span>
-            <span style="font-weight:700">{{ m.cantidad }}</span>
-            <span class="muted" style="font-size:11px">{{ m.insumo.unidad_base.codigo|default:'' }}</span>
+            <span class="captura-mov-name">{{ m.insumo.nombre|truncatechars:28 }}</span>
+            <span class="captura-mov-qty">{{ m.cantidad }}</span>
+            <span class="muted captura-mov-unit">{{ m.insumo.unidad_base.codigo|default:'' }}</span>
           </div>
           {% endfor %}
         </div>
@@ -153,32 +114,32 @@
   {# ── TABLA STOCK DERECHA ──────────────────────────────────────────── #}
   <div>
     <div class="filter-bar">
-      <form method="get" style="display:flex;gap:10px;flex-wrap:wrap">
-        <input type="text" name="q" value="{{ filtro_q }}" class="form-control"
-               style="width:200px" placeholder="Buscar insumo...">
-        <select name="almacen" class="form-control" style="width:200px">
+      <form method="get" class="captura-filter-form">
+        <input type="text" name="q" value="{{ filtro_q }}" class="form-control captura-filter-control"
+               placeholder="Buscar insumo...">
+        <select name="almacen" class="form-control captura-filter-control">
           <option value="">Todos los almacenes</option>
           {% for val, label in almacen_choices %}
             <option value="{{ val }}" {% if filtro_almacen == val %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
         <button type="submit" class="btn btn-secondary btn-sm">Filtrar</button>
-        <a href="{% url 'inventario:captura_diaria' %}" class="btn btn-sm" style="background:#f0f0f0">Limpiar</a>
+        <a href="{% url 'inventario:captura_diaria' %}" class="btn btn-sm captura-clean">Limpiar</a>
       </form>
     </div>
 
     <div class="table-wrapper">
-      <table class="table table-striped stock-table" style="font-size:13px">
+      <table class="table table-striped stock-table captura-stock-table">
         <thead>
           <tr>
             <th>Insumo</th>
             <th>Almacén</th>
             <th>Unidad</th>
-            <th style="text-align:right">Stock actual</th>
-            <th style="text-align:right">Stock mín</th>
-            <th style="text-align:right">Stock máx</th>
-            <th style="text-align:right">P. Reorden</th>
-            <th style="text-align:right">Días cob.</th>
+            <th class="captura-num">Stock actual</th>
+            <th class="captura-num">Stock mín</th>
+            <th class="captura-num">Stock máx</th>
+            <th class="captura-num">P. Reorden</th>
+            <th class="captura-num">Días cob.</th>
             <th>Estado</th>
             {% if can_manage %}<th></th>{% endif %}
           </tr>
@@ -187,13 +148,13 @@
           {% for r in exist_rows %}
           <tr class="alerta-{{ r.alerta }}">
             <td><strong>{{ r.nombre }}</strong></td>
-            <td style="font-size:11px">{{ r.almacen_label }}</td>
+            <td class="captura-cell-sm">{{ r.almacen_label }}</td>
             <td>{{ r.unidad }}</td>
-            <td style="text-align:right;font-weight:700">{{ r.stock_actual|floatformat:2|intcomma }}</td>
-            <td style="text-align:right;color:var(--texto-light)">{{ r.stock_minimo|floatformat:0|intcomma }}</td>
-            <td style="text-align:right;color:var(--texto-light)">{{ r.stock_maximo|floatformat:0|intcomma }}</td>
-            <td style="text-align:right">{{ r.punto_reorden|floatformat:0|intcomma }}</td>
-            <td style="text-align:right">
+            <td class="captura-num-strong">{{ r.stock_actual|floatformat:2|intcomma }}</td>
+            <td class="captura-num-muted">{{ r.stock_minimo|floatformat:0|intcomma }}</td>
+            <td class="captura-num-muted">{{ r.stock_maximo|floatformat:0|intcomma }}</td>
+            <td class="captura-num">{{ r.punto_reorden|floatformat:0|intcomma }}</td>
+            <td class="captura-num">
               {% if r.dias_cobertura is not None %}
                 <span class="dias-cobertura {% if r.dias_cobertura >= 7 %}dias-ok{% elif r.dias_cobertura >= 3 %}dias-bajo{% else %}dias-crit{% endif %}">
                   {{ r.dias_cobertura }}d
@@ -202,17 +163,17 @@
             </td>
             <td>
               <span class="badge badge-{{ r.alerta }}">
-                {% if r.alerta == 'critico' %}⚠ CRÍTICO
-                {% elif r.alerta == 'reorden' %}🔁 REORDEN
-                {% elif r.alerta == 'exceso' %}↑ EXCESO
-                {% else %}✓ OK{% endif %}
+                {% if r.alerta == 'critico' %}CRÍTICO
+                {% elif r.alerta == 'reorden' %}REORDEN
+                {% elif r.alerta == 'exceso' %}EXCESO
+                {% else %}OK{% endif %}
               </span>
             </td>
             {% if can_manage %}
             <td>
               <button class="btn btn-sm btn-secondary"
                       onclick="quickFill({{ r.insumo_id }},'{{ r.nombre|escapejs }}','{{ r.unidad }}','{{ r.almacen }}')"
-                      title="Registro rápido">+/−</button>
+                      title="Registro rápido">+/-</button>
             </td>
             {% endif %}
           </tr>
@@ -224,19 +185,19 @@
     </div>
 
     {# Últimos 50 movimientos #}
-    <div class="card" style="margin-top:20px">
+    <div class="card captura-section">
       <div class="card-header">Últimos 50 movimientos</div>
-      <div style="padding:12px">
+      <div class="captura-card-body">
         <div class="mov-list">
           {% for m in movs_recientes %}
           <div class="mov-row">
-            <span class="{% if m.tipo == 'ENTRADA' %}mov-tipo-e{% else %}mov-tipo-s{% endif %}" style="width:60px">
-              {% if m.tipo == 'ENTRADA' %}⬆ ENT{% else %}⬇ SAL{% endif %}
+            <span class="{% if m.tipo == 'ENTRADA' %}mov-tipo-e{% else %}mov-tipo-s{% endif %} captura-mov-type">
+              {% if m.tipo == 'ENTRADA' %}ENT{% else %}SAL{% endif %}
             </span>
-            <span style="width:100px;font-size:11px;color:var(--texto-light)">{{ m.fecha|date:"d/m H:i" }}</span>
-            <span style="flex:1">{{ m.insumo.nombre|truncatechars:35 }}</span>
-            <span style="font-weight:700;min-width:60px;text-align:right">{{ m.cantidad }} {{ m.insumo.unidad_base.codigo|default:'' }}</span>
-            {% if m.notas %}<span class="muted" style="font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.notas }}</span>{% endif %}
+            <span class="captura-mov-date">{{ m.fecha|date:"d/m H:i" }}</span>
+            <span class="captura-mov-product">{{ m.insumo.nombre|truncatechars:35 }}</span>
+            <span class="captura-mov-total">{{ m.cantidad }} {{ m.insumo.unidad_base.codigo|default:'' }}</span>
+            {% if m.notas %}<span class="muted captura-mov-notes">{{ m.notas }}</span>{% endif %}
           </div>
           {% endfor %}
         </div>
@@ -262,11 +223,13 @@ function setTipo(tipo, btn) {
   const labelNotas = document.getElementById('label-notas');
   if (tipo === 'entrada') {
     btnSubmit.textContent = 'Registrar entrada';
-    btnSubmit.style.background = '#2e7d32';
+    btnSubmit.classList.add('is-entrada');
+    btnSubmit.classList.remove('is-salida');
     labelNotas.textContent = 'Proveedor / Folio (opcional)';
   } else {
     btnSubmit.textContent = 'Registrar salida';
-    btnSubmit.style.background = '#c62828';
+    btnSubmit.classList.add('is-salida');
+    btnSubmit.classList.remove('is-entrada');
     labelNotas.textContent = 'Destino (sucursal, producción...)';
   }
 }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from collections import OrderedDict, defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
@@ -28,6 +29,7 @@ from ventas.services.pronostico_engine import (
     WEEKDAYS_ES,
 )
 from ventas.services.pronostico_engine import calcular_pronostico
+from ventas.services.proyecciones_engine import calcular_proyeccion_operativa
 from ventas.services.sales_freshness import (
     get_forecast_sales_freshness,
     queue_forecast_sales_refresh_if_needed,
@@ -173,6 +175,13 @@ def _int_from_json(value) -> int:
     return int(Decimal(str(value)))
 
 
+def _int_from_form(value) -> int:
+    try:
+        return int(Decimal(str(value or "0")))
+    except Exception:
+        return 0
+
+
 def _parse_iso_date(value: str) -> date | None:
     try:
         return date.fromisoformat(str(value))
@@ -196,6 +205,19 @@ def _selected_branch_ids(request, *, source: str = "GET") -> set[int]:
 
 def _selected_product_skus(request) -> list[str]:
     return [value.strip() for value in request.POST.getlist("productos_incluidos") if value.strip()]
+
+
+def _projection_presets() -> list[dict[str, str | int]]:
+    start = timezone.localdate()
+    return [
+        {
+            "label": label,
+            "days": days,
+            "fecha_inicio": start.isoformat(),
+            "fecha_fin": (start + timedelta(days=days - 1)).isoformat(),
+        }
+        for label, days in (("Semana", 7), ("15 días", 15), ("30 días", 30))
+    ]
 
 
 def _catalogo_productos_por_categoria() -> OrderedDict[str, list[dict]]:
@@ -548,6 +570,179 @@ def _write_escenarios_sheet(ws, *, title: str, subtitle: str, categorias: list[d
         ws.column_dimensions[column_letter].width = min(max(max_length + 2, 10), 44)
 
 
+def _build_adjustment_rows(resultados: dict) -> tuple[list[dict], dict]:
+    ajustes = resultados.get("ajustes_ventas") or {}
+    fechas = resultados.get("fechas_tabla") or []
+    rows = []
+    total_propuesta = 0
+    total_ajuste_general = 0
+    total_ajuste_dias = 0
+    total_final = 0
+    ingreso_final = Decimal("0")
+    fallback_index = 0
+
+    for category in resultados.get("por_categoria") or []:
+        category_name = category.get("categoria") or "Sin categoría"
+        for product in category.get("productos") or []:
+            product_id = product.get("point_product_id")
+            recipe_id = product.get("receta_id")
+            if product_id:
+                key = f"p{product_id}"
+            elif recipe_id:
+                key = f"r{recipe_id}"
+            else:
+                key = f"n{fallback_index}"
+            fallback_index += 1
+            ajuste = ajustes.get(key) or {}
+            day_adjustments = ajuste.get("dias") or {}
+            propuesta = _int_from_json(product.get("total_piezas"))
+            general_delta = _int_from_json(ajuste.get("ajuste"))
+            dias = []
+            day_delta_total = 0
+            product_days = {day.get("fecha_iso"): day for day in product.get("dias_lista") or []}
+            for fecha in fechas:
+                fecha_iso = fecha.get("iso")
+                day_values = product_days.get(fecha_iso) or {}
+                sistema = _int_from_json(day_values.get("recomendado") or (product.get("por_dia") or {}).get(fecha_iso))
+                day_adjustment = day_adjustments.get(fecha_iso) or {}
+                day_delta = _int_from_json(day_adjustment.get("ajuste"))
+                day_delta_total += day_delta
+                dias.append(
+                    {
+                        "fecha_iso": fecha_iso,
+                        "label": fecha.get("label") or fecha_iso,
+                        "sistema": sistema,
+                        "ajuste": day_delta,
+                        "final": max(0, sistema + day_delta),
+                        "nota": day_adjustment.get("nota") or "",
+                    }
+                )
+            final = max(0, propuesta + general_delta + day_delta_total)
+            price = _decimal_from_json(product.get("precio"))
+            income = final * price
+            total_propuesta += propuesta
+            total_ajuste_general += general_delta
+            total_ajuste_dias += day_delta_total
+            total_final += final
+            ingreso_final += income
+            rows.append(
+                {
+                    "key": key,
+                    "categoria": category_name,
+                    "nombre": product.get("nombre") or "Producto",
+                    "base": propuesta,
+                    "propuesta": propuesta,
+                    "ajuste": general_delta,
+                    "ajuste_dias": day_delta_total,
+                    "ajuste_total": general_delta + day_delta_total,
+                    "total_final": final,
+                    "precio": price,
+                    "ingreso_final": income,
+                    "nota": ajuste.get("nota") or "",
+                    "dias": dias,
+                }
+            )
+
+    total_ajuste = total_ajuste_general + total_ajuste_dias
+    return rows, {
+        "total_base": total_propuesta,
+        "total_propuesta": total_propuesta,
+        "total_ajuste_general": total_ajuste_general,
+        "total_ajuste_dias": total_ajuste_dias,
+        "total_ajuste": total_ajuste,
+        "total_final": total_final,
+        "ingreso_final": ingreso_final,
+    }
+
+
+def _save_manual_adjustments(pronostico: PronosticoGuardado, post_data) -> None:
+    resultados = deepcopy(pronostico.resultado_json or {})
+    resultados["ajustes_ventas"] = _adjustment_payload_from_post(resultados, post_data)
+    _rows, totals = _build_adjustment_rows(resultados)
+    resumen = resultados.get("resumen") or {}
+    resumen["total_piezas_base"] = totals["total_base"]
+    resumen["ajuste_piezas_ventas"] = totals["total_ajuste"]
+    resumen["total_piezas"] = totals["total_final"]
+    resumen["total_ingreso"] = totals["ingreso_final"]
+    resultados["resumen"] = resumen
+    pronostico.resultado_json = _json_ready(resultados)
+    pronostico.total_piezas = totals["total_final"]
+    pronostico.total_ingreso = totals["ingreso_final"]
+    pronostico.save(update_fields=["resultado_json", "total_piezas", "total_ingreso"])
+
+
+def _adjustment_payload_from_post(resultados: dict, post_data) -> dict:
+    rows, _totals = _build_adjustment_rows(resultados)
+    ajustes = {}
+    for row in rows:
+        key = row["key"]
+        delta = _int_from_form(post_data.get(f"ajuste_{key}"))
+        nota = (post_data.get(f"nota_{key}") or "").strip()
+        day_payload = {}
+        for day in row.get("dias") or []:
+            fecha_iso = day.get("fecha_iso")
+            day_delta = _int_from_form(post_data.get(f"ajuste_dia_{key}_{fecha_iso}"))
+            day_note = (post_data.get(f"nota_dia_{key}_{fecha_iso}") or "").strip()
+            if day_delta or day_note:
+                day_payload[fecha_iso] = {"ajuste": day_delta, "nota": day_note}
+        if delta or nota or day_payload:
+            ajustes[key] = {"ajuste": delta, "nota": nota, "dias": day_payload}
+    return ajustes
+
+
+def _apply_manual_adjustments(resultados: dict, post_data) -> tuple[dict, dict]:
+    resultados = deepcopy(resultados or {})
+    resultados["ajustes_ventas"] = _adjustment_payload_from_post(resultados, post_data)
+    _rows, totals = _build_adjustment_rows(resultados)
+    resumen = resultados.get("resumen") or {}
+    resumen["total_piezas_base"] = totals["total_base"]
+    resumen["ajuste_piezas_ventas"] = totals["total_ajuste"]
+    resumen["total_piezas"] = totals["total_final"]
+    resumen["total_ingreso"] = totals["ingreso_final"]
+    resultados["resumen"] = resumen
+    return resultados, totals
+
+
+def _write_adjustments_sheet(ws, *, rows: list[dict], totals: dict):
+    ws["A1"] = "Ajustes de ventas"
+    ws["A1"].font = Font(color="7B1A48", bold=True, size=14)
+    ws.append([])
+    ws.append(["Categoría", "Producto", "Propuesta ERP", "Ajuste general", "Ajuste por día", "Total final", "Precio", "Ingreso final", "Nota"])
+    _style_row(ws, 3, fill="F5E6ED", font_color="7B1A48", bold=True)
+    for row in rows:
+        ws.append(
+            [
+                row["categoria"],
+                row["nombre"],
+                row["propuesta"],
+                row["ajuste"],
+                row["ajuste_dias"],
+                row["total_final"],
+                float(row["precio"]),
+                float(row["ingreso_final"]),
+                row["nota"],
+            ]
+        )
+    ws.append(
+        [
+            "Total",
+            "",
+            totals["total_propuesta"],
+            totals["total_ajuste_general"],
+            totals["total_ajuste_dias"],
+            totals["total_final"],
+            "",
+            float(totals["ingreso_final"]),
+            "",
+        ]
+    )
+    _style_row(ws, ws.max_row, fill="3D0A24", font_color="FFFFFF", bold=True)
+    for column_cells in ws.columns:
+        column_letter = get_column_letter(column_cells[0].column)
+        max_length = max(len(str(cell.value or "")) for cell in column_cells)
+        ws.column_dimensions[column_letter].width = min(max(max_length + 2, 10), 44)
+
+
 def _build_pronostico_excel_response(pronostico: PronosticoGuardado) -> HttpResponse:
     resultados = pronostico.resultado_json or {}
     fechas = resultados.get("fechas") or []
@@ -590,6 +785,10 @@ def _build_pronostico_excel_response(pronostico: PronosticoGuardado) -> HttpResp
         subtitle=subtitle,
         categorias=resultados.get("por_categoria") or [],
     )
+    adjustment_rows, adjustment_totals = _build_adjustment_rows(resultados)
+    if adjustment_rows:
+        adjustments_sheet = workbook.create_sheet(_safe_sheet_title("Ajustes ventas", used_titles))
+        _write_adjustments_sheet(adjustments_sheet, rows=adjustment_rows, totals=adjustment_totals)
 
     buffer = BytesIO()
     workbook.save(buffer)
@@ -614,17 +813,35 @@ def _get_pronostico_for_user(user, pk: int) -> PronosticoGuardado:
 def _build_pronostico_detail_context(pronostico: PronosticoGuardado) -> dict:
     resultados = pronostico.resultado_json or {}
     tiene_real, comparativa, resumen_comparativa = _build_comparativa_real(pronostico, resultados)
+    adjustment_rows, adjustment_totals = _build_adjustment_rows(resultados)
     return {
         "pronostico": pronostico,
         "tiene_real": tiene_real,
         "comparativa": comparativa,
         "resumen_comparativa": resumen_comparativa,
+        "adjustment_rows": adjustment_rows,
+        "adjustment_totals": adjustment_totals,
         **_empty_result_context(resultados),
     }
 
 
-def _calcular_y_guardar_sync(*, nombre, fecha_inicio, fecha_fin, sucursal_ids, usuario, skus_incluidos=None):
-    resultado = calcular_pronostico(fecha_inicio, fecha_fin, set(sucursal_ids), skus_incluidos=skus_incluidos or None)
+def _calcular_y_guardar_sync(
+    *,
+    nombre,
+    fecha_inicio,
+    fecha_fin,
+    sucursal_ids,
+    usuario,
+    skus_incluidos=None,
+    ajustes_post=None,
+    tipo="pronosticos",
+):
+    if tipo == "proyecciones":
+        resultado = calcular_proyeccion_operativa(fecha_inicio, fecha_fin, set(sucursal_ids), skus_incluidos=skus_incluidos or None)
+    else:
+        resultado = calcular_pronostico(fecha_inicio, fecha_fin, set(sucursal_ids), skus_incluidos=skus_incluidos or None)
+    if ajustes_post:
+        resultado, _totals = _apply_manual_adjustments(resultado, ajustes_post)
     resumen = resultado.get("resumen") or {}
     pronostico = PronosticoGuardado.objects.create(
         nombre=nombre,
@@ -661,6 +878,9 @@ def PronosticoVentasView(request):
     if not _can_view_pronostico(request.user):
         raise PermissionDenied("No tienes permisos para ver pronosticos de ventas.")
 
+    active_tab = request.POST.get("tab") if request.method == "POST" else request.GET.get("tab", "pronosticos")
+    if active_tab not in {"pronosticos", "proyecciones"}:
+        active_tab = "pronosticos"
     branches = Sucursal.objects.filter(activa=True).order_by("nombre")
     source = "POST" if request.method == "POST" else "GET"
     data = request.POST if request.method == "POST" else request.GET
@@ -671,6 +891,7 @@ def PronosticoVentasView(request):
     available_skus = {product["sku"] for products in categorias_productos.values() for product in products}
     selected_product_skus = _selected_product_skus(request) if request.method == "POST" else sorted(available_skus)
     form_errors = []
+    resultados_preview = {}
 
     if request.method == "POST":
         fecha_inicio, fecha_fin, form_errors = _validate_dates(fecha_inicio_raw, fecha_fin_raw)
@@ -681,31 +902,41 @@ def PronosticoVentasView(request):
             form_errors.append("Selecciona al menos un producto para incluir en el pronostico.")
         if not form_errors and fecha_inicio and fecha_fin:
             _warn_stale_sales_forecast(request)
-            nombre = f"Pronóstico {fecha_inicio.isoformat()} a {fecha_fin.isoformat()}"
-            pronostico = _calcular_y_guardar_sync(
-                nombre=nombre,
-                fecha_inicio=fecha_inicio,
-                fecha_fin=fecha_fin,
-                sucursal_ids=sorted(selected_branch_ids),
-                usuario=request.user,
-                skus_incluidos=selected_product_skus,
-            )
-            return redirect("ventas:pronostico_detalle", pk=pronostico.id)
+            if active_tab == "proyecciones":
+                resultados_preview = calcular_proyeccion_operativa(
+                    fecha_inicio,
+                    fecha_fin,
+                    selected_branch_ids,
+                    skus_incluidos=selected_product_skus,
+                )
+            else:
+                resultados_preview = calcular_pronostico(
+                    fecha_inicio,
+                    fecha_fin,
+                    selected_branch_ids,
+                    skus_incluidos=selected_product_skus,
+                )
         for error in form_errors:
             messages.error(request, error)
 
+    adjustment_rows, adjustment_totals = _build_adjustment_rows(resultados_preview)
+
     context = {
         "branches": branches,
+        "active_tab": active_tab,
         "selected_branch_ids": selected_branch_ids,
         "fecha_inicio": fecha_inicio_raw,
         "fecha_fin": fecha_fin_raw,
         "categorias_productos": categorias_productos,
         "categorias_principales": {category.upper() for category in CATALOG_CATEGORY_ORDER},
         "selected_product_skus": set(selected_product_skus),
+        "projection_presets": _projection_presets(),
         "form_errors": form_errors,
         "pronosticos_guardados": _pronosticos_for_user(request.user)[:10],
         "sales_freshness": get_forecast_sales_freshness(),
-        **_empty_result_context({}),
+        "adjustment_rows": adjustment_rows,
+        "adjustment_totals": adjustment_totals,
+        **_empty_result_context(resultados_preview),
     }
     return render(request, "ventas/pronostico.html", context)
 
@@ -737,6 +968,9 @@ def PronosticoGuardarView(request):
         raise PermissionDenied("No tienes permisos para guardar pronosticos de ventas.")
 
     nombre = (request.POST.get("nombre") or "").strip()
+    active_tab = request.POST.get("tab") or "pronosticos"
+    if active_tab not in {"pronosticos", "proyecciones"}:
+        active_tab = "pronosticos"
     fecha_inicio_raw = (request.POST.get("fecha_inicio") or "").strip()
     fecha_fin_raw = (request.POST.get("fecha_fin") or "").strip()
     fecha_inicio, fecha_fin, errors = _validate_dates(fecha_inicio_raw, fecha_fin_raw)
@@ -744,6 +978,8 @@ def PronosticoGuardarView(request):
     selected_product_skus = _selected_product_skus(request)
     if not selected_branch_ids:
         errors.append("Selecciona al menos una sucursal activa.")
+    if not selected_product_skus:
+        errors.append("Selecciona al menos un producto para guardar la proyeccion.")
     if errors:
         for error in errors:
             messages.error(request, error)
@@ -760,7 +996,9 @@ def PronosticoGuardarView(request):
         fecha_fin=fecha_fin,
         sucursal_ids=sorted(selected_branch_ids),
         usuario=request.user,
-        skus_incluidos=selected_product_skus or None,
+        skus_incluidos=selected_product_skus,
+        ajustes_post=request.POST,
+        tipo=active_tab,
     )
     return redirect("ventas:pronostico_detalle", pk=pronostico.id)
 
@@ -778,6 +1016,17 @@ def PronosticoDetalleView(request, pk: int):
         raise PermissionDenied("No tienes permisos para ver este pronostico.")
     pronostico = _get_pronostico_for_user(request.user, pk)
     return render(request, "ventas/pronostico_detalle.html", _build_pronostico_detail_context(pronostico))
+
+
+@login_required
+@require_POST
+def PronosticoAjustesView(request, pk: int):
+    if not _can_view_pronostico(request.user):
+        raise PermissionDenied("No tienes permisos para ajustar este pronostico.")
+    pronostico = _get_pronostico_for_user(request.user, pk)
+    _save_manual_adjustments(pronostico, request.POST)
+    messages.success(request, "Ajustes de ventas guardados.")
+    return redirect("ventas:pronostico_detalle", pk=pronostico.id)
 
 
 @login_required

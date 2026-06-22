@@ -12,9 +12,14 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
+    <!-- ponytail: CDN icons keep this Django UI useful without adding a frontend build; self-host if CSP/offline matters. -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.44.0/dist/tabler-icons.min.css">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Sharp:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200">
+    <script defer src="https://cdn.jsdelivr.net/npm/lucide@1.21.0/dist/umd/lucide.min.js"></script>
     <link rel="stylesheet" href="/static/css/styles.css?v=20260606-alert-close-v1">
-    <link rel="stylesheet" href="/static/css/pollyana_ops_ui.css?v=20260526-logistica-bitacoras-v1">
+    <link rel="stylesheet" href="/static/css/pollyana_ops_ui.css?v=20260614-ui-fase-final-v1">
     {% block extra_css %}{% endblock %}
+    <link rel="stylesheet" href="/static/css/pollyana_generated_utilities.css?v=20260614-ui100-v1">
     <link rel="stylesheet" href="/static/css/hallmark_guardrails.css?v=20260601-reportes-kpis-order-v1">
 </head>
 <body class="{% block body_class %}{% endblock %}">
@@ -55,6 +60,12 @@
                                     <path d="M3 3h2l.4 2M7 13h10l4-8H5.4"/>
                                     <path d="M7 13 5.4 5M7 13l-1.4 5h12.8"/>
                                     <circle cx="9" cy="21" r="1"/><circle cx="19" cy="21" r="1"/>
+                                </svg>
+                                {% elif group.key == "fallas" %}
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                                    <path d="M12 9v4"/>
+                                    <path d="M12 17h.01"/>
                                 </svg>
                                 {% elif group.key == "produccion" %}
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -825,7 +836,8 @@
         </main>
     </div>
 
-    <script src="{% static 'js/searchable_selects.js' %}?v=20260605-rrhh-catalogos-v1" defer></script>
+    <script src="{% static 'js/searchable_selects.js' %}?v=20260613-calculo-insumos-a11y-v1" defer></script>
+    <script src="{% static 'js/pollyana_ops_ui.js' %}?v=20260614-ui100-v1" defer></script>
 
     {% block extra_js %}{% endblock %}
 

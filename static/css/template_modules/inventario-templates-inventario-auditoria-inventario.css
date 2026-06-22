@@ -1,0 +1,31 @@
+/* Extracted from inventario/templates/inventario/auditoria_inventario.html */
+.kpi-strip { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:20px; }
+  .kpi-chip  { padding:8px 18px; border-radius:20px; font-size:13px; font-weight:700; cursor:pointer; border:2px solid transparent; }
+  .kpi-chip:hover { opacity:.85; }
+  .kpi-chip.active { border-color: var(--texto); }
+  .chip-ok      { background:#e8f5e9; color:#2e7d32; }
+  .chip-bajo    { background:#ffebee; color:#c62828; }
+  .chip-alto    { background:#fff8e1; color:#e65100; }
+  .chip-sinpoint{ background:#f3e5f5; color:#6a1b9a; }
+  .chip-sinerp  { background:#fce4ec; color:#880e4f; }
+  .chip-total   { background:var(--gris-suave); color:var(--texto); }
+
+  .audit-table th { white-space:normal; position:sticky; top:0; background:#fff; z-index:1; }
+  .audit-table td { vertical-align:middle; }
+  .disc-pos  { color:#e65100; font-weight:700; }
+  .disc-neg  { color:#c62828; font-weight:700; }
+  .disc-ok   { color:#2e7d32; }
+
+  .badge-OK       { background:#e8f5e9; color:#2e7d32; }
+  .badge-ALTO     { background:#fff3e0; color:#e65100; }
+  .badge-BAJO     { background:#ffebee; color:#c62828; }
+  .badge-SIN_POINT{ background:#f3e5f5; color:#6a1b9a; }
+  .badge-SIN_ERP  { background:#fce4ec; color:#880e4f; }
+
+  tr.row-BAJO     { background:#fff5f5 !important; }
+  tr.row-ALTO     { background:#fffde7 !important; }
+  tr.row-SIN_ERP  { background:#fce4ec !important; }
+  tr.row-SIN_POINT{ background:#f9f0ff !important; }
+
+  .sync-info { font-size:12px; color:var(--texto-light); margin-bottom:12px; }
+  .filter-bar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }

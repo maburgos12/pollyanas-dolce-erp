@@ -107,6 +107,60 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertTrue(self.check.completado)
         self.assertEqual(self.check.completado_por, self.user)
 
+    def test_minuta_con_checks_muestra_panel_abierto_para_colaborador(self):
+        item = SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            titulo="Minuta con checks visibles",
+            descripcion="Acuerdo de junta.",
+            responsable_empleado=self.empleado,
+            area="PRODUCCION",
+            fecha_limite=timezone.now() + timedelta(days=1),
+        )
+        check = SeguimientoChecklistItem.objects.create(
+            seguimiento=item,
+            titulo="Punto que debe marcar Carolina",
+        )
+
+        response = self.client.get("/seguimiento/minutas/")
+        content = response.content.decode()
+
+        self.assertContains(response, "Minuta con checks visibles")
+        self.assertIn("<details open>", content)
+        self.assertIn(f'action="/seguimiento/{item.pk}/checklist/{check.pk}/"', content)
+
+    def test_paso_agente_dg_no_acepta_toggle_local(self):
+        self.item.tipo = SeguimientoItem.TIPO_PROYECTO
+        self.item.origen = "Agente DG"
+        self.item.metadata = {"source": "agente_dg", "source_table": "minute_projects", "source_id": 9}
+        self.item.save(update_fields=["tipo", "origen", "metadata"])
+        self.check.origen_step_id = 14
+        self.check.estatus_origen = "READY"
+        self.check.save(update_fields=["origen_step_id", "estatus_origen"])
+
+        response = self.client.post(f"/seguimiento/{self.item.pk}/checklist/{self.check.pk}/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], f"/seguimiento/{self.item.pk}/")
+        self.check.refresh_from_db()
+        self.assertFalse(self.check.completado)
+        self.assertFalse(Notificacion.objects.filter(objeto_id=str(self.item.pk), tipo=Notificacion.TIPO_SEGUIMIENTO).exists())
+
+    def test_mi_trabajo_no_expone_toggle_local_para_paso_agente_dg(self):
+        self.item.tipo = SeguimientoItem.TIPO_PROYECTO
+        self.item.origen = "Agente DG"
+        self.item.metadata = {"source": "agente_dg", "source_table": "minute_projects", "source_id": 9}
+        self.item.save(update_fields=["tipo", "origen", "metadata"])
+        self.check.origen_step_id = 14
+        self.check.estatus_origen = "READY"
+        self.check.save(update_fields=["origen_step_id", "estatus_origen"])
+
+        response = self.client.get("/seguimiento/")
+        content = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(f'action="/seguimiento/{self.item.pk}/checklist/{self.check.pk}/"', content)
+        self.assertIn(f'href="/seguimiento/{self.item.pk}/"', content)
+
     def test_usuario_ajeno_no_ve_ni_actualiza_acuerdo(self):
         otro = get_user_model().objects.create_user(username="usuario.ajeno", password="test12345")
         self.client.force_login(otro)
@@ -698,6 +752,168 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertIsNone(checks[0].completado_por)
         self.assertIsNone(checks[0].completado_at)
 
+    def test_sync_no_desmarca_mismo_check_local_si_agente_dg_llega_atrasado(self):
+        command = ImportarAgenteDGCommand()
+        counters = {"created": 0, "updated": 0, "skipped": 0}
+        row = {
+            "id": 11,
+            "titulo": "Proyecto con avance local",
+            "descripcion": "Validar avance local",
+            "expected_deliverable": "",
+            "status": "IN_PROGRESS",
+            "target_date": timezone.now() + timedelta(days=5),
+            "user_email": self.user.email,
+            "user_name": self.user.get_full_name(),
+            "user_id": 4,
+            "area_name": "Proyecto",
+        }
+        payload = [{"titulo": "Paso vigente", "descripcion": "", "completado": False}]
+        command._upsert_item(row, "minute_projects", SeguimientoItem.TIPO_PROYECTO, counters, checklist=payload)
+        item = SeguimientoItem.objects.get(titulo="Proyecto con avance local")
+        check = item.checklist.get()
+        check.completado = True
+        check.completado_por = self.user
+        check.completado_at = timezone.now()
+        check.save(update_fields=["completado", "completado_por", "completado_at"])
+
+        command._upsert_item(row, "minute_projects", SeguimientoItem.TIPO_PROYECTO, counters, checklist=payload)
+
+        check.refresh_from_db()
+        self.assertTrue(check.completado)
+        self.assertEqual(check.completado_por, self.user)
+        self.assertIsNotNone(check.completado_at)
+
+    def test_sync_preserva_subpuntos_locales_si_agente_dg_llega_atrasado(self):
+        command = ImportarAgenteDGCommand()
+        counters = {"created": 0, "updated": 0, "skipped": 0}
+        row = {
+            "id": 12,
+            "titulo": "Proyecto con subpuntos",
+            "descripcion": "Validar avance local",
+            "expected_deliverable": "",
+            "status": "IN_PROGRESS",
+            "target_date": timezone.now() + timedelta(days=5),
+            "user_email": self.user.email,
+            "user_name": self.user.get_full_name(),
+            "user_id": 4,
+            "area_name": "Proyecto",
+        }
+        checklist_json = json.dumps([
+            {"text": "Primer subpunto", "completed": False},
+            {"text": "Segundo subpunto", "completed": False},
+        ])
+        payload = [
+            {
+                "titulo": "Paso con checklist",
+                "origen_step_id": 201,
+                "descripcion": "",
+                "completado": False,
+                "checklist_items_json": checklist_json,
+            }
+        ]
+        command._upsert_item(row, "minute_projects", SeguimientoItem.TIPO_PROYECTO, counters, checklist=payload)
+        item = SeguimientoItem.objects.get(titulo="Proyecto con subpuntos")
+        check = item.checklist.get(origen_step_id=201)
+        check.sub_checklist[0]["completado"] = True
+        check.save(update_fields=["sub_checklist"])
+
+        command._upsert_item(row, "minute_projects", SeguimientoItem.TIPO_PROYECTO, counters, checklist=payload)
+
+        check.refresh_from_db()
+        self.assertTrue(check.sub_checklist[0]["completado"])
+        self.assertFalse(check.sub_checklist[1]["completado"])
+
+    def test_webhook_parcial_no_borra_participantes_existentes(self):
+        command = ImportarAgenteDGCommand()
+        counters = {"created": 0, "updated": 0, "skipped": 0}
+        row = {
+            "id": 13,
+            "titulo": "Proyecto compartido parcial",
+            "descripcion": "Validar participantes",
+            "expected_deliverable": "",
+            "status": "IN_PROGRESS",
+            "target_date": timezone.now() + timedelta(days=5),
+            "user_email": "otra@pollyanasdolce.com",
+            "user_name": "Otra Persona",
+            "user_id": 4,
+            "area_name": "Proyecto",
+        }
+        command._upsert_item(
+            row,
+            "minute_projects",
+            SeguimientoItem.TIPO_PROYECTO,
+            counters,
+            checklist=[{"titulo": "Paso", "descripcion": "", "completado": False}],
+            participants=[
+                {
+                    "user_id": 5,
+                    "user_email": self.user.email,
+                    "user_name": self.user.get_full_name(),
+                    "role": "STEP_OWNER",
+                }
+            ],
+        )
+        item = SeguimientoItem.objects.get(titulo="Proyecto compartido parcial")
+
+        upsert_agente_dg_payload({
+            "source_table": "minute_projects",
+            "source_id": 13,
+            "record": {**row, "descripcion": "Actualizacion parcial"},
+        })
+
+        item.refresh_from_db()
+        self.assertIn(self.user, item.participantes_user.all())
+        self.assertIn(self.empleado, item.participantes_empleado.all())
+
+    def test_importador_preserva_identidad_de_pasos_por_origen_step_id_al_reordenar(self):
+        command = ImportarAgenteDGCommand()
+        counters = {"created": 0, "updated": 0, "skipped": 0}
+        row = {
+            "id": 10,
+            "titulo": "Proyecto reordenado",
+            "descripcion": "Validar reorden de pasos",
+            "expected_deliverable": "",
+            "status": "IN_PROGRESS",
+            "target_date": timezone.now() + timedelta(days=5),
+            "user_email": self.user.email,
+            "user_name": self.user.get_full_name(),
+            "user_id": 4,
+            "area_name": "Proyecto",
+        }
+        command._upsert_item(
+            row,
+            "minute_projects",
+            SeguimientoItem.TIPO_PROYECTO,
+            counters,
+            checklist=[
+                {"titulo": "Paso uno", "origen_step_id": 101, "descripcion": "", "completado": False},
+                {"titulo": "Paso dos", "origen_step_id": 102, "descripcion": "", "completado": False},
+            ],
+        )
+        item = SeguimientoItem.objects.get(titulo="Proyecto reordenado")
+        pk_by_step = {check.origen_step_id: check.pk for check in item.checklist.all()}
+
+        command._upsert_item(
+            row,
+            "minute_projects",
+            SeguimientoItem.TIPO_PROYECTO,
+            counters,
+            checklist=[
+                {"titulo": "Paso dos actualizado", "origen_step_id": 102, "descripcion": "", "completado": False},
+                {"titulo": "Paso uno actualizado", "origen_step_id": 101, "descripcion": "", "completado": True},
+            ],
+        )
+
+        checks = list(item.checklist.order_by("orden"))
+        self.assertEqual(len(checks), 2)
+        self.assertEqual(checks[0].origen_step_id, 102)
+        self.assertEqual(checks[0].pk, pk_by_step[102])
+        self.assertEqual(checks[0].titulo, "Paso dos actualizado")
+        self.assertEqual(checks[1].origen_step_id, 101)
+        self.assertEqual(checks[1].pk, pk_by_step[101])
+        self.assertEqual(checks[1].titulo, "Paso uno actualizado")
+        self.assertTrue(checks[1].completado)
+
     def test_importador_trunca_titulo_de_checklist_largo_y_preserva_texto(self):
         command = ImportarAgenteDGCommand()
         counters = {"created": 0, "updated": 0, "skipped": 0}
@@ -946,6 +1162,34 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertEqual(item.checklist.count(), 1)
         self.assertEqual(item.checklist.get().titulo, "Paso existente")
 
+    def test_sync_vacio_no_borra_checklist_existente(self):
+        command = ImportarAgenteDGCommand()
+        counters = {"created": 0, "updated": 0, "skipped": 0}
+        row = {
+            "id": 602,
+            "titulo": "Minuta con checklist preservado",
+            "descripcion": "La fuente llegó sin checklist.",
+            "status": "OPEN",
+            "due_at": timezone.now() + timedelta(days=5),
+            "user_email": self.user.email,
+            "user_name": self.user.get_full_name(),
+            "user_id": 4,
+            "area_name": "Junta",
+        }
+
+        command._upsert_item(
+            row,
+            "minute_agreements",
+            SeguimientoItem.TIPO_MINUTA,
+            counters,
+            checklist=[{"titulo": "Check capturado", "descripcion": "", "completado": False}],
+        )
+        command._upsert_item(row, "minute_agreements", SeguimientoItem.TIPO_MINUTA, counters, checklist=[])
+
+        item = SeguimientoItem.objects.get(metadata__source_table="minute_agreements", metadata__source_id=602)
+        self.assertEqual(item.checklist.count(), 1)
+        self.assertEqual(item.checklist.get().titulo, "Check capturado")
+
     def test_superusuario_conserva_bonos_en_menu(self):
         admin = get_user_model().objects.create_superuser(username="admin-seguimiento", password="x")
 
@@ -1139,7 +1383,7 @@ class CalendarioTests(TestCase):
         self.assertEqual(eventos[0]["titulo"], "Actividad B")
 
     def test_dg_ve_todo_y_filtra_por_colaborador(self):
-        SeguimientoItem.objects.create(
+        item = SeguimientoItem.objects.create(
             tipo=SeguimientoItem.TIPO_MINUTA,
             titulo="Minuta A",
             responsable_user=self.user_a,
@@ -1155,6 +1399,52 @@ class CalendarioTests(TestCase):
         self.assertEqual(len(response_all.json()["eventos"]), 3)
         self.assertEqual(response_a.status_code, 200)
         self.assertEqual({evento["titulo"] for evento in response_a.json()["eventos"]}, {"Minuta A", "Actividad A"})
+        evento_minuta = next(evento for evento in response_a.json()["eventos"] if evento["titulo"] == "Minuta A")
+        self.assertEqual(evento_minuta["url"], f"/seguimiento/panel/{item.pk}/")
+
+    def test_colaborador_mantiene_url_personal_de_seguimiento(self):
+        item = SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_COMPROMISO,
+            titulo="Compromiso propio",
+            responsable_user=self.user_a,
+            fecha_limite=self._dt(self.hoy),
+        )
+
+        response = self._eventos(self.user_a)
+
+        self.assertEqual(response.status_code, 200)
+        evento = next(evento for evento in response.json()["eventos"] if evento["titulo"] == "Compromiso propio")
+        self.assertEqual(evento["url"], f"/seguimiento/{item.pk}/")
+        self.assertEqual(evento["source_label"], "Compromiso")
+        self.assertEqual(evento["accion_label"], "Ver seguimiento")
+        self.assertFalse(evento["finalizado"])
+
+    def test_completados_siguen_visibles_como_finalizados(self):
+        item = SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_PROYECTO,
+            titulo="Proyecto cerrado",
+            responsable_user=self.user_a,
+            fecha_limite=self._dt(self.hoy),
+            estatus=SeguimientoItem.ESTATUS_COMPLETADO,
+        )
+        check = SeguimientoChecklistItem.objects.create(
+            seguimiento=item,
+            titulo="Paso cerrado",
+            vence=self._dt(self.hoy, time(11, 0)),
+            completado=True,
+            completado_por=self.user_a,
+            completado_at=timezone.now(),
+        )
+
+        response = self._eventos(self.user_a)
+
+        self.assertEqual(response.status_code, 200)
+        eventos = {evento["id"]: evento for evento in response.json()["eventos"]}
+        self.assertTrue(eventos[f"item-{item.pk}"]["finalizado"])
+        self.assertEqual(eventos[f"item-{item.pk}"]["source_label"], "Proyecto")
+        self.assertFalse(eventos[f"item-{item.pk}"]["vencido"])
+        self.assertTrue(eventos[f"paso-{check.pk}"]["finalizado"])
+        self.assertEqual(eventos[f"paso-{check.pk}"]["source_label"], "Paso")
 
     def test_item_por_responsable_empleado_usuario_erp_aparece(self):
         empleado = Empleado.objects.create(
@@ -1198,6 +1488,14 @@ class CalendarioTests(TestCase):
         propia.refresh_from_db()
         self.assertFalse(propia.activo)
 
+    def test_calendario_no_expone_boton_eliminar_actividad(self):
+        self.client.force_login(self.user_a)
+
+        response = self.client.get("/seguimiento/calendario/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Eliminar")
+
     def test_crud_crear_editar_completar_valida_campos(self):
         self.client.force_login(self.user_a)
         sin_titulo = self.client.post("/seguimiento/calendario/actividades/", {"fecha": self.hoy.isoformat()})
@@ -1227,6 +1525,44 @@ class CalendarioTests(TestCase):
         actividad.refresh_from_db()
         self.assertEqual(actividad.titulo, "Actividad editada")
         self.assertEqual(actividad.estatus, ActividadCalendario.ESTATUS_COMPLETADA)
+
+    def test_crear_reunion_recurrente_notifica_y_se_muestra_a_invitado(self):
+        UserProfile.objects.create(user=self.user_b, telefono="6687654321")
+        self.client.force_login(self.user_a)
+
+        with patch("seguimiento.views.send_mail") as send_mail_mock, patch("seguimiento.views._enviar_whatsapp_maya") as whatsapp_mock:
+            response = self.client.post(
+                "/seguimiento/calendario/actividades/",
+                {
+                    "tipo": "REUNION",
+                    "titulo": "Reunión semanal DG",
+                    "fecha": self.hoy.isoformat(),
+                    "hora_inicio": "09:00",
+                    "hora_fin": "09:30",
+                    "invitado_user": str(self.user_b.pk),
+                    "direccion_general": "1",
+                    "periodicidad": "SEMANAL",
+                    "repeticiones": "3",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["creadas"], 3)
+        self.assertEqual(ActividadCalendario.objects.filter(tipo=ActividadCalendario.TIPO_REUNION).count(), 3)
+        self.assertTrue(Notificacion.objects.filter(usuario=self.user_b, titulo__startswith="Reunión:").exists())
+        self.assertTrue(Notificacion.objects.filter(usuario=self.dg, titulo__startswith="Reunión:").exists())
+        send_mail_mock.assert_called()
+        whatsapp_mock.assert_called_once()
+
+        response_invitado = self._eventos(self.user_b)
+        response_creador = self._eventos(self.user_a)
+
+        evento_invitado = next(evento for evento in response_invitado.json()["eventos"] if evento["titulo"] == "Reunión semanal DG")
+        evento_creador = next(evento for evento in response_creador.json()["eventos"] if evento["titulo"] == "Reunión semanal DG")
+        self.assertEqual(evento_invitado["source_label"], "Reunión DG")
+        self.assertEqual(evento_invitado["invitado"], "Usuario B")
+        self.assertTrue(evento_invitado["direccion_general"])
+        self.assertEqual(evento_creador["source_label"], "Reunión DG")
 
     def test_validaciones_endpoint_eventos(self):
         self.client.force_login(self.user_a)

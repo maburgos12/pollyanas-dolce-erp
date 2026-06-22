@@ -247,3 +247,17 @@ Un cambio visual no esta terminado hasta que:
 - no agrega nueva deuda de estilo segun `scripts/audit_ui_style.py`;
 - no deja numeros visibles sin separador segun `scripts/audit_numeric_format.py`;
 - se valida el flujo final donde el usuario lo usa.
+
+## Correos HTML
+
+Las plantillas fuente de correo deben seguir el mismo sistema visual: clases
+semanticas, base compartido y cero estilos manuales en el HTML fuente.
+
+Los clientes de correo siguen requiriendo estilos inline para compatibilidad.
+Por eso el ERP compila el HTML final con `core.email_rendering.render_email_to_string`,
+tomando `static/css/pollyana_email.css` como fuente visual e inyectando los
+estilos inline solo en la salida enviada.
+
+`scripts/audit_ui_style.py` puede auditar tambien la fuente de correos con los
+umbrales `--max-email-*`. La meta estricta de fuente es cero `style=""`, cero
+`<style>`, cero `transition: all` y cero emojis funcionales.

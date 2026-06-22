@@ -792,6 +792,8 @@ class PointProductRecipeSyncService:
             status = LineaReceta.STATUS_REJECTED
             if resolution.insumo is not None:
                 status = clasificar_match(resolution.match_score)
+                if self._should_exclude_derived_slice_consumable(receta=receta, row=row):
+                    status = LineaReceta.STATUS_REJECTED
                 if status == LineaReceta.STATUS_AUTO:
                     summary["lineas_auto"] += 1
                 elif status == LineaReceta.STATUS_NEEDS_REVIEW:
@@ -850,6 +852,19 @@ class PointProductRecipeSyncService:
             PointRecipeNodeLine.objects.bulk_create(graph_lines, batch_size=200)
         summary["lineas_created"] += len(recipe_lines)
         summary["graph_lines"] += len(graph_lines)
+
+    def _should_exclude_derived_slice_consumable(self, *, receta: Receta, row: dict) -> bool:
+        from recetas.utils.derived_product_presentations import get_active_derived_relation
+
+        relation = get_active_derived_relation(receta)
+        if relation is None or not relation.activo or relation.tipo_derivado != "REBANADA":
+            return False
+
+        point_code = str(row.get("Codigo_Articulo") or row.get("CodigoInsumo") or "").strip()
+        point_name = normalizar_nombre(
+            row.get("Articulo") or row.get("Nombre") or row.get("Nombre_Articulo") or ""
+        )
+        return point_code == "068" or point_name == "servilleta"
 
     def _resolve_component(
         self,
@@ -1276,6 +1291,10 @@ class PointProductRecipeSyncService:
             yield_mode = PointRecipeNode.YIELD_VOLUME
         else:
             yield_mode = PointRecipeNode.YIELD_UNIT
+
+        purchase_conversion = self._decimal(detail.get("ConvUnidadCompra"))
+        if purchase_conversion is not None and purchase_conversion > 0:
+            return purchase_conversion, unit, unit_text, yield_mode
         return Decimal("1"), unit, unit_text, yield_mode
 
     def _upsert_recipe_record(

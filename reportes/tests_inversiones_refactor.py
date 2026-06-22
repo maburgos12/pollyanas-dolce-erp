@@ -140,6 +140,11 @@ class InversionesRefactorTests(TestCase):
             "discount_rate": "12",
             "roi_objetivo": "25",
             "payback_objetivo_meses": "24",
+            "capital_inicial_aportado": "",
+            "deuda_asociada": "0",
+            "tasa_interes_anual": "0",
+            "plazo_deuda_meses": "0",
+            "pago_mensual_deuda_estimado": "0",
         }
 
     def test_portafolio_carga_200(self):
@@ -155,6 +160,8 @@ class InversionesRefactorTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Nuevo Proyecto de Inversión")
         self.assertContains(response, "partidas_json")
+        self.assertContains(response, "Financiamiento")
+        self.assertNotContains(response, 'value="Apertura Bamoa 2026"')
 
     def test_wizard_post_crea_proyecto_y_escenarios(self):
         response = self.client.post(reverse("reportes:inversiones_wizard"), self._payload_wizard())
@@ -164,6 +171,55 @@ class InversionesRefactorTests(TestCase):
         self.assertEqual(project.monto_inversion_planeado, Decimal("190000.00"))
         self.assertEqual(project.gastos_inversion.count(), 1)
         self.assertEqual(project.escenarios.count(), 3)
+        self.assertEqual(project.capital_inicial_aportado, Decimal("190000.00"))
+
+    def test_wizard_post_persiste_financiamiento(self):
+        payload = self._payload_wizard()
+        payload.update(
+            {
+                "deuda_asociada": "90000.00",
+                "tasa_interes_anual": "18.5",
+                "plazo_deuda_meses": "24",
+                "pago_mensual_deuda_estimado": "4500.00",
+            }
+        )
+
+        self.client.post(reverse("reportes:inversiones_wizard"), payload)
+
+        project = ProyectoInversion.objects.get(nombre_proyecto="Apertura Bamoa Refactor")
+        self.assertEqual(project.deuda_asociada, Decimal("90000.00"))
+        self.assertEqual(project.capital_inicial_aportado, Decimal("100000.00"))
+        self.assertEqual(project.pago_mensual_deuda_estimado, Decimal("4500.00"))
+
+    def test_wizard_rechaza_categoria_invalida(self):
+        payload = self._payload_wizard()
+        partidas = json.loads(payload["partidas_json"])
+        partidas[0]["categoria"] = "CATEGORIA_FALSA"
+        payload["partidas_json"] = json.dumps(partidas)
+        before = ProyectoInversion.objects.count()
+
+        response = self.client.post(reverse("reportes:inversiones_wizard"), payload)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(ProyectoInversion.objects.count(), before)
+
+    def test_wizard_rechaza_opex_cero(self):
+        payload = self._payload_wizard()
+        payload.update(
+            {
+                "renta_mensual": "0",
+                "nomina_mensual": "0",
+                "servicios_mensual": "0",
+                "marketing_mensual": "0",
+                "otros_fijos_mensual": "0",
+            }
+        )
+        before = ProyectoInversion.objects.count()
+
+        response = self.client.post(reverse("reportes:inversiones_wizard"), payload)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(ProyectoInversion.objects.count(), before)
 
     def test_detalle_get_tab_ficha(self):
         response = self.client.get(reverse("reportes:inversiones_detalle", args=[self.guamuchil.pk]), {"tab": "ficha"})
@@ -215,6 +271,24 @@ class InversionesRefactorTests(TestCase):
         self.assertEqual(self.guamuchil.gastos_inversion.count(), before + 1)
         self.assertTrue(self.guamuchil.gastos_inversion.filter(descripcion="Terminal adicional").exists())
 
+    def test_detalle_post_add_expense_rechaza_categoria_invalida(self):
+        before = self.guamuchil.gastos_inversion.count()
+
+        response = self.client.post(
+            reverse("reportes:inversiones_detalle", args=[self.guamuchil.pk]),
+            {
+                "action": "add_expense",
+                "fecha": "2026-02-01",
+                "categoria": "NO_EXISTE",
+                "descripcion": "Gasto inválido",
+                "monto": "12000",
+                "iva": "0",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.guamuchil.gastos_inversion.count(), before)
+
     def test_detalle_post_actualizar_supuestos_recalcula_escenarios(self):
         response = self.client.post(
             reverse("reportes:inversiones_detalle", args=[self.guamuchil.pk]),
@@ -233,6 +307,11 @@ class InversionesRefactorTests(TestCase):
                 "discount_rate": "12",
                 "roi_objetivo": "25",
                 "payback_objetivo_meses": "24",
+                "capital_inicial_aportado": "700000",
+                "deuda_asociada": "500000",
+                "tasa_interes_anual": "18",
+                "plazo_deuda_meses": "36",
+                "pago_mensual_deuda_estimado": "18000",
             },
         )
 
@@ -242,6 +321,8 @@ class InversionesRefactorTests(TestCase):
         base = self.guamuchil.escenarios.get(tipo_escenario=ProyectoInversionEscenario.TIPO_BASE)
         self.assertEqual(base.ventas_promedio_mensuales, Decimal("540000.00"))
         self.assertEqual(self.guamuchil.metadata["supuestos_operativos"]["gastos_fijos_total"], 141500.0)
+        self.assertEqual(self.guamuchil.deuda_asociada, Decimal("500000.00"))
+        self.assertEqual(self.guamuchil.pago_mensual_deuda_estimado, Decimal("18000.00"))
 
     def test_calcular_proyeccion_simple_tir_positiva(self):
         from reportes.investment_views import _calcular_proyeccion_simple
@@ -285,6 +366,34 @@ class InversionesRefactorTests(TestCase):
         )
 
         self.assertEqual(proyeccion["payback_meses"], 5.0)
+
+    def test_calcular_proyeccion_simple_sin_payback_no_es_viable(self):
+        from reportes.investment_views import _calcular_proyeccion_simple
+
+        project = ProyectoInversion.objects.create(
+            nombre_proyecto="Payback imposible",
+            tipo_proyecto=ProyectoInversion.TIPO_APERTURA_SUCURSAL,
+            fecha_inicio=date(2026, 6, 1),
+            monto_inversion_planeado=Decimal("100000.00"),
+            pago_mensual_deuda_estimado=Decimal("5000.00"),
+            discount_rate=Decimal("12.00"),
+        )
+        proyeccion = _calcular_proyeccion_simple(
+            project,
+            {
+                "ventas_base": 10000,
+                "margen_pct": 30,
+                "gastos_fijos_total": 25000,
+                "crecimiento_mensual_pct": 0,
+                "horizonte_meses": 12,
+            },
+            [],
+        )
+
+        self.assertTrue(proyeccion["disponible"])
+        self.assertIsNone(proyeccion["payback_meses"])
+        self.assertFalse(proyeccion["viable"])
+        self.assertLess(proyeccion["roi"], 0)
 
     @override_settings(OPENAI_API_KEY="")
     def test_generar_estudio_mercado_sin_api_key_retorna_error(self):

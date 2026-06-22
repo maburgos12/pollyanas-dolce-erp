@@ -16,6 +16,18 @@ Director General: Mauricio Burgos. Sistema de uso interno para el equipo operati
 - Deploy: Docker + VPS propio (NO Railway)
 - Servidor: Gunicorn + WhiteNoise · Zona horaria: America/Mazatlan · Moneda: MXN
 
+## Contexto de producto y diseño
+Para cualquier tarea de UI, frontend, diseño visual, experiencia de usuario,
+branding, tienda online o marketing, leer primero:
+- `PRODUCT.md`: estrategia del producto, usuarios, principios, anti-referencias
+  y accesibilidad.
+- `DESIGN_STACK.md`: enrutamiento de skills entre `impeccable`, `hallmark`,
+  `emil-design-eng` y los skills de Leon.
+
+No duplicar las reglas completas de diseño en este archivo. `CLAUDE.md` conserva
+el protocolo operativo del ERP; `DESIGN_STACK.md` es la fuente compartida para
+ejecución de diseño.
+
 ## Deploy manual (NO es automático al mergear)
 ```bash
 cd /opt/pastelerias-erp && git pull origin main
@@ -235,6 +247,10 @@ No pasar a una segunda tarea hasta que la primera esté deployada y validada en 
 2. `git pull origin main` en VPS
 3. `docker compose restart web` en VPS
 4. Verificar resultado visible en producción
+5. Borrar la rama de trabajo local y remota cuando ya esté mergeada, deployada
+   y validada, para que no se atraviese ni aparezca como opción en otros hilos:
+   `git branch -D <rama>` y `git push origin --delete <rama>`; después correr
+   `git fetch --prune origin`.
 
 ### Datos de usuarios — NUNCA pisar
 `bono_extra`, `ajuste_positivo`, `ajuste_negativo` son datos de nómina real capturados

@@ -4,92 +4,7 @@
 {% block page_title %}Activos · Registro Rápido{% endblock %}
 
 {% block extra_css %}
-<style>
-.rr-section { margin-bottom: 20px; }
-.rr-section-title {
-  font-family: 'Playfair Display', serif;
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--vino);
-  border-bottom: 2px solid var(--rosa-hover);
-  padding-bottom: 6px;
-  margin-bottom: 14px;
-}
-.mobile-form-group { margin-bottom: 14px; }
-.mobile-form-group label {
-  display: block;
-  font-weight: 700;
-  font-size: 0.9rem;
-  margin-bottom: 5px;
-  color: var(--texto);
-}
-.mobile-form-group select,
-.mobile-form-group input[type="text"],
-.mobile-form-group input[type="date"],
-.mobile-form-group input[type="number"],
-.mobile-form-group textarea {
-  width: 100%;
-  font-size: 1rem;
-  padding: 12px;
-  border-radius: 8px;
-  border: 1.5px solid #d0c0c0;
-  background: #fff;
-  box-sizing: border-box;
-}
-.mobile-form-group textarea { min-height: 90px; resize: vertical; }
-.mobile-form-group .hint { font-size: 0.8rem; color: var(--texto-light); margin-top: 4px; }
-.costos-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
-@media (max-width: 480px) { .costos-grid { grid-template-columns: 1fr; } }
-.btn-grande { width: 100%; padding: 16px; font-size: 1.1rem; font-weight: 700; border-radius: 10px; margin-top: 8px; }
-
-/* Fallas vinculables */
-#fallas-container { display: none; }
-.falla-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1.5px solid var(--amarillo);
-  border-radius: 8px;
-  margin-bottom: 8px;
-  background: #fffbe6;
-  cursor: pointer;
-}
-.falla-item.selected { border-color: var(--verde); background: #f0fff4; }
-.falla-item input[type="checkbox"] { width: 20px; height: 20px; margin-top: 2px; flex-shrink: 0; }
-.falla-item-body { flex: 1; }
-.falla-item-folio { font-family: monospace; font-weight: 700; font-size: 0.85rem; color: var(--vino); }
-.falla-item-desc { font-size: 0.9rem; margin: 3px 0; }
-.falla-item-meta { font-size: 0.78rem; color: var(--texto-light); }
-.fallas-loading { color: var(--texto-light); font-style: italic; padding: 8px 0; }
-.fallas-empty { color: var(--texto-light); font-size: 0.9rem; padding: 8px 0; }
-
-/* Upload evidencias */
-.upload-area {
-  border: 2px dashed var(--dorado);
-  border-radius: 10px;
-  padding: 24px 16px;
-  text-align: center;
-  background: #fffbf0;
-  cursor: pointer;
-  transition: border-color .2s, background .2s;
-}
-.upload-area:hover, .upload-area.drag-over { border-color: var(--vino); background: var(--rosa); }
-.upload-area input[type="file"] { display: none; }
-.upload-area .upload-icon { font-size: 2.5rem; margin-bottom: 8px; }
-.upload-area p { margin: 0; color: var(--texto-light); font-size: 0.9rem; }
-.preview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; margin-top: 12px; }
-.preview-item { position: relative; border-radius: 8px; overflow: hidden; background: #f0f0f0; }
-.preview-item img { width: 100%; height: 90px; object-fit: cover; display: block; }
-.preview-item .preview-name { font-size: 0.7rem; padding: 4px; color: var(--texto); word-break: break-all; text-align: center; }
-.preview-item .preview-remove {
-  position: absolute; top: 4px; right: 4px;
-  background: rgba(229,57,53,.85); color: #fff;
-  border: none; border-radius: 50%; width: 22px; height: 22px;
-  font-size: 0.75rem; cursor: pointer; line-height: 22px; text-align: center; padding: 0;
-}
-.doc-preview { height: 90px; display: flex; align-items: center; justify-content: center; font-size: 2rem; }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/activos-templates-activos-registro-rapido.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
@@ -101,13 +16,13 @@
 
 {% if messages %}
   {% for msg in messages %}
-    <div class="alert alert-{{ msg.tags|default:'info' }}" style="margin-bottom:12px;">{{ msg }}</div>
+    <div class="alert alert-{{ msg.tags|default:'info' }} pd-u-3ef1fa1aa1">{{ msg }}</div>
   {% endfor %}
 {% endif %}
 
 <section class="card card-form-narrow">
-  <div class="card-header" style="background:linear-gradient(135deg,var(--vino),#6B1740);color:#fff;">
-    🔧 Registrar mantenimiento no planeado
+  <div class="card-header pd-u-cee44f9d91">
+    Falla Registrar mantenimiento no planeado
   </div>
 
   <form method="post" enctype="multipart/form-data" id="form-registro-rapido">
@@ -129,7 +44,7 @@
 
       <!-- Fallas abiertas vinculables -->
       <div id="fallas-container">
-        <label style="font-weight:700;font-size:.9rem;color:var(--texto);display:block;margin-bottom:8px;">
+        <label class="pd-u-eabc721f66">
           Fallas reportadas para este equipo (selecciona las que resuelve este mantenimiento)
         </label>
         <div id="fallas-lista"><span class="fallas-loading">Cargando…</span></div>
@@ -216,14 +131,14 @@
 
       <div class="mobile-form-group">
         <label>Archivo de factura (PDF o foto)</label>
-        <div class="upload-area" style="padding:16px 12px;" onclick="document.getElementById('input-factura').click()">
+        <div class="upload-area pd-u-3639b87ed7" onclick="document.getElementById('input-factura').click()">
           <input type="file" name="factura_archivo" id="input-factura"
                  accept=".pdf,image/*" capture="environment">
-          <div style="font-size:1.8rem;margin-bottom:4px;">🧾</div>
+          <div class="pd-u-11969f5d7a">Recibo</div>
           <p><strong>Toca para adjuntar factura</strong></p>
           <p>PDF o foto de la factura · Máx. 30 MB</p>
         </div>
-        <div id="preview-factura" style="margin-top:8px;"></div>
+        <div id="preview-factura" class="pd-u-b1ecc496e0"></div>
       </div>
 
       <div class="mobile-form-group">
@@ -251,7 +166,7 @@
         <input type="file" name="evidencias" id="input-evidencias" multiple
                accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx"
                capture="environment">
-        <div class="upload-icon">📷</div>
+        <div class="upload-icon">Foto</div>
         <p><strong>Toca aquí para agregar fotos o archivos</strong></p>
         <p>Fotos, videos, PDF de factura · Máx. 30 MB por archivo</p>
       </div>
@@ -259,7 +174,7 @@
     </div>
 
     <button type="submit" class="btn btn-primary btn-grande">
-      ✔ Guardar mantenimiento
+      OK Guardar mantenimiento
     </button>
   </form>
 </section>
@@ -281,7 +196,7 @@ if (inputFactura) {
     const isImg = ['jpg','jpeg','png','gif','webp','heic'].includes(ext);
     const div = document.createElement('div');
     div.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px;background:#f0fff4;border-radius:8px;border:1.5px solid var(--verde);';
-    div.innerHTML = `<span style="font-size:1.8rem">${isImg ? '🖼️' : '🧾'}</span><div><strong>${file.name}</strong><br><span style="font-size:.8rem;color:var(--texto-light)">${(file.size/1024/1024).toFixed(2)} MB</span></div>`;
+    div.innerHTML = `<span class="pd-u-34d8711a27">${isImg ? 'Imagen' : 'Recibo'}</span><div><strong>${file.name}</strong><br><span class="pd-u-6e4b91a759">${(file.size/1024/1024).toFixed(2)} MB</span></div>`;
     previewFactura.appendChild(div);
   });
 }
@@ -373,11 +288,11 @@ function renderPreviews() {
       div.appendChild(img);
     } else if (isVideo) {
       const icon = document.createElement('div');
-      icon.className = 'doc-preview'; icon.textContent = '🎥';
+      icon.className = 'doc-preview'; icon.textContent = 'Video';
       div.appendChild(icon);
     } else {
       const icon = document.createElement('div');
-      icon.className = 'doc-preview'; icon.textContent = '📄';
+      icon.className = 'doc-preview'; icon.textContent = 'DOC';
       div.appendChild(icon);
     }
 

@@ -3,21 +3,7 @@
 {% block page_title %}Notificaciones{% endblock %}
 
 {% block extra_css %}
-<style>
-  .notif-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
-  .notif-tabs{display:flex;gap:8px;flex-wrap:wrap}
-  .notif-tab{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border:1px solid var(--border-color,#e5dce8);border-radius:8px;color:var(--text-muted,#6b5f70);font-weight:800;text-decoration:none;background:#fff}
-  .notif-tab.active{background:#9b1b59;color:#fff;border-color:#9b1b59}
-  .notif-list{display:grid;gap:10px}
-  .notif-card{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center;padding:14px 16px;border:1px solid var(--border-color,#e5dce8);border-radius:10px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.05)}
-  .notif-card.is-unread{border-left:5px solid #9b1b59}
-  .notif-title{font-weight:900;color:#241522;margin-bottom:3px}
-  .notif-meta{font-size:12px;color:#6b5f70;font-weight:700}
-  .notif-msg{margin-top:7px;color:#483946}
-  .notif-badge{display:inline-flex;align-items:center;padding:3px 8px;border-radius:999px;background:#f6eaf1;color:#9b1b59;font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.04em}
-  .notif-actions{display:flex;align-items:center;gap:8px;justify-content:flex-end}
-  @media(max-width:760px){.notif-card{grid-template-columns:1fr}.notif-actions{justify-content:flex-start}}
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/core-templates-core-notificaciones.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
@@ -48,7 +34,7 @@
   {% for notificacion in page.object_list %}
   <article class="notif-card {% if not notificacion.leida %}is-unread{% endif %}">
     <div>
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+      <div class="pd-u-ab3659c67f">
         <span class="notif-badge">{{ notificacion.get_tipo_display }}</span>
         {% if notificacion.prioridad == "alta" %}<span class="notif-badge">Alta</span>{% endif %}
       </div>
@@ -81,8 +67,8 @@
 </section>
 
 {% if page.has_other_pages %}
-<section class="card" style="margin-top:14px;">
-  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+<section class="card pd-u-88b9d5c614">
+  <div class="pd-u-7d8ee7f35b">
     {% if page.has_previous %}
     <a class="btn btn-secondary" href="?estado={{ estado }}&page={{ page.previous_page_number }}">Anterior</a>
     {% else %}<span></span>{% endif %}

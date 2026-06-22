@@ -46,11 +46,59 @@ def _parse_decimal(value: str | None, *, default: str = "0") -> Decimal:
         return Decimal(default)
 
 
+def _parse_decimal_with_errors(
+    value,
+    *,
+    label: str,
+    errors: list[str],
+    default: str = "0",
+    minimum: Decimal | None = None,
+    required: bool = False,
+) -> Decimal:
+    raw = str(value or "").strip()
+    if not raw:
+        if required:
+            errors.append(f"{label} es obligatorio.")
+        raw = default
+    try:
+        parsed = Decimal(raw)
+    except (InvalidOperation, TypeError, ValueError):
+        errors.append(f"{label} debe ser un número válido.")
+        return Decimal(default)
+    if minimum is not None and parsed < minimum:
+        errors.append(f"{label} no puede ser menor a {minimum}.")
+    return parsed
+
+
 def _parse_int(value: str | None, *, default: int = 0) -> int:
     try:
         return int(str(value or "").strip() or default)
     except (TypeError, ValueError):
         return default
+
+
+def _parse_int_with_errors(
+    value,
+    *,
+    label: str,
+    errors: list[str],
+    default: int = 0,
+    minimum: int | None = None,
+    required: bool = False,
+) -> int:
+    raw = str(value or "").strip()
+    if not raw:
+        if required:
+            errors.append(f"{label} es obligatorio.")
+        return default
+    try:
+        parsed = int(raw)
+    except (TypeError, ValueError):
+        errors.append(f"{label} debe ser un número entero válido.")
+        return default
+    if minimum is not None and parsed < minimum:
+        errors.append(f"{label} no puede ser menor a {minimum}.")
+    return parsed
 
 
 def _parse_date(value: str | None) -> date | None:
@@ -72,6 +120,22 @@ def _decimal_value(value) -> Decimal:
         return Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
         return Decimal("0")
+
+
+def _choice_value_with_errors(
+    value: str | None,
+    *,
+    choices,
+    label: str,
+    errors: list[str],
+    default: str,
+) -> str:
+    raw = (value or "").strip() or default
+    allowed = {choice_value for choice_value, _label in choices}
+    if raw not in allowed:
+        errors.append(f"{label} no es una opción válida.")
+        return default
+    return raw
 
 
 def _require_reportes_access(user) -> None:
@@ -1339,13 +1403,51 @@ def proyecto_inversion_detail(request: HttpRequest, project_id: int) -> HttpResp
             return redirect("reportes:proyecto_inversion_detail", project_id=project.pk)
 
         if action == "add_debt_payment":
+            errores = []
+            monto_pago = _parse_decimal_with_errors(
+                request.POST.get("monto_pago"),
+                label="Monto pagado",
+                errors=errores,
+                default="0",
+                minimum=Decimal("0"),
+                required=True,
+            )
+            interes_pagado = _parse_decimal_with_errors(
+                request.POST.get("interes_pagado"),
+                label="Interés pagado",
+                errors=errores,
+                default="0",
+                minimum=Decimal("0"),
+            )
+            capital_amortizado = _parse_decimal_with_errors(
+                request.POST.get("capital_amortizado"),
+                label="Capital amortizado",
+                errors=errores,
+                default="0",
+                minimum=Decimal("0"),
+            )
+            saldo_insoluto = _parse_decimal_with_errors(
+                request.POST.get("saldo_insoluto"),
+                label="Saldo insoluto",
+                errors=errores,
+                default="0",
+                minimum=Decimal("0"),
+            )
+            if monto_pago <= 0:
+                errores.append("El monto pagado debe ser mayor a cero.")
+            if abs(monto_pago - (interes_pagado + capital_amortizado)) > Decimal("0.01"):
+                errores.append("El pago de deuda debe coincidir con interés pagado más capital amortizado.")
+            if errores:
+                for error in errores:
+                    messages.error(request, error)
+                return redirect("reportes:proyecto_inversion_detail", project_id=project.pk)
             payment = ProyectoInversionPagoDeuda.objects.create(
                 proyecto=project,
                 fecha_pago=_parse_date(request.POST.get("fecha_pago")) or timezone.localdate(),
-                monto_pago=_parse_decimal(request.POST.get("monto_pago")),
-                interes_pagado=_parse_decimal(request.POST.get("interes_pagado")),
-                capital_amortizado=_parse_decimal(request.POST.get("capital_amortizado")),
-                saldo_insoluto=_parse_decimal(request.POST.get("saldo_insoluto")),
+                monto_pago=monto_pago,
+                interes_pagado=interes_pagado,
+                capital_amortizado=capital_amortizado,
+                saldo_insoluto=saldo_insoluto,
                 referencia=(request.POST.get("referencia") or "").strip(),
                 notas=(request.POST.get("notas") or "").strip(),
                 capturado_por=request.user,
@@ -1983,62 +2085,233 @@ def inversiones_wizard(request: HttpRequest) -> HttpResponse:
         fecha_inicio = _parse_date(request.POST.get("fecha_inicio"))
         if not fecha_inicio:
             errores.append("La fecha de inicio es obligatoria.")
+        tipo_proyecto = _choice_value_with_errors(
+            request.POST.get("tipo_proyecto"),
+            choices=ProyectoInversion.TIPO_CHOICES,
+            label="Tipo de proyecto",
+            errors=errores,
+            default=ProyectoInversion.TIPO_APERTURA_SUCURSAL,
+        )
 
         try:
             partidas_raw = json.loads(request.POST.get("partidas_json") or "[]")
         except Exception:
             partidas_raw = []
             errores.append("Error al leer partidas de inversión.")
+        if not isinstance(partidas_raw, list):
+            partidas_raw = []
+            errores.append("Las partidas de inversión deben enviarse como lista.")
 
-        partidas_validas = [
-            partida
-            for partida in partidas_raw
-            if str(partida.get("descripcion", "")).strip()
-            and _parse_decimal(str(partida.get("monto", 0))) > 0
-        ]
+        partidas_validas = []
+        for idx, partida in enumerate(partidas_raw, start=1):
+            if not isinstance(partida, dict):
+                errores.append(f"Partida {idx} no tiene formato válido.")
+                continue
+            descripcion = str(partida.get("descripcion") or "").strip()
+            proveedor_nombre = str(partida.get("proveedor_nombre") or "").strip()
+            raw_monto = str(partida.get("monto") or "").strip()
+            raw_iva = str(partida.get("iva") or "").strip()
+            if not any([descripcion, proveedor_nombre, raw_monto, raw_iva]):
+                continue
+            categoria = _choice_value_with_errors(
+                str(partida.get("categoria") or ""),
+                choices=ProyectoInversionGasto.CATEGORIA_CHOICES,
+                label=f"Categoría de partida {idx}",
+                errors=errores,
+                default=ProyectoInversionGasto.CATEGORIA_OTROS,
+            )
+            monto = _parse_decimal_with_errors(
+                raw_monto,
+                label=f"Monto de partida {idx}",
+                errors=errores,
+                default="0",
+                minimum=Decimal("0"),
+            )
+            iva = _parse_decimal_with_errors(
+                raw_iva,
+                label=f"IVA de partida {idx}",
+                errors=errores,
+                default="0",
+                minimum=Decimal("0"),
+            )
+            if descripcion and monto > 0:
+                partidas_validas.append(
+                    {
+                        "categoria": categoria,
+                        "subcategoria": str(partida.get("subcategoria") or "").strip(),
+                        "descripcion": descripcion,
+                        "proveedor_nombre": proveedor_nombre,
+                        "monto": monto,
+                        "iva": iva,
+                        "notas": str(partida.get("notas") or "").strip(),
+                    }
+                )
+            elif descripcion or monto > 0:
+                errores.append(f"Partida {idx} requiere descripción y monto mayor a cero.")
         if not partidas_validas:
             errores.append("Agrega al menos una partida de inversión con monto mayor a cero.")
 
-        ventas_base = _parse_decimal(request.POST.get("ventas_promedio_base"))
+        ventas_base = _parse_decimal_with_errors(
+            request.POST.get("ventas_promedio_base"),
+            label="Ventas promedio base",
+            errors=errores,
+            default="0",
+            minimum=Decimal("0"),
+            required=True,
+        )
         if ventas_base <= 0:
             errores.append("Las ventas promedio base deben ser mayores a cero.")
+
+        renta = _parse_decimal_with_errors(
+            request.POST.get("renta_mensual"),
+            label="Renta mensual",
+            errors=errores,
+            default="0",
+            minimum=Decimal("0"),
+        )
+        nomina = _parse_decimal_with_errors(
+            request.POST.get("nomina_mensual"),
+            label="Nómina mensual",
+            errors=errores,
+            default="0",
+            minimum=Decimal("0"),
+        )
+        servicios = _parse_decimal_with_errors(
+            request.POST.get("servicios_mensual"),
+            label="Servicios mensuales",
+            errors=errores,
+            default="0",
+            minimum=Decimal("0"),
+        )
+        marketing = _parse_decimal_with_errors(
+            request.POST.get("marketing_mensual"),
+            label="Marketing mensual",
+            errors=errores,
+            default="0",
+            minimum=Decimal("0"),
+        )
+        otros = _parse_decimal_with_errors(
+            request.POST.get("otros_fijos_mensual"),
+            label="Otros fijos mensuales",
+            errors=errores,
+            default="0",
+            minimum=Decimal("0"),
+        )
+        gastos_fijos = renta + nomina + servicios + marketing + otros
+        if gastos_fijos <= 0:
+            errores.append("Captura gastos fijos mensuales para evitar una proyección inflada.")
+
+        margen = _parse_decimal_with_errors(
+            request.POST.get("margen_bruto_pct"),
+            label="Margen bruto",
+            errors=errores,
+            default="45",
+            minimum=Decimal("0"),
+        )
+        if margen > 100:
+            errores.append("Margen bruto no puede ser mayor a 100%.")
+        crecimiento = _parse_decimal_with_errors(
+            request.POST.get("crecimiento_mensual_pct"),
+            label="Crecimiento mensual",
+            errors=errores,
+            default="0.8",
+        )
+        horizonte = _parse_int_with_errors(
+            request.POST.get("horizonte_meses"),
+            label="Horizonte",
+            errors=errores,
+            default=36,
+            minimum=1,
+        )
+        deuda_asociada = _parse_decimal_with_errors(
+            request.POST.get("deuda_asociada"),
+            label="Deuda asociada",
+            errors=errores,
+            default="0",
+            minimum=Decimal("0"),
+        )
+        tasa_interes_anual = _parse_decimal_with_errors(
+            request.POST.get("tasa_interes_anual"),
+            label="Tasa de interés anual",
+            errors=errores,
+            default="0",
+            minimum=Decimal("0"),
+        )
+        plazo_deuda_meses = _parse_int_with_errors(
+            request.POST.get("plazo_deuda_meses"),
+            label="Plazo de deuda",
+            errors=errores,
+            default=0,
+            minimum=0,
+        )
+        pago_mensual_deuda_estimado = _parse_decimal_with_errors(
+            request.POST.get("pago_mensual_deuda_estimado"),
+            label="Pago mensual de deuda",
+            errors=errores,
+            default="0",
+            minimum=Decimal("0"),
+        )
+        discount_rate = _parse_decimal_with_errors(
+            request.POST.get("discount_rate"),
+            label="Tasa de descuento",
+            errors=errores,
+            default="12",
+            minimum=Decimal("0"),
+        )
+        roi_objetivo = _parse_decimal_with_errors(
+            request.POST.get("roi_objetivo"),
+            label="ROI objetivo",
+            errors=errores,
+            default="25",
+            minimum=Decimal("0"),
+        )
+        payback_objetivo_meses = _parse_int_with_errors(
+            request.POST.get("payback_objetivo_meses"),
+            label="Payback objetivo",
+            errors=errores,
+            default=24,
+            minimum=1,
+        )
+
+        inversion_total = sum(
+            partida["monto"] + partida["iva"]
+            for partida in partidas_validas
+        )
+        capital_raw = str(request.POST.get("capital_inicial_aportado") or "").strip()
+        if capital_raw:
+            capital_inicial = _parse_decimal_with_errors(
+                capital_raw,
+                label="Capital inicial aportado",
+                errors=errores,
+                default="0",
+                minimum=Decimal("0"),
+            )
+        else:
+            capital_inicial = max(inversion_total - deuda_asociada, Decimal("0"))
 
         if errores:
             for error in errores:
                 messages.error(request, error)
             return redirect("inversiones:wizard")
 
-        inversion_total = sum(
-            _parse_decimal(str(partida.get("monto", 0))) + _parse_decimal(str(partida.get("iva", 0)))
-            for partida in partidas_validas
-        )
-        renta = _parse_decimal(request.POST.get("renta_mensual"))
-        nomina = _parse_decimal(request.POST.get("nomina_mensual"))
-        servicios = _parse_decimal(request.POST.get("servicios_mensual"))
-        marketing = _parse_decimal(request.POST.get("marketing_mensual"))
-        otros = _parse_decimal(request.POST.get("otros_fijos_mensual"))
-        gastos_fijos = renta + nomina + servicios + marketing + otros
-        margen = _parse_decimal(request.POST.get("margen_bruto_pct"), default="45")
-        crecimiento = _parse_decimal(request.POST.get("crecimiento_mensual_pct"), default="0.8")
-        horizonte = _parse_int(request.POST.get("horizonte_meses"), default=36)
-
         with transaction.atomic():
             project = ProyectoInversion.objects.create(
                 nombre_proyecto=(request.POST.get("nombre_proyecto") or "Nuevo proyecto").strip(),
-                tipo_proyecto=(request.POST.get("tipo_proyecto") or ProyectoInversion.TIPO_APERTURA_SUCURSAL).strip(),
+                tipo_proyecto=tipo_proyecto,
                 sucursal_relacionada_id=_parse_int(request.POST.get("sucursal_relacionada_id")) or None,
                 fecha_inicio=fecha_inicio,
                 fecha_apertura=_parse_date(request.POST.get("fecha_apertura")),
                 responsable=request.user,
                 estatus=ProyectoInversion.ESTATUS_PLANEACION,
                 monto_inversion_planeado=inversion_total,
-                capital_inicial_aportado=inversion_total,
-                deuda_asociada=_parse_decimal(request.POST.get("deuda_asociada")),
-                tasa_interes_anual=_parse_decimal(request.POST.get("tasa_interes_anual")),
-                plazo_deuda_meses=_parse_int(request.POST.get("plazo_deuda_meses")),
-                discount_rate=_parse_decimal(request.POST.get("discount_rate"), default="12"),
-                roi_objetivo=_parse_decimal(request.POST.get("roi_objetivo"), default="25"),
-                payback_objetivo_meses=_parse_int(request.POST.get("payback_objetivo_meses"), default=24),
+                capital_inicial_aportado=capital_inicial,
+                deuda_asociada=deuda_asociada,
+                tasa_interes_anual=tasa_interes_anual,
+                plazo_deuda_meses=plazo_deuda_meses,
+                pago_mensual_deuda_estimado=pago_mensual_deuda_estimado,
+                discount_rate=discount_rate,
+                roi_objetivo=roi_objetivo,
+                payback_objetivo_meses=payback_objetivo_meses,
                 recovery_strategy=ProyectoInversion.RECOVERY_FULL_NET_CASHFLOW,
                 recovery_percentage=Decimal("1"),
                 cierre_por_recuperacion_total=True,
@@ -2071,22 +2344,22 @@ def inversiones_wizard(request: HttpRequest) -> HttpResponse:
             )
 
             for partida in partidas_validas:
-                monto = _parse_decimal(str(partida.get("monto", 0)))
-                iva = _parse_decimal(str(partida.get("iva", 0)))
+                monto = partida["monto"]
+                iva = partida["iva"]
                 ProyectoInversionGasto.objects.create(
                     proyecto=project,
                     fecha=fecha_inicio,
-                    categoria=partida.get("categoria") or ProyectoInversionGasto.CATEGORIA_OTROS,
-                    subcategoria=(partida.get("subcategoria") or "").strip(),
-                    descripcion=(partida.get("descripcion") or "Partida").strip(),
-                    proveedor_nombre=(partida.get("proveedor_nombre") or "").strip(),
+                    categoria=partida["categoria"],
+                    subcategoria=partida["subcategoria"],
+                    descripcion=partida["descripcion"],
+                    proveedor_nombre=partida["proveedor_nombre"],
                     monto=monto,
                     iva=iva,
                     monto_total=monto + iva,
                     metodo_pago="",
                     financiado=False,
-                    referencia_contable=f"PLAN_{project.pk}_{partida.get('categoria', 'OTROS')}",
-                    notas=(partida.get("notas") or "").strip(),
+                    referencia_contable=f"PLAN_{project.pk}_{partida['categoria']}",
+                    notas=partida["notas"],
                     capturado_por=request.user,
                 )
 
@@ -2186,12 +2459,39 @@ def inversiones_detalle(request: HttpRequest, project_id: int) -> HttpResponse:
             return redirect("inversiones:detalle", project_id=project.pk)
 
         if action == "add_expense":
-            monto = _parse_decimal(request.POST.get("monto"))
-            iva = _parse_decimal(request.POST.get("iva"))
+            errores = []
+            categoria = _choice_value_with_errors(
+                request.POST.get("categoria"),
+                choices=ProyectoInversionGasto.CATEGORIA_CHOICES,
+                label="Categoría",
+                errors=errores,
+                default=ProyectoInversionGasto.CATEGORIA_OTROS,
+            )
+            monto = _parse_decimal_with_errors(
+                request.POST.get("monto"),
+                label="Monto",
+                errors=errores,
+                default="0",
+                minimum=Decimal("0"),
+                required=True,
+            )
+            iva = _parse_decimal_with_errors(
+                request.POST.get("iva"),
+                label="IVA",
+                errors=errores,
+                default="0",
+                minimum=Decimal("0"),
+            )
+            if monto <= 0:
+                errores.append("El monto del gasto debe ser mayor a cero.")
+            if errores:
+                for error in errores:
+                    messages.error(request, error)
+                return redirect(f"{reverse('inversiones:detalle', args=[project.pk])}?tab=inversion")
             expense = ProyectoInversionGasto.objects.create(
                 proyecto=project,
                 fecha=_parse_date(request.POST.get("fecha")) or timezone.localdate(),
-                categoria=(request.POST.get("categoria") or ProyectoInversionGasto.CATEGORIA_OTROS).strip(),
+                categoria=categoria,
                 subcategoria=(request.POST.get("subcategoria") or "").strip(),
                 descripcion=(request.POST.get("descripcion") or "Gasto").strip(),
                 proveedor_id=_parse_int(request.POST.get("proveedor_id")) or None,
@@ -2255,19 +2555,125 @@ def inversiones_detalle(request: HttpRequest, project_id: int) -> HttpResponse:
             return redirect("inversiones:detalle", project_id=project.pk)
 
         if action == "actualizar_supuestos":
+            errores = []
             meta = project.metadata or {}
-            renta = _parse_decimal(request.POST.get("renta_mensual"))
-            nomina = _parse_decimal(request.POST.get("nomina_mensual"))
-            servicios = _parse_decimal(request.POST.get("servicios_mensual"))
-            marketing = _parse_decimal(request.POST.get("marketing_mensual"))
-            otros = _parse_decimal(request.POST.get("otros_fijos_mensual"))
-            gastos_fijos = _parse_decimal(request.POST.get("gastos_fijos_total"))
+            renta = _parse_decimal_with_errors(
+                request.POST.get("renta_mensual"),
+                label="Renta mensual",
+                errors=errores,
+                default="0",
+                minimum=Decimal("0"),
+            )
+            nomina = _parse_decimal_with_errors(
+                request.POST.get("nomina_mensual"),
+                label="Nómina mensual",
+                errors=errores,
+                default="0",
+                minimum=Decimal("0"),
+            )
+            servicios = _parse_decimal_with_errors(
+                request.POST.get("servicios_mensual"),
+                label="Servicios mensuales",
+                errors=errores,
+                default="0",
+                minimum=Decimal("0"),
+            )
+            marketing = _parse_decimal_with_errors(
+                request.POST.get("marketing_mensual"),
+                label="Marketing mensual",
+                errors=errores,
+                default="0",
+                minimum=Decimal("0"),
+            )
+            otros = _parse_decimal_with_errors(
+                request.POST.get("otros_fijos_mensual"),
+                label="Otros fijos mensuales",
+                errors=errores,
+                default="0",
+                minimum=Decimal("0"),
+            )
+            gastos_fijos = _parse_decimal_with_errors(
+                request.POST.get("gastos_fijos_total"),
+                label="Gastos fijos total",
+                errors=errores,
+                default="0",
+                minimum=Decimal("0"),
+            )
             if gastos_fijos <= 0:
                 gastos_fijos = renta + nomina + servicios + marketing + otros
-            ventas_base = _parse_decimal(request.POST.get("ventas_promedio_base"))
-            margen = _parse_decimal(request.POST.get("margen_bruto_pct"), default="45")
-            crecimiento = _parse_decimal(request.POST.get("crecimiento_mensual_pct"), default="0.8")
-            horizonte = _parse_int(request.POST.get("horizonte_meses"), default=36)
+            if gastos_fijos <= 0:
+                errores.append("Captura gastos fijos mensuales para evitar una proyección inflada.")
+            ventas_base = _parse_decimal_with_errors(
+                request.POST.get("ventas_promedio_base"),
+                label="Ventas base",
+                errors=errores,
+                default="0",
+                minimum=Decimal("0"),
+                required=True,
+            )
+            if ventas_base <= 0:
+                errores.append("Ventas base debe ser mayor a cero.")
+            margen = _parse_decimal_with_errors(
+                request.POST.get("margen_bruto_pct"),
+                label="Margen bruto",
+                errors=errores,
+                default="45",
+                minimum=Decimal("0"),
+            )
+            if margen > 100:
+                errores.append("Margen bruto no puede ser mayor a 100%.")
+            crecimiento = _parse_decimal_with_errors(
+                request.POST.get("crecimiento_mensual_pct"),
+                label="Crecimiento mensual",
+                errors=errores,
+                default="0.8",
+            )
+            horizonte = _parse_int_with_errors(
+                request.POST.get("horizonte_meses"),
+                label="Horizonte",
+                errors=errores,
+                default=36,
+                minimum=1,
+            )
+            project.capital_inicial_aportado = _parse_decimal_with_errors(
+                request.POST.get("capital_inicial_aportado"),
+                label="Capital inicial aportado",
+                errors=errores,
+                default="0",
+                minimum=Decimal("0"),
+            )
+            project.deuda_asociada = _parse_decimal_with_errors(
+                request.POST.get("deuda_asociada"),
+                label="Deuda asociada",
+                errors=errores,
+                default="0",
+                minimum=Decimal("0"),
+            )
+            project.tasa_interes_anual = _parse_decimal_with_errors(
+                request.POST.get("tasa_interes_anual"),
+                label="Tasa de interés anual",
+                errors=errores,
+                default="0",
+                minimum=Decimal("0"),
+            )
+            project.plazo_deuda_meses = _parse_int_with_errors(
+                request.POST.get("plazo_deuda_meses"),
+                label="Plazo de deuda",
+                errors=errores,
+                default=0,
+                minimum=0,
+            )
+            project.pago_mensual_deuda_estimado = _parse_decimal_with_errors(
+                request.POST.get("pago_mensual_deuda_estimado"),
+                label="Pago mensual de deuda",
+                errors=errores,
+                default="0",
+                minimum=Decimal("0"),
+            )
+            if errores:
+                for error in errores:
+                    messages.error(request, error)
+                return redirect(f"{reverse('inversiones:detalle', args=[project.pk])}?tab=finanzas")
             meta["supuestos_operativos"] = {
                 "renta": float(renta),
                 "nomina": float(nomina),
@@ -2280,12 +2686,39 @@ def inversiones_detalle(request: HttpRequest, project_id: int) -> HttpResponse:
                 "crecimiento_mensual_pct": float(crecimiento),
                 "horizonte_meses": horizonte,
             }
-            project.discount_rate = _parse_decimal(request.POST.get("discount_rate"), default="12")
-            project.roi_objetivo = _parse_decimal(request.POST.get("roi_objetivo"), default="25")
-            project.payback_objetivo_meses = _parse_int(request.POST.get("payback_objetivo_meses"), default=24)
+            project.discount_rate = _parse_decimal_with_errors(
+                request.POST.get("discount_rate"),
+                label="Tasa de descuento",
+                errors=errores,
+                default="12",
+                minimum=Decimal("0"),
+            )
+            project.roi_objetivo = _parse_decimal_with_errors(
+                request.POST.get("roi_objetivo"),
+                label="ROI objetivo",
+                errors=errores,
+                default="25",
+                minimum=Decimal("0"),
+            )
+            project.payback_objetivo_meses = _parse_int_with_errors(
+                request.POST.get("payback_objetivo_meses"),
+                label="Payback objetivo",
+                errors=errores,
+                default=24,
+                minimum=1,
+            )
+            if errores:
+                for error in errores:
+                    messages.error(request, error)
+                return redirect(f"{reverse('inversiones:detalle', args=[project.pk])}?tab=finanzas")
             project.metadata = meta
             project.save(
                 update_fields=[
+                    "capital_inicial_aportado",
+                    "deuda_asociada",
+                    "tasa_interes_anual",
+                    "plazo_deuda_meses",
+                    "pago_mensual_deuda_estimado",
                     "discount_rate",
                     "roi_objetivo",
                     "payback_objetivo_meses",
@@ -2427,38 +2860,48 @@ def _upsert_escenarios_inversion(
 
 
 def _calcular_proyeccion_simple(project, supuestos_op: dict, escenarios) -> dict:
-    """Calcula métricas financieras básicas sin dependencias externas."""
+    """Calcula métricas financieras preliminares con supuestos capturados."""
     def _supuesto(key: str, default):
         value = supuestos_op.get(key)
         return default if value in (None, "") else value
 
-    ventas_base = float(_supuesto("ventas_base", 0))
-    margen_pct = float(_supuesto("margen_pct", 45)) / 100
-    gastos_fijos = float(_supuesto("gastos_fijos_total", 0))
-    crecimiento = float(_supuesto("crecimiento_mensual_pct", 0.8)) / 100
+    ventas_base = _decimal_value(_supuesto("ventas_base", 0))
+    margen_pct = _decimal_value(_supuesto("margen_pct", 45)) / Decimal("100")
+    gastos_fijos = _decimal_value(_supuesto("gastos_fijos_total", 0))
+    crecimiento = _decimal_value(_supuesto("crecimiento_mensual_pct", 0.8)) / Decimal("100")
     horizonte = int(_supuesto("horizonte_meses", 36))
-    inversion = float(project.monto_inversion_planeado or 0)
-    discount_anual = float(project.discount_rate or 12) / 100
-    discount_mensual = (1 + discount_anual) ** (1 / 12) - 1
+    inversion = _decimal_value(project.monto_inversion_planeado)
+    servicio_deuda = _decimal_value(project.pago_mensual_deuda_estimado)
+    discount_anual = _decimal_value(project.discount_rate or 12) / Decimal("100")
+    discount_mensual = Decimal(str((1 + float(discount_anual)) ** (1 / 12) - 1))
+    warnings = []
+    if gastos_fijos <= 0:
+        warnings.append("Sin gastos fijos mensuales capturados; ROI/payback pueden quedar inflados.")
+    if servicio_deuda <= 0 and _decimal_value(project.deuda_asociada) > 0:
+        warnings.append("Hay deuda asociada sin pago mensual estimado; flujo libre no descuenta servicio de deuda.")
 
-    if inversion <= 0 or ventas_base <= 0:
-        return {"disponible": False}
+    if inversion <= 0 or ventas_base <= 0 or horizonte <= 0:
+        return {"disponible": False, "warnings": warnings}
 
     flujos = [-inversion]
+    utilidad_operativa_total = Decimal("0")
     for mes in range(1, horizonte + 1):
         ventas_mes = ventas_base * (1 + crecimiento) ** (mes - 1)
         utilidad_bruta = ventas_mes * margen_pct
-        flujos.append(utilidad_bruta - gastos_fijos)
+        utilidad_operativa = utilidad_bruta - gastos_fijos
+        utilidad_operativa_total += utilidad_operativa
+        flujos.append(utilidad_operativa - servicio_deuda)
 
     vpn = sum(flujo / (1 + discount_mensual) ** idx for idx, flujo in enumerate(flujos))
     tir_mensual = None
     try:
         tasa = 0.01
+        flujos_float = [float(flujo) for flujo in flujos]
         for _ in range(500):
-            npv = sum(flujo / (1 + tasa) ** idx for idx, flujo in enumerate(flujos))
+            npv = sum(flujo / (1 + tasa) ** idx for idx, flujo in enumerate(flujos_float))
             dnpv = sum(
                 -idx * flujo / (1 + tasa) ** (idx + 1)
-                for idx, flujo in enumerate(flujos)
+                for idx, flujo in enumerate(flujos_float)
                 if idx > 0
             )
             if abs(dnpv) < 1e-10:
@@ -2474,8 +2917,8 @@ def _calcular_proyeccion_simple(project, supuestos_op: dict, escenarios) -> dict
         tir_mensual = None
 
     tir_anual = ((1 + tir_mensual) ** 12 - 1) * 100 if tir_mensual is not None else None
-    utilidad_total = sum(flujos[1:])
-    roi = (utilidad_total / inversion) * 100 if inversion > 0 else 0
+    flujo_libre_total = sum(flujos[1:])
+    roi = (flujo_libre_total / inversion) * Decimal("100") if inversion > 0 else Decimal("0")
     acumulado = -inversion
     payback_meses = None
     for mes, flujo in enumerate(flujos[1:], start=1):
@@ -2484,27 +2927,30 @@ def _calcular_proyeccion_simple(project, supuestos_op: dict, escenarios) -> dict
         if acumulado >= 0:
             denominador = abs(previo) + abs(acumulado)
             fraccion = abs(previo) / denominador if denominador > 0 else 0
-            payback_meses = round(mes - 1 + fraccion, 1)
+            payback_meses = float((Decimal(mes - 1) + fraccion).quantize(Decimal("0.1")))
             break
 
     pe_mensual = gastos_fijos / margen_pct if margen_pct > 0 else None
     flujo_acumulado = -inversion
-    flujo_acum_chart = [round(flujo_acumulado, 2)]
+    flujo_acum_chart = [float(flujo_acumulado.quantize(Decimal("0.01")))]
     for flujo in flujos[1:]:
         flujo_acumulado += flujo
-        flujo_acum_chart.append(round(flujo_acumulado, 2))
+        flujo_acum_chart.append(float(flujo_acumulado.quantize(Decimal("0.01"))))
 
     return {
         "disponible": True,
-        "inversion": round(inversion, 2),
-        "vpn": round(vpn, 2),
+        "inversion": float(inversion.quantize(Decimal("0.01"))),
+        "vpn": float(vpn.quantize(Decimal("0.01"))),
         "tir_anual": round(tir_anual, 2) if tir_anual is not None else None,
-        "roi": round(roi, 2),
+        "roi": float(roi.quantize(Decimal("0.01"))),
         "payback_meses": payback_meses,
-        "pe_mensual": round(pe_mensual, 2) if pe_mensual else None,
-        "utilidad_total": round(utilidad_total, 2),
+        "pe_mensual": float(pe_mensual.quantize(Decimal("0.01"))) if pe_mensual else None,
+        "utilidad_total": float(flujo_libre_total.quantize(Decimal("0.01"))),
+        "utilidad_operativa_total": float(utilidad_operativa_total.quantize(Decimal("0.01"))),
+        "servicio_deuda_mensual": float(servicio_deuda.quantize(Decimal("0.01"))),
         "horizonte": horizonte,
         "flujo_acum_chart": json.dumps(flujo_acum_chart[::3]),
+        "warnings": warnings,
         "viable": bool(
             tir_anual is not None
             and tir_anual >= 15

@@ -11,12 +11,12 @@
   </p>
 
   {% if pronosticos_unavailable %}
-    <p style="color:#9a3412;">
+    <p class="pd-u-67ce0798d5">
       Tabla de pronósticos no disponible en este entorno. Se muestra solo información del plan.
     </p>
   {% endif %}
 
-  <div style="margin:12px 0;display:flex;gap:18px;flex-wrap:wrap;">
+  <div class="pd-u-0dabaa824d">
     <div><strong>Total plan:</strong> {{ total_plan|floatformat:2|intcomma }}</div>
     <div><strong>Total pronóstico:</strong> {{ total_pronostico|floatformat:2|intcomma }}</div>
     <div><strong>Delta (plan-pronóstico):</strong> {{ total_delta|floatformat:2|intcomma }}</div>
@@ -59,7 +59,7 @@
     </tbody>
   </table>
 
-  <p style="margin-top:16px;">
+  <p class="pd-u-8a359a76eb">
     <a href="{% url 'admin:recetas_planproduccion_change' plan.id %}">Volver al plan</a>
   </p>
 </div>

@@ -7,66 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<style>
-  .fallas-toolbar{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
-  .fallas-toolbar select,.fallas-toolbar button,.fallas-modal select,.fallas-modal input,.fallas-modal textarea{min-height:42px;border:1px solid var(--border-soft,#e5dce1);border-radius:10px;padding:8px 10px;font:inherit}
-  .fallas-table{width:100%;border-collapse:collapse}
-  .fallas-table th,.fallas-table td{padding:10px 10px;border-bottom:1px solid rgba(139,34,82,.10);text-align:left;vertical-align:middle}
-  .fallas-table th{color:#6f3150;font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:600}
-  .fallas-table tr:hover td{background:rgba(139,34,82,.03)}
-  .fallas-table-wrap{max-width:100%;overflow:auto;margin-top:14px;-webkit-overflow-scrolling:touch}
-  .fallas-badge{display:inline-flex;align-items:center;min-height:24px;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700}
-  .fallas-category-layout{display:grid;grid-template-columns:minmax(260px,.8fr) minmax(0,1.4fr);gap:18px;align-items:start}
-  .fallas-category-form{display:grid;gap:10px}
-  .fallas-check{display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700}
-  .fallas-check input{width:auto;min-height:0}
-  .fallas-file-input{min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%}
-  .p-critica{background:#fef2f2;color:#991b1b;border:1px solid #fca5a5}
-  .p-alta{background:#fff7ed;color:#c2410c;border:1px solid #fdba74}
-  .p-media{background:#fffbeb;color:#92400e;border:1px solid #fde68a}
-  .p-baja{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
-  .p-verde{background:#f0fdf4;color:#166534;border:1px solid #86efac}
-  .fallas-modal-backdrop{position:fixed;inset:0;z-index:20;display:none;background:rgba(24,12,18,.56);padding:24px;overflow:auto}
-  .fallas-modal-backdrop.is-open{display:flex;align-items:flex-start;justify-content:center}
-  .fallas-modal{width:min(900px,100%);margin:40px 0;background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.28);overflow:hidden}
-  .fallas-modal-head{display:flex;justify-content:space-between;gap:12px;align-items:center;background:#8B2252;color:#fff;padding:16px 20px}
-  .fallas-modal-body{padding:20px}
-  .fallas-detail-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:18px}
-  .fallas-modal-actions{display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;border-top:1px solid #eee;background:#fafafa}
-  /* Thumbnail en tabla */
-  .thumb-cell{width:48px}
-  .thumb-img{width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid rgba(139,34,82,.15);cursor:pointer;transition:transform .15s}
-  .thumb-img:hover{transform:scale(1.08)}
-  .thumb-none{width:44px;height:44px;background:rgba(139,34,82,.06);border-radius:6px;display:flex;align-items:center;justify-content:center;color:rgba(139,34,82,.3);font-size:18px}
-  /* Asignación */
-  .asign-row{display:flex;align-items:center;gap:8px;margin-top:6px}
-  .asign-row select{flex:1;min-height:38px;border:1px solid var(--border-soft,#e5dce1);border-radius:8px;padding:6px 10px;font:inherit}
-  /* KPI charts mini */
-  .kpi-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
-  .kpi-chart-card{background:#fff;border:1px solid rgba(139,34,82,.10);border-radius:10px;padding:14px}
-  .kpi-chart-title{font-size:11px;font-weight:600;color:#6f3150;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px}
-  .bar-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
-  .bar-label{font-size:12px;color:#444;min-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .bar-track{flex:1;height:8px;background:rgba(139,34,82,.08);border-radius:4px;overflow:hidden}
-  .bar-fill{height:100%;background:linear-gradient(90deg,#8B2252,#c0607e);border-radius:4px;transition:width .5s ease}
-  .bar-count{font-size:11px;font-weight:600;color:#8B2252;min-width:20px;text-align:right}
-  /* Estado vacío */
-  .fallas-empty{padding:48px 24px;text-align:center}
-  .fallas-empty-icon{font-size:40px;margin-bottom:12px;opacity:.35}
-  .fallas-empty-title{font-size:16px;font-weight:600;color:#6f3150;margin-bottom:6px}
-  .fallas-empty-sub{font-size:13px;color:#888;margin-bottom:18px}
-  /* Estatus badges */
-  .e-abierto{background:#fef2f2;color:#991b1b;border:1px solid #fca5a5}
-  .e-revision{background:#fffbeb;color:#92400e;border:1px solid #fde68a}
-  .e-proceso{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
-  .e-resuelto{background:#f0fdf4;color:#166534;border:1px solid #86efac}
-  .e-cerrado{background:#f3f4f6;color:#374151;border:1px solid #d1d5db}
-  .e-cancelado{background:#f9fafb;color:#9ca3af;border:1px solid #e5e7eb}
-  @media(max-width:820px){
-    .fallas-toolbar,.fallas-detail-grid,.fallas-category-layout,.kpi-charts{grid-template-columns:1fr}
-    .fallas-table{min-width:700px}
-  }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/fallas-templates-fallas-dashboard.css?v=20260614-ui100-v1">
 <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
 {% endblock %}
 
@@ -93,14 +34,14 @@
         <div class="bi-hero-status-grid">
           <article class="bi-status-card"><span class="bi-status-label">Abiertos</span><strong id="kpi-abiertos">-</strong></article>
           <article class="bi-status-card"><span class="bi-status-label">Críticos</span><strong id="kpi-criticos">-</strong></article>
-          <article class="bi-status-card"><span class="bi-status-label">Resueltos 30d</span><strong id="kpi-resueltos">-</strong></article>
+          <article class="bi-status-card"><span class="bi-status-label">Finalizados 30d</span><strong id="kpi-resueltos">-</strong></article>
           <article class="bi-status-card"><span class="bi-status-label">Respuesta prom.</span><strong id="kpi-tiempo">-</strong></article>
         </div>
       </div>
     </section>
 
     {# Mini gráficas por sucursal y categoría #}
-    <div class="kpi-charts" id="kpi-charts" style="display:none">
+    <div class="kpi-charts pd-is-hidden" id="kpi-charts">
       <div class="kpi-chart-card">
         <div class="kpi-chart-title">Abiertos por sucursal</div>
         <div id="chart-sucursal"></div>
@@ -122,8 +63,7 @@
           <option value="abierto">Abierto</option>
           <option value="en_revision">En revisión</option>
           <option value="en_proceso">En proceso</option>
-          <option value="resuelto">Resuelto</option>
-          <option value="cerrado">Cerrado</option>
+          <option value="resuelto">Finalizado</option>
           <option value="cancelado">Cancelado</option>
         </select>
         <select id="f-prioridad">
@@ -158,7 +98,7 @@
               <th>Acciones</th>
             </tr>
           </thead>
-          <tbody id="tabla-body"><tr><td colspan="10" style="padding:20px;color:#aaa;text-align:center">Cargando...</td></tr></tbody>
+          <tbody id="tabla-body"><tr><td colspan="10" class="pd-cell-loading">Cargando...</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -166,14 +106,14 @@
 
   {# ── PANEL CATEGORÍAS (solo DG) ───────────────────────── #}
   {% if es_dg %}
-  <section class="bi-panel" id="panel-categorias" style="display:none">
+  <section class="bi-panel pd-is-hidden" id="panel-categorias">
     <div class="bi-panel-head">
       <div><div class="bi-kicker">Catálogo</div><h2 class="bi-panel-title">Gestión de categorías</h2></div>
       <div class="bi-panel-actions"><span class="fallas-badge p-baja" id="cat-total">0 categorías</span></div>
     </div>
     <div class="fallas-category-layout">
-      <section class="bi-panel" style="margin:0">
-        <p style="font-weight:700;color:#6f3150;margin:0 0 12px">Nueva categoría</p>
+      <section class="bi-panel fallas-panel-flat">
+        <p class="fallas-form-title">Nueva categoría</p>
         <div class="fallas-category-form">
           <label for="cat-nombre">Nombre</label>
           <input id="cat-nombre" type="text" maxlength="100" placeholder="Ej. Vitrina refrigerada">
@@ -201,7 +141,7 @@
 
   {# Modal editar categoría #}
   <div class="fallas-modal-backdrop" id="modal-cat">
-    <div class="fallas-modal" style="max-width:460px">
+    <div class="fallas-modal fallas-modal-sm">
       <div class="fallas-modal-head">
         <strong>Editar categoría</strong>
         <button type="button" class="btn btn-secondary btn-small" onclick="cerrarModalCat()">Cerrar</button>
@@ -275,8 +215,8 @@ const ESTATUS_BADGE = {
   abierto:    '<span class="fallas-badge e-abierto">Abierto</span>',
   en_revision:'<span class="fallas-badge e-revision">En revisión</span>',
   en_proceso: '<span class="fallas-badge e-proceso">En proceso</span>',
-  resuelto:   '<span class="fallas-badge e-resuelto">Resuelto</span>',
-  cerrado:    '<span class="fallas-badge e-cerrado">Cerrado</span>',
+  resuelto:   '<span class="fallas-badge e-resuelto">Finalizado</span>',
+  cerrado:    '<span class="fallas-badge e-cerrado">Cerrado / validado</span>',
   cancelado:  '<span class="fallas-badge e-cancelado">Cancelado</span>',
 };
 
@@ -328,7 +268,7 @@ function renderBarChart(containerId, items, labelKey) {
   container.innerHTML = items.slice(0, 6).map(item => `
     <div class="bar-row">
       <div class="bar-label" title="${esc(item[labelKey])}">${esc(item[labelKey])}</div>
-      <div class="bar-track"><div class="bar-fill" style="width:${Math.round((item.total / max) * 100)}%"></div></div>
+      <div class="bar-track"><div class="bar-fill pd-js-width" data-pd-width="${Math.round((item.total / max) * 100)}%"></div></div>
       <div class="bar-count">${item.total}</div>
     </div>`).join("");
 }
@@ -345,7 +285,7 @@ async function cargarSucursales() {
 
 // ── Tabla de reportes ────────────────────────────────────
 async function cargarReportes() {
-  document.getElementById("tabla-body").innerHTML = `<tr><td colspan="10" style="padding:20px;color:#aaa;text-align:center">Cargando...</td></tr>`;
+  document.getElementById("tabla-body").innerHTML = `<tr><td colspan="10" class="pd-cell-loading">Cargando...</td></tr>`;
   const params = new URLSearchParams();
   [["f-estatus","estatus"],["f-prioridad","prioridad"],["f-area","area"],["f-sucursal","sucursal"]].forEach(([id, key]) => {
     const v = document.getElementById(id).value;
@@ -361,7 +301,7 @@ async function cargarReportes() {
     document.getElementById("tabla-body").innerHTML = `
       <tr><td colspan="10">
         <div class="fallas-empty">
-          <div class="fallas-empty-icon">🔧</div>
+          <div class="fallas-empty-icon">Falla</div>
           <div class="fallas-empty-title">Sin reportes de fallas</div>
           <div class="fallas-empty-sub">No hay registros con los filtros seleccionados.</div>
           <a href="{% url 'fallas:pwa-reporte' %}" class="btn btn-primary">Registrar falla</a>
@@ -374,17 +314,17 @@ async function cargarReportes() {
     const fecha = new Date(rep.fecha_reporte).toLocaleString("es-MX", {day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"});
     const thumb = rep.foto_evidencia
       ? `<img src="${rep.foto_evidencia}" class="thumb-img" onclick="abrirDetalle(${rep.id})" alt="Evidencia" loading="lazy">`
-      : `<div class="thumb-none">📷</div>`;
+      : `<div class="thumb-none">Foto</div>`;
     return `<tr>
-      <td><strong style="color:#8B2252">#${rep.id}</strong></td>
+      <td><strong class="fallas-table-id">#${rep.id}</strong></td>
       <td class="thumb-cell">${thumb}</td>
-      <td style="font-size:13px">${esc(rep.sucursal_nombre)}</td>
-      <td><strong style="font-size:13px">${esc(rep.titulo)}</strong><br><span class="bi-subtle" style="font-size:11px">${esc(rep.reportado_por_nombre || "")}</span></td>
-      <td style="font-size:12px">${esc(rep.area_display || rep.area || "-")}</td>
-      <td style="font-size:12px">${esc(rep.categoria_nombre)}</td>
+      <td class="fallas-table-md">${esc(rep.sucursal_nombre)}</td>
+      <td><strong class="fallas-table-md">${esc(rep.titulo)}</strong><br><span class="bi-subtle fallas-inline-subtle">${esc(rep.reportado_por_nombre || "")}</span></td>
+      <td class="fallas-table-sm">${esc(rep.area_display || rep.area || "-")}</td>
+      <td class="fallas-table-sm">${esc(rep.categoria_nombre)}</td>
       <td>${PRIORIDAD_BADGE[rep.prioridad] || rep.prioridad}</td>
       <td>${ESTATUS_BADGE[rep.estatus] || esc(rep.estatus_display)}</td>
-      <td style="font-size:12px;white-space:nowrap">${fecha}</td>
+      <td class="fallas-table-sm">${fecha}</td>
       <td><button type="button" class="btn btn-secondary btn-small" onclick="abrirDetalle(${rep.id})">Ver</button></td>
     </tr>`;
   }).join("");
@@ -394,7 +334,7 @@ async function cargarReportes() {
 async function abrirDetalle(id) {
   reporteActual = id;
   document.getElementById("modal").classList.add("is-open");
-  document.getElementById("modal-body").innerHTML = `<div style="padding:20px;text-align:center;color:#aaa">Cargando...</div>`;
+  document.getElementById("modal-body").innerHTML = `<div class="pd-cell-loading">Cargando...</div>`;
 
   const res = await fetch(`${API}/reportes/${id}/`, {headers: h()});
   if (!res.ok) { document.getElementById("modal-body").textContent = "Error al cargar el reporte."; return; }
@@ -406,83 +346,82 @@ async function abrirDetalle(id) {
   const bitacora = (rep.bitacora || []).map(row => `
     <article class="bi-list-item is-tight">
       <strong>${esc(row.usuario_nombre)}</strong>
-      <span style="color:#aaa;font-size:11px;margin-left:6px">${new Date(row.timestamp).toLocaleString("es-MX",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</span>
-      <div style="font-size:12px;margin-top:2px">${row.estatus_nuevo_display ? `<span class="fallas-badge e-${row.estatus_nuevo}" style="font-size:10px">${esc(row.estatus_nuevo_display)}</span> ` : ""}${esc(row.comentario || "")}</div>
+      <span class="fallas-bitacora-meta">${new Date(row.timestamp).toLocaleString("es-MX",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</span>
+      <div class="fallas-bitacora-line">${row.estatus_nuevo_display ? `<span class="fallas-badge e-${row.estatus_nuevo} fallas-inline-subtle">${esc(row.estatus_nuevo_display)}</span> ` : ""}${esc(row.comentario || "")}</div>
     </article>`).join("");
 
   // Selector de asignación
   const opcionesUsuarios = usuariosGestion.length
-    ? `<select id="asignado-a" style="min-height:36px;border:1px solid #e5dce1;border-radius:8px;padding:6px 10px;font:inherit;width:100%">
+    ? `<select id="asignado-a" class="fallas-select-full">
         <option value="">Sin asignar</option>
         ${usuariosGestion.map(u => `<option value="${u.id}" ${rep.asignado_a === u.id ? "selected" : ""}>${esc(u.nombre || u.username)}</option>`).join("")}
       </select>`
-    : `<input id="asignado-a" type="number" placeholder="ID de usuario" style="min-height:36px;border:1px solid #e5dce1;border-radius:8px;padding:6px 10px;font:inherit;width:100%" value="${rep.asignado_a || ""}">`;
+    : `<input id="asignado-a" type="number" placeholder="ID de usuario" class="fallas-input-full" value="${rep.asignado_a || ""}">`;
 
   document.getElementById("modal-body").innerHTML = `
     <div class="fallas-detail-grid">
       <div>
-        <p style="margin:0 0 6px"><strong>Sucursal:</strong> ${esc(rep.sucursal_nombre)}</p>
-        <p style="margin:0 0 6px"><strong>Área:</strong> ${esc(rep.area_display || rep.area || "-")}</p>
-        <p style="margin:0 0 6px"><strong>Categoría:</strong> ${esc(rep.categoria_nombre)}</p>
-        <p style="margin:0 0 6px"><strong>Título:</strong> ${esc(rep.titulo)}</p>
-        <p style="margin:0 0 6px"><strong>Descripción:</strong><br><span style="font-size:13px;color:#555">${esc(rep.descripcion)}</span></p>
-        ${rep.activo_nombre ? `<p style="margin:0 0 6px"><strong>Activo:</strong> ${esc(rep.activo_nombre)}</p>` : ""}
-        ${rep.proveedor_servicio ? `<p style="margin:0 0 6px"><strong>Proveedor:</strong> ${esc(rep.proveedor_servicio)}</p>` : ""}
-        <div style="display:flex;gap:16px;margin-top:8px">
+        <p class="fallas-detail-pair"><strong>Sucursal:</strong> ${esc(rep.sucursal_nombre)}</p>
+        <p class="fallas-detail-pair"><strong>Área:</strong> ${esc(rep.area_display || rep.area || "-")}</p>
+        <p class="fallas-detail-pair"><strong>Categoría:</strong> ${esc(rep.categoria_nombre)}</p>
+        <p class="fallas-detail-pair"><strong>Título:</strong> ${esc(rep.titulo)}</p>
+        <p class="fallas-detail-pair"><strong>Descripción:</strong><br><span class="fallas-detail-copy">${esc(rep.descripcion)}</span></p>
+        ${rep.activo_nombre ? `<p class="fallas-detail-pair"><strong>Activo:</strong> ${esc(rep.activo_nombre)}</p>` : ""}
+        ${rep.proveedor_servicio ? `<p class="fallas-detail-pair"><strong>Proveedor:</strong> ${esc(rep.proveedor_servicio)}</p>` : ""}
+        <div class="fallas-detail-badges">
           <span>${PRIORIDAD_BADGE[rep.prioridad]}</span>
           <span>${ESTATUS_BADGE[rep.estatus] || ""}</span>
         </div>
       </div>
       <div>
         ${rep.foto_evidencia
-          ? `<a href="${rep.foto_evidencia}" target="_blank" rel="noopener"><img src="${rep.foto_evidencia}" alt="Evidencia" style="width:100%;max-height:220px;object-fit:cover;border-radius:10px;border:1px solid rgba(139,34,82,.15)"></a>`
-          : `<div style="height:120px;background:rgba(139,34,82,.05);border-radius:10px;display:flex;align-items:center;justify-content:center;color:#ccc;font-size:32px">📷</div>`}
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
-          <div style="background:rgba(139,34,82,.05);border-radius:8px;padding:8px 10px;text-align:center">
-            <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.04em">Respuesta</div>
-            <div style="font-size:18px;font-weight:700;color:#8B2252">${rep.tiempo_respuesta_horas != null ? rep.tiempo_respuesta_horas+"h" : "—"}</div>
+          ? `<a href="${rep.foto_evidencia}" target="_blank" rel="noopener"><img src="${rep.foto_evidencia}" alt="Evidencia" class="fallas-evidence-img"></a>`
+          : `<div class="fallas-evidence-empty">Sin foto</div>`}
+        <div class="fallas-metric-grid">
+          <div class="fallas-metric-mini">
+            <div class="fallas-metric-label">Respuesta</div>
+            <div class="fallas-metric-value">${rep.tiempo_respuesta_horas != null ? rep.tiempo_respuesta_horas+"h" : "—"}</div>
           </div>
-          <div style="background:rgba(139,34,82,.05);border-radius:8px;padding:8px 10px;text-align:center">
-            <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.04em">Resolución</div>
-            <div style="font-size:18px;font-weight:700;color:#8B2252">${rep.tiempo_resolucion_horas != null ? rep.tiempo_resolucion_horas+"h" : "—"}</div>
+          <div class="fallas-metric-mini">
+            <div class="fallas-metric-label">Resolución</div>
+            <div class="fallas-metric-value">${rep.tiempo_resolucion_horas != null ? rep.tiempo_resolucion_horas+"h" : "—"}</div>
           </div>
         </div>
-        ${rep.latitud ? `<p style="font-size:11px;color:#aaa;margin-top:8px">📍 ${rep.latitud}, ${rep.longitud}</p>` : ""}
+        ${rep.latitud ? `<p class="fallas-location">Ubicación: ${rep.latitud}, ${rep.longitud}</p>` : ""}
       </div>
     </div>
     ${PUEDE_GESTIONAR ? `
-      <hr style="margin:16px 0;border:none;border-top:1px solid #eee">
+      <hr class="fallas-divider">
       <div class="fallas-detail-grid">
         <div>
-          <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin-bottom:4px">Cambiar estatus</label>
-          <select id="nuevo-estatus" style="min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%">
+          <label class="pd-form-label">Cambiar estatus</label>
+          <select id="nuevo-estatus" class="fallas-select-full">
             <option value="">Sin cambio</option>
             <option value="en_revision">En revisión</option>
             <option value="en_proceso">En proceso</option>
-            <option value="resuelto">Resuelto</option>
-            <option value="cerrado">Cerrado</option>
+            <option value="resuelto">Finalizado</option>
             <option value="cancelado">Cancelado</option>
           </select>
-          <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin:10px 0 4px">Asignar a</label>
+          <label class="pd-form-label pd-mt-3">Asignar a</label>
           ${opcionesUsuarios}
         </div>
         <div>
-          <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin-bottom:4px">Costo estimado ($)</label>
-          <input id="costo-est" type="number" step="0.01" placeholder="0.00" value="${rep.costo_estimado || ""}" style="min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%">
-          <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin:10px 0 4px">Costo real ($)</label>
-          <input id="costo-real" type="number" step="0.01" placeholder="0.00" value="${rep.costo_real || ""}" style="min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%">
+          <label class="pd-form-label">Costo estimado ($)</label>
+          <input id="costo-est" type="number" step="0.01" placeholder="0.00" value="${rep.costo_estimado || ""}" class="fallas-input-full">
+          <label class="pd-form-label pd-mt-3">Costo real ($)</label>
+          <input id="costo-real" type="number" step="0.01" placeholder="0.00" value="${rep.costo_real || ""}" class="fallas-input-full">
         </div>
       </div>
-      <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin:12px 0 4px">Comentario</label>
-      <textarea id="comentario-estatus" rows="3" style="width:100%;min-height:80px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;resize:vertical"></textarea>
-      <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin:10px 0 4px">Evidencia para seguimiento</label>
+      <label class="pd-form-label pd-mt-3">Comentario</label>
+      <textarea id="comentario-estatus" rows="3" class="fallas-input-full pd-textarea-lg"></textarea>
+      <label class="pd-form-label pd-mt-3">Evidencia para seguimiento</label>
       <input id="evidencias-seguimiento" class="fallas-file-input" type="file" multiple accept="image/*,.pdf">
-      <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin:10px 0 4px">Proveedor de servicio</label>
-      <input id="proveedor-servicio" type="text" placeholder="Nombre del proveedor o técnico" value="${esc(rep.proveedor_servicio || "")}" style="min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%">
+      <label class="pd-form-label pd-mt-3">Proveedor de servicio</label>
+      <input id="proveedor-servicio" type="text" placeholder="Nombre del proveedor o técnico" value="${esc(rep.proveedor_servicio || "")}" class="fallas-input-full">
     ` : ""}
-    <hr style="margin:16px 0;border:none;border-top:1px solid #eee">
-    <h3 style="font-size:15px;font-weight:600;color:#6f3150;margin:0 0 10px">Bitácora</h3>
-    <div class="bi-list bi-list-dense">${bitacora || '<article class="bi-list-item" style="color:#aaa">Sin historial aún.</article>'}</div>`;
+    <hr class="fallas-divider">
+    <h3 class="fallas-log-title">Bitácora</h3>
+    <div class="bi-list bi-list-dense">${bitacora || '<article class="bi-list-item pd-detail-meta">Sin historial aún.</article>'}</div>`;
 }
 
 async function actualizarEstatus() {
@@ -531,12 +470,12 @@ async function cargarCatalogoAdmin() {
   document.getElementById("cat-tbody").innerHTML = items.length
     ? items.map(cat => `<tr class="${cat.activo ? "" : "bi-subtle"}">
         <td><strong>${esc(cat.nombre)}</strong></td>
-        <td style="font-size:12px">${esc(tipos[cat.tipo] || cat.tipo)}</td>
-        <td style="font-size:12px">${cat.orden}</td>
+        <td class="fallas-table-sm">${esc(tipos[cat.tipo] || cat.tipo)}</td>
+        <td class="fallas-table-sm">${cat.orden}</td>
         <td><span class="fallas-badge ${cat.activo ? "p-verde" : ""}">${cat.activo ? "Activa" : "Inactiva"}</span></td>
         <td><button class="btn btn-secondary btn-small" onclick="abrirEditCat(${cat.id})">Editar</button></td>
       </tr>`).join("")
-    : `<tr><td colspan="5" class="bi-subtle" style="padding:16px;text-align:center">Sin categorías.</td></tr>`;
+    : `<tr><td colspan="5" class="bi-subtle pd-empty-row">Sin categorías.</td></tr>`;
 }
 
 function abrirEditCat(id) {

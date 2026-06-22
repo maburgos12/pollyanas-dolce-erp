@@ -8,7 +8,7 @@ from django.test import Client, TestCase, override_settings
 
 from core.access import ROLE_PRODUCCION, ROLE_RRHH
 from core.navigation import NAV_GROUPS
-from rrhh.models import Empleado, NominaLinea, NominaPeriodo, PermisoSalida, PermisoSalidaCambio
+from rrhh.models import Empleado, HoraExtra, NominaLinea, NominaPeriodo, PermisoSalida, PermisoSalidaCambio
 
 from .models import (
     AREA_EMBETUNADO,
@@ -272,6 +272,10 @@ class BonosProduccionTests(TestCase):
         self.assertIn("Teclea nombre o apellido", content)
         self.assertIn("Vista previa tamaño carta", content)
         self.assertIn("Imprimir / PDF", content)
+        self.assertIn("label:'Area',value:contextLabel", content)
+        self.assertNotIn("Monto calculado", content)
+        self.assertIn("grid-template-columns:repeat(2,minmax(0,1fr))", content)
+        self.assertIn("margin:28px auto 0", content)
         self.assertIn("Permiso ${lastPermiso.folio} registrado", content)
         self.assertIn("Imprimir / guardar PDF", content)
         self.assertIn("ReactDOM.createPortal", content)
@@ -338,7 +342,7 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-produccion-pwa-v12", sw_content)
+        self.assertIn("pollyanas-bonos-produccion-pwa-v18", sw_content)
         self.assertIn('cache: "no-store"', sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-produccion/dashboard/")', sw_content)
 
@@ -688,6 +692,138 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_RECHAZADO)
         self.assertEqual(permiso.autorizado_jefe_por, user)
 
+    def test_horas_extra_produccion_crea_y_autoriza_en_rrhh(self):
+        user = get_user_model().objects.create_user(username="jefe-produccion-he")
+        user.groups.add(Group.objects.get_or_create(name=ROLE_PRODUCCION)[0])
+        user.groups.add(Group.objects.get_or_create(name=ROLE_RRHH)[0])
+        self.client.force_login(user)
+        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
+        jefe = Empleado.objects.create(nombre="Jefe Produccion HE", departamento=Empleado.DEP_PRODUCCION, usuario_erp=user)
+        empleado = Empleado.objects.create(
+            nombre="Empleado Hornos HE",
+            area="PRODUCCION",
+            jefe_directo=jefe,
+            participa_bonos_produccion=True,
+            salario_diario=Decimal("400.00"),
+        )
+        BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado, area=AREA_HORNOS)
+
+        creado = self.client.post(
+            "/api/bonos-produccion/horas-extra/",
+            json.dumps(
+                {
+                    "empleado": empleado.id,
+                    "mes": 5,
+                    "anio": 2026,
+                    "area": AREA_HORNOS,
+                    "fecha": "2026-05-21",
+                    "horas": "2.50",
+                    "notas": "Cierre de produccion",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(creado.status_code, 201)
+        hora_extra = HoraExtra.objects.get(pk=creado.json()["id"])
+        self.assertEqual(hora_extra.empleado, empleado)
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_PENDIENTE)
+        self.assertEqual(hora_extra.jefe_directo, user)
+        self.assertTrue(creado.json()["puede_autorizar"])
+        self.assertTrue(creado.json()["puede_editar"])
+        self.assertTrue(creado.json()["puede_eliminar"])
+        self.assertIn("folio", creado.json())
+
+        duplicado = self.client.post(
+            "/api/bonos-produccion/horas-extra/",
+            json.dumps(
+                {
+                    "empleado": empleado.id,
+                    "mes": 5,
+                    "anio": 2026,
+                    "area": AREA_HORNOS,
+                    "fecha": "2026-05-21",
+                    "horas": "1.00",
+                    "notas": "Duplicado",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(duplicado.status_code, 400)
+
+        sin_motivo = self.client.post(
+            f"/api/bonos-produccion/horas-extra/{hora_extra.id}/editar/",
+            json.dumps({"fecha": "2026-05-22", "horas": "3.00", "notas": "Cierre corregido"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(sin_motivo.status_code, 400)
+
+        corregida = self.client.post(
+            f"/api/bonos-produccion/horas-extra/{hora_extra.id}/editar/",
+            json.dumps(
+                {
+                    "fecha": "2026-05-22",
+                    "horas": "3.00",
+                    "notas": "Cierre corregido",
+                    "motivo_cambio": "Se capturo fecha incorrecta",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(corregida.status_code, 200)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.fecha.isoformat(), "2026-05-22")
+        self.assertEqual(hora_extra.horas, Decimal("3.00"))
+        self.assertIn("Se capturo fecha incorrecta", hora_extra.notas)
+
+        hora_cancelada = HoraExtra.objects.create(
+            empleado=empleado,
+            fecha="2026-05-23",
+            horas=Decimal("1.00"),
+            jefe_directo=user,
+            notas="Solicitud duplicada",
+        )
+        eliminado = self.client.post(
+            f"/api/bonos-produccion/horas-extra/{hora_cancelada.id}/eliminar/",
+            json.dumps({"motivo_cambio": "Solicitud duplicada"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(eliminado.status_code, 200)
+        hora_cancelada.refresh_from_db()
+        self.assertEqual(hora_cancelada.estado, HoraExtra.ESTADO_CANCELADO)
+        self.assertIn("Solicitud duplicada", hora_cancelada.notas)
+
+        autorizado = self.client.post(f"/api/bonos-produccion/horas-extra/{hora_extra.id}/autorizar/")
+
+        self.assertEqual(autorizado.status_code, 200)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_AUTORIZADO)
+        self.assertEqual(hora_extra.autorizado_por, user)
+        self.assertEqual(hora_extra.monto_calculado, Decimal("300.00"))
+
+        rechazar_autorizada = self.client.post(f"/api/bonos-produccion/horas-extra/{hora_extra.id}/rechazar/")
+        self.assertEqual(rechazar_autorizada.status_code, 400)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_AUTORIZADO)
+
+        editar_autorizada = self.client.post(
+            f"/api/bonos-produccion/horas-extra/{hora_extra.id}/editar/",
+            json.dumps(
+                {
+                    "fecha": "2026-05-22",
+                    "horas": "2.00",
+                    "notas": "No debe editar",
+                    "motivo_cambio": "Prueba",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(editar_autorizada.status_code, 400)
+
     def test_jefe_directo_corrige_y_elimina_permiso_aprobado_con_auditoria(self):
         user = get_user_model().objects.create_user(username="jefe-produccion-audit")
         user.groups.add(Group.objects.get_or_create(name=ROLE_PRODUCCION)[0])
@@ -724,7 +860,7 @@ class BonosProduccionTests(TestCase):
         self.assertFalse(permiso_payload["puede_preautorizar"])
 
         sin_motivo = self.client.post(
-            f"/api/bonos-produccion/permisos/{permiso.id}/editar/",
+            f"/api/bonos-produccion/permisos/{permiso.id}/editar/?mes=5&anio=2026&area=TODAS",
             json.dumps(
                 {
                     "tipo": PermisoSalida.TIPO_PERMISO_HORA,
@@ -741,7 +877,7 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(PermisoSalidaCambio.objects.count(), 0)
 
         corregido = self.client.post(
-            f"/api/bonos-produccion/permisos/{permiso.id}/editar/",
+            f"/api/bonos-produccion/permisos/{permiso.id}/editar/?mes=5&anio=2026&area=TODAS",
             json.dumps(
                 {
                     "tipo": PermisoSalida.TIPO_PERMISO_HORA,
@@ -765,7 +901,7 @@ class BonosProduccionTests(TestCase):
         self.assertIn("goce_sueldo", cambio.cambios)
 
         eliminado = self.client.post(
-            f"/api/bonos-produccion/permisos/{permiso.id}/eliminar/",
+            f"/api/bonos-produccion/permisos/{permiso.id}/eliminar/?mes=5&anio=2026&area=TODAS",
             json.dumps({"motivo_cambio": "Permiso duplicado"}),
             content_type="application/json",
         )
@@ -833,8 +969,10 @@ class BonosProduccionTests(TestCase):
         )
         roxana = Empleado.objects.create(
             nombre="RIVAS SOLIS ROXANA",
+            area="ADMINISTRACION",
+            departamento="PRODUCCION",
             puesto="Supervisora de Producción",
-            puesto_operativo="SUPERVISION_PRODUCCION",
+            nivel_organizacional=Empleado.NIVEL_SUPERVISION,
             jefe_directo=carolina,
         )
         julissa = Empleado.objects.create(
@@ -861,6 +999,8 @@ class BonosProduccionTests(TestCase):
         self.assertIn(julissa.id, empleados_ids)
         self.assertIn(roxana.id, empleados_ids)
         self.assertIn(operativo.id, empleados_ids)
+        roxana_payload = next(row for row in listado.json()["empleados"] if row["id"] == roxana.id)
+        self.assertEqual(roxana_payload["area"], AREA_PRODUCCION)
         primeros = [row["id"] for row in listado.json()["empleados"][:2]]
         self.assertEqual(primeros, [roxana.id, julissa.id])
 
@@ -886,6 +1026,31 @@ class BonosProduccionTests(TestCase):
         permiso = PermisoSalida.objects.get(pk=creado.json()["id"])
         self.assertEqual(permiso.empleado, roxana)
 
+        hora_extra = self.client.post(
+            "/api/bonos-produccion/horas-extra/",
+            json.dumps(
+                {
+                    "empleado": roxana.id,
+                    "mes": 5,
+                    "anio": 2026,
+                    "area": "ADMINISTRACION",
+                    "fecha": "2026-05-22",
+                    "horas": "1.50",
+                    "notas": "Cierre supervisora",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(hora_extra.status_code, 201)
+        self.assertEqual(HoraExtra.objects.get(pk=hora_extra.json()["id"]).empleado, roxana)
+
+        listado_horas = self.client.get("/api/bonos-produccion/horas-extra/?mes=5&anio=2026&area=PRODUCCION")
+
+        self.assertEqual(listado_horas.status_code, 200)
+        roxana_horas_payload = next(row for row in listado_horas.json()["empleados"] if row["id"] == roxana.id)
+        self.assertEqual(roxana_horas_payload["area"], AREA_PRODUCCION)
+
     def test_permisos_produccion_superusuario_ve_area_sin_bono_periodo(self):
         user = get_user_model().objects.create_superuser(username="test.dg.permisos", password="x")
         self.client.force_login(user)
@@ -895,7 +1060,7 @@ class BonosProduccionTests(TestCase):
             area="ADMINISTRACION",
             departamento="PRODUCCION",
             puesto="Jefe de Producción",
-            puesto_operativo="JEFATURA",
+            nivel_organizacional=Empleado.NIVEL_JEFATURA,
         )
         roxana = Empleado.objects.create(
             nombre="RIVAS SOLIS ROXANA",

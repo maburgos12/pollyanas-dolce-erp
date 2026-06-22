@@ -82,11 +82,24 @@ def _history_window(series: dict[date, dict[str, Decimal]], target_day: date, st
     ]
 
 
-def _same_weekday_history(series: dict[date, dict[str, Decimal]], target_day: date, lookback_weeks: int) -> list[Decimal]:
-    return [
-        _to_decimal((series.get(target_day - timedelta(days=7 * week)) or {}).get("qty"))
-        for week in range(1, lookback_weeks + 1)
-    ]
+def _same_weekday_history(
+    series: dict[date, dict[str, Decimal]],
+    target_day: date,
+    lookback_weeks: int,
+    history_anchor: date | None = None,
+) -> list[Decimal]:
+    if history_anchor is None:
+        return [
+            _to_decimal((series.get(target_day - timedelta(days=7 * week)) or {}).get("qty"))
+            for week in range(1, lookback_weeks + 1)
+        ]
+    values = []
+    cursor = history_anchor - timedelta(days=1)
+    while len(values) < lookback_weeks and cursor >= history_anchor - timedelta(days=lookback_weeks * 14):
+        if cursor.weekday() == target_day.weekday():
+            values.append(_to_decimal((series.get(cursor) or {}).get("qty")))
+        cursor -= timedelta(days=1)
+    return values
 
 
 def _weighted_moving_average(
@@ -102,9 +115,15 @@ def _weighted_moving_average(
     return (recent_14 * recent_weight) + (previous_14 * mid_weight) + (older_28 * older_weight)
 
 
-def _weekday_factor(series: dict[date, dict[str, Decimal]], target_day: date, lookback_weeks: int) -> Decimal:
-    weekday_values = _same_weekday_history(series, target_day, lookback_weeks)
-    trailing_values = _history_window(series, target_day, 1, max(lookback_weeks * 7, 7))
+def _weekday_factor(
+    series: dict[date, dict[str, Decimal]],
+    target_day: date,
+    lookback_weeks: int,
+    history_anchor: date | None = None,
+) -> Decimal:
+    history_anchor = history_anchor or target_day
+    weekday_values = _same_weekday_history(series, target_day, lookback_weeks, history_anchor)
+    trailing_values = _history_window(series, history_anchor, 1, max(lookback_weeks * 7, 7))
     weekday_avg = _mean(weekday_values)
     trailing_avg = _mean(trailing_values)
     if weekday_avg <= ZERO or trailing_avg <= ZERO:
@@ -171,11 +190,13 @@ def _build_forecast_row(
     labels: dict[str, object],
     series: dict[date, dict[str, Decimal]],
     target_day: date,
-    lookback_weeks: int,
+    history_anchor: date | None = None,
+    lookback_weeks: int = DEFAULT_LOOKBACK_WEEKS,
     contribution: dict[str, Decimal] | None,
     calibration_profile: dict[str, Decimal] | None,
 ) -> dict[str, object]:
-    recent_avg_28 = _mean(_history_window(series, target_day, 1, 28))
+    history_anchor = history_anchor or target_day
+    recent_avg_28 = _mean(_history_window(series, history_anchor, 1, 28))
     weekly_pattern = weekly_pattern_for_day(target_day)
     rotation_band = rotation_band_for_avg(recent_avg_28)
     calibration_profile = calibration_profile or {}
@@ -189,14 +210,14 @@ def _build_forecast_row(
 
     weighted_avg = _weighted_moving_average(
         series,
-        target_day,
+        history_anchor,
         recent_weight=recent_weight,
         mid_weight=mid_weight,
         older_weight=older_weight,
     )
-    weekday_factor = _weekday_factor(series, target_day, lookback_weeks)
-    trend_factor, trend_pct = _trend_factor(series, target_day)
-    stddev_28 = _stddev(_history_window(series, target_day, 1, 28))
+    weekday_factor = _weekday_factor(series, target_day, lookback_weeks, history_anchor)
+    trend_factor, trend_pct = _trend_factor(series, history_anchor)
+    stddev_28 = _stddev(_history_window(series, history_anchor, 1, 28))
     base_forecast = weighted_avg * weekday_factor * trend_factor * bias_adjustment
     forecast_qty = _quantize_units(max(base_forecast, ZERO))
     dynamic_error_factor = min((segment_wape_pct / HUNDRED) * Decimal("0.35"), Decimal("0.25"))
@@ -208,10 +229,10 @@ def _build_forecast_row(
     buffer_units = _quantize_units(min(raw_buffer, forecast_qty * Decimal("0.65")))
     forecast_min = _quantize_units(max(forecast_qty - buffer_units, ZERO))
     forecast_max = _quantize_units(forecast_qty + buffer_units)
-    avg_price = _recent_avg_price(series, target_day)
+    avg_price = _recent_avg_price(series, history_anchor)
     forecast_amount = _quantize_money(forecast_qty * avg_price)
-    recent_avg_7 = _mean(_history_window(series, target_day, 1, 7))
-    same_weekday_avg = _mean(_same_weekday_history(series, target_day, lookback_weeks))
+    recent_avg_7 = _mean(_history_window(series, history_anchor, 1, 7))
+    same_weekday_avg = _mean(_same_weekday_history(series, target_day, lookback_weeks, history_anchor))
     contribution = contribution or {}
     why = (
         f"Promedio ponderado {weighted_avg.quantize(Decimal('0.01'))} pzs con pesos "
@@ -249,7 +270,7 @@ def _build_forecast_row(
         "margin_pct": _to_decimal(contribution.get("margin_pct")),
         "contribution_unit": _to_decimal(contribution.get("contribution_unit")),
         "contribution_total": _to_decimal(contribution.get("contribution_total")),
-        "history_days": sum(1 for day in series if day < target_day and _to_decimal((series.get(day) or {}).get("qty")) > ZERO),
+        "history_days": sum(1 for day in series if day < history_anchor and _to_decimal((series.get(day) or {}).get("qty")) > ZERO),
         "why": why,
     }
 
@@ -289,6 +310,7 @@ def _build_backtest_summary(
                 labels=labels,
                 series=series,
                 target_day=target_day,
+                history_anchor=target_day,
                 lookback_weeks=lookback_weeks,
                 contribution=contribution,
                 calibration_profile=calibration_profiles.get(calibration_key),
@@ -321,7 +343,8 @@ def build_daily_forecast_context(
 ) -> dict[str, object]:
     reference_date = reference_date or timezone.localdate()
     target_date = target_date or reference_date
-    history_start = target_date - timedelta(days=(lookback_weeks * 7) + validation_days + 28)
+    history_anchor = min(target_date, reference_date)
+    history_start = history_anchor - timedelta(days=(lookback_weeks * 7) + validation_days + 28)
     history_end = max(reference_date, target_date)
     sales_rows = list(
         FactVentaDiaria.objects.filter(
@@ -365,7 +388,7 @@ def build_daily_forecast_context(
         revenue = _to_decimal(row.get("revenue"))
         margin = _to_decimal(row.get("margin"))
         series_by_key[key][day] = {"qty": qty, "revenue": revenue, "margin": margin}
-        if day >= target_date - timedelta(days=28):
+        if day >= history_anchor - timedelta(days=28):
             recent_revenue_by_key[key] += revenue
 
     ranked_keys = sorted(
@@ -380,9 +403,9 @@ def build_daily_forecast_context(
     backtest_candidates: list[tuple[tuple[int, int], dict[str, object], dict[date, dict[str, Decimal]]]] = []
     for key in selected_keys:
         series = series_by_key[key]
-        if sum(1 for day in series if day < target_date and _to_decimal((series.get(day) or {}).get("qty")) > ZERO) < 14:
+        if sum(1 for day in series if day < history_anchor and _to_decimal((series.get(day) or {}).get("qty")) > ZERO) < 14:
             continue
-        avg_28 = _mean(_history_window(series, target_date, 1, 28))
+        avg_28 = _mean(_history_window(series, history_anchor, 1, 28))
         calibration_key = (
             int(key[0]),
             (labels_by_key[key].get("family") or "SIN_FAMILIA").strip()[:120],
@@ -394,6 +417,7 @@ def build_daily_forecast_context(
             labels=labels_by_key[key],
             series=series,
             target_day=target_date,
+            history_anchor=history_anchor,
             lookback_weeks=lookback_weeks,
             contribution=contribution_map.get(key),
             calibration_profile=calibration_profiles.get(calibration_key),

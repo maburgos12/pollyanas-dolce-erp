@@ -5,37 +5,8 @@
 {% block page_title %}Logística · Reportes ERP{% endblock %}
 
 {% block extra_css %}
-<style>
-  .reports-shell { display: grid; gap: 18px; }
-  .logi-box { background: #fff; border: 1px solid rgba(139,34,82,.16); border-radius: 18px; padding: 24px; box-shadow: 0 18px 42px rgba(139,34,82,.08); }
-  .logi-box-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 18px; }
-  .logi-box-title { margin: 0; font-family: "Playfair Display", serif; font-size: 30px; line-height: 1.08; color: #3f2633; }
-  .logi-box-copy { margin: 6px 0 0; color: #77656d; line-height: 1.45; }
-  .reports-filter { display: grid; grid-template-columns: repeat(5, minmax(140px, 1fr)) minmax(190px, .8fr); gap: 14px; align-items: end; }
-  .reports-filter label { display: grid; gap: 7px; min-width: 0; color: #6f3150; font-weight: 800; }
-  .logi-filter-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: stretch; }
-  .logi-filter-actions .btn { width: 100%; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
-  .logi-table-box { padding: 0; overflow: hidden; }
-  .logi-table-head { display: flex; justify-content: space-between; gap: 14px; align-items: center; padding: 18px 24px; border-bottom: 1px solid rgba(139,34,82,.10); }
-  .logi-table-title { margin: 0; color: #6f3150; font-size: 16px; font-weight: 900; }
-  .logi-table-wrap { overflow: auto; }
-  .report-badge { display: inline-flex; border-radius: 999px; padding: 5px 10px; font-size: 12px; font-weight: 900; }
-  .report-badge.ok { background: #e5f5ee; color: #1f7554; }
-  .report-badge.warn { background: #fff4d8; color: #9a6a00; }
-  .report-badge.danger { background: #ffe8ec; color: #bc3b56; }
-  .report-badge.info { background: #e9f0ff; color: #305caa; }
-  .report-row { cursor: pointer; }
-  .report-detail { display: none; background: #fffafc; }
-  .report-detail.open { display: table-row; }
-  .report-detail-grid { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 14px; }
-  .report-photo { width: 100%; max-height: 150px; object-fit: cover; border-radius: 12px; border: 1px solid #efc7d8; }
-  .report-muted { color: #77656d; font-size: 13px; line-height: 1.45; }
-  .report-pager { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
-  @media (max-width: 1180px) { .reports-filter { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-  @media (max-width: 980px) { .reports-filter { grid-template-columns: repeat(2, minmax(0, 1fr)); } .report-detail-grid { grid-template-columns: 1fr; } }
-  @media (max-width: 620px) { .logi-box { padding: 18px; } .logi-box-head, .logi-table-head { display: grid; } .reports-filter, .logi-filter-actions, .report-pager { grid-template-columns: 1fr; flex-direction: column; align-items: stretch; } }
-</style>
-<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
+<link rel="stylesheet" href="/static/css/template_modules/logistica-templates-logistica-reportes-lista.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260621-button-gap-v1">
 {% endblock %}
 
 {% block content %}
@@ -53,7 +24,7 @@
         <p class="logi-box-copy">Tickets de fallas e incidencias de la flota, consultables y creables desde el ERP.</p>
       </div>
       {% if can_crear_reporte %}
-      <a class="btn btn-primary" href="{% url 'logistica:reporte_crear' %}" style="background:#8B2252;border-color:#8B2252;">
+      <a class="btn btn-primary pd-u-8e46cb0687" href="{% url 'logistica:reporte_crear' %}">
         + Nuevo reporte
       </a>
       {% endif %}
@@ -80,7 +51,7 @@
       <label>Desde<input class="input-field" type="date" name="fecha_desde" value="{{ filters.fecha_desde }}"></label>
       <label>Hasta<input class="input-field" type="date" name="fecha_hasta" value="{{ filters.fecha_hasta }}"></label>
       <div class="logi-filter-actions">
-        <button class="btn btn-primary" type="submit" style="background:#8B2252;border-color:#8B2252;">Filtrar</button>
+        <button class="btn btn-primary pd-u-8e46cb0687" type="submit">Filtrar</button>
         <a class="btn btn-secondary" href="{% url 'logistica:reportes_lista' %}">Limpiar</a>
       </div>
     </form>

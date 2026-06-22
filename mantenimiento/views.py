@@ -17,9 +17,10 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento, PlanMantenimiento
 from mantenimiento.models import SolicitudCancelacion, ProveedorServicio
 from core.access import can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
+from core.audit import log_event
 from core.models import Sucursal, sucursales_operativas
 from fallas.models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
-from logistica.models import ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
+from logistica.models import Repartidor, ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
 from maestros.models import Proveedor
 
 from .serializers import (
@@ -961,6 +962,127 @@ def crear_servicio_mantenimiento(request):
     else:
         msg.success(request, f"Servicio sin orden previa registrado: {orden.folio}.")
     return redirect("mantenimiento:dashboard")
+
+def crear_reporte_unidad(request):
+    """Crea un ReporteUnidad desde Mantenimiento cuando el repartidor no lo capturó."""
+    _require_mantenimiento(request.user)
+
+    unidades = Unidad.objects.filter(activa=True).order_by("codigo")
+    repartidores = Repartidor.objects.filter(user__is_active=True).select_related("user", "user__empleado_rrhh").order_by(
+        "user__first_name", "user__username"
+    )
+
+    if request.method == "POST":
+        unidad_id = (request.POST.get("unidad") or "").strip()
+        tipo = (request.POST.get("tipo") or "").strip()
+        severidad = (request.POST.get("severidad") or "").strip()
+        descripcion = (request.POST.get("descripcion") or "").strip()
+        kilometraje_raw = (request.POST.get("kilometraje") or "").strip()
+        repartidor_id = (request.POST.get("repartidor") or "").strip()
+        foto = request.FILES.get("foto")
+
+        errors: dict[str, str] = {}
+        if not unidad_id:
+            errors["unidad"] = "Selecciona una unidad."
+        if tipo not in {value for value, _label in ReporteUnidad.TIPO_CHOICES}:
+            errors["tipo"] = "Tipo de reporte no válido."
+        if severidad not in {value for value, _label in ReporteUnidad.SEVERIDAD_CHOICES}:
+            errors["severidad"] = "Severidad no válida."
+        if not descripcion:
+            errors["descripcion"] = "La descripción es obligatoria."
+
+        unidad = None
+        if unidad_id and not errors.get("unidad"):
+            unidad = Unidad.objects.filter(pk=unidad_id, activa=True).first()
+            if not unidad:
+                errors["unidad"] = "Unidad no encontrada."
+
+        repartidor = None
+        if repartidor_id:
+            repartidor = Repartidor.objects.filter(pk=repartidor_id, user__is_active=True).first()
+            if not repartidor:
+                errors["repartidor"] = "Repartidor no encontrado."
+
+        kilometraje = None
+        if kilometraje_raw:
+            try:
+                kilometraje = int(kilometraje_raw)
+            except ValueError:
+                errors["kilometraje"] = "El kilometraje debe ser un número entero."
+            else:
+                if kilometraje < 0:
+                    errors["kilometraje"] = "El kilometraje no puede ser negativo."
+
+        if foto:
+            allowed_content_types = {"image/jpeg", "image/png"}
+            if foto.content_type not in allowed_content_types:
+                errors["foto"] = "La evidencia debe ser una imagen JPG o PNG."
+            elif foto.size > 10 * 1024 * 1024:
+                errors["foto"] = "La evidencia no puede superar 10 MB."
+
+        if not errors:
+            from django.contrib import messages as msg
+
+            reporte = ReporteUnidad.objects.create(
+                unidad=unidad,
+                repartidor=repartidor,
+                tipo=tipo,
+                severidad=severidad,
+                descripcion=descripcion,
+                kilometraje=kilometraje,
+                foto=foto if foto else None,
+                ip_reporte=request.META.get("REMOTE_ADDR"),
+                estatus=ReporteUnidad.ESTATUS_ABIERTO,
+                asignado_a=request.user,
+                notas_compras="Reporte levantado desde Mantenimiento cuando no fue capturado en la app.",
+            )
+            log_event(
+                request.user,
+                "CREATE",
+                "logistica.ReporteUnidad",
+                str(reporte.id),
+                {
+                    "unidad": reporte.unidad.codigo,
+                    "tipo": reporte.tipo,
+                    "severidad": reporte.severidad,
+                    "origen": "mantenimiento",
+                },
+            )
+            msg.success(request, f"Reporte de unidad #{reporte.id} creado desde Mantenimiento.")
+            return redirect("mantenimiento:dashboard")
+
+        return render(
+            request,
+            "mantenimiento/reporte_unidad_form.html",
+            {
+                "unidades": unidades,
+                "repartidores": repartidores,
+                "tipo_choices": ReporteUnidad.TIPO_CHOICES,
+                "severidad_choices": ReporteUnidad.SEVERIDAD_CHOICES,
+                "errors": errors,
+                "prev": {
+                    "unidad": unidad_id,
+                    "tipo": tipo,
+                    "severidad": severidad,
+                    "descripcion": descripcion,
+                    "kilometraje": kilometraje_raw,
+                    "repartidor": repartidor_id,
+                },
+            },
+        )
+
+    return render(
+        request,
+        "mantenimiento/reporte_unidad_form.html",
+        {
+            "unidades": unidades,
+            "repartidores": repartidores,
+            "tipo_choices": ReporteUnidad.TIPO_CHOICES,
+            "severidad_choices": ReporteUnidad.SEVERIDAD_CHOICES,
+            "errors": {},
+            "prev": {},
+        },
+    )
 
 
 @login_required

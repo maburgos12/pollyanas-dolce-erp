@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from django.utils import timezone
 
 from conciliacion.models import ImportacionBancaria
 from conciliacion.services.importador import (
@@ -12,6 +14,11 @@ from conciliacion.services.importador import (
     confirmar_importacion,
     generar_preview,
     resumen_periodo_conciliacion,
+    sugerir_cfdis_para_movimientos,
+)
+from conciliacion.services.reglas_fiscales import (
+    regla_para_forma_pago,
+    regla_para_movimiento,
 )
 from sat_client.models import CfdiDescargado, CfdiPagoRelacionado
 from syncfy_client.models import CuentaBancaria, MovimientoBancario
@@ -30,6 +37,81 @@ class ImportadorBancarioTests(TestCase):
             id_site_syncfy="site-1",
             numero_cuenta="410641890201",
         )
+
+    def test_reglas_fiscales_separate_cash_cards_transfer_and_credit(self):
+        efectivo = regla_para_forma_pago("01")
+        transferencia = regla_para_forma_pago("03")
+        tarjeta_credito = regla_para_forma_pago("04")
+        tarjeta_debito = regla_para_forma_pago("28")
+        tarjeta_servicios = regla_para_forma_pago("29")
+        credito = regla_para_forma_pago("99", metodo_pago="PPD")
+
+        self.assertEqual(efectivo.codigo, "EFECTIVO_SUCURSAL_DIA")
+        self.assertFalse(efectivo.permite_match_directo)
+        self.assertIn("CFDI de ingreso emitido por sucursal", efectivo.sat)
+        self.assertIn("factura de ingreso contra deposito bancario", efectivo.metodo)
+        self.assertEqual(transferencia.codigo, "TRANSFERENCIA_CLIENTE")
+        self.assertTrue(transferencia.permite_match_directo)
+        self.assertEqual(tarjeta_credito.codigo, "TARJETA_TPV_NETO")
+        self.assertIn("CFDI de ingreso por sucursal", tarjeta_credito.sat)
+        self.assertEqual(tarjeta_debito.codigo, "TARJETA_TPV_NETO")
+        self.assertEqual(tarjeta_servicios.codigo, "TARJETA_TPV_NETO")
+        self.assertFalse(tarjeta_credito.permite_match_directo)
+        self.assertEqual(credito.codigo, "CREDITO_COMPLEMENTO_PAGO")
+
+    def test_sugerir_cfdis_no_matches_cash_deposit_as_single_invoice(self):
+        movimiento = MovimientoBancario.objects.create(
+            id_transaction="deposito-efectivo-1",
+            cuenta=self.cuenta,
+            descripcion="DEPOSITO EN EFECTIVO SUCURSAL MATRIZ",
+            monto=Decimal("500.00"),
+            tipo=MovimientoBancario.TIPO_ABONO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 16, 12, 0)),
+            fecha_refresh=timezone.make_aware(datetime(2026, 5, 16, 13, 0)),
+        )
+        CfdiDescargado.objects.create(
+            uuid="55555555-5555-5555-5555-555555555555",
+            rfc_emisor="GEF211230KR2",
+            rfc_receptor="XAXX010101000",
+            subtotal=Decimal("500.00"),
+            total=Decimal("500.00"),
+            tipo_comprobante="I",
+            tipo_cfdi=CfdiDescargado.TIPO_EMITIDO,
+            forma_pago="01",
+            fecha_emision="2026-05-16T10:00:00-07:00",
+        )
+
+        sugerencias = sugerir_cfdis_para_movimientos([movimiento])
+
+        self.assertEqual(regla_para_movimiento(movimiento).codigo, "EFECTIVO_SUCURSAL_DIA")
+        self.assertEqual(sugerencias[movimiento.pk], [])
+
+    def test_sugerir_cfdis_keeps_direct_transfer_candidates(self):
+        movimiento = MovimientoBancario.objects.create(
+            id_transaction="spei-cliente-1",
+            cuenta=self.cuenta,
+            descripcion="SPEI RECIBIDO CLIENTE MAYORISTA",
+            monto=Decimal("1500.00"),
+            tipo=MovimientoBancario.TIPO_ABONO,
+            fecha_transaccion=timezone.make_aware(datetime(2026, 5, 16, 12, 0)),
+            fecha_refresh=timezone.make_aware(datetime(2026, 5, 16, 13, 0)),
+        )
+        cfdi = CfdiDescargado.objects.create(
+            uuid="66666666-6666-6666-6666-666666666666",
+            rfc_emisor="GEF211230KR2",
+            rfc_receptor="CLI010101AAA",
+            subtotal=Decimal("1500.00"),
+            total=Decimal("1500.00"),
+            tipo_comprobante="I",
+            tipo_cfdi=CfdiDescargado.TIPO_EMITIDO,
+            forma_pago="03",
+            fecha_emision="2026-05-16T10:00:00-07:00",
+        )
+
+        sugerencias = sugerir_cfdis_para_movimientos([movimiento])
+
+        self.assertEqual(regla_para_movimiento(movimiento).codigo, "TRANSFERENCIA_CLIENTE")
+        self.assertEqual(sugerencias[movimiento.pk], [cfdi])
 
     def test_generar_preview_normalizes_cargo_and_abono_csv(self):
         archivo = SimpleUploadedFile(

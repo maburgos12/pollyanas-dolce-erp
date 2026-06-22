@@ -33,6 +33,9 @@ def empleado_de_usuario(user) -> Empleado | None:
     if not user or not user.is_authenticated:
         return None
     candidates = Empleado.objects.filter(activo=True)
+    empleado = getattr(user, "empleado_rrhh", None)
+    if empleado and empleado.activo:
+        return empleado
     if user.email:
         empleado = candidates.filter(email__iexact=user.email).first()
         if empleado:

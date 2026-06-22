@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Paquete de auditoría{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="/static/css/template_modules/conciliacion-templates-conciliacion-paquete-auditoria.css?v=20260614-ui100-v1">
+
+<div class="audit-pack">
+  <div class="audit-head">
+    <div>
+      <h1>Paquete de auditoría {{ paquete.periodo_value }}</h1>
+      <p class="audit-note">Resumen mensual para revisar cierre bancario, evidencia, excepciones y paquete de trabajo para CONTPAQi Contabilidad Desktop y Nóminas Desktop.</p>
+    </div>
+    <div class="audit-actions">
+      <a class="audit-btn" href="{% url 'conciliacion:bancaria' %}?periodo={{ paquete.periodo_value }}#mesa-movimientos">Volver a mesa</a>
+      <a class="audit-btn" href="?periodo={{ paquete.periodo_value }}&export=xlsx">Descargar XLSX</a>
+      <a class="audit-btn" href="?periodo={{ paquete.periodo_value }}&export=contabilidad_csv">Descargar CSV contabilidad</a>
+      <a class="audit-btn" href="?periodo={{ paquete.periodo_value }}&export=contabilidad_desktop_csv">CSV Contabilidad Desktop</a>
+    </div>
+  </div>
+
+  <div class="audit-grid">
+    <div class="audit-kpi"><span>Movimientos</span><strong>{{ paquete.resumen.movimientos_total|intcomma }}</strong></div>
+    <div class="audit-kpi"><span>Conciliados</span><strong>{{ paquete.resumen.movimientos_conciliados|intcomma }}</strong></div>
+    <div class="audit-kpi"><span>Pendientes</span><strong>{{ paquete.resumen.movimientos_pendientes|intcomma }}</strong></div>
+    <div class="audit-kpi"><span>Excepciones / soporte</span><strong>{{ paquete.resumen.excepciones|intcomma }}</strong></div>
+    <div class="audit-kpi"><span>CFDI SAT</span><strong>{{ paquete.resumen.cfdis_total|intcomma }}</strong></div>
+    <div class="audit-kpi"><span>CFDI conciliados</span><strong>{{ paquete.resumen.cfdis_conciliados|intcomma }}</strong></div>
+    <div class="audit-kpi"><span>CFDI pendientes</span><strong>{{ paquete.resumen.cfdis_pendientes|intcomma }}</strong></div>
+    <div class="audit-kpi"><span>Monto banco</span><strong>${{ paquete.resumen.monto_total|floatformat:2|intcomma }}</strong></div>
+  </div>
+
+  <section class="audit-section">
+    <h2>Por cuenta bancaria</h2>
+    <div class="table-responsive">
+      <table class="audit-table">
+        <thead><tr><th>Cuenta</th><th>Banco</th><th>Movimientos</th><th>Conciliados</th><th>Monto</th></tr></thead>
+        <tbody>
+          {% for row in paquete.por_cuenta %}
+          <tr>
+            <td>{{ row.cuenta__nombre_display }}</td>
+            <td>{{ row.cuenta__banco }}</td>
+            <td>{{ row.movimientos|intcomma }}</td>
+            <td>{{ row.conciliados|intcomma }}</td>
+            <td>${{ row.monto|floatformat:2|intcomma }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="5">Sin movimientos.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="audit-section">
+    <h2>Por tipo de conciliación</h2>
+    <div class="table-responsive">
+      <table class="audit-table">
+        <thead><tr><th>Tipo</th><th>Movimientos</th><th>Monto</th></tr></thead>
+        <tbody>
+          {% for row in paquete.por_tipo %}
+          <tr><td>{{ row.tipo_conciliacion|default:"Sin clasificar" }}</td><td>{{ row.movimientos|intcomma }}</td><td>${{ row.monto|floatformat:2|intcomma }}</td></tr>
+          {% empty %}
+          <tr><td colspan="3">Sin movimientos.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="audit-section">
+    <h2>Excepciones y soporte pendiente</h2>
+    <div class="table-responsive">
+      <table class="audit-table">
+        <thead><tr><th>Folio</th><th>Fecha</th><th>Cuenta</th><th>Importe</th><th>Conciliación</th><th>Pendiente</th></tr></thead>
+        <tbody>
+          {% for doc in paquete.excepciones|slice:":100" %}
+          <tr>
+            <td><a href="{% url 'conciliacion:movimiento_detalle' doc.movimiento.pk %}">{{ doc.folio }}</a></td>
+            <td>{{ doc.movimiento.fecha_transaccion|date:"Y-m-d" }}</td>
+            <td>{{ doc.movimiento.cuenta.nombre_display }}</td>
+            <td>${{ doc.movimiento.monto|floatformat:2|intcomma }}</td>
+            <td>{{ doc.tipo_conciliacion }}</td>
+            <td>{{ doc.evidencia_pendiente|join:" | " }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6"><span class="audit-chip">Sin excepciones detectadas</span></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if paquete.excepciones|length > 100 %}
+      <p class="audit-note">Mostrando las primeras 100 excepciones. Descarga el XLSX para el detalle completo.</p>
+    {% endif %}
+  </section>
+
+  <section class="audit-section">
+    <h2>Entregables</h2>
+    <p class="audit-note">El XLSX incluye Banco_vs_Factura para ver cada movimiento del estado de cuenta contra su UUID/CFDI ligado, más póliza sugerida, movimientos banco, CFDI relacionados, auxiliar de cuentas, traspasos propios, tarjetas de crédito, líneas de crédito, nómina, excepciones y evidencia pendiente. Este paquete está pensado para CONTPAQi Contabilidad Desktop y Nóminas Desktop; no asume CONTPAQi Bancos ni API nube.</p>
+  </section>
+</div>
+{% endblock %}

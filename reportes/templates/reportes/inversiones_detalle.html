@@ -1,86 +1,85 @@
 {% extends "base.html" %}
-{% load humanize %}
+{% load static humanize %}
 
 {% block title %}Reportes - {{ project.nombre_proyecto }}{% endblock %}
 {% block page_title %}Reportes · {{ project.nombre_proyecto }}{% endblock %}
 {% block body_class %}page-reportes-inversiones-detalle{% endblock %}
 
 {% block extra_css %}
-<style>
-  :root { --inv-wine:#8B2252; --inv-gold:#C9A84C; --inv-light:#f9f5fb; --inv-line:#e5e7eb; --inv-muted:#6b7280; }
-  .inv-shell { max-width:1400px; margin:0 auto; padding:1.5rem; font-family:"Nunito", system-ui, sans-serif; color:#111827; }
-  .module-tabs,.inv-tabs,.inv-actions { display:flex; gap:.5rem; flex-wrap:wrap; }
-  .module-tab,.inv-tab { padding:.45rem .85rem; border:1px solid var(--inv-line); border-radius:.5rem; color:#374151; text-decoration:none; background:#fff; font-weight:800; }
-  .module-tab.active,.inv-tab.active { background:var(--inv-wine); border-color:var(--inv-wine); color:#fff; }
-  .inv-header { display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; margin:1rem 0; }
-  .inv-title { margin:0; font-family:"Playfair Display", Georgia, serif; color:var(--inv-wine); font-size:2rem; }
-  .inv-copy,.inv-muted { color:var(--inv-muted); }
-  .inv-pill { display:inline-flex; padding:.25rem .55rem; background:#f3f4f6; border-radius:999px; font-size:.78rem; font-weight:800; color:#374151; }
-  .inv-button { display:inline-flex; align-items:center; justify-content:center; padding:.6rem .9rem; border:0; border-radius:.5rem; background:var(--inv-wine); color:#fff; text-decoration:none; font-weight:900; cursor:pointer; }
-  .inv-button.secondary { background:#fff; color:var(--inv-wine); border:1px solid var(--inv-wine); }
-  .inv-dropdown { position:relative; }
-  .inv-dropdown summary { list-style:none; cursor:pointer; }
-  .inv-dropdown-menu { position:absolute; right:0; z-index:5; min-width:220px; padding:.45rem; background:#fff; border:1px solid var(--inv-line); border-radius:.5rem; box-shadow:0 12px 24px rgba(0,0,0,.12); }
-  .inv-dropdown-menu a { display:block; padding:.45rem .55rem; color:#374151; text-decoration:none; border-radius:.35rem; }
-  .inv-dropdown-menu a:hover { background:var(--inv-light); }
-  .inv-panel { background:#fff; border:1px solid var(--inv-line); border-radius:.75rem; padding:1rem; margin-top:1rem; }
-  .inv-grid-2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem; }
-  .inv-grid-3 { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1rem; }
-  .inv-kpis { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:.75rem; }
-  .inv-kpi { background:#fff; border:1px solid var(--inv-line); border-radius:.65rem; padding:.8rem; }
-  .inv-label { display:block; font-size:.7rem; text-transform:uppercase; letter-spacing:.06em; color:var(--inv-muted); font-weight:900; margin-bottom:.25rem; }
-  .inv-value { color:var(--inv-wine); font-family:"Playfair Display", Georgia, serif; font-size:1.35rem; font-weight:900; }
-  .inv-input,.inv-select,.inv-textarea { width:100%; border:1px solid #d1d5db; border-radius:.45rem; padding:.55rem .65rem; font:inherit; background:#fff; }
-  .inv-textarea { min-height:90px; resize:vertical; }
-  .inv-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.85rem; }
-  .inv-table { width:100%; border-collapse:separate; border-spacing:0; }
-  .inv-table th { background:var(--inv-wine); color:#fff; padding:.5rem; text-align:left; font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
-  .inv-table td { border-bottom:1px solid var(--inv-line); padding:.5rem; vertical-align:top; }
-  .num { text-align:right; font-variant-numeric:tabular-nums; }
-  .score-circle { width:7rem; height:7rem; border-radius:50%; display:grid; place-items:center; background:#9ca3af; color:#fff; font-size:2rem; font-weight:900; }
-  .score-circle.ok { background:#15803d; } .score-circle.warn { background:#b45309; } .score-circle.risk { background:#b91c1c; }
-  .foda-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.75rem; }
-  .chart-box { min-height:260px; }
-  @media (max-width:1100px){ .inv-header,.inv-grid-2,.inv-grid-3,.inv-kpis,.inv-form-grid,.foda-grid{display:block;} .inv-kpi,.inv-grid-2>*,.inv-grid-3>*{margin-bottom:.75rem;} }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/reportes-templates-reportes-inversiones-detalle.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="{% static 'css/investment_projects.css' %}?v=20260614d">
 {% endblock %}
 
 {% block content %}
-<div class="inv-shell">
-  <nav class="module-tabs">
+<div class="investment-shell investment-detail-shell">
+  <nav class="module-tabs investment-module-tabs" aria-label="Reportes">
     {% for tab in module_tabs %}
       <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
     {% endfor %}
   </nav>
 
-  <header class="inv-header">
-    <div>
-      <h1 class="inv-title">{{ project.nombre_proyecto }}</h1>
-      <div class="inv-actions" style="margin-top:.6rem">
-        <span class="inv-pill">{{ project.get_tipo_proyecto_display }}</span>
-        <span class="inv-pill">{{ project.get_estatus_display }}</span>
-        <span class="inv-pill">Apertura {% if project.fecha_apertura %}{{ project.fecha_apertura|date:"Y-m-d" }}{% else %}pendiente{% endif %}</span>
-        <span class="inv-pill">Responsable {% if project.responsable %}{{ project.responsable.get_full_name|default:project.responsable.username }}{% else %}sin asignar{% endif %}</span>
+  <section class="investment-header investment-detail-header">
+    <article class="investment-hero investment-detail-hero">
+      <div class="investment-kicker">Proyecto de inversión</div>
+      <h1 class="investment-title">{{ project.nombre_proyecto }}</h1>
+      <p class="investment-copy">Ficha ejecutiva para capturar presupuesto, operación mensual, financiamiento y recuperación sin mezclar supuestos con datos reales.</p>
+      <div class="investment-meta">
+        <span class="investment-pill">{{ project.get_tipo_proyecto_display }}</span>
+        <span class="investment-status-pill is-warning">{{ project.get_estatus_display }}</span>
+        <span class="investment-pill">Apertura {% if project.fecha_apertura %}{{ project.fecha_apertura|date:"Y-m-d" }}{% else %}pendiente{% endif %}</span>
+        <span class="investment-pill">Responsable {% if project.responsable %}{{ project.responsable.get_full_name|default:project.responsable.username }}{% else %}sin asignar{% endif %}</span>
       </div>
-    </div>
-    <div class="inv-actions">
-      <form method="post">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="refresh_project">
-        <button class="inv-button secondary" type="submit">Actualizar métricas</button>
-      </form>
-      <details class="inv-dropdown">
-        <summary class="inv-button">Reportes</summary>
-        <div class="inv-dropdown-menu">
-          <a href="{% url 'reportes:proyecto_viabilidad_export_excel' project.pk %}">Viabilidad XLSX</a>
-          <a href="{% url 'reportes:proyecto_inversion_detail' project.pk %}?report=summary&export=xlsx">Legacy resumen XLSX</a>
-          <a href="{% url 'reportes:proyecto_inversion_detail' project.pk %}?report=summary&export=pdf">Legacy resumen PDF</a>
+    </article>
+    <aside class="investment-side investment-detail-actions">
+      <div class="investment-panel-head">
+        <div>
+          <div class="investment-kicker">Acciones</div>
+          <h2 class="investment-panel-title">Cierre y reportes</h2>
         </div>
-      </details>
-    </div>
-  </header>
+      </div>
+      <div class="investment-actions">
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="refresh_project">
+          <button class="investment-button is-ghost" type="submit">Actualizar métricas</button>
+        </form>
+        <details class="inv-dropdown">
+          <summary class="investment-button">Reportes</summary>
+          <div class="inv-dropdown-menu">
+            <a href="{% url 'reportes:proyecto_viabilidad_export_excel' project.pk %}">Viabilidad XLSX</a>
+            <a href="{% url 'reportes:proyecto_inversion_detail' project.pk %}?report=summary&export=xlsx">Legacy resumen XLSX</a>
+            <a href="{% url 'reportes:proyecto_inversion_detail' project.pk %}?report=summary&export=pdf">Legacy resumen PDF</a>
+          </div>
+        </details>
+      </div>
+      <div class="investment-muted">Las proyecciones marcadas como preliminares usan supuestos capturados. El seguimiento operativo se alimenta de snapshots reales cuando la sucursal ya opera.</div>
+    </aside>
+  </section>
 
-  <nav class="inv-tabs" aria-label="Tabs del proyecto">
+  <section class="investment-kpis investment-detail-summary" aria-label="Resumen del proyecto">
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Inversión planeada</div>
+      <div class="investment-kpi-value">${{ project.monto_inversion_planeado|floatformat:0|intcomma }}</div>
+      <div class="investment-kpi-note">CAPEX presupuestado</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Inversión real</div>
+      <div class="investment-kpi-value">${{ project.monto_inversion_real|floatformat:0|intcomma }}</div>
+      <div class="investment-kpi-note">Gastos registrados</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Deuda</div>
+      <div class="investment-kpi-value">${{ project.deuda_asociada|floatformat:0|intcomma }}</div>
+      <div class="investment-kpi-note">Pago mensual ${{ project.pago_mensual_deuda_estimado|floatformat:0|intcomma }}</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Ventas base</div>
+      <div class="investment-kpi-value">${{ supuestos_op.ventas_base|default:0|floatformat:0|intcomma }}</div>
+      <div class="investment-kpi-note">Supuesto mensual</div>
+    </article>
+  </section>
+
+  <nav class="investment-section-nav inv-tabs" aria-label="Tabs del proyecto">
     <a class="inv-tab{% if tab_activo == 'ficha' %} active{% endif %}" href="?tab=ficha">Ficha</a>
     <a class="inv-tab{% if tab_activo == 'inversion' %} active{% endif %}" href="?tab=inversion">Inversión</a>
     <a class="inv-tab{% if tab_activo == 'mercado' %} active{% endif %}" href="?tab=mercado">Mercado</a>
@@ -112,7 +111,7 @@
     if (flujoCtx && flujoAcum.length) {
       new Chart(flujoCtx, {
         type: "line",
-        data: { labels: flujoAcum.map((_, idx) => `M${idx * 3}`), datasets: [{ label: "Flujo acumulado", data: flujoAcum, borderColor: "#8B2252", backgroundColor: "rgba(139,34,82,.12)", tension: .25, fill: true }] },
+        data: { labels: flujoAcum.map((_, idx) => `M${idx * 3}`), datasets: [{ label: "Flujo acumulado", data: flujoAcum, borderColor: "#17324d", backgroundColor: "rgba(23,50,77,.10)", tension: .25, fill: true }] },
         options: { responsive: true, maintainAspectRatio: false }
       });
     }
@@ -120,7 +119,7 @@
     if (ventasCtx && snapshotRows.length) {
       new Chart(ventasCtx, {
         type: "line",
-        data: { labels: snapshotRows.map((r) => r.periodo), datasets: [{ label: "Ventas", data: snapshotRows.map((r) => r.ventas), borderColor: "#8B2252" }, { label: "Recuperación", data: snapshotRows.map((r) => r.recuperacion_acumulada), borderColor: "#C9A84C" }] },
+        data: { labels: snapshotRows.map((r) => r.periodo), datasets: [{ label: "Ventas", data: snapshotRows.map((r) => r.ventas), borderColor: "#17324d" }, { label: "Recuperación", data: snapshotRows.map((r) => r.recuperacion_acumulada), borderColor: "#b88632" }] },
         options: { responsive: true, maintainAspectRatio: false }
       });
     }

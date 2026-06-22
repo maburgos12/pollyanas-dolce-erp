@@ -42,6 +42,20 @@ class RRHHAsignacionSucursalTests(TestCase):
         empleado.refresh_from_db()
         self.assertEqual(empleado.sucursal, "")
 
+    def test_patch_asignar_sucursal_rechaza_empleado_inactivo(self):
+        Sucursal.objects.update_or_create(codigo="PAY-TEST", defaults={"nombre": "Payán Test", "activa": True})
+        empleado = Empleado.objects.create(nombre="Empleado Baja", area="VENTAS", sucursal="", activo=False)
+
+        response = self.client.patch(
+            f"/api/rrhh/empleados/{empleado.id}/asignar-sucursal/",
+            data={"sucursal": "Payán Test"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        empleado.refresh_from_db()
+        self.assertEqual(empleado.sucursal, "")
+
     def test_patch_asignar_area_produccion_y_regresar_a_pool(self):
         empleado = Empleado.objects.create(nombre="Empleado Produccion", area="PRODUCCION", sucursal="")
 
@@ -70,6 +84,7 @@ class RRHHAsignacionSucursalTests(TestCase):
         Empleado.objects.create(nombre="Produccion sin sucursal", area="PRODUCCION", sucursal="")
         Empleado.objects.create(nombre="Ventas asignado", area="VENTAS", sucursal="Payán")
         Empleado.objects.create(nombre="Administracion sin sucursal", area="ADMINISTRACION", sucursal="")
+        Empleado.objects.create(nombre="Ventas baja", area="VENTAS", sucursal="", activo=False)
 
         response = self.client.get("/api/rrhh/empleados/sin-asignar/")
 

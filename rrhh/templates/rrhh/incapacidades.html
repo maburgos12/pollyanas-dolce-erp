@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+
+{% block title %}RRHH · Incapacidades{% endblock %}
+{% block page_title %}RRHH · Incapacidades{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+{% if messages %}
+  {% for message in messages %}
+    <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'success' %}alert-success{% elif message.tags == 'info' %}alert-info{% else %}alert-info{% endif %}">
+      {{ message }}
+    </div>
+  {% endfor %}
+{% endif %}
+
+{% if can_manage_rrhh %}
+  <section class="card">
+    <div class="card-header">
+      <h2>Alta de incapacidad</h2>
+    </div>
+    <form method="post" action="{% url 'rrhh:rrhh_incapacidad_crear' %}">
+      {% csrf_token %}
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label for="empleado">Empleado</label>
+          <select class="input-field" id="empleado" name="empleado" required>
+            <option value="">Seleccionar empleado</option>
+            {% for empleado in empleados %}
+              <option value="{{ empleado.id }}">{{ empleado.nombre }}{% if empleado.codigo %} · {{ empleado.codigo }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="fecha_inicio">Fecha inicio</label>
+          <input class="input-field" id="fecha_inicio" type="date" name="fecha_inicio" required>
+        </div>
+        <div class="form-group">
+          <label for="fecha_fin">Fecha fin</label>
+          <input class="input-field" id="fecha_fin" type="date" name="fecha_fin" required>
+        </div>
+        <div class="form-group">
+          <label for="tipo">Tipo</label>
+          <select class="input-field" id="tipo" name="tipo" required>
+            {% for value, label in tipo_choices %}
+              <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="folio">Folio IMSS / referencia</label>
+          <input class="input-field" id="folio" type="text" name="folio" maxlength="80">
+        </div>
+        <div class="form-group">
+          <label for="estado_alta">Estado</label>
+          <select class="input-field" id="estado_alta" name="estado">
+            <option value="activa">Activa</option>
+            <option value="cerrada">Cerrada</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="notas">Notas</label>
+          <textarea class="input-field" id="notas" name="notas"></textarea>
+        </div>
+      </div>
+      <button class="btn btn-primary pd-u-d0ee3ca9de" type="submit">Registrar incapacidad</button>
+    </form>
+  </section>
+{% endif %}
+
+<section class="card">
+  <div class="card-header">
+    <h2>Incapacidades</h2>
+  </div>
+  <form method="get">
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label for="filtro_empleado">Empleado</label>
+        <select class="input-field" id="filtro_empleado" name="empleado">
+          <option value="">Todos</option>
+          {% for empleado in empleados %}
+            <option value="{{ empleado.id }}" {% if empleado_id == empleado.id|stringformat:"s" %}selected{% endif %}>{{ empleado.nombre }}{% if empleado.codigo %} · {{ empleado.codigo }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="estado">Estado</label>
+        <select class="input-field" id="estado" name="estado">
+          <option value="">Todos</option>
+          {% for value, label in estado_choices %}
+            <option value="{{ value }}" {% if estado == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <button class="btn btn-primary pd-u-d0ee3ca9de" type="submit">Filtrar</button>
+    <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_incapacidades' %}">Limpiar</a>
+  </form>
+
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Empleado</th>
+          <th>Inicio</th>
+          <th>Fin</th>
+          <th>Días</th>
+          <th>Tipo</th>
+          <th>Folio</th>
+          <th>Estado</th>
+          <th>Vacaciones cruzadas</th>
+          <th>Registró</th>
+          <th>Notas</th>
+          {% if can_manage_rrhh %}<th>Acciones</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          {% with incapacidad=row.incapacidad %}
+            <tr>
+              <td>{{ incapacidad.empleado.nombre }}{% if incapacidad.empleado.codigo %} · {{ incapacidad.empleado.codigo }}{% endif %}</td>
+              <td>{{ incapacidad.fecha_inicio|date:"Y-m-d" }}</td>
+              <td>{{ incapacidad.fecha_fin|date:"Y-m-d" }}</td>
+              <td>{{ incapacidad.dias_naturales }}</td>
+              <td>{{ incapacidad.get_tipo_display }}</td>
+              <td>{{ incapacidad.folio|default:"-" }}</td>
+              <td>
+                {% if incapacidad.estado == "activa" %}
+                  <span class="badge bg-warning">Activa</span>
+                {% elif incapacidad.estado == "cerrada" %}
+                  <span class="badge bg-success">Cerrada</span>
+                {% else %}
+                  <span class="badge bg-danger">Cancelada</span>
+                {% endif %}
+              </td>
+              <td>
+                {% for solicitud in row.vacaciones %}
+                  {{ solicitud.folio }} · {{ solicitud.get_estado_display }}<br>
+                {% empty %}
+                  -
+                {% endfor %}
+              </td>
+              <td>{{ incapacidad.registrada_por.get_full_name|default:incapacidad.registrada_por.username|default:"-" }}</td>
+              <td>{{ incapacidad.notas|default:""|linebreaksbr }}</td>
+              {% if can_manage_rrhh %}
+                <td>
+                  {% if incapacidad.estado != "cancelada" %}
+                    <details>
+                      <summary class="btn btn-sm btn-secondary">Cancelar</summary>
+                      <form method="post" action="{% url 'rrhh:rrhh_incapacidad_cancelar' incapacidad.id %}">
+                        {% csrf_token %}
+                        <div class="form-group">
+                          <label for="comentario_cancelacion_{{ incapacidad.id }}">Comentario</label>
+                          <textarea class="input-field" id="comentario_cancelacion_{{ incapacidad.id }}" name="comentario_cancelacion" required></textarea>
+                        </div>
+                        <button class="btn btn-sm btn-primary pd-u-d0ee3ca9de" type="submit">Confirmar cancelación</button>
+                      </form>
+                    </details>
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+              {% endif %}
+            </tr>
+          {% endwith %}
+        {% empty %}
+          <tr>
+            <td colspan="{% if can_manage_rrhh %}11{% else %}10{% endif %}">Sin incapacidades registradas.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

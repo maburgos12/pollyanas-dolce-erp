@@ -7,314 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<style>
-  .seguimiento-shell {
-    width: min(100%, 1580px);
-  }
-
-  .seguimiento-tabs {
-    margin-bottom: 0;
-  }
-
-  .seguimiento-hero-title {
-    font-size: 2rem;
-  }
-
-  .seguimiento-copy {
-    max-width: 62ch;
-  }
-
-  .seguimiento-kpi-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
-
-  .seguimiento-board {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 12px;
-    align-items: start;
-  }
-
-  .seguimiento-board.is-detail {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .seguimiento-column {
-    min-width: 0;
-    overflow: hidden;
-  }
-
-  .seguimiento-column .bi-panel-head {
-    align-items: center;
-    margin-bottom: 8px;
-  }
-
-  .seguimiento-count {
-    min-width: 42px;
-    min-height: 42px;
-    border-radius: 12px;
-    display: inline-grid;
-    place-items: center;
-    background: rgba(122, 40, 83, 0.10);
-    color: #7a2853;
-    font-weight: 800;
-    font-size: 1.12rem;
-  }
-
-  .seguimiento-column.minute .seguimiento-count {
-    background: rgba(47, 108, 119, 0.12);
-    color: #2f6c77;
-  }
-
-  .seguimiento-column.project .seguimiento-count {
-    background: rgba(185, 140, 36, 0.14);
-    color: #8b6b1c;
-  }
-
-  .seguimiento-section-metrics {
-    margin-bottom: 10px;
-  }
-
-  .seguimiento-list {
-    max-height: calc(100vh - 330px);
-    overflow: auto;
-    padding-right: 2px;
-  }
-
-  .seguimiento-list::-webkit-scrollbar {
-    width: 8px;
-  }
-
-  .seguimiento-list::-webkit-scrollbar-thumb {
-    background: rgba(139, 34, 82, 0.18);
-    border-radius: 999px;
-  }
-
-  .seguimiento-item {
-    padding: 12px;
-    border-radius: 16px;
-    background: rgba(255, 255, 255, 0.86);
-    border: 1px solid rgba(139, 34, 82, 0.08);
-    display: grid;
-    gap: 10px;
-    min-width: 0;
-  }
-
-  .seguimiento-item.is-overdue {
-    border-color: rgba(188, 59, 59, 0.22);
-    background: rgba(255, 250, 250, 0.96);
-  }
-
-  .seguimiento-item-head {
-    display: flex;
-    justify-content: space-between;
-    gap: 10px;
-    align-items: flex-start;
-  }
-
-  .seguimiento-item-title {
-    margin: 0;
-    color: #42292e;
-    font-size: 1rem;
-    line-height: 1.18;
-  }
-
-  .seguimiento-item-copy {
-    margin: 5px 0 0;
-    color: #6b5e65;
-    font-size: 0.9rem;
-    line-height: 1.32;
-  }
-
-  .seguimiento-deliverable {
-    color: #4f4249;
-    font-weight: 800;
-  }
-
-  .seguimiento-meta-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-  }
-
-  .seguimiento-meta-grid .bi-metric-value {
-    font-size: 0.95rem;
-    line-height: 1.18;
-    overflow-wrap: anywhere;
-  }
-
-  .seguimiento-action-summary {
-    cursor: pointer;
-    list-style: none;
-    min-height: 38px;
-    border-radius: 12px;
-    border: 1px solid rgba(139, 34, 82, 0.14);
-    background: rgba(255, 255, 255, 0.94);
-    color: #7a2853;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 8px 12px;
-    font-weight: 800;
-  }
-
-  .seguimiento-action-summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .seguimiento-action-panel {
-    margin-top: 8px;
-    padding: 10px;
-    border-radius: 16px;
-    background: rgba(250, 246, 248, 0.92);
-    border: 1px solid rgba(139, 34, 82, 0.08);
-    display: grid;
-    gap: 10px;
-  }
-
-  .seguimiento-checks {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .seguimiento-checks form,
-  .seguimiento-action-form {
-    margin: 0;
-  }
-
-  .seguimiento-action-form {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
-    align-items: start;
-  }
-
-  .seguimiento-action-form textarea:last-child {
-    grid-column: 1 / -1;
-  }
-
-  .seguimiento-action-form textarea,
-  .seguimiento-action-form input[type="date"],
-  .seguimiento-action-form input[type="file"] {
-    width: 100%;
-    min-width: 0;
-    border: 1px solid rgba(139, 34, 82, 0.14);
-    border-radius: 12px;
-    padding: 9px 10px;
-    font: inherit;
-    color: var(--texto);
-    background: rgba(255, 255, 255, 0.96);
-  }
-
-  .seguimiento-action-form textarea {
-    min-height: 72px;
-    resize: vertical;
-  }
-
-  .seguimiento-action-button {
-    min-height: 38px;
-    border-radius: 12px;
-    border: 1px solid rgba(139, 34, 82, 0.12);
-    padding: 8px 12px;
-    background: rgba(255, 255, 255, 0.95);
-    color: #7a2853;
-    font: inherit;
-    font-weight: 800;
-    cursor: pointer;
-    white-space: normal;
-  }
-
-  .seguimiento-action-button.is-done {
-    background: rgba(35, 109, 83, 0.10);
-    color: #236d53;
-    border-color: rgba(35, 109, 83, 0.20);
-  }
-
-  .seguimiento-action-button.is-primary {
-    background: linear-gradient(135deg, var(--vino), var(--vino-light));
-    color: #fff;
-    border: 0;
-    box-shadow: 0 8px 20px rgba(139, 34, 82, 0.16);
-  }
-
-  .seguimiento-empty {
-    padding: 18px 12px;
-    color: #6b5e65;
-    text-align: center;
-  }
-
-  .seguimiento-item.has-dg-response {
-    border-color: rgba(201, 168, 76, 0.45);
-    background: rgba(255, 252, 240, 0.98);
-  }
-
-  .seg-dg-respuesta {
-    background: rgba(255, 250, 230, 0.92);
-    border: 1px solid rgba(201, 168, 76, 0.25);
-    border-radius: 12px;
-    padding: 10px 12px;
-    display: grid;
-    gap: 5px;
-  }
-
-  .seg-dg-respuesta.is-nueva {
-    border-color: rgba(201, 168, 76, 0.55);
-    background: rgba(255, 248, 210, 0.98);
-  }
-
-  .seg-dg-respuesta-head {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.8rem;
-    font-weight: 800;
-    color: #8b6b1c;
-    flex-wrap: wrap;
-  }
-
-  .seg-dg-fecha {
-    font-weight: 400;
-    color: var(--texto-light);
-  }
-
-  .seg-dg-texto {
-    margin: 0;
-    font-size: 0.88rem;
-    color: var(--texto);
-    line-height: 1.42;
-  }
-
-  @media (max-width: 1320px) {
-    .seguimiento-board {
-      grid-template-columns: 1fr;
-    }
-
-    .seguimiento-list {
-      max-height: none;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-
-  @media (max-width: 1040px) {
-    .seguimiento-kpi-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-
-  @media (max-width: 760px) {
-    .seguimiento-hero-title {
-      font-size: 1.55rem;
-    }
-
-    .seguimiento-kpi-grid,
-    .seguimiento-list,
-    .seguimiento-meta-grid,
-    .seguimiento-action-form {
-      grid-template-columns: 1fr;
-    }
-  }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/seguimiento-templates-seguimiento-mi-seguimiento.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
@@ -324,8 +17,8 @@
     <a href="{% url tab.url_name %}" class="module-tab {% if active_tipo == tab.tipo %}active{% endif %}">{{ tab.label }}</a>
     {% endfor %}
     {% if puede_revisar_seguimiento_global %}
-    <a href="{% url 'seguimiento:bandeja_revision' %}" class="module-tab" style="margin-left:auto; color:var(--dorado);">
-      Bandeja DG {% if metrics.en_revision %}<span class="badge bg-warning" style="font-size:.72rem;">{{ metrics.en_revision }}</span>{% endif %}
+    <a href="{% url 'seguimiento:bandeja_revision' %}" class="module-tab pd-u-b39421f3b8">
+      Bandeja DG {% if metrics.en_revision %}<span class="badge bg-warning pd-u-9e2840da51">{{ metrics.en_revision }}</span>{% endif %}
     </a>
     {% endif %}
   </nav>
@@ -410,39 +103,39 @@
 
   <!-- Pasos de proyectos que esperan la aprobación de este usuario -->
   {% if mis_aprobaciones %}
-  <div class="bi-panel" style="margin-bottom:20px; border-left:4px solid var(--dorado);">
-    <p class="seg-section-title">Pasos que esperan tu aprobación <span class="badge bg-warning" style="font-size:.72rem;">{{ mis_aprobaciones|length }}</span></p>
-    <p class="muted" style="margin:-4px 0 12px; font-size:.82rem;">
+  <div class="bi-panel pd-u-5fb2fb69f3">
+    <p class="seg-section-title">Pasos que esperan tu aprobación <span class="badge bg-warning pd-u-9e2840da51">{{ mis_aprobaciones|length }}</span></p>
+    <p class="muted pd-u-d751d1f1fe">
       Eres el aprobador designado. El responsable ya los marcó como listos para tu revisión.
     </p>
-    <div style="display:grid; gap:10px;">
+    <div class="pd-u-c90bcffeab">
       {% for paso in mis_aprobaciones %}
-      <div style="padding:12px 14px; background:rgba(201,168,76,.08); border:1px solid rgba(201,168,76,.25); border-radius:12px;">
-        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:flex-start; justify-content:space-between; margin-bottom:6px;">
+      <div class="pd-u-43b236c941">
+        <div class="pd-u-c7fe6f8cfe">
           <div>
-            <div style="font-weight:700; font-size:.95rem;">{{ paso.titulo }}</div>
-            <div class="muted" style="font-size:.8rem; margin-top:2px;">
+            <div class="pd-u-97a367c8bc">{{ paso.titulo }}</div>
+            <div class="muted pd-u-2d36853af1">
               Proyecto: <strong>{{ paso.seguimiento.titulo }}</strong>
               {% with resp=paso.seguimiento.responsable_user %}{% if resp %} · Responsable: {{ resp.get_full_name|default:resp.username }}{% endif %}{% endwith %}
               {% if paso.vence %} · Vence: {{ paso.vence|date:"d/m/Y" }}{% endif %}
             </div>
-            {% if paso.entregable %}<div class="muted" style="font-size:.78rem; margin-top:4px;">Entregable: {{ paso.entregable|truncatechars:100 }}</div>{% endif %}
+            {% if paso.entregable %}<div class="muted pd-u-59b196f375">Entregable: {{ paso.entregable|truncatechars:100 }}</div>{% endif %}
           </div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap; flex-shrink:0;">
+          <div class="pd-u-f54df6fc91">
             <form method="post" action="{% url 'seguimiento:aprobar_paso' paso.seguimiento_id paso.pk %}">
               {% csrf_token %}
               <input type="hidden" name="accion" value="aprobar">
-              <button class="btn btn-primary btn-sm" type="submit">✓ Aprobar</button>
+              <button class="btn btn-primary btn-sm" type="submit">OK Aprobar</button>
             </form>
-            <details style="display:inline-block;">
-              <summary style="list-style:none; cursor:pointer;" class="btn btn-secondary btn-sm">↩ Devolver</summary>
-              <div style="position:absolute; z-index:10; margin-top:4px; background:var(--blanco); border:1px solid rgba(201,168,76,.35); border-radius:10px; padding:12px 14px; box-shadow:0 4px 16px rgba(0,0,0,.1);">
+            <details class="pd-u-44c26a8e8e">
+              <summary class="pd-u-8400ad8a3f" class="btn btn-secondary btn-sm">↩ Devolver</summary>
+              <div class="pd-u-c5254e8b59">
                 <form method="post" action="{% url 'seguimiento:aprobar_paso' paso.seguimiento_id paso.pk %}">
                   {% csrf_token %}
                   <input type="hidden" name="accion" value="devolver">
-                  <label style="font-size:.8rem; font-weight:600; display:block; margin-bottom:4px;">Motivo de devolución (opcional)</label>
-                  <textarea name="motivo" rows="2" placeholder="¿Por qué se devuelve el paso?" class="input-field" style="font-size:.82rem; resize:vertical;"></textarea>
-                  <button class="btn btn-secondary btn-sm" type="submit" style="margin-top:8px;">Confirmar devolución</button>
+                  <label class="pd-u-13aecfcd22">Motivo de devolución (opcional)</label>
+                  <textarea name="motivo" rows="2" placeholder="¿Por qué se devuelve el paso?" class="input-field pd-u-a274598fbf"></textarea>
+                  <button class="btn btn-secondary btn-sm pd-u-b1ecc496e0" type="submit">Confirmar devolución</button>
                 </form>
               </div>
             </details>
@@ -485,7 +178,7 @@
         <article class="seguimiento-item {% if item.esta_vencido %}is-overdue{% endif %} {% if item.respuesta_dg_nueva %}has-dg-response{% endif %}">
           <div>
             <div class="seguimiento-item-head">
-              <h3 class="seguimiento-item-title"><a href="{% url 'seguimiento:detalle' item.pk %}" style="color:inherit; text-decoration:none;">{{ item.titulo }}</a></h3>
+              <h3 class="seguimiento-item-title"><a href="{% url 'seguimiento:detalle' item.pk %}" class="pd-u-34fe2e3239">{{ item.titulo }}</a></h3>
               <span class="bi-pill {% if item.prioridad_tone == 'danger' %}danger{% elif item.prioridad_tone == 'warn' %}warning{% endif %}">{{ item.get_tipo_display }}</span>
             </div>
             {% if item.descripcion %}<p class="seguimiento-item-copy">{{ item.descripcion|truncatechars:190 }}</p>{% endif %}
@@ -525,33 +218,39 @@
           {% endif %}
 
           <div class="bi-progress-track" aria-label="Avance de checklist">
-            <span class="bi-progress-fill {% if item.esta_vencido %}is-danger{% elif item.progreso_pct >= 100 %}is-success{% else %}is-plum{% endif %}" style="width: {{ item.progreso_pct }}%"></span>
+            <span class="bi-progress-fill pd-js-width {% if item.esta_vencido %}is-danger{% elif item.progreso_pct >= 100 %}is-success{% else %}is-plum{% endif %}" data-pd-width="{{ item.progreso_pct }}%"></span>
           </div>
           <div class="bi-subtle">{{ item.checklist_done }}/{{ item.checklist_total }} checks · {{ item.progreso_pct }}%</div>
 
           {% if item.ultimo_comentario_dg %}
           <div class="seg-dg-respuesta {% if item.respuesta_dg_nueva %}is-nueva{% endif %}">
             <div class="seg-dg-respuesta-head">
-              <span>⭐</span>
+              <span>DG</span>
               <span>Director General</span>
               <span class="seg-dg-fecha">· {{ item.ultimo_comentario_dg.created_at|date:"d/m/Y H:i" }}</span>
-              {% if item.respuesta_dg_nueva %}<span class="badge bg-warning" style="font-size:.7rem; padding:2px 8px;">Nuevo</span>{% endif %}
+              {% if item.respuesta_dg_nueva %}<span class="badge bg-warning pd-u-b0774758a6">Nuevo</span>{% endif %}
             </div>
             <p class="seg-dg-texto">{{ item.ultimo_comentario_dg.comentario|truncatechars:260 }}</p>
           </div>
           {% endif %}
 
-          <details>
+          <details{% if item.checklist_total and not item.esta_cerrado %} open{% endif %}>
             <summary class="seguimiento-action-summary">Actualizar seguimiento</summary>
             <div class="seguimiento-action-panel">
               <div class="seguimiento-checks">
                 {% for check in item.checklist.all %}
+                {% if check.origen_step_id %}
+                <a class="seguimiento-action-button {% if check.completado %}is-done{% endif %}" href="{% url 'seguimiento:detalle' item.pk %}">
+                  {% if check.completado %}Listo{% else %}Pendiente{% endif %}: {{ check.titulo }}
+                </a>
+                {% else %}
                 <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk check.pk %}">
                   {% csrf_token %}
                   <button class="seguimiento-action-button {% if check.completado %}is-done{% endif %}" type="submit">
                     {% if check.completado %}Listo{% else %}Pendiente{% endif %}: {{ check.titulo }}
                   </button>
                 </form>
+                {% endif %}
                 {% empty %}
                 <span class="bi-summary-chip"><span>Checklist</span><strong>Sin checklist</strong></span>
                 {% endfor %}

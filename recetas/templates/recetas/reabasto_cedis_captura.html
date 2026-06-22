@@ -15,7 +15,7 @@
       <div class="kpi-grid">
         <article class="kpi-card">
           <div class="kpi-label">Responsable principal</div>
-          <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
+          <div class="pd-u-4304c62622">{{ erp_command_center.owner }}</div>
         </article>
         <article class="kpi-card">
           <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
@@ -27,7 +27,7 @@
         </article>
         <article class="kpi-card">
           <div class="kpi-label">Siguiente paso</div>
-          <div class="muted" style="margin:8px 0 10px;">{{ erp_command_center.next_step }}</div>
+          <div class="muted pd-u-332dbeaac1">{{ erp_command_center.next_step }}</div>
           <a class="btn btn-secondary btn-small" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
         </article>
       </div>
@@ -63,7 +63,7 @@
               <td>Solicitud requerida calculada automáticamente</td>
               <td>Transferencia a abastecimiento</td>
               <td>Convertir el cierre de tienda en demanda operativa para producción y surtido.</td>
-              <td>La solicitud debe quedar enviada para entrar al plan de reabasto.</td>
+              <td>La solicitud debe quedar enviada a CEDIS para entrar al plan de reabasto.</td>
               <td>Generar plan CEDIS</td>
             </tr>
           </tbody>
@@ -216,9 +216,9 @@
               <td><strong>{{ row.label }}</strong></td>
               <td>{{ row.owner|default:"Operación ERP" }}</td>
               <td class="text-end">{{ row.open_count }}</td>
-              <td style="min-width: 180px;">
+              <td class="pd-u-d369d47afa">
                 <div class="erp-progress">
-                  <div class="erp-progress-fill {% if row.semaphore_tone == 'danger' %}is-danger{% elif row.semaphore_tone == 'warning' %}is-warning{% elif row.semaphore_tone == 'primary' %}is-primary{% elif row.semaphore_tone == 'success' %}is-success{% endif %}" style="width: {{ row.progress_pct }}%;"></div>
+                  <div class="erp-progress-fill {% if row.semaphore_tone == 'danger' %}is-danger{% elif row.semaphore_tone == 'warning' %}is-warning{% elif row.semaphore_tone == 'primary' %}is-primary{% elif row.semaphore_tone == 'success' %}is-success{% endif %} pd-js-width" data-pd-width="{{ row.progress_pct }}%"></div>
                 </div>
                 <div class="muted mt-1">{{ row.progress_pct }}%</div>
               </td>

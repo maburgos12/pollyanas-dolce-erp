@@ -5,27 +5,7 @@
 {% block page_title %}CRM · Pedidos{% endblock %}
 
 {% block extra_css %}
-<style>
-  .ops-shell { display:grid; gap:18px; }
-  .ops-topline { display:grid; gap:12px; grid-template-columns: repeat(5, minmax(0, 1fr)); }
-  .ops-stat { border:1px solid var(--rosa-deep); border-radius:14px; padding:14px 16px; background:#fff; }
-  .ops-stat strong { display:block; font-size:28px; line-height:1; color:var(--vino); margin-bottom:8px; }
-  .ops-stat span { display:block; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--texto-light); }
-  .ops-grid-2 { display:grid; gap:18px; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); }
-  .ops-focus-grid { display:grid; gap:12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .ops-focus-card { border:1px solid var(--rosa); border-radius:12px; background:#fff; padding:12px 14px; }
-  .ops-focus-card.is-active { border-color: var(--vino); box-shadow: 0 10px 24px rgba(139,34,82,.08); }
-  .ops-focus-card strong { display:block; font-size:24px; color:var(--vino); }
-  .ops-chip-row { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
-  .ops-chip { display:inline-flex; align-items:center; padding:5px 10px; border-radius:999px; background:rgba(139,34,82,.08); color:var(--vino); font-size:12px; font-weight:600; }
-  .ops-table td, .ops-table th { vertical-align: middle; }
-  @media (max-width: 1080px) {
-    .ops-topline, .ops-focus-grid, .ops-grid-2 { grid-template-columns: 1fr 1fr; }
-  }
-  @media (max-width: 760px) {
-    .ops-topline, .ops-focus-grid, .ops-grid-2 { grid-template-columns: 1fr; }
-  }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/crm-templates-crm-pedidos.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
@@ -51,7 +31,7 @@
       {% for card in focus_cards %}
       <article class="ops-focus-card {% if card.is_active %}is-active{% endif %}">
         <strong>{{ card.count }}</strong>
-        <div style="font-weight:700; margin-bottom:6px;">{{ card.label }}</div>
+        <div class="pd-u-f9e5bd58dc">{{ card.label }}</div>
         <div class="muted">{{ card.detail }}</div>
         <div class="mt-2"><a class="btn btn-secondary btn-small" href="{{ card.url }}">Abrir</a></div>
       </article>
@@ -71,7 +51,7 @@
     <article class="card">
       <div class="card-header">Nuevo pedido</div>
       {% if can_manage_crm %}
-      <form method="post" class="filters" style="margin-bottom:0;">
+      <form method="post" class="filters pd-u-76084ee4e5">
         {% csrf_token %}
         <select class="input-field" name="cliente_id" required>
           <option value="">Cliente...</option>
@@ -107,7 +87,7 @@
 
     <article class="card">
       <div class="card-header">Filtro operativo</div>
-      <form method="get" class="filters" style="margin-bottom:0;">
+      <form method="get" class="filters pd-u-76084ee4e5">
         <input class="input-field" type="text" name="q" value="{{ q }}" placeholder="Buscar por folio, cliente, descripción o sucursal">
         <input class="input-field" type="date" name="date_from" value="{{ date_from }}">
         <input class="input-field" type="date" name="date_to" value="{{ date_to }}">

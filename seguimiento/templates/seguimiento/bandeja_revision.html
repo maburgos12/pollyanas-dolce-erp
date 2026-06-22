@@ -7,107 +7,16 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<style>
-  .seg-rev-shell { width: min(100%, 1200px); }
-
-  .seg-rev-item {
-    background: rgba(255,255,255,.88);
-    border: 1px solid rgba(201,168,76,.22);
-    border-radius: 16px;
-    padding: 18px 20px;
-    display: grid;
-    gap: 14px;
-  }
-
-  .seg-rev-item-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
-
-  .seg-rev-title { margin: 0; font-size: 1.05rem; color: var(--texto); }
-
-  .seg-rev-meta { font-size: .82rem; color: var(--texto-light); margin-top: 4px; }
-
-  .seg-rev-actividad {
-    background: rgba(250,246,248,.94);
-    border: 1px solid rgba(139,34,82,.08);
-    border-radius: 12px;
-    padding: 12px;
-    display: grid;
-    gap: 8px;
-    font-size: .9rem;
-  }
-
-  .seg-rev-evidencia-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: rgba(35,109,83,.10);
-    color: #236d53;
-    border-radius: 8px;
-    padding: 4px 10px;
-    font-size: .85rem;
-    font-weight: 700;
-    text-decoration: none;
-  }
-  .seg-rev-evidencia-link:hover { background: rgba(35,109,83,.18); }
-
-  .seg-rev-actions {
-    display: grid;
-    gap: 10px;
-  }
-
-  .seg-rev-actions form {
-    display: grid;
-    gap: 8px;
-  }
-
-  .seg-rev-actions textarea {
-    width: 100%;
-    border: 1px solid rgba(139,34,82,.14);
-    border-radius: 10px;
-    padding: 9px 10px;
-    font: inherit;
-    color: var(--texto);
-    background: rgba(255,255,255,.96);
-    resize: vertical;
-    min-height: 60px;
-    box-sizing: border-box;
-  }
-
-  .seg-rev-action-row {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    align-items: flex-start;
-  }
-
-  .seg-prorroga-box {
-    background: rgba(255,193,7,.10);
-    border: 1px solid rgba(255,193,7,.30);
-    border-radius: 12px;
-    padding: 12px;
-    font-size: .88rem;
-  }
-
-  .seg-empty {
-    text-align: center;
-    padding: 48px 24px;
-    color: var(--texto-light);
-  }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/seguimiento-templates-seguimiento-bandeja-revision.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}
 <div class="module-shell bi-shell seg-rev-shell">
 
-  <section class="bi-hero" style="margin-bottom:20px;">
+  <section class="bi-hero pd-u-7dde5e56b3">
     <div class="bi-hero-main">
       <div class="bi-kicker">Director General</div>
-      <h1 class="bi-hero-title" style="font-size:1.8rem;">Bandeja de revisión</h1>
+      <h1 class="bi-hero-title pd-u-34d8711a27">Bandeja de revisión</h1>
       <p class="bi-copy">Acuerdos entregados por colaboradores que esperan tu aprobación o devolución.</p>
     </div>
     <div class="bi-hero-side">
@@ -121,7 +30,7 @@
           <strong>Mi trabajo</strong>
         </article>
       </div>
-      <div style="margin-top:10px;">
+      <div class="pd-u-d8a81eac84">
         <a href="{% url 'seguimiento:mi_seguimiento' %}" class="btn btn-secondary btn-sm">← Mi trabajo</a>
       </div>
     </div>
@@ -129,17 +38,17 @@
 
   {% if not items %}
   <div class="bi-panel seg-empty">
-    <p style="font-size:2rem; margin:0;">✅</p>
-    <p style="margin:8px 0 0; font-weight:700;">Sin acuerdos pendientes de revisión.</p>
-    <p class="muted" style="font-size:.9rem;">Cuando un colaborador marque un acuerdo como listo aparecerá aquí.</p>
+    <p class="pd-u-47aea90855">OK</p>
+    <p class="pd-u-d29eb2ef6a">Sin acuerdos pendientes de revisión.</p>
+    <p class="muted pd-u-186ddf5ae7">Cuando un colaborador marque un acuerdo como listo aparecerá aquí.</p>
   </div>
   {% else %}
-  <div style="display:grid; gap:14px;">
+  <div class="pd-u-7b22574d45">
     {% for item in items %}
     <div class="seg-rev-item">
       <div class="seg-rev-item-head">
         <div>
-          <span class="bi-pill" style="margin-bottom:6px;">{{ item.get_tipo_display }}</span>
+          <span class="bi-pill pd-u-6c002e2180">{{ item.get_tipo_display }}</span>
           <h2 class="seg-rev-title">{{ item.titulo }}</h2>
           <p class="seg-rev-meta">
             Responsable:
@@ -150,19 +59,19 @@
             </strong>
             · Área: {{ item.area|default:"—" }}
             · Fecha límite:
-            <strong {% if item.esta_vencido %}style="color:var(--rojo)"{% endif %}>
+            <strong class="{% if item.esta_vencido %}pd-expired-text{% endif %}">
               {% if item.fecha_limite %}{{ item.fecha_limite|date:"d/m/Y" }}{% else %}Sin fecha{% endif %}
             </strong>
           </p>
         </div>
-        <div style="display:flex; gap:8px; flex-shrink:0; align-items:center;">
-          <span style="font-size:.8rem; color:var(--texto-light);">{{ item.updated_at|timesince }} atrás</span>
+        <div class="pd-u-43b7eb3b77">
+          <span class="pd-u-6e4b91a759">{{ item.updated_at|timesince }} atrás</span>
           <a href="{% url 'seguimiento:detalle' item.pk %}" class="btn btn-secondary btn-sm">Ver detalle</a>
         </div>
       </div>
 
       {% if item.entregable_esperado %}
-      <p style="margin:0; font-size:.88rem; font-weight:700; color:#4f4249;">
+      <p class="pd-u-6fdf7b9ab1">
         Entregable esperado: {{ item.entregable_esperado }}
       </p>
       {% endif %}
@@ -171,20 +80,20 @@
       <div class="seg-rev-actividad">
         {% if item.ultima_evidencia %}
         <div>
-          <span style="font-weight:700;">Evidencia adjunta:</span>
+          <span class="pd-u-758a887326">Evidencia adjunta:</span>
           <a href="{{ item.ultima_evidencia.archivo.url }}" target="_blank" rel="noopener" class="seg-rev-evidencia-link">
-            📎 {{ item.ultima_evidencia.nombre_original }}
+            Adjunto {{ item.ultima_evidencia.nombre_original }}
           </a>
           {% if item.ultima_evidencia.comentario %}
-          <span class="muted" style="font-size:.85rem;"> — {{ item.ultima_evidencia.comentario|truncatechars:120 }}</span>
+          <span class="muted pd-u-9d56aaf28c"> — {{ item.ultima_evidencia.comentario|truncatechars:120 }}</span>
           {% endif %}
         </div>
         {% endif %}
         {% if item.ultimo_comentario %}
         <div>
-          <span style="font-weight:700;">Último mensaje:</span>
+          <span class="pd-u-758a887326">Último mensaje:</span>
           "{{ item.ultimo_comentario.comentario|truncatechars:200 }}"
-          <span class="muted" style="font-size:.82rem;">— {{ item.ultimo_comentario.usuario.get_full_name|default:item.ultimo_comentario.usuario.username }}, {{ item.ultimo_comentario.created_at|date:"d/m/Y H:i" }}</span>
+          <span class="muted pd-u-f6909f80c2">— {{ item.ultimo_comentario.usuario.get_full_name|default:item.ultimo_comentario.usuario.username }}, {{ item.ultimo_comentario.created_at|date:"d/m/Y H:i" }}</span>
         </div>
         {% endif %}
         {% if not item.ultima_evidencia and not item.ultimo_comentario %}
@@ -199,7 +108,7 @@
         <strong>⏳ Solicitud de prórroga:</strong>
         hasta {{ item.prorroga_pendiente.fecha_solicitada|date:"d/m/Y" }} —
         {{ item.prorroga_pendiente.motivo|truncatechars:160 }}
-        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+        <div class="pd-u-ee3ba85bc7">
           <form method="post" action="{% url 'seguimiento:resolver_prorroga' item.pk item.prorroga_pendiente.pk %}">
             {% csrf_token %}
             <input type="hidden" name="accion" value="aprobar">
@@ -216,13 +125,13 @@
 
       <!-- Aprobar / Devolver -->
       <div class="seg-rev-actions">
-        <p style="margin:0; font-size:.82rem; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--texto-light);">Tu decisión</p>
+        <p class="pd-u-b39bb2d1ee">Tu decisión</p>
         <form method="post" action="{% url 'seguimiento:resolver_revision' item.pk %}">
           {% csrf_token %}
           <input type="hidden" name="accion" value="aprobar">
           <textarea name="comentario" placeholder="Comentario de aprobación (opcional)"></textarea>
           <div class="seg-rev-action-row">
-            <button class="btn btn-primary" type="submit">✓ Aprobar — marcar completado</button>
+            <button class="btn btn-primary" type="submit">OK Aprobar — marcar completado</button>
           </div>
         </form>
         <form method="post" action="{% url 'seguimiento:resolver_revision' item.pk %}">

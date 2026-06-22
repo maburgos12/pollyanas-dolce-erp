@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import IntegrityError, models, transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
 
@@ -1027,11 +1027,13 @@ class HoraExtra(models.Model):
     ESTADO_AUTORIZADO = "autorizado"
     ESTADO_RECHAZADO = "rechazado"
     ESTADO_PAGADO = "pagado"
+    ESTADO_CANCELADO = "cancelado"
     ESTADO_CHOICES = [
         (ESTADO_PENDIENTE, "Pendiente autorización"),
         (ESTADO_AUTORIZADO, "Autorizado"),
         (ESTADO_RECHAZADO, "Rechazado"),
         (ESTADO_PAGADO, "Pagado en nómina"),
+        (ESTADO_CANCELADO, "Cancelado"),
     ]
 
     empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.CASCADE, related_name="horas_extra")
@@ -1283,6 +1285,85 @@ class SuspensionEmpleado(models.Model):
     def clean(self):
         if self.fecha_inicio and self.fecha_fin and self.fecha_fin < self.fecha_inicio:
             raise ValidationError({"fecha_fin": "La fecha final no puede ser anterior a la fecha inicial."})
+
+    def __str__(self) -> str:
+        return f"{self.empleado} · {self.fecha_inicio} a {self.fecha_fin}"
+
+
+class IncapacidadEmpleado(models.Model):
+    TIPO_ENFERMEDAD_GENERAL = "enfermedad_general"
+    TIPO_RIESGO_TRABAJO = "riesgo_trabajo"
+    TIPO_MATERNIDAD = "maternidad"
+    TIPO_OTRO = "otro"
+    TIPO_CHOICES = [
+        (TIPO_ENFERMEDAD_GENERAL, "Enfermedad general"),
+        (TIPO_RIESGO_TRABAJO, "Riesgo de trabajo"),
+        (TIPO_MATERNIDAD, "Maternidad"),
+        (TIPO_OTRO, "Otro"),
+    ]
+    ESTADO_ACTIVA = "activa"
+    ESTADO_CERRADA = "cerrada"
+    ESTADO_CANCELADA = "cancelada"
+    ESTADO_CHOICES = [
+        (ESTADO_ACTIVA, "Activa"),
+        (ESTADO_CERRADA, "Cerrada"),
+        (ESTADO_CANCELADA, "Cancelada"),
+    ]
+
+    empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.CASCADE, related_name="incapacidades")
+    fecha_inicio = models.DateField()
+    fecha_fin = models.DateField()
+    tipo = models.CharField(max_length=24, choices=TIPO_CHOICES, default=TIPO_ENFERMEDAD_GENERAL, db_index=True)
+    folio = models.CharField(max_length=80, blank=True, default="")
+    estado = models.CharField(max_length=12, choices=ESTADO_CHOICES, default=ESTADO_ACTIVA, db_index=True)
+    notas = models.TextField(blank=True, default="")
+    registrada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="incapacidades_registradas",
+    )
+    comentario_cancelacion = models.TextField(blank=True, default="")
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-fecha_inicio", "-id"]
+        constraints = [
+            models.CheckConstraint(
+                check=Q(fecha_fin__gte=models.F("fecha_inicio")),
+                name="rrhh_incapacidad_fecha_fin_gte_inicio",
+            ),
+            models.UniqueConstraint(
+                fields=["empleado", "folio"],
+                condition=~Q(folio=""),
+                name="rrhh_incapacidad_folio_unico_empleado",
+            )
+        ]
+        verbose_name = "Incapacidad"
+        verbose_name_plural = "Incapacidades"
+
+    @property
+    def dias_naturales(self) -> int:
+        return (self.fecha_fin - self.fecha_inicio).days + 1
+
+    def clean(self):
+        if self.fecha_inicio and self.fecha_fin and self.fecha_fin < self.fecha_inicio:
+            raise ValidationError({"fecha_fin": "La fecha final no puede ser anterior a la fecha inicial."})
+        if self.estado != self.ESTADO_CANCELADA and self.empleado_id and self.fecha_inicio and self.fecha_fin:
+            traslape = IncapacidadEmpleado.objects.filter(
+                empleado_id=self.empleado_id,
+                estado__in=[self.ESTADO_ACTIVA, self.ESTADO_CERRADA],
+                fecha_inicio__lte=self.fecha_fin,
+                fecha_fin__gte=self.fecha_inicio,
+            ).exclude(pk=self.pk)
+            if traslape.exists():
+                raise ValidationError("Ya existe una incapacidad no cancelada que cruza esas fechas.")
+
+    def save(self, *args, **kwargs):
+        self.folio = (self.folio or "").strip()
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return f"{self.empleado} · {self.fecha_inicio} a {self.fecha_fin}"
@@ -1640,6 +1721,316 @@ class ImportacionChecador(models.Model):
 
     def __str__(self) -> str:
         return f"{self.get_metodo_display()} · {self.fecha_inicio} a {self.fecha_fin}"
+
+
+class PrenominaCorte(models.Model):
+    TIPO_SEMANAL = "SEMANAL"
+    TIPO_QUINCENAL = "QUINCENAL"
+    TIPO_MENSUAL = "MENSUAL"
+    TIPO_RANGO = "RANGO"
+    TIPO_CHOICES = [
+        (TIPO_SEMANAL, "Semanal"),
+        (TIPO_QUINCENAL, "Quincenal"),
+        (TIPO_MENSUAL, "Mensual"),
+        (TIPO_RANGO, "Rango manual"),
+    ]
+
+    ESTADO_BORRADOR = "BORRADOR"
+    ESTADO_EN_REVISION = "EN_REVISION"
+    ESTADO_LISTO = "LISTO"
+    ESTADO_EXPORTADO = "EXPORTADO"
+    ESTADO_CERRADO = "CERRADO"
+    ESTADO_CHOICES = [
+        (ESTADO_BORRADOR, "Borrador"),
+        (ESTADO_EN_REVISION, "En revision"),
+        (ESTADO_LISTO, "Listo"),
+        (ESTADO_EXPORTADO, "Exportado"),
+        (ESTADO_CERRADO, "Cerrado"),
+    ]
+
+    folio = models.CharField(max_length=40, unique=True, blank=True)
+    fecha_inicio = models.DateField(db_index=True)
+    fecha_fin = models.DateField(db_index=True)
+    fecha_corte = models.DateField(db_index=True)
+    tipo_periodo = models.CharField(max_length=20, choices=TIPO_CHOICES, default=TIPO_QUINCENAL)
+    sucursal = models.CharField(max_length=120, blank=True, default="")
+    area = models.CharField(max_length=120, blank=True, default="")
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_BORRADOR, db_index=True)
+    resumen = models.JSONField(default=dict, blank=True)
+    notas = models.TextField(blank=True, default="")
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="prenomina_cortes_creados",
+    )
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-fecha_fin", "-id"]
+        verbose_name = "Corte de prenomina"
+        verbose_name_plural = "Cortes de prenomina"
+
+    def _generate_folio(self) -> str:
+        period = self.fecha_inicio.strftime("%Y%m")
+        prefix = f"PRE-{period}-"
+        max_seq = 0
+        for folio in PrenominaCorte.objects.filter(folio__startswith=prefix).values_list("folio", flat=True):
+            try:
+                max_seq = max(max_seq, int(folio.removeprefix(prefix)))
+            except ValueError:
+                continue
+        return f"{prefix}{max_seq + 1:03d}"
+
+    def save(self, *args, **kwargs):
+        if self.folio:
+            super().save(*args, **kwargs)
+            return
+        for attempt in range(5):
+            self.folio = self._generate_folio()
+            try:
+                with transaction.atomic():
+                    super().save(*args, **kwargs)
+                return
+            except IntegrityError:
+                self.folio = ""
+                if attempt == 4:
+                    raise
+
+    def __str__(self) -> str:
+        return self.folio
+
+
+class PrenominaEmpleadoResumen(models.Model):
+    ESTADO_LISTO = "LISTO"
+    ESTADO_REVISAR = "REVISAR"
+    ESTADO_BLOQUEADO = "BLOQUEADO"
+    ESTADO_CHOICES = [
+        (ESTADO_LISTO, "Listo"),
+        (ESTADO_REVISAR, "Revisar"),
+        (ESTADO_BLOQUEADO, "Bloqueado"),
+    ]
+
+    corte = models.ForeignKey(PrenominaCorte, on_delete=models.CASCADE, related_name="resumenes")
+    empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.PROTECT, related_name="resumenes_prenomina")
+    dias_periodo = models.PositiveSmallIntegerField(default=0)
+    dias_laborables = models.PositiveSmallIntegerField(default=0)
+    dias_no_laborados_pre_ingreso = models.PositiveSmallIntegerField(default=0)
+    dias_asistencia = models.PositiveSmallIntegerField(default=0)
+    faltas = models.PositiveSmallIntegerField(default=0)
+    retardos = models.PositiveSmallIntegerField(default=0)
+    suspensiones = models.PositiveSmallIntegerField(default=0)
+    incapacidades = models.PositiveSmallIntegerField(default=0)
+    permisos = models.PositiveSmallIntegerField(default=0)
+    vacaciones = models.PositiveSmallIntegerField(default=0)
+    horas_extra_autorizadas = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0"))
+    ajustes_pendientes = models.PositiveSmallIntegerField(default=0)
+    alertas_bloqueantes = models.PositiveSmallIntegerField(default=0)
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_LISTO, db_index=True)
+    observaciones = models.TextField(blank=True, default="")
+    snapshot = models.JSONField(default=dict, blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("corte", "empleado")]
+        ordering = ["empleado__nombre", "id"]
+        verbose_name = "Resumen de empleado en prenomina"
+        verbose_name_plural = "Resumenes de empleados en prenomina"
+
+    def __str__(self) -> str:
+        return f"{self.corte.folio} · {self.empleado.nombre}"
+
+
+class PrenominaEquivalenciaCONTPAQi(models.Model):
+    tipo_movimiento_erp = models.CharField(max_length=32, unique=True, db_index=True)
+    clave_contpaqi = models.CharField(max_length=20)
+    descripcion = models.CharField(max_length=180)
+    aplica_valor = models.BooleanField(default=False)
+    aplica_horas = models.BooleanField(default=False)
+    aplica_importe = models.BooleanField(default=False)
+    activo = models.BooleanField(default=True, db_index=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tipo_movimiento_erp"]
+        verbose_name = "Equivalencia CONTPAQi prenomina"
+        verbose_name_plural = "Equivalencias CONTPAQi prenomina"
+
+    def __str__(self) -> str:
+        return f"{self.tipo_movimiento_erp} -> {self.clave_contpaqi}"
+
+
+class PrenominaMovimiento(models.Model):
+    TIPO_FALTA = "FALTA"
+    TIPO_SUSPENSION = "SUSPENSION"
+    TIPO_HORA_EXTRA = "HORA_EXTRA"
+    TIPO_INCAPACIDAD = "INCAPACIDAD"
+    TIPO_CHOICES = [
+        (TIPO_FALTA, "Falta"),
+        (TIPO_SUSPENSION, "Suspension"),
+        (TIPO_HORA_EXTRA, "Hora extra"),
+        (TIPO_INCAPACIDAD, "Incapacidad"),
+    ]
+
+    ESTADO_PENDIENTE_CONFIGURACION = "PENDIENTE_CONFIGURACION"
+    ESTADO_LISTO = "LISTO"
+    ESTADO_BLOQUEADO = "BLOQUEADO"
+    ESTADO_EXPORTADO = "EXPORTADO"
+    ESTADO_CHOICES = [
+        (ESTADO_PENDIENTE_CONFIGURACION, "Pendiente configuracion"),
+        (ESTADO_LISTO, "Listo"),
+        (ESTADO_BLOQUEADO, "Bloqueado"),
+        (ESTADO_EXPORTADO, "Exportado"),
+    ]
+
+    corte = models.ForeignKey(PrenominaCorte, on_delete=models.CASCADE, related_name="movimientos")
+    empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.PROTECT, related_name="movimientos_prenomina")
+    fecha = models.DateField(db_index=True)
+    tipo_movimiento_erp = models.CharField(max_length=32, choices=TIPO_CHOICES, db_index=True)
+    clave_contpaqi = models.CharField(max_length=20, blank=True, default="")
+    estado = models.CharField(
+        max_length=32,
+        choices=ESTADO_CHOICES,
+        default=ESTADO_PENDIENTE_CONFIGURACION,
+        db_index=True,
+    )
+    valor = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    horas = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    importe = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    fuente = models.CharField(max_length=80, blank=True, default="")
+    fuente_modelo = models.CharField(max_length=80, blank=True, default="", db_index=True)
+    fuente_id = models.CharField(max_length=80, blank=True, default="", db_index=True)
+    referencia = models.CharField(max_length=120, blank=True, default="")
+    notas = models.TextField(blank=True, default="")
+    metadata = models.JSONField(default=dict, blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["empleado__nombre", "fecha", "tipo_movimiento_erp", "id"]
+        verbose_name = "Movimiento de prenomina"
+        verbose_name_plural = "Movimientos de prenomina"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["corte", "fuente_modelo", "fuente_id", "tipo_movimiento_erp"],
+                condition=Q(fuente_modelo__gt="", fuente_id__gt=""),
+                name="rrhh_prenomina_movimiento_fuente_unica",
+            )
+        ]
+
+    def aplicar_equivalencia(self) -> bool:
+        equivalencia = PrenominaEquivalenciaCONTPAQi.objects.filter(
+            tipo_movimiento_erp=self.tipo_movimiento_erp,
+            activo=True,
+        ).first()
+        if not equivalencia:
+            self.clave_contpaqi = ""
+            self.estado = self.ESTADO_PENDIENTE_CONFIGURACION
+            return False
+        self.clave_contpaqi = equivalencia.clave_contpaqi
+        self.estado = self.ESTADO_LISTO
+        return True
+
+    def __str__(self) -> str:
+        return f"{self.corte.folio} · {self.empleado.nombre} · {self.tipo_movimiento_erp}"
+
+
+class AjusteAsistencia(models.Model):
+    TIPO_ENTRADA = "entrada"
+    TIPO_SALIDA = "salida"
+    TIPO_SALIDA_COMIDA = "salida_comida"
+    TIPO_REGRESO_COMIDA = "regreso_comida"
+    TIPO_TURNO = "turno"
+    TIPO_OBSERVACION = "observacion"
+    TIPO_CHOICES = [
+        (TIPO_ENTRADA, "Entrada"),
+        (TIPO_SALIDA, "Salida"),
+        (TIPO_SALIDA_COMIDA, "Salida comida"),
+        (TIPO_REGRESO_COMIDA, "Regreso comida"),
+        (TIPO_TURNO, "Turno"),
+        (TIPO_OBSERVACION, "Observacion"),
+    ]
+
+    ESTADO_PENDIENTE = "PENDIENTE"
+    ESTADO_APROBADO = "APROBADO"
+    ESTADO_RECHAZADO = "RECHAZADO"
+    ESTADO_APLICADO = "APLICADO"
+    ESTADO_CHOICES = [
+        (ESTADO_PENDIENTE, "Pendiente"),
+        (ESTADO_APROBADO, "Aprobado"),
+        (ESTADO_RECHAZADO, "Rechazado"),
+        (ESTADO_APLICADO, "Aplicado"),
+    ]
+
+    empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.PROTECT, related_name="ajustes_asistencia")
+    fecha = models.DateField(db_index=True)
+    asistencia = models.ForeignKey(
+        AsistenciaEmpleado,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ajustes",
+    )
+    tipo_ajuste = models.CharField(max_length=24, choices=TIPO_CHOICES, db_index=True)
+    estado = models.CharField(max_length=16, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE, db_index=True)
+    valores_anteriores = models.JSONField(default=dict, blank=True)
+    valores_propuestos = models.JSONField(default=dict, blank=True)
+    valores_aplicados = models.JSONField(default=dict, blank=True)
+    motivo = models.TextField()
+    comentario_autorizacion = models.TextField(blank=True, default="")
+    solicitado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ajustes_asistencia_solicitados",
+    )
+    autorizado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ajustes_asistencia_autorizados",
+    )
+    aplicado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ajustes_asistencia_aplicados",
+    )
+    solicitado_en = models.DateTimeField(auto_now_add=True)
+    autorizado_en = models.DateTimeField(null=True, blank=True)
+    aplicado_en = models.DateTimeField(null=True, blank=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-fecha", "empleado__nombre", "-id"]
+        verbose_name = "Ajuste de asistencia"
+        verbose_name_plural = "Ajustes de asistencia"
+
+    def __str__(self) -> str:
+        return f"{self.empleado.nombre} · {self.fecha} · {self.get_tipo_ajuste_display()}"
+
+    def clean(self):
+        super().clean()
+        if not self.asistencia_id:
+            return
+        errors = {}
+        if self.empleado_id and self.asistencia.empleado_id != self.empleado_id:
+            errors["asistencia"] = "La asistencia debe pertenecer al mismo empleado del ajuste."
+        if self.fecha and self.asistencia.fecha != self.fecha:
+            errors["fecha"] = "La fecha del ajuste debe coincidir con la fecha de la asistencia."
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
 
 class Prestamo(models.Model):

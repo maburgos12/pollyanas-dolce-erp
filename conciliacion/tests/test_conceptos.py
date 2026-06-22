@@ -15,6 +15,9 @@ class ConceptoConciliacionTests(TestCase):
         self.assertIn("PAGO_PARCIAL_CLIENTE_REP", codigos)
         self.assertIn("DEVOLUCION_SAT_IVA", codigos)
         self.assertIn("PAGO_NOMINA_TIMBRADA", codigos)
+        self.assertIn("DISPOSICION_LINEA_CREDITO", codigos)
+        self.assertIn("PAGO_LINEA_CREDITO", codigos)
+        self.assertIn("PAGO_TARJETA_CREDITO", codigos)
         self.assertIn("PENDIENTE_ORIGEN", codigos)
 
     def test_efectivo_sucursal_requiere_cfdi_emitido_y_evidencia(self):

@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Logística · Puntos logísticos{% endblock %}
+{% block page_title %}Logística · Puntos logísticos{% endblock %}
+
+{% block extra_css %}
+<style>
+  .points-shell { display:grid; gap:18px; }
+  .points-grid { display:grid; grid-template-columns:minmax(0, .85fr) minmax(0, 1.15fr); gap:18px; align-items:start; }
+  .point-form-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
+  .point-field { display:grid; gap:6px; }
+  .point-field label { font-weight:800; color:var(--vino); }
+  .point-error { color:#bc3b3b; font-weight:700; font-size:13px; }
+  .point-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:14px; }
+  .points-shell .module-tabs { display:flex; flex-wrap:wrap; gap:8px; overflow-x:auto; }
+  @media (max-width: 960px) {
+    .points-grid, .point-form-grid { grid-template-columns:1fr; }
+  }
+</style>
+<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260621-button-gap-v1">
+{% endblock %}
+
+{% block content %}
+<div class="points-shell">
+  <section class="module-tabs report-tabs" aria-label="Submódulos Logística">
+    {% for tab in module_tabs %}
+      <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+    {% endfor %}
+  </section>
+
+  <section class="points-grid">
+    <article class="card">
+      <div class="card-header">Crear punto logístico</div>
+      <p class="muted">Un punto activo con coordenadas puede usarse como parada y validar llegada por GPS.</p>
+      {% if can_manage_logistica %}
+      <form method="post" novalidate>
+        {% csrf_token %}
+        {% if errors.punto_cercano %}
+        <div class="point-error" style="margin-bottom:12px;">
+          {{ errors.punto_cercano }}
+          {% if errors.punto_cercano_url %}<a class="btn btn-secondary btn-small" href="{{ errors.punto_cercano_url }}" style="margin-left:8px;">Editar punto existente</a>{% endif %}
+        </div>
+        {% endif %}
+        <div class="point-form-grid">
+          <div class="point-field">
+            <label for="id_nombre">Nombre</label>
+            <input class="input-field" id="id_nombre" name="nombre" type="text" value="{{ form_values.nombre }}" placeholder="Sucursal Centro" required>
+            {% if errors.nombre %}<div class="point-error">{{ errors.nombre }}</div>{% endif %}
+          </div>
+          <div class="point-field">
+            <label for="id_tipo">Tipo</label>
+            <select class="input-field" id="id_tipo" name="tipo">
+              {% for value,label in tipo_choices %}
+              <option value="{{ value }}" {% if form_values.tipo == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            {% if errors.tipo %}<div class="point-error">{{ errors.tipo }}</div>{% endif %}
+          </div>
+          <div class="point-field">
+            <label for="id_sucursal">Sucursal vinculada</label>
+            <select class="input-field" id="id_sucursal" name="sucursal">
+              <option value="">Sin vincular</option>
+              {% for sucursal in sucursales %}
+              <option value="{{ sucursal.id }}" {% if form_values.sucursal_id == sucursal.id %}selected{% endif %}>{{ sucursal }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="point-field">
+            <label for="id_radio">Radio geocerca metros</label>
+            <input class="input-field" id="id_radio" name="radio_geocerca_metros" type="number" min="20" max="1000" value="{{ form_values.radio_geocerca_metros }}">
+            {% if errors.radio_geocerca_metros %}<div class="point-error">{{ errors.radio_geocerca_metros }}</div>{% endif %}
+          </div>
+          <div class="point-field">
+            <label for="id_latitud">Latitud</label>
+            <input class="input-field" id="id_latitud" name="latitud" type="number" step="0.000001" value="{{ form_values.latitud }}" required>
+            {% if errors.latitud %}<div class="point-error">{{ errors.latitud }}</div>{% endif %}
+          </div>
+          <div class="point-field">
+            <label for="id_longitud">Longitud</label>
+            <input class="input-field" id="id_longitud" name="longitud" type="number" step="0.000001" value="{{ form_values.longitud }}" required>
+            {% if errors.longitud %}<div class="point-error">{{ errors.longitud }}</div>{% endif %}
+          </div>
+        </div>
+        <div class="point-field" style="margin-top:12px;">
+          <label for="id_notas">Notas</label>
+          <textarea class="input-field" id="id_notas" name="notas" rows="3" placeholder="Dirección, referencia o instrucciones internas">{{ form_values.notas }}</textarea>
+        </div>
+        <label style="display:inline-flex; gap:8px; align-items:center; margin-top:12px; font-weight:800; color:var(--vino);">
+          <input type="checkbox" name="activo" {% if form_values.activo %}checked{% endif %}>
+          Punto activo
+        </label>
+        <div class="point-actions">
+          <button class="btn btn-primary" type="submit">Crear punto</button>
+          <a class="btn btn-secondary" href="{% url 'logistica:rutas' %}">Volver a rutas</a>
+        </div>
+      </form>
+      {% else %}
+      <p class="muted">Tu rol es de consulta. No puedes crear puntos.</p>
+      {% endif %}
+    </article>
+
+    <article class="card">
+      <div class="card-header">Puntos existentes</div>
+      <form method="get" class="filters">
+        <input class="input-field" type="text" name="q" value="{{ q }}" placeholder="Buscar punto, sucursal o nota">
+        <select class="input-field" name="tipo">
+          <option value="">Todos los tipos</option>
+          {% for value,label in tipo_choices %}
+          <option value="{{ value }}" {% if tipo == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-primary" type="submit">Filtrar</button>
+      </form>
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead>
+            <tr>
+              <th>Punto</th>
+              <th>Tipo</th>
+              <th>Sucursal</th>
+              <th>Coordenadas</th>
+              <th>Radio</th>
+              <th>Uso</th>
+              <th>Estatus</th>
+              {% if can_manage_logistica %}<th>Acciones</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for punto in puntos %}
+            <tr>
+              <td>{{ punto.nombre }}</td>
+              <td>{{ punto.get_tipo_display }}</td>
+              <td>{{ punto.sucursal|default:"-" }}</td>
+              <td>{{ punto.latitud }}, {{ punto.longitud }}</td>
+              <td>{{ punto.radio_geocerca_metros }} m</td>
+              <td>
+                {{ punto.rutas_total_count }} ruta{{ punto.rutas_total_count|pluralize }}
+                {% if punto.rutas_abiertas_count %}
+                <br><span class="badge bg-warning">{{ punto.rutas_abiertas_count }} abiertas</span>
+                {% endif %}
+              </td>
+              <td>{% if punto.activo %}<span class="badge bg-success">Activo</span>{% else %}<span class="badge bg-secondary">Inactivo</span>{% endif %}</td>
+              {% if can_manage_logistica %}
+              <td>
+                <div class="point-actions" style="margin-top:0;">
+                  <a class="btn btn-secondary btn-small" href="{% url 'logistica:punto_logistico_edit' punto.id %}">Editar</a>
+                  <form method="post" action="{% url 'logistica:punto_logistico_toggle' punto.id %}">
+                    {% csrf_token %}
+                    <button class="btn {% if punto.activo %}btn-danger{% else %}btn-primary{% endif %} btn-small" type="submit" {% if punto.activo %}onclick="return confirm('¿Desactivar este punto logístico? Las rutas ya planeadas conservarán su geocerca histórica.')" {% endif %}>
+                      {% if punto.activo %}Desactivar{% else %}Activar{% endif %}
+                    </button>
+                  </form>
+                </div>
+              </td>
+              {% endif %}
+            </tr>
+            {% empty %}
+            <tr><td colspan="8" class="muted">No hay puntos logísticos para este filtro.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+</div>
+{% endblock %}

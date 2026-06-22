@@ -71,11 +71,42 @@ def _localized_range(fecha_inicio: date, fecha_fin: date) -> tuple[datetime, dat
     return inicio, fin
 
 
+def _es_fecha_pre_ingreso(empleado: Empleado, fecha: date) -> bool:
+    return bool(empleado.fecha_ingreso and fecha < empleado.fecha_ingreso)
+
+
+def _build_fila_pre_ingreso(empleado: Empleado, fecha: date) -> dict:
+    detalle = f"Ingreso: {empleado.fecha_ingreso.isoformat()}" if empleado.fecha_ingreso else ""
+    return {
+        "fecha": fecha,
+        "asistencia": None,
+        "incidencias": [],
+        "estado_laboral": "pre_ingreso",
+        "estado_laboral_label": "No laborado (previo ingreso)",
+        "detalle_laboral": detalle,
+    }
+
+
 def _build_export_rows(reportes: list[dict]) -> list[list]:
     rows = []
     for reporte in reportes:
         datos = reporte["datos"]
         for fila in reporte["filas"]:
+            if fila.get("estado_laboral_label"):
+                rows.append(
+                    [
+                        datos["codigo"],
+                        datos["nombre"],
+                        datos["sucursal"],
+                        fila["fecha"].isoformat(),
+                        fila["estado_laboral_label"],
+                        "No aplica",
+                        "",
+                        0,
+                        fila.get("detalle_laboral", ""),
+                    ]
+                )
+                continue
             for incidencia in fila["incidencias"]:
                 rows.append(
                     [
@@ -140,6 +171,7 @@ def _build_reporte_asistencia(
 
     empleados = list(empleados_qs)
     empleado_ids = [empleado.id for empleado in empleados]
+    empleados_por_id = {empleado.id: empleado for empleado in empleados}
     fechas = _date_range(fecha_inicio, fecha_fin)
     inicio_dt, fin_dt = _localized_range(fecha_inicio, fecha_fin)
 
@@ -152,6 +184,7 @@ def _build_reporte_asistencia(
 
     incidencias = (
         IncidenciaAsistencia.objects.filter(empleado_id__in=empleado_ids, fecha__range=(fecha_inicio, fecha_fin))
+        .exclude(estado=IncidenciaAsistencia.ESTADO_RESUELTO)
         .select_related("empleado")
         .order_by("empleado__nombre", "fecha", "tipo")
     )
@@ -172,6 +205,9 @@ def _build_reporte_asistencia(
     )
 
     for incidencia in incidencias:
+        empleado = empleados_por_id.get(incidencia.empleado_id)
+        if empleado and _es_fecha_pre_ingreso(empleado, incidencia.fecha):
+            continue
         resumen = resumenes[incidencia.empleado_id]
         if incidencia.tipo == IncidenciaAsistencia.TIPO_FALTA:
             resumen["faltas"] += 1
@@ -233,6 +269,10 @@ def _build_reporte_asistencia(
         resumen = resumenes[empleado.id]
         filas = []
         for fecha in fechas:
+            if _es_fecha_pre_ingreso(empleado, fecha):
+                if empleado_especifico:
+                    filas.append(_build_fila_pre_ingreso(empleado, fecha))
+                continue
             incidencia_dia = incidencias_por_dia.get((empleado.id, fecha), [])
             total_incidencias += len(incidencia_dia)
             asistencia = asistencias_por_dia.get((empleado.id, fecha))

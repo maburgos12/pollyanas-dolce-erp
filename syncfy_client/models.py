@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 
@@ -42,6 +43,28 @@ class MovimientoBancario(models.Model):
     TIPO_CARGO = "cargo"
     TIPO_ABONO = "abono"
     TIPO_CHOICES = [(TIPO_CARGO, "Cargo"), (TIPO_ABONO, "Abono")]
+    CONCILIACION_CFDI = "cfdi"
+    CONCILIACION_INGRESO_FACTURADO = "ingreso_facturado"
+    CONCILIACION_TRASPASO = "traspaso_cuentas"
+    CONCILIACION_LINEA_CREDITO = "linea_credito"
+    CONCILIACION_TARJETA_CREDITO = "tarjeta_credito"
+    CONCILIACION_COMISION = "comision_bancaria"
+    CONCILIACION_FISCAL = "fiscal"
+    CONCILIACION_NOMINA = "nomina"
+    CONCILIACION_REVISION = "revision_operativa"
+    CONCILIACION_SOPORTE = "soporte"
+    CONCILIACION_CHOICES = [
+        (CONCILIACION_CFDI, "CFDI"),
+        (CONCILIACION_INGRESO_FACTURADO, "Ingreso facturado"),
+        (CONCILIACION_TRASPASO, "Traspaso entre cuentas"),
+        (CONCILIACION_LINEA_CREDITO, "Linea de credito"),
+        (CONCILIACION_TARJETA_CREDITO, "Tarjeta de credito"),
+        (CONCILIACION_COMISION, "Comision bancaria"),
+        (CONCILIACION_FISCAL, "Fiscal"),
+        (CONCILIACION_NOMINA, "Nomina"),
+        (CONCILIACION_REVISION, "Revision operativa"),
+        (CONCILIACION_SOPORTE, "Soporte sin CFDI"),
+    ]
 
     id_transaction = models.CharField(max_length=100, unique=True)
     cuenta = models.ForeignKey(CuentaBancaria, on_delete=models.CASCADE, related_name="movimientos")
@@ -60,6 +83,23 @@ class MovimientoBancario(models.Model):
         blank=True,
         related_name="movimientos_bancarios",
     )
+    tipo_conciliacion = models.CharField(max_length=30, choices=CONCILIACION_CHOICES, blank=True)
+    movimiento_relacionado = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="movimientos_relacionados",
+    )
+    nota_conciliacion = models.TextField(blank=True)
+    conciliado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="movimientos_conciliados",
+    )
+    conciliado_en = models.DateTimeField(null=True, blank=True)
     descargado_en = models.DateTimeField(auto_now_add=True)
 
     class Meta:

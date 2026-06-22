@@ -1,0 +1,21 @@
+/* Extracted from ventas/templates/ventas/pronostico_lista.html */
+.page-pronostico-ventas .forecast-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+  .page-pronostico-ventas .production-table-wrap .table thead th { background:#f5e6ed; color:#7b1a48; }
+  .page-pronostico-ventas .production-table-wrap .table tbody tr:nth-child(even) { background:#fdf2f6; }
+  .page-pronostico-ventas .saved-forecasts-wrap { --table-min-width:1480px; overflow-x:auto; padding-bottom:8px; }
+  .page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table { min-width:var(--table-min-width); table-layout:fixed; border-collapse:separate; border-spacing:0; }
+  .page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table th,
+  .page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table td { width:auto; min-width:0; vertical-align:middle; overflow-wrap:anywhere; word-break:normal; line-height:1.25; white-space:normal; text-align:left; }
+  .page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table th:nth-child(n+3),
+  .page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table td:nth-child(n+3) { width:auto; min-width:0; white-space:normal; text-align:left; }
+  .page-pronostico-ventas .saved-forecasts-table .forecast-number-cell,
+  .page-pronostico-ventas .saved-forecasts-table .forecast-date-cell { white-space:normal; overflow-wrap:normal; text-align:right; }
+  .page-pronostico-ventas .forecast-method-cell { font-size:0.92rem; color:#4f464b; word-break:break-word; }
+  .page-pronostico-ventas .forecast-user-cell { font-size:0.92rem; color:#4f464b; word-break:break-word; }
+  .page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table .forecast-actions-cell { width:280px; min-width:280px; white-space:normal; text-align:right; overflow:visible; }
+  .page-pronostico-ventas .forecast-row-actions { display:flex; justify-content:flex-end; align-items:center; gap:8px; flex-wrap:nowrap; }
+  .page-pronostico-ventas .forecast-row-actions form { display:inline-flex; margin:0; }
+  .page-pronostico-ventas .forecast-row-actions .btn { min-width:64px; }
+  @media (max-width: 900px) {
+    .page-pronostico-ventas .forecast-actions { justify-content:flex-start; }
+  }

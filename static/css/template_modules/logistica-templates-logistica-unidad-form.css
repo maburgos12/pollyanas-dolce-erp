@@ -1,0 +1,13 @@
+/* Extracted from logistica/templates/logistica/unidad_form.html */
+.unit-form-shell { display: grid; gap: 18px; max-width: 920px; }
+  .unit-form-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .unit-form-field { display: grid; gap: 6px; }
+  .unit-form-field label { font-weight: 800; color: var(--vino); }
+  .unit-form-field .is-required::after { content: " *"; color: #bc3b3b; }
+  .unit-form-error { color: #bc3b3b; font-size: 13px; font-weight: 700; }
+  .unit-form-check { display: inline-flex; gap: 8px; align-items: center; font-weight: 800; color: var(--vino); }
+  .unit-form-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+  @media (max-width: 760px) {
+    .unit-form-grid { grid-template-columns: 1fr; }
+    .unit-form-actions { flex-direction: column; }
+  }

@@ -1,0 +1,51 @@
+/* Extracted from rrhh/templates/rrhh/empleado_documentos.html */
+.docs-layout { display: grid; gap: 20px; }
+  .docs-card { background: #fff; border: 1px solid var(--rosa); border-radius: 12px; padding: 22px; }
+  .docs-card h2 { color: var(--vino); font-family: "Playfair Display", serif; font-size: 18px; margin: 0 0 16px; }
+
+  .emp-resumen { display: flex; gap: 24px; flex-wrap: wrap; }
+  .emp-resumen-item { font-size: 13px; color: var(--texto-light); }
+  .emp-resumen-item strong { color: var(--texto); display: block; font-size: 12px; font-weight: 900; text-transform: uppercase; }
+
+  .doc-tipo-list { display: grid; gap: 10px; }
+  .doc-tipo-row { border: 1px solid var(--rosa); border-radius: 8px; overflow: hidden; }
+  .doc-tipo-header {
+    align-items: center; background: var(--gris-suave); cursor: pointer;
+    display: flex; gap: 10px; padding: 12px 16px; user-select: none;
+  }
+  .doc-tipo-header:hover { background: var(--rosa-hover); }
+  .doc-tipo-icon { font-size: 18px; width: 26px; text-align: center; flex-shrink: 0; }
+  .doc-tipo-label { flex: 1; font-weight: 700; color: var(--texto); font-size: 14px; }
+  .doc-badge { font-size: 11px; font-weight: 900; border-radius: 999px; padding: 3px 10px; flex-shrink: 0; }
+  .doc-badge.ok { background: #e8f5e9; color: #2e7d32; }
+  .doc-badge.pendiente { background: #fff3e0; color: #bf360c; }
+  .doc-chevron { color: var(--texto-light); font-size: 11px; transition: transform .2s; flex-shrink: 0; }
+  .doc-tipo-row.open .doc-chevron { transform: rotate(180deg); }
+
+  .doc-tipo-body { display: none; padding: 16px; border-top: 1px solid var(--rosa); background: #fffafb; }
+  .doc-tipo-row.open .doc-tipo-body { display: block; }
+
+  .doc-saved-list { margin-bottom: 14px; display: grid; gap: 8px; }
+  .doc-saved-item {
+    align-items: center; background: #fff; border: 1px solid #e8d8e4;
+    border-radius: 6px; display: flex; gap: 12px; padding: 10px 14px;
+  }
+  .doc-saved-info { flex: 1; min-width: 0; }
+  .doc-saved-info strong { display: block; font-size: 13px; color: var(--texto); word-break: break-word; }
+  .doc-saved-info span { color: var(--texto-light); font-size: 12px; }
+  .doc-saved-link { color: var(--vino); font-size: 12px; font-weight: 700; text-decoration: none; }
+  .doc-saved-link:hover { text-decoration: underline; }
+
+  .doc-form { display: grid; gap: 12px; margin-top: 4px; }
+  .doc-form-row { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+  .banco-fields { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+  .doc-form-group label { color: var(--texto-light); display: block; font-size: 11px; font-weight: 900; margin-bottom: 4px; text-transform: uppercase; }
+  .doc-form-group input[type="text"],
+  .doc-form-group input[type="file"] { width: 100%; }
+  .doc-form-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .doc-form-divider { border: none; border-top: 1px dashed var(--rosa); margin: 6px 0; }
+
+  @media (max-width: 680px) {
+    .emp-resumen { gap: 12px; }
+    .doc-form-row, .banco-fields { grid-template-columns: 1fr; }
+  }

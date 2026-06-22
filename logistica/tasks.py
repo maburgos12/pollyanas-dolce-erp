@@ -4,21 +4,25 @@ from celery import shared_task
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
-from django.template.loader import render_to_string
+from django.db import transaction
 from django.utils import timezone
 from django.utils.html import strip_tags
 
-from core.access import group_name_variants
+from core.access import can_view_module, group_name_variants
+from core.email_rendering import render_email_to_string
 
 from .models import (
     BitacoraSalidaLlegada,
     ConfigAlertaFlota,
     DocumentoUnidad,
+    EventoRuta,
     LavadoUnidad,
     ReporteUnidad,
+    RutaEntrega,
     ServicioRealizadoUnidad,
     Unidad,
 )
+from .services_rutas_control import detectar_gps_perdido
 
 
 def _emails_de_grupo(nombre_grupo: str) -> list[str]:
@@ -29,6 +33,16 @@ def _emails_de_grupo(nombre_grupo: str) -> list[str]:
         .values_list("email", flat=True)
         .distinct()
     )
+
+
+def _emails_con_acceso_modulo(modulo: str) -> list[str]:
+    usuarios = (
+        get_user_model()
+        .objects.filter(is_active=True)
+        .exclude(email__isnull=True)
+        .exclude(email="")
+    )
+    return sorted({usuario.email for usuario in usuarios if can_view_module(usuario, modulo)})
 
 
 def _emails_de_usuarios(usuarios) -> list[str]:
@@ -45,6 +59,30 @@ def _from_email() -> str:
 
 
 @shared_task
+def detectar_gps_perdido_rutas(umbral_minutos: int = 10):
+    fecha = timezone.localdate()
+    rutas = RutaEntrega.objects.filter(
+        fecha_ruta=fecha,
+        estatus=RutaEntrega.ESTATUS_EN_RUTA,
+    ).order_by("id")
+    revisadas = rutas.count()
+    eventos = []
+
+    for ruta in rutas:
+        with transaction.atomic():
+            ruta_bloqueada = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
+            evento = detectar_gps_perdido(ruta_bloqueada, umbral_minutos=umbral_minutos)
+        if evento:
+            eventos.append(evento.id)
+
+    return {
+        "fecha": fecha.isoformat(),
+        "rutas_revisadas": revisadas,
+        "eventos_gps_perdido": len(set(eventos)),
+    }
+
+
+@shared_task
 def notificar_reporte_nuevo(reporte_id):
     try:
         reporte = ReporteUnidad.objects.select_related("unidad", "repartidor__user").get(pk=reporte_id)
@@ -55,7 +93,7 @@ def notificar_reporte_nuevo(reporte_id):
         "reporte": reporte,
         "ticket_url": f"/logistica/tickets/?ticket={reporte.id}",
     }
-    html_message = render_to_string("logistica/emails/reporte_nuevo.html", context)
+    html_message = render_email_to_string("logistica/emails/reporte_nuevo.html", context)
     plain_message = strip_tags(html_message)
     from_email = _from_email()
 
@@ -89,6 +127,36 @@ def notificar_reporte_nuevo(reporte_id):
 
 
 @shared_task
+def notificar_desvio_ruta_automatico(evento_id):
+    try:
+        evento = EventoRuta.objects.select_related("ruta__repartidor__user", "ruta__unidad_operativa").get(pk=evento_id)
+    except EventoRuta.DoesNotExist:
+        return {"enviado": False, "motivo": "evento_no_encontrado", "evento_id": evento_id}
+
+    context = {
+        "evento": evento,
+        "control_url": "/logistica/rutas/control/",
+    }
+    html_message = render_email_to_string("logistica/emails/desvio_ruta.html", context)
+    plain_message = strip_tags(html_message)
+    from_email = _from_email()
+
+    destinatarios = sorted(set(_emails_de_grupo("dg")) | set(_emails_con_acceso_modulo("logistica")))
+    if not destinatarios:
+        return {"enviado": False, "motivo": "sin_destinatarios", "evento_id": evento.id}
+
+    send_mail(
+        subject=f"Desvío de ruta detectado · {evento.ruta.folio}",
+        message=plain_message,
+        from_email=from_email,
+        recipient_list=destinatarios,
+        html_message=html_message,
+        fail_silently=False,
+    )
+    return {"enviado": True, "destinatarios": len(destinatarios), "evento_id": evento.id}
+
+
+@shared_task
 def escalar_tickets_sin_respuesta():
     limite = timezone.now() - timedelta(hours=2)
     tickets = ReporteUnidad.objects.select_related("unidad", "repartidor__user").filter(
@@ -103,7 +171,7 @@ def escalar_tickets_sin_respuesta():
 
     dg_emails = _emails_de_grupo("dg")
     if dg_emails:
-        html_message = render_to_string("logistica/emails/escalado.html", {"tickets": tickets})
+        html_message = render_email_to_string("logistica/emails/escalado.html", {"tickets": tickets})
         send_mail(
             subject="Escalado de tickets de logística sin respuesta",
             message=strip_tags(html_message),
@@ -146,7 +214,7 @@ def alertar_documentos_por_vencer():
                 vigente=True,
             )
             for documento in documentos:
-                html_message = render_to_string(
+                html_message = render_email_to_string(
                     "logistica/emails/alerta_documento.html",
                     {
                         "documento": documento,
@@ -155,9 +223,9 @@ def alertar_documentos_por_vencer():
                     },
                 )
                 subject = (
-                    f"🚨 VENCE HOY — {documento.unidad.codigo} · {documento.get_tipo_display()}"
+                    f"VENCE HOY - {documento.unidad.codigo} · {documento.get_tipo_display()}"
                     if dias == 0
-                    else f"⚠️ Documento por vencer — {documento.unidad.codigo} · {documento.get_tipo_display()} · {dias} días"
+                    else f"Documento por vencer - {documento.unidad.codigo} · {documento.get_tipo_display()} · {dias} días"
                 )
                 send_mail(
                     subject=subject,
@@ -191,7 +259,7 @@ def alertar_servicios_proximos():
             proxima_fecha=fecha_objetivo
         )
         for servicio in servicios:
-            html_message = render_to_string(
+            html_message = render_email_to_string(
                 "logistica/emails/alerta_servicio.html",
                 {
                     "servicio": servicio,
@@ -202,9 +270,9 @@ def alertar_servicios_proximos():
                 },
             )
             subject = (
-                f"🔧 SERVICIO HOY — {servicio.unidad.codigo} · {servicio.tipo_servicio.nombre}"
+                f"SERVICIO HOY - {servicio.unidad.codigo} · {servicio.tipo_servicio.nombre}"
                 if dias == 0
-                else f"🔧 Servicio próximo — {servicio.unidad.codigo} · {servicio.tipo_servicio.nombre} · en {dias} días"
+                else f"Servicio próximo - {servicio.unidad.codigo} · {servicio.tipo_servicio.nombre} · en {dias} días"
             )
             send_mail(
                 subject=subject,
@@ -234,7 +302,7 @@ def alertar_servicios_proximos():
             continue
 
         vencido = km_actual >= servicio.proximos_km
-        html_message = render_to_string(
+        html_message = render_email_to_string(
             "logistica/emails/alerta_servicio.html",
             {
                 "servicio": servicio,
@@ -245,9 +313,9 @@ def alertar_servicios_proximos():
             },
         )
         subject = (
-            f"🔧 Servicio VENCIDO por km — {servicio.unidad.codigo} · {servicio.tipo_servicio.nombre}"
+            f"Servicio VENCIDO por km - {servicio.unidad.codigo} · {servicio.tipo_servicio.nombre}"
             if vencido
-            else f"🔧 Servicio próximo por km — {servicio.unidad.codigo} · {servicio.tipo_servicio.nombre}"
+            else f"Servicio próximo por km - {servicio.unidad.codigo} · {servicio.tipo_servicio.nombre}"
         )
         send_mail(
             subject=subject,
@@ -282,7 +350,7 @@ def alertar_lavados_pendientes():
             continue
 
         dias_sin_lavar = (hoy - ultimo_lavado.fecha).days if ultimo_lavado else None
-        html_message = render_to_string(
+        html_message = render_email_to_string(
             "logistica/emails/alerta_lavado.html",
             {
                 "unidad": unidad,
@@ -291,9 +359,9 @@ def alertar_lavados_pendientes():
             },
         )
         subject = (
-            f"🚿 Lavado pendiente — {unidad.codigo} · {dias_sin_lavar} días sin lavar"
+            f"Lavado pendiente - {unidad.codigo} · {dias_sin_lavar} días sin lavar"
             if ultimo_lavado
-            else f"🚿 Sin registro de lavado — {unidad.codigo}"
+            else f"Sin registro de lavado - {unidad.codigo}"
         )
         send_mail(
             subject=subject,

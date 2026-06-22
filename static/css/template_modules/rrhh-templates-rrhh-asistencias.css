@@ -1,0 +1,7 @@
+/* Extracted from rrhh/templates/rrhh/asistencias.html */
+.ch-panel { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 18px; }
+  .ch-filters { display: grid; grid-template-columns: 170px minmax(220px, 1fr) auto auto; gap: 10px; align-items: end; }
+  .ch-table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  .ch-table th, .ch-table td { border-bottom: 1px solid var(--rosa); padding: 10px; text-align: left; }
+  .ch-table th { color: var(--vino); font-size: 12px; text-transform: uppercase; }
+  @media (max-width: 760px) { .ch-filters { grid-template-columns: 1fr; } }

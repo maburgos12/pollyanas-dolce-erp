@@ -136,7 +136,7 @@
           <div class="investment-chart-card investment-chart-card--summary">
             <h3 class="investment-panel-title">Avance de recuperación</h3>
             <div class="investment-progress">
-              <div class="investment-progress-bar" style="width: {{ kpis.recovery_progress_pct|floatformat:2 }}%;"></div>
+              <div class="investment-progress-bar pd-js-width" data-pd-width="{{ kpis.recovery_progress_pct|floatformat:2 }}%"></div>
             </div>
             <div class="investment-progress-meta">
               <span>{{ kpis.recovery_pct|floatformat:2|intcomma }}% recuperado</span>
@@ -293,7 +293,7 @@
               <label for="exp_proveedor_nombre">Proveedor</label>
               <input id="exp_proveedor_nombre" type="text" name="proveedor_nombre">
             </div>
-            <div class="investment-field" style="grid-column:1 / -1;">
+            <div class="investment-field pd-u-804ac9edc8">
               <label for="exp_descripcion">Descripción</label>
               <input id="exp_descripcion" type="text" name="descripcion" required>
             </div>
@@ -386,7 +386,7 @@
             <button class="investment-button" type="submit">Guardar pago</button>
           </div>
         </form>
-        <div class="investment-table-wrap" style="margin-top:1rem;">
+        <div class="investment-table-wrap pd-u-0cf8f93b0e">
           <table class="investment-table">
             <thead>
               <tr>
@@ -475,7 +475,7 @@
             <button class="investment-button" type="submit">Guardar escenario</button>
           </div>
         </form>
-        <div class="investment-table-wrap" style="margin-top:1rem;">
+        <div class="investment-table-wrap pd-u-0cf8f93b0e">
           <table class="investment-table">
             <thead>
               <tr>
@@ -546,7 +546,7 @@
               <label for="close_fecha_cierre">Fecha cierre</label>
               <input id="close_fecha_cierre" type="date" name="fecha_cierre" value="{{ today|date:'Y-m-d' }}">
             </div>
-            <div class="investment-field" style="grid-column:1 / -1;">
+            <div class="investment-field pd-u-804ac9edc8">
               <label for="close_motivo_cierre">Motivo</label>
               <textarea id="close_motivo_cierre" name="motivo_cierre" placeholder="Razón ejecutiva para cierre manual del proyecto."></textarea>
             </div>

@@ -460,6 +460,21 @@ class Command(BaseCommand):
             },
         )
 
+        gps_perdido_interval, _ = IntervalSchedule.objects.get_or_create(
+            every=5,
+            period=IntervalSchedule.MINUTES,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="logistica: detectar GPS perdido rutas activas",
+            defaults={
+                "task": "logistica.tasks.detectar_gps_perdido_rutas",
+                "interval": gps_perdido_interval,
+                "crontab": None,
+                "kwargs": json.dumps({"umbral_minutos": 10}),
+                "enabled": True,
+            },
+        )
+
         recipes_cron, _ = CrontabSchedule.objects.get_or_create(
             minute="0",
             hour="3",

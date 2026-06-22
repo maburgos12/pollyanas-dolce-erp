@@ -4,7 +4,7 @@ from .recetas import (
     receta_sync_point,
     costeo_dashboard, costeo_dashboard_snapshot, costeo_simulador_draft_detail,
     costeo_simulador_draft_save, costeo_simulador_insumos_search, monitor_margenes,
-    monitor_margenes_precio_sugerido,
+    monitor_margenes_politicas_precio, monitor_margenes_precio_sugerido,
     receta_composition_json, receta_create, receta_detail, receta_update, receta_delete,
     receta_sync_derivados, receta_versiones_export, receta_copy_lineas,
     linea_edit, linea_create, linea_delete, linea_apply_direct_base_replacement,
@@ -28,6 +28,8 @@ from .plan import (
     _resolve_sucursal_for_sales, _ui_to_model_alcance,
     # public views
     forecast_preview_export, forecast_supply_export, forecast_vs_solicitud_export, forecast_backtest_export,
+    calculo_insumos_plantilla, calculo_insumos_guardar, calculo_insumos_calcular, calculo_insumos_importar,
+    calculo_insumos_desde_proyeccion, calculo_insumos_limpiar, calculo_insumos_export,
     pronosticos_descargar_plantilla, pronosticos_importar,
     ventas_historicas_descargar_plantilla, ventas_historicas_importar,
     solicitud_ventas_descargar_plantilla, solicitud_ventas_guardar,

@@ -1,6 +1,7 @@
 import json
 from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -10,7 +11,7 @@ from core.access import ROLE_RRHH, ROLE_VENTAS
 from core.navigation import NAV_GROUPS
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointDailySale, PointProduct
-from rrhh.models import Empleado, NominaLinea, NominaPeriodo, PermisoSalida
+from rrhh.models import Empleado, HoraExtra, NominaLinea, NominaPeriodo, PermisoSalida
 
 from .models import BonoVentasEmpleado, ConfigBonoVentasPeriodo, RegistroDiarioVentas, VentaCategoriaSucursal
 from .services import sync_ventas_categorias
@@ -118,6 +119,10 @@ class BonosVentasTests(TestCase):
         self.assertIn("Teclea nombre o apellido", content)
         self.assertIn("Vista previa tamaño carta", content)
         self.assertIn("Imprimir / PDF", content)
+        self.assertIn("label:'Sucursal',value:contextLabel", content)
+        self.assertNotIn("Monto calculado", content)
+        self.assertIn("grid-template-columns:repeat(2,minmax(0,1fr))", content)
+        self.assertIn("margin:28px auto 0", content)
         self.assertIn("Permiso ${lastPermiso.folio} registrado", content)
         self.assertIn("Imprimir / guardar PDF", content)
         self.assertIn("Sincronizar repartidores", content)
@@ -153,7 +158,7 @@ class BonosVentasTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-ventas-pwa-v11", sw_content)
+        self.assertIn("pollyanas-bonos-ventas-pwa-v16", sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-ventas/dashboard/")', sw_content)
 
     def test_api_ventas_acepta_post_con_sesion_y_csrf(self):
@@ -172,24 +177,31 @@ class BonosVentasTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
 
-    def test_recalcular_presentacion_usa_dias_laborables_como_base_de_asistencia(self):
+    def test_recalcular_periodo_parcial_no_castiga_dias_futuros(self):
         sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
         empleado = Empleado.objects.create(nombre="Empleado Ventas", area="VENTAS")
-        periodo = ConfigBonoVentasPeriodo.objects.create(mes=5, anio=2026, dias_laborables=23)
+        periodo = ConfigBonoVentasPeriodo.objects.create(
+            mes=6,
+            anio=2026,
+            dias_laborables=31,
+            fecha_inicio=date(2026, 5, 28),
+            fecha_fin=date(2026, 6, 27),
+        )
         bono = BonoVentasEmpleado.objects.create(
             periodo=periodo,
             empleado=empleado,
             sucursal=sucursal,
-            dias_trabajados=15,
-            dias_asistencia=15,
-            dias_uniforme=15,
-            dias_puntualidad=15,
+            dias_trabajados=10,
+            dias_asistencia=10,
+            dias_uniforme=10,
+            dias_puntualidad=10,
         )
 
-        bono.recalcular()
+        with patch("bonos_ventas.models.timezone.localdate", return_value=date(2026, 6, 11)):
+            bono.recalcular()
 
-        self.assertFalse(bono.pasa_asistencia)
-        self.assertEqual(bono.sub1, Decimal("0.00"))
+        self.assertTrue(bono.pasa_asistencia)
+        self.assertEqual(bono.sub1, Decimal("225.00"))
 
     def test_una_falta_cancela_bono_ventas_con_limite_cero(self):
         sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
@@ -497,3 +509,90 @@ class BonosVentasTests(TestCase):
         self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_PREAUTORIZADO)
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_APROBADO)
         self.assertEqual(permiso.autorizado_jefe_por, user)
+
+    def test_horas_extra_ventas_crea_y_autoriza_en_rrhh(self):
+        Empleado.objects.all().delete()
+        user = get_user_model().objects.create_user(username="jefe-ventas-he")
+        user.groups.add(Group.objects.get_or_create(name=ROLE_VENTAS)[0])
+        user.groups.add(Group.objects.get_or_create(name=ROLE_RRHH)[0])
+        self.client.force_login(user)
+        sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
+        periodo = ConfigBonoVentasPeriodo.objects.create(mes=5, anio=2026)
+        jefe = Empleado.objects.create(nombre="Jefe Ventas HE", departamento=Empleado.DEP_VENTAS, usuario_erp=user)
+        empleado = Empleado.objects.create(
+            nombre="Empleado Ventas HE",
+            area="VENTAS",
+            sucursal="Payán",
+            jefe_directo=jefe,
+            salario_diario=Decimal("400.00"),
+        )
+        BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal)
+
+        creado = self.client.post(
+            "/api/bonos-ventas/horas-extra/",
+            json.dumps(
+                {
+                    "empleado": empleado.id,
+                    "mes": 5,
+                    "anio": 2026,
+                    "sucursal": sucursal.id,
+                    "fecha": "2026-05-20",
+                    "horas": "1.50",
+                    "notas": "Cierre de sucursal",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(creado.status_code, 201)
+        hora_extra = HoraExtra.objects.get(pk=creado.json()["id"])
+        self.assertEqual(hora_extra.empleado, empleado)
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_PENDIENTE)
+        self.assertEqual(hora_extra.jefe_directo, user)
+        self.assertTrue(creado.json()["puede_autorizar"])
+        self.assertTrue(creado.json()["puede_editar"])
+        self.assertTrue(creado.json()["puede_eliminar"])
+
+        corregido = self.client.post(
+            f"/api/bonos-ventas/horas-extra/{hora_extra.id}/editar/",
+            json.dumps(
+                {
+                    "fecha": "2026-05-21",
+                    "horas": "2.00",
+                    "notas": "Cierre corregido",
+                    "motivo_cambio": "Faltaba media hora",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(corregido.status_code, 200)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.fecha.isoformat(), "2026-05-21")
+        self.assertEqual(hora_extra.horas, Decimal("2.00"))
+        self.assertIn("Faltaba media hora", hora_extra.notas)
+
+        hora_cancelada = HoraExtra.objects.create(
+            empleado=empleado,
+            fecha="2026-05-22",
+            horas=Decimal("1.00"),
+            jefe_directo=user,
+            notas="Duplicada",
+        )
+        eliminado = self.client.post(
+            f"/api/bonos-ventas/horas-extra/{hora_cancelada.id}/eliminar/",
+            json.dumps({"motivo_cambio": "Solicitud duplicada"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(eliminado.status_code, 200)
+        hora_cancelada.refresh_from_db()
+        self.assertEqual(hora_cancelada.estado, HoraExtra.ESTADO_CANCELADO)
+
+        autorizado = self.client.post(f"/api/bonos-ventas/horas-extra/{hora_extra.id}/autorizar/")
+
+        self.assertEqual(autorizado.status_code, 200)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_AUTORIZADO)
+        self.assertEqual(hora_extra.autorizado_por, user)
+        self.assertEqual(hora_extra.monto_calculado, Decimal("200.00"))

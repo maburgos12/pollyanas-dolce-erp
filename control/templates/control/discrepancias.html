@@ -49,7 +49,7 @@
     {% if enterprise_focus %}
       <input type="hidden" name="enterprise_focus" value="{{ enterprise_focus }}">
     {% endif %}
-    <div class="grid-filters" style="display:grid;grid-template-columns:1.1fr 1fr 1fr 1fr 1fr auto;gap:10px;align-items:end;">
+    <div class="grid-filters pd-u-b867b214c9">
       <div>
         <label>Periodo (YYYY-MM)</label>
         <input type="text" name="periodo" placeholder="2026-02" value="{{ periodo }}">
@@ -103,7 +103,7 @@
 
 <section class="card">
   <div class="card-header">Foco operativo</div>
-  <div class="enterprise-pill-grid enterprise-pill-grid-compact" style="margin-bottom:12px;">
+  <div class="enterprise-pill-grid enterprise-pill-grid-compact pd-u-3ef1fa1aa1">
     {% for card in focus_cards %}
       <article class="enterprise-pill tone-{{ card.tone|default:'neutral' }}{% if card.active %} active{% endif %}">
         <div class="enterprise-pill-title">{{ card.label }}</div>
@@ -126,7 +126,7 @@
 
 <section class="card">
   <div class="card-header">Discrepancias del corte · {{ report.semaforo_global }}</div>
-  <div class="muted" style="margin-bottom:12px;">
+  <div class="muted pd-u-3ef1fa1aa1">
     Producción {{ report.totals.produccion|floatformat:2|intcomma }} ·
     ventas POS {{ report.totals.ventas_pos|floatformat:2|intcomma }} ·
     mermas POS {{ report.totals.mermas_pos|floatformat:2|intcomma }}

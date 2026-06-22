@@ -1,4 +1,5 @@
 from django.contrib.auth.models import Group, User
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import TestCase, override_settings
@@ -19,10 +20,13 @@ from rrhh.models import (
     EmpleadoBaja,
     EmpleadoIdentidadPendiente,
     HoraExtra,
+    IncidenciaAsistencia,
+    IncapacidadEmpleado,
     NominaConceptoLinea,
     NominaImportacion,
     NominaLinea,
     NominaPeriodo,
+    MovimientoVacaciones,
     PlantillaAutorizada,
     PermisoSalida,
     PoliticaVacaciones,
@@ -85,6 +89,188 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertEqual(saldo["reservado"], Decimal("0"))
         self.assertEqual(saldo["disponible"], Decimal("7.00"))
 
+    def test_incapacidad_bloquea_vacaciones_traslapadas(self):
+        from datetime import date
+
+        rrhh_user = User.objects.create_user(username="paula", is_superuser=True, is_staff=True)
+        empleado = Empleado.objects.create(
+            nombre="Colaborador Incapacidad",
+            fecha_ingreso=date(2025, 1, 1),
+            activo=True,
+        )
+        PoliticaVacaciones.objects.create(
+            antiguedad_desde=1,
+            antiguedad_hasta=5,
+            dias_laborables=Decimal("12.00"),
+            vigente_desde=date(2026, 1, 1),
+        )
+        incidencia = IncidenciaAsistencia.objects.create(
+            empleado=empleado,
+            fecha=date(2026, 6, 16),
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+            severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+            detalle="Falta antes de capturar incapacidad.",
+        )
+
+        self.client.force_login(rrhh_user)
+        response = self.client.post(
+            reverse("rrhh:rrhh_incapacidad_crear"),
+            {
+                "empleado": empleado.id,
+                "fecha_inicio": "2026-06-15",
+                "fecha_fin": "2026-06-20",
+                "tipo": IncapacidadEmpleado.TIPO_ENFERMEDAD_GENERAL,
+                "folio": "IMSS-1",
+                "estado": IncapacidadEmpleado.ESTADO_ACTIVA,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(IncapacidadEmpleado.objects.count(), 1)
+        incidencia.refresh_from_db()
+        self.assertEqual(incidencia.estado, IncidenciaAsistencia.ESTADO_RESUELTO)
+
+        response = self.client.post(
+            reverse("rrhh:rrhh_vacaciones_list"),
+            {
+                "action": "crear",
+                "empleado_id": empleado.id,
+                "fecha_inicio": "2026-06-16",
+                "fecha_fin": "2026-06-18",
+                "motivo": "Cruza incapacidad",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(SolicitudVacaciones.objects.filter(empleado=empleado).exists())
+        response = self.client.get(reverse("rrhh:rrhh_incapacidades"))
+        self.assertContains(response, "IMSS-1")
+
+    def test_incapacidades_exigen_permiso_de_nomina(self):
+        vacaciones_user = User.objects.create_user(username="vacaciones-viewer")
+        nomina_user = User.objects.create_user(username="nomina-viewer")
+        UserModuleAccess.objects.create(
+            user=vacaciones_user,
+            module="rrhh.vacaciones",
+            access=UserModuleAccess.ACCESS_MANAGE,
+        )
+        UserModuleAccess.objects.create(
+            user=nomina_user,
+            module="rrhh.nomina",
+            access=UserModuleAccess.ACCESS_VIEW,
+        )
+
+        self.client.force_login(vacaciones_user)
+        self.assertEqual(self.client.get(reverse("rrhh:rrhh_incapacidades")).status_code, 403)
+
+        self.client.force_login(nomina_user)
+        response = self.client.get(reverse("rrhh:rrhh_incapacidades"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Alta de incapacidad")
+
+    def test_cancelar_incapacidad_futura_no_crea_faltas_futuras(self):
+        from datetime import date
+
+        rrhh_user = User.objects.create_user(username="paula", is_superuser=True, is_staff=True)
+        empleado = Empleado.objects.create(
+            nombre="Colaborador Incapacidad Futura",
+            fecha_ingreso=date(2025, 1, 1),
+            activo=True,
+        )
+        incapacidad = IncapacidadEmpleado.objects.create(
+            empleado=empleado,
+            fecha_inicio=date(2026, 7, 1),
+            fecha_fin=date(2026, 7, 5),
+            tipo=IncapacidadEmpleado.TIPO_ENFERMEDAD_GENERAL,
+            folio="IMSS-FUTURA",
+        )
+
+        self.client.force_login(rrhh_user)
+        with patch("rrhh.views_incapacidades.timezone.localdate", return_value=date(2026, 6, 16)):
+            response = self.client.post(
+                reverse("rrhh:rrhh_incapacidad_cancelar", args=[incapacidad.id]),
+                {"comentario_cancelacion": "Captura futura cancelada."},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(IncidenciaAsistencia.objects.filter(empleado=empleado).exists())
+
+    def test_incapacidad_rechaza_traslape_y_cancelada_no_bloquea(self):
+        from datetime import date
+
+        empleado = Empleado.objects.create(
+            nombre="Colaborador Duplicado Incapacidad",
+            fecha_ingreso=date(2025, 1, 1),
+            activo=True,
+        )
+        incapacidad = IncapacidadEmpleado.objects.create(
+            empleado=empleado,
+            fecha_inicio=date(2026, 6, 15),
+            fecha_fin=date(2026, 6, 20),
+            tipo=IncapacidadEmpleado.TIPO_ENFERMEDAD_GENERAL,
+            folio="IMSS-2",
+        )
+        duplicada = IncapacidadEmpleado(
+            empleado=empleado,
+            fecha_inicio=date(2026, 6, 18),
+            fecha_fin=date(2026, 6, 22),
+            tipo=IncapacidadEmpleado.TIPO_RIESGO_TRABAJO,
+            folio="IMSS-3",
+        )
+        with self.assertRaises(ValidationError):
+            duplicada.full_clean()
+
+        incapacidad.estado = IncapacidadEmpleado.ESTADO_CANCELADA
+        incapacidad.comentario_cancelacion = "Captura duplicada."
+        incapacidad.save(update_fields=["estado", "comentario_cancelacion", "actualizado_en"])
+
+        duplicada.full_clean()
+        duplicada.save()
+        self.assertEqual(IncapacidadEmpleado.objects.filter(estado=IncapacidadEmpleado.ESTADO_ACTIVA).count(), 1)
+
+    def test_vacaciones_respeta_descansos_oficiales_moviles_lft(self):
+        from datetime import date
+
+        from rrhh.services_vacaciones import contar_dias_laborables, es_dia_laborable
+
+        self.assertFalse(es_dia_laborable(date(2026, 2, 2)))
+        self.assertTrue(es_dia_laborable(date(2026, 2, 5)))
+        self.assertFalse(es_dia_laborable(date(2026, 3, 16)))
+        self.assertFalse(es_dia_laborable(date(2026, 11, 16)))
+        self.assertEqual(contar_dias_laborables(date(2026, 2, 2), date(2026, 2, 6)), Decimal("4"))
+
+    def test_vacaciones_usa_antiguedad_a_fecha_inicio(self):
+        from datetime import date
+
+        from rrhh.services_vacaciones import crear_solicitud_vacaciones, saldo_vacaciones_empleado
+
+        rrhh_user = User.objects.create_user(username="paula")
+        empleado = Empleado.objects.create(
+            nombre="Colaborador Aniversario Futuro",
+            fecha_ingreso=date(2025, 12, 1),
+            activo=True,
+        )
+        PoliticaVacaciones.objects.create(
+            antiguedad_desde=1,
+            antiguedad_hasta=5,
+            dias_laborables=Decimal("12.00"),
+            vigente_desde=date(2026, 1, 1),
+        )
+
+        with patch("rrhh.services_vacaciones.timezone.localdate", return_value=date(2026, 6, 16)):
+            solicitud = crear_solicitud_vacaciones(
+                empleado=empleado,
+                fecha_inicio=date(2026, 12, 2),
+                fecha_fin=date(2026, 12, 4),
+                motivo="Descanso al cumplir aniversario",
+                actor=rrhh_user,
+            )
+
+        self.assertEqual(solicitud.dias_laborables, Decimal("3"))
+        saldo = saldo_vacaciones_empleado(empleado, periodo_anio=2026, al=date(2026, 12, 2))
+        self.assertEqual(saldo["generado"], Decimal("12.00"))
+        self.assertEqual(saldo["reservado"], Decimal("3"))
+
     def test_jefe_crea_y_preautoriza_vacaciones_de_equipo(self):
         from datetime import date
 
@@ -132,6 +318,43 @@ class CapitalHumanoServiceTests(TestCase):
         solicitud.refresh_from_db()
         self.assertEqual(solicitud.estado, SolicitudVacaciones.ESTADO_PREAUTORIZADA)
         self.assertEqual(solicitud.preautorizado_por, jefe_user)
+
+    def test_vacaciones_administrativas_las_preautoriza_dg(self):
+        from datetime import date
+        from rrhh.services_vacaciones import crear_solicitud_vacaciones, preautorizar_solicitud_vacaciones_jefe
+
+        dg_user = User.objects.create_user(username="mauricio")
+        dg_user.groups.add(Group.objects.create(name="DG"))
+        rrhh_user = User.objects.create_user(username="paula")
+        rrhh_user.groups.add(Group.objects.create(name="RRHH"))
+        empleada = Empleado.objects.create(
+            nombre="YESENIA SOTO INZUNZA",
+            departamento=Empleado.DEP_ADMINISTRACION,
+            puesto="Responsable Administracion",
+            fecha_ingreso=date(2025, 1, 1),
+            activo=True,
+        )
+        PoliticaVacaciones.objects.create(
+            antiguedad_desde=1,
+            antiguedad_hasta=5,
+            dias_laborables=Decimal("12.00"),
+            vigente_desde=date(2026, 1, 1),
+        )
+
+        solicitud = crear_solicitud_vacaciones(
+            empleado=empleada,
+            fecha_inicio=date(2026, 6, 15),
+            fecha_fin=date(2026, 6, 19),
+            motivo="Descanso administrativo",
+            actor=rrhh_user,
+        )
+
+        self.assertEqual(solicitud.jefe_directo, dg_user)
+
+        preautorizar_solicitud_vacaciones_jefe(solicitud, dg_user, aprobar=True)
+        solicitud.refresh_from_db()
+        self.assertEqual(solicitud.estado, SolicitudVacaciones.ESTADO_PREAUTORIZADA)
+        self.assertEqual(solicitud.preautorizado_por, dg_user)
 
     def test_reglamento_interno_renderiza_reglas_vacaciones(self):
         reglamento = ReglamentoLaboral.objects.create(
@@ -186,7 +409,7 @@ class CapitalHumanoServiceTests(TestCase):
         response = self.client.get(reverse("rrhh:rrhh_vacaciones_list"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Solicitud de vacaciones")
+        self.assertContains(response, "Vacaciones")
         self.assertNotContains(response, "Ver reglamento interno")
 
     def test_vacaciones_list_expone_puesto_del_empleado_en_selector(self):
@@ -212,6 +435,86 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertContains(response, 'data-puesto-operativo="CAJAS"')
         self.assertContains(response, 'data-departamento="Ventas"')
         self.assertContains(response, "El puesto y área aparecerán automáticamente.")
+
+    def test_vacaciones_list_muestra_saldos_e_historial(self):
+        from datetime import date
+
+        rrhh_user = User.objects.create_user(username="paula", is_superuser=True, is_staff=True)
+        empleado = Empleado.objects.create(
+            nombre="Carolina Cayetano",
+            fecha_ingreso=date(2025, 1, 1),
+            activo=True,
+            puesto="Jefa de Produccion",
+            sucursal="CEDIS",
+        )
+        PoliticaVacaciones.objects.create(
+            antiguedad_desde=1,
+            antiguedad_hasta=5,
+            dias_laborables=Decimal("12.00"),
+            vigente_desde=date(2026, 1, 1),
+        )
+        MovimientoVacaciones.objects.create(
+            empleado=empleado,
+            tipo=MovimientoVacaciones.TIPO_AJUSTE,
+            dias=Decimal("7.00"),
+            periodo_anio=2025,
+            descripcion="[saldo-inicial-vacaciones-20260616] pendiente de goce 2025",
+        )
+
+        self.client.force_login(rrhh_user)
+        with patch("rrhh.views.timezone.localdate", return_value=date(2026, 6, 16)), patch(
+            "rrhh.services_vacaciones.timezone.localdate", return_value=date(2026, 6, 16)
+        ):
+            response = self.client.get(reverse("rrhh:rrhh_vacaciones_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Saldos e historial")
+        self.assertContains(response, "Fecha límite legal")
+        self.assertContains(response, "Goce anterior")
+        self.assertContains(response, "Ajuste manual")
+        self.assertContains(response, "Carolina Cayetano")
+
+    def test_vacaciones_historial_filtra_y_concilia_saldo(self):
+        from datetime import date
+
+        rrhh_user = User.objects.create_user(username="paula", is_superuser=True, is_staff=True)
+        empleado = Empleado.objects.create(
+            nombre="Carolina Cayetano",
+            fecha_ingreso=date(2025, 1, 1),
+            activo=True,
+            puesto="Jefa de Produccion",
+            sucursal="CEDIS",
+        )
+        PoliticaVacaciones.objects.create(
+            antiguedad_desde=1,
+            antiguedad_hasta=5,
+            dias_laborables=Decimal("12.00"),
+            vigente_desde=date(2026, 1, 1),
+        )
+
+        self.client.force_login(rrhh_user)
+        response = self.client.get(reverse("rrhh:rrhh_vacaciones_list"), {"q": "nadie"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Sin empleados para esos filtros.")
+
+        response = self.client.post(
+            reverse("rrhh:rrhh_vacaciones_list"),
+            {
+                "action": "ajustar_saldo",
+                "empleado_id": empleado.id,
+                "periodo_anio": "2026",
+                "dias_ajuste": "-2",
+                "descripcion": "Corrección por pago timbrado",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        movimiento = MovimientoVacaciones.objects.get(empleado=empleado)
+        self.assertEqual(movimiento.tipo, MovimientoVacaciones.TIPO_AJUSTE)
+        self.assertEqual(movimiento.dias, Decimal("-2.00"))
+        self.assertEqual(movimiento.periodo_anio, 2026)
+        self.assertEqual(movimiento.actor, rrhh_user)
+        self.assertIn("[conciliacion-manual] Corrección por pago timbrado", movimiento.descripcion)
 
     def test_permiso_de_jefatura_lo_resuelve_direccion_no_rrhh(self):
         from datetime import datetime
@@ -679,6 +982,42 @@ class CapitalHumanoAPITests(TestCase):
         self.assertEqual(hora_extra.autorizado_por, jefe_user)
         self.assertIsNotNone(hora_extra.fecha_autorizacion_jefe)
         self.assertEqual(hora_extra.monto_calculado, Decimal("200.00"))
+
+    def test_hora_extra_administrativa_la_autoriza_dg(self):
+        dg_user = User.objects.create_user(username="mauricio", password="pass123")
+        dg_user.groups.add(Group.objects.create(name="DG"))
+        empleado_user = User.objects.create_user(
+            username="yesenia.soto",
+            email="yesenia@example.com",
+            password="pass123",
+        )
+        empleada = Empleado.objects.create(
+            nombre="YESENIA SOTO INZUNZA",
+            email="yesenia@example.com",
+            departamento=Empleado.DEP_ADMINISTRACION,
+            puesto="Responsable Administracion",
+            salario_diario="800.00",
+        )
+        self.client.force_authenticate(user=empleado_user)
+
+        resp = self.client.post(
+            reverse("rrhh:hora-extra-list"),
+            {"fecha": "2026-05-20", "horas": "2.00", "notas": "Cierre administrativo"},
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, 201)
+        hora_extra = HoraExtra.objects.get(pk=resp.data["id"])
+        self.assertEqual(hora_extra.empleado, empleada)
+        self.assertEqual(hora_extra.jefe_directo, dg_user)
+        self.assertEqual(Notificacion.objects.filter(usuario=dg_user, tipo=Notificacion.TIPO_HORA_EXTRA).count(), 1)
+
+        self.client.force_authenticate(user=dg_user)
+        resp_dg = self.client.post(reverse("rrhh:hora-extra-autorizar", args=[hora_extra.id]))
+        self.assertEqual(resp_dg.status_code, 200)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_AUTORIZADO)
+        self.assertEqual(hora_extra.autorizado_por, dg_user)
 
     def test_usuario_sin_empleado_no_se_vincula_a_otro_empleado(self):
         Empleado.objects.create(nombre="XANTECO MENA MARISOL", salario_diario="500.00")
@@ -1225,6 +1564,48 @@ class RRHHViewsTests(TestCase):
         repartidor = Repartidor.objects.get(user=usuario)
         self.assertEqual(repartidor.sucursal, sucursal)
         self.assertEqual(str(repartidor), "VALDEZ FÉLIX REY IVÁN")
+
+    def test_baja_desactiva_empleado_usuario_y_repartidor_operativo(self):
+        from api.logistica_views import _can_operate_pwa
+        from logistica.models import Repartidor
+
+        sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        usuario = User.objects.create_user(username="rep.baja", password="pass123")
+        usuario.groups.add(Group.objects.get_or_create(name="repartidor")[0])
+        empleado = Empleado.objects.create(
+            nombre="REPARTIDOR BAJA",
+            fecha_ingreso=timezone.localdate(),
+            area="REPARTIDORES",
+            puesto_operativo="REPARTIDOR",
+            usuario_erp=usuario,
+            activo=True,
+        )
+        Repartidor.objects.create(user=usuario, sucursal=sucursal)
+
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "baja",
+                "empleado": str(empleado.id),
+                "fecha_baja": "2026-06-15",
+                "motivo": EmpleadoBaja.MOTIVO_OTRO,
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(EmpleadoBaja.objects.filter(empleado=empleado).exists())
+        empleado.refresh_from_db()
+        usuario.refresh_from_db()
+        self.assertFalse(empleado.activo)
+        self.assertFalse(usuario.is_active)
+        self.assertFalse(usuario.groups.filter(name__iexact="repartidor").exists())
+        self.assertFalse(_can_operate_pwa(usuario))
+
+        activos = self.client.get(reverse("rrhh:empleados"))
+        self.assertNotIn(empleado.id, [e.id for e in activos.context["empleados"]])
+        inactivos = self.client.get(reverse("rrhh:empleados"), {"estado": "inactivos"})
+        self.assertIn(empleado.id, [e.id for e in inactivos.context["empleados"]])
 
     def test_empleados_crea_usuario_repartidor_con_password_y_licencia(self):
         from logistica.models import Repartidor
@@ -2584,6 +2965,95 @@ class RRHHViewsTests(TestCase):
         resp = self.client.get(reverse("rrhh:empleados"))
         self.assertEqual(resp.status_code, 302)
         self.assertIn("/login/", resp.url)
+
+
+class ReporteAsistenciaFechaIngresoTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="paula-fecha-ingreso", is_superuser=True, is_staff=True)
+        self.client.force_login(self.user)
+
+    def test_reporte_no_castiga_faltas_previas_a_fecha_ingreso(self):
+        from datetime import date
+
+        empleado = Empleado.objects.create(
+            nombre="ANAYA BERNAL CARLOS EZEQUIEL",
+            codigo="347",
+            fecha_ingreso=date(2026, 6, 10),
+            activo=True,
+            sucursal="Produccion",
+        )
+        IncidenciaAsistencia.objects.create(
+            empleado=empleado,
+            fecha=date(2026, 6, 9),
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+            estado=IncidenciaAsistencia.ESTADO_RESUELTO,
+            severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+            detalle="Incidencia resuelta por reevaluacion automatica.",
+        )
+        IncidenciaAsistencia.objects.create(
+            empleado=empleado,
+            fecha=date(2026, 6, 11),
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+            severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+            detalle="Sin registro posterior al ingreso.",
+        )
+
+        response = self.client.get(
+            reverse("rrhh:rrhh_reporte_asistencia"),
+            {
+                "fecha_inicio": "2026-06-01",
+                "fecha_fin": "2026-06-11",
+                "empleado": str(empleado.id),
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        reporte = response.context["reportes"][0]
+        self.assertEqual(reporte["resumen"]["faltas"], 1)
+        filas_pre_ingreso = [fila for fila in reporte["filas"] if fila["fecha"] < empleado.fecha_ingreso]
+        self.assertEqual(len(filas_pre_ingreso), 9)
+        self.assertTrue(all(fila["estado_laboral"] == "pre_ingreso" for fila in filas_pre_ingreso))
+        self.assertContains(response, "No laborado (previo ingreso)")
+        self.assertContains(response, "Sin registro posterior al ingreso.")
+        self.assertNotContains(response, "Incidencia resuelta por reevaluacion automatica.")
+
+    def test_export_reporte_marca_pre_ingreso_como_no_laborado(self):
+        from datetime import date
+
+        empleado = Empleado.objects.create(
+            nombre="ANAYA BERNAL CARLOS EZEQUIEL",
+            codigo="347",
+            fecha_ingreso=date(2026, 6, 10),
+            activo=True,
+            sucursal="Produccion",
+        )
+        IncidenciaAsistencia.objects.create(
+            empleado=empleado,
+            fecha=date(2026, 6, 9),
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+            estado=IncidenciaAsistencia.ESTADO_RESUELTO,
+            severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+            detalle="No debe exportar como falta.",
+        )
+
+        response = self.client.get(
+            reverse("rrhh:rrhh_reporte_asistencia"),
+            {
+                "fecha_inicio": "2026-06-09",
+                "fecha_fin": "2026-06-10",
+                "empleado": str(empleado.id),
+                "export": "csv",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+        self.assertIn("No laborado (previo ingreso)", content)
+        self.assertIn("No aplica", content)
+        self.assertNotIn("No debe exportar como falta.", content)
 
 
 class ListaRayaImportTests(TestCase):

@@ -1,0 +1,35 @@
+/* Extracted from reportes/templates/reportes/cierre_operativo_diario.html */
+.closure-shell { display:grid; gap:18px; }
+  .closure-grid-4 { display:grid; gap:12px; grid-template-columns:repeat(4,minmax(0,1fr)); }
+  .closure-grid-2 { display:grid; gap:14px; grid-template-columns:1.15fr .85fr; }
+  .closure-card { padding:14px 16px; border-radius:20px; border:1px solid rgba(145,36,86,.10); background:linear-gradient(180deg,rgba(255,255,255,.98),rgba(255,248,251,.96)); box-shadow:0 10px 30px rgba(93,22,59,.04); }
+  .closure-card-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:8px; }
+  .closure-card-title { margin:0; color:#42292e; font-size:1.05rem; }
+  .closure-copy { margin:0; color:#6f6170; line-height:1.4; }
+  .closure-kpi-value { font-size:1.8rem; line-height:1; font-weight:700; color:#922456; margin-bottom:6px; }
+  .closure-kpi-value.success { color:#236d53; }
+  .closure-kpi-value.warning { color:#9b6b00; }
+  .closure-kpi-value.danger { color:#a53434; }
+  .closure-pill-row, .closure-meta-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .closure-pill { padding:7px 11px; border-radius:999px; font-size:.82rem; font-weight:700; background:rgba(122,40,83,.08); color:#7a2853; }
+  .closure-pill.success { background:rgba(35,109,83,.12); color:#236d53; }
+  .closure-pill.warning { background:rgba(185,140,36,.14); color:#8f6800; }
+  .closure-pill.danger { background:rgba(188,59,59,.13); color:#9c2f2f; }
+  .closure-note-list { display:grid; gap:10px; }
+  .closure-note-item { padding:12px 14px; border-radius:16px; border:1px solid rgba(145,36,86,.08); background:rgba(255,255,255,.84); }
+  .closure-note-item strong { display:block; margin-bottom:4px; }
+  .closure-table { width:100%; border-collapse:collapse; font-size:.92rem; }
+  .closure-table th, .closure-table td { padding:10px 8px; border-bottom:1px solid rgba(145,36,86,.08); vertical-align:top; }
+  .closure-table th { color:#7d6873; text-transform:uppercase; letter-spacing:.08em; font-size:.76rem; text-align:left; }
+  .closure-table td:last-child, .closure-table th:last-child { text-align:right; }
+  .closure-table td.is-right, .closure-table th.is-right { text-align:right; }
+  .closure-muted { color:#7d6873; font-size:.88rem; }
+  .closure-alert-success { border-color:rgba(35,109,83,.20); background:rgba(35,109,83,.06); }
+  .closure-alert-warning { border-color:rgba(185,140,36,.20); background:rgba(185,140,36,.08); }
+  .closure-alert-danger { border-color:rgba(188,59,59,.22); background:rgba(188,59,59,.08); }
+  .closure-source-list { display:grid; gap:10px; grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .closure-source-item { padding:12px 14px; border-radius:16px; border:1px solid rgba(145,36,86,.08); background:rgba(255,255,255,.92); }
+  .closure-source-item strong { display:block; margin-bottom:6px; color:#42292e; }
+  @media (max-width: 1180px) {
+    .closure-grid-4, .closure-grid-2, .closure-source-list { grid-template-columns:1fr; }
+  }

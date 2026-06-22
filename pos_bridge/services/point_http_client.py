@@ -259,6 +259,33 @@ class PointHttpSessionClient:
         response = self._request("GET", "/Catalogos/get_producto_byID", params={"id_producto": product_id})
         return self._parse_json(response, label="detalle de producto Point")
 
+    def get_stock_products(self, *, text: str, timeout: int | float | None = None) -> list[dict]:
+        response = self._request(
+            "GET",
+            "/Stock/get_productos_insumos",
+            params={"texto": text},
+            **({"timeout": timeout} if timeout is not None else {}),
+        )
+        payload = self._parse_json(response, label="búsqueda de productos stock Point")
+        if not isinstance(payload, list):
+            raise ExtractionError("Point devolvió una búsqueda de stock con formato inesperado.", context={"text": text})
+        return payload
+
+    def get_product_stock(self, product_id: int | str, *, timeout: int | float | None = None) -> list[dict]:
+        response = self._request(
+            "GET",
+            "/Stock/get_productos_existencia",
+            params={"pk": product_id},
+            **({"timeout": timeout} if timeout is not None else {}),
+        )
+        payload = self._parse_json(response, label="existencia producto Point")
+        if not isinstance(payload, list):
+            raise ExtractionError(
+                "Point devolvió una existencia de producto con formato inesperado.",
+                context={"product_id": product_id},
+            )
+        return payload
+
     def get_product_bom(self, product_id: int | str) -> list[dict]:
         response = self._request("GET", "/Catalogos/getBomsByProducts", params={"pkProducto": product_id})
         try:

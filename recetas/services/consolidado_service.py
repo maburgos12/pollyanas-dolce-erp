@@ -241,7 +241,7 @@ class ConsolidadoNocturnoCedisService:
             if solicitud.estado == SolicitudReabastoCedis.ESTADO_BORRADOR:
                 solicitud.estado = SolicitudReabastoCedis.ESTADO_ENVIADA
                 solicitud.notas = (solicitud.notas + "\n" if solicitud.notas else "") + (
-                    "Marcada como enviada por consolidado nocturno PointMeUp."
+                    "Marcada como enviada a CEDIS por consolidado nocturno PointMeUp."
                 )
                 solicitud.save(update_fields=["estado", "notas", "actualizado_en"])
             for receta, cantidad in recetas.items():

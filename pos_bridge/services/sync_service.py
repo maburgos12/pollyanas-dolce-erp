@@ -77,10 +77,24 @@ class PointSyncService:
             match = Sucursal.objects.filter(nombre__iexact=name).first()
         if match is None and name:
             normalized = normalize_text(name)
-            for branch in Sucursal.objects.all().only("id", "nombre"):
+            branches = list(Sucursal.objects.all().only("id", "nombre"))
+            for branch in branches:
                 if normalize_text(branch.nombre) == normalized:
                     match = branch
                     break
+            if match is None:
+                matches = [branch for branch in branches if normalized and normalized in normalize_text(branch.nombre)]
+                if len(matches) == 1:
+                    match = matches[0]
+        if match is None and name:
+            alias_ids = set(
+                PointBranch.objects.filter(
+                    normalized_name=normalize_text(name),
+                    erp_branch_id__isnull=False,
+                ).values_list("erp_branch_id", flat=True)
+            )
+            if len(alias_ids) == 1:
+                match = Sucursal.objects.filter(id=alias_ids.pop()).first()
         return match
 
     def record_log(self, sync_job: PointSyncJob, level: str, message: str, *, context: dict | None = None) -> None:

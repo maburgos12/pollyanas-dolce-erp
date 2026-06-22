@@ -4,17 +4,7 @@
 {% block page_title %}RRHH · Horas extra{% endblock %}
 
 {% block extra_css %}
-<style>
-  .ch-kanban { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; align-items: start; }
-  .ch-column { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; min-height: 220px; padding: 12px; }
-  .ch-column h2 { color: var(--vino); font-size: 16px; margin: 0 0 12px; }
-  .ch-item { border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
-  .ch-main { color: var(--texto); font-weight: 800; }
-  .ch-meta { color: var(--texto-light); font-size: 13px; margin-top: 4px; }
-  .ch-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-  @media (max-width: 1100px) { .ch-kanban { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @media (max-width: 700px) { .ch-kanban { grid-template-columns: 1fr; } }
-</style>
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-horas-extra-list.css?v=20260614-ui100-v1">
 {% endblock %}
 
 {% block content %}

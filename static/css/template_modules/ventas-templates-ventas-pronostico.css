@@ -1,0 +1,130 @@
+/* Extracted from ventas/templates/ventas/pronostico.html */
+.page-pronostico-ventas .forecast-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+  .page-pronostico-ventas .forecast-workflow-tabs { display:flex; gap:6px; flex-wrap:wrap; margin:0 0 14px; border-bottom:1px solid #eadce3; }
+  .page-pronostico-ventas .forecast-workflow-tab { display:inline-flex; align-items:center; min-height:38px; padding:9px 14px; border-bottom:3px solid transparent; color:#6b5e65; font-weight:800; text-decoration:none; }
+  .page-pronostico-ventas .forecast-workflow-tab:hover,
+  .page-pronostico-ventas .forecast-workflow-tab:focus { color:#7b1a48; outline:none; }
+  .page-pronostico-ventas .forecast-workflow-tab:focus-visible { box-shadow:0 0 0 3px rgba(123,26,72,0.18); border-radius:6px 6px 0 0; }
+  .page-pronostico-ventas .forecast-workflow-tab.active { color:#7b1a48; border-bottom-color:#7b1a48; }
+  .page-pronostico-ventas .forecast-projection-copy { margin:0 0 16px; }
+  .page-pronostico-ventas .forecast-projection-presets { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; margin-bottom:16px; }
+  .page-pronostico-ventas .forecast-projection-preset { display:flex; flex-direction:column; gap:3px; min-height:68px; padding:12px; border:1px solid #eadce3; border-radius:8px; background:#fff; color:#3d0a24; text-align:left; cursor:pointer; transition:background-color 160ms ease, border-color 160ms ease, transform 120ms ease; }
+  .page-pronostico-ventas .forecast-projection-preset span { font-weight:900; }
+  .page-pronostico-ventas .forecast-projection-preset small { color:#6f6269; font-size:0.82rem; line-height:1.25; }
+  .page-pronostico-ventas .forecast-projection-preset:hover,
+  .page-pronostico-ventas .forecast-projection-preset:focus { border-color:#c783a3; background:#fdf2f6; outline:none; }
+  .page-pronostico-ventas .forecast-projection-preset:active { transform:scale(0.98); }
+  .page-pronostico-ventas .forecast-projection-preset:focus-visible { box-shadow:0 0 0 3px rgba(123,26,72,0.18); }
+  .page-pronostico-ventas .forecast-projection-preset.active { border-color:#7b1a48; background:#f5e6ed; color:#7b1a48; }
+  .page-pronostico-ventas .saved-forecast-filters { display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:12px; align-items:end; margin-bottom:16px; }
+  .page-pronostico-ventas .saved-forecasts-wrap { --table-min-width:1320px; overflow-x:auto; padding-bottom:8px; }
+  .page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table { min-width:var(--table-min-width); table-layout:fixed; border-collapse:separate; border-spacing:0; }
+  .page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table th,
+  .page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table td { width:auto; min-width:0; vertical-align:middle; overflow-wrap:anywhere; word-break:normal; line-height:1.25; white-space:normal; text-align:left; }
+  .page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table th:nth-child(n+3),
+  .page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table td:nth-child(n+3) { width:auto; min-width:0; white-space:normal; text-align:left; }
+  .page-pronostico-ventas .saved-forecasts-table .forecast-number-cell,
+  .page-pronostico-ventas .saved-forecasts-table .forecast-date-cell { white-space:normal; overflow-wrap:normal; text-align:right; }
+  .page-pronostico-ventas .forecast-method-cell { font-size:0.92rem; color:#4f464b; word-break:break-word; }
+  .page-pronostico-ventas .saved-forecasts-wrap > table.saved-forecasts-table .forecast-actions-cell { width:280px; min-width:280px; white-space:normal; text-align:right; overflow:visible; }
+  .page-pronostico-ventas .forecast-row-actions { display:flex; justify-content:flex-end; align-items:center; gap:8px; flex-wrap:nowrap; }
+  .page-pronostico-ventas .forecast-row-actions form { display:inline-flex; margin:0; }
+  .page-pronostico-ventas .forecast-row-actions .btn { min-width:64px; }
+  .page-pronostico-ventas .new-forecast-summary { cursor:pointer; padding:12px 0; font-size:16px; font-weight:600; color:#7b1a48; list-style:none; display:flex; align-items:center; gap:8px; user-select:none; }
+  .page-pronostico-ventas .new-forecast-summary::-webkit-details-marker { display:none; }
+  .page-pronostico-ventas .forecast-product-section > summary { cursor:pointer; list-style:none; user-select:none; }
+  .page-pronostico-ventas .forecast-product-section > summary::-webkit-details-marker { display:none; }
+  .page-pronostico-ventas .forecast-filter-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:16px; align-items:end; }
+  .page-pronostico-ventas .forecast-filter-submit { margin-top:16px; }
+  .page-pronostico-ventas .forecast-branch-filter { position:relative; width:100%; }
+  .page-pronostico-ventas .forecast-branch-button { width:100%; height:42px; border:1px solid #ced4da; border-radius:6px; background:#fff; cursor:pointer; font-size:14px; padding:0 12px; text-align:left; display:flex; justify-content:space-between; align-items:center; color:#333; }
+  .page-pronostico-ventas .forecast-branch-menu { display:none; position:absolute; top:100%; left:0; width:100%; background:#fff; border:1px solid #ced4da; border-radius:6px; padding:8px; z-index:200; box-shadow:0 4px 12px rgba(0,0,0,0.1); margin-top:2px; }
+  .page-pronostico-ventas .forecast-branch-menu label { display:flex; align-items:center; gap:8px; padding:5px 4px; font-size:13px; cursor:pointer; color:#333; }
+  .page-pronostico-ventas .forecast-product-section { margin-top:18px; border-top:1px solid #eadce3; padding-top:16px; }
+  .page-pronostico-ventas .forecast-products-summary { cursor:pointer; padding:10px 0; font-weight:600; color:#7b1a48; font-size:15px; display:flex; align-items:center; gap:8px; list-style:none; user-select:none; }
+  .page-pronostico-ventas .forecast-products-summary::-webkit-details-marker { display:none; }
+  .page-pronostico-ventas .forecast-products-count { font-weight:400; color:#999; font-size:13px; }
+  .page-pronostico-ventas .forecast-product-actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .page-pronostico-ventas .forecast-product-group { border:1px solid #eadce3; border-radius:8px; margin-bottom:8px; background:#fff; overflow:hidden; }
+  .page-pronostico-ventas .forecast-product-summary { display:flex; align-items:center; gap:10px; padding:10px 12px; color:#3d0a24; font-weight:800; cursor:pointer; }
+  .page-pronostico-ventas .forecast-product-summary span { color:#776b72; font-weight:700; font-size:0.85rem; }
+  .page-pronostico-ventas .forecast-product-summary .btn { margin-left:auto; }
+  .page-pronostico-ventas .forecast-product-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:4px; padding:8px 12px 12px; }
+  .page-pronostico-ventas .forecast-product-option { display:flex; align-items:center; gap:6px; font-size:13px; color:#4f464b; min-width:0; }
+  .page-pronostico-ventas .forecast-product-option span { overflow:hidden; text-overflow:ellipsis; white-space:normal; }
+  .page-pronostico-ventas .forecast-special-banner { background:#fff3cd; border:1px solid #ffc107; color:#6b4c00; border-radius:8px; padding:12px 14px; margin-bottom:16px; font-weight:600; }
+  .page-pronostico-ventas .kpi-number,
+  .page-pronostico-ventas .kpi-number.is-success,
+  .page-pronostico-ventas .kpi-number.is-warning,
+  .page-pronostico-ventas .kpi-number.is-danger { color:#7b1a48; font-size:2rem; white-space:normal; overflow:hidden; text-overflow:ellipsis; width:100%; }
+  .page-pronostico-ventas .kpi-icon,
+  .page-pronostico-ventas .kpi-icon.is-success { background:#f5e6ed; color:#7b1a48; }
+  .page-pronostico-ventas .forecast-method { color:#6f6269; font-size:0.9rem; margin:-4px 0 18px; }
+  .page-pronostico-ventas .forecast-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; border-bottom:1px solid #eadce3; }
+  .page-pronostico-ventas .forecast-tab { border:0; border-bottom:3px solid transparent; background:transparent; color:#6b5e65; padding:10px 14px; font-weight:700; cursor:pointer; }
+  .page-pronostico-ventas .forecast-tab.active { color:#7b1a48; border-bottom-color:#7b1a48; }
+  .page-pronostico-ventas .forecast-panel { display:none; }
+  .page-pronostico-ventas .forecast-panel.active { display:block; }
+  .page-pronostico-ventas .production-table-wrap .table thead th { background:#f5e6ed; color:#7b1a48; }
+  .page-pronostico-ventas .production-table-wrap .table tbody tr:nth-child(even):not(.production-subtotal-row):not(.production-grand-total-row) { background:#fdf2f6; }
+  .page-pronostico-ventas .production-subtotal-row td { background:#7b1a48; color:#fff; font-weight:800; }
+  .page-pronostico-ventas .production-grand-total-row td { background:#3d0a24; color:#fff; font-weight:900; }
+  .page-pronostico-ventas .forecast-trend { font-weight:800; white-space:normal; }
+  .page-pronostico-ventas .forecast-trend.sube { color:#198754; }
+  .page-pronostico-ventas .forecast-trend.baja { color:#dc3545; }
+  .page-pronostico-ventas .forecast-trend.estable { color:#6c757d; }
+  .page-pronostico-ventas .forecast-day-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:14px; margin-bottom:18px; }
+  .page-pronostico-ventas .forecast-day-card { border:1px solid #e2d6dc; border-radius:8px; padding:14px; background:#fff; box-shadow:0 4px 16px rgba(61,10,36,0.06); }
+  .page-pronostico-ventas .forecast-day-title { display:flex; justify-content:space-between; gap:12px; align-items:center; color:#3d0a24; font-weight:800; margin-bottom:10px; }
+  .page-pronostico-ventas .forecast-day-metrics { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px; }
+  .page-pronostico-ventas .forecast-day-number { color:#7b1a48; font-size:1.2rem; font-weight:900; }
+  .page-pronostico-ventas .forecast-top-list { margin:0; padding-left:18px; color:#4f464b; font-size:0.9rem; }
+  .page-pronostico-ventas .forecast-branch-section { border-top:1px solid #eadce3; padding-top:18px; margin-top:18px; }
+  .page-pronostico-ventas .forecast-branch-header { display:flex; justify-content:space-between; gap:12px; align-items:flex-end; margin-bottom:10px; }
+  .page-pronostico-ventas .forecast-branch-header h3 { margin:0; color:#3d0a24; font-size:1rem; font-weight:900; }
+  .page-pronostico-ventas .forecast-branch-totals { display:flex; gap:14px; flex-wrap:wrap; color:#7b1a48; font-weight:800; font-size:0.92rem; }
+  .page-pronostico-ventas .forecast-save-name { max-width:420px; margin-bottom:14px; }
+  .page-pronostico-ventas .forecast-adjustments-table { --table-min-width: 960px; }
+  .page-pronostico-ventas .forecast-adjustments-table td:nth-child(2) { min-width:260px; }
+  .page-pronostico-ventas .forecast-adjustment-input { min-width:96px; text-align:right; }
+  .page-pronostico-ventas .forecast-adjustment-actions { display:flex; justify-content:flex-end; margin-top:14px; }
+  .page-pronostico-ventas .forecast-modal-backdrop { display:none; position:fixed; inset:0; z-index:1200; background:rgba(61,10,36,0.32); align-items:center; justify-content:center; padding:18px; }
+  .page-pronostico-ventas .forecast-modal-backdrop.active { display:flex; }
+  .page-pronostico-ventas .forecast-modal { width:min(460px, 100%); background:#fff; border-radius:12px; box-shadow:0 18px 42px rgba(61,10,36,0.22); border:1px solid #f1dce6; padding:22px; }
+  .page-pronostico-ventas .forecast-modal-title { margin:0 0 6px; color:#3d0a24; font-size:1.15rem; font-weight:800; }
+  .page-pronostico-ventas .forecast-modal-copy { margin:0 0 18px; color:#776b72; font-size:0.92rem; }
+  .page-pronostico-ventas .forecast-modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:18px; }
+  .page-pronostico-ventas .forecast-chart-wrap { min-height:280px; }
+  .page-pronostico-ventas .forecast-loading-overlay { display:none; position:fixed; inset:0; z-index:1300; align-items:center; justify-content:center; padding:18px; background:rgba(61,10,36,0.28); backdrop-filter:blur(3px); }
+  .page-pronostico-ventas .forecast-loading-overlay.active { display:flex; }
+  .page-pronostico-ventas .forecast-loading-card { width:min(440px, 100%); border-radius:12px; background:linear-gradient(180deg, #fff 0%, #fdf2f6 100%); color:#3d0a24; padding:28px; text-align:center; box-shadow:0 10px 14px rgba(61,10,36,0.18); }
+  .page-pronostico-ventas .forecast-loading-brand { color:#7b1a48; font-family:"Playfair Display", Georgia, serif; font-size:1.15rem; font-weight:800; margin-bottom:16px; }
+  .page-pronostico-ventas .forecast-loading-orbit { position:relative; width:86px; height:86px; margin:0 auto 18px; border-radius:50%; background:#f5e6ed; display:grid; place-items:center; }
+  .page-pronostico-ventas .forecast-loading-orbit::before { content:""; position:absolute; inset:8px; border-radius:50%; border:3px solid rgba(123,26,72,0.18); border-top-color:#7b1a48; animation:forecast-spin 900ms linear infinite; }
+  .page-pronostico-ventas .forecast-loading-core { position:relative; z-index:1; display:grid; place-items:center; width:48px; height:48px; border-radius:50%; background:#fff; color:#7b1a48; font-weight:900; letter-spacing:0; }
+  .page-pronostico-ventas .forecast-loading-card h2 { margin:0 0 8px; color:#3d0a24; font-size:1.18rem; line-height:1.25; font-weight:900; text-wrap:balance; }
+  .page-pronostico-ventas .forecast-loading-card p { margin:0; color:#5f5058; line-height:1.45; }
+  .page-pronostico-ventas .forecast-loading-bar { height:7px; margin:18px 0 12px; overflow:hidden; border-radius:999px; background:#eadce3; }
+  .page-pronostico-ventas .forecast-loading-bar span { display:block; width:42%; height:100%; border-radius:inherit; background:#7b1a48; animation:forecast-bar 1.35s cubic-bezier(0.23, 1, 0.32, 1) infinite; }
+  .page-pronostico-ventas .forecast-loading-note { font-size:0.85rem; font-weight:800; color:#7b1a48; }
+  @keyframes forecast-spin {
+    to { transform:rotate(360deg); }
+  }
+  @keyframes forecast-bar {
+    0% { transform:translateX(-120%); }
+    100% { transform:translateX(240%); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .page-pronostico-ventas .forecast-loading-orbit::before,
+    .page-pronostico-ventas .forecast-loading-bar span { animation:none; }
+    .page-pronostico-ventas .forecast-loading-orbit::before { border-color:#7b1a48; }
+    .page-pronostico-ventas .forecast-loading-bar span { width:100%; transform:none; opacity:0.7; }
+  }
+  @media (max-width: 900px) {
+    .page-pronostico-ventas .saved-forecast-filters { grid-template-columns:1fr; }
+    .page-pronostico-ventas .forecast-projection-presets { grid-template-columns:1fr; }
+    .page-pronostico-ventas .forecast-filter-grid { grid-template-columns:1fr; }
+    .page-pronostico-ventas .forecast-product-grid { grid-template-columns:1fr; }
+    .page-pronostico-ventas .forecast-actions,
+    .page-pronostico-ventas .forecast-branch-header { justify-content:flex-start; }
+  }

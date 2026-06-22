@@ -1,0 +1,12 @@
+/* Extracted from logistica/templates/logistica/unidades_list.html */
+.unit-shell { display: grid; gap: 18px; }
+  .unit-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+  .unit-search { display: flex; flex-wrap: wrap; gap: 10px; }
+  .unit-badge { display: inline-flex; border-radius: 999px; color: #fff; font-size: 12px; font-weight: 800; padding: 5px 10px; }
+  .unit-badge.active { background: #236d53; }
+  .unit-badge.inactive { background: #bc3b3b; }
+  .unit-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .unit-pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 14px; }
+  @media (max-width: 760px) {
+    .unit-head, .unit-search, .unit-actions, .unit-pager { align-items: stretch; flex-direction: column; }
+  }

@@ -5,21 +5,8 @@
 {% block page_title %}Logística · {% if unidad %}Editar unidad{% else %}Nueva unidad{% endif %}{% endblock %}
 
 {% block extra_css %}
-<style>
-  .unit-form-shell { display: grid; gap: 18px; max-width: 920px; }
-  .unit-form-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .unit-form-field { display: grid; gap: 6px; }
-  .unit-form-field label { font-weight: 800; color: var(--vino); }
-  .unit-form-field .is-required::after { content: " *"; color: #bc3b3b; }
-  .unit-form-error { color: #bc3b3b; font-size: 13px; font-weight: 700; }
-  .unit-form-check { display: inline-flex; gap: 8px; align-items: center; font-weight: 800; color: var(--vino); }
-  .unit-form-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
-  @media (max-width: 760px) {
-    .unit-form-grid { grid-template-columns: 1fr; }
-    .unit-form-actions { flex-direction: column; }
-  }
-</style>
-<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
+<link rel="stylesheet" href="/static/css/template_modules/logistica-templates-logistica-unidad-form.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260621-button-gap-v1">
 {% endblock %}
 
 {% block content %}
@@ -80,7 +67,7 @@
         </div>
       </div>
       <div class="unit-form-actions">
-        <button class="btn btn-primary" style="background:#8B2252;border-color:#8B2252;" type="submit">Guardar</button>
+        <button class="btn btn-primary pd-u-8e46cb0687" type="submit">Guardar</button>
         <a class="btn btn-secondary" href="{% url 'logistica:unidades_list' %}">Cancelar</a>
       </div>
     </form>
