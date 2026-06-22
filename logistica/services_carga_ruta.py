@@ -429,8 +429,26 @@ def _elegir_recepcion_point(linea: RutaCargaChecklistLinea, candidates: list[Poi
     return [max(exactas, key=lambda line: (line.received_at or line.updated_at, line.id))]
 
 
-@transaction.atomic
 def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_sync: bool = True) -> ChecklistCargaResumen:
+    ruta = RutaEntrega.objects.get(pk=ruta.pk)
+    if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
+        raise ValidationError("La carga solo se puede sincronizar mientras la ruta está planeada o en ruta.")
+    if not _paradas_por_sucursal(ruta):
+        raise ValidationError("La ruta no tiene paradas ligadas a sucursales para relacionar transferencias Point.")
+
+    sync_job = None
+    if ejecutar_sync:
+        service = OpenTransferSyncService()
+        for fecha in [ruta.fecha_ruta - timedelta(days=1), ruta.fecha_ruta]:
+            sync_job = service.sync_open_transfers(fecha=fecha, triggered_by=user)
+            if sync_job.status != sync_job.STATUS_SUCCESS:
+                raise ValidationError("No se pudo sincronizar Point para generar la carga esperada.")
+
+    return _actualizar_checklist_carga_desde_point(ruta=ruta, user=user, sync_job=sync_job)
+
+
+@transaction.atomic
+def _actualizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, sync_job=None) -> ChecklistCargaResumen:
     ruta = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
     if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
         raise ValidationError("La carga solo se puede sincronizar mientras la ruta está planeada o en ruta.")
@@ -440,6 +458,7 @@ def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, eje
         raise ValidationError("La ruta no tiene paradas ligadas a sucursales para relacionar transferencias Point.")
     checklist = RutaCargaChecklist.objects.select_for_update().filter(ruta=ruta).first()
     checklist = checklist or obtener_checklist_carga(ruta)
+    checklist.point_sync_job = sync_job or checklist.point_sync_job
     checklist.sincronizado_en = timezone.now()
     if checklist.estatus == RutaCargaChecklist.ESTATUS_PENDIENTE:
         checklist.estatus = RutaCargaChecklist.ESTATUS_EN_REVISION
@@ -454,15 +473,6 @@ def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, eje
         ).delete()
         checklist.notas = "Carga esperada generada desde consolidado CEDIS."
         checklist.save(update_fields=["notas", "actualizado_en"])
-    sync_job = None
-    if ejecutar_sync:
-        service = OpenTransferSyncService()
-        for fecha in [ruta.fecha_ruta - timedelta(days=1), ruta.fecha_ruta]:
-            sync_job = service.sync_open_transfers(fecha=fecha, triggered_by=user)
-            if sync_job.status != sync_job.STATUS_SUCCESS:
-                raise ValidationError("No se pudo sincronizar Point para generar la carga esperada.")
-        checklist.point_sync_job = sync_job or checklist.point_sync_job
-        checklist.save(update_fields=["point_sync_job", "actualizado_en"])
     checklist.lineas.filter(point_transfer_line__is_open=False, estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).delete()
     creadas_point, actualizadas_point, omitidas_point = _sincronizar_lineas_point_para_ruta(ruta=ruta, checklist=checklist, solo_abiertas=True)
     creadas += creadas_point
@@ -820,12 +830,10 @@ def registrar_evento_checklist_confirmado(*, ruta: RutaEntrega, user) -> None:
     )
 
 
-@transaction.atomic
 def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_sync: bool = True) -> RecepcionPointResumen:
+    ruta = RutaEntrega.objects.get(pk=ruta.pk)
     if ruta.estatus not in {RutaEntrega.ESTATUS_EN_RUTA, RutaEntrega.ESTATUS_COMPLETADA}:
         raise ValidationError("La recepción Point solo aplica a rutas en seguimiento o completadas.")
-
-    checklist = obtener_checklist_carga(ruta)
 
     if ejecutar_sync:
         sync_job = PointMovementSyncService().run_transfer_sync(
@@ -835,6 +843,17 @@ def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_
         )
         if sync_job.status != sync_job.STATUS_SUCCESS:
             raise ValidationError("No se pudo sincronizar Point para confirmar recepción de transferencias.")
+
+    return _actualizar_recepcion_desde_point(ruta=ruta, user=user)
+
+
+@transaction.atomic
+def _actualizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None) -> RecepcionPointResumen:
+    ruta = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
+    if ruta.estatus not in {RutaEntrega.ESTATUS_EN_RUTA, RutaEntrega.ESTATUS_COMPLETADA}:
+        raise ValidationError("La recepción Point solo aplica a rutas en seguimiento o completadas.")
+
+    checklist = obtener_checklist_carga(ruta)
 
     if not checklist.lineas.exists():
         return RecepcionPointResumen(ruta=ruta)
