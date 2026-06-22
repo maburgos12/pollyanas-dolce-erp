@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from decimal import Decimal
 from io import StringIO
 from pathlib import Path
@@ -473,6 +474,67 @@ class LogisticaViewsTests(TestCase):
         self.assertContains(resp_post, "Se ignoraron puntos repetidos")
         ruta = RutaEntrega.objects.get(nombre="Ruta sin duplicados")
         self.assertEqual(ruta.paradas.filter(punto=punto).count(), 1)
+
+    def test_rutas_create_bloquea_segunda_vuelta_sin_transferencia_point_nueva(self):
+        sucursal = Sucursal.objects.create(nombre="Sucursal Colosio", codigo="COL")
+        punto = PuntoLogistico.objects.create(
+            nombre="Sucursal Colosio",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            sucursal=sucursal,
+            latitud="25.570000",
+            longitud="-108.470000",
+            radio_geocerca_metros=120,
+        )
+        ruta_previa = RutaEntrega.objects.create(nombre="CEDIS-Colosio", fecha_ruta="2026-06-21", estatus=RutaEntrega.ESTATUS_COMPLETADA)
+        ParadaRuta.objects.create(ruta=ruta_previa, punto=punto, orden=1)
+
+        resp_post = self.client.post(
+            reverse("logistica:rutas"),
+            {"nombre": "CEDIS-COLOSIO", "fecha_ruta": "2026-06-21", "puntos_ruta": [str(punto.id)]},
+            follow=True,
+        )
+
+        self.assertEqual(resp_post.status_code, 200)
+        self.assertContains(resp_post, "no hay transferencia Point nueva")
+        self.assertFalse(RutaEntrega.objects.filter(nombre="CEDIS-COLOSIO").exists())
+
+    def test_rutas_create_permite_segunda_vuelta_con_transferencia_point_nueva(self):
+        sucursal = Sucursal.objects.create(nombre="Sucursal Colosio", codigo="COL")
+        punto = PuntoLogistico.objects.create(
+            nombre="Sucursal Colosio",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            sucursal=sucursal,
+            latitud="25.570000",
+            longitud="-108.470000",
+            radio_geocerca_metros=120,
+        )
+        ruta_previa = RutaEntrega.objects.create(nombre="CEDIS-Colosio", fecha_ruta="2026-06-21", estatus=RutaEntrega.ESTATUS_COMPLETADA)
+        ParadaRuta.objects.create(ruta=ruta_previa, punto=punto, orden=1)
+        origin = PointBranch.objects.create(external_id="CEDIS-2DA", name="CEDIS")
+        destination = PointBranch.objects.create(external_id="COL-2DA", name="Sucursal Colosio", erp_branch=sucursal)
+        PointTransferLine.objects.create(
+            origin_branch=origin,
+            destination_branch=destination,
+            erp_destination_branch=sucursal,
+            transfer_external_id="35967",
+            detail_external_id="1",
+            source_hash="point-colosio-segunda-vuelta",
+            registered_at=timezone.make_aware(datetime(2026, 6, 21, 20, 2)),
+            item_name="Pastel",
+            requested_quantity="1.000",
+            sent_quantity="1.000",
+            is_open=True,
+            is_cancelled=False,
+        )
+
+        resp_post = self.client.post(
+            reverse("logistica:rutas"),
+            {"nombre": "CEDIS-COLOSIO", "fecha_ruta": "2026-06-21", "puntos_ruta": [str(punto.id)]},
+            follow=True,
+        )
+
+        self.assertEqual(resp_post.status_code, 200)
+        self.assertTrue(RutaEntrega.objects.filter(nombre="CEDIS-COLOSIO").exists())
 
     def test_ruta_detail_add_entrega(self):
         cliente = Cliente.objects.create(nombre="Cliente Logística")

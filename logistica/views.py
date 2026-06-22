@@ -52,6 +52,7 @@ from .services_carga_ruta import (
     ruta_tiene_entregas_pendientes,
     ruta_tiene_paradas_entregables_pendientes,
     registrar_recarga_cedis,
+    ruta_tiene_movimiento_point_nuevo,
     sincronizar_checklist_carga_desde_point,
     sincronizar_recepcion_desde_point,
     validar_linea_carga,
@@ -1740,10 +1741,32 @@ def rutas(request):
                 messages.error(request, "Los puntos seleccionados no están activos. Revisa el catálogo de puntos logísticos.")
                 return redirect("logistica:rutas")
 
+            fecha_ruta = _parse_date(request.POST.get("fecha_ruta")) or timezone.localdate()
+            sucursales_repetidas = {
+                punto.sucursal_id
+                for _, _, punto in puntos_ordenados
+                if punto.tipo != PuntoLogistico.TIPO_CEDIS and punto.sucursal_id
+            }
+            sucursales_repetidas = set(
+                RutaEntrega.objects.filter(
+                    fecha_ruta=fecha_ruta,
+                    paradas__punto__sucursal_id__in=sucursales_repetidas,
+                )
+                .exclude(estatus=RutaEntrega.ESTATUS_CANCELADA)
+                .values_list("paradas__punto__sucursal_id", flat=True)
+            )
+            puntos_repetidos = [punto for _, _, punto in puntos_ordenados if punto.sucursal_id in sucursales_repetidas]
+            if sucursales_repetidas and not ruta_tiene_movimiento_point_nuevo(
+                fecha=fecha_ruta,
+                puntos=puntos_repetidos,
+            ):
+                messages.error(request, "Ya existe ruta del día para esa sucursal y no hay transferencia Point nueva para otra vuelta.")
+                return redirect("logistica:rutas")
+
             with transaction.atomic():
                 ruta = RutaEntrega.objects.create(
                     nombre=nombre,
-                    fecha_ruta=request.POST.get("fecha_ruta") or timezone.localdate(),
+                    fecha_ruta=fecha_ruta,
                     chofer=(request.POST.get("chofer") or "").strip() or (str(repartidor) if repartidor else ""),
                     unidad=(request.POST.get("unidad") or "").strip() or (str(unidad_operativa) if unidad_operativa else ""),
                     repartidor=repartidor,
