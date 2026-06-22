@@ -74,7 +74,37 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         html = base.read_text()
         self.assertIn('data-hallmark-scope="erp"', html)
         self.assertLess(html.index("{% block extra_css %}"), html.index("hallmark_guardrails.css"))
-        self.assertIn("20260601-reportes-kpis-order-v1", html)
+        self.assertIn("20260622-mobile-tabs-v1", html)
+
+    def test_base_template_includes_mobile_touch_navigation_shell(self):
+        base = Path(settings.BASE_DIR) / "templates" / "base.html"
+        html = base.read_text()
+        css = (Path(settings.BASE_DIR) / "static" / "css" / "styles.css").read_text()
+
+        self.assertIn('class="skip-link"', html)
+        self.assertIn('class="mobile-app-bar"', html)
+        self.assertIn('class="mobile-app-bar-brand"', html)
+        self.assertIn('class="mobile-app-bar-mark"', html)
+        self.assertIn('class="mobile-app-bar-title"', html)
+        self.assertIn('class="mobile-app-bar-subtitle"', html)
+        self.assertIn("Pollyana&#x27;s Dolce", html.replace("'", "&#x27;"))
+        self.assertIn("{% url 'notificaciones' %}", html)
+        self.assertIn('class="mobile-nav-toggle"', html)
+        self.assertIn('aria-label="Abrir menú"', html)
+        self.assertIn('class="mobile-nav-toggle-text"', html)
+        self.assertIn('id="erp-sidebar"', html)
+        self.assertIn('class="mobile-nav-backdrop"', html)
+        self.assertIn("mobile-nav-open", html)
+        self.assertIn("20260622-mobile-shell-v1", html)
+        self.assertNotIn("Principal", html)
+        self.assertNotIn("#ef4b2e", css)
+        self.assertIn(".mobile-app-bar", css)
+        self.assertIn(".mobile-app-bar-mark", css)
+        self.assertIn("border-bottom: 2px solid rgba(201, 168, 76", css)
+        self.assertIn("--mobile-bar-bg: var(--vino)", css)
+        self.assertIn("body.mobile-nav-open .sidebar", css)
+        self.assertIn(".mobile-nav-backdrop:not([hidden])", css)
+        self.assertIn("@media (max-width: 720px)", css)
 
     def test_guardrails_define_global_erp_scope(self):
         css = (Path(settings.BASE_DIR) / "static" / "css" / "hallmark_guardrails.css").read_text()
@@ -109,6 +139,15 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         for selector in required_selectors:
             with self.subTest(selector=selector):
                 self.assertIn(selector, css)
+
+    def test_guardrails_keep_module_tabs_horizontally_scrollable_on_mobile(self):
+        css = (Path(settings.BASE_DIR) / "static" / "css" / "hallmark_guardrails.css").read_text()
+        self.assertIn(":is(.module-tabs, .rrhh-tabs, .report-tabs, .mant-tabs)", css)
+        self.assertIn("flex-wrap: nowrap !important", css)
+        self.assertIn("overflow-x: auto !important", css)
+        self.assertIn("scroll-snap-type: x proximity", css)
+        self.assertIn("min-width: max-content !important", css)
+        self.assertIn("width: auto !important", css)
 
     def test_hallmark_ui_has_no_unapproved_regressions(self):
         issues = new_issues_against_baseline(Path(settings.BASE_DIR))
