@@ -259,16 +259,50 @@ body,
  * These selectors map the real RRHH templates, so new CH views inherit the same
  * containment rules instead of drifting into isolated card walls or wide forms.
  */
-.main-content[data-hallmark-scope="erp"] > .module-tabs,
-.main-content[data-hallmark-scope="erp"] > .rrhh-tabs,
-.main-content[data-hallmark-scope="erp"] > .report-tabs {
+.main-content[data-hallmark-scope="erp"] > :is(
+  .module-tabs,
+  .rrhh-tabs,
+  .report-tabs,
+  .mant-tabs,
+  .tabs-wrap,
+  .forecast-tabs,
+  .forecast-workflow-tabs,
+  .costeo-tabs,
+  .costeo-view-tabs,
+  .rent-tabs,
+  .unit-tabs,
+  .cedis-tabs,
+  .bandeja-tabs,
+  .notif-tabs,
+  .assign-tabs,
+  .panel-dg-tabs,
+  .panel-dg-view-tabs
+) {
   width: 100% !important;
   max-width: min(var(--erp-workspace-max), 100%) !important;
   margin-left: 0 !important;
   margin-right: auto !important;
 }
 
-.main-content[data-hallmark-scope="erp"] :is(.rrhh-tabs, .report-tabs) {
+.main-content[data-hallmark-scope="erp"] :is(
+  .module-tabs,
+  .rrhh-tabs,
+  .report-tabs,
+  .mant-tabs,
+  .tabs-wrap,
+  .forecast-tabs,
+  .forecast-workflow-tabs,
+  .costeo-tabs,
+  .costeo-view-tabs,
+  .rent-tabs,
+  .unit-tabs,
+  .cedis-tabs,
+  .bandeja-tabs,
+  .notif-tabs,
+  .assign-tabs,
+  .panel-dg-tabs,
+  .panel-dg-view-tabs
+) {
   display: grid !important;
   gap: 8px;
   grid-template-columns: repeat(auto-fit, var(--erp-tab-min)) !important;
@@ -276,7 +310,25 @@ body,
   overflow: visible !important;
 }
 
-.main-content[data-hallmark-scope="erp"] :is(.rrhh-tabs, .report-tabs) .module-tab {
+.main-content[data-hallmark-scope="erp"] :is(
+  .module-tabs,
+  .rrhh-tabs,
+  .report-tabs,
+  .mant-tabs,
+  .tabs-wrap,
+  .forecast-tabs,
+  .forecast-workflow-tabs,
+  .costeo-tabs,
+  .costeo-view-tabs,
+  .rent-tabs,
+  .unit-tabs,
+  .cedis-tabs,
+  .bandeja-tabs,
+  .notif-tabs,
+  .assign-tabs,
+  .panel-dg-tabs,
+  .panel-dg-view-tabs
+) :is(.module-tab, .tab-btn, a, button) {
   align-items: center;
   display: inline-flex;
   justify-content: center;
@@ -737,7 +789,25 @@ body,
     width: 100%;
   }
 
-  .main-content[data-hallmark-scope="erp"] :is(.module-tabs, .rrhh-tabs, .report-tabs, .mant-tabs),
+  .main-content[data-hallmark-scope="erp"] :is(
+    .module-tabs,
+    .rrhh-tabs,
+    .report-tabs,
+    .mant-tabs,
+    .tabs-wrap,
+    .forecast-tabs,
+    .forecast-workflow-tabs,
+    .costeo-tabs,
+    .costeo-view-tabs,
+    .rent-tabs,
+    .unit-tabs,
+    .cedis-tabs,
+    .bandeja-tabs,
+    .notif-tabs,
+    .assign-tabs,
+    .panel-dg-tabs,
+    .panel-dg-view-tabs
+  ),
   .main-content[data-hallmark-scope="erp"] .rrhh-page .rrhh-tabs {
     display: flex !important;
     flex-wrap: nowrap !important;
@@ -750,13 +820,77 @@ body,
     -webkit-overflow-scrolling: touch;
   }
 
-  .main-content[data-hallmark-scope="erp"] :is(.module-tabs, .rrhh-tabs, .report-tabs, .mant-tabs) .module-tab,
+  .main-content[data-hallmark-scope="erp"] :is(
+    .module-tabs,
+    .rrhh-tabs,
+    .report-tabs,
+    .mant-tabs,
+    .tabs-wrap,
+    .forecast-tabs,
+    .forecast-workflow-tabs,
+    .costeo-tabs,
+    .costeo-view-tabs,
+    .rent-tabs,
+    .unit-tabs,
+    .cedis-tabs,
+    .bandeja-tabs,
+    .notif-tabs,
+    .assign-tabs,
+    .panel-dg-tabs,
+    .panel-dg-view-tabs
+  ) :is(.module-tab, .tab-btn, a, button),
   .main-content[data-hallmark-scope="erp"] .rrhh-page .rrhh-tabs .module-tab {
     flex: 0 0 auto !important;
     width: auto !important;
     min-width: max-content !important;
     scroll-snap-align: start;
     white-space: nowrap;
+  }
+
+  .main-content[data-hallmark-scope="erp"] :is(
+    .rango-corte-grid,
+    .period-filter,
+    .filter-bar,
+    .config-grid,
+    .concept-grid,
+    .rule-concepts,
+    .rule-row,
+    .cancel-rules,
+    .adjust-grid,
+    .money-grid,
+    .branch-grid,
+    .area-grid,
+    .category-grid
+  ) {
+    grid-template-columns: 1fr !important;
+    min-width: 0 !important;
+  }
+
+  .main-content[data-hallmark-scope="erp"] :is(
+    .bonos-card,
+    .rango-corte,
+    .kpi-card,
+    .metric-card,
+    .periodo-bar
+  ) {
+    overflow: hidden;
+  }
+
+  .main-content[data-hallmark-scope="erp"] .rango-corte :is(input, select, textarea),
+  .main-content[data-hallmark-scope="erp"] :is(.period-filter, .filter-bar) :is(input, select, textarea) {
+    min-width: 0;
+  }
+
+  .main-content[data-hallmark-scope="erp"] .rango-corte .bonos-field > div {
+    align-items: stretch;
+    display: grid !important;
+    gap: 8px;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .main-content[data-hallmark-scope="erp"] .rango-corte .bonos-btn {
+    min-height: 44px;
+    width: auto !important;
   }
 }
 
