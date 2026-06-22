@@ -195,13 +195,6 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
                     cedis_line = existing
                     break
         if cedis_line:
-            if cantidad_esperada <= 0:
-                if cedis_line.estatus == RutaCargaChecklistLinea.ESTATUS_PENDIENTE:
-                    cedis_line.delete()
-                    actualizadas += 1
-                else:
-                    omitidas += 1
-                continue
             if cedis_line.estatus != RutaCargaChecklistLinea.ESTATUS_PENDIENTE:
                 omitidas += 1
                 continue
