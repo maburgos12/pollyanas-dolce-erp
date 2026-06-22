@@ -32,5 +32,6 @@ urlpatterns = [
     path("reportes/", views.reportes_lista, name="reportes_lista"),
     path("reportes/nuevo/", views.reporte_crear, name="reporte_crear"),
     path("bitacoras/", views.bitacoras_lista, name="bitacoras_lista"),
+    path("rutas/<int:pk>/imprimir/", views.ruta_print, name="ruta_print"),
     path("rutas/<int:pk>/", views.ruta_detail, name="ruta_detail"),
 ]

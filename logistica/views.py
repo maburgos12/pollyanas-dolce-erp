@@ -2795,6 +2795,21 @@ def ruta_detail(request, pk: int):
 
 
 @login_required
+def ruta_print(request, pk: int):
+    if not can_view_submodule(request.user, "logistica", "rutas"):
+        raise PermissionDenied("No tienes permisos para ver Logística")
+
+    ruta = get_object_or_404(RutaEntrega, pk=pk)
+    context = {
+        "ruta": ruta,
+        "paradas": ruta.paradas.select_related("punto", "punto__sucursal").order_by("orden", "id"),
+        "tiempos_ruta": resumen_tiempos_ruta(ruta),
+        "printed_at": timezone.localtime(),
+    }
+    return render(request, "logistica/ruta_print.html", context)
+
+
+@login_required
 def dashboard_ejecutivo(request):
     if not _can_view_logistica_ejecutivo(request.user):
         raise PermissionDenied("No tienes permisos para ver el dashboard ejecutivo de Logística")

@@ -35,6 +35,8 @@
     text-align:right;
     font-variant-numeric:tabular-nums;
   }
+  .route-detail-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; }
+  .route-print-action { display:inline-flex; align-items:center; gap:8px; }
   .route-inline-form { display:grid; gap:6px; min-width:220px; }
   .route-inline-number { max-width:120px; text-align:right; }
   .route-delivery-modal[hidden] { display:none; }
@@ -82,7 +84,13 @@
   </section>
 
   <section class="card">
-    <div class="card-header">Detalle de ruta</div>
+    <div class="card-header route-detail-head">
+      <span>Detalle de ruta</span>
+      <a class="btn btn-secondary btn-small route-print-action" href="{% url 'logistica:ruta_print' ruta.id %}" target="_blank" rel="noopener">
+        <i class="ti ti-printer" aria-hidden="true"></i>
+        Imprimir orden de paradas
+      </a>
+    </div>
     <div class="ops-summary">
       <article class="ops-summary-card"><span class="muted">Ruta</span><strong style="font-size:22px;">{{ ruta.nombre }}</strong><div>{{ ruta.folio }}</div></article>
       <article class="ops-summary-card"><span class="muted">Fecha</span><strong style="font-size:22px;">{{ ruta.fecha_ruta|date:"Y-m-d" }}</strong><div>{{ ruta.get_estatus_display }}</div></article>
