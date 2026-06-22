@@ -1944,11 +1944,11 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v47", pwa_html)
+        self.assertIn("route-control-v48", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v47", pwa_html)
+        self.assertIn("?v=route-control-v48", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v47-tema-claro-y-preview-repartidor", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v48-recarga-cedis-pwa", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
         self.assertIn("Logística debe asignar la unidad a la ruta.", pwa_html)
@@ -1998,6 +1998,10 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("entregadas = entregables.filter((parada) => parada.entrega_estado === \"ENTREGADA\")", pwa_html)
         self.assertIn("confirmarEntregaParada(${Number(rutaId)}, ${Number(parada.id)}, this)", pwa_html)
         self.assertIn("const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && entrega === \"PENDIENTE\";", pwa_html)
+        self.assertIn("const puedeRegistrarRecarga = !requiereEntrega && rutaEnSeguimiento && !visited;", pwa_html)
+        self.assertIn("registrarRecargaCedis(${Number(rutaId)}, ${Number(parada.id)}, this)", pwa_html)
+        self.assertIn("Registrar llegada / recarga CEDIS", pwa_html)
+        self.assertIn("/recarga-cedis/", pwa_html)
         self.assertIn("paradaRequiereEntrega", pwa_html)
         self.assertIn('toUpperCase() !== "CEDIS"', pwa_html)
         self.assertIn('button.textContent = "Enviando...";', pwa_html)
@@ -2015,7 +2019,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v47-tema-claro-y-preview-repartidor", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v48-recarga-cedis-pwa", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -2846,6 +2850,44 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("recarga", response.json()["detail"])
         self.assertEqual(parada_cedis.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
+
+    def test_api_registra_recarga_cedis_desde_pwa(self):
+        self.client.force_login(self.user)
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.567916",
+            longitud="-108.459969",
+            radio_geocerca_metros=120,
+        )
+        parada_cedis = ParadaRuta.objects.create(
+            ruta=self.ruta,
+            punto=cedis,
+            orden=2,
+            estado=ParadaRuta.ESTADO_PENDIENTE,
+        )
+        url = reverse("api_logistica_ruta_parada_recarga_cedis", kwargs={"ruta_id": self.ruta.id, "parada_id": parada_cedis.id})
+
+        response = self.client.post(
+            url,
+            json.dumps({"notas": "Llegué a CEDIS para recargar."}),
+            content_type="application/json",
+        )
+        retry = self.client.post(url, json.dumps({}), content_type="application/json")
+
+        parada_cedis.refresh_from_db()
+        self.ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(retry.status_code, 200)
+        self.assertEqual(parada_cedis.estado, ParadaRuta.ESTADO_VISITADA)
+        self.assertIsNotNone(parada_cedis.hora_llegada_real)
+        self.assertIsNotNone(parada_cedis.hora_salida_real)
+        self.assertEqual(parada_cedis.notas, "Llegué a CEDIS para recargar.")
+        self.assertEqual(
+            EventoRuta.objects.filter(ruta=self.ruta, parada=parada_cedis, metadata__tipo="recarga_cedis_pwa").count(),
+            1,
+        )
+        self.assertEqual(self.ruta.cumplimiento_porcentaje, Decimal("50.00"))
 
     def test_api_retry_no_sobrescribe_entrega_confirmada(self):
         self.client.force_login(self.user)

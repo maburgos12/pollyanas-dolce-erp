@@ -1362,7 +1362,7 @@
       const TRACKING_QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
       const ACCESS_TOKEN_KEY = "pd_logistica_access";
       const REFRESH_TOKEN_KEY = "pd_logistica_refresh";
-      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v47
+      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v48
       const PREVIEW_REPARTIDOR_PARAM = "preview_repartidor";
       const app = document.getElementById("app");
       const initialParams = new URLSearchParams(window.location.search);
@@ -2501,6 +2501,7 @@
           const entrega = parada.entrega_estado || "PENDIENTE";
           const requiereEntrega = paradaRequiereEntrega(parada);
           const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && entrega === "PENDIENTE";
+          const puedeRegistrarRecarga = !requiereEntrega && rutaEnSeguimiento && !visited;
           const esSiguiente = !visited && Number(parada.id) === nextId;
           const notasDraft = entregaNotasDraftFor(parada.id);
           return `
@@ -2528,6 +2529,11 @@
                       <button class="primary-btn" type="button" onclick="confirmarEntregaParada(${Number(rutaId)}, ${Number(parada.id)}, this, '${notasDraft.estado}')">Guardar</button>
                     </div>
                   ` : ""}
+                ` : ""}
+                ${puedeRegistrarRecarga ? `
+                  <div class="route-status-row" style="margin-top:10px;flex-wrap:wrap;gap:8px;">
+                    <button class="primary-btn" type="button" onclick="registrarRecargaCedis(${Number(rutaId)}, ${Number(parada.id)}, this)">Registrar llegada / recarga CEDIS</button>
+                  </div>
                 ` : ""}
               </div>
             </section>
@@ -2934,6 +2940,31 @@
           return renderRutaActiva("✅ Entrega registrada.");
         } catch (error) {
           return renderRutaActiva(error?.message === "Sesión expirada" ? "Tu sesión expiró. Vuelve a iniciar sesión." : "No se pudo confirmar la entrega. Reintenta con señal.");
+        }
+      }
+
+      async function registrarRecargaCedis(rutaId, paradaId, button = null) {
+        if (previewBlocked("El registro de recarga CEDIS está bloqueado en vista como repartidor.")) return;
+        rutaId = Number(rutaId || state.rutaActiva?.ruta?.id);
+        if (!rutaId || !paradaId) return renderRutaActiva("No hay ruta activa para registrar recarga CEDIS.");
+        if (button) {
+          button.disabled = true;
+          button.textContent = "Registrando...";
+        }
+        try {
+          const response = await apiFetch(`/rutas/${rutaId}/paradas/${paradaId}/recarga-cedis/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ notas: "Recarga CEDIS registrada por repartidor en PWA." })
+          });
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            return renderRutaActiva(apiErrorMessage(error, "No se pudo registrar la recarga CEDIS."));
+          }
+          state.rutaActiva = null;
+          return renderRutaActiva("✅ Recarga CEDIS registrada.");
+        } catch (error) {
+          return renderRutaActiva(error?.message === "Sesión expirada" ? "Tu sesión expiró. Vuelve a iniciar sesión." : "No se pudo registrar la recarga CEDIS. Reintenta con señal.");
         }
       }
 
@@ -4523,7 +4554,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v47", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v48", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {

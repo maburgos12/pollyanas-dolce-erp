@@ -1439,6 +1439,56 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         )
 
 
+class LogisticaRutaParadaRecargaCedisView(_LogisticaBaseView):
+    def post(self, request, ruta_id: int, parada_id: int):
+        if not _can_operate_pwa(request.user) and not can_manage_submodule(request.user, "logistica", "rutas"):
+            return Response({"detail": "No tienes permisos para registrar recargas CEDIS."}, status=status.HTTP_403_FORBIDDEN)
+
+        ruta = get_object_or_404(RutaEntrega.objects.select_related("repartidor", "unidad_operativa"), pk=ruta_id)
+        can_manage_rutas = can_manage_submodule(request.user, "logistica", "rutas")
+        repartidor = _get_repartidor_for_user(request.user)
+        if not can_manage_rutas and (repartidor is None or ruta.repartidor_id != repartidor.id):
+            return Response({"detail": "No puedes registrar recargas de una ruta asignada a otro repartidor."}, status=status.HTTP_403_FORBIDDEN)
+        if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
+            return Response({"detail": "Solo puedes registrar recarga CEDIS en una ruta en seguimiento."}, status=status.HTTP_400_BAD_REQUEST)
+
+        parada = get_object_or_404(ParadaRuta.objects.select_related("punto"), pk=parada_id, ruta=ruta)
+        if parada.punto.tipo != PuntoLogistico.TIPO_CEDIS:
+            return Response({"detail": "Esta acción solo aplica a paradas CEDIS."}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            parada = ParadaRuta.objects.select_for_update().select_related("punto").get(pk=parada.pk)
+            created_event = False
+            if parada.estado != ParadaRuta.ESTADO_VISITADA:
+                now = timezone.now()
+                parada.estado = ParadaRuta.ESTADO_VISITADA
+                parada.hora_llegada_real = parada.hora_llegada_real or now
+                parada.hora_salida_real = parada.hora_salida_real or now
+                parada.notas = (request.data.get("notas") or "Recarga CEDIS registrada por repartidor en PWA.").strip()
+                parada.save(update_fields=["estado", "hora_llegada_real", "hora_salida_real", "notas", "actualizado_en"])
+                EventoRuta.objects.create(
+                    ruta=ruta,
+                    parada=parada,
+                    tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+                    severidad=EventoRuta.SEVERIDAD_INFO,
+                    descripcion="Recarga CEDIS registrada por repartidor en PWA.",
+                    metadata={"tipo": "recarga_cedis_pwa"},
+                    creado_por=request.user,
+                )
+                ruta.recompute_route_control()
+                ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
+                created_event = True
+
+        log_event(
+            request.user,
+            "CREATE",
+            "logistica.EventoRuta",
+            str(parada.id),
+            {"ruta": ruta.folio, "parada": parada.id, "tipo": "recarga_cedis_pwa", "created": created_event},
+        )
+        return Response({"parada": ParadaRutaSerializer(parada).data}, status=status.HTTP_200_OK)
+
+
 class LogisticaRutaActivaView(_LogisticaBaseView):
     def get(self, request):
         if not _can_operate_pwa(request.user):
