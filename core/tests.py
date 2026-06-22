@@ -117,6 +117,16 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('name="apple-mobile-web-app-title"', html)
         self.assertIn("navigator.serviceWorker.register('/erp-sw.js?v=20260622-erp-pwa-v1')", html)
 
+    def test_login_template_also_exposes_pwa_install_metadata(self):
+        login = Path(settings.BASE_DIR) / "core" / "templates" / "core" / "login.html"
+        html = login.read_text()
+
+        self.assertIn("manifest.webmanifest", html)
+        self.assertIn('name="theme-color"', html)
+        self.assertIn('name="apple-mobile-web-app-capable"', html)
+        self.assertIn('name="apple-mobile-web-app-title"', html)
+        self.assertIn("navigator.serviceWorker.register('/erp-sw.js?v=20260622-erp-pwa-v1')", html)
+
     def test_erp_pwa_manifest_and_service_worker_are_minimal(self):
         manifest = (Path(settings.BASE_DIR) / "static" / "manifest.webmanifest").read_text()
         sw = (Path(settings.BASE_DIR) / "static" / "erp-sw.js").read_text()
