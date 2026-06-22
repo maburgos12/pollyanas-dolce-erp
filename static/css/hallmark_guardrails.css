@@ -737,8 +737,26 @@ body,
     width: 100%;
   }
 
-  .main-content[data-hallmark-scope="erp"] :is(.rrhh-tabs, .report-tabs) .module-tab {
-    min-width: 0;
+  .main-content[data-hallmark-scope="erp"] :is(.module-tabs, .rrhh-tabs, .report-tabs, .mant-tabs),
+  .main-content[data-hallmark-scope="erp"] .rrhh-page .rrhh-tabs {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    gap: 8px;
+    max-width: 100%;
+    overflow-x: auto !important;
+    overflow-y: hidden;
+    padding: 6px;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .main-content[data-hallmark-scope="erp"] :is(.module-tabs, .rrhh-tabs, .report-tabs, .mant-tabs) .module-tab,
+  .main-content[data-hallmark-scope="erp"] .rrhh-page .rrhh-tabs .module-tab {
+    flex: 0 0 auto !important;
+    width: auto !important;
+    min-width: max-content !important;
+    scroll-snap-align: start;
+    white-space: nowrap;
   }
 }
 

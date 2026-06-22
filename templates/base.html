@@ -16,15 +16,37 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.44.0/dist/tabler-icons.min.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Sharp:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200">
     <script defer src="https://cdn.jsdelivr.net/npm/lucide@1.21.0/dist/umd/lucide.min.js"></script>
-    <link rel="stylesheet" href="/static/css/styles.css?v=20260606-alert-close-v1">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260622-mobile-shell-v1">
     <link rel="stylesheet" href="/static/css/pollyana_ops_ui.css?v=20260614-ui-fase-final-v1">
     {% block extra_css %}{% endblock %}
     <link rel="stylesheet" href="/static/css/pollyana_generated_utilities.css?v=20260614-ui100-v1">
-    <link rel="stylesheet" href="/static/css/hallmark_guardrails.css?v=20260601-reportes-kpis-order-v1">
+    <link rel="stylesheet" href="/static/css/hallmark_guardrails.css?v=20260622-mobile-tabs-v1">
 </head>
 <body class="{% block body_class %}{% endblock %}">
+    <a class="skip-link" href="#main-content">Saltar al contenido</a>
     <div class="layout-wrapper">
-        <aside class="sidebar">
+        <header class="mobile-app-bar" aria-label="Navegación móvil">
+            <button class="mobile-nav-toggle" type="button" aria-controls="erp-sidebar" aria-expanded="false" aria-label="Abrir menú">
+                <span class="mobile-nav-toggle-icon" aria-hidden="true"></span>
+                <span class="mobile-nav-toggle-text">Menú</span>
+            </button>
+            <div class="mobile-app-bar-brand">
+                <span class="mobile-app-bar-mark" aria-hidden="true">
+                    <img src="{% static 'core/dolce-logo-pin-transparent.png' %}?v=20260525-logo-v1" alt="">
+                </span>
+                <span class="mobile-app-bar-copy">
+                    <span class="mobile-app-bar-title">{% block mobile_title %}Pollyana's Dolce{% endblock %}</span>
+                    <span class="mobile-app-bar-subtitle">{{ ui_access.role_label|default:"ERP operativo" }}</span>
+                </span>
+            </div>
+            <a class="mobile-app-bar-action" href="{% url 'notificaciones' %}" aria-label="Notificaciones">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/>
+                    <path d="M10 21h4"/>
+                </svg>
+            </a>
+        </header>
+        <aside class="sidebar" id="erp-sidebar">
             <div class="sidebar-header">
                 <div class="sidebar-logo" aria-hidden="true">
                     <img src="{% static 'core/dolce-logo-pin-transparent.png' %}?v=20260525-logo-v1" alt="">
@@ -816,7 +838,9 @@
             </div>
         </aside>
 
-        <main class="main-content" data-hallmark-scope="erp">
+        <button class="mobile-nav-backdrop" type="button" aria-label="Cerrar menú" hidden></button>
+
+        <main class="main-content" id="main-content" data-hallmark-scope="erp">
             {% if messages %}
             <div class="messages-container">
                 {% for message in messages %}
@@ -842,6 +866,40 @@
     {% block extra_js %}{% endblock %}
 
     <script>
+    // ── Navegación móvil touch ────────────────────────────────────
+    (function () {
+        var toggle = document.querySelector('.mobile-nav-toggle');
+        var backdrop = document.querySelector('.mobile-nav-backdrop');
+        var sidebar = document.getElementById('erp-sidebar');
+        if (!toggle || !backdrop || !sidebar) return;
+
+        function setOpen(open) {
+            document.body.classList.toggle('mobile-nav-open', open);
+            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            backdrop.hidden = !open;
+        }
+
+        toggle.addEventListener('click', function () {
+            setOpen(!document.body.classList.contains('mobile-nav-open'));
+        });
+
+        backdrop.addEventListener('click', function () {
+            setOpen(false);
+        });
+
+        sidebar.addEventListener('click', function (event) {
+            if (event.target.closest('a')) setOpen(false);
+        });
+
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape') setOpen(false);
+        });
+
+        window.addEventListener('resize', function () {
+            if (window.innerWidth > 720) setOpen(false);
+        });
+    })();
+
     // ── Sidebar colapsable ─────────────────────────────────────────
     (function () {
         function setGroup(btn, expanded) {
