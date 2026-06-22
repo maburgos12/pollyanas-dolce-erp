@@ -1944,11 +1944,11 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v48", pwa_html)
+        self.assertIn("route-control-v49", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v48", pwa_html)
+        self.assertIn("?v=route-control-v49", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v48-recarga-cedis-pwa", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v49-recarga-abre-carga", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
         self.assertIn("Logística debe asignar la unidad a la ruta.", pwa_html)
@@ -2002,6 +2002,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("registrarRecargaCedis(${Number(rutaId)}, ${Number(parada.id)}, this)", pwa_html)
         self.assertIn("Registrar llegada / recarga CEDIS", pwa_html)
         self.assertIn("/recarga-cedis/", pwa_html)
+        self.assertIn('return renderRutaCarga("✅ Recarga CEDIS registrada. Captura lo que se cargó.");', pwa_html)
         self.assertIn("paradaRequiereEntrega", pwa_html)
         self.assertIn('toUpperCase() !== "CEDIS"', pwa_html)
         self.assertIn('button.textContent = "Enviando...";', pwa_html)
@@ -2019,7 +2020,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v48-recarga-cedis-pwa", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v49-recarga-abre-carga", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
