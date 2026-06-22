@@ -5,7 +5,7 @@
 {% block page_title %}Logística · {{ ruta.folio }}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/logistica-templates-logistica-ruta-detail.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/logistica-templates-logistica-ruta-detail.css?v=20260622-mobile-route-plan-v1">
 <style>
   .ops-shell { display:grid; gap:18px; }
   .ops-grid-2 { display:grid; gap:18px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
@@ -13,8 +13,8 @@
   .ops-summary-card { border:1px solid var(--rosa-deep); border-radius:14px; background:#fff; padding:14px 16px; }
   .ops-summary-card strong { display:block; font-size:28px; color:var(--vino); line-height:1; margin-bottom:8px; }
   .ops-shell .module-tabs { display:flex; flex-wrap:wrap; gap:8px; overflow-x:auto; }
-  .route-plan-grid { display:grid; gap:12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .route-plan-field { display:grid; gap:6px; }
+  .route-plan-grid { display:grid; gap:12px; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); }
+  .route-plan-field { display:grid; gap:6px; min-width:0; }
   .route-plan-field label { font-weight:800; color:var(--vino); }
   .route-action-row { display:flex; flex-wrap:wrap; gap:10px 12px; align-items:center; }
   .route-action-row form { margin:0; }
@@ -70,7 +70,17 @@
     .route-loading-bar span { width:100%; opacity:.7; }
   }
   @media (max-width: 960px) { .ops-grid-2, .ops-summary { grid-template-columns: 1fr; } }
-  @media (max-width: 760px) { .route-plan-grid { grid-template-columns:1fr; } }
+  @media (max-width: 760px) {
+    .route-plan-grid { grid-template-columns:minmax(0, 1fr); }
+    .route-plan-field,
+    .route-plan-field :is(input, select, textarea, .input-field, .pd-searchable-select, .pd-searchable-select__input),
+    .ops-shell .card :is(form, .filters, .route-action-row, .route-plan-actions),
+    .ops-shell .card :is(button, .btn) {
+      max-width:100%;
+      min-width:0;
+      width:100%;
+    }
+  }
 </style>
 <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260621-button-gap-v1">
 {% endblock %}

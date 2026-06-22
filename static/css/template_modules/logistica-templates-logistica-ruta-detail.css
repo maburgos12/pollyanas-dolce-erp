@@ -5,3 +5,11 @@
   .ops-summary-card { border:1px solid var(--rosa-deep); border-radius:14px; background:#fff; padding:14px 16px; }
   .ops-summary-card strong { display:block; font-size:28px; color:var(--vino); line-height:1; margin-bottom:8px; }
   @media (max-width: 960px) { .ops-grid-2, .ops-summary { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) {
+    .ops-shell .card :is(form, .filters, .route-action-row, .route-plan-actions),
+    .ops-shell .card :is(button, .btn) {
+      max-width: 100%;
+      min-width: 0;
+      width: 100%;
+    }
+  }

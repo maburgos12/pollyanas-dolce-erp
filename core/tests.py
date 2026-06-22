@@ -74,7 +74,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         html = base.read_text()
         self.assertIn('data-hallmark-scope="erp"', html)
         self.assertLess(html.index("{% block extra_css %}"), html.index("hallmark_guardrails.css"))
-        self.assertIn("20260622-mobile-tabs-forms-v1", html)
+        self.assertIn("20260622-mobile-all-tabs-v1", html)
 
     def test_base_template_includes_mobile_touch_navigation_shell(self):
         base = Path(settings.BASE_DIR) / "templates" / "base.html"
