@@ -2710,6 +2710,10 @@ def ruta_detail(request, pk: int):
     checklist_carga = getattr(ruta, "checklist_carga", None)
     recepcion_point_rows = _recepcion_point_rows(checklist_carga)
     recepcion_point_totales = _totales_recepcion_point(recepcion_point_rows)
+    captura_erp_disponible = can_manage_submodule(request.user, "logistica", "rutas") and ruta.estatus in {
+        RutaEntrega.ESTATUS_PLANEADA,
+        RutaEntrega.ESTATUS_EN_RUTA,
+    }
     carga_manual_pendiente = bool(
         checklist_carga
         and ruta.estatus == RutaEntrega.ESTATUS_PLANEADA
@@ -2762,6 +2766,7 @@ def ruta_detail(request, pk: int):
         "cierre_diferencia_disponible": cierre_diferencia_disponible,
         "recepcion_point_rows": recepcion_point_rows,
         "recepcion_point_totales": recepcion_point_totales,
+        "captura_erp_disponible": captura_erp_disponible,
         "motivos_carga_manual": RutaCargaChecklistLinea.MOTIVO_CHOICES,
         "enterprise_chain": enterprise_chain,
         "critical_path_rows": _logistica_critical_path_rows(enterprise_chain),

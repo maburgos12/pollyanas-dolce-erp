@@ -4235,6 +4235,21 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.cantidad_cargada, linea.cantidad_enviada_esperada)
         self.assertEqual(checklist.estatus, RutaCargaChecklist.ESTATUS_CONFIRMADA)
 
+    def test_ruta_detail_muestra_captura_erp_en_ruta(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        self._crear_transferencia_point_abierta()
+        sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+        ruta.estatus = RutaEntrega.ESTATUS_EN_RUTA
+        ruta.save(update_fields=["estatus"])
+
+        response = self.client.get(reverse("logistica:ruta_detail", kwargs={"pk": ruta.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Captura ERP")
+        self.assertContains(response, 'name="action" value="confirmar_linea_carga_manual"')
+
     def test_validar_linea_carga_sigue_bloqueando_salida_si_quedan_lineas_pendientes(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
         checklist = RutaCargaChecklist.objects.create(ruta=ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
