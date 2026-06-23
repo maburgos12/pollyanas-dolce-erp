@@ -294,9 +294,10 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
             )
         try:
             from rrhh.models import Prestamo
+            from rrhh.services_prestamos import prestamos_jefe_q
 
             tiene_prestamos_por_autorizar = Prestamo.objects.filter(
-                jefe_directo=user,
+                prestamos_jefe_q(user),
                 estado=Prestamo.ESTADO_SOLICITADO,
             ).exists()
         except Exception:

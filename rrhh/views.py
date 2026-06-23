@@ -515,7 +515,9 @@ def _has_rrhh_task_access(user, tab_key: str) -> bool:
             or VacanteRRHH.objects.filter(Q(solicitado_por=user) | Q(creado_por=user)).exists()
         )
     if tab_key == "prestamos":
-        return Prestamo.objects.filter(jefe_directo=user).exists()
+        from .services_prestamos import prestamos_jefe_q
+
+        return Prestamo.objects.filter(prestamos_jefe_q(user)).exists()
     if tab_key == "horas_extra":
         return HoraExtra.objects.filter(jefe_directo=user).exists()
     if tab_key == "vacaciones":
