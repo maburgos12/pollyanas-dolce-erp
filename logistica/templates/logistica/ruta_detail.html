@@ -480,7 +480,7 @@
               <th class="text-end">Ajustado (enviado Point)</th>
               <th class="text-end">Cargado PWA</th>
               <th>Estado de carga</th>
-              {% if can_manage_logistica and ruta.estatus == "PLANEADA" %}<th>Captura ERP</th>{% endif %}
+              {% if captura_erp_disponible %}<th>Captura ERP</th>{% endif %}
             </tr>
           </thead>
           <tbody>
@@ -495,7 +495,7 @@
               <td class="text-end">{{ row.enviado|floatformat:-2 }}</td>
               <td class="text-end">{% if row.cargado_validado %}{{ row.cargado|floatformat:-2 }}{% else %}-{% endif %}</td>
               <td><span class="point-status is-{{ row.estado_tone }}">{{ row.estado_label }}</span></td>
-              {% if can_manage_logistica and ruta.estatus == "PLANEADA" %}
+              {% if captura_erp_disponible %}
               <td>
                 <form method="post" class="route-inline-form" data-route-loading-form data-loading-title="Guardando carga manual" data-loading-message="Registrando cantidad capturada en ERP...">
                   {% csrf_token %}
@@ -515,9 +515,9 @@
               {% endif %}
             </tr>
             {% empty %}
-            <tr><td colspan="{% if can_manage_logistica and ruta.estatus == "PLANEADA" %}7{% else %}6{% endif %}" class="muted">Sin checklist de carga para esta ruta.</td></tr>
+            <tr><td colspan="{% if captura_erp_disponible %}7{% else %}6{% endif %}" class="muted">Sin checklist de carga para esta ruta.</td></tr>
             {% endfor %}
-            <tr data-route-load-detail-empty hidden><td colspan="{% if can_manage_logistica and ruta.estatus == "PLANEADA" %}7{% else %}6{% endif %}" class="muted">Sin coincidencias para la búsqueda.</td></tr>
+            <tr data-route-load-detail-empty hidden><td colspan="{% if captura_erp_disponible %}7{% else %}6{% endif %}" class="muted">Sin coincidencias para la búsqueda.</td></tr>
           </tbody>
         </table>
       </div>
