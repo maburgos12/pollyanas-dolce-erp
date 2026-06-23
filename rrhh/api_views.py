@@ -36,6 +36,7 @@ from .services_vacaciones import (
     preautorizar_solicitud_vacaciones_jefe,
     rechazar_solicitud_vacaciones,
     saldo_vacaciones_empleado,
+    vacaciones_jefe_q,
 )
 
 
@@ -85,7 +86,9 @@ class _CapitalHumanoAccessMixin:
             if model == Prestamo:
                 filtro |= prestamos_jefe_q(self.request.user)
             elif model == HoraExtra:
-                filtro |= Q(jefe_directo=self.request.user)
+                filtro |= Q(pk__isnull=False) if self.request.user.is_superuser else Q(jefe_directo=self.request.user)
+            elif model == SolicitudVacaciones:
+                filtro |= vacaciones_jefe_q(self.request.user)
             qs = qs.filter(filtro) if filtro else qs.none()
         limit = self.request.query_params.get("limit")
         if limit:
@@ -149,7 +152,7 @@ class HoraExtraViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def autorizar(self, request, pk=None):
         he = self.get_object()
-        if he.jefe_directo_id != request.user.id:
+        if he.jefe_directo_id != request.user.id and not request.user.is_superuser:
             raise PermissionDenied("Solo el jefe directo asignado puede autorizar esta hora extra.")
         he.estado = HoraExtra.ESTADO_AUTORIZADO
         he.autorizado_por = request.user
@@ -161,7 +164,7 @@ class HoraExtraViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def rechazar(self, request, pk=None):
         he = self.get_object()
-        if he.jefe_directo_id != request.user.id:
+        if he.jefe_directo_id != request.user.id and not request.user.is_superuser:
             raise PermissionDenied("Solo el jefe directo asignado puede rechazar esta hora extra.")
         he.estado = HoraExtra.ESTADO_RECHAZADO
         he.autorizado_por = request.user
@@ -237,11 +240,11 @@ class SolicitudVacacionesViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSe
         if can_view_rrhh(self.request.user):
             pass
         elif empleado:
-            qs = qs.filter(Q(empleado=empleado) | prestamos_jefe_q(self.request.user))
+            qs = qs.filter(Q(empleado=empleado) | vacaciones_jefe_q(self.request.user))
         else:
-            qs = qs.filter(prestamos_jefe_q(self.request.user))
+            qs = qs.filter(vacaciones_jefe_q(self.request.user))
         if self.request.query_params.get("equipo") == "true":
-            qs = qs.filter(jefe_directo=self.request.user)
+            qs = qs.filter(vacaciones_jefe_q(self.request.user))
         estado = self.request.query_params.get("estado")
         if estado:
             qs = qs.filter(estado=estado)

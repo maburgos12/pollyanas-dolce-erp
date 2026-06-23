@@ -82,6 +82,8 @@ def can_resolver_permiso_jefe(user: AbstractBaseUser, permiso: PermisoSalida) ->
         return False
     if _es_mismo_empleado(user, permiso.empleado):
         return False
+    if getattr(user, "is_superuser", False):
+        return True
     return getattr(usuario_jefe_directo_permiso(permiso), "id", None) == user.id
 
 
@@ -176,13 +178,13 @@ def permiso_requiere_autorizacion_direccion(empleado: Empleado | None) -> bool:
     if not empleado:
         return False
 
+    if empleado.jefe_directo_id:
+        return False
+
     nombre = normalizar_nombre(empleado.nombre or "")
     nombres_direccion = {normalizar_nombre(item) for item in DIRECCION_NOMBRES}
     if nombre in nombres_direccion or any(nombre.startswith(item) for item in nombres_direccion if len(item) > 5):
         return True
-
-    if empleado.jefe_directo_id:
-        return False
 
     departamento = (empleado.departamento or empleado.departamento_origen or "").strip().upper()
     if departamento not in DIRECCION_DEPARTAMENTOS:

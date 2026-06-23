@@ -338,12 +338,37 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                 }
             )
         try:
+            from rrhh.models import SolicitudVacaciones
+            from rrhh.services_vacaciones import vacaciones_jefe_q
+
+            vacaciones_por_autorizar = SolicitudVacaciones.objects.filter(
+                vacaciones_jefe_q(user),
+                estado=SolicitudVacaciones.ESTADO_SOLICITADA,
+            ).count()
+        except Exception:
+            vacaciones_por_autorizar = 0
+        if vacaciones_por_autorizar:
+            match_len = len("/rrhh/vacaciones/") if current_path.startswith("/rrhh/vacaciones/") else 0
+            best_match_len = max(best_match_len, match_len)
+            mi_trabajo["items"].append(
+                {
+                    "label": "Vacaciones por autorizar",
+                    "url": "/rrhh/vacaciones/",
+                    "active": False,
+                    "_match_len": match_len,
+                    "module": "rrhh",
+                    "submodule": "vacaciones",
+                    "initial": "V",
+                    "badge_count": vacaciones_por_autorizar,
+                }
+            )
+        try:
             from rrhh.models import HoraExtra
 
-            horas_extra_por_autorizar = HoraExtra.objects.filter(
-                jefe_directo=user,
-                estado=HoraExtra.ESTADO_PENDIENTE,
-            ).count()
+            horas_extra_qs = HoraExtra.objects.filter(estado=HoraExtra.ESTADO_PENDIENTE)
+            if not user.is_superuser:
+                horas_extra_qs = horas_extra_qs.filter(jefe_directo=user)
+            horas_extra_por_autorizar = horas_extra_qs.count()
         except Exception:
             horas_extra_por_autorizar = 0
         if horas_extra_por_autorizar:

@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils import timezone
 
 from core.access import can_manage_rrhh
@@ -125,7 +125,17 @@ def usuario_jefe_directo_vacaciones(empleado: Empleado):
 def can_gestionar_vacaciones_jefe(user, empleado: Empleado | None) -> bool:
     if not user or not getattr(user, "is_authenticated", False) or not empleado:
         return False
+    if getattr(user, "is_superuser", False):
+        return True
     return getattr(usuario_jefe_directo_vacaciones(empleado), "id", None) == user.id
+
+
+def vacaciones_jefe_q(user) -> Q:
+    if not user or not getattr(user, "is_authenticated", False):
+        return Q(pk__in=[])
+    if getattr(user, "is_superuser", False):
+        return Q(pk__isnull=False)
+    return Q(jefe_directo=user)
 
 
 def can_resolver_vacaciones_jefe(user, solicitud: SolicitudVacaciones) -> bool:
