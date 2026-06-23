@@ -1362,7 +1362,7 @@
       const TRACKING_QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
       const ACCESS_TOKEN_KEY = "pd_logistica_access";
       const REFRESH_TOKEN_KEY = "pd_logistica_refresh";
-      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v51
+      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v52
       const PREVIEW_REPARTIDOR_PARAM = "preview_repartidor";
       const app = document.getElementById("app");
       const initialParams = new URLSearchParams(window.location.search);
@@ -2458,6 +2458,11 @@
         return String(parada?.punto?.tipo || "").toUpperCase() !== "CEDIS";
       }
 
+      function paradaDisponibleParaEntrega(parada, paradas) {
+        const orden = Number(parada?.orden || 0);
+        return !(paradas || []).some((item) => String(item?.punto?.tipo || "").toUpperCase() === "CEDIS" && item.estado !== "VISITADA" && Number(item.orden || 0) < orden);
+      }
+
       function pointRecepcionTone(linea) {
         const estado = linea?.point_recepcion_estado || "PENDIENTE_POINT";
         if (estado === "RECIBIDO_OK") return "ok";
@@ -2500,7 +2505,7 @@
           const visited = parada.estado === "VISITADA";
           const entrega = parada.entrega_estado || "PENDIENTE";
           const requiereEntrega = paradaRequiereEntrega(parada);
-          const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && entrega === "PENDIENTE";
+          const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && entrega === "PENDIENTE" && paradaDisponibleParaEntrega(parada, paradas);
           const puedeRegistrarRecarga = !requiereEntrega && rutaEnSeguimiento && !visited;
           const esSiguiente = !visited && Number(parada.id) === nextId;
           const notasDraft = entregaNotasDraftFor(parada.id);
@@ -4566,7 +4571,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v51", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v52", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {

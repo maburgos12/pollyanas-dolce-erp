@@ -1945,11 +1945,11 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v51", pwa_html)
+        self.assertIn("route-control-v52", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v51", pwa_html)
+        self.assertIn("?v=route-control-v52", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v51-liberar-tramo-cedis", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v52-bloquea-entrega-post-cedis", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
         self.assertIn("Logística debe asignar la unidad a la ruta.", pwa_html)
@@ -2003,7 +2003,8 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("entregables = (paradas || []).filter(paradaRequiereEntrega)", pwa_html)
         self.assertIn("entregadas = entregables.filter((parada) => parada.entrega_estado === \"ENTREGADA\")", pwa_html)
         self.assertIn("confirmarEntregaParada(${Number(rutaId)}, ${Number(parada.id)}, this)", pwa_html)
-        self.assertIn("const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && entrega === \"PENDIENTE\";", pwa_html)
+        self.assertIn("paradaDisponibleParaEntrega", pwa_html)
+        self.assertIn("const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && entrega === \"PENDIENTE\" && paradaDisponibleParaEntrega(parada, paradas);", pwa_html)
         self.assertIn("const puedeRegistrarRecarga = !requiereEntrega && rutaEnSeguimiento && !visited;", pwa_html)
         self.assertIn("registrarRecargaCedis(${Number(rutaId)}, ${Number(parada.id)}, this)", pwa_html)
         self.assertIn("Registrar llegada / recarga CEDIS", pwa_html)
@@ -2026,7 +2027,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v51-liberar-tramo-cedis", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v52-bloquea-entrega-post-cedis", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -2857,6 +2858,47 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("recarga", response.json()["detail"])
         self.assertEqual(parada_cedis.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
+
+    def test_api_no_confirma_entrega_despues_de_cedis_pendiente(self):
+        self.client.force_login(self.user)
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS tramo",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.567916",
+            longitud="-108.459969",
+            radio_geocerca_metros=120,
+        )
+        parada_cedis = ParadaRuta.objects.create(ruta=self.ruta, punto=cedis, orden=2, estado=ParadaRuta.ESTADO_PENDIENTE)
+        self.parada.orden = 3
+        self.parada.save(update_fields=["orden", "actualizado_en"])
+        url = reverse("api_logistica_ruta_parada_entrega", kwargs={"ruta_id": self.ruta.id, "parada_id": self.parada.id})
+
+        response = self.client.post(
+            url,
+            json.dumps(
+                {
+                    "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+                    "evidencias": [{"comentario": "Intento antes de recarga"}],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("recarga CEDIS", response.json()["detail"])
+        parada_cedis.estado = ParadaRuta.ESTADO_VISITADA
+        parada_cedis.save(update_fields=["estado", "actualizado_en"])
+        response = self.client.post(
+            url,
+            json.dumps(
+                {
+                    "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+                    "evidencias": [{"comentario": "Entrega tras recarga"}],
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
 
     def test_api_registra_recarga_cedis_desde_pwa(self):
         self.client.force_login(self.user)

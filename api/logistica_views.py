@@ -1316,6 +1316,8 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         parada = get_object_or_404(ParadaRuta.objects.select_related("punto"), pk=parada_id, ruta=ruta)
         if parada.punto.tipo == PuntoLogistico.TIPO_CEDIS:
             return Response({"detail": "CEDIS es parada de recarga; no requiere confirmación de entrega."}, status=status.HTTP_400_BAD_REQUEST)
+        if ruta.paradas.filter(punto__tipo=PuntoLogistico.TIPO_CEDIS, estado=ParadaRuta.ESTADO_PENDIENTE, orden__lt=parada.orden).exists():
+            return Response({"detail": "Primero registra la recarga CEDIS y captura la carga del siguiente tramo."}, status=status.HTTP_400_BAD_REQUEST)
         serializer = ParadaEntregaConfirmarSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         payload = serializer.validated_data
