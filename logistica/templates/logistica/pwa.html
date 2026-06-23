@@ -1362,7 +1362,7 @@
       const TRACKING_QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
       const ACCESS_TOKEN_KEY = "pd_logistica_access";
       const REFRESH_TOKEN_KEY = "pd_logistica_refresh";
-      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v52
+      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v53
       const PREVIEW_REPARTIDOR_PARAM = "preview_repartidor";
       const app = document.getElementById("app");
       const initialParams = new URLSearchParams(window.location.search);
@@ -2785,6 +2785,8 @@
         const unidadOk = turnoOk && String(turnoActivo.unidad) === String(ruta.unidad_operativa);
         const pendientesOffline = loadRutaTrackingQueue().length;
         const paradas = rutaData.paradas || [];
+        const lineasTramoCarga = segmentoCargaOperativo(rutaData.checklist_carga?.lineas || [], paradas).lineas;
+        const puedeLiberarTramo = !rutaEnSeguimiento && turnoOk && unidadOk && lineasTramoCarga.length > 0 && !lineasTramoCarga.some((linea) => linea.estatus === "PENDIENTE");
         const counts = routeStopCounts(paradas);
         const progress = routeProgressValue(ruta, paradas);
         state.trackingQueueCount = pendientesOffline;
@@ -2824,6 +2826,12 @@
             ${turnoOk ? "" : `<div class="daily-banner warning">Inicia turno en Bitácora antes de registrar seguimiento.</div>`}
             ${turnoOk && !unidadOk ? `<div class="daily-banner warning">Tu turno activo no corresponde a la unidad asignada a esta ruta.</div>` : ""}
             ${pendientesOffline ? `<div class="daily-banner warning">${pendientesOffline} seguimiento${pendientesOffline === 1 ? "" : "s"} pendiente${pendientesOffline === 1 ? "" : "s"} por enviar. Se reintentará automáticamente al recuperar conexión.</div>` : ""}
+            ${puedeLiberarTramo ? `
+              <div class="daily-banner">
+                <span style="font-size:22px;">✅</span> Carga del tramo lista. Inicia la ruta con este turno.
+              </div>
+              <button class="primary-btn" type="button" onclick="liberarRutaConTurno()">Iniciar ruta con este turno</button>
+            ` : ""}
             <p class="muted">Tu ubicación se envía automáticamente cada 45 segundos mientras estás en ruta.</p>
             <div class="route-actions-main">
               <button class="secondary-btn" type="button" onclick="toggleDesvioRuta()" ${rutaEnSeguimiento ? "" : "disabled"}>${draft.fuera_de_ruta_confirmado ? "Cancelar desvío" : "Reportar desvío"}</button>
@@ -4155,9 +4163,9 @@
                 </div>
               ` : cargaListaParaLiberar ? `
                 <div class="daily-banner">
-                  <span style="font-size:22px;">✅</span> Carga revisada para ${escapeHtml(ruta.folio)}. Puedes liberar la ruta con este turno.
+                  <span style="font-size:22px;">✅</span> Carga revisada para ${escapeHtml(ruta.folio)}.
                 </div>
-                <button class="primary-btn" type="button" onclick="liberarRutaConTurno()">Liberar ruta con este turno</button>
+                <button class="primary-btn" type="button" onclick="showScreen('ruta_activa')">Ir a Mi ruta para iniciar</button>
               ` : lineasPendientesCarga > 0 ? `
                 <div class="daily-banner warning">
                   ${escapeHtml(ruta.folio)} sigue planeada. Faltan ${lineasPendientesCarga} línea${lineasPendientesCarga === 1 ? "" : "s"} de carga por capturar.
@@ -4292,7 +4300,8 @@
         const response = await apiFetch("/bitacora-salida/liberar-ruta/", { method: "POST" });
         if (!response.ok) {
           const error = await response.json().catch(() => ({}));
-          return renderBitacoraSalida(apiErrorMessage(error, "No se pudo liberar la ruta."));
+          const message = apiErrorMessage(error, "No se pudo iniciar la ruta.");
+          return state.pantallaActual === "ruta_activa" ? renderRutaActiva(message) : renderBitacoraSalida(message);
         }
         await showScreen("ruta_activa");
       }
@@ -4571,7 +4580,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v52", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v53", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {
