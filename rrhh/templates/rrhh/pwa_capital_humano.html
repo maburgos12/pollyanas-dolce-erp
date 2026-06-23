@@ -66,6 +66,23 @@
         return base;
       }
 
+      function clearAuthState() {
+        state.token = "";
+        state.refreshToken = "";
+        state.perfil = null;
+        localStorage.removeItem("pd_logistica_access");
+        localStorage.removeItem("pd_logistica_refresh");
+      }
+
+      function tokenExpired(token) {
+        try {
+          const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+          return !payload.exp || Date.now() >= payload.exp * 1000;
+        } catch {
+          return true;
+        }
+      }
+
       async function apiFetch(url, options = {}) {
         const res = await fetch(url, {...options, headers: headers(options.headers || {})});
         if (res.status === 401 && state.refreshToken && !options._retry) {
@@ -80,6 +97,11 @@
             localStorage.setItem("pd_logistica_access", data.access);
             return apiFetch(url, {...options, _retry: true});
           }
+          clearAuthState();
+          return refreshed;
+        }
+        if (res.status === 401) {
+          clearAuthState();
         }
         return res;
       }
@@ -107,11 +129,7 @@
       }
 
       function logout() {
-        state.token = "";
-        state.refreshToken = "";
-        state.perfil = null;
-        localStorage.removeItem("pd_logistica_access");
-        localStorage.removeItem("pd_logistica_refresh");
+        clearAuthState();
         render();
       }
 
@@ -138,7 +156,17 @@
           render();
           return;
         }
-        await Promise.all([cargarPerfilEmpleado(), cargarHistorialReciente()]);
+        if (tokenExpired(state.token)) {
+          clearAuthState();
+          render();
+          return;
+        }
+        await cargarPerfilEmpleado();
+        if (!state.token) {
+          render();
+          return;
+        }
+        await cargarHistorialReciente();
         render();
       }
 
