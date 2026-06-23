@@ -51,14 +51,16 @@ def can_autorizar_prestamo_jefe(user, prestamo: Prestamo) -> bool:
         return False
     if prestamo.estado != Prestamo.ESTADO_SOLICITADO:
         return False
-    if not usuario_equivale_jefe_prestamo(user, prestamo):
+    if _same_user_or_email(getattr(prestamo.empleado, "usuario_erp", None), user):
         return False
-    return not _same_user_or_email(getattr(prestamo.empleado, "usuario_erp", None), user)
+    return getattr(user, "is_superuser", False) or usuario_equivale_jefe_prestamo(user, prestamo)
 
 
 def prestamos_jefe_q(user) -> Q:
     if not user or not user.is_authenticated:
         return Q(pk__in=[])
+    if getattr(user, "is_superuser", False):
+        return Q(pk__isnull=False)
     filtro = Q(jefe_directo=user)
     email = _email(user)
     if email:

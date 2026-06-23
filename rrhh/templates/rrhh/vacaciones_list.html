@@ -216,7 +216,7 @@
                   <span class="vac-badge">{{ solicitud.dias_laborables }} días</span>
                   <span class="vac-badge gold">{{ solicitud.get_estado_display }}</span>
                 </div>
-                {% if solicitud.jefe_directo_id == user_id and solicitud.estado == "solicitada" %}
+                {% if solicitud.puede_preautorizar_jefe %}
                   <form class="vac-card-actions" method="post">
                     {% csrf_token %}
                     <input type="hidden" name="solicitud_id" value="{{ solicitud.id }}">

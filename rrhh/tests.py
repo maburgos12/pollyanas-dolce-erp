@@ -356,6 +356,89 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertEqual(solicitud.estado, SolicitudVacaciones.ESTADO_PREAUTORIZADA)
         self.assertEqual(solicitud.preautorizado_por, dg_user)
 
+    def test_superuser_ve_y_preautoriza_vacaciones_asignadas_a_otro_usuario(self):
+        from datetime import date
+
+        jefe_user = User.objects.create_user(username="jefe.vacaciones")
+        super_user = User.objects.create_user(username="mauricio.admin", is_superuser=True, is_staff=True)
+        jefe = Empleado.objects.create(
+            nombre="Jefe Vacaciones",
+            fecha_ingreso=date(2024, 1, 1),
+            usuario_erp=jefe_user,
+            activo=True,
+        )
+        colaborador = Empleado.objects.create(
+            nombre="Colaborador Solicitud Ocho Dias",
+            fecha_ingreso=date(2025, 1, 1),
+            jefe_directo=jefe,
+            activo=True,
+        )
+        PoliticaVacaciones.objects.create(
+            antiguedad_desde=1,
+            antiguedad_hasta=5,
+            dias_laborables=Decimal("12.00"),
+            vigente_desde=date(2026, 1, 1),
+        )
+        solicitud = SolicitudVacaciones.objects.create(
+            empleado=colaborador,
+            fecha_inicio=date(2026, 7, 6),
+            fecha_fin=date(2026, 7, 15),
+            dias_laborables=Decimal("8.00"),
+            motivo="Vacaciones ocho dias",
+            jefe_directo=jefe_user,
+            creado_por=jefe_user,
+        )
+
+        self.client.force_login(super_user)
+        response = self.client.get(reverse("rrhh:rrhh_vacaciones_list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Colaborador Solicitud Ocho Dias")
+        self.assertContains(response, "Preautorizar")
+
+        response = self.client.post(
+            reverse("rrhh:rrhh_vacaciones_list"),
+            {"action": "preautorizar_jefe", "solicitud_id": solicitud.id},
+        )
+        self.assertEqual(response.status_code, 302)
+        solicitud.refresh_from_db()
+        self.assertEqual(solicitud.estado, SolicitudVacaciones.ESTADO_PREAUTORIZADA)
+        self.assertEqual(solicitud.preautorizado_por, super_user)
+
+    def test_api_vacaciones_equipo_superuser_no_filtra_por_jefe_directo(self):
+        from datetime import date
+
+        jefe_user = User.objects.create_user(username="jefe.api")
+        super_user = User.objects.create_user(username="admin.api", is_superuser=True, is_staff=True)
+        jefe = Empleado.objects.create(
+            nombre="Jefe API",
+            fecha_ingreso=date(2024, 1, 1),
+            usuario_erp=jefe_user,
+            activo=True,
+        )
+        colaborador = Empleado.objects.create(
+            nombre="Colaborador API Vacaciones",
+            fecha_ingreso=date(2025, 1, 1),
+            jefe_directo=jefe,
+            activo=True,
+        )
+        SolicitudVacaciones.objects.create(
+            empleado=colaborador,
+            fecha_inicio=date(2026, 7, 6),
+            fecha_fin=date(2026, 7, 15),
+            dias_laborables=Decimal("8.00"),
+            motivo="Vacaciones ocho dias",
+            jefe_directo=jefe_user,
+            creado_por=jefe_user,
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=super_user)
+        response = client.get(reverse("rrhh:vacaciones-list"), {"equipo": "true"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["empleado_nombre"], "Colaborador API Vacaciones")
+
     def test_reglamento_interno_renderiza_reglas_vacaciones(self):
         reglamento = ReglamentoLaboral.objects.create(
             nombre="Reglamento interno FONSMA",
@@ -561,6 +644,29 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_APROBADO)
         self.assertEqual(permiso.autorizado_por, dg_user)
 
+    def test_jefe_directo_prevalece_para_personal_administrativo_nominal(self):
+        mauricio_user = User.objects.create_user(username="maburgos12", is_superuser=True, is_staff=True)
+        mauricio = Empleado.objects.create(
+            nombre="MAURICIO BURGOS",
+            usuario_erp=mauricio_user,
+            nivel_organizacional=Empleado.NIVEL_DIRECCION,
+        )
+        paula = Empleado.objects.create(
+            nombre="LUGO ESPINOZA PAULA ELIZABETH",
+            departamento=Empleado.DEP_RRHH,
+            puesto="Jefe de Recursos Humanos",
+            jefe_directo=mauricio,
+        )
+        permiso = PermisoSalida.objects.create(
+            empleado=paula,
+            tipo=PermisoSalida.TIPO_PERMISO_DIA,
+            fecha_inicio=timezone.datetime(2026, 5, 26, 8, 0, tzinfo=timezone.get_current_timezone()),
+            motivo="Permiso Capital Humano",
+        )
+
+        self.assertFalse(permiso.requiere_direccion)
+        self.assertEqual(permiso.estado_direccion, PermisoSalida.ESTADO_DIRECCION_NO_REQUIERE)
+
     def test_permiso_operativo_lo_resuelve_jefe_directo_no_rrhh(self):
         from datetime import datetime
         from zoneinfo import ZoneInfo
@@ -611,6 +717,32 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_PREAUTORIZADO)
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_APROBADO)
         self.assertEqual(permiso.autorizado_por, jefe_user)
+
+    def test_superuser_resuelve_permiso_asignado_a_otro_jefe(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from rrhh.services_permisos import resolver_permiso_jefe
+
+        jefe_user = User.objects.create_user(username="jefe.permiso")
+        super_user = User.objects.create_user(username="mauricio.super", is_superuser=True, is_staff=True)
+        jefe = Empleado.objects.create(nombre="Jefe Permiso", usuario_erp=jefe_user)
+        empleado = Empleado.objects.create(nombre="Empleado Permiso", jefe_directo=jefe)
+        permiso = PermisoSalida.objects.create(
+            empleado=empleado,
+            tipo=PermisoSalida.TIPO_PERMISO_HORA,
+            fecha_inicio=datetime(2026, 5, 26, 13, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            fecha_fin=datetime(2026, 5, 26, 15, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            motivo="Cita",
+            estado_jefe=PermisoSalida.ESTADO_JEFE_PENDIENTE,
+        )
+
+        resolver_permiso_jefe(permiso, super_user, aprobar=True)
+
+        permiso.refresh_from_db()
+        self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_PREAUTORIZADO)
+        self.assertEqual(permiso.estado, PermisoSalida.ESTADO_APROBADO)
+        self.assertEqual(permiso.autorizado_por, super_user)
 
     def test_supervisora_y_encargada_produccion_las_resuelve_jefe_directo(self):
         from datetime import datetime
@@ -983,6 +1115,33 @@ class CapitalHumanoAPITests(TestCase):
         self.assertEqual(hora_extra.autorizado_por, jefe_user)
         self.assertIsNotNone(hora_extra.fecha_autorizacion_jefe)
         self.assertEqual(hora_extra.monto_calculado, Decimal("200.00"))
+
+    def test_hora_extra_api_superuser_autoriza_asignada_a_otro_jefe(self):
+        from datetime import date
+
+        jefe_user = User.objects.create_user(username="jefe.he", password="pass123")
+        super_user = User.objects.create_user(username="mauricio.he", is_superuser=True, is_staff=True)
+        jefe = Empleado.objects.create(nombre="Jefe HE", usuario_erp=jefe_user)
+        empleado = Empleado.objects.create(
+            nombre="Empleado HE",
+            salario_diario="350.00",
+            jefe_directo=jefe,
+        )
+        hora_extra = HoraExtra.objects.create(
+            empleado=empleado,
+            fecha=date(2026, 5, 20),
+            horas=Decimal("2.00"),
+            estado=HoraExtra.ESTADO_PENDIENTE,
+            jefe_directo=jefe_user,
+        )
+
+        self.client.force_authenticate(user=super_user)
+        response = self.client.post(reverse("rrhh:hora-extra-autorizar", args=[hora_extra.id]))
+
+        self.assertEqual(response.status_code, 200)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_AUTORIZADO)
+        self.assertEqual(hora_extra.autorizado_por, super_user)
 
     def test_hora_extra_administrativa_la_autoriza_dg(self):
         dg_user = User.objects.create_user(username="mauricio", password="pass123")
@@ -2763,6 +2922,33 @@ class RRHHViewsTests(TestCase):
         prestamo.refresh_from_db()
         self.assertEqual(prestamo.estado, Prestamo.ESTADO_AUTORIZADO)
         self.assertEqual(prestamo.autorizado_jefe, jefe)
+
+    def test_superuser_autoriza_prestamo_asignado_a_otro_jefe(self):
+        from datetime import date
+
+        jefe = User.objects.create_user(username="jefe.prestamo", password="pass123")
+        super_user = User.objects.create_user(username="mauricio.prestamo", is_superuser=True, is_staff=True)
+        empleado = Empleado.objects.create(nombre="Empleado Prestamo Superuser", salario_diario="400.00")
+        prestamo = Prestamo.objects.create(
+            empleado=empleado,
+            concepto="Solicitud superuser",
+            fecha_solicitud=date(2026, 5, 15),
+            importe=Decimal("800.00"),
+            num_quincenas=2,
+            descuento_quincenal=Decimal("400.00"),
+            saldo_actual=Decimal("800.00"),
+            estado=Prestamo.ESTADO_SOLICITADO,
+            jefe_directo=jefe,
+            creado_por=self.user,
+        )
+
+        self.client.force_login(super_user)
+        response = self.client.post(reverse("rrhh:rrhh_prestamo_auth_jefe", args=[prestamo.pk]), follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        prestamo.refresh_from_db()
+        self.assertEqual(prestamo.estado, Prestamo.ESTADO_AUTORIZADO)
+        self.assertEqual(prestamo.autorizado_jefe, super_user)
 
     def test_jefe_duplicado_por_email_ve_y_autoriza_prestamo(self):
         from datetime import date

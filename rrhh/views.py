@@ -92,10 +92,12 @@ from .api_views import empleado_de_usuario
 from .services_vacaciones import (
     aprobar_solicitud_vacaciones_rrhh,
     can_gestionar_vacaciones_jefe,
+    can_resolver_vacaciones_jefe,
     crear_solicitud_vacaciones,
     preautorizar_solicitud_vacaciones_jefe,
     rechazar_solicitud_vacaciones,
     saldo_vacaciones_empleado,
+    vacaciones_jefe_q,
 )
 from .services_vacantes import (
     can_autorizar_vacante,
@@ -521,7 +523,7 @@ def _has_rrhh_task_access(user, tab_key: str) -> bool:
     if tab_key == "horas_extra":
         return HoraExtra.objects.filter(jefe_directo=user).exists()
     if tab_key == "vacaciones":
-        return SolicitudVacaciones.objects.filter(Q(jefe_directo=user) | Q(creado_por=user)).exists()
+        return SolicitudVacaciones.objects.filter(vacaciones_jefe_q(user) | Q(creado_por=user)).exists()
     if tab_key == "incapacidades":
         return IncapacidadEmpleado.objects.filter(registrada_por=user).exists()
     return False
@@ -2569,14 +2571,14 @@ def importar_checador(request):
 def horas_extra_list(request):
     tiene_asignadas = (
         request.user.is_authenticated
-        and HoraExtra.objects.filter(jefe_directo=request.user).exists()
+        and (request.user.is_superuser or HoraExtra.objects.filter(jefe_directo=request.user).exists())
     )
     if not can_view_rrhh(request.user) and not tiene_asignadas:
         raise PermissionDenied("No tienes permisos para ver horas extra")
 
     if request.method == "POST":
         he = get_object_or_404(HoraExtra.objects.select_related("empleado", "jefe_directo"), pk=request.POST.get("hora_extra_id"))
-        if he.jefe_directo_id != request.user.id:
+        if he.jefe_directo_id != request.user.id and not request.user.is_superuser:
             raise PermissionDenied("Solo el jefe directo asignado puede autorizar horas extra.")
         action = (request.POST.get("action") or "").strip()
         if action == "autorizar":
@@ -2698,7 +2700,10 @@ def permisos_list(request):
 @login_required
 def vacaciones_list(request):
     empleado_actual = empleado_de_usuario(request.user)
-    equipo_qs = Empleado.objects.filter(activo=True, jefe_directo__usuario_erp=request.user)
+    if request.user.is_superuser:
+        equipo_qs = Empleado.objects.filter(activo=True)
+    else:
+        equipo_qs = Empleado.objects.filter(activo=True, jefe_directo__usuario_erp=request.user)
     tiene_equipo = equipo_qs.exists()
     puede_ver_vacaciones = can_view_submodule(request.user, "rrhh", "vacaciones") or tiene_equipo or bool(empleado_actual)
     if not puede_ver_vacaciones:
@@ -2799,9 +2804,9 @@ def vacaciones_list(request):
     )
     if not can_view_submodule(request.user, "rrhh", "vacaciones"):
         if empleado_actual:
-            solicitudes_qs = solicitudes_qs.filter(Q(empleado=empleado_actual) | Q(jefe_directo=request.user))
+            solicitudes_qs = solicitudes_qs.filter(Q(empleado=empleado_actual) | vacaciones_jefe_q(request.user))
         else:
-            solicitudes_qs = solicitudes_qs.filter(jefe_directo=request.user)
+            solicitudes_qs = solicitudes_qs.filter(vacaciones_jefe_q(request.user))
     empleados = list(empleados_qs[:250])
     filtro_q = (request.GET.get("q") or "").strip()
     filtro_estado = (request.GET.get("estado") or "").strip()
@@ -2881,15 +2886,25 @@ def vacaciones_list(request):
                 "movimientos": movimientos_por_empleado.get(empleado.id, []),
             }
         )
+    def _con_permisos_accion(qs):
+        rows = list(qs[:120])
+        for solicitud in rows:
+            solicitud.puede_preautorizar_jefe = can_resolver_vacaciones_jefe(request.user, solicitud)
+        return rows
+
     columnas = [
-        ("solicitada", "Solicitadas", solicitudes_qs.filter(estado=SolicitudVacaciones.ESTADO_SOLICITADA)[:120]),
+        (
+            "solicitada",
+            "Solicitadas",
+            _con_permisos_accion(solicitudes_qs.filter(estado=SolicitudVacaciones.ESTADO_SOLICITADA)),
+        ),
         (
             "preautorizada",
             "Preautorizadas",
-            solicitudes_qs.filter(estado=SolicitudVacaciones.ESTADO_PREAUTORIZADA)[:120],
+            _con_permisos_accion(solicitudes_qs.filter(estado=SolicitudVacaciones.ESTADO_PREAUTORIZADA)),
         ),
-        ("aprobada", "Aprobadas", solicitudes_qs.filter(estado=SolicitudVacaciones.ESTADO_APROBADA)[:120]),
-        ("rechazada", "Rechazadas", solicitudes_qs.filter(estado=SolicitudVacaciones.ESTADO_RECHAZADA)[:120]),
+        ("aprobada", "Aprobadas", _con_permisos_accion(solicitudes_qs.filter(estado=SolicitudVacaciones.ESTADO_APROBADA))),
+        ("rechazada", "Rechazadas", _con_permisos_accion(solicitudes_qs.filter(estado=SolicitudVacaciones.ESTADO_RECHAZADA))),
     ]
     stats = {
         "total": solicitudes_qs.count(),
