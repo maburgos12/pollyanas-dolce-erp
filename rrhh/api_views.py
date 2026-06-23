@@ -12,7 +12,11 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from core.access import can_manage_rrhh, can_view_rrhh
-from core.notificaciones import notificar_hora_extra_solicitada, notificar_prestamo_solicitado
+from core.notificaciones import (
+    notificar_hora_extra_solicitada,
+    notificar_prestamo_para_direccion,
+    notificar_prestamo_solicitado,
+)
 from recetas.utils.normalizacion import normalizar_nombre
 from .models import AsistenciaEmpleado, Empleado, HoraExtra, PermisoSalida, Prestamo, SolicitudVacaciones
 from .serializers import (
@@ -23,6 +27,7 @@ from .serializers import (
     SolicitudVacacionesSerializer,
 )
 from .services import calcular_monto_hora_extra, usuario_jefe_directo_de_empleado
+from .services_prestamos import autorizar_prestamo_jefe
 from .services_permisos import resolver_permiso_direccion
 from .services_vacaciones import (
     aprobar_solicitud_vacaciones_rrhh,
@@ -75,7 +80,11 @@ class _CapitalHumanoAccessMixin:
     def _apply_mis_and_limit(self, qs):
         if self.request.query_params.get("mis") == "true":
             empleado = empleado_de_usuario(self.request.user)
-            qs = qs.filter(empleado=empleado) if empleado else qs.none()
+            filtro = Q(empleado=empleado) if empleado else Q()
+            model = getattr(qs, "model", None)
+            if model in (HoraExtra, Prestamo):
+                filtro |= Q(jefe_directo=self.request.user)
+            qs = qs.filter(filtro) if filtro else qs.none()
         limit = self.request.query_params.get("limit")
         if limit:
             try:
@@ -347,6 +356,13 @@ class PrestamoViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
             creado_por=self.request.user,
         )
         notificar_prestamo_solicitado(prestamo, actor=self.request.user)
+
+    @action(detail=True, methods=["post"], url_path="autorizar-jefe")
+    def autorizar_jefe(self, request, pk=None):
+        prestamo = self.get_object()
+        autorizar_prestamo_jefe(prestamo, request.user)
+        notificar_prestamo_para_direccion(prestamo, actor=request.user)
+        return Response(self.get_serializer(prestamo).data)
 
 
 @api_view(["GET"])
