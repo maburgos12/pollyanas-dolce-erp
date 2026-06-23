@@ -2748,6 +2748,10 @@ class RRHHViewsTests(TestCase):
         self.assertIsNone(prestamo.autorizado_jefe)
 
         self.client.force_login(jefe)
+        resp_detalle = self.client.get(reverse("rrhh:rrhh_prestamo_detalle", args=[prestamo.pk]))
+        self.assertContains(resp_detalle, "Autorizar jefe")
+        self.assertIn("no-store", resp_detalle["Cache-Control"])
+
         resp_lista = self.client.get(reverse("rrhh:rrhh_prestamos_lista"))
         self.assertEqual(resp_lista.status_code, 200)
         self.assertContains(resp_lista, "Préstamos por autorizar")

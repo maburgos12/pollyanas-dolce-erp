@@ -8,6 +8,7 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.views.decorators.cache import never_cache
 from django.shortcuts import get_object_or_404, redirect, render
 
 from core.access import can_manage_rrhh, can_view_rrhh
@@ -195,6 +196,7 @@ def prestamo_nuevo(request):
 
 
 @login_required
+@never_cache
 def prestamo_detalle(request, pk):
     _require_rrhh_view(request.user)
     prestamo = get_object_or_404(
