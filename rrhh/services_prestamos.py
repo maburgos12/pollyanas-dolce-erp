@@ -5,6 +5,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.core.exceptions import PermissionDenied
+from django.db.models import Q
 from django.utils import timezone
 
 from core.access import ROLE_ADMIN, ROLE_DG, has_any_role
@@ -50,9 +51,39 @@ def can_autorizar_prestamo_jefe(user, prestamo: Prestamo) -> bool:
         return False
     if prestamo.estado != Prestamo.ESTADO_SOLICITADO:
         return False
-    if prestamo.jefe_directo_id != user.id:
+    if not usuario_equivale_jefe_prestamo(user, prestamo):
         return False
-    return getattr(prestamo.empleado, "usuario_erp_id", None) != user.id
+    return not _same_user_or_email(getattr(prestamo.empleado, "usuario_erp", None), user)
+
+
+def prestamos_jefe_q(user) -> Q:
+    if not user or not user.is_authenticated:
+        return Q(pk__in=[])
+    filtro = Q(jefe_directo=user)
+    email = _email(user)
+    if email:
+        filtro |= Q(jefe_directo__email__iexact=email)
+    return filtro
+
+
+def usuario_equivale_jefe_prestamo(user, prestamo: Prestamo) -> bool:
+    if not user or not user.is_authenticated or not getattr(prestamo, "jefe_directo_id", None):
+        return False
+    if prestamo.jefe_directo_id == user.id:
+        return True
+    return _email(user) and _email(prestamo.jefe_directo) == _email(user)
+
+
+def _same_user_or_email(left, right) -> bool:
+    if not left or not right:
+        return False
+    if getattr(left, "id", None) == getattr(right, "id", None):
+        return True
+    return bool(_email(left) and _email(left) == _email(right))
+
+
+def _email(user) -> str:
+    return (getattr(user, "email", "") or "").strip().lower()
 
 
 def autorizar_prestamo_jefe(prestamo: Prestamo, user) -> Prestamo:

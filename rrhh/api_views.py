@@ -27,7 +27,7 @@ from .serializers import (
     SolicitudVacacionesSerializer,
 )
 from .services import calcular_monto_hora_extra, usuario_jefe_directo_de_empleado
-from .services_prestamos import autorizar_prestamo_jefe
+from .services_prestamos import autorizar_prestamo_jefe, prestamos_jefe_q
 from .services_permisos import resolver_permiso_direccion
 from .services_vacaciones import (
     aprobar_solicitud_vacaciones_rrhh,
@@ -82,7 +82,9 @@ class _CapitalHumanoAccessMixin:
             empleado = empleado_de_usuario(self.request.user)
             filtro = Q(empleado=empleado) if empleado else Q()
             model = getattr(qs, "model", None)
-            if model in (HoraExtra, Prestamo):
+            if model == Prestamo:
+                filtro |= prestamos_jefe_q(self.request.user)
+            elif model == HoraExtra:
                 filtro |= Q(jefe_directo=self.request.user)
             qs = qs.filter(filtro) if filtro else qs.none()
         limit = self.request.query_params.get("limit")
@@ -235,9 +237,9 @@ class SolicitudVacacionesViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSe
         if can_view_rrhh(self.request.user):
             pass
         elif empleado:
-            qs = qs.filter(Q(empleado=empleado) | Q(jefe_directo=self.request.user))
+            qs = qs.filter(Q(empleado=empleado) | prestamos_jefe_q(self.request.user))
         else:
-            qs = qs.filter(jefe_directo=self.request.user)
+            qs = qs.filter(prestamos_jefe_q(self.request.user))
         if self.request.query_params.get("equipo") == "true":
             qs = qs.filter(jefe_directo=self.request.user)
         estado = self.request.query_params.get("estado")

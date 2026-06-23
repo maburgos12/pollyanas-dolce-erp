@@ -2764,6 +2764,46 @@ class RRHHViewsTests(TestCase):
         self.assertEqual(prestamo.estado, Prestamo.ESTADO_AUTORIZADO)
         self.assertEqual(prestamo.autorizado_jefe, jefe)
 
+    def test_jefe_duplicado_por_email_ve_y_autoriza_prestamo(self):
+        from datetime import date
+
+        jefe_asignado = User.objects.create_user(
+            username="maburgos12",
+            email="mauricioburgos12@gmail.com",
+            password="pass123",
+        )
+        jefe_login = User.objects.create_user(
+            username="maburgos12@pollyanasdolce.com",
+            email="mauricioburgos12@gmail.com",
+            password="pass123",
+        )
+        empleado = Empleado.objects.create(nombre="Empleado con Jefe Duplicado", area="VENTAS", salario_diario="400.00")
+        prestamo = Prestamo.objects.create(
+            empleado=empleado,
+            concepto="Solicitud con jefe duplicado",
+            fecha_solicitud=date(2026, 5, 15),
+            importe=Decimal("800.00"),
+            num_quincenas=2,
+            descuento_quincenal=Decimal("400.00"),
+            saldo_actual=Decimal("800.00"),
+            estado=Prestamo.ESTADO_SOLICITADO,
+            jefe_directo=jefe_asignado,
+            creado_por=self.user,
+        )
+
+        self.client.force_login(jefe_login)
+        resp_detalle = self.client.get(reverse("rrhh:rrhh_prestamo_detalle", args=[prestamo.pk]))
+        self.assertContains(resp_detalle, "Autorizar jefe")
+
+        resp_lista = self.client.get(reverse("rrhh:rrhh_prestamos_lista"))
+        self.assertContains(resp_lista, prestamo.folio)
+
+        resp_auth = self.client.post(reverse("rrhh:rrhh_prestamo_auth_jefe", args=[prestamo.pk]), follow=True)
+        self.assertEqual(resp_auth.status_code, 200)
+        prestamo.refresh_from_db()
+        self.assertEqual(prestamo.estado, Prestamo.ESTADO_AUTORIZADO)
+        self.assertEqual(prestamo.autorizado_jefe, jefe_login)
+
     def test_capital_humano_no_autoriza_su_propio_prestamo(self):
         from datetime import date
 

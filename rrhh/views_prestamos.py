@@ -25,6 +25,8 @@ from .services_prestamos import (
     autorizar_prestamo_jefe,
     can_autorizar_prestamo_direccion,
     can_autorizar_prestamo_jefe,
+    prestamos_jefe_q,
+    usuario_equivale_jefe_prestamo,
 )
 from .views import _module_tabs
 
@@ -41,7 +43,7 @@ def _prestamos_por_autorizar(user):
     if not user or not user.is_authenticated:
         return Prestamo.objects.none()
     return Prestamo.objects.filter(
-        jefe_directo=user,
+        prestamos_jefe_q(user),
         estado=Prestamo.ESTADO_SOLICITADO,
     ).select_related("empleado", "jefe_directo", "autorizado_jefe")
 
@@ -49,7 +51,7 @@ def _prestamos_por_autorizar(user):
 def _prestamos_asignados(user):
     if not user or not user.is_authenticated:
         return Prestamo.objects.none()
-    return Prestamo.objects.filter(jefe_directo=user).select_related("empleado", "jefe_directo", "autorizado_jefe")
+    return Prestamo.objects.filter(prestamos_jefe_q(user)).select_related("empleado", "jefe_directo", "autorizado_jefe")
 
 
 def _can_view_prestamos(user) -> bool:
@@ -76,7 +78,7 @@ def _require_direccion(user):
 
 
 def _is_jefe_asignado(user, prestamo: Prestamo) -> bool:
-    return bool(user and user.is_authenticated and prestamo.jefe_directo_id == user.id)
+    return usuario_equivale_jefe_prestamo(user, prestamo)
 
 
 def _can_view_prestamo(user, prestamo: Prestamo) -> bool:
@@ -120,7 +122,7 @@ def prestamos_lista(request):
     if can_view_rrhh(request.user):
         base_qs = Prestamo.objects.select_related("empleado", "jefe_directo", "autorizado_jefe")
     else:
-        base_qs = Prestamo.objects.filter(jefe_directo=request.user).select_related("empleado", "jefe_directo", "autorizado_jefe")
+        base_qs = Prestamo.objects.filter(prestamos_jefe_q(request.user)).select_related("empleado", "jefe_directo", "autorizado_jefe")
     por_autorizar = _prestamos_por_autorizar(request.user)
     activos = base_qs.filter(estado=Prestamo.ESTADO_ACTIVO)
     pendientes = base_qs.filter(estado__in=[Prestamo.ESTADO_SOLICITADO, Prestamo.ESTADO_AUTORIZADO])
