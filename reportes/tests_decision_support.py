@@ -252,6 +252,31 @@ class DecisionSupportServicesTests(TestCase):
         self.assertEqual(future_row["forecast_qty"], current_row["forecast_qty"])
         self.assertEqual(future_row["same_weekday_avg"], current_row["same_weekday_avg"])
 
+    def test_forecast_caps_recent_event_spike_before_projecting_next_week(self):
+        event_day = self.target_date - timedelta(days=7)
+        FactVentaDiaria.objects.filter(
+            fecha=event_day,
+            sucursal=self.branch,
+            receta=self.recipe_hot,
+        ).update(
+            cantidad=Decimal("120"),
+            venta_bruta=Decimal("28800"),
+            venta_total=Decimal("28800"),
+            venta_neta=Decimal("28800"),
+            margen=Decimal("15600"),
+        )
+
+        forecast_context = build_daily_forecast_context(
+            target_date=self.target_date,
+            reference_date=self.target_date,
+            lookback_weeks=3,
+            top_n=10,
+        )
+
+        hot_forecast = next(row for row in forecast_context["rows"] if row["recipe_id"] == self.recipe_hot.id)
+        self.assertLess(Decimal(str(hot_forecast["forecast_qty"])), Decimal("40"))
+        self.assertLess(Decimal(str(hot_forecast["same_weekday_avg"])), Decimal("40"))
+
     @patch("reportes.dashboard_full_dataset.get_dashboard_sales_dataset")
     @patch("reportes.dashboard_full_dataset.get_dashboard_daily_ops_dataset")
     @patch("reportes.dashboard_full_dataset.build_executive_bi_panels")

@@ -67,11 +67,34 @@ def _mean(values: list[Decimal]) -> Decimal:
     return sum(values, ZERO) / Decimal(len(values))
 
 
+def _median(values: list[Decimal]) -> Decimal:
+    ordered = sorted(value for value in values if value > ZERO)
+    if not ordered:
+        return ZERO
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / Decimal("2")
+
+
+def _robust_values(values: list[Decimal], *, high_multiplier: Decimal = Decimal("2.25")) -> list[Decimal]:
+    median_value = _median(values)
+    if median_value <= ZERO:
+        return values
+    ceiling = median_value * high_multiplier
+    return [min(value, ceiling) if value > ZERO else value for value in values]
+
+
+def _robust_mean(values: list[Decimal], *, high_multiplier: Decimal = Decimal("2.25")) -> Decimal:
+    return _mean(_robust_values(values, high_multiplier=high_multiplier))
+
+
 def _stddev(values: list[Decimal]) -> Decimal:
     if not values:
         return ZERO
-    mean_value = _mean(values)
-    variance = sum((value - mean_value) ** 2 for value in values) / Decimal(len(values))
+    robust_values = _robust_values(values)
+    mean_value = _mean(robust_values)
+    variance = sum((value - mean_value) ** 2 for value in robust_values) / Decimal(len(robust_values))
     return Decimal(str(sqrt(float(variance)))) if variance > ZERO else ZERO
 
 
@@ -109,9 +132,9 @@ def _weighted_moving_average(
     mid_weight: Decimal = DEFAULT_MID_WEIGHT,
     older_weight: Decimal = DEFAULT_OLDER_WEIGHT,
 ) -> Decimal:
-    recent_14 = _mean(_history_window(series, target_day, 1, 14))
-    previous_14 = _mean(_history_window(series, target_day, 15, 28))
-    older_28 = _mean(_history_window(series, target_day, 29, 56))
+    recent_14 = _robust_mean(_history_window(series, target_day, 1, 14))
+    previous_14 = _robust_mean(_history_window(series, target_day, 15, 28))
+    older_28 = _robust_mean(_history_window(series, target_day, 29, 56))
     return (recent_14 * recent_weight) + (previous_14 * mid_weight) + (older_28 * older_weight)
 
 
@@ -124,16 +147,16 @@ def _weekday_factor(
     history_anchor = history_anchor or target_day
     weekday_values = _same_weekday_history(series, target_day, lookback_weeks, history_anchor)
     trailing_values = _history_window(series, history_anchor, 1, max(lookback_weeks * 7, 7))
-    weekday_avg = _mean(weekday_values)
-    trailing_avg = _mean(trailing_values)
+    weekday_avg = _robust_mean(weekday_values)
+    trailing_avg = _robust_mean(trailing_values)
     if weekday_avg <= ZERO or trailing_avg <= ZERO:
         return ONE
     return _clamp(weekday_avg / trailing_avg, Decimal("0.70"), Decimal("1.35"))
 
 
 def _trend_factor(series: dict[date, dict[str, Decimal]], target_day: date) -> tuple[Decimal, Decimal]:
-    recent_14 = _mean(_history_window(series, target_day, 1, 14))
-    previous_14 = _mean(_history_window(series, target_day, 15, 28))
+    recent_14 = _robust_mean(_history_window(series, target_day, 1, 14))
+    previous_14 = _robust_mean(_history_window(series, target_day, 15, 28))
     if recent_14 <= ZERO or previous_14 <= ZERO:
         return ONE, ZERO
     ratio = _clamp(recent_14 / previous_14, Decimal("0.75"), Decimal("1.30"))
@@ -196,7 +219,7 @@ def _build_forecast_row(
     calibration_profile: dict[str, Decimal] | None,
 ) -> dict[str, object]:
     history_anchor = history_anchor or target_day
-    recent_avg_28 = _mean(_history_window(series, history_anchor, 1, 28))
+    recent_avg_28 = _robust_mean(_history_window(series, history_anchor, 1, 28))
     weekly_pattern = weekly_pattern_for_day(target_day)
     rotation_band = rotation_band_for_avg(recent_avg_28)
     calibration_profile = calibration_profile or {}
@@ -231,8 +254,8 @@ def _build_forecast_row(
     forecast_max = _quantize_units(forecast_qty + buffer_units)
     avg_price = _recent_avg_price(series, history_anchor)
     forecast_amount = _quantize_money(forecast_qty * avg_price)
-    recent_avg_7 = _mean(_history_window(series, history_anchor, 1, 7))
-    same_weekday_avg = _mean(_same_weekday_history(series, target_day, lookback_weeks, history_anchor))
+    recent_avg_7 = _robust_mean(_history_window(series, history_anchor, 1, 7))
+    same_weekday_avg = _robust_mean(_same_weekday_history(series, target_day, lookback_weeks, history_anchor))
     contribution = contribution or {}
     why = (
         f"Promedio ponderado {weighted_avg.quantize(Decimal('0.01'))} pzs con pesos "
