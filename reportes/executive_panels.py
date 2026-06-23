@@ -816,6 +816,32 @@ class ForecastWeek:
     atypical_reason: str
 
 
+def _operational_projection_for_week(*, start_date: date, end_date: date) -> dict[str, object] | None:
+    from ventas.services.proyecciones_engine import calcular_proyeccion_operativa
+
+    projection = calcular_proyeccion_operativa(start_date, end_date)
+    summary = projection.get("resumen") or {}
+    amount = _to_decimal(summary.get("total_ingreso"))
+    quantity = _to_decimal(summary.get("total_piezas"))
+    if amount <= ZERO or quantity <= ZERO:
+        return None
+    high_quantity = sum(
+        _to_decimal(((product.get("escenarios") or {}).get("agresivo")))
+        for product in projection.get("por_producto") or []
+    )
+    high_amount = amount
+    if high_quantity > quantity:
+        high_amount = amount * (high_quantity / quantity)
+    return {
+        "amount": amount,
+        "quantity": quantity,
+        "high_amount": high_amount,
+        "high_quantity": high_quantity if high_quantity > ZERO else quantity,
+        "method": summary.get("metodo") or "forecast-operativo",
+        "products": int(summary.get("productos") or 0),
+    }
+
+
 def build_sales_forecast_panel(*, latest_date: date | None = None, lookback_weeks: int = 8, baseline_weeks: int = 3) -> dict[str, object]:
     latest_date = latest_date or _sales_cutoff_date() or (timezone.localdate() - timedelta(days=1))
     min_high_uplift_pct = _to_decimal(
@@ -860,7 +886,8 @@ def build_sales_forecast_panel(*, latest_date: date | None = None, lookback_week
             )
         )
 
-    historical_rows = [row for row in weekly_rows[:-1] if row.amount > 0]
+    closed_week_rows = [row for row in weekly_rows if row.week_end <= latest_date]
+    historical_rows = [row for row in closed_week_rows if row.amount > 0]
     amount_median = _decimal_median([row.amount for row in historical_rows])
     qty_median = _decimal_median([row.quantity for row in historical_rows])
     for row in historical_rows:
@@ -876,7 +903,7 @@ def build_sales_forecast_panel(*, latest_date: date | None = None, lookback_week
         row.atypical = bool(reasons)
         row.atypical_reason = ", ".join(reasons)
 
-    ordered_recent = list(reversed(weekly_rows))
+    ordered_recent = list(reversed(closed_week_rows))
     baseline_candidates = [row for row in ordered_recent if not row.atypical and row.amount > 0][:baseline_weeks]
     if len(baseline_candidates) < min(2, baseline_weeks):
         baseline_candidates = [row for row in ordered_recent if row.amount > 0][:baseline_weeks]
@@ -901,15 +928,26 @@ def build_sales_forecast_panel(*, latest_date: date | None = None, lookback_week
         )
     next_week_start = current_week_start + timedelta(days=7)
     next_week_end = next_week_start + timedelta(days=6)
+    operational_projection = _operational_projection_for_week(start_date=next_week_start, end_date=next_week_end)
+    forecast_source = "historical_weekly_average"
+    if operational_projection:
+        base_amount = _to_decimal(operational_projection["amount"])
+        base_quantity = _to_decimal(operational_projection["quantity"])
+        high_scenario_amount = max(high_scenario_amount, _to_decimal(operational_projection["high_amount"]))
+        high_scenario_quantity = max(high_scenario_quantity, _to_decimal(operational_projection["high_quantity"]))
+        forecast_source = str(operational_projection["method"])
+        if base_avg_ticket > ZERO:
+            base_tickets = int(base_amount / base_avg_ticket)
 
     return {
         "latest_date": latest_date,
         "basis_note": (
-            "Pronóstico inferido con las últimas 2-3 semanas normales. "
-            "No existe calendario oficial de fechas atípicas parametrizado; los picos se detectan por anomalía histórica. "
-            f"Cuando no hay picos, el escenario alto conserva un colchón mínimo de {min_high_uplift_pct.quantize(Q2)}%."
+            "Pronóstico conectado a la proyección operativa por día, sucursal y producto cuando hay historial suficiente. "
+            "Si no hay proyección operativa disponible, usa semanas completas normales como respaldo; "
+            f"el escenario alto conserva un colchón mínimo de {min_high_uplift_pct.quantize(Q2)}%."
         ),
-        "baseline_label": f"{len(baseline_candidates)} semana(s) base",
+        "baseline_label": "Proyección operativa" if operational_projection else f"{len(baseline_candidates)} semana(s) base",
+        "forecast_source": forecast_source,
         "forecast_amount": base_amount.quantize(Q2),
         "forecast_quantity": base_quantity.quantize(Q2),
         "forecast_tickets": base_tickets,
