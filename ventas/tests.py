@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 import inspect
 from pathlib import Path
@@ -22,6 +22,8 @@ from ventas.services.sales_freshness import (
 )
 from ventas.services.proyecciones_engine import _context_uplift_lookup, _season_name, calcular_proyeccion_operativa
 from core.models import Sucursal
+from recetas.models import Receta
+from reportes.models import FactVentaDiaria
 import ventas.views as ventas_views
 from ventas.views import _apply_manual_adjustments, _build_adjustment_rows, _projection_presets, _save_manual_adjustments
 
@@ -488,6 +490,64 @@ class VentasProjectionEngineTests(TestCase):
         self.assertEqual(result["por_dia"][1]["total_piezas"], 18)
         self.assertEqual(result["por_producto"][0]["por_dia"]["2026-06-20"], 18)
         self.assertEqual(result["por_producto"][0]["tendencia"], "sube")
+
+    def test_projection_reconciles_non_event_day_to_robust_weekday_total(self):
+        branch = Sucursal.objects.create(codigo="GSV", nombre="Guasave")
+        recipe = Receta.objects.create(
+            nombre="Pay prueba",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pay",
+            categoria="Pay Grande",
+            hash_contenido="hash-pay-prueba",
+        )
+        target_day = date(2026, 6, 29)
+        for week in range(1, 9):
+            history_day = target_day - timedelta(days=7 * week)
+            qty = Decimal("100") if week == 1 else Decimal("10")
+            FactVentaDiaria.objects.create(
+                fecha=history_day,
+                sucursal=branch,
+                receta=recipe,
+                producto_clave="PAY001",
+                producto_nombre="Pay prueba",
+                categoria="Pay Grande",
+                cantidad=qty,
+                tickets=10,
+                venta_bruta=qty * Decimal("100"),
+                venta_total=qty * Decimal("100"),
+                venta_neta=qty * Decimal("100"),
+                margen=qty * Decimal("50"),
+                source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE,
+            )
+
+        def fake_forecast(*, target_date, lookback_weeks, top_n):
+            return {
+                "rows": [
+                    {
+                        "branch_id": branch.id,
+                        "recipe_id": recipe.id,
+                        "recipe_name": "Pay prueba",
+                        "family": "Pay",
+                        "category": "Pay Grande",
+                        "forecast_qty": Decimal("100"),
+                        "forecast_min_qty": Decimal("90"),
+                        "forecast_max_qty": Decimal("120"),
+                        "forecast_amount": Decimal("10000"),
+                        "avg_price": Decimal("100"),
+                        "trend_factor": Decimal("1"),
+                    }
+                ],
+                "validation": {"wape_pct": Decimal("10")},
+            }
+
+        with patch("ventas.services.proyecciones_engine._selected_recipe_ids", return_value=None), patch(
+            "ventas.services.proyecciones_engine.build_daily_forecast_context",
+            side_effect=fake_forecast,
+        ):
+            result = calcular_proyeccion_operativa(target_day, target_day, {branch.id})
+
+        self.assertLess(result["por_dia"][0]["total_piezas"], 20)
+        self.assertLess(result["por_dia"][0]["total_ingreso"], Decimal("2000"))
 
     def test_projection_applies_special_event_uplift_without_copying_old_units(self):
         branch = Sucursal.objects.create(codigo="GSV", nombre="Guasave")

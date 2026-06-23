@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, timedelta
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 
 from django.db.models import Sum
 
@@ -64,6 +64,13 @@ def _units(value) -> int:
     if numeric <= ZERO:
         return 0
     return int(numeric.to_integral_value(rounding=ROUND_CEILING))
+
+
+def _scaled_units(value, scale: Decimal) -> int:
+    numeric = _decimal(value) * scale
+    if numeric <= ZERO:
+        return 0
+    return int(numeric.to_integral_value(rounding=ROUND_HALF_UP))
 
 
 def _date_label(value: date) -> str:
@@ -231,6 +238,63 @@ def _temporadas_en_rango(days: list[date]) -> list[dict]:
     return rows
 
 
+def _median(values: list[Decimal]) -> Decimal:
+    ordered = sorted(value for value in values if value > ZERO)
+    if not ordered:
+        return ZERO
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / Decimal("2")
+
+
+def _robust_mean(values: list[Decimal], *, high_multiplier: Decimal = Decimal("1.35")) -> Decimal:
+    median_value = _median(values)
+    if median_value <= ZERO:
+        return ZERO
+    ceiling = median_value * high_multiplier
+    capped = [min(value, ceiling) if value > ZERO else value for value in values]
+    return sum(capped, ZERO) / Decimal(len(capped)) if capped else ZERO
+
+
+def _daily_aggregate_targets(days: list[date], branch_ids: set[int], *, lookback_weeks: int = 8) -> dict[date, dict[str, Decimal]]:
+    lookup_days: set[date] = set()
+    comparable_days: dict[date, list[date]] = {}
+    for target_day in days:
+        if _special_day_name(target_day) or _season_name(target_day):
+            continue
+        candidates = [target_day - timedelta(days=7 * week) for week in range(1, lookback_weeks + 1)]
+        candidates = [
+            candidate
+            for candidate in candidates
+            if not _special_day_name(candidate) and not _season_name(candidate)
+        ]
+        comparable_days[target_day] = candidates
+        lookup_days.update(candidates)
+    if not lookup_days:
+        return {}
+
+    rows = (
+        FactVentaDiaria.objects.filter(
+            fecha__in=lookup_days,
+            sucursal_id__in=branch_ids,
+            sucursal__activa=True,
+        )
+        .values("fecha")
+        .annotate(qty=Sum("cantidad"), amount=Sum("venta_total"))
+    )
+    by_date = {
+        row["fecha"]: {"qty": _decimal(row.get("qty")), "amount": _decimal(row.get("amount"))}
+        for row in rows
+    }
+    targets = {}
+    for target_day, candidates in comparable_days.items():
+        qty_values = [_decimal((by_date.get(candidate) or {}).get("qty")) for candidate in candidates]
+        amount_values = [_decimal((by_date.get(candidate) or {}).get("amount")) for candidate in candidates]
+        targets[target_day] = {"qty": _robust_mean(qty_values), "amount": _robust_mean(amount_values)}
+    return targets
+
+
 def _context_uplift_lookup(days: list[date], branch_ids: set[int]) -> dict[tuple[date, int, int], Decimal]:
     comparable_by_day = {target_day: _context_comparable_days(target_day, days) for target_day in days}
     blocked_days = {day for comparables in comparable_by_day.values() for day in comparables}
@@ -380,6 +444,7 @@ def calcular_proyeccion_operativa(
                     "categoria_pronostico": category,
                     "precio": price,
                     "dias": {},
+                    "_ingresos_dias": {},
                     "total_piezas": 0,
                     "total_ingreso": ZERO,
                     "escenarios": {"conservador": 0, "recomendado": 0, "agresivo": 0},
@@ -399,6 +464,7 @@ def calcular_proyeccion_operativa(
                 "recomendado": product["dias"].get(day_key, {}).get("recomendado", 0) + qty,
                 "agresivo": product["dias"].get(day_key, {}).get("agresivo", 0) + aggressive,
             }
+            product["_ingresos_dias"][day_key] = _money(product["_ingresos_dias"].get(day_key, ZERO) + amount)
             product["total_piezas"] += qty
             product["total_ingreso"] = _money(product["total_ingreso"] + amount)
             product["escenarios"]["conservador"] += conservative
@@ -410,6 +476,7 @@ def calcular_proyeccion_operativa(
                 {
                     **product,
                     "dias": {},
+                    "_ingresos_dias": {},
                     "total_piezas": 0,
                     "total_ingreso": ZERO,
                     "escenarios": {"conservador": 0, "recomendado": 0, "agresivo": 0},
@@ -422,6 +489,7 @@ def calcular_proyeccion_operativa(
                 "recomendado": qty,
                 "agresivo": aggressive,
             }
+            branch_product["_ingresos_dias"][day_key] = _money(branch_product["_ingresos_dias"].get(day_key, ZERO) + amount)
             branch_product["total_piezas"] += qty
             branch_product["total_ingreso"] = _money(branch_product["total_ingreso"] + amount)
             branch_product["escenarios"]["conservador"] += conservative
@@ -431,6 +499,70 @@ def calcular_proyeccion_operativa(
             day_totals[target_day]["total_piezas"] += qty
             day_totals[target_day]["total_ingreso"] = _money(day_totals[target_day]["total_ingreso"] + amount)
             product_day_rank[target_day][name] += qty
+
+    daily_targets = _daily_aggregate_targets(selected_days, branch_ids)
+    daily_qty_scales: dict[str, Decimal] = {}
+    daily_amount_scales: dict[str, Decimal] = {}
+    for target_day in selected_days:
+        day_key = target_day.isoformat()
+        target = daily_targets.get(target_day) or {}
+        raw_qty = _decimal(day_totals[target_day].get("total_piezas"))
+        raw_amount = _decimal(day_totals[target_day].get("total_ingreso"))
+        target_qty = _decimal(target.get("qty"))
+        target_amount = _decimal(target.get("amount"))
+        daily_qty_scales[day_key] = (
+            (target_qty / raw_qty) if raw_qty > ZERO and target_qty > ZERO and raw_qty > target_qty else ONE
+        )
+        daily_amount_scales[day_key] = (
+            (target_amount / raw_amount)
+            if raw_amount > ZERO and target_amount > ZERO and raw_amount > target_amount
+            else ONE
+        )
+
+    def apply_daily_reconciliation(product: dict) -> dict:
+        product["total_piezas"] = 0
+        product["total_ingreso"] = ZERO
+        product["escenarios"] = {"conservador": 0, "recomendado": 0, "agresivo": 0}
+        for day_key, values in list(product.get("dias", {}).items()):
+            qty_scale = daily_qty_scales.get(day_key, ONE)
+            amount_scale = daily_amount_scales.get(day_key, ONE)
+            scaled_values = {
+                "conservador": _scaled_units(values.get("conservador", 0), qty_scale),
+                "recomendado": _scaled_units(values.get("recomendado", 0), qty_scale),
+                "agresivo": _scaled_units(values.get("agresivo", 0), qty_scale),
+            }
+            product["dias"][day_key] = scaled_values
+            product["escenarios"]["conservador"] += scaled_values["conservador"]
+            product["escenarios"]["recomendado"] += scaled_values["recomendado"]
+            product["escenarios"]["agresivo"] += scaled_values["agresivo"]
+            product["total_piezas"] += scaled_values["recomendado"]
+            product["total_ingreso"] = _money(
+                product["total_ingreso"] + (_decimal((product.get("_ingresos_dias") or {}).get(day_key)) * amount_scale)
+            )
+        return product
+
+    for product in products_by_recipe.values():
+        apply_daily_reconciliation(product)
+    for products_by_id in branch_products.values():
+        for product in products_by_id.values():
+            apply_daily_reconciliation(product)
+    for target_day in selected_days:
+        day_key = target_day.isoformat()
+        day_totals[target_day]["total_piezas"] = sum(
+            product["dias"].get(day_key, {}).get("recomendado", 0)
+            for product in products_by_recipe.values()
+        )
+        day_totals[target_day]["total_ingreso"] = _money(
+            sum(
+                _decimal(product.get("_ingresos_dias", {}).get(day_key)) * daily_amount_scales.get(day_key, ONE)
+                for product in products_by_recipe.values()
+            )
+        )
+        product_day_rank[target_day] = defaultdict(int)
+        for product in products_by_recipe.values():
+            qty = product["dias"].get(day_key, {}).get("recomendado", 0)
+            if qty:
+                product_day_rank[target_day][product.get("nombre") or "Producto"] += qty
 
     total_pieces = sum(product["total_piezas"] for product in products_by_recipe.values())
     total_income = sum((_decimal(product["total_ingreso"]) for product in products_by_recipe.values()), ZERO)
@@ -465,6 +597,7 @@ def calcular_proyeccion_operativa(
         )
         product["pct_total"] = float(product["pct_del_total"])
         product["total_ingreso"] = _money(product["total_ingreso"])
+        product.pop("_ingresos_dias", None)
         return product
 
     products = [finalize_product(product) for product in products_by_recipe.values()]
