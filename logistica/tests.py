@@ -38,6 +38,7 @@ from logistica.models import (
 from logistica.services_carga_ruta import (
     cerrar_ruta_con_diferencia_autorizada,
     checklist_bloquea_salida,
+    lineas_tramo_operativo_actual,
     obtener_checklist_carga_detallado,
     registrar_recarga_cedis,
     sincronizar_checklist_carga_desde_point,
@@ -4237,7 +4238,7 @@ class LogisticaControlRutasTests(TestCase):
         parada_cedis = ParadaRuta.objects.create(ruta=ruta, punto=cedis, orden=2, punto_nombre_snapshot="CEDIS")
         parada_payan = ParadaRuta.objects.create(ruta=ruta, punto=parada_guamuchil.punto, orden=3, punto_nombre_snapshot="Sucursal Payan")
         checklist = RutaCargaChecklist.objects.create(ruta=ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
-        RutaCargaChecklistLinea.objects.create(
+        linea_guamuchil = RutaCargaChecklistLinea.objects.create(
             checklist=checklist,
             parada=parada_guamuchil,
             source_hash="guamuchil-cargada",
@@ -4251,7 +4252,7 @@ class LogisticaControlRutasTests(TestCase):
             validado_por=self.user,
             validado_en=timezone.now(),
         )
-        RutaCargaChecklistLinea.objects.create(
+        linea_sobrante = RutaCargaChecklistLinea.objects.create(
             checklist=checklist,
             parada=parada_guamuchil,
             source_hash="guamuchil-sobrante",
@@ -4266,7 +4267,7 @@ class LogisticaControlRutasTests(TestCase):
             validado_por=self.user,
             validado_en=timezone.now(),
         )
-        RutaCargaChecklistLinea.objects.create(
+        linea_payan = RutaCargaChecklistLinea.objects.create(
             checklist=checklist,
             parada=parada_payan,
             source_hash="payan-pendiente",
@@ -4277,7 +4278,11 @@ class LogisticaControlRutasTests(TestCase):
             cantidad_enviada_esperada="3.000",
         )
 
+        self.assertEqual(list(lineas_tramo_operativo_actual(ruta, checklist=checklist).order_by("id")), [linea_guamuchil, linea_sobrante])
         self.assertIsNone(checklist_bloquea_salida(ruta))
+        parada_cedis.estado = ParadaRuta.ESTADO_VISITADA
+        parada_cedis.save(update_fields=["estado", "actualizado_en"])
+        self.assertEqual(list(lineas_tramo_operativo_actual(ruta, checklist=checklist)), [linea_payan])
         parada_cedis.delete()
         self.assertEqual(checklist_bloquea_salida(ruta), "confirma todas las líneas de carga antes de liberar la ruta")
 

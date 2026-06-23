@@ -597,9 +597,8 @@ def checklist_bloquea_salida(ruta: RutaEntrega) -> str | None:
     checklist = getattr(ruta, "checklist_carga", None)
     if not checklist or not checklist.lineas.exists():
         return None
-    limite_cedis = ruta.paradas.filter(punto__tipo=PuntoLogistico.TIPO_CEDIS).order_by("orden").values_list("orden", flat=True).first()
-    if ruta.estatus == RutaEntrega.ESTATUS_PLANEADA and limite_cedis:
-        lineas_salida = checklist.lineas.filter(parada__orden__lt=limite_cedis)
+    if ruta.paradas.filter(punto__tipo=PuntoLogistico.TIPO_CEDIS).exists():
+        lineas_salida = lineas_tramo_operativo_actual(ruta, checklist=checklist)
         if not lineas_salida.exists():
             return None
         if lineas_salida.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists():
@@ -612,6 +611,20 @@ def checklist_bloquea_salida(ruta: RutaEntrega) -> str | None:
             return None
         return "logística debe autorizar la ruta con la diferencia"
     return "confirma todas las líneas de carga antes de liberar la ruta"
+
+
+def lineas_tramo_operativo_actual(ruta: RutaEntrega, *, checklist: RutaCargaChecklist | None = None):
+    checklist = checklist or getattr(ruta, "checklist_carga", None)
+    if not checklist:
+        return RutaCargaChecklistLinea.objects.none()
+    lineas = checklist.lineas.all()
+    limite_inferior = 0
+    for parada in ruta.paradas.select_related("punto").filter(punto__tipo=PuntoLogistico.TIPO_CEDIS).order_by("orden", "id"):
+        if parada.estado == ParadaRuta.ESTADO_VISITADA:
+            limite_inferior = max(limite_inferior, parada.orden)
+            continue
+        return lineas.filter(parada__orden__gt=limite_inferior, parada__orden__lt=parada.orden)
+    return lineas.filter(parada__orden__gt=limite_inferior)
 
 
 @transaction.atomic
@@ -653,8 +666,9 @@ def registrar_recarga_cedis(*, ruta: RutaEntrega, user, notas: str = "") -> Even
     if not cedis_punto:
         raise ValidationError("No hay punto logístico CEDIS configurado para registrar la recarga.")
 
-    pendientes = checklist.lineas.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).count()
-    diferencias = checklist.lineas.exclude(
+    lineas_tramo = lineas_tramo_operativo_actual(ruta, checklist=checklist)
+    pendientes = lineas_tramo.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).count()
+    diferencias = lineas_tramo.exclude(
         estatus__in=[RutaCargaChecklistLinea.ESTATUS_CARGADA, RutaCargaChecklistLinea.ESTATUS_NO_APLICA]
     ).count()
     if ruta.estatus == RutaEntrega.ESTATUS_PLANEADA:
