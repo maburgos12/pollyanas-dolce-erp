@@ -1362,7 +1362,7 @@
       const TRACKING_QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
       const ACCESS_TOKEN_KEY = "pd_logistica_access";
       const REFRESH_TOKEN_KEY = "pd_logistica_refresh";
-      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v49
+      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v50
       const PREVIEW_REPARTIDOR_PARAM = "preview_repartidor";
       const app = document.getElementById("app");
       const initialParams = new URLSearchParams(window.location.search);
@@ -4139,17 +4139,30 @@
           const ruta = rutaData?.ruta || null;
           const rutaPlaneada = ruta?.estatus === "PLANEADA";
           const mismaUnidadRuta = ruta && String(ruta.unidad_operativa || "") === String(actual.unidad || "");
-          const cargaConfirmada = Number(rutaData?.checklist_carga?.lineas_confirmadas || 0) > 0;
+          const checklistCarga = rutaData?.checklist_carga || null;
+          const lineasPendientesCarga = Number(checklistCarga?.lineas_pendientes || 0);
+          const cargaListaParaLiberar = checklistCarga && lineasPendientesCarga === 0 && (
+            checklistCarga.estatus === "CONFIRMADA" || (checklistCarga.estatus === "CON_INCIDENCIA" && checklistCarga.motivo_override)
+          );
           const rutaTurnoBanner = rutaPlaneada
             ? (!mismaUnidadRuta ? `
                 <div class="daily-banner warning">
                   Tienes turno abierto en ${escapeHtml(actual.unidad_codigo)}. Para salir a ${escapeHtml(ruta.folio)}, cierra este turno y abre con ${escapeHtml(ruta.unidad_operativa_codigo || "la unidad asignada")}.
                 </div>
-              ` : cargaConfirmada ? `
+              ` : cargaListaParaLiberar ? `
                 <div class="daily-banner">
                   <span style="font-size:22px;">✅</span> Carga revisada para ${escapeHtml(ruta.folio)}. Puedes liberar la ruta con este turno.
                 </div>
                 <button class="primary-btn" type="button" onclick="liberarRutaConTurno()">Liberar ruta con este turno</button>
+              ` : lineasPendientesCarga > 0 ? `
+                <div class="daily-banner warning">
+                  ${escapeHtml(ruta.folio)} sigue planeada. Faltan ${lineasPendientesCarga} línea${lineasPendientesCarga === 1 ? "" : "s"} de carga por capturar.
+                </div>
+                <button class="primary-btn" type="button" onclick="showScreen('ruta_carga')">Capturar carga pendiente</button>
+              ` : checklistCarga?.estatus === "CON_INCIDENCIA" ? `
+                <div class="daily-banner warning">
+                  ${escapeHtml(ruta.folio)} tiene diferencias de carga. Logística debe autorizar la salida.
+                </div>
               ` : `
                 <div class="daily-banner warning">
                   ${escapeHtml(ruta.folio)} sigue planeada. Revisa al menos una línea de carga antes de liberar la ruta.
@@ -4554,7 +4567,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v49", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v50", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {
