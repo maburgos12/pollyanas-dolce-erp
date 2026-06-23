@@ -189,12 +189,14 @@ class ReportesBITests(TestCase):
         self.assertIn("inventory_ledger_panel", resp.context)
         self.assertEqual(resp.context["ventas_historicas_summary"]["total_rows"], 2)
 
+    @patch("reportes.executive_panels._operational_projection_for_week", return_value=None)
     @patch("reportes.executive_panels._indicator_daily_ticket_map")
     @patch("reportes.executive_panels._sales_fact_daily_map")
     def test_sales_forecast_panel_applies_minimum_high_scenario_buffer_when_history_is_stable(
         self,
         sales_daily_map_mock,
         ticket_daily_map_mock,
+        _operational_projection_mock,
     ):
         latest_date = date(2026, 4, 12)
         current_week_start = latest_date - timedelta(days=latest_date.weekday())
@@ -219,12 +221,14 @@ class ReportesBITests(TestCase):
         self.assertIn("colchón mínimo de 5.00%", panel["basis_note"])
         self.assertIn("No se detectaron picos atípicos recientes", panel["high_scenario_note"])
 
+    @patch("reportes.executive_panels._operational_projection_for_week", return_value=None)
     @patch("reportes.executive_panels._indicator_daily_ticket_map")
     @patch("reportes.executive_panels._sales_fact_daily_map")
     def test_sales_forecast_panel_uses_atypical_peak_for_high_scenario(
         self,
         sales_daily_map_mock,
         ticket_daily_map_mock,
+        _operational_projection_mock,
     ):
         latest_date = date(2026, 4, 12)
         current_week_start = latest_date - timedelta(days=latest_date.weekday())
@@ -252,6 +256,85 @@ class ReportesBITests(TestCase):
         self.assertEqual(panel["high_scenario_quantity"], Decimal("140.00"))
         self.assertIn("mayor pico atípico reciente", panel["high_scenario_note"])
         self.assertEqual(panel["atypical_rows"][0]["amount"], Decimal("1400.00"))
+
+    @patch("reportes.executive_panels._operational_projection_for_week", return_value=None)
+    @patch("reportes.executive_panels._indicator_daily_ticket_map")
+    @patch("reportes.executive_panels._sales_fact_daily_map")
+    def test_sales_forecast_panel_excludes_open_current_week_from_baseline(
+        self,
+        sales_daily_map_mock,
+        ticket_daily_map_mock,
+        _operational_projection_mock,
+    ):
+        latest_date = date(2026, 6, 23)
+        current_week_start = latest_date - timedelta(days=latest_date.weekday())
+        sales_daily_map = {}
+        ticket_daily_map = {}
+        weekly_amounts = {
+            0: Decimal("100"),
+            1: Decimal("600"),
+            2: Decimal("620"),
+            3: Decimal("640"),
+        }
+        for week_offset in range(8):
+            week_start = current_week_start - timedelta(days=7 * week_offset)
+            weekly_amount = weekly_amounts.get(week_offset, Decimal("650"))
+            daily_amount = weekly_amount / Decimal("7")
+            daily_quantity = Decimal("10")
+            for day_offset in range(7):
+                current_day = week_start + timedelta(days=day_offset)
+                sales_daily_map[current_day] = (daily_amount, daily_quantity)
+                ticket_daily_map[current_day] = 1
+        sales_daily_map_mock.return_value = sales_daily_map
+        ticket_daily_map_mock.return_value = ticket_daily_map
+
+        panel = build_sales_forecast_panel(latest_date=latest_date)
+
+        self.assertEqual(panel["forecast_amount"], Decimal("620.00"))
+        self.assertEqual(panel["baseline_label"], "3 semana(s) base")
+
+    @patch(
+        "reportes.executive_panels._operational_projection_for_week",
+        return_value={
+            "amount": Decimal("900.00"),
+            "quantity": Decimal("90.00"),
+            "high_amount": Decimal("990.00"),
+            "high_quantity": Decimal("99.00"),
+            "method": "forecast-operativo-3-semanas",
+            "products": 12,
+        },
+    )
+    @patch("reportes.executive_panels._indicator_daily_ticket_map")
+    @patch("reportes.executive_panels._sales_fact_daily_map")
+    def test_sales_forecast_panel_prefers_operational_projection_when_available(
+        self,
+        sales_daily_map_mock,
+        ticket_daily_map_mock,
+        operational_projection_mock,
+    ):
+        latest_date = date(2026, 4, 12)
+        current_week_start = latest_date - timedelta(days=latest_date.weekday())
+        sales_daily_map = {}
+        ticket_daily_map = {}
+        for week_offset in range(8):
+            week_start = current_week_start - timedelta(days=7 * week_offset)
+            for day_offset in range(7):
+                current_day = week_start + timedelta(days=day_offset)
+                sales_daily_map[current_day] = (Decimal("100"), Decimal("10"))
+                ticket_daily_map[current_day] = 1
+        sales_daily_map_mock.return_value = sales_daily_map
+        ticket_daily_map_mock.return_value = ticket_daily_map
+
+        panel = build_sales_forecast_panel(latest_date=latest_date)
+
+        self.assertEqual(panel["forecast_amount"], Decimal("900.00"))
+        self.assertEqual(panel["forecast_quantity"], Decimal("90.00"))
+        self.assertEqual(panel["baseline_label"], "Proyección operativa")
+        self.assertEqual(panel["forecast_source"], "forecast-operativo-3-semanas")
+        operational_projection_mock.assert_called_once_with(
+            start_date=date(2026, 4, 13),
+            end_date=date(2026, 4, 19),
+        )
 
     def test_daily_snapshot_marks_missing_required_branch(self):
         fecha_actual = timezone.localdate() - timedelta(days=1)
