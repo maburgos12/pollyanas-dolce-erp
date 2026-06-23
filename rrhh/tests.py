@@ -1067,6 +1067,40 @@ class CapitalHumanoAPITests(TestCase):
         self.assertEqual(Decimal(resp.data["descuento_quincenal"]), Decimal("300.00"))
         self.assertEqual(Decimal(resp.data["saldo_actual"]), Decimal("1200.00"))
 
+    def test_prestamo_api_jefe_directo_autoriza_desde_pwa(self):
+        jefe_user = User.objects.create_user(username="jefe.prestamo", password="pass123")
+        jefe_empleado = Empleado.objects.create(nombre="Jefe Prestamo", usuario_erp=jefe_user)
+        self.empleado.jefe_directo = jefe_empleado
+        self.empleado.save(update_fields=["jefe_directo"])
+
+        resp = self.client.post(
+            reverse("rrhh:prestamo-list"),
+            {
+                "concepto": "Apoyo personal",
+                "metodo_pago": Prestamo.METODO_TRANSFERENCIA,
+                "importe": "1200.00",
+                "num_quincenas": 4,
+            },
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, 201)
+        prestamo = Prestamo.objects.get(pk=resp.data["id"])
+        self.assertEqual(prestamo.jefe_directo, jefe_user)
+        self.assertFalse(resp.data["puede_autorizar_jefe"])
+        self.assertEqual(Notificacion.objects.filter(usuario=jefe_user, tipo=Notificacion.TIPO_PRESTAMO).count(), 1)
+
+        self.client.force_authenticate(user=jefe_user)
+        lista = self.client.get(reverse("rrhh:prestamo-list"), {"mis": "true"})
+        self.assertEqual(lista.status_code, 200)
+        self.assertTrue(lista.data[0]["puede_autorizar_jefe"])
+
+        auth = self.client.post(reverse("rrhh:prestamo-autorizar-jefe", args=[prestamo.id]))
+        self.assertEqual(auth.status_code, 200)
+        prestamo.refresh_from_db()
+        self.assertEqual(prestamo.estado, Prestamo.ESTADO_AUTORIZADO)
+        self.assertEqual(prestamo.autorizado_jefe, jefe_user)
+
     def test_prestamo_api_bloquea_solicitud_si_hay_saldo_vigente(self):
         Prestamo.objects.create(
             empleado=self.empleado,

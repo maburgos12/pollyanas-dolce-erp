@@ -319,6 +319,19 @@
         }
       }
 
+      async function autorizarPrestamo(id) {
+        const res = await apiFetch(`${API}/prestamos/${id}/autorizar-jefe/`, {method: "POST"});
+        const data = await res.json();
+        if (res.ok) {
+          await cargarHistorialReciente();
+          state.message = `Préstamo autorizado - Folio: ${data.folio || "sin folio"}`;
+          state.error = "";
+          render();
+        } else {
+          mostrarError(`Error al autorizar préstamo: ${JSON.stringify(data)}`);
+        }
+      }
+
       function shell(content) {
         const nombre = state.perfil?.nombre || "Capital Humano";
         return `
@@ -605,6 +618,7 @@
             <div class="muted">$${esc(p.importe)} · ${esc(p.num_quincenas)} quincenas · descuento $${esc(p.descuento_quincenal)}</div>
             ${p.jefe_directo_nombre ? `<div class="muted">Autoriza: ${esc(p.jefe_directo_nombre)}</div>` : ""}
             <div>${esc(p.concepto)}</div>
+            ${p.puede_autorizar_jefe ? `<button class="btn-submit" type="button" onclick="autorizarPrestamo(${Number(p.id)})">AUTORIZAR PRÉSTAMO</button>` : ""}
           </article>
         `).join("") || `<div class="muted">Sin préstamos registrados.</div>`;
         app.innerHTML = shell(`
