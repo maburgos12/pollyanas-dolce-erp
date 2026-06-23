@@ -1944,11 +1944,11 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("enqueueRutaTracking", pwa_html)
         self.assertIn("flushRutaTrackingQueue", pwa_html)
         self.assertIn("Sin conexión: seguimiento guardado para reintento.", pwa_html)
-        self.assertIn("route-control-v50", pwa_html)
+        self.assertIn("route-control-v51", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v50", pwa_html)
+        self.assertIn("?v=route-control-v51", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v50-carga-pendiente-libera", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v51-liberar-tramo-cedis", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
         self.assertIn("Logística debe asignar la unidad a la ruta.", pwa_html)
@@ -1989,8 +1989,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn('await showScreen("ruta_activa")', pwa_html)
         self.assertIn("Liberar ruta con este turno", pwa_html)
         self.assertIn("/bitacora-salida/liberar-ruta/", pwa_html)
-        self.assertIn("const lineasPendientesCarga = Number(checklistCarga?.lineas_pendientes || 0);", pwa_html)
-        self.assertIn("const cargaListaParaLiberar = checklistCarga && lineasPendientesCarga === 0", pwa_html)
+        self.assertIn("const lineasTramoCarga = segmentoCargaOperativo(checklistCarga?.lineas || [], rutaData?.paradas || []).lineas;", pwa_html)
+        self.assertIn('lineasTramoCarga.filter((linea) => linea.estatus === "PENDIENTE").length', pwa_html)
+        self.assertIn("const cargaListaParaLiberar = lineasTramoCarga.length > 0 && lineasPendientesCarga === 0;", pwa_html)
         self.assertIn("Capturar carga pendiente", pwa_html)
         self.assertIn("Logística debe autorizar la salida", pwa_html)
         self.assertIn("confirmarEntregaParada", pwa_html)
@@ -2024,7 +2025,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v50-carga-pendiente-libera", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v51-liberar-tramo-cedis", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -4222,6 +4223,62 @@ class LogisticaControlRutasTests(TestCase):
 
         checklist.refresh_from_db()
         self.assertEqual(checklist.estatus, RutaCargaChecklist.ESTATUS_EN_REVISION)
+        self.assertEqual(checklist_bloquea_salida(ruta), "confirma todas las líneas de carga antes de liberar la ruta")
+
+    def test_checklist_carga_libera_solo_tramo_antes_de_cedis(self):
+        ruta, parada_guamuchil = self._crear_ruta_planeada_para_carga()
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS tramo",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.567916",
+            longitud="-108.459969",
+            radio_geocerca_metros=120,
+        )
+        parada_cedis = ParadaRuta.objects.create(ruta=ruta, punto=cedis, orden=2, punto_nombre_snapshot="CEDIS")
+        parada_payan = ParadaRuta.objects.create(ruta=ruta, punto=parada_guamuchil.punto, orden=3, punto_nombre_snapshot="Sucursal Payan")
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada_guamuchil,
+            source_hash="guamuchil-cargada",
+            item_code="PZA1",
+            item_name="Producto Guamuchil",
+            unit="PZA",
+            cantidad_solicitada="2.000",
+            cantidad_enviada_esperada="2.000",
+            cantidad_cargada="2.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+            validado_por=self.user,
+            validado_en=timezone.now(),
+        )
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada_guamuchil,
+            source_hash="guamuchil-sobrante",
+            item_code="PZA2",
+            item_name="Producto extra Guamuchil",
+            unit="PZA",
+            cantidad_solicitada="0.000",
+            cantidad_enviada_esperada="0.000",
+            cantidad_cargada="1.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_SOBRANTE,
+            motivo_diferencia=RutaCargaChecklistLinea.MOTIVO_CAMBIO_AUTORIZADO,
+            validado_por=self.user,
+            validado_en=timezone.now(),
+        )
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada_payan,
+            source_hash="payan-pendiente",
+            item_code="PZA3",
+            item_name="Producto Payan",
+            unit="PZA",
+            cantidad_solicitada="3.000",
+            cantidad_enviada_esperada="3.000",
+        )
+
+        self.assertIsNone(checklist_bloquea_salida(ruta))
+        parada_cedis.delete()
         self.assertEqual(checklist_bloquea_salida(ruta), "confirma todas las líneas de carga antes de liberar la ruta")
 
     def test_validar_linea_carga_con_diferencia_notifica_logistica_una_sola_vez(self):

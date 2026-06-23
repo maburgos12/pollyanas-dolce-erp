@@ -597,6 +597,14 @@ def checklist_bloquea_salida(ruta: RutaEntrega) -> str | None:
     checklist = getattr(ruta, "checklist_carga", None)
     if not checklist or not checklist.lineas.exists():
         return None
+    limite_cedis = ruta.paradas.filter(punto__tipo=PuntoLogistico.TIPO_CEDIS).order_by("orden").values_list("orden", flat=True).first()
+    if ruta.estatus == RutaEntrega.ESTATUS_PLANEADA and limite_cedis:
+        lineas_salida = checklist.lineas.filter(parada__orden__lt=limite_cedis)
+        if not lineas_salida.exists():
+            return None
+        if lineas_salida.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists():
+            return "confirma todas las líneas de carga antes de liberar la ruta"
+        return None
     if checklist.estatus == RutaCargaChecklist.ESTATUS_CONFIRMADA:
         return None
     if checklist.estatus == RutaCargaChecklist.ESTATUS_CON_INCIDENCIA:
