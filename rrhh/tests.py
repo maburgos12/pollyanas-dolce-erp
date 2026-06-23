@@ -859,6 +859,7 @@ class CapitalHumanoAPITests(TestCase):
             nombre="Empleado App",
             email="empleado.app@example.com",
             salario_diario="350.00",
+            usuario_erp=self.user,
         )
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
@@ -1045,6 +1046,53 @@ class CapitalHumanoAPITests(TestCase):
         )
 
         self.assertEqual(resp.status_code, 400)
+
+    def test_prestamo_api_crea_solicitud_para_empleado_actual(self):
+        resp = self.client.post(
+            reverse("rrhh:prestamo-list"),
+            {
+                "concepto": "Apoyo personal",
+                "metodo_pago": Prestamo.METODO_TRANSFERENCIA,
+                "fecha_deposito": "2026-06-30",
+                "importe": "1200.00",
+                "num_quincenas": 4,
+            },
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["empleado"], self.empleado.id)
+        self.assertTrue(resp.data["folio"].startswith("PR-"))
+        self.assertEqual(resp.data["estado"], Prestamo.ESTADO_SOLICITADO)
+        self.assertEqual(Decimal(resp.data["descuento_quincenal"]), Decimal("300.00"))
+        self.assertEqual(Decimal(resp.data["saldo_actual"]), Decimal("1200.00"))
+
+    def test_prestamo_api_bloquea_solicitud_si_hay_saldo_vigente(self):
+        Prestamo.objects.create(
+            empleado=self.empleado,
+            concepto="Préstamo vigente",
+            fecha_solicitud=timezone.localdate(),
+            importe=Decimal("900.00"),
+            num_quincenas=3,
+            descuento_quincenal=Decimal("300.00"),
+            saldo_actual=Decimal("300.00"),
+            estado=Prestamo.ESTADO_ACTIVO,
+            creado_por=self.user,
+        )
+
+        resp = self.client.post(
+            reverse("rrhh:prestamo-list"),
+            {
+                "concepto": "Segundo préstamo",
+                "metodo_pago": Prestamo.METODO_TRANSFERENCIA,
+                "importe": "500.00",
+                "num_quincenas": 2,
+            },
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(Prestamo.objects.filter(empleado=self.empleado).count(), 1)
 
     def test_rutas_capital_humano_cargan(self):
         rrhh_group, _ = Group.objects.get_or_create(name="RRHH")

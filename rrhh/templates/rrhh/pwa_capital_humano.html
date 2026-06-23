@@ -4,14 +4,15 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="theme-color" content="#8B2252">
+    <meta name="theme-color" content="#f7f4ef">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Capital Humano</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-pwa-capital-humano.css?v=20260614-ui100-v1">
+    <link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-pwa-capital-humano.css?v=20260623-prestamos-v1">
   </head>
   <body>
     <main id="app"></main>
@@ -21,6 +22,7 @@
         <button data-section="permisos">Permisos</button>
         <button data-section="vacaciones">Vacaciones</button>
         <button data-section="horas">Horas Extra</button>
+        <button data-section="prestamos">Préstamos</button>
       </nav>
     </footer>
 
@@ -36,6 +38,7 @@
         permisos: [],
         vacaciones: [],
         horas: [],
+        prestamos: [],
         message: "",
         error: ""
       };
@@ -118,14 +121,16 @@
       }
 
       async function cargarHistorialReciente() {
-        const [permisosRes, vacacionesRes, horasRes] = await Promise.all([
+        const [permisosRes, vacacionesRes, horasRes, prestamosRes] = await Promise.all([
           apiFetch(`${API}/permisos/?mis=true&limit=3`),
           apiFetch(`${API}/vacaciones/?mis=true&limit=3`),
-          apiFetch(`${API}/horas-extra/?mis=true&limit=3`)
+          apiFetch(`${API}/horas-extra/?mis=true&limit=3`),
+          apiFetch(`${API}/prestamos/?mis=true&limit=3`)
         ]);
         state.permisos = permisosRes.ok ? await permisosRes.json() : [];
         state.vacaciones = vacacionesRes.ok ? await vacacionesRes.json() : [];
         state.horas = horasRes.ok ? await horasRes.json() : [];
+        state.prestamos = prestamosRes.ok ? await prestamosRes.json() : [];
       }
 
       async function loadData() {
@@ -169,6 +174,11 @@
 
       function limpiarFormVacaciones() {
         const form = document.getElementById("form_vacaciones");
+        if (form) form.reset();
+      }
+
+      function limpiarFormPrestamo() {
+        const form = document.getElementById("form_prestamo");
         if (form) form.reset();
       }
 
@@ -255,6 +265,32 @@
         }
       }
 
+      async function enviarPrestamo(event) {
+        event.preventDefault();
+        const payload = {
+          concepto: document.getElementById("pr_concepto").value,
+          metodo_pago: document.getElementById("pr_metodo").value,
+          fecha_deposito: document.getElementById("pr_deposito").value || null,
+          importe: document.getElementById("pr_importe").value,
+          num_quincenas: document.getElementById("pr_quincenas").value
+        };
+        const res = await apiFetch(`${API}/prestamos/`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok) {
+          await cargarHistorialReciente();
+          limpiarFormPrestamo();
+          state.message = `Préstamo solicitado - Folio: ${data.folio || "sin folio"}`;
+          state.error = "";
+          render();
+        } else {
+          mostrarError(`Error al solicitar préstamo: ${JSON.stringify(data)}`);
+        }
+      }
+
       function shell(content) {
         const nombre = state.perfil?.nombre || "Capital Humano";
         return `
@@ -276,8 +312,8 @@
             <h1 class="brand">Capital Humano</h1>
             <p class="gold">Pollyana's Dolce</p>
             <form onsubmit="login(event)">
-              <div class="login-field"><label>Usuario</label><input name="username" autocomplete="username" required></div>
-              <div class="login-field"><label>Contraseña</label><input name="password" type="password" autocomplete="current-password" required></div>
+              <div class="login-field"><label for="login_username">Usuario</label><input id="login_username" name="username" autocomplete="username" required></div>
+              <div class="login-field"><label for="login_password">Contraseña</label><input id="login_password" name="password" type="password" autocomplete="current-password" required></div>
               <button class="primary" type="submit">Entrar</button>
               ${state.error ? `<div class="error">${esc(state.error)}</div>` : ""}
             </form>
@@ -308,6 +344,13 @@
             estado: h.estado,
             folio: `HE-${h.id}`,
             fecha: h.fecha
+          })),
+          ...state.prestamos.map(p => ({
+            tipo: "Préstamo",
+            desc: `$${p.importe} · ${p.num_quincenas} quincenas`,
+            estado: p.estado,
+            folio: p.folio,
+            fecha: p.fecha_solicitud
           }))
         ].sort((a, b) => new Date(b.fecha) - new Date(a.fecha)).slice(0, 4);
         const historial = items.length
@@ -340,6 +383,10 @@
               <span class="quick-icon">HE</span>
               <span>Registrar horas extra</span>
             </button>
+            <button class="quick-btn" onclick="setSection('prestamos')">
+              <span class="quick-icon">$</span>
+              <span>Solicitar préstamo</span>
+            </button>
           </div>
           <div class="section-label">MIS SOLICITUDES RECIENTES</div>
           <div id="historial_reciente" class="historial-list">${historial}</div>
@@ -360,20 +407,20 @@
             <form id="form_permiso" onsubmit="enviarPermiso(event)">
               <div class="talon-header">TALÓN DE PERMISOS</div>
               <div class="field-row">
-                <label>FECHA</label>
-                <input type="date" id="p_fecha" value="${today()}" required>
+                <label for="p_fecha">FECHA</label>
+                <input type="date" id="p_fecha" name="fecha" value="${today()}" required>
               </div>
               <div class="field-row">
-                <label>NOMBRE DE EMPLEADO</label>
-                <input type="text" id="p_nombre" value="${perfilValue("nombre")}" readonly class="readonly-field">
+                <label for="p_nombre">NOMBRE DE EMPLEADO</label>
+                <input type="text" id="p_nombre" name="nombre" value="${perfilValue("nombre")}" readonly class="readonly-field">
               </div>
               <div class="field-row">
-                <label>PUESTO</label>
-                <input type="text" id="p_puesto" value="${perfilValue("puesto")}" readonly class="readonly-field">
+                <label for="p_puesto">PUESTO</label>
+                <input type="text" id="p_puesto" name="puesto" value="${perfilValue("puesto")}" readonly class="readonly-field">
               </div>
               <div class="field-row">
-                <label>ÁREA</label>
-                <input type="text" id="p_area" value="${perfilValue("area")}" readonly class="readonly-field">
+                <label for="p_area">ÁREA</label>
+                <input type="text" id="p_area" name="area" value="${perfilValue("area")}" readonly class="readonly-field">
               </div>
               <div class="field-row">
                 <label>TIPO DE PERMISO</label>
@@ -390,12 +437,12 @@
               </div>
               <div class="field-row-double">
                 <div>
-                  <label>DESDE</label>
-                  <input type="datetime-local" id="p_desde" required>
+                  <label for="p_desde">DESDE</label>
+                  <input type="datetime-local" id="p_desde" name="fecha_inicio" required>
                 </div>
                 <div>
-                  <label>HASTA</label>
-                  <input type="datetime-local" id="p_hasta">
+                  <label for="p_hasta">HASTA</label>
+                  <input type="datetime-local" id="p_hasta" name="fecha_fin">
                 </div>
               </div>
               <div class="field-row">
@@ -412,8 +459,8 @@
                 </div>
               </div>
               <div class="field-row">
-                <label>MOTIVO DE PERMISO</label>
-                <textarea id="p_motivo" rows="3" required placeholder="Describe el motivo..."></textarea>
+                <label for="p_motivo">MOTIVO DE PERMISO</label>
+                <textarea id="p_motivo" name="motivo" rows="3" required placeholder="Describe el motivo..."></textarea>
               </div>
               <button class="btn-submit" type="submit">ENVIAR SOLICITUD</button>
               ${state.message ? `<div id="p_folio_result" class="folio-badge">${esc(state.message)}</div>` : ""}
@@ -437,38 +484,38 @@
             <form id="form_horas_extra" onsubmit="enviarHorasExtra(event)">
               <div class="talon-header">SOLICITUD DE HORAS EXTRAS</div>
               <div class="field-row">
-                <label>FECHA</label>
-                <input type="date" id="he_fecha" value="${today()}" required>
+                <label for="he_fecha">FECHA</label>
+                <input type="date" id="he_fecha" name="fecha" value="${today()}" required>
               </div>
               <div class="field-row">
-                <label>NOMBRE DE EMPLEADO</label>
-                <input type="text" id="he_nombre" value="${perfilValue("nombre")}" readonly class="readonly-field">
+                <label for="he_nombre">NOMBRE DE EMPLEADO</label>
+                <input type="text" id="he_nombre" name="nombre" value="${perfilValue("nombre")}" readonly class="readonly-field">
               </div>
               <div class="field-row">
-                <label>PUESTO</label>
-                <input type="text" id="he_puesto" value="${perfilValue("puesto")}" readonly class="readonly-field">
+                <label for="he_puesto">PUESTO</label>
+                <input type="text" id="he_puesto" name="puesto" value="${perfilValue("puesto")}" readonly class="readonly-field">
               </div>
               <div class="field-row">
-                <label>ÁREA</label>
-                <input type="text" id="he_area" value="${perfilValue("area")}" readonly class="readonly-field">
+                <label for="he_area">ÁREA</label>
+                <input type="text" id="he_area" name="area" value="${perfilValue("area")}" readonly class="readonly-field">
               </div>
               <div class="field-row">
-                <label>CANTIDAD DE HORAS SOLICITADAS</label>
-                <input type="number" id="he_horas" min="0.25" max="12" step="0.25" required placeholder="Ej: 1.5">
+                <label for="he_horas">CANTIDAD DE HORAS SOLICITADAS</label>
+                <input type="number" id="he_horas" name="horas" min="0.25" max="12" step="0.25" required placeholder="Ej: 1.5">
               </div>
               <div class="field-row-double">
                 <div>
-                  <label>DESDE</label>
-                  <input type="time" id="he_desde" required>
+                  <label for="he_desde">DESDE</label>
+                  <input type="time" id="he_desde" name="entrada_extra" required>
                 </div>
                 <div>
-                  <label>HASTA</label>
-                  <input type="time" id="he_hasta" required>
+                  <label for="he_hasta">HASTA</label>
+                  <input type="time" id="he_hasta" name="salida_extra" required>
                 </div>
               </div>
               <div class="field-row">
-                <label>DESCRIPCIÓN DETALLADA SOBRE LA RAZÓN DE<br>SOLICITUD DE HORAS EXTRAS</label>
-                <textarea id="he_descripcion" rows="4" required placeholder="Describe detalladamente la razón..."></textarea>
+                <label for="he_descripcion">DESCRIPCIÓN DETALLADA SOBRE LA RAZÓN DE<br>SOLICITUD DE HORAS EXTRAS</label>
+                <textarea id="he_descripcion" name="notas" rows="4" required placeholder="Describe detalladamente la razón..."></textarea>
               </div>
               <button class="btn-submit" type="submit">REGISTRAR HORAS EXTRA</button>
               ${state.message ? `<div class="folio-badge">${esc(state.message)}</div>` : ""}
@@ -493,28 +540,82 @@
             <form id="form_vacaciones" onsubmit="enviarVacaciones(event)">
               <div class="talon-header">SOLICITUD DE VACACIONES</div>
               <div class="field-row">
-                <label>NOMBRE DE EMPLEADO</label>
-                <input type="text" value="${perfilValue("nombre")}" readonly class="readonly-field">
+                <label for="v_nombre">NOMBRE DE EMPLEADO</label>
+                <input type="text" id="v_nombre" name="nombre" value="${perfilValue("nombre")}" readonly class="readonly-field">
               </div>
               <div class="field-row">
-                <label>PUESTO</label>
-                <input type="text" value="${perfilValue("puesto")}" readonly class="readonly-field">
+                <label for="v_puesto">PUESTO</label>
+                <input type="text" id="v_puesto" name="puesto" value="${perfilValue("puesto")}" readonly class="readonly-field">
               </div>
               <div class="field-row-double">
                 <div>
-                  <label>INICIO</label>
-                  <input type="date" id="v_inicio" value="${today()}" required>
+                  <label for="v_inicio">INICIO</label>
+                  <input type="date" id="v_inicio" name="fecha_inicio" value="${today()}" required>
                 </div>
                 <div>
-                  <label>FIN</label>
-                  <input type="date" id="v_fin" required>
+                  <label for="v_fin">FIN</label>
+                  <input type="date" id="v_fin" name="fecha_fin" required>
                 </div>
               </div>
               <div class="field-row">
-                <label>MOTIVO / NOTAS</label>
-                <textarea id="v_motivo" rows="4" placeholder="Comentarios de cobertura o fechas solicitadas"></textarea>
+                <label for="v_motivo">MOTIVO / NOTAS</label>
+                <textarea id="v_motivo" name="motivo" rows="4" placeholder="Comentarios de cobertura o fechas solicitadas"></textarea>
               </div>
               <button class="btn-submit" type="submit">ENVIAR VACACIONES</button>
+              ${state.message ? `<div class="folio-badge">${esc(state.message)}</div>` : ""}
+              ${state.error ? `<div class="error">${esc(state.error)}</div>` : ""}
+            </form>
+          </section>
+          <div class="list">${items}</div>
+        `);
+      }
+
+      function renderPrestamos() {
+        const items = state.prestamos.map(p => `
+          <article class="card">
+            <div class="row"><strong>${esc(p.folio)}</strong><span class="badge">${esc(p.estado_display || p.estado)}</span></div>
+            <div class="muted">$${esc(p.importe)} · ${esc(p.num_quincenas)} quincenas · descuento $${esc(p.descuento_quincenal)}</div>
+            ${p.jefe_directo_nombre ? `<div class="muted">Autoriza: ${esc(p.jefe_directo_nombre)}</div>` : ""}
+            <div>${esc(p.concepto)}</div>
+          </article>
+        `).join("") || `<div class="muted">Sin préstamos registrados.</div>`;
+        app.innerHTML = shell(`
+          <section class="panel">
+            <form id="form_prestamo" onsubmit="enviarPrestamo(event)">
+              <div class="talon-header">SOLICITUD DE PRÉSTAMO</div>
+              <div class="field-row">
+                <label for="pr_nombre">NOMBRE DE EMPLEADO</label>
+                <input type="text" id="pr_nombre" name="nombre" value="${perfilValue("nombre")}" readonly class="readonly-field">
+              </div>
+              <div class="field-row-double">
+                <div>
+                  <label for="pr_importe">IMPORTE SOLICITADO</label>
+                  <input type="number" id="pr_importe" name="importe" min="1" step="0.01" inputmode="decimal" required placeholder="Ej: 1500.00">
+                </div>
+                <div>
+                  <label for="pr_quincenas">QUINCENAS</label>
+                  <input type="number" id="pr_quincenas" name="num_quincenas" min="1" max="24" step="1" required placeholder="Ej: 4">
+                </div>
+              </div>
+              <div class="field-row-double">
+                <div>
+                  <label for="pr_metodo">MÉTODO DE PAGO</label>
+                  <select id="pr_metodo" name="metodo_pago" required>
+                    <option value="transferencia">Transferencia</option>
+                    <option value="cheque">Cheque</option>
+                    <option value="efectivo">Efectivo</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="pr_deposito">FECHA DE DEPÓSITO</label>
+                  <input type="date" id="pr_deposito" name="fecha_deposito">
+                </div>
+              </div>
+              <div class="field-row">
+                <label for="pr_concepto">CONCEPTO / MOTIVO</label>
+                <textarea id="pr_concepto" name="concepto" rows="4" required placeholder="Describe para qué solicitas el préstamo"></textarea>
+              </div>
+              <button class="btn-submit" type="submit">ENVIAR PRÉSTAMO</button>
               ${state.message ? `<div class="folio-badge">${esc(state.message)}</div>` : ""}
               ${state.error ? `<div class="error">${esc(state.error)}</div>` : ""}
             </form>
@@ -545,6 +646,7 @@
         if (state.section === "permisos") renderPermisos();
         else if (state.section === "vacaciones") renderVacaciones();
         else if (state.section === "horas") renderHoras();
+        else if (state.section === "prestamos") renderPrestamos();
         else renderInicio();
       }
 

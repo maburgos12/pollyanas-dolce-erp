@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import permissions, status, viewsets
@@ -10,10 +12,16 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from core.access import can_manage_rrhh, can_view_rrhh
-from core.notificaciones import notificar_hora_extra_solicitada
+from core.notificaciones import notificar_hora_extra_solicitada, notificar_prestamo_solicitado
 from recetas.utils.normalizacion import normalizar_nombre
-from .models import AsistenciaEmpleado, Empleado, HoraExtra, PermisoSalida, SolicitudVacaciones
-from .serializers import AsistenciaSerializer, HoraExtraSerializer, PermisoSalidaSerializer, SolicitudVacacionesSerializer
+from .models import AsistenciaEmpleado, Empleado, HoraExtra, PermisoSalida, Prestamo, SolicitudVacaciones
+from .serializers import (
+    AsistenciaSerializer,
+    HoraExtraSerializer,
+    PermisoSalidaSerializer,
+    PrestamoSerializer,
+    SolicitudVacacionesSerializer,
+)
 from .services import calcular_monto_hora_extra, usuario_jefe_directo_de_empleado
 from .services_permisos import resolver_permiso_direccion
 from .services_vacaciones import (
@@ -281,6 +289,64 @@ class SolicitudVacacionesViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSe
         if not empleado:
             return Response({"empleado": None, "saldo": None})
         return Response({"empleado": empleado.id, "saldo": saldo_vacaciones_empleado(empleado)})
+
+
+class PrestamoViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
+    serializer_class = PrestamoSerializer
+
+    def get_queryset(self):
+        qs = Prestamo.objects.select_related("empleado", "jefe_directo", "autorizado_jefe", "autorizado_dg")
+        empleado = empleado_de_usuario(self.request.user)
+        if can_view_rrhh(self.request.user):
+            pass
+        elif empleado:
+            qs = qs.filter(Q(empleado=empleado) | Q(jefe_directo=self.request.user))
+        else:
+            qs = qs.filter(jefe_directo=self.request.user)
+        estado = self.request.query_params.get("estado")
+        if estado:
+            qs = qs.filter(estado=estado)
+        return self._apply_mis_and_limit(qs.order_by("-fecha_solicitud", "-id"))
+
+    def perform_create(self, serializer):
+        empleado = serializer.validated_data.get("empleado") or empleado_de_usuario(self.request.user)
+        if not empleado:
+            raise ValidationError({"empleado": "No se pudo vincular tu usuario con un empleado activo."})
+        if not can_view_rrhh(self.request.user) and empleado != empleado_de_usuario(self.request.user):
+            raise PermissionDenied("No puedes solicitar préstamos para otro empleado.")
+
+        deuda = Prestamo.objects.filter(
+            empleado=empleado,
+            estado__in=[
+                Prestamo.ESTADO_SOLICITADO,
+                Prestamo.ESTADO_AUTORIZADO,
+                Prestamo.ESTADO_APROBADO,
+                Prestamo.ESTADO_ACTIVO,
+            ],
+            saldo_actual__gt=0,
+        ).first()
+        if deuda:
+            raise ValidationError(
+                {
+                    "empleado": (
+                        f"Aún tienes un préstamo vigente: {deuda.folio} · saldo ${deuda.saldo_actual}."
+                    )
+                }
+            )
+
+        importe = serializer.validated_data["importe"]
+        quincenas = serializer.validated_data["num_quincenas"]
+        descuento = (importe / Decimal(str(quincenas))).quantize(Decimal("0.01"))
+        prestamo = serializer.save(
+            empleado=empleado,
+            fecha_solicitud=timezone.localdate(),
+            descuento_quincenal=descuento,
+            saldo_actual=importe,
+            estado=Prestamo.ESTADO_SOLICITADO,
+            jefe_directo=usuario_jefe_directo_de_empleado(empleado),
+            creado_por=self.request.user,
+        )
+        notificar_prestamo_solicitado(prestamo, actor=self.request.user)
 
 
 @api_view(["GET"])

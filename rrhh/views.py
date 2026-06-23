@@ -2960,3 +2960,7 @@ def pwa_vacaciones(request):
 @login_required
 def pwa_horas_extra(request):
     return render(request, "rrhh/pwa_capital_humano.html", {"initial_section": "horas"})
+
+
+def pwa_prestamos(request):
+    return render(request, "rrhh/pwa_capital_humano.html", {"initial_section": "prestamos"})
