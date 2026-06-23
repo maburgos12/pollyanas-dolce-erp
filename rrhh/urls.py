@@ -22,6 +22,7 @@ router.register(r"api/asistencias", api_views.AsistenciaViewSet, basename="asist
 router.register(r"api/horas-extra", api_views.HoraExtraViewSet, basename="hora-extra")
 router.register(r"api/permisos", api_views.PermisoSalidaViewSet, basename="permiso")
 router.register(r"api/vacaciones", api_views.SolicitudVacacionesViewSet, basename="vacaciones")
+router.register(r"api/prestamos", api_views.PrestamoViewSet, basename="prestamo")
 
 urlpatterns = [
     path("", views.empleados, name="home"),
@@ -61,6 +62,7 @@ urlpatterns = [
     path("app/permisos/", views.pwa_permisos, name="rrhh_pwa_permisos"),
     path("app/vacaciones/", views.pwa_vacaciones, name="rrhh_pwa_vacaciones"),
     path("app/horas-extra/", views.pwa_horas_extra, name="rrhh_pwa_he"),
+    path("app/prestamos/", views.pwa_prestamos, name="rrhh_pwa_prestamos"),
     path("dashboard/", views.dashboard_ch, name="rrhh_dashboard"),
     path("indicadores/", views.indicadores_ch, name="rrhh_indicadores"),
     path("organizacion/", views.organizacion_ch, name="rrhh_organizacion"),
