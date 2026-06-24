@@ -744,6 +744,49 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_APROBADO)
         self.assertEqual(permiso.autorizado_por, super_user)
 
+    def test_superuser_autoriza_permiso_de_jefe_desde_panel_rrhh(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        super_user = User.objects.create_user(username="mauricio.panel", is_superuser=True, is_staff=True)
+        mauricio = Empleado.objects.create(
+            nombre="MAURICIO ANTONIO BURGOS FONSECA",
+            usuario_erp=super_user,
+            nivel_organizacional=Empleado.NIVEL_DIRECCION,
+        )
+        paula = Empleado.objects.create(
+            nombre="LUGO ESPINOZA PAULA ELIZABETH",
+            departamento=Empleado.DEP_RRHH,
+            puesto="Jefe de Recursos Humanos",
+            jefe_directo=mauricio,
+        )
+        permiso = PermisoSalida.objects.create(
+            empleado=paula,
+            tipo=PermisoSalida.TIPO_PERMISO_DIA,
+            fecha_inicio=datetime(2026, 7, 3, 8, 0, tzinfo=ZoneInfo("America/Mazatlan")),
+            motivo="Tramites personales",
+            estado_jefe=PermisoSalida.ESTADO_JEFE_PENDIENTE,
+            requiere_direccion=False,
+            estado_direccion=PermisoSalida.ESTADO_DIRECCION_NO_REQUIERE,
+        )
+
+        self.client.force_login(super_user)
+        response = self.client.get(reverse("rrhh:rrhh_permisos_list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, permiso.folio)
+        self.assertContains(response, "Autorizar jefe")
+
+        response = self.client.post(
+            reverse("rrhh:rrhh_permisos_list"),
+            {"permiso_id": permiso.id, "action": "preautorizar_jefe"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        permiso.refresh_from_db()
+        self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_PREAUTORIZADO)
+        self.assertEqual(permiso.estado, PermisoSalida.ESTADO_APROBADO)
+        self.assertEqual(permiso.autorizado_por, super_user)
+
     def test_supervisora_y_encargada_produccion_las_resuelve_jefe_directo(self):
         from datetime import datetime
         from zoneinfo import ZoneInfo

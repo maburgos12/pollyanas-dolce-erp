@@ -87,7 +87,12 @@ from .services_identidad import (
 from .services.lista_raya import importar_lista_raya_nomina
 from .services_personnel_normalization import build_personnel_normalization_plan
 from .services_niveles import jefatura_q, liderazgo_q
-from .services_permisos import can_authorize_direccion, resolver_permiso_direccion
+from .services_permisos import (
+    can_authorize_direccion,
+    can_resolver_permiso_jefe,
+    resolver_permiso_direccion,
+    resolver_permiso_jefe,
+)
 from .api_views import empleado_de_usuario
 from .services_vacaciones import (
     aprobar_solicitud_vacaciones_rrhh,
@@ -2628,7 +2633,11 @@ def permisos_list(request):
     if request.method == "POST":
         permiso = get_object_or_404(PermisoSalida, pk=request.POST.get("permiso_id"))
         action = (request.POST.get("action") or "").strip()
-        if action in {"autorizar_direccion", "rechazar_direccion"}:
+        if action in {"preautorizar_jefe", "rechazar_jefe"}:
+            resolver_permiso_jefe(permiso, request.user, aprobar=action == "preautorizar_jefe")
+            estado = "autorizado" if action == "preautorizar_jefe" else "rechazado"
+            messages.success(request, f"Permiso {permiso.folio} {estado} por jefe directo.")
+        elif action in {"autorizar_direccion", "rechazar_direccion"}:
             resolver_permiso_direccion(permiso, request.user, aprobar=action == "autorizar_direccion")
             estado = "autorizado" if action == "autorizar_direccion" else "rechazado"
             messages.success(request, f"Permiso {permiso.folio} {estado} por Dirección.")
@@ -2646,27 +2655,42 @@ def permisos_list(request):
         .order_by("-creado_en")
     )
     permisos = permisos_qs[:500]
+
+    def _con_permisos_accion(qs):
+        rows = list(qs[:120])
+        for permiso in rows:
+            permiso.puede_preautorizar_jefe = can_resolver_permiso_jefe(request.user, permiso)
+        return rows
+
     columnas = [
         (
             "jefe",
             "Pendiente jefe",
-            permisos_qs.filter(
+            _con_permisos_accion(permisos_qs.filter(
                 estado=PermisoSalida.ESTADO_SOLICITADO,
                 estado_jefe=PermisoSalida.ESTADO_JEFE_PENDIENTE,
                 requiere_direccion=False,
-            )[:120],
+            )),
         ),
         (
             "direccion",
             "Pendiente Dirección",
-            permisos_qs.filter(
+            _con_permisos_accion(permisos_qs.filter(
                 estado=PermisoSalida.ESTADO_SOLICITADO,
                 requiere_direccion=True,
                 estado_direccion=PermisoSalida.ESTADO_DIRECCION_PENDIENTE,
-            )[:120],
+            )),
         ),
-        ("aprobado", "Autorizados / archivo", permisos_qs.filter(estado=PermisoSalida.ESTADO_APROBADO)[:120]),
-        ("rechazado", "Rechazados", permisos_qs.filter(estado=PermisoSalida.ESTADO_RECHAZADO)[:120]),
+        (
+            "aprobado",
+            "Autorizados / archivo",
+            _con_permisos_accion(permisos_qs.filter(estado=PermisoSalida.ESTADO_APROBADO)),
+        ),
+        (
+            "rechazado",
+            "Rechazados",
+            _con_permisos_accion(permisos_qs.filter(estado=PermisoSalida.ESTADO_RECHAZADO)),
+        ),
     ]
     stats = {
         "total": permisos_qs.count(),
