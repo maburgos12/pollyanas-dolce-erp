@@ -59,7 +59,14 @@
             {% if permiso.autorizado_direccion_por %}<br>{{ permiso.autorizado_direccion_por }}{% endif %}
           </div>
         {% endif %}
-        {% if can_authorize_direccion and permiso.estado == "solicitado" and permiso.requiere_direccion and permiso.estado_direccion == "pendiente" %}
+        {% if permiso.puede_preautorizar_jefe %}
+        <form method="post" class="permiso-actions">
+          {% csrf_token %}
+          <input type="hidden" name="permiso_id" value="{{ permiso.id }}">
+          <button class="btn btn-primary" type="submit" name="action" value="preautorizar_jefe">Autorizar jefe</button>
+          <button class="btn btn-secondary" type="submit" name="action" value="rechazar_jefe">Rechazar</button>
+        </form>
+        {% elif can_authorize_direccion and permiso.estado == "solicitado" and permiso.requiere_direccion and permiso.estado_direccion == "pendiente" %}
         <form method="post" class="permiso-actions">
           {% csrf_token %}
           <input type="hidden" name="permiso_id" value="{{ permiso.id }}">
