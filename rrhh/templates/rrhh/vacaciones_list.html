@@ -4,7 +4,7 @@
 {% block page_title %}RRHH · Vacaciones{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-vacaciones-list.css?v=20260616-conciliacion-v1">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-vacaciones-list.css?v=20260623-status-rows-v3">
 {% endblock %}
 
 {% block content %}
@@ -196,47 +196,42 @@
       {% endfor %}
       </div>
 
-      <div class="vac-list">
+      <div class="vac-row-table">
       {% for key, label, items in columnas %}
-        <div id="estado-{{ key }}">
-          {% for solicitud in items %}
-            <div class="vac-card">
-              <div class="vac-card-row">
-                <div>
-                  <div class="vac-card-main">{{ solicitud.empleado.nombre }}</div>
-                  <div class="vac-meta">{{ solicitud.folio }}</div>
-                </div>
-                <div class="vac-meta">{{ solicitud.fecha_inicio|date:"Y-m-d" }} a {{ solicitud.fecha_fin|date:"Y-m-d" }}</div>
-                <div class="vac-meta">
-                  {% if solicitud.jefe_directo %}Jefe: {{ solicitud.jefe_directo.get_full_name|default:solicitud.jefe_directo.username }}{% endif %}
-                  {% if solicitud.aprobado_rrhh_por %}RRHH: {{ solicitud.aprobado_rrhh_por }}{% endif %}
-                  {% if not solicitud.jefe_directo and not solicitud.aprobado_rrhh_por %}Sin autorizador asignado{% endif %}
-                </div>
-                <div class="vac-badges">
-                  <span class="vac-badge">{{ solicitud.dias_laborables }} días</span>
-                  <span class="vac-badge gold">{{ solicitud.get_estado_display }}</span>
-                </div>
-                {% if solicitud.puede_preautorizar_jefe %}
-                  <form class="vac-card-actions" method="post">
-                    {% csrf_token %}
-                    <input type="hidden" name="solicitud_id" value="{{ solicitud.id }}">
-                    <button class="btn btn-primary" type="submit" name="action" value="preautorizar_jefe">Preautorizar</button>
-                    <button class="btn btn-secondary" type="submit" name="action" value="rechazar_jefe">Rechazar</button>
-                  </form>
-                {% elif can_manage_rrhh and solicitud.estado == "solicitada" or can_manage_rrhh and solicitud.estado == "preautorizada" %}
-                  <form class="vac-card-actions" method="post">
-                    {% csrf_token %}
-                    <input type="hidden" name="solicitud_id" value="{{ solicitud.id }}">
-                    <button class="btn btn-primary" type="submit" name="action" value="aprobar_rrhh">Aprobar RRHH</button>
-                    <button class="btn btn-secondary" type="submit" name="action" value="rechazar_rrhh">Rechazar</button>
-                  </form>
-                {% endif %}
-              </div>
-              {% if solicitud.motivo %}
-                <div class="vac-meta">{{ solicitud.motivo|truncatechars:160 }}</div>
-              {% endif %}
+        <div id="estado-{{ key }}" class="vac-state-group">
+        {% for solicitud in items %}
+          <article class="vac-row-item">
+            <div>
+              <strong>{{ solicitud.empleado.nombre }}</strong>
+              <span>{{ solicitud.folio }}</span>
+              {% if solicitud.motivo %}<p>{{ solicitud.motivo|truncatechars:140 }}</p>{% endif %}
             </div>
-          {% endfor %}
+            <div>{{ solicitud.fecha_inicio|date:"Y-m-d" }} a {{ solicitud.fecha_fin|date:"Y-m-d" }}</div>
+            <div>
+              {% if solicitud.jefe_directo %}Jefe: {{ solicitud.jefe_directo.get_full_name|default:solicitud.jefe_directo.username }}{% endif %}
+              {% if solicitud.aprobado_rrhh_por %}{% if solicitud.jefe_directo %}<br>{% endif %}RRHH: {{ solicitud.aprobado_rrhh_por }}{% endif %}
+            </div>
+            <div class="vac-row-badges">
+              <span class="vac-badge">{{ solicitud.dias_laborables }} días</span>
+              <span class="vac-badge gold">{{ solicitud.get_estado_display }}</span>
+            </div>
+            {% if solicitud.puede_preautorizar_jefe %}
+              <form class="vac-card-actions" method="post">
+                {% csrf_token %}
+                <input type="hidden" name="solicitud_id" value="{{ solicitud.id }}">
+                <button class="btn btn-primary" type="submit" name="action" value="preautorizar_jefe">Preautorizar</button>
+                <button class="btn btn-secondary" type="submit" name="action" value="rechazar_jefe">Rechazar</button>
+              </form>
+            {% elif can_manage_rrhh and solicitud.estado == "solicitada" or can_manage_rrhh and solicitud.estado == "preautorizada" %}
+              <form class="vac-card-actions" method="post">
+                {% csrf_token %}
+                <input type="hidden" name="solicitud_id" value="{{ solicitud.id }}">
+                <button class="btn btn-primary" type="submit" name="action" value="aprobar_rrhh">Aprobar RRHH</button>
+                <button class="btn btn-secondary" type="submit" name="action" value="rechazar_rrhh">Rechazar</button>
+              </form>
+            {% endif %}
+          </article>
+        {% endfor %}
         </div>
       {% endfor %}
       {% if not hay_solicitudes %}

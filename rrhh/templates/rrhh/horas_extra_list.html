@@ -4,7 +4,7 @@
 {% block page_title %}RRHH · Horas extra{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-horas-extra-list.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-horas-extra-list.css?v=20260623-status-rows-v3">
 {% endblock %}
 
 {% block content %}
@@ -16,29 +16,41 @@
 </section>
 {% endif %}
 
-<section class="ch-kanban">
-  {% for key, label, items in columnas %}
-  <article class="ch-column">
-    <h2>{{ label }}</h2>
-    {% for he in items %}
-    <div class="ch-item">
-      <div class="ch-main">{{ he.empleado.nombre }}</div>
-      <div class="ch-meta">{{ he.fecha|date:"Y-m-d" }} · {{ he.horas }} h · {{ he.monto_calculado|default:"Sin monto" }}</div>
-      <div class="ch-meta">Jefe directo: {% if he.jefe_directo %}{{ he.jefe_directo.get_full_name|default:he.jefe_directo.username }}{% else %}Sin asignar{% endif %}</div>
-      {% if he.notas %}<div class="ch-meta">{{ he.notas }}</div>{% endif %}
-      {% if key == "pendiente" and he.jefe_directo_id == user_id %}
-      <form method="post" class="ch-actions">
-        {% csrf_token %}
-        <input type="hidden" name="hora_extra_id" value="{{ he.id }}">
-        <button class="btn btn-primary" type="submit" name="action" value="autorizar">Autorizar</button>
-        <button class="btn btn-secondary" type="submit" name="action" value="rechazar">Rechazar</button>
-      </form>
-      {% endif %}
-    </div>
-    {% empty %}
-    <div class="ch-meta">Sin registros.</div>
+<section class="ch-table-panels" aria-label="Horas extra por estado">
+  <div class="ch-status-strip">
+    {% for key, label, items in columnas %}
+      <div class="ch-status-card {% if forloop.first %}active{% endif %}">
+        <strong>{{ label }}</strong>
+        <span>{{ items|length }} registros</span>
+      </div>
     {% endfor %}
-  </article>
+  </div>
+  <div class="ch-row-table">
+  {% for key, label, items in columnas %}
+    {% for he in items %}
+      <article class="ch-row-item">
+        <div>
+          <strong>{{ he.empleado.nombre }}</strong>
+          {% if he.notas %}<p>{{ he.notas|truncatechars:140 }}</p>{% endif %}
+        </div>
+        <div>{{ he.fecha|date:"Y-m-d" }}</div>
+        <div>{% if he.jefe_directo %}Jefe directo: {{ he.jefe_directo.get_full_name|default:he.jefe_directo.username }}{% else %}Sin asignar{% endif %}</div>
+        <div class="ch-row-badges">
+          <span class="ch-badge">{{ he.horas }} h</span>
+          <span class="ch-badge">{{ label }}</span>
+          {% if he.monto_calculado %}<span class="ch-badge gold">${{ he.monto_calculado }}</span>{% endif %}
+        </div>
+        {% if key == "pendiente" and he.jefe_directo_id == user_id %}
+          <form method="post" class="ch-actions">
+            {% csrf_token %}
+            <input type="hidden" name="hora_extra_id" value="{{ he.id }}">
+            <button class="btn btn-primary" type="submit" name="action" value="autorizar">Autorizar</button>
+            <button class="btn btn-secondary" type="submit" name="action" value="rechazar">Rechazar</button>
+          </form>
+        {% endif %}
+      </article>
+    {% endfor %}
   {% endfor %}
+  </div>
 </section>
 {% endblock %}

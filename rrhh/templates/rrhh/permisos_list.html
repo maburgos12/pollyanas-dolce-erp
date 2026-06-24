@@ -4,7 +4,7 @@
 {% block page_title %}RRHH · Permisos{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-permisos-list.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-permisos-list.css?v=20260623-status-rows-v3">
 {% endblock %}
 
 {% block content %}
@@ -32,54 +32,67 @@
     </div>
   </div>
 
-  <section class="permisos-board">
-    {% for key, label, items in columnas %}
-    <article class="permisos-col">
-      <h2>{{ label }}</h2>
-      {% for permiso in items %}
-      <div class="permiso-card">
-        <div class="permiso-main">{{ permiso.empleado.nombre }}</div>
-        <div class="permiso-meta">{{ permiso.folio }} · {{ permiso.get_tipo_display }}</div>
-        <div class="permiso-meta">
-          {{ permiso.fecha_inicio|date:"Y-m-d H:i" }}{% if permiso.fecha_fin %} a {{ permiso.fecha_fin|date:"Y-m-d H:i" }}{% endif %}
+  <section class="permisos-worktable" aria-label="Permisos por estado">
+    <div class="permisos-status-strip">
+      {% for key, label, items in columnas %}
+        <div class="permisos-status-card {% if forloop.first %}active{% endif %}">
+          <strong>{{ label }}</strong>
+          <span>{{ items|length }} registros</span>
         </div>
-        <div class="permiso-row">
-          <span class="permiso-badge">{{ permiso.get_origen_solicitud_display }}</span>
-          <span class="permiso-badge {% if permiso.goce_sueldo %}gold{% endif %}">
-            {% if permiso.goce_sueldo %}Con goce{% else %}Sin goce{% endif %}
-          </span>
-        </div>
-        <div class="permiso-meta">{{ permiso.motivo|truncatechars:120 }}</div>
-        {% if permiso.autorizado_jefe_por %}
-          <div class="permiso-meta">Jefe: {{ permiso.autorizado_jefe_por }}</div>
-        {% endif %}
-        {% if permiso.requiere_direccion %}
-          <div class="permiso-meta">
-            Dirección: {{ permiso.get_estado_direccion_display }}
-            {% if permiso.autorizado_direccion_por %}<br>{{ permiso.autorizado_direccion_por }}{% endif %}
-          </div>
-        {% endif %}
-        {% if permiso.puede_preautorizar_jefe %}
-        <form method="post" class="permiso-actions">
-          {% csrf_token %}
-          <input type="hidden" name="permiso_id" value="{{ permiso.id }}">
-          <button class="btn btn-primary" type="submit" name="action" value="preautorizar_jefe">Autorizar jefe</button>
-          <button class="btn btn-secondary" type="submit" name="action" value="rechazar_jefe">Rechazar</button>
-        </form>
-        {% elif can_authorize_direccion and permiso.estado == "solicitado" and permiso.requiere_direccion and permiso.estado_direccion == "pendiente" %}
-        <form method="post" class="permiso-actions">
-          {% csrf_token %}
-          <input type="hidden" name="permiso_id" value="{{ permiso.id }}">
-          <button class="btn btn-primary" type="submit" name="action" value="autorizar_direccion">Autorizar Dirección</button>
-          <button class="btn btn-secondary" type="submit" name="action" value="rechazar_direccion">Rechazar</button>
-        </form>
-        {% endif %}
-      </div>
-      {% empty %}
-      <div class="permiso-meta">Sin registros.</div>
       {% endfor %}
-    </article>
-    {% endfor %}
+    </div>
+
+    <div class="permisos-row-table">
+      {% for key, label, items in columnas %}
+        {% for permiso in items %}
+          <article class="permiso-row-item">
+            <div>
+              <strong>{{ permiso.empleado.nombre }}</strong>
+              <span>{{ permiso.folio }} · {{ permiso.get_tipo_display }}</span>
+              {% if permiso.motivo %}<p>{{ permiso.motivo|truncatechars:120 }}</p>{% endif %}
+            </div>
+            <div>{{ permiso.fecha_inicio|date:"Y-m-d H:i" }}{% if permiso.fecha_fin %} a {{ permiso.fecha_fin|date:"Y-m-d H:i" }}{% endif %}</div>
+            <div>
+              {% if permiso.autorizado_jefe_por %}Jefe: {{ permiso.autorizado_jefe_por }}{% endif %}
+              {% if permiso.requiere_direccion %}{% if permiso.autorizado_jefe_por %}<br>{% endif %}Dirección: {{ permiso.get_estado_direccion_display }}{% endif %}
+            </div>
+            <div class="permiso-row-badges">
+              <span class="permiso-badge">{{ label }}</span>
+              <span class="permiso-badge">{{ permiso.get_origen_solicitud_display }}</span>
+              <span class="permiso-badge {% if permiso.goce_sueldo %}gold{% endif %}">
+                {% if permiso.goce_sueldo %}Con goce{% else %}Sin goce{% endif %}
+              </span>
+            </div>
+            {% if permiso.puede_preautorizar_jefe %}
+              <form method="post" class="permiso-actions">
+                {% csrf_token %}
+                <input type="hidden" name="permiso_id" value="{{ permiso.id }}">
+                <button class="btn btn-primary" type="submit" name="action" value="preautorizar_jefe">Autorizar jefe</button>
+                <button class="btn btn-secondary" type="submit" name="action" value="rechazar_jefe">Rechazar</button>
+              </form>
+            {% elif can_authorize_direccion and permiso.estado == "solicitado" and permiso.requiere_direccion and permiso.estado_direccion == "pendiente" %}
+              <form method="post" class="permiso-actions">
+                {% csrf_token %}
+                <input type="hidden" name="permiso_id" value="{{ permiso.id }}">
+                <button class="btn btn-primary" type="submit" name="action" value="autorizar_direccion">Autorizar Dirección</button>
+                <button class="btn btn-secondary" type="submit" name="action" value="rechazar_direccion">Rechazar</button>
+              </form>
+            {% endif %}
+          </article>
+        {% endfor %}
+      {% endfor %}
+      {% if not permisos %}
+        <article class="permiso-row-item">
+          <div>
+            <strong>Sin permisos registrados.</strong>
+            <span>Cuando existan solicitudes aparecerán aquí en filas horizontales.</span>
+          </div>
+          <div>-</div>
+          <div>-</div>
+          <div class="permiso-row-badges"><span class="permiso-badge">Sin registros</span></div>
+        </article>
+      {% endif %}
+    </div>
   </section>
 
   <section class="permisos-table-card">
