@@ -74,8 +74,8 @@
   .vac-history-metrics strong { color: var(--vino); font-size: 14px; }
   .vac-movement-list { display: grid; gap: 5px; }
   .vac-movement-line {
-    background: #fff;
-    border-left: 3px solid var(--rosa);
+    background: #fbf6f8;
+    border: 1px solid var(--rosa);
     color: var(--texto-light);
     display: grid;
     font-size: 12px;
@@ -122,19 +122,25 @@
   .vac-status-tab span { color: var(--texto-light); font-size: 12px; font-weight: 900; text-transform: uppercase; }
   .vac-status-tab.active { background: var(--vino); color: #fff; }
   .vac-status-tab.active span { color: rgba(255, 255, 255, .8); }
-  .vac-list { display: grid; gap: 10px; }
-  .vac-card { border: 1px solid var(--rosa); border-radius: 8px; display: grid; gap: 10px; padding: 12px; }
-  .vac-card-row {
+  .vac-row-table { border-top: 1px solid var(--rosa); display: grid; }
+  .vac-row-item {
     align-items: center;
+    border-bottom: 1px solid var(--rosa);
     display: grid;
-    gap: 12px;
-    grid-template-columns: minmax(180px, 1.2fr) minmax(190px, 1fr) minmax(180px, 1fr) minmax(130px, .7fr) auto;
+    gap: 14px;
+    grid-template-columns: minmax(280px, 1.4fr) minmax(210px, .9fr) minmax(300px, 1.2fr) minmax(170px, auto) auto;
+    min-height: 82px;
+    padding: 12px 14px;
   }
-  .vac-card-main { color: var(--texto); font-weight: 900; }
+  .vac-row-item:last-child { border-bottom: 0; }
+  .vac-row-item strong { color: var(--texto); display: block; font-size: 15px; }
+  .vac-row-item span, .vac-row-item div, .vac-row-item p { color: var(--texto-light); font-size: 13px; }
+  .vac-row-item p { margin: 8px 0 0; }
+  .vac-row-badges { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
   .vac-badges { display: flex; flex-wrap: wrap; gap: 6px; }
   .vac-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }
   .vac-badge.gold { background: rgba(201, 168, 76, .18); color: #6f5415; }
-  .vac-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .vac-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
   .vac-reglamento {
     background: #fff;
     border: 1px solid var(--rosa);
@@ -144,12 +150,12 @@
   .vac-reglamento summary { color: var(--vino); cursor: pointer; font-weight: 900; }
   .vac-reglamento ul { color: var(--texto-light); margin: 10px 0 0 18px; padding: 0; }
   @media (max-width: 1280px) {
-    .vac-card-row { grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr); align-items: start; }
     .vac-entry-grid { grid-template-columns: 1fr; }
   }
   @media (max-width: 760px) {
     .vac-head { grid-template-columns: 1fr; }
     .vac-review-tools, .vac-adjust-form { grid-template-columns: 1fr; }
     .vac-status-strip, .vac-stats { grid-template-columns: 1fr; }
-    .vac-card-row { grid-template-columns: 1fr; }
+    .vac-row-item { grid-template-columns: 1fr; }
+    .vac-row-badges { justify-content: flex-start; }
   }

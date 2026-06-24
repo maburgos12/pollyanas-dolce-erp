@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-erp-shell-v3-ios-pwa-lock";
+const CACHE_NAME = "pollyanas-erp-shell-v4-rrhh-table-panels";
 const INSTALL_ASSETS = [
   "/static/manifest.webmanifest",
   "/static/favicon-192x192.png?v=20260525-logo-v1",

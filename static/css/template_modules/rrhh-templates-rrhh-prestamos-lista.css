@@ -1,12 +1,34 @@
 /* Extracted from rrhh/templates/rrhh/prestamos_lista.html */
 .loan-page { display: grid; gap: 16px; }
   .loan-actions { display: flex; gap: 10px; flex-wrap: wrap; }
-  .loan-board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-  .loan-col { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 14px; }
-  .loan-col h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
-  .loan-list { display: grid; gap: 10px; }
-  .loan-card { border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; text-decoration: none; color: inherit; }
-  .loan-card strong { color: var(--vino); }
-  .loan-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .loan-worktable { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; overflow: hidden; }
+  .loan-status-strip { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); padding: 14px; }
+  .loan-status-card { background: #fbf6f8; border: 1px solid var(--rosa); border-radius: 8px; color: var(--vino); min-height: 66px; padding: 12px; }
+  .loan-status-card.active { background: var(--vino); color: #fff; }
+  .loan-status-card strong { display: block; font-size: 17px; line-height: 1.1; }
+  .loan-status-card span { color: var(--texto-light); display: block; font-size: 12px; font-weight: 900; margin-top: 5px; text-transform: uppercase; }
+  .loan-status-card.active span { color: rgba(255,255,255,.86); }
+  .loan-row-table { border-top: 1px solid var(--rosa); display: grid; }
+  .loan-row-item {
+    align-items: center;
+    border-bottom: 1px solid var(--rosa);
+    display: grid;
+    gap: 14px;
+    grid-template-columns: minmax(260px, 1.3fr) minmax(150px, .7fr) minmax(260px, 1fr) minmax(180px, auto) auto;
+    min-height: 78px;
+    padding: 12px 14px;
+  }
+  .loan-row-item:last-child { border-bottom: 0; }
+  .loan-row-item a { color: inherit; text-decoration: none; }
+  .loan-row-item strong { color: var(--vino); display: block; font-size: 15px; }
+  .loan-row-item span, .loan-row-item div { color: var(--texto-light); font-size: 13px; }
+  .loan-row-badges { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+  .loan-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }
+  .loan-badge.gold { background: rgba(201, 168, 76, .18); color: #6f5415; }
+  .loan-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
   .muted { color: var(--texto-light); font-size: 13px; }
-  @media (max-width: 900px) { .loan-board { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) {
+    .loan-status-strip { grid-template-columns: 1fr; }
+    .loan-row-item { grid-template-columns: 1fr; }
+    .loan-row-badges { justify-content: flex-start; }
+  }

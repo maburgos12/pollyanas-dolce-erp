@@ -15,12 +15,28 @@
   .permisos-stat { background: #fbf6f8; border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; }
   .permisos-stat strong { color: var(--vino); display: block; font-size: 22px; line-height: 1; }
   .permisos-stat span { color: var(--texto-light); font-size: 11px; font-weight: 900; text-transform: uppercase; }
-  .permisos-board { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); align-items: start; }
-  .permisos-col { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; min-height: 220px; padding: 12px; }
-  .permisos-col h2 { color: var(--vino); font-size: 16px; margin: 0 0 12px; }
-  .permiso-card { border: 1px solid var(--rosa); border-radius: 8px; display: grid; gap: 8px; margin-bottom: 10px; padding: 12px; }
-  .permiso-main { color: var(--texto); font-weight: 900; }
-  .permiso-meta { color: var(--texto-light); font-size: 13px; }
+  .permisos-worktable { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; overflow: hidden; }
+  .permisos-status-strip { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); padding: 14px; }
+  .permisos-status-card { background: #fbf6f8; border: 1px solid var(--rosa); border-radius: 8px; color: var(--vino); min-height: 66px; padding: 12px; }
+  .permisos-status-card.active { background: var(--vino); color: #fff; }
+  .permisos-status-card strong { display: block; font-size: 17px; line-height: 1.1; }
+  .permisos-status-card span { color: var(--texto-light); display: block; font-size: 12px; font-weight: 900; margin-top: 5px; text-transform: uppercase; }
+  .permisos-status-card.active span { color: rgba(255,255,255,.86); }
+  .permisos-row-table { border-top: 1px solid var(--rosa); display: grid; }
+  .permiso-row-item {
+    align-items: center;
+    border-bottom: 1px solid var(--rosa);
+    display: grid;
+    gap: 14px;
+    grid-template-columns: minmax(260px, 1.4fr) minmax(190px, .9fr) minmax(220px, 1fr) minmax(220px, 1fr) auto;
+    min-height: 78px;
+    padding: 12px 14px;
+  }
+  .permiso-row-item:last-child { border-bottom: 0; }
+  .permiso-row-item strong { color: var(--texto); display: block; font-size: 15px; }
+  .permiso-row-item span, .permiso-row-item div, .permiso-row-item p { color: var(--texto-light); font-size: 13px; }
+  .permiso-row-item p { margin: 8px 0 0; }
+  .permiso-row-badges { display: flex; flex-wrap: wrap; gap: 6px; }
   .permiso-row { display: flex; flex-wrap: wrap; gap: 6px; }
   .permiso-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }
   .permiso-badge.gold { background: rgba(201, 168, 76, .18); color: #6f5415; }
@@ -31,12 +47,13 @@
   .permisos-table th, .permisos-table td { border-bottom: 1px solid var(--rosa); padding: 10px; text-align: left; vertical-align: top; }
   .permisos-table th { color: var(--vino); font-size: 12px; text-transform: uppercase; }
   @media (max-width: 1280px) {
-    .permisos-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .permiso-row-item { grid-template-columns: minmax(240px, 1fr) minmax(190px, .9fr) minmax(220px, 1fr); align-items: start; }
   }
   @media (max-width: 900px) {
     .permisos-head { grid-template-columns: 1fr; }
   }
   @media (max-width: 680px) {
-    .permisos-board,
+    .permisos-status-strip,
     .permisos-stats { grid-template-columns: 1fr; }
+    .permiso-row-item { grid-template-columns: 1fr; }
   }

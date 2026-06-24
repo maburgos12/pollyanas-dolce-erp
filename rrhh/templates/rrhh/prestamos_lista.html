@@ -4,7 +4,7 @@
 {% block page_title %}Préstamos de personal{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-prestamos-lista.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-prestamos-lista.css?v=20260623-status-rows-v3">
 {% endblock %}
 
 {% block content %}
@@ -25,74 +25,65 @@
     {% endif %}
   </div>
 
-  <div class="loan-board">
-    <section class="loan-col">
-      <h2>Por autorizar por mí</h2>
-      <div class="loan-list">
+  <div class="loan-worktable" aria-label="Préstamos por estado">
+    <div class="loan-status-strip">
+      <div class="loan-status-card active"><strong>Por autorizar por mí</strong><span>{{ por_autorizar|length }} registros</span></div>
+      <div class="loan-status-card"><strong>Pendientes autorización</strong><span>{{ pendientes|length }} registros</span></div>
+      <div class="loan-status-card"><strong>Activos</strong><span>{{ activos|length }} registros</span></div>
+      <div class="loan-status-card"><strong>Liquidados</strong><span>{{ liquidados|length }} registros</span></div>
+    </div>
+
+    <div class="loan-row-table">
         {% for prestamo in por_autorizar %}
-          <div class="loan-card">
-            <a href="{% url 'rrhh:rrhh_prestamo_detalle' prestamo.pk %}" class="pd-u-af3b97a004">
-              <strong>{{ prestamo.folio }}</strong>
-              <div>{{ prestamo.empleado.nombre }}</div>
-              <div class="muted">${{ prestamo.importe }} · {{ prestamo.get_estado_display }}</div>
-            </a>
-            <form class="loan-card-actions" method="post" action="{% url 'rrhh:rrhh_prestamo_auth_jefe' prestamo.pk %}">
-              {% csrf_token %}
-              <button class="btn btn-primary btn-sm" type="submit">Autorizar</button>
-              <a class="btn btn-secondary btn-sm" href="{% url 'rrhh:rrhh_prestamo_imprimir' prestamo.pk %}">Imprimir</a>
-            </form>
-          </div>
-        {% empty %}
-          <div class="muted">Sin préstamos pendientes de tu autorización.</div>
+          <article class="loan-row-item">
+            <div>
+              <a href="{% url 'rrhh:rrhh_prestamo_detalle' prestamo.pk %}"><strong>{{ prestamo.folio }}</strong></a>
+              <span>{{ prestamo.empleado.nombre }}</span>
+            </div>
+            <div>${{ prestamo.importe }}</div>
+            <div>{% if prestamo.jefe_directo %}Jefe: {{ prestamo.jefe_directo.get_full_name|default:prestamo.jefe_directo.username }}{% endif %}</div>
+            <div class="loan-row-badges"><span class="loan-badge">Por autorizar</span><span class="loan-badge gold">{{ prestamo.get_estado_display }}</span></div>
+              <form class="loan-card-actions" method="post" action="{% url 'rrhh:rrhh_prestamo_auth_jefe' prestamo.pk %}">
+                {% csrf_token %}
+                <button class="btn btn-primary btn-sm" type="submit">Autorizar</button>
+                <a class="btn btn-secondary btn-sm" href="{% url 'rrhh:rrhh_prestamo_imprimir' prestamo.pk %}">Imprimir</a>
+              </form>
+          </article>
         {% endfor %}
-      </div>
-    </section>
-
-    <section class="loan-col">
-      <h2>Pendientes autorización</h2>
-      <div class="loan-list">
         {% for prestamo in pendientes %}
-          <a class="loan-card" href="{% url 'rrhh:rrhh_prestamo_detalle' prestamo.pk %}">
-            <strong>{{ prestamo.folio }}</strong>
-            <div>{{ prestamo.empleado.nombre }}</div>
-            <div class="muted">${{ prestamo.importe }} · {{ prestamo.get_estado_display }}</div>
-            {% if prestamo.jefe_directo %}<div class="muted">Jefe: {{ prestamo.jefe_directo.get_full_name|default:prestamo.jefe_directo.username }}</div>{% endif %}
-          </a>
-        {% empty %}
-          <div class="muted">Sin préstamos pendientes.</div>
+          <article class="loan-row-item">
+            <div>
+              <a href="{% url 'rrhh:rrhh_prestamo_detalle' prestamo.pk %}"><strong>{{ prestamo.folio }}</strong></a>
+              <span>{{ prestamo.empleado.nombre }}</span>
+            </div>
+            <div>${{ prestamo.importe }}</div>
+            <div>{% if prestamo.jefe_directo %}Jefe: {{ prestamo.jefe_directo.get_full_name|default:prestamo.jefe_directo.username }}{% else %}Sin asignar{% endif %}</div>
+            <div class="loan-row-badges"><span class="loan-badge">Pendiente</span><span class="loan-badge gold">{{ prestamo.get_estado_display }}</span></div>
+          </article>
         {% endfor %}
-      </div>
-    </section>
-
-    <section class="loan-col">
-      <h2>Activos</h2>
-      <div class="loan-list">
         {% for prestamo in activos %}
-          <a class="loan-card" href="{% url 'rrhh:rrhh_prestamo_detalle' prestamo.pk %}">
-            <strong>{{ prestamo.folio }}</strong>
-            <div>{{ prestamo.empleado.nombre }}</div>
-            <div class="muted">Saldo ${{ prestamo.saldo_actual }} · Q{{ prestamo.num_quincenas }}</div>
-          </a>
-        {% empty %}
-          <div class="muted">Sin préstamos activos.</div>
+          <article class="loan-row-item">
+            <div>
+              <a href="{% url 'rrhh:rrhh_prestamo_detalle' prestamo.pk %}"><strong>{{ prestamo.folio }}</strong></a>
+              <span>{{ prestamo.empleado.nombre }}</span>
+            </div>
+            <div>Saldo ${{ prestamo.saldo_actual }}</div>
+            <div>Q{{ prestamo.num_quincenas }}</div>
+            <div class="loan-row-badges"><span class="loan-badge">Activo</span></div>
+          </article>
         {% endfor %}
-      </div>
-    </section>
-
-    <section class="loan-col">
-      <h2>Liquidados</h2>
-      <div class="loan-list">
         {% for prestamo in liquidados %}
-          <a class="loan-card" href="{% url 'rrhh:rrhh_prestamo_detalle' prestamo.pk %}">
-            <strong>{{ prestamo.folio }}</strong>
-            <div>{{ prestamo.empleado.nombre }}</div>
-            <div class="muted">${{ prestamo.importe }} liquidado</div>
-          </a>
-        {% empty %}
-          <div class="muted">Sin préstamos liquidados.</div>
+          <article class="loan-row-item">
+            <div>
+              <a href="{% url 'rrhh:rrhh_prestamo_detalle' prestamo.pk %}"><strong>{{ prestamo.folio }}</strong></a>
+              <span>{{ prestamo.empleado.nombre }}</span>
+            </div>
+            <div>${{ prestamo.importe }} liquidado</div>
+            <div></div>
+            <div class="loan-row-badges"><span class="loan-badge gold">Liquidado</span></div>
+          </article>
         {% endfor %}
-      </div>
-    </section>
+    </div>
   </div>
 </section>
 {% endblock %}

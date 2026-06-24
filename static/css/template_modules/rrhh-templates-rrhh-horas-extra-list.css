@@ -1,10 +1,31 @@
 /* Extracted from rrhh/templates/rrhh/horas_extra_list.html */
-.ch-kanban { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; align-items: start; }
-  .ch-column { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; min-height: 220px; padding: 12px; }
-  .ch-column h2 { color: var(--vino); font-size: 16px; margin: 0 0 12px; }
-  .ch-item { border: 1px solid var(--rosa); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
-  .ch-main { color: var(--texto); font-weight: 800; }
-  .ch-meta { color: var(--texto-light); font-size: 13px; margin-top: 4px; }
-  .ch-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-  @media (max-width: 1100px) { .ch-kanban { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @media (max-width: 700px) { .ch-kanban { grid-template-columns: 1fr; } }
+.ch-table-panels { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; overflow: hidden; }
+  .ch-status-strip { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); padding: 14px; }
+  .ch-status-card { background: #fbf6f8; border: 1px solid var(--rosa); border-radius: 8px; color: var(--vino); min-height: 66px; padding: 12px; }
+  .ch-status-card.active { background: var(--vino); color: #fff; }
+  .ch-status-card strong { display: block; font-size: 17px; line-height: 1.1; }
+  .ch-status-card span { color: var(--texto-light); display: block; font-size: 12px; font-weight: 900; margin-top: 5px; text-transform: uppercase; }
+  .ch-status-card.active span { color: rgba(255,255,255,.86); }
+  .ch-row-table { border-top: 1px solid var(--rosa); display: grid; }
+  .ch-row-item {
+    align-items: center;
+    border-bottom: 1px solid var(--rosa);
+    display: grid;
+    gap: 14px;
+    grid-template-columns: minmax(280px, 1.4fr) minmax(130px, .6fr) minmax(280px, 1.1fr) minmax(200px, auto) auto;
+    min-height: 78px;
+    padding: 12px 14px;
+  }
+  .ch-row-item:last-child { border-bottom: 0; }
+  .ch-row-item strong { color: var(--texto); display: block; font-size: 15px; }
+  .ch-row-item div, .ch-row-item p { color: var(--texto-light); font-size: 13px; }
+  .ch-row-item p { margin: 8px 0 0; }
+  .ch-row-badges { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+  .ch-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }
+  .ch-badge.gold { background: rgba(201, 168, 76, .18); color: #6f5415; }
+  .ch-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+  @media (max-width: 760px) {
+    .ch-status-strip { grid-template-columns: 1fr; }
+    .ch-row-item { grid-template-columns: 1fr; }
+    .ch-row-badges { justify-content: flex-start; }
+  }
