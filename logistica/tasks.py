@@ -13,6 +13,7 @@ from core.email_rendering import render_email_to_string
 
 from .models import (
     BitacoraSalidaLlegada,
+    CargaCombustibleUnidad,
     ConfigAlertaFlota,
     DocumentoUnidad,
     EventoRuta,
@@ -22,6 +23,7 @@ from .models import (
     ServicioRealizadoUnidad,
     Unidad,
 )
+from .services_combustible_auditoria import auditar_carga_combustible
 from .services_rutas_control import detectar_gps_perdido
 
 
@@ -56,6 +58,14 @@ def _emails_de_usuarios(usuarios) -> list[str]:
 
 def _from_email() -> str:
     return getattr(settings, "DEFAULT_FROM_EMAIL", "") or getattr(settings, "EMAIL_HOST_USER", "")
+
+
+@shared_task
+def auditar_ticket_combustible(carga_id):
+    try:
+        return auditar_carga_combustible(carga_id)
+    except CargaCombustibleUnidad.DoesNotExist:
+        return {"estado": "no_encontrado", "carga_id": carga_id}
 
 
 @shared_task

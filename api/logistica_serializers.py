@@ -988,6 +988,11 @@ class LogisticaCargaCombustibleSerializer(serializers.ModelSerializer):
             "fecha_registro",
             "latitud",
             "longitud",
+            "auditoria_estado",
+            "auditoria_score",
+            "auditoria_motivos",
+            "auditoria_detalle",
+            "auditoria_analizada_en",
         ]
         read_only_fields = [
             "id",
@@ -998,6 +1003,11 @@ class LogisticaCargaCombustibleSerializer(serializers.ModelSerializer):
             "repartidor",
             "repartidor_nombre",
             "fecha_registro",
+            "auditoria_estado",
+            "auditoria_score",
+            "auditoria_motivos",
+            "auditoria_detalle",
+            "auditoria_analizada_en",
         ]
 
     def get_repartidor_nombre(self, obj):

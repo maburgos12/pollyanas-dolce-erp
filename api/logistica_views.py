@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from decimal import Decimal
 
@@ -42,6 +43,8 @@ from logistica.models import (
     Unidad,
 )
 from logistica.services_google_routes import recalcular_ruta_programada
+from logistica.services_combustible_auditoria import auditar_carga_combustible
+from logistica.tasks import auditar_ticket_combustible
 from logistica.services_carga_ruta import (
     checklist_bloquea_salida,
     obtener_checklist_carga_detallado,
@@ -89,6 +92,8 @@ from .logistica_serializers import (
     UbicacionRutaCreateSerializer,
     UbicacionRutaSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 LOGISTICA_ROLE_REPARTIDOR = "repartidor"
@@ -201,6 +206,16 @@ def _liberar_ruta_desde_bitacora_salida(*, ruta: RutaEntrega | None, bitacora: B
             descripcion="Ruta liberada por salida registrada desde PWA.",
             creado_por=user,
         )
+
+
+def _auditar_ticket_combustible_sin_bloquear(carga_id: int) -> None:
+    try:
+        auditar_ticket_combustible.delay(carga_id)
+    except Exception:
+        try:
+            auditar_carga_combustible(carga_id)
+        except Exception as exc:
+            logger.warning("No se pudo auditar ticket de combustible %s: %s", carga_id, exc)
 
 
 def _serializer_error_message(errors) -> str:
@@ -819,6 +834,7 @@ class LogisticaCargaCombustibleView(_LogisticaBaseView):
                 "importe_total": str(carga.importe_total),
             },
         )
+        transaction.on_commit(lambda: _auditar_ticket_combustible_sin_bloquear(carga.id))
         return Response(LogisticaCargaCombustibleSerializer(carga).data, status=status.HTTP_201_CREATED)
 
 

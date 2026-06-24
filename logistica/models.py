@@ -949,6 +949,19 @@ class BitacoraSalidaLlegada(models.Model):
 
 
 class CargaCombustibleUnidad(models.Model):
+    AUDITORIA_PENDIENTE = "pendiente"
+    AUDITORIA_OK = "ok"
+    AUDITORIA_REVISION = "revision"
+    AUDITORIA_ALTO_RIESGO = "alto_riesgo"
+    AUDITORIA_ERROR = "error"
+    AUDITORIA_CHOICES = [
+        (AUDITORIA_PENDIENTE, "Pendiente"),
+        (AUDITORIA_OK, "OK"),
+        (AUDITORIA_REVISION, "Revisar"),
+        (AUDITORIA_ALTO_RIESGO, "Alto riesgo"),
+        (AUDITORIA_ERROR, "Error IA"),
+    ]
+
     bitacora = models.ForeignKey(
         BitacoraSalidaLlegada,
         on_delete=models.PROTECT,
@@ -964,6 +977,12 @@ class CargaCombustibleUnidad(models.Model):
     ip_registro = models.GenericIPAddressField(null=True)
     latitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     longitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    ticket_sha256 = models.CharField(max_length=64, blank=True, db_index=True)
+    auditoria_estado = models.CharField(max_length=20, choices=AUDITORIA_CHOICES, default=AUDITORIA_PENDIENTE)
+    auditoria_score = models.PositiveSmallIntegerField(default=0)
+    auditoria_motivos = models.JSONField(default=list, blank=True)
+    auditoria_detalle = models.JSONField(default=dict, blank=True)
+    auditoria_analizada_en = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-fecha_registro"]

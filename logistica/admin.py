@@ -405,10 +405,10 @@ class BitacoraSalidaLlegadaAdmin(admin.ModelAdmin):
 
 @admin.register(CargaCombustibleUnidad)
 class CargaCombustibleUnidadAdmin(admin.ModelAdmin):
-    list_display = ("fecha_registro", "unidad", "repartidor", "bitacora", "litros", "importe_total", "nivel_gas_despues")
-    list_filter = ("fecha_registro", "unidad", "repartidor")
+    list_display = ("fecha_registro", "unidad", "repartidor", "bitacora", "litros", "importe_total", "auditoria_estado", "auditoria_score")
+    list_filter = ("auditoria_estado", "fecha_registro", "unidad", "repartidor")
     search_fields = ("bitacora__folio", "unidad__codigo", "repartidor__user__username", "repartidor__user__first_name")
-    readonly_fields = ("fecha_registro", "ip_registro")
+    readonly_fields = ("fecha_registro", "ip_registro", "ticket_sha256", "auditoria_score", "auditoria_motivos", "auditoria_detalle", "auditoria_analizada_en")
     autocomplete_fields = ("bitacora", "unidad", "repartidor")
 
 
