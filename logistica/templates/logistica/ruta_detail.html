@@ -13,12 +13,29 @@
   .ops-summary-card { border:1px solid var(--rosa-deep); border-radius:14px; background:#fff; padding:14px 16px; }
   .ops-summary-card strong { display:block; font-size:28px; color:var(--vino); line-height:1; margin-bottom:8px; }
   .ops-shell .module-tabs { display:flex; flex-wrap:wrap; gap:8px; overflow-x:auto; }
-  .route-plan-grid { display:grid; gap:12px; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); }
+  .route-plan-grid { display:grid; gap:12px; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); width:100%; }
   .route-plan-field { display:grid; gap:6px; min-width:0; }
   .route-plan-field label { font-weight:800; color:var(--vino); }
+  .route-planning-form,
+  .route-delivery-form,
+  .route-stop-form,
+  .route-status-form { display:block !important; }
+  .route-planning-form .route-plan-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; align-items:end; }
+  .route-delivery-form .route-plan-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; align-items:end; }
+  .route-stop-form .route-plan-grid { grid-template-columns: minmax(86px, .45fr) minmax(260px, 1.35fr) minmax(190px, 1fr) minmax(180px, 1fr) !important; align-items:end; }
+  .route-plan-field :is(input, select, textarea, .input-field, .pd-searchable-select, .pd-searchable-select__input) { width:100% !important; max-width:100% !important; min-width:0 !important; }
   .route-action-row { display:flex; flex-wrap:wrap; gap:10px 12px; align-items:center; }
   .route-action-row form { margin:0; }
   .route-plan-actions { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:12px; }
+  .route-form-actions { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:16px; padding-top:2px; }
+  .route-planning-form > .btn,
+  .route-status-form > .btn,
+  .route-form-actions .btn,
+  .route-plan-actions .btn { width:auto !important; }
+  .route-planning-form > .btn { margin-top:14px; }
+  .route-status-form { margin-top:12px; }
+  .route-status-form-inner { display:flex; flex-wrap:wrap; gap:10px 12px; align-items:end; }
+  .route-status-form-inner .route-plan-field { min-width:180px; max-width:240px; }
   .route-status-note { padding:10px 12px; border-radius:8px; background:#fff7e6; border:1px solid #ffd58a; color:#5d3b00; font-weight:700; }
   .point-reception-head { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-start; justify-content:space-between; margin-bottom:12px; }
   .point-reception-copy { max-width:680px; }
@@ -74,8 +91,16 @@
     .route-loading-bar span { width:100%; opacity:.7; }
   }
   @media (max-width: 960px) { .ops-grid-2, .ops-summary { grid-template-columns: 1fr; } }
+  @media (max-width: 1180px) {
+    .route-planning-form .route-plan-grid,
+    .route-delivery-form .route-plan-grid,
+    .route-stop-form .route-plan-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  }
   @media (max-width: 760px) {
-    .route-plan-grid { grid-template-columns:minmax(0, 1fr); }
+    .route-planning-form .route-plan-grid,
+    .route-delivery-form .route-plan-grid,
+    .route-stop-form .route-plan-grid,
+    .route-plan-grid { grid-template-columns:minmax(0, 1fr) !important; }
     .route-plan-field,
     .route-plan-field :is(input, select, textarea, .input-field, .pd-searchable-select, .pd-searchable-select__input),
     .ops-shell .card :is(form, .filters, .route-action-row, .route-plan-actions),
@@ -84,6 +109,9 @@
       min-width:0;
       width:100%;
     }
+    .route-status-form-inner { display:grid; grid-template-columns:minmax(0, 1fr); }
+    .route-status-form-inner .route-plan-field { max-width:100%; }
+    .route-form-actions { display:grid; grid-template-columns:minmax(0, 1fr); }
   }
 </style>
 <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260621-button-gap-v1">
@@ -146,7 +174,7 @@
     <article class="card">
       <div class="card-header">Planeación operativa</div>
       {% if can_manage_logistica and ruta.estatus == "PLANEADA" %}
-      <form method="post" class="filters" style="margin-bottom:0;">
+      <form method="post" class="filters route-planning-form" style="margin-bottom:0;">
         {% csrf_token %}
         <input type="hidden" name="action" value="update_plan">
         <div class="route-plan-grid">
@@ -214,18 +242,20 @@
       <div class="muted">Tu rol es de consulta. No puedes editar la ruta.</div>
       {% endif %}
       {% if can_manage_logistica and ruta.estatus != "COMPLETADA" and ruta.estatus != "CANCELADA" %}
-      <form method="post" class="filters" style="margin-top:12px; margin-bottom:0;" onsubmit="return confirmRouteStatusChange(this);">
+      <form method="post" class="filters route-status-form" style="margin-bottom:0;" onsubmit="return confirmRouteStatusChange(this);">
         {% csrf_token %}
         <input type="hidden" name="action" value="ruta_status">
-        <div class="route-plan-field">
-          <label for="id_estatus_ruta">Estatus de ruta</label>
-          <select class="input-field" id="id_estatus_ruta" name="estatus">
-            {% for value,label in estatus_ruta_choices %}
-            <option value="{{ value }}" {% if ruta.estatus == value %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-          </select>
+        <div class="route-status-form-inner">
+          <div class="route-plan-field">
+            <label for="id_estatus_ruta">Estatus de ruta</label>
+            <select class="input-field" id="id_estatus_ruta" name="estatus">
+              {% for value,label in estatus_ruta_choices %}
+              <option value="{{ value }}" {% if ruta.estatus == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <button class="btn btn-primary" type="submit">Actualizar estatus</button>
         </div>
-        <button class="btn btn-primary" type="submit">Actualizar estatus</button>
       </form>
       {% if not ruta.repartidor_id or not ruta.unidad_operativa_id or not paradas %}
       <div class="route-status-note" style="margin-top:12px;">Para liberar seguimiento: asigna repartidor, unidad operativa y al menos una parada.</div>
@@ -253,7 +283,7 @@
     <article class="card">
       <div class="card-header">Agregar parada</div>
       {% if can_manage_logistica and ruta.estatus in "PLANEADA EN_RUTA" %}
-      <form method="post" class="filters" style="margin-bottom:0;">
+      <form method="post" class="filters route-stop-form" style="margin-bottom:0;">
         {% csrf_token %}
         <input type="hidden" name="action" value="add_parada">
         {% if ruta.estatus == "EN_RUTA" %}
@@ -527,7 +557,7 @@
   <section class="card">
     <div class="card-header">Agregar entrega</div>
     {% if can_manage_logistica and ruta.estatus == "PLANEADA" %}
-    <form method="post" class="filters" style="margin-bottom:0;">
+    <form method="post" class="filters route-delivery-form" style="margin-bottom:0;">
       {% csrf_token %}
       <input type="hidden" name="action" value="add_entrega">
       <div class="route-plan-grid">
@@ -585,7 +615,9 @@
           <input class="input-field" id="id_comentario_entrega" type="text" name="comentario">
         </div>
       </div>
-      <button class="btn btn-primary" type="submit">Guardar entrega</button>
+      <div class="route-form-actions">
+        <button class="btn btn-primary" type="submit">Guardar entrega</button>
+      </div>
     </form>
     {% else %}
     <div class="muted">{% if can_manage_logistica %}Las entregas están congeladas para conservar evidencia de la ruta.{% else %}Tu rol es de consulta. No puedes editar entregas.{% endif %}</div>
