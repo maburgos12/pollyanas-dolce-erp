@@ -24,19 +24,45 @@ def _restar_meses(fecha: date, meses: int) -> date:
     return date(year, month, 1)
 
 
-def periodos_mensuales_a_descargar(meses_atras: int, *, hoy: date | None = None) -> list[tuple[date, date]]:
+def periodos_diarios_a_descargar(meses_atras: int, *, hoy: date | None = None) -> list[tuple[date, date]]:
     hoy = hoy or date.today()
     primer_dia_mes_actual = hoy.replace(day=1)
+    fecha_final = hoy - timedelta(days=1)
+    fecha = _restar_meses(primer_dia_mes_actual, max(0, meses_atras - 1))
+    if fecha > fecha_final:
+        fecha = fecha_final
     periodos: list[tuple[date, date]] = []
-    for offset in range(meses_atras, 0, -1):
-        inicio = _restar_meses(primer_dia_mes_actual, offset)
-        siguiente = _restar_meses(primer_dia_mes_actual, offset - 1)
-        periodos.append((inicio, siguiente - timedelta(days=1)))
+    while fecha <= fecha_final:
+        periodos.append((fecha, fecha))
+        fecha += timedelta(days=1)
     return periodos
 
 
 def _tipo_cfdi_desde_direccion(direccion: str) -> str:
     return CfdiDescargado.TIPO_EMITIDO if direccion == SolicitudDescarga.DIRECCION_EMITIDOS else CfdiDescargado.TIPO_RECIBIDO
+
+
+def _solicitud_periodo_registrada(fecha_inicial: date, fecha_final: date, direccion: str) -> bool:
+    rfc = (getattr(settings, "SAT_RFC", "") or "").strip().upper()
+    if not rfc:
+        return False
+    return (
+        SolicitudDescarga.objects.filter(
+            fecha_inicial=fecha_inicial,
+            fecha_final=fecha_final,
+            rfc_solicitante=rfc,
+            tipo_solicitud=SolicitudDescarga.TIPO_CFDI,
+            direccion=direccion,
+            estado__in=[
+                SolicitudDescarga.ESTADO_ACEPTADA,
+                SolicitudDescarga.ESTADO_EN_PROCESO,
+                SolicitudDescarga.ESTADO_TERMINADA,
+            ],
+        )
+        .exclude(id_solicitud="")
+        .exclude(id_solicitud__isnull=True)
+        .exists()
+    )
 
 
 def _alertar_error(mensaje: str) -> None:
@@ -118,10 +144,15 @@ def ejecutar_descarga_sat_nocturna(self):
         return {"status": "deshabilitada"}
 
     meses_atras = max(1, int(getattr(settings, "SAT_DESCARGA_MESES_ATRAS", 1)))
+    periodos = periodos_diarios_a_descargar(meses_atras)
     resultados: list[dict[str, int | str]] = []
+    omitidos = 0
     try:
-        for fecha_inicial, fecha_final in periodos_mensuales_a_descargar(meses_atras):
+        for fecha_inicial, fecha_final in periodos:
             for direccion in (SolicitudDescarga.DIRECCION_EMITIDOS, SolicitudDescarga.DIRECCION_RECIBIDOS):
+                if _solicitud_periodo_registrada(fecha_inicial, fecha_final, direccion):
+                    omitidos += 1
+                    continue
                 resultados.extend(_procesar_con_split(fecha_inicial, fecha_final, direccion))
     except SatConfigurationError as exc:
         mensaje = f"Descarga SAT no configurada: {exc}"
@@ -147,14 +178,15 @@ def ejecutar_descarga_sat_nocturna(self):
     duracion = int(time.monotonic() - inicio)
     LogDescargaSat.objects.create(
         nivel=LogDescargaSat.NIVEL_INFO,
-        mensaje=f"Descarga SAT nocturna finalizada: {nuevos}/{descargados} CFDIs nuevos",
+        mensaje=f"Descarga SAT nocturna finalizada: {nuevos}/{descargados} CFDIs nuevos, {omitidos} dias omitidos",
         cfdis_descargados=descargados,
         cfdis_nuevos=nuevos,
         duracion_segundos=duracion,
     )
     return {
         "status": "ok",
-        "periodos": len(periodos_mensuales_a_descargar(meses_atras)),
+        "periodos": len(periodos),
+        "omitidos": omitidos,
         "descargados": descargados,
         "nuevos": nuevos,
         "duracion_segundos": duracion,
