@@ -1606,6 +1606,45 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.json()["paradas"][0]["id"], self.parada.id)
         self.assertEqual(response.json()["paradas"][0]["punto_nombre_snapshot"], "Sucursal Control")
 
+    def test_pwa_finaliza_ruta_asignada_completa(self):
+        self.client.force_login(self.user)
+        self.parada.estado = ParadaRuta.ESTADO_VISITADA
+        self.parada.entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
+        self.parada.hora_llegada_real = timezone.now()
+        self.parada.entrega_confirmada_en = timezone.now()
+        self.parada.entrega_confirmada_por = self.user
+        self.parada.save(
+            update_fields=[
+                "estado",
+                "entrega_estado",
+                "hora_llegada_real",
+                "entrega_confirmada_en",
+                "entrega_confirmada_por",
+                "actualizado_en",
+            ]
+        )
+
+        response = self.client.post(reverse("api_logistica_ruta_finalizar_pwa", kwargs={"ruta_id": self.ruta.id}))
+
+        self.ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
+        self.assertIsNotNone(self.ruta.hora_cierre_real)
+        self.assertTrue(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_CIERRE).exists())
+
+    def test_pwa_finalizar_ruta_bloquea_entrega_pendiente(self):
+        self.client.force_login(self.user)
+        self.parada.estado = ParadaRuta.ESTADO_VISITADA
+        self.parada.hora_llegada_real = timezone.now()
+        self.parada.save(update_fields=["estado", "hora_llegada_real", "actualizado_en"])
+
+        response = self.client.post(reverse("api_logistica_ruta_finalizar_pwa", kwargs={"ruta_id": self.ruta.id}))
+
+        self.ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
+        self.assertIn("entrega confirmada", response.json()["detail"])
+
     def test_superadmin_puede_ver_pwa_como_repartidor(self):
         admin = User.objects.create_superuser(username="admin.preview", password="pass123")
         self.client.force_login(admin)
@@ -2030,7 +2069,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v53-liberar-desde-mi-ruta", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v54-finalizar-ruta", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -2052,6 +2091,8 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("Pendiente de entrega", pwa_html)
         self.assertIn("Recibido", pwa_html)
         self.assertIn("La ruta puede continuar; cierre final espera recepción Point.", pwa_html)
+        self.assertIn("Finalizar ruta del día", pwa_html)
+        self.assertIn("finalizarRutaDia", pwa_html)
         self.assertIn('draft.geoStatus === "idle" ? "" : geoOverlay(draft, "confirmarDesvioRuta")', pwa_html)
 
     def test_puntos_logisticos_crea_punto_manual(self):

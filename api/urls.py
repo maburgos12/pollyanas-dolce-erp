@@ -126,6 +126,7 @@ from .logistica_views import (
     LogisticaRutaCargaChecklistSyncView,
     LogisticaRutaCargaChecklistView,
     LogisticaRutaCargaLineaValidarView,
+    LogisticaRutaFinalizarPwaView,
     LogisticaRutaParadaEntregaView,
     LogisticaRutaParadaRecargaCedisView,
     LogisticaRutaRecepcionPointSyncView,
@@ -375,6 +376,7 @@ urlpatterns = [
         name="api_logistica_ruta_recepcion_point_sync",
     ),
     path("logistica/rutas/<int:ruta_id>/estatus/", LogisticaRutaStatusView.as_view(), name="api_logistica_ruta_estatus"),
+    path("logistica/rutas/<int:ruta_id>/finalizar-pwa/", LogisticaRutaFinalizarPwaView.as_view(), name="api_logistica_ruta_finalizar_pwa"),
     path("logistica/rutas/<int:ruta_id>/entregas/", LogisticaRutaEntregasView.as_view(), name="api_logistica_ruta_entregas"),
     path(
         "logistica/rutas/<int:ruta_id>/paradas/<int:parada_id>/entrega/",
