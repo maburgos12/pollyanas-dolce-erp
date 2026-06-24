@@ -184,7 +184,6 @@ class MermasOnlyMiddleware:
     """
 
     ALLOWED_PREFIXES = (
-        "/app/",
         "/merma/",
         "/mermas/",
         "/logout/",

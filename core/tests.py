@@ -502,11 +502,11 @@ class LoginViewAuthenticatedRedirectTests(TestCase):
         self.user = get_user_model().objects.create_user(username="johana.lopez", password="test12345")
         self.client.force_login(self.user)
 
-    def test_authenticated_user_gets_redirected_from_login_to_dashboard(self):
+    def test_authenticated_user_gets_redirected_from_login_to_user_default(self):
         response = self.client.get("/login/")
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], "/dashboard/")
+        self.assertEqual(response["Location"], "/seguimiento/")
         self.assertIn("no-cache", response["Cache-Control"])
 
     def test_authenticated_user_gets_redirected_from_login_to_safe_next(self):
@@ -528,6 +528,33 @@ class LoginViewAuthenticatedRedirectTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "/mermas/app/")
+
+    def test_mermas_capture_only_user_cannot_navigate_erp_shell(self):
+        UserModuleAccess.objects.create(user=self.user, module="mermas.captura", access=UserModuleAccess.ACCESS_MANAGE)
+
+        for path in ("/", "/dashboard/", "/seguimiento/", "/app/"):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response["Location"], "/mermas/app/")
+
+    def test_mermas_reception_only_user_cannot_navigate_erp_shell(self):
+        UserModuleAccess.objects.create(user=self.user, module="mermas.recepcion", access=UserModuleAccess.ACCESS_MANAGE)
+
+        for path in ("/", "/dashboard/", "/seguimiento/", "/app/"):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response["Location"], "/mermas/app/")
+
+    def test_mermas_capture_app_does_not_link_to_general_operacion_home(self):
+        UserModuleAccess.objects.create(user=self.user, module="mermas.captura", access=UserModuleAccess.ACCESS_MANAGE)
+
+        response = self.client.get("/mermas/app/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'href="/mermas/app/"')
+        self.assertNotContains(response, 'href="/app/"')
 
     def test_short_bonus_links_keep_login_next_simple(self):
         self.client.logout()
