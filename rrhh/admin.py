@@ -17,15 +17,18 @@ from .models import (
     NominaImportacion,
     NominaLinea,
     NominaPeriodo,
+    MovimientoVacaciones,
     PermisoSalida,
     PermisoSalidaCambio,
     PlantillaAutorizada,
+    PoliticaVacaciones,
     PrenominaCorte,
     PrenominaEmpleadoResumen,
     PrenominaEquivalenciaCONTPAQi,
     PrenominaMovimiento,
     Prestamo,
     PrestamoCuota,
+    SolicitudVacaciones,
     SuspensionEmpleado,
     Turno,
     VacanteCobertura,
@@ -368,6 +371,50 @@ class PermisoSalidaCambioAdmin(admin.ModelAdmin):
 
     def has_change_permission(self, request, obj=None):
         return False
+
+
+@admin.register(PoliticaVacaciones)
+class PoliticaVacacionesAdmin(admin.ModelAdmin):
+    list_display = (
+        "nombre",
+        "antiguedad_desde",
+        "antiguedad_hasta",
+        "dias_laborables",
+        "prima_porcentaje",
+        "vigente_desde",
+        "vigente_hasta",
+        "activo",
+    )
+    list_filter = ("activo", "vigente_desde", "vigente_hasta")
+    search_fields = ("nombre", "notas")
+
+
+@admin.register(SolicitudVacaciones)
+class SolicitudVacacionesAdmin(admin.ModelAdmin):
+    list_display = (
+        "folio",
+        "empleado",
+        "fecha_inicio",
+        "fecha_fin",
+        "dias_laborables",
+        "estado",
+        "jefe_directo",
+        "preautorizado_por",
+        "aprobado_rrhh_por",
+    )
+    list_filter = ("estado", "fecha_inicio", "fecha_fin", "jefe_directo")
+    search_fields = ("folio", "empleado__nombre", "empleado__codigo", "motivo", "notas_rrhh")
+    readonly_fields = ("folio", "creado_en", "actualizado_en")
+    autocomplete_fields = ("empleado", "jefe_directo", "preautorizado_por", "aprobado_rrhh_por", "creado_por")
+
+
+@admin.register(MovimientoVacaciones)
+class MovimientoVacacionesAdmin(admin.ModelAdmin):
+    list_display = ("empleado", "tipo", "dias", "periodo_anio", "solicitud", "actor", "creado_en")
+    list_filter = ("tipo", "periodo_anio", "creado_en")
+    search_fields = ("empleado__nombre", "empleado__codigo", "solicitud__folio", "descripcion")
+    readonly_fields = ("creado_en",)
+    autocomplete_fields = ("empleado", "solicitud", "actor")
 
 
 @admin.register(SuspensionEmpleado)
