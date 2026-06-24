@@ -4,7 +4,7 @@
 {% block page_title %}RRHH · Permisos{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-permisos-list.css?v=20260623-status-rows-v3">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-permisos-list.css?v=20260623-status-filter-v7">
 {% endblock %}
 
 {% block content %}
@@ -33,17 +33,31 @@
   </div>
 
   <section class="permisos-worktable" aria-label="Permisos por estado">
-    <div class="permisos-status-strip">
+    <div class="permisos-status-strip" role="tablist" aria-label="Filtrar permisos por estado">
       {% for key, label, items in columnas %}
-        <div class="permisos-status-card {% if forloop.first %}active{% endif %}">
+        <button
+          type="button"
+          class="permisos-status-card {% if forloop.first %}active{% endif %}"
+          data-permisos-filter="{{ key }}"
+          aria-controls="permisos-panel-{{ key }}"
+          aria-selected="{% if forloop.first %}true{% else %}false{% endif %}"
+          role="tab"
+        >
           <strong>{{ label }}</strong>
           <span>{{ items|length }} registros</span>
-        </div>
+        </button>
       {% endfor %}
     </div>
 
     <div class="permisos-row-table">
       {% for key, label, items in columnas %}
+        <div
+          class="permisos-state-panel {% if forloop.first %}active{% endif %}"
+          id="permisos-panel-{{ key }}"
+          data-permisos-panel="{{ key }}"
+          role="tabpanel"
+          {% if not forloop.first %}hidden{% endif %}
+        >
         {% for permiso in items %}
           <article class="permiso-row-item">
             <div>
@@ -79,19 +93,19 @@
               </form>
             {% endif %}
           </article>
+        {% empty %}
+          <article class="permiso-row-item permiso-row-empty">
+            <div>
+              <strong>Sin registros en {{ label }}.</strong>
+              <span>Cuando existan solicitudes de esta sección aparecerán aquí.</span>
+            </div>
+            <div>-</div>
+            <div>-</div>
+            <div class="permiso-row-badges"><span class="permiso-badge">{{ label }}</span></div>
+          </article>
         {% endfor %}
+        </div>
       {% endfor %}
-      {% if not permisos %}
-        <article class="permiso-row-item">
-          <div>
-            <strong>Sin permisos registrados.</strong>
-            <span>Cuando existan solicitudes aparecerán aquí en filas horizontales.</span>
-          </div>
-          <div>-</div>
-          <div>-</div>
-          <div class="permiso-row-badges"><span class="permiso-badge">Sin registros</span></div>
-        </article>
-      {% endif %}
     </div>
   </section>
 
@@ -144,4 +158,32 @@
     </div>
   </section>
 </section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (function () {
+    const buttons = Array.from(document.querySelectorAll("[data-permisos-filter]"));
+    const panels = Array.from(document.querySelectorAll("[data-permisos-panel]"));
+    if (!buttons.length || !panels.length) return;
+
+    function selectPanel(key) {
+      buttons.forEach((button) => {
+        const isActive = button.dataset.permisosFilter === key;
+        button.classList.toggle("active", isActive);
+        button.setAttribute("aria-selected", isActive ? "true" : "false");
+      });
+
+      panels.forEach((panel) => {
+        const isActive = panel.dataset.permisosPanel === key;
+        panel.classList.toggle("active", isActive);
+        panel.hidden = !isActive;
+      });
+    }
+
+    buttons.forEach((button) => {
+      button.addEventListener("click", () => selectPanel(button.dataset.permisosFilter));
+    });
+  })();
+</script>
 {% endblock %}
