@@ -1360,9 +1360,12 @@
       const PHOTO_CAPTURE_SESSION_MS = 10 * 60 * 1000;
       const TRACKING_QUEUE_KEY = "pd_logistica_tracking_queue";
       const TRACKING_QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
+      const OFFLINE_MUTATION_QUEUE_KEY = "pd_logistica_offline_mutations";
+      const OFFLINE_MUTATION_QUEUE_TTL_MS = 72 * 60 * 60 * 1000;
+      const OFFLINE_MUTATION_QUEUE_MAX = 80;
       const ACCESS_TOKEN_KEY = "pd_logistica_access";
       const REFRESH_TOKEN_KEY = "pd_logistica_refresh";
-      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v54
+      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v55
       const PREVIEW_REPARTIDOR_PARAM = "preview_repartidor";
       const app = document.getElementById("app");
       const initialParams = new URLSearchParams(window.location.search);
@@ -1388,6 +1391,8 @@
         rutaCargaDraft: {},
         entregaNotasDraft: {},
         trackingQueueCount: 0,
+        offlineMutationQueueCount: 0,
+        offlineMutationFailedCount: 0,
         routeAutoTrackingTimer: null,
         routeAutoTrackingRutaId: null,
         routeAutoTrackingBusy: false,
@@ -1829,6 +1834,219 @@
         return `<span class="app-glyph" aria-hidden="true">${icons[name] || icons.reporte}</span>`;
       }
 
+      function isMutationMethod(method) {
+        return ["POST", "PUT", "PATCH", "DELETE"].includes(String(method || "GET").toUpperCase());
+      }
+
+      function offlineMutationLabel(path, method = "POST") {
+        if (path.includes("/entrega/")) return "Entrega de parada";
+        if (path.includes("/carga-checklist/")) return "Revisión de carga";
+        if (path.includes("/recarga-cedis/")) return "Recarga CEDIS";
+        if (path.includes("/reportes/")) return "Reporte de unidad";
+        if (path.includes("/lavados/")) return "Lavado de unidad";
+        if (path.includes("/inspeccion-diaria/")) return "Inspección diaria";
+        if (path.includes("/inspeccion/")) return "Inspección de unidad";
+        if (path.includes("/combustible/")) return "Carga de combustible";
+        if (path.includes("/bitacora-salida/")) return "Bitácora de turno";
+        if (path.includes("/bitacora/")) return "Bitácora";
+        return `${String(method || "POST").toUpperCase()} ${path}`;
+      }
+
+      function responseQueuedOffline(response) {
+        return response?.headers?.get("X-Offline-Queued") === "1";
+      }
+
+      function queuedSuccessMessage(label = "Captura") {
+        return `✅ ${label} guardada sin conexión. Se enviará automáticamente cuando vuelva la señal.`;
+      }
+
+      function mutationQueueStorageKey() {
+        const username = state.perfil?.username || "anonimo";
+        return `${OFFLINE_MUTATION_QUEUE_KEY}:${username}`;
+      }
+
+      function normalizeOfflineMutations(rows) {
+        const now = Date.now();
+        const currentUser = state.perfil?.username || "";
+        return (Array.isArray(rows) ? rows : [])
+          .filter((row) => {
+            const queuedAt = Date.parse(row.queued_at || "");
+            if (!Number.isFinite(queuedAt) || now - queuedAt > OFFLINE_MUTATION_QUEUE_TTL_MS) return false;
+            if (currentUser && row.username && row.username !== currentUser) return false;
+            return Boolean(row.path && row.method && row.body);
+          })
+          .slice(-OFFLINE_MUTATION_QUEUE_MAX);
+      }
+
+      function loadOfflineMutationQueue() {
+        try {
+          const rows = JSON.parse(localStorage.getItem(mutationQueueStorageKey()) || "[]");
+          const normalized = normalizeOfflineMutations(rows);
+          state.offlineMutationQueueCount = normalized.length;
+          return normalized;
+        } catch (error) {
+          state.offlineMutationQueueCount = 0;
+          return [];
+        }
+      }
+
+      function saveOfflineMutationQueue(rows) {
+        const normalized = normalizeOfflineMutations(rows);
+        localStorage.setItem(mutationQueueStorageKey(), JSON.stringify(normalized));
+        state.offlineMutationQueueCount = normalized.length;
+        return normalized;
+      }
+
+      function purgeOfflineMutationQueue() {
+        saveOfflineMutationQueue(loadOfflineMutationQueue());
+      }
+
+      function cleanReplayHeaders(headers = {}) {
+        const cleaned = {};
+        Object.entries(headers || {}).forEach(([key, value]) => {
+          const normalized = String(key).toLowerCase();
+          if (["authorization", "content-length"].includes(normalized)) return;
+          cleaned[key] = value;
+        });
+        return cleaned;
+      }
+
+      function readFileAsDataUrl(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ""));
+          reader.onerror = () => reject(reader.error || new Error("No se pudo leer el archivo."));
+          reader.readAsDataURL(file);
+        });
+      }
+
+      async function serializeOfflineBody(body) {
+        if (!body) return { kind: "empty", entries: [] };
+        if (typeof body === "string") return { kind: "text", value: body };
+        if (body instanceof URLSearchParams) return { kind: "urlencoded", value: body.toString() };
+        if (body instanceof FormData) {
+          const entries = [];
+          for (const [name, value] of body.entries()) {
+            if (value instanceof File) {
+              entries.push({
+                name,
+                type: "file",
+                filename: value.name || "archivo",
+                mime: value.type || "application/octet-stream",
+                lastModified: value.lastModified || Date.now(),
+                dataUrl: await readFileAsDataUrl(value)
+              });
+            } else {
+              entries.push({ name, type: "text", value: String(value ?? "") });
+            }
+          }
+          return { kind: "formData", entries };
+        }
+        throw new Error("Esta captura no se puede guardar sin conexión.");
+      }
+
+      function fileFromDataUrl(dataUrl, filename, mime, lastModified) {
+        const [header, data] = String(dataUrl || "").split(",");
+        const contentType = mime || (/data:(.*?);base64/.exec(header || "") || [])[1] || "application/octet-stream";
+        const binary = atob(data || "");
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+        return new File([bytes], filename || "archivo", { type: contentType, lastModified: lastModified || Date.now() });
+      }
+
+      function deserializeOfflineBody(body) {
+        if (!body || body.kind === "empty") return undefined;
+        if (body.kind === "text") return body.value || "";
+        if (body.kind === "urlencoded") return new URLSearchParams(body.value || "");
+        if (body.kind === "formData") {
+          const form = new FormData();
+          (body.entries || []).forEach((entry) => {
+            if (entry.type === "file") {
+              form.append(entry.name, fileFromDataUrl(entry.dataUrl, entry.filename, entry.mime, entry.lastModified));
+            } else {
+              form.append(entry.name, entry.value || "");
+            }
+          });
+          return form;
+        }
+        return undefined;
+      }
+
+      async function enqueueOfflineMutation(path, options = {}) {
+        const method = String(options.method || "GET").toUpperCase();
+        if (!isMutationMethod(method) || options.skipOfflineQueue || options._retry) return null;
+        const item = {
+          id: newClientEventId(),
+          path,
+          method,
+          headers: cleanReplayHeaders(options.headers || {}),
+          body: await serializeOfflineBody(options.body),
+          label: offlineMutationLabel(path, method),
+          username: state.perfil?.username || "",
+          queued_at: new Date().toISOString(),
+          attempts: 0
+        };
+        const rows = loadOfflineMutationQueue();
+        rows.push(item);
+        saveOfflineMutationQueue(rows);
+        return item;
+      }
+
+      function offlineQueuedResponse(item) {
+        return new Response(
+          JSON.stringify({
+            queued_offline: true,
+            detail: queuedSuccessMessage(item?.label || "Captura"),
+            offline_queue_id: item?.id || ""
+          }),
+          {
+            status: 202,
+            headers: {
+              "Content-Type": "application/json",
+              "X-Offline-Queued": "1"
+            }
+          }
+        );
+      }
+
+      async function flushOfflineMutationQueue() {
+        if (!state.token || !navigator.onLine) return loadOfflineMutationQueue().length;
+        const pending = loadOfflineMutationQueue();
+        if (!pending.length) return 0;
+        const remaining = [];
+        let failed = 0;
+        for (const item of pending) {
+          try {
+            const headers = cleanReplayHeaders(item.headers || {});
+            const response = await apiFetch(item.path, {
+              method: item.method,
+              headers,
+              body: deserializeOfflineBody(item.body),
+              skipOfflineQueue: true
+            });
+            if (!response.ok) {
+              if ([400, 403, 404, 409].includes(response.status)) {
+                failed += 1;
+              } else {
+                remaining.push({ ...item, attempts: Number(item.attempts || 0) + 1 });
+              }
+            }
+          } catch (error) {
+            remaining.push({ ...item, attempts: Number(item.attempts || 0) + 1 });
+          }
+        }
+        state.offlineMutationFailedCount = failed;
+        saveOfflineMutationQueue(remaining);
+        return remaining.length;
+      }
+
+      async function flushAllOfflineQueues() {
+        await Promise.allSettled([flushRutaTrackingQueue(), flushOfflineMutationQueue()]);
+        if (state.pantallaActual === "ruta_activa") renderRutaActiva();
+        else if (state.pantallaActual === "ruta_carga") renderRutaCarga();
+        else if (state.perfil) renderCurrentScreen();
+      }
+
       async function apiFetch(path, options = {}) {
         const headers = { ...(options.headers || {}) };
         if (state.token) headers.Authorization = `Bearer ${state.token}`;
@@ -1838,7 +2056,14 @@
           finalPath = `${finalPath}${separator}${PREVIEW_REPARTIDOR_PARAM}=${encodeURIComponent(state.previewRepartidor)}`;
           headers["X-Logistica-Preview-Repartidor"] = state.previewRepartidor;
         }
-        const response = await fetch(`${API}${finalPath}`, { ...options, headers });
+        let response;
+        try {
+          response = await fetch(`${API}${finalPath}`, { ...options, headers });
+        } catch (error) {
+          const queued = await enqueueOfflineMutation(path, options);
+          if (queued) return offlineQueuedResponse(queued);
+          throw error;
+        }
         if (response.status === 401) {
           if (state.refreshToken && !options._retry) {
             const refreshed = await fetch(`${API}/auth/token/refresh/`, {
@@ -1922,7 +2147,8 @@
             const response = await apiFetch(`/rutas/${item.ruta_id}/tracking/`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(item.payload)
+              body: JSON.stringify(item.payload),
+              skipOfflineQueue: true
             });
             if (!response.ok) {
               if ([400, 403, 404, 409].includes(response.status)) {
@@ -1967,7 +2193,8 @@
           const response = await apiFetch(`/rutas/${rutaId}/tracking/`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            skipOfflineQueue: true
           });
           if (response.ok) {
             state.routeAutoTrackingLastSentAt = new Date().toISOString();
@@ -2035,6 +2262,10 @@
         localStorage.removeItem(ACCESS_TOKEN_KEY);
         localStorage.removeItem(REFRESH_TOKEN_KEY);
         localStorage.removeItem(TRACKING_QUEUE_KEY);
+        for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+          const key = localStorage.key(index);
+          if (key?.startsWith(`${OFFLINE_MUTATION_QUEUE_KEY}:`)) localStorage.removeItem(key);
+        }
         if (render) window.location.href = "/logout/";
       }
 
@@ -2056,6 +2287,7 @@
 
       function shell(content) {
         const nombre = escapeHtml(state.perfil?.primerNombre || state.perfil?.nombre || "");
+        const pendientesOffline = loadOfflineMutationQueue().length;
         return `
           <div class="topbar">
             <div>
@@ -2066,9 +2298,23 @@
             <button class="logout" onclick="logout()">Salir</button>
           </div>
           ${previewBanner()}
+          ${offlineMutationBanner(pendientesOffline)}
           ${content}
           ${operationalModalHtml()}
           <div class="footer">Pollyana's Dolce © 2026</div>
+        `;
+      }
+
+      function offlineMutationBanner(count = loadOfflineMutationQueue().length) {
+        if (!count && !state.offlineMutationFailedCount) return "";
+        const failed = state.offlineMutationFailedCount || 0;
+        return `
+          <section class="daily-banner ${failed ? "warning" : ""}" style="margin:0 0 16px;">
+            <strong>${count} captura${count === 1 ? "" : "s"} pendiente${count === 1 ? "" : "s"} por sincronizar.</strong>
+            ${count ? "La app la enviará automáticamente cuando vuelva la señal." : ""}
+            ${failed ? ` ${failed} captura${failed === 1 ? "" : "s"} requiere${failed === 1 ? "" : "n"} revisión porque el servidor la rechazó.` : ""}
+            ${count ? `<button class="secondary-btn" type="button" onclick="flushAllOfflineQueues()" style="margin-top:10px;">Reintentar ahora</button>` : ""}
+          </section>
         `;
       }
 
@@ -2180,6 +2426,8 @@
         state.previewRepartidor = raw?.preview?.repartidor_id ? String(raw.preview.repartidor_id) : state.previewRepartidor;
         state.perfil = normalizePerfil(raw);
         purgeRutaTrackingQueue();
+        purgeOfflineMutationQueue();
+        flushOfflineMutationQueue().catch(() => {});
       }
 
       async function loadReportes() {
@@ -2917,6 +3165,11 @@
             const error = await response.json().catch(() => ({}));
             return renderRutaScreen(apiErrorMessage(error, "No se pudo validar la carga."));
           }
+          if (responseQueuedOffline(response)) {
+            delete state.rutaCargaDraft[lineaId];
+            state.rutaActiva = null;
+            return renderRutaScreen(queuedSuccessMessage("Revisión de carga"));
+          }
           delete state.rutaCargaDraft[lineaId];
           state.rutaActiva = null;
           return renderRutaScreen("✅ Carga revisada.");
@@ -2955,6 +3208,11 @@
             const error = await response.json().catch(() => ({}));
             return renderRutaActiva(apiErrorMessage(error, "No se pudo confirmar la entrega."));
           }
+          if (responseQueuedOffline(response)) {
+            delete state.entregaNotasDraft[paradaId];
+            state.rutaActiva = null;
+            return renderRutaActiva(queuedSuccessMessage("Entrega de parada"));
+          }
           delete state.entregaNotasDraft[paradaId];
           state.rutaActiva = null;
           return renderRutaActiva("✅ Entrega registrada.");
@@ -2980,6 +3238,10 @@
           if (!response.ok) {
             const error = await response.json().catch(() => ({}));
             return renderRutaActiva(apiErrorMessage(error, "No se pudo registrar la recarga CEDIS."));
+          }
+          if (responseQueuedOffline(response)) {
+            state.rutaActiva = null;
+            return renderRutaActiva(queuedSuccessMessage("Recarga CEDIS"));
           }
           state.rutaActiva = null;
           return renderRutaCarga("✅ Recarga CEDIS registrada. Captura lo que se cargó.");
@@ -3036,7 +3298,8 @@
           response = await apiFetch(`/rutas/${rutaId}/tracking/`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(trackingPayload)
+            body: JSON.stringify(trackingPayload),
+            skipOfflineQueue: true
           });
           if (!response.ok) {
             const error = await response.json().catch(() => ({}));
@@ -3328,6 +3591,19 @@
         if (draft.longitud) form.append("longitud", draft.longitud);
         const response = await apiFetch("/reportes/", { method: "POST", body: form });
         if (!response.ok) return renderNuevoReporte("No se pudo enviar el reporte. Revisa los datos.");
+        if (responseQueuedOffline(response)) {
+          state.reporteDraft = null;
+          render(shell(`
+            <section class="confirm">
+              <div class="confirm-mark">✅</div>
+              <h1 class="screen-title">Reporte pendiente</h1>
+              <p class="unit-line">${escapeHtml(queuedSuccessMessage("Reporte de unidad"))}</p>
+              <p class="muted">No cierres sesión. La app lo enviará al recuperar conexión.</p>
+              <button class="primary-btn" onclick="showScreen('dashboard')">Volver al inicio</button>
+            </section>
+          `));
+          return;
+        }
         const creado = await response.json();
         render(shell(`
           <section class="confirm">
@@ -3349,6 +3625,17 @@
           body: payload
         });
         if (!response.ok) return renderNuevoReporte("No se pudo reafirmar el reporte. Intenta de nuevo.");
+        if (responseQueuedOffline(response)) {
+          render(shell(`
+            <section class="confirm">
+              <div class="confirm-mark">✅</div>
+              <h1 class="screen-title">Reafirmación pendiente</h1>
+              <p class="unit-line">${escapeHtml(queuedSuccessMessage("Reporte de unidad"))}</p>
+              <button class="primary-btn" onclick="showScreen('dashboard')">Volver al inicio</button>
+            </section>
+          `));
+          return;
+        }
         const data = await response.json();
         render(shell(`
           <section class="confirm">
@@ -3473,6 +3760,10 @@
           body: JSON.stringify(payload)
         });
         if (!response.ok) return renderBitacora("No se pudo guardar. Revisa el kilometraje.");
+        if (responseQueuedOffline(response)) {
+          state.editandoBitacora = false;
+          return renderBitacora(queuedSuccessMessage("Bitácora"));
+        }
         state.editandoBitacora = false;
         await renderBitacora("Bitácora guardada.");
       }
@@ -3646,6 +3937,18 @@
           const error = await response.json().catch(() => ({}));
           draft.guardando = false;
           return renderLavadoUnidad(apiErrorMessage(error, "No se pudo registrar el lavado."));
+        }
+        if (responseQueuedOffline(response)) {
+          state.lavadoDraft = null;
+          render(shell(`
+            <section class="confirm">
+              <div class="check">✅</div>
+              <h1 class="screen-title">Lavado pendiente</h1>
+              <p class="unit-line">${escapeHtml(queuedSuccessMessage("Lavado de unidad"))}</p>
+              <button class="primary-btn" onclick="showScreen('dashboard')">Volver al inicio</button>
+            </section>
+          `));
+          return;
         }
         const lavado = await response.json();
         state.lavadoDraft = null;
@@ -3886,6 +4189,11 @@
           }
           return renderBitacoraSalida(apiErrorMessage(error, "No se pudo guardar la inspección diaria."));
         }
+        if (responseQueuedOffline(response)) {
+          draft.inspeccionDiariaCompletada = true;
+          draft.inspeccionDiariaAviso = queuedSuccessMessage("Inspección diaria");
+          return renderBitacoraSalida();
+        }
         const data = await response.json();
         draft.inspeccionDiariaCompletada = true;
         draft.inspeccionDiariaAviso = data.tiene_fallas && data.reporte_generado_id
@@ -4069,6 +4377,10 @@
           const error = await response.json().catch(() => ({}));
           draft.carga_guardando = false;
           return renderBitacoraSalida(apiErrorMessage(error, "No se pudo guardar la carga de combustible."));
+        }
+        if (responseQueuedOffline(response)) {
+          resetCargaCombustibleForm();
+          return renderBitacoraSalida(queuedSuccessMessage("Carga de combustible"));
         }
         const carga = await response.json();
         if (state.bitacoraSalida) {
@@ -4313,6 +4625,10 @@
           }
           return renderBitacoraSalida(apiErrorMessage(error, "No se pudo iniciar el turno."));
         }
+        if (responseQueuedOffline(response)) {
+          state.bitacoraSalidaDraft = null;
+          return renderBitacoraSalida(queuedSuccessMessage("Bitácora de turno"));
+        }
         const creado = await response.json();
         state.bitacoraSalidaDraft = null;
         state.bitacoraSalida = creado;
@@ -4330,6 +4646,10 @@
         if (!response.ok) {
           const error = await response.json().catch(() => ({}));
           const message = apiErrorMessage(error, "No se pudo iniciar la ruta.");
+          return state.pantallaActual === "ruta_activa" ? renderRutaActiva(message) : renderBitacoraSalida(message);
+        }
+        if (responseQueuedOffline(response)) {
+          const message = queuedSuccessMessage("Bitácora de turno");
           return state.pantallaActual === "ruta_activa" ? renderRutaActiva(message) : renderBitacoraSalida(message);
         }
         await showScreen("ruta_activa");
@@ -4362,6 +4682,10 @@
         if (!response.ok) {
           const error = await response.json().catch(() => ({}));
           return renderBitacoraSalida(apiErrorMessage(error, "No se pudo registrar la llegada."));
+        }
+        if (responseQueuedOffline(response)) {
+          state.bitacoraSalidaDraft = null;
+          return renderBitacoraSalida(queuedSuccessMessage("Bitácora de turno"));
         }
         const cerrada = await response.json();
         state.bitacoraSalidaDraft = null;
@@ -4592,6 +4916,18 @@
           const error = await response.json().catch(() => ({}));
           return renderInspeccionVehiculo(apiErrorMessage(error, "No se pudo enviar la inspección."));
         }
+        if (responseQueuedOffline(response)) {
+          state.inspeccionDraft = null;
+          render(shell(`
+            <section class="confirm">
+              <div class="confirm-mark">✅</div>
+              <h1 class="screen-title">Inspección pendiente</h1>
+              <p class="unit-line">${escapeHtml(queuedSuccessMessage("Inspección de unidad"))}</p>
+              <button class="primary-btn" onclick="showScreen('dashboard')">Volver al panel principal</button>
+            </section>
+          `));
+          return;
+        }
         state.inspeccionDraft = null;
         render(shell(`
           <section class="confirm">
@@ -4609,12 +4945,10 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v54", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v55", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
-          flushRutaTrackingQueue().then(() => {
-            if (state.pantallaActual === "ruta_activa") renderRutaActiva();
-          });
+          flushAllOfflineQueues();
         });
         document.addEventListener("visibilitychange", () => {
           if (document.hidden) stopRutaAutoTracking();
@@ -4624,7 +4958,7 @@
 
         try {
           if (await useDjangoSessionToken()) {
-            await flushRutaTrackingQueue();
+            await Promise.allSettled([flushRutaTrackingQueue(), flushOfflineMutationQueue()]);
             await abrirPantallaInicial();
             return;
           }
@@ -4634,7 +4968,7 @@
 
         if (state.token) {
           try {
-            await flushRutaTrackingQueue();
+            await Promise.allSettled([flushRutaTrackingQueue(), flushOfflineMutationQueue()]);
             await abrirPantallaInicial();
             return;
           } catch (error) {
