@@ -1362,14 +1362,14 @@ textarea:focus,
 }
 
 .logi-bitacoras-table-wrap {
-  --table-min-width: 1680px;
+  --table-min-width: 1900px;
   border: 0;
   border-radius: 0;
 }
 
 .table-responsive > table.logi-bitacoras-table {
   width: 100%;
-  min-width: 1680px;
+  min-width: 1900px;
 }
 
 .logi-bitacoras-table th,
@@ -1384,6 +1384,37 @@ textarea:focus,
 
 .logi-bitacoras-table .logi-photos-cell {
   min-width: 142px;
+}
+
+.logi-bitacoras-table .logi-ticket-cell {
+  min-width: 92px;
+  max-width: 156px;
+}
+
+.logi-bitacoras-table .logi-audit-cell {
+  min-width: 122px;
+}
+
+.logi-ticket-cell a + a,
+.logi-audit-cell .log-badge + .log-badge {
+  margin-left: 6px;
+}
+
+.log-badge.audit-ok {
+  background: var(--pd-success-soft);
+  color: var(--pd-success);
+}
+
+.log-badge.audit-pendiente,
+.log-badge.audit-error {
+  background: var(--pd-warning-soft);
+  color: var(--pd-warning);
+}
+
+.log-badge.audit-revision,
+.log-badge.audit-alto_riesgo {
+  background: var(--pd-danger-soft);
+  color: var(--pd-danger);
 }
 
 .log-fuel {
@@ -1426,6 +1457,12 @@ textarea:focus,
   object-fit: cover;
   border: 1px solid var(--pd-border-strong);
   border-radius: var(--pd-radius-md);
+}
+
+.log-ticket-thumb {
+  height: 64px;
+  background: #fff;
+  object-fit: contain;
 }
 
 tr.log-overdue td {

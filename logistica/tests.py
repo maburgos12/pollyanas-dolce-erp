@@ -23,6 +23,7 @@ from crm.models import Cliente, PedidoCliente
 from api.logistica_serializers import ParadaRutaSerializer, RutaCargaChecklistSerializer
 from logistica.models import (
     BitacoraSalidaLlegada,
+    CargaCombustibleUnidad,
     EntregaRuta,
     EventoRuta,
     ParadaEntregaEvidencia,
@@ -35,6 +36,7 @@ from logistica.models import (
     UbicacionRuta,
     Unidad,
 )
+from logistica.services_combustible_auditoria import auditar_carga_combustible
 from logistica.services_carga_ruta import (
     cerrar_ruta_con_diferencia_autorizada,
     checklist_bloquea_salida,
@@ -83,6 +85,20 @@ class LogisticaEmailTemplateTests(SimpleTestCase):
 
 
 class LogisticaControlRutasTemplateTests(SimpleTestCase):
+    def test_bitacoras_muestra_preview_y_semaforo_de_tickets_combustible(self):
+        template_path = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "bitacoras_lista.html"
+        source = template_path.read_text(encoding="utf-8")
+        css = (Path(settings.BASE_DIR) / "static" / "css" / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn("<th>Tickets</th>", source)
+        self.assertIn("<th>Auditoría</th>", source)
+        self.assertIn("logi-ticket-cell", source)
+        self.assertIn("logi-audit-cell", source)
+        self.assertIn('alt="Ticket combustible cierre"', source)
+        self.assertIn('alt="Ticket combustible ruta"', source)
+        self.assertIn("log-ticket-thumb", source)
+        self.assertIn("object-fit: contain", css)
+
     def test_programmed_google_polyline_uses_route_source_not_pipe_character(self):
         template_path = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "control_rutas.html"
         source = template_path.read_text(encoding="utf-8")
@@ -168,6 +184,46 @@ VALID_GIF = (
     b"\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00"
     b"\x00\x02\x02D\x01\x00;"
 )
+
+
+class LogisticaCombustibleAuditoriaTests(TestCase):
+    def test_auditoria_marca_ticket_duplicado_como_alto_riesgo(self):
+        user = User.objects.create_user(username="auditor.ticket", password="pass123")
+        sucursal = Sucursal.objects.create(codigo="QA-AUD", nombre="QA Auditoría", activa=True)
+        unidad = Unidad.objects.create(codigo="QA-AUD-1", descripcion="Unidad auditoría", sucursal=sucursal)
+        repartidor = Repartidor.objects.create(user=user, sucursal=sucursal, unidad_asignada=unidad)
+        bitacora = BitacoraSalidaLlegada.objects.create(
+            repartidor=repartidor,
+            unidad=unidad,
+            km_salida=1000,
+            nivel_gas_salida="1/2",
+            foto_tablero_salida=SimpleUploadedFile("tablero.gif", VALID_GIF, content_type="image/gif"),
+        )
+        primera = CargaCombustibleUnidad.objects.create(
+            bitacora=bitacora,
+            unidad=unidad,
+            repartidor=repartidor,
+            litros=Decimal("44.00"),
+            importe_total=Decimal("1200.00"),
+            foto_ticket=SimpleUploadedFile("ticket1.gif", VALID_GIF, content_type="image/gif"),
+        )
+        segunda = CargaCombustibleUnidad.objects.create(
+            bitacora=bitacora,
+            unidad=unidad,
+            repartidor=repartidor,
+            litros=Decimal("44.00"),
+            importe_total=Decimal("1200.00"),
+            foto_ticket=SimpleUploadedFile("ticket2.gif", VALID_GIF, content_type="image/gif"),
+        )
+
+        auditar_carga_combustible(primera.id)
+        resultado = auditar_carga_combustible(segunda.id)
+        segunda.refresh_from_db()
+
+        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_ALTO_RIESGO)
+        self.assertEqual(segunda.auditoria_estado, CargaCombustibleUnidad.AUDITORIA_ALTO_RIESGO)
+        self.assertIn("ticket_duplicado", segunda.auditoria_motivos)
+        self.assertEqual(segunda.auditoria_detalle["modo"], "reglas_locales")
 
 
 class LogisticaGroupAliasCompatibilityTests(TestCase):

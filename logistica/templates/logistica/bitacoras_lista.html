@@ -74,7 +74,7 @@
     </div>
     <div class="table-responsive logi-bitacoras-table-wrap">
       <table class="table table-striped logi-bitacoras-table">
-        <thead><tr><th>Folio</th><th>Unidad</th><th>Repartidor</th><th>Hora salida</th><th>Hora llegada</th><th>KM salida</th><th>KM llegada</th><th>KM recorridos</th><th>Nivel gas</th><th>Combustible (importe total)</th><th>Estatus</th><th>Fotos</th></tr></thead>
+        <thead><tr><th>Folio</th><th>Unidad</th><th>Repartidor</th><th>Hora salida</th><th>Hora llegada</th><th>KM salida</th><th>KM llegada</th><th>KM recorridos</th><th>Nivel gas</th><th>Combustible (importe total)</th><th>Tickets</th><th>Auditoría</th><th>Estatus</th><th>Fotos</th></tr></thead>
         <tbody>
           {% for bitacora in bitacoras %}
           <tr class="{% if not bitacora.cerrada and bitacora.horas_abierta > 8 %}log-overdue{% endif %}">
@@ -91,27 +91,34 @@
               {% if bitacora.litros_cargados or bitacora.costo_combustible or bitacora.foto_ticket_combustible %}
                 <div class="log-fuel">
                   <strong>{{ bitacora.litros_cargados|default:"0" }} L · Total ${{ bitacora.costo_combustible|default:"0"|floatformat:2|intcomma }}</strong>
-                  {% if bitacora.foto_ticket_combustible %}
-                    <a href="{{ bitacora.foto_ticket_combustible.url }}" target="_blank" rel="noopener">Ver ticket</a>
-                  {% else %}
-                    <span class="log-muted">Sin ticket</span>
-                  {% endif %}
                 </div>
               {% endif %}
               {% for carga in bitacora.cargas_combustible.all %}
                 <div class="log-fuel">
                   <strong>{{ carga.litros|default:"0" }} L · Total ${{ carga.importe_total|default:"0"|floatformat:2|intcomma }}</strong>
                   <span class="log-muted">{{ carga.fecha_registro|date:"d/m/Y H:i" }}</span>
-                  {% if carga.foto_ticket %}
-                    <a href="{{ carga.foto_ticket.url }}" target="_blank" rel="noopener">Ver ticket</a>
-                  {% else %}
-                    <span class="log-muted">Sin ticket</span>
-                  {% endif %}
                 </div>
               {% empty %}
                 {% if not bitacora.litros_cargados and not bitacora.costo_combustible and not bitacora.foto_ticket_combustible %}
                 <span class="log-muted">Sin carga</span>
                 {% endif %}
+              {% endfor %}
+            </td>
+            <td class="cell-nowrap logi-ticket-cell">
+              {% if bitacora.foto_ticket_combustible %}
+                <a href="{{ bitacora.foto_ticket_combustible.url }}" target="_blank" rel="noopener"><img class="log-thumb log-ticket-thumb" src="{{ bitacora.foto_ticket_combustible.url }}" alt="Ticket combustible cierre"></a>
+              {% endif %}
+              {% for carga in bitacora.cargas_combustible.all %}
+                {% if carga.foto_ticket %}<a href="{{ carga.foto_ticket.url }}" target="_blank" rel="noopener"><img class="log-thumb log-ticket-thumb" src="{{ carga.foto_ticket.url }}" alt="Ticket combustible ruta"></a>{% endif %}
+              {% empty %}
+                {% if not bitacora.foto_ticket_combustible %}<span class="log-muted">Sin ticket</span>{% endif %}
+              {% endfor %}
+            </td>
+            <td class="cell-nowrap logi-audit-cell">
+              {% for carga in bitacora.cargas_combustible.all %}
+                <span class="log-badge audit-{{ carga.auditoria_estado }}">{{ carga.get_auditoria_estado_display }}{% if carga.auditoria_score %} · {{ carga.auditoria_score }}{% endif %}</span>
+              {% empty %}
+                <span class="log-muted">-</span>
               {% endfor %}
             </td>
             <td class="cell-nowrap">{% if bitacora.cerrada %}<span class="log-badge ok">Cerrada</span>{% else %}<span class="log-badge danger">Abierto</span>{% if bitacora.horas_abierta > 8 %}<span class="log-badge warn">{{ bitacora.horas_abierta }} h</span>{% endif %}{% endif %}</td>
@@ -121,7 +128,7 @@
             </td>
           </tr>
           {% empty %}
-          <tr><td colspan="12" class="muted">No hay bitácoras con esos filtros.</td></tr>
+          <tr><td colspan="14" class="muted">No hay bitácoras con esos filtros.</td></tr>
           {% endfor %}
         </tbody>
       </table>
