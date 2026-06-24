@@ -17,12 +17,28 @@
   .permisos-stat span { color: var(--texto-light); font-size: 11px; font-weight: 900; text-transform: uppercase; }
   .permisos-worktable { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; overflow: hidden; }
   .permisos-status-strip { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); padding: 14px; }
-  .permisos-status-card { background: #fbf6f8; border: 1px solid var(--rosa); border-radius: 8px; color: var(--vino); min-height: 66px; padding: 12px; }
-  .permisos-status-card.active { background: var(--vino); color: #fff; }
+  .permisos-status-card {
+    appearance: none;
+    background: #fbf6f8;
+    border: 1px solid var(--rosa);
+    border-radius: 8px;
+    color: var(--vino);
+    cursor: pointer;
+    min-height: 66px;
+    padding: 12px;
+    text-align: left;
+    transition: box-shadow 160ms ease-out, transform 120ms ease-out;
+    width: 100%;
+  }
+  .permisos-status-card.active { background-color: #8b2252; border-color: #8b2252; box-shadow: 0 10px 22px rgba(146, 31, 84, .18); color: #fff; }
+  .permisos-status-card:focus-visible { outline: 3px solid rgba(146, 31, 84, .24); outline-offset: 3px; }
+  .permisos-status-card:active { transform: scale(.985); }
   .permisos-status-card strong { display: block; font-size: 17px; line-height: 1.1; }
   .permisos-status-card span { color: var(--texto-light); display: block; font-size: 12px; font-weight: 900; margin-top: 5px; text-transform: uppercase; }
   .permisos-status-card.active span { color: rgba(255,255,255,.86); }
   .permisos-row-table { border-top: 1px solid var(--rosa); display: grid; }
+  .permisos-state-panel { display: grid; }
+  .permisos-state-panel[hidden] { display: none; }
   .permiso-row-item {
     align-items: center;
     border-bottom: 1px solid var(--rosa);
@@ -36,6 +52,7 @@
   .permiso-row-item strong { color: var(--texto); display: block; font-size: 15px; }
   .permiso-row-item span, .permiso-row-item div, .permiso-row-item p { color: var(--texto-light); font-size: 13px; }
   .permiso-row-item p { margin: 8px 0 0; }
+  .permiso-row-empty { background: #fffafb; }
   .permiso-row-badges { display: flex; flex-wrap: wrap; gap: 6px; }
   .permiso-row { display: flex; flex-wrap: wrap; gap: 6px; }
   .permiso-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }
@@ -56,4 +73,12 @@
     .permisos-status-strip,
     .permisos-stats { grid-template-columns: 1fr; }
     .permiso-row-item { grid-template-columns: 1fr; }
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .permisos-status-card:hover { border-color: rgba(146, 31, 84, .42); box-shadow: 0 8px 18px rgba(146, 31, 84, .10); transform: translateY(-1px); }
+    .permisos-status-card.active:hover { box-shadow: 0 12px 24px rgba(146, 31, 84, .22); }
+    .permisos-status-card:hover:active { transform: scale(.985); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .permisos-status-card { transition: none; }
   }
