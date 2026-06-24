@@ -599,6 +599,47 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertEqual(movimiento.actor, rrhh_user)
         self.assertIn("[conciliacion-manual] Corrección por pago timbrado", movimiento.descripcion)
 
+    def test_admin_borra_solicitud_al_borrar_movimiento_vacaciones_ligado(self):
+        from datetime import date
+
+        from django.contrib import admin
+
+        empleado = Empleado.objects.create(nombre="Paula Lugo", fecha_ingreso=date(2025, 1, 1), activo=True)
+        solicitud = SolicitudVacaciones.objects.create(
+            empleado=empleado,
+            fecha_inicio=date(2026, 7, 15),
+            fecha_fin=date(2026, 7, 24),
+            dias_laborables=Decimal("9.00"),
+            estado=SolicitudVacaciones.ESTADO_APROBADA,
+        )
+        reservado = MovimientoVacaciones.objects.create(
+            empleado=empleado,
+            solicitud=solicitud,
+            tipo=MovimientoVacaciones.TIPO_RESERVADO,
+            dias=Decimal("9.00"),
+            periodo_anio=2026,
+        )
+        MovimientoVacaciones.objects.create(
+            empleado=empleado,
+            solicitud=solicitud,
+            tipo=MovimientoVacaciones.TIPO_CONSUMIDO,
+            dias=Decimal("9.00"),
+            periodo_anio=2026,
+        )
+        ajuste = MovimientoVacaciones.objects.create(
+            empleado=empleado,
+            tipo=MovimientoVacaciones.TIPO_AJUSTE,
+            dias=Decimal("2.00"),
+            periodo_anio=2026,
+        )
+
+        model_admin = admin.site._registry[MovimientoVacaciones]
+        model_admin.delete_queryset(None, MovimientoVacaciones.objects.filter(pk=reservado.pk))
+
+        self.assertFalse(SolicitudVacaciones.objects.filter(pk=solicitud.pk).exists())
+        self.assertFalse(MovimientoVacaciones.objects.filter(solicitud_id=solicitud.pk).exists())
+        self.assertTrue(MovimientoVacaciones.objects.filter(pk=ajuste.pk).exists())
+
     def test_permiso_de_jefatura_lo_resuelve_direccion_no_rrhh(self):
         from datetime import datetime
         from zoneinfo import ZoneInfo

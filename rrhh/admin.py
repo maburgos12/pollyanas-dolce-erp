@@ -416,6 +416,19 @@ class MovimientoVacacionesAdmin(admin.ModelAdmin):
     readonly_fields = ("creado_en",)
     autocomplete_fields = ("empleado", "solicitud", "actor")
 
+    def delete_model(self, request, obj):
+        self._delete_with_solicitudes(MovimientoVacaciones.objects.filter(pk=obj.pk))
+
+    def delete_queryset(self, request, queryset):
+        self._delete_with_solicitudes(queryset)
+
+    def _delete_with_solicitudes(self, queryset):
+        solicitud_ids = list(queryset.exclude(solicitud__isnull=True).values_list("solicitud_id", flat=True).distinct())
+        queryset.filter(solicitud__isnull=True).delete()
+        if solicitud_ids:
+            MovimientoVacaciones.objects.filter(solicitud_id__in=solicitud_ids).delete()
+            SolicitudVacaciones.objects.filter(id__in=solicitud_ids).delete()
+
 
 @admin.register(SuspensionEmpleado)
 class SuspensionEmpleadoAdmin(admin.ModelAdmin):
