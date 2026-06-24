@@ -1362,7 +1362,7 @@
       const TRACKING_QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
       const ACCESS_TOKEN_KEY = "pd_logistica_access";
       const REFRESH_TOKEN_KEY = "pd_logistica_refresh";
-      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v53
+      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v54
       const PREVIEW_REPARTIDOR_PARAM = "preview_repartidor";
       const app = document.getElementById("app");
       const initialParams = new URLSearchParams(window.location.search);
@@ -2788,6 +2788,7 @@
         const lineasTramoCarga = segmentoCargaOperativo(rutaData.checklist_carga?.lineas || [], paradas).lineas;
         const puedeLiberarTramo = !rutaEnSeguimiento && turnoOk && unidadOk && lineasTramoCarga.length > 0 && !lineasTramoCarga.some((linea) => linea.estatus === "PENDIENTE");
         const counts = routeStopCounts(paradas);
+        const puedeFinalizarRuta = rutaEnSeguimiento && counts.total > 0 && counts.pendientes === 0 && counts.entregables === counts.entregadas && !pendientesOffline;
         const progress = routeProgressValue(ruta, paradas);
         state.trackingQueueCount = pendientesOffline;
         render(shell(`
@@ -2831,6 +2832,12 @@
                 <span style="font-size:22px;">✅</span> Carga del tramo lista. Inicia la ruta con este turno.
               </div>
               <button class="primary-btn" type="button" onclick="liberarRutaConTurno()">Iniciar ruta con este turno</button>
+            ` : ""}
+            ${puedeFinalizarRuta ? `
+              <div class="daily-banner">
+                <span style="font-size:22px;">✅</span> Ruta al 100%. Finaliza el día para cerrar la ruta en ERP.
+              </div>
+              <button class="primary-btn" type="button" onclick="finalizarRutaDia(${Number(ruta.id)})">Finalizar ruta del día</button>
             ` : ""}
             <p class="muted">Tu ubicación se envía automáticamente cada 45 segundos mientras estás en ruta.</p>
             <div class="route-actions-main">
@@ -2978,6 +2985,28 @@
           return renderRutaCarga("✅ Recarga CEDIS registrada. Captura lo que se cargó.");
         } catch (error) {
           return renderRutaActiva(error?.message === "Sesión expirada" ? "Tu sesión expiró. Vuelve a iniciar sesión." : "No se pudo registrar la recarga CEDIS. Reintenta con señal.");
+        }
+      }
+
+      async function finalizarRutaDia(rutaId) {
+        if (previewBlocked("El cierre de ruta está bloqueado en vista como repartidor.")) return;
+        rutaId = Number(rutaId || state.rutaActiva?.ruta?.id);
+        if (!rutaId) return renderRutaActiva("No hay ruta activa para finalizar.");
+        try {
+          const response = await apiFetch(`/rutas/${rutaId}/finalizar-pwa/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({})
+          });
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            return renderRutaActiva(apiErrorMessage(error, "No se pudo finalizar la ruta."));
+          }
+          state.rutaActiva = null;
+          stopRutaAutoTracking();
+          return renderRutaActiva("✅ Ruta finalizada en ERP.");
+        } catch (error) {
+          return renderRutaActiva(error?.message === "Sesión expirada" ? "Tu sesión expiró. Vuelve a iniciar sesión." : "No se pudo finalizar la ruta. Reintenta con señal.");
         }
       }
 
@@ -4580,7 +4609,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v53", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v54", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushRutaTrackingQueue().then(() => {

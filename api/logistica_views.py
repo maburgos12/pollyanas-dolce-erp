@@ -1300,6 +1300,54 @@ class LogisticaRutaStatusView(_LogisticaBaseView):
         return Response(LogisticaRutaSerializer(ruta).data, status=status.HTTP_200_OK)
 
 
+class LogisticaRutaFinalizarPwaView(_LogisticaBaseView):
+    def post(self, request, ruta_id: int):
+        if not _can_operate_pwa(request.user):
+            return Response({"detail": "No tienes permisos para finalizar rutas desde PWA."}, status=status.HTTP_403_FORBIDDEN)
+
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor:
+            return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
+
+        with transaction.atomic():
+            ruta = get_object_or_404(
+                RutaEntrega.objects.select_for_update(),
+                pk=ruta_id,
+                repartidor=repartidor,
+            )
+            if ruta.estatus == RutaEntrega.ESTATUS_COMPLETADA:
+                return Response(LogisticaRutaSerializer(ruta).data, status=status.HTTP_200_OK)
+            if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
+                return Response({"detail": "Solo puedes finalizar una ruta en seguimiento."}, status=status.HTTP_400_BAD_REQUEST)
+            if ruta_tiene_paradas_entregables_pendientes(ruta):
+                return Response({"detail": "No se puede finalizar la ruta: hay paradas pendientes por visitar u omitir."}, status=status.HTTP_400_BAD_REQUEST)
+            if ruta_tiene_entregas_pendientes(ruta):
+                return Response({"detail": "No se puede finalizar la ruta: hay paradas sin entrega confirmada."}, status=status.HTTP_400_BAD_REQUEST)
+            if ruta_tiene_diferencias_entrega(ruta):
+                return Response({"detail": "No se puede finalizar la ruta: hay diferencias o entregas no recibidas por resolver."}, status=status.HTTP_400_BAD_REQUEST)
+
+            ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
+            ruta.hora_cierre_real = ruta.hora_cierre_real or timezone.now()
+            ruta.save(update_fields=["estatus", "hora_cierre_real", "updated_at"])
+            if not EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_CIERRE).exists():
+                EventoRuta.objects.create(
+                    ruta=ruta,
+                    tipo=EventoRuta.TIPO_CIERRE,
+                    severidad=EventoRuta.SEVERIDAD_INFO,
+                    descripcion="Ruta finalizada por repartidor desde PWA.",
+                    creado_por=request.user,
+                )
+
+        log_event(
+            request.user,
+            "UPDATE",
+            "logistica.RutaEntrega",
+            str(ruta.id),
+            {"estatus": RutaEntrega.ESTATUS_COMPLETADA, "origen": "pwa_finalizar_ruta"},
+        )
+        return Response(LogisticaRutaSerializer(ruta).data, status=status.HTTP_200_OK)
+
+
 class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
     def post(self, request, ruta_id: int, parada_id: int):
         if not _can_operate_pwa(request.user) and not can_manage_submodule(request.user, "logistica", "rutas"):
