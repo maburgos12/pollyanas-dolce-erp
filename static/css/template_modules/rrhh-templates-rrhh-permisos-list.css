@@ -58,8 +58,31 @@
   .permiso-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }
   .permiso-badge.gold { background: rgba(201, 168, 76, .18); color: #6f5415; }
   .permiso-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-  .permisos-table-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 16px; }
-  .permisos-table-card h2 { color: var(--vino); font-size: 18px; margin: 0 0 12px; }
+  .permisos-history-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; overflow: hidden; }
+  .permisos-history-toggle {
+    appearance: none;
+    align-items: center;
+    background: #fbf6f8;
+    border: 0;
+    color: var(--vino);
+    cursor: pointer;
+    display: flex;
+    gap: 16px;
+    justify-content: space-between;
+    padding: 16px;
+    text-align: left;
+    transition: box-shadow 160ms ease-out, transform 120ms ease-out;
+    width: 100%;
+  }
+  .permisos-history-toggle.active { background-color: #8b2252; color: #fff; }
+  .permisos-history-toggle:focus-visible { outline: 3px solid rgba(146, 31, 84, .24); outline-offset: -3px; }
+  .permisos-history-toggle:active { transform: scale(.995); }
+  .permisos-history-toggle strong { display: block; font-family: "Playfair Display", serif; font-size: 19px; line-height: 1.1; }
+  .permisos-history-toggle small { color: var(--texto-light); display: block; font-size: 12px; font-weight: 800; margin-top: 5px; text-transform: uppercase; }
+  .permisos-history-toggle.active small { color: rgba(255,255,255,.82); }
+  .permisos-history-action { background: #fff; border-radius: 999px; color: var(--vino); flex: 0 0 auto; font-size: 12px; font-weight: 900; padding: 8px 12px; }
+  .permisos-history-panel { border-top: 1px solid var(--rosa); padding: 16px; }
+  .permisos-history-panel[hidden] { display: none; }
   .permisos-table { min-width: 1060px; width: 100%; border-collapse: collapse; }
   .permisos-table th, .permisos-table td { border-bottom: 1px solid var(--rosa); padding: 10px; text-align: left; vertical-align: top; }
   .permisos-table th { color: var(--vino); font-size: 12px; text-transform: uppercase; }
@@ -73,12 +96,15 @@
     .permisos-status-strip,
     .permisos-stats { grid-template-columns: 1fr; }
     .permiso-row-item { grid-template-columns: 1fr; }
+    .permisos-history-toggle { align-items: flex-start; flex-direction: column; }
   }
   @media (hover: hover) and (pointer: fine) {
     .permisos-status-card:hover { border-color: rgba(146, 31, 84, .42); box-shadow: 0 8px 18px rgba(146, 31, 84, .10); transform: translateY(-1px); }
     .permisos-status-card.active:hover { box-shadow: 0 12px 24px rgba(146, 31, 84, .22); }
     .permisos-status-card:hover:active { transform: scale(.985); }
+    .permisos-history-toggle:hover { box-shadow: 0 8px 18px rgba(146, 31, 84, .10); }
   }
   @media (prefers-reduced-motion: reduce) {
-    .permisos-status-card { transition: none; }
+    .permisos-status-card,
+    .permisos-history-toggle { transition: none; }
   }

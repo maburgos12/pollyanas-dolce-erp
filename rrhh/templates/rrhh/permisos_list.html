@@ -4,7 +4,7 @@
 {% block page_title %}RRHH · Permisos{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-permisos-list.css?v=20260623-status-filter-v7">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-permisos-list.css?v=20260623-history-toggle-v8">
 {% endblock %}
 
 {% block content %}
@@ -109,9 +109,21 @@
     </div>
   </section>
 
-  <section class="permisos-table-card">
-    <h2>Historial reciente</h2>
-    <div class="table-responsive">
+  <section class="permisos-history-card">
+    <button
+      type="button"
+      class="permisos-history-toggle"
+      data-permisos-history-toggle
+      aria-controls="permisos-historial-panel"
+      aria-expanded="false"
+    >
+      <span>
+        <strong>Historial reciente</strong>
+        <small>{{ permisos|length }} registros · abrir solo cuando necesites revisar el detalle completo</small>
+      </span>
+      <span class="permisos-history-action">Ver historial</span>
+    </button>
+    <div class="table-responsive permisos-history-panel" id="permisos-historial-panel" data-permisos-history-panel hidden>
       <table class="permisos-table">
         <thead>
           <tr>
@@ -184,6 +196,19 @@
     buttons.forEach((button) => {
       button.addEventListener("click", () => selectPanel(button.dataset.permisosFilter));
     });
+
+    const historyToggle = document.querySelector("[data-permisos-history-toggle]");
+    const historyPanel = document.querySelector("[data-permisos-history-panel]");
+    if (historyToggle && historyPanel) {
+      historyToggle.addEventListener("click", () => {
+        const isExpanded = historyToggle.getAttribute("aria-expanded") === "true";
+        historyToggle.setAttribute("aria-expanded", isExpanded ? "false" : "true");
+        historyToggle.classList.toggle("active", !isExpanded);
+        historyPanel.hidden = isExpanded;
+        const action = historyToggle.querySelector(".permisos-history-action");
+        if (action) action.textContent = isExpanded ? "Ver historial" : "Ocultar historial";
+      });
+    }
   })();
 </script>
 {% endblock %}
