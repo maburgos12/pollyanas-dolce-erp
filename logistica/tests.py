@@ -3277,6 +3277,69 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
         self.assertNotIn("Pendiente de sincronizar recepción completa", self.parada.entrega_notas)
 
+    def test_sincronizar_recepcion_no_reabre_entrega_pwa_por_producto(self):
+        _, linea, _ = self._crear_linea_carga_con_transferencia_recibida(is_received=False, received_quantity="0.000")
+        ParadaEntregaEvidencia.objects.create(
+            ruta=self.ruta,
+            parada=self.parada,
+            linea_carga=linea,
+            tipo=ParadaEntregaEvidencia.TIPO_CONFIRMACION,
+            cantidad_entregada=Decimal("5.000"),
+            comentario="Entrega confirmada: Pastel Snicker chico",
+            capturado_por=self.user,
+            client_event_id="pwa-linea-entrega-1",
+            metadata={"origen": "pwa_entrega_parada"},
+        )
+        self.parada.estado = ParadaRuta.ESTADO_VISITADA
+        self.parada.entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
+        self.parada.entrega_confirmada_en = timezone.now()
+        self.parada.entrega_confirmada_por = self.user
+        self.parada.save(
+            update_fields=[
+                "estado",
+                "entrega_estado",
+                "entrega_confirmada_en",
+                "entrega_confirmada_por",
+                "actualizado_en",
+            ]
+        )
+
+        resumen = sincronizar_recepcion_desde_point(ruta=self.ruta, user=self.user, ejecutar_sync=False)
+
+        self.parada.refresh_from_db()
+        self.assertEqual(resumen.evidencias_creadas, 0)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+
+    def test_sincronizar_recepcion_no_reabre_ajuste_manual_con_diferencia(self):
+        self._crear_linea_carga_con_transferencia_recibida(received_quantity="3.000")
+        ParadaEntregaEvidencia.objects.create(
+            ruta=self.ruta,
+            parada=self.parada,
+            tipo=ParadaEntregaEvidencia.TIPO_INCIDENCIA,
+            comentario="Ajuste manual de diferencia confirmado por logística.",
+            capturado_por=self.user,
+            metadata={"origen": "erp_manual", "entrega_estado": ParadaRuta.ENTREGA_CON_DIFERENCIA},
+        )
+        self.parada.estado = ParadaRuta.ESTADO_VISITADA
+        self.parada.entrega_estado = ParadaRuta.ENTREGA_CON_DIFERENCIA
+        self.parada.entrega_confirmada_en = timezone.now()
+        self.parada.entrega_confirmada_por = self.user
+        self.parada.save(
+            update_fields=[
+                "estado",
+                "entrega_estado",
+                "entrega_confirmada_en",
+                "entrega_confirmada_por",
+                "actualizado_en",
+            ]
+        )
+
+        resumen = sincronizar_recepcion_desde_point(ruta=self.ruta, user=self.user, ejecutar_sync=False)
+
+        self.parada.refresh_from_db()
+        self.assertEqual(resumen.evidencias_creadas, 1)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_CON_DIFERENCIA)
+
     def test_sincronizar_recepcion_desde_point_actualiza_evidencia_si_point_corrige(self):
         _, _, transfer_line = self._crear_linea_carga_con_transferencia_recibida(loaded_quantity="5.000", received_quantity="3.000")
         sincronizar_recepcion_desde_point(ruta=self.ruta, user=self.user, ejecutar_sync=False)
@@ -3653,6 +3716,28 @@ class LogisticaControlRutasTests(TestCase):
                 url=f"/logistica/rutas/{self.ruta.id}/",
             ).exists()
         )
+
+    def test_ruta_detail_cierre_con_diferencia_no_resincroniza_point(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        self.parada.estado = ParadaRuta.ESTADO_VISITADA
+        self.parada.entrega_estado = ParadaRuta.ENTREGA_CON_DIFERENCIA
+        self.parada.hora_llegada_real = timezone.now()
+        self.parada.save(update_fields=["estado", "entrega_estado", "hora_llegada_real", "actualizado_en"])
+
+        with patch("logistica.views.sincronizar_recepcion_desde_point") as sync_mock:
+            response = self.client.post(
+                reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+                {
+                    "action": "cerrar_con_diferencia_autorizada",
+                    "notas_cierre_diferencia": "Diferencia revisada.",
+                },
+            )
+
+        self.ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
+        sync_mock.assert_not_called()
 
     def test_api_ruta_activa_expone_recepcion_point_por_producto(self):
         self.client.force_login(self.user)

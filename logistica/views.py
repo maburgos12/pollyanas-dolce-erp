@@ -2233,7 +2233,6 @@ def ruta_detail(request, pk: int):
 
         if action == "cerrar_con_diferencia_autorizada":
             try:
-                sincronizar_recepcion_desde_point(ruta=ruta, user=request.user, ejecutar_sync=False)
                 evento = cerrar_ruta_con_diferencia_autorizada(
                     ruta=ruta,
                     user=request.user,

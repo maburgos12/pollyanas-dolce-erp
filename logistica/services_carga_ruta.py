@@ -400,6 +400,12 @@ def _confirmacion_completa_parada(parada: ParadaRuta) -> ParadaEntregaEvidencia 
     )
 
 
+def _tiene_cierre_local(parada: ParadaRuta) -> bool:
+    if parada.entrega_estado == ParadaRuta.ENTREGA_PENDIENTE:
+        return False
+    return parada.evidencias_entrega.exclude(client_event_id__startswith="point-recepcion-").exists()
+
+
 def _cantidad_recibida_con_respaldo_pwa(
     linea: RutaCargaChecklistLinea,
     confirmacion: ParadaEntregaEvidencia | None,
@@ -972,6 +978,8 @@ def _actualizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None) -> Recepc
         touched_paradas.add(linea.parada_id)
 
     for parada in ruta.paradas.filter(id__in=touched_paradas).order_by("orden", "id"):
+        if _tiene_cierre_local(parada):
+            continue
         lineas = list(checklist.lineas.filter(parada=parada).select_related("point_transfer_line"))
         if not lineas:
             continue
