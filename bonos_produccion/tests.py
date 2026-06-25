@@ -816,13 +816,18 @@ class BonosProduccionTests(TestCase):
                 {
                     "fecha": "2026-05-22",
                     "horas": "2.00",
-                    "notas": "No debe editar",
-                    "motivo_cambio": "Prueba",
+                    "notas": "Captura corregida despues de autorizar",
+                    "motivo_cambio": "Se autorizo con horas incorrectas",
                 }
             ),
             content_type="application/json",
         )
-        self.assertEqual(editar_autorizada.status_code, 400)
+        self.assertEqual(editar_autorizada.status_code, 200)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_AUTORIZADO)
+        self.assertEqual(hora_extra.horas, Decimal("2.00"))
+        self.assertEqual(hora_extra.monto_calculado, Decimal("200.00"))
+        self.assertIn("Se autorizo con horas incorrectas", hora_extra.notas)
 
     def test_jefe_directo_corrige_y_elimina_permiso_aprobado_con_auditoria(self):
         user = get_user_model().objects.create_user(username="jefe-produccion-audit")

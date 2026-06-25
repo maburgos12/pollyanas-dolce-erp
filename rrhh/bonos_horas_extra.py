@@ -20,7 +20,7 @@ ESTADOS_HORA_EXTRA_ACTIVOS = {
     HoraExtra.ESTADO_PAGADO,
 }
 
-ESTADOS_HORA_EXTRA_EDITABLES = {HoraExtra.ESTADO_PENDIENTE}
+ESTADOS_HORA_EXTRA_EDITABLES = {HoraExtra.ESTADO_PENDIENTE, HoraExtra.ESTADO_AUTORIZADO}
 ESTADOS_HORA_EXTRA_ELIMINABLES = {HoraExtra.ESTADO_PENDIENTE}
 
 
@@ -200,7 +200,7 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
         if not self.can_gestionar_empleado(hora_extra.empleado):
             return Response({"detail": "No tienes permiso para editar esta hora extra."}, status=status.HTTP_403_FORBIDDEN)
         if hora_extra.estado not in ESTADOS_HORA_EXTRA_EDITABLES:
-            return Response({"detail": "Solo se pueden editar horas extra pendientes."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Solo se pueden editar horas extra pendientes o autorizadas."}, status=status.HTTP_400_BAD_REQUEST)
 
         motivo_cambio = _motivo_cambio(request)
         if not motivo_cambio:
@@ -238,11 +238,15 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
         hora_extra.fecha = fecha
         hora_extra.horas = horas
         hora_extra.notas = notas
+        update_fields = ["fecha", "horas", "notas"]
+        if hora_extra.estado == HoraExtra.ESTADO_AUTORIZADO:
+            calcular_monto_hora_extra(hora_extra)
+            update_fields.append("monto_calculado")
         _append_nota_operativa(
             hora_extra,
             f"Correccion registrada por {request.user.get_username()} el {timezone.localtime():%Y-%m-%d %H:%M}: {motivo_cambio}",
         )
-        hora_extra.save(update_fields=["fecha", "horas", "notas"])
+        hora_extra.save(update_fields=update_fields)
         return Response(
             _hora_extra_payload(
                 hora_extra,
