@@ -95,7 +95,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('id="erp-sidebar"', html)
         self.assertIn('class="mobile-nav-backdrop"', html)
         self.assertIn("mobile-nav-open", html)
-        self.assertIn("20260622-mobile-shell-v1", html)
+        self.assertIn("20260624-erp-nav-unica-v1", html)
         self.assertNotIn("Principal", html)
         self.assertNotIn("#ef4b2e", css)
         self.assertIn(".mobile-app-bar", css)
@@ -106,17 +106,21 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn(".mobile-nav-backdrop:not([hidden])", css)
         self.assertIn("@media (max-width: 720px)", css)
 
-    def test_base_template_inserts_group_tabs_when_page_has_none(self):
+    def test_base_template_uses_sidebar_group_tabs_as_canonical_top_tabs(self):
         base = Path(settings.BASE_DIR) / "templates" / "base.html"
         html = base.read_text()
 
         self.assertIn('id="active-group-tabs-template"', html)
         self.assertIn("module-tabs erp-group-tabs", html)
         self.assertIn("group.active", html)
-        self.assertIn(
-            "main.querySelector('.erp-group-tabs, .module-tabs, .rrhh-tabs, .report-tabs, .mant-tabs')",
-            html,
-        )
+        self.assertIn("top tabs mirror the active sidebar accordion", html)
+        self.assertIn("main.querySelector('.erp-group-tabs')", html)
+        self.assertIn("canonicalSet.has(label)", html)
+        self.assertIn("canonicalHrefs.has(href)", html)
+        self.assertIn("mostlySameHrefs", html)
+        self.assertIn(".forecast-workflow-tabs", html)
+        self.assertIn(".investment-module-tabs", html)
+        self.assertIn("localTabs.remove()", html)
         self.assertNotIn(".forecast-workflow-tabs')) return", html)
         self.assertIn("main.prepend(tabs)", html)
 
@@ -287,6 +291,80 @@ class NavigationActiveStateTests(TestCase):
         item = next((item for item in produccion["items"] if item["label"] == "Cálculo de insumos"), None)
         self.assertIsNotNone(item)
         self.assertEqual(item["url"], "/recetas/plan-produccion/?seccion=calculo_insumos#calculo-insumos")
+
+    def test_logistica_sidebar_group_defines_horizontal_tabs(self):
+        with patch("core.navigation.can_view_submodule", return_value=True):
+            groups = build_nav_groups(SimpleNamespace(is_authenticated=True, is_superuser=True, is_staff=False), "/logistica/rutas/control/")
+        logistica = next(group for group in groups if group["key"] == "logistica")
+
+        self.assertEqual(
+            [item["label"] for item in logistica["items"]],
+            [
+                "Dashboard",
+                "Ejecutivo",
+                "Tickets",
+                "Flota",
+                "Reportes",
+                "Bitácoras",
+                "Rutas",
+                "Control rutas",
+                "Puntos",
+                "Unidades",
+                "Capturas",
+                "Mermas",
+                "Captura merma",
+            ],
+        )
+        self.assertEqual(self._active_labels("/logistica/rutas/control/"), ["Control rutas"])
+
+    def test_capital_humano_sidebar_group_defines_horizontal_tabs(self):
+        with patch("core.navigation.can_view_submodule", return_value=True):
+            groups = build_nav_groups(SimpleNamespace(is_authenticated=True, is_superuser=True, is_staff=False), "/rrhh/empleados/")
+        capital_humano = next(group for group in groups if group["key"] == "capital_humano")
+
+        self.assertEqual(
+            [item["label"] for item in capital_humano["items"]],
+            [
+                "Indicadores",
+                "Organización",
+                "Catálogos",
+                "Empleados",
+                "Permisos",
+                "Suspensiones",
+                "Incapacidades",
+                "Vacaciones",
+                "Horas extra",
+                "Asistencias",
+                "Reporte asistencia",
+                "Vacantes",
+                "Préstamos",
+                "Nómina",
+                "Prenómina",
+                "Checador",
+                "Asignación sucursal",
+            ],
+        )
+        self.assertEqual(self._active_labels("/rrhh/prenomina/"), ["Prenómina"])
+
+    def test_fallas_sidebar_group_defines_horizontal_tabs(self):
+        with patch("core.navigation.can_view_submodule", return_value=True):
+            groups = build_nav_groups(SimpleNamespace(is_authenticated=True, is_superuser=True, is_staff=False), "/fallas/")
+        fallas = next(group for group in groups if group["key"] == "fallas")
+
+        self.assertEqual(
+            [item["label"] for item in fallas["items"]],
+            ["Reportes de fallas", "Reportar falla", "Reportes", "Categorías"],
+        )
+        categorias = next(item for item in fallas["items"] if item["label"] == "Categorías")
+        self.assertEqual(categorias["url"], "/fallas/?tab=categorias")
+
+    def test_administracion_sidebar_group_defines_horizontal_tabs(self):
+        with patch("core.navigation.can_view_submodule", return_value=True):
+            groups = build_nav_groups(SimpleNamespace(is_authenticated=True, is_superuser=True, is_staff=False), "/activos/seguimiento/")
+        administracion = next(group for group in groups if group["key"] == "administracion")
+
+        self.assertIn("Bandeja Compras", [item["label"] for item in administracion["items"]])
+        self.assertEqual(self._active_labels("/activos/seguimiento/"), ["Bandeja Compras"])
 
     def test_fallas_group_has_sidebar_svg_icon(self):
         template = (Path(settings.BASE_DIR) / "templates" / "base.html").read_text()
