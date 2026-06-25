@@ -357,6 +357,7 @@ class NavigationActiveStateTests(TestCase):
         )
         categorias = next(item for item in fallas["items"] if item["label"] == "Categorías")
         self.assertEqual(categorias["url"], "/fallas/?tab=categorias")
+        self.assertEqual(self._active_labels("/fallas/?tab=categorias"), ["Categorías"])
 
     def test_administracion_sidebar_group_defines_horizontal_tabs(self):
         with patch("core.navigation.can_view_submodule", return_value=True):
