@@ -43,6 +43,11 @@ ERP guardrails:
 
 - Do not make ERP screens feel like Oracle, SAP, or a generic admin template.
 - Do not turn dense operational screens into marketing pages.
+- `core/navigation.py` is the source of truth for ERP group navigation. Every
+  item inside the left sidebar accordion for the active group must also appear
+  in the horizontal top bar, in the same order and with the same labels.
+- New groups or submodules must be added to `NAV_GROUPS` first. Do not create a
+  separate hardcoded horizontal tab list in a template.
 - Keep source-of-truth boundaries visible: Point owns catalog/product/insumos truth, RRHH owns people, `auth.User` owns credentials, and `UserProfile` owns operational scope.
 - Prefer labels and workflows that match bakery operations: production, sales, inventory, branches, logistics, maintenance, bonuses, reports, and exports.
 - Validate important UI changes against the real visible flow when possible: route, button, modal, export, print/PWA behavior, hard refresh, and production state are separate checkpoints.

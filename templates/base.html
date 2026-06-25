@@ -22,7 +22,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.44.0/dist/tabler-icons.min.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Sharp:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200">
     <script defer src="https://cdn.jsdelivr.net/npm/lucide@1.21.0/dist/umd/lucide.min.js"></script>
-    <link rel="stylesheet" href="/static/css/styles.css?v=20260624-logistica-ticket-audit-v1">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260624-erp-nav-unica-v1">
     <link rel="stylesheet" href="/static/css/pollyana_ops_ui.css?v=20260614-ui-fase-final-v1">
     {% block extra_css %}{% endblock %}
     <link rel="stylesheet" href="/static/css/pollyana_generated_utilities.css?v=20260614-ui100-v1">
@@ -921,14 +921,56 @@
         });
     })();
 
-    // ponytail: fallback only; pages with their own group tabs keep them.
+    // ponytail: one source of truth; top tabs mirror the active sidebar accordion.
     (function () {
         var main = document.getElementById('main-content');
         var tpl = document.getElementById('active-group-tabs-template');
         if (!main || !tpl) return;
-        if (main.querySelector('.erp-group-tabs, .module-tabs, .rrhh-tabs, .report-tabs, .mant-tabs')) return;
+        if (main.querySelector('.erp-group-tabs')) return;
         var tabs = tpl.content.firstElementChild && tpl.content.firstElementChild.cloneNode(true);
-        if (tabs) main.prepend(tabs);
+        if (!tabs) return;
+        var canonicalLabels = Array.from(tabs.querySelectorAll('a, button')).map(function (el) {
+            return el.textContent.trim().replace(/\s+/g, ' ');
+        });
+        var canonicalSet = new Set(canonicalLabels);
+        var canonicalHrefs = new Set(Array.from(tabs.querySelectorAll('a[href]')).map(function (el) {
+            return new URL(el.getAttribute('href'), window.location.origin).pathname;
+        }));
+        var tabSelector = [
+            '.module-tabs',
+            '.rrhh-tabs',
+            '.report-tabs',
+            '.mant-tabs',
+            '.tabs-wrap',
+            '.forecast-workflow-tabs',
+            '.costeo-tabs',
+            '.costeo-view-tabs',
+            '.rent-tabs',
+            '.cedis-tabs',
+            '.bandeja-tabs',
+            '.notif-tabs',
+            '.assign-tabs',
+            '.panel-dg-tabs',
+            '.panel-dg-view-tabs',
+            '.investment-module-tabs'
+        ].join(', ');
+        main.querySelectorAll(tabSelector).forEach(function (localTabs) {
+            if (localTabs.classList.contains('erp-group-tabs')) return;
+            var localLabels = Array.from(localTabs.querySelectorAll('a, button')).map(function (el) {
+                return el.textContent.trim().replace(/\s+/g, ' ');
+            }).filter(Boolean);
+            var localHrefs = Array.from(localTabs.querySelectorAll('a[href]')).map(function (el) {
+                return new URL(el.getAttribute('href'), window.location.origin).pathname;
+            });
+            var sameLabels = localLabels.length > 1 && localLabels.every(function (label) { return canonicalSet.has(label); });
+            var sameHrefs = localHrefs.length > 1 && localHrefs.every(function (href) { return canonicalHrefs.has(href); });
+            var matchingHrefs = localHrefs.filter(function (href) { return canonicalHrefs.has(href); }).length;
+            var mostlySameHrefs = localHrefs.length > 1 && matchingHrefs / localHrefs.length >= 0.7;
+            if (sameLabels || sameHrefs || mostlySameHrefs) {
+                localTabs.remove();
+            }
+        });
+        main.prepend(tabs);
     })();
 
     // ── Sidebar colapsable ─────────────────────────────────────────
