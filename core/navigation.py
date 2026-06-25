@@ -44,7 +44,7 @@ NAV_GROUPS = [
             ("fallas", "dashboard", "Reportes de fallas", "/fallas/", ["/fallas/"]),
             ("fallas", "reportar", "Reportar falla", "/fallas/reportar/", ["/fallas/reportar/"]),
             ("fallas", "mis_reportes", "Reportes", "/fallas/mis-reportes/", ["/fallas/mis-reportes/"]),
-            ("fallas", "categorias", "Categorías", "/fallas/?tab=categorias", ["/__fallas_categorias_query__/"]),
+            ("fallas", "categorias", "Categorías", "/fallas/?tab=categorias", ["/fallas/?tab=categorias"]),
         ],
     },
     {
