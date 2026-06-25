@@ -596,3 +596,23 @@ class BonosVentasTests(TestCase):
         self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_AUTORIZADO)
         self.assertEqual(hora_extra.autorizado_por, user)
         self.assertEqual(hora_extra.monto_calculado, Decimal("200.00"))
+
+        editar_autorizada = self.client.post(
+            f"/api/bonos-ventas/horas-extra/{hora_extra.id}/editar/",
+            json.dumps(
+                {
+                    "fecha": "2026-05-21",
+                    "horas": "2.50",
+                    "notas": "Captura corregida despues de autorizar",
+                    "motivo_cambio": "Se autorizo con horas incorrectas",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(editar_autorizada.status_code, 200)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_AUTORIZADO)
+        self.assertEqual(hora_extra.horas, Decimal("2.50"))
+        self.assertEqual(hora_extra.monto_calculado, Decimal("250.00"))
+        self.assertIn("Se autorizo con horas incorrectas", hora_extra.notas)
