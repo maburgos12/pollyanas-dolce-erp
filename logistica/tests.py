@@ -3793,6 +3793,28 @@ class LogisticaControlRutasTests(TestCase):
             ["ANTES-CEDIS", "DESPUES-CEDIS"],
         )
 
+    def test_api_ruta_activa_hidrata_carga_desde_cache_point_si_checklist_esta_vacia(self):
+        self.client.force_login(self.user)
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        transfer_line = self._crear_transferencia_point_abierta(source_hash="transfer-pwa-vacia")
+        RutaCargaChecklist.objects.create(ruta=ruta, estatus=RutaCargaChecklist.ESTATUS_PENDIENTE)
+
+        response = self.client.get(reverse("api_logistica_ruta_activa"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["ruta"]["id"], ruta.id)
+        self.assertEqual(len(response.json()["checklist_carga"]["lineas"]), 1)
+        linea = response.json()["checklist_carga"]["lineas"][0]
+        self.assertEqual(linea["item_code"], transfer_line.item_code)
+        self.assertEqual(linea["parada"], parada.id)
+        self.assertTrue(
+            RutaCargaChecklistLinea.objects.filter(
+                checklist__ruta=ruta,
+                source_hash=transfer_line.source_hash,
+                parada=parada,
+            ).exists()
+        )
+
     def test_checklist_detallado_serializa_sin_consultas_por_linea(self):
         self._crear_linea_carga_con_transferencia_recibida()
         checklist = obtener_checklist_carga_detallado(self.ruta)
