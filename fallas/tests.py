@@ -5,11 +5,13 @@ from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
+from rest_framework.authtoken.models import Token
 
 from core.models import Sucursal, UserModuleAccess, UserProfile
 from core.navigation import build_nav_groups
 
 from .models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
+from .serializers import SucursalFallaSerializer
 from .tasks import _emails_de_grupo
 
 
@@ -109,6 +111,20 @@ class MisReportesActionsTests(TestCase):
         bitacora = BitacoraFalla.objects.get(reporte=self.reporte, comentario="Trabajo terminado con evidencia.")
         evidencia = EvidenciaSeguimientoFalla.objects.get(bitacora=bitacora)
         self.assertEqual(evidencia.nombre, "resultado.jpg")
+
+    def test_sucursales_endpoint_uniforma_etiquetas_con_prefijo_sucursal(self):
+        token = Token.objects.create(user=self.user)
+        self.client.defaults["HTTP_AUTHORIZATION"] = f"Token {token.key}"
+
+        response = self.client.get(reverse("fallas:sucursales"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        items = payload.get("results") if isinstance(payload, dict) else payload
+        names = [item["nombre"] for item in items]
+        self.assertIn("Sucursal Las Glorias", names)
+        self.assertTrue(all(name.startswith("Sucursal ") for name in names))
+        self.assertEqual(SucursalFallaSerializer(self.cedis).data["nombre"], "Sucursal CEDIS")
 
     def test_editar_reporte_propio_abierto_actualiza_campos(self):
         self.client.force_login(self.user)
