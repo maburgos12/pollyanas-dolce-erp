@@ -245,8 +245,31 @@ class LogisticaSeedPuntosPollyanasTests(TestCase):
 
         self.assertEqual(Sucursal.objects.filter(codigo__in=["MATRIZ", "GUAMUCHIL"]).count(), 2)
         self.assertEqual(PuntoLogistico.objects.filter(tipo=PuntoLogistico.TIPO_SUCURSAL, activo=True).count(), 9)
+        self.assertTrue(Sucursal.objects.filter(codigo="LAS_GLORIAS").exists())
+        self.assertTrue(Sucursal.objects.filter(codigo="PLAZA_NIO").exists())
+        self.assertTrue(Sucursal.objects.filter(codigo="EL_TUNEL").exists())
+        self.assertFalse(Sucursal.objects.filter(codigo__in=["GLORIAS", "NIO", "TUNEL"]).exists())
         self.assertTrue(PuntoLogistico.objects.filter(nombre="Sucursal Matriz", radio_geocerca_metros=120).exists())
         self.assertTrue(PuntoLogistico.objects.filter(nombre="Sucursal Guamuchil", notas__contains="Blvd. Rosales 627").exists())
+
+    def test_normalize_branch_aliases_migrates_logistica_and_deletes_alias(self):
+        canonical = Sucursal.objects.create(codigo="LAS_GLORIAS", nombre="Las Glorias", activa=True)
+        alias = Sucursal.objects.create(codigo="GLORIAS", nombre="Sucursal Plaza Las Glorias", activa=True)
+        punto = PuntoLogistico.objects.create(
+            sucursal=alias,
+            nombre="Sucursal Plaza Las Glorias",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.558665",
+            longitud="-108.470713",
+            radio_geocerca_metros=120,
+            activo=True,
+        )
+
+        call_command("normalize_branch_aliases", "--execute", stdout=StringIO())
+
+        punto.refresh_from_db()
+        self.assertEqual(punto.sucursal_id, canonical.id)
+        self.assertFalse(Sucursal.objects.filter(codigo="GLORIAS").exists())
 
 
 class LogisticaSeedRepartidoresTests(TestCase):

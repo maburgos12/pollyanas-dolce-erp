@@ -78,6 +78,15 @@ class DailyInventoryCloseServiceTests(TestCase):
         self.assertEqual(payload["rows"][0]["total_stock"], Decimal("14.500"))
         self.assertEqual(payload["missing_branch_codes"], [])
 
+    def test_build_close_ignores_operational_alias_branch_without_point_mapping(self):
+        Sucursal.objects.create(codigo="TUNEL", nombre="Sucursal El Tunel", activa=True)
+        self._snapshot(branch=self.matriz_branch, stock="4.5", captured_at="2026-05-08T23:00:00")
+
+        payload = DailyInventoryCloseService().build_close(fecha_operacion=datetime(2026, 5, 8).date())
+
+        self.assertEqual([branch["code"] for branch in payload["branches"]], ["EL_TUNEL", "CEDIS"])
+        self.assertNotIn("TUNEL", payload["missing_branch_codes"])
+
     def test_build_workbook_exports_same_matrix(self):
         self._snapshot(branch=self.matriz_branch, stock="4", captured_at="2026-05-08T23:00:00")
         self._snapshot(branch=self.cedis_branch, stock="10", captured_at="2026-05-08T23:05:00")

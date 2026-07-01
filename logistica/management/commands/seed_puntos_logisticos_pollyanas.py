@@ -29,7 +29,7 @@ class Command(BaseCommand):
             "google_maps_url": "https://maps.app.goo.gl/cYEw3cTmRV9EoPe16",
         },
         {
-            "codigo": "GLORIAS",
+            "codigo": "LAS_GLORIAS",
             "nombre": "Sucursal Plaza Las Glorias",
             "direccion": "Francisco Gonzalez Bocanegra 87, Plaza Las Glorias, Local 4, Col. Las Huertas, Guasave, Sinaloa",
             "latitud": "25.558665",
@@ -37,7 +37,7 @@ class Command(BaseCommand):
             "google_maps_url": "https://maps.app.goo.gl/azxPRc3FTf6dFjZj9",
         },
         {
-            "codigo": "NIO",
+            "codigo": "PLAZA_NIO",
             "nombre": "Sucursal Plaza Nio",
             "direccion": "Paseo Miguel Leyson Perez, Plaza Nio 133, Local 9, Guasave, Sinaloa",
             "latitud": "25.581116",
@@ -61,7 +61,7 @@ class Command(BaseCommand):
             "google_maps_url": "https://maps.app.goo.gl/L7xThrqK36PTYeVx6",
         },
         {
-            "codigo": "TUNEL",
+            "codigo": "EL_TUNEL",
             "nombre": "Sucursal El Tunel",
             "direccion": "Juan San Millan S/N, Las Palmillas, Guasave, Sinaloa",
             "latitud": "25.565774",

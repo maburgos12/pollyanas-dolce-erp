@@ -13,7 +13,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from core.models import Sucursal, sucursales_operativas
+from core.branch_catalog import canonical_point_network_branch_qs
+from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointInventorySnapshot
 
 
@@ -63,7 +64,7 @@ class DailyInventoryCloseService:
         return start_local.astimezone(datetime_timezone.utc), end_local.astimezone(datetime_timezone.utc)
 
     def _target_branches(self, fecha_operacion: date) -> list[Sucursal]:
-        branches = list(sucursales_operativas(fecha_operacion).order_by("codigo", "nombre"))
+        branches = list(canonical_point_network_branch_qs(fecha_operacion))
         cedis = Sucursal.objects.filter(codigo="CEDIS").first()
         if cedis and all(branch.pk != cedis.pk for branch in branches):
             branches.append(cedis)
