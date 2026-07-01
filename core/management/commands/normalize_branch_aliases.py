@@ -6,6 +6,8 @@ from django.db import IntegrityError, transaction
 
 from core.branch_catalog import POINT_BRANCH_CODE_ALIASES
 from core.models import Sucursal
+from rentabilidad.models_rentabilidad import SucursalRentabilidad
+from reportes.models import FactProduccionDiaria
 
 
 class Command(BaseCommand):
@@ -67,6 +69,8 @@ class Command(BaseCommand):
         return sorted(counts)
 
     def _migrate_foreign_keys(self, *, ghost: Sucursal, canonical: Sucursal) -> None:
+        self._merge_fact_produccion_diaria(ghost=ghost, canonical=canonical)
+        self._merge_sucursal_rentabilidad(ghost=ghost, canonical=canonical)
         for model in apps.get_models(include_auto_created=True):
             for field in model._meta.get_fields():
                 if not getattr(field, "concrete", False):
@@ -74,6 +78,8 @@ class Command(BaseCommand):
                 if getattr(field, "related_model", None) is not Sucursal:
                     continue
                 if not (getattr(field, "many_to_one", False) or getattr(field, "one_to_one", False)):
+                    continue
+                if model in {FactProduccionDiaria, SucursalRentabilidad}:
                     continue
                 queryset = model.objects.filter(**{field.name: ghost})
                 if not queryset.exists():
@@ -84,3 +90,33 @@ class Command(BaseCommand):
                     raise CommandError(
                         f"No pude migrar {model._meta.label}.{field.name} de {ghost.codigo} a {canonical.codigo}: {exc}"
                     ) from exc
+
+    def _merge_fact_produccion_diaria(self, *, ghost: Sucursal, canonical: Sucursal) -> None:
+        for row in FactProduccionDiaria.objects.filter(sucursal=ghost):
+            duplicate = FactProduccionDiaria.objects.filter(
+                sucursal=canonical,
+                fecha=row.fecha,
+                receta=row.receta,
+            ).first()
+            if not duplicate:
+                row.sucursal = canonical
+                row.save(update_fields=["sucursal", "actualizado_en"])
+                continue
+            duplicate.producido += row.producido
+            duplicate.vendido += row.vendido
+            duplicate.merma += row.merma
+            duplicate.transferido += row.transferido
+            duplicate.save(update_fields=["producido", "vendido", "merma", "transferido", "actualizado_en"])
+            row.delete()
+
+    def _merge_sucursal_rentabilidad(self, *, ghost: Sucursal, canonical: Sucursal) -> None:
+        for row in SucursalRentabilidad.objects.filter(sucursal=ghost):
+            duplicate = SucursalRentabilidad.objects.filter(
+                sucursal=canonical,
+                periodo=row.periodo,
+            ).first()
+            if duplicate:
+                row.delete()
+                continue
+            row.sucursal = canonical
+            row.save(update_fields=["sucursal"])
