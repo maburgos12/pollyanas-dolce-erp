@@ -529,9 +529,14 @@ def _can_approve_ajustes(user) -> bool:
     return has_any_role(user, ROLE_ADMIN, ROLE_DG)
 
 
+@transaction.atomic
 def _apply_ajuste(ajuste: AjusteInventario, acted_by, comentario: str = "") -> None:
+    ajuste = AjusteInventario.objects.select_for_update().select_related("insumo").get(pk=ajuste.pk)
+    if ajuste.estatus == AjusteInventario.STATUS_APLICADO:
+        return
     insumo_canonical = canonical_insumo_by_id(ajuste.insumo_id) or ajuste.insumo
     existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=insumo_canonical)
+    existencia = ExistenciaInsumo.objects.select_for_update().get(pk=existencia.pk)
     prev_stock = existencia.stock_actual
     delta = ajuste.cantidad_fisica - ajuste.cantidad_sistema
     if ajuste.insumo_id == insumo_canonical.id:

@@ -19,6 +19,7 @@ from compras.models import (
     RecepcionCompra,
     SolicitudCompra,
 )
+from compras.views import _apply_recepcion_to_inventario
 from inventario.models import ExistenciaInsumo, MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
 from recetas.models import (
@@ -2411,6 +2412,14 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
         self.recepcion_pendiente.refresh_from_db()
         self.assertEqual(self.recepcion_pendiente.estatus, RecepcionCompra.STATUS_CERRADA)
         existencia.refresh_from_db()
+        self.assertEqual(existencia.stock_actual, Decimal("2"))
+        self.assertEqual(
+            MovimientoInventario.objects.filter(source_hash=f"recepcion:{self.recepcion_pendiente.id}:entrada").count(),
+            1,
+        )
+        result = _apply_recepcion_to_inventario(self.recepcion_pendiente, acted_by=self.user)
+        existencia.refresh_from_db()
+        self.assertEqual(result["reason"], "ya_aplicado")
         self.assertEqual(existencia.stock_actual, Decimal("2"))
         self.assertEqual(
             MovimientoInventario.objects.filter(source_hash=f"recepcion:{self.recepcion_pendiente.id}:entrada").count(),
