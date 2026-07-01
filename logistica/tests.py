@@ -54,6 +54,8 @@ from logistica.tasks import _emails_de_grupo, detectar_gps_perdido_rutas
 from api.logistica_views import _can_operate_pwa
 from pos_bridge.models import PointBranch, PointSyncJob, PointTransferLine
 from recetas.models import Receta, SolicitudReabastoCedis, SolicitudReabastoCedisLinea
+from rentabilidad.models_rentabilidad import SucursalRentabilidad
+from reportes.models import FactProduccionDiaria
 
 
 class LogisticaEmailTemplateTests(SimpleTestCase):
@@ -270,6 +272,39 @@ class LogisticaSeedPuntosPollyanasTests(TestCase):
         punto.refresh_from_db()
         self.assertEqual(punto.sucursal_id, canonical.id)
         self.assertFalse(Sucursal.objects.filter(codigo="GLORIAS").exists())
+
+    def test_normalize_branch_aliases_merges_fact_produccion_and_drops_zero_rentabilidad_alias(self):
+        canonical = Sucursal.objects.create(codigo="EL_TUNEL", nombre="El Túnel", activa=True)
+        alias = Sucursal.objects.create(codigo="TUNEL", nombre="Sucursal El Tunel", activa=True)
+        receta = Receta.objects.create(
+            nombre="Pastel QA",
+            codigo_point="PASTEL-QA-TUNEL",
+            hash_contenido="hash-normalize-branch-aliases-tunel",
+        )
+        FactProduccionDiaria.objects.create(
+            fecha=timezone.localdate(),
+            sucursal=canonical,
+            receta=receta,
+            vendido=Decimal("2"),
+            transferido=Decimal("0"),
+        )
+        FactProduccionDiaria.objects.create(
+            fecha=timezone.localdate(),
+            sucursal=alias,
+            receta=receta,
+            vendido=Decimal("0"),
+            transferido=Decimal("3"),
+        )
+        SucursalRentabilidad.objects.create(sucursal=canonical, periodo=timezone.localdate().replace(day=1), ventas_brutas=Decimal("100"))
+        SucursalRentabilidad.objects.create(sucursal=alias, periodo=timezone.localdate().replace(day=1), ventas_brutas=Decimal("0"))
+
+        call_command("normalize_branch_aliases", "--execute", stdout=StringIO())
+
+        fact = FactProduccionDiaria.objects.get(sucursal=canonical, fecha=timezone.localdate(), receta=receta)
+        self.assertEqual(fact.vendido, Decimal("2"))
+        self.assertEqual(fact.transferido, Decimal("3"))
+        self.assertEqual(SucursalRentabilidad.objects.filter(sucursal=canonical, periodo=timezone.localdate().replace(day=1)).count(), 1)
+        self.assertFalse(Sucursal.objects.filter(codigo="TUNEL").exists())
 
 
 class LogisticaSeedRepartidoresTests(TestCase):
