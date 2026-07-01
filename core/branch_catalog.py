@@ -27,9 +27,24 @@ POINT_MATURE_BRANCH_CODES = (
     "PLAZA_NIO",
 )
 
+POINT_BRANCH_CODE_ALIASES = {
+    "GLORIAS": "LAS_GLORIAS",
+    "NIO": "PLAZA_NIO",
+    "TUNEL": "EL_TUNEL",
+}
+
 
 def canonical_point_active_branch_qs():
     return eligible_operational_branch_qs().filter(codigo__in=POINT_MATURE_BRANCH_CODES).order_by("codigo")
+
+
+def canonical_point_network_branch_qs(reference_date=None):
+    return eligible_operational_branch_qs(reference_date).filter(codigo__in=POINT_NETWORK_BRANCH_CODES).order_by("codigo")
+
+
+def canonical_point_branch_code(code: str | None) -> str:
+    normalized = (code or "").strip().upper()
+    return POINT_BRANCH_CODE_ALIASES.get(normalized, normalized)
 
 
 def eligible_operational_branch_qs(reference_date=None):
