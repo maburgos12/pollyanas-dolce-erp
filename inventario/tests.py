@@ -14,6 +14,7 @@ from core.models import AuditLog
 from compras.models import SolicitudCompra
 from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
 from inventario.stock_trace import TRACE_RECONSTRUCTED_MOVEMENT, TRACE_RECONSTRUCTED_SYNC
+from inventario.views import _apply_ajuste
 from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch, Proveedor, UnidadMedida
 from recetas.models import LineaReceta, Receta, VentaHistorica
 
@@ -2401,6 +2402,11 @@ class InventarioAjustesApprovalTests(TestCase):
         self.assertIsNotNone(movimiento)
         self.assertEqual(movimiento.cantidad, Decimal("2"))
         self.assertEqual(movimiento.tipo, MovimientoInventario.TIPO_SALIDA)
+
+        _apply_ajuste(ajuste, self.admin)
+        self.existencia.refresh_from_db()
+        self.assertEqual(self.existencia.stock_actual, Decimal("8"))
+        self.assertEqual(MovimientoInventario.objects.filter(referencia=ajuste.folio).count(), 1)
 
     def test_admin_aprueba_ajuste_de_variante_y_aplica_en_canonico(self):
         proveedor = Proveedor.objects.create(nombre="Proveedor Ajuste Canon", activo=True)
