@@ -54,16 +54,20 @@ def _append_nota_operativa(hora_extra: HoraExtra, texto: str) -> None:
     hora_extra.notas = f"{nota_actual}\n\n{texto}".strip()
 
 
+def _puede_autorizar_hora_extra(user, hora_extra: HoraExtra) -> bool:
+    return bool(
+        user
+        and getattr(user, "is_authenticated", False)
+        and hora_extra.estado == HoraExtra.ESTADO_PENDIENTE
+        and (hora_extra.jefe_directo_id == user.id or getattr(user, "is_superuser", False))
+    )
+
+
 def _hora_extra_payload(hora_extra: HoraExtra, user=None, puede_gestionar: bool = False) -> dict:
     jefe_nombre = ""
     if hora_extra.jefe_directo_id:
         jefe_nombre = hora_extra.jefe_directo.get_full_name() or hora_extra.jefe_directo.username
-    puede_autorizar = bool(
-        user
-        and getattr(user, "is_authenticated", False)
-        and hora_extra.estado == HoraExtra.ESTADO_PENDIENTE
-        and hora_extra.jefe_directo_id == user.id
-    )
+    puede_autorizar = _puede_autorizar_hora_extra(user, hora_extra)
     puede_editar = bool(puede_gestionar and hora_extra.estado in ESTADOS_HORA_EXTRA_EDITABLES)
     puede_eliminar = bool(puede_gestionar and hora_extra.estado in ESTADOS_HORA_EXTRA_ELIMINABLES)
     return {
@@ -285,10 +289,10 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
     @action(detail=True, methods=["post"])
     def autorizar(self, request, pk=None):
         hora_extra = self.get_object()
-        if hora_extra.jefe_directo_id != request.user.id:
-            return Response({"detail": "Solo el jefe directo asignado puede autorizar esta hora extra."}, status=status.HTTP_403_FORBIDDEN)
         if hora_extra.estado != HoraExtra.ESTADO_PENDIENTE:
             return Response({"detail": "Solo se pueden autorizar horas extra pendientes."}, status=status.HTTP_400_BAD_REQUEST)
+        if not _puede_autorizar_hora_extra(request.user, hora_extra):
+            return Response({"detail": "Solo el jefe directo asignado puede autorizar esta hora extra."}, status=status.HTTP_403_FORBIDDEN)
         hora_extra.estado = HoraExtra.ESTADO_AUTORIZADO
         hora_extra.autorizado_por = request.user
 
