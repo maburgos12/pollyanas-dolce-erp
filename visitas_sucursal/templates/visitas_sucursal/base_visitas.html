@@ -49,6 +49,7 @@
   .visit-calendar-title { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 12px; border-bottom: 1px solid #eadde4; }
   .visit-calendar-title strong { color: #2f1724; font-size: 1.05rem; }
   .visit-calendar-title span { color: #715d68; font-size: .9rem; font-weight: 800; }
+  .visit-mobile-schedule { display: none; }
   .visit-calendar-wrap { overflow-x: auto; }
   .visit-calendar { width: 100%; min-width: 980px; border-collapse: collapse; table-layout: fixed; }
   .visit-calendar th, .visit-calendar td { height: 36px; border: 1px solid #1f151b; padding: 2px; text-align: center; vertical-align: middle; }
@@ -84,7 +85,28 @@
   }
   @media (max-width: 520px) {
     .visit-shell { padding: 12px; }
+    .visit-title { font-size: 1.22rem; }
+    .visit-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; }
+    .visit-btn { min-height: 44px; padding: 0 10px; }
+    .visit-btn.compact { width: auto; }
+    .visit-summary-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+    .visit-summary-strip span { display: grid; justify-items: center; min-height: 52px; padding: 7px 6px; text-align: center; line-height: 1.12; }
     .visit-panel { padding: 12px; }
+    .visit-calendar-card { border: 0; background: transparent; overflow: visible; }
+    .visit-calendar-title { padding: 14px; border: 1px solid #eadde4; border-radius: 8px; background: #fff; }
+    .visit-calendar-wrap { display: none; }
+    .visit-mobile-schedule { display: grid; gap: 10px; padding: 10px 0 0; }
+    .visit-mobile-branch { border: 1px solid #eadde4; border-radius: 8px; background: #fff; overflow: hidden; }
+    .visit-mobile-branch-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; padding: 12px; background: #fbf7f9; }
+    .visit-mobile-branch-head strong { color: #8b2252; font-size: .96rem; line-height: 1.2; }
+    .visit-mobile-branch-head span { color: #2f1724; font-weight: 900; text-align: right; }
+    .visit-mobile-days { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; }
+    .visit-mobile-day { display: inline-flex; min-width: 46px; min-height: 44px; align-items: center; justify-content: center; gap: 3px; border-radius: 8px; background: #f4ecf0; color: #5d2742; font-weight: 900; text-decoration: none; }
+    .visit-mobile-day.programada { background: #c59645; color: #1f151b; }
+    .visit-mobile-day.realizada { background: #2e8b66; color: #fff; }
+    .visit-mobile-day.cancelada { background: #d8c7d0; color: #4b3642; }
+    .visit-mobile-empty { padding: 0 12px 12px; color: #715d68; font-size: .88rem; }
+    .visit-legend { font-size: .82rem; }
     .visit-check { gap: 10px; padding: 12px; }
     .visit-check-controls { grid-template-columns: 1fr; }
   }

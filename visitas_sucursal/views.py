@@ -208,6 +208,7 @@ def lista_visitas(request):
                 "sucursal": sucursal,
                 "cells": cells,
                 "avance": round((row_visits / total_programadas) * 100) if total_programadas else 0,
+                "visitas_count": row_visits,
             }
         )
 
