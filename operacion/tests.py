@@ -140,6 +140,8 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Registrar merma")
         self.assertContains(response, "Reportar falla")
+        self.assertContains(response, 'href="/fallas/app/"')
+        self.assertNotContains(response, 'href="/fallas/reportar/"')
         self.assertContains(response, "Colosio")
         self.assertNotContains(response, "Flota")
         self.assertNotContains(response, "Mantenimiento vehicular")
@@ -153,7 +155,7 @@ class OperacionAppTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "Auditorías")
-        self.assertNotContains(response, "/visitas-sucursal/app/")
+        self.assertNotContains(response, 'href="/visitas-sucursal/app/"')
         self.assertNotContains(response, 'href="/visitas-sucursal/"')
 
     def test_auditor_gets_auditorias_tile_from_unified_app(self):
@@ -166,8 +168,8 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Auditorías")
         self.assertContains(response, "Visitas a sucursal, checklist, hallazgos")
-        self.assertContains(response, 'href="/visitas-sucursal/"')
-        self.assertNotContains(response, "/visitas-sucursal/app/")
+        self.assertContains(response, 'href="/visitas-sucursal/app/"')
+        self.assertNotContains(response, 'href="/visitas-sucursal/"')
 
     def test_branch_capture_only_can_enter_app_but_regular_erp_still_redirects(self):
         user = self._user("captura.reabasto", sucursal=self.sucursal)
@@ -197,6 +199,9 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "Tickets logística")
         self.assertContains(response, "Flota")
         self.assertContains(response, "Rutas")
+        self.assertContains(response, "/logistica/app/?pantalla=mis_reportes")
+        self.assertContains(response, "/logistica/app/?pantalla=inspeccion_vehiculo")
+        self.assertContains(response, "/logistica/app/?pantalla=ruta_activa")
         self.assertNotContains(response, "Logística móvil")
         self.assertNotContains(response, "Registrar merma")
 
@@ -425,6 +430,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Mantenimiento")
         self.assertContains(response, "Tickets logística")
+        self.assertContains(response, "/logistica/app/?pantalla=mis_reportes")
         self.assertNotContains(response, "Logística móvil")
 
     def test_dg_mermas_tiles_do_not_logout_and_respect_requested_mode(self):
