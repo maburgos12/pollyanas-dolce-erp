@@ -45,6 +45,49 @@ class VisitasSucursalTests(TestCase):
         self.assertContains(response, "Payán")
         self.assertContains(response, "Plan")
 
+    def test_visitas_sucursal_excluye_cedis_del_cronograma_y_app(self):
+        cedis, _created = Sucursal.objects.update_or_create(
+            codigo="CEDIS",
+            defaults={"nombre": "CEDIS", "activa": True},
+        )
+        VisitaSucursal.objects.create(
+            sucursal=cedis,
+            fecha_programada="2026-06-24",
+            creado_por=self.user,
+        )
+        Empleado.objects.create(nombre="Encargado de control de producción", sucursal="CEDIS")
+
+        response = self.client.get(reverse("visitas_sucursal:lista"), {"anio": 2026, "mes": 6})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("CEDIS", [row["sucursal"].codigo for row in response.context["rows"]])
+
+        response = self.client.get(reverse("visitas_sucursal:app"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("CEDIS", [visita.sucursal.codigo for visita in response.context["visitas"]])
+        self.assertNotIn("CEDIS", [sucursal.codigo for sucursal in response.context["sucursales_preview"]])
+        self.assertNotContains(response, "Encargado de control de producción")
+
+    def test_no_permite_programar_visita_a_cedis(self):
+        cedis, _created = Sucursal.objects.update_or_create(
+            codigo="CEDIS",
+            defaults={"nombre": "CEDIS", "activa": True},
+        )
+
+        response = self.client.post(
+            reverse("visitas_sucursal:lista"),
+            {
+                "anio": 2026,
+                "mes": 6,
+                "sucursal": cedis.id,
+                "fecha_programada": "2026-06-25",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(VisitaSucursal.objects.filter(sucursal=cedis).exists())
+
     def test_lista_programa_visita_desde_cronograma(self):
         response = self.client.post(
             reverse("visitas_sucursal:lista"),
