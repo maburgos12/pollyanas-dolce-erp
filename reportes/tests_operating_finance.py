@@ -84,6 +84,11 @@ from reportes.services_branch_real_operating_expense_import import (
 from reportes.services_historical_branch_expense_import import HistoricalBranchExpenseImportService
 from reportes.services_operating_expense_automation import OperatingExpenseImportAutomationService
 from reportes.services_production_expense_import import ProductionExpenseImportService
+from reportes.services_nomina_produccion import (
+    calcular_mano_obra_produccion,
+    sincronizar_mano_obra_produccion,
+)
+from rrhh.models import Empleado, NominaLinea, NominaPeriodo
 
 
 class OperatingFinanceBootstrapServiceTests(TestCase):
@@ -3552,3 +3557,117 @@ class BudgetAreaUploadViewTests(TestCase):
         self.assertIsNotNone(success_log)
         self.assertEqual(success_log.payload["area_key"], "admin")
         self.assertContains(response, "PRESUPUESTO ADMINISTRACIÓN 2026.xlsx::ADMON")
+
+
+class ManoObraProduccionAutomaticaTests(TestCase):
+    def _empleado(self, *, codigo, nombre, departamento):
+        return Empleado.objects.create(
+            codigo=codigo,
+            nombre=nombre,
+            departamento=departamento,
+            fecha_ingreso=date(2026, 1, 1),
+            salario_diario=Decimal("400.00"),
+        )
+
+    def _periodo(self, *, fecha_inicio, fecha_fin, estatus):
+        return NominaPeriodo.objects.create(
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+            estatus=estatus,
+        )
+
+    def test_suma_solo_produccion_de_periodos_cerrados(self):
+        produccion = self._empleado(codigo="P1", nombre="Prod Uno", departamento=Empleado.DEP_PRODUCCION)
+        ventas = self._empleado(codigo="V1", nombre="Ventas Uno", departamento=Empleado.DEP_VENTAS)
+        periodo = self._periodo(
+            fecha_inicio=date(2026, 5, 1), fecha_fin=date(2026, 5, 15), estatus=NominaPeriodo.ESTATUS_CERRADA
+        )
+        NominaLinea.objects.create(periodo=periodo, empleado=produccion, salario_base=Decimal("5000.00"))
+        NominaLinea.objects.create(periodo=periodo, empleado=ventas, salario_base=Decimal("3000.00"))
+
+        total = calcular_mano_obra_produccion(date(2026, 5, 1))
+
+        self.assertEqual(total, Decimal("5000.00"))
+
+    def test_incluye_departamento_origen_como_fallback(self):
+        empleado = self._empleado(codigo="P2", nombre="Prod Dos", departamento="")
+        empleado.departamento_origen = Empleado.DEP_PRODUCCION
+        empleado.save(update_fields=["departamento_origen"])
+        periodo = self._periodo(
+            fecha_inicio=date(2026, 5, 1), fecha_fin=date(2026, 5, 15), estatus=NominaPeriodo.ESTATUS_PAGADA
+        )
+        NominaLinea.objects.create(periodo=periodo, empleado=empleado, salario_base=Decimal("4200.00"))
+
+        total = calcular_mano_obra_produccion(date(2026, 5, 1))
+
+        self.assertEqual(total, Decimal("4200.00"))
+
+    def test_mes_solo_con_periodo_borrador_retorna_none(self):
+        produccion = self._empleado(codigo="P3", nombre="Prod Tres", departamento=Empleado.DEP_PRODUCCION)
+        periodo = self._periodo(
+            fecha_inicio=date(2026, 5, 1), fecha_fin=date(2026, 5, 15), estatus=NominaPeriodo.ESTATUS_BORRADOR
+        )
+        NominaLinea.objects.create(periodo=periodo, empleado=produccion, salario_base=Decimal("5000.00"))
+
+        self.assertIsNone(calcular_mano_obra_produccion(date(2026, 5, 1)))
+
+    def test_sincronizar_sin_periodos_no_escribe(self):
+        resumen = sincronizar_mano_obra_produccion(date(2026, 5, 1))
+
+        self.assertFalse(resumen.escrito)
+        self.assertEqual(GastoOperativoMensual.objects.count(), 0)
+
+    def test_sincronizar_crea_fila_y_es_idempotente(self):
+        produccion = self._empleado(codigo="P4", nombre="Prod Cuatro", departamento=Empleado.DEP_PRODUCCION)
+        periodo = self._periodo(
+            fecha_inicio=date(2026, 5, 1), fecha_fin=date(2026, 5, 15), estatus=NominaPeriodo.ESTATUS_CERRADA
+        )
+        NominaLinea.objects.create(periodo=periodo, empleado=produccion, salario_base=Decimal("7000.00"))
+
+        primero = sincronizar_mano_obra_produccion(date(2026, 5, 1))
+        segundo = sincronizar_mano_obra_produccion(date(2026, 5, 1))
+
+        self.assertTrue(primero.escrito)
+        self.assertTrue(segundo.escrito)
+        self.assertEqual(GastoOperativoMensual.objects.filter(external_key=primero.external_key).count(), 1)
+        fila = GastoOperativoMensual.objects.get(external_key=primero.external_key)
+        self.assertEqual(fila.monto, Decimal("7000.00"))
+        self.assertEqual(fila.categoria_gasto.codigo, "MANO_OBRA_PROD")
+        self.assertEqual(fila.centro_costo.codigo, "PROD")
+
+    def test_dry_run_no_persiste(self):
+        produccion = self._empleado(codigo="P5", nombre="Prod Cinco", departamento=Empleado.DEP_PRODUCCION)
+        periodo = self._periodo(
+            fecha_inicio=date(2026, 5, 1), fecha_fin=date(2026, 5, 15), estatus=NominaPeriodo.ESTATUS_CERRADA
+        )
+        NominaLinea.objects.create(periodo=periodo, empleado=produccion, salario_base=Decimal("7000.00"))
+
+        resumen = sincronizar_mano_obra_produccion(date(2026, 5, 1), dry_run=True)
+
+        self.assertFalse(resumen.escrito)
+        self.assertEqual(resumen.monto, Decimal("7000.00"))
+        self.assertEqual(GastoOperativoMensual.objects.count(), 0)
+
+    def test_reemplaza_filas_legacy_del_mismo_mes_sin_duplicar(self):
+        OperatingFinanceBootstrapService().bootstrap()
+        categoria = CategoriaGasto.objects.get(codigo="MANO_OBRA_PROD")
+        centro = CentroCosto.objects.get(codigo="PROD")
+        GastoOperativoMensual.objects.create(
+            external_key="NOMINA_REAL|PROD|2026-05|sueldo",
+            periodo=date(2026, 5, 1),
+            categoria_gasto=categoria,
+            centro_costo=centro,
+            monto=Decimal("6000.00"),
+        )
+        produccion = self._empleado(codigo="P6", nombre="Prod Seis", departamento=Empleado.DEP_PRODUCCION)
+        periodo = self._periodo(
+            fecha_inicio=date(2026, 5, 1), fecha_fin=date(2026, 5, 15), estatus=NominaPeriodo.ESTATUS_CERRADA
+        )
+        NominaLinea.objects.create(periodo=periodo, empleado=produccion, salario_base=Decimal("7000.00"))
+
+        resumen = sincronizar_mano_obra_produccion(date(2026, 5, 1))
+
+        self.assertEqual(resumen.filas_legacy_borradas, 1)
+        filas = GastoOperativoMensual.objects.filter(periodo=date(2026, 5, 1), categoria_gasto=categoria, centro_costo=centro)
+        self.assertEqual(filas.count(), 1)
+        self.assertEqual(filas.first().monto, Decimal("7000.00"))
