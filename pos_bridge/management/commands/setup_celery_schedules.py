@@ -440,6 +440,26 @@ class Command(BaseCommand):
             },
         )
 
+        reporte_diario_offset = analytics_refresh_minute + 25  # +10 del snapshot, +15 de margen
+        reporte_diario_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute=str(reporte_diario_offset % 60),
+            hour=str((analytics_refresh_hour + reporte_diario_offset // 60) % 24),
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="reportes: enviar reporte diario",
+            defaults={
+                "task": "reportes.enviar_reporte_diario",
+                "crontab": reporte_diario_cron,
+                "interval": None,
+                "kwargs": json.dumps({}),
+                "enabled": True,
+            },
+        )
+
         realtime_minutes = _env_int(
             "POS_BRIDGE_REALTIME_INTERVAL_MINUTES",
             10,

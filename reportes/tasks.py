@@ -37,6 +37,13 @@ def task_refresh_dg_operacion_snapshot(self):
     }
 
 
+@shared_task(name="reportes.enviar_reporte_diario")
+def enviar_reporte_diario(fecha_operacion: str | None = None) -> dict:
+    from reportes.services_reporte_diario import construir_y_enviar_reporte_diario
+
+    return construir_y_enviar_reporte_diario(fecha_operacion=fecha_operacion)
+
+
 @shared_task(name="reportes.refresh_investment_snapshots", bind=True, max_retries=1, default_retry_delay=300)
 def task_refresh_investment_snapshots(self):
     from reportes.models import ProyectoInversion
