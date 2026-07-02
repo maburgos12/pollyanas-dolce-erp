@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load static %}
+{% load static branch_labels %}
 
 {% block title %}{% if modo_edicion %}Editar reporte{% else %}Reportar falla{% endif %}{% endblock %}
 {% block page_title %}Fallas · {% if modo_edicion %}Editar reporte{% else %}Reportar{% endif %}{% endblock %}
@@ -56,7 +56,7 @@
         <select class="fallas-input" name="sucursal" required>
           <option value="">Selecciona sucursal</option>
           {% for sucursal in sucursales %}
-          <option value="{{ sucursal.id }}" {% if reporte and reporte.sucursal_id == sucursal.id %}selected{% endif %}>{{ sucursal.nombre }}</option>
+          <option value="{{ sucursal.id }}" {% if reporte and reporte.sucursal_id == sucursal.id %}selected{% endif %}>{{ sucursal|branch_label }}</option>
           {% endfor %}
         </select>
       </label>

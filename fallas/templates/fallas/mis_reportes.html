@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load static %}
+{% load static branch_labels %}
 
 {% block title %}Reportes de fallas{% endblock %}
 {% block page_title %}Fallas · Reportes{% endblock %}
@@ -61,7 +61,7 @@
           <tr>
             <td><strong>#{{ reporte.id }}</strong></td>
             <td>{% if reporte.foto_evidencia %}<a href="{{ reporte.foto_evidencia.url }}" target="_blank" rel="noopener"><img class="fallas-thumb" src="{{ reporte.foto_evidencia.url }}" alt="Evidencia"></a>{% else %}-{% endif %}</td>
-            <td>{{ reporte.sucursal.nombre }}</td>
+            <td>{{ reporte.sucursal|branch_label }}</td>
             <td>
               <strong>{{ reporte.titulo }}</strong><br>
               <span class="fallas-muted">{{ reporte.descripcion|truncatechars:90 }}</span>
@@ -112,7 +112,7 @@
       <div class="fallas-drawer-head">
         <div>
           <h2 id="fallas-detail-title-{{ reporte.id }}">#{{ reporte.id }} · {{ reporte.titulo }}</h2>
-          <p>{{ reporte.sucursal.nombre }} · {{ reporte.get_area_display }} · {{ reporte.fecha_reporte|date:"d/m/Y H:i" }}</p>
+          <p>{{ reporte.sucursal|branch_label }} · {{ reporte.get_area_display }} · {{ reporte.fecha_reporte|date:"d/m/Y H:i" }}</p>
         </div>
         <button class="btn-soft" type="button" data-close-falla-detail>Cerrar</button>
       </div>

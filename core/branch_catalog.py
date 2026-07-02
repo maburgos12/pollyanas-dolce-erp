@@ -34,6 +34,17 @@ POINT_BRANCH_CODE_ALIASES = {
 }
 
 
+def display_branch_name(name: str | None) -> str:
+    value = (name or "").strip()
+    if not value or value.upper() == "CEDIS" or value.lower().startswith("sucursal "):
+        return value
+    return f"Sucursal {value}"
+
+
+def display_branch(branch: Sucursal | None) -> str:
+    return display_branch_name(branch.nombre if branch else "")
+
+
 def canonical_point_active_branch_qs():
     return eligible_operational_branch_qs().filter(codigo__in=POINT_MATURE_BRANCH_CODES).order_by("codigo")
 

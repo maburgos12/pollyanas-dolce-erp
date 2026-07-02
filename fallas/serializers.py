@@ -2,28 +2,18 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from rest_framework import serializers
 
+from core.branch_catalog import display_branch_name
 from core.models import Sucursal
 from activos.models import Activo
 
 from .models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
 
 
-def _display_branch_name(name: str | None) -> str:
-    value = (name or "").strip()
-    if not value:
-        return ""
-    if value.upper() == "CEDIS":
-        return value
-    if value.lower().startswith("sucursal "):
-        return value
-    return f"Sucursal {value}"
-
-
 class SucursalFallaSerializer(serializers.ModelSerializer):
     nombre = serializers.SerializerMethodField()
 
     def get_nombre(self, obj):
-        return _display_branch_name(obj.nombre)
+        return display_branch_name(obj.nombre)
 
     class Meta:
         model = Sucursal

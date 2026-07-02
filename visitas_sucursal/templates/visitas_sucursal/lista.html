@@ -1,5 +1,5 @@
 {% extends "visitas_sucursal/base_visitas.html" %}
-{% load humanize %}
+{% load humanize branch_labels %}
 
 {% block title %}Cronograma de visitas{% endblock %}
 {% block page_title %}Comercial · Visitas a sucursal{% endblock %}
@@ -72,11 +72,11 @@
           {% for row in rows %}
             <tr>
               <td class="visit-col-percent">{{ row.avance }}%</td>
-              <th class="visit-col-branch" scope="row">{{ row.sucursal.nombre }}</th>
+              <th class="visit-col-branch" scope="row">{{ row.sucursal|branch_label }}</th>
               {% for cell in row.cells %}
                 <td class="visit-cell {% if cell.day.is_sunday %}visit-day-off{% endif %}">
                   {% if cell.visita %}
-                    <a class="visit-mark {{ cell.visita.estatus|lower }}" href="{% url 'visitas_sucursal:detalle' cell.visita.id %}" title="{{ cell.visita.sucursal.nombre }} · {{ cell.visita.get_estatus_display }}">
+                    <a class="visit-mark {{ cell.visita.estatus|lower }}" href="{% url 'visitas_sucursal:detalle' cell.visita.id %}" title="{{ cell.visita.sucursal|branch_label }} · {{ cell.visita.get_estatus_display }}">
                       {% if cell.visita.estatus == "REALIZADA" %}R{% elif cell.visita.estatus == "CANCELADA" %}C{% else %}P{% endif %}
                     </a>
                     {% if cell.count > 1 %}<span class="visit-more">+{{ cell.count|add:"-1" }}</span>{% endif %}
@@ -87,7 +87,7 @@
                       <input type="hidden" name="mes" value="{{ month }}">
                       <input type="hidden" name="sucursal" value="{{ row.sucursal.id }}">
                       <input type="hidden" name="fecha_programada" value="{{ cell.day.date|date:'Y-m-d' }}">
-                      <button type="submit" title="Programar {{ row.sucursal.nombre }} el {{ cell.day.date|date:'d/m/Y' }}">+</button>
+                      <button type="submit" title="Programar {{ row.sucursal|branch_label }} el {{ cell.day.date|date:'d/m/Y' }}">+</button>
                     </form>
                   {% endif %}
                 </td>

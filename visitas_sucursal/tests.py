@@ -241,3 +241,14 @@ class VisitasSucursalTests(TestCase):
         self.assertEqual(response.status_code, 302)
         item.refresh_from_db()
         self.assertEqual(item.respuesta, ChecklistVisita.RESPUESTA_PENDIENTE)
+
+    def test_app_superusuario_muestra_etiqueta_global_de_sucursal(self):
+        visita = VisitaSucursal.objects.create(sucursal=self.sucursal, creado_por=self.user)
+
+        response = self.client.get(
+            reverse("visitas_sucursal:app"),
+            {"modo": "sucursal", "sucursal": self.sucursal.id, "visita": visita.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Sucursal Payán")

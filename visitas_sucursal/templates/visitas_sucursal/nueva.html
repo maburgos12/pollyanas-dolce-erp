@@ -1,4 +1,5 @@
 {% extends "visitas_sucursal/base_visitas.html" %}
+{% load branch_labels %}
 
 {% block title %}Nueva visita{% endblock %}
 {% block page_title %}Comercial · Nueva visita{% endblock %}
@@ -20,7 +21,7 @@
         <select name="sucursal" required>
           <option value="">Selecciona</option>
           {% for sucursal in sucursales %}
-          <option value="{{ sucursal.id }}">{{ sucursal.nombre }}</option>
+          <option value="{{ sucursal.id }}">{{ sucursal|branch_label }}</option>
           {% endfor %}
         </select>
       </label>
