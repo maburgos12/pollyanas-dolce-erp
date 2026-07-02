@@ -153,6 +153,10 @@
     }
     .messages { max-width: 840px; margin: 0 auto 12px; display: grid; gap: 8px; }
     .message { padding: 10px 12px; border-radius: 8px; background: #e8f5ee; color: var(--ok); font-weight: 750; }
+    .preview-panel { padding: 12px 14px; display: grid; gap: 10px; }
+    .preview-panel form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) auto; gap: 8px; align-items: end; }
+    .preview-panel strong { display: block; font-size: .94rem; }
+    .preview-panel p { margin: 3px 0 0; color: var(--muted); font-size: .84rem; }
     .gps-box { padding: 12px 14px; border-top: 1px solid var(--line); background: #fffaf0; }
     .gps-box strong { display: block; margin-bottom: 4px; }
     .gps-box p { margin: 0 0 10px; color: var(--muted); font-size: .88rem; }
@@ -171,6 +175,7 @@
       .metrics { grid-template-columns: 1fr; }
       .check-fields { grid-template-columns: 1fr; }
       .audit-route { grid-template-columns: 1fr; }
+      .preview-panel form { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -193,6 +198,31 @@
           <div class="message">{{ message }}</div>
         {% endfor %}
       </div>
+    {% endif %}
+
+    {% if is_superuser %}
+      <section class="card preview-panel" aria-label="Vista superusuario">
+        <div>
+          <strong>Vista superusuario</strong>
+          <p>{% if preview_read_only %}Viendo la app como empleado de sucursal. Las capturas están bloqueadas.{% else %}Viendo la app como auditor autorizado.{% endif %}</p>
+        </div>
+        <form method="get">
+          <label>Modo
+            <select name="modo" onchange="this.form.submit()">
+              <option value="auditor" {% if app_mode == "auditor" %}selected{% endif %}>Auditor</option>
+              <option value="sucursal" {% if app_mode == "sucursal" %}selected{% endif %}>Sucursal</option>
+            </select>
+          </label>
+          <label>Sucursal
+            <select name="sucursal" onchange="this.form.submit()">
+              {% for item in sucursales_preview %}
+                <option value="{{ item.id }}" {% if preview_sucursal and item.id == preview_sucursal.id %}selected{% endif %}>{{ item.nombre }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <button class="link-btn" type="submit">Ver</button>
+        </form>
+      </section>
     {% endif %}
 
     <section class="card {% if can_manage %}audit-focus{% endif %}">
@@ -227,7 +257,7 @@
       <section class="card" aria-label="Visitas recientes">
         <div class="visits-list">
           {% for item in visitas %}
-            <a class="visit-chip {% if visita and item.id == visita.id %}active{% endif %}" href="?visita={{ item.id }}">{{ item.fecha_programada|date:"d/m" }} · {{ item.sucursal.nombre }} · {{ item.get_estatus_display }}</a>
+            <a class="visit-chip {% if visita and item.id == visita.id %}active{% endif %}" href="?visita={{ item.id }}{% if is_superuser %}&modo={{ app_mode }}{% if preview_sucursal %}&sucursal={{ preview_sucursal.id }}{% endif %}{% endif %}">{{ item.fecha_programada|date:"d/m" }} · {{ item.sucursal.nombre }} · {{ item.get_estatus_display }}</a>
           {% endfor %}
         </div>
         {% if can_manage %}
@@ -265,12 +295,12 @@
               <div class="check-item">
                 <p class="check-title">{{ item.titulo }}</p>
                 <div class="check-fields">
-                  <select name="respuesta_{{ item.id }}" aria-label="Respuesta {{ item.titulo }}">
+                  <select name="respuesta_{{ item.id }}" aria-label="Respuesta {{ item.titulo }}" {% if preview_read_only %}disabled{% endif %}>
                     {% for value, label in respuesta_choices %}
                       <option value="{{ value }}" {% if item.respuesta == value %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
                   </select>
-                  <input name="observaciones_{{ item.id }}" value="{{ item.observaciones }}" placeholder="Observación">
+                  <input name="observaciones_{{ item.id }}" value="{{ item.observaciones }}" placeholder="Observación" {% if preview_read_only %}disabled{% endif %}>
                 </div>
               </div>
             {% endfor %}
@@ -297,9 +327,9 @@
               <input class="photo-input" type="file" name="fotos" accept="image/*" capture="environment" multiple>
             </label>
           {% endif %}
-          <textarea name="observaciones" placeholder="Observaciones generales">{{ visita.observaciones }}</textarea>
+          <textarea name="observaciones" placeholder="Observaciones generales" {% if preview_read_only %}disabled{% endif %}>{{ visita.observaciones }}</textarea>
           <div class="{% if can_manage %}audit-sticky{% endif %}">
-            <button class="primary-btn {% if can_manage %}audit{% endif %}" type="submit">{% if can_manage %}Ejecutar auditoría{% else %}Guardar bitácora{% endif %}</button>
+            <button class="primary-btn {% if can_manage %}audit{% endif %}" type="submit" {% if preview_read_only %}disabled{% endif %}>{% if preview_read_only %}Vista bloqueada{% elif can_manage %}Ejecutar auditoría{% else %}Guardar bitácora{% endif %}</button>
           </div>
         </div>
       </form>

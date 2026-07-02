@@ -14,6 +14,7 @@
     <div class="visit-actions">
       <a class="visit-btn secondary compact" href="?anio={{ prev_month.anio }}&mes={{ prev_month.mes }}" aria-label="Mes anterior">←</a>
       <a class="visit-btn secondary compact" href="?anio={{ next_month.anio }}&mes={{ next_month.mes }}" aria-label="Mes siguiente">→</a>
+      <a class="visit-btn secondary" href="{% url 'visitas_sucursal:app' %}">App</a>
       <a class="visit-btn" href="{% url 'visitas_sucursal:nueva' %}">+ Visita</a>
     </div>
   </header>
