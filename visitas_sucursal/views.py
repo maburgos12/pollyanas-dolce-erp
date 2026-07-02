@@ -292,8 +292,23 @@ def nueva_visita(request):
 @login_required
 def app_visitas_sucursal(request):
     _require_visitas(request.user)
-    can_manage = can_manage_submodule(request.user, "ventas", "visitas_sucursal")
+    base_can_manage = can_manage_submodule(request.user, "ventas", "visitas_sucursal")
+    is_superuser = bool(request.user.is_superuser)
+    app_mode = request.GET.get("modo") if is_superuser else ""
+    preview_read_only = False
+    preview_sucursal = None
+    can_manage = base_can_manage
     sucursal = _sucursal_usuario(request.user)
+    if is_superuser and app_mode == "sucursal":
+        preview_sucursal = (
+            Sucursal.objects.filter(sucursales_operativas_q(), pk=request.GET.get("sucursal")).first()
+            or Sucursal.objects.filter(sucursales_operativas_q()).order_by("nombre").first()
+        )
+        sucursal = preview_sucursal
+        can_manage = False
+        preview_read_only = True
+    else:
+        app_mode = "auditor" if base_can_manage else "sucursal"
     if not sucursal and not can_manage:
         raise PermissionDenied("Tu usuario no tiene sucursal asignada.")
 
@@ -308,6 +323,9 @@ def app_visitas_sucursal(request):
         )
 
     if request.method == "POST":
+        if preview_read_only:
+            messages.info(request, "Vista de superusuario: las capturas están bloqueadas.")
+            return redirect(request.get_full_path())
         action = request.POST.get("action")
         if action == "crear":
             messages.error(request, "No hay visita programada para capturar.")
@@ -375,6 +393,11 @@ def app_visitas_sucursal(request):
             "punto_logistico": _punto_logistico_sucursal(visita.sucursal) if visita and can_manage else None,
             "respuesta_choices": ChecklistVisita.RESPUESTA_CHOICES,
             "can_manage": can_manage,
+            "app_mode": app_mode,
+            "preview_read_only": preview_read_only,
+            "preview_sucursal": preview_sucursal,
+            "sucursales_preview": Sucursal.objects.filter(sucursales_operativas_q()).order_by("nombre") if is_superuser else [],
+            "is_superuser": is_superuser,
         },
     )
 

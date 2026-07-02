@@ -216,3 +216,28 @@ class VisitasSucursalTests(TestCase):
         response = self.client.post(reverse("visitas_sucursal:app"), {"visita_id": visita_ajena.id})
 
         self.assertEqual(response.status_code, 404)
+
+    def test_app_superusuario_puede_ver_como_sucursal_sin_capturar(self):
+        visita = VisitaSucursal.objects.create(sucursal=self.sucursal, creado_por=self.user)
+        item = ChecklistVisita.objects.create(visita=visita, categoria="Orden y limpieza", titulo="Pisos", orden=1)
+
+        response = self.client.get(
+            reverse("visitas_sucursal:app"),
+            {"modo": "sucursal", "sucursal": self.sucursal.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Viendo la app como empleado de sucursal")
+        self.assertContains(response, "Vista bloqueada")
+
+        response = self.client.post(
+            f"{reverse('visitas_sucursal:app')}?modo=sucursal&sucursal={self.sucursal.id}",
+            {
+                "visita_id": visita.id,
+                f"respuesta_{item.id}": ChecklistVisita.RESPUESTA_SI,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        item.refresh_from_db()
+        self.assertEqual(item.respuesta, ChecklistVisita.RESPUESTA_PENDIENTE)
