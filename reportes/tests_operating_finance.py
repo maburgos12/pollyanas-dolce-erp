@@ -522,7 +522,7 @@ class OperatingFinanceSnapshotServiceTests(TestCase):
 
         company_row = EmpresaResultadoMensual.objects.get(periodo=date(2026, 3, 1))
         self.assertEqual(company_row.venta_total, Decimal("1850"))
-        self.assertEqual(company_row.metadata["sales_total_source"], "SALES_READ_V2_FACT")
+        self.assertEqual(company_row.metadata["sales_total_source"], "SALES_CANONICAL_POINT_SALES_DAILY_CATEGORY_FACT")
 
     def test_audit_operating_finance_sources_reports_classification_buckets_and_balance(self):
         service_recipe = Receta.objects.create(

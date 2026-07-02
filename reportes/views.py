@@ -103,6 +103,9 @@ from .auto_production_service import (
 from .auto_purchase_service import generate_purchase_requests_from_production, list_auto_purchase_snapshots
 from .alert_service import generate_operational_alerts, resolve_alert
 from .dashboard_sales_dataset import get_dashboard_sales_dataset
+
+
+BI_SALES_CACHE_GENERATION = "bi-sales-v2"
 from .daily_operational_closure_service import build_daily_operational_closure
 from .forecast_service import build_daily_forecast_context
 from .production_projection_supply_service import build_projection_supply_context
@@ -367,7 +370,7 @@ def _bi_cached_value(
     parts: tuple[object, ...] = (),
 ):
     return get_or_set_versioned_cache(
-        key_parts=("erp", "bi", section, *parts),
+        key_parts=("erp", "bi", BI_SALES_CACHE_GENERATION, section, *parts),
         scopes=("dashboard",),
         builder=builder,
         runtime_cache=runtime_cache,

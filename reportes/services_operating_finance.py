@@ -32,7 +32,7 @@ from reportes.product_business_rules import (
     CRITICAL_FIXED_REVENTA_PRODUCT_NAMES,
     normalize_product_name,
 )
-from ventas.services.sales_read_service import get_sales_range
+from ventas.services.sales_canonical_source import canonical_point_sales_range_total
 
 logger = logging.getLogger(__name__)
 COST_GUARDRAIL_MAX_COGS_TO_SALES_RATIO = Decimal("2.0")
@@ -499,13 +499,9 @@ class OperatingFinanceSnapshotService:
         official = PointMonthlySalesOfficial.objects.filter(month_start=period_start).first()
         if official is not None:
             return as_decimal(official.total_amount), "POINT_MONTHLY_OFFICIAL"
-        aggregate = get_sales_range(
-            start_date=period_start,
-            end_date=period_end,
-            coverage_policy="prefer_complete",
-        )
-        source = str(aggregate.get("source") or "none").upper()
-        return as_decimal(aggregate.get("monto")), f"SALES_READ_{source}"
+        aggregate = canonical_point_sales_range_total(start_date=period_start, end_date=period_end)
+        source = str(aggregate.get("source_detail") or "none").upper()
+        return as_decimal(aggregate.get("value")), f"SALES_CANONICAL_{source}"
 
     def _split_unmapped_sales(self, period_start: date, period_end: date) -> tuple[Decimal, Decimal]:
         non_recipe_total = Decimal("0")

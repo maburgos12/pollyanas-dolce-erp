@@ -9,7 +9,12 @@ from django.db import connection
 from django.utils import timezone
 
 from core.cache_versions import get_or_set_versioned_cache
-from ventas.services.sales_canonical_source import canonical_point_max_date, canonical_point_previous_dates, point_sales_month_total
+from ventas.services.sales_canonical_source import (
+    SALES_CANONICAL_CACHE_GENERATION,
+    canonical_point_max_date,
+    canonical_point_previous_dates,
+    point_sales_month_total,
+)
 from ventas.services.sales_read_service import get_daily_sales_bulk, get_sales_range
 
 
@@ -547,7 +552,7 @@ def get_dashboard_sales_dataset(*, today: date | None = None, months: int = 6) -
     if bool(getattr(settings, "RUNNING_TESTS", False)):
         return _build_dashboard_sales_dataset(today=today, months=months)
     return get_or_set_versioned_cache(
-        key_parts=("erp", "analytics", "dashboard-sales-dataset", today.isoformat(), months),
+        key_parts=("erp", "analytics", "dashboard-sales-dataset", SALES_CANONICAL_CACHE_GENERATION, today.isoformat(), months),
         scopes=("ventas", "dashboard"),
         builder=lambda: _build_dashboard_sales_dataset(today=today, months=months),
     )

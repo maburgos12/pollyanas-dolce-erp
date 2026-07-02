@@ -14,6 +14,7 @@ from logistica.models import EntregaRuta, RutaEntrega
 from reportes.analytics_service import get_sales_fact_range_summary
 from reportes.models import FactInventarioDiario, FactProduccionDiaria, FactVentaDiaria
 from rrhh.models import Empleado, NominaPeriodo
+from ventas.services.sales_canonical_source import point_sales_month_total
 from ventas.services.sales_read_service import get_sales_range
 
 
@@ -127,14 +128,9 @@ def compute_bi_snapshot(period_days: int = 90, months_window: int = 6) -> dict:
         entregas_qs.filter(estatus=EntregaRuta.ESTATUS_ENTREGADA),
         date_field="ruta__fecha_ruta",
     )
-    ventas_month_rows = (
-        FactVentaDiaria.objects.filter(fecha__gte=min(_month_bounds(y, m)[0] for y, m in monthly_pairs), fecha__lte=today)
-        .values("fecha__year", "fecha__month")
-        .annotate(total=Sum("venta_total"))
-    )
     ventas_month_map = {
-        f"{int(row['fecha__year']):04d}-{int(row['fecha__month']):02d}": row.get("total") or Decimal("0")
-        for row in ventas_month_rows
+        period_key: point_sales_month_total(y, m)["value"]
+        for (y, m), period_key in zip(monthly_pairs, monthly_keys, strict=False)
     }
 
     monthly_rows = []
