@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Consejo Estratégico de IA{% endblock %}
+{% block page_title %}Consejo Estratégico de IA{% endblock %}
+
+{% block content %}
+
+<section class="card">
+  <div class="card-header">Pregunta al Consejo</div>
+  <p class="muted">Escribe una pregunta estratégica libre. Ocho roles la analizarán desde su perspectiva y el CEO dará la conclusión ejecutiva final, usando datos reales del ERP.</p>
+
+  {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+  {% endif %}
+
+  <form method="post">
+    {% csrf_token %}
+    <div class="form-group full">
+      <label for="id_pregunta">Pregunta <span class="text-danger">*</span></label>
+      <textarea class="input-field" id="id_pregunta" name="pregunta" rows="3" required>{{ request.POST.pregunta }}</textarea>
+    </div>
+    <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">
+      <button class="btn btn-primary" style="background:var(--vino);border-color:var(--vino);" type="submit">Consultar al Consejo</button>
+    </div>
+  </form>
+</section>
+
+{% if consulta %}
+<section class="card">
+  <div class="card-header">Conclusión del CEO</div>
+  <p><span class="badge bg-primary">{{ consulta.get_veredicto_ceo_display }}</span></p>
+  <p>{{ consulta.resumen_ejecutivo_ceo }}</p>
+  <p class="muted">{{ consulta.respuestas_json.ceo.conclusion|default:"" }}</p>
+</section>
+
+<div class="dashboard-grid">
+  {% for resultado in resultados_roles %}
+    <section class="card">
+      <div class="card-header">{{ resultado.nombre }}</div>
+      {% if resultado.respuesta.error %}
+        <p class="alert alert-danger">{{ resultado.respuesta.error }}</p>
+      {% else %}
+        <p>{{ resultado.respuesta.analisis }}</p>
+        {% if resultado.respuesta.supuestos %}
+          <p class="muted"><strong>Supuestos:</strong> {{ resultado.respuesta.supuestos|join:"; " }}</p>
+        {% endif %}
+        {% if resultado.respuesta.datos_faltantes %}
+          <p class="muted"><strong>Datos faltantes:</strong> {{ resultado.respuesta.datos_faltantes|join:"; " }}</p>
+        {% endif %}
+      {% endif %}
+    </section>
+  {% endfor %}
+</div>
+{% endif %}
+
+<section class="card">
+  <div class="card-header">Historial de consultas</div>
+  {% if historial %}
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Pregunta</th>
+            <th>Veredicto</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in historial %}
+          <tr>
+            <td>{{ item.creado_en|date:"d/m/Y H:i" }}</td>
+            <td>{{ item.pregunta|truncatechars:80 }}</td>
+            <td><span class="badge bg-primary">{{ item.get_veredicto_ceo_display }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted">Sin consultas todavía.</p>
+  {% endif %}
+</section>
+
+{% endblock %}
