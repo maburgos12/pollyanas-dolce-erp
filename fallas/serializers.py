@@ -12,6 +12,8 @@ def _display_branch_name(name: str | None) -> str:
     value = (name or "").strip()
     if not value:
         return ""
+    if value.upper() == "CEDIS":
+        return value
     if value.lower().startswith("sucursal "):
         return value
     return f"Sucursal {value}"
