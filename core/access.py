@@ -534,6 +534,10 @@ def can_manage_rentabilidad(user: AbstractBaseUser) -> bool:
     return can_manage_submodule(user, "direccion", "rentabilidad")
 
 
+def can_view_consejo_ia(user: AbstractBaseUser) -> bool:
+    return can_view_submodule(user, "direccion", "consejo_ia")
+
+
 def can_view_product_closure(user: AbstractBaseUser) -> bool:
     return can_view_reportes(user)
 

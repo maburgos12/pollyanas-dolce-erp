@@ -129,6 +129,7 @@ INSTALLED_APPS = [
     "proyecciones",
     "orquestacion",
     "rentabilidad",
+    "consejo_ia",
     "sat_client",
     "syncfy_client",
     "conciliacion",

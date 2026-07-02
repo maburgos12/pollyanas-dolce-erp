@@ -103,6 +103,7 @@ urlpatterns = [
         name="rentabilidad_analizar",
     ),
     path("rentabilidad/analizar-todas/", views_rentabilidad.analizar_todas, name="rentabilidad_analizar_todas"),
+    path("consejo-ia/", include(("consejo_ia.urls", "consejo_ia"), namespace="consejo_ia")),
     path("api/", include("api.urls")),
     path("api/bonos-produccion/", include("bonos_produccion.urls")),
     path("api/bonos-ventas/", include("bonos_ventas.urls")),
