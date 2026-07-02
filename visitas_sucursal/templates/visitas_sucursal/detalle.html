@@ -43,19 +43,21 @@
         </div>
         {% for item in group.list %}
         <div class="visit-check">
-          <div>
+          <div class="visit-check-copy">
             <h4>{{ item.titulo }}</h4>
           </div>
-          <label class="visit-field">Resultado
-            <select name="respuesta_{{ item.id }}" {% if not can_manage %}disabled{% endif %}>
-              {% for value,label in respuesta_choices %}
-              <option value="{{ value }}" {% if item.respuesta == value %}selected{% endif %}>{{ label }}</option>
-              {% endfor %}
-            </select>
-          </label>
-          <label class="visit-field">Observación
-            <input type="text" name="observaciones_{{ item.id }}" value="{{ item.observaciones }}" {% if not can_manage %}disabled{% endif %}>
-          </label>
+          <div class="visit-check-controls">
+            <label class="visit-field">Resultado
+              <select name="respuesta_{{ item.id }}" {% if not can_manage %}disabled{% endif %}>
+                {% for value,label in respuesta_choices %}
+                <option value="{{ value }}" {% if item.respuesta == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label class="visit-field visit-check-observation">Observación
+              <input type="text" name="observaciones_{{ item.id }}" value="{{ item.observaciones }}" {% if not can_manage %}disabled{% endif %}>
+            </label>
+          </div>
         </div>
         {% endfor %}
       </section>
