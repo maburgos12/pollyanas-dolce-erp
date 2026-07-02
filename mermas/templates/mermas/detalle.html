@@ -20,7 +20,7 @@
             {% if can_receive_mermas and not can_capture_mermas %}
             <a class="secondary-link" href="{% url 'mermas:app' %}">Cola</a>
             {% elif can_dashboard %}
-            <a class="secondary-link" href="{% url 'mermas:dashboard' %}">Panel</a>
+            <a class="secondary-link" href="{% url 'operacion:app_home' %}">App</a>
             {% else %}
             <a class="secondary-link" href="{% url 'mermas:app' %}">App</a>
             {% endif %}

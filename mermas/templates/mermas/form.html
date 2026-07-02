@@ -17,11 +17,7 @@
             <span>{{ now|date:"d/m/Y H:i" }}</span>
         </div>
         <nav class="app-header-actions" aria-label="Acciones de sesión">
-            {% if can_dashboard %}
-            <a class="secondary-link" href="{% url 'mermas:dashboard' %}">Panel</a>
-            {% else %}
-            <a class="secondary-link" href="{% url 'operacion:app_home' %}">Inicio</a>
-            {% endif %}
+            <a class="secondary-link" href="{% url 'operacion:app_home' %}">App</a>
             <a class="secondary-link" href="{% url 'logout' %}">Salir</a>
         </nav>
     </header>
@@ -96,11 +92,7 @@
         <div class="sticky-submit">
             <div class="sticky-submit-inner">
                 <button class="primary-btn" type="submit">Guardar merma</button>
-                {% if can_dashboard %}
-                <a class="secondary-link" href="{% url 'mermas:dashboard' %}">Cancelar</a>
-                {% else %}
                 <a class="secondary-link" href="{% url 'operacion:app_home' %}">Cancelar</a>
-                {% endif %}
             </div>
         </div>
     </form>
