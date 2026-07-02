@@ -9,6 +9,8 @@ from core.access import ACCESS_MANAGE, ACCESS_VIEW, ROLE_DG, ROLE_LOGISTICA, ROL
 from core.models import Sucursal, UserModuleAccess, UserProfile
 from logistica.models import Repartidor, Unidad
 from mermas.models import PersonalEnviosSucursal
+from recetas.models import Receta
+from operacion.models import BitacoraOperativa, BitacoraOperativaLinea
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -78,9 +80,54 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Registrar merma")
         self.assertContains(response, "/mermas/app/?modo=captura")
+
+    def test_produccion_user_gets_bitacoras_tile(self):
+        user = self._user("produccion.bitacoras")
+        self._grant(user, "produccion")
+        self.client.force_login(user)
+
+        response = self.client.get("/app/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Bitácoras")
+        self.assertContains(response, "/app/bitacoras/")
+
+    def test_bitacora_capture_uses_existing_receta(self):
+        user = self._user("produccion.captura")
+        self._grant(user, "produccion")
+        receta = Receta.objects.create(nombre="Pastel prueba", hash_contenido="bitacora-test")
+        self.client.force_login(user)
+
+        response = self.client.post(
+            f"/app/bitacoras/{BitacoraOperativa.TIPO_INVENTARIO_CFP1}/",
+            {
+                "fecha": "2026-07-01",
+                "receta_0": str(receta.id),
+                "cedis_0": "4",
+                "devolucion_0": "1",
+                "observaciones_0": "Conteo inicial",
+                "cerrar": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        bitacora = BitacoraOperativa.objects.get()
+        linea = BitacoraOperativaLinea.objects.get()
+        self.assertEqual(bitacora.estatus, BitacoraOperativa.ESTATUS_CERRADA)
+        self.assertEqual(linea.receta, receta)
+        self.assertEqual(linea.datos["cedis"], "4")
+        self.assertEqual(linea.datos["devolucion"], "1")
+
+    def test_merma_recepcion_stays_on_existing_mermas_app(self):
+        user = self._user("cedis.merma")
+        self._grant(user, "mermas.recepcion", ACCESS_MANAGE)
+        self.client.force_login(user)
+
+        response = self.client.get("/app/bitacoras/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "/mermas/app/?modo=recepcion")
         self.assertNotContains(response, "Logística móvil")
-        self.assertEqual(dashboard.status_code, 302)
-        self.assertEqual(dashboard["Location"], "/mermas/app/")
 
     def test_sucursal_user_gets_only_assigned_operational_actions(self):
         user = self._user("sucursal.colosio", sucursal=self.sucursal)

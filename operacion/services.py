@@ -66,6 +66,17 @@ def _can_use_mantenimiento(user) -> bool:
     )
 
 
+def _can_use_bitacoras(user) -> bool:
+    if user.is_superuser:
+        return True
+    return (
+        can_view_module(user, "produccion")
+        or can_view_module(user, "logistica")
+        or can_view_submodule(user, "mermas", "captura")
+        or can_view_submodule(user, "mermas", "recepcion")
+    )
+
+
 def _append_logistica_tiles(tiles: list[OperacionTile], user, *, mobile_only: bool = False) -> None:
     if mobile_only:
         tiles.extend(
@@ -236,6 +247,17 @@ def build_operacion_context(user) -> dict:
                     href="/recetas/reabasto-cedis/captura/",
                     icon="cierre",
                     area="Sucursal",
+                )
+            )
+        if _can_use_bitacoras(user):
+            tiles.append(
+                OperacionTile(
+                    key="bitacoras_operativas",
+                    title="Bitácoras",
+                    detail="Capturas diarias de producción y logística.",
+                    href="/app/bitacoras/",
+                    icon="bitacora",
+                    area="Operación",
                 )
             )
         if can_view_module(user, "logistica"):
