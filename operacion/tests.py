@@ -144,6 +144,18 @@ class OperacionAppTests(TestCase):
         self.assertNotContains(response, "Flota")
         self.assertNotContains(response, "Mantenimiento vehicular")
 
+    def test_sucursal_user_gets_visitas_sucursal_app_tile(self):
+        user = self._user("visitas.colosio", sucursal=self.sucursal)
+        self._grant(user, "ventas.visitas_sucursal")
+        self.client.force_login(user)
+
+        response = self.client.get("/app/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Checklist sucursal")
+        self.assertContains(response, "/visitas-sucursal/app/")
+        self.assertNotContains(response, 'href="/visitas-sucursal/"')
+
     def test_branch_capture_only_can_enter_app_but_regular_erp_still_redirects(self):
         user = self._user("captura.reabasto", sucursal=self.sucursal)
         profile = user.userprofile

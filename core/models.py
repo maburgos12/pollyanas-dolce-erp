@@ -82,6 +82,7 @@ class UserModuleAccess(models.Model):
         ("mermas.dashboard", "Mermas - Panel ERP"),
         ("compras", "Compras"),
         ("ventas", "Ventas"),
+        ("ventas.visitas_sucursal", "Ventas - Visitas a sucursal"),
         ("reportes", "Reportes"),
         ("produccion", "Producción"),
         ("rrhh", "RRHH"),

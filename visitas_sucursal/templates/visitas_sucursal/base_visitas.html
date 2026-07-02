@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block extra_css %}
+<style>
+  .visit-shell { max-width: 1480px; margin: 0 auto; padding: 18px; }
+  .visit-head { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; margin-bottom: 10px; }
+  .visit-title { margin: 0; font-size: 1.35rem; color: #2f1724; }
+  .visit-copy { margin: 3px 0 0; color: #66515e; max-width: 54ch; }
+  .visit-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .visit-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 38px; padding: 0 14px; border-radius: 10px; border: 1px solid #8b2252; background: #8b2252; color: #fff; font-weight: 800; text-decoration: none; cursor: pointer; }
+  .visit-btn.secondary { background: #fff; color: #7c1f49; border-color: #d9bdcb; }
+  .visit-btn.compact { width: 38px; padding: 0; font-size: 1.05rem; }
+  .visit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 14px 0 18px; }
+  .visit-stat, .visit-panel { border: 1px solid #eadde4; border-radius: 12px; background: #fff; padding: 16px; }
+  .visit-stat span, .visit-label { display: block; color: #715d68; font-size: .86rem; font-weight: 700; }
+  .visit-stat strong { display: block; margin-top: 6px; color: #2f1724; font-size: 1.7rem; }
+  .visit-summary-strip { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+  .visit-summary-strip span { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 10px; border: 1px solid #eadde4; border-radius: 999px; background: #fff; color: #715d68; font-size: .86rem; font-weight: 750; }
+  .visit-summary-strip b { color: #2f1724; }
+  .visit-filter { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 18px; }
+  .visit-field { display: grid; gap: 6px; min-width: 180px; }
+  .visit-field input, .visit-field select, .visit-field textarea { border: 1px solid #d8c7d0; border-radius: 10px; padding: 10px 12px; font: inherit; background: #fff; color: #27151f; }
+  .visit-field textarea { min-height: 84px; resize: vertical; }
+  .visit-table-wrap { overflow-x: auto; border: 1px solid #eadde4; border-radius: 12px; background: #fff; }
+  .visit-table { width: 100%; border-collapse: collapse; min-width: 820px; }
+  .visit-table th, .visit-table td { padding: 12px 14px; border-bottom: 1px solid #f0e7ec; text-align: left; vertical-align: top; }
+  .visit-table th { color: #5c4652; font-size: .82rem; }
+  .visit-muted { color: #715d68; }
+  .visit-badge { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border-radius: 999px; background: #f4ecf0; color: #5d2742; font-weight: 800; font-size: .78rem; }
+  .visit-badge.warn { background: #fff3d8; color: #6f4a00; }
+  .visit-badge.danger { background: #fde4e4; color: #8b1d1d; }
+  .visit-split { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(300px, .8fr); gap: 16px; align-items: start; }
+  .visit-check-group { margin-top: 18px; border: 1px solid #eadde4; border-radius: 12px; overflow: hidden; }
+  .visit-check-group:first-of-type { margin-top: 8px; }
+  .visit-check-group-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 12px 14px; background: #fbf7f9; border-bottom: 1px solid #eadde4; }
+  .visit-check-group-head h3 { margin: 0; color: #2f1724; font-size: 1rem; }
+  .visit-check-group-head span { color: #715d68; font-size: .84rem; font-weight: 800; }
+  .visit-check { display: grid; grid-template-columns: minmax(220px, 1fr) 150px minmax(220px, 1fr); gap: 10px; padding: 12px 0; border-bottom: 1px solid #f0e7ec; }
+  .visit-check { padding: 12px 14px; }
+  .visit-check:last-child { border-bottom: 0; }
+  .visit-check h4 { margin: 0; font-size: .96rem; color: #2f1724; }
+  .visit-panel h2 { margin: 0 0 12px; font-size: 1.1rem; color: #2f1724; }
+  .visit-empty { padding: 20px; color: #715d68; text-align: center; }
+  .visit-calendar-card { border: 1px solid #eadde4; border-radius: 12px; background: #fff; overflow: hidden; }
+  .visit-calendar-title { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 12px; border-bottom: 1px solid #eadde4; }
+  .visit-calendar-title strong { color: #2f1724; font-size: 1.05rem; }
+  .visit-calendar-title span { color: #715d68; font-size: .9rem; font-weight: 800; }
+  .visit-calendar-wrap { overflow-x: auto; }
+  .visit-calendar { width: 100%; min-width: 980px; border-collapse: collapse; table-layout: fixed; }
+  .visit-calendar th, .visit-calendar td { height: 36px; border: 1px solid #1f151b; padding: 2px; text-align: center; vertical-align: middle; }
+  .visit-calendar thead th { height: 32px; background: #fbf7f9; color: #2f1724; font-size: .82rem; font-weight: 900; }
+  .visit-calendar tfoot th, .visit-calendar tfoot td { height: 32px; background: #fff; font-size: .76rem; font-weight: 900; }
+  .visit-calendar .visit-col-percent { position: sticky; left: 0; z-index: 2; width: 46px; background: #fff; font-size: .82rem; font-weight: 900; }
+  .visit-calendar .visit-col-branch { position: sticky; left: 46px; z-index: 2; width: 168px; background: #fff; text-align: left; font-size: .82rem; line-height: 1.15; }
+  .visit-calendar thead .visit-col-percent, .visit-calendar thead .visit-col-branch { z-index: 3; background: #fbf7f9; text-align: center; }
+  .visit-calendar .visit-col-total { width: 48px; background: #a52c63; color: #fff; font-size: .82rem; font-weight: 900; }
+  .visit-calendar .visit-day-off { background: #a52c63; color: #fff; }
+  .visit-cell { position: relative; background: #fff; }
+  .visit-cell-form { margin: 0; }
+  .visit-cell-form button { width: 100%; min-height: 30px; border: 0; border-radius: 4px; background: transparent; color: transparent; font: inherit; font-weight: 900; cursor: pointer; }
+  .visit-cell-form button:focus, .visit-cell-form button:hover { background: #f7edf2; color: #7c1f49; outline: 2px solid #8b2252; outline-offset: -2px; }
+  .visit-mark { display: inline-flex; align-items: center; justify-content: center; width: 100%; min-height: 30px; border-radius: 4px; background: #c59645; color: #1f151b; font-size: .86rem; font-weight: 950; text-decoration: none; }
+  .visit-mark.realizada { background: #2e8b66; color: #fff; }
+  .visit-mark.cancelada { background: #d8c7d0; color: #4b3642; }
+  .visit-more { position: absolute; right: 2px; bottom: 1px; color: #2f1724; font-size: .65rem; font-weight: 900; }
+  .visit-legend { display: flex; flex-wrap: wrap; gap: 10px; padding: 9px 12px; border-top: 1px solid #eadde4; color: #715d68; font-size: .84rem; }
+  .visit-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .visit-dot { width: 14px; height: 14px; border-radius: 4px; display: inline-block; }
+  .visit-dot.planned { background: #c59645; }
+  .visit-dot.done { background: #2e8b66; }
+  .visit-dot.canceled { background: #d8c7d0; }
+  @media (max-width: 860px) {
+    .visit-shell { padding: 16px; }
+    .visit-head, .visit-split { display: grid; grid-template-columns: 1fr; }
+    .visit-check { grid-template-columns: 1fr; }
+    .visit-calendar-title { align-items: flex-start; flex-direction: column; }
+  }
+</style>
+{% endblock %}

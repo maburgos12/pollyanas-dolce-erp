@@ -45,6 +45,7 @@ NAV_GROUPS = [
                 ["/ventas/pronostico/?tab=proyecciones"],
             ),
             ("ventas", "bonos", "Bonos ventas", "/bonos-ventas/dashboard/", ["/bonos-ventas/"]),
+            ("ventas", "visitas_sucursal", "Visitas a sucursal", "/visitas-sucursal/", ["/visitas-sucursal/"]),
             ("crm", "dashboard", "CRM", "/crm/dashboard/", ["/crm/dashboard/"]),
             ("crm", "clientes", "Clientes", "/crm/clientes/", ["/crm/clientes/"]),
             ("crm", "pedidos", "Pedidos", "/crm/pedidos/", ["/crm/pedidos/"]),

@@ -77,6 +77,7 @@ ACCESS_SUBMODULES = {
         ("eventos", "Eventos"),
         ("tendencias", "Tendencias"),
         ("pronostico", "Pronóstico"),
+        ("visitas_sucursal", "Visitas a sucursal"),
         ("bonos", "Bonos ventas"),
     ],
     "crm": [
