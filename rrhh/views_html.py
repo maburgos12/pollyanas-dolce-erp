@@ -32,6 +32,7 @@ def asignacion_sucursales_api(request):
         .values("id", "nombre", "activa")
     )
     for row in rows:
+        row["valor"] = row["nombre"]
         row["nombre"] = _display_branch_name(row["nombre"])
     return JsonResponse({"count": len(rows), "results": rows})
 

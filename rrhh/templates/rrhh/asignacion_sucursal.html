@@ -232,8 +232,9 @@
     }
     setStatus("Actualizando personal");
     if (state.mode === "ventas") {
+      const selectedValue = state.selected.valor || state.selected.nombre;
       const [assigned, pool] = await Promise.all([
-        api(`/api/rrhh/empleados/?area=VENTAS&sucursal=${encodeURIComponent(state.selected.nombre)}&limit=500`),
+        api(`/api/rrhh/empleados/?area=VENTAS&sucursal=${encodeURIComponent(selectedValue)}&limit=500`),
         api("/api/rrhh/empleados/sin-asignar/?area=VENTAS"),
       ]);
       state.assigned = assigned.results;
@@ -252,7 +253,9 @@
 
   async function assignHere(employee) {
     setStatus("Guardando asignación");
-    const body = state.mode === "ventas" ? {sucursal: state.selected.nombre} : {area_detalle: state.selected.id};
+    const body = state.mode === "ventas"
+      ? {sucursal: state.selected.valor || state.selected.nombre}
+      : {area_detalle: state.selected.id};
     await api(`/api/rrhh/empleados/${employee.id}/asignar-sucursal/`, {method: "PATCH", body: JSON.stringify(body)});
     await loadEmployees();
   }
