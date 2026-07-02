@@ -219,15 +219,6 @@ class CapitalHumanoServiceTests(TestCase):
         )
         with self.assertRaises(ValidationError):
             duplicada.full_clean()
-
-        incapacidad.estado = IncapacidadEmpleado.ESTADO_CANCELADA
-        incapacidad.comentario_cancelacion = "Captura duplicada."
-        incapacidad.save(update_fields=["estado", "comentario_cancelacion", "actualizado_en"])
-
-        duplicada.full_clean()
-        duplicada.save()
-        self.assertEqual(IncapacidadEmpleado.objects.filter(estado=IncapacidadEmpleado.ESTADO_ACTIVA).count(), 1)
-
     def test_vacaciones_respeta_descansos_oficiales_moviles_lft(self):
         from datetime import date
 

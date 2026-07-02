@@ -110,3 +110,18 @@ class RRHHAsignacionSucursalTests(TestCase):
         self.assertContains(response, "Asignación de personal")
         self.assertContains(response, "Buscar empleado")
         self.assertContains(response, "data-employee-search")
+
+    def test_api_asignacion_sucursales_uniforma_nombres_operativos(self):
+        Sucursal.objects.get_or_create(codigo="TUN", defaults={"nombre": "El Túnel", "activa": True})
+        Sucursal.objects.get_or_create(codigo="GLO", defaults={"nombre": "Las Glorias", "activa": True})
+        Sucursal.objects.get_or_create(codigo="COL", defaults={"nombre": "Sucursal Colosio", "activa": True})
+        Sucursal.objects.get_or_create(codigo="CEDIS", defaults={"nombre": "CEDIS", "activa": True})
+
+        response = self.client.get("/rrhh/api/asignacion-sucursales/")
+
+        self.assertEqual(response.status_code, 200)
+        names = [item["nombre"] for item in response.json()["results"]]
+        self.assertIn("Sucursal El Túnel", names)
+        self.assertIn("Sucursal Las Glorias", names)
+        self.assertIn("Sucursal Colosio", names)
+        self.assertNotIn("CEDIS", names)
