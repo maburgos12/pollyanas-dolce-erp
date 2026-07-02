@@ -252,6 +252,8 @@ class OperacionAppTests(TestCase):
 
         recepcion = self.client.get("/mermas/app/?modo=recepcion")
         self.assertEqual(recepcion.status_code, 200)
+        self.assertContains(recepcion, 'href="/app/"')
+        self.assertContains(recepcion, 'aria-label="Menú principal"')
         self.assertContains(recepcion, 'href="/logout/"')
         self.assertContains(recepcion, "Salir")
 
@@ -410,7 +412,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'href="/app/"')
         self.assertContains(response, 'href="/logout/"')
-        self.assertContains(response, "App")
+        self.assertContains(response, 'aria-label="Menú principal"')
         self.assertNotContains(response, 'href="/mermas/">Panel</a>')
 
     def test_mermas_detail_hidden_sidebar_keeps_logout_escape(self):
@@ -419,6 +421,7 @@ class OperacionAppTests(TestCase):
 
         self.assertIn("{% url 'logout' %}", html)
         self.assertIn("{% url 'operacion:app_home' %}", html)
+        self.assertIn('aria-label="Menú principal"', html)
         self.assertNotIn("{% url 'mermas:dashboard' %}", html)
         self.assertIn(">Salir<", html)
 
@@ -541,6 +544,12 @@ class OperacionAppTests(TestCase):
         fallas_pwa_html = fallas_pwa_template.read_text(encoding="utf-8")
         self.assertIn('window.location.href = "/logout/";', fallas_pwa_html)
         self.assertIn("window.location.href='/app/'", fallas_pwa_html)
+        self.assertIn('aria-label="Menú principal"', fallas_pwa_html)
+
+        logistica_pwa_template = Path(__file__).resolve().parents[1] / "logistica/templates/logistica/pwa.html"
+        logistica_pwa_html = logistica_pwa_template.read_text(encoding="utf-8")
+        self.assertIn("window.location.href='/app/'", logistica_pwa_html)
+        self.assertIn('aria-label="Menú principal"', logistica_pwa_html)
 
     def test_operational_pwas_prefer_current_django_session_before_cached_token(self):
         mantenimiento_group = Group.objects.create(name="MANTENIMIENTO")

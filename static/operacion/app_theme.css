@@ -167,6 +167,28 @@ select:focus {
   background: var(--pd-gold-light) !important;
 }
 
+.app-home-link {
+  width: 40px !important;
+  min-width: 40px !important;
+  min-height: 40px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border: 1px solid var(--pd-line) !important;
+  border-radius: 8px !important;
+  background: var(--pd-card) !important;
+  color: var(--pd-wine) !important;
+  text-decoration: none !important;
+  box-shadow: none !important;
+}
+
+.app-home-link svg {
+  width: 19px;
+  height: 19px;
+  stroke: currentColor;
+}
+
 .daily-banner,
 .fuel-notice,
 .pd-alert {
