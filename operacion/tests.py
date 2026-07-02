@@ -399,7 +399,7 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "Salir")
         self.assertNotContains(response, 'href="/mermas/"')
 
-    def test_mermas_capture_cancel_keeps_panel_for_dashboard_user(self):
+    def test_mermas_capture_cancel_returns_to_unified_app_for_dashboard_user(self):
         user = self._user("mermas.panel", sucursal=self.sucursal)
         self._grant(user, "mermas.captura")
         self._grant(user, "mermas.dashboard")
@@ -408,15 +408,18 @@ class OperacionAppTests(TestCase):
         response = self.client.get("/mermas/app/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'href="/mermas/"')
+        self.assertContains(response, 'href="/app/"')
         self.assertContains(response, 'href="/logout/"')
-        self.assertContains(response, "Panel")
+        self.assertContains(response, "App")
+        self.assertNotContains(response, 'href="/mermas/">Panel</a>')
 
     def test_mermas_detail_hidden_sidebar_keeps_logout_escape(self):
         template = Path(__file__).resolve().parents[1] / "mermas/templates/mermas/detalle.html"
         html = template.read_text(encoding="utf-8")
 
         self.assertIn("{% url 'logout' %}", html)
+        self.assertIn("{% url 'operacion:app_home' %}", html)
+        self.assertNotIn("{% url 'mermas:dashboard' %}", html)
         self.assertIn(">Salir<", html)
 
     def test_dg_group_gets_management_surface(self):
