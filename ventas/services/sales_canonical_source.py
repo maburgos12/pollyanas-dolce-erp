@@ -18,6 +18,24 @@ OFFICIAL_POINT_SOURCE = "/Report/PrintReportes?idreporte=3"
 RECENT_POINT_SOURCE = "/Report/VentasCategorias"
 
 
+def _range_totals_payload(*, value, net_value, quantity, source_label: str, source_detail: str) -> dict[str, object]:
+    return {
+        "value": Decimal(str(value or 0)),
+        "net_value": Decimal(str(net_value or 0)),
+        "quantity": Decimal(str(quantity or 0)),
+        "source_label": source_label,
+        "source_detail": source_detail,
+    }
+
+
+def _same_range_totals(left: dict[str, object], right: dict[str, object], tolerance: Decimal = Decimal("1.00")) -> bool:
+    left_value = Decimal(str(left.get("value") or 0))
+    right_value = Decimal(str(right.get("value") or 0))
+    left_qty = Decimal(str(left.get("quantity") or 0))
+    right_qty = Decimal(str(right.get("quantity") or 0))
+    return abs(left_value - right_value) <= tolerance and abs(left_qty - right_qty) <= Decimal("1")
+
+
 def official_sales_stage_max_date():
     return (
         PointDailySale.objects.filter(source_endpoint=OFFICIAL_POINT_SOURCE)
@@ -212,14 +230,13 @@ def canonical_point_sales_range_total(*, start_date: date, end_date: date) -> di
         net_value=Sum("net_amount"),
         quantity=Sum("quantity"),
     )
-    if authoritative.exists() and (authoritative_totals["value"] or authoritative_totals["quantity"]):
-        return {
-            "value": Decimal(str(authoritative_totals["value"] or 0)),
-            "net_value": Decimal(str(authoritative_totals["net_value"] or 0)),
-            "quantity": Decimal(str(authoritative_totals["quantity"] or 0)),
-            "source_label": "Point directo",
-            "source_detail": "venta_autoritativa_point",
-        }
+    authoritative_payload = _range_totals_payload(
+        value=authoritative_totals["value"],
+        net_value=authoritative_totals["net_value"],
+        quantity=authoritative_totals["quantity"],
+        source_label="Point directo",
+        source_detail="venta_autoritativa_point",
+    )
 
     v2 = PointSalesDailyCategoryFact.objects.filter(sale_date__range=(start_date, end_date))
     v2_totals = v2.aggregate(
@@ -227,14 +244,13 @@ def canonical_point_sales_range_total(*, start_date: date, end_date: date) -> di
         net_value=Sum("total_venta_neta"),
         quantity=Sum("total_cantidad"),
     )
-    if v2.exists() and (v2_totals["value"] or v2_totals["quantity"]):
-        return {
-            "value": Decimal(str(v2_totals["value"] or 0)),
-            "net_value": Decimal(str(v2_totals["net_value"] or 0)),
-            "quantity": Decimal(str(v2_totals["quantity"] or 0)),
-            "source_label": "Point directo",
-            "source_detail": "point_sales_daily_category_fact",
-        }
+    v2_payload = _range_totals_payload(
+        value=v2_totals["value"],
+        net_value=v2_totals["net_value"],
+        quantity=v2_totals["quantity"],
+        source_label="Point directo",
+        source_detail="point_sales_daily_category_fact",
+    )
 
     legacy = PointDailySale.objects.filter(sale_date__range=(start_date, end_date)).filter(
         operational_sales_filters(start_date=start_date, end_date=end_date)
@@ -244,14 +260,34 @@ def canonical_point_sales_range_total(*, start_date: date, end_date: date) -> di
         net_value=Sum("net_amount"),
         quantity=Sum("quantity"),
     )
-    if legacy.exists() and (legacy_totals["value"] or legacy_totals["quantity"]):
+    legacy_payload = _range_totals_payload(
+        value=legacy_totals["value"],
+        net_value=legacy_totals["net_value"],
+        quantity=legacy_totals["quantity"],
+        source_label="Point directo",
+        source_detail="point_daily_sale_selected",
+    )
+
+    if v2.exists() and legacy.exists() and _same_range_totals(v2_payload, legacy_payload):
         return {
-            "value": Decimal(str(legacy_totals["value"] or 0)),
-            "net_value": Decimal(str(legacy_totals["net_value"] or 0)),
-            "quantity": Decimal(str(legacy_totals["quantity"] or 0)),
-            "source_label": "Point directo",
-            "source_detail": "point_daily_sale_selected",
+            **v2_payload,
+            "source_detail": "point_stage_consensus",
         }
+
+    if authoritative.exists() and v2.exists() and _same_range_totals(authoritative_payload, v2_payload):
+        return authoritative_payload
+
+    if authoritative.exists() and legacy.exists() and _same_range_totals(authoritative_payload, legacy_payload):
+        return authoritative_payload
+
+    if v2.exists() and (v2_payload["value"] or v2_payload["quantity"]):
+        return v2_payload
+
+    if legacy.exists() and (legacy_payload["value"] or legacy_payload["quantity"]):
+        return legacy_payload
+
+    if authoritative.exists() and (authoritative_payload["value"] or authoritative_payload["quantity"]):
+        return authoritative_payload
 
     return {
         "value": Decimal("0"),
