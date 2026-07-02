@@ -9,7 +9,7 @@ from django.db import connection
 from django.utils import timezone
 
 from core.cache_versions import get_or_set_versioned_cache
-from ventas.services.sales_canonical_source import canonical_point_max_date, canonical_point_previous_dates
+from ventas.services.sales_canonical_source import canonical_point_max_date, canonical_point_previous_dates, point_sales_month_total
 from ventas.services.sales_read_service import get_daily_sales_bulk, get_sales_range
 
 
@@ -431,11 +431,16 @@ def _build_dashboard_sales_dataset(*, today: date, months: int) -> dict[str, obj
             raw["cut_amount"] = indicator_total_amount
 
     monthly_rows = []
-    monthly_max = max((_to_decimal(row.get("amount")) for row in raw["monthly_rows"]), default=Decimal("0"))
+    monthly_canonical_values = []
     for row in raw["monthly_rows"]:
         periodo = str(row.get("periodo") or "")
         year, month = periodo.split("-", 1) if "-" in periodo else ("0000", "00")
-        value = _to_decimal(row.get("amount"))
+        canonical = point_sales_month_total(int(year), int(month)) if year != "0000" and month != "00" else {"value": Decimal("0"), "source_label": "Sin dato oficial"}
+        monthly_canonical_values.append((periodo, canonical))
+    monthly_max = max((canonical["value"] for _, canonical in monthly_canonical_values), default=Decimal("0"))
+    for periodo, canonical in monthly_canonical_values:
+        year, month = periodo.split("-", 1) if "-" in periodo else ("0000", "00")
+        value = _to_decimal(canonical["value"])
         pct = float((value / monthly_max) * Decimal("100")) if monthly_max > 0 else 0.0
         monthly_rows.append(
             {
@@ -444,9 +449,13 @@ def _build_dashboard_sales_dataset(*, today: date, months: int) -> dict[str, obj
                 "value": value,
                 "ventas": value,
                 "pct": max(8.0, pct) if value > 0 else 0.0,
-                "source_label": str(row.get("source_label") or "Point directo"),
+                "source_label": str(canonical.get("source_label") or "Point directo"),
             }
         )
+
+    current_month_key = f"{raw['latest_date'].year:04d}-{raw['latest_date'].month:02d}" if raw["latest_date"] else ""
+    current_month_row = next((row for row in monthly_rows if row["periodo"] == current_month_key), None)
+    current_month_amount = current_month_row["value"] if current_month_row else raw["month_amount"]
 
     total_amount = raw["cut_amount"] if raw["cut_amount"] > 0 else raw["raw_day_amount"]
     total_tickets = raw["cut_tickets"] if raw["cut_tickets"] > 0 else raw["raw_day_tickets"]
@@ -517,11 +526,11 @@ def _build_dashboard_sales_dataset(*, today: date, months: int) -> dict[str, obj
             "recipe_count": raw["recipe_count"],
             "avg_ticket": (total_amount / Decimal(total_tickets)) if tickets_available else None,
             "avg_branch_amount": (total_amount / Decimal(raw["branch_count"])) if raw["branch_count"] else Decimal("0"),
-            "month_amount": raw["month_amount"],
+            "month_amount": current_month_amount,
             "month_units": raw["month_units"],
             "month_tickets": raw["month_tickets"],
             "month_tickets_available": month_tickets_available,
-            "month_avg_ticket": (raw["month_amount"] / Decimal(raw["month_tickets"])) if month_tickets_available else None,
+            "month_avg_ticket": (current_month_amount / Decimal(raw["month_tickets"])) if month_tickets_available else None,
             "comparison_label": comparison_label,
             "comparison_tone": comparison_tone,
             "comparison_detail": comparison_detail,

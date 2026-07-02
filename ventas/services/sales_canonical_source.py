@@ -205,17 +205,69 @@ def sales_rows_for_month(source: dict[str, object], year: int, month: int):
     return VentaHistorica.objects.none()
 
 
+def canonical_point_sales_range_total(*, start_date: date, end_date: date) -> dict[str, object]:
+    authoritative = VentaAutoritativaPoint.objects.filter(sale_date__range=(start_date, end_date))
+    authoritative_totals = authoritative.aggregate(
+        value=Sum("total_amount"),
+        net_value=Sum("net_amount"),
+        quantity=Sum("quantity"),
+    )
+    if authoritative.exists() and (authoritative_totals["value"] or authoritative_totals["quantity"]):
+        return {
+            "value": Decimal(str(authoritative_totals["value"] or 0)),
+            "net_value": Decimal(str(authoritative_totals["net_value"] or 0)),
+            "quantity": Decimal(str(authoritative_totals["quantity"] or 0)),
+            "source_label": "Point directo",
+            "source_detail": "venta_autoritativa_point",
+        }
+
+    v2 = PointSalesDailyCategoryFact.objects.filter(sale_date__range=(start_date, end_date))
+    v2_totals = v2.aggregate(
+        value=Sum("total_venta"),
+        net_value=Sum("total_venta_neta"),
+        quantity=Sum("total_cantidad"),
+    )
+    if v2.exists() and (v2_totals["value"] or v2_totals["quantity"]):
+        return {
+            "value": Decimal(str(v2_totals["value"] or 0)),
+            "net_value": Decimal(str(v2_totals["net_value"] or 0)),
+            "quantity": Decimal(str(v2_totals["quantity"] or 0)),
+            "source_label": "Point directo",
+            "source_detail": "point_sales_daily_category_fact",
+        }
+
+    legacy = PointDailySale.objects.filter(sale_date__range=(start_date, end_date)).filter(
+        operational_sales_filters(start_date=start_date, end_date=end_date)
+    )
+    legacy_totals = legacy.aggregate(
+        value=Sum("total_amount"),
+        net_value=Sum("net_amount"),
+        quantity=Sum("quantity"),
+    )
+    if legacy.exists() and (legacy_totals["value"] or legacy_totals["quantity"]):
+        return {
+            "value": Decimal(str(legacy_totals["value"] or 0)),
+            "net_value": Decimal(str(legacy_totals["net_value"] or 0)),
+            "quantity": Decimal(str(legacy_totals["quantity"] or 0)),
+            "source_label": "Point directo",
+            "source_detail": "point_daily_sale_selected",
+        }
+
+    return {
+        "value": Decimal("0"),
+        "net_value": Decimal("0"),
+        "quantity": Decimal("0"),
+        "source_label": "Sin dato oficial",
+        "source_detail": "none",
+    }
+
+
 def point_sales_month_total(year: int, month: int) -> dict[str, object]:
     start_date = date(year, month, 1)
     end_date = date(year, month, monthrange(year, month)[1])
-    canonical = get_sales_range(
-        start_date=start_date,
-        end_date=end_date,
-        coverage_policy="prefer_complete",
-    )
-    canonical_total = canonical.get("monto") or Decimal("0")
-    if canonical_total > 0:
-        return {"value": Decimal(str(canonical_total)), "source_label": "Point directo"}
+    canonical = canonical_point_sales_range_total(start_date=start_date, end_date=end_date)
+    if canonical["value"] > 0:
+        return {"value": canonical["value"], "source_label": str(canonical["source_label"] or "Point directo")}
 
     bridge_qs = VentaHistorica.objects.filter(
         fecha__year=year,

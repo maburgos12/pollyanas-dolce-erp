@@ -41,6 +41,7 @@ from reportes.executive_panels import (
     build_monthly_yoy_panel,
     build_sales_forecast_panel,
 )
+from reportes.dashboard_sales_dataset import get_dashboard_sales_dataset
 from reportes.bi_utils import compute_bi_snapshot
 from reportes.views import _point_sales_month_total as reportes_point_sales_month_total
 from reportes.views import (
@@ -2102,6 +2103,111 @@ class ReportesBIUtilsTests(TestCase):
         self.assertEqual(march_row["month_label"], "2026-03")
         self.assertEqual(march_row["amount"], Decimal("1850.00"))
         self.assertEqual(march_row["quantity"], Decimal("10.00"))
+
+    def test_month_total_ignores_duplicated_fact_table_when_point_is_available(self):
+        FactVentaDiaria.objects.create(
+            fecha=date(2026, 3, 16),
+            sucursal=self.sucursal,
+            receta=self.receta,
+            producto_clave="BIUTILS01",
+            producto_nombre="Pastel BI Utils",
+            cantidad=Decimal("20"),
+            tickets=10,
+            venta_bruta=Decimal("3700"),
+            descuento=Decimal("0"),
+            venta_total=Decimal("3700"),
+            venta_neta=Decimal("3700"),
+            costo_estimado=Decimal("0"),
+            margen=Decimal("0"),
+            source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE,
+        )
+        PointSalesDailyCategoryFact.objects.create(
+            branch=self.point_branch,
+            sale_date=date(2026, 3, 16),
+            sucursal_nombre=self.sucursal.nombre,
+            categoria="Pasteles",
+            total_cantidad=Decimal("10"),
+            total_descuento=Decimal("0"),
+            total_venta=Decimal("1850"),
+            total_impuestos=Decimal("0"),
+            total_venta_neta=Decimal("1850"),
+        )
+
+        resolved = reportes_point_sales_month_total(2026, 3)
+
+        self.assertEqual(resolved["value"], Decimal("1850"))
+        self.assertEqual(resolved["source_label"], "Point directo")
+
+    def test_yoy_panel_ignores_duplicated_fact_table_when_point_is_available(self):
+        fecha_actual = date(2026, 3, 31)
+        FactVentaDiaria.objects.create(
+            fecha=date(2026, 3, 16),
+            sucursal=self.sucursal,
+            receta=self.receta,
+            producto_clave="BIUTILS01",
+            producto_nombre="Pastel BI Utils",
+            cantidad=Decimal("20"),
+            tickets=10,
+            venta_bruta=Decimal("3700"),
+            descuento=Decimal("0"),
+            venta_total=Decimal("3700"),
+            venta_neta=Decimal("3700"),
+            costo_estimado=Decimal("0"),
+            margen=Decimal("0"),
+            source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE,
+        )
+        PointSalesDailyCategoryFact.objects.create(
+            branch=self.point_branch,
+            sale_date=date(2026, 3, 16),
+            sucursal_nombre=self.sucursal.nombre,
+            categoria="Pasteles",
+            total_cantidad=Decimal("10"),
+            total_descuento=Decimal("0"),
+            total_venta=Decimal("1850"),
+            total_impuestos=Decimal("0"),
+            total_venta_neta=Decimal("1850"),
+        )
+
+        panel = build_monthly_yoy_panel(latest_date=fecha_actual, months=1)
+
+        self.assertEqual(panel["rows"][0]["amount"], Decimal("1850.00"))
+        self.assertEqual(panel["rows"][0]["quantity"], Decimal("10.00"))
+
+    def test_dashboard_monthly_rows_ignore_duplicated_fact_table_when_point_is_available(self):
+        fecha_actual = date(2026, 3, 31)
+        FactVentaDiaria.objects.create(
+            fecha=date(2026, 3, 16),
+            sucursal=self.sucursal,
+            receta=self.receta,
+            producto_clave="BIUTILS01",
+            producto_nombre="Pastel BI Utils",
+            cantidad=Decimal("20"),
+            tickets=10,
+            venta_bruta=Decimal("3700"),
+            descuento=Decimal("0"),
+            venta_total=Decimal("3700"),
+            venta_neta=Decimal("3700"),
+            costo_estimado=Decimal("0"),
+            margen=Decimal("0"),
+            source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE,
+        )
+        PointSalesDailyCategoryFact.objects.create(
+            branch=self.point_branch,
+            sale_date=date(2026, 3, 16),
+            sucursal_nombre=self.sucursal.nombre,
+            categoria="Pasteles",
+            total_cantidad=Decimal("10"),
+            total_descuento=Decimal("0"),
+            total_venta=Decimal("1850"),
+            total_impuestos=Decimal("0"),
+            total_venta_neta=Decimal("1850"),
+        )
+
+        with patch("reportes.dashboard_sales_dataset.timezone.localdate", return_value=fecha_actual):
+            dataset = get_dashboard_sales_dataset(today=fecha_actual, months=1)
+
+        self.assertEqual(dataset["monthly_sales_rows"][0]["value"], Decimal("1850"))
+        self.assertEqual(dataset["daily_sales_snapshot"]["month_amount"], Decimal("1850"))
 
     def test_central_flow_panel_uses_canonical_range_when_monthly_cache_missing(self):
         fecha_actual = date(2026, 3, 31)
