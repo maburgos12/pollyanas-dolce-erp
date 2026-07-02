@@ -32,7 +32,7 @@ from openpyxl.utils import get_column_letter
 from rapidfuzz import fuzz
 
 from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
-from control.models import MermaPOS
+from control.models import MermaMensualSucursal, MermaPOS
 from core.access import can_manage_compras, can_view_recetas, is_branch_capture_only
 from core.audit import log_event
 from core.models import Sucursal, sucursales_operativas
@@ -103,6 +103,7 @@ from reportes.models import (
     ProductoCostoOperativoMensual,
     ProductoReventaCosto,
     ProductoReventaCostoHistoricoMensual,
+    ProductoSucursalContribucionMensual,
 )
 from ventas.models import VentaAutoritativaPoint
 
@@ -6850,6 +6851,32 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
 
     price_stats = _median_point_prices_bulk(receta_ids, start_period, today, branch_ids)
 
+    # --- Rentabilidad: contribución real (ya incluye comisión bancaria y
+    # logística vía gasto_comercial_unit, reportes/services_operating_finance.py)
+    # y merma real (control.MermaMensualSucursal, no unida hoy a contribución). ---
+    rentabilidad_por_receta: dict[int, dict[str, Decimal]] = defaultdict(
+        lambda: {"contribucion_total": Decimal("0"), "gasto_comercial_total": Decimal("0"), "unidades": Decimal("0")}
+    )
+    if cost_ids:
+        for registro in (
+            ProductoSucursalContribucionMensual.objects.filter(
+                receta_id__in=cost_ids, periodo__gte=start_period, periodo__lte=current_period
+            ).values("receta_id", "contribucion_total", "gasto_comercial_total", "unidades_vendidas")
+        ):
+            acc = rentabilidad_por_receta[registro["receta_id"]]
+            acc["contribucion_total"] += Decimal(str(registro["contribucion_total"] or 0))
+            acc["gasto_comercial_total"] += Decimal(str(registro["gasto_comercial_total"] or 0))
+            acc["unidades"] += Decimal(str(registro["unidades_vendidas"] or 0))
+
+    merma_total_por_receta: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
+    if cost_ids:
+        for registro in (
+            MermaMensualSucursal.objects.filter(
+                receta_id__in=cost_ids, periodo__gte=start_period, periodo__lte=current_period
+            ).values("receta_id").annotate(total=Sum("costo_merma"))
+        ):
+            merma_total_por_receta[registro["receta_id"]] = Decimal(str(registro["total"] or 0))
+
     sales_start = today - timedelta(days=90)
     sales_skus = set(skus_set)
     for addon_list in addons_por_base.values():
@@ -6896,6 +6923,31 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             "net": net.quantize(Decimal("0.01")),
             "asp": asp,
             "tickets": int(data.get("tickets") or 0),
+        }
+
+    def _rentabilidad_payload(recipe_id: int) -> dict[str, Decimal | bool | None]:
+        acc = rentabilidad_por_receta.get(recipe_id)
+        contribucion_total = acc["contribucion_total"] if acc else Decimal("0")
+        unidades = acc["unidades"] if acc else Decimal("0")
+        desglose_disponible = bool(acc and unidades > 0)
+        gasto_comercial_unit = (
+            (acc["gasto_comercial_total"] / unidades).quantize(Decimal("0.01"))
+            if desglose_disponible
+            else None
+        )
+        merma_total = merma_total_por_receta.get(recipe_id, Decimal("0"))
+        merma_unit = (merma_total / unidades).quantize(Decimal("0.01")) if unidades > 0 else Decimal("0.00")
+        utilidad_estimada_unit = (
+            ((contribucion_total - merma_total) / unidades).quantize(Decimal("0.01"))
+            if unidades > 0
+            else None
+        )
+        return {
+            "contribucion_total": contribucion_total.quantize(Decimal("0.01")),
+            "gasto_comercial_unit": gasto_comercial_unit,
+            "gasto_comercial_desglose_disponible": desglose_disponible,
+            "merma_unit": merma_unit,
+            "utilidad_estimada_unit": utilidad_estimada_unit,
         }
 
     def _costo_fabricado(recipe_id: int):
@@ -7049,6 +7101,8 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             precio_actual=precio_actual,
         )
 
+        rentabilidad = _rentabilidad_payload(receta.id)
+
         base_row = {
             "receta_id": receta.id,
             "nombre": receta.nombre,
@@ -7092,7 +7146,13 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             "accion_sugerida": accion_sugerida,
             "accion_sugerida_label": ACCION_LABELS[accion_sugerida],
             "serie": [float(s) for s in serie],
+            "contribucion_total": rentabilidad["contribucion_total"],
+            "gasto_comercial_unit": rentabilidad["gasto_comercial_unit"],
+            "gasto_comercial_desglose_disponible": rentabilidad["gasto_comercial_desglose_disponible"],
+            "merma_unit": rentabilidad["merma_unit"],
+            "utilidad_estimada_unit": rentabilidad["utilidad_estimada_unit"],
             "_margen_sort": margen if margen is not None else Decimal("9999"),
+            "_contribucion_sort": rentabilidad["contribucion_total"],
         }
 
         combo_rows: list[dict[str, Any]] = []
@@ -7192,7 +7252,13 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
                     "accion_sugerida": combo_accion,
                     "accion_sugerida_label": ACCION_LABELS[combo_accion],
                     "serie": [float(s) for s in serie],
+                    "contribucion_total": rentabilidad["contribucion_total"],
+                    "gasto_comercial_unit": rentabilidad["gasto_comercial_unit"],
+                    "gasto_comercial_desglose_disponible": rentabilidad["gasto_comercial_desglose_disponible"],
+                    "merma_unit": rentabilidad["merma_unit"],
+                    "utilidad_estimada_unit": rentabilidad["utilidad_estimada_unit"],
                     "_margen_sort": combo_margen if combo_margen is not None else Decimal("9999"),
+                    "_contribucion_sort": rentabilidad["contribucion_total"],
                 })
 
         # En precio sugerido el producto comercial correcto es el total base+addon.
@@ -7233,6 +7299,8 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             "Precio minimo rentable", "Precio recomendado", "Margen recomendado %",
             "Subida recomendada %", "Brecha vs minimo", "Ventas 90d pzas",
             "Venta neta 90d", "Impacto 90d est.", "Estado", "Accion sugerida", "Politica margen",
+            "Contribucion total (ventana)", "Gasto comercial por unidad", "Merma por unidad",
+            "Utilidad estimada por unidad",
         ])
         for row in rows:
             bd = row["breakdown"] or {}
@@ -7258,6 +7326,10 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
                 row["estado"],
                 row["accion_sugerida_label"],
                 row["politica_margen_label"],
+                row["contribucion_total"],
+                row["gasto_comercial_unit"] if row["gasto_comercial_unit"] is not None else "",
+                row["merma_unit"],
+                row["utilidad_estimada_unit"] if row["utilidad_estimada_unit"] is not None else "",
             ])
         return response
 
@@ -7324,6 +7396,11 @@ def monitor_margenes_precio_sugerido(request: HttpRequest) -> HttpResponse:
             "accion_sugerida": row["accion_sugerida"],
             "accion_sugerida_label": row["accion_sugerida_label"],
             "serie": row["serie"],
+            "contribucion_total": str(row["contribucion_total"]),
+            "gasto_comercial_unit": _s(row["gasto_comercial_unit"]),
+            "gasto_comercial_desglose_disponible": row["gasto_comercial_desglose_disponible"],
+            "merma_unit": str(row["merma_unit"]),
+            "utilidad_estimada_unit": _s(row["utilidad_estimada_unit"]),
         })
 
     export_params = request.GET.copy()

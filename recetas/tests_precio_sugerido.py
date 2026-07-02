@@ -26,8 +26,10 @@ from pos_bridge.models import PointBranch, PointDailySale, PointProduct
 from reportes.models import (
     ProductoCostoOperativoMensual,
     ProductoReventaCostoHistoricoMensual,
+    ProductoSucursalContribucionMensual,
     RecetaCostoHistoricoMensual,
 )
+from control.models import MermaMensualSucursal
 
 
 class PrecioSugeridoViewTests(TestCase):
@@ -441,4 +443,93 @@ class PrecioSugeridoViewTests(TestCase):
         self.assertEqual(data["politicas_base"]["mp"]["margen_meta_pct"], "55")
         row = self._row(self._fetch(), r)
         self.assertEqual(row["margen_meta"], "55")
+
+
+class RentabilidadProductoTests(PrecioSugeridoViewTests):
+    """Campos de rentabilidad agregados al JSON de Precio sugerido para la
+    pestaña Rentabilidad: contribución real, merma real, gasto comercial."""
+
+    def _contribucion(self, receta, *, contribucion_total, gasto_comercial_total, unidades, periodo=None):
+        return ProductoSucursalContribucionMensual.objects.create(
+            periodo=periodo or self.period,
+            receta=receta,
+            sucursal=self.sucursal,
+            unidades_vendidas=Decimal(str(unidades)),
+            gasto_comercial_total=Decimal(str(gasto_comercial_total)),
+            gasto_comercial_unit=(Decimal(str(gasto_comercial_total)) / Decimal(str(unidades))) if unidades else Decimal("0"),
+            contribucion_total=Decimal(str(contribucion_total)),
+        )
+
+    def _merma(self, receta, *, costo, periodo=None):
+        return MermaMensualSucursal.objects.create(
+            periodo=periodo or self.period,
+            sucursal=self.sucursal,
+            receta=receta,
+            nombre_producto=receta.nombre,
+            costo_merma=Decimal(str(costo)),
+        )
+
+    def test_utilidad_estimada_resta_merma_real(self):
+        r = self._receta("Pastel Rentable", "RENT1")
+        self._point("RENT1", "Pastel Rentable", precio=500)
+        self._operativo(r, fab=100, mp=60, mo=20, ind=10, emp=10)
+        self._contribucion(r, contribucion_total=Decimal("4000.00"), gasto_comercial_total=Decimal("500.00"), unidades=100)
+        self._merma(r, costo=Decimal("100.00"))
+
+        row = self._row(self._fetch(), r)
+
+        self.assertEqual(row["contribucion_total"], "4000.00")
+        self.assertEqual(row["gasto_comercial_unit"], "5.00")
+        self.assertTrue(row["gasto_comercial_desglose_disponible"])
+        self.assertEqual(row["merma_unit"], "1.00")
+        # utilidad_estimada_unit = (contribucion_total - merma_total) / unidades = (4000-100)/100
+        self.assertEqual(row["utilidad_estimada_unit"], "39.00")
+
+    def test_sin_filas_de_merma_es_cero_no_faltante(self):
+        r = self._receta("Pastel Sin Merma", "RENT2")
+        self._point("RENT2", "Pastel Sin Merma", precio=300)
+        self._operativo(r, fab=80, mp=50, mo=15, ind=10, emp=5)
+        self._contribucion(r, contribucion_total=Decimal("1000.00"), gasto_comercial_total=Decimal("200.00"), unidades=50)
+
+        row = self._row(self._fetch(), r)
+
+        self.assertEqual(row["merma_unit"], "0.00")
+        self.assertIsNotNone(row["utilidad_estimada_unit"])
+
+    def test_sin_contribucion_declara_gasto_comercial_no_disponible(self):
+        r = self._receta("Pastel Sin Contribucion", "RENT3")
+        self._point("RENT3", "Pastel Sin Contribucion", precio=300)
+        self._mp_hist(r, 80)
+
+        row = self._row(self._fetch(), r)
+
+        self.assertEqual(row["contribucion_total"], "0.00")
+        self.assertIsNone(row["gasto_comercial_unit"])
+        self.assertFalse(row["gasto_comercial_desglose_disponible"])
+        self.assertIsNone(row["utilidad_estimada_unit"])
+
+    def test_sin_costo_no_rompe_calculo_rentabilidad(self):
+        r = self._receta("Pastel Sin Costo Alguno", "RENT4")
+        self._point("RENT4", "Pastel Sin Costo Alguno", precio=100)
+
+        row = self._row(self._fetch(), r)
+
+        self.assertEqual(row["costo_fuente"], "SIN_COSTO")
+        self.assertEqual(row["merma_unit"], "0.00")
+
+    def test_suma_contribucion_entre_sucursales_de_la_ventana(self):
+        r = self._receta("Pastel Multisucursal", "RENT5")
+        self._point("RENT5", "Pastel Multisucursal", precio=400)
+        self._operativo(r, fab=90, mp=60, mo=15, ind=10, emp=5)
+        otra_sucursal = Sucursal.objects.create(codigo="S2", nombre="Otra Sucursal", fecha_apertura=date(2020, 1, 1))
+        self._contribucion(r, contribucion_total=Decimal("1000.00"), gasto_comercial_total=Decimal("100.00"), unidades=20)
+        ProductoSucursalContribucionMensual.objects.create(
+            periodo=self.period, receta=r, sucursal=otra_sucursal,
+            unidades_vendidas=Decimal("30"), gasto_comercial_total=Decimal("150.00"),
+            gasto_comercial_unit=Decimal("5.00"), contribucion_total=Decimal("1500.00"),
+        )
+
+        row = self._row(self._fetch(), r)
+
+        self.assertEqual(row["contribucion_total"], "2500.00")
         self.assertEqual(row["estado"], "OK")

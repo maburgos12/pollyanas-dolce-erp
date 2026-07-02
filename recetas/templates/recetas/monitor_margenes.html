@@ -21,6 +21,7 @@
     </div>
     <div class="pd-action-row mm-actions">
       <button type="button" class="btn btn-primary" id="ps-open">Precio sugerido</button>
+      <button type="button" class="btn btn-primary" id="rent-open">Rentabilidad</button>
       <a class="btn btn-secondary" href="{% url 'recetas:costeo_dashboard' %}">Costeo semanal</a>
       <a class="btn btn-secondary" href="{% url 'recetas:recetas_list' %}">Recetas</a>
       <a class="btn btn-secondary btn-export" href="?{{ export_query }}">Exportar CSV</a>
@@ -109,6 +110,35 @@
     <div class="ps-summary" id="ps-summary" hidden></div>
     <div class="ps-result" id="ps-result">
       <div class="mm-empty"><div class="mm-empty-title">Elige meses y familias</div><div>Luego presiona “Calcular precios”.</div></div>
+    </div>
+  </section>
+
+  <section class="ps-panel" id="rent-panel" hidden>
+    <div class="ps-head">
+      <div>
+        <h2 class="ps-title">Ranking de rentabilidad por producto</h2>
+        <p class="ps-sub">Ordenado por contribución total del periodo (venta − costo de fabricación − gasto comercial, que ya incluye comisión bancaria y logística − merma real). Los componentes que aún no estén cargados se muestran como no disponibles, nunca inventados.</p>
+      </div>
+      <button type="button" class="ps-close" id="rent-close" aria-label="Cerrar">X</button>
+    </div>
+    <div class="ps-controls">
+      <div class="ps-control">
+        <label for="rent-meses">Meses a revisar</label>
+        <select id="rent-meses">
+          <option value="3">Últimos 3 meses</option>
+          <option value="6" selected>Últimos 6 meses</option>
+          <option value="12">Últimos 12 meses</option>
+        </select>
+      </div>
+      <div class="ps-control ps-control-actions">
+        <button type="button" class="btn btn-primary" id="rent-calc">Calcular rentabilidad</button>
+        <div class="ps-export-box">
+          <a class="btn btn-secondary btn-export" id="rent-export" href="#" hidden>Exportar CSV</a>
+        </div>
+      </div>
+    </div>
+    <div class="ps-result" id="rent-result">
+      <div class="mm-empty"><div class="mm-empty-title">Elige meses</div><div>Luego presiona “Calcular rentabilidad”.</div></div>
     </div>
   </section>
 
@@ -657,6 +687,82 @@
   if (closeBtn) closeBtn.addEventListener("click", function () { panel.hidden = true; });
   if (calcBtn) calcBtn.addEventListener("click", calcular);
   if (policySaveBtn) policySaveBtn.addEventListener("click", guardarPoliticas);
+
+  // --- Rentabilidad: mismo endpoint, ordenado client-side por contribución
+  // total en vez del orden de estado/margen que usa Precio sugerido. ---
+  var rentPanel = document.getElementById("rent-panel");
+  var rentOpenBtn = document.getElementById("rent-open");
+  var rentCloseBtn = document.getElementById("rent-close");
+  var rentMesesSel = document.getElementById("rent-meses");
+  var rentCalcBtn = document.getElementById("rent-calc");
+  var rentExportLink = document.getElementById("rent-export");
+  var rentResult = document.getElementById("rent-result");
+
+  function renderRentabilidad(data) {
+    var conCosto = data.rows.filter(function (row) { return row.costo_fuente !== "SIN_COSTO"; });
+    var sinCosto = data.rows.length - conCosto.length;
+    conCosto.sort(function (a, b) { return parseFloat(b.contribucion_total) - parseFloat(a.contribucion_total); });
+
+    if (!conCosto.length) {
+      rentResult.innerHTML = '<div class="mm-empty"><div class="mm-empty-title">Sin resultados</div><div>No hay productos con costo calculado para armar el ranking.</div></div>';
+      rentExportLink.hidden = true;
+      return;
+    }
+
+    var html = '';
+    if (sinCosto > 0) {
+      html += '<div class="mm-empty" style="margin-bottom:12px;"><div>' + sinCosto + ' producto' + (sinCosto === 1 ? '' : 's') + ' sin costo calculado, excluido' + (sinCosto === 1 ? '' : 's') + ' de este ranking.</div></div>';
+    }
+    html += '<div class="mm-table-wrap"><table class="mm-table"><thead><tr>' +
+      '<th class="is-right">#</th><th>Producto</th><th>Fuente costo</th>' +
+      '<th class="is-right">Precio</th><th class="is-right">Costo fabricación</th>' +
+      '<th class="is-right">Gasto comercial/u</th><th class="is-right">Merma/u</th>' +
+      '<th class="is-right">Utilidad estimada/u</th><th class="is-right">Contribución total</th>' +
+      '</tr></thead><tbody>';
+    conCosto.forEach(function (row, i) {
+      var gastoComercialTxt = row.gasto_comercial_desglose_disponible
+        ? money(row.gasto_comercial_unit)
+        : '<span class="ps-hint" title="No disponible a nivel producto todavía">No disponible</span>';
+      html += '<tr>' +
+        '<td class="is-right">' + (i + 1) + '</td>' +
+        '<td><span class="mm-recipe-name">' + esc(row.nombre) + '</span></td>' +
+        '<td>' + fuenteChip(row.costo_fuente) + '</td>' +
+        '<td class="is-right">' + (row.precio_actual ? money(row.precio_actual) : '—') + '</td>' +
+        '<td class="is-right">' + money(row.costo_completo) + '</td>' +
+        '<td class="is-right">' + gastoComercialTxt + '</td>' +
+        '<td class="is-right">' + money(row.merma_unit) + '</td>' +
+        '<td class="is-right">' + (row.utilidad_estimada_unit !== null ? money(row.utilidad_estimada_unit) : '—') + '</td>' +
+        '<td class="is-right">' + money(row.contribucion_total) + '</td>' +
+        '</tr>';
+    });
+    html += "</tbody></table></div>";
+    rentResult.innerHTML = html;
+    rentExportLink.hidden = false;
+    rentExportLink.href = ENDPOINT + "?" + (data.export_csv_query || data.export_query);
+  }
+
+  function calcularRentabilidad() {
+    var params = new URLSearchParams();
+    params.set("meses", rentMesesSel.value);
+    rentResult.innerHTML = '<div class="ps-loading">Calculando…</div>';
+    rentExportLink.hidden = true;
+    fetch(ENDPOINT + "?" + params.toString(), { headers: { "X-Requested-With": "XMLHttpRequest" } })
+      .then(function (resp) {
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        return resp.json();
+      })
+      .then(renderRentabilidad)
+      .catch(function (err) {
+        rentResult.innerHTML = '<div class="mm-empty"><div class="mm-empty-title">Error al calcular</div><div>' + err.message + '</div></div>';
+      });
+  }
+
+  if (rentOpenBtn) rentOpenBtn.addEventListener("click", function () {
+    rentPanel.hidden = false;
+    rentPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  if (rentCloseBtn) rentCloseBtn.addEventListener("click", function () { rentPanel.hidden = true; });
+  if (rentCalcBtn) rentCalcBtn.addEventListener("click", calcularRentabilidad);
 
   var famAll = document.getElementById("ps-fam-all");
   var famNone = document.getElementById("ps-fam-none");
