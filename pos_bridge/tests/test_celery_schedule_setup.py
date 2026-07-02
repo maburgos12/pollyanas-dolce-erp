@@ -59,6 +59,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "erp-doctor: reporte diario",
                 "ventas: sync ventas autoritativas mensual",
                 "reportes: snapshot operacion dg",
+                "reportes: enviar reporte diario",
                 "logistica: detectar GPS perdido rutas activas",
                 "orquestacion: plan diario faltante",
                 "orquestacion: cadena plan demanda-produccion-compras",
@@ -66,7 +67,11 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "orquestacion: guardia ajustes inventario",
             },
         )
-        self.assertEqual(PeriodicTask.objects.count(), 38)
+        self.assertEqual(PeriodicTask.objects.count(), 39)
+        reporte_diario = PeriodicTask.objects.get(name="reportes: enviar reporte diario")
+        self.assertEqual(reporte_diario.task, "reportes.enviar_reporte_diario")
+        self.assertEqual(reporte_diario.crontab.hour, "4")
+        self.assertEqual(reporte_diario.crontab.minute, "0")
         sat_download = PeriodicTask.objects.get(name="sat: descarga cfdi nocturna")
         self.assertEqual(sat_download.task, "sat_client.ejecutar_descarga_sat_nocturna")
         self.assertEqual(sat_download.crontab.hour, "1")
