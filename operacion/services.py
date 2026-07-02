@@ -227,16 +227,15 @@ def build_operacion_context(user) -> dict:
                     area="Sucursal",
                 )
             )
-        if can_view_submodule(user, "ventas", "visitas_sucursal"):
-            href = "/visitas-sucursal/" if can_manage_submodule(user, "ventas", "visitas_sucursal") else "/visitas-sucursal/app/"
+        if can_manage_submodule(user, "ventas", "visitas_sucursal"):
             tiles.append(
                 OperacionTile(
                     key="visitas_sucursal",
-                    title="Checklist sucursal",
-                    detail="Orden, limpieza, equipos, personal y actividades del día.",
-                    href=href,
+                    title="Auditorías",
+                    detail="Visitas a sucursal, checklist, hallazgos y seguimiento comercial.",
+                    href="/visitas-sucursal/",
                     icon="checklist",
-                    area="Sucursal",
+                    area="Comercial",
                 )
             )
         if _can_use_mantenimiento(user):
