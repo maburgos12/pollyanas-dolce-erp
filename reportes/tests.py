@@ -2173,6 +2173,34 @@ class ReportesBIUtilsTests(TestCase):
         self.assertEqual(panel["rows"][0]["amount"], Decimal("1850.00"))
         self.assertEqual(panel["rows"][0]["quantity"], Decimal("10.00"))
 
+    @patch(
+        "reportes.executive_panels._best_partial_cache_payload",
+        return_value={
+            "period_start": "2026-03-01",
+            "period_end": "2026-03-23",
+            "total_amount": "1800",
+            "total_quantity": "9",
+        },
+    )
+    def test_yoy_panel_ignores_partial_cache_when_month_is_closed(self, _partial_cache):
+        fecha_actual = date(2026, 3, 31)
+        PointSalesDailyCategoryFact.objects.create(
+            branch=self.point_branch,
+            sale_date=date(2026, 3, 16),
+            sucursal_nombre=self.sucursal.nombre,
+            categoria="Pasteles",
+            total_cantidad=Decimal("10"),
+            total_descuento=Decimal("0"),
+            total_venta=Decimal("1850"),
+            total_impuestos=Decimal("0"),
+            total_venta_neta=Decimal("1850"),
+        )
+
+        panel = build_monthly_yoy_panel(latest_date=fecha_actual, months=1)
+
+        self.assertEqual(panel["rows"][0]["amount"], Decimal("1850.00"))
+        self.assertEqual(panel["rows"][0]["quantity"], Decimal("10.00"))
+
     def test_dashboard_monthly_rows_ignore_duplicated_fact_table_when_point_is_available(self):
         fecha_actual = date(2026, 3, 31)
         FactVentaDiaria.objects.create(
