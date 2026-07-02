@@ -359,6 +359,25 @@ class NavigationActiveStateTests(TestCase):
         self.assertEqual(categorias["url"], "/fallas/?tab=categorias")
         self.assertEqual(self._active_labels("/fallas/?tab=categorias"), ["Categorías"])
 
+    def test_comercial_sidebar_separates_pronostico_and_proyecciones(self):
+        with patch("core.navigation.can_view_submodule", return_value=True):
+            groups = build_nav_groups(
+                SimpleNamespace(is_authenticated=True, is_superuser=True, is_staff=False),
+                "/ventas/pronostico/?tab=proyecciones",
+            )
+        comercial = next(group for group in groups if group["key"] == "comercial")
+
+        self.assertEqual(
+            [item["label"] for item in comercial["items"][:2]],
+            ["Pronóstico", "Proyecciones"],
+        )
+        self.assertEqual(
+            [item["url"] for item in comercial["items"][:2]],
+            ["/ventas/pronostico/?tab=pronosticos", "/ventas/pronostico/?tab=proyecciones"],
+        )
+        self.assertEqual(self._active_labels("/ventas/pronostico/?tab=proyecciones"), ["Proyecciones"])
+        self.assertEqual(self._active_labels("/ventas/pronostico/?tab=pronosticos"), ["Pronóstico"])
+
     def test_administracion_sidebar_group_defines_horizontal_tabs(self):
         with patch("core.navigation.can_view_submodule", return_value=True):
             groups = build_nav_groups(SimpleNamespace(is_authenticated=True, is_superuser=True, is_staff=False), "/activos/seguimiento/")
