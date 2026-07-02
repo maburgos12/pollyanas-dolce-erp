@@ -2209,6 +2209,74 @@ class ReportesBIUtilsTests(TestCase):
         self.assertEqual(dataset["monthly_sales_rows"][0]["value"], Decimal("1850"))
         self.assertEqual(dataset["daily_sales_snapshot"]["month_amount"], Decimal("1850"))
 
+    def test_monthly_point_totals_ignore_duplicated_autoritative_table_when_stage_sources_match(self):
+        fecha_venta = date(2026, 3, 16)
+        VentaAutoritativaPoint.objects.create(
+            branch=self.sucursal,
+            product=self.receta,
+            sale_date=fecha_venta,
+            product_code="BIUTILS01",
+            point_name=self.receta.nombre,
+            category="Pasteles",
+            quantity=Decimal("20"),
+            gross_amount=Decimal("3700"),
+            discount_amount=Decimal("0"),
+            total_amount=Decimal("3700"),
+            tax_amount=Decimal("0"),
+            net_amount=Decimal("3600"),
+            source_file="dup-a",
+            source_sheet="Sheet1",
+            raw_payload={},
+        )
+        VentaAutoritativaPoint.objects.create(
+            branch=self.sucursal,
+            product=self.receta,
+            sale_date=fecha_venta,
+            product_code="BIUTILS01-DUP",
+            point_name=self.receta.nombre,
+            category="Pasteles",
+            quantity=Decimal("20"),
+            gross_amount=Decimal("3700"),
+            discount_amount=Decimal("0"),
+            total_amount=Decimal("3700"),
+            tax_amount=Decimal("0"),
+            net_amount=Decimal("3600"),
+            source_file="dup-b",
+            source_sheet="Sheet1",
+            raw_payload={},
+        )
+        PointSalesDailyCategoryFact.objects.create(
+            branch=self.point_branch,
+            sale_date=fecha_venta,
+            sucursal_nombre=self.sucursal.nombre,
+            categoria="Pasteles",
+            total_cantidad=Decimal("10"),
+            total_descuento=Decimal("0"),
+            total_venta=Decimal("1850"),
+            total_impuestos=Decimal("0"),
+            total_venta_neta=Decimal("1800"),
+        )
+        PointDailySale.objects.create(
+            branch=self.point_branch,
+            product=self.point_product,
+            receta=self.receta,
+            sale_date=fecha_venta,
+            quantity=Decimal("10"),
+            gross_amount=Decimal("1850"),
+            discount_amount=Decimal("0"),
+            total_amount=Decimal("1850"),
+            tax_amount=Decimal("0"),
+            net_amount=Decimal("1800"),
+            source_endpoint="/Report/VentasCategorias",
+        )
+
+        resolved = reportes_point_sales_month_total(2026, 3)
+        panel = build_monthly_yoy_panel(latest_date=date(2026, 3, 31), months=1)
+
+        self.assertEqual(resolved["value"], Decimal("1850"))
+        self.assertEqual(panel["rows"][0]["amount"], Decimal("1850.00"))
+        self.assertEqual(panel["rows"][0]["quantity"], Decimal("10.00"))
+
     def test_central_flow_panel_uses_canonical_range_when_monthly_cache_missing(self):
         fecha_actual = date(2026, 3, 31)
         sucursal = self._create_sucursal("BI-FLOW-CAN", "Sucursal Flow Can")
