@@ -30,6 +30,32 @@
       <strong>{{ month_label }} {{ year }}</strong>
       <span>Real {{ avance_real }}% · Plan {{ avance_estimado }}%</span>
     </div>
+    <div class="visit-mobile-schedule" aria-label="Agenda móvil de visitas">
+      {% for row in rows %}
+        <article class="visit-mobile-branch">
+          <div class="visit-mobile-branch-head">
+            <strong>{{ row.sucursal.nombre }}</strong>
+            <span>{{ row.visitas_count }} visita{% if row.visitas_count != 1 %}s{% endif %}</span>
+          </div>
+          {% if row.visitas_count %}
+            <div class="visit-mobile-days">
+              {% for cell in row.cells %}
+                {% if cell.visita %}
+                  <a class="visit-mobile-day {{ cell.visita.estatus|lower }}" href="{% url 'visitas_sucursal:detalle' cell.visita.id %}" title="{{ cell.visita.sucursal.nombre }} · {{ cell.visita.get_estatus_display }}">
+                    {{ cell.day.day }}
+                    {% if cell.visita.estatus == "REALIZADA" %}R{% elif cell.visita.estatus == "CANCELADA" %}C{% else %}P{% endif %}
+                  </a>
+                {% endif %}
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="visit-mobile-empty">Sin visitas este mes.</p>
+          {% endif %}
+        </article>
+      {% empty %}
+        <div class="visit-empty">No hay sucursales operativas configuradas.</div>
+      {% endfor %}
+    </div>
     <div class="visit-calendar-wrap">
       <table class="visit-calendar">
         <thead>
