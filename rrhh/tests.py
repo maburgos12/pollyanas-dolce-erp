@@ -3150,6 +3150,40 @@ class RRHHViewsTests(TestCase):
         self.assertEqual(hora_extra.autorizado_por, jefe_user)
         self.assertIsNotNone(hora_extra.fecha_autorizacion_jefe)
 
+    def test_superuser_ve_y_autoriza_horas_extra_asignadas_a_otro_jefe(self):
+        from datetime import date
+
+        jefe_user = User.objects.create_user(username="jefe.he.web", password="pass123")
+        super_user = User.objects.create_user(username="mauricio.he.web", is_superuser=True, is_staff=True)
+        empleado = Empleado.objects.create(
+            nombre="Empleado HE Superuser",
+            area="PRODUCCION",
+            salario_diario="400.00",
+        )
+        hora_extra = HoraExtra.objects.create(
+            empleado=empleado,
+            jefe_directo=jefe_user,
+            fecha=date(2026, 5, 20),
+            horas=Decimal("1.50"),
+            notas="Carga extraordinaria",
+        )
+
+        self.client.force_login(super_user)
+        resp_lista = self.client.get(reverse("rrhh:rrhh_he_list"))
+        self.assertEqual(resp_lista.status_code, 200)
+        self.assertContains(resp_lista, "Empleado HE Superuser")
+        self.assertContains(resp_lista, "Autorizar")
+
+        resp_auth = self.client.post(
+            reverse("rrhh:rrhh_he_list"),
+            {"hora_extra_id": str(hora_extra.id), "action": "autorizar"},
+            follow=True,
+        )
+        self.assertEqual(resp_auth.status_code, 200)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_AUTORIZADO)
+        self.assertEqual(hora_extra.autorizado_por, super_user)
+
     def test_prestamo_tiene_formato_imprimible_y_regresos_a_dashboard(self):
         from datetime import date
 

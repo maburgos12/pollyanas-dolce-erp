@@ -40,13 +40,15 @@
           <span class="ch-badge">{{ label }}</span>
           {% if he.monto_calculado %}<span class="ch-badge gold">${{ he.monto_calculado }}</span>{% endif %}
         </div>
-        {% if key == "pendiente" and he.jefe_directo_id == user_id %}
-          <form method="post" class="ch-actions">
-            {% csrf_token %}
-            <input type="hidden" name="hora_extra_id" value="{{ he.id }}">
-            <button class="btn btn-primary" type="submit" name="action" value="autorizar">Autorizar</button>
-            <button class="btn btn-secondary" type="submit" name="action" value="rechazar">Rechazar</button>
-          </form>
+        {% if key == "pendiente" %}
+          {% if he.jefe_directo_id == user_id or is_superuser %}
+            <form method="post" class="ch-actions">
+              {% csrf_token %}
+              <input type="hidden" name="hora_extra_id" value="{{ he.id }}">
+              <button class="btn btn-primary" type="submit" name="action" value="autorizar">Autorizar</button>
+              <button class="btn btn-secondary" type="submit" name="action" value="rechazar">Rechazar</button>
+            </form>
+          {% endif %}
         {% endif %}
       </article>
     {% endfor %}

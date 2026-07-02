@@ -2621,6 +2621,7 @@ def horas_extra_list(request):
             "columnas": columnas,
             "can_view_rrhh": can_view_rrhh(request.user),
             "user_id": request.user.id,
+            "is_superuser": request.user.is_superuser,
         },
     )
 
