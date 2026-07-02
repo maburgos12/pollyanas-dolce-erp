@@ -1,13 +1,14 @@
 {% extends "visitas_sucursal/base_visitas.html" %}
+{% load branch_labels %}
 
-{% block title %}Visita {{ visita.sucursal.nombre }}{% endblock %}
+{% block title %}Visita {{ visita.sucursal|branch_label }}{% endblock %}
 {% block page_title %}Comercial · Visita a sucursal{% endblock %}
 
 {% block content %}
 <main class="visit-shell">
   <header class="visit-head">
     <div>
-      <h1 class="visit-title">{{ visita.sucursal.nombre }}</h1>
+      <h1 class="visit-title">{{ visita.sucursal|branch_label }}</h1>
       <p class="visit-copy">{{ visita.fecha_programada|date:"d/m/Y" }} · {{ visita.get_tipo_display }} · {{ visita.porcentaje_cumplimiento }}% de cumplimiento</p>
     </div>
     <a class="visit-btn secondary" href="{% url 'visitas_sucursal:lista' %}">Volver</a>

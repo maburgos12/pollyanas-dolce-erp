@@ -7,15 +7,9 @@ from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
+from core.branch_catalog import display_branch_name
 from core.access import can_manage_rrhh
 from core.models import Sucursal, UserProfile
-
-
-def _display_branch_name(name: str | None) -> str:
-    value = (name or "").strip()
-    if not value or value.upper() == "CEDIS" or value.lower().startswith("sucursal "):
-        return value
-    return f"Sucursal {value}"
 
 
 @login_required
@@ -33,7 +27,7 @@ def asignacion_sucursales_api(request):
     )
     for row in rows:
         row["valor"] = row["nombre"]
-        row["nombre"] = _display_branch_name(row["nombre"])
+        row["nombre"] = display_branch_name(row["nombre"])
     return JsonResponse({"count": len(rows), "results": rows})
 
 

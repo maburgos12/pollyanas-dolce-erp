@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load branch_labels %}
 
 {% block title %}RRHH · Nueva vacante{% endblock %}
 {% block page_title %}RRHH · Nueva vacante{% endblock %}
@@ -56,10 +57,10 @@
         <select name="sucursal">
           <option value="">CEDIS / General</option>
           {% for sucursal in sucursales %}
-            <option value="{{ sucursal.id }}">{{ sucursal.nombre }}</option>
-          {% endfor %}
-        </select>
-      </div>
+            <option value="{{ sucursal.id }}">{{ sucursal|branch_label }}</option>
+            {% endfor %}
+          </select>
+        </div>
       <div class="vacante-field">
         <label>Fecha solicitada</label>
         <input type="date" name="fecha_solicitada" required>

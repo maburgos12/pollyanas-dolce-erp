@@ -1,4 +1,4 @@
-{% load static %}
+{% load static branch_labels %}
 <!doctype html>
 <html lang="es-MX">
 <head>
@@ -184,7 +184,7 @@
     <header class="topbar">
       <div>
         <h1>{% if can_manage %}Auditoría sucursal{% else %}Checklist sucursal{% endif %}</h1>
-        <p>{% if visita %}{{ visita.sucursal.nombre }}{% else %}{{ sucursal.nombre|default:"Visitas programadas" }}{% endif %}</p>
+        <p>{% if visita %}{{ visita.sucursal|branch_label }}{% else %}{{ sucursal|branch_label|default:"Visitas programadas" }}{% endif %}</p>
       </div>
       <nav class="nav-actions" aria-label="Acciones">
         <a class="link-btn" href="/app/">App</a>
@@ -216,7 +216,7 @@
           <label>Sucursal
             <select name="sucursal" onchange="this.form.submit()">
               {% for item in sucursales_preview %}
-                <option value="{{ item.id }}" {% if preview_sucursal and item.id == preview_sucursal.id %}selected{% endif %}>{{ item.nombre }}</option>
+                <option value="{{ item.id }}" {% if preview_sucursal and item.id == preview_sucursal.id %}selected{% endif %}>{{ item|branch_label }}</option>
               {% endfor %}
             </select>
           </label>
@@ -239,7 +239,7 @@
           <div class="audit-route">
             <div>
               <span>Sucursal a auditar</span>
-              <strong>{{ visita.sucursal.nombre }}</strong>
+              <strong>{{ visita.sucursal|branch_label }}</strong>
             </div>
             <span>{{ visita.porcentaje_cumplimiento }}% capturado</span>
           </div>
@@ -257,7 +257,7 @@
       <section class="card" aria-label="Visitas recientes">
         <div class="visits-list">
           {% for item in visitas %}
-            <a class="visit-chip {% if visita and item.id == visita.id %}active{% endif %}" href="?visita={{ item.id }}{% if is_superuser %}&modo={{ app_mode }}{% if preview_sucursal %}&sucursal={{ preview_sucursal.id }}{% endif %}{% endif %}">{{ item.fecha_programada|date:"d/m" }} · {{ item.sucursal.nombre }} · {{ item.get_estatus_display }}</a>
+            <a class="visit-chip {% if visita and item.id == visita.id %}active{% endif %}" href="?visita={{ item.id }}{% if is_superuser %}&modo={{ app_mode }}{% if preview_sucursal %}&sucursal={{ preview_sucursal.id }}{% endif %}{% endif %}">{{ item.fecha_programada|date:"d/m" }} · {{ item.sucursal|branch_label }} · {{ item.get_estatus_display }}</a>
           {% endfor %}
         </div>
         {% if can_manage %}
