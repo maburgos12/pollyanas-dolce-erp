@@ -142,7 +142,7 @@ def _append_logistica_tiles(tiles: list[OperacionTile], user, *, mobile_only: bo
                 key="logistica_tickets",
                 title="Tickets logística",
                 detail="Incidencias abiertas y seguimiento de unidades.",
-                href="/logistica/tickets/",
+                href="/logistica/app/?pantalla=mis_reportes",
                 icon="tickets",
                 area="Logística",
             )
@@ -153,7 +153,7 @@ def _append_logistica_tiles(tiles: list[OperacionTile], user, *, mobile_only: bo
                 key="logistica_flota",
                 title="Flota",
                 detail="Unidades, servicios y estado operativo.",
-                href="/logistica/flota/",
+                href="/logistica/app/?pantalla=inspeccion_vehiculo",
                 icon="flota",
                 area="Logística",
             )
@@ -164,7 +164,7 @@ def _append_logistica_tiles(tiles: list[OperacionTile], user, *, mobile_only: bo
                 key="logistica_rutas",
                 title="Rutas",
                 detail="Planeación y entregas del día.",
-                href="/logistica/rutas/",
+                href="/logistica/app/?pantalla=ruta_activa",
                 icon="entrega",
                 area="Logística",
             )
@@ -211,7 +211,7 @@ def build_operacion_context(user) -> dict:
                     key="fallas_reportar",
                     title="Reportar falla",
                     detail="Foto, sucursal, activo y prioridad del reporte.",
-                    href="/fallas/reportar/",
+                    href="/fallas/app/",
                     icon="falla",
                     area="Sucursal",
                 )
@@ -222,7 +222,7 @@ def build_operacion_context(user) -> dict:
                     key="fallas_mis_reportes",
                     title="Mis reportes",
                     detail="Seguimiento de fallas enviadas por el usuario.",
-                    href="/fallas/mis-reportes/",
+                    href="/fallas/app/",
                     icon="historial",
                     area="Sucursal",
                 )
@@ -233,7 +233,7 @@ def build_operacion_context(user) -> dict:
                     key="visitas_sucursal",
                     title="Auditorías",
                     detail="Visitas a sucursal, checklist, hallazgos y seguimiento comercial.",
-                    href="/visitas-sucursal/",
+                    href="/visitas-sucursal/app/",
                     icon="checklist",
                     area="Comercial",
                 )
