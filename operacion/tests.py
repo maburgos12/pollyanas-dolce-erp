@@ -522,6 +522,8 @@ class OperacionAppTests(TestCase):
         mantenimiento = self.client.get("/mantenimiento/app/")
         self.assertEqual(mantenimiento.status_code, 200)
         self.assertContains(mantenimiento, 'window.location.href = "/logout/";')
+        self.assertContains(mantenimiento, "window.location.href='/app/'")
+        self.assertContains(mantenimiento, 'aria-label="Menú principal"')
 
         self.client.logout()
         logistica_group = Group.objects.create(name=ROLE_LOGISTICA)
@@ -550,6 +552,26 @@ class OperacionAppTests(TestCase):
         logistica_pwa_html = logistica_pwa_template.read_text(encoding="utf-8")
         self.assertIn("window.location.href='/app/'", logistica_pwa_html)
         self.assertIn('aria-label="Menú principal"', logistica_pwa_html)
+
+    def test_all_app_operativa_destinations_have_home_icon(self):
+        root = Path(__file__).resolve().parents[1]
+        templates = [
+            "fallas/templates/fallas/pwa_reporte.html",
+            "logistica/templates/logistica/pwa.html",
+            "templates/mantenimiento/pwa.html",
+            "mermas/templates/mermas/form.html",
+            "mermas/templates/mermas/app_recepcion.html",
+            "mermas/templates/mermas/detalle.html",
+            "visitas_sucursal/templates/visitas_sucursal/app.html",
+            "templates/operacion/bitacoras_home.html",
+            "templates/operacion/bitacora_captura.html",
+            "recetas/templates/recetas/reabasto_cedis_captura.html",
+        ]
+
+        for template in templates:
+            html = (root / template).read_text(encoding="utf-8")
+            self.assertIn("app-home-link", html, template)
+            self.assertIn('aria-label="Menú principal"', html, template)
 
     def test_operational_pwas_prefer_current_django_session_before_cached_token(self):
         mantenimiento_group = Group.objects.create(name="MANTENIMIENTO")
