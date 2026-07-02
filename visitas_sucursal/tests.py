@@ -285,6 +285,38 @@ class VisitasSucursalTests(TestCase):
         item.refresh_from_db()
         self.assertEqual(item.respuesta, ChecklistVisita.RESPUESTA_PENDIENTE)
 
+    def test_app_superusuario_sucursal_asegura_bitacora_diaria(self):
+        response = self.client.get(
+            reverse("visitas_sucursal:app"),
+            {"modo": "sucursal", "sucursal": self.sucursal.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        visita = response.context["visita"]
+        self.assertEqual(visita.sucursal, self.sucursal)
+        self.assertEqual(visita.tipo, VisitaSucursal.TIPO_BITACORA)
+        self.assertGreater(visita.checklist.count(), 10)
+
+        self.client.get(reverse("visitas_sucursal:app"), {"modo": "sucursal", "sucursal": self.sucursal.id})
+        self.assertEqual(
+            VisitaSucursal.objects.filter(sucursal=self.sucursal, tipo=VisitaSucursal.TIPO_BITACORA).count(),
+            1,
+        )
+
+    def test_bitacora_diaria_no_entra_al_cronograma(self):
+        VisitaSucursal.objects.create(
+            sucursal=self.sucursal,
+            tipo=VisitaSucursal.TIPO_BITACORA,
+            creado_por=self.user,
+        )
+
+        response = self.client.get(reverse("visitas_sucursal:lista"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["programadas"], 0)
+        row = next(row for row in response.context["rows"] if row["sucursal"] == self.sucursal)
+        self.assertEqual(row["visitas_count"], 0)
+
     def test_app_superusuario_muestra_etiqueta_global_de_sucursal(self):
         visita = VisitaSucursal.objects.create(sucursal=self.sucursal, creado_por=self.user)
 
