@@ -1,0 +1,145 @@
+{% extends "visitas_sucursal/base_visitas.html" %}
+
+{% block title %}Visita {{ visita.sucursal.nombre }}{% endblock %}
+{% block page_title %}Comercial · Visita a sucursal{% endblock %}
+
+{% block content %}
+<main class="visit-shell">
+  <header class="visit-head">
+    <div>
+      <h1 class="visit-title">{{ visita.sucursal.nombre }}</h1>
+      <p class="visit-copy">{{ visita.fecha_programada|date:"d/m/Y" }} · {{ visita.get_tipo_display }} · {{ visita.porcentaje_cumplimiento }}% de cumplimiento</p>
+    </div>
+    <a class="visit-btn secondary" href="{% url 'visitas_sucursal:lista' %}">Volver</a>
+  </header>
+
+  <form method="post" class="visit-split">
+    {% csrf_token %}
+    <section class="visit-panel">
+      <h2>Checklist de visita</h2>
+      <div class="visit-grid">
+        <div class="visit-field">
+          <span class="visit-label">Estatus</span>
+          <strong>{{ visita.get_estatus_display }}</strong>
+        </div>
+        <div class="visit-field">
+          <span class="visit-label">Fecha real</span>
+          <strong>{{ visita.fecha_real|date:"d/m/Y"|default:"Pendiente" }}</strong>
+        </div>
+        {% if visita.realizada_en %}
+        <div class="visit-field">
+          <span class="visit-label">Confirmada por</span>
+          <strong>{{ visita.realizada_por.get_full_name|default:visita.realizada_por.username }}</strong>
+          <span class="visit-muted">{{ visita.realizada_en|date:"d/m/Y H:i" }}</span>
+        </div>
+        {% endif %}
+      </div>
+      {% regroup checklist by categoria as checklist_groups %}
+      {% for group in checklist_groups %}
+      <section class="visit-check-group" aria-labelledby="check-group-{{ forloop.counter }}">
+        <div class="visit-check-group-head">
+          <h3 id="check-group-{{ forloop.counter }}">{{ group.grouper }}</h3>
+          <span>{{ group.list|length }} puntos</span>
+        </div>
+        {% for item in group.list %}
+        <div class="visit-check">
+          <div>
+            <h4>{{ item.titulo }}</h4>
+          </div>
+          <label class="visit-field">Resultado
+            <select name="respuesta_{{ item.id }}" {% if not can_manage %}disabled{% endif %}>
+              {% for value,label in respuesta_choices %}
+              <option value="{{ value }}" {% if item.respuesta == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="visit-field">Observación
+            <input type="text" name="observaciones_{{ item.id }}" value="{{ item.observaciones }}" {% if not can_manage %}disabled{% endif %}>
+          </label>
+        </div>
+        {% endfor %}
+      </section>
+      {% endfor %}
+      <label class="visit-field">Observaciones generales
+        <textarea name="observaciones" {% if not can_manage %}disabled{% endif %}>{{ visita.observaciones }}</textarea>
+      </label>
+    </section>
+
+    <aside class="visit-panel">
+      <h2>Nuevo hallazgo</h2>
+      {% if can_manage %}
+      <label class="visit-field">Categoría
+        <select name="hallazgo_categoria">
+          <option>Orden y limpieza</option>
+          <option>Funcionamiento de equipos</option>
+          <option>Personal</option>
+          <option>Actividades del día</option>
+          <option>COFEPRIS</option>
+          <option>Mantenimiento</option>
+        </select>
+      </label>
+      <label class="visit-field">Descripción
+        <textarea name="hallazgo_descripcion" placeholder="Problema detectado"></textarea>
+      </label>
+      <label class="visit-field">Acción correctiva
+        <textarea name="hallazgo_accion" placeholder="Qué se debe corregir"></textarea>
+      </label>
+      <label class="visit-field">Responsable
+        <input type="text" name="hallazgo_responsable" placeholder="Encargada, mantenimiento, sucursal">
+      </label>
+      <label class="visit-field">Fecha compromiso
+        <input type="date" name="hallazgo_fecha_compromiso">
+      </label>
+      <label class="visit-field">Prioridad
+        <select name="hallazgo_prioridad">
+          {% for value,label in prioridad_choices %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="visit-field">
+        <span><input type="checkbox" name="hallazgo_requiere_falla" value="1"> Requiere reporte/falla</span>
+      </label>
+      <button class="visit-btn" type="submit">Guardar visita</button>
+      {% else %}
+      <p class="visit-muted">Solo lectura.</p>
+      {% endif %}
+    </aside>
+  </form>
+
+  <section class="visit-panel" style="margin-top:16px">
+    <h2>Hallazgos</h2>
+    <div class="visit-table-wrap">
+      <table class="visit-table">
+        <thead><tr><th>Categoría</th><th>Descripción</th><th>Acción</th><th>Prioridad</th><th>Falla</th></tr></thead>
+        <tbody>
+          {% for hallazgo in hallazgos %}
+          <tr>
+            <td>{{ hallazgo.categoria }}</td>
+            <td>{{ hallazgo.descripcion }}</td>
+            <td>{{ hallazgo.accion_correctiva|default:"Pendiente" }}</td>
+            <td><span class="visit-badge {% if hallazgo.prioridad == 'CRITICA' or hallazgo.prioridad == 'ALTA' %}danger{% endif %}">{{ hallazgo.get_prioridad_display }}</span></td>
+            <td>
+              {% if hallazgo.reporte_falla %}
+              <span class="visit-badge">Falla #{{ hallazgo.reporte_falla_id }}</span>
+              {% elif hallazgo.requiere_falla and can_manage %}
+              <form method="post" action="{% url 'visitas_sucursal:convertir_falla' hallazgo.id %}">
+                {% csrf_token %}
+                <button class="visit-btn secondary" type="submit">Crear falla</button>
+              </form>
+              {% elif hallazgo.requiere_falla %}
+              <span class="visit-badge warn">Requiere falla</span>
+              {% else %}
+              <span class="visit-muted">No aplica</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="5" class="visit-empty">Sin hallazgos registrados.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+{% endblock %}

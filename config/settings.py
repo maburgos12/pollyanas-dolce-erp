@@ -112,6 +112,7 @@ INSTALLED_APPS = [
     "control",
     "crm",
     "ventas",
+    "visitas_sucursal",
     "rrhh",
     "bonos_produccion",
     "bonos_ventas",

@@ -1,0 +1,340 @@
+{% load static %}
+<!doctype html>
+<html lang="es-MX">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#8B2252">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Auditoría sucursal</title>
+  <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
+  <style>
+    :root {
+      --ink: #2b1722;
+      --muted: #705d68;
+      --line: #eadde4;
+      --paper: #fff;
+      --soft: #fbf7f9;
+      --brand: #8b2252;
+      --brand-dark: #66163a;
+      --ok: #19724a;
+      --warn: #866000;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #f6f1f4;
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    a { color: inherit; }
+    .app-shell { min-height: 100vh; padding: 16px; }
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      max-width: 840px;
+      margin: 0 auto 14px;
+    }
+    .topbar h1 { margin: 0; font-size: 1.22rem; letter-spacing: 0; }
+    .topbar p { margin: 3px 0 0; color: var(--muted); font-size: .9rem; }
+    .nav-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .link-btn,
+    .primary-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 40px;
+      padding: 0 13px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--paper);
+      color: var(--brand-dark);
+      font-weight: 800;
+      text-decoration: none;
+      cursor: pointer;
+      font: inherit;
+    }
+    .primary-btn { width: 100%; border-color: var(--brand); background: var(--brand); color: #fff; }
+    .primary-btn.audit { min-height: 48px; font-size: 1rem; }
+    .card {
+      max-width: 840px;
+      margin: 0 auto 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      overflow: hidden;
+    }
+    .summary { padding: 14px; }
+    .summary-row { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+    .summary h2 { margin: 0; font-size: 1.05rem; }
+    .summary p { margin: 5px 0 0; color: var(--muted); }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      padding: 0 9px;
+      border-radius: 999px;
+      background: #f1e7ec;
+      color: var(--brand-dark);
+      font-size: .78rem;
+      font-weight: 850;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .metric { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: var(--soft); }
+    .metric span { display: block; color: var(--muted); font-size: .76rem; font-weight: 750; }
+    .metric strong { display: block; margin-top: 4px; font-size: 1rem; }
+    .audit-focus { border-color: #d7a24d; background: #fffaf0; }
+    .audit-focus .badge { background: #8b2252; color: #fff; }
+    .audit-route { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 12px; align-items: center; }
+    .audit-route strong { font-size: 1.05rem; }
+    .audit-route span { color: var(--muted); font-size: .86rem; font-weight: 750; }
+    .group-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      padding: 12px 14px;
+      background: var(--soft);
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+    .group-head:first-child { border-top: 0; }
+    .group-head h3 { margin: 0; font-size: .98rem; }
+    .group-head span { color: var(--muted); font-size: .78rem; font-weight: 800; }
+    .check-item { padding: 12px 14px; border-bottom: 1px solid #f0e7ec; }
+    .check-item:last-child { border-bottom: 0; }
+    .check-title { margin: 0 0 9px; font-size: .95rem; font-weight: 850; }
+    .check-fields { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 8px; }
+    select,
+    input,
+    textarea {
+      width: 100%;
+      border: 1px solid #d9c6d0;
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+      padding: 10px 11px;
+    }
+    textarea { min-height: 82px; resize: vertical; }
+    .footer-form { padding: 14px; display: grid; gap: 12px; }
+    .empty { padding: 18px 14px; color: var(--muted); }
+    .visits-list { display: flex; gap: 8px; overflow-x: auto; padding: 12px 14px; }
+    .visit-chip {
+      flex: 0 0 auto;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      padding: 8px 11px;
+      color: var(--brand-dark);
+      font-size: .86rem;
+      font-weight: 800;
+      text-decoration: none;
+    }
+    .visit-chip.active { border-color: var(--brand); background: var(--brand); color: #fff; }
+    .audit-note { padding: 10px 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: .86rem; font-weight: 750; }
+    .audit-sticky {
+      position: sticky;
+      bottom: 0;
+      z-index: 5;
+      max-width: 840px;
+      margin: 0 auto;
+      padding: 10px 0 0;
+      background: linear-gradient(180deg, rgba(246,241,244,0), #f6f1f4 35%);
+    }
+    .messages { max-width: 840px; margin: 0 auto 12px; display: grid; gap: 8px; }
+    .message { padding: 10px 12px; border-radius: 8px; background: #e8f5ee; color: var(--ok); font-weight: 750; }
+    .gps-box { padding: 12px 14px; border-top: 1px solid var(--line); background: #fffaf0; }
+    .gps-box strong { display: block; margin-bottom: 4px; }
+    .gps-box p { margin: 0 0 10px; color: var(--muted); font-size: .88rem; }
+    .gps-status { display: inline-flex; min-height: 28px; align-items: center; padding: 0 9px; border-radius: 999px; background: #fff; color: var(--warn); font-weight: 850; font-size: .82rem; }
+    .gps-status.ready { background: #e8f5ee; color: var(--ok); }
+    .photo-input { border: 1px dashed #c9a8b8; background: #fff; }
+    .person-list { display: grid; gap: 8px; }
+    .person-option { display: flex; gap: 8px; align-items: flex-start; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+    .person-option input { width: auto; margin-top: 2px; }
+    .person-option span { display: block; color: var(--muted); font-size: .78rem; }
+    @media (max-width: 640px) {
+      .app-shell { padding: 12px; }
+      .topbar { align-items: flex-start; }
+      .nav-actions { display: grid; grid-template-columns: 1fr; }
+      .link-btn { min-width: 78px; }
+      .metrics { grid-template-columns: 1fr; }
+      .check-fields { grid-template-columns: 1fr; }
+      .audit-route { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div>
+        <h1>{% if can_manage %}Auditoría sucursal{% else %}Checklist sucursal{% endif %}</h1>
+        <p>{% if visita %}{{ visita.sucursal.nombre }}{% else %}{{ sucursal.nombre|default:"Visitas programadas" }}{% endif %}</p>
+      </div>
+      <nav class="nav-actions" aria-label="Acciones">
+        <a class="link-btn" href="/app/">App</a>
+        <a class="link-btn" href="{% url 'logout' %}">Salir</a>
+      </nav>
+    </header>
+
+    {% if messages %}
+      <div class="messages">
+        {% for message in messages %}
+          <div class="message">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <section class="card {% if can_manage %}audit-focus{% endif %}">
+      <div class="summary">
+        <div class="summary-row">
+          <div>
+            <h2>{% if visita %}{% if can_manage %}Auditoría #{{ visita.id }}{% else %}Bitácora #{{ visita.id }}{% endif %}{% else %}Sin visita asignada{% endif %}</h2>
+            <p>{% if visita %}{{ visita.fecha_programada|date:"d/m/Y" }} · {{ visita.get_tipo_display }}{% else %}No hay visita programada disponible.{% endif %}</p>
+          </div>
+          {% if visita %}<span class="badge">{{ visita.get_estatus_display }}</span>{% endif %}
+        </div>
+        {% if visita %}
+          {% if can_manage %}
+          <div class="audit-route">
+            <div>
+              <span>Sucursal a auditar</span>
+              <strong>{{ visita.sucursal.nombre }}</strong>
+            </div>
+            <span>{{ visita.porcentaje_cumplimiento }}% capturado</span>
+          </div>
+          {% endif %}
+          <div class="metrics">
+            <div class="metric"><span>Tipo</span><strong>{{ visita.get_tipo_display }}</strong></div>
+            <div class="metric"><span>Cumplimiento</span><strong>{{ visita.porcentaje_cumplimiento }}%</strong></div>
+            <div class="metric"><span>Puntos</span><strong>{{ checklist|length }}</strong></div>
+          </div>
+        {% endif %}
+      </div>
+    </section>
+
+    {% if visitas %}
+      <section class="card" aria-label="Visitas recientes">
+        <div class="visits-list">
+          {% for item in visitas %}
+            <a class="visit-chip {% if visita and item.id == visita.id %}active{% endif %}" href="?visita={{ item.id }}">{{ item.fecha_programada|date:"d/m" }} · {{ item.sucursal.nombre }} · {{ item.get_estatus_display }}</a>
+          {% endfor %}
+        </div>
+        {% if can_manage %}
+          <div class="audit-note">Selecciona la visita programada, captura el checklist y ejecuta la auditoría desde la sucursal visitada.</div>
+        {% endif %}
+      </section>
+    {% endif %}
+
+    {% if visita %}
+      <form method="post" class="card" enctype="multipart/form-data" id="audit-form">
+        {% csrf_token %}
+        <input type="hidden" name="visita_id" value="{{ visita.id }}">
+        <input type="hidden" name="gps_latitud" id="gps_latitud">
+        <input type="hidden" name="gps_longitud" id="gps_longitud">
+        <input type="hidden" name="gps_precision_m" id="gps_precision_m">
+        {% if can_manage %}
+          <section class="gps-box">
+            <strong>Ubicación requerida</strong>
+            <p>
+              Activa GPS antes de ejecutar la auditoría.
+              {% if punto_logistico %}Se validará contra geocerca logística de {{ punto_logistico.radio_geocerca_metros }} m.{% else %}Esta sucursal aún no tiene geocerca logística vinculada.{% endif %}
+            </p>
+            <button class="link-btn" type="button" onclick="requestAuditGeo()">Activar GPS</button>
+            <span class="gps-status" id="gps_status">Pendiente</span>
+          </section>
+        {% endif %}
+        {% regroup checklist by categoria as checklist_groups %}
+        {% for group in checklist_groups %}
+          <section>
+            <div class="group-head">
+              <h3>{{ group.grouper }}</h3>
+              <span>{{ group.list|length }} puntos</span>
+            </div>
+            {% for item in group.list %}
+              <div class="check-item">
+                <p class="check-title">{{ item.titulo }}</p>
+                <div class="check-fields">
+                  <select name="respuesta_{{ item.id }}" aria-label="Respuesta {{ item.titulo }}">
+                    {% for value, label in respuesta_choices %}
+                      <option value="{{ value }}" {% if item.respuesta == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                  <input name="observaciones_{{ item.id }}" value="{{ item.observaciones }}" placeholder="Observación">
+                </div>
+              </div>
+            {% endfor %}
+          </section>
+        {% empty %}
+          <div class="empty">Esta visita no tiene checklist cargado.</div>
+        {% endfor %}
+        <div class="footer-form">
+          {% if can_manage %}
+            <section class="visit-field">
+              <span class="visit-label">Personal presente</span>
+              <div class="person-list">
+                {% for empleado in empleados_sucursal %}
+                  <label class="person-option">
+                    <input type="checkbox" name="personal_presente" value="{{ empleado.id }}" {% if empleado in visita.personal_presente.all %}checked{% endif %}>
+                    <span><strong>{{ empleado.nombre }}</strong><span>{{ empleado.puesto|default:empleado.area|default:"Sucursal" }}</span></span>
+                  </label>
+                {% empty %}
+                  <p class="empty">No hay personal activo ligado a esta sucursal en RRHH.</p>
+                {% endfor %}
+              </div>
+            </section>
+            <label class="visit-field">Fotos de observación
+              <input class="photo-input" type="file" name="fotos" accept="image/*" capture="environment" multiple>
+            </label>
+          {% endif %}
+          <textarea name="observaciones" placeholder="Observaciones generales">{{ visita.observaciones }}</textarea>
+          <div class="{% if can_manage %}audit-sticky{% endif %}">
+            <button class="primary-btn {% if can_manage %}audit{% endif %}" type="submit">{% if can_manage %}Ejecutar auditoría{% else %}Guardar bitácora{% endif %}</button>
+          </div>
+        </div>
+      </form>
+    {% endif %}
+  </main>
+  <script>
+    function setGpsStatus(text, ready) {
+      const node = document.getElementById("gps_status");
+      if (!node) return;
+      node.textContent = text;
+      node.classList.toggle("ready", Boolean(ready));
+    }
+    function requestAuditGeo() {
+      if (!navigator.geolocation) {
+        setGpsStatus("GPS no disponible", false);
+        return;
+      }
+      setGpsStatus("Obteniendo...", false);
+      navigator.geolocation.getCurrentPosition((position) => {
+        document.getElementById("gps_latitud").value = position.coords.latitude.toFixed(6);
+        document.getElementById("gps_longitud").value = position.coords.longitude.toFixed(6);
+        document.getElementById("gps_precision_m").value = Number(position.coords.accuracy || 0).toFixed(2);
+        setGpsStatus(`GPS listo · ${Math.round(position.coords.accuracy || 0)}m`, true);
+      }, () => setGpsStatus("Permiso pendiente", false), {enableHighAccuracy: true, timeout: 10000, maximumAge: 0});
+    }
+    const auditForm = document.getElementById("audit-form");
+    if (auditForm) {
+      auditForm.addEventListener("submit", (event) => {
+        const needsGps = Boolean(document.getElementById("gps_status"));
+        if (needsGps && !document.getElementById("gps_latitud").value) {
+          event.preventDefault();
+          requestAuditGeo();
+        }
+      });
+    }
+  </script>
+</body>
+</html>

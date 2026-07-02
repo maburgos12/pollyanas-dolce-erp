@@ -71,6 +71,7 @@ urlpatterns = [
     path("control/", include(("control.urls", "control"), namespace="control")),
     path("crm/", include(("crm.urls", "crm"), namespace="crm")),
     path("ventas/", include(("ventas.urls", "ventas"), namespace="ventas")),
+    path("visitas-sucursal/", include(("visitas_sucursal.urls", "visitas_sucursal"), namespace="visitas_sucursal")),
     path("rrhh/", include(("rrhh.urls", "rrhh"), namespace="rrhh")),
     path("bonos-produccion/", RedirectView.as_view(url="/bonos-produccion/dashboard/", permanent=False)),
     path("bonos-produccion/", include(("bonos_produccion.urls", "bonos_produccion"), namespace="bonos_produccion")),
