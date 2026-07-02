@@ -144,7 +144,7 @@ class OperacionAppTests(TestCase):
         self.assertNotContains(response, "Flota")
         self.assertNotContains(response, "Mantenimiento vehicular")
 
-    def test_sucursal_user_gets_visitas_sucursal_app_tile(self):
+    def test_sucursal_user_does_not_get_auditorias_tile(self):
         user = self._user("visitas.colosio", sucursal=self.sucursal)
         self._grant(user, "ventas.visitas_sucursal")
         self.client.force_login(user)
@@ -152,9 +152,22 @@ class OperacionAppTests(TestCase):
         response = self.client.get("/app/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Checklist sucursal")
-        self.assertContains(response, "/visitas-sucursal/app/")
+        self.assertNotContains(response, "Auditorías")
+        self.assertNotContains(response, "/visitas-sucursal/app/")
         self.assertNotContains(response, 'href="/visitas-sucursal/"')
+
+    def test_auditor_gets_auditorias_tile_from_unified_app(self):
+        user = self._user("auditor.visitas")
+        self._grant(user, "ventas.visitas_sucursal", ACCESS_MANAGE)
+        self.client.force_login(user)
+
+        response = self.client.get("/app/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Auditorías")
+        self.assertContains(response, "Visitas a sucursal, checklist, hallazgos")
+        self.assertContains(response, 'href="/visitas-sucursal/"')
+        self.assertNotContains(response, "/visitas-sucursal/app/")
 
     def test_branch_capture_only_can_enter_app_but_regular_erp_still_redirects(self):
         user = self._user("captura.reabasto", sucursal=self.sucursal)
@@ -322,6 +335,7 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "Registrar merma")
         self.assertContains(response, "Recibir merma")
         self.assertContains(response, "Reportar falla")
+        self.assertContains(response, "Auditorías")
         self.assertContains(response, "Mantenimiento")
         self.assertContains(response, "Flota")
         self.assertContains(response, "Rutas")
