@@ -120,8 +120,12 @@ class RRHHAsignacionSucursalTests(TestCase):
         response = self.client.get("/rrhh/api/asignacion-sucursales/")
 
         self.assertEqual(response.status_code, 200)
-        names = [item["nombre"] for item in response.json()["results"]]
+        rows = response.json()["results"]
+        names = [item["nombre"] for item in rows]
+        values = {item["valor"] for item in rows}
         self.assertIn("Sucursal El Túnel", names)
         self.assertIn("Sucursal Las Glorias", names)
         self.assertIn("Sucursal Colosio", names)
+        self.assertIn("El Túnel", values)
+        self.assertIn("Las Glorias", values)
         self.assertNotIn("CEDIS", names)
