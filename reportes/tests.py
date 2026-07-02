@@ -1952,7 +1952,7 @@ class ReportesBIUtilsTests(TestCase):
 
         self.assertEqual(snapshot["kpis"]["ventas_total"], Decimal("1200"))
         self.assertEqual(snapshot["kpis"]["pedidos_venta"], 2)
-        current_period = f"{today.year:04d}-{today.month:02d}"
+        current_period = f"{second_day.year:04d}-{second_day.month:02d}"
         current_month_row = next(row for row in snapshot["series_mensual"] if row["periodo"] == current_period)
         self.assertEqual(current_month_row["ventas"], Decimal("1200"))
         self.assertFalse(snapshot["kpis"]["official_sales_series_ready"])

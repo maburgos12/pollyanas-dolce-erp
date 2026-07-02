@@ -16,6 +16,7 @@ from ventas.services.sales_read_service import get_sales_range
 POINT_BRIDGE_SALES_SOURCE = "POINT_BRIDGE_SALES"
 OFFICIAL_POINT_SOURCE = "/Report/PrintReportes?idreporte=3"
 RECENT_POINT_SOURCE = "/Report/VentasCategorias"
+SALES_CANONICAL_CACHE_GENERATION = "sales-canonical-v2"
 
 
 def _range_totals_payload(*, value, net_value, quantity, source_label: str, source_detail: str) -> dict[str, object]:
@@ -169,7 +170,7 @@ def get_sales_source_context(*, cache_key_parts: tuple[object, ...]) -> dict[str
     if bool(getattr(settings, "RUNNING_TESTS", False)):
         return build_sales_source_context()
     return get_or_set_versioned_cache(
-        key_parts=cache_key_parts,
+        key_parts=(SALES_CANONICAL_CACHE_GENERATION, *cache_key_parts),
         scopes=("ventas", "dashboard"),
         builder=build_sales_source_context,
     )
