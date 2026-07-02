@@ -6,7 +6,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="/static/css/template_modules/mermas-templates-mermas-app-recepcion.css?v=20260614-ui100-v1">
-<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
+<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260702-home-icon-v1">
 {% endblock %}
 
 {% block content %}
@@ -16,7 +16,12 @@
             <h1>Recepción CEDIS</h1>
             <span>{{ now|date:"d/m/Y H:i" }}</span>
         </div>
-        <a class="secondary-link" href="{% url 'logout' %}">Salir</a>
+        <nav class="app-header-actions" aria-label="Acciones de sesión">
+            <a class="app-home-link" href="{% url 'operacion:app_home' %}" aria-label="Menú principal" title="Menú principal">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.8 12 3l9 7.8"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
+            </a>
+            <a class="secondary-link" href="{% url 'logout' %}">Salir</a>
+        </nav>
     </header>
 
     {% for registro in registros %}
