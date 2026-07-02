@@ -359,6 +359,10 @@ def _canonical_sales_range_summary(*, start_date: date, end_date: date) -> dict[
 
 
 def _partial_month_amount_quantity(*, start_date: date, end_date: date) -> tuple[Decimal, Decimal]:
+    if end_date == _month_end(start_date):
+        aggregate = _canonical_sales_range_summary(start_date=start_date, end_date=end_date)
+        return _to_decimal(aggregate.get("monto")), _to_decimal(aggregate.get("cantidad"))
+
     payload = _best_partial_cache_payload(start_date, end_date)
     if payload is None:
         aggregate = _canonical_sales_range_summary(start_date=start_date, end_date=end_date)
