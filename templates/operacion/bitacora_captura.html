@@ -1,0 +1,120 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{{ config.titulo }} · App Operativa</title>
+  <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f6f1f4; color: #2b1722; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .page { min-height: 100vh; padding: 16px 16px 88px; }
+    .shell { max-width: 900px; margin: 0 auto; display: grid; gap: 12px; }
+    .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    h1 { margin: 0; font-size: 1.25rem; letter-spacing: 0; }
+    p { margin: 4px 0 0; color: #705d68; }
+    .link { min-height: 40px; display: inline-flex; align-items: center; padding: 0 12px; border: 1px solid #eadde4; border-radius: 8px; background: #fff; color: #66163a; font-weight: 800; text-decoration: none; }
+    .panel, .line { border: 1px solid #eadde4; border-radius: 8px; background: #fff; }
+    .panel { padding: 14px; display: grid; gap: 10px; }
+    .line { padding: 12px; display: grid; gap: 10px; }
+    .lines { display: grid; gap: 10px; }
+    label { display: grid; gap: 5px; color: #705d68; font-size: .82rem; font-weight: 800; }
+    input, select, textarea { width: 100%; min-height: 42px; border: 1px solid #d9c6d0; border-radius: 8px; background: #fff; color: #2b1722; font: inherit; padding: 9px 10px; }
+    textarea { min-height: 76px; resize: vertical; }
+    .meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 9px; }
+    .sucursales { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; padding: 10px; border-radius: 8px; background: #fbf7f9; }
+    .actions { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 16px env(safe-area-inset-bottom); background: linear-gradient(180deg, rgba(246,241,244,0), #f6f1f4 35%); }
+    .actions-inner { max-width: 900px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    button { min-height: 48px; border-radius: 8px; border: 1px solid #8b2252; background: #8b2252; color: #fff; font: inherit; font-weight: 850; }
+    button.secondary { background: #fff; color: #66163a; }
+    @media (max-width: 640px) {
+      .page { padding: 12px 12px 88px; }
+      .meta, .actions-inner { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <form class="page" method="post">
+    {% csrf_token %}
+    <section class="shell">
+      <header class="top">
+        <div>
+          <h1>{{ config.titulo }}</h1>
+          <p>{{ config.ayuda }}</p>
+        </div>
+        <a class="link" href="{% url 'operacion:bitacoras_home' %}">Volver</a>
+      </header>
+
+      <section class="panel">
+        <div class="meta">
+          <label>Fecha
+            <input type="date" name="fecha" value="{{ today|date:'Y-m-d' }}">
+          </label>
+          <label>Área / sucursal
+            <select name="sucursal">
+              <option value="">CEDIS / Producción</option>
+              {% for sucursal in sucursales %}<option value="{{ sucursal.id }}">{{ sucursal.nombre }}</option>{% endfor %}
+            </select>
+          </label>
+        </div>
+        <label>Notas generales
+          <textarea name="notas" placeholder="Observaciones generales de la bitácora"></textarea>
+        </label>
+      </section>
+
+      <div class="lines">
+        {% for index in row_range %}
+          <section class="line">
+            {% if not config.sin_producto %}
+              <label>Producto
+                <select name="receta_{{ index }}">
+                  <option value="">Seleccionar producto</option>
+                  {% for receta in recetas %}<option value="{{ receta.id }}">{{ receta.nombre }}</option>{% endfor %}
+                </select>
+              </label>
+            {% endif %}
+
+            <div class="fields">
+              {% for campo in config.campos %}
+                <label>
+                  {% if campo == "cedis" %}CEDIS{% elif campo == "devolucion" %}Devolución{% elif campo == "fecha_deteccion" %}Fecha detección{% elif campo == "tamano" %}Tamaño{% elif campo == "pastel_entero" %}Pastel entero{% elif campo == "total_rebanadas" %}Total rebanadas{% elif campo == "merma_rebanadas" %}Merma rebanadas{% elif campo == "fecha_producto" %}Fecha producto{% elif campo == "motivo_merma" %}Motivo merma{% else %}{{ campo|capfirst }}{% endif %}
+                  {% if campo == "fecha_producto" or campo == "fecha_deteccion" %}
+                    <input type="date" name="{{ campo }}_{{ index }}">
+                  {% elif campo == "plaga" or campo == "area" or campo == "metodo" or campo == "bloque" or campo == "tamano" or campo == "motivo_merma" %}
+                    <input type="text" name="{{ campo }}_{{ index }}">
+                  {% else %}
+                    <input type="number" step="0.001" inputmode="decimal" name="{{ campo }}_{{ index }}">
+                  {% endif %}
+                </label>
+              {% endfor %}
+            </div>
+
+            {% if config.usa_sucursales %}
+              <div class="sucursales">
+                {% for sucursal in sucursales %}
+                  <label>{{ sucursal.codigo }}
+                    <input type="number" step="0.001" inputmode="decimal" name="sucursal_{{ index }}_{{ sucursal.id }}">
+                  </label>
+                {% endfor %}
+              </div>
+            {% endif %}
+
+            <label>Observaciones
+              <textarea name="observaciones_{{ index }}" placeholder="Comentario de esta línea"></textarea>
+            </label>
+          </section>
+        {% endfor %}
+      </div>
+    </section>
+
+    <div class="actions">
+      <div class="actions-inner">
+        <button class="secondary" type="submit" name="cerrar" value="0">Guardar borrador</button>
+        <button type="submit" name="cerrar" value="1">Cerrar bitácora</button>
+      </div>
+    </div>
+  </form>
+</body>
+</html>
