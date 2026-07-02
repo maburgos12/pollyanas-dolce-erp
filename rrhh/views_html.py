@@ -11,6 +11,13 @@ from core.access import can_manage_rrhh
 from core.models import Sucursal, UserProfile
 
 
+def _display_branch_name(name: str | None) -> str:
+    value = (name or "").strip()
+    if not value or value.upper() == "CEDIS" or value.lower().startswith("sucursal "):
+        return value
+    return f"Sucursal {value}"
+
+
 @login_required
 def asignacion_sucursal_view(request):
     return render(request, "rrhh/asignacion_sucursal.html")
@@ -24,6 +31,8 @@ def asignacion_sucursales_api(request):
         .order_by("nombre")
         .values("id", "nombre", "activa")
     )
+    for row in rows:
+        row["nombre"] = _display_branch_name(row["nombre"])
     return JsonResponse({"count": len(rows), "results": rows})
 
 
