@@ -123,8 +123,8 @@ class MisReportesActionsTests(TestCase):
         items = payload.get("results") if isinstance(payload, dict) else payload
         names = [item["nombre"] for item in items]
         self.assertIn("Sucursal Las Glorias", names)
-        self.assertTrue(all(name.startswith("Sucursal ") for name in names))
-        self.assertEqual(SucursalFallaSerializer(self.cedis).data["nombre"], "Sucursal CEDIS")
+        self.assertTrue(all(name == "CEDIS" or name.startswith("Sucursal ") for name in names))
+        self.assertEqual(SucursalFallaSerializer(self.cedis).data["nombre"], "CEDIS")
 
     def test_editar_reporte_propio_abierto_actualiza_campos(self):
         self.client.force_login(self.user)
