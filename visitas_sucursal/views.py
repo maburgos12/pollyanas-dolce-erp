@@ -69,6 +69,10 @@ def _visitas_visitables():
     return VisitaSucursal.objects.filter(sucursal__in=_sucursales_visitables())
 
 
+def _visitas_planificadas():
+    return _visitas_visitables().exclude(tipo=VisitaSucursal.TIPO_BITACORA)
+
+
 def _parse_date(value):
     try:
         return date.fromisoformat(value) if value else None
@@ -90,6 +94,33 @@ def _crear_checklist_base(visita):
     )
 
 
+def _asegurar_bitacora_diaria(sucursal, user):
+    if not _sucursal_es_visitable(sucursal):
+        return None
+    hoy = timezone.localdate()
+    visita = (
+        VisitaSucursal.objects.filter(
+            sucursal=sucursal,
+            fecha_programada=hoy,
+            tipo=VisitaSucursal.TIPO_BITACORA,
+        )
+        .order_by("id")
+        .first()
+    )
+    if not visita:
+        with transaction.atomic():
+            visita = VisitaSucursal.objects.create(
+                sucursal=sucursal,
+                fecha_programada=hoy,
+                tipo=VisitaSucursal.TIPO_BITACORA,
+                creado_por=user,
+            )
+            _crear_checklist_base(visita)
+    elif not visita.checklist.exists():
+        _crear_checklist_base(visita)
+    return visita
+
+
 def _sucursal_usuario(user):
     profile = getattr(user, "userprofile", None)
     return getattr(profile, "sucursal", None)
@@ -108,7 +139,7 @@ def _visitas_de_sucursal(sucursal):
 def _visitas_app(user, sucursal, manage):
     if manage:
         return (
-            _visitas_visitables()
+            _visitas_planificadas()
             .select_related("sucursal", "responsable", "auditor")
             .order_by("-fecha_programada", "sucursal__nombre", "-id")
         )
@@ -189,7 +220,7 @@ def lista_visitas(request):
     hoy = timezone.localdate()
     sucursales = list(_sucursales_visitables().order_by("nombre"))
     visitas_mes = (
-        _visitas_visitables()
+        _visitas_planificadas()
         .filter(fecha_programada__range=(first_day, last_day))
         .select_related("sucursal", "responsable", "auditor")
         .annotate(
@@ -259,13 +290,19 @@ def lista_visitas(request):
         "prev_month": _month_shift(first_day, -1),
         "next_month": _month_shift(first_day, 1),
         "can_manage": can_manage,
-        "programadas": _visitas_visitables().filter(estatus=VisitaSucursal.ESTATUS_PROGRAMADA).count(),
-        "vencidas": _visitas_visitables().filter(
+        "programadas": _visitas_planificadas().filter(estatus=VisitaSucursal.ESTATUS_PROGRAMADA).count(),
+        "vencidas": _visitas_planificadas().filter(
             estatus=VisitaSucursal.ESTATUS_PROGRAMADA,
             fecha_programada__lt=hoy,
         ).count(),
         "hallazgos_abiertos": HallazgoVisita.objects.filter(
             visita__sucursal__in=_sucursales_visitables(),
+            visita__tipo__in=[
+                VisitaSucursal.TIPO_NORMAL,
+                VisitaSucursal.TIPO_QUINCENAL,
+                VisitaSucursal.TIPO_SEGUIMIENTO,
+                VisitaSucursal.TIPO_EXTRAORDINARIA,
+            ],
             estatus__in=[HallazgoVisita.ESTATUS_ABIERTO, HallazgoVisita.ESTATUS_EN_PROCESO]
         ).count(),
         "avance_estimado": 100 if total_programadas else 0,
@@ -281,18 +318,20 @@ def nueva_visita(request):
     _require_visitas(request.user, manage=True)
     sucursales = _sucursales_visitables().order_by("nombre")
     users = _active_users()
+    tipo_choices = [choice for choice in VisitaSucursal.TIPO_CHOICES if choice[0] != VisitaSucursal.TIPO_BITACORA]
     if request.method == "POST":
         sucursal_id = request.POST.get("sucursal")
         fecha = _parse_date(request.POST.get("fecha_programada"))
+        tipo = request.POST.get("tipo") or VisitaSucursal.TIPO_QUINCENAL
         sucursal = _sucursales_visitables().filter(pk=sucursal_id).first() if sucursal_id else None
-        if not sucursal or not fecha:
+        if not sucursal or not fecha or tipo == VisitaSucursal.TIPO_BITACORA:
             messages.error(request, "Selecciona sucursal y fecha programada.")
         else:
             with transaction.atomic():
                 visita = VisitaSucursal.objects.create(
                     sucursal=sucursal,
                     fecha_programada=fecha,
-                    tipo=request.POST.get("tipo") or VisitaSucursal.TIPO_QUINCENAL,
+                    tipo=tipo,
                     responsable_id=request.POST.get("responsable") or None,
                     auditor_id=request.POST.get("auditor") or None,
                     observaciones=(request.POST.get("observaciones") or "").strip(),
@@ -307,7 +346,7 @@ def nueva_visita(request):
         {
             "sucursales": sucursales,
             "users": users,
-            "tipo_choices": VisitaSucursal.TIPO_CHOICES,
+            "tipo_choices": tipo_choices,
             "today": timezone.localdate(),
         },
     )
@@ -335,6 +374,9 @@ def app_visitas_sucursal(request):
         app_mode = "auditor" if base_can_manage else "sucursal"
     if not sucursal and not can_manage:
         raise PermissionDenied("Tu usuario no tiene sucursal de venta asignada.")
+
+    if sucursal and not can_manage:
+        _asegurar_bitacora_diaria(sucursal, request.user)
 
     visitas = _visitas_app(request.user, sucursal, can_manage)
     visita_id = request.GET.get("visita")

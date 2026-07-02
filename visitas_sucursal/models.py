@@ -7,11 +7,13 @@ from django.utils import timezone
 
 class VisitaSucursal(models.Model):
     TIPO_NORMAL = "NORMAL"
+    TIPO_BITACORA = "BITACORA"
     TIPO_QUINCENAL = "QUINCENAL"
     TIPO_SEGUIMIENTO = "SEGUIMIENTO"
     TIPO_EXTRAORDINARIA = "EXTRAORDINARIA"
     TIPO_CHOICES = [
         (TIPO_NORMAL, "Visita normal"),
+        (TIPO_BITACORA, "Bitácora diaria"),
         (TIPO_QUINCENAL, "Auditoría quincenal"),
         (TIPO_SEGUIMIENTO, "Seguimiento"),
         (TIPO_EXTRAORDINARIA, "Extraordinaria"),
