@@ -138,6 +138,17 @@
         localStorage.setItem("pd_logistica_refresh", data.refresh);
       }
 
+      async function useDjangoSessionToken() {
+        state.token = "";
+        state.refreshToken = "";
+        const response = await fetch(`${AUTH_API}/auth/session-token/`, {
+          headers: {"Accept": "application/json"}
+        });
+        if (!response.ok) return false;
+        setTokens(await response.json());
+        return true;
+      }
+
       function logout(render = true) {
         state.token = "";
         state.refreshToken = "";
@@ -171,7 +182,10 @@
               <div class="mini-brand">Pollyana's</div>
               <p class="hello">Hola, ${nombre}</p>
             </div>
-            <button class="logout" onclick="logout()">Salir</button>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <button class="logout" onclick="window.location.href='/app/'">App</button>
+              <button class="logout" onclick="logout()">Salir</button>
+            </div>
           </div>
           ${content}
           <div class="footer">Pollyana's Dolce © 2026</div>
@@ -641,6 +655,14 @@
       async function boot() {
         if ("serviceWorker" in navigator) {
           navigator.serviceWorker.register("{% static 'fallas/sw.js' %}?v=20260614-ui100-v6").catch(() => {});
+        }
+        try {
+          if (await useDjangoSessionToken()) {
+            await showScreen("dashboard");
+            return;
+          }
+        } catch (error) {
+          logout(false);
         }
         if (state.token) {
           try {

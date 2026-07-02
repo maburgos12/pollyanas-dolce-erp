@@ -535,7 +535,9 @@ class OperacionAppTests(TestCase):
         self.assertContains(fallas, 'href="/logout/"')
 
         fallas_pwa_template = Path(__file__).resolve().parents[1] / "fallas/templates/fallas/pwa_reporte.html"
-        self.assertIn('window.location.href = "/logout/";', fallas_pwa_template.read_text(encoding="utf-8"))
+        fallas_pwa_html = fallas_pwa_template.read_text(encoding="utf-8")
+        self.assertIn('window.location.href = "/logout/";', fallas_pwa_html)
+        self.assertIn("window.location.href='/app/'", fallas_pwa_html)
 
     def test_operational_pwas_prefer_current_django_session_before_cached_token(self):
         mantenimiento_group = Group.objects.create(name="MANTENIMIENTO")
@@ -563,6 +565,19 @@ class OperacionAppTests(TestCase):
         self.assertLess(
             logistica_boot.index("if (await useDjangoSessionToken())"),
             logistica_boot.index("if (state.token)"),
+        )
+
+        self.client.logout()
+        fallas_user = self._user("fallas.token.actual", sucursal=self.sucursal)
+        self._grant(fallas_user, "fallas.reportar")
+        self.client.force_login(fallas_user)
+        fallas = self.client.get("/fallas/app/")
+        self.assertEqual(fallas.status_code, 200)
+        fallas_html = fallas.content.decode()
+        fallas_boot = fallas_html[fallas_html.index("async function boot()") :]
+        self.assertLess(
+            fallas_boot.index("if (await useDjangoSessionToken())"),
+            fallas_boot.index("if (state.token)"),
         )
 
     def test_mantenimiento_group_gets_app_tile_and_pwa_access(self):
