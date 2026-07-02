@@ -53,6 +53,22 @@ def _active_users():
     return get_user_model().objects.filter(is_active=True).order_by("first_name", "last_name", "username")
 
 
+def _sucursales_visitables_q():
+    return sucursales_operativas_q() & ~Q(codigo__iexact="CEDIS") & ~Q(nombre__iexact="CEDIS")
+
+
+def _sucursales_visitables():
+    return Sucursal.objects.filter(_sucursales_visitables_q())
+
+
+def _sucursal_es_visitable(sucursal):
+    return bool(sucursal and _sucursales_visitables().filter(pk=sucursal.pk).exists())
+
+
+def _visitas_visitables():
+    return VisitaSucursal.objects.filter(sucursal__in=_sucursales_visitables())
+
+
 def _parse_date(value):
     try:
         return date.fromisoformat(value) if value else None
@@ -80,6 +96,8 @@ def _sucursal_usuario(user):
 
 
 def _visitas_de_sucursal(sucursal):
+    if not _sucursal_es_visitable(sucursal):
+        return VisitaSucursal.objects.none()
     return (
         VisitaSucursal.objects.filter(sucursal=sucursal)
         .select_related("sucursal", "responsable", "auditor")
@@ -90,7 +108,8 @@ def _visitas_de_sucursal(sucursal):
 def _visitas_app(user, sucursal, manage):
     if manage:
         return (
-            VisitaSucursal.objects.select_related("sucursal", "responsable", "auditor")
+            _visitas_visitables()
+            .select_related("sucursal", "responsable", "auditor")
             .order_by("-fecha_programada", "sucursal__nombre", "-id")
         )
     return _visitas_de_sucursal(sucursal)
@@ -148,16 +167,17 @@ def lista_visitas(request):
         _require_visitas(request.user, manage=True)
         fecha = _parse_date(request.POST.get("fecha_programada"))
         sucursal_id = request.POST.get("sucursal")
-        if not fecha or not sucursal_id:
+        sucursal = _sucursales_visitables().filter(pk=sucursal_id).first() if sucursal_id else None
+        if not fecha or not sucursal:
             messages.error(request, "Selecciona sucursal y fecha para programar.")
         else:
-            visita = VisitaSucursal.objects.filter(sucursal_id=sucursal_id, fecha_programada=fecha).first()
+            visita = VisitaSucursal.objects.filter(sucursal=sucursal, fecha_programada=fecha).first()
             if visita:
                 messages.info(request, "La sucursal ya tiene visita programada ese día.")
             else:
                 with transaction.atomic():
                     visita = VisitaSucursal.objects.create(
-                        sucursal_id=sucursal_id,
+                        sucursal=sucursal,
                         fecha_programada=fecha,
                         tipo=VisitaSucursal.TIPO_QUINCENAL,
                         creado_por=request.user,
@@ -167,9 +187,10 @@ def lista_visitas(request):
         return redirect(f"{request.path}?anio={first_day.year}&mes={first_day.month}")
 
     hoy = timezone.localdate()
-    sucursales = list(Sucursal.objects.filter(sucursales_operativas_q()).order_by("nombre"))
+    sucursales = list(_sucursales_visitables().order_by("nombre"))
     visitas_mes = (
-        VisitaSucursal.objects.filter(fecha_programada__range=(first_day, last_day))
+        _visitas_visitables()
+        .filter(fecha_programada__range=(first_day, last_day))
         .select_related("sucursal", "responsable", "auditor")
         .annotate(
             hallazgos_abiertos=Count(
@@ -238,12 +259,13 @@ def lista_visitas(request):
         "prev_month": _month_shift(first_day, -1),
         "next_month": _month_shift(first_day, 1),
         "can_manage": can_manage,
-        "programadas": VisitaSucursal.objects.filter(estatus=VisitaSucursal.ESTATUS_PROGRAMADA).count(),
-        "vencidas": VisitaSucursal.objects.filter(
+        "programadas": _visitas_visitables().filter(estatus=VisitaSucursal.ESTATUS_PROGRAMADA).count(),
+        "vencidas": _visitas_visitables().filter(
             estatus=VisitaSucursal.ESTATUS_PROGRAMADA,
             fecha_programada__lt=hoy,
         ).count(),
         "hallazgos_abiertos": HallazgoVisita.objects.filter(
+            visita__sucursal__in=_sucursales_visitables(),
             estatus__in=[HallazgoVisita.ESTATUS_ABIERTO, HallazgoVisita.ESTATUS_EN_PROCESO]
         ).count(),
         "avance_estimado": 100 if total_programadas else 0,
@@ -257,17 +279,18 @@ def lista_visitas(request):
 @login_required
 def nueva_visita(request):
     _require_visitas(request.user, manage=True)
-    sucursales = Sucursal.objects.filter(sucursales_operativas_q()).order_by("nombre")
+    sucursales = _sucursales_visitables().order_by("nombre")
     users = _active_users()
     if request.method == "POST":
         sucursal_id = request.POST.get("sucursal")
         fecha = _parse_date(request.POST.get("fecha_programada"))
-        if not sucursal_id or not fecha:
+        sucursal = _sucursales_visitables().filter(pk=sucursal_id).first() if sucursal_id else None
+        if not sucursal or not fecha:
             messages.error(request, "Selecciona sucursal y fecha programada.")
         else:
             with transaction.atomic():
                 visita = VisitaSucursal.objects.create(
-                    sucursal_id=sucursal_id,
+                    sucursal=sucursal,
                     fecha_programada=fecha,
                     tipo=request.POST.get("tipo") or VisitaSucursal.TIPO_QUINCENAL,
                     responsable_id=request.POST.get("responsable") or None,
@@ -302,8 +325,8 @@ def app_visitas_sucursal(request):
     sucursal = _sucursal_usuario(request.user)
     if is_superuser and app_mode == "sucursal":
         preview_sucursal = (
-            Sucursal.objects.filter(sucursales_operativas_q(), pk=request.GET.get("sucursal")).first()
-            or Sucursal.objects.filter(sucursales_operativas_q()).order_by("nombre").first()
+            _sucursales_visitables().filter(pk=request.GET.get("sucursal")).first()
+            or _sucursales_visitables().order_by("nombre").first()
         )
         sucursal = preview_sucursal
         can_manage = False
@@ -311,7 +334,7 @@ def app_visitas_sucursal(request):
     else:
         app_mode = "auditor" if base_can_manage else "sucursal"
     if not sucursal and not can_manage:
-        raise PermissionDenied("Tu usuario no tiene sucursal asignada.")
+        raise PermissionDenied("Tu usuario no tiene sucursal de venta asignada.")
 
     visitas = _visitas_app(request.user, sucursal, can_manage)
     visita_id = request.GET.get("visita")
@@ -397,7 +420,7 @@ def app_visitas_sucursal(request):
             "app_mode": app_mode,
             "preview_read_only": preview_read_only,
             "preview_sucursal": preview_sucursal,
-            "sucursales_preview": Sucursal.objects.filter(sucursales_operativas_q()).order_by("nombre") if is_superuser else [],
+            "sucursales_preview": _sucursales_visitables().order_by("nombre") if is_superuser else [],
             "is_superuser": is_superuser,
         },
     )
