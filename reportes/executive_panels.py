@@ -31,7 +31,7 @@ from pos_bridge.services.sales_matching_service import PointSalesMatchingService
 from recetas.models import RecetaCostoSemanal
 from reportes.models import FactVentaDiaria, SnapshotFlujoCentralMensual, SnapshotLedgerInventarioMensual
 from reportes.dashboard_production_dataset import get_dashboard_production_dataset
-from ventas.services.sales_read_service import get_sales_range
+from ventas.services.sales_canonical_source import canonical_point_sales_range_total
 
 
 ZERO = Decimal("0")
@@ -348,11 +348,14 @@ def _best_partial_cache_payload(start_date: date, end_date: date) -> dict | None
 
 
 def _canonical_sales_range_summary(*, start_date: date, end_date: date) -> dict[str, object]:
-    return get_sales_range(
-        start_date=start_date,
-        end_date=end_date,
-        coverage_policy="prefer_complete",
-    )
+    totals = canonical_point_sales_range_total(start_date=start_date, end_date=end_date)
+    return {
+        "monto": totals["value"],
+        "monto_neto": totals["net_value"],
+        "cantidad": totals["quantity"],
+        "source_label": totals["source_label"],
+        "source_detail": totals["source_detail"],
+    }
 
 
 def _partial_month_amount_quantity(*, start_date: date, end_date: date) -> tuple[Decimal, Decimal]:
