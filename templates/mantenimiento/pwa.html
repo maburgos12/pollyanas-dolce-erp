@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/template_modules/templates-mantenimiento-pwa.css?v=20260614-ui100-v1">
-    <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
+    <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260702-home-icon-v1">
   </head>
   <body>
     <div id="app"></div>
@@ -182,7 +182,12 @@
               <div class="mini-brand">Pollyana's</div>
               <p class="hello">Hola, ${nombre}</p>
             </div>
-            <button class="logout" onclick="logout()">Salir</button>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <button class="logout app-home-link" type="button" onclick="window.location.href='/app/'" aria-label="Menú principal" title="Menú principal">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.8 12 3l9 7.8"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
+              </button>
+              <button class="logout" onclick="logout()">Salir</button>
+            </div>
           </div>
           ${content}
           <div class="footer">Pollyana's Dolce · Mantenimiento</div>
