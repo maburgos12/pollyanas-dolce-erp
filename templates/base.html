@@ -22,7 +22,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.44.0/dist/tabler-icons.min.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Sharp:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200">
     <script defer src="https://cdn.jsdelivr.net/npm/lucide@1.21.0/dist/umd/lucide.min.js"></script>
-    <link rel="stylesheet" href="/static/css/styles.css?v=20260703-erp-mobile-badges-v3">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260703-sidebar-mobile-fix-v4">
     <link rel="stylesheet" href="/static/css/pollyana_ops_ui.css?v=20260614-ui-fase-final-v1">
     {% block extra_css %}{% endblock %}
     <link rel="stylesheet" href="/static/css/pollyana_generated_utilities.css?v=20260614-ui100-v1">
@@ -1012,7 +1012,8 @@
 
         buttons.forEach(function (btn) {
             btn.addEventListener('click', function () {
-                if (btn.dataset.dashboardUrl) {
+                var isMobileSidebar = window.innerWidth <= 720;
+                if (btn.dataset.dashboardUrl && !isMobileSidebar) {
                     window.location.href = btn.dataset.dashboardUrl;
                     return;
                 }

@@ -5707,8 +5707,14 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
   }
 
   .sidebar-nav a .nav-badge,
+  .sidebar-nav a > span:first-child,
   .sidebar-group-title .nav-badge {
     display: inline-flex;
+  }
+
+  .sidebar-nav a > span:first-child {
+    display: block;
+    min-width: 0;
   }
 
   .sidebar-user,
@@ -5743,9 +5749,15 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
   .sidebar-nav a,
   .sidebar:hover .sidebar-nav a,
   .sidebar:focus-within .sidebar-nav a {
-    justify-content: flex-start;
+    justify-content: space-between;
     min-height: 44px;
     padding: 10px 12px;
+  }
+
+  .sidebar-collapsible,
+  .sidebar:hover .sidebar-collapsible:not(.sidebar-collapsed),
+  .sidebar:focus-within .sidebar-collapsible:not(.sidebar-collapsed) {
+    display: block;
   }
 
   .sidebar-actions,

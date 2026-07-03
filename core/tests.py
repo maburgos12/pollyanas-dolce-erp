@@ -95,7 +95,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('id="erp-sidebar"', html)
         self.assertIn('class="mobile-nav-backdrop"', html)
         self.assertIn("mobile-nav-open", html)
-        self.assertIn("20260703-erp-mobile-badges-v3", html)
+        self.assertIn("20260703-sidebar-mobile-fix-v4", html)
         self.assertNotIn("Principal", html)
         self.assertNotIn("#ef4b2e", css)
         self.assertIn(".mobile-app-bar", css)
@@ -108,6 +108,8 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn(".mobile-nav-backdrop:not([hidden])", css)
         self.assertIn("@media (max-width: 720px)", css)
         self.assertIn(".layout-wrapper {\n    background: #fffdfa;", css)
+        self.assertIn(".sidebar-nav a > span:first-child", css)
+        self.assertIn("btn.dataset.dashboardUrl && !isMobileSidebar", html)
 
     def test_base_template_uses_sidebar_group_tabs_as_canonical_top_tabs(self):
         base = Path(settings.BASE_DIR) / "templates" / "base.html"
