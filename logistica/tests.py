@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, time
 from decimal import Decimal
 from io import StringIO
 from pathlib import Path
@@ -1719,6 +1719,26 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.json()["ruta"]["id"], self.ruta.id)
         self.assertEqual(response.json()["paradas"][0]["id"], self.parada.id)
         self.assertEqual(response.json()["paradas"][0]["punto_nombre_snapshot"], "Sucursal Control")
+
+    def test_api_ruta_activa_reconoce_ruta_planeada_anoche_como_hoy(self):
+        self.ruta.delete()
+        previous_day = timezone.localdate() - timezone.timedelta(days=1)
+        ruta = RutaEntrega.objects.create(
+            nombre="Ruta Noche Operativa",
+            fecha_ruta=previous_day,
+            estatus=RutaEntrega.ESTATUS_PLANEADA,
+            repartidor=self.repartidor,
+            unidad_operativa=self.unidad,
+        )
+        ParadaRuta.objects.create(ruta=ruta, punto=self.punto, orden=1)
+        late_created_at = timezone.make_aware(datetime.combine(previous_day, time(hour=23, minute=30)))
+        RutaEntrega.objects.filter(pk=ruta.pk).update(created_at=late_created_at)
+
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("api_logistica_ruta_activa"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["ruta"]["id"], ruta.id)
 
     def test_pwa_finaliza_ruta_asignada_completa(self):
         self.client.force_login(self.user)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -262,11 +262,11 @@ def _ruta_activa_dia_para_repartidor(repartidor: Repartidor) -> RutaEntrega | No
 
 
 def _ruta_operativa_dia_para_repartidor(repartidor: Repartidor) -> RutaEntrega | None:
-    return (
+    today = timezone.localdate()
+    rutas_operativas = (
         RutaEntrega.objects.select_related("unidad_operativa", "repartidor__user", "bitacora_salida")
         .filter(
             repartidor=repartidor,
-            fecha_ruta=timezone.localdate(),
             estatus__in=[RutaEntrega.ESTATUS_EN_RUTA, RutaEntrega.ESTATUS_PLANEADA],
         )
         .order_by(
@@ -277,8 +277,15 @@ def _ruta_operativa_dia_para_repartidor(repartidor: Repartidor) -> RutaEntrega |
             ),
             "-id",
         )
-        .first()
     )
+    ruta_hoy = rutas_operativas.filter(fecha_ruta=today).first()
+    if ruta_hoy:
+        return ruta_hoy
+
+    previous_day = today - timedelta(days=1)
+    # ponytail: fallback acotado para rutas planeadas de noche que operativamente salen al día siguiente.
+    night_cutoff = timezone.make_aware(datetime.combine(previous_day, time(hour=22)))
+    return rutas_operativas.filter(fecha_ruta=previous_day, created_at__gte=night_cutoff).first()
 
 
 def _gas_rank(value: str | None) -> int | None:
