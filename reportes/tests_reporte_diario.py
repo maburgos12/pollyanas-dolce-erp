@@ -6,23 +6,38 @@ from django.test import TestCase, override_settings
 from reportes.models import DgOperacionSnapshot
 from reportes.services_reporte_diario import construir_y_enviar_reporte_diario
 
+def _decimal(value: str) -> dict:
+    """Mismo formato que reportes.services_dg_operacion_snapshot._json_safe
+    usa para serializar Decimal en el payload real — el bug original era
+    que el reporte no "hidrataba" este envoltorio antes de leer los valores."""
+    return {"__type__": "decimal", "value": value}
+
+
 PAYLOAD_COMPLETO = {
     "point_exec_summary": {
-        "latest_sales_amount": "12345.67",
+        "latest_sales_amount": _decimal("12345.67"),
         "latest_tickets": 80,
-        "latest_avg_ticket": "154.32",
+        "latest_avg_ticket": _decimal("154.32"),
         "active_branch_count": 9,
     },
     "resumen_cierre": {
         "detalle": [
-            {"sucursal": {"nombre": "Colosio"}, "semaforo": "verde", "estado_label": "Cerrado"},
-            {"sucursal": {"nombre": "Crucero"}, "semaforo": "rojo", "estado_label": "Por validar"},
+            {
+                "sucursal": {"__type__": "sucursal", "id": 1, "codigo": "COLOSIO", "nombre": "Colosio", "activa": True},
+                "semaforo": "verde",
+                "estado_label": "Cerrado",
+            },
+            {
+                "sucursal": {"__type__": "sucursal", "id": 2, "codigo": "CRUCERO", "nombre": "Crucero", "activa": True},
+                "semaforo": "rojo",
+                "estado_label": "Por validar",
+            },
         ]
     },
     "point_waste_summary": {
-        "total_qty": "12.5",
-        "total_cost": "340.00",
-        "top_branches": [{"branch_label": "Crucero"}],
+        "total_qty": _decimal("12.5"),
+        "total_cost": _decimal("340.00"),
+        "top_branches": [{"branch_name": "Crucero"}],
     },
 }
 
@@ -46,7 +61,13 @@ class ReporteDiarioTests(TestCase):
         mock_send_mail.assert_called_once()
         kwargs = mock_send_mail.call_args.kwargs
         self.assertEqual(kwargs["recipient_list"], ["director@example.com"])
-        self.assertIn("Crucero", kwargs["message"])
+        cuerpo = kwargs["message"]
+        self.assertIn("Crucero", cuerpo)
+        # Regresión: los valores vienen envueltos como {"value":..,"__type__":"decimal"}
+        # en el payload real — si no se "hidratan" antes de formatear, todo cae en N/D.
+        self.assertNotIn("N/D", cuerpo)
+        self.assertIn("$12,345.67", cuerpo)
+        self.assertIn("$154.32", cuerpo)
 
     @patch("reportes.services_reporte_diario.send_mail")
     def test_snapshot_con_error_no_envia(self, mock_send_mail):
