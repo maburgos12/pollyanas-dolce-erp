@@ -220,6 +220,7 @@ h4 {
   font-size: 11px;
   font-weight: 900;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2), 0 6px 16px rgba(0, 0, 0, 0.18);
   flex: 0 0 auto;
 }
@@ -748,7 +749,26 @@ h4 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   transition: background .18s ease, border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #fff;
+  color: #9b1b59;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.22), 0 6px 16px rgba(0, 0, 0, 0.12);
+  flex: 0 0 auto;
 }
 
 .module-tab.active,
@@ -5479,9 +5499,7 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
   padding: env(safe-area-inset-top, 0px) 12px 0;
   align-items: center;
   grid-template-columns: 44px minmax(0, 1fr) 44px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 52%),
-    var(--mobile-bar-bg);
+  background: var(--mobile-bar-bg);
   color: #fff;
   border-bottom: 2px solid rgba(201, 168, 76, 0.86);
   box-shadow: 0 2px 10px rgba(83, 15, 47, 0.2);
@@ -5686,10 +5704,14 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
   .sidebar-group-toggle .sidebar-section-label,
   .sidebar-group-toggle .toggle-chevron,
   .sidebar-collapsible,
-  .sidebar-nav a span:last-child,
   .sidebar-user,
   .logout-link {
     display: revert;
+  }
+
+  .sidebar-nav a .nav-badge,
+  .sidebar-group-title .nav-badge {
+    display: inline-flex;
   }
 
   .sidebar-user,
