@@ -2,12 +2,23 @@ from django.urls import path
 
 from . import views
 from . import investment_views
+from . import views_mano_obra_area
 from .views_produccion import ProducidoVsVendidoMermaView
 
 app_name = "reportes"
 
 urlpatterns = [
     path("", views.consumo, name="home"),
+    path(
+        "mano-obra-area/clasificacion/",
+        views_mano_obra_area.clasificacion_area_produccion,
+        name="mano_obra_area_clasificacion",
+    ),
+    path(
+        "mano-obra-area/reporte/",
+        views_mano_obra_area.reporte_costo_diario_area,
+        name="mano_obra_area_reporte",
+    ),
     path("produccion-automatica/", views.production_orders, name="production_orders"),
     path("ventas/", views.ventas, name="ventas"),
     path("cierre-operativo/", views.cierre_operativo, name="cierre_operativo"),

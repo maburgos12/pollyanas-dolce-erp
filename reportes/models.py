@@ -6,6 +6,12 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
+from bonos_produccion.models import (
+    AREA_ARMADO as _BONOS_AREA_ARMADO,
+    AREA_EMBETUNADO as _BONOS_AREA_EMBETUNADO,
+    AREA_HORNOS as _BONOS_AREA_HORNOS,
+)
+
 
 class CentroCosto(models.Model):
     TIPO_PRODUCCION = "PRODUCCION"
@@ -1313,6 +1319,80 @@ class DgOperacionSnapshot(models.Model):
 
     def __str__(self) -> str:
         return f"Operación DG {self.fecha_operacion:%Y-%m-%d} [{self.status}]"
+
+
+class RecetaAreaProduccion(models.Model):
+    """Qué área(s) de producción (Hornos/Armado/Embetunado) requiere una
+    familia de recetas, o una receta puntual como excepción a su familia.
+
+    Reutiliza las mismas constantes de área que bonos_produccion (no las
+    redefine) — son las mismas 3 áreas de producción que ya clasifican a
+    los empleados vía Empleado.puesto_operativo."""
+
+    AREA_HORNOS = _BONOS_AREA_HORNOS
+    AREA_ARMADO = _BONOS_AREA_ARMADO
+    AREA_EMBETUNADO = _BONOS_AREA_EMBETUNADO
+    AREA_CHOICES = [
+        (AREA_HORNOS, "Hornos"),
+        (AREA_ARMADO, "Armado"),
+        (AREA_EMBETUNADO, "Embetunado"),
+    ]
+
+    familia = models.CharField(max_length=120, blank=True, default="", db_index=True)
+    receta = models.ForeignKey(
+        "recetas.Receta",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="areas_produccion",
+    )
+    area = models.CharField(max_length=20, choices=AREA_CHOICES, db_index=True)
+    creado_en = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = "Área de producción por receta/familia"
+        verbose_name_plural = "Áreas de producción por receta/familia"
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(familia__gt="", receta__isnull=True)
+                    | models.Q(familia="", receta__isnull=False)
+                ),
+                name="rap_familia_xor_receta",
+            ),
+            models.UniqueConstraint(fields=["familia", "area"], name="rap_familia_area_unico"),
+            models.UniqueConstraint(fields=["receta", "area"], name="rap_receta_area_unico"),
+        ]
+
+    def __str__(self) -> str:
+        origen = self.receta.nombre if self.receta_id else self.familia
+        return f"{origen} · {self.get_area_display()}"
+
+
+class CostoManoObraDiarioArea(models.Model):
+    """Snapshot diario de costo de mano de obra por área de producción:
+    nómina real del área (prorrateada del período) entre lo que
+    efectivamente salió de esa área ese día, según Point."""
+
+    fecha = models.DateField(db_index=True)
+    area = models.CharField(max_length=20, choices=RecetaAreaProduccion.AREA_CHOICES, db_index=True)
+    nomina_dia_area = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    unidades_producidas = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    costo_unidad = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    es_dia_laborable_esperado = models.BooleanField(default=True)
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-fecha", "area"]
+        verbose_name = "Costo de mano de obra diario por área"
+        verbose_name_plural = "Costos de mano de obra diarios por área"
+        constraints = [
+            models.UniqueConstraint(fields=["fecha", "area"], name="cmoda_fecha_area_unico"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.fecha:%Y-%m-%d} · {self.get_area_display()}"
 
 
 class ProductionExecutionLog(models.Model):

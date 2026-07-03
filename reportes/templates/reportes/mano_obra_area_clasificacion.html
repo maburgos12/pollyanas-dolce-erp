@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}Mano de obra por área — Clasificación{% endblock %}
+{% block page_title %}Mano de obra por área — Clasificación{% endblock %}
+
+{% block content %}
+
+<section class="card">
+  <div class="card-header">Familias de receta</div>
+  <p class="muted">Marca qué área(s) requiere cada familia. Una familia puede pasar por varias — ej. Pastel lleva Hornos, Armado y Embetunado.</p>
+  <div class="dashboard-grid">
+    {% for familia in familias %}
+    <div class="card">
+      <div class="card-header">{{ familia.nombre }} <span class="muted" style="font-size:12px;">{{ familia.cantidad }} recetas</span></div>
+      <form method="post" style="display:flex; gap:8px; flex-wrap:wrap;">
+        {% csrf_token %}
+        <input type="hidden" name="accion" value="toggle_familia">
+        <input type="hidden" name="familia" value="{{ familia.nombre }}">
+        {% for value, label in areas %}
+        <button type="submit" name="area" value="{{ value }}" class="btn {% if value in familia.areas %}btn-primary{% else %}btn-secondary{% endif %} btn-sm">{{ label }}</button>
+        {% endfor %}
+      </form>
+    </div>
+    {% empty %}
+    <p class="muted">No hay familias de receta capturadas todavía.</p>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Excepciones por receta</div>
+  <p class="muted">Cuando una receta puntual no sigue el patrón de su familia — ej. un Pay que sí lleva embetunado.</p>
+
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr><th>Receta</th><th>Familia</th><th>Áreas</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for entrada in excepciones %}
+        <tr>
+          <td>{{ entrada.receta.nombre }}</td>
+          <td class="muted">{{ entrada.receta.familia }}</td>
+          <td>
+            {% for value, label in areas %}
+              {% if value in entrada.areas %}<span class="badge bg-primary">{{ label }}</span>{% endif %}
+            {% endfor %}
+          </td>
+          <td>
+            {% for area_valor, fila_id in entrada.filas.items %}
+            <form method="post" style="display:inline;">
+              {% csrf_token %}
+              <input type="hidden" name="accion" value="quitar_excepcion">
+              <input type="hidden" name="fila_id" value="{{ fila_id }}">
+              <button type="submit" class="btn btn-secondary btn-sm">Quitar {{ area_valor }}</button>
+            </form>
+            {% endfor %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4" class="muted">Sin excepciones capturadas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <div class="card-header">Agregar excepción</div>
+    <form method="post" class="form-grid-2">
+      {% csrf_token %}
+      <input type="hidden" name="accion" value="agregar_excepcion">
+      <div class="form-group">
+        <label for="id_receta_id">ID de receta <span class="text-danger">*</span></label>
+        <input class="input-field" id="id_receta_id" name="receta_id" type="number" required>
+        <p class="muted">Por ahora se captura por ID — se puede mejorar con buscador después.</p>
+      </div>
+      <div class="form-group">
+        <label for="id_area">Área <span class="text-danger">*</span></label>
+        <select class="input-field" id="id_area" name="area" required>
+          {% for value, label in areas %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-group full">
+        <button class="btn btn-primary" style="background:var(--vino);border-color:var(--vino);" type="submit">Agregar</button>
+      </div>
+    </form>
+  </div>
+</section>
+
+{% endblock %}
