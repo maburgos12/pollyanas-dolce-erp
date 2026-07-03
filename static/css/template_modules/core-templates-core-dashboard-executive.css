@@ -55,16 +55,18 @@
     font-size: 0.96rem;
   }
 
-  .home-exec-pills,
-  .home-exec-actions {
+  .home-exec-pills {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
   }
 
   .home-exec-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 8px;
-    justify-content: flex-end;
+    justify-content: stretch;
+    width: min(100%, 320px);
   }
 
   .home-exec-pills {
@@ -460,6 +462,10 @@
   }
 
   .home-exec-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
     padding: 8px 12px;
     min-height: 0;
     border-radius: 999px;
@@ -492,6 +498,10 @@
     .home-exec-pills {
       justify-items: start;
       justify-content: flex-start;
+    }
+
+    .home-exec-actions {
+      width: 100%;
     }
 
     .home-exec-grid-top {
