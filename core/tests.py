@@ -95,7 +95,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('id="erp-sidebar"', html)
         self.assertIn('class="mobile-nav-backdrop"', html)
         self.assertIn("mobile-nav-open", html)
-        self.assertIn("20260703-erp-mobile-badges-v2", html)
+        self.assertIn("20260703-erp-mobile-badges-v3", html)
         self.assertNotIn("Principal", html)
         self.assertNotIn("#ef4b2e", css)
         self.assertIn(".mobile-app-bar", css)
