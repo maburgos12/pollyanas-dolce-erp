@@ -7,6 +7,7 @@ from django.core.mail import send_mail
 
 from core.tasks import _director_email, _from_email
 from reportes.models import DgOperacionSnapshot
+from reportes.services_dg_operacion_snapshot import hydrate_dg_operacion_payload
 
 logger = logging.getLogger(__name__)
 
@@ -74,13 +75,13 @@ def _seccion_merma(payload: dict) -> str:
     if top_branches:
         lineas.append("Top sucursales con merma:")
         for branch in top_branches[:5]:
-            nombre = branch.get("branch_label") or branch.get("nombre") or "N/D"
+            nombre = branch.get("branch_name") or branch.get("branch_label") or branch.get("nombre") or "N/D"
             lineas.append(f"- {nombre}")
     return "\n".join(lineas)
 
 
 def _armar_cuerpo(snapshot: DgOperacionSnapshot) -> str:
-    payload = snapshot.payload or {}
+    payload = hydrate_dg_operacion_payload(snapshot.payload or {})
     partes = [
         _seccion_ventas(payload),
         _seccion_cierre(payload),
