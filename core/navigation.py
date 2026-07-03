@@ -77,6 +77,13 @@ NAV_GROUPS = [
             ("produccion", "reabasto_cedis", "Reabasto CEDIS", "/recetas/reabasto-cedis/", ["/recetas/reabasto-cedis/"]),
             ("produccion", "consolidado_cedis", "Consolidado CEDIS", "/recetas/consolidado-cedis/", ["/recetas/consolidado-cedis/"]),
             ("produccion", "cedis_semanal", "Producción CEDIS semanal", "/recetas/produccion-cedis/semanal/", ["/recetas/produccion-cedis/semanal/"]),
+            (
+                "produccion",
+                "mano_obra_area",
+                "Mano de obra por área",
+                "/reportes/mano-obra-area/reporte/",
+                ["/reportes/mano-obra-area/"],
+            ),
             ("recetas", "catalogo", "Recetas", "/recetas/", ["/recetas/"]),
             ("recetas", "costeo", "Costeo", "/recetas/costeo/", ["/recetas/costeo/", "/recetas/drivers-costeo/"]),
             ("recetas", "margenes", "Monitor de márgenes", "/recetas/monitor-margenes/", ["/recetas/monitor-margenes/"]),

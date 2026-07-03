@@ -5,6 +5,10 @@
 
 {% block content %}
 
+<div class="pd-action-row" style="margin-bottom:12px;">
+  <a class="btn btn-secondary" href="{% url 'reportes:mano_obra_area_clasificacion' %}">Clasificar familias por área</a>
+</div>
+
 <section class="kpi-grid">
   {% for bloque in bloques %}
   <div class="kpi-card">
