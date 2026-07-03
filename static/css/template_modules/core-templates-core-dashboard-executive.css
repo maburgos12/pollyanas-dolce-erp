@@ -496,12 +496,13 @@
   @media (max-width: 760px) {
     .home-exec-hero-side,
     .home-exec-pills {
-      justify-items: start;
-      justify-content: flex-start;
+      justify-items: center;
+      justify-content: center;
     }
 
     .home-exec-actions {
       width: 100%;
+      justify-items: center;
     }
 
     .home-exec-grid-top {
