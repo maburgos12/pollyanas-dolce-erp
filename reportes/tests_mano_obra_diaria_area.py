@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from django.test import TestCase
 
+from maestros.models import Insumo
 from pos_bridge.models import PointBranch, PointProductionLine
 from recetas.models import Receta
 from reportes.models import RecetaAreaProduccion
@@ -111,6 +112,36 @@ class UnidadesAreaDiaTests(TestCase):
         # (tiene su propia excepcion que solo lo pone en HORNOS)
         self.assertEqual(unidades_area_dia(date(2026, 6, 1), "EMBETUNADO"), Decimal("10"))
         self.assertEqual(unidades_area_dia(date(2026, 6, 1), "HORNOS"), Decimal("5"))
+
+    def test_produccion_ligada_a_insumo_interno_tambien_cuenta(self):
+        # ~51% de la produccion real en Point se liga a Insumo (masas,
+        # betunes, rellenos), no a Receta. Insumo.categoria usa las mismas
+        # etiquetas que Receta.familia (verificado en produccion: PAN,
+        # GALLETAS, MASAS, etc.).
+        RecetaAreaProduccion.objects.create(familia="MASAS", area="ARMADO")
+        masa_hojaldre = Insumo.objects.create(
+            nombre="Masa Hojaldre", tipo_item=Insumo.TIPO_INTERNO, categoria="MASAS",
+        )
+        PointProductionLine.objects.create(
+            branch=self.branch, insumo=masa_hojaldre, item_name="Masa Hojaldre",
+            produced_quantity=Decimal("40"), production_date=date(2026, 6, 1),
+            source_hash=str(uuid4()),
+        )
+
+        self.assertEqual(unidades_area_dia(date(2026, 6, 1), "ARMADO"), Decimal("40"))
+
+    def test_insumo_materia_prima_no_cuenta_como_produccion_interna(self):
+        RecetaAreaProduccion.objects.create(familia="MASAS", area="ARMADO")
+        harina = Insumo.objects.create(
+            nombre="Harina", tipo_item=Insumo.TIPO_MATERIA_PRIMA, categoria="MASAS",
+        )
+        PointProductionLine.objects.create(
+            branch=self.branch, insumo=harina, item_name="Harina",
+            produced_quantity=Decimal("40"), production_date=date(2026, 6, 1),
+            source_hash=str(uuid4()),
+        )
+
+        self.assertEqual(unidades_area_dia(date(2026, 6, 1), "ARMADO"), Decimal("0"))
 
     def test_produccion_sin_receta_no_se_cuenta(self):
         RecetaAreaProduccion.objects.create(familia="Pastel", area="HORNOS")

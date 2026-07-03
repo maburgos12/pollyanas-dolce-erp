@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from django.db.models import Sum
+from django.db.models import Q, Sum
 
 from pos_bridge.models import PointProductionLine
 from reportes.models import CostoManoObraDiarioArea, RecetaAreaProduccion
@@ -89,14 +89,35 @@ def _recetas_ids_por_area(area: str) -> set[int]:
     return excepciones | recetas_por_familia
 
 
+def _insumo_ids_por_area(area: str) -> set[int]:
+    """Point registra producción tanto contra Receta (productos terminados)
+    como contra Insumo (preparaciones internas: masas, betunes, rellenos —
+    ~51% de la producción real). Insumo.categoria usa las mismas etiquetas
+    que Receta.familia (PAN, GALLETAS, MASAS, etc., verificado en
+    producción), así que la misma clasificación por familia en
+    RecetaAreaProduccion aplica a ambos catálogos. Sin excepciones puntuales
+    por insumo en este MVP — no hay evidencia de que haga falta."""
+    familias = list(
+        RecetaAreaProduccion.objects.filter(area=area, familia__gt="").values_list("familia", flat=True)
+    )
+    if not familias:
+        return set()
+    from maestros.models import Insumo
+
+    return set(
+        Insumo.objects.filter(tipo_item=Insumo.TIPO_INTERNO, categoria__in=familias).values_list("id", flat=True)
+    )
+
+
 def unidades_area_dia(fecha: date, area: str) -> Decimal:
     receta_ids = _recetas_ids_por_area(area)
-    if not receta_ids:
+    insumo_ids = _insumo_ids_por_area(area)
+    if not receta_ids and not insumo_ids:
         return Decimal("0")
-    total = PointProductionLine.objects.filter(
-        production_date=fecha,
-        receta_id__in=receta_ids,
-    ).aggregate(total=Sum("produced_quantity"))["total"]
+    filtro = Q(receta_id__in=receta_ids) | Q(insumo_id__in=insumo_ids)
+    total = PointProductionLine.objects.filter(filtro, production_date=fecha).aggregate(
+        total=Sum("produced_quantity")
+    )["total"]
     return Decimal(str(total or 0))
 
 
