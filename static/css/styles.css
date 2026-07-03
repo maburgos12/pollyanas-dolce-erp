@@ -746,11 +746,17 @@ h4 {
   font-size: 13px;
   font-weight: 700;
   min-height: 38px;
-  display: inline-flex;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
   align-items: center;
   justify-content: center;
   gap: 8px;
   transition: background .18s ease, border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+
+.module-tab-label {
+  min-width: 0;
 }
 
 .tab-badge {
@@ -5670,7 +5676,7 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
   }
 
   .layout-wrapper {
-    background: linear-gradient(180deg, #fffdfa 0%, #fff7fa 100%);
+    background: #fffdfa;
   }
 
   .sidebar {

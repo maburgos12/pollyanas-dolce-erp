@@ -95,16 +95,19 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('id="erp-sidebar"', html)
         self.assertIn('class="mobile-nav-backdrop"', html)
         self.assertIn("mobile-nav-open", html)
-        self.assertIn("20260624-erp-nav-unica-v1", html)
+        self.assertIn("20260703-erp-mobile-badges-v2", html)
         self.assertNotIn("Principal", html)
         self.assertNotIn("#ef4b2e", css)
         self.assertIn(".mobile-app-bar", css)
         self.assertIn(".mobile-app-bar-mark", css)
+        self.assertIn(".module-tab-label", css)
         self.assertIn("border-bottom: 2px solid rgba(201, 168, 76", css)
         self.assertIn("--mobile-bar-bg: var(--vino)", css)
+        self.assertIn('name="apple-mobile-web-app-status-bar-style" content="black-translucent"', html)
         self.assertIn("body.mobile-nav-open .sidebar", css)
         self.assertIn(".mobile-nav-backdrop:not([hidden])", css)
         self.assertIn("@media (max-width: 720px)", css)
+        self.assertIn(".layout-wrapper {\n    background: #fffdfa;", css)
 
     def test_base_template_uses_sidebar_group_tabs_as_canonical_top_tabs(self):
         base = Path(settings.BASE_DIR) / "templates" / "base.html"
@@ -133,7 +136,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('name="mobile-web-app-capable"', html)
         self.assertIn('name="apple-mobile-web-app-capable"', html)
         self.assertIn('name="apple-mobile-web-app-title"', html)
-        self.assertIn("navigator.serviceWorker.register('/erp-sw.js?v=20260623-rrhh-permisos-history-v8')", html)
+        self.assertIn("navigator.serviceWorker.register('/erp-sw.js?v=20260703-erp-mobile-badges-v9')", html)
 
     def test_login_template_also_exposes_pwa_install_metadata(self):
         login = Path(settings.BASE_DIR) / "core" / "templates" / "core" / "login.html"
@@ -143,7 +146,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('name="theme-color"', html)
         self.assertIn('name="apple-mobile-web-app-capable"', html)
         self.assertIn('name="apple-mobile-web-app-title"', html)
-        self.assertIn("navigator.serviceWorker.register('/erp-sw.js?v=20260623-rrhh-permisos-history-v8')", html)
+        self.assertIn("navigator.serviceWorker.register('/erp-sw.js?v=20260703-erp-mobile-badges-v9')", html)
 
     def test_erp_pwa_manifest_and_service_worker_are_minimal(self):
         manifest = (Path(settings.BASE_DIR) / "static" / "manifest.webmanifest").read_text()
@@ -153,13 +156,13 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('"start_url": "/dashboard/?source=pwa"', manifest)
         self.assertIn('"scope": "/"', manifest)
         self.assertIn('"sizes": "512x512"', manifest)
-        self.assertIn('const CACHE_NAME = "pollyanas-erp-shell-v8-rrhh-permisos-history"', sw)
+        self.assertIn('const CACHE_NAME = "pollyanas-erp-shell-v9-mobile-badges"', sw)
         self.assertIn("self.addEventListener(\"fetch\"", sw)
         self.assertIn("event.respondWith(fetch(event.request))", sw)
 
         response = self.client.get("/erp-sw.js")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"pollyanas-erp-shell-v8-rrhh-permisos-history", b"".join(response.streaming_content))
+        self.assertIn(b"pollyanas-erp-shell-v9-mobile-badges", b"".join(response.streaming_content))
 
     def test_guardrails_define_global_erp_scope(self):
         css = (Path(settings.BASE_DIR) / "static" / "css" / "hallmark_guardrails.css").read_text()
