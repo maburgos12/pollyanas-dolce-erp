@@ -22,7 +22,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.44.0/dist/tabler-icons.min.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Sharp:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200">
     <script defer src="https://cdn.jsdelivr.net/npm/lucide@1.21.0/dist/umd/lucide.min.js"></script>
-    <link rel="stylesheet" href="/static/css/styles.css?v=20260703-badge-centering-v8">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260703-badge-centering-v9">
     <link rel="stylesheet" href="/static/css/pollyana_ops_ui.css?v=20260614-ui-fase-final-v1">
     {% block extra_css %}{% endblock %}
     <link rel="stylesheet" href="/static/css/pollyana_generated_utilities.css?v=20260614-ui100-v1">
@@ -140,7 +140,7 @@
                             </span>
                             <span class="sidebar-section-label">{{ group.label }}</span>
                             {% if group.badge_count %}
-                            <span class="nav-badge nav-badge-alert" aria-label="{{ group.badge_count }} notificaciones pendientes">{{ group.badge_count }}</span>
+                            <span class="nav-badge nav-badge-alert" aria-label="{{ group.badge_count }} notificaciones pendientes"><span class="badge-value">{{ group.badge_count }}</span></span>
                             {% endif %}
                         </span>
                         <span class="toggle-chevron" aria-hidden="true">
@@ -155,7 +155,7 @@
                             <a href="{{ item.url }}" class="{% if item.active %}active{% endif %}">
                                 <span>{{ item.label }}</span>
                                 {% if item.badge_count %}
-                                <span class="nav-badge nav-badge-alert" aria-label="{{ item.badge_count }} notificaciones pendientes">{{ item.badge_count }}</span>
+                                <span class="nav-badge nav-badge-alert" aria-label="{{ item.badge_count }} notificaciones pendientes"><span class="badge-value">{{ item.badge_count }}</span></span>
                                 {% endif %}
                             </a>
                         </li>
@@ -853,7 +853,7 @@
                     {% for item in group.items %}
                     <a class="module-tab{% if item.active %} active{% endif %}" href="{{ item.url }}">
                         <span class="module-tab-label">{{ item.label }}</span>
-                        {% if item.badge_count %}<span class="tab-badge">{{ item.badge_count }}</span>{% endif %}
+                        {% if item.badge_count %}<span class="tab-badge"><span class="badge-value">{{ item.badge_count }}</span></span>{% endif %}
                     </a>
                     {% endfor %}
                 </nav>
@@ -923,17 +923,6 @@
 
     // ponytail: one source of truth; top tabs mirror the active sidebar accordion.
     (function () {
-        document.querySelectorAll('.nav-badge, .tab-badge').forEach(function (badge) {
-            if (badge.querySelector('.badge-value')) return;
-            var value = badge.textContent.trim();
-            if (!value) return;
-            badge.textContent = '';
-            var span = document.createElement('span');
-            span.className = 'badge-value';
-            span.textContent = value;
-            badge.appendChild(span);
-        });
-
         var main = document.getElementById('main-content');
         var tpl = document.getElementById('active-group-tabs-template');
         if (!main || !tpl) return;

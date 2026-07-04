@@ -750,6 +750,13 @@ h4 {
   box-shadow: 0 12px 30px rgba(67, 24, 41, 0.06);
 }
 
+.erp-group-tabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
 .module-tab {
   text-decoration: none;
   color: var(--vino);
@@ -771,6 +778,11 @@ h4 {
 
 .module-tab-label {
   min-width: 0;
+}
+
+.erp-group-tabs .module-tab {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .tab-badge {
