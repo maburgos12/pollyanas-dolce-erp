@@ -236,9 +236,11 @@ h4 {
 .nav-badge > .badge-value,
 .tab-badge > .badge-value {
   position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  transform: translateY(-50%);
+  text-align: center;
   line-height: 1;
 }
 
@@ -248,15 +250,15 @@ h4 {
 
 @keyframes navBadgeAttention {
   0%, 100% {
-    transform: translateY(0) scale(1);
+    transform: scale(1);
     box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2), 0 6px 16px rgba(0, 0, 0, 0.18);
   }
   35% {
-    transform: translateY(-2px) scale(1.08);
+    transform: scale(1.08);
     box-shadow: 0 0 0 5px rgba(255, 255, 255, 0.12), 0 8px 20px rgba(0, 0, 0, 0.22);
   }
   55% {
-    transform: translateY(0) scale(0.98);
+    transform: scale(0.98);
   }
 }
 
