@@ -40,6 +40,15 @@ para calibrar una por una.
 - **Las recetas (productos terminados: Pastel, Pay, Bollo, etc.) NO
   cambian.** Confirmado que sus variantes de tamaño comparten proceso —
   siguen calibrándose por grupo de familia, como en PR #870.
+- **`Receta` = sección "Productos" de Point** (se vende directo, producto
+  terminado). **`Insumo` (tipo interno) = sección "Catálogos" de Point**
+  (materia prima/preparaciones internas, no se vende directo). Son
+  modelos distintos desde antes de esta sesión y esta vuelta los mantiene
+  completamente separados — nunca se cruzan clasificación ni fusión entre
+  uno y otro. Confirmado por Mauricio: en la pantalla de clasificación,
+  las secciones se llaman **"Productos"** y **"Catálogos"** (no "Familias
+  de receta"/"Preparaciones de insumo"), para que se sienta familiar a
+  como ya conoce Point.
 - **Los insumos (preparaciones internas) se calibran por preparación
   específica, no por categoría.** Cada preparación (`Insumo` individual,
   ej. "Betún Dream Whip Pastel") tiene su propio lote/minutos capturado,
@@ -118,14 +127,16 @@ módulo.
 
 ### Pantalla de clasificación
 
-- Nueva sección "Preparaciones de insumo" (paralela a "Familias de
-  receta"), construida desde `Insumo.objects.filter(tipo_item=TIPO_INTERNO)`
-  con producción real, agrupadas por `grupo_mano_obra` (o su propio
-  `nombre` si está en blanco). Cada tarjeta: unidad real detectada (ej.
-  "kg", leída de `PointProductionLine.unit` para ese insumo), toggle de
-  área, captura de lote (mismo patrón que PR #870, ahora con la unidad
-  real en el placeholder/label en vez de asumir "piezas"), botón de
-  fusionar.
+- La sección existente "Familias de receta" se renombra a **"Productos"**
+  (mismo contenido/comportamiento, solo la etiqueta cambia para calzar
+  con la terminología de Point).
+- Nueva sección **"Catálogos"** (paralela a "Productos"), construida desde
+  `Insumo.objects.filter(tipo_item=TIPO_INTERNO)` con producción real,
+  agrupadas por `grupo_mano_obra` (o su propio `nombre` si está en
+  blanco). Cada tarjeta: unidad real detectada (ej. "kg", leída de
+  `PointProductionLine.unit` para ese insumo), toggle de área, captura de
+  lote (mismo patrón que PR #870, ahora con la unidad real en el
+  placeholder/label en vez de asumir "piezas"), botón de fusionar.
 - La acción POST `capturar_lote` gana un parámetro `es_grupo_insumo` para
   marcar la fila `RecetaAreaProduccion` correspondiente.
 - Nueva acción POST `fusionar_insumo` (paralela a `fusionar_grupo`, que
@@ -173,8 +184,9 @@ módulo.
       unicidad ampliada (`["familia", "area", "es_grupo_insumo"]`).
 - [ ] `_grupos_insumo_por_area()` nueva, reemplaza a
       `_insumos_minutos_por_area()` en `minutos_area_dia()`.
-- [ ] Pantalla: sección "Preparaciones de insumo" con captura de lote
-      (unidad real detectada) y acción `fusionar_insumo`.
+- [ ] Pantalla: sección "Productos" (renombrada de "Familias de receta")
+      y nueva sección "Catálogos" con captura de lote (unidad real
+      detectada) y acción `fusionar_insumo`.
 - [ ] Tests: unidad detectada correctamente por preparación; grupo de
       insumo fusionado (vía `grupo_mano_obra`) agrega correctamente sus
       minutos; una familia de receta y una preparación de insumo con el
