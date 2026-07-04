@@ -39,6 +39,7 @@ from .models import (
     RutaCargaChecklistLinea,
     RutaEntrega,
     ServicioRealizadoUnidad,
+    SolicitudDomicilio,
     TipoServicioUnidad,
     Unidad,
 )
@@ -3453,6 +3454,105 @@ def domicilios_ecommerce(request):
             "pedidos_pendientes": pedidos_pendientes,
             "error_conexion": error_conexion,
             "entregas_recientes": entregas_recientes,
+            "unidades": Unidad.objects.filter(activa=True).order_by("codigo"),
+            "repartidores": Repartidor.objects.filter(user__is_active=True).select_related("user").order_by("user__first_name", "user__username"),
+        },
+    )
+
+
+@login_required
+def domicilios_generales(request):
+    """Captura y asigna servicios a domicilio que no vienen de la tienda en línea
+    (llamada, WhatsApp, redes sociales)."""
+    if not can_view_submodule(request.user, "logistica", "rutas"):
+        raise PermissionDenied("No tienes permisos para ver Logística")
+
+    if request.method == "POST":
+        if not can_manage_submodule(request.user, "logistica", "rutas"):
+            raise PermissionDenied("No tienes permisos para gestionar Logística")
+
+        accion = request.POST.get("accion")
+
+        if accion == "crear":
+            cliente_nombre = (request.POST.get("cliente_nombre") or "").strip()
+            cliente_telefono = (request.POST.get("cliente_telefono") or "").strip()
+            direccion = (request.POST.get("direccion") or "").strip()
+            canal_origen = (request.POST.get("canal_origen") or "").strip()
+            canal_detalle = (request.POST.get("canal_detalle") or "").strip()
+            notas = (request.POST.get("notas") or "").strip()
+
+            if not cliente_nombre or not direccion:
+                messages.error(request, "Captura nombre y dirección del cliente.")
+            elif canal_origen not in dict(SolicitudDomicilio.CANAL_CHOICES):
+                messages.error(request, "Selecciona un canal válido.")
+            else:
+                solicitud = SolicitudDomicilio.objects.create(
+                    cliente_nombre=cliente_nombre,
+                    cliente_telefono=cliente_telefono,
+                    direccion=direccion,
+                    canal_origen=canal_origen,
+                    canal_detalle=canal_detalle,
+                    notas=notas,
+                    created_by=request.user,
+                )
+                log_event(
+                    request.user,
+                    "CREATE",
+                    "logistica.SolicitudDomicilio",
+                    solicitud.id,
+                    {"cliente": cliente_nombre, "canal": canal_origen},
+                )
+                messages.success(request, f"Solicitud de {cliente_nombre} capturada.")
+
+        elif accion == "asignar":
+            solicitud_id = (request.POST.get("solicitud_id") or "").strip()
+            repartidor_id = (request.POST.get("repartidor") or "").strip()
+            unidad_id = (request.POST.get("unidad_operativa") or "").strip()
+
+            solicitud = SolicitudDomicilio.objects.filter(pk=int(solicitud_id)).first() if solicitud_id.isdigit() else None
+            repartidor = Repartidor.objects.filter(pk=int(repartidor_id), user__is_active=True).first() if repartidor_id.isdigit() else None
+            unidad = Unidad.objects.filter(pk=int(unidad_id), activa=True).first() if unidad_id.isdigit() else None
+
+            if solicitud is None:
+                messages.error(request, "Solicitud inválida.")
+            elif repartidor is None:
+                messages.error(request, "Selecciona un repartidor activo.")
+            elif unidad is None:
+                messages.error(request, "Selecciona una unidad activa.")
+            else:
+                solicitud.repartidor = repartidor
+                solicitud.unidad = unidad
+                solicitud.estatus = SolicitudDomicilio.ESTATUS_ASIGNADO
+                solicitud.asignado_en = timezone.now()
+                solicitud.save(update_fields=["repartidor", "unidad", "estatus", "asignado_en"])
+                log_event(
+                    request.user,
+                    "UPDATE",
+                    "logistica.SolicitudDomicilio",
+                    solicitud.id,
+                    {"repartidor": str(repartidor), "unidad": unidad.codigo},
+                )
+                messages.success(request, f"Domicilio de {solicitud.cliente_nombre} asignado a {repartidor}.")
+
+        return redirect("logistica:domicilios_generales")
+
+    solicitudes_pendientes = (
+        SolicitudDomicilio.objects.filter(estatus=SolicitudDomicilio.ESTATUS_PENDIENTE).order_by("-created_at")
+    )
+    solicitudes_recientes = (
+        SolicitudDomicilio.objects.exclude(estatus=SolicitudDomicilio.ESTATUS_PENDIENTE)
+        .select_related("repartidor__user", "unidad")
+        .order_by("-created_at")[:30]
+    )
+
+    return render(
+        request,
+        "logistica/domicilios_generales.html",
+        {
+            "module_tabs": _module_tabs("rutas", request.user),
+            "canal_choices": SolicitudDomicilio.CANAL_CHOICES,
+            "solicitudes_pendientes": solicitudes_pendientes,
+            "solicitudes_recientes": solicitudes_recientes,
             "unidades": Unidad.objects.filter(activa=True).order_by("codigo"),
             "repartidores": Repartidor.objects.filter(user__is_active=True).select_related("user").order_by("user__first_name", "user__username"),
         },

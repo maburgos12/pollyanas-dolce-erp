@@ -41,6 +41,7 @@ from logistica.models import (
     ReporteUnidadReafirmacion,
     RutaCargaChecklistLinea,
     RutaEntrega,
+    SolicitudDomicilio,
     Unidad,
 )
 from logistica.services_google_routes import recalcular_ruta_programada
@@ -1619,6 +1620,35 @@ class LogisticaEntregasEcommerceView(_LogisticaBaseView):
                     "driver_url": entrega.driver_url,
                 }
                 for entrega in entregas
+            ],
+            status=status.HTTP_200_OK,
+        )
+
+
+class LogisticaDomiciliosGeneralesAsignadosView(_LogisticaBaseView):
+    """Domicilios generales (llamada/WhatsApp/redes) asignados al repartidor en sesión."""
+
+    def get(self, request):
+        repartidor = _get_repartidor_for_request(request)
+        if not repartidor:
+            return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
+
+        solicitudes = SolicitudDomicilio.objects.filter(
+            repartidor=repartidor,
+            estatus__in=[SolicitudDomicilio.ESTATUS_ASIGNADO, SolicitudDomicilio.ESTATUS_EN_RUTA],
+        ).order_by("-asignado_en")
+
+        return Response(
+            [
+                {
+                    "id": solicitud.id,
+                    "cliente_nombre": solicitud.cliente_nombre,
+                    "direccion": solicitud.direccion,
+                    "canal_origen": solicitud.canal_origen,
+                    "canal_origen_display": solicitud.get_canal_origen_display(),
+                    "notas": solicitud.notas,
+                }
+                for solicitud in solicitudes
             ],
             status=status.HTTP_200_OK,
         )

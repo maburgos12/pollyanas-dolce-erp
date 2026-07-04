@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Logística · Domicilios generales{% endblock %}
+{% block page_title %}Logística · Domicilios generales{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/template_modules/logistica-templates-logistica-unidades-list.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260621-button-gap-v1">
+{% endblock %}
+
+{% block content %}
+<div class="unit-shell">
+  <section class="module-tabs report-tabs" aria-label="Submódulos Logística">
+    {% for tab in module_tabs %}
+      <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+    {% endfor %}
+  </section>
+
+  <section class="card">
+    <div class="card-header">Capturar solicitud</div>
+    <p class="muted">Servicio a domicilio que entró por teléfono, WhatsApp o redes sociales — no es un pedido de la tienda en línea.</p>
+    <form method="post" class="unit-form">
+      {% csrf_token %}
+      <input type="hidden" name="accion" value="crear">
+      <div class="form-row">
+        <label>Cliente
+          <input class="input-field" type="text" name="cliente_nombre" required>
+        </label>
+        <label>Teléfono
+          <input class="input-field" type="text" name="cliente_telefono">
+        </label>
+      </div>
+      <div class="form-row">
+        <label>Dirección
+          <input class="input-field" type="text" name="direccion" required>
+        </label>
+      </div>
+      <div class="form-row">
+        <label>Canal
+          <select class="input-field" name="canal_origen" required>
+            {% for valor, etiqueta in canal_choices %}
+            <option value="{{ valor }}">{{ etiqueta }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Detalle del canal (opcional)
+          <input class="input-field" type="text" name="canal_detalle" placeholder="Ej. Instagram, Facebook">
+        </label>
+      </div>
+      <div class="form-row">
+        <label>Notas
+          <input class="input-field" type="text" name="notas" placeholder="Qué se va a entregar">
+        </label>
+      </div>
+      <button class="btn btn-primary" type="submit">Capturar solicitud</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <div class="card-header">Pendientes de asignar</div>
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Cliente</th>
+            <th>Dirección</th>
+            <th>Canal</th>
+            <th>Repartidor</th>
+            <th>Unidad</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for solicitud in solicitudes_pendientes %}
+          <tr>
+            <td>{{ solicitud.cliente_nombre }}</td>
+            <td>{{ solicitud.direccion }}</td>
+            <td>{{ solicitud.get_canal_origen_display }}{% if solicitud.canal_detalle %} · {{ solicitud.canal_detalle }}{% endif %}</td>
+            <td>
+              <select class="input-field" form="asignar-{{ solicitud.id }}" name="repartidor" required>
+                <option value="">Selecciona</option>
+                {% for repartidor in repartidores %}
+                <option value="{{ repartidor.id }}">{{ repartidor }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td>
+              <select class="input-field" form="asignar-{{ solicitud.id }}" name="unidad_operativa" required>
+                <option value="">Selecciona</option>
+                {% for unidad in unidades %}
+                <option value="{{ unidad.id }}">{{ unidad.codigo }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td>
+              <form id="asignar-{{ solicitud.id }}" method="post">
+                {% csrf_token %}
+                <input type="hidden" name="accion" value="asignar">
+                <input type="hidden" name="solicitud_id" value="{{ solicitud.id }}">
+                <button class="btn btn-primary btn-small" type="submit">Asignar</button>
+              </form>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6" class="muted">No hay domicilios generales pendientes en este momento</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">Historial reciente</div>
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Cliente</th>
+            <th>Canal</th>
+            <th>Repartidor</th>
+            <th>Unidad</th>
+            <th>Estatus</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for solicitud in solicitudes_recientes %}
+          <tr>
+            <td>{{ solicitud.cliente_nombre }}</td>
+            <td>{{ solicitud.get_canal_origen_display }}{% if solicitud.canal_detalle %} · {{ solicitud.canal_detalle }}{% endif %}</td>
+            <td>{{ solicitud.repartidor|default:"-" }}</td>
+            <td>{{ solicitud.unidad.codigo|default:"-" }}</td>
+            <td>
+              {% if solicitud.estatus == "ENTREGADO" %}
+              <span class="unit-badge active">Entregado</span>
+              {% elif solicitud.estatus == "CANCELADO" %}
+              <span class="unit-badge inactive">Cancelado</span>
+              {% else %}
+              <span class="unit-badge active">{{ solicitud.get_estatus_display }}</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="5" class="muted">Todavía no hay domicilios generales registrados</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

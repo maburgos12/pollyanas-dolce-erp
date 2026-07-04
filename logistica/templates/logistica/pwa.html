@@ -2473,6 +2473,12 @@
         return state.entregasEcommerce;
       }
 
+      async function loadSolicitudesDomicilio() {
+        const response = await apiFetch("/domicilios-generales/asignados/");
+        state.solicitudesDomicilio = response.ok ? await response.json() : [];
+        return state.solicitudesDomicilio;
+      }
+
       async function loadResumenSemanal() {
         const today = new Date();
         if (today.getDay() !== 1) return null;
@@ -2585,6 +2591,12 @@
         } catch (error) {
           entregasEcommerce = [];
         }
+        let solicitudesDomicilio = [];
+        try {
+          solicitudesDomicilio = await loadSolicitudesDomicilio();
+        } catch (error) {
+          solicitudesDomicilio = [];
+        }
         const abiertos = state.reportes.filter((r) => r.estatus !== "cerrado").length;
         const turnoBadge = turnoActivo?.id
           ? `<span class="badge turno abierto">ABIERTO</span>`
@@ -2609,6 +2621,17 @@
                 <span>#${escapeHtml(entrega.order_number || "")} · ${escapeHtml(entrega.cliente_nombre || "")}</span>
                 <span class="badge turno abierto">Abrir</span>
               </a>
+            `).join("")}
+          </div>
+          ` : ""}
+          ${solicitudesDomicilio.length ? `
+          <p class="muted" style="margin:18px 0 8px;font-weight:800;">Domicilios generales</p>
+          <div class="card" style="display:grid;gap:8px;">
+            ${solicitudesDomicilio.map((solicitud) => `
+              <div class="unit-line" style="display:flex;flex-direction:column;gap:2px;">
+                <span><strong>${escapeHtml(solicitud.cliente_nombre || "")}</strong> · ${escapeHtml(solicitud.canal_origen_display || "")}</span>
+                <span class="muted">${escapeHtml(solicitud.direccion || "")}</span>
+              </div>
             `).join("")}
           </div>
           ` : ""}

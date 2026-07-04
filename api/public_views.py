@@ -235,6 +235,49 @@ class PublicRecetasView(APIView):
         return Response(payload, status=status.HTTP_200_OK)
 
 
+class PublicDomiciliosGeneralesResumenView(APIView):
+    """Lectura para que el panel de operaciones del e-commerce muestre los domicilios
+    generales (llamada/WhatsApp/redes) capturados en el ERP, sin exponer asignación."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        client, error = _auth_public_client(request)
+        if error:
+            return error
+
+        from logistica.models import SolicitudDomicilio
+
+        activos = SolicitudDomicilio.objects.exclude(
+            estatus__in=[SolicitudDomicilio.ESTATUS_ENTREGADO, SolicitudDomicilio.ESTATUS_CANCELADO],
+        )
+        por_canal = {
+            row["canal_origen"]: row["total"]
+            for row in activos.values("canal_origen").annotate(total=Count("id"))
+        }
+        payload = {
+            "activos_total": activos.count(),
+            "por_canal": por_canal,
+            "solicitudes": [
+                {
+                    "id": s.id,
+                    "cliente_nombre": s.cliente_nombre,
+                    "direccion": s.direccion,
+                    "canal_origen": s.canal_origen,
+                    "canal_origen_display": s.get_canal_origen_display(),
+                    "canal_detalle": s.canal_detalle,
+                    "estatus": s.estatus,
+                    "repartidor": str(s.repartidor) if s.repartidor else None,
+                    "created_at": s.created_at.isoformat(),
+                }
+                for s in activos.order_by("-created_at")[:50]
+            ],
+            "timestamp": timezone.now().isoformat(),
+        }
+        _log_access(client, request, status.HTTP_200_OK)
+        return Response(payload, status=status.HTTP_200_OK)
+
+
 class PublicResumenView(APIView):
     permission_classes = [AllowAny]
 
