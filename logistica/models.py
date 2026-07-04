@@ -1357,3 +1357,77 @@ class EntregaEcommerce(models.Model):
 
     def __str__(self) -> str:
         return f"#{self.ecommerce_order_number or self.ecommerce_order_id} · {nombre_operativo_usuario(self.repartidor.user)}"
+
+
+class SolicitudDomicilio(models.Model):
+    """Servicio a domicilio capturado por un canal distinto a la tienda en línea
+    (llamada, WhatsApp, redes sociales). Vive aparte de EntregaEcommerce porque no
+    hay un pedido de e-commerce detrás; opcionalmente se liga a un PedidoCliente
+    del CRM si ya existe ese registro."""
+
+    CANAL_MOSTRADOR = PedidoCliente.CANAL_MOSTRADOR
+    CANAL_WHATSAPP = PedidoCliente.CANAL_WHATSAPP
+    CANAL_TELEFONO = PedidoCliente.CANAL_TELEFONO
+    CANAL_WEB = PedidoCliente.CANAL_WEB
+    CANAL_OTRO = PedidoCliente.CANAL_OTRO
+    CANAL_CHOICES = PedidoCliente.CANAL_CHOICES
+
+    ESTATUS_PENDIENTE = "PENDIENTE"
+    ESTATUS_ASIGNADO = "ASIGNADO"
+    ESTATUS_EN_RUTA = "EN_RUTA"
+    ESTATUS_ENTREGADO = "ENTREGADO"
+    ESTATUS_CANCELADO = "CANCELADO"
+    ESTATUS_CHOICES = [
+        (ESTATUS_PENDIENTE, "Pendiente"),
+        (ESTATUS_ASIGNADO, "Asignado"),
+        (ESTATUS_EN_RUTA, "En ruta"),
+        (ESTATUS_ENTREGADO, "Entregado"),
+        (ESTATUS_CANCELADO, "Cancelado"),
+    ]
+
+    pedido_cliente = models.ForeignKey(
+        PedidoCliente,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="solicitudes_domicilio",
+    )
+    cliente_nombre = models.CharField(max_length=160)
+    cliente_telefono = models.CharField(max_length=30, blank=True, default="")
+    direccion = models.CharField(max_length=255)
+    canal_origen = models.CharField(max_length=20, choices=CANAL_CHOICES, default=CANAL_TELEFONO)
+    canal_detalle = models.CharField(max_length=60, blank=True, default="")
+    notas = models.TextField(blank=True, default="")
+    repartidor = models.ForeignKey(
+        "Repartidor",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="solicitudes_domicilio",
+    )
+    unidad = models.ForeignKey(
+        "Unidad",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="solicitudes_domicilio",
+    )
+    estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default=ESTATUS_PENDIENTE)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="solicitudes_domicilio_creadas",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    asignado_en = models.DateTimeField(null=True, blank=True)
+    entregado_en = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Solicitud de domicilio"
+        verbose_name_plural = "Solicitudes de domicilio"
+
+    def __str__(self) -> str:
+        return f"{self.cliente_nombre} · {self.get_canal_origen_display()}"
