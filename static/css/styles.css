@@ -234,9 +234,12 @@ h4 {
 
 .nav-badge > .badge-value,
 .tab-badge > .badge-value {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
   line-height: 1;
-  transform: translateY(-1px);
+  transform: translateY(1px);
 }
 
 .nav-badge-alert {
