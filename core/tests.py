@@ -95,7 +95,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('id="erp-sidebar"', html)
         self.assertIn('class="mobile-nav-backdrop"', html)
         self.assertIn("mobile-nav-open", html)
-        self.assertIn("20260704-badge-centering-v15", html)
+        self.assertIn("20260704-badge-centering-v16", html)
         self.assertNotIn("Principal", html)
         self.assertNotIn("#ef4b2e", css)
         self.assertIn(".mobile-app-bar", css)
@@ -103,9 +103,8 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn(".module-tab-label", css)
         self.assertIn(".erp-group-tabs", css)
         self.assertIn('font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;', css)
-        self.assertIn(".nav-badge > .badge-value", css)
-        self.assertIn("top: 50%;", css)
-        self.assertIn("transform: translateY(-50%);", css)
+        self.assertIn("display: inline-grid;", css)
+        self.assertIn("place-items: center;", css)
         self.assertIn("border-bottom: 2px solid rgba(201, 168, 76", css)
         self.assertIn("--mobile-bar-bg: var(--vino)", css)
         self.assertIn('name="apple-mobile-web-app-status-bar-style" content="black-translucent"', html)
@@ -115,7 +114,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn(".layout-wrapper {\n    background: #fffdfa;", css)
         self.assertIn(".sidebar-nav a > span:first-child", css)
         self.assertIn("btn.dataset.dashboardUrl && !isMobileSidebar", html)
-        self.assertIn('<span class="tab-badge"><span class="badge-value">', html)
+        self.assertIn('{% if item.badge_count %}<span class="tab-badge">{{ item.badge_count }}</span>{% endif %}', html)
 
     def test_base_template_uses_sidebar_group_tabs_as_canonical_top_tabs(self):
         base = Path(settings.BASE_DIR) / "templates" / "base.html"
@@ -144,7 +143,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('name="mobile-web-app-capable"', html)
         self.assertIn('name="apple-mobile-web-app-capable"', html)
         self.assertIn('name="apple-mobile-web-app-title"', html)
-        self.assertIn("navigator.serviceWorker.register('/erp-sw.js?v=20260704-erp-mobile-badges-v12')", html)
+        self.assertIn("navigator.serviceWorker.register('/erp-sw.js?v=20260704-erp-mobile-badges-v13')", html)
 
     def test_login_template_also_exposes_pwa_install_metadata(self):
         login = Path(settings.BASE_DIR) / "core" / "templates" / "core" / "login.html"
@@ -154,7 +153,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('name="theme-color"', html)
         self.assertIn('name="apple-mobile-web-app-capable"', html)
         self.assertIn('name="apple-mobile-web-app-title"', html)
-        self.assertIn("navigator.serviceWorker.register('/erp-sw.js?v=20260704-erp-mobile-badges-v12')", html)
+        self.assertIn("navigator.serviceWorker.register('/erp-sw.js?v=20260704-erp-mobile-badges-v13')", html)
 
     def test_erp_pwa_manifest_and_service_worker_are_minimal(self):
         manifest = (Path(settings.BASE_DIR) / "static" / "manifest.webmanifest").read_text()
@@ -164,13 +163,13 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('"start_url": "/dashboard/?source=pwa"', manifest)
         self.assertIn('"scope": "/"', manifest)
         self.assertIn('"sizes": "512x512"', manifest)
-        self.assertIn('const CACHE_NAME = "pollyanas-erp-shell-v12-mobile-badges"', sw)
+        self.assertIn('const CACHE_NAME = "pollyanas-erp-shell-v13-mobile-badges"', sw)
         self.assertIn("self.addEventListener(\"fetch\"", sw)
         self.assertIn("event.respondWith(fetch(event.request))", sw)
 
         response = self.client.get("/erp-sw.js")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"pollyanas-erp-shell-v12-mobile-badges", b"".join(response.streaming_content))
+        self.assertIn(b"pollyanas-erp-shell-v13-mobile-badges", b"".join(response.streaming_content))
 
     def test_guardrails_define_global_erp_scope(self):
         css = (Path(settings.BASE_DIR) / "static" / "css" / "hallmark_guardrails.css").read_text()
