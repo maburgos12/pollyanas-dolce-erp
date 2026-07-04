@@ -92,6 +92,7 @@ ACCESS_SUBMODULES = {
         ("consolidado_cedis", "Consolidado CEDIS"),
         ("cedis_semanal", "Producción CEDIS semanal"),
         ("bonos", "Bonos producción"),
+        ("mano_obra_area", "Mano de obra por área"),
     ],
     "mantenimiento": [
         ("dashboard", "Dashboard"),
@@ -536,6 +537,14 @@ def can_manage_rentabilidad(user: AbstractBaseUser) -> bool:
 
 def can_view_consejo_ia(user: AbstractBaseUser) -> bool:
     return can_view_submodule(user, "direccion", "consejo_ia")
+
+
+def can_view_mano_obra_area(user: AbstractBaseUser) -> bool:
+    return can_view_submodule(user, "produccion", "mano_obra_area")
+
+
+def can_manage_mano_obra_area(user: AbstractBaseUser) -> bool:
+    return can_manage_submodule(user, "produccion", "mano_obra_area")
 
 
 def can_view_product_closure(user: AbstractBaseUser) -> bool:

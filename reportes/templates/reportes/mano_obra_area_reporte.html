@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Mano de obra por área — Costo diario{% endblock %}
+{% block page_title %}Mano de obra por área — Costo diario{% endblock %}
+
+{% block content %}
+
+<div class="pd-action-row" style="margin-bottom:12px;">
+  <a class="btn btn-secondary" href="{% url 'reportes:mano_obra_area_clasificacion' %}">Clasificar familias por área</a>
+</div>
+
+<section class="kpi-grid">
+  {% for bloque in bloques %}
+  <div class="kpi-card">
+    <div class="kpi-label">{{ bloque.label }}</div>
+    {% if bloque.hoy.costo_unidad != None %}
+      <div class="kpi-number">${{ bloque.hoy.costo_unidad|floatformat:2 }}<span style="font-size:13px;"> /unidad</span></div>
+      <div class="muted" style="font-size:12px;">${{ bloque.hoy.nomina_dia_area|floatformat:2 }} nómina de hoy ÷ {{ bloque.hoy.unidades_producidas|floatformat:0 }} pzas</div>
+    {% else %}
+      <div class="kpi-number is-warning">—</div>
+      <div class="muted" style="font-size:12px;">Sin producción registrada hoy en esta área todavía.</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</section>
+
+{% for bloque in bloques %}
+<section class="card">
+  <div class="card-header">{{ bloque.label }} — últimos {{ dias }} días</div>
+  <p class="muted">Cuando el costo por unidad se dispara muy por encima de lo normal, es señal de que hubo nómina pagada sin la producción que normalmente la justifica.</p>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr><th>Fecha</th><th class="is-right">Nómina del día</th><th class="is-right">Unidades producidas</th><th class="is-right">Costo/unidad</th><th>Estado</th></tr>
+      </thead>
+      <tbody>
+        {% for snapshot in bloque.filas %}
+        <tr>
+          <td>{{ snapshot.fecha|date:"D d M" }}</td>
+          <td class="is-right">${{ snapshot.nomina_dia_area|floatformat:2 }}</td>
+          <td class="is-right">{{ snapshot.unidades_producidas|floatformat:0 }}</td>
+          <td class="is-right">
+            {% if snapshot.costo_unidad != None %}${{ snapshot.costo_unidad|floatformat:2 }}{% else %}—{% endif %}
+          </td>
+          <td>
+            {% if not snapshot.es_dia_laborable_esperado %}
+              <span class="badge bg-muted">Sin nómina vigente</span>
+            {% elif snapshot.costo_unidad == None %}
+              <span class="badge bg-danger">Sin producción — revisar</span>
+            {% else %}
+              <span class="badge bg-success">Normal</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endfor %}
+
+{% endblock %}
