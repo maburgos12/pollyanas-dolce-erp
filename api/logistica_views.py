@@ -27,6 +27,7 @@ from logistica.models import (
     BitacoraRepartidor,
     BitacoraSalidaLlegada,
     CargaCombustibleUnidad,
+    EntregaEcommerce,
     EntregaRuta,
     EventoRuta,
     InspeccionDiaria,
@@ -1591,6 +1592,34 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
                     context={"request": request},
                 ).data,
             },
+            status=status.HTTP_200_OK,
+        )
+
+
+class LogisticaEntregasEcommerceView(_LogisticaBaseView):
+    """Entregas de la tienda en línea asignadas al repartidor en sesión, pendientes de cerrar."""
+
+    def get(self, request):
+        repartidor = _get_repartidor_for_request(request)
+        if not repartidor:
+            return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
+
+        entregas = EntregaEcommerce.objects.filter(
+            repartidor=repartidor,
+            estatus=EntregaEcommerce.ESTATUS_PENDIENTE,
+        ).order_by("-created_at")
+
+        return Response(
+            [
+                {
+                    "id": entrega.id,
+                    "order_number": entrega.ecommerce_order_number,
+                    "cliente_nombre": entrega.cliente_nombre,
+                    "direccion": entrega.direccion,
+                    "driver_url": entrega.driver_url,
+                }
+                for entrega in entregas
+            ],
             status=status.HTTP_200_OK,
         )
 

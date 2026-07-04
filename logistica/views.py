@@ -24,6 +24,7 @@ from .models import (
     BitacoraSalidaLlegada,
     CargaCombustibleUnidad,
     DocumentoUnidad,
+    EntregaEcommerce,
     EntregaRuta,
     EventoRuta,
     InspeccionVehiculo,
@@ -43,6 +44,7 @@ from .models import (
 )
 from .services_google_routes import recalcular_ruta_programada
 from .services_google_roads import snap_gps_path_to_roads
+from .services_ecommerce import EcommerceClient, EcommerceIntegrationError
 from .services_carga_ruta import (
     autorizar_diferencia_checklist_carga,
     checklist_bloquea_salida,
@@ -3365,5 +3367,93 @@ def bitacoras_lista(request):
                 "fecha_desde": fecha_desde.isoformat() if fecha_desde else "",
                 "fecha_hasta": fecha_hasta.isoformat() if fecha_hasta else "",
             },
+        },
+    )
+
+
+@login_required
+def domicilios_ecommerce(request):
+    """Asigna repartidor+unidad reales a pedidos de domicilio de la tienda en línea."""
+    if not can_view_submodule(request.user, "logistica", "rutas"):
+        raise PermissionDenied("No tienes permisos para ver Logística")
+
+    if request.method == "POST":
+        if not can_manage_submodule(request.user, "logistica", "rutas"):
+            raise PermissionDenied("No tienes permisos para gestionar Logística")
+
+        order_id = (request.POST.get("order_id") or "").strip()
+        order_number = (request.POST.get("order_number") or "").strip()
+        cliente_nombre = (request.POST.get("cliente_nombre") or "").strip()
+        direccion = (request.POST.get("direccion") or "").strip()
+        repartidor_id = (request.POST.get("repartidor") or "").strip()
+        unidad_id = (request.POST.get("unidad_operativa") or "").strip()
+
+        repartidor = Repartidor.objects.filter(pk=int(repartidor_id), user__is_active=True).first() if repartidor_id.isdigit() else None
+        unidad = Unidad.objects.filter(pk=int(unidad_id), activa=True).first() if unidad_id.isdigit() else None
+
+        if not order_id.isdigit():
+            messages.error(request, "Pedido inválido.")
+        elif repartidor is None:
+            messages.error(request, "Selecciona un repartidor activo.")
+        elif unidad is None:
+            messages.error(request, "Selecciona una unidad activa.")
+        else:
+            try:
+                resultado = EcommerceClient().asignar(
+                    order_id=int(order_id),
+                    erp_repartidor_id=str(repartidor.id),
+                    repartidor_name=str(repartidor),
+                    repartidor_phone=repartidor.telefono,
+                    erp_unidad_id=str(unidad.id),
+                    unidad_code=unidad.codigo,
+                    unidad_type=f"{unidad.marca} {unidad.modelo}".strip(),
+                    unidad_plate=unidad.placa,
+                )
+            except EcommerceIntegrationError as exc:
+                messages.error(request, f"No se pudo asignar en la tienda en línea: {exc}")
+            else:
+                with transaction.atomic():
+                    EntregaEcommerce.objects.create(
+                        repartidor=repartidor,
+                        unidad=unidad,
+                        ecommerce_order_id=int(order_id),
+                        ecommerce_order_number=order_number,
+                        ecommerce_task_id=resultado["task_id"],
+                        cliente_nombre=cliente_nombre,
+                        direccion=direccion,
+                        driver_access_token=resultado["driver_access_token"],
+                        driver_url=resultado["driver_url"],
+                    )
+                    log_event(
+                        request.user,
+                        "CREATE",
+                        "logistica.EntregaEcommerce",
+                        order_id,
+                        {"repartidor": str(repartidor), "unidad": unidad.codigo},
+                    )
+                messages.success(request, f"Pedido #{order_number or order_id} asignado a {repartidor}.")
+        return redirect("logistica:domicilios_ecommerce")
+
+    try:
+        pedidos_pendientes = EcommerceClient().listar_pedidos_pendientes()
+        error_conexion = ""
+    except EcommerceIntegrationError as exc:
+        pedidos_pendientes = []
+        error_conexion = str(exc)
+
+    entregas_recientes = (
+        EntregaEcommerce.objects.select_related("repartidor__user", "unidad").order_by("-created_at")[:30]
+    )
+
+    return render(
+        request,
+        "logistica/domicilios_ecommerce.html",
+        {
+            "module_tabs": _module_tabs("rutas", request.user),
+            "pedidos_pendientes": pedidos_pendientes,
+            "error_conexion": error_conexion,
+            "entregas_recientes": entregas_recientes,
+            "unidades": Unidad.objects.filter(activa=True).order_by("codigo"),
+            "repartidores": Repartidor.objects.filter(user__is_active=True).select_related("user").order_by("user__first_name", "user__username"),
         },
     )

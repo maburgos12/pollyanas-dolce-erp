@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Logística · Domicilios e-commerce{% endblock %}
+{% block page_title %}Logística · Domicilios e-commerce{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/template_modules/logistica-templates-logistica-unidades-list.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260621-button-gap-v1">
+{% endblock %}
+
+{% block content %}
+<div class="unit-shell">
+  <section class="module-tabs report-tabs" aria-label="Submódulos Logística">
+    {% for tab in module_tabs %}
+      <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+    {% endfor %}
+  </section>
+
+  <section class="card">
+    <div class="unit-head">
+      <div>
+        <div class="card-header">Pedidos de domicilio sin asignar</div>
+        <p class="muted">Vienen de la tienda en línea. Asigna repartidor + unidad para abrirle el acceso a la app de reparto.</p>
+      </div>
+    </div>
+
+    {% if error_conexion %}
+    <p class="muted">No se pudo conectar con la tienda en línea: {{ error_conexion }}</p>
+    {% endif %}
+
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Pedido</th>
+            <th>Cliente</th>
+            <th>Dirección</th>
+            <th>Repartidor</th>
+            <th>Unidad</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for pedido in pedidos_pendientes %}
+          <tr>
+            <td>#{{ pedido.order_number }}</td>
+            <td>{{ pedido.customer_name }}</td>
+            <td>{{ pedido.delivery_address|default:"-" }}</td>
+            <td>
+              <select class="input-field" form="asignar-{{ pedido.id }}" name="repartidor" required>
+                <option value="">Selecciona</option>
+                {% for repartidor in repartidores %}
+                <option value="{{ repartidor.id }}">{{ repartidor }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td>
+              <select class="input-field" form="asignar-{{ pedido.id }}" name="unidad_operativa" required>
+                <option value="">Selecciona</option>
+                {% for unidad in unidades %}
+                <option value="{{ unidad.id }}">{{ unidad.codigo }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td>
+              <form id="asignar-{{ pedido.id }}" method="post">
+                {% csrf_token %}
+                <input type="hidden" name="order_id" value="{{ pedido.id }}">
+                <input type="hidden" name="order_number" value="{{ pedido.order_number }}">
+                <input type="hidden" name="cliente_nombre" value="{{ pedido.customer_name }}">
+                <input type="hidden" name="direccion" value="{{ pedido.delivery_address }}">
+                <button class="btn btn-primary btn-small" type="submit">Asignar</button>
+              </form>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6" class="muted">No hay pedidos de domicilio pendientes en este momento</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">Últimas asignaciones</div>
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Pedido</th>
+            <th>Repartidor</th>
+            <th>Unidad</th>
+            <th>Estatus</th>
+            <th>Acceso</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entrega in entregas_recientes %}
+          <tr>
+            <td>#{{ entrega.ecommerce_order_number|default:entrega.ecommerce_order_id }}</td>
+            <td>{{ entrega.repartidor }}</td>
+            <td>{{ entrega.unidad.codigo }}</td>
+            <td>
+              {% if entrega.estatus == "PENDIENTE" %}
+              <span class="unit-badge active">Pendiente</span>
+              {% elif entrega.estatus == "ENTREGADA" %}
+              <span class="unit-badge active">Entregada</span>
+              {% else %}
+              <span class="unit-badge inactive">Cancelada</span>
+              {% endif %}
+            </td>
+            <td><a href="{{ entrega.driver_url }}" target="_blank" rel="noopener">Abrir entrega</a></td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="5" class="muted">Todavía no hay asignaciones registradas</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

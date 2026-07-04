@@ -1298,3 +1298,62 @@ class ConfigAlertaFlota(models.Model):
 
     def __str__(self) -> str:
         return self.get_tipo_display()
+
+
+class EntregaEcommerce(models.Model):
+    """Puente hacia una entrega a domicilio de la tienda en línea (pollyanas-ecommerce).
+
+    No reutiliza EntregaRuta porque esa tabla está atada a PedidoCliente (CRM local);
+    un pedido de la tienda en línea vive en el otro sistema, referenciado aquí solo por id.
+    """
+
+    ESTATUS_PENDIENTE = "PENDIENTE"
+    ESTATUS_ENTREGADA = "ENTREGADA"
+    ESTATUS_CANCELADA = "CANCELADA"
+    ESTATUS_CHOICES = [
+        (ESTATUS_PENDIENTE, "Pendiente"),
+        (ESTATUS_ENTREGADA, "Entregada"),
+        (ESTATUS_CANCELADA, "Cancelada"),
+    ]
+
+    ruta = models.ForeignKey(
+        RutaEntrega,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="entregas_ecommerce",
+    )
+    repartidor = models.ForeignKey(
+        "Repartidor",
+        on_delete=models.PROTECT,
+        related_name="entregas_ecommerce",
+    )
+    unidad = models.ForeignKey(
+        "Unidad",
+        on_delete=models.PROTECT,
+        related_name="entregas_ecommerce",
+    )
+    ecommerce_order_id = models.PositiveIntegerField()
+    ecommerce_order_number = models.CharField(max_length=60, blank=True, default="")
+    ecommerce_task_id = models.PositiveIntegerField()
+    cliente_nombre = models.CharField(max_length=160, blank=True, default="")
+    direccion = models.CharField(max_length=255, blank=True, default="")
+    driver_access_token = models.CharField(max_length=64)
+    driver_url = models.URLField(max_length=300)
+    estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default=ESTATUS_PENDIENTE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Entrega e-commerce"
+        verbose_name_plural = "Entregas e-commerce"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["ecommerce_order_id"],
+                condition=Q(estatus="PENDIENTE"),
+                name="entregaecommerce_unica_pendiente_por_pedido",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"#{self.ecommerce_order_number or self.ecommerce_order_id} · {nombre_operativo_usuario(self.repartidor.user)}"

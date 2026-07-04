@@ -2467,6 +2467,12 @@
         return state.rutaActiva;
       }
 
+      async function loadEntregasEcommerce() {
+        const response = await apiFetch("/entregas-ecommerce/");
+        state.entregasEcommerce = response.ok ? await response.json() : [];
+        return state.entregasEcommerce;
+      }
+
       async function loadResumenSemanal() {
         const today = new Date();
         if (today.getDay() !== 1) return null;
@@ -2573,6 +2579,12 @@
         } catch (error) {
           rutaActiva = null;
         }
+        let entregasEcommerce = [];
+        try {
+          entregasEcommerce = await loadEntregasEcommerce();
+        } catch (error) {
+          entregasEcommerce = [];
+        }
         const abiertos = state.reportes.filter((r) => r.estatus !== "cerrado").length;
         const turnoBadge = turnoActivo?.id
           ? `<span class="badge turno abierto">ABIERTO</span>`
@@ -2589,6 +2601,17 @@
             <button class="dash-btn" onclick="showScreen('bitacora_salida')">${appGlyph("bitacora")}<span>Bitácora</span>${turnoBadge}</button>
             <button class="dash-btn route-dashboard-card" onclick="showScreen('ruta_activa')">${appGlyph("ruta")}<span>Mi ruta</span>${rutaBadge}</button>
           </div>
+          ${entregasEcommerce.length ? `
+          <p class="muted" style="margin:18px 0 8px;font-weight:800;">Domicilios e-commerce</p>
+          <div class="card" style="display:grid;gap:8px;">
+            ${entregasEcommerce.map((entrega) => `
+              <a href="${escapeHtml(entrega.driver_url)}" target="_blank" rel="noopener" class="unit-line" style="display:flex;justify-content:space-between;align-items:center;">
+                <span>#${escapeHtml(entrega.order_number || "")} · ${escapeHtml(entrega.cliente_nombre || "")}</span>
+                <span class="badge turno abierto">Abrir</span>
+              </a>
+            `).join("")}
+          </div>
+          ` : ""}
           <p class="unit-line" style="margin-top:18px;">Selecciona la unidad al iniciar cada captura.</p>
           <p class="muted" style="margin:4px 0 8px;font-weight:800;">Capturas</p>
           <div class="dash-grid">

@@ -14,6 +14,7 @@ urlpatterns = [
     path("tickets/<int:pk>/actualizar/", views.ticket_actualizar, name="ticket_actualizar"),
     path("flota/", views.flota_resumen, name="flota_resumen"),
     path("rutas/", views.rutas, name="rutas"),
+    path("domicilios-ecommerce/", views.domicilios_ecommerce, name="domicilios_ecommerce"),
     path("rutas/control/", views.control_rutas, name="control_rutas"),
     path("rutas/puntos/", views.puntos_logisticos, name="puntos_logisticos"),
     path("rutas/puntos/<int:pk>/editar/", views.punto_logistico_edit, name="punto_logistico_edit"),
