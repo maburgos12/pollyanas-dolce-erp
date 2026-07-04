@@ -1,8 +1,10 @@
+from decimal import Decimal
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from reportes.models import RecetaAreaProduccion
+from reportes.models import FamiliaGrupoManoObra, RecetaAreaProduccion
 
 
 class ManoObraAreaViewsRBACTests(TestCase):
@@ -35,6 +37,33 @@ class ManoObraAreaViewsRBACTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Hornos")
 
+    def test_reporte_calcula_pct_aprovechamiento_sin_dividir_en_template(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from rrhh.models import Empleado, NominaLinea, NominaPeriodo
+
+        hoy = timezone.localdate()
+        empleado = Empleado.objects.create(
+            codigo="E-APROV1", nombre="Empleado Test", departamento=Empleado.DEP_PRODUCCION,
+            puesto_operativo="HORNOS", fecha_ingreso=hoy - timedelta(days=365), salario_diario=Decimal("400.00"),
+        )
+        periodo = NominaPeriodo.objects.create(
+            fecha_inicio=hoy - timedelta(days=7), fecha_fin=hoy + timedelta(days=7),
+            estatus=NominaPeriodo.ESTATUS_CERRADA,
+        )
+        NominaLinea.objects.create(periodo=periodo, empleado=empleado, salario_base=Decimal("4200.00"))
+
+        self.client.force_login(self.superuser)
+        response = self.client.get(reverse("reportes:mano_obra_area_reporte"))
+
+        bloque_hornos = next(b for b in response.context["bloques"] if b["valor"] == "HORNOS")
+        # 1 empleado * 480 min disponibles, sin producción calibrada ese
+        # período -> 0 minutos demandados -> 0% de aprovechamiento, no None.
+        self.assertEqual(bloque_hornos["hoy"].minutos_disponibles, Decimal("480"))
+        self.assertEqual(bloque_hornos["hoy"].pct_aprovechamiento, Decimal("0"))
+
 
 class ClasificacionAreaProduccionTests(TestCase):
     def setUp(self):
@@ -43,6 +72,8 @@ class ClasificacionAreaProduccionTests(TestCase):
             username="moa_super2", email="moa_super2@example.com", password="pass12345",
         )
         self.client.force_login(self.superuser)
+        FamiliaGrupoManoObra.objects.create(familia_real="Pastel Chico", grupo="Pastel")
+        FamiliaGrupoManoObra.objects.create(familia_real="Pastel Grande", grupo="Pastel")
 
     def test_toggle_familia_crea_y_quita(self):
         url = reverse("reportes:mano_obra_area_clasificacion")
@@ -98,6 +129,40 @@ class ClasificacionAreaProduccionTests(TestCase):
         nombres = [entrada["nombre"] for entrada in familias_ctx]
         self.assertNotIn("Pastel Chico", nombres)
         self.assertNotIn("Pastel Grande", nombres)
+
+    def test_capturar_lote_calcula_minutos_estandar_pieza(self):
+        url = reverse("reportes:mano_obra_area_clasificacion")
+
+        self.client.post(url, {
+            "accion": "capturar_lote",
+            "familia": "Pastel",
+            "area": "HORNOS",
+            "lote_personas": "2",
+            "lote_minutos": "20",
+            "lote_piezas": "30",
+        })
+
+        fila = RecetaAreaProduccion.objects.get(familia="Pastel", area="HORNOS")
+        self.assertEqual(fila.lote_personas, 2)
+        self.assertEqual(fila.lote_minutos, Decimal("20"))
+        self.assertEqual(fila.lote_piezas, 30)
+        self.assertEqual(fila.minutos_estandar_pieza, Decimal("40") / Decimal("30"))
+
+    def test_fusionar_grupo_cambia_grupo_sin_tocar_codigo(self):
+        # Simula el caso real encontrado: "RELLENOS Y CREMAS" es una
+        # familia real nueva de Point que Carolina fusiona a un grupo ya
+        # existente, sin depender de un cambio de código.
+        FamiliaGrupoManoObra.objects.create(familia_real="RELLENOS Y CREMAS", grupo="RELLENOS Y CREMAS")
+        url = reverse("reportes:mano_obra_area_clasificacion")
+
+        self.client.post(url, {
+            "accion": "fusionar_grupo",
+            "familia_real": "RELLENOS Y CREMAS",
+            "grupo_destino": "Betún, Cremas, Rellenos (INSUMO PRODUCIDO)",
+        })
+
+        fila = FamiliaGrupoManoObra.objects.get(familia_real="RELLENOS Y CREMAS")
+        self.assertEqual(fila.grupo, "Betún, Cremas, Rellenos (INSUMO PRODUCIDO)")
 
     def test_agregar_y_quitar_excepcion(self):
         from uuid import uuid4

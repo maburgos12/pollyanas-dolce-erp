@@ -11,7 +11,7 @@
 
 <section class="card">
   <div class="card-header">Familias de receta</div>
-  <p class="muted">Marca qué área(s) requiere cada familia. Una familia puede pasar por varias — ej. Pastel lleva Hornos, Armado y Embetunado.</p>
+  <p class="muted">Marca qué área(s) requiere cada familia. Una familia puede pasar por varias — ej. Pastel lleva Hornos, Armado y Embetunado. Para cada área marcada, captura un lote típico (personas, minutos activos, piezas) para calcular el minuto estándar por pieza — minutos de horno/reposo pasivo NO se capturan aquí.</p>
   <div class="dashboard-grid">
     {% for familia in familias %}
     <div class="card">
@@ -23,15 +23,50 @@
         {% csrf_token %}
         <input type="hidden" name="accion" value="toggle_familia">
         <input type="hidden" name="familia" value="{{ familia.nombre }}">
-        {% for value, label in areas %}
-        <button type="submit" name="area" value="{{ value }}" class="btn {% if value in familia.areas %}btn-primary{% else %}btn-secondary{% endif %} btn-sm">{{ label }}</button>
+        {% for detalle in familia.areas_detalle %}
+        <button type="submit" name="area" value="{{ detalle.value }}" class="btn {% if detalle.activa %}btn-primary{% else %}btn-secondary{% endif %} btn-sm">{{ detalle.label }}</button>
         {% endfor %}
+      </form>
+
+      {% for detalle in familia.areas_detalle %}
+      {% if detalle.activa %}
+      <form method="post" style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:8px;">
+        {% csrf_token %}
+        <input type="hidden" name="accion" value="capturar_lote">
+        <input type="hidden" name="familia" value="{{ familia.nombre }}">
+        <input type="hidden" name="area" value="{{ detalle.value }}">
+        <span class="muted" style="font-size:12px;">{{ detalle.label }}:</span>
+        <input class="input-field" size="4" type="number" min="1" name="lote_personas" value="{{ detalle.fila.lote_personas|default_if_none:'' }}" placeholder="pers.">
+        <input class="input-field" size="5" type="number" step="0.01" min="0" name="lote_minutos" value="{{ detalle.fila.lote_minutos|default_if_none:'' }}" placeholder="min.">
+        <input class="input-field" size="4" type="number" min="1" name="lote_piezas" value="{{ detalle.fila.lote_piezas|default_if_none:'' }}" placeholder="pzas.">
+        <button type="submit" class="btn btn-secondary btn-sm">Guardar lote</button>
+        {% if detalle.fila.minutos_estandar_pieza %}
+          <span class="muted" style="font-size:11.5px;">≈ {{ detalle.fila.minutos_estandar_pieza|floatformat:2 }} min/pieza</span>
+        {% else %}
+          <span class="badge bg-warning">Sin calibrar</span>
+        {% endif %}
+      </form>
+      {% endif %}
+      {% endfor %}
+
+      <form method="post" style="display:flex; gap:6px; align-items:center; margin-top:10px;">
+        {% csrf_token %}
+        <input type="hidden" name="accion" value="fusionar_grupo">
+        <input type="hidden" name="familia_real" value="{{ familia.nombre }}">
+        <span class="muted" style="font-size:11.5px;">Fusionar con:</span>
+        <input class="input-field" size="28" type="text" name="grupo_destino" list="grupos-existentes" placeholder="nombre del grupo destino">
+        <button type="submit" class="btn btn-secondary btn-sm">Fusionar</button>
       </form>
     </div>
     {% empty %}
     <p class="muted">No hay familias de receta capturadas todavía.</p>
     {% endfor %}
   </div>
+  <datalist id="grupos-existentes">
+    {% for grupo in grupos_existentes %}
+    <option value="{{ grupo }}"></option>
+    {% endfor %}
+  </datalist>
 </section>
 
 <section class="card">
