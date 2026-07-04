@@ -336,6 +336,24 @@ body,
   white-space: nowrap;
 }
 
+.main-content[data-hallmark-scope="erp"] .erp-group-tabs {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 10px 12px;
+  grid-template-columns: none !important;
+  max-width: min(var(--erp-workspace-max), 100%) !important;
+  min-width: 0;
+  overflow: visible !important;
+  width: 100% !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+.main-content[data-hallmark-scope="erp"] .erp-group-tabs .module-tab {
+  flex: 0 0 auto !important;
+  min-width: max-content !important;
+  width: auto !important;
+}
+
 .main-content[data-hallmark-scope="erp"] :is(
   .rrhh-page,
   .ch-page,
@@ -846,6 +864,17 @@ body,
     min-width: max-content !important;
     scroll-snap-align: start;
     white-space: nowrap;
+  }
+
+  .main-content[data-hallmark-scope="erp"] .erp-group-tabs {
+    flex-wrap: nowrap !important;
+    gap: 8px;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+  }
+
+  .main-content[data-hallmark-scope="erp"] .erp-group-tabs .module-tab {
+    width: max-content !important;
   }
 
   .main-content[data-hallmark-scope="erp"] :is(

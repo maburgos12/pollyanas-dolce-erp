@@ -74,7 +74,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         html = base.read_text()
         self.assertIn('data-hallmark-scope="erp"', html)
         self.assertLess(html.index("{% block extra_css %}"), html.index("hallmark_guardrails.css"))
-        self.assertIn("20260622-ios-pwa-lock-v1", html)
+        self.assertIn("20260703-erp-group-tabs-v2", html)
 
     def test_base_template_includes_mobile_touch_navigation_shell(self):
         base = Path(settings.BASE_DIR) / "templates" / "base.html"
@@ -236,6 +236,14 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn("grid-template-columns: 1fr !important", css)
         self.assertIn(".rango-corte .bonos-field > div", css)
         self.assertIn("grid-template-columns: minmax(0, 1fr) auto", css)
+
+    def test_guardrails_keep_erp_group_tabs_out_of_grid_layout(self):
+        css = (Path(settings.BASE_DIR) / "static" / "css" / "hallmark_guardrails.css").read_text()
+        self.assertIn(".erp-group-tabs", css)
+        self.assertIn("grid-template-columns: none !important;", css)
+        self.assertIn("flex-wrap: wrap !important;", css)
+        self.assertIn("overflow: visible !important;", css)
+        self.assertIn("width: max-content !important;", css)
 
     def test_hallmark_ui_has_no_unapproved_regressions(self):
         issues = new_issues_against_baseline(Path(settings.BASE_DIR))
