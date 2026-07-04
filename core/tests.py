@@ -95,13 +95,14 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('id="erp-sidebar"', html)
         self.assertIn('class="mobile-nav-backdrop"', html)
         self.assertIn("mobile-nav-open", html)
-        self.assertIn("20260703-badge-centering-v6", html)
+        self.assertIn("20260703-badge-centering-v7", html)
         self.assertNotIn("Principal", html)
         self.assertNotIn("#ef4b2e", css)
         self.assertIn(".mobile-app-bar", css)
         self.assertIn(".mobile-app-bar-mark", css)
         self.assertIn(".module-tab-label", css)
         self.assertIn('font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;', css)
+        self.assertIn(".nav-badge > .badge-value", css)
         self.assertIn("border-bottom: 2px solid rgba(201, 168, 76", css)
         self.assertIn("--mobile-bar-bg: var(--vino)", css)
         self.assertIn('name="apple-mobile-web-app-status-bar-style" content="black-translucent"', html)
@@ -111,6 +112,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn(".layout-wrapper {\n    background: #fffdfa;", css)
         self.assertIn(".sidebar-nav a > span:first-child", css)
         self.assertIn("btn.dataset.dashboardUrl && !isMobileSidebar", html)
+        self.assertIn("document.querySelectorAll('.nav-badge, .tab-badge')", html)
 
     def test_base_template_uses_sidebar_group_tabs_as_canonical_top_tabs(self):
         base = Path(settings.BASE_DIR) / "templates" / "base.html"

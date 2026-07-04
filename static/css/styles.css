@@ -230,7 +230,13 @@ h4 {
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2), 0 6px 16px rgba(0, 0, 0, 0.18);
   flex: 0 0 auto;
   overflow: hidden;
-  padding-top: 2px;
+}
+
+.nav-badge > .badge-value,
+.tab-badge > .badge-value {
+  display: block;
+  line-height: 1;
+  transform: translateY(1px);
 }
 
 .nav-badge-alert {
