@@ -7,11 +7,13 @@ from django.test import TestCase
 from maestros.models import Insumo
 from pos_bridge.models import PointBranch, PointProductionLine
 from recetas.models import Receta
-from reportes.models import RecetaAreaProduccion
+from reportes.models import FamiliaGrupoManoObra, RecetaAreaProduccion
 from reportes.services_mano_obra_diaria_area import (
     area_produccion_empleado,
     calcular_costo_diario_area,
     costo_mano_obra_diario_receta,
+    empleados_area_periodo,
+    minutos_area_dia,
     nomina_diaria_area,
     unidades_area_dia,
 )
@@ -161,6 +163,8 @@ class UnidadesAreaDiaTests(TestCase):
         # trae la producción real bajo familias distintas por tamaño
         # (Pastel Chico/Grande/Mediano/Mini) — decisión de negocio confirmada
         # por Mauricio de fusionar por tamaño, no una fusión de texto genérica.
+        FamiliaGrupoManoObra.objects.create(familia_real="Pastel Chico", grupo="Pastel")
+        FamiliaGrupoManoObra.objects.create(familia_real="Pastel Grande", grupo="Pastel")
         RecetaAreaProduccion.objects.create(familia="Pastel", area="EMBETUNADO")
         pastel_chico = self._receta(nombre="Pastel Chico Fresa", familia="Pastel Chico")
         pastel_grande = self._receta(nombre="Pastel Grande Chocolate", familia="Pastel Grande")
@@ -173,6 +177,9 @@ class UnidadesAreaDiaTests(TestCase):
     def test_clasificar_grupo_betun_incluye_familia_original_de_point(self):
         # "Betún y Rellenos" y "Betún, Cremas, Rellenos (INSUMO PRODUCIDO)"
         # son, confirmado por Mauricio, el mismo grupo de producción.
+        FamiliaGrupoManoObra.objects.create(
+            familia_real="Betún y Rellenos", grupo="Betún, Cremas, Rellenos (INSUMO PRODUCIDO)"
+        )
         RecetaAreaProduccion.objects.create(
             familia="Betún, Cremas, Rellenos (INSUMO PRODUCIDO)", area="ARMADO"
         )
@@ -186,6 +193,64 @@ class UnidadesAreaDiaTests(TestCase):
         )
 
         self.assertEqual(unidades_area_dia(date(2026, 6, 1), "ARMADO"), Decimal("15"))
+
+
+class MinutosEstandarPiezaTests(TestCase):
+    def test_calcula_con_los_3_campos_presentes(self):
+        fila = RecetaAreaProduccion.objects.create(
+            familia="Pastel", area="HORNOS",
+            lote_personas=2, lote_minutos=Decimal("20"), lote_piezas=30,
+        )
+        # 2 personas * 20 min = 40 minutos-persona / 30 piezas
+        self.assertEqual(fila.minutos_estandar_pieza, Decimal("40") / Decimal("30"))
+
+    def test_none_si_falta_cualquier_campo(self):
+        fila = RecetaAreaProduccion.objects.create(familia="Pastel", area="HORNOS")
+        self.assertIsNone(fila.minutos_estandar_pieza)
+
+        fila.lote_personas = 2
+        fila.lote_minutos = Decimal("20")
+        self.assertIsNone(fila.minutos_estandar_pieza)
+
+
+class MinutosAreaDiaTests(TestCase):
+    def setUp(self):
+        self.branch = PointBranch.objects.create(external_id=f"B-{uuid4().hex[:6]}", name="Sucursal Test")
+
+    def _receta(self, *, nombre, familia):
+        return Receta.objects.create(
+            nombre=nombre,
+            codigo_point=f"COD-{uuid4().hex[:6]}",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            modo_costeo=Receta.MODO_COSTEO_FABRICADO,
+            familia=familia,
+            hash_contenido=f"h-{uuid4()}",
+        )
+
+    def test_receta_calibrada_aporta_piezas_por_minuto_pieza(self):
+        receta = self._receta(nombre="Pastel Grande Fresa", familia="Pastel")
+        RecetaAreaProduccion.objects.create(
+            familia="Pastel", area="EMBETUNADO",
+            lote_personas=1, lote_minutos=Decimal("20"), lote_piezas=10,
+        )  # 2 min/pieza
+        PointProductionLine.objects.create(
+            branch=self.branch, receta=receta, item_name=receta.nombre,
+            produced_quantity=Decimal("15"), production_date=date(2026, 6, 1),
+            source_hash=str(uuid4()),
+        )
+
+        self.assertEqual(minutos_area_dia(date(2026, 6, 1), "EMBETUNADO"), Decimal("30"))
+
+    def test_receta_clasificada_sin_calibrar_no_aporta(self):
+        receta = self._receta(nombre="Pay de Queso", familia="Pay")
+        RecetaAreaProduccion.objects.create(familia="Pay", area="HORNOS")  # sin lote capturado
+        PointProductionLine.objects.create(
+            branch=self.branch, receta=receta, item_name=receta.nombre,
+            produced_quantity=Decimal("20"), production_date=date(2026, 6, 1),
+            source_hash=str(uuid4()),
+        )
+
+        self.assertEqual(minutos_area_dia(date(2026, 6, 1), "HORNOS"), Decimal("0"))
 
 
 class CalcularCostoDiarioAreaTests(TestCase):
@@ -209,7 +274,7 @@ class CalcularCostoDiarioAreaTests(TestCase):
             hash_contenido=f"h-{uuid4()}",
         )
 
-    def test_sin_unidades_costo_unidad_es_none_no_forzado(self):
+    def test_sin_minutos_demandados_costo_minuto_es_none_no_forzado(self):
         empleado = self._empleado(puesto_operativo="HORNOS")
         periodo = NominaPeriodo.objects.create(
             fecha_inicio=date(2026, 5, 1), fecha_fin=date(2026, 5, 14), estatus=NominaPeriodo.ESTATUS_CERRADA
@@ -218,11 +283,13 @@ class CalcularCostoDiarioAreaTests(TestCase):
 
         snapshot = calcular_costo_diario_area(date(2026, 5, 5), "HORNOS")
 
-        self.assertIsNone(snapshot.costo_unidad)
+        self.assertIsNone(snapshot.costo_minuto)
         self.assertTrue(snapshot.es_dia_laborable_esperado)
         self.assertEqual(snapshot.unidades_producidas, Decimal("0"))
+        # 1 empleado en HORNOS ese período * 480 min de turno estándar
+        self.assertEqual(snapshot.minutos_disponibles, Decimal("480"))
 
-    def test_con_nomina_y_unidades_calcula_costo(self):
+    def test_con_nomina_y_minutos_calibrados_calcula_costo_minuto(self):
         empleado = self._empleado(puesto_operativo="HORNOS")
         periodo = NominaPeriodo.objects.create(
             fecha_inicio=date(2026, 5, 1), fecha_fin=date(2026, 5, 14), estatus=NominaPeriodo.ESTATUS_CERRADA
@@ -230,7 +297,10 @@ class CalcularCostoDiarioAreaTests(TestCase):
         NominaLinea.objects.create(periodo=periodo, empleado=empleado, salario_base=Decimal("4200.00"))
         branch = PointBranch.objects.create(external_id=f"B-{uuid4().hex[:6]}", name="Sucursal Test")
         receta = self._receta(nombre="Pan Blanco", familia="PAN")
-        RecetaAreaProduccion.objects.create(familia="PAN", area="HORNOS")
+        RecetaAreaProduccion.objects.create(
+            familia="PAN", area="HORNOS",
+            lote_personas=1, lote_minutos=Decimal("100"), lote_piezas=100,
+        )  # 1 min/pieza
         PointProductionLine.objects.create(
             branch=branch, receta=receta, item_name="Pan Blanco",
             produced_quantity=Decimal("100"), production_date=date(2026, 5, 5),
@@ -239,8 +309,10 @@ class CalcularCostoDiarioAreaTests(TestCase):
 
         snapshot = calcular_costo_diario_area(date(2026, 5, 5), "HORNOS")
 
-        # nomina_diaria = 4200 / 12 = 350.00; costo_unidad = 350/100 = 3.50
-        self.assertEqual(snapshot.costo_unidad, Decimal("3.50"))
+        # nomina_diaria = 4200 / 12 = 350.00; minutos_demandados = 100*1 = 100
+        # costo_minuto = 350/100 = 3.50
+        self.assertEqual(snapshot.minutos_demandados, Decimal("100"))
+        self.assertEqual(snapshot.costo_minuto, Decimal("3.50"))
 
     def test_costo_mano_obra_diario_receta_sin_clasificar(self):
         receta = self._receta(nombre="Postre Nuevo", familia="Sin Clasificar Aun")
@@ -253,13 +325,24 @@ class CalcularCostoDiarioAreaTests(TestCase):
 
     def test_costo_mano_obra_diario_receta_declara_area_faltante(self):
         # El costo de un área es un fondo compartido entre TODAS las recetas
-        # que le pertenecen ese día, no algo aislado por receta.
+        # que le pertenecen ese día, no algo aislado por receta. Ambas
+        # familias están calibradas (con minutos) — lo que falta es
+        # producción real en ARMADO ese día, no calibración.
         pan_base = self._receta(nombre="Pan Base", familia="PAN")
-        RecetaAreaProduccion.objects.create(familia="PAN", area="HORNOS")
+        RecetaAreaProduccion.objects.create(
+            familia="PAN", area="HORNOS",
+            lote_personas=1, lote_minutos=Decimal("100"), lote_piezas=100,
+        )
 
         pastel_test = self._receta(nombre="Pastel Test", familia="Pastel Especial")
-        RecetaAreaProduccion.objects.create(familia="Pastel Especial", area="HORNOS")
-        RecetaAreaProduccion.objects.create(familia="Pastel Especial", area="ARMADO")
+        RecetaAreaProduccion.objects.create(
+            familia="Pastel Especial", area="HORNOS",
+            lote_personas=1, lote_minutos=Decimal("100"), lote_piezas=100,
+        )
+        RecetaAreaProduccion.objects.create(
+            familia="Pastel Especial", area="ARMADO",
+            lote_personas=1, lote_minutos=Decimal("50"), lote_piezas=50,
+        )
 
         empleado_hornos = self._empleado(puesto_operativo="HORNOS")
         periodo = NominaPeriodo.objects.create(
@@ -285,9 +368,14 @@ class CalcularCostoDiarioAreaTests(TestCase):
 
     def test_receta_con_familia_variante_resuelve_por_grupo_canonico(self):
         # La receta trae la familia real de Point ("Pastel Chico"), pero la
-        # clasificación se guardó contra el grupo canónico ("Pastel").
+        # clasificación (con minutos calibrados) se guardó contra el grupo
+        # canónico ("Pastel").
+        FamiliaGrupoManoObra.objects.create(familia_real="Pastel Chico", grupo="Pastel")
         pastel_chico = self._receta(nombre="Pastel Chico Fresa", familia="Pastel Chico")
-        RecetaAreaProduccion.objects.create(familia="Pastel", area="HORNOS")
+        RecetaAreaProduccion.objects.create(
+            familia="Pastel", area="HORNOS",
+            lote_personas=1, lote_minutos=Decimal("100"), lote_piezas=100,
+        )  # 1 min/pieza
 
         empleado_hornos = self._empleado(puesto_operativo="HORNOS")
         periodo = NominaPeriodo.objects.create(
@@ -304,5 +392,45 @@ class CalcularCostoDiarioAreaTests(TestCase):
 
         resultado = costo_mano_obra_diario_receta(date(2026, 5, 5), pastel_chico)
 
+        # minutos_receta (1.0) * costo_minuto (350/100=3.50) = 3.50
         self.assertTrue(resultado["completo"])
         self.assertEqual(resultado["costo_total"], Decimal("3.50"))
+
+    def test_receta_clasificada_sin_calibrar_declara_area_faltante(self):
+        # Distinto del caso "sin producción": aquí SÍ hubo producción y
+        # nómina ese día, pero nadie ha capturado los minutos de esta
+        # familia todavía — no se inventa un costo.
+        receta = self._receta(nombre="Pay de Queso", familia="Pay")
+        RecetaAreaProduccion.objects.create(familia="Pay", area="HORNOS")  # sin lote
+
+        empleado_hornos = self._empleado(puesto_operativo="HORNOS")
+        periodo = NominaPeriodo.objects.create(
+            fecha_inicio=date(2026, 5, 1), fecha_fin=date(2026, 5, 14), estatus=NominaPeriodo.ESTATUS_CERRADA
+        )
+        NominaLinea.objects.create(periodo=periodo, empleado=empleado_hornos, salario_base=Decimal("4200.00"))
+
+        branch = PointBranch.objects.create(external_id=f"B-{uuid4().hex[:6]}", name="Sucursal Test")
+        PointProductionLine.objects.create(
+            branch=branch, receta=receta, item_name="Pay de Queso",
+            produced_quantity=Decimal("20"), production_date=date(2026, 5, 5),
+            source_hash=str(uuid4()),
+        )
+
+        resultado = costo_mano_obra_diario_receta(date(2026, 5, 5), receta)
+
+        self.assertFalse(resultado["completo"])
+        self.assertIn("HORNOS", resultado["areas_faltantes"])
+        self.assertIsNone(resultado["costo_total"])
+        self.assertFalse(resultado["sin_clasificar"])
+
+    def test_empleados_area_periodo_cuenta_headcount_no_nomina(self):
+        self._empleado(puesto_operativo="HORNOS")
+        self._empleado(puesto_operativo="HORNOS")
+        periodo = NominaPeriodo.objects.create(
+            fecha_inicio=date(2026, 5, 1), fecha_fin=date(2026, 5, 14), estatus=NominaPeriodo.ESTATUS_CERRADA
+        )
+        for empleado in Empleado.objects.filter(puesto_operativo="HORNOS"):
+            NominaLinea.objects.create(periodo=periodo, empleado=empleado, salario_base=Decimal("4200.00"))
+
+        self.assertEqual(empleados_area_periodo(date(2026, 5, 5), "HORNOS"), 2)
+        self.assertEqual(empleados_area_periodo(date(2026, 6, 1), "HORNOS"), 0)

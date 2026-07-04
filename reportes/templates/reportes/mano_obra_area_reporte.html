@@ -13,12 +13,15 @@
   {% for bloque in bloques %}
   <div class="kpi-card">
     <div class="kpi-label">{{ bloque.label }}</div>
-    {% if bloque.hoy.costo_unidad != None %}
-      <div class="kpi-number">${{ bloque.hoy.costo_unidad|floatformat:2 }}<span style="font-size:13px;"> /unidad</span></div>
-      <div class="muted" style="font-size:12px;">${{ bloque.hoy.nomina_dia_area|floatformat:2 }} nómina de hoy ÷ {{ bloque.hoy.unidades_producidas|floatformat:0 }} pzas</div>
+    {% if bloque.hoy.costo_minuto != None %}
+      <div class="kpi-number">${{ bloque.hoy.costo_minuto|floatformat:2 }}<span style="font-size:13px;"> /minuto</span></div>
+      <div class="muted" style="font-size:12px;">${{ bloque.hoy.nomina_dia_area|floatformat:2 }} nómina de hoy ÷ {{ bloque.hoy.minutos_demandados|floatformat:0 }} min demandados</div>
     {% else %}
       <div class="kpi-number is-warning">—</div>
-      <div class="muted" style="font-size:12px;">Sin producción registrada hoy en esta área todavía.</div>
+      <div class="muted" style="font-size:12px;">Sin minutos calibrados/producidos hoy en esta área todavía.</div>
+    {% endif %}
+    {% if bloque.hoy.pct_aprovechamiento != None %}
+      <div class="muted" style="font-size:12px; margin-top:4px;">{{ bloque.hoy.pct_aprovechamiento|floatformat:0 }}% de aprovechamiento — {{ bloque.hoy.minutos_ociosos|floatformat:0 }} min ociosos</div>
     {% endif %}
   </div>
   {% endfor %}
@@ -27,11 +30,11 @@
 {% for bloque in bloques %}
 <section class="card">
   <div class="card-header">{{ bloque.label }} — últimos {{ dias }} días</div>
-  <p class="muted">Cuando el costo por unidad se dispara muy por encima de lo normal, es señal de que hubo nómina pagada sin la producción que normalmente la justifica.</p>
+  <p class="muted">Cuando el costo por minuto se dispara muy por encima de lo normal, es señal de que hubo nómina pagada sin la producción que normalmente la justifica. El % de aprovechamiento compara los minutos que realmente se demandaron contra los minutos-persona disponibles ese día.</p>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
-        <tr><th>Fecha</th><th class="is-right">Nómina del día</th><th class="is-right">Unidades producidas</th><th class="is-right">Costo/unidad</th><th>Estado</th></tr>
+        <tr><th>Fecha</th><th class="is-right">Nómina del día</th><th class="is-right">Unidades producidas</th><th class="is-right">Costo/minuto</th><th class="is-right">Aprovechamiento</th><th>Estado</th></tr>
       </thead>
       <tbody>
         {% for snapshot in bloque.filas %}
@@ -40,12 +43,15 @@
           <td class="is-right">${{ snapshot.nomina_dia_area|floatformat:2 }}</td>
           <td class="is-right">{{ snapshot.unidades_producidas|floatformat:0 }}</td>
           <td class="is-right">
-            {% if snapshot.costo_unidad != None %}${{ snapshot.costo_unidad|floatformat:2 }}{% else %}—{% endif %}
+            {% if snapshot.costo_minuto != None %}${{ snapshot.costo_minuto|floatformat:2 }}{% else %}—{% endif %}
+          </td>
+          <td class="is-right">
+            {% if snapshot.pct_aprovechamiento != None %}{{ snapshot.pct_aprovechamiento|floatformat:0 }}%{% else %}—{% endif %}
           </td>
           <td>
             {% if not snapshot.es_dia_laborable_esperado %}
               <span class="badge bg-muted">Sin nómina vigente</span>
-            {% elif snapshot.costo_unidad == None %}
+            {% elif snapshot.costo_minuto == None %}
               <span class="badge bg-danger">Sin producción — revisar</span>
             {% else %}
               <span class="badge bg-success">Normal</span>

@@ -11,6 +11,7 @@ from reportes.models import CostoManoObraDiarioArea, RecetaAreaProduccion
 from rrhh.models import Empleado, NominaLinea, NominaPeriodo
 
 _PERIODOS_VALIDOS = (NominaPeriodo.ESTATUS_CERRADA, NominaPeriodo.ESTATUS_PAGADA)
+MINUTOS_TURNO_ESTANDAR = Decimal("480")  # 8 horas — misma aproximación que el prorrateo 6/7
 
 
 def area_produccion_empleado(empleado: Empleado) -> str | None:
@@ -62,6 +63,27 @@ def nomina_diaria_area(fecha: date, area: str) -> Decimal | None:
         dias = _dias_laborables_periodo(periodo)
         total += nomina_area / dias
     return total
+
+
+def empleados_area_periodo(fecha: date, area: str) -> int:
+    """Headcount de empleados del área vigentes ese día (para
+    minutos_disponibles) — no prorrateado, es un conteo de personas, no de
+    nómina. Asume que todos trabajan el turno completo (mismo nivel de
+    aproximación que `_dias_laborables_periodo`, no descuenta incapacidades
+    ni permisos individuales)."""
+    periodos = list(_periodos_vigentes(fecha))
+    if not periodos:
+        return 0
+    empleados_ids: set[int] = set()
+    for periodo in periodos:
+        nomina_periodo = (
+            NominaLinea.objects.filter(periodo=periodo, empleado__departamento=Empleado.DEP_PRODUCCION)
+            .select_related("empleado")
+        )
+        empleados_ids.update(
+            linea.empleado_id for linea in nomina_periodo if area_produccion_empleado(linea.empleado) == area
+        )
+    return len(empleados_ids)
 
 
 def _familias_reales_clasificadas(area: str) -> list[str]:
@@ -121,6 +143,9 @@ def _insumo_ids_por_area(area: str) -> set[int]:
 
 
 def unidades_area_dia(fecha: date, area: str) -> Decimal:
+    """Total físico de piezas del área ese día, calibradas o no — dato
+    informativo de actividad, ya no es el divisor del costo (ver
+    minutos_area_dia)."""
     receta_ids = _recetas_ids_por_area(area)
     insumo_ids = _insumo_ids_por_area(area)
     if not receta_ids and not insumo_ids:
@@ -132,10 +157,93 @@ def unidades_area_dia(fecha: date, area: str) -> Decimal:
     return Decimal(str(total or 0))
 
 
+def _recetas_minutos_por_area(area: str) -> dict[int, Decimal]:
+    """receta_id -> minutos_estandar_pieza para esa área. Un grupo aporta un
+    solo minuto/pieza compartido por todas sus recetas; una excepción de
+    receta en la MISMA área sobreescribe ese valor (o lo quita, si la
+    excepción existe pero todavía no tiene minutos capturados — "sin
+    calibrar" no cae de vuelta al promedio del grupo)."""
+    from recetas.models import Receta
+
+    resultado: dict[int, Decimal] = {}
+    recetas_excepcion_otra_area = set(
+        RecetaAreaProduccion.objects.exclude(area=area)
+        .filter(receta__isnull=False)
+        .values_list("receta_id", flat=True)
+    )
+    for fila_grupo in RecetaAreaProduccion.objects.filter(area=area, familia__gt=""):
+        minutos = fila_grupo.minutos_estandar_pieza
+        if minutos is None:
+            continue
+        familias_reales = familias_del_grupo(fila_grupo.familia)
+        recetas_ids = (
+            Receta.objects.filter(familia__in=familias_reales)
+            .exclude(id__in=recetas_excepcion_otra_area)
+            .values_list("id", flat=True)
+        )
+        for receta_id in recetas_ids:
+            resultado[receta_id] = minutos
+
+    for fila_excepcion in RecetaAreaProduccion.objects.filter(area=area, receta__isnull=False):
+        minutos = fila_excepcion.minutos_estandar_pieza
+        if minutos is not None:
+            resultado[fila_excepcion.receta_id] = minutos
+        else:
+            resultado.pop(fila_excepcion.receta_id, None)
+    return resultado
+
+
+def _insumos_minutos_por_area(area: str) -> dict[int, Decimal]:
+    """insumo_id -> minutos_estandar_pieza para esa área. Sin excepciones
+    puntuales por insumo (mismo alcance que _insumo_ids_por_area)."""
+    from maestros.models import Insumo
+
+    resultado: dict[int, Decimal] = {}
+    for fila_grupo in RecetaAreaProduccion.objects.filter(area=area, familia__gt=""):
+        minutos = fila_grupo.minutos_estandar_pieza
+        if minutos is None:
+            continue
+        familias_reales = familias_del_grupo(fila_grupo.familia)
+        insumo_ids = Insumo.objects.filter(
+            tipo_item=Insumo.TIPO_INTERNO, categoria__in=familias_reales
+        ).values_list("id", flat=True)
+        for insumo_id in insumo_ids:
+            resultado[insumo_id] = minutos
+    return resultado
+
+
+def minutos_area_dia(fecha: date, area: str) -> Decimal:
+    """Minutos-persona demandados ese día en el área, según lo producido y
+    los minutos estándar calibrados. Recetas/insumos clasificados pero sin
+    calibrar NO aportan — no distorsionan el minuto de las que sí están
+    calibradas."""
+    receta_minutos = _recetas_minutos_por_area(area)
+    insumo_minutos = _insumos_minutos_por_area(area)
+    if not receta_minutos and not insumo_minutos:
+        return Decimal("0")
+
+    filtro = Q(receta_id__in=receta_minutos.keys()) | Q(insumo_id__in=insumo_minutos.keys())
+    lineas = PointProductionLine.objects.filter(filtro, production_date=fecha).values(
+        "receta_id", "insumo_id", "produced_quantity"
+    )
+    total = Decimal("0")
+    for linea in lineas:
+        minutos = receta_minutos.get(linea["receta_id"])
+        if minutos is None:
+            minutos = insumo_minutos.get(linea["insumo_id"])
+        if minutos is None:
+            continue
+        total += Decimal(str(linea["produced_quantity"])) * minutos
+    return total
+
+
 def calcular_costo_diario_area(fecha: date, area: str) -> CostoManoObraDiarioArea:
     nomina = nomina_diaria_area(fecha, area)
     unidades = unidades_area_dia(fecha, area)
-    costo_unidad = (nomina / unidades) if (nomina is not None and unidades > 0) else None
+    minutos = minutos_area_dia(fecha, area)
+    costo_minuto = (nomina / minutos) if (nomina is not None and minutos > 0) else None
+    empleados = empleados_area_periodo(fecha, area)
+    minutos_disponibles = Decimal(empleados) * MINUTOS_TURNO_ESTANDAR if empleados else None
 
     snapshot, _ = CostoManoObraDiarioArea.objects.update_or_create(
         fecha=fecha,
@@ -143,7 +251,9 @@ def calcular_costo_diario_area(fecha: date, area: str) -> CostoManoObraDiarioAre
         defaults={
             "nomina_dia_area": nomina or Decimal("0"),
             "unidades_producidas": unidades,
-            "costo_unidad": costo_unidad,
+            "minutos_demandados": minutos,
+            "minutos_disponibles": minutos_disponibles,
+            "costo_minuto": costo_minuto,
             "es_dia_laborable_esperado": nomina is not None,
         },
     )
@@ -151,28 +261,27 @@ def calcular_costo_diario_area(fecha: date, area: str) -> CostoManoObraDiarioAre
 
 
 def costo_mano_obra_diario_receta(fecha: date, receta) -> dict:
-    excepcion_areas = list(
-        RecetaAreaProduccion.objects.filter(receta=receta).values_list("area", flat=True)
-    )
-    if excepcion_areas:
-        areas = excepcion_areas
+    excepcion_filas = list(RecetaAreaProduccion.objects.filter(receta=receta))
+    if excepcion_filas:
+        filas_por_area = {fila.area: fila for fila in excepcion_filas}
     else:
         grupo = grupo_de_familia(receta.familia)
-        areas = list(
-            RecetaAreaProduccion.objects.filter(familia=grupo).values_list("area", flat=True)
-        )
+        filas_por_area = {
+            fila.area: fila for fila in RecetaAreaProduccion.objects.filter(familia=grupo)
+        }
 
-    if not areas:
+    if not filas_por_area:
         return {"completo": False, "costo_total": None, "areas_faltantes": [], "sin_clasificar": True}
 
     costo_total = Decimal("0")
     areas_faltantes = []
-    for area in areas:
+    for area, fila in filas_por_area.items():
+        minutos_receta = fila.minutos_estandar_pieza
         snapshot = calcular_costo_diario_area(fecha, area)
-        if snapshot.costo_unidad is None:
+        if minutos_receta is None or snapshot.costo_minuto is None:
             areas_faltantes.append(area)
         else:
-            costo_total += snapshot.costo_unidad
+            costo_total += minutos_receta * snapshot.costo_minuto
 
     return {
         "completo": not areas_faltantes,

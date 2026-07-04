@@ -1347,7 +1347,21 @@ class RecetaAreaProduccion(models.Model):
         related_name="areas_produccion",
     )
     area = models.CharField(max_length=20, choices=AREA_CHOICES, db_index=True)
+    # Captura por lote típico (no por pieza directa): cuántas personas y
+    # minutos ACTIVOS toma un lote y cuántas piezas salen de él. Minutos de
+    # horno/reposo pasivo NO se capturan aquí — mientras algo se hornea sin
+    # que nadie le esté poniendo mano, esa persona ya está en otra tarea que
+    # se cuenta aparte.
+    lote_personas = models.PositiveSmallIntegerField(null=True, blank=True)
+    lote_minutos = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    lote_piezas = models.PositiveSmallIntegerField(null=True, blank=True)
     creado_en = models.DateTimeField(default=timezone.now)
+
+    @property
+    def minutos_estandar_pieza(self) -> Decimal | None:
+        if self.lote_personas and self.lote_minutos and self.lote_piezas:
+            return (self.lote_personas * self.lote_minutos) / self.lote_piezas
+        return None
 
     class Meta:
         verbose_name = "Área de producción por receta/familia"
@@ -1369,16 +1383,37 @@ class RecetaAreaProduccion(models.Model):
         return f"{origen} · {self.get_area_display()}"
 
 
+class FamiliaGrupoManoObra(models.Model):
+    """Point trae familias/categorías reales con texto duplicado o casi
+    idéntico (ej. variantes de tamaño de Pastel, "Betún y Rellenos" vs
+    "Betún, Cremas, Rellenos"). En vez de un mapeo fijo en código, esta
+    tabla es editable desde la pantalla de clasificación por quien conozca
+    el negocio (Carolina) — cada familia real apunta a un grupo canónico,
+    por default ella misma."""
+
+    familia_real = models.CharField(max_length=120, unique=True, db_index=True)
+    grupo = models.CharField(max_length=120, db_index=True)
+
+    class Meta:
+        verbose_name = "Grupo de familia para mano de obra"
+        verbose_name_plural = "Grupos de familia para mano de obra"
+
+    def __str__(self) -> str:
+        return f"{self.familia_real} → {self.grupo}"
+
+
 class CostoManoObraDiarioArea(models.Model):
     """Snapshot diario de costo de mano de obra por área de producción:
-    nómina real del área (prorrateada del período) entre lo que
-    efectivamente salió de esa área ese día, según Point."""
+    nómina real del área (prorrateada del período) entre los minutos-persona
+    activos que efectivamente demandó lo producido ese día, según Point."""
 
     fecha = models.DateField(db_index=True)
     area = models.CharField(max_length=20, choices=RecetaAreaProduccion.AREA_CHOICES, db_index=True)
     nomina_dia_area = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     unidades_producidas = models.DecimalField(max_digits=18, decimal_places=3, default=0)
-    costo_unidad = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    minutos_demandados = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    minutos_disponibles = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    costo_minuto = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
     es_dia_laborable_esperado = models.BooleanField(default=True)
     creado_en = models.DateTimeField(default=timezone.now)
     actualizado_en = models.DateTimeField(auto_now=True)
