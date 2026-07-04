@@ -767,17 +767,18 @@ h4 {
   font-size: 13px;
   font-weight: 700;
   min-height: 38px;
-  display: inline-grid;
-  grid-auto-flow: column;
-  grid-auto-columns: max-content;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
   transition: background .18s ease, border-color .18s ease, transform .18s ease, box-shadow .18s ease;
 }
 
 .module-tab-label {
   min-width: 0;
+  white-space: nowrap;
 }
 
 .erp-group-tabs .module-tab {
