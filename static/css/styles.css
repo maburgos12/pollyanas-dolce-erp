@@ -236,7 +236,7 @@ h4 {
 .tab-badge > .badge-value {
   display: block;
   line-height: 1;
-  transform: translateY(2px);
+  transform: translateY(-1px);
 }
 
 .nav-badge-alert {
