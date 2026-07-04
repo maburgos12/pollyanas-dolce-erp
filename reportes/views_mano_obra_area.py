@@ -4,11 +4,13 @@ from datetime import timedelta
 
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.db.models import Count
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
 from core.access import can_manage_mano_obra_area
 from recetas.models import Receta
+from reportes.mano_obra_grupos_familia import grupo_de_familia
 from reportes.models import RecetaAreaProduccion
 from reportes.services_mano_obra_diaria_area import calcular_costo_diario_area
 
@@ -27,10 +29,13 @@ def clasificacion_area_produccion(request):
     if request.method == "POST":
         accion = request.POST.get("accion")
         if accion == "toggle_familia":
-            familia = request.POST.get("familia", "").strip()
+            # Se guarda el GRUPO canónico (ej. "Pastel"), no la familia
+            # cruda del formulario — un grupo puede representar varias
+            # familias reales de Point (ver mano_obra_grupos_familia.py).
+            grupo = grupo_de_familia(request.POST.get("familia", "").strip())
             area = request.POST.get("area", "").strip()
-            if familia and area in AREAS:
-                fila, created = RecetaAreaProduccion.objects.get_or_create(familia=familia, area=area, receta=None)
+            if grupo and area in AREAS:
+                fila, created = RecetaAreaProduccion.objects.get_or_create(familia=grupo, area=area, receta=None)
                 if not created:
                     fila.delete()
         elif accion == "agregar_excepcion":
@@ -43,21 +48,29 @@ def clasificacion_area_produccion(request):
             RecetaAreaProduccion.objects.filter(id=fila_id, receta__isnull=False).delete()
         return redirect("reportes:mano_obra_area_clasificacion")
 
-    familias = list(
-        Receta.objects.exclude(familia="").values_list("familia", flat=True).distinct().order_by("familia")
+    # Point es la fuente de la familia real (Receta.familia); varias
+    # familias reales pueden mapear al mismo grupo canónico de mano de obra
+    # (decisión de negocio explícita, ver mano_obra_grupos_familia.py) —
+    # se muestra UNA tarjeta por grupo, no por familia cruda.
+    conteo_por_familia_real = dict(
+        Receta.objects.exclude(familia="").values_list("familia").annotate(n=Count("id"))
     )
-    areas_por_familia = {}
-    for fila in RecetaAreaProduccion.objects.filter(receta__isnull=True):
-        areas_por_familia.setdefault(fila.familia, set()).add(fila.area)
+    grupos_ctx: dict[str, dict] = {}
+    for familia_real, cantidad in conteo_por_familia_real.items():
+        grupo = grupo_de_familia(familia_real)
+        entrada = grupos_ctx.setdefault(grupo, {"nombre": grupo, "cantidad": 0, "familias_reales": set()})
+        entrada["cantidad"] += cantidad
+        entrada["familias_reales"].add(familia_real)
 
-    familias_ctx = [
-        {
-            "nombre": familia,
-            "cantidad": Receta.objects.filter(familia=familia).count(),
-            "areas": areas_por_familia.get(familia, set()),
-        }
-        for familia in familias
-    ]
+    areas_por_grupo = {}
+    for fila in RecetaAreaProduccion.objects.filter(receta__isnull=True):
+        areas_por_grupo.setdefault(fila.familia, set()).add(fila.area)
+
+    for grupo, entrada in grupos_ctx.items():
+        entrada["areas"] = areas_por_grupo.get(grupo, set())
+        entrada["familias_reales"] = sorted(entrada["familias_reales"])
+
+    familias_ctx = sorted(grupos_ctx.values(), key=lambda entrada: entrada["nombre"])
 
     excepciones = (
         RecetaAreaProduccion.objects.filter(receta__isnull=False)

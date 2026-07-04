@@ -156,6 +156,37 @@ class UnidadesAreaDiaTests(TestCase):
 
         self.assertEqual(unidades_area_dia(date(2026, 6, 1), "HORNOS"), Decimal("0"))
 
+    def test_clasificar_grupo_pastel_incluye_variantes_de_tamano(self):
+        # RecetaAreaProduccion guarda el GRUPO canónico "Pastel", pero Point
+        # trae la producción real bajo familias distintas por tamaño
+        # (Pastel Chico/Grande/Mediano/Mini) — decisión de negocio confirmada
+        # por Mauricio de fusionar por tamaño, no una fusión de texto genérica.
+        RecetaAreaProduccion.objects.create(familia="Pastel", area="EMBETUNADO")
+        pastel_chico = self._receta(nombre="Pastel Chico Fresa", familia="Pastel Chico")
+        pastel_grande = self._receta(nombre="Pastel Grande Chocolate", familia="Pastel Grande")
+
+        self._produccion(receta=pastel_chico, cantidad=6, fecha=date(2026, 6, 1))
+        self._produccion(receta=pastel_grande, cantidad=4, fecha=date(2026, 6, 1))
+
+        self.assertEqual(unidades_area_dia(date(2026, 6, 1), "EMBETUNADO"), Decimal("10"))
+
+    def test_clasificar_grupo_betun_incluye_familia_original_de_point(self):
+        # "Betún y Rellenos" y "Betún, Cremas, Rellenos (INSUMO PRODUCIDO)"
+        # son, confirmado por Mauricio, el mismo grupo de producción.
+        RecetaAreaProduccion.objects.create(
+            familia="Betún, Cremas, Rellenos (INSUMO PRODUCIDO)", area="ARMADO"
+        )
+        betun_original = Insumo.objects.create(
+            nombre="Betún de Vainilla", tipo_item=Insumo.TIPO_INTERNO, categoria="Betún y Rellenos",
+        )
+        PointProductionLine.objects.create(
+            branch=self.branch, insumo=betun_original, item_name="Betún de Vainilla",
+            produced_quantity=Decimal("15"), production_date=date(2026, 6, 1),
+            source_hash=str(uuid4()),
+        )
+
+        self.assertEqual(unidades_area_dia(date(2026, 6, 1), "ARMADO"), Decimal("15"))
+
 
 class CalcularCostoDiarioAreaTests(TestCase):
     def _empleado(self, *, puesto_operativo):
@@ -251,3 +282,27 @@ class CalcularCostoDiarioAreaTests(TestCase):
         self.assertIn("ARMADO", resultado["areas_faltantes"])
         self.assertNotIn("HORNOS", resultado["areas_faltantes"])
         self.assertIsNone(resultado["costo_total"])
+
+    def test_receta_con_familia_variante_resuelve_por_grupo_canonico(self):
+        # La receta trae la familia real de Point ("Pastel Chico"), pero la
+        # clasificación se guardó contra el grupo canónico ("Pastel").
+        pastel_chico = self._receta(nombre="Pastel Chico Fresa", familia="Pastel Chico")
+        RecetaAreaProduccion.objects.create(familia="Pastel", area="HORNOS")
+
+        empleado_hornos = self._empleado(puesto_operativo="HORNOS")
+        periodo = NominaPeriodo.objects.create(
+            fecha_inicio=date(2026, 5, 1), fecha_fin=date(2026, 5, 14), estatus=NominaPeriodo.ESTATUS_CERRADA
+        )
+        NominaLinea.objects.create(periodo=periodo, empleado=empleado_hornos, salario_base=Decimal("4200.00"))
+
+        branch = PointBranch.objects.create(external_id=f"B-{uuid4().hex[:6]}", name="Sucursal Test")
+        PointProductionLine.objects.create(
+            branch=branch, receta=pastel_chico, item_name="Pastel Chico Fresa",
+            produced_quantity=Decimal("100"), production_date=date(2026, 5, 5),
+            source_hash=str(uuid4()),
+        )
+
+        resultado = costo_mano_obra_diario_receta(date(2026, 5, 5), pastel_chico)
+
+        self.assertTrue(resultado["completo"])
+        self.assertEqual(resultado["costo_total"], Decimal("3.50"))
