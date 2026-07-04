@@ -119,6 +119,7 @@ from .logistica_views import (
     LogisticaReportesUnidadAbiertosView,
     LogisticaReporteCreateView,
     LogisticaReporteDetailView,
+    LogisticaEntregasEcommerceView,
     LogisticaReporteReafirmarView,
     LogisticaResumenSemanalView,
     LogisticaRutasView,
@@ -358,6 +359,7 @@ urlpatterns = [
     path("logistica/inspeccion/ultima/", LogisticaInspeccionUltimaView.as_view(), name="api_logistica_inspeccion_ultima"),
     path("logistica/rutas/", LogisticaRutasView.as_view(), name="api_logistica_rutas"),
     path("logistica/rutas/activa/", LogisticaRutaActivaView.as_view(), name="api_logistica_ruta_activa"),
+    path("logistica/entregas-ecommerce/", LogisticaEntregasEcommerceView.as_view(), name="api_logistica_entregas_ecommerce"),
     path("logistica/rutas/control/", LogisticaRutasControlView.as_view(), name="api_logistica_rutas_control"),
     path("logistica/rutas/<int:ruta_id>/carga-checklist/", LogisticaRutaCargaChecklistView.as_view(), name="api_logistica_ruta_carga_checklist"),
     path(
