@@ -212,6 +212,7 @@ h4 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  position: relative;
   min-width: 22px;
   width: max-content;
   height: 22px;
@@ -234,12 +235,11 @@ h4 {
 
 .nav-badge > .badge-value,
 .tab-badge > .badge-value {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 100%;
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
   line-height: 1;
-  transform: translateY(1px);
 }
 
 .nav-badge-alert {
