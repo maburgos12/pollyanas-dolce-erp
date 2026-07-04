@@ -783,7 +783,13 @@ h4 {
 
 .erp-group-tabs .module-tab {
   flex: 0 0 auto;
+  width: max-content;
   white-space: nowrap;
+}
+
+.erp-group-tabs .module-tab-label,
+.erp-group-tabs .tab-badge {
+  flex: 0 0 auto;
 }
 
 .tab-badge {
