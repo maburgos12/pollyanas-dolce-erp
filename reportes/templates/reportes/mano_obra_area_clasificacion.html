@@ -16,6 +16,9 @@
     {% for familia in familias %}
     <div class="card">
       <div class="card-header">{{ familia.nombre }} <span class="muted" style="font-size:12px;">{{ familia.cantidad }} recetas</span></div>
+      {% if familia.familias_reales|length > 1 %}
+      <p class="muted" style="font-size:11.5px;">Incluye de Point: {{ familia.familias_reales|join:", " }}</p>
+      {% endif %}
       <form method="post" style="display:flex; gap:8px; flex-wrap:wrap;">
         {% csrf_token %}
         <input type="hidden" name="accion" value="toggle_familia">

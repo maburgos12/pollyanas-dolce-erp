@@ -53,6 +53,52 @@ class ClasificacionAreaProduccionTests(TestCase):
         self.client.post(url, {"accion": "toggle_familia", "familia": "Pastel", "area": "HORNOS"})
         self.assertFalse(RecetaAreaProduccion.objects.filter(familia="Pastel", area="HORNOS").exists())
 
+    def test_toggle_familia_variante_guarda_grupo_canonico(self):
+        # El formulario puede enviar cualquier familia real de Point que
+        # pertenezca al grupo (ej. "Pastel Chico"); se persiste el grupo
+        # canónico ("Pastel"), no el texto crudo del formulario.
+        url = reverse("reportes:mano_obra_area_clasificacion")
+
+        self.client.post(url, {"accion": "toggle_familia", "familia": "Pastel Chico", "area": "EMBETUNADO"})
+
+        self.assertTrue(RecetaAreaProduccion.objects.filter(familia="Pastel", area="EMBETUNADO").exists())
+        self.assertFalse(RecetaAreaProduccion.objects.filter(familia="Pastel Chico", area="EMBETUNADO").exists())
+
+    def test_clasificacion_agrega_variantes_de_pastel_en_una_sola_tarjeta(self):
+        from uuid import uuid4
+
+        from recetas.models import Receta
+
+        for nombre, familia in [
+            ("Pastel Chico Fresa", "Pastel Chico"),
+            ("Pastel Grande Chocolate", "Pastel Grande"),
+            ("Pastel Tres Leches", "Pastel"),
+        ]:
+            Receta.objects.create(
+                nombre=nombre,
+                codigo_point=f"COD-{uuid4().hex[:6]}",
+                tipo=Receta.TIPO_PRODUCTO_FINAL,
+                modo_costeo=Receta.MODO_COSTEO_FABRICADO,
+                familia=familia,
+                hash_contenido=f"h-{uuid4()}",
+            )
+
+        url = reverse("reportes:mano_obra_area_clasificacion")
+        response = self.client.get(url)
+
+        familias_ctx = response.context["familias"]
+        grupo_pastel = next(entrada for entrada in familias_ctx if entrada["nombre"] == "Pastel")
+
+        self.assertEqual(grupo_pastel["cantidad"], 3)
+        self.assertEqual(
+            grupo_pastel["familias_reales"], ["Pastel", "Pastel Chico", "Pastel Grande"]
+        )
+        self.assertContains(response, "Incluye de Point:")
+        # No debe aparecer una tarjeta separada por cada variante cruda.
+        nombres = [entrada["nombre"] for entrada in familias_ctx]
+        self.assertNotIn("Pastel Chico", nombres)
+        self.assertNotIn("Pastel Grande", nombres)
+
     def test_agregar_y_quitar_excepcion(self):
         from uuid import uuid4
 

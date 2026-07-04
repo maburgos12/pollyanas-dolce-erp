@@ -6,6 +6,7 @@ from decimal import Decimal
 from django.db.models import Q, Sum
 
 from pos_bridge.models import PointProductionLine
+from reportes.mano_obra_grupos_familia import familias_del_grupo, grupo_de_familia
 from reportes.models import CostoManoObraDiarioArea, RecetaAreaProduccion
 from rrhh.models import Empleado, NominaLinea, NominaPeriodo
 
@@ -63,14 +64,26 @@ def nomina_diaria_area(fecha: date, area: str) -> Decimal | None:
     return total
 
 
+def _familias_reales_clasificadas(area: str) -> list[str]:
+    """RecetaAreaProduccion.familia guarda el GRUPO canónico (ej. "Pastel"),
+    que puede representar varias familias/categorías reales de Point (ej.
+    "Pastel Chico", "Pastel Grande" — ver reportes/mano_obra_grupos_familia.py).
+    Expande cada grupo clasificado a sus familias reales antes de consultar
+    Receta.familia/Insumo.categoria, que siguen guardando el texto tal cual
+    viene de Point, sin normalizar."""
+    grupos = RecetaAreaProduccion.objects.filter(area=area, familia__gt="").values_list("familia", flat=True)
+    familias_reales: list[str] = []
+    for grupo in grupos:
+        familias_reales.extend(familias_del_grupo(grupo))
+    return familias_reales
+
+
 def _recetas_ids_por_area(area: str) -> set[int]:
     """Excepciones por receta tienen prioridad sobre la fila de familia."""
     excepciones = set(
         RecetaAreaProduccion.objects.filter(area=area, receta__isnull=False).values_list("receta_id", flat=True)
     )
-    familias = list(
-        RecetaAreaProduccion.objects.filter(area=area, familia__gt="").values_list("familia", flat=True)
-    )
+    familias = _familias_reales_clasificadas(area)
     recetas_excepcion_otra_area = set(
         RecetaAreaProduccion.objects.exclude(area=area)
         .filter(receta__isnull=False)
@@ -97,9 +110,7 @@ def _insumo_ids_por_area(area: str) -> set[int]:
     producción), así que la misma clasificación por familia en
     RecetaAreaProduccion aplica a ambos catálogos. Sin excepciones puntuales
     por insumo en este MVP — no hay evidencia de que haga falta."""
-    familias = list(
-        RecetaAreaProduccion.objects.filter(area=area, familia__gt="").values_list("familia", flat=True)
-    )
+    familias = _familias_reales_clasificadas(area)
     if not familias:
         return set()
     from maestros.models import Insumo
@@ -146,8 +157,9 @@ def costo_mano_obra_diario_receta(fecha: date, receta) -> dict:
     if excepcion_areas:
         areas = excepcion_areas
     else:
+        grupo = grupo_de_familia(receta.familia)
         areas = list(
-            RecetaAreaProduccion.objects.filter(familia=receta.familia).values_list("area", flat=True)
+            RecetaAreaProduccion.objects.filter(familia=grupo).values_list("area", flat=True)
         )
 
     if not areas:
