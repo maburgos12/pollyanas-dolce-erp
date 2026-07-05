@@ -62,6 +62,11 @@ class Insumo(models.Model):
     nombre = models.CharField(max_length=250)
     tipo_item = models.CharField(max_length=20, choices=TIPO_CHOICES, default=TIPO_MATERIA_PRIMA, db_index=True)
     categoria = models.CharField(max_length=120, blank=True, default="")
+    # Grupo canónico de calibración de mano de obra (reportes/services_mano_obra_diaria_area.py).
+    # En blanco = "su grupo es su propio nombre" — la unidad (kg/lt/pza) es
+    # consistente por preparación específica, no por categoría, así que la
+    # calibración de minutos se hace por insumo/grupo, no por categoria.
+    grupo_mano_obra = models.CharField(max_length=250, blank=True, default="")
     nombre_normalizado = models.CharField(max_length=260, db_index=True)
     unidad_base = models.ForeignKey(UnidadMedida, null=True, blank=True, on_delete=models.SET_NULL)
     proveedor_principal = models.ForeignKey(Proveedor, null=True, blank=True, on_delete=models.SET_NULL)

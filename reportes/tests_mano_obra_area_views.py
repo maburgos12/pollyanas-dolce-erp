@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from maestros.models import Insumo
 from reportes.models import FamiliaGrupoManoObra, RecetaAreaProduccion
 
 
@@ -29,7 +30,8 @@ class ManoObraAreaViewsRBACTests(TestCase):
         self.client.force_login(self.superuser)
         response = self.client.get(reverse("reportes:mano_obra_area_clasificacion"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Familias de receta")
+        self.assertContains(response, "Productos")
+        self.assertContains(response, "Catálogos")
 
     def test_superuser_ve_reporte(self):
         self.client.force_login(self.superuser)
@@ -184,3 +186,92 @@ class ClasificacionAreaProduccionTests(TestCase):
 
         self.client.post(url, {"accion": "quitar_excepcion", "fila_id": fila.id})
         self.assertFalse(RecetaAreaProduccion.objects.filter(id=fila.id).exists())
+
+
+class ClasificacionCatalogosTests(TestCase):
+    """Catálogos de Point (Insumo) — namespace separado de Productos,
+    calibrado por preparación específica con unidad real detectada."""
+
+    def setUp(self):
+        from datetime import date
+        from uuid import uuid4
+
+        from pos_bridge.models import PointBranch, PointProductionLine
+
+        self.user_model = get_user_model()
+        self.superuser = self.user_model.objects.create_superuser(
+            username="moa_catalogos", email="moa_catalogos@example.com", password="pass12345",
+        )
+        self.client.force_login(self.superuser)
+        self.branch = PointBranch.objects.create(external_id=f"B-{uuid4().hex[:6]}", name="Sucursal Test")
+        self.betun = Insumo.objects.create(
+            nombre="Betún Dream Whip Pastel", tipo_item=Insumo.TIPO_INTERNO,
+            categoria="Betún, Cremas, Rellenos (INSUMO PRODUCIDO)",
+        )
+        PointProductionLine.objects.create(
+            branch=self.branch, insumo=self.betun, item_name=self.betun.nombre, unit="KG",
+            produced_quantity=Decimal("20"), production_date=date(2026, 6, 1),
+            source_hash=str(uuid4()),
+        )
+
+    def test_get_clasificacion_muestra_catalogos_con_unidad_detectada(self):
+        url = reverse("reportes:mano_obra_area_clasificacion")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        catalogos_ctx = response.context["catalogos"]
+        grupo_betun = next(e for e in catalogos_ctx if e["nombre"] == "Betún Dream Whip Pastel")
+        self.assertEqual(grupo_betun["unidad_detectada"], "KG")
+        self.assertContains(response, "Betún Dream Whip Pastel")
+
+    def test_capturar_lote_insumo_no_colisiona_con_producto_mismo_texto(self):
+        from uuid import uuid4
+
+        from recetas.models import Receta
+
+        Receta.objects.create(
+            nombre="Betún Dream Whip Pastel Receta", codigo_point=f"COD-{uuid4().hex[:6]}",
+            tipo=Receta.TIPO_PRODUCTO_FINAL, modo_costeo=Receta.MODO_COSTEO_FABRICADO,
+            familia="Betún Dream Whip Pastel", hash_contenido=f"h-{uuid4()}",
+        )
+        url = reverse("reportes:mano_obra_area_clasificacion")
+
+        self.client.post(url, {
+            "accion": "capturar_lote", "es_grupo_insumo": "1",
+            "familia": "Betún Dream Whip Pastel", "area": "EMBETUNADO",
+            "lote_personas": "1", "lote_minutos": "30", "lote_piezas": "10",
+        })
+        self.client.post(url, {
+            "accion": "toggle_familia", "familia": "Betún Dream Whip Pastel", "area": "HORNOS",
+        })
+
+        fila_insumo = RecetaAreaProduccion.objects.get(
+            familia="Betún Dream Whip Pastel", area="EMBETUNADO", es_grupo_insumo=True
+        )
+        fila_producto = RecetaAreaProduccion.objects.get(
+            familia="Betún Dream Whip Pastel", area="HORNOS", es_grupo_insumo=False
+        )
+        self.assertEqual(fila_insumo.minutos_estandar_pieza, Decimal("3"))
+        self.assertIsNone(fila_producto.minutos_estandar_pieza)
+
+    def test_fusionar_insumo_propaga_a_grupo_ya_fusionado(self):
+        pan_chico = Insumo.objects.create(
+            nombre="Pan Vainilla Dawn Chico", tipo_item=Insumo.TIPO_INTERNO,
+            categoria="PAN", grupo_mano_obra="Pan Vainilla Dawn",
+        )
+        pan_grande = Insumo.objects.create(
+            nombre="Pan Vainilla Dawn Grande", tipo_item=Insumo.TIPO_INTERNO,
+            categoria="PAN", grupo_mano_obra="Pan Vainilla Dawn",
+        )
+        url = reverse("reportes:mano_obra_area_clasificacion")
+
+        self.client.post(url, {
+            "accion": "fusionar_insumo",
+            "grupo_actual": "Pan Vainilla Dawn",
+            "grupo_destino": "Pan Dawn General",
+        })
+
+        pan_chico.refresh_from_db()
+        pan_grande.refresh_from_db()
+        self.assertEqual(pan_chico.grupo_mano_obra, "Pan Dawn General")
+        self.assertEqual(pan_grande.grupo_mano_obra, "Pan Dawn General")

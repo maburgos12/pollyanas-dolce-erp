@@ -93,7 +93,9 @@ def _familias_reales_clasificadas(area: str) -> list[str]:
     Expande cada grupo clasificado a sus familias reales antes de consultar
     Receta.familia/Insumo.categoria, que siguen guardando el texto tal cual
     viene de Point, sin normalizar."""
-    grupos = RecetaAreaProduccion.objects.filter(area=area, familia__gt="").values_list("familia", flat=True)
+    grupos = RecetaAreaProduccion.objects.filter(
+        area=area, familia__gt="", es_grupo_insumo=False
+    ).values_list("familia", flat=True)
     familias_reales: list[str] = []
     for grupo in grupos:
         familias_reales.extend(familias_del_grupo(grupo))
@@ -171,7 +173,7 @@ def _recetas_minutos_por_area(area: str) -> dict[int, Decimal]:
         .filter(receta__isnull=False)
         .values_list("receta_id", flat=True)
     )
-    for fila_grupo in RecetaAreaProduccion.objects.filter(area=area, familia__gt=""):
+    for fila_grupo in RecetaAreaProduccion.objects.filter(area=area, familia__gt="", es_grupo_insumo=False):
         minutos = fila_grupo.minutos_estandar_pieza
         if minutos is None:
             continue
@@ -193,19 +195,23 @@ def _recetas_minutos_por_area(area: str) -> dict[int, Decimal]:
     return resultado
 
 
-def _insumos_minutos_por_area(area: str) -> dict[int, Decimal]:
-    """insumo_id -> minutos_estandar_pieza para esa área. Sin excepciones
-    puntuales por insumo (mismo alcance que _insumo_ids_por_area)."""
+def _grupos_insumo_por_area(area: str) -> dict[int, Decimal]:
+    """insumo_id -> minutos_estandar_pieza para esa área, calibrado por
+    PREPARACIÓN específica (Insumo.grupo_mano_obra/nombre), no por
+    categoria — verificado con datos reales: la unidad (kg/lt/pza) es
+    consistente por preparación, pero una misma categoria (ej. "Betún,
+    Cremas, Rellenos") puede mezclar preparaciones de unidades distintas
+    (Betún Dream Whip en KG, Mezcla 3 Leches en Litro). Calibrar por
+    categoria trataría ambas como si compartieran un solo minuto/unidad."""
     from maestros.models import Insumo
 
     resultado: dict[int, Decimal] = {}
-    for fila_grupo in RecetaAreaProduccion.objects.filter(area=area, familia__gt=""):
-        minutos = fila_grupo.minutos_estandar_pieza
+    for fila in RecetaAreaProduccion.objects.filter(area=area, familia__gt="", es_grupo_insumo=True):
+        minutos = fila.minutos_estandar_pieza
         if minutos is None:
             continue
-        familias_reales = familias_del_grupo(fila_grupo.familia)
         insumo_ids = Insumo.objects.filter(
-            tipo_item=Insumo.TIPO_INTERNO, categoria__in=familias_reales
+            Q(grupo_mano_obra=fila.familia) | Q(grupo_mano_obra="", nombre=fila.familia)
         ).values_list("id", flat=True)
         for insumo_id in insumo_ids:
             resultado[insumo_id] = minutos
@@ -218,7 +224,7 @@ def minutos_area_dia(fecha: date, area: str) -> Decimal:
     calibrar NO aportan — no distorsionan el minuto de las que sí están
     calibradas."""
     receta_minutos = _recetas_minutos_por_area(area)
-    insumo_minutos = _insumos_minutos_por_area(area)
+    insumo_minutos = _grupos_insumo_por_area(area)
     if not receta_minutos and not insumo_minutos:
         return Decimal("0")
 
@@ -267,7 +273,8 @@ def costo_mano_obra_diario_receta(fecha: date, receta) -> dict:
     else:
         grupo = grupo_de_familia(receta.familia)
         filas_por_area = {
-            fila.area: fila for fila in RecetaAreaProduccion.objects.filter(familia=grupo)
+            fila.area: fila
+            for fila in RecetaAreaProduccion.objects.filter(familia=grupo, es_grupo_insumo=False)
         }
 
     if not filas_por_area:
