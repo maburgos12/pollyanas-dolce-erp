@@ -5,11 +5,13 @@ from decimal import Decimal, InvalidOperation
 
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
 from core.access import can_manage_mano_obra_area
+from maestros.models import Insumo
+from pos_bridge.models import PointProductionLine
 from recetas.models import Receta
 from reportes.mano_obra_grupos_familia import grupo_de_familia
 from reportes.models import FamiliaGrupoManoObra, RecetaAreaProduccion
@@ -44,13 +46,23 @@ def clasificacion_area_produccion(request):
     if request.method == "POST":
         accion = request.POST.get("accion")
         if accion == "toggle_familia":
-            # Se guarda el GRUPO canónico (ej. "Pastel"), no la familia
-            # cruda del formulario — un grupo puede representar varias
-            # familias reales de Point (ver mano_obra_grupos_familia.py).
-            grupo = grupo_de_familia(request.POST.get("familia", "").strip())
+            es_grupo_insumo = request.POST.get("es_grupo_insumo") == "1"
             area = request.POST.get("area", "").strip()
+            if es_grupo_insumo:
+                # Catálogos (Insumo): el texto ya ES el grupo canónico
+                # (Insumo.grupo_mano_obra/nombre) — no pasa por
+                # grupo_de_familia(), que solo resuelve el namespace de
+                # Productos (Receta.familia).
+                grupo = request.POST.get("familia", "").strip()
+            else:
+                # Se guarda el GRUPO canónico (ej. "Pastel"), no la familia
+                # cruda del formulario — un grupo puede representar varias
+                # familias reales de Point (ver mano_obra_grupos_familia.py).
+                grupo = grupo_de_familia(request.POST.get("familia", "").strip())
             if grupo and area in AREAS:
-                fila, created = RecetaAreaProduccion.objects.get_or_create(familia=grupo, area=area, receta=None)
+                fila, created = RecetaAreaProduccion.objects.get_or_create(
+                    familia=grupo, area=area, receta=None, es_grupo_insumo=es_grupo_insumo
+                )
                 if not created:
                     fila.delete()
         elif accion == "agregar_excepcion":
@@ -62,11 +74,12 @@ def clasificacion_area_produccion(request):
             fila_id = request.POST.get("fila_id")
             RecetaAreaProduccion.objects.filter(id=fila_id, receta__isnull=False).delete()
         elif accion == "capturar_lote":
+            es_grupo_insumo = request.POST.get("es_grupo_insumo") == "1"
             grupo = request.POST.get("familia", "").strip()
             area = request.POST.get("area", "").strip()
             if grupo and area in AREAS:
                 fila, _created = RecetaAreaProduccion.objects.get_or_create(
-                    familia=grupo, area=area, receta=None
+                    familia=grupo, area=area, receta=None, es_grupo_insumo=es_grupo_insumo
                 )
                 fila.lote_personas = _entero_o_none(request.POST.get("lote_personas"))
                 fila.lote_minutos = _decimal_o_none(request.POST.get("lote_minutos"))
@@ -82,6 +95,17 @@ def clasificacion_area_produccion(request):
                 FamiliaGrupoManoObra.objects.update_or_create(
                     familia_real=familia_real, defaults={"grupo": grupo_destino}
                 )
+        elif accion == "fusionar_insumo":
+            # Paralelo a fusionar_grupo, pero para Catálogos: actualiza
+            # TODOS los insumos que hoy resuelven a grupo_actual (propaga
+            # a grupos que ya tenían varias preparaciones fusionadas, no
+            # solo a la preparación "fundadora").
+            grupo_actual = request.POST.get("grupo_actual", "").strip()
+            grupo_destino = request.POST.get("grupo_destino", "").strip()
+            if grupo_actual and grupo_destino:
+                Insumo.objects.filter(
+                    Q(grupo_mano_obra=grupo_actual) | Q(grupo_mano_obra="", nombre=grupo_actual)
+                ).update(grupo_mano_obra=grupo_destino)
         return redirect("reportes:mano_obra_area_clasificacion")
 
     # Point es la fuente de la familia real (Receta.familia); varias
@@ -99,7 +123,7 @@ def clasificacion_area_produccion(request):
         entrada["familias_reales"].add(familia_real)
 
     filas_por_grupo: dict[str, dict[str, RecetaAreaProduccion]] = {}
-    for fila in RecetaAreaProduccion.objects.filter(receta__isnull=True):
+    for fila in RecetaAreaProduccion.objects.filter(receta__isnull=True, es_grupo_insumo=False):
         filas_por_grupo.setdefault(fila.familia, {})[fila.area] = fila
 
     for grupo, entrada in grupos_ctx.items():
@@ -122,6 +146,49 @@ def clasificacion_area_produccion(request):
     familias_ctx = sorted(grupos_ctx.values(), key=lambda entrada: entrada["nombre"])
     grupos_existentes = sorted(grupos_ctx.keys())
 
+    # Catálogos de Point (Insumo tipo interno) — namespace separado de
+    # Productos, nunca se cruzan (ver es_grupo_insumo en RecetaAreaProduccion
+    # e Insumo.grupo_mano_obra). Solo insumos con producción real: de ahí
+    # se puede inferir la unidad (kg/lt/pza) que usa Point para calibrar.
+    insumos_con_produccion = Insumo.objects.filter(
+        tipo_item=Insumo.TIPO_INTERNO,
+        id__in=PointProductionLine.objects.exclude(insumo__isnull=True).values_list("insumo_id", flat=True),
+    )
+    grupos_insumo_ctx: dict[str, dict] = {}
+    for insumo in insumos_con_produccion:
+        grupo = insumo.grupo_mano_obra or insumo.nombre
+        entrada = grupos_insumo_ctx.setdefault(grupo, {"nombre": grupo, "insumo_ids": set(), "insumos_reales": set()})
+        entrada["insumo_ids"].add(insumo.id)
+        entrada["insumos_reales"].add(insumo.nombre)
+
+    filas_insumo_por_grupo: dict[str, dict[str, RecetaAreaProduccion]] = {}
+    for fila in RecetaAreaProduccion.objects.filter(receta__isnull=True, es_grupo_insumo=True):
+        filas_insumo_por_grupo.setdefault(fila.familia, {})[fila.area] = fila
+
+    for grupo, entrada in grupos_insumo_ctx.items():
+        filas_area = filas_insumo_por_grupo.get(grupo, {})
+        entrada["areas_detalle"] = [
+            {
+                "value": area_valor,
+                "label": area_label,
+                "activa": area_valor in filas_area,
+                "fila": filas_area.get(area_valor),
+            }
+            for area_valor, area_label in RecetaAreaProduccion.AREA_CHOICES
+        ]
+        unidad = (
+            PointProductionLine.objects.filter(insumo_id__in=entrada["insumo_ids"])
+            .exclude(unit="")
+            .values_list("unit", flat=True)
+            .first()
+        )
+        entrada["unidad_detectada"] = unidad or "unidades"
+        entrada["insumos_reales"] = sorted(entrada["insumos_reales"])
+        del entrada["insumo_ids"]
+
+    catalogos_ctx = sorted(grupos_insumo_ctx.values(), key=lambda entrada: entrada["nombre"])
+    grupos_insumo_existentes = sorted(grupos_insumo_ctx.keys())
+
     excepciones = (
         RecetaAreaProduccion.objects.filter(receta__isnull=False)
         .select_related("receta")
@@ -141,9 +208,11 @@ def clasificacion_area_produccion(request):
         "reportes/mano_obra_area_clasificacion.html",
         {
             "familias": familias_ctx,
+            "catalogos": catalogos_ctx,
             "excepciones": list(excepciones_por_receta.values()),
             "areas": RecetaAreaProduccion.AREA_CHOICES,
             "grupos_existentes": grupos_existentes,
+            "grupos_insumo_existentes": grupos_insumo_existentes,
         },
     )
 

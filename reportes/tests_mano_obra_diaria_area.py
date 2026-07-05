@@ -9,6 +9,8 @@ from pos_bridge.models import PointBranch, PointProductionLine
 from recetas.models import Receta
 from reportes.models import FamiliaGrupoManoObra, RecetaAreaProduccion
 from reportes.services_mano_obra_diaria_area import (
+    _grupos_insumo_por_area,
+    _recetas_minutos_por_area,
     area_produccion_empleado,
     calcular_costo_diario_area,
     costo_mano_obra_diario_receta,
@@ -251,6 +253,110 @@ class MinutosAreaDiaTests(TestCase):
         )
 
         self.assertEqual(minutos_area_dia(date(2026, 6, 1), "HORNOS"), Decimal("0"))
+
+
+class GruposInsumoPorAreaTests(TestCase):
+    """Calibración de mano de obra para Catálogos (Insumo) por preparación
+    específica, no por categoria — la unidad (kg/lt/pza) es consistente
+    por preparación, no por categoria (verificado con datos reales:
+    "Betún, Cremas, Rellenos" mezcla KG y Litro según la preparación)."""
+
+    def setUp(self):
+        self.branch = PointBranch.objects.create(external_id=f"B-{uuid4().hex[:6]}", name="Sucursal Test")
+
+    def test_insumo_sin_grupo_mano_obra_resuelve_por_su_propio_nombre(self):
+        betun = Insumo.objects.create(
+            nombre="Betún Dream Whip Pastel", tipo_item=Insumo.TIPO_INTERNO,
+            categoria="Betún, Cremas, Rellenos (INSUMO PRODUCIDO)",
+        )
+        RecetaAreaProduccion.objects.create(
+            familia="Betún Dream Whip Pastel", area="EMBETUNADO", es_grupo_insumo=True,
+            lote_personas=1, lote_minutos=Decimal("30"), lote_piezas=10,
+        )  # 3 min/kg
+
+        minutos = _grupos_insumo_por_area("EMBETUNADO")
+
+        self.assertEqual(minutos[betun.id], Decimal("3"))
+
+    def test_dos_preparaciones_fusionadas_agregan_minutos_bajo_el_mismo_grupo(self):
+        pan_chico = Insumo.objects.create(
+            nombre="Pan Vainilla Dawn Chico", tipo_item=Insumo.TIPO_INTERNO,
+            categoria="PAN", grupo_mano_obra="Pan Vainilla Dawn",
+        )
+        pan_grande = Insumo.objects.create(
+            nombre="Pan Vainilla Dawn Grande", tipo_item=Insumo.TIPO_INTERNO,
+            categoria="PAN", grupo_mano_obra="Pan Vainilla Dawn",
+        )
+        RecetaAreaProduccion.objects.create(
+            familia="Pan Vainilla Dawn", area="HORNOS", es_grupo_insumo=True,
+            lote_personas=1, lote_minutos=Decimal("10"), lote_piezas=5,
+        )  # 2 min/pieza
+
+        minutos = _grupos_insumo_por_area("HORNOS")
+
+        self.assertEqual(minutos[pan_chico.id], Decimal("2"))
+        self.assertEqual(minutos[pan_grande.id], Decimal("2"))
+
+    def test_preparaciones_distintas_no_comparten_minuto_aunque_compartan_categoria(self):
+        # Caso real: "Betún, Cremas, Rellenos" mezcla KG (Betún Dream Whip)
+        # y Litro (Mezcla 3 Leches) — antes de esta vuelta ambos compartían
+        # el minuto/unidad de la categoria completa, lo cual mezclaba
+        # unidades incompatibles.
+        betun = Insumo.objects.create(
+            nombre="Betún Dream Whip Pastel", tipo_item=Insumo.TIPO_INTERNO,
+            categoria="Betún, Cremas, Rellenos (INSUMO PRODUCIDO)",
+        )
+        mezcla = Insumo.objects.create(
+            nombre="Mezcla 3 Leches", tipo_item=Insumo.TIPO_INTERNO,
+            categoria="Betún, Cremas, Rellenos (INSUMO PRODUCIDO)",
+        )
+        RecetaAreaProduccion.objects.create(
+            familia="Betún Dream Whip Pastel", area="EMBETUNADO", es_grupo_insumo=True,
+            lote_personas=1, lote_minutos=Decimal("30"), lote_piezas=10,
+        )  # 3 min/kg
+        RecetaAreaProduccion.objects.create(
+            familia="Mezcla 3 Leches", area="EMBETUNADO", es_grupo_insumo=True,
+            lote_personas=2, lote_minutos=Decimal("15"), lote_piezas=6,
+        )  # 5 min/litro
+        PointProductionLine.objects.create(
+            branch=self.branch, insumo=betun, item_name=betun.nombre, unit="KG",
+            produced_quantity=Decimal("20"), production_date=date(2026, 6, 1),
+            source_hash=str(uuid4()),
+        )
+        PointProductionLine.objects.create(
+            branch=self.branch, insumo=mezcla, item_name=mezcla.nombre, unit="Litro",
+            produced_quantity=Decimal("10"), production_date=date(2026, 6, 1),
+            source_hash=str(uuid4()),
+        )
+
+        # 20 kg * 3 min/kg + 10 litros * 5 min/litro = 60 + 50 = 110
+        self.assertEqual(minutos_area_dia(date(2026, 6, 1), "EMBETUNADO"), Decimal("110"))
+
+    def test_familia_receta_y_grupo_insumo_con_mismo_texto_no_colisionan(self):
+        receta = Receta.objects.create(
+            nombre="Pastel Tres Leches", codigo_point=f"COD-{uuid4().hex[:6]}",
+            tipo=Receta.TIPO_PRODUCTO_FINAL, modo_costeo=Receta.MODO_COSTEO_FABRICADO,
+            familia="Tres Leches", hash_contenido=f"h-{uuid4()}",
+        )
+        insumo = Insumo.objects.create(
+            nombre="Tres Leches", tipo_item=Insumo.TIPO_INTERNO, categoria="MASAS",
+        )
+        RecetaAreaProduccion.objects.create(
+            familia="Tres Leches", area="HORNOS", es_grupo_insumo=False,
+            lote_personas=1, lote_minutos=Decimal("10"), lote_piezas=10,
+        )  # 1 min/pieza, receta
+        RecetaAreaProduccion.objects.create(
+            familia="Tres Leches", area="ARMADO", es_grupo_insumo=True,
+            lote_personas=1, lote_minutos=Decimal("20"), lote_piezas=10,
+        )  # 2 min/unidad, insumo
+
+        # La fila de receta (HORNOS) no debe aparecer al resolver insumos,
+        # y viceversa — cada namespace se resuelve por separado aunque
+        # compartan el mismo texto en "familia".
+        self.assertEqual(_recetas_minutos_por_area("HORNOS"), {receta.id: Decimal("1")})
+        self.assertEqual(_grupos_insumo_por_area("HORNOS"), {})
+        self.assertEqual(_recetas_minutos_por_area("ARMADO"), {})
+        self.assertEqual(_grupos_insumo_por_area("ARMADO"), {insumo.id: Decimal("2")})
 
 
 class CalcularCostoDiarioAreaTests(TestCase):

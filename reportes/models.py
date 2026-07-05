@@ -1347,6 +1347,11 @@ class RecetaAreaProduccion(models.Model):
         related_name="areas_produccion",
     )
     area = models.CharField(max_length=20, choices=AREA_CHOICES, db_index=True)
+    # Cuando familia está poblado, distingue si ese texto resuelve contra
+    # Receta.familia (False, comportamiento existente) o contra
+    # Insumo.grupo_mano_obra/nombre (True) — Productos vs Catálogos de
+    # Point, namespaces separados que nunca se cruzan.
+    es_grupo_insumo = models.BooleanField(default=False)
     # Captura por lote típico (no por pieza directa): cuántas personas y
     # minutos ACTIVOS toma un lote y cuántas piezas salen de él. Minutos de
     # horno/reposo pasivo NO se capturan aquí — mientras algo se hornea sin
@@ -1374,7 +1379,9 @@ class RecetaAreaProduccion(models.Model):
                 ),
                 name="rap_familia_xor_receta",
             ),
-            models.UniqueConstraint(fields=["familia", "area"], name="rap_familia_area_unico"),
+            models.UniqueConstraint(
+                fields=["familia", "area", "es_grupo_insumo"], name="rap_familia_area_unico"
+            ),
             models.UniqueConstraint(fields=["receta", "area"], name="rap_receta_area_unico"),
         ]
 
