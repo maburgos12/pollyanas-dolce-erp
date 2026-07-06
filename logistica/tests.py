@@ -531,6 +531,40 @@ class LogisticaViewsTests(TestCase):
         self.assertEqual(ruta_row.monto_transferido_point, Decimal("25"))
         self.assertContains(resp, "$25.00")
 
+    def test_rutas_view_muestra_y_filtra_bloqueo_point_sin_enviado(self):
+        ruta_ok = RutaEntrega.objects.create(nombre="Ruta sin bloqueo Point", fecha_ruta=timezone.localdate())
+        ruta_bloqueada = RutaEntrega.objects.create(nombre="Ruta Point Pendiente", fecha_ruta=timezone.localdate())
+        sucursal = Sucursal.objects.create(nombre="Sucursal Point", codigo="SPT")
+        punto = PuntoLogistico.objects.create(
+            nombre="Sucursal Point",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            sucursal=sucursal,
+            latitud="25.570000",
+            longitud="-108.470000",
+        )
+        parada = ParadaRuta.objects.create(ruta=ruta_bloqueada, punto=punto, orden=1)
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta_bloqueada, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="point-sin-enviado-lista",
+            item_code="PZA1",
+            item_name="Producto sin enviado",
+            unit="pz",
+            cantidad_solicitada="3.000",
+            cantidad_enviada_esperada="0.000",
+        )
+
+        resp = self.client.get(reverse("logistica:rutas"), {"enterprise_focus": "POINT_BLOQUEO"})
+
+        rutas = list(resp.context["rutas"])
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual([ruta.id for ruta in rutas], [ruta_bloqueada.id])
+        self.assertEqual(rutas[0].point_bloqueo_lineas, 1)
+        self.assertContains(resp, "Point sin enviado")
+        self.assertContains(resp, "1 sin enviado")
+        self.assertNotContains(resp, ruta_ok.nombre)
+
     def test_rutas_selector_omite_repartidores_con_usuario_inactivo(self):
         sucursal = Sucursal.objects.create(nombre="Sucursal Centro", codigo="SC01")
         activo_user = User.objects.create_user(username="rep.activo", password="pass123")

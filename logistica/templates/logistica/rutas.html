@@ -12,7 +12,7 @@
   .ops-stat { border:1px solid var(--rosa-deep); border-radius:14px; padding:14px 16px; background:#fff; }
   .ops-stat strong { display:block; font-size:28px; line-height:1; color:var(--vino); margin-bottom:8px; }
   .ops-grid-2 { display:grid; gap:18px; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); }
-  .ops-focus-grid { display:grid; gap:12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .ops-focus-grid { display:grid; gap:12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
   .ops-focus-card { border:1px solid var(--rosa); border-radius:12px; background:#fff; padding:12px 14px; }
   .ops-focus-card.is-active { border-color: var(--vino); box-shadow: 0 10px 24px rgba(139,34,82,.08); }
   .ops-focus-card strong { display:block; font-size:24px; color:var(--vino); }
@@ -186,6 +186,7 @@
             <th class="text-end">Paradas entrega</th>
             <th class="text-end">Entregadas</th>
             <th class="text-end">Incidencias</th>
+            <th>Point</th>
             <th class="text-end">Costo transferido</th>
             <th>Estatus</th>
             <th>Detalle</th>
@@ -204,6 +205,13 @@
             <td class="text-end">{{ r.paradas_entrega_total }}</td>
             <td class="text-end">{{ r.paradas_entregadas }}</td>
             <td class="text-end">{{ r.paradas_incidencia }}</td>
+            <td>
+              {% if r.point_bloqueo_lineas %}
+              <span class="badge bg-danger">{{ r.point_bloqueo_lineas }} sin enviado</span>
+              {% else %}
+              <span class="badge bg-success">OK</span>
+              {% endif %}
+            </td>
             <td class="text-end">${{ r.monto_transferido_point|floatformat:2|intcomma }}</td>
             <td>
               {% if r.estatus == 'COMPLETADA' %}
@@ -219,7 +227,7 @@
             <td><a class="btn btn-secondary btn-small" href="{% url 'logistica:ruta_detail' r.id %}">Abrir</a></td>
           </tr>
           {% empty %}
-          <tr><td colspan="13" class="muted">No hay rutas para este filtro.</td></tr>
+          <tr><td colspan="14" class="muted">No hay rutas para este filtro.</td></tr>
           {% endfor %}
         </tbody>
       </table>
