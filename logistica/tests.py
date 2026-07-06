@@ -2129,13 +2129,18 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("fileFromDataUrl", pwa_html)
         self.assertIn("flushAllOfflineQueues", pwa_html)
         self.assertIn("pendiente${count === 1 ? \"\" : \"s\"} por sincronizar", pwa_html)
-        self.assertIn("route-control-v55", pwa_html)
+        self.assertIn("route-control-v56", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v55", pwa_html)
+        self.assertIn("?v=route-control-v56", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v55-offline-acciones-finalizar-ruta", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v56-error-operativo-detallado", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
+        self.assertIn("function operationalErrorTitle(error, fallback = \"No se puede continuar\")", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
+        self.assertIn('case "turno_abierto":', pwa_html)
+        self.assertIn('return "Turno abierto";', pwa_html)
+        self.assertIn('case "ruta_no_liberada":', pwa_html)
+        self.assertIn('return "Ruta no liberada";', pwa_html)
         self.assertIn("Logística debe asignar la unidad a la ruta.", pwa_html)
         self.assertIn("Tu turno activo no corresponde a la unidad asignada a esta ruta.", pwa_html)
         api_block = sw_js[sw_js.index('url.pathname.startsWith("/api/")'):sw_js.index('event.request.mode === "navigate"')]
@@ -2218,7 +2223,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v55-offline-acciones-finalizar-ruta", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v56-error-operativo-detallado", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
