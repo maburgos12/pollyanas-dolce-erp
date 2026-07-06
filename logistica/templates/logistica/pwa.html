@@ -1365,7 +1365,7 @@
       const OFFLINE_MUTATION_QUEUE_MAX = 80;
       const ACCESS_TOKEN_KEY = "pd_logistica_access";
       const REFRESH_TOKEN_KEY = "pd_logistica_refresh";
-      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v56
+      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v57
       const PREVIEW_REPARTIDOR_PARAM = "preview_repartidor";
       const app = document.getElementById("app");
       const initialParams = new URLSearchParams(window.location.search);
@@ -1719,6 +1719,7 @@
       }
 
       function operationalErrorTitle(error, fallback = "No se puede continuar") {
+        const message = String(error?.mensaje || error?.detail || "").toLowerCase();
         switch (error?.error) {
           case "turno_abierto":
             return "Turno abierto";
@@ -1727,6 +1728,7 @@
           case "unidad_ruta_distinta":
             return "Unidad incorrecta";
           case "ruta_no_liberada":
+            if (message.includes("point") || message.includes("enviada")) return "Carga no enviada en Point";
             return "Ruta no liberada";
           case "sin_turno":
             return "Turno requerido";
@@ -2997,6 +2999,7 @@
               ${lineasOperativas.map((linea) => {
                 const draft = cargaDraftFor(linea.id);
                 const pendiente = linea.estatus === "PENDIENTE";
+                const pendientePoint = pendiente && Number(linea.cantidad_enviada_esperada || 0) <= 0;
                 const diferencia = ["PARCIAL", "FALTANTE", "SOBRANTE"].includes(linea.estatus);
                 const cantidadValue = draft.cantidad !== "" ? draft.cantidad : (linea.cantidad_cargada ?? linea.cantidad_enviada_esperada ?? "0");
                 return `
@@ -3010,7 +3013,11 @@
                         <span class="route-status-pill ${linea.cantidad_cargada !== null && linea.cantidad_cargada !== undefined ? "ok" : "warn"}">Cargado ${escapeHtml(linea.cantidad_cargada ?? "pendiente")} ${escapeHtml(linea.unit || "")}</span>
                         <span class="route-status-pill ${pointRecepcionTone(linea)}">${escapeHtml(pointRecepcionLabel(linea))}</span>
                       </div>
-                      ${pendiente ? `
+                      ${pendientePoint ? `
+                        <div class="daily-banner warning" style="margin-top:10px;">
+                          ${escapeHtml(linea.notas || "La carga aún no aparece enviada en Point. Pide a logística que atienda o actualice la transferencia en Point.")}
+                        </div>
+                      ` : pendiente ? `
                         <div class="form-salida" style="margin-top:10px;">
                           <label for="carga_${linea.id}">Cantidad real</label>
                           <input id="carga_${linea.id}" type="number" min="0" step="0.001" value="${escapeHtml(cantidadValue)}" oninput="updateCargaLinea(${linea.id}, 'cantidad', this.value)">
@@ -5025,7 +5032,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v56", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v57", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();
