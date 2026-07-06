@@ -1000,6 +1000,49 @@ class LogisticaPwaApiTests(TestCase):
         self.assertEqual(liberar.json()["error"], "ruta_no_liberada")
         self.assertIn("confirma todas las líneas de carga", liberar.json()["mensaje"])
 
+    def test_bitacora_salida_no_libera_ruta_si_point_no_ha_enviado(self):
+        ruta = RutaEntrega.objects.create(
+            nombre="Ruta Point Sin Enviado",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_PLANEADA,
+            repartidor=self.repartidor,
+            unidad_operativa=self.unidad,
+        )
+        punto = PuntoLogistico.objects.create(
+            sucursal=self.sucursal,
+            nombre="Sucursal Point Sin Enviado",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.570000",
+            longitud="-108.470000",
+            radio_geocerca_metros=120,
+        )
+        parada = ParadaRuta.objects.create(ruta=ruta, punto=punto, orden=1)
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="pwa-point-sin-enviado",
+            item_code="PZA1",
+            item_name="Producto pendiente Point",
+            unit="PZA",
+            cantidad_solicitada="1.000",
+            cantidad_enviada_esperada="0.000",
+        )
+        BitacoraSalidaLlegada.objects.create(
+            repartidor=self.repartidor,
+            unidad=self.unidad,
+            km_salida=1000,
+            nivel_gas_salida="lleno",
+            foto_tablero_salida=SimpleUploadedFile("tablero.gif", VALID_GIF, content_type="image/gif"),
+        )
+
+        liberar = self.client.post(reverse("api_logistica_bitacora_salida_liberar_ruta"))
+
+        self.assertEqual(liberar.status_code, 400)
+        self.assertEqual(liberar.json()["error"], "ruta_no_liberada")
+        self.assertIn("Point", liberar.json()["mensaje"])
+        self.assertIn("enviada", liberar.json()["mensaje"])
+
     def test_bitacora_salida_permite_turno_mandado_si_ruta_planeada_usa_otra_unidad(self):
         unidad_ruta = Unidad.objects.create(codigo="QA-RUTA", descripcion="Unidad ruta", sucursal=self.sucursal)
         ruta = RutaEntrega.objects.create(
@@ -2175,6 +2218,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn('case "turno_abierto":', pwa_html)
         self.assertIn('return "Turno abierto";', pwa_html)
         self.assertIn('case "ruta_no_liberada":', pwa_html)
+        self.assertIn('return "Carga no enviada en Point";', pwa_html)
         self.assertIn('return "Ruta no liberada";', pwa_html)
         self.assertIn("const pendientePoint = pendiente && Number(linea.cantidad_enviada_esperada || 0) <= 0;", pwa_html)
         self.assertIn("La carga aún no aparece enviada en Point.", pwa_html)
