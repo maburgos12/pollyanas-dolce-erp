@@ -126,6 +126,13 @@ class ClasificacionAreaProduccionTests(TestCase):
         self.assertEqual(
             grupo_pastel["familias_reales"], ["Pastel", "Pastel Chico", "Pastel Grande"]
         )
+        # El conteo por sí solo no dice qué productos son — deben listarse
+        # los nombres reales de las recetas agrupadas, no solo el número.
+        self.assertEqual(
+            grupo_pastel["productos"],
+            ["Pastel Chico Fresa", "Pastel Grande Chocolate", "Pastel Tres Leches"],
+        )
+        self.assertContains(response, "Pastel Chico Fresa")
         self.assertContains(response, "Incluye de Point:")
         # No debe aparecer una tarjeta separada por cada variante cruda.
         nombres = [entrada["nombre"] for entrada in familias_ctx]

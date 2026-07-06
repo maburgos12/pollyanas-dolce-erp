@@ -19,6 +19,10 @@
       {% if familia.familias_reales|length > 1 %}
       <p class="muted" style="font-size:11.5px;">Incluye de Point: {{ familia.familias_reales|join:", " }}</p>
       {% endif %}
+      <details style="margin-bottom:8px;">
+        <summary class="muted" style="font-size:11.5px; cursor:pointer;">Ver los {{ familia.cantidad }} productos</summary>
+        <p class="muted" style="font-size:11.5px;">{{ familia.productos|join:", " }}</p>
+      </details>
       <form method="post" style="display:flex; gap:8px; flex-wrap:wrap;">
         {% csrf_token %}
         <input type="hidden" name="accion" value="toggle_familia">

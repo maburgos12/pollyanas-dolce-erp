@@ -5,7 +5,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.db.models import Count, Q
+from django.db.models import Q
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
@@ -112,15 +112,21 @@ def clasificacion_area_produccion(request):
     # familias reales pueden mapear al mismo grupo canónico de mano de obra
     # (decisión de negocio explícita, ver mano_obra_grupos_familia.py) —
     # se muestra UNA tarjeta por grupo, no por familia cruda.
-    conteo_por_familia_real = dict(
-        Receta.objects.exclude(familia="").values_list("familia").annotate(n=Count("id"))
-    )
+    nombres_por_familia_real: dict[str, list[str]] = {}
+    for familia_real, nombre in (
+        Receta.objects.exclude(familia="").order_by("nombre").values_list("familia", "nombre")
+    ):
+        nombres_por_familia_real.setdefault(familia_real, []).append(nombre)
+
     grupos_ctx: dict[str, dict] = {}
-    for familia_real, cantidad in conteo_por_familia_real.items():
+    for familia_real, nombres in nombres_por_familia_real.items():
         grupo = grupo_de_familia(familia_real)
-        entrada = grupos_ctx.setdefault(grupo, {"nombre": grupo, "cantidad": 0, "familias_reales": set()})
-        entrada["cantidad"] += cantidad
+        entrada = grupos_ctx.setdefault(
+            grupo, {"nombre": grupo, "cantidad": 0, "familias_reales": set(), "productos": []}
+        )
+        entrada["cantidad"] += len(nombres)
         entrada["familias_reales"].add(familia_real)
+        entrada["productos"].extend(nombres)
 
     filas_por_grupo: dict[str, dict[str, RecetaAreaProduccion]] = {}
     for fila in RecetaAreaProduccion.objects.filter(receta__isnull=True, es_grupo_insumo=False):
@@ -142,6 +148,7 @@ def clasificacion_area_produccion(request):
             for area_valor, area_label in RecetaAreaProduccion.AREA_CHOICES
         ]
         entrada["familias_reales"] = sorted(entrada["familias_reales"])
+        entrada["productos"] = sorted(entrada["productos"])
 
     familias_ctx = sorted(grupos_ctx.values(), key=lambda entrada: entrada["nombre"])
     grupos_existentes = sorted(grupos_ctx.keys())
