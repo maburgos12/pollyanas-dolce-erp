@@ -29,6 +29,11 @@ from .models import (
     RutaEntrega,
 )
 
+POINT_PENDIENTE_ENVIO_NOTA = (
+    "La carga aún no aparece enviada en Point. "
+    "Pide a logística que atienda o actualice la transferencia en Point."
+)
+
 
 @dataclass(frozen=True)
 class ChecklistCargaResumen:
@@ -72,6 +77,10 @@ def _cantidad_referencia_entrega(linea: RutaCargaChecklistLinea) -> Decimal:
     if linea.cantidad_cargada is not None:
         return Decimal(str(linea.cantidad_cargada or 0))
     return Decimal(str(linea.cantidad_enviada_esperada or 0))
+
+
+def _linea_pendiente_envio_point(linea: RutaCargaChecklistLinea) -> bool:
+    return linea.estatus == RutaCargaChecklistLinea.ESTATUS_PENDIENTE and Decimal(str(linea.cantidad_enviada_esperada or 0)) <= 0
 
 
 def obtener_checklist_carga(ruta: RutaEntrega) -> RutaCargaChecklist:
@@ -191,7 +200,11 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
         cedis_line = None
         if producto_key:
             for existing in checklist.lineas.filter(parada=parada).select_for_update():
-                if existing.source_hash.startswith("cedis-reabasto-") and _linea_producto_key(existing) == producto_key:
+                if (
+                    existing.source_hash.startswith("cedis-reabasto-")
+                    and existing.point_transfer_line_id is None
+                    and _linea_producto_key(existing) == producto_key
+                ):
                     cedis_line = existing
                     break
         if cedis_line:
@@ -205,6 +218,7 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             cedis_line.erp_origin_branch = line.erp_origin_branch
             cedis_line.erp_destination_branch = line.erp_destination_branch
             cedis_line.cantidad_enviada_esperada = cantidad_esperada
+            cedis_line.notas = "" if cantidad_esperada > 0 else POINT_PENDIENTE_ENVIO_NOTA
             cedis_line.save(
                 update_fields=[
                     "point_transfer_line",
@@ -214,18 +228,38 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
                     "erp_origin_branch",
                     "erp_destination_branch",
                     "cantidad_enviada_esperada",
+                    "notas",
                     "actualizado_en",
                 ]
             )
             actualizadas += 1
             continue
         if cantidad_esperada <= 0:
-            RutaCargaChecklistLinea.objects.filter(
+            defaults = {
+                "parada": parada,
+                "point_transfer_line": line,
+                "transfer_external_id": line.transfer_external_id,
+                "detail_external_id": line.detail_external_id,
+                "item_code": line.item_code,
+                "item_name": line.item_name,
+                "unit": line.unit,
+                "erp_origin_branch": line.erp_origin_branch,
+                "erp_destination_branch": line.erp_destination_branch,
+                "cantidad_solicitada": line.requested_quantity,
+                "cantidad_enviada_esperada": Decimal("0"),
+                "cantidad_cargada": None,
+                "estatus": RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
+                "notas": POINT_PENDIENTE_ENVIO_NOTA,
+            }
+            _, created = RutaCargaChecklistLinea.objects.update_or_create(
                 checklist=checklist,
                 source_hash=line.source_hash,
-                estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
-            ).delete()
-            omitidas += 1
+                defaults=defaults,
+            )
+            if created:
+                creadas += 1
+            else:
+                actualizadas += 1
             continue
         existing = RutaCargaChecklistLinea.objects.filter(checklist=checklist, source_hash=line.source_hash).first()
         if existing and existing.estatus != RutaCargaChecklistLinea.ESTATUS_PENDIENTE:
@@ -243,6 +277,7 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             "erp_destination_branch": line.erp_destination_branch,
             "cantidad_solicitada": line.requested_quantity,
             "cantidad_enviada_esperada": cantidad_esperada,
+            "notas": "",
         }
         _, created = RutaCargaChecklistLinea.objects.update_or_create(
             checklist=checklist,
@@ -328,7 +363,8 @@ def _sincronizar_lineas_consolidado_para_ruta(*, ruta: RutaEntrega, checklist: R
                 "erp_origin_branch": None,
                 "erp_destination_branch": linea.solicitud.sucursal,
                 "cantidad_solicitada": cantidad,
-                "cantidad_enviada_esperada": cantidad,
+                "cantidad_enviada_esperada": Decimal("0"),
+                "notas": POINT_PENDIENTE_ENVIO_NOTA,
             },
         )
         if created:
@@ -535,6 +571,8 @@ def validar_linea_carga(
         raise ValidationError("La cantidad cargada no puede ser negativa.")
 
     esperada = Decimal(str(linea.cantidad_enviada_esperada or 0))
+    if esperada <= 0:
+        raise ValidationError(POINT_PENDIENTE_ENVIO_NOTA)
     if cantidad == esperada:
         estatus = RutaCargaChecklistLinea.ESTATUS_CARGADA
         motivo_diferencia = ""
@@ -585,7 +623,7 @@ def validar_linea_carga(
 
     if checklist.estatus == RutaCargaChecklist.ESTATUS_CON_INCIDENCIA and estatus_previo != RutaCargaChecklist.ESTATUS_CON_INCIDENCIA:
         crear_notificaciones(
-            _usuarios_logistica_rutas(),
+            _usuarios_diferencia_carga(ruta),
             titulo=f"Diferencia de carga: {ruta.folio}",
             mensaje="La carga quedó completa con al menos una línea con diferencia. Logística debe autorizar la ruta con la diferencia.",
             url=f"/logistica/rutas/{ruta.id}/",
@@ -607,9 +645,13 @@ def checklist_bloquea_salida(ruta: RutaEntrega) -> str | None:
         lineas_salida = lineas_tramo_operativo_actual(ruta, checklist=checklist)
         if not lineas_salida.exists():
             return None
+        if any(_linea_pendiente_envio_point(linea) for linea in lineas_salida):
+            return POINT_PENDIENTE_ENVIO_NOTA
         if lineas_salida.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists():
             return "confirma todas las líneas de carga antes de liberar la ruta"
         return None
+    if any(_linea_pendiente_envio_point(linea) for linea in checklist.lineas.all()):
+        return POINT_PENDIENTE_ENVIO_NOTA
     if checklist.estatus == RutaCargaChecklist.ESTATUS_CONFIRMADA:
         return None
     if checklist.estatus == RutaCargaChecklist.ESTATUS_CON_INCIDENCIA:
@@ -730,6 +772,18 @@ def _usuarios_logistica_rutas():
     return [usuario for usuario in usuarios if can_manage_submodule(usuario, "logistica", "rutas")]
 
 
+def _usuarios_diferencia_carga(ruta: RutaEntrega):
+    User = get_user_model()
+    usuarios = {usuario.id: usuario for usuario in _usuarios_logistica_rutas()}
+    for usuario in User.objects.filter(is_active=True, is_superuser=True):
+        usuarios[usuario.id] = usuario
+    empleado = getattr(getattr(ruta.repartidor, "user", None), "empleado_rrhh", None)
+    jefe_usuario = getattr(getattr(empleado, "jefe_directo", None), "usuario_erp", None)
+    if jefe_usuario and jefe_usuario.is_active:
+        usuarios[jefe_usuario.id] = jefe_usuario
+    return list(usuarios.values())
+
+
 def paradas_con_entrega_requerida(ruta: RutaEntrega):
     return ruta.paradas.select_related("punto").exclude(punto__tipo=PuntoLogistico.TIPO_CEDIS)
 
@@ -830,6 +884,8 @@ def confirmar_checklist_carga_manual(*, ruta: RutaEntrega, user, notas: str = ""
         raise ValidationError("La ruta no tiene carga Point para confirmar.")
     now = timezone.now()
     lineas = list(checklist.lineas.select_for_update().filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE))
+    if any(_linea_pendiente_envio_point(linea) for linea in lineas):
+        raise ValidationError(POINT_PENDIENTE_ENVIO_NOTA)
     for linea in lineas:
         linea.cantidad_cargada = linea.cantidad_enviada_esperada
         linea.estatus = RutaCargaChecklistLinea.ESTATUS_CARGADA

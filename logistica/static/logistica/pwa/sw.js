@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-logistica-pwa-v56-error-operativo-detallado";
+const CACHE_NAME = "pollyanas-logistica-pwa-v57-point-enviado-obligatorio";
 const SHELL_ASSETS = [
   "/logistica/app/",
   "/static/logistica/pwa/manifest.json",
