@@ -1365,7 +1365,7 @@
       const OFFLINE_MUTATION_QUEUE_MAX = 80;
       const ACCESS_TOKEN_KEY = "pd_logistica_access";
       const REFRESH_TOKEN_KEY = "pd_logistica_refresh";
-      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v55
+      const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000; // route-control-v56
       const PREVIEW_REPARTIDOR_PARAM = "preview_repartidor";
       const app = document.getElementById("app");
       const initialParams = new URLSearchParams(window.location.search);
@@ -1716,6 +1716,25 @@
         if (Array.isArray(value)) return `${firstKey}: ${value[0]}`;
         if (typeof value === "string") return `${firstKey}: ${value}`;
         return fallback;
+      }
+
+      function operationalErrorTitle(error, fallback = "No se puede continuar") {
+        switch (error?.error) {
+          case "turno_abierto":
+            return "Turno abierto";
+          case "licencia_no_vigente":
+            return "Licencia no vigente";
+          case "unidad_ruta_distinta":
+            return "Unidad incorrecta";
+          case "ruta_no_liberada":
+            return "Ruta no liberada";
+          case "sin_turno":
+            return "Turno requerido";
+          case "sin_ruta":
+            return "Ruta no disponible";
+          default:
+            return fallback;
+        }
       }
 
       function showOperationalModal(title, message, key = "") {
@@ -3045,8 +3064,8 @@
         }));
       }
 
-      async function renderRutaActiva(message = "") {
-        if (message && !message.startsWith("✅")) operationalError(message);
+      async function renderRutaActiva(message = "", alertTitle = "No se puede continuar") {
+        if (message && !message.startsWith("✅")) operationalError(message, alertTitle);
         let rutaData = null;
         let turnoActivo = null;
         try {
@@ -4454,8 +4473,8 @@
         return faltantes;
       }
 
-      async function renderBitacoraSalida(message = "") {
-        if (message && !message.startsWith("✅")) operationalError(message);
+      async function renderBitacoraSalida(message = "", alertTitle = "No se puede continuar") {
+        if (message && !message.startsWith("✅")) operationalError(message, alertTitle);
         let actual = null;
         try {
           actual = await loadTurnoActivo();
@@ -4667,14 +4686,21 @@
         });
         if (!response.ok) {
           const error = await response.json().catch(() => ({}));
+          const alertTitle = operationalErrorTitle(error);
           if (error.error === "turno_abierto") {
             state.bitacoraSalida = error.bitacora || state.bitacoraSalida;
-            return renderBitacoraSalida(error.mensaje || `⚠️ Tienes un turno abierto en ${error.bitacora?.unidad_codigo || "otra unidad"}.`);
+            return renderBitacoraSalida(
+              error.mensaje || `⚠️ Tienes un turno abierto en ${error.bitacora?.unidad_codigo || "otra unidad"}.`,
+              alertTitle,
+            );
           }
           if (error.error === "unidad_ruta_distinta") {
-            return renderBitacoraSalida(error.mensaje || "Tienes una ruta activa en otra unidad. Inicia turno con la unidad asignada.");
+            return renderBitacoraSalida(
+              error.mensaje || "Tienes una ruta activa en otra unidad. Inicia turno con la unidad asignada.",
+              alertTitle,
+            );
           }
-          return renderBitacoraSalida(apiErrorMessage(error, "No se pudo iniciar el turno."));
+          return renderBitacoraSalida(apiErrorMessage(error, "No se pudo iniciar el turno."), alertTitle);
         }
         if (responseQueuedOffline(response)) {
           state.bitacoraSalidaDraft = null;
@@ -4697,7 +4723,10 @@
         if (!response.ok) {
           const error = await response.json().catch(() => ({}));
           const message = apiErrorMessage(error, "No se pudo iniciar la ruta.");
-          return state.pantallaActual === "ruta_activa" ? renderRutaActiva(message) : renderBitacoraSalida(message);
+          const alertTitle = operationalErrorTitle(error);
+          return state.pantallaActual === "ruta_activa"
+            ? renderRutaActiva(message, alertTitle)
+            : renderBitacoraSalida(message, alertTitle);
         }
         if (responseQueuedOffline(response)) {
           const message = queuedSuccessMessage("Bitácora de turno");
@@ -4996,7 +5025,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v55", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v56", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();
