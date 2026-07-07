@@ -51,6 +51,24 @@ class BonosVentasTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "/bonos-ventas/dashboard/")
 
+    def test_dashboard_erp_muestra_sucursales_activas_aunque_no_tengan_bonos(self):
+        user = get_user_model().objects.create_superuser(username="admin-bonos-ventas-sucursales", password="x")
+        self.client.force_login(user)
+        sucursal_con_bono = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
+        sucursal_sin_bono = Sucursal.objects.create(codigo="GVE", nombre="Guasave Centro", activa=True)
+        empleado = Empleado.objects.create(nombre="Empleada Dashboard Ventas", area="VENTAS", sucursal="Payán")
+        periodo = ConfigBonoVentasPeriodo.objects.create(mes=5, anio=2026)
+        BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal_con_bono)
+
+        response = self.client.get("/bonos-ventas/dashboard/?mes=5&anio=2026")
+
+        self.assertEqual(response.status_code, 200)
+        sucursal_rows = response.context["sucursal_rows"]
+        self.assertEqual([row["nombre"] for row in sucursal_rows], ["Guasave Centro", "Payán"])
+        row_sin_bono = next(row for row in sucursal_rows if row["id"] == sucursal_sin_bono.id)
+        self.assertEqual(row_sin_bono["count"], 0)
+        self.assertEqual(row_sin_bono["total"], Decimal("0"))
+
     def test_app_desktop_redirige_al_dashboard_y_captura_forzada_funciona(self):
         user = get_user_model().objects.create_superuser(username="desktop-ventas")
         self.client.force_login(user)
