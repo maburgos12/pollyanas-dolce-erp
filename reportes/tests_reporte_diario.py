@@ -1,7 +1,9 @@
 from datetime import date
 from unittest.mock import patch
 
+from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
+from django.urls import reverse
 
 from reportes.models import DgOperacionSnapshot
 from reportes.services_reporte_diario import construir_y_enviar_reporte_diario
@@ -44,6 +46,14 @@ PAYLOAD_COMPLETO = {
 
 @override_settings(DIRECTOR_EMAIL="director@example.com", DEFAULT_FROM_EMAIL="erp@example.com")
 class ReporteDiarioTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_superuser(
+            username="reporte-diario-dg",
+            email="reporte-diario-dg@example.com",
+            password="test12345",
+        )
+        self.client.force_login(self.user)
+
     def _snapshot(self, *, status=DgOperacionSnapshot.STATUS_READY, payload=None, fecha=None):
         return DgOperacionSnapshot.objects.create(
             fecha_operacion=fecha or date(2026, 5, 20),
@@ -146,3 +156,32 @@ class ReporteDiarioTests(TestCase):
 
         cuerpo = mock_send_mail.call_args.kwargs["message"]
         self.assertIn("Cantidad total: 12.5", cuerpo)
+
+    def test_reporte_diario_view_renders_preview(self):
+        self._snapshot()
+
+        response = self.client.get(reverse("reportes:reporte_diario"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Preview del reporte diario")
+        self.assertContains(response, "Venta total: $12,345.67")
+        self.assertContains(response, "Crucero: Por validar")
+
+    @patch("reportes.views.construir_y_enviar_reporte_diario")
+    def test_reporte_diario_view_can_resend_snapshot(self, mock_send):
+        self._snapshot(fecha=date(2026, 5, 18))
+        mock_send.return_value = {
+            "status": "enviado",
+            "fecha_operacion": "2026-05-18",
+            "recipient": "director@example.com",
+        }
+
+        response = self.client.post(
+            reverse("reportes:reporte_diario"),
+            {"action": "resend", "fecha_operacion": "2026-05-18"},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_send.assert_called_once_with(fecha_operacion="2026-05-18")
+        self.assertContains(response, "Reporte diario reenviado para 2026-05-18")

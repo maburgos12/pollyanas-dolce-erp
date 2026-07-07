@@ -38,8 +38,9 @@ from recetas.models import (
 )
 from recetas.utils.costeo_versionado import calcular_costeo_receta
 from recetas.utils.costeo_snapshot import resolve_line_snapshot_cost, resolve_preparation_recipe_for_insumo
-from recetas.views import (
+from recetas.views.plan import (
     _apply_plan_consumption,
+    _build_point_waste_summary,
     _export_periodo_mrp_csv,
     _plan_enterprise_board,
     _plan_explosion,
@@ -691,6 +692,32 @@ class DerivedProductPresentationCostingTests(TestCase):
         self.assertEqual(response.context["point_closure_summary"]["cuadra"], 1)
         self.assertEqual(response.context["point_closure_summary"]["rows"][0]["sold_tickets"], 2)
         self.assertEqual(response.context["point_closure_summary"]["rows"][0]["avg_ticket"], Decimal("50"))
+
+    def test_point_waste_summary_falls_back_to_recipe_cost_when_point_cost_is_zero(self):
+        sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        point_branch = PointBranch.objects.create(external_id="1", name="Matriz", erp_branch=sucursal)
+        sync_job = PointSyncJob.objects.create(job_type=PointSyncJob.JOB_TYPE_INVENTORY, status=PointSyncJob.STATUS_SUCCESS)
+        PointWasteLine.objects.create(
+            branch=point_branch,
+            erp_branch=sucursal,
+            receta=self.parent,
+            sync_job=sync_job,
+            movement_external_id="W-ZERO",
+            source_hash="waste-fallback-parent-cost",
+            movement_at=timezone.make_aware(datetime(2026, 3, 19, 14, 0)),
+            item_name=self.parent.nombre,
+            item_code=self.parent.codigo_point,
+            quantity=Decimal("2"),
+            unit="PZA",
+            unit_cost=Decimal("0"),
+            total_cost=Decimal("0"),
+        )
+
+        summary = _build_point_waste_summary(date(2026, 3, 19))
+
+        self.assertEqual(summary["total_qty"], Decimal("2"))
+        self.assertEqual(summary["total_cost"], Decimal("160"))
+        self.assertEqual(summary["top_branches"][0]["total_cost"], Decimal("160"))
 
     def test_dg_operacion_dashboard_excludes_inactive_preopening_branch(self):
         sucursal_activa = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)

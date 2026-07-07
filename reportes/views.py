@@ -103,6 +103,8 @@ from .auto_production_service import (
 from .auto_purchase_service import generate_purchase_requests_from_production, list_auto_purchase_snapshots
 from .alert_service import generate_operational_alerts, resolve_alert
 from .dashboard_sales_dataset import get_dashboard_sales_dataset
+from .models import DgOperacionSnapshot
+from .services_reporte_diario import _armar_cuerpo, construir_y_enviar_reporte_diario
 
 
 BI_SALES_CACHE_GENERATION = "bi-sales-v2"
@@ -193,6 +195,7 @@ def _reportes_module_tabs(active: str) -> list[dict[str, str | bool]]:
     tabs = [
         ("ventas", reverse("reportes:ventas"), "Ventas"),
         ("cierre_operativo", reverse("reportes:cierre_operativo"), "Cierre diario"),
+        ("reporte_diario", reverse("reportes:reporte_diario"), "Reporte diario DG"),
         ("cierre_producto", reverse("reportes:cierre_producto"), "Cierre producto"),
         ("producido_vs_vendido", reverse("reportes:producido_vs_vendido"), "Producido vs Vendido"),
         ("financiero", reverse("reportes:financiero"), "Financiero"),
@@ -1406,6 +1409,54 @@ def cierre_operativo(request: HttpRequest) -> HttpResponse:
         "inventory_snapshot": inventory_snapshot,
     }
     return render(request, "reportes/cierre_operativo_diario.html", context)
+
+
+@login_required
+def reporte_diario(request: HttpRequest) -> HttpResponse:
+    if not can_view_reportes(request.user):
+        raise PermissionDenied("No tienes permisos para ver Reportes.")
+
+    raw_target_date = (request.POST.get("fecha_operacion") if request.method == "POST" else request.GET.get("fecha_operacion") or "").strip()
+    target_date = None
+    if raw_target_date:
+        try:
+            target_date = date.fromisoformat(raw_target_date)
+        except ValueError:
+            messages.warning(request, "La fecha operativa solicitada no es válida.")
+
+    if request.method == "POST" and (request.POST.get("action") or "").strip() == "resend":
+        resultado = construir_y_enviar_reporte_diario(fecha_operacion=target_date.isoformat() if target_date else None)
+        if resultado.get("status") == "enviado":
+            messages.success(
+                request,
+                f"Reporte diario reenviado para {resultado.get('fecha_operacion')} a {resultado.get('recipient')}.",
+            )
+        else:
+            messages.warning(
+                request,
+                f"No se envió el reporte diario. Motivo: {resultado.get('reason', 'desconocido')}.",
+            )
+        redirect_date = target_date.isoformat() if target_date else ""
+        target = reverse("reportes:reporte_diario")
+        return redirect(f"{target}?fecha_operacion={redirect_date}" if redirect_date else target)
+
+    snapshots_qs = DgOperacionSnapshot.objects.order_by("-fecha_operacion")
+    snapshot = snapshots_qs.filter(fecha_operacion=target_date).first() if target_date else snapshots_qs.first()
+    body_preview = _armar_cuerpo(snapshot) if snapshot else "No hay snapshot operativo DG disponible."
+    latest_ready = snapshots_qs.filter(status=DgOperacionSnapshot.STATUS_READY).first()
+    snapshot_rows = list(
+        snapshots_qs.values("fecha_operacion", "status", "generated_at", "source_cutoff_at")[:14]
+    )
+
+    context = {
+        "module_tabs": _reportes_module_tabs("reporte_diario"),
+        "snapshot": snapshot,
+        "snapshot_rows": snapshot_rows,
+        "latest_ready": latest_ready,
+        "target_date_iso": snapshot.fecha_operacion.isoformat() if snapshot else (target_date.isoformat() if target_date else ""),
+        "body_preview": body_preview,
+    }
+    return render(request, "reportes/reporte_diario.html", context)
 
 
 def _bi_bar_rows(
