@@ -68,6 +68,7 @@ class ReporteDiarioTests(TestCase):
         self.assertNotIn("N/D", cuerpo)
         self.assertIn("$12,345.67", cuerpo)
         self.assertIn("$154.32", cuerpo)
+        self.assertIn("Crucero: Por validar", cuerpo)
 
     @patch("reportes.services_reporte_diario.send_mail")
     def test_snapshot_con_error_no_envia(self, mock_send_mail):
@@ -115,3 +116,33 @@ class ReporteDiarioTests(TestCase):
         resultado = construir_y_enviar_reporte_diario(fecha_operacion="2026-05-18")
 
         self.assertEqual(resultado["fecha_operacion"], "2026-05-18")
+
+    @patch("reportes.services_reporte_diario.send_mail")
+    def test_alertas_amarillas_tambien_aparecen_en_cierre(self, mock_send_mail):
+        payload_con_tardia = {
+            **PAYLOAD_COMPLETO,
+            "resumen_cierre": {
+                "detalle": [
+                    {
+                        "sucursal": {"__type__": "sucursal", "id": 1, "codigo": "COLOSIO", "nombre": "Colosio", "activa": True},
+                        "semaforo": "amarillo",
+                        "estado_label": "Enviada (tardía)",
+                    }
+                ]
+            },
+        }
+        self._snapshot(payload=payload_con_tardia)
+
+        construir_y_enviar_reporte_diario()
+
+        cuerpo = mock_send_mail.call_args.kwargs["message"]
+        self.assertIn("Colosio: Enviada (tardía)", cuerpo)
+
+    @patch("reportes.services_reporte_diario.send_mail")
+    def test_merma_fraccional_conserva_decimales(self, mock_send_mail):
+        self._snapshot()
+
+        construir_y_enviar_reporte_diario()
+
+        cuerpo = mock_send_mail.call_args.kwargs["message"]
+        self.assertIn("Cantidad total: 12.5", cuerpo)

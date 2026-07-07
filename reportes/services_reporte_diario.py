@@ -28,7 +28,10 @@ def _money(value) -> str:
 
 def _qty(value) -> str:
     try:
-        return f"{float(value):,.0f}"
+        qty = float(value)
+        if qty.is_integer():
+            return f"{qty:,.0f}"
+        return f"{qty:,.2f}".rstrip("0").rstrip(".")
     except (TypeError, ValueError):
         return "N/D"
 
@@ -51,7 +54,7 @@ def _seccion_cierre(payload: dict) -> str:
     if not seccion:
         return "Estado de cierre por sucursal: no disponible."
     pendientes = [
-        fila for fila in (seccion.get("detalle") or []) if fila.get("semaforo") == "rojo"
+        fila for fila in (seccion.get("detalle") or []) if fila.get("semaforo") in {"rojo", "amarillo"}
     ]
     if not pendientes:
         return "=== CIERRE POR SUCURSAL ===\nTodas las sucursales cerraron sin alertas."

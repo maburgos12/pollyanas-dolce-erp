@@ -19025,9 +19025,15 @@ def _point_operational_sales_history_queryset():
 
 
 def _latest_point_operational_cutoff_date() -> date:
+    sales_cutoff = max(
+        [value for value in [_point_official_sales_stage_max_date(), _point_recent_sales_stage_max_date()] if value],
+        default=None,
+    )
+    if sales_cutoff:
+        return sales_cutoff
+
     candidates: list[date] = []
     raw_candidates = [
-        max([value for value in [_point_official_sales_stage_max_date(), _point_recent_sales_stage_max_date()] if value], default=None),
         PointDailyBranchIndicator.objects.aggregate(max_date=Max("indicator_date")).get("max_date"),
         PointProductionLine.objects.aggregate(max_date=Max("production_date")).get("max_date"),
         PointWasteLine.objects.aggregate(max_date=Max("movement_at")).get("max_date"),
@@ -19041,7 +19047,7 @@ def _latest_point_operational_cutoff_date() -> date:
             candidates.append(timezone.localtime(value).date() if timezone.is_aware(value) else value.date())
         else:
             candidates.append(value)
-    return min(candidates) if candidates else (timezone.localdate() - timedelta(days=1))
+    return max(candidates) if candidates else (timezone.localdate() - timedelta(days=1))
 
 
 def _expected_dg_operacion_cut_date() -> date:
