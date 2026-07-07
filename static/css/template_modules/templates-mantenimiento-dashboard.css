@@ -1,6 +1,29 @@
 /* Extracted from templates/mantenimiento/dashboard.html */
 .page-mantenimiento-dashboard .container{width:100%;max-width:none;margin:0;padding:clamp(18px,1.8vw,32px);overflow-x:clip}
   .page-mantenimiento-dashboard .bi-shell{width:100%;max-width:none;margin:0;gap:16px}
+  .page-mantenimiento-dashboard .module-tabs{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));align-items:stretch}
+  .page-mantenimiento-dashboard .module-tab{min-width:0;max-width:100%;white-space:normal;flex-wrap:wrap;text-align:center;overflow-wrap:anywhere;word-break:normal;line-height:1.2}
+  .page-mantenimiento-dashboard .module-tab .mant-tab-count{margin-left:0}
+  .page-mantenimiento-dashboard .bi-panel,
+  .page-mantenimiento-dashboard .bi-kpi-card,
+  .page-mantenimiento-dashboard .bi-status-card,
+  .page-mantenimiento-dashboard .bi-summary-chip,
+  .page-mantenimiento-dashboard .mant-col,
+  .page-mantenimiento-dashboard .mant-ticket,
+  .page-mantenimiento-dashboard .mant-plan-row,
+  .page-mantenimiento-dashboard .mant-fleet-item{min-width:0}
+  .page-mantenimiento-dashboard .bi-panel-title,
+  .page-mantenimiento-dashboard .bi-copy,
+  .page-mantenimiento-dashboard .bi-kpi-label,
+  .page-mantenimiento-dashboard .bi-kpi-note,
+  .page-mantenimiento-dashboard .bi-status-label,
+  .page-mantenimiento-dashboard .mant-ticket-title,
+  .page-mantenimiento-dashboard .mant-ticket-meta,
+  .page-mantenimiento-dashboard .mant-plan-title,
+  .page-mantenimiento-dashboard .mant-plan-meta,
+  .page-mantenimiento-dashboard .mant-breakdown-row span:first-child,
+  .page-mantenimiento-dashboard .mant-fleet-item strong,
+  .page-mantenimiento-dashboard .mant-fleet-item span{min-width:0;overflow-wrap:anywhere;word-break:normal}
   .mant-tab-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;border-radius:999px;background:rgba(139,34,82,.14);color:#8B2252;font-size:11px;font-weight:900;padding:0 5px;margin-left:4px}
   .module-tab.active .mant-tab-count,.module-tab:hover .mant-tab-count{background:rgba(139,34,82,.18);color:#8B2252}
   .mant-tab-panel{display:none}
@@ -139,4 +162,4 @@
   .mant-service-realizado{display:contents}
   .mant-provider-active{display:none}
   .mant-provider-check{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:700;color:#513744;cursor:pointer}
-  @media(max-width:760px){.mant-origin-tabs{display:grid}.mant-origin-tab{justify-content:space-between}.mant-form-grid,.mant-asset-create-grid,.mant-board-tools,.mant-drawer-evidence,.mant-drawer-facts{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr}.mant-drawer-photo{width:100%;max-height:280px;aspect-ratio:16/10}.mant-ticket-main{grid-template-columns:64px minmax(0,1fr)}.mant-ticket-photo,.mant-ticket-photo-empty{width:64px}}
+  @media(max-width:760px){.page-mantenimiento-dashboard .module-tabs{grid-template-columns:1fr 1fr}.mant-origin-tabs{display:grid}.mant-origin-tab{justify-content:space-between}.mant-form-grid,.mant-asset-create-grid,.mant-board-tools,.mant-drawer-evidence,.mant-drawer-facts{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr}.mant-drawer-photo{width:100%;max-height:280px;aspect-ratio:16/10}.mant-ticket-main{grid-template-columns:64px minmax(0,1fr)}.mant-ticket-photo,.mant-ticket-photo-empty{width:64px}}
