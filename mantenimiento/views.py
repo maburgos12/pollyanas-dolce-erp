@@ -55,23 +55,27 @@ class EsMantenimiento(BasePermission):
     GRUPOS = {"dg", "DG", "mantenimiento", "MANTENIMIENTO"}
 
     def has_permission(self, request, view):
-        if not request.user or not request.user.is_authenticated:
-            return False
-        grupos = set(request.user.groups.values_list("name", flat=True))
-        return (
-            request.user.is_superuser
-            or bool(grupos & self.GRUPOS)
-            or can_view_module(request.user, "activos")
-            or can_manage_submodule(request.user, "mantenimiento", "bandeja")
-            or can_view_submodule(request.user, "mantenimiento", "app")
-            or can_view_submodule(request.user, "mantenimiento", "dashboard")
-        )
+        return _can_access_mantenimiento(request.user)
+
+
+def _can_access_mantenimiento(user) -> bool:
+    if not user or not user.is_authenticated:
+        return False
+    grupos = set(user.groups.values_list("name", flat=True))
+    return (
+        user.is_superuser
+        or bool(grupos & EsMantenimiento.GRUPOS)
+        or can_view_module(user, "activos")
+        or can_manage_submodule(user, "mantenimiento", "bandeja")
+        or can_view_submodule(user, "mantenimiento", "app")
+        or can_view_submodule(user, "mantenimiento", "dashboard")
+    )
 
 
 def _require_mantenimiento(user):
     if is_admin_or_dg(user):
         return
-    if not can_view_submodule(user, "mantenimiento", "dashboard"):
+    if not _can_access_mantenimiento(user):
         raise PermissionDenied("No tienes permisos para ver Mantenimiento.")
 
 

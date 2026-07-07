@@ -97,6 +97,34 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertEqual(portal.status_code, 403)
         self.assertEqual(perfil.status_code, 403)
 
+    def test_activos_access_can_open_maintenance_dashboard(self):
+        user_model = get_user_model()
+        activos_user = user_model.objects.create_user(username="activos_only", password="test12345")
+        UserModuleAccess.objects.create(
+            user=activos_user,
+            module="activos",
+            access=ACCESS_MANAGE,
+        )
+        self.client.force_login(activos_user)
+
+        response = self.client.get(reverse("mantenimiento:dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_mantenimiento_bandeja_access_can_open_maintenance_dashboard(self):
+        user_model = get_user_model()
+        bandeja_user = user_model.objects.create_user(username="mantenimiento_bandeja", password="test12345")
+        UserModuleAccess.objects.create(
+            user=bandeja_user,
+            module="mantenimiento.bandeja",
+            access=ACCESS_MANAGE,
+        )
+        self.client.force_login(bandeja_user)
+
+        response = self.client.get(reverse("mantenimiento:dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+
 
 class MantenimientoUnifiedInboxTests(TestCase):
     def setUp(self):
