@@ -45,6 +45,31 @@ class BonosVentasTests(TestCase):
         self.assertIn("Empleada Dashboard Ventas", content)
         self.assertEqual(response["Cache-Control"], "max-age=0, no-cache, no-store, must-revalidate, private")
 
+    def test_dashboard_erp_muestra_sucursal_solo_con_repartidores(self):
+        # Regresión: una sucursal cuyo único bono es de reparto debe seguir visible.
+        # El bug histórico la ocultaba con un `if not rows: continue` (rows excluye repartidores).
+        user = get_user_model().objects.create_superuser(username="admin-bonos-ventas-reparto", password="x")
+        self.client.force_login(user)
+        sucursal = Sucursal.objects.create(codigo="GVE", nombre="Guasave Centro", activa=True)
+        repartidor = Empleado.objects.create(
+            nombre="Repartidor Guasave", area="VENTAS", sucursal="Guasave Centro", puesto_operativo="REPARTIDOR"
+        )
+        periodo = ConfigBonoVentasPeriodo.objects.create(mes=5, anio=2026)
+        BonoVentasEmpleado.objects.create(periodo=periodo, empleado=repartidor, sucursal=sucursal)
+
+        response = self.client.get("/bonos-ventas/dashboard/?mes=5&anio=2026")
+
+        self.assertEqual(response.status_code, 200)
+        sucursal_rows = response.context["sucursal_rows"]
+        # La sucursal aparece aunque su único bono sea de reparto...
+        fila = next(row for row in sucursal_rows if row["id"] == sucursal.id)
+        # ...y el repartidor NO cuenta como fila normal de sucursal.
+        self.assertEqual(fila["count"], 0)
+        # El repartidor vive en su propia fila especial.
+        repartidor_row = response.context["repartidor_row"]
+        self.assertIsNotNone(repartidor_row)
+        self.assertEqual(repartidor_row["count"], 1)
+
     def test_raiz_web_de_bonos_ventas_redirige_al_dashboard(self):
         response = self.client.get("/bonos-ventas/")
 
