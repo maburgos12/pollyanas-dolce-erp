@@ -1825,7 +1825,7 @@ class LogisticaControlRutasTests(TestCase):
             response = self.client.get(reverse("api_logistica_ruta_activa"))
 
         self.assertEqual(response.status_code, 200)
-        sync.assert_called_once()
+        sync.assert_called_once_with(ruta=self.ruta, user=self.user, ejecutar_sync=False)
         lineas = response.json()["checklist_carga"]["lineas"]
         self.assertEqual(lineas[0]["cantidad_enviada_esperada"], "2")
 
