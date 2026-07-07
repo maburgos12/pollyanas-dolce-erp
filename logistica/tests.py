@@ -4068,6 +4068,40 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.source_hash, f"cedis-reabasto-{ruta.fecha_ruta:%Y%m%d}-{self.sucursal.id}-{receta.id}")
         self.assertIn("Point", checklist_bloquea_salida(ruta))
 
+    def test_checklist_carga_omite_linea_point_sin_enviado_si_mismo_producto_ya_tiene_enviado(self):
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        sin_enviado = self._crear_transferencia_point_abierta(
+            item_name="Crema Para Fresas",
+            source_hash="crema-sin-enviado",
+        )
+        sin_enviado.sent_quantity = Decimal("0.000")
+        sin_enviado.sent_at = None
+        sin_enviado.save(update_fields=["sent_quantity", "sent_at", "updated_at"])
+        enviado = self._crear_transferencia_point_abierta(
+            item_name="Crema Para Fresas",
+            source_hash="crema-enviado",
+        )
+
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        self.assertFalse(RutaCargaChecklistLinea.objects.filter(checklist=resumen.checklist, source_hash=sin_enviado.source_hash).exists())
+        linea = RutaCargaChecklistLinea.objects.get(checklist=resumen.checklist, source_hash=enviado.source_hash)
+        self.assertEqual(linea.cantidad_enviada_esperada, Decimal("5.000"))
+
+    def test_checklist_carga_omite_linea_point_reducida_a_cero_si_transferencia_ya_fue_enviada(self):
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        reducida = self._crear_transferencia_point_abierta(
+            item_name="Crema Para Fresas",
+            source_hash="crema-reducida-cero",
+        )
+        reducida.sent_quantity = Decimal("0.000")
+        reducida.raw_payload = {"transfer": {"isEnviado": True, "Fecha_envio": timezone.now().isoformat()}}
+        reducida.save(update_fields=["sent_quantity", "raw_payload", "updated_at"])
+
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        self.assertFalse(RutaCargaChecklistLinea.objects.filter(checklist=resumen.checklist, source_hash=reducida.source_hash).exists())
+
     def test_checklist_carga_no_genera_lineas_para_parada_cedis(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
         cedis_sucursal = Sucursal.objects.create(codigo="CEDIS-T", nombre="CEDIS Test", activa=True)

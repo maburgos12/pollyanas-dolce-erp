@@ -57,6 +57,11 @@ def _cantidad_esperada(line: PointTransferLine) -> Decimal:
     return Decimal(str(line.sent_quantity or 0))
 
 
+def _point_transfer_enviada(line: PointTransferLine) -> bool:
+    transfer = (line.raw_payload or {}).get("transfer") or {}
+    return bool(line.sent_at or transfer.get("isEnviado") or transfer.get("Fecha_envio"))
+
+
 def _paradas_por_sucursal(ruta: RutaEntrega) -> dict[int, ParadaRuta]:
     paradas = ruta.paradas.select_related("punto", "punto__sucursal").order_by("orden", "id")
     result = {}
@@ -179,6 +184,13 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
     if solo_abiertas:
         candidates = candidates.filter(is_open=True)
 
+    sent_product_keys = set()
+    for line in candidates:
+        branch = resolve_requesting_erp_branch(line)
+        producto_key = _point_producto_key(line)
+        if branch and branch.id in paradas_by_branch and producto_key and _cantidad_esperada(line) > 0:
+            sent_product_keys.add((branch.id, producto_key))
+
     creadas = 0
     actualizadas = 0
     omitidas = 0
@@ -211,6 +223,10 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             if cedis_line.estatus != RutaCargaChecklistLinea.ESTATUS_PENDIENTE:
                 omitidas += 1
                 continue
+            if cantidad_esperada <= 0 and (_point_transfer_enviada(line) or (branch.id, producto_key) in sent_product_keys):
+                cedis_line.delete()
+                omitidas += 1
+                continue
             cedis_line.point_transfer_line = line
             cedis_line.transfer_external_id = line.transfer_external_id
             cedis_line.detail_external_id = line.detail_external_id
@@ -235,6 +251,15 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             actualizadas += 1
             continue
         if cantidad_esperada <= 0:
+            if _point_transfer_enviada(line) or (branch.id, producto_key) in sent_product_keys:
+                # ponytail: no mostrar reducciones cuando Point ya atendió la transferencia.
+                RutaCargaChecklistLinea.objects.filter(
+                    checklist=checklist,
+                    source_hash=line.source_hash,
+                    estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
+                ).delete()
+                omitidas += 1
+                continue
             defaults = {
                 "parada": parada,
                 "point_transfer_line": line,
