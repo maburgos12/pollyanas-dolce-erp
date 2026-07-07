@@ -5,8 +5,11 @@ from decimal import Decimal, InvalidOperation
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.contrib.staticfiles import finders
+from django.http import Http404, HttpResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
+from django.views.decorators.cache import never_cache
 
 from core.access import can_view_module, can_view_submodule
 from core.models import Sucursal
@@ -55,6 +58,15 @@ BITACORA_CONFIG = {
 @login_required
 def app_home(request):
     return render(request, "operacion/app_home.html", build_operacion_context(request.user))
+
+
+@never_cache
+def app_sw(request):
+    path = finders.find("operacion/sw.js")
+    if not path:
+        raise Http404("Service worker de App Operativa no encontrado")
+    with open(path, encoding="utf-8") as service_worker:
+        return HttpResponse(service_worker.read(), content_type="application/javascript")
 
 
 def _can_use_bitacoras(user) -> bool:

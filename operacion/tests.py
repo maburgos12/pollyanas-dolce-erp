@@ -71,6 +71,7 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "operacion/manifest.webmanifest")
         self.assertContains(response, "operacion/app-icon-192.png")
         self.assertContains(response, "operacion/apple-touch-icon.png")
+        self.assertContains(response, 'navigator.serviceWorker.register("/app/sw.js?v=20260707-operativa-pwa-v1"')
         self.assertContains(response, 'href="/logout/"')
         self.assertContains(response, "Cerrar sesión")
 
@@ -84,6 +85,15 @@ class OperacionAppTests(TestCase):
         self.assertIn("/static/operacion/app-icon-192.png", manifest)
         self.assertIn("/static/operacion/app-icon-512.png", manifest)
         self.assertTrue((root / "static/operacion/apple-touch-icon.png").exists())
+
+    def test_operational_app_serves_own_service_worker(self):
+        response = self.client.get("/app/sw.js")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/javascript")
+        body = response.content.decode("utf-8")
+        self.assertIn("pollyanas-app-operativa-pwa-v1", body)
+        self.assertIn("/static/operacion/manifest.webmanifest?v=20260707-workflow-icon-v4", body)
 
     def test_mermas_only_user_can_enter_unified_app_without_losing_guardrail(self):
         user = self._user("mermas.colosio", sucursal=self.sucursal)
