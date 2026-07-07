@@ -125,6 +125,14 @@ class MantenimientoUnifiedAccessTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
 
+    def test_dashboard_restores_active_tab_from_hash_changes(self):
+        self.client.force_login(self.mantenimiento)
+
+        response = self.client.get(reverse("mantenimiento:dashboard"))
+
+        self.assertContains(response, 'window.addEventListener("hashchange", syncTabFromHash);')
+        self.assertContains(response, 'if (location.hash === `#${tabId}`) {')
+
 
 class MantenimientoUnifiedInboxTests(TestCase):
     def setUp(self):

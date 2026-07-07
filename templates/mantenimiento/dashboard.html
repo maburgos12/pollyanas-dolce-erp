@@ -920,13 +920,31 @@
     try { sessionStorage.setItem("mant_tab", tabId); } catch(e) {}
   }
 
+  function syncTabFromHash() {
+    const hash = location.hash.replace("#", "");
+    if (hash && document.getElementById(hash)) {
+      activateTab(hash);
+      return true;
+    }
+    return false;
+  }
+
   tabs.forEach((tab) => {
-    tab.addEventListener("click", () => activateTab(tab.dataset.tab));
+    tab.addEventListener("click", (event) => {
+      event.preventDefault();
+      const tabId = tab.dataset.tab;
+      if (location.hash === `#${tabId}`) {
+        activateTab(tabId);
+        return;
+      }
+      location.hash = tabId;
+    });
   });
 
+  window.addEventListener("hashchange", syncTabFromHash);
+
   // Restore on load or activate from URL hash
-  const hash = location.hash.replace("#", "");
-  const saved = (hash && document.getElementById(hash)) ? hash : (() => { try { return sessionStorage.getItem("mant_tab"); } catch(e) { return null; } })();
+  const saved = syncTabFromHash() ? null : (() => { try { return sessionStorage.getItem("mant_tab"); } catch(e) { return null; } })();
   if (saved && document.getElementById(saved)) {
     activateTab(saved);
   } else {
