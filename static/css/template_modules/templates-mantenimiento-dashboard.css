@@ -87,10 +87,13 @@
   .mant-description-box{background:#fdf6f9;border:1px solid #f0d0dc;border-radius:8px;padding:10px 12px;font-size:13px;color:#42292e;line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:180px;overflow-y:auto;margin-bottom:4px}
   .mant-drawer-evidence{display:grid;grid-template-columns:150px minmax(0,1fr);gap:12px;align-items:start;margin-bottom:14px}
   .mant-drawer-photo{display:block;width:150px;aspect-ratio:1;border-radius:10px;object-fit:cover;border:1px solid rgba(139,34,82,.16);background:#f6edf2}
-  .mant-drawer-facts{display:grid;gap:8px}
-  .mant-fact-row{display:grid;grid-template-columns:112px minmax(0,1fr);gap:8px;font-size:13px;line-height:1.35}
-  .mant-fact-row span{color:#8B2252;font-weight:900}
-  .mant-fact-row strong{color:#3a2b30;font-weight:800;word-break:break-word}
+  .mant-drawer-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px}
+  .mant-fact-row{display:flex;align-items:flex-start;gap:8px;font-size:13px;line-height:1.35;padding:8px 10px;border:1px solid rgba(139,34,82,.12);border-radius:10px;background:#fffafc}
+  .mant-fact-row span{color:#8B2252;font-weight:900;white-space:nowrap;flex:0 0 auto}
+  .mant-fact-row strong{color:#3a2b30;font-weight:800;overflow-wrap:anywhere;word-break:normal}
+  .mant-money-field{position:relative;display:block}
+  .mant-money-prefix{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#8B2252;font-weight:900;pointer-events:none}
+  .mant-money-input{padding-left:28px}
   .mant-latest-note{background:#fffafc;border:1px solid #f0d0dc;border-radius:8px;padding:10px 12px;font-size:13px;color:#42292e;line-height:1.45;margin-bottom:14px}
   .mant-latest-note span{display:block;color:#8B2252;font-size:11px;font-weight:900;text-transform:uppercase;margin-bottom:5px}
   .mant-planes-grid{display:grid;gap:10px}
@@ -136,4 +139,4 @@
   .mant-service-realizado{display:contents}
   .mant-provider-active{display:none}
   .mant-provider-check{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:700;color:#513744;cursor:pointer}
-  @media(max-width:760px){.mant-origin-tabs{display:grid}.mant-origin-tab{justify-content:space-between}.mant-form-grid,.mant-asset-create-grid,.mant-board-tools,.mant-drawer-evidence{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr}.mant-drawer-photo{width:100%;max-height:280px;aspect-ratio:16/10}.mant-ticket-main{grid-template-columns:64px minmax(0,1fr)}.mant-ticket-photo,.mant-ticket-photo-empty{width:64px}}
+  @media(max-width:760px){.mant-origin-tabs{display:grid}.mant-origin-tab{justify-content:space-between}.mant-form-grid,.mant-asset-create-grid,.mant-board-tools,.mant-drawer-evidence,.mant-drawer-facts{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr}.mant-drawer-photo{width:100%;max-height:280px;aspect-ratio:16/10}.mant-ticket-main{grid-template-columns:64px minmax(0,1fr)}.mant-ticket-photo,.mant-ticket-photo-empty{width:64px}}

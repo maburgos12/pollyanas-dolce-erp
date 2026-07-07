@@ -137,6 +137,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertContains(response, 'if (event.target.closest("#btnNuevaFalla")) modal.classList.add("is-open");')
         self.assertContains(response, 'if (event.target.closest("#btnServicioRealizado")) open("realizado");')
         self.assertContains(response, 'reportMaintenanceInitFailure')
+        self.assertContains(response, 'class="mant-money-prefix"')
 
 
 class MantenimientoUnifiedInboxTests(TestCase):
