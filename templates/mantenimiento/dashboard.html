@@ -909,6 +909,30 @@
 
 {% block extra_js %}
 <script>
+function reportMaintenanceInitFailure(scope, missingIds) {
+  const message = `[mantenimiento] ${scope} sin inicializar. Faltan nodos: ${missingIds.join(", ")}`;
+  console.error(message);
+  if (document.getElementById("mantInitError")) return;
+  const shell = document.querySelector(".module-shell.bi-shell");
+  if (!shell) return;
+  const alert = document.createElement("div");
+  alert.id = "mantInitError";
+  alert.className = "alert alert-danger";
+  alert.textContent = "Mantenimiento cargó incompleto. Recarga la página; si sigue igual, reporta a sistemas.";
+  shell.insertAdjacentElement("afterbegin", alert);
+}
+
+function requireElements(scope, elementMap) {
+  const missing = Object.entries(elementMap)
+    .filter(([, element]) => !element)
+    .map(([key]) => key);
+  if (missing.length) {
+    reportMaintenanceInitFailure(scope, missing);
+    return null;
+  }
+  return elementMap;
+}
+
 // ── Tab switching ──
 (() => {
   const tabs = document.querySelectorAll("[data-tab]");
@@ -989,6 +1013,11 @@
   const date = document.getElementById("mantDrawerDate");
   const latestBlock = document.getElementById("mantDrawerLatestBlock");
   const latestNote = document.getElementById("mantDrawerLatestNote");
+  if (!requireElements("drawer-seguimiento", {
+    drawer, form, title, meta, status, provider, estimated, real, asset, assetField,
+    descBlock, descBox, evidence, photo, photoLink, reporter, area, category,
+    priority, date, latestBlock, latestNote,
+  })) return;
 
   function setFact(element, value) {
     if (element) element.textContent = (value || "").trim() || "-";
@@ -1090,28 +1119,30 @@
   const motivoInput = document.getElementById("mantMotivoInput");
   const submitBtn = document.getElementById("mantCancelarSubmit");
   const cerrar = document.getElementById("mantCancelarCerrar");
-  if (!modal || !form) return;
+  if (!requireElements("cancelacion-seguimiento", {
+    modal, form, titulo, label, motivoBlock, motivoInput, submitBtn, cerrar,
+  })) return;
 
-  document.querySelectorAll("[data-open-cancelar]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const esDG = btn.dataset.esDg === "1";
-      form.action = btn.dataset.action;
-	      if (esDG) {
-	        titulo.textContent = "Eliminar reporte";
-	        label.textContent = `¿Confirmas eliminar "${btn.dataset.label}"? Esta acción no se puede deshacer.`;
-	        motivoBlock.classList.add("mant-cancel-block");
-	        motivoInput.required = false;
-	        submitBtn.textContent = "Eliminar";
-	      } else {
-	        titulo.textContent = "Solicitar cancelación";
-	        label.textContent = `Solicitar cancelación de: "${btn.dataset.label}". El DG recibirá una notificación para aprobar o rechazar.`;
-	        motivoBlock.classList.remove("mant-cancel-block");
-	        motivoInput.required = true;
+  document.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-open-cancelar]");
+    if (!btn) return;
+    const esDG = btn.dataset.esDg === "1";
+    form.action = btn.dataset.action;
+      if (esDG) {
+        titulo.textContent = "Eliminar reporte";
+        label.textContent = `¿Confirmas eliminar "${btn.dataset.label}"? Esta acción no se puede deshacer.`;
+        motivoBlock.classList.add("mant-cancel-block");
+        motivoInput.required = false;
+        submitBtn.textContent = "Eliminar";
+      } else {
+        titulo.textContent = "Solicitar cancelación";
+        label.textContent = `Solicitar cancelación de: "${btn.dataset.label}". El DG recibirá una notificación para aprobar o rechazar.`;
+        motivoBlock.classList.remove("mant-cancel-block");
+        motivoInput.required = true;
         motivoInput.value = "";
         submitBtn.textContent = "Enviar solicitud";
       }
       modal.classList.add("is-open");
-    });
   });
   cerrar.addEventListener("click", () => modal.classList.remove("is-open"));
   modal.addEventListener("click", (e) => { if (e.target === modal) modal.classList.remove("is-open"); });
@@ -1121,9 +1152,11 @@
 (() => {
   const modal = document.getElementById("modalNuevaFalla");
   const btnAbrir = document.getElementById("btnNuevaFalla");
-  if (!modal || !btnAbrir) return;
+  if (!requireElements("nueva-falla", { modal, btnAbrir })) return;
 
-  btnAbrir.addEventListener("click", () => modal.classList.add("is-open"));
+  document.addEventListener("click", (event) => {
+    if (event.target.closest("#btnNuevaFalla")) modal.classList.add("is-open");
+  });
 
   document.querySelectorAll("[data-close-nueva-falla]").forEach((btn) => {
     btn.addEventListener("click", () => modal.classList.remove("is-open"));
@@ -1143,8 +1176,6 @@
   const modal = document.getElementById("modalOrdenServicio");
   const btnRealizado = document.getElementById("btnServicioRealizado");
   const btnPendiente = document.getElementById("btnServicioPendiente");
-  if (!modal || !btnRealizado || !btnPendiente) return;
-
   const modoInput = document.getElementById("ordenServicioModo");
   const titulo = document.getElementById("modalOrdenServicioTitulo");
   const subtitulo = document.getElementById("modalOrdenServicioSubtitulo");
@@ -1163,11 +1194,16 @@
   const cierreBlock = document.getElementById("ordenServicioCierreBlock");
   const cerrar = document.getElementById("ordenServicioCerrar");
   const submit = document.getElementById("ordenServicioSubmit");
-  const realizadoOnly = modal.querySelectorAll("[data-realizado-only]");
-  const activoOnly = modal.querySelectorAll("[data-activo-only]");
   const instalacionCategorias = new Set([
     {% for categoria in instalacion_categorias %}"{{ categoria|escapejs }}"{% if not forloop.last %},{% endif %}{% endfor %}
   ]);
+  if (!requireElements("orden-servicio", {
+    modal, btnRealizado, btnPendiente, modoInput, titulo, subtitulo, fechaLabel, fecha,
+    tipo, origen, alcance, sucursal, activo, instalacion, unidad, activoField,
+    instalacionField, unidadField, cierreBlock, cerrar, submit,
+  })) return;
+  const realizadoOnly = modal.querySelectorAll("[data-realizado-only]");
+  const activoOnly = modal.querySelectorAll("[data-activo-only]");
 
   function setSelectValue(select, value) {
     if (!select) return;
@@ -1309,8 +1345,10 @@
 
   alcance.addEventListener("change", () => setAlcance(alcance.value));
   sucursal.addEventListener("change", filtrarPorSucursal);
-  btnRealizado.addEventListener("click", () => open("realizado"));
-  btnPendiente.addEventListener("click", () => open("pendiente"));
+  document.addEventListener("click", (event) => {
+    if (event.target.closest("#btnServicioRealizado")) open("realizado");
+    if (event.target.closest("#btnServicioPendiente")) open("pendiente");
+  });
   document.querySelectorAll("[data-close-orden-servicio]").forEach((button) => {
     button.addEventListener("click", () => modal.classList.remove("is-open"));
   });

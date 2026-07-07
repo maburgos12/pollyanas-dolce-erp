@@ -133,6 +133,10 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertContains(response, 'window.addEventListener("hashchange", syncTabFromHash);')
         self.assertContains(response, 'if (location.hash === `#${tabId}`) {')
         self.assertContains(response, 'const button = event.target.closest("[data-open-follow]");')
+        self.assertContains(response, 'const btn = event.target.closest("[data-open-cancelar]");')
+        self.assertContains(response, 'if (event.target.closest("#btnNuevaFalla")) modal.classList.add("is-open");')
+        self.assertContains(response, 'if (event.target.closest("#btnServicioRealizado")) open("realizado");')
+        self.assertContains(response, 'reportMaintenanceInitFailure')
 
 
 class MantenimientoUnifiedInboxTests(TestCase):
