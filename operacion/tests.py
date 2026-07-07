@@ -68,8 +68,21 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "logistica/pwa/pollyanas-logo-header.png")
         self.assertContains(response, "20260707-session-chip-v1")
+        self.assertContains(response, "operacion/manifest.webmanifest")
+        self.assertContains(response, "operacion/app-icon-192.png")
+        self.assertContains(response, "operacion/apple-touch-icon.png")
         self.assertContains(response, 'href="/logout/"')
         self.assertContains(response, "Cerrar sesión")
+
+    def test_operational_app_manifest_uses_ops_identity(self):
+        root = Path(__file__).resolve().parents[1]
+        manifest = (root / "static/operacion/manifest.webmanifest").read_text(encoding="utf-8")
+
+        self.assertIn('"name": "Pollyana\'s Ops"', manifest)
+        self.assertIn('"start_url": "/app/?source=pwa"', manifest)
+        self.assertIn("/static/operacion/app-icon-192.png", manifest)
+        self.assertIn("/static/operacion/app-icon-512.png", manifest)
+        self.assertTrue((root / "static/operacion/apple-touch-icon.png").exists())
 
     def test_mermas_only_user_can_enter_unified_app_without_losing_guardrail(self):
         user = self._user("mermas.colosio", sucursal=self.sucursal)
