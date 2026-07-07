@@ -1,6 +1,6 @@
 {
-  "name": "Pollyana's Mantenimiento",
-  "short_name": "PD Mant.",
+  "name": "App Operativa",
+  "short_name": "Operativa",
   "description": "Registra mantenimientos de equipos y vehículos",
   "start_url": "/mantenimiento/app/",
   "display": "standalone",
