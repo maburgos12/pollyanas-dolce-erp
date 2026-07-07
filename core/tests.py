@@ -1,6 +1,7 @@
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from django.conf import settings
 from django.core.management import call_command
@@ -34,7 +35,7 @@ from core.middleware import CanonicalLocalHostMiddleware
 from core.models import Departamento, Notificacion, Sucursal, UserModuleAccess, UserProfile
 from core.navigation import build_nav_groups
 from core.notificaciones import notificar_permiso_solicitado, notificar_prestamo_solicitado, usuarios_por_grupo
-from core.hallmark_ui_audit import new_issues_against_baseline
+from core.hallmark_ui_audit import new_issues_against_baseline, scan_hallmark_ui
 from core.views import _build_dashboard_daily_sales_snapshot, _build_dashboard_sales_history_summary, _compute_budget_semaforo, _compute_plan_forecast_semaforo, _sales_previous_dates, _sales_source_context
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo, PointPendingMatch, UnidadMedida
@@ -215,6 +216,16 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn("min-width: max-content !important", css)
         self.assertIn("width: auto !important", css)
 
+    def test_guardrails_own_maintenance_tab_distribution(self):
+        css = (Path(settings.BASE_DIR) / "static" / "css" / "hallmark_guardrails.css").read_text()
+        docs = (Path(settings.BASE_DIR) / "docs" / "HALLMARK_UI_GUARDRAILS.md").read_text()
+
+        self.assertIn(".page-mantenimiento-dashboard .module-tabs", css)
+        self.assertIn("grid-template-columns: 0.95fr 1fr 1.28fr 1.2fr 1fr 1fr !important;", css)
+        self.assertIn(".page-mantenimiento-dashboard .module-tab", css)
+        self.assertIn("font-size: 12.5px;", css)
+        self.assertIn("Ningun modulo puede redefinir localmente el ancho, truncado o distribucion de `.module-tabs` o `.module-tab`.", docs)
+
     def test_guardrails_standardize_tab_aliases_and_mobile_forms(self):
         css = (Path(settings.BASE_DIR) / "static" / "css" / "hallmark_guardrails.css").read_text()
         for selector in [
@@ -252,6 +263,22 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
             f"{issue.rule}: {issue.path} :: {issue.snippet}" for issue in issues[:20]
         )
         self.assertEqual(issues, [], details)
+
+    def test_hallmark_ui_flags_local_module_tab_layout_overrides(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            css = root / "static" / "css" / "feature.css"
+            css.parent.mkdir(parents=True)
+            css.write_text(
+                ".page-demo .module-tabs{display:grid;grid-template-columns:1fr 1fr 1fr}\n"
+                ".page-demo .module-tab{flex-wrap:nowrap;overflow:hidden;text-overflow:ellipsis}\n",
+                encoding="utf-8",
+            )
+
+            issues = scan_hallmark_ui(root)
+
+        rules = {issue.rule for issue in issues}
+        self.assertIn("local-module-tabs-layout", rules)
 
     def test_reportes_produccion_contains_visible_data_guardrails(self):
         css = (Path(settings.BASE_DIR) / "static" / "css" / "styles.css").read_text()

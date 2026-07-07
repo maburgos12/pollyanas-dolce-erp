@@ -43,6 +43,11 @@ INLINE_STYLE_RE = re.compile(r'style=["\'][^"\']*(?:min-width|max-width|width)\s
 WIDE_GRID_RE = re.compile(r"grid-template-columns\s*:\s*repeat\(\s*([5-9]|\d{2,})\s*,", re.IGNORECASE)
 HARD_OVERFLOW_RE = re.compile(r"overflow-x\s*:\s*hidden", re.IGNORECASE)
 NOWRAP_RE = re.compile(r"white-space\s*:\s*nowrap", re.IGNORECASE)
+LOCAL_MODULE_TABS_LAYOUT_RE = re.compile(
+    r"\.module-tabs[^{\n]*\{[^}\n]*(?:grid-template-columns|width\s*:|max-width\s*:)|"
+    r"\.module-tab[^{\n]*\{[^}\n]*(?:flex-wrap\s*:\s*nowrap|overflow\s*:\s*hidden|text-overflow\s*:\s*ellipsis)",
+    re.IGNORECASE,
+)
 
 
 def _is_skipped(path: Path) -> bool:
@@ -152,6 +157,18 @@ def scan_hallmark_ui(base_dir: Path) -> list[HallmarkIssue]:
                     rel_path,
                     _clean_snippet(line),
                     "No fuerces nowrap local en tabs/chips/botones sin una regla responsive global.",
+                )
+            )
+
+        for line in _line_matches(LOCAL_MODULE_TABS_LAYOUT_RE, text):
+            if "hallmark_guardrails.css" in rel_path:
+                continue
+            issues.append(
+                HallmarkIssue(
+                    "local-module-tabs-layout",
+                    rel_path,
+                    _clean_snippet(line),
+                    "No redefinas ancho o truncado de .module-tabs/.module-tab fuera de Hallmark; mueve esa distribucion a hallmark_guardrails.css.",
                 )
             )
 

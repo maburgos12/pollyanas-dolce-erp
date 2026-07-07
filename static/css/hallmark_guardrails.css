@@ -336,6 +336,21 @@ body,
   white-space: nowrap;
 }
 
+.main-content[data-hallmark-scope="erp"] .page-mantenimiento-dashboard .module-tabs {
+  align-items: stretch;
+  grid-template-columns: 0.95fr 1fr 1.28fr 1.2fr 1fr 1fr !important;
+}
+
+.main-content[data-hallmark-scope="erp"] .page-mantenimiento-dashboard .module-tab {
+  font-size: 12.5px;
+  gap: 6px;
+  justify-content: center;
+  line-height: 1.2;
+  max-width: none;
+  padding: 10px 12px;
+  text-align: center;
+}
+
 .main-content[data-hallmark-scope="erp"] .erp-group-tabs {
   display: flex !important;
   flex-wrap: wrap !important;
@@ -794,6 +809,15 @@ body,
 @media (max-width: 760px) {
   .main-content[data-hallmark-scope="erp"] {
     padding-inline: 12px;
+  }
+
+  .main-content[data-hallmark-scope="erp"] .page-mantenimiento-dashboard .module-tabs {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  .main-content[data-hallmark-scope="erp"] .page-mantenimiento-dashboard .module-tab {
+    flex-wrap: wrap;
+    min-width: 0;
   }
 
   .main-content[data-hallmark-scope="erp"] :is(
