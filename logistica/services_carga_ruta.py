@@ -57,6 +57,11 @@ def _cantidad_esperada(line: PointTransferLine) -> Decimal:
     return Decimal(str(line.sent_quantity or 0))
 
 
+def _point_transfer_enviada(line: PointTransferLine) -> bool:
+    transfer = (line.raw_payload or {}).get("transfer") or {}
+    return bool(line.sent_at or transfer.get("isEnviado") or transfer.get("Fecha_envio"))
+
+
 def _paradas_por_sucursal(ruta: RutaEntrega) -> dict[int, ParadaRuta]:
     paradas = ruta.paradas.select_related("punto", "punto__sucursal").order_by("orden", "id")
     result = {}
@@ -218,7 +223,7 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             if cedis_line.estatus != RutaCargaChecklistLinea.ESTATUS_PENDIENTE:
                 omitidas += 1
                 continue
-            if cantidad_esperada <= 0 and (branch.id, producto_key) in sent_product_keys:
+            if cantidad_esperada <= 0 and (_point_transfer_enviada(line) or (branch.id, producto_key) in sent_product_keys):
                 cedis_line.delete()
                 omitidas += 1
                 continue
@@ -246,8 +251,8 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             actualizadas += 1
             continue
         if cantidad_esperada <= 0:
-            if (branch.id, producto_key) in sent_product_keys:
-                # ponytail: no mostrar bloqueos viejos cuando Point ya trae enviado para el mismo producto/sucursal.
+            if _point_transfer_enviada(line) or (branch.id, producto_key) in sent_product_keys:
+                # ponytail: no mostrar reducciones cuando Point ya atendió la transferencia.
                 RutaCargaChecklistLinea.objects.filter(
                     checklist=checklist,
                     source_hash=line.source_hash,
