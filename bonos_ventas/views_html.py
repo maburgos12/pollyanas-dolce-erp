@@ -235,6 +235,10 @@ def bonos_ventas_dashboard(request):
     for sucursal in sorted(sucursales_por_id.values(), key=lambda item: item.nombre):
         rows = [bono for bono in bonos if bono.sucursal_id == sucursal.id and not bono._es_repartidor()]
         cats = [venta for venta in ventas_categoria if venta.sucursal_id == sucursal.id]
+        # NO agregar `if not rows: continue`: `rows` excluye repartidores, así que
+        # una sucursal de solo-reparto (o activa sin bonos) quedaría oculta. Todas las
+        # sucursales activas deben verse. Regresión cubierta por
+        # test_dashboard_erp_muestra_sucursal_solo_con_repartidores.
         sucursal_rows.append(
             {
                 "id": sucursal.id,
