@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-migrate_sqlite_to_postgres.py
+scripts/oneoff/migrate_sqlite_to_postgres.py
 
 Migra datos del backup SQLite → PostgreSQL local.
-Uso:  python migrate_sqlite_to_postgres.py
+Uso:  python scripts/oneoff/migrate_sqlite_to_postgres.py
 """
 
 import json

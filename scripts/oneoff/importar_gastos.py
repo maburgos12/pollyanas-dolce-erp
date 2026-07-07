@@ -1,7 +1,7 @@
 """
 Script de carga de gastos operativos 2026 al ERP.
 Ejecutar desde la raíz del repo:
-    ./.venv/bin/python importar_gastos.py
+    ./.venv/bin/python scripts/oneoff/importar_gastos.py
 
 Crea CentroCosto, CategoriaGasto y GastoOperativoMensual
 para todas las sucursales con datos reales del Excel.
@@ -10,8 +10,10 @@ para todas las sucursales con datos reales del Excel.
 import os, sys, django, json
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 # Setup Django
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(REPO_ROOT))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
 
@@ -22,7 +24,7 @@ from datetime import date
 from decimal import Decimal
 
 # ---- Cargar datos extraídos del Excel ----
-DATA_FILE = Path(__file__).parent / "gastos_2026.json"
+DATA_FILE = REPO_ROOT / "gastos_2026.json"
 with open(DATA_FILE, encoding="utf-8") as f:
     registros = json.load(f)
 
