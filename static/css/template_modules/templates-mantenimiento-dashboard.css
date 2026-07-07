@@ -111,9 +111,9 @@
   .mant-drawer-evidence{display:grid;grid-template-columns:150px minmax(0,1fr);gap:12px;align-items:start;margin-bottom:14px}
   .mant-drawer-photo{display:block;width:150px;aspect-ratio:1;border-radius:10px;object-fit:cover;border:1px solid rgba(139,34,82,.16);background:#f6edf2}
   .mant-drawer-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px}
-  .mant-fact-row{display:flex;align-items:flex-start;gap:8px;font-size:13px;line-height:1.35;padding:8px 10px;border:1px solid rgba(139,34,82,.12);border-radius:10px;background:#fffafc}
-  .mant-fact-row span{color:#8B2252;font-weight:900;min-width:68px;flex:0 0 auto}
-  .mant-fact-row strong{color:#3a2b30;font-weight:800;overflow-wrap:anywhere;word-break:normal}
+  .mant-fact-row{display:grid;gap:4px;font-size:13px;line-height:1.35;padding:8px 10px;border:1px solid rgba(139,34,82,.12);border-radius:10px;background:#fffafc;align-content:start}
+  .mant-fact-row span{color:#8B2252;font-weight:900}
+  .mant-fact-row strong{color:#3a2b30;font-weight:800;overflow-wrap:anywhere;word-break:normal;white-space:normal}
   .mant-money-field{position:relative;display:block}
   .mant-money-prefix{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#8B2252;font-weight:900;pointer-events:none}
   .mant-money-input{padding-left:28px}

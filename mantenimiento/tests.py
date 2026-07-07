@@ -138,7 +138,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertContains(response, 'if (event.target.closest("#btnServicioRealizado")) open("realizado");')
         self.assertContains(response, 'reportMaintenanceInitFailure')
         self.assertContains(response, 'class="mant-money-prefix"')
-        self.assertContains(response, 'v=20260707-mant-wrap-v3')
+        self.assertContains(response, 'v=20260707-mant-horizontal-v4')
 
 
 class MantenimientoUnifiedInboxTests(TestCase):
