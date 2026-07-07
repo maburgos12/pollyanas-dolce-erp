@@ -1580,6 +1580,19 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
         if not checklist.lineas.exists():
             sincronizar_checklist_carga_desde_point(ruta=ruta, user=request.user, ejecutar_sync=False)
             checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=False)
+        else:
+            pendientes_point = checklist.lineas.filter(
+                estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
+                cantidad_solicitada__gt=0,
+                cantidad_enviada_esperada=0,
+            )
+            sync_stale = not checklist.sincronizado_en or checklist.sincronizado_en <= timezone.now() - timedelta(minutes=2)
+            if pendientes_point.exists() and sync_stale:
+                try:
+                    sincronizar_checklist_carga_desde_point(ruta=ruta, user=request.user, ejecutar_sync=True)
+                    checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=False)
+                except ValidationError:
+                    logger.warning("No se pudo refrescar checklist Point para ruta activa %s", ruta.folio, exc_info=True)
         ultima_ubicacion = ruta.ubicaciones.select_related("repartidor__user", "unidad").first()
 
         return Response(

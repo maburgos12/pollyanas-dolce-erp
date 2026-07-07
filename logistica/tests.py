@@ -1798,6 +1798,37 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.json()["paradas"][0]["id"], self.parada.id)
         self.assertEqual(response.json()["paradas"][0]["punto_nombre_snapshot"], "Sucursal Control")
 
+    def test_api_ruta_activa_refresca_checklist_point_pendiente_viejo(self):
+        checklist = RutaCargaChecklist.objects.create(
+            ruta=self.ruta,
+            estatus=RutaCargaChecklist.ESTATUS_EN_REVISION,
+            sincronizado_en=timezone.now() - timezone.timedelta(minutes=5),
+        )
+        linea = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=self.parada,
+            source_hash="point-viejo",
+            item_code="PZA1",
+            item_name="Producto Point viejo",
+            unit="PZA",
+            cantidad_solicitada="2.000",
+            cantidad_enviada_esperada="0.000",
+        )
+
+        def refrescar(**_kwargs):
+            linea.cantidad_enviada_esperada = "2.000"
+            linea.notas = ""
+            linea.save(update_fields=["cantidad_enviada_esperada", "notas", "actualizado_en"])
+
+        self.client.force_login(self.user)
+        with patch("api.logistica_views.sincronizar_checklist_carga_desde_point", side_effect=refrescar) as sync:
+            response = self.client.get(reverse("api_logistica_ruta_activa"))
+
+        self.assertEqual(response.status_code, 200)
+        sync.assert_called_once()
+        lineas = response.json()["checklist_carga"]["lineas"]
+        self.assertEqual(lineas[0]["cantidad_enviada_esperada"], "2")
+
     def test_api_ruta_activa_reconoce_ruta_planeada_anoche_como_hoy(self):
         self.ruta.delete()
         previous_day = timezone.localdate() - timezone.timedelta(days=1)
