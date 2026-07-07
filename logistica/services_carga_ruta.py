@@ -179,6 +179,13 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
     if solo_abiertas:
         candidates = candidates.filter(is_open=True)
 
+    sent_product_keys = set()
+    for line in candidates:
+        branch = resolve_requesting_erp_branch(line)
+        producto_key = _point_producto_key(line)
+        if branch and branch.id in paradas_by_branch and producto_key and _cantidad_esperada(line) > 0:
+            sent_product_keys.add((branch.id, producto_key))
+
     creadas = 0
     actualizadas = 0
     omitidas = 0
@@ -211,6 +218,10 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             if cedis_line.estatus != RutaCargaChecklistLinea.ESTATUS_PENDIENTE:
                 omitidas += 1
                 continue
+            if cantidad_esperada <= 0 and (branch.id, producto_key) in sent_product_keys:
+                cedis_line.delete()
+                omitidas += 1
+                continue
             cedis_line.point_transfer_line = line
             cedis_line.transfer_external_id = line.transfer_external_id
             cedis_line.detail_external_id = line.detail_external_id
@@ -235,6 +246,15 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             actualizadas += 1
             continue
         if cantidad_esperada <= 0:
+            if (branch.id, producto_key) in sent_product_keys:
+                # ponytail: no mostrar bloqueos viejos cuando Point ya trae enviado para el mismo producto/sucursal.
+                RutaCargaChecklistLinea.objects.filter(
+                    checklist=checklist,
+                    source_hash=line.source_hash,
+                    estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
+                ).delete()
+                omitidas += 1
+                continue
             defaults = {
                 "parada": parada,
                 "point_transfer_line": line,
