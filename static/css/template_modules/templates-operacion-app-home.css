@@ -79,6 +79,9 @@
       font-weight: 800;
     }
     .session-chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       border: 1px solid var(--line);
       border-radius: 999px;
       background: var(--wine-light);
@@ -86,7 +89,8 @@
       padding: 4px 9px;
       font-size: 12px;
       font-weight: 900;
-      white-space:normal;
+      text-align: center;
+      white-space: normal;
     }
     .content {
       flex: 1;

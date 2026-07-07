@@ -67,6 +67,7 @@ class OperacionAppTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "logistica/pwa/pollyanas-logo-header.png")
+        self.assertContains(response, "20260707-session-chip-v1")
         self.assertContains(response, 'href="/logout/"')
         self.assertContains(response, "Cerrar sesión")
 
