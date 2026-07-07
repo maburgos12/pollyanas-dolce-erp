@@ -1,9 +1,9 @@
 const CACHE_NAME = "pollyanas-logistica-pwa-v58-workflow-icon";
 const SHELL_ASSETS = [
   "/logistica/app/",
-  "/static/logistica/pwa/manifest.json?v=20260707-workflow-icon-v2",
-  "/static/operacion/app-icon-192.png?v=20260707-workflow-icon-v2",
-  "/static/operacion/app-icon-512.png?v=20260707-workflow-icon-v2"
+  "/static/logistica/pwa/manifest.json?v=20260707-workflow-icon-v3",
+  "/static/operacion/app-icon-192.png?v=20260707-workflow-icon-v3",
+  "/static/operacion/app-icon-512.png?v=20260707-workflow-icon-v3"
 ];
 
 self.addEventListener("install", (event) => {
