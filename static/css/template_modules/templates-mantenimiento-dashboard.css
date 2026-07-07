@@ -2,7 +2,7 @@
 .page-mantenimiento-dashboard .container{width:100%;max-width:none;margin:0;padding:clamp(18px,1.8vw,32px);overflow-x:clip}
   .page-mantenimiento-dashboard .bi-shell{width:100%;max-width:none;margin:0;gap:16px}
   .page-mantenimiento-dashboard .module-tabs{display:grid;grid-template-columns:.95fr 1fr 1.28fr 1.2fr 1fr 1fr;align-items:stretch}
-  .page-mantenimiento-dashboard .module-tab{min-width:0;max-width:none;white-space:nowrap;flex-wrap:nowrap;text-align:center;justify-content:center;overflow:hidden;text-overflow:ellipsis;line-height:1.2;padding:10px 12px;font-size:12.5px}
+  .page-mantenimiento-dashboard .module-tab{min-width:0;max-width:none;flex-wrap:nowrap;text-align:center;justify-content:center;overflow:hidden;text-overflow:ellipsis;line-height:1.2;padding:10px 12px;font-size:12.5px}
   .page-mantenimiento-dashboard .module-tab .mant-tab-count{margin-left:0}
   .page-mantenimiento-dashboard .bi-panel,
   .page-mantenimiento-dashboard .bi-kpi-card,
@@ -163,4 +163,4 @@
   .mant-service-realizado{display:contents}
   .mant-provider-active{display:none}
   .mant-provider-check{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:700;color:#513744;cursor:pointer}
-  @media(max-width:760px){.page-mantenimiento-dashboard .module-tabs{grid-template-columns:1fr 1fr}.page-mantenimiento-dashboard .module-tab{min-width:0;white-space:normal;flex-wrap:wrap}.mant-origin-tabs{display:grid}.mant-origin-tab{justify-content:space-between}.mant-form-grid,.mant-asset-create-grid,.mant-board-tools,.mant-drawer-evidence,.mant-drawer-facts{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr}.mant-drawer-photo{width:100%;max-height:280px;aspect-ratio:16/10}.mant-ticket-main{grid-template-columns:64px minmax(0,1fr)}.mant-ticket-photo,.mant-ticket-photo-empty{width:64px}}
+  @media(max-width:760px){.page-mantenimiento-dashboard .module-tabs{grid-template-columns:1fr 1fr}.page-mantenimiento-dashboard .module-tab{min-width:0;flex-wrap:wrap}.mant-origin-tabs{display:grid}.mant-origin-tab{justify-content:space-between}.mant-form-grid,.mant-asset-create-grid,.mant-board-tools,.mant-drawer-evidence,.mant-drawer-facts{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr}.mant-drawer-photo{width:100%;max-height:280px;aspect-ratio:16/10}.mant-ticket-main{grid-template-columns:64px minmax(0,1fr)}.mant-ticket-photo,.mant-ticket-photo-empty{width:64px}}
