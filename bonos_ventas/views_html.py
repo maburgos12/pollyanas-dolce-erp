@@ -18,6 +18,8 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from core.access import can_manage_submodule, can_view_module, can_view_submodule
 from core.models import Sucursal
 
+from recetas.utils.normalizacion import normalizar_nombre
+
 from .empleados import empleados_elegibles_bonos_ventas
 from .models import BonoVentasEmpleado, CATEGORIAS_PRODUCTO, ConfigBonoVentasPeriodo, VentaCategoriaSucursal
 from .services import sync_dias_repartidor, sync_ventas_categorias
@@ -61,24 +63,58 @@ def _recalcular_periodo(periodo: ConfigBonoVentasPeriodo) -> int:
     return total
 
 
+def _indice_sucursales_por_texto() -> dict[str, "Sucursal"]:
+    """Índice de sucursales activas por nombre/código normalizado.
+
+    Permite resolver `empleado.sucursal` (texto libre capturado en RRHH) sin
+    depender de igualdad exacta. Es robusto al prefijo 'Sucursal ', a los acentos
+    y a los separadores del código. NO emparejar por nombre exacto: el catálogo se
+    renombra y rompe el vínculo (ver FASE 1: migrar Empleado.sucursal a FK).
+    """
+    indice: dict[str, Sucursal] = {}
+    for sucursal in Sucursal.objects.filter(activa=True):
+        nombre_norm = normalizar_nombre(sucursal.nombre)
+        claves = {
+            nombre_norm,
+            normalizar_nombre(sucursal.codigo),
+            normalizar_nombre((sucursal.codigo or "").replace("_", " ")),
+        }
+        if nombre_norm.startswith("sucursal "):
+            claves.add(nombre_norm[len("sucursal "):])
+        for clave in claves:
+            if clave:
+                indice.setdefault(clave, sucursal)
+    return indice
+
+
+def _resolver_sucursal(indice: dict[str, "Sucursal"], sucursal_nombre: str) -> "Sucursal | None":
+    objetivo = normalizar_nombre(sucursal_nombre)
+    if not objetivo:
+        return None
+    if objetivo in indice:
+        return indice[objetivo]
+    if objetivo.startswith("sucursal "):
+        return indice.get(objetivo[len("sucursal "):])
+    return None
+
+
 def _inicializar_bonos(periodo: ConfigBonoVentasPeriodo) -> dict[str, object]:
     empleados = empleados_elegibles_bonos_ventas()
-    sucursal_matriz = Sucursal.objects.filter(nombre__iexact="matriz", activa=True).first()
+    indice = _indice_sucursales_por_texto()
+    sucursal_matriz = indice.get("matriz")
     creados = 0
     sin_sucursal = []
     for empleado in empleados:
         sucursal_nombre = (empleado.sucursal or "").strip()
-        if not sucursal_nombre:
-            # Repartidores (y otros sin sucursal) van a Matriz por defecto
+        sucursal = _resolver_sucursal(indice, sucursal_nombre)
+        if sucursal is None:
+            # Repartidores (y otros sin sucursal resoluble) van a Matriz por defecto
             if sucursal_matriz and (empleado.puesto_operativo or "").strip().upper() == "REPARTIDOR":
                 sucursal = sucursal_matriz
-            else:
+            elif not sucursal_nombre:
                 sin_sucursal.append(empleado.nombre)
                 continue
-        else:
-            try:
-                sucursal = Sucursal.objects.get(nombre__iexact=sucursal_nombre, activa=True)
-            except Sucursal.DoesNotExist:
+            else:
                 sin_sucursal.append(f"{empleado.nombre} (sucursal desconocida: {sucursal_nombre!r})")
                 continue
         _, created = BonoVentasEmpleado.objects.get_or_create(
