@@ -30,11 +30,11 @@ ejecución de diseño.
 
 ## Deploy manual (NO es automático al mergear)
 ```bash
-cd /opt/pastelerias-erp && git pull origin main
-docker compose -f /opt/pastelerias-erp/docker-compose.yml exec -T web python manage.py migrate --noinput
-docker compose -f /opt/pastelerias-erp/docker-compose.yml restart web
+cd /opt/pastelerias-erp
+bash scripts/deploy_web_safe.sh
 ```
 Si migrate falla por columna duplicada: `migrate <app> <numero> --fake` en la migración específica.
+`restart web` queda reservado para cambios de imagen, dependencias del contenedor o variables de entorno; para código y estáticos normales se usa recarga `HUP` de Gunicorn para no abrir una ventana de `502`.
 
 ## Backups
 - Automático: diario 2am via cron

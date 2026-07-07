@@ -171,11 +171,10 @@ quedó hecho y qué falta para confirmar.
 El deploy NO se activa solo al mergear. Pasos obligatorios tras merge a main:
 ```bash
 cd /opt/pastelerias-erp
-git pull origin main
-docker compose -f /opt/pastelerias-erp/docker-compose.yml exec -T web python manage.py migrate --noinput
-docker compose -f /opt/pastelerias-erp/docker-compose.yml restart web
+bash scripts/deploy_web_safe.sh
 ```
 Si migrate falla por columna duplicada: usar `--fake` en la migración específica.
+Usar `docker compose ... restart web` solo cuando cambie la imagen, dependencias del contenedor o variables de entorno; para cambios normales de Python/HTML/CSS/JS el `HUP` de Gunicorn evita la ventana de `502`.
 
 ### Service Worker — caché en módulos PWA
 Cualquier módulo que registre un `sw.js` mantiene un caché activo en el navegador del
@@ -209,7 +208,7 @@ No abrir una segunda tarea hasta que la primera esté deployada y validada en pr
 **Flujo mínimo obligatorio al cerrar cualquier cambio de código:**
 1. PR mergeado a main
 2. `git pull origin main` en VPS
-3. `docker compose restart web` en VPS
+3. `bash scripts/deploy_web_safe.sh` en VPS
 4. Verificar que el resultado es visible en producción
 5. Borrar la rama de trabajo local y remota cuando ya esté mergeada, deployada
    y validada, para que no se atraviese ni aparezca como opción en otros hilos:
