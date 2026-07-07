@@ -86,5 +86,10 @@
       </footer>
     </section>
   </main>
+  <script>
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/app/sw.js?v=20260707-operativa-pwa-v1", { scope: "/app/" }).catch(function () {});
+    }
+  </script>
 </body>
 </html>
