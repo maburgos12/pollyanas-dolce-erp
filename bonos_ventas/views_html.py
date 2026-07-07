@@ -235,8 +235,6 @@ def bonos_ventas_dashboard(request):
     for sucursal in sorted(sucursales_por_id.values(), key=lambda item: item.nombre):
         rows = [bono for bono in bonos if bono.sucursal_id == sucursal.id and not bono._es_repartidor()]
         cats = [venta for venta in ventas_categoria if venta.sucursal_id == sucursal.id]
-        if not rows:
-            continue
         sucursal_rows.append(
             {
                 "id": sucursal.id,
