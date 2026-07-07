@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Reportes - Reporte Diario DG{% endblock %}
+{% block page_title %}Reportes · Reporte Diario DG{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
+<style>
+  .report-shell { display: grid; gap: 20px; }
+  .report-grid { display: grid; gap: 20px; grid-template-columns: 340px 1fr; }
+  .report-card { background: #fffaf3; border: 1px solid #eadfce; border-radius: 18px; padding: 18px; box-shadow: 0 12px 30px rgba(88, 47, 32, 0.08); }
+  .report-kicker { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #8b5e3c; margin-bottom: 8px; }
+  .report-title { margin: 0 0 8px; font-size: 30px; line-height: 1.1; }
+  .report-copy { margin: 0; color: #6a5848; }
+  .report-form { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; margin-top: 16px; }
+  .report-form label { display: block; font-size: 12px; color: #7d6855; margin-bottom: 6px; }
+  .report-form input, .report-form select { min-width: 180px; }
+  .report-meta { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .report-meta strong { display: block; font-size: 22px; }
+  .report-preview { background: #2f241d; color: #f8f1e8; border-radius: 16px; padding: 18px; overflow: auto; white-space: pre-wrap; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .report-list { width: 100%; border-collapse: collapse; }
+  .report-list td, .report-list th { padding: 10px 8px; border-bottom: 1px solid #eadfce; text-align: left; vertical-align: top; }
+  .report-actions { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+  .report-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; }
+  .report-badge.ready { background: #e5f7ec; color: #20663c; }
+  .report-badge.error { background: #fde8e8; color: #9f2d2d; }
+  .report-badge.stale { background: #fff1d6; color: #8a5a00; }
+  @media (max-width: 960px) {
+    .report-grid { grid-template-columns: 1fr; }
+    .report-meta { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-shell bi-shell report-shell">
+  <nav class="module-tabs report-tabs" aria-label="Reportes">
+    {% for tab in module_tabs %}
+    <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
+    {% endfor %}
+  </nav>
+
+  <section class="report-card">
+    <div class="report-kicker">Dirección general</div>
+    <h1 class="report-title">Preview del reporte diario</h1>
+    <p class="report-copy">Aquí ves exactamente el cuerpo que el ERP enviará por correo para una fecha operativa dada, junto con el estado del snapshot y el historial reciente.</p>
+    <form class="report-form" method="get">
+      <div>
+        <label for="fecha_operacion">Fecha operativa</label>
+        <input id="fecha_operacion" name="fecha_operacion" type="date" value="{{ target_date_iso }}">
+      </div>
+      <div>
+        <button type="submit">Cargar snapshot</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="report-meta">
+    <article class="report-card">
+      <div class="report-kicker">Snapshot visible</div>
+      <strong>{{ snapshot.fecha_operacion|date:"Y-m-d"|default:"Sin snapshot" }}</strong>
+      {% if snapshot %}
+      <span class="report-badge {% if snapshot.status == 'READY' %}ready{% elif snapshot.status == 'ERROR' %}error{% else %}stale{% endif %}">
+        {{ snapshot.get_status_display }}
+      </span>
+      {% endif %}
+    </article>
+    <article class="report-card">
+      <div class="report-kicker">Generado</div>
+      <strong>{{ snapshot.generated_at|date:"Y-m-d H:i"|default:"-" }}</strong>
+      <div class="report-copy">Última construcción del snapshot elegido.</div>
+    </article>
+    <article class="report-card">
+      <div class="report-kicker">Corte fuente</div>
+      <strong>{{ snapshot.source_cutoff_at|date:"Y-m-d H:i"|default:"-" }}</strong>
+      <div class="report-copy">Momento de corte operativo que quedó persistido.</div>
+    </article>
+    <article class="report-card">
+      <div class="report-kicker">Último READY</div>
+      <strong>{{ latest_ready.fecha_operacion|date:"Y-m-d"|default:"-" }}</strong>
+      <div class="report-copy">Referencia rápida del último snapshot utilizable.</div>
+    </article>
+  </section>
+
+  <section class="report-grid">
+    <article class="report-card">
+      <div class="report-kicker">Historial reciente</div>
+      <div class="table-responsive">
+        <table class="report-list">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Status</th>
+              <th>Generado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in snapshot_rows %}
+            <tr>
+              <td><a href="?fecha_operacion={{ row.fecha_operacion|date:'Y-m-d' }}">{{ row.fecha_operacion|date:"Y-m-d" }}</a></td>
+              <td>{{ row.status }}</td>
+              <td>{{ row.generated_at|date:"Y-m-d H:i" }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="3">No hay snapshots recientes.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="report-actions">
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="resend">
+          <input type="hidden" name="fecha_operacion" value="{{ target_date_iso }}">
+          <button type="submit" {% if not snapshot %}disabled{% endif %}>Reenviar correo real</button>
+        </form>
+      </div>
+    </article>
+
+    <article class="report-card">
+      <div class="report-kicker">Cuerpo exacto del correo</div>
+      <div class="report-preview">{{ body_preview }}</div>
+    </article>
+  </section>
+</div>
+{% endblock %}

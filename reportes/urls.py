@@ -22,6 +22,7 @@ urlpatterns = [
     path("produccion-automatica/", views.production_orders, name="production_orders"),
     path("ventas/", views.ventas, name="ventas"),
     path("cierre-operativo/", views.cierre_operativo, name="cierre_operativo"),
+    path("reporte-diario/", views.reporte_diario, name="reporte_diario"),
     path("cierre-producto/", views.cierre_producto, name="cierre_producto"),
     path("produccion/", ProducidoVsVendidoMermaView.as_view(), name="producido_vs_vendido"),
     path("produccion/data/", ProducidoVsVendidoMermaView.as_view(), name="producido_vs_vendido_data"),

@@ -78,6 +78,7 @@ from ..models import (
     SolicitudReabastoCedisLinea,
 )
 from ..utils.costeo_versionado import asegurar_version_costeo, calcular_costeo_receta, comparativo_versiones
+from ..utils.derived_product_presentations import get_total_cost_map
 from ..utils.costeo_semanal import snapshot_weekly_costs, week_bounds
 from ..utils.costeo_snapshot import resolve_insumo_unit_cost, resolve_line_snapshot_cost
 from ..utils.derived_product_presentations import (
@@ -19170,6 +19171,33 @@ def _point_waste_branch_label(row: PointWasteLine) -> tuple[str, str]:
     return code, branch_name or code
 
 
+def _point_waste_effective_total_cost(
+    row: PointWasteLine,
+    *,
+    recipe_cost_map: dict[int, Decimal],
+) -> Decimal:
+    total_cost = Decimal(str(row.total_cost or 0))
+    if total_cost > 0:
+        return total_cost
+
+    unit_cost = Decimal(str(row.unit_cost or 0))
+    quantity = Decimal(str(row.quantity or 0))
+    if unit_cost > 0 and quantity > 0:
+        return unit_cost * quantity
+
+    if row.receta_id:
+        recipe_unit_cost = recipe_cost_map.get(int(row.receta_id), Decimal("0"))
+        if recipe_unit_cost > 0 and quantity > 0:
+            return recipe_unit_cost * quantity
+
+    if row.insumo_id:
+        insumo_unit_cost = _latest_cost_for_insumo(row.insumo)
+        if insumo_unit_cost and insumo_unit_cost > 0 and quantity > 0:
+            return Decimal(str(insumo_unit_cost)) * quantity
+
+    return total_cost
+
+
 def _build_point_exec_summary(fecha_operacion: date) -> dict[str, Any]:
     cierre_fecha = fecha_operacion
     try:
@@ -19286,13 +19314,20 @@ def _build_point_waste_summary(fecha_operacion: date) -> dict[str, Any]:
             .order_by("movement_at", "branch__name", "item_name")
             if _point_operational_date_from_timestamp(row.movement_at) == cierre_fecha
         ]
+        recipe_cost_map = get_total_cost_map(
+            {int(row.receta_id) for row in waste_rows if row.receta_id}
+        )
         total_rows = len(waste_rows)
         total_qty = sum((Decimal(str(row.quantity or 0)) for row in waste_rows), Decimal("0"))
-        total_cost = sum((Decimal(str(row.total_cost or 0)) for row in waste_rows), Decimal("0"))
+        total_cost = sum(
+            (_point_waste_effective_total_cost(row, recipe_cost_map=recipe_cost_map) for row in waste_rows),
+            Decimal("0"),
+        )
         branch_buckets: dict[tuple[str, str], dict[str, Any]] = {}
         responsible_buckets: dict[str, dict[str, Any]] = {}
         for row in waste_rows:
             branch_code, branch_name = _point_waste_branch_label(row)
+            effective_total_cost = _point_waste_effective_total_cost(row, recipe_cost_map=recipe_cost_map)
             branch_bucket = branch_buckets.setdefault(
                 (branch_code, branch_name),
                 {
@@ -19305,7 +19340,7 @@ def _build_point_waste_summary(fecha_operacion: date) -> dict[str, Any]:
                 },
             )
             branch_bucket["total_qty"] += Decimal(str(row.quantity or 0))
-            branch_bucket["total_cost"] += Decimal(str(row.total_cost or 0))
+            branch_bucket["total_cost"] += effective_total_cost
             branch_bucket["total_rows"] += 1
 
             responsible = (row.responsible or "").strip()
@@ -19320,7 +19355,7 @@ def _build_point_waste_summary(fecha_operacion: date) -> dict[str, Any]:
                     },
                 )
                 responsible_bucket["total_qty"] += Decimal(str(row.quantity or 0))
-                responsible_bucket["total_cost"] += Decimal(str(row.total_cost or 0))
+                responsible_bucket["total_cost"] += effective_total_cost
                 responsible_bucket["total_rows"] += 1
 
         top_branches = sorted(
