@@ -1,9 +1,9 @@
 const CACHE_NAME = "pollyanas-fallas-pwa-v8-pwa-format";
 const SHELL_ASSETS = [
   "/fallas/app/",
-  "/static/fallas/manifest.json?v=20260707-workflow-icon-v4",
-  "/static/operacion/app-icon-192.png?v=20260707-workflow-icon-v4",
-  "/static/operacion/app-icon-512.png?v=20260707-workflow-icon-v4"
+  "/static/fallas/manifest.json?v=20260707-workflow-icon-v5",
+  "/static/operacion/app-icon-192.png?v=20260707-workflow-icon-v5",
+  "/static/operacion/app-icon-512.png?v=20260707-workflow-icon-v5"
 ];
 
 self.addEventListener("install", (event) => {
