@@ -4102,6 +4102,29 @@ class LogisticaControlRutasTests(TestCase):
 
         self.assertFalse(RutaCargaChecklistLinea.objects.filter(checklist=resumen.checklist, source_hash=reducida.source_hash).exists())
 
+    def test_checklist_carga_omite_linea_cero_si_mismo_folio_ya_tiene_enviados(self):
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        reducida = self._crear_transferencia_point_abierta(
+            item_name="Galleta Lotus",
+            source_hash="lotus-reducida-cero",
+        )
+        reducida.transfer_external_id = "T-LOTUS"
+        reducida.sent_quantity = Decimal("0.000")
+        reducida.sent_at = None
+        reducida.raw_payload = {"transfer": {"isEnviado": False}}
+        reducida.save(update_fields=["transfer_external_id", "sent_quantity", "sent_at", "raw_payload", "updated_at"])
+        enviada = self._crear_transferencia_point_abierta(
+            item_name="Pastel Fresas con Crema Mini",
+            source_hash="lotus-folio-enviado",
+        )
+        enviada.transfer_external_id = "T-LOTUS"
+        enviada.save(update_fields=["transfer_external_id", "updated_at"])
+
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        self.assertFalse(RutaCargaChecklistLinea.objects.filter(checklist=resumen.checklist, source_hash=reducida.source_hash).exists())
+        self.assertTrue(RutaCargaChecklistLinea.objects.filter(checklist=resumen.checklist, source_hash=enviada.source_hash).exists())
+
     def test_checklist_carga_no_genera_lineas_para_parada_cedis(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
         cedis_sucursal = Sucursal.objects.create(codigo="CEDIS-T", nombre="CEDIS Test", activa=True)

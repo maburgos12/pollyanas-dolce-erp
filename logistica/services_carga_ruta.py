@@ -185,11 +185,14 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
         candidates = candidates.filter(is_open=True)
 
     sent_product_keys = set()
+    sent_transfer_keys = set()
     for line in candidates:
         branch = resolve_requesting_erp_branch(line)
         producto_key = _point_producto_key(line)
-        if branch and branch.id in paradas_by_branch and producto_key and _cantidad_esperada(line) > 0:
-            sent_product_keys.add((branch.id, producto_key))
+        if branch and branch.id in paradas_by_branch and (_point_transfer_enviada(line) or _cantidad_esperada(line) > 0):
+            sent_transfer_keys.add((branch.id, line.transfer_external_id))
+            if producto_key and _cantidad_esperada(line) > 0:
+                sent_product_keys.add((branch.id, producto_key))
 
     creadas = 0
     actualizadas = 0
@@ -223,7 +226,11 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             if cedis_line.estatus != RutaCargaChecklistLinea.ESTATUS_PENDIENTE:
                 omitidas += 1
                 continue
-            if cantidad_esperada <= 0 and (_point_transfer_enviada(line) or (branch.id, producto_key) in sent_product_keys):
+            if cantidad_esperada <= 0 and (
+                _point_transfer_enviada(line)
+                or (branch.id, line.transfer_external_id) in sent_transfer_keys
+                or (branch.id, producto_key) in sent_product_keys
+            ):
                 cedis_line.delete()
                 omitidas += 1
                 continue
@@ -251,7 +258,11 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             actualizadas += 1
             continue
         if cantidad_esperada <= 0:
-            if _point_transfer_enviada(line) or (branch.id, producto_key) in sent_product_keys:
+            if (
+                _point_transfer_enviada(line)
+                or (branch.id, line.transfer_external_id) in sent_transfer_keys
+                or (branch.id, producto_key) in sent_product_keys
+            ):
                 # ponytail: no mostrar reducciones cuando Point ya atendió la transferencia.
                 RutaCargaChecklistLinea.objects.filter(
                     checklist=checklist,
