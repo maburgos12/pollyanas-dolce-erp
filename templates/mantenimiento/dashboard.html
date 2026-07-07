@@ -101,8 +101,8 @@
         </div>
         <div class="bi-panel-actions">
           <button class="btn btn-primary btn-sm" type="button" id="btnNuevaFalla">+ Falla / imprevisto</button>
-          <button class="btn btn-secondary btn-sm" type="button" onclick="abrirModalServicio('', 'realizado')">+ Servicio sin orden</button>
-          <button class="btn btn-secondary btn-sm" type="button" onclick="abrirModalPlan()">+ Programar servicio</button>
+          <button class="btn btn-secondary btn-sm" type="button" id="btnServicioRealizado">+ Servicio sin orden</button>
+          <button class="btn btn-secondary btn-sm" type="button" id="btnServicioPendiente">+ Programar servicio</button>
           <a class="btn btn-secondary btn-sm" href="{% url 'mantenimiento:crear-reporte-unidad' %}">Nuevo reporte de unidad</a>
         </div>
       </div>
@@ -262,7 +262,7 @@
           <p class="bi-copy">Cambios de aceite, frenos, llantas y más. Registra el servicio aquí para actualizar la próxima fecha automáticamente.</p>
         </div>
         <div class="bi-panel-actions">
-          <button class="btn btn-primary btn-sm" type="button" onclick="abrirModalServicio()">+ Registrar servicio</button>
+          <button class="btn btn-primary btn-sm" type="button" onclick="abrirModalServicio('', 'realizado', 'flota')">+ Registrar servicio</button>
         </div>
       </div>
       {% if servicios_flota %}
@@ -294,7 +294,7 @@
             </div>
           </div>
           <button class="btn btn-secondary btn-sm" type="button"
-            onclick="abrirModalServicio('{{ srv.unidad.pk }}')">
+            onclick="abrirModalServicio('{{ srv.unidad.pk }}', 'realizado', 'flota')">
             Registrar siguiente
           </button>
         </article>
@@ -784,10 +784,10 @@
 
     <!-- Selector de modo -->
     <div class="mant-mode-switch">
-      <button type="button" id="modoRealizado" class="mant-mode-btn is-first is-active" onclick="setModoServicio('realizado')">
+      <button type="button" id="modoRealizado" class="mant-mode-btn is-first is-active" onclick="setModoServicioLegacy('realizado')">
         Registrar servicio ya realizado
       </button>
-      <button type="button" id="modoProgramado" class="mant-mode-btn" onclick="setModoServicio('programado')">
+      <button type="button" id="modoProgramado" class="mant-mode-btn" onclick="setModoServicioLegacy('programado')">
         Programar próximo (sin historial)
       </button>
     </div>
@@ -844,7 +844,7 @@
         </label>
       </div>
       <div class="mant-eliminar-actions">
-        <button class="btn btn-secondary btn-sm" type="button" onclick="cerrarModalServicio()">Cancelar</button>
+        <button class="btn btn-secondary btn-sm" type="button" onclick="cerrarModalServicioLegacy()">Cancelar</button>
         <button class="btn btn-primary btn-sm" id="servicioSubmitBtn" type="submit">Registrar</button>
       </div>
     </form>
@@ -1260,11 +1260,28 @@
     submit.textContent = esPendiente ? "Programar servicio" : "Guardar servicio";
   }
 
-  function open(modo) {
+  function open(modo, unidadId = "", alcanceValue = "activo") {
     setModo(modo);
+    if (alcanceValue) {
+      alcance.value = alcanceValue;
+      setAlcance(alcanceValue);
+    }
+    if (unidadId) {
+      const unidadOption = unidad.querySelector(`option[value="${unidadId}"]`);
+      if (unidadOption && unidadOption.dataset.sucursal) {
+        sucursal.value = unidadOption.dataset.sucursal;
+        filtrarPorSucursal();
+      }
+      unidad.value = String(unidadId);
+    }
     modal.classList.add("is-open");
     setTimeout(() => alcance.focus(), 120);
   }
+
+  window.abrirModalServicio = function abrirModalServicio(unidadId = "", modo = "realizado", alcanceValue = "activo") {
+    const resolvedAlcance = unidadId && alcanceValue === "activo" ? "flota" : alcanceValue;
+    open(modo, unidadId, resolvedAlcance);
+  };
 
   alcance.addEventListener("change", () => setAlcance(alcance.value));
   sucursal.addEventListener("change", filtrarPorSucursal);
@@ -1329,7 +1346,7 @@ const MODOS_HELP = {
   programado: "Úsalo cuando aún no hay historial pero ya sabes cuándo toca el próximo servicio. Registra solo la fecha objetivo y el sistema la usará como punto de partida.",
 };
 
-function setModoServicio(modo) {
+function setModoServicioLegacy(modo) {
   document.getElementById("modoServicioInput").value = modo;
   const esRealizado = modo === "realizado";
   document.getElementById("modoRealizado").classList.toggle("is-active", esRealizado);
@@ -1356,18 +1373,18 @@ function setModoServicio(modo) {
   }
 }
 
-function abrirModalServicio(unidadId) {
+function abrirModalServicioLegacy(unidadId) {
   const modal = document.getElementById("modalServicio");
   document.getElementById("servicioUnidadId").value = unidadId || "";
   document.getElementById("servicioNombre").value = "";
-  setModoServicio("realizado");
+  setModoServicioLegacy("realizado");
   modal.classList.add("is-open");
   setTimeout(() => document.getElementById("servicioNombre").focus(), 120);
 }
-function cerrarModalServicio() {
+function cerrarModalServicioLegacy() {
   document.getElementById("modalServicio").classList.remove("is-open");
 }
-document.getElementById("modalServicio").addEventListener("click", (e) => { if (e.target === document.getElementById("modalServicio")) cerrarModalServicio(); });
+document.getElementById("modalServicio").addEventListener("click", (e) => { if (e.target === document.getElementById("modalServicio")) cerrarModalServicioLegacy(); });
 
 // ── Modal tipo de servicio ──
 function actualizarCamposTipo() {
@@ -1448,7 +1465,7 @@ document.getElementById("modalProveedor").addEventListener("click", (e) => {
 
 // Cerrar con ESC (extender el existente)
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { cerrarModalPlan(); cerrarModalServicio(); cerrarModalTipoServicio(); cerrarModalProveedor(); }
+  if (e.key === "Escape") { cerrarModalPlan(); cerrarModalServicioLegacy(); cerrarModalTipoServicio(); cerrarModalProveedor(); }
 });
 </script>
 {% endblock %}
