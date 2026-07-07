@@ -66,6 +66,7 @@ class OperacionAppTests(TestCase):
         response = self.client.get("/app/")
 
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "logistica/pwa/pollyanas-logo-header.png")
         self.assertContains(response, 'href="/logout/"')
         self.assertContains(response, "Cerrar sesión")
 
