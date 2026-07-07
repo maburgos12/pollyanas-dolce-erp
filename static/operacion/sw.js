@@ -1,9 +1,9 @@
 const CACHE_NAME = "pollyanas-app-operativa-pwa-v1";
 const SHELL_ASSETS = [
   "/app/",
-  "/static/operacion/manifest.webmanifest?v=20260707-workflow-icon-v4",
-  "/static/operacion/app-icon-192.png?v=20260707-workflow-icon-v4",
-  "/static/operacion/app-icon-512.png?v=20260707-workflow-icon-v4"
+  "/static/operacion/manifest.webmanifest?v=20260707-workflow-icon-v5",
+  "/static/operacion/app-icon-192.png?v=20260707-workflow-icon-v5",
+  "/static/operacion/app-icon-512.png?v=20260707-workflow-icon-v5"
 ];
 
 self.addEventListener("install", (event) => {

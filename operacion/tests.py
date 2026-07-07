@@ -79,12 +79,28 @@ class OperacionAppTests(TestCase):
         root = Path(__file__).resolve().parents[1]
         manifest = (root / "static/operacion/manifest.webmanifest").read_text(encoding="utf-8")
 
-        self.assertIn('"name": "App Operativa"', manifest)
+        self.assertIn('"name": "Pollyana\'s Operativa"', manifest)
         self.assertIn('"short_name": "Operativa"', manifest)
         self.assertIn('"start_url": "/app/?source=pwa"', manifest)
         self.assertIn("/static/operacion/app-icon-192.png", manifest)
         self.assertIn("/static/operacion/app-icon-512.png", manifest)
         self.assertTrue((root / "static/operacion/apple-touch-icon.png").exists())
+
+    def test_module_manifests_install_app_operativa_home(self):
+        root = Path(__file__).resolve().parents[1]
+        for relative_path in (
+            "logistica/static/logistica/pwa/manifest.json",
+            "static/mantenimiento/manifest.json",
+            "static/fallas/manifest.json",
+        ):
+            manifest = (root / relative_path).read_text(encoding="utf-8")
+
+            self.assertIn('"id": "/app/"', manifest)
+            self.assertIn('"start_url": "/app/?source=pwa"', manifest)
+            self.assertIn('"scope": "/"', manifest)
+            self.assertNotIn('"start_url": "/logistica/app/"', manifest)
+            self.assertNotIn('"start_url": "/mantenimiento/app/"', manifest)
+            self.assertNotIn('"start_url": "/fallas/app/"', manifest)
 
     def test_operational_app_serves_own_service_worker(self):
         response = self.client.get("/app/sw.js")
@@ -93,7 +109,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response["Content-Type"], "application/javascript")
         body = response.content.decode("utf-8")
         self.assertIn("pollyanas-app-operativa-pwa-v1", body)
-        self.assertIn("/static/operacion/manifest.webmanifest?v=20260707-workflow-icon-v4", body)
+        self.assertIn("/static/operacion/manifest.webmanifest?v=20260707-workflow-icon-v5", body)
 
     def test_mermas_only_user_can_enter_unified_app_without_losing_guardrail(self):
         user = self._user("mermas.colosio", sucursal=self.sucursal)

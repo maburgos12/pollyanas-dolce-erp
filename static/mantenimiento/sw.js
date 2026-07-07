@@ -1,9 +1,9 @@
 const CACHE_NAME = "pollyanas-mantenimiento-pwa-v10-20260707-pwa-format";
 const SHELL_ASSETS = [
   "/mantenimiento/app/",
-  "/static/mantenimiento/manifest.json?v=20260707-workflow-icon-v4",
-  "/static/operacion/app-icon-192.png?v=20260707-workflow-icon-v4",
-  "/static/operacion/app-icon-512.png?v=20260707-workflow-icon-v4"
+  "/static/mantenimiento/manifest.json?v=20260707-workflow-icon-v5",
+  "/static/operacion/app-icon-192.png?v=20260707-workflow-icon-v5",
+  "/static/operacion/app-icon-512.png?v=20260707-workflow-icon-v5"
 ];
 
 self.addEventListener("install", (event) => {
