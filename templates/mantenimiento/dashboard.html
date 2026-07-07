@@ -7,7 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<link rel="stylesheet" href="/static/css/template_modules/templates-mantenimiento-dashboard.css?v=20260707-mant-tabs-v7">
+<link rel="stylesheet" href="/static/css/template_modules/templates-mantenimiento-dashboard.css?v=20260707-mant-facts-v8">
 {% endblock %}
 
 {% block content %}
@@ -1063,10 +1063,12 @@ function requireElements(scope, elementMap) {
 	        photo.src = photoUrl;
 	        photoLink.href = photoUrl;
 	        photoLink.classList.remove("pd-is-hidden");
+          evidence.classList.remove("is-without-photo");
 	      } else {
 	        photo.removeAttribute("src");
 	        photoLink.removeAttribute("href");
 	        photoLink.classList.add("pd-is-hidden");
+          evidence.classList.add("is-without-photo");
 	      }
 	    }
     setFact(reporter, button.dataset.reporter);
