@@ -11,7 +11,7 @@ git pull origin main
 "${COMPOSE[@]}" exec -T web python manage.py migrate --noinput
 "${COMPOSE[@]}" exec -T web python manage.py check
 "${COMPOSE[@]}" exec -T web python manage.py collectstatic --noinput
-"${COMPOSE[@]}" exec -T web kill -HUP 1
+"${COMPOSE[@]}" exec -T web sh -lc 'kill -HUP 1'
 
 for _ in {1..20}; do
   if curl -fsS http://127.0.0.1:8011/login/ >/dev/null; then
