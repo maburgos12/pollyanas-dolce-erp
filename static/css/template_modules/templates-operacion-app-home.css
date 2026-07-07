@@ -56,8 +56,9 @@
       min-width: 0;
     }
     .brand-logo {
-      width: 58px;
-      height: 36px;
+      width: min(142px, 30vw);
+      height: auto;
+      max-height: 48px;
       object-fit: contain;
       flex: 0 0 auto;
       filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .08));
