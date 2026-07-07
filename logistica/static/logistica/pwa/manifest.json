@@ -1,20 +1,25 @@
 {
   "name": "App Operativa",
   "short_name": "Operativa",
+  "id": "/logistica/app/",
   "start_url": "/logistica/app/",
+  "scope": "/logistica/",
   "display": "standalone",
   "background_color": "#0f0f14",
   "theme_color": "#8B2252",
+  "orientation": "portrait",
   "icons": [
     {
       "src": "/static/operacion/app-icon-192.png?v=20260707-workflow-icon-v4",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "/static/operacion/app-icon-512.png?v=20260707-workflow-icon-v4",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
     }
   ]
 }

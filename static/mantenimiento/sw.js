@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-mantenimiento-pwa-v9-20260707-workflow-icon";
+const CACHE_NAME = "pollyanas-mantenimiento-pwa-v10-20260707-pwa-format";
 const SHELL_ASSETS = [
   "/mantenimiento/app/",
   "/static/mantenimiento/manifest.json?v=20260707-workflow-icon-v4",

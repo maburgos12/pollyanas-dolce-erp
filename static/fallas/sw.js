@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-fallas-pwa-v7-workflow-icon";
+const CACHE_NAME = "pollyanas-fallas-pwa-v8-pwa-format";
 const SHELL_ASSETS = [
   "/fallas/app/",
   "/static/fallas/manifest.json?v=20260707-workflow-icon-v4",

@@ -5,6 +5,10 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#8B2252">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="App Operativa">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>App Operativa</title>
     <link rel="manifest" href="{% static 'logistica/pwa/manifest.json' %}?v=20260707-workflow-icon-v4">
     <link rel="icon" type="image/png" sizes="192x192" href="{% static 'operacion/app-icon-192.png' %}?v=20260707-workflow-icon-v4">
@@ -5033,7 +5037,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v57", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v59-pwa-format", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();
