@@ -1059,8 +1059,10 @@
 
   if (boardSearch) boardSearch.addEventListener("input", filterBoard);
 
-  document.querySelectorAll("[data-open-follow]").forEach((button) => {
-    button.addEventListener("click", () => openDrawer(button));
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-open-follow]");
+    if (!button) return;
+    openDrawer(button);
   });
   document.querySelectorAll("[data-close-drawer]").forEach((button) => {
     button.addEventListener("click", () => drawer.classList.remove("is-open"));

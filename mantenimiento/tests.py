@@ -132,6 +132,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
 
         self.assertContains(response, 'window.addEventListener("hashchange", syncTabFromHash);')
         self.assertContains(response, 'if (location.hash === `#${tabId}`) {')
+        self.assertContains(response, 'const button = event.target.closest("[data-open-follow]");')
 
 
 class MantenimientoUnifiedInboxTests(TestCase):
