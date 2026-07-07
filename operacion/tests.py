@@ -74,11 +74,12 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, 'href="/logout/"')
         self.assertContains(response, "Cerrar sesión")
 
-    def test_operational_app_manifest_uses_ops_identity(self):
+    def test_operational_app_manifest_uses_app_operativa_identity(self):
         root = Path(__file__).resolve().parents[1]
         manifest = (root / "static/operacion/manifest.webmanifest").read_text(encoding="utf-8")
 
-        self.assertIn('"name": "Pollyana\'s Ops"', manifest)
+        self.assertIn('"name": "App Operativa"', manifest)
+        self.assertIn('"short_name": "Operativa"', manifest)
         self.assertIn('"start_url": "/app/?source=pwa"', manifest)
         self.assertIn("/static/operacion/app-icon-192.png", manifest)
         self.assertIn("/static/operacion/app-icon-512.png", manifest)

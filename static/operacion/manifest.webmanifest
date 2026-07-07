@@ -1,6 +1,6 @@
 {
-  "name": "Pollyana's Ops",
-  "short_name": "PD Ops",
+  "name": "App Operativa",
+  "short_name": "Operativa",
   "description": "App operativa de Pollyana's Dolce",
   "id": "/app/",
   "start_url": "/app/?source=pwa",
