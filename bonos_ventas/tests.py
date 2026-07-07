@@ -16,6 +16,7 @@ from rrhh.models import Empleado, HoraExtra, NominaLinea, NominaPeriodo, Permiso
 from .models import BonoVentasEmpleado, ConfigBonoVentasPeriodo, RegistroDiarioVentas, VentaCategoriaSucursal
 from .services import sync_ventas_categorias
 from .views import _recalcular_desde_registros
+from .views_html import _inicializar_bonos
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -69,6 +70,44 @@ class BonosVentasTests(TestCase):
         repartidor_row = response.context["repartidor_row"]
         self.assertIsNotNone(repartidor_row)
         self.assertEqual(repartidor_row["count"], 1)
+
+    def test_inicializar_bonos_resuelve_sucursal_por_codigo_pese_a_rename(self):
+        # El catálogo se renombró a 'Sucursal X' (sin acento), pero los empleados
+        # siguen con el nombre viejo/acentuado. La inicialización debe resolver por
+        # código/normalización, NO por igualdad exacta, o esas sucursales quedan invisibles.
+        colosio = Sucursal.objects.create(codigo="COLOSIO", nombre="Sucursal Colosio", activa=True)
+        payan = Sucursal.objects.create(codigo="PAYAN", nombre="Sucursal Payan", activa=True)
+        matriz = Sucursal.objects.create(codigo="MATRIZ", nombre="Sucursal Matriz", activa=True)
+        emp_colosio = Empleado.objects.create(nombre="Vendedora Colosio", area="VENTAS", sucursal="Colosio", activo=True)
+        emp_payan = Empleado.objects.create(nombre="Vendedora Payan", area="VENTAS", sucursal="Payán", activo=True)
+        repartidor = Empleado.objects.create(
+            nombre="Repartidor Sin Sucursal", area="VENTAS", sucursal="", puesto_operativo="REPARTIDOR", activo=True
+        )
+        periodo = ConfigBonoVentasPeriodo.objects.create(mes=7, anio=2026)
+
+        result = _inicializar_bonos(periodo)
+
+        self.assertEqual(result["sin_sucursal"], [])
+        self.assertEqual(BonoVentasEmpleado.objects.get(periodo=periodo, empleado=emp_colosio).sucursal_id, colosio.id)
+        self.assertEqual(BonoVentasEmpleado.objects.get(periodo=periodo, empleado=emp_payan).sucursal_id, payan.id)
+        # Repartidor sin sucursal cae a Matriz aunque el catálogo se llame 'Sucursal Matriz'.
+        self.assertEqual(BonoVentasEmpleado.objects.get(periodo=periodo, empleado=repartidor).sucursal_id, matriz.id)
+
+    def test_inicializar_bonos_es_idempotente_y_no_pisa_ajustes(self):
+        # Re-inicializar no debe duplicar ni tocar bono_extra/ajustes ya capturados.
+        colosio = Sucursal.objects.create(codigo="COLOSIO", nombre="Sucursal Colosio", activa=True)
+        empleado = Empleado.objects.create(nombre="Vendedora Colosio", area="VENTAS", sucursal="Colosio", activo=True)
+        periodo = ConfigBonoVentasPeriodo.objects.create(mes=7, anio=2026)
+        bono = BonoVentasEmpleado.objects.create(
+            periodo=periodo, empleado=empleado, sucursal=colosio, bono_extra=Decimal("150.00")
+        )
+
+        _inicializar_bonos(periodo)
+        _inicializar_bonos(periodo)
+
+        self.assertEqual(BonoVentasEmpleado.objects.filter(periodo=periodo, empleado=empleado).count(), 1)
+        bono.refresh_from_db()
+        self.assertEqual(bono.bono_extra, Decimal("150.00"))
 
     def test_raiz_web_de_bonos_ventas_redirige_al_dashboard(self):
         response = self.client.get("/bonos-ventas/")
