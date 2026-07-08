@@ -40,6 +40,33 @@ def sync_asistencia_hikvision_isapi(dias: int = 1):
 
 
 @shared_task
+def reconciliar_bonos_asistencia_periodo_actual():
+    """Reconcilia los bonos del periodo vigente con la asistencia real (checador/Point).
+
+    Red de seguridad automática: el trigger por-día (transaction.on_commit) puede
+    saltarse días si `evaluar_dia_empleado` falla. Este recompute lee TODA la
+    asistencia del periodo y reconstruye los registros diarios. Solo toca bonos
+    BORRADOR; no pisa bono_extra/ajustes capturados. Idempotente.
+    """
+    hoy = timezone.localdate()
+    resultado: dict[str, object] = {}
+
+    from bonos_ventas.models import ConfigBonoVentasPeriodo
+    from bonos_ventas.services_checador import sincronizar_asistencia_desde_checador as _sync_ventas
+
+    periodo_ventas = ConfigBonoVentasPeriodo.objects.filter(mes=hoy.month, anio=hoy.year).first()
+    resultado["ventas"] = _sync_ventas(periodo_ventas) if periodo_ventas else "sin periodo"
+
+    from bonos_produccion.models import ConfigBonoPeriodo
+    from bonos_produccion.services_checador import sincronizar_asistencia_desde_checador as _sync_prod
+
+    periodo_prod = ConfigBonoPeriodo.objects.filter(mes=hoy.month, anio=hoy.year).first()
+    resultado["produccion"] = _sync_prod(periodo_prod) if periodo_prod else "sin periodo"
+
+    return {"ok": True, **resultado}
+
+
+@shared_task
 def alertar_he_pendientes():
     """
     Envía email si hay horas extra en estado pendiente por más de 24 horas.
