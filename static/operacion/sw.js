@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-app-operativa-pwa-v1";
+const CACHE_NAME = "pollyanas-app-operativa-pwa-v4-react-icons";
 const SHELL_ASSETS = [
   "/app/",
   "/static/operacion/manifest.webmanifest?v=20260707-workflow-icon-v5",

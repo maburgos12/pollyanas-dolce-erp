@@ -76,6 +76,22 @@
         gap: 7px;
         margin-bottom: 14px;
       }
+      .field-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .check-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 48px;
+        margin: 0 0 14px;
+      }
+      .check-row input {
+        width: 20px;
+        min-height: 20px;
+      }
       label {
         color: var(--text-muted);
         font-size: 13px;
@@ -123,6 +139,14 @@
         font-family: "Playfair Display", serif;
         font-size: 22px;
       }
+      .mini-brand-logo {
+        display: block;
+        width: min(150px, 36vw);
+        height: auto;
+        max-height: 48px;
+        object-fit: contain;
+        filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .08));
+      }
       .hello {
         margin: 3px 0 0;
         color: var(--text-muted);
@@ -145,6 +169,10 @@
         gap: 12px;
       }
       .dash-btn {
+        display: grid;
+        align-content: center;
+        justify-items: center;
+        gap: 10px;
         min-height: 100px;
         border: 2px solid var(--border);
         border-radius: 12px;
@@ -154,7 +182,52 @@
         font-weight: 800;
         padding: 14px 10px;
       }
+      .app-glyph {
+        display: grid;
+        width: 40px;
+        height: 40px;
+        place-items: center;
+        border: 1px solid rgba(139, 34, 82, .16);
+        border-radius: 12px;
+        background: rgba(139, 34, 82, .06);
+        color: var(--wine);
+      }
+      .app-glyph svg {
+        width: 23px;
+        height: 23px;
+      }
       .dash-btn:hover, .dash-btn:focus { border-color: var(--wine); }
+      .dash-btn-wide {
+        grid-column: 1 / -1;
+        min-height: 76px;
+      }
+      .quick-actions {
+        display: flex;
+        gap: 8px;
+        margin: 0 -16px 14px;
+        overflow-x: auto;
+        padding: 2px 16px 10px;
+        scrollbar-width: none;
+      }
+      .quick-actions::-webkit-scrollbar {
+        display: none;
+      }
+      .quick-action {
+        flex: 0 0 auto;
+        min-height: 44px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--surface);
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 900;
+        padding: 10px 13px;
+      }
+      .quick-action.primary {
+        border-color: var(--wine);
+        background: var(--wine);
+        color: var(--surface);
+      }
       .card-list {
         display: grid;
         gap: 10px;
@@ -350,6 +423,33 @@
         font-size: 12px;
         font-weight: 800;
       }
+      .ops-strip {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin: 0 0 14px;
+      }
+      .ops-strip-spaced {
+        margin-top: 4px;
+      }
+      .ops-strip div {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--surface);
+        padding: 10px;
+        text-align: center;
+      }
+      .ops-strip strong {
+        display: block;
+        color: var(--wine);
+        font-size: 20px;
+        line-height: 1;
+      }
+      .ops-strip span {
+        color: var(--text-muted);
+        font-size: 11px;
+        font-weight: 900;
+      }
       .toolbar {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -386,6 +486,10 @@
       .status-chip.alta { color: var(--danger); border-color: rgba(230,79,100,.45); }
       .status-chip.proceso { color: var(--warning); border-color: rgba(230,184,79,.45); }
       .status-chip.cerrada { color: var(--success); border-color: rgba(81,181,111,.45); }
+      .status-chip.activo { color: var(--success); border-color: rgba(81,181,111,.45); }
+      .status-chip.vencido { color: var(--danger); border-color: rgba(230,79,100,.45); }
+      .status-chip.urgente { color: var(--warning); border-color: rgba(230,184,79,.45); }
+      .status-chip.programado { color: var(--info); border-color: rgba(79,142,230,.45); }
       .status-chip.origen-flota,
       .status-chip.origen-sucursal {
         border-color: transparent;
@@ -456,6 +560,12 @@
       .report-card-spaced {
         margin-top: 12px;
       }
+      .agenda-card.vencido {
+        border-color: rgba(230, 79, 100, .32);
+      }
+      .agenda-card.urgente {
+        border-color: rgba(230, 184, 79, .38);
+      }
       .card-actions {
         display: flex;
         flex-wrap: wrap;
@@ -486,4 +596,21 @@
         grid-template-columns: 1fr;
         gap: 8px;
         margin-bottom: 12px;
+      }
+      @media (max-width: 360px) {
+        #app {
+          padding-right: 12px;
+          padding-left: 12px;
+        }
+        .field-grid,
+        .dash-grid,
+        .summary-grid {
+          grid-template-columns: 1fr;
+        }
+        .quick-actions {
+          margin-right: -12px;
+          margin-left: -12px;
+          padding-right: 12px;
+          padding-left: 12px;
+        }
       }

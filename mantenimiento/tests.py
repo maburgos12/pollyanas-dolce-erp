@@ -8,13 +8,13 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from activos.models import Activo, OrdenMantenimiento
-from core.access import ACCESS_MANAGE
+from activos.models import Activo, OrdenMantenimiento, PlanMantenimiento
+from core.access import ACCESS_MANAGE, ACCESS_VIEW
 from core.models import Sucursal, UserModuleAccess
 from core.navigation import build_nav_groups
 from fallas.models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
-from logistica.models import Repartidor, ReporteUnidad, ServicioRealizadoUnidad, Unidad
-from mantenimiento.models import ProveedorServicio
+from logistica.models import Repartidor, ReporteUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
+from mantenimiento.models import ProveedorServicio, SolicitudCancelacion
 from maestros.models import Proveedor
 
 
@@ -71,6 +71,18 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertEqual(perfil.status_code, 200)
         self.assertEqual(perfil.json()["username"], "jorge.isaac")
 
+    def test_maintenance_pwa_serves_scoped_service_worker(self):
+        self.client.force_login(self.mantenimiento)
+
+        app = self.client.get(reverse("mantenimiento:app"))
+        worker = self.client.get(reverse("mantenimiento:pwa-sw"))
+
+        self.assertEqual(app.status_code, 200)
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260707-mobile-operativo-v8", { scope: "/mantenimiento/" })')
+        self.assertEqual(worker.status_code, 200)
+        self.assertEqual(worker["Content-Type"], "application/javascript")
+        self.assertContains(worker, "pollyanas-mantenimiento-pwa-v18-20260707-mobile-operativo")
+
     def test_provider_api_uses_service_provider_catalog(self):
         Proveedor.objects.create(nombre="Proveedor insumos QA", activo=True)
         ProveedorServicio.objects.create(nombre="Proveedor importado QA", activo=True)
@@ -80,13 +92,49 @@ class MantenimientoUnifiedAccessTests(TestCase):
         response = self.client.get("/api/mantenimiento/proveedores/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.json(),
-            [
-                {"id": ProveedorServicio.objects.get(nombre="Proveedor importado QA").id, "nombre": "Proveedor importado QA"},
-                {"id": ProveedorServicio.objects.get(nombre="Taller mantenimiento QA").id, "nombre": "Taller mantenimiento QA"},
-            ],
+        rows = response.json()
+        self.assertEqual([row["nombre"] for row in rows], ["Proveedor importado QA", "Taller mantenimiento QA"])
+        self.assertIn("telefono", rows[0])
+        self.assertIn("especialidad", rows[0])
+
+    def test_provider_api_can_create_mobile_provider(self):
+        self.client.force_login(self.mantenimiento)
+
+        response = self.client.post("/api/mantenimiento/proveedores/", {"nombre": "Taller móvil QA"}, content_type="application/json")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(ProveedorServicio.objects.filter(nombre="Taller móvil QA", activo=True).exists())
+
+        proveedor_id = response.json()["id"]
+        update = self.client.patch(
+            f"/api/mantenimiento/proveedores/{proveedor_id}/",
+            {
+                "nombre": "Taller móvil QA editado",
+                "telefono": "6680000000",
+                "especialidad": "Refrigeración",
+                "activo": True,
+            },
+            content_type="application/json",
         )
+
+        self.assertEqual(update.status_code, 200)
+        self.assertTrue(ProveedorServicio.objects.filter(nombre="Taller móvil QA editado", telefono="6680000000").exists())
+
+    def test_provider_api_can_import_general_provider(self):
+        proveedor_general = Proveedor.objects.create(nombre="Taller general importable", activo=True)
+        self.client.force_login(self.mantenimiento)
+
+        listed = self.client.get("/api/mantenimiento/proveedores/importables/")
+        imported = self.client.post(
+            "/api/mantenimiento/proveedores/importar/",
+            {"proveedor_ids": [proveedor_general.id]},
+            content_type="application/json",
+        )
+
+        self.assertEqual(listed.status_code, 200)
+        self.assertIn("Taller general importable", [row["nombre"] for row in listed.json()])
+        self.assertEqual(imported.status_code, 201)
+        self.assertTrue(ProveedorServicio.objects.filter(nombre="Taller general importable").exists())
 
     def test_compras_logistica_group_does_not_open_maintenance_without_permission(self):
         self.client.force_login(self.compras)
@@ -216,6 +264,186 @@ class MantenimientoUnifiedInboxTests(TestCase):
         self.assertIn(f"falla:{self.falla.id}", [item["uid"] for item in sucursales["items"]])
         self.assertIn(f"orden:{self.orden.id}", [item["uid"] for item in sucursales["items"]])
         self.assertIn(f"unidad:{self.reporte_unidad.id}", [item["uid"] for item in logistica["items"]])
+
+    def test_mobile_summary_includes_plan_and_fleet_agenda(self):
+        today = timezone.localdate()
+        plan = PlanMantenimiento.objects.create(
+            activo_ref=self.activo,
+            nombre="Limpieza profunda horno",
+            tipo=PlanMantenimiento.TIPO_LIMPIEZA,
+            frecuencia_dias=15,
+            proxima_ejecucion=today - timedelta(days=2),
+            responsable="Mantenimiento",
+        )
+        tipo = TipoServicioUnidad.objects.create(nombre="Cambio aceite", activo=True)
+        ServicioRealizadoUnidad.objects.create(
+            unidad=self.unidad,
+            tipo_servicio=tipo,
+            fecha_servicio=today,
+            proxima_fecha=today + timedelta(days=5),
+            proveedor="Taller QA",
+            registrado_por=self.user,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get("/api/mantenimiento/resumen/")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["agenda_counts"]["vencidos"], 1)
+        self.assertEqual(data["agenda_counts"]["urgentes"], 1)
+        self.assertIn("sin_asignar", data["summary"])
+        self.assertEqual([item["estado"] for item in data["agenda"][:2]], ["vencido", "urgente"])
+        self.assertEqual({item["tipo"] for item in data["agenda"][:2]}, {"plan", "servicio_flota"})
+
+        execute = self.client.post(
+            f"/api/mantenimiento/resumen/planes/{plan.id}/ejecutar/",
+            {"notas": "Hecho en recorrido"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(execute.status_code, 200)
+        plan.refresh_from_db()
+        self.assertEqual(plan.ultima_ejecucion, today)
+        self.assertTrue(OrdenMantenimiento.objects.filter(plan_ref=plan, estatus=OrdenMantenimiento.ESTATUS_CERRADA).exists())
+
+    def test_mobile_action_endpoints_create_operational_records(self):
+        self.client.force_login(self.user)
+
+        catalogos = self.client.get("/api/mantenimiento/catalogos/")
+        falla = self.client.post(
+            "/api/mantenimiento/fallas/",
+            {
+                "sucursal": self.branch.id,
+                "categoria": self.categoria.id,
+                "titulo": "Fuga en tarja",
+                "descripcion": "Se detecta fuga durante recorrido.",
+                "area": ReporteFalla.AREA_GENERAL,
+                "prioridad": ReporteFalla.PRIORIDAD_MEDIA,
+                "activo_id": self.activo.id,
+            },
+            content_type="application/json",
+        )
+        servicio = self.client.post(
+            "/api/mantenimiento/servicios-puntuales/",
+            {
+                "modo_servicio": "pendiente",
+                "alcance": "activo",
+                "sucursal_id": self.branch.id,
+                "activo_id": self.activo.id,
+                "fecha_objetivo": timezone.localdate().isoformat(),
+                "descripcion": "Programar cambio de empaque",
+            },
+            content_type="application/json",
+        )
+        unidad = self.client.post(
+            "/api/mantenimiento/reportes-unidad/",
+            {
+                "unidad": self.unidad.id,
+                "tipo": ReporteUnidad.TIPO_FALLA,
+                "severidad": ReporteUnidad.SEVERIDAD_URGENTE,
+                "descripcion": "Falla reportada desde mantenimiento móvil.",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(catalogos.status_code, 200)
+        self.assertEqual(falla.status_code, 201)
+        self.assertEqual(servicio.status_code, 201)
+        self.assertEqual(unidad.status_code, 201)
+        self.assertTrue(ReporteFalla.objects.filter(titulo="Fuga en tarja").exists())
+        self.assertTrue(OrdenMantenimiento.objects.filter(descripcion="Programar cambio de empaque").exists())
+        self.assertTrue(ReporteUnidad.objects.filter(descripcion="Falla reportada desde mantenimiento móvil.").exists())
+
+    def test_view_only_user_can_read_but_cannot_write_mobile_maintenance(self):
+        user_model = get_user_model()
+        view_user = user_model.objects.create_user(username="mantenimiento_view", password="test12345")
+        UserModuleAccess.objects.create(user=view_user, module="mantenimiento.app", access=ACCESS_VIEW)
+        self.client.force_login(view_user)
+
+        read_response = self.client.get("/api/mantenimiento/resumen/")
+        write_response = self.client.post(
+            "/api/mantenimiento/fallas/",
+            {
+                "sucursal": self.branch.id,
+                "categoria": self.categoria.id,
+                "titulo": "Solo lectura no crea",
+                "descripcion": "Este usuario no debe capturar.",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(read_response.status_code, 200)
+        self.assertEqual(write_response.status_code, 403)
+        self.assertFalse(ReporteFalla.objects.filter(titulo="Solo lectura no crea").exists())
+
+    def test_mobile_failure_rejects_asset_from_other_branch(self):
+        self.client.force_login(self.user)
+        report_count = ReporteFalla.objects.count()
+
+        response = self.client.post(
+            "/api/mantenimiento/fallas/",
+            {
+                "sucursal": self.branch.id,
+                "categoria": self.categoria.id,
+                "titulo": "Activo cruzado",
+                "descripcion": "No debe ligar activo de otra sucursal.",
+                "activo_id": self.other_activo.id,
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(ReporteFalla.objects.count(), report_count)
+
+    def test_mobile_admin_endpoints_manage_plans_and_cancellations(self):
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+        self.client.force_login(self.user)
+
+        created = self.client.post(
+            "/api/mantenimiento/planes/",
+            {
+                "activo_id": self.activo.id,
+                "nombre": "Plan móvil horno",
+                "tipo": PlanMantenimiento.TIPO_PREVENTIVO,
+                "frecuencia_dias": 20,
+                "proxima_ejecucion": timezone.localdate().isoformat(),
+                "responsable": "Técnico móvil",
+            },
+            content_type="application/json",
+        )
+        plan_id = created.json()["id"]
+        updated = self.client.patch(
+            f"/api/mantenimiento/planes/{plan_id}/",
+            {"nombre": "Plan móvil horno actualizado", "frecuencia_dias": 30},
+            content_type="application/json",
+        )
+        deleted = self.client.delete(f"/api/mantenimiento/planes/{plan_id}/")
+        solicitud = SolicitudCancelacion.objects.create(
+            tipo=SolicitudCancelacion.TIPO_FALLA,
+            objeto_id=self.falla.id,
+            referencia=f"Falla #{self.falla.id}",
+            motivo="Duplicado en pruebas",
+            solicitado_por=self.reporter,
+        )
+        cancelaciones = self.client.get("/api/mantenimiento/cancelaciones/")
+        resolved = self.client.post(
+            f"/api/mantenimiento/cancelaciones/{solicitud.id}/resolver/",
+            {"accion": "rechazar", "notas_resolucion": "Se conserva el reporte."},
+            content_type="application/json",
+        )
+
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["nombre"], "Plan móvil horno actualizado")
+        self.assertEqual(deleted.status_code, 204)
+        self.assertFalse(PlanMantenimiento.objects.get(pk=plan_id).activo)
+        self.assertEqual(cancelaciones.status_code, 200)
+        self.assertEqual(cancelaciones.json()["items"][0]["id"], solicitud.id)
+        self.assertEqual(resolved.status_code, 200)
+        solicitud.refresh_from_db()
+        self.assertEqual(solicitud.estatus, SolicitudCancelacion.ESTATUS_RECHAZADA)
 
     def test_branch_failure_items_include_evidence_and_work_context(self):
         BitacoraFalla.objects.create(

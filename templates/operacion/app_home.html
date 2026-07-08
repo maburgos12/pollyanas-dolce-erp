@@ -15,26 +15,26 @@
   <link rel="icon" type="image/png" sizes="192x192" href="{% static 'operacion/app-icon-192.png' %}?v=20260707-workflow-icon-v5">
   <link rel="apple-touch-icon" href="{% static 'operacion/apple-touch-icon.png' %}?v=20260707-workflow-icon-v5">
   <link rel="manifest" href="{% static 'operacion/manifest.webmanifest' %}?v=20260707-workflow-icon-v5">
-  <link rel="stylesheet" href="/static/css/template_modules/templates-operacion-app-home.css?v=20260707-session-chip-v1">
+  <link rel="stylesheet" href="/static/css/template_modules/templates-operacion-app-home.css?v=20260707-react-icons-v3">
   <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
 </head>
 <body>
   <svg class="sr-symbols" aria-hidden="true">
-    <symbol id="icon-merma" viewBox="0 0 32 32"><path class="gold-fill" d="M8 13h16l-2 10H10z"/><path class="stroke" d="M8 13h16l-2 10H10L8 13Z"/><path class="gold-stroke" d="M11 10c1.5-2.2 3.5-3.2 6-3 2.1.2 3.6 1.1 4.7 2.8"/><path class="stroke" d="M12 17h8M13 20h5"/></symbol>
-    <symbol id="icon-reporte" viewBox="0 0 32 32"><path class="soft" d="M8 10h16v14H8z"/><path class="gold-stroke" d="M13 15h6M16 12v6"/><path class="stroke" d="M10 8h12M11 24l-3 3M21 24l3 3"/></symbol>
-    <symbol id="icon-mantenimiento" viewBox="0 0 32 32"><path class="gold-fill" d="M10 21l3 3 9-9-3-3z"/><path class="stroke" d="M10 21l3 3 9-9-3-3-9 9Z"/><path class="gold-stroke" d="M20 7c1.6-.5 3.5-.2 4.8 1.1l-3.2 3.2 2.1 2.1 3.2-3.2c.8 2.5-.4 5.4-2.9 6.6"/><path class="stroke" d="M8 24l-2 2"/></symbol>
-    <symbol id="icon-falla" viewBox="0 0 32 32"><path class="soft" d="M16 5 27 25H5L16 5Z"/><path class="gold-stroke" d="M16 12v6"/><path class="stroke" d="M16 23h.1"/></symbol>
-    <symbol id="icon-cierre" viewBox="0 0 32 32"><path class="soft" d="M8 9h16v16H8z"/><path class="gold-stroke" d="M11 15l3.5 3.5L22 11"/><path class="stroke" d="M12 7v4M20 7v4M8 13h16"/></symbol>
-    <symbol id="icon-recibir" viewBox="0 0 32 32"><path class="soft" d="M7 12h18v12H7z"/><path class="gold-stroke" d="M16 5v11m0 0-4-4m4 4 4-4"/><path class="stroke" d="M10 20h12"/></symbol>
-    <symbol id="icon-historial" viewBox="0 0 32 32"><path class="soft" d="M10 7h12v18H10z"/><path class="gold-stroke" d="M13 12h6M13 16h6M13 20h4"/><path class="stroke" d="M8 10h2M8 15h2M8 20h2"/></symbol>
-    <symbol id="icon-checklist" viewBox="0 0 32 32"><path class="soft" d="M9 6h14v20H9z"/><path class="gold-stroke" d="m12 13 2 2 5-6M12 21h8"/><path class="stroke" d="M12 17h8M13 6h6"/></symbol>
-    <symbol id="icon-ruta" viewBox="0 0 32 32"><path class="gold-stroke" d="M8 23c6-1 3-11 9-12 3-.5 4.8 1.3 7 3"/><path class="soft" d="M7 20a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/><path class="stroke" d="M24 10a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></symbol>
-    <symbol id="icon-entrega" viewBox="0 0 32 32"><path class="soft" d="M7 10h13v12H7z"/><path class="stroke" d="M20 14h4l3 4v4h-7"/><path class="gold-stroke" d="m11 16 3 3 6-7"/><path class="stroke" d="M11 24h.1M24 24h.1"/></symbol>
-    <symbol id="icon-inspeccion" viewBox="0 0 32 32"><path class="soft" d="M9 6h14v20H9z"/><path class="gold-stroke" d="m12 14 2 2 5-6"/><path class="stroke" d="M12 20h8M13 6h6M13 26h6"/></symbol>
-    <symbol id="icon-lavado" viewBox="0 0 32 32"><path class="gold-stroke" d="M11 7c2.2 2.5 3.3 4.7 3.3 6.4a3.3 3.3 0 0 1-6.6 0C7.7 11.7 8.8 9.5 11 7Z"/><path class="soft" d="M21 12c2 2.2 3 4.1 3 5.7a3 3 0 0 1-6 0c0-1.6 1-3.5 3-5.7Z"/><path class="stroke" d="M8 25h17"/></symbol>
-    <symbol id="icon-bitacora" viewBox="0 0 32 32"><path class="soft" d="M9 6h14v20H9z"/><path class="gold-stroke" d="m12 13 2 2 4-5M12 21h8"/><path class="stroke" d="M12 17h8M21 6v20"/></symbol>
-    <symbol id="icon-tickets" viewBox="0 0 32 32"><path class="soft" d="M7 10h18v12H7z"/><path class="stroke" d="M7 14a2 2 0 0 0 0 4M25 14a2 2 0 0 1 0 4"/><path class="gold-stroke" d="M13 16h6M16 12v8"/></symbol>
-    <symbol id="icon-flota" viewBox="0 0 32 32"><path class="soft" d="M7 13h14l4 4v5H7z"/><path class="stroke" d="M10 24h.1M23 24h.1M10 13l2-4h8l3 8"/><path class="gold-stroke" d="M13 17h5"/></symbol>
+    <symbol id="icon-merma" viewBox="0 0 24 24"><path d="m15 11-1 9"/><path d="m19 11-4-7"/><path d="M2 11h20"/><path d="m3.5 11 1.6 7.4a2 2 0 0 0 2 1.6h9.8a2 2 0 0 0 2-1.6l1.7-7.4"/><path d="M4.5 15.5h15"/><path d="m5 11 4-7"/><path d="m9 11 1 9"/></symbol>
+    <symbol id="icon-reporte" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+    <symbol id="icon-mantenimiento" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></symbol>
+    <symbol id="icon-falla" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+    <symbol id="icon-cierre" viewBox="0 0 24 24"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></symbol>
+    <symbol id="icon-recibir" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></symbol>
+    <symbol id="icon-historial" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+    <symbol id="icon-checklist" viewBox="0 0 24 24"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></symbol>
+    <symbol id="icon-ruta" viewBox="0 0 512 512"><path class="solid" d="M416 320h-96c-17.6 0-32-14.4-32-32s14.4-32 32-32h96s96-107 96-160-43-96-96-96-96 43-96 96c0 25.5 22.2 63.4 45.3 96H320c-52.9 0-96 43.1-96 96s43.1 96 96 96h96c17.6 0 32 14.4 32 32s-14.4 32-32 32H185.5c-16 24.8-33.8 47.7-47.3 64H416c52.9 0 96-43.1 96-96s-43.1-96-96-96zm0-256c17.7 0 32 14.3 32 32s-14.3 32-32 32-32-14.3-32-32 14.3-32 32-32zM96 256c-53 0-96 43-96 96s96 160 96 160 96-107 96-160-43-96-96-96zm0 128c-17.7 0-32-14.3-32-32s14.3-32 32-32 32 14.3 32 32-14.3 32-32 32z"/></symbol>
+    <symbol id="icon-entrega" viewBox="0 0 24 24"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></symbol>
+    <symbol id="icon-inspeccion" viewBox="0 0 24 24"><path d="m8 11 2 2 4-4"/><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="icon-lavado" viewBox="0 0 24 24"><path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"/><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"/></symbol>
+    <symbol id="icon-bitacora" viewBox="0 0 24 24"><path d="M2 6h4"/><path d="M2 10h4"/><path d="M2 14h4"/><path d="M2 18h4"/><rect width="16" height="20" x="4" y="2" rx="2"/><path d="M15 2v20"/><path d="M15 7h5"/><path d="M15 12h5"/><path d="M15 17h5"/></symbol>
+    <symbol id="icon-tickets" viewBox="0 0 24 24"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></symbol>
+    <symbol id="icon-flota" viewBox="0 0 24 24"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></symbol>
   </svg>
   <main class="page">
     <section class="shell">
@@ -66,7 +66,11 @@
             {% for tile in tiles %}
               <a class="action" href="{{ tile.href }}" aria-label="{{ tile.title }}. {{ tile.detail }}">
                 <span class="mark">
-                  <svg class="glyph" aria-hidden="true"><use href="#icon-{{ tile.icon }}"></use></svg>
+                  {% if tile.icon == "ruta" %}
+                    <svg class="glyph route-glyph" viewBox="0 0 512 512" aria-hidden="true"><path class="solid" d="M416 320h-96c-17.6 0-32-14.4-32-32s14.4-32 32-32h96s96-107 96-160-43-96-96-96-96 43-96 96c0 25.5 22.2 63.4 45.3 96H320c-52.9 0-96 43.1-96 96s43.1 96 96 96h96c17.6 0 32 14.4 32 32s-14.4 32-32 32H185.5c-16 24.8-33.8 47.7-47.3 64H416c52.9 0 96-43.1 96-96s-43.1-96-96-96zm0-256c17.7 0 32 14.3 32 32s-14.3 32-32 32-32-14.3-32-32 14.3-32 32-32zM96 256c-53 0-96 43-96 96s96 160 96 160 96-107 96-160-43-96-96-96zm0 128c-17.7 0-32-14.3-32-32s14.3-32 32-32 32 14.3 32 32-14.3 32-32 32z"/></svg>
+                  {% else %}
+                    <svg class="glyph" aria-hidden="true"><use href="#icon-{{ tile.icon }}"></use></svg>
+                  {% endif %}
                 </span>
                 <span>
                   <b>{{ tile.title }}</b>
@@ -88,7 +92,7 @@
   </main>
   <script>
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/app/sw.js?v=20260707-operativa-pwa-v1", { scope: "/app/" }).catch(function () {});
+      navigator.serviceWorker.register("/app/sw.js?v=20260707-operativa-react-icons-v4", { scope: "/app/" }).catch(function () {});
     }
   </script>
 </body>

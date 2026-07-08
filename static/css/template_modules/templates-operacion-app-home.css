@@ -181,32 +181,24 @@
       box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .8), 0 1px 2px rgba(28, 21, 32, .06);
     }
     .glyph {
-      width: 30px;
-      height: 30px;
+      width: 25px;
+      height: 25px;
       display: block;
-    }
-    .stroke {
       fill: none;
       stroke: currentColor;
-      stroke-width: 1.9;
+      stroke-width: 2;
       stroke-linecap: round;
       stroke-linejoin: round;
     }
-    .soft {
-      fill: rgba(139, 34, 82, .08);
-      stroke: currentColor;
-      stroke-width: 1.7;
-      stroke-linecap: round;
-      stroke-linejoin: round;
+    .glyph .solid {
+      fill: currentColor;
+      stroke: none;
     }
-    .gold-stroke {
-      fill: none;
-      stroke: var(--gold);
-      stroke-width: 1.9;
-      stroke-linecap: round;
-      stroke-linejoin: round;
+    .route-glyph {
+      width: 21px;
+      height: 21px;
+      opacity: .82;
     }
-    .gold-fill { fill: rgba(201, 168, 76, .22); }
     .empty {
       border: 1px dashed rgba(139, 34, 82, .28);
       border-radius: var(--r);
