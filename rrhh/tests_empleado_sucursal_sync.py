@@ -46,3 +46,13 @@ class EmpleadoSucursalSyncTests(TestCase):
         emp = Empleado.objects.create(nombre="X", area="VENTAS", sucursal="texto que no macha", sucursal_ref=suc)
 
         self.assertEqual(_sucursal_de_empleado(emp), suc)
+
+    def test_sucursal_display_prefiere_fk_y_cae_al_texto(self):
+        suc = Sucursal.objects.create(codigo="MATRIZ", nombre="Sucursal Matriz", activa=True)
+        con_fk = Empleado.objects.create(nombre="Con FK", area="VENTAS", sucursal="Crucero", sucursal_ref=suc)
+        sin_fk = Empleado.objects.create(nombre="Sin FK", area="VENTAS", sucursal="Guamúchil")
+        vacio = Empleado.objects.create(nombre="Vacio", area="VENTAS", sucursal="")
+
+        self.assertEqual(con_fk.sucursal_display, "Sucursal Matriz")  # FK gana sobre texto viejo
+        self.assertEqual(sin_fk.sucursal_display, "Guamúchil")        # cae al texto legacy
+        self.assertEqual(vacio.sucursal_display, "")

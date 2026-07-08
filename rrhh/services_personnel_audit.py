@@ -220,7 +220,7 @@ def build_personnel_identity_audit(*, limit: int = 25) -> dict:
                     {
                         **_employee_detail(empleado),
                         "username": empleado.usuario_erp.username,
-                        "employee_branch": empleado.sucursal,
+                        "employee_branch": empleado.sucursal_display,
                         "profile_branch": profile.sucursal.nombre,
                     },
                 )
@@ -279,6 +279,6 @@ def _employee_detail(empleado: Empleado) -> dict:
         "departamento": empleado.departamento or "",
         "puesto_operativo": empleado.puesto_operativo or "",
         "nivel_organizacional": empleado.nivel_organizacional or "",
-        "sucursal": empleado.sucursal or "",
+        "sucursal": empleado.sucursal_display,
         "jefe_directo": empleado.jefe_directo.nombre if empleado.jefe_directo_id else "",
     }
