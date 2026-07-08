@@ -159,9 +159,10 @@ class RRHHAsignacionSucursalTests(TestCase):
         self.assertContains(response, "data-employee-search")
 
     def test_api_asignacion_sucursales_uniforma_nombres_operativos(self):
-        Sucursal.objects.get_or_create(codigo="TUN", defaults={"nombre": "El Túnel", "activa": True})
-        Sucursal.objects.get_or_create(codigo="GLO", defaults={"nombre": "Las Glorias", "activa": True})
-        Sucursal.objects.get_or_create(codigo="COL", defaults={"nombre": "Sucursal Colosio", "activa": True})
+        Sucursal.objects.get_or_create(codigo="EL_TUNEL", defaults={"nombre": "Sucursal El Túnel", "activa": True})
+        Sucursal.objects.get_or_create(codigo="LAS_GLORIAS", defaults={"nombre": "Sucursal Las Glorias", "activa": True})
+        Sucursal.objects.get_or_create(codigo="COLOSIO", defaults={"nombre": "Sucursal Colosio", "activa": True})
+        Sucursal.objects.get_or_create(codigo="MATRIZ", defaults={"nombre": "Sucursal Matriz", "activa": True})
         Sucursal.objects.get_or_create(codigo="CEDIS", defaults={"nombre": "CEDIS", "activa": True})
 
         response = self.client.get("/rrhh/api/asignacion-sucursales/")
@@ -173,6 +174,7 @@ class RRHHAsignacionSucursalTests(TestCase):
         self.assertIn("Sucursal El Túnel", names)
         self.assertIn("Sucursal Las Glorias", names)
         self.assertIn("Sucursal Colosio", names)
-        self.assertIn("El Túnel", values)
-        self.assertIn("Las Glorias", values)
+        self.assertIn("Sucursal El Túnel", values)
+        self.assertIn("Sucursal Las Glorias", values)
+        self.assertNotIn("Sucursal Matriz", values)
         self.assertNotIn("CEDIS", names)

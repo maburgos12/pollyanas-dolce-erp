@@ -2,19 +2,20 @@ from __future__ import annotations
 
 from django.core.management.base import BaseCommand
 
+from core.branch_catalog import POINT_BRANCH_CANONICAL_NAMES
 from core.models import Sucursal
 
 
 SUCURSALES_POINT = [
-    {"codigo": "COLOSIO", "nombre": "Colosio", "activa": True},
-    {"codigo": "CRUCERO", "nombre": "Crucero", "activa": True},
-    {"codigo": "EL_TUNEL", "nombre": "EL TUNEL", "activa": True},
-    {"codigo": "GUAMUCHIL", "nombre": "Guamuchil", "activa": True, "fecha_apertura": None},
-    {"codigo": "LAS_GLORIAS", "nombre": "Las Glorias", "activa": True},
-    {"codigo": "LEYVA", "nombre": "Leyva", "activa": True},
-    {"codigo": "MATRIZ", "nombre": "Matriz", "activa": True},
-    {"codigo": "PAYAN", "nombre": "Payán", "activa": True},
-    {"codigo": "PLAZA_NIO", "nombre": "Plaza Nío", "activa": True},
+    {"codigo": "COLOSIO", "nombre": POINT_BRANCH_CANONICAL_NAMES["COLOSIO"], "activa": True},
+    {"codigo": "CRUCERO", "nombre": POINT_BRANCH_CANONICAL_NAMES["CRUCERO"], "activa": True},
+    {"codigo": "EL_TUNEL", "nombre": POINT_BRANCH_CANONICAL_NAMES["EL_TUNEL"], "activa": True},
+    {"codigo": "GUAMUCHIL", "nombre": POINT_BRANCH_CANONICAL_NAMES["GUAMUCHIL"], "activa": True, "fecha_apertura": None},
+    {"codigo": "LAS_GLORIAS", "nombre": POINT_BRANCH_CANONICAL_NAMES["LAS_GLORIAS"], "activa": True},
+    {"codigo": "LEYVA", "nombre": POINT_BRANCH_CANONICAL_NAMES["LEYVA"], "activa": True},
+    {"codigo": "MATRIZ", "nombre": POINT_BRANCH_CANONICAL_NAMES["MATRIZ"], "activa": True},
+    {"codigo": "PAYAN", "nombre": POINT_BRANCH_CANONICAL_NAMES["PAYAN"], "activa": True},
+    {"codigo": "PLAZA_NIO", "nombre": POINT_BRANCH_CANONICAL_NAMES["PLAZA_NIO"], "activa": True},
 ]
 
 
