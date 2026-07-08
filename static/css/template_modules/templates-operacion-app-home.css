@@ -234,10 +234,10 @@
     }
     @media (max-width: 520px) {
       .page {
-        padding: calc(18px + env(safe-area-inset-top)) 0 calc(18px + env(safe-area-inset-bottom));
+        padding: calc(10px + env(safe-area-inset-top)) 0 calc(12px + env(safe-area-inset-bottom));
       }
       .shell {
-        min-height: calc(100dvh - 18px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+        min-height: calc(100dvh - 22px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
         border-radius: 0;
         border-left: 0;
         border-right: 0;

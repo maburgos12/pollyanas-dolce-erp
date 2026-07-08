@@ -15,7 +15,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="{% static 'operacion/app-icon-192.png' %}?v=20260707-workflow-icon-v5">
   <link rel="apple-touch-icon" href="{% static 'operacion/apple-touch-icon.png' %}?v=20260707-workflow-icon-v5">
   <link rel="manifest" href="{% static 'operacion/manifest.webmanifest' %}?v=20260707-workflow-icon-v5">
-  <link rel="stylesheet" href="/static/css/template_modules/templates-operacion-app-home.css?v=20260708-safe-area-v1">
+  <link rel="stylesheet" href="/static/css/template_modules/templates-operacion-app-home.css?v=20260708-safe-area-compact-v1">
   <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
 </head>
 <body>
@@ -92,7 +92,7 @@
   </main>
   <script>
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/app/sw.js?v=20260708-operativa-safe-area-v1", { scope: "/app/" }).catch(function () {});
+      navigator.serviceWorker.register("/app/sw.js?v=20260708-operativa-safe-area-compact-v1", { scope: "/app/" }).catch(function () {});
     }
   </script>
 </body>
