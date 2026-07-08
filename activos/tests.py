@@ -1,5 +1,6 @@
 from io import BytesIO
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -675,6 +676,30 @@ class ActivosFlowsTests(TestCase):
         orden = OrdenMantenimiento.objects.filter(activo_ref=activo).order_by("-id").first()
         self.assertIsNotNone(orden)
         self.assertEqual(str(orden.costo_otros), "1250.75")
+
+    def test_orden_folio_retries_on_collision(self):
+        # Simula creación concurrente: el primer folio calculado ya existe;
+        # save() debe reintentar con uno único en vez de reventar con IntegrityError.
+        activo = Activo.objects.create(nombre="Equipo folio", categoria="Test")
+        existente = OrdenMantenimiento.objects.create(
+            activo_ref=activo,
+            fecha_programada=timezone.localdate(),
+            descripcion="ocupa folio",
+        )
+        with patch.object(
+            OrdenMantenimiento,
+            "_next_folio",
+            side_effect=[existente.folio, "OM-RETRY-TEST-1"],
+        ):
+            nueva = OrdenMantenimiento(
+                activo_ref=activo,
+                fecha_programada=timezone.localdate(),
+                descripcion="reintenta folio",
+            )
+            nueva.save()
+        nueva.refresh_from_db()
+        self.assertEqual(nueva.folio, "OM-RETRY-TEST-1")
+        self.assertEqual(OrdenMantenimiento.objects.filter(activo_ref=activo).count(), 2)
 
     @staticmethod
     def _build_bitacora_upload(filename: str) -> SimpleUploadedFile:
