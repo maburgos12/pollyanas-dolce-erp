@@ -6,7 +6,7 @@ from datetime import datetime, time
 import pandas as pd
 from django.db.models import Q
 
-from core.models import Sucursal
+from core.branch_catalog import resolver_sucursal_por_texto
 from rrhh.models import AsistenciaEmpleado, Empleado, ImportacionChecador
 from rrhh.services import generar_horas_extra_automatico
 from rrhh.services_asistencia_reglas import evaluar_dia_empleado
@@ -62,10 +62,8 @@ def _buscar_empleado(row) -> Empleado:
 
 
 def _sucursal_de_empleado(empleado: Empleado):
-    sucursal_texto = (empleado.sucursal or "").strip()
-    if not sucursal_texto:
-        return None
-    return Sucursal.objects.filter(Q(nombre__iexact=sucursal_texto) | Q(codigo__iexact=sucursal_texto)).first()
+    # Preferir el FK canónico (FASE 2); resolver de texto solo como respaldo.
+    return empleado.sucursal_ref or resolver_sucursal_por_texto(empleado.sucursal)
 
 
 def importar_excel_hikconnect(archivo, user, fecha_inicio, fecha_fin):

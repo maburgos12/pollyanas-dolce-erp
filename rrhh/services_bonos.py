@@ -164,7 +164,7 @@ def sincronizar_bonos_operativos_periodo_actual(empleado: Empleado) -> None:
         area_bono_produccion_empleado,
     )
     from bonos_ventas.models import BonoVentasEmpleado, ConfigBonoVentasPeriodo
-    from core.models import Sucursal
+    from core.branch_catalog import resolver_sucursal_por_texto
 
     periodo_produccion = ConfigBonoPeriodo.objects.filter(mes=hoy.month, anio=hoy.year).first()
     if periodo_produccion:
@@ -191,9 +191,9 @@ def sincronizar_bonos_operativos_periodo_actual(empleado: Empleado) -> None:
     if periodo_ventas:
         bonos = BonoVentasEmpleado.objects.filter(periodo=periodo_ventas, empleado=empleado)
         if empleado.activo and empleado.participa_bonos_ventas:
-            sucursal_nombre = (empleado.sucursal or "").strip()
-            sucursal = Sucursal.objects.filter(nombre__iexact=sucursal_nombre, activa=True).first()
-            if sucursal:
+            # Vínculo canónico por FK (FASE 2); resolver de texto solo como respaldo.
+            sucursal = empleado.sucursal_ref or resolver_sucursal_por_texto(empleado.sucursal)
+            if sucursal and sucursal.activa:
                 bono, created = BonoVentasEmpleado.objects.get_or_create(
                     periodo=periodo_ventas,
                     empleado=empleado,
