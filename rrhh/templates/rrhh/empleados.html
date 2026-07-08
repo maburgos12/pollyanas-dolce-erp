@@ -348,7 +348,12 @@
             </div>
             <div class="rrhh-field span-2">
               <label for="sucursal">Sucursal</label>
-              <input id="sucursal" class="input-field" type="text" name="sucursal" value="{{ alta_prefill.sucursal|default:'' }}">
+              <select id="sucursal" class="input-field" name="sucursal_id">
+                <option value="">Buscar y seleccionar</option>
+                {% for s in sucursales_app %}
+                  <option value="{{ s.id }}" {% if alta_prefill_sucursal_id == s.id|stringformat:'s' %}selected{% endif %}>{{ s.nombre }}</option>
+                {% endfor %}
+              </select>
             </div>
             <div class="rrhh-access-panel" data-access-block>
               <div>
@@ -884,7 +889,12 @@
                       </div>
                       <div class="rrhh-field">
                         <label for="edit_sucursal_{{ e.id }}">Sucursal</label>
-                        <input id="edit_sucursal_{{ e.id }}" class="input-field" type="text" name="sucursal" value="{{ e.sucursal }}">
+                        <select id="edit_sucursal_{{ e.id }}" class="input-field" name="sucursal_id">
+                          <option value="">Buscar y seleccionar</option>
+                          {% for s in sucursales_app %}
+                          <option value="{{ s.id }}" {% if e.sucursal_form_id == s.id|stringformat:'s' %}selected{% endif %}>{{ s.nombre }}</option>
+                          {% endfor %}
+                        </select>
                       </div>
                       <div class="rrhh-access-panel" data-access-block>
                         <div>

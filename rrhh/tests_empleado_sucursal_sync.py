@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from io import StringIO
+
+from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
@@ -56,3 +59,36 @@ class EmpleadoSucursalSyncTests(TestCase):
         self.assertEqual(con_fk.sucursal_display, "Sucursal Matriz")  # FK gana sobre texto viejo
         self.assertEqual(sin_fk.sucursal_display, "Guamúchil")        # cae al texto legacy
         self.assertEqual(vacio.sucursal_display, "")
+
+    def test_canonizar_empleado_sucursal_dry_run_no_escribe(self):
+        Sucursal.objects.create(codigo="MATRIZ", nombre="Sucursal Matriz", activa=True)
+        empleado = Empleado.objects.create(nombre="Legacy Matriz", area="VENTAS", sucursal="Matriz")
+        out = StringIO()
+
+        call_command("canonizar_empleado_sucursal", stdout=out)
+
+        empleado.refresh_from_db()
+        self.assertEqual(empleado.sucursal, "Matriz")
+        self.assertIsNone(empleado.sucursal_ref_id)
+        self.assertIn("Legacy Matriz", out.getvalue())
+        self.assertIn("Sucursal Matriz", out.getvalue())
+
+    def test_canonizar_empleado_sucursal_apply_canoniza_texto_y_fk(self):
+        suc = Sucursal.objects.create(codigo="MATRIZ", nombre="Sucursal Matriz", activa=True)
+        empleado = Empleado.objects.create(nombre="Legacy Matriz", area="VENTAS", sucursal="Matriz")
+
+        call_command("canonizar_empleado_sucursal", "--apply")
+
+        empleado.refresh_from_db()
+        self.assertEqual(empleado.sucursal, "Sucursal Matriz")
+        self.assertEqual(empleado.sucursal_ref_id, suc.id)
+
+    def test_canonizar_empleado_sucursal_no_adivina_no_resueltos(self):
+        Empleado.objects.create(nombre="Sucursal Rara", area="VENTAS", sucursal="Sucursal Inventada")
+        out = StringIO()
+
+        call_command("canonizar_empleado_sucursal", stdout=out)
+
+        text = out.getvalue()
+        self.assertIn("No resolvió contra core.Sucursal", text)
+        self.assertIn("Sucursal Inventada", text)

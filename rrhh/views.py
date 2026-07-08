@@ -186,6 +186,33 @@ def _catalogo_value(post_data, field_name: str, allowed_values: frozenset[str], 
     return value
 
 
+def _resolver_sucursal_desde_post(post_data) -> Sucursal | None:
+    sucursal_id = (post_data.get("sucursal_id") or "").strip()
+    if sucursal_id:
+        if not sucursal_id.isdigit():
+            raise ValidationError("Selecciona una sucursal válida del catálogo.")
+        sucursal = Sucursal.objects.filter(pk=int(sucursal_id), activa=True).first()
+        if not sucursal:
+            raise ValidationError("Selecciona una sucursal válida del catálogo.")
+        return sucursal
+
+    # Compatibilidad temporal: aceptar texto legacy solo si resuelve al catálogo real.
+    sucursal_texto = (post_data.get("sucursal") or "").strip()
+    if not sucursal_texto:
+        return None
+    sucursal = resolver_sucursal_por_texto(sucursal_texto, sucursal_qs=Sucursal.objects.filter(activa=True))
+    if not sucursal:
+        raise ValidationError("Selecciona una sucursal válida del catálogo.")
+    return sucursal
+
+
+def _sucursal_form_id(*, sucursal_ref_id: int | None, sucursal_texto: str) -> str:
+    if sucursal_ref_id:
+        return str(sucursal_ref_id)
+    sucursal = resolver_sucursal_por_texto(sucursal_texto, sucursal_qs=Sucursal.objects.filter(activa=True))
+    return str(sucursal.id) if sucursal else ""
+
+
 def _organizacion_desde_post(post_data, empleado: Empleado | None = None) -> dict:
     area = _catalogo_value(post_data, "area", area_division_values(), empleado.area if empleado else "")
     defaults = area_division_map().get(area, {})
@@ -1110,6 +1137,7 @@ def _crear_empleado_desde_post(
     alta_pendiente: AltaPendienteEmpleado | None = None,
 ) -> Empleado:
     with transaction.atomic():
+        sucursal = _resolver_sucursal_desde_post(request.POST)
         empleado = Empleado.objects.create(
             codigo=codigo,
             nombre=nombre,
@@ -1131,7 +1159,8 @@ def _crear_empleado_desde_post(
             salario_diario=_parse_decimal(request.POST.get("salario_diario")),
             telefono=(request.POST.get("telefono") or "").strip(),
             email=(request.POST.get("email") or "").strip(),
-            sucursal=(request.POST.get("sucursal") or "").strip(),
+            sucursal=sucursal.nombre if sucursal else "",
+            sucursal_ref=sucursal,
         )
         empleado.usuario_erp = _resolver_usuario_erp_desde_post(request, empleado)
         if empleado.usuario_erp_id:
@@ -1312,10 +1341,13 @@ def empleados(request):
                 empleado.salario_diario = _parse_decimal(request.POST.get("salario_diario"))
                 empleado.telefono = (request.POST.get("telefono") or "").strip()
                 empleado.email = (request.POST.get("email") or "").strip()
-                empleado.sucursal = (request.POST.get("sucursal") or "").strip()
-                # Mantener sincronizado el FK canónico (FASE 2): editar la sucursal aquí
-                # no debe dejar sucursal_ref viejo. El texto queda como display/legacy.
-                empleado.sucursal_ref = resolver_sucursal_por_texto(empleado.sucursal)
+                try:
+                    sucursal = _resolver_sucursal_desde_post(request.POST)
+                except ValidationError as exc:
+                    messages.error(request, exc.messages[0])
+                    return redirect("rrhh:empleados")
+                empleado.sucursal = sucursal.nombre if sucursal else ""
+                empleado.sucursal_ref = sucursal
                 empleado.activo = request.POST.get("activo") == "on"
                 try:
                     empleado.usuario_erp = _resolver_usuario_erp_desde_post(request, empleado)
@@ -1476,6 +1508,10 @@ def empleados(request):
     empleados_page = list(qs.order_by("nombre")[:600])
     for empleado in empleados_page:
         empleado.bono_esquema_ids = {esquema.id for esquema in empleado.bonos_esquemas.all()}
+        empleado.sucursal_form_id = _sucursal_form_id(
+            sucursal_ref_id=empleado.sucursal_ref_id,
+            sucursal_texto=empleado.sucursal,
+        )
         empleado.repartidor_logistica = None
         if empleado.usuario_erp_id:
             try:
@@ -1514,6 +1550,7 @@ def empleados(request):
     if alta_pendiente_id.isdigit():
         alta_pendiente_seleccionada = altas_pendientes_qs.filter(pk=int(alta_pendiente_id)).first()
     altas_pendientes = list(altas_pendientes_qs[:20])
+    alta_prefill = _alta_pendiente_prefill(alta_pendiente_seleccionada)
 
     context = {
         "module_tabs": _module_tabs("empleados", request.user),
@@ -1593,7 +1630,11 @@ def empleados(request):
         "empleados_identidad_opciones": empleados_identidad_opciones,
         "altas_pendientes": altas_pendientes,
         "alta_pendiente_seleccionada": alta_pendiente_seleccionada,
-        "alta_prefill": _alta_pendiente_prefill(alta_pendiente_seleccionada),
+        "alta_prefill": alta_prefill,
+        "alta_prefill_sucursal_id": _sucursal_form_id(
+            sucursal_ref_id=None,
+            sucursal_texto=alta_prefill.get("sucursal", ""),
+        ),
         "enterprise_chain": enterprise_chain,
         "critical_path_rows": _rrhh_critical_path_rows(enterprise_chain),
         "document_stage_rows": document_stage_rows,
