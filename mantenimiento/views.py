@@ -1,8 +1,10 @@
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
 from django.contrib.auth.decorators import login_required
 from django.contrib.staticfiles import finders
+from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.db.models import Prefetch, Q
 from django.http import Http404, HttpResponse
@@ -100,8 +102,8 @@ def _require_mantenimiento(user):
 
 @never_cache
 def pwa_sw(request):
-    path = finders.find("mantenimiento/sw.js")
-    if not path:
+    path = finders.find("mantenimiento/sw.js") or settings.BASE_DIR / "static" / "mantenimiento" / "sw.js"
+    if not path or not Path(path).exists():
         raise Http404("Service worker de Mantenimiento no encontrado")
     with open(path, encoding="utf-8") as service_worker:
         return HttpResponse(service_worker.read(), content_type="application/javascript")
