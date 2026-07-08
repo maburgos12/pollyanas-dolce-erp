@@ -164,6 +164,16 @@ def _bono_ventas_tiene_captura(bono) -> bool:
     return any(getattr(bono, campo) for campo in campos)
 
 
+def _bono_ventas_captura_manual(bono) -> bool:
+    """Captura REAL que un cambio de sucursal NO debe pisar: ajustes manuales o bono
+    ya cerrado. La asistencia y el bono de ventas son derivados (se recalculan tras
+    el cambio), así que NO bloquean el re-asignado de sucursal."""
+    if bono.estatus != "BORRADOR":
+        return True
+    campos = ("ajuste_positivo", "ajuste_negativo", "bono_extra")
+    return any(getattr(bono, campo) for campo in campos)
+
+
 def sincronizar_bonos_operativos_periodo_actual(empleado: Empleado) -> None:
     """
     Mantiene alineado el catálogo RRHH con las tablas mensuales de bonos.
@@ -218,9 +228,12 @@ def sincronizar_bonos_operativos_periodo_actual(empleado: Empleado) -> None:
                     empleado=empleado,
                     defaults={"sucursal": sucursal},
                 )
-                if not created and bono.sucursal_id != sucursal.id and not _bono_ventas_tiene_captura(bono):
+                if not created and bono.sucursal_id != sucursal.id and not _bono_ventas_captura_manual(bono):
+                    # Re-asignar sucursal al editar el empleado, aunque ya haya asistencia
+                    # sincronizada. Recalcular para reflejar la nueva sucursal.
                     bono.sucursal = sucursal
-                    bono.save(update_fields=["sucursal", "actualizado_en"])
+                    bono.recalcular()
+                    bono.save()
         else:
             for bono in bonos:
                 if not _bono_ventas_tiene_captura(bono):
