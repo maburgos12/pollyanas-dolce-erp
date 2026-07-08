@@ -3,6 +3,7 @@ import json
 
 from django.core.management.base import BaseCommand, CommandError
 
+from core.branch_catalog import resolver_sucursal_por_texto
 from core.models import Sucursal
 from proyecciones.services import ProyeccionProduccionService
 
@@ -38,11 +39,8 @@ class Command(BaseCommand):
     def _get_sucursal(self, value: str | None):
         if not value:
             return None
-        normalized = value.strip()
-        try:
-            return Sucursal.objects.get(codigo__iexact=normalized)
-        except Sucursal.DoesNotExist:
-            try:
-                return Sucursal.objects.get(nombre__iexact=normalized)
-            except Sucursal.DoesNotExist as exc:
-                raise CommandError(f"No existe sucursal ERP: {value}") from exc
+        # Resolver canónico (FASE 2): nombre/código normalizado, tolerante a prefijo 'Sucursal ' y acentos.
+        sucursal = resolver_sucursal_por_texto(value.strip())
+        if sucursal is None:
+            raise CommandError(f"No existe sucursal ERP: {value}")
+        return sucursal

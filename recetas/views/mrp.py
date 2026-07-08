@@ -30,6 +30,7 @@ from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
 from control.models import MermaPOS
 from core.access import can_manage_compras, can_view_recetas, is_branch_capture_only
 from core.audit import log_event
+from core.branch_catalog import resolver_sucursal_por_texto
 from core.models import Sucursal, sucursales_operativas
 from inventario.models import ExistenciaInsumo, MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
@@ -12569,13 +12570,8 @@ def _resolve_sucursal_for_sales(sucursal_name: str, sucursal_codigo: str, defaul
     if sucursal_codigo:
         sucursal = Sucursal.objects.filter(codigo__iexact=sucursal_codigo, activa=True).order_by("id").first()
     if sucursal is None and sucursal_name:
-        sucursal = Sucursal.objects.filter(nombre__iexact=sucursal_name, activa=True).order_by("id").first()
-    if sucursal is None and sucursal_name:
-        objetivo = normalizar_nombre(sucursal_name)
-        for row in sucursales_operativas().only("id", "codigo", "nombre").order_by("id"):
-            if normalizar_nombre(row.nombre) == objetivo or normalizar_nombre(row.codigo) == objetivo:
-                sucursal = row
-                break
+        # Resolver canónico (FASE 2): nombre/código normalizado, tolerante a prefijo 'Sucursal ' y acentos.
+        sucursal = resolver_sucursal_por_texto(sucursal_name)
     return sucursal or default_sucursal
 
 
