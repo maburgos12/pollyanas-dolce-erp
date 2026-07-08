@@ -2,10 +2,36 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
-from django.db import models
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 
 from maestros.models import Proveedor
+
+
+def _save_with_folio_retry(instance, field, generate, do_save):
+    """Persiste `instance` generando su folio/código y reintentando ante colisión.
+
+    `count()+1` puede producir el mismo valor cuando dos registros se crean a la
+    vez (captura móvil en piso); el índice `unique` lo rechaza con IntegrityError.
+    En vez de reventar con un 500, regeneramos el folio —que ya ve la fila recién
+    creada— y reintentamos.
+    """
+    if getattr(instance, field):
+        do_save()
+        return
+    # ponytail: 5 intentos cubren la baja concurrencia real de mantenimiento;
+    #           si el volumen sube, migrar a una secuencia de BD.
+    for _ in range(5):
+        setattr(instance, field, generate())
+        try:
+            with transaction.atomic():
+                do_save()
+                return
+        except IntegrityError:
+            continue
+    # Último intento sin atrapar: si aún falla, que suba el error real.
+    setattr(instance, field, generate())
+    do_save()
 
 
 class Activo(models.Model):
@@ -63,13 +89,17 @@ class Activo(models.Model):
         verbose_name = "Activo"
         verbose_name_plural = "Activos"
 
+    def _next_codigo(self):
+        ymd = timezone.localdate().strftime("%y%m")
+        prefix = f"ACT-{ymd}-"
+        seq = Activo.objects.filter(codigo__startswith=prefix).count() + 1
+        return f"{prefix}{seq:03d}"
+
     def save(self, *args, **kwargs):
-        if not self.codigo:
-            ymd = timezone.localdate().strftime("%y%m")
-            prefix = f"ACT-{ymd}-"
-            seq = Activo.objects.filter(codigo__startswith=prefix).count() + 1
-            self.codigo = f"{prefix}{seq:03d}"
-        super().save(*args, **kwargs)
+        _save_with_folio_retry(
+            self, "codigo", self._next_codigo,
+            lambda: super(Activo, self).save(*args, **kwargs),
+        )
 
     def __str__(self):
         return f"{self.codigo} · {self.nombre}"
@@ -232,13 +262,17 @@ class OrdenMantenimiento(models.Model):
         verbose_name = "Orden de mantenimiento"
         verbose_name_plural = "Órdenes de mantenimiento"
 
+    def _next_folio(self):
+        ymd = timezone.localdate().strftime("%y%m%d")
+        prefix = f"OM-{ymd}-"
+        seq = OrdenMantenimiento.objects.filter(folio__startswith=prefix).count() + 1
+        return f"{prefix}{seq:03d}"
+
     def save(self, *args, **kwargs):
-        if not self.folio:
-            ymd = timezone.localdate().strftime("%y%m%d")
-            prefix = f"OM-{ymd}-"
-            seq = OrdenMantenimiento.objects.filter(folio__startswith=prefix).count() + 1
-            self.folio = f"{prefix}{seq:03d}"
-        super().save(*args, **kwargs)
+        _save_with_folio_retry(
+            self, "folio", self._next_folio,
+            lambda: super(OrdenMantenimiento, self).save(*args, **kwargs),
+        )
 
     @property
     def costo_total(self) -> Decimal:
@@ -304,13 +338,17 @@ class SolicitudFalla(models.Model):
         verbose_name = "Solicitud de falla"
         verbose_name_plural = "Solicitudes de falla"
 
+    def _next_folio(self):
+        ymd = timezone.localdate().strftime("%y%m%d")
+        prefix = f"SF-{ymd}-"
+        seq = SolicitudFalla.objects.filter(folio__startswith=prefix).count() + 1
+        return f"{prefix}{seq:03d}"
+
     def save(self, *args, **kwargs):
-        if not self.folio:
-            ymd = timezone.localdate().strftime("%y%m%d")
-            prefix = f"SF-{ymd}-"
-            seq = SolicitudFalla.objects.filter(folio__startswith=prefix).count() + 1
-            self.folio = f"{prefix}{seq:03d}"
-        super().save(*args, **kwargs)
+        _save_with_folio_retry(
+            self, "folio", self._next_folio,
+            lambda: super(SolicitudFalla, self).save(*args, **kwargs),
+        )
 
     def __str__(self):
         return f"{self.folio} · {self.activo_ref.nombre}"
